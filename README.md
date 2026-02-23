@@ -1,4 +1,4 @@
-# kuzushi — Agentic SAST Scanner
+# Kuzushi — Agentic SAST Scanner
 
 Static analysis + AI triage in one command. Runs Opengrep/Semgrep on your codebase, sends every finding to an LLM for semantic verification, and tells you what's actually dangerous. No more drowning in false positives.
 

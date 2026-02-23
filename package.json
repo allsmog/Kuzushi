@@ -1,7 +1,7 @@
 {
   "name": "kuzushi",
   "version": "0.1.0",
-  "description": "Agentic SAST scanner — Semgrep + AI triage",
+  "description": "Kuzushi — Agentic SAST scanner with AI triage",
   "type": "module",
   "bin": {
     "kuzushi": "./dist/cli.js"

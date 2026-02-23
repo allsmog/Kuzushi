@@ -26,7 +26,7 @@ const program = new Command();
 
 program
   .name("kuzushi")
-  .description("Agentic SAST scanner — Semgrep + LLM triage")
+  .description("Kuzushi — Agentic SAST scanner")
   .version("0.1.0");
 
 // ── scan (default command) ────────────────────────────────────────────────
@@ -131,7 +131,7 @@ program
 
 const configCmd = program
   .command("config")
-  .description("Manage kuzushi configuration");
+  .description("Manage Kuzushi configuration");
 
 configCmd
   .command("get")
