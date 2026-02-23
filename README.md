@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="kuzushi.png" alt="Kuzushi" width="200" />
-</p>
+<img src="kuzushi.png" alt="Kuzushi" width="200" />
 
 # Kuzushi — Agentic SAST Scanner
 
