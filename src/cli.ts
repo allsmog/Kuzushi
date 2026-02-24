@@ -4,10 +4,20 @@ import { Command } from "commander";
 import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { createDefaultDeps } from "./deps.js";
 import { loadConfig, getConfigValue, setConfigValue, unsetConfigValue, configPath } from "./config.js";
-import { initDb, defaultDbPath, getTriagedFingerprints, upsertFinding } from "./store.js";
-import { printScanStart, printResumeInfo, printTriageProgress, printSummary } from "./report.js";
+import { initDb, defaultDbPath } from "./store.js";
+import { createDefaultRegistry } from "./scanners/index.js";
+import { createDefaultTaskRegistry } from "./agents/index.js";
+import { configureAgentRuntime } from "./agent-runtime/index.js";
+import {
+  createBus,
+  registerAllWorkers,
+  createEvent,
+  generateRunId,
+  type PipelineCompleteEvent,
+  type PipelineErrorEvent,
+} from "./bus/index.js";
+import type { ScanOpts } from "./types.js";
 
 function resolveRepo(repoPath: string): { root: string; name: string } {
   const absPath = path.resolve(repoPath);
@@ -22,28 +32,43 @@ function resolveRepo(repoPath: string): { root: string; name: string } {
   }
 }
 
+function parseScannersArg(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 const program = new Command();
 
 program
   .name("kuzushi")
-  .description("Kuzushi — Agentic SAST scanner")
+  .description("Kuzushi — Agentic SAST orchestration")
   .version("0.1.0");
 
 // ── scan (default command) ────────────────────────────────────────────────
 
 program
   .command("scan", { isDefault: true })
-  .description("Scan a repository with Semgrep and triage findings with an LLM")
+  .description("Scan a repository with configured scanners and triage findings with an agent")
   .argument("<repo>", "Path to the repository to scan")
-  .option("--severity <levels>", "Semgrep severity filter (comma-separated)")
+  .option("--scanners <names>", "Scanners to run (comma-separated scanner ids)")
+  .option("--severity <levels>", "Severity filter (comma-separated)")
   .option("--max <n>", "Max findings to triage", parseInt)
-  .option("--model <model>", "LLM model to use for triage")
+  .option("--model <model>", "Model to use for scanners")
+  .option("--triage-model <model>", "Override model used by triage agent")
+  .option("--triage-max-turns <n>", "Override triage agent max turn budget", parseInt)
+  .option("--agent-runtime <backend>", "Agent runtime backend (claude-sdk|acp)")
   .option("--fresh", "Clear prior results before scanning", false)
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
   .action(async (repoPath: string, opts: {
+    scanners?: string;
     severity?: string;
     max?: number;
     model?: string;
+    triageModel?: string;
+    triageMaxTurns?: number;
+    agentRuntime?: string;
     fresh: boolean;
     db?: string;
   }) => {
@@ -53,78 +78,104 @@ program
       process.exit(1);
     }
 
-    // Load config, then apply CLI overrides
-    const config = loadConfig();
-    if (opts.model) config.model = opts.model;
-
     const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
 
-    // Set up DB
-    const dbPath = opts.db ?? defaultDbPath(repoRoot);
-    const dbDir = path.dirname(dbPath);
-    if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
-    const db = initDb(dbPath);
+    // Load config with optional project-level overlay, then apply CLI overrides.
+    const config = loadConfig(repoRoot);
+    if (opts.model) config.model = opts.model;
+    if (opts.triageModel) config.triageModel = opts.triageModel;
+    if (opts.agentRuntime) {
+      config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
+    }
+    if (opts.triageMaxTurns !== undefined) {
+      if (!Number.isFinite(opts.triageMaxTurns) || opts.triageMaxTurns < 1) {
+        console.error("Error: --triage-max-turns must be a positive integer.");
+        process.exit(1);
+      }
+      config.triageMaxTurns = Math.floor(opts.triageMaxTurns);
+    }
 
-    const deps = await createDefaultDeps(config);
+    try {
+      configureAgentRuntime(config);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
     const severity = opts.severity
       ? opts.severity.split(",").map((s) => s.trim().toUpperCase())
       : config.severity;
 
-    // Run scanner
-    console.log(`\n  Scanning ${repoName}...`);
-    const allFindings = await deps.runScanner(repoRoot, {
+    const scannersOverride = opts.scanners
+      ? parseScannersArg(opts.scanners)
+      : undefined;
+
+    const scanOpts: ScanOpts = {
       severity,
       maxFindings: opts.max,
       excludePatterns: config.excludePatterns,
+      scanners: scannersOverride,
       fresh: opts.fresh,
-    });
+    };
 
-    if (allFindings.length === 0) {
-      console.log("  No findings from scanner. Code looks clean.");
-      db.close();
-      return;
+    const registry = createDefaultRegistry();
+    try {
+      scanOpts.scanners = registry.resolveEnabled(scanOpts, config);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
     }
 
-    // Filter already-triaged (resume support)
-    const alreadyTriaged = opts.fresh ? new Set<string>() : getTriagedFingerprints(db);
-    const findings = allFindings.filter((f) => !alreadyTriaged.has(f.fingerprint));
+    // Set up DB.
+    const dbPath = opts.db ?? defaultDbPath(repoRoot);
+    const dbDir = path.dirname(dbPath);
+    if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
 
-    printScanStart(repoName, findings.length, allFindings.length);
-    if (findings.length < allFindings.length) {
-      printResumeInfo(allFindings.length - findings.length, findings.length);
-    }
+    const db = initDb(dbPath);
+    const bus = createBus(config);
+    const taskRegistry = createDefaultTaskRegistry(registry);
+    registerAllWorkers(bus, { registry, taskRegistry, db, config });
 
-    if (findings.length === 0) {
-      console.log("  All findings already triaged. Nothing to do.");
-      printSummary(db, repoName);
-      db.close();
-      return;
-    }
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot,
+      repoName,
+      dbPath,
+    };
 
-    // Triage each finding sequentially
-    console.log(`  Triaging ${findings.length} findings via ${config.model}...\n`);
-    let triaged = 0;
+    const pipelineComplete = bus
+      .waitFor<PipelineCompleteEvent>(
+        "pipeline:complete",
+        (event) => event.meta.runId === runId,
+      )
+      .then((event) => ({ kind: "complete" as const, event }));
 
-    for (const finding of findings) {
-      const filePath = path.isAbsolute(finding.filePath)
-        ? finding.filePath
-        : path.join(repoRoot, finding.filePath);
+    const pipelineError = bus
+      .waitFor<PipelineErrorEvent>(
+        "pipeline:error",
+        (event) => event.meta.runId === runId && event.payload.fatal,
+      )
+      .then((event) => ({ kind: "error" as const, event }));
 
-      const context = await deps.readFileContext(filePath, finding.startLine, 30);
+    try {
+      await bus.publish(
+        createEvent("pipeline:start", runId, {
+          context,
+          config,
+          scanOpts,
+        }),
+      );
 
-      try {
-        const result = await deps.triageFinding(finding, context, repoName);
-        upsertFinding(db, finding, result, repoName, "HEAD");
-        triaged++;
-        printTriageProgress(result, triaged, findings.length);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`  Error triaging ${finding.fingerprint.slice(0, 12)}: ${msg}`);
+      const outcome = await Promise.race([pipelineComplete, pipelineError]);
+      if (outcome.kind === "error") {
+        console.error(`Error: ${outcome.event.payload.error}`);
+        process.exitCode = 1;
       }
+    } finally {
+      await bus.close();
+      db.close();
     }
-
-    printSummary(db, repoName);
-    db.close();
   });
 
 // ── config get/set/unset ──────────────────────────────────────────────────

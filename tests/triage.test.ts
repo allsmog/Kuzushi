@@ -1,16 +1,32 @@
-import { describe, it, expect } from "vitest";
-import { triageFinding, parseVerdict, extractJson, parseTriageResponse } from "../src/triage.js";
-import type { LLMClient, RawFinding } from "../src/types.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildDefaultTriageAgentConfig,
+  extractJson,
+  parseAgentOutput,
+  parseTriageResponse,
+  parseVerdict,
+  triageFindingWithAgent,
+} from "../src/triage.js";
+import type { Finding, TriageAgentConfig } from "../src/scanners/types.js";
 
-function makeFinding(): RawFinding {
+const { queryMock } = vi.hoisted(() => ({
+  queryMock: vi.fn(),
+}));
+
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+  query: queryMock,
+}));
+
+function makeFinding(): Finding {
   return {
+    scanner: "semgrep",
     fingerprint: "test-fp",
     ruleId: "test.rule",
     filePath: "src/test.ts",
     startLine: 10,
     severity: "ERROR",
     message: "test finding",
-    semgrepConfidence: "HIGH",
+    scannerConfidence: "HIGH",
     subcategory: ["vuln"],
     likelihood: "HIGH",
     impact: "HIGH",
@@ -19,13 +35,38 @@ function makeFinding(): RawFinding {
   };
 }
 
-function mockLLM(response: string): LLMClient {
+function registryWithConfig(config: TriageAgentConfig) {
   return {
-    async complete(_system: string, _user: string): Promise<string> {
-      return response;
+    has: () => true,
+    get: () => ({
+      id: "semgrep",
+      displayName: "Semgrep",
+      triageAgentConfig: () => config,
+      scan: async () => [],
+    }),
+  };
+}
+
+function missingRegistry() {
+  return {
+    has: () => false,
+    get: () => {
+      throw new Error("missing");
     },
   };
 }
+
+function streamResult(messages: Array<Record<string, unknown>>) {
+  return (async function* () {
+    for (const message of messages) {
+      yield message;
+    }
+  })();
+}
+
+beforeEach(() => {
+  queryMock.mockReset();
+});
 
 describe("parseVerdict", () => {
   it("accepts tp", () => expect(parseVerdict("tp")).toBe("tp"));
@@ -82,45 +123,211 @@ describe("parseTriageResponse", () => {
   });
 });
 
-describe("triageFinding", () => {
-  it("returns a properly shaped TriageResult from mock LLM", async () => {
-    const llm = mockLLM(
-      JSON.stringify({
-        fingerprint: "test-fp",
-        verdict: "fp",
-        confidence: 0.95,
-        rationale: "Variable is hardcoded, not user-controlled",
-        verification_steps: ["Check source", "Verify no user input"],
-        fix_patch: null,
-      }),
-    );
+describe("parseAgentOutput", () => {
+  it("parses structured object output", () => {
+    const result = parseAgentOutput({
+      fingerprint: "fp-obj",
+      verdict: "tp",
+      confidence: 0.88,
+      rationale: "confirmed",
+      verification_steps: ["step"],
+      fix_patch: null,
+    }, "fallback");
 
-    const result = await triageFinding(llm, makeFinding(), "// code context", "test-repo");
-
-    expect(result.fingerprint).toBe("test-fp");
-    expect(result.verdict).toBe("fp");
-    expect(result.confidence).toBe(0.95);
-    expect(result.rationale).toContain("hardcoded");
-    expect(result.verificationSteps).toHaveLength(2);
-    expect(result.fixPatch).toBeNull();
+    expect(result.fingerprint).toBe("fp-obj");
+    expect(result.verdict).toBe("tp");
+    expect(result.confidence).toBe(0.88);
   });
 
-  it("handles markdown-fenced JSON from LLM", async () => {
-    const llm = mockLLM(
-      '```json\n{"verdict":"tp","confidence":0.8,"rationale":"Real vuln","verification_steps":["step"],"fix_patch":"diff"}\n```',
+  it("falls back to text parser for string output", () => {
+    const result = parseAgentOutput(
+      JSON.stringify({
+        verdict: "fp",
+        confidence: 0.91,
+        rationale: "safe",
+        verification_steps: ["step"],
+      }),
+      "fallback-fp",
     );
 
-    const result = await triageFinding(llm, makeFinding(), "code", "repo");
+    expect(result.fingerprint).toBe("fallback-fp");
+    expect(result.verdict).toBe("fp");
+  });
+});
+
+describe("buildDefaultTriageAgentConfig", () => {
+  it("builds a fallback prompt with finding metadata", () => {
+    const config = buildDefaultTriageAgentConfig(makeFinding(), "repo");
+    expect(config.prompt).toContain("security triage agent");
+    expect(config.prompt).toContain("test.rule");
+    expect(config.prompt).toContain("test-fp");
+  });
+});
+
+describe("triageFindingWithAgent", () => {
+  it("uses structured_output when available", async () => {
+    queryMock.mockReturnValue(streamResult([
+      {
+        type: "result",
+        subtype: "success",
+        result: "{}",
+        structured_output: {
+          fingerprint: "test-fp",
+          verdict: "fp",
+          confidence: 0.95,
+          rationale: "hardcoded input",
+          verification_steps: ["check source"],
+          fix_patch: null,
+        },
+      },
+    ]));
+
+    const result = await triageFindingWithAgent(
+      registryWithConfig({ prompt: "custom triage" }) as any,
+      makeFinding(),
+      "/tmp/repo",
+      "repo",
+      "claude-sonnet-4-20250514",
+      12,
+    );
+
+    expect(result.verdict).toBe("fp");
+    expect(result.confidence).toBe(0.95);
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(queryMock.mock.calls[0][0]?.options?.maxTurns).toBe(12);
+  });
+
+  it("falls back to result text parsing when structured_output is missing", async () => {
+    queryMock.mockReturnValue(streamResult([
+      {
+        type: "result",
+        subtype: "success",
+        result: JSON.stringify({
+          verdict: "tp",
+          confidence: 0.8,
+          rationale: "real vulnerability",
+          verification_steps: ["follow taint"],
+          fix_patch: "diff",
+        }),
+      },
+    ]));
+
+    const result = await triageFindingWithAgent(
+      registryWithConfig({ prompt: "custom triage" }) as any,
+      makeFinding(),
+      "/tmp/repo",
+      "repo",
+      "claude-sonnet-4-20250514",
+      7,
+    );
+
     expect(result.verdict).toBe("tp");
     expect(result.fixPatch).toBe("diff");
   });
 
-  it("defaults unknown verdict to needs_review", async () => {
-    const llm = mockLLM(
-      JSON.stringify({ verdict: "maybe", confidence: 0.5, rationale: "unsure", verification_steps: [] }),
+  it("uses default agent config when scanner plugin is missing", async () => {
+    queryMock.mockReturnValue(streamResult([
+      {
+        type: "result",
+        subtype: "success",
+        result: JSON.stringify({
+          verdict: "needs_review",
+          confidence: 0.5,
+          rationale: "insufficient evidence",
+          verification_steps: ["inspect runtime path"],
+          fix_patch: null,
+        }),
+      },
+    ]));
+
+    const result = await triageFindingWithAgent(
+      missingRegistry() as any,
+      makeFinding(),
+      "/tmp/repo",
+      "repo",
+      "claude-sonnet-4-20250514",
+      9,
     );
 
-    const result = await triageFinding(llm, makeFinding(), "code", "repo");
     expect(result.verdict).toBe("needs_review");
+    expect(queryMock.mock.calls[0][0]?.prompt).toContain("security triage agent");
+  });
+
+  it("throws when agent run fails", async () => {
+    queryMock.mockReturnValue(streamResult([
+      {
+        type: "result",
+        subtype: "error_max_turns",
+        errors: ["max turns exceeded"],
+      },
+    ]));
+
+    await expect(
+      triageFindingWithAgent(
+        registryWithConfig({ prompt: "custom triage" }) as any,
+        makeFinding(),
+        "/tmp/repo",
+        "repo",
+        "claude-sonnet-4-20250514",
+        9,
+      ),
+    ).rejects.toThrow("triage agent failed");
+  });
+
+  it("emits activity callbacks for assistant/tool progress/summary messages", async () => {
+    queryMock.mockReturnValue(streamResult([
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: "Read", input: { file_path: "src/test.ts" } },
+            { type: "text", text: "Investigating dataflow path." },
+          ],
+        },
+      },
+      {
+        type: "tool_progress",
+        tool_use_id: "tool-1",
+        tool_name: "Read",
+        elapsed_time_seconds: 1.2,
+      },
+      {
+        type: "tool_use_summary",
+        summary: "Verified sanitization before sink.",
+        preceding_tool_use_ids: ["tool-1"],
+      },
+      {
+        type: "result",
+        subtype: "success",
+        result: JSON.stringify({
+          verdict: "fp",
+          confidence: 0.9,
+          rationale: "sanitized",
+          verification_steps: ["trace data flow"],
+          fix_patch: null,
+        }),
+      },
+    ]));
+
+    const activities: Array<Record<string, unknown>> = [];
+
+    await triageFindingWithAgent(
+      registryWithConfig({ prompt: "custom triage" }) as any,
+      makeFinding(),
+      "/tmp/repo",
+      "repo",
+      "claude-sonnet-4-20250514",
+      10,
+      {
+        activityCallback: (activity) => {
+          activities.push(activity as unknown as Record<string, unknown>);
+        },
+      },
+    );
+
+    expect(activities.some((a) => a["kind"] === "tool-start")).toBe(true);
+    expect(activities.some((a) => a["kind"] === "reasoning")).toBe(true);
+    expect(activities.some((a) => a["kind"] === "tool-progress")).toBe(true);
+    expect(activities.some((a) => a["kind"] === "tool-complete")).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { TriageResult, Verdict } from "./types.js";
+import type { ScannerId } from "./scanners/types.js";
 import type Database from "better-sqlite3";
 import { getVerdictCounts, getActionableFindings } from "./store.js";
 
@@ -21,7 +22,6 @@ export function printTriageProgress(
   index: number,
   total: number,
 ): void {
-  const pct = Math.round((index / total) * 100);
   const verdict = colorVerdict(result.verdict);
   const conf = chalk.dim(`(${(result.confidence * 100).toFixed(0)}%)`);
   console.log(
@@ -55,8 +55,9 @@ export function printSummary(db: Database.Database, repo: string): void {
       const location = chalk.cyan(`${f.filePath}:${f.startLine}`);
       const conf = chalk.dim(`${(f.confidence * 100).toFixed(0)}%`);
       const severity = f.severity === "ERROR" ? chalk.red(f.severity) : chalk.yellow(f.severity);
+      const scanner = chalk.dim(`[${f.scanner}]`);
 
-      console.log(`  ${verdict} ${conf}  ${severity}`);
+      console.log(`  ${verdict} ${conf}  ${severity} ${scanner}`);
       console.log(`    ${location}`);
       console.log(`    ${chalk.dim(f.ruleId)}`);
       console.log(`    ${f.rationale.slice(0, 120)}${f.rationale.length > 120 ? "..." : ""}`);
@@ -71,10 +72,16 @@ export function printSummary(db: Database.Database, repo: string): void {
 }
 
 /** Print a short line when starting a scan. */
-export function printScanStart(repoName: string, findingCount: number, total: number): void {
+export function printScanStart(
+  repoName: string,
+  findingCount: number,
+  total: number,
+  scanners: ScannerId[],
+): void {
   console.log("");
   console.log(chalk.bold(`  Kuzushi v0.1 — scanning ${repoName}`));
-  console.log(`  ${total} Semgrep findings, ${findingCount} selected for AI triage`);
+  console.log(`  Scanners: ${scanners.join(", ")}`);
+  console.log(`  ${total} findings, ${findingCount} selected for AI triage`);
   console.log("");
 }
 

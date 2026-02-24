@@ -17,7 +17,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.52",
     "better-sqlite3": "^11.8.1",
     "chalk": "^5.4.1",
     "commander": "^13.1.0"
@@ -31,8 +31,18 @@
     "vitest": "^3.0.5"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
   },
-  "keywords": ["sast", "security", "semgrep", "ai", "triage"],
-  "license": "MIT"
+  "keywords": [
+    "sast",
+    "security",
+    "semgrep",
+    "ai",
+    "triage"
+  ],
+  "license": "MIT",
+  "packageManager": "pnpm@10.30.0+sha512.2b5753de015d480eeb88f5b5b61e0051f05b4301808a82ec8b840c9d2adf7748eb352c83f5c1593ca703ff1017295bc3fdd3119abb9686efc96b9fcb18200937"
 }

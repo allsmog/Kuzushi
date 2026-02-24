@@ -8,19 +8,21 @@ import {
   printScanStart,
   printResumeInfo,
 } from "../src/report.js";
-import type { RawFinding, TriageResult } from "../src/types.js";
+import type { TriageResult } from "../src/types.js";
+import type { Finding } from "../src/scanners/types.js";
 
 const TMP_DIR = path.join(import.meta.dirname, ".tmp-report-test");
 
-function makeFinding(fp: string): RawFinding {
+function makeFinding(fp: string): Finding {
   return {
+    scanner: "semgrep",
     fingerprint: fp,
     ruleId: "test.rule",
     filePath: "src/test.ts",
     startLine: 10,
     severity: "ERROR",
     message: "test finding",
-    semgrepConfidence: "HIGH",
+    scannerConfidence: "HIGH",
     subcategory: ["vuln"],
     likelihood: "HIGH",
     impact: "HIGH",
@@ -124,7 +126,7 @@ describe("printSummary", () => {
 
 describe("printScanStart", () => {
   it("prints scan start info", () => {
-    printScanStart("my-repo", 15, 200);
+    printScanStart("my-repo", 15, 200, ["semgrep"]);
     expect(console.log).toHaveBeenCalled();
   });
 });

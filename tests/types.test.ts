@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { Verdict, RawFinding, TriageResult, ScanOpts } from "../src/types.js";
+import type { Verdict, TriageResult, ScanOpts } from "../src/types.js";
+import type { Finding } from "../src/scanners/types.js";
 
 describe("types", () => {
   it("Verdict accepts valid values", () => {
@@ -7,15 +8,16 @@ describe("types", () => {
     expect(verdicts).toHaveLength(3);
   });
 
-  it("RawFinding shape is constructible", () => {
-    const finding: RawFinding = {
+  it("Finding shape is constructible", () => {
+    const finding: Finding = {
+      scanner: "semgrep",
       fingerprint: "abc123",
       ruleId: "test.rule",
       filePath: "src/app.ts",
       startLine: 1,
       severity: "ERROR",
       message: "test",
-      semgrepConfidence: "HIGH",
+      scannerConfidence: "HIGH",
       subcategory: ["vuln"],
       likelihood: "HIGH",
       impact: "HIGH",
@@ -42,6 +44,7 @@ describe("types", () => {
       severity: ["ERROR"],
       maxFindings: 10,
       excludePatterns: ["node_modules"],
+      scanners: ["semgrep"],
       fresh: false,
     };
     expect(opts.severity).toEqual(["ERROR"]);

@@ -78,7 +78,7 @@ async function downloadFile(url: string, dest: string): Promise<void> {
 }
 
 /**
- * Resolve the scanner binary path.
+ * Resolve the Semgrep-compatible scanner binary path.
  *
  * Precedence:
  * 1. `opengrep` on PATH
@@ -86,16 +86,13 @@ async function downloadFile(url: string, dest: string): Promise<void> {
  * 3. Previously downloaded binary at ~/.kuzushi/bin/opengrep
  * 4. Auto-download from GitHub releases
  */
-export async function resolveScanner(): Promise<string> {
-  // 1. Check PATH
+export async function resolveSemgrepBinary(): Promise<string> {
   const onPath = which("opengrep") ?? which("semgrep");
   if (onPath) return onPath;
 
-  // 2. Check local cache
   const localBin = path.join(BIN_DIR, process.platform === "win32" ? "opengrep.exe" : "opengrep");
   if (existsSync(localBin)) return localBin;
 
-  // 3. Download
   console.log("  No scanner found on PATH. Downloading opengrep...");
   const assetName = getAssetName();
   const downloadUrl = await getLatestReleaseDownloadUrl(assetName);

@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
-import type { RawFinding, TriageResult, Verdict } from "./types.js";
+import type { TriageResult, Verdict } from "./types.js";
+import type { Finding, ScannerId } from "./scanners/types.js";
 
 /** Initialize the SQLite database with the findings schema. */
 export function initDb(dbPath: string): Database.Database {
@@ -10,6 +11,7 @@ export function initDb(dbPath: string): Database.Database {
   db.exec(`
     CREATE TABLE IF NOT EXISTS findings (
       fingerprint        TEXT PRIMARY KEY,
+      scanner            TEXT NOT NULL DEFAULT 'semgrep',
       repo               TEXT NOT NULL,
       ref                TEXT NOT NULL,
       rule_id            TEXT NOT NULL,
@@ -27,8 +29,11 @@ export function initDb(dbPath: string): Database.Database {
     );
 
     CREATE INDEX IF NOT EXISTS idx_repo_ref ON findings(repo, ref);
+    CREATE INDEX IF NOT EXISTS idx_scanner  ON findings(scanner);
     CREATE INDEX IF NOT EXISTS idx_rule_id  ON findings(rule_id);
   `);
+
+  ensureScannerColumn(db);
 
   return db;
 }
@@ -41,18 +46,19 @@ export function defaultDbPath(repoRoot: string): string {
 /** Upsert a triage result into the database. */
 export function upsertFinding(
   db: Database.Database,
-  finding: RawFinding,
+  finding: Finding,
   triage: TriageResult,
   repo: string,
   ref: string,
 ): void {
   const stmt = db.prepare(`
     INSERT INTO findings (
-      fingerprint, repo, ref, rule_id, file_path, start_line,
+      fingerprint, scanner, repo, ref, rule_id, file_path, start_line,
       severity, message, verdict, confidence,
       rationale, verification_steps, fix_patch
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fingerprint) DO UPDATE SET
+      scanner=excluded.scanner,
       verdict=excluded.verdict,
       confidence=excluded.confidence,
       rationale=excluded.rationale,
@@ -63,6 +69,7 @@ export function upsertFinding(
 
   stmt.run(
     triage.fingerprint,
+    finding.scanner,
     repo,
     ref,
     finding.ruleId,
@@ -117,6 +124,7 @@ export function getActionableFindings(
   db: Database.Database,
   repo?: string,
 ): Array<{
+  scanner: ScannerId;
   fingerprint: string;
   ruleId: string;
   filePath: string;
@@ -131,7 +139,7 @@ export function getActionableFindings(
     : "WHERE verdict != 'fp'";
 
   const query = `
-    SELECT fingerprint, rule_id as ruleId, file_path as filePath, start_line as startLine,
+    SELECT scanner, fingerprint, rule_id as ruleId, file_path as filePath, start_line as startLine,
            severity, verdict, confidence, rationale
     FROM findings ${where}
     ORDER BY
@@ -144,6 +152,7 @@ export function getActionableFindings(
     : db.prepare(query).all();
 
   return rows as Array<{
+    scanner: ScannerId;
     fingerprint: string;
     ruleId: string;
     filePath: string;
@@ -153,4 +162,12 @@ export function getActionableFindings(
     confidence: number;
     rationale: string;
   }>;
+}
+
+function ensureScannerColumn(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
+  const hasScanner = columns.some((column) => column.name === "scanner");
+  if (!hasScanner) {
+    db.exec("ALTER TABLE findings ADD COLUMN scanner TEXT NOT NULL DEFAULT 'semgrep'");
+  }
 }

@@ -10,14 +10,12 @@ vi.mock("node:os", () => ({
   homedir: () => TMP_HOME,
 }));
 
-// Control which binaries are "found" on PATH
 let whichResults: Record<string, string | null> = {};
 
 vi.mock("node:child_process", async () => {
   const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
   return {
     ...actual,
-    // execFileSync is used by the `which` helper in resolve.ts
     execFileSync: vi.fn((cmd: string, args: string[]) => {
       if (cmd === "which" && args?.[0]) {
         const result = whichResults[args[0]];
@@ -29,7 +27,7 @@ vi.mock("node:child_process", async () => {
   };
 });
 
-const { resolveScanner } = await import("../src/scanner/resolve.js");
+const { resolveSemgrepBinary } = await import("../src/scanners/resolve-semgrep.js");
 
 beforeEach(() => {
   mkdirSync(TMP_BIN, { recursive: true });
@@ -40,23 +38,23 @@ afterEach(() => {
   rmSync(TMP_HOME, { recursive: true, force: true });
 });
 
-describe("resolveScanner", () => {
+describe("resolveSemgrepBinary", () => {
   it("returns opengrep from PATH if available", async () => {
     whichResults["opengrep"] = "/usr/local/bin/opengrep";
-    const result = await resolveScanner();
+    const result = await resolveSemgrepBinary();
     expect(result).toBe("/usr/local/bin/opengrep");
   });
 
   it("falls back to semgrep on PATH", async () => {
     whichResults["semgrep"] = "/usr/local/bin/semgrep";
-    const result = await resolveScanner();
+    const result = await resolveSemgrepBinary();
     expect(result).toBe("/usr/local/bin/semgrep");
   });
 
   it("prefers opengrep over semgrep on PATH", async () => {
     whichResults["opengrep"] = "/usr/local/bin/opengrep";
     whichResults["semgrep"] = "/usr/local/bin/semgrep";
-    const result = await resolveScanner();
+    const result = await resolveSemgrepBinary();
     expect(result).toBe("/usr/local/bin/opengrep");
   });
 
@@ -65,7 +63,7 @@ describe("resolveScanner", () => {
     writeFileSync(cachedBin, "fake-binary");
     chmodSync(cachedBin, 0o755);
 
-    const result = await resolveScanner();
+    const result = await resolveSemgrepBinary();
     expect(result).toBe(cachedBin);
   });
 });

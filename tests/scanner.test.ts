@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { scoreFinding, computeFingerprint, selectFindings, type SemgrepResult, type SemgrepOutput } from "../src/scanner.js";
+import {
+  scoreSemgrepFinding,
+  computeFingerprint,
+  selectFindings,
+  type SemgrepResult,
+  type SemgrepOutput,
+} from "../src/scanners/run-semgrep.js";
 
 function makeFinding(overrides: Partial<SemgrepResult> = {}): SemgrepResult {
   return {
@@ -23,11 +29,10 @@ function makeFinding(overrides: Partial<SemgrepResult> = {}): SemgrepResult {
   };
 }
 
-describe("scoreFinding", () => {
+describe("scoreSemgrepFinding", () => {
   it("scores a high-severity vuln finding as 54", () => {
-    // ERROR(3) * HIGH(3) * HIGH(3) * vuln(2) = 54
     const finding = makeFinding();
-    expect(scoreFinding(finding)).toBe(54);
+    expect(scoreSemgrepFinding(finding)).toBe(54);
   });
 
   it("scores a low-severity audit finding as 1", () => {
@@ -42,8 +47,7 @@ describe("scoreFinding", () => {
         },
       },
     });
-    // INFO(1) * LOW(1) * LOW(1) * audit(1) = 1
-    expect(scoreFinding(finding)).toBe(1);
+    expect(scoreSemgrepFinding(finding)).toBe(1);
   });
 
   it("uses defaults for missing metadata", () => {
@@ -53,8 +57,7 @@ describe("scoreFinding", () => {
       start: { line: 1, col: 1 },
       end: { line: 1, col: 10 },
     };
-    // INFO(1) * LOW(1) * LOW(1) * audit(1) = 1
-    expect(scoreFinding(finding)).toBe(1);
+    expect(scoreSemgrepFinding(finding)).toBe(1);
   });
 
   it("scores WARNING/MEDIUM correctly", () => {
@@ -69,8 +72,7 @@ describe("scoreFinding", () => {
         },
       },
     });
-    // WARNING(2) * MEDIUM(2) * MEDIUM(2) * vuln(2) = 16
-    expect(scoreFinding(finding)).toBe(16);
+    expect(scoreSemgrepFinding(finding)).toBe(16);
   });
 });
 
@@ -131,14 +133,13 @@ describe("selectFindings", () => {
     };
     const selected = selectFindings(output, "repo", "HEAD");
     expect(selected.length).toBe(2);
-    // Highest score first
     expect(selected[0].score).toBeGreaterThanOrEqual(selected[1].score);
   });
 
   it("deduplicates by fingerprint keeping highest score", () => {
     const finding = makeFinding();
     const output: SemgrepOutput = {
-      results: [finding, finding], // duplicate
+      results: [finding, finding],
     };
     const selected = selectFindings(output, "repo", "HEAD");
     expect(selected.length).toBe(1);
@@ -164,10 +165,11 @@ describe("selectFindings", () => {
     const output: SemgrepOutput = { results: [makeFinding()] };
     const [f] = selectFindings(output, "repo", "HEAD");
     expect(f.ruleId).toBe("javascript.express.security.audit.xss");
+    expect(f.scanner).toBe("semgrep");
     expect(f.filePath).toBe("src/app.ts");
     expect(f.startLine).toBe(42);
     expect(f.severity).toBe("ERROR");
-    expect(f.semgrepConfidence).toBe("HIGH");
+    expect(f.scannerConfidence).toBe("HIGH");
     expect(f.cwe).toEqual(["CWE-79"]);
     expect(f.fingerprint).toMatch(/^[0-9a-f]{64}$/);
   });

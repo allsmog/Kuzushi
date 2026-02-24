@@ -1,13 +1,13 @@
-/** Scanner backend — today just semgrep. Type exists for later. */
-export type Scanner = "semgrep";
+import type { ScannerConfig, ScannerId } from "./scanners/types.js";
 
-/** LLM backend — today just anthropic. Type exists for later. */
-export type LLMBackend = "anthropic";
+/** Pluggable message bus backend. */
+export type BusBackend = "in-process" | "redis" | "google-pubsub" | "nats";
 
-/** Provider-agnostic LLM client. Implementations live in src/llm/. */
-export interface LLMClient {
-  complete(system: string, user: string): Promise<string>;
-}
+/** Scanner execution mode. */
+export type ScanMode = "sequential" | "concurrent";
+
+/** Runtime provider for agent execution. */
+export type AgentRuntimeBackend = "claude-sdk" | "acp";
 
 /** Verdict assigned by AI triage. */
 export type Verdict = "tp" | "fp" | "needs_review";
@@ -17,23 +17,8 @@ export interface ScanOpts {
   severity: string[];
   maxFindings?: number;
   excludePatterns: string[];
+  scanners?: ScannerId[];
   fresh: boolean;
-}
-
-/** A raw finding from Semgrep before AI triage. */
-export interface RawFinding {
-  fingerprint: string;
-  ruleId: string;
-  filePath: string;
-  startLine: number;
-  severity: string;
-  message: string;
-  semgrepConfidence: string;
-  subcategory: string[];
-  likelihood: string;
-  impact: string;
-  cwe: string[];
-  score: number;
 }
 
 /** Result of AI triage for a single finding. */
@@ -46,20 +31,37 @@ export interface TriageResult {
   fixPatch: string | null;
 }
 
-/** User configuration stored at ~/.kuzushi/config.json. */
+/** User configuration stored at ~/.kuzushi/config.json (and optional project override). */
 export interface KuzushiConfig {
-  /** LLM model identifier (e.g. "claude-sonnet-4-20250514"). */
+  /** Scanner model identifier (e.g. "claude-sonnet-4-20250514"). */
   model: string;
-  /** Max tokens for LLM response. */
-  maxTokens: number;
-  /** Default severity filter (e.g. ["ERROR", "WARNING"]). */
+  /** Optional override model for triage agents. */
+  triageModel?: string;
+  /** Max turns for triage agents. */
+  triageMaxTurns: number;
+  /** Message bus backend for pipeline events. */
+  busBackend: BusBackend;
+  /** Number of in-flight triage tasks. */
+  triageConcurrency: number;
+  /** Scanner execution strategy. */
+  scanMode: ScanMode;
+  /** Backend used for agent execution. */
+  agentRuntimeBackend?: AgentRuntimeBackend;
+  /** Optional list of additional AgentTask IDs to enable in DAG execution. */
+  enabledTasks?: string[];
+  /** Enabled scanner IDs, in execution order. */
+  scanners: ScannerId[];
+  /** Default severity filter. */
   severity: string[];
-  /** Default exclude patterns for Semgrep. */
+  /** Default exclude patterns for Semgrep-like scanners. */
   excludePatterns: string[];
+  /** Scanner-specific config blocks keyed by scanner id. */
+  scannerConfig: Record<string, ScannerConfig>;
 }
 
 /** A persisted finding row from SQLite. */
 export interface FindingRow {
+  scanner: ScannerId;
   fingerprint: string;
   repo: string;
   ref: string;

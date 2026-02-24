@@ -1,61 +1,221 @@
-import type { LLMClient, RawFinding, TriageResult, Verdict } from "./types.js";
+import { getAgentRuntime, type AgentRuntime } from "./agent-runtime/index.js";
+import type {
+  AllowedTriageTool,
+  Finding,
+  TriageAgentConfig,
+} from "./scanners/types.js";
+import type { TriageResult, Verdict } from "./types.js";
 
-const TRIAGE_SYSTEM_PROMPT = `You are a security triage agent. Your job is to eliminate false positives that Semgrep cannot distinguish from true positives due to lack of semantic context. Semgrep matches syntactic patterns; you verify data flow and intent.
+export const TRIAGE_RESULT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["fingerprint", "verdict", "confidence", "rationale", "verification_steps"],
+  properties: {
+    fingerprint: { type: "string" },
+    verdict: { type: "string", enum: ["tp", "fp", "needs_review"] },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    rationale: { type: "string" },
+    verification_steps: { type: "array", items: { type: "string" }, minItems: 1 },
+    fix_patch: { type: ["string", "null"] },
+  },
+} as const;
 
-Rules:
-- DO NOT suggest edits to source files.
-- DO NOT print secrets (redact if needed).`;
+export const DEFAULT_TOOLS: AllowedTriageTool[] = ["Read", "Glob", "Grep"];
+export const DEFAULT_MAX_TURNS = 10;
 
-function buildTriagePrompt(
-  finding: RawFinding,
-  codeContext: string,
+export interface TriageRuntimeOptions {
+  runtime?: AgentRuntime;
+  abortController?: AbortController;
+  maxBudgetUsd?: number;
+  activityCallback?: AgentActivityCallback;
+}
+
+export interface TriageConfigProvider {
+  has(id: string): boolean;
+  get(id: string): {
+    triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig;
+  };
+}
+
+export interface AgentActivity {
+  kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  summary?: string;
+  elapsedSeconds?: number;
+}
+
+export type AgentActivityCallback = (
+  activity: AgentActivity,
+) => Promise<void> | void;
+
+export async function triageFindingWithAgent(
+  registry: TriageConfigProvider,
+  finding: Finding,
+  repoRoot: string,
   repoName: string,
-): string {
-  return `## Finding to triage
+  model: string,
+  maxTurns: number,
+  runtimeOptions: TriageRuntimeOptions = {},
+): Promise<TriageResult> {
+  const agentConfig = resolveAgentConfig(registry, finding, repoName);
+  const allowedTools = normalizeAllowedTools(agentConfig.allowedTools);
+  const effectiveMaxTurns = normalizeTurns(agentConfig.maxTurns ?? maxTurns);
+  const runtime = runtimeOptions.runtime ?? getAgentRuntime();
 
-Repo: ${repoName}
-Rule: ${finding.ruleId}
-File: ${finding.filePath}:${finding.startLine}
-Severity: ${finding.severity}
-Semgrep Confidence: ${finding.semgrepConfidence}
-Likelihood: ${finding.likelihood}
-Impact: ${finding.impact}
-CWE: ${finding.cwe.join(", ") || "none"}
-Message: ${finding.message}
+  let resultText = "";
+  let structuredOutput: unknown = undefined;
+  let executionError: string | null = null;
 
-## Source code context
+  for await (const message of runtime.query({
+    prompt: agentConfig.prompt,
+    options: {
+      cwd: repoRoot,
+      model,
+      maxTurns: effectiveMaxTurns,
+      allowedTools,
+      permissionMode: "dontAsk",
+      maxBudgetUsd: runtimeOptions.maxBudgetUsd,
+      abortController: runtimeOptions.abortController,
+      outputFormat: {
+        type: "json_schema",
+        schema: TRIAGE_RESULT_SCHEMA,
+      },
+    },
+  })) {
+    if (message.type === "assistant") {
+      await emitAssistantActivity(message.content, runtimeOptions.activityCallback);
+      continue;
+    }
 
-${codeContext}
+    if (message.type === "tool-progress") {
+      await runtimeOptions.activityCallback?.({
+        kind: "tool-progress",
+        toolName: message.toolName,
+        elapsedSeconds: message.elapsedSeconds,
+      });
+      continue;
+    }
 
-## Instructions
+    if (message.type === "tool-summary") {
+      await runtimeOptions.activityCallback?.({
+        kind: "tool-complete",
+        summary: message.summary,
+      });
+      continue;
+    }
 
-1. Read the code around line ${finding.startLine}.
-2. Trace the flagged value back to its source:
-   - Is it user-controlled, config-derived, or hardcoded?
-   - Is there sanitization or validation between source and sink?
-   - Is the code path reachable? (Check for dead code, feature flags, test-only)
-3. Inspect call sites if the data flow crosses function boundaries.
-4. Note the finding's semgrep_confidence and likelihood — factor these into your assessment.
-5. Assign a verdict:
-   - tp: confirmed true positive
-   - fp: confirmed false positive (explain why Semgrep was wrong)
-   - needs_review: ONLY when you cannot determine the verdict after reading the code
-6. Assign confidence (0.0-1.0, be conservative).
-7. Write a short rationale referencing specific variable names, functions, and code patterns.
-8. List 2-6 concrete verification steps a human reviewer could follow.
-9. Optionally produce a unified diff fix (or null if not applicable).
+    if (message.type !== "result") continue;
+    if ("result" in message) {
+      resultText = message.result;
+      structuredOutput = message.structuredOutput;
+      continue;
+    }
 
-## Output format
+    executionError = message.errors.join("; ") || message.subtype;
+  }
 
-Respond with ONLY a JSON object (no markdown fencing, no extra text):
-{
-  "fingerprint": "${finding.fingerprint}",
-  "verdict": "tp" | "fp" | "needs_review",
-  "confidence": 0.0-1.0,
-  "rationale": "...",
-  "verification_steps": ["..."],
-  "fix_patch": "..." or null
-}`;
+  if (executionError) {
+    throw new Error(`triage agent failed: ${executionError}`);
+  }
+
+  return parseAgentOutput(structuredOutput ?? resultText, finding.fingerprint);
+}
+
+export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResult {
+  if (isRecord(raw)) {
+    return {
+      fingerprint: asString(raw["fingerprint"], fingerprint),
+      verdict: parseVerdict(asString(raw["verdict"], "needs_review")),
+      confidence: clampConfidence(raw["confidence"]),
+      rationale: asString(raw["rationale"], ""),
+      verificationSteps: normalizeVerificationSteps(raw["verification_steps"]),
+      fixPatch: normalizeFixPatch(raw["fix_patch"]),
+    };
+  }
+
+  if (typeof raw === "string") {
+    return parseTriageResponse(raw, fingerprint);
+  }
+
+  return parseTriageResponse(String(raw ?? ""), fingerprint);
+}
+
+export function buildDefaultTriageAgentConfig(
+  finding: Finding,
+  repoName: string,
+): TriageAgentConfig {
+  return {
+    prompt: [
+      "You are a security triage agent.",
+      "Use available repo tools to investigate whether this finding is a true or false positive.",
+      "",
+      "## Finding",
+      `Repo: ${repoName}`,
+      `Scanner: ${finding.scanner}`,
+      `Rule: ${finding.ruleId}`,
+      `File: ${finding.filePath}:${finding.startLine}`,
+      `Severity: ${finding.severity}`,
+      `Scanner Confidence: ${finding.scannerConfidence}`,
+      `Likelihood: ${finding.likelihood}`,
+      `Impact: ${finding.impact}`,
+      `CWE: ${finding.cwe.join(", ") || "none"}`,
+      `Message: ${finding.message}`,
+      `Fingerprint: ${finding.fingerprint}`,
+      "",
+      "## Investigation instructions",
+      "1. Read the flagged file and surrounding code.",
+      "2. Trace dataflow to source/sink across call boundaries.",
+      "3. Use Grep/Glob to locate sanitization, validation, and guards.",
+      "4. Validate reachability and realistic attacker control.",
+      "5. Decide tp/fp/needs_review with conservative confidence.",
+      "",
+      "## Output requirements",
+      "Return ONLY a JSON object with:",
+      "fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null)",
+    ].join("\n"),
+  };
+}
+
+function resolveAgentConfig(
+  registry: TriageConfigProvider,
+  finding: Finding,
+  repoName: string,
+): TriageAgentConfig {
+  if (!registry.has(finding.scanner)) {
+    return buildDefaultTriageAgentConfig(finding, repoName);
+  }
+
+  try {
+    const config = registry.get(finding.scanner).triageAgentConfig(finding, repoName);
+    if (!config.prompt || !config.prompt.trim()) {
+      return buildDefaultTriageAgentConfig(finding, repoName);
+    }
+    return config;
+  } catch {
+    return buildDefaultTriageAgentConfig(finding, repoName);
+  }
+}
+
+function normalizeAllowedTools(tools: AllowedTriageTool[] | undefined): AllowedTriageTool[] {
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return [...DEFAULT_TOOLS];
+  }
+
+  const normalized = tools
+    .filter((tool): tool is AllowedTriageTool => (
+      tool === "Read" || tool === "Glob" || tool === "Grep"
+    ));
+
+  return normalized.length > 0 ? normalized : [...DEFAULT_TOOLS];
+}
+
+function normalizeTurns(value: number): number {
+  if (!Number.isFinite(value) || value < 1) {
+    return DEFAULT_MAX_TURNS;
+  }
+
+  return Math.floor(value);
 }
 
 /** Parse a verdict string, defaulting to needs_review for unknown values. */
@@ -66,11 +226,9 @@ export function parseVerdict(v: string): Verdict {
 
 /** Extract JSON from LLM response, handling markdown fences and preamble. */
 export function extractJson(text: string): string {
-  // Try to extract from markdown code fence
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenceMatch) return fenceMatch[1].trim();
 
-  // Try to find a JSON object directly
   const braceStart = text.indexOf("{");
   const braceEnd = text.lastIndexOf("}");
   if (braceStart !== -1 && braceEnd > braceStart) {
@@ -89,25 +247,73 @@ export function parseTriageResponse(
   const parsed = JSON.parse(jsonStr);
 
   return {
-    fingerprint,
-    verdict: parseVerdict(parsed.verdict),
-    confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
-    rationale: String(parsed.rationale ?? ""),
-    verificationSteps: Array.isArray(parsed.verification_steps)
-      ? parsed.verification_steps.map(String)
-      : [],
-    fixPatch: parsed.fix_patch ?? null,
+    fingerprint: asString(parsed.fingerprint, fingerprint),
+    verdict: parseVerdict(asString(parsed.verdict, "needs_review")),
+    confidence: clampConfidence(parsed.confidence),
+    rationale: asString(parsed.rationale, ""),
+    verificationSteps: normalizeVerificationSteps(parsed.verification_steps),
+    fixPatch: normalizeFixPatch(parsed.fix_patch),
   };
 }
 
-/** Triage a single finding via an LLM client. */
-export async function triageFinding(
-  llm: LLMClient,
-  finding: RawFinding,
-  codeContext: string,
-  repoName: string,
-): Promise<TriageResult> {
-  const userPrompt = buildTriagePrompt(finding, codeContext, repoName);
-  const text = await llm.complete(TRIAGE_SYSTEM_PROMPT, userPrompt);
-  return parseTriageResponse(text, finding.fingerprint);
+function normalizeVerificationSteps(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((step) => String(step).trim())
+    .filter(Boolean);
+}
+
+function clampConfidence(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(1, numeric));
+}
+
+function normalizeFixPatch(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string") return null;
+  return value;
+}
+
+async function emitAssistantActivity(
+  blocks: Array<Record<string, unknown>>,
+  callback: AgentActivityCallback | undefined,
+): Promise<void> {
+  if (!callback) {
+    return;
+  }
+
+  for (const block of blocks) {
+    const blockType = asString(block["type"], "");
+
+    if (blockType === "tool_use") {
+      const toolName = asString(block["name"], "");
+      const input = isRecord(block["input"]) ? block["input"] : undefined;
+      await callback({
+        kind: "tool-start",
+        toolName: toolName || undefined,
+        toolInput: input,
+      });
+      continue;
+    }
+
+    if (blockType === "text") {
+      const text = asString(block["text"], "").trim();
+      if (!text) continue;
+      await callback({
+        kind: "reasoning",
+        summary: text,
+      });
+    }
+  }
+}
+
+function asString(value: unknown, fallback: string): string {
+  if (typeof value === "string") return value;
+  if (value == null) return fallback;
+  return String(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
 }
