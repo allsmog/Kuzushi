@@ -75,6 +75,7 @@ program
   .option("--no-context", "Disable pre-scan repository context gathering")
   .option("--audit-log", "Persist per-run audit logs to .kuzushi/runs/<runId>/", false)
   .option("--output <path>", "Write markdown report to this path")
+  .option("--sarif <path>", "Write SARIF v2.1.0 report to this path")
   .option("--agent-runtime <backend>", "Agent runtime backend (claude-sdk|acp)")
   .option("--fresh", "Clear prior results before scanning", false)
   .option("--resume [runId]", "Resume a previous run (optionally by run id)")
@@ -97,6 +98,7 @@ program
     context: boolean;
     auditLog: boolean;
     output?: string;
+    sarif?: string;
     agentRuntime?: string;
     fresh: boolean;
     resume?: string | boolean;
@@ -126,6 +128,7 @@ program
     if (opts.context === false) config.enableContextGathering = false;
     if (opts.auditLog) config.auditLog = true;
     if (opts.output) config.reportOutput = path.resolve(opts.output);
+    if (opts.sarif) config.sarifOutput = path.resolve(opts.sarif);
     if (opts.agentRuntime) {
       config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
     }

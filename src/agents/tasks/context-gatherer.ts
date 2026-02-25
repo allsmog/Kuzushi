@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import type { ScanOpts, RepoContext } from "../../types.js";
+import { isRecord } from "../../utils.js";
 import type { AgentTask } from "../types.js";
 
 const MAX_WALK_DEPTH = 5;
@@ -386,8 +387,4 @@ function normalizeRelPath(relPath: string): string {
 
 function sortValues(values: Set<string>): string[] {
   return [...values].sort((a, b) => a.localeCompare(b));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }

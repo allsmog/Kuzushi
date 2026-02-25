@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import type { KuzushiConfig, Verdict } from "./types.js";
 import type { ScannerConfig } from "./scanners/types.js";
+import { isRecord } from "./utils.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".kuzushi");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
@@ -30,6 +31,7 @@ export const DEFAULTS: KuzushiConfig = {
   enableContextGathering: true,
   auditLog: false,
   reportOutput: undefined,
+  sarifOutput: undefined,
   maxTriageRetries: 2,
   maxVerifyRetries: 2,
   retryBackoffMs: 5000,
@@ -48,6 +50,7 @@ export const DEFAULTS: KuzushiConfig = {
   scannerConfig: {
     semgrep: { configFlag: "auto" },
     "claude-adk": { model: "claude-sonnet-4-20250514", maxFindings: 20 },
+    codeql: {},
   },
 };
 
@@ -220,6 +223,12 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "sarifOutput") {
+    config.sarifOutput = raw.trim() || undefined;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
   if (key === "maxTriageRetries") {
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) {
@@ -351,6 +360,7 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
       config.enableContextGathering = DEFAULTS.enableContextGathering;
     } else if (key === "auditLog") config.auditLog = DEFAULTS.auditLog;
     else if (key === "reportOutput") config.reportOutput = DEFAULTS.reportOutput;
+    else if (key === "sarifOutput") config.sarifOutput = DEFAULTS.sarifOutput;
     else if (key === "maxTriageRetries") config.maxTriageRetries = DEFAULTS.maxTriageRetries;
     else if (key === "maxVerifyRetries") config.maxVerifyRetries = DEFAULTS.maxVerifyRetries;
     else if (key === "retryBackoffMs") config.retryBackoffMs = DEFAULTS.retryBackoffMs;
@@ -416,6 +426,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   );
   const auditLog = normalizeBoolean(config.auditLog, DEFAULTS.auditLog ?? false);
   const reportOutput = normalizeOptionalString(config.reportOutput);
+  const sarifOutput = normalizeOptionalString(config.sarifOutput);
   const maxTriageRetries = normalizeNonNegativeInt(
     config.maxTriageRetries,
     DEFAULTS.maxTriageRetries ?? 2,
@@ -448,6 +459,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     enableContextGathering,
     auditLog,
     reportOutput,
+    sarifOutput,
     maxTriageRetries,
     maxVerifyRetries,
     retryBackoffMs,
@@ -527,6 +539,10 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
 
     if (typeof layer["reportOutput"] === "string") {
       merged.reportOutput = layer["reportOutput"];
+    }
+
+    if (typeof layer["sarifOutput"] === "string") {
+      merged.sarifOutput = layer["sarifOutput"];
     }
 
     if (
@@ -819,10 +835,6 @@ function unsetByPath(root: unknown, pathParts: string[]): void {
   }
 
   delete cursor[pathParts[pathParts.length - 1]];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }
 
 function cloneScannerConfig(value: Record<string, ScannerConfig>): Record<string, ScannerConfig> {

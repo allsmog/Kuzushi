@@ -1,4 +1,5 @@
 import type { KuzushiConfig, ScanOpts } from "../types.js";
+import { isRecord } from "../utils.js";
 import type { Finding, ScannerConfig, ScannerId, ScannerPlugin } from "./types.js";
 
 /** Registry and orchestrator for scanner plugins (throws/waza). */
@@ -88,8 +89,4 @@ function dedupeFindings(findings: Finding[], maxFindings?: number): Finding[] {
   return [...seen.values()]
     .sort((a, b) => b.score - a.score)
     .slice(0, maxFindings);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }

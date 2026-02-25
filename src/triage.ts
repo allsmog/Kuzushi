@@ -5,6 +5,7 @@ import type {
   TriageAgentConfig,
 } from "./scanners/types.js";
 import type { RepoContext, TriageResult, Verdict } from "./types.js";
+import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 
 export const TRIAGE_RESULT_SCHEMA = {
   type: "object",
@@ -203,6 +204,7 @@ export function buildDefaultTriageAgentConfig(
       `Impact: ${finding.impact}`,
       `CWE: ${finding.cwe.join(", ") || "none"}`,
       `Message: ${finding.message}`,
+      `Evidence: ${finding.evidence || "none"}`,
       `Fingerprint: ${finding.fingerprint}`,
       "",
       "## Investigation instructions",
@@ -289,14 +291,6 @@ function normalizeTurns(value: number): number {
   }
 
   return Math.floor(value);
-}
-
-function normalizeCostUsd(value: number): number {
-  if (!Number.isFinite(value) || value < 0) {
-    return 0;
-  }
-
-  return value;
 }
 
 /** Parse a verdict string, defaulting to needs_review for unknown values. */
@@ -425,16 +419,4 @@ function asString(value: unknown, fallback: string): string {
   if (typeof value === "string") return value;
   if (value == null) return fallback;
   return String(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
 }

@@ -153,6 +153,7 @@ export function selectFindings(
       startLine: finding.start.line,
       severity: extra.severity ?? "UNKNOWN",
       message: extra.message ?? "",
+      evidence: normalizeEvidence(extra.lines),
       scannerConfidence: meta.confidence ?? "UNKNOWN",
       subcategory: meta.subcategory ?? ["unknown"],
       likelihood: meta.likelihood ?? "UNKNOWN",
@@ -161,4 +162,13 @@ export function selectFindings(
       score,
     };
   });
+}
+
+function normalizeEvidence(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || null;
 }

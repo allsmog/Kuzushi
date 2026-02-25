@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SemgrepPlugin } from "../src/scanners/semgrep.js";
 import { ClaudeAdkPlugin } from "../src/scanners/claude-adk.js";
+import { CodeQLPlugin } from "../src/scanners/codeql.js";
 import type { Finding } from "../src/scanners/types.js";
 
 function makeFinding(scanner: string): Finding {
@@ -34,5 +35,12 @@ describe("scanner plugin triage prompts", () => {
     const config = plugin.triageAgentConfig(makeFinding("claude-adk"), "repo");
     expect(config.prompt.toLowerCase()).toContain("prior agentic scan pass");
     expect(config.prompt.toLowerCase()).toContain("correct or mistaken");
+  });
+
+  it("CodeQLPlugin prompt references semantic dataflow analysis", () => {
+    const plugin = new CodeQLPlugin();
+    const config = plugin.triageAgentConfig(makeFinding("codeql"), "repo");
+    expect(config.prompt.toLowerCase()).toContain("dataflow/taint");
+    expect(config.prompt.toLowerCase()).toContain("source-to-sink");
   });
 });

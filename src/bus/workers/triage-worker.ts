@@ -4,6 +4,7 @@ import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
 import { triageFindingWithAgent } from "../../triage.js";
 import type { KuzushiConfig, RepoContext } from "../../types.js";
+import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -133,14 +134,6 @@ function createTriageConfigProvider(
   };
 }
 
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
-
 function getErrorCostUsd(error: unknown): number | undefined {
   if (!isRecord(error)) {
     return undefined;
@@ -151,11 +144,7 @@ function getErrorCostUsd(error: unknown): number | undefined {
     return undefined;
   }
 
-  return raw;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
+  return normalizeCostUsd(raw);
 }
 
 function asRepoContext(value: unknown): RepoContext | undefined {

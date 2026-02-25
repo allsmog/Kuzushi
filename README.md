@@ -12,20 +12,20 @@ Prereqs: Node 22+, an Anthropic API key.
 2. Set it: `export ANTHROPIC_API_KEY=sk-ant-...`
 3. Scan: `npx kuzushi /path/to/your/repo`
 
-That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed.
+That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed. To add CodeQL, see [CodeQL Setup](#codeql-setup).
 
 ## What It Does
 
 - **Runs Opengrep/Semgrep** with severity-ranked rule matching
-- **Runs configurable scanners** (`semgrep`, `claude-adk`) in one orchestration flow
+- **Runs configurable scanners** (`semgrep`, `claude-adk`, `codeql`) in one orchestration flow
 - **Gathers repo context** — auto-detects language, frameworks, auth patterns, ORMs, and sanitization libraries to enrich AI analysis
-- **Scores and deduplicates** findings by severity, likelihood, impact, and subcategory
+- **Scores and deduplicates** findings by severity, likelihood, impact, and subcategory — cross-scanner normalization merges equivalent findings from different scanners at the same location
 - **AI-triages selected findings** — after dedupe/resume/max filters, agent investigates with repo tools, assigns tp/fp/needs_review with confidence and rationale
 - **Verifies exploitability** — optional post-triage phase constructs concrete proof-of-concept payloads for true positives (e.g., SQL injection strings, XSS vectors)
 - **Tracks cost** — per-finding triage and verification costs are persisted and displayed in the summary
 - **Event-driven pipeline** — pluggable message bus interface (in-process backend implemented; Redis/Google Pub/Sub/NATS adapters are scaffolded)
 - **DAG-based task orchestration** — tasks declare dependencies, run in parallel groups, pass outputs downstream
-- **Extensible agent framework** — `AgentTask` interface for adding new analysis types (CodeQL, threat modeling, binary analysis, etc.)
+- **Extensible agent framework** — `AgentTask` interface for adding new analysis types (threat modeling, binary analysis, etc.)
 - **Persists results** in SQLite — resume interrupted scans, skip already-triaged findings
 - **Resumable runs** — checkpoint pipeline state to SQLite; `--resume` picks up where a crashed or interrupted scan left off
 - **Retry with backoff** — transient agent failures are retried automatically with exponential backoff
@@ -41,9 +41,9 @@ Under the hood, Kuzushi uses an event-driven architecture with a DAG-based task 
 
 1. **Context gathering** (optional, enabled by default) — the context-gatherer task analyzes the repo structure (package.json, go.mod, etc.) to identify the tech stack, frameworks, and security-relevant libraries.
 2. **Pipeline starts** — the orchestrator resolves enabled tasks into a dependency graph and groups them into parallel stages.
-3. **Scanners run** — scanner tasks (Semgrep, Claude ADK, etc.) execute concurrently within their stage, emitting findings as typed events on the message bus.
+3. **Scanners run** — scanner tasks (Semgrep, CodeQL, Claude ADK, etc.) execute concurrently within their stage, emitting findings as typed events on the message bus.
 4. **Results gate downstream tasks** — the orchestrator waits for each stage to complete before starting dependent stages. Upstream outputs are forwarded to dependent tasks via `TaskContext`.
-5. **Triage stage** — findings are deduplicated, ranked, and sent to an LLM for semantic verification with configurable concurrency. The repo context from step 1 enriches every triage prompt.
+5. **Triage stage** — findings are deduplicated (fingerprint + cross-scanner location/CWE/rule normalization), ranked, and sent to an LLM for semantic verification with configurable concurrency. The repo context from step 1 enriches every triage prompt.
 6. **Verification stage** (optional) — triaged findings that pass verification gates (`verifyVerdicts`, scanner-level `scannerConfig.<id>.verify`, and `verifyMinConfidence`) are sent to a verification agent that attempts to construct concrete PoC exploit payloads.
 7. **Report** — final results are persisted, rendered to terminal, and optionally exported as markdown.
 
@@ -55,6 +55,8 @@ All communication happens through a transport-agnostic `MessageBus` interface. T
 
 ```
 kuzushi <repo>                        # scan with defaults
+kuzushi <repo> --scanners codeql
+kuzushi <repo> --scanners semgrep,codeql
 kuzushi <repo> --scanners semgrep,claude-adk
 kuzushi <repo> --severity ERROR       # only ERROR-level findings
 kuzushi <repo> --max 20               # triage top 20 findings only
@@ -81,6 +83,7 @@ kuzushi <repo> --verify --verify-min-confidence 0.7  # skip low-confidence TPs
 
 ```
 kuzushi <repo> --output report.md     # export markdown report
+kuzushi <repo> --sarif results.sarif  # export SARIF v2.1.0
 kuzushi <repo> --audit-log            # write agent activity to .kuzushi/runs/{runId}/
 kuzushi <repo> --no-context           # disable repo context gathering
 ```
@@ -100,6 +103,8 @@ kuzushi config get                    # show all config
 kuzushi config get model              # show one key
 kuzushi config set model claude-opus-4-20250514
 kuzushi config set scanners semgrep,claude-adk
+kuzushi config set scannerConfig.codeql.dbPath ./codeql-db
+kuzushi config set scannerConfig.codeql.suite javascript-security-extended
 kuzushi config set scannerConfig.semgrep.binary opengrep
 kuzushi config set scannerConfig.semgrep.configFlag auto
 kuzushi config set scannerConfig.claude-adk.model claude-sonnet-4-20250514
@@ -124,7 +129,7 @@ Global config lives at `~/.kuzushi/config.json`. Optional project overrides can 
 | `scanners` | `["semgrep"]` | Scanner plugins to run, in order |
 | `severity` | `["ERROR","WARNING"]` | Semgrep severity filter |
 | `excludePatterns` | `["test","tests","node_modules",...]` | Directories/globs to skip |
-| `scannerConfig` | `{ semgrep: {...}, "claude-adk": {...} }` | Per-scanner config blocks keyed by scanner id |
+| `scannerConfig` | `{ semgrep: {...}, "claude-adk": {...}, codeql: {...} }` | Per-scanner config blocks keyed by scanner id |
 | `busBackend` | `"in-process"` | Message bus transport (`in-process`, future: `redis`, `google-pubsub`, `nats`) |
 | `triageConcurrency` | `1` | Parallel LLM triage calls |
 | `scanMode` | `"sequential"` | Scanner execution mode (`sequential` or `concurrent`) |
@@ -139,6 +144,7 @@ Global config lives at `~/.kuzushi/config.json`. Optional project overrides can 
 | `enableContextGathering` | `true` | Run repo context analysis before triage |
 | `auditLog` | `false` | Write agent activity to JSONL audit files |
 | `reportOutput` | _(unset)_ | Write markdown report output to this path |
+| `sarifOutput` | _(unset)_ | Write SARIF v2.1.0 output to this path |
 | `maxTriageRetries` | `2` | Retry failed triage calls |
 | `maxVerifyRetries` | `2` | Retry failed verification calls |
 | `retryBackoffMs` | `5000` | Initial retry backoff delay in ms |
@@ -148,7 +154,7 @@ Example:
 
 ```json
 {
-  "scanners": ["semgrep", "claude-adk"],
+  "scanners": ["semgrep", "codeql", "claude-adk"],
   "scanMode": "concurrent",
   "triageConcurrency": 3,
   "verify": true,
@@ -156,6 +162,7 @@ Example:
   "auditLog": true,
   "enabledTasks": [],
   "scannerConfig": {
+    "codeql": { "dbPath": "./codeql-db", "suite": "javascript-security-extended" },
     "semgrep": { "binary": "opengrep", "configFlag": "auto" },
     "claude-adk": { "model": "claude-sonnet-4-20250514", "maxFindings": 20 }
   }
@@ -171,6 +178,7 @@ Example:
 ## Scanner Plugins
 
 - `semgrep`: traditional SAST via Opengrep/Semgrep binary
+- `codeql`: semantic dataflow/taint analysis via GitHub CodeQL CLI (SARIF output)
 - `claude-adk`: AI-driven scanner via `@anthropic-ai/claude-agent-sdk` with read-only repo tools
 
 ## Semgrep Resolution
@@ -183,6 +191,40 @@ For the `semgrep` plugin, Kuzushi finds a scanner binary in this order:
 4. Auto-downloads Opengrep from GitHub releases (~40 MB, cached for future runs)
 
 No pip, no brew, no manual install needed.
+
+## CodeQL Setup
+
+The `codeql` scanner requires the [CodeQL CLI](https://github.com/github/codeql-cli-binaries/releases) to be installed separately. Unlike Semgrep, it is **not auto-downloaded** (the CLI is ~500 MB and requires accepting GitHub's license).
+
+Install it:
+
+```sh
+# Via GitHub CLI (recommended):
+gh extension install github/gh-codeql && gh codeql install-stub
+
+# Or download directly from:
+# https://github.com/github/codeql-cli-binaries/releases
+```
+
+Kuzushi finds the CodeQL binary in this order:
+
+1. `codeql` on your PATH
+2. Previously placed binary at `~/.kuzushi/bin/codeql`
+3. Fails with install instructions if not found
+
+CodeQL is **opt-in** — the default scanner list is `["semgrep"]`. To enable it:
+
+```sh
+kuzushi <repo> --scanners codeql              # CodeQL only
+kuzushi <repo> --scanners semgrep,codeql      # both scanners
+kuzushi config set scanners semgrep,codeql    # persist as default
+```
+
+CodeQL builds a database from your source code before running queries. You can skip this step by pointing to a pre-built database:
+
+```sh
+kuzushi config set scannerConfig.codeql.dbPath ./codeql-db
+```
 
 ## Output
 
@@ -199,6 +241,22 @@ Results are stored in SQLite at `<repo>/.kuzushi/findings.sqlite3`. Each finding
 The terminal report shows true positives first, then needs-review items. False positives are counted but hidden. Verified exploitable findings are highlighted with their PoC payloads.
 
 Use `--output report.md` to export a shareable markdown report.
+Use `--sarif results.sarif` to export SARIF v2.1.0 for code scanning platforms.
+
+## SARIF / GitHub Code Scanning
+
+Kuzushi can emit SARIF v2.1.0 directly. GitHub Code Scanning ingests SARIF and creates inline annotations.
+
+```
+kuzushi <repo> --sarif results.sarif
+
+gh api \
+  -X POST \
+  repos/OWNER/REPO/code-scanning/sarifs \
+  -f commit_sha="$(git rev-parse HEAD)" \
+  -f ref="refs/heads/$(git rev-parse --abbrev-ref HEAD)" \
+  -f sarif="$(gzip -c results.sarif | base64 | tr -d '\n')"
+```
 
 ## Resume Support
 
@@ -242,7 +300,7 @@ See [AGENTS.md](AGENTS.md) for the full developer guide on adding new agent task
 pnpm install                          # install deps
 pnpm dev -- /path/to/repo             # run in dev mode
 pnpm typecheck                        # type check
-pnpm test                             # run tests (191 tests across 27 files)
+pnpm test                             # run tests (214 tests across 31 files)
 pnpm test:coverage                    # tests + coverage (70% threshold)
 pnpm build                            # compile to dist/
 ```

@@ -52,6 +52,7 @@ describe("loadConfig", () => {
     expect(config.verifyMinConfidence).toBe(DEFAULTS.verifyMinConfidence);
     expect(config.enableContextGathering).toBe(DEFAULTS.enableContextGathering);
     expect(config.auditLog).toBe(DEFAULTS.auditLog);
+    expect(config.sarifOutput).toBe(DEFAULTS.sarifOutput);
     expect(config.maxTriageRetries).toBe(DEFAULTS.maxTriageRetries);
     expect(config.maxVerifyRetries).toBe(DEFAULTS.maxVerifyRetries);
     expect(config.retryBackoffMs).toBe(DEFAULTS.retryBackoffMs);
@@ -72,6 +73,7 @@ describe("loadConfig", () => {
       enableContextGathering: false,
       auditLog: true,
       reportOutput: "/tmp/report.md",
+      sarifOutput: "/tmp/report.sarif",
       maxTriageRetries: 4,
       maxVerifyRetries: 5,
       retryBackoffMs: 2000,
@@ -90,6 +92,7 @@ describe("loadConfig", () => {
     expect(config.enableContextGathering).toBe(false);
     expect(config.auditLog).toBe(true);
     expect(config.reportOutput).toBe("/tmp/report.md");
+    expect(config.sarifOutput).toBe("/tmp/report.sarif");
     expect(config.maxTriageRetries).toBe(4);
     expect(config.maxVerifyRetries).toBe(5);
     expect(config.retryBackoffMs).toBe(2000);
@@ -186,6 +189,7 @@ describe("setConfigValue", () => {
     setConfigValue("enableContextGathering", "false");
     setConfigValue("auditLog", "true");
     setConfigValue("reportOutput", "report.md");
+    setConfigValue("sarifOutput", "report.sarif");
     setConfigValue("maxTriageRetries", "3");
     setConfigValue("maxVerifyRetries", "4");
     setConfigValue("retryBackoffMs", "1200");
@@ -195,6 +199,7 @@ describe("setConfigValue", () => {
     expect(getConfigValue("enableContextGathering")).toBe(false);
     expect(getConfigValue("auditLog")).toBe(true);
     expect(getConfigValue("reportOutput")).toBe("report.md");
+    expect(getConfigValue("sarifOutput")).toBe("report.sarif");
     expect(getConfigValue("maxTriageRetries")).toBe(3);
     expect(getConfigValue("maxVerifyRetries")).toBe(4);
     expect(getConfigValue("retryBackoffMs")).toBe(1200);
@@ -338,6 +343,7 @@ describe("unsetConfigValue", () => {
     setConfigValue("enableContextGathering", "false");
     setConfigValue("auditLog", "true");
     setConfigValue("reportOutput", "report.md");
+    setConfigValue("sarifOutput", "report.sarif");
     setConfigValue("maxTriageRetries", "9");
     setConfigValue("maxVerifyRetries", "8");
     setConfigValue("retryBackoffMs", "42");
@@ -347,6 +353,7 @@ describe("unsetConfigValue", () => {
     unsetConfigValue("enableContextGathering");
     unsetConfigValue("auditLog");
     unsetConfigValue("reportOutput");
+    unsetConfigValue("sarifOutput");
     unsetConfigValue("maxTriageRetries");
     unsetConfigValue("maxVerifyRetries");
     unsetConfigValue("retryBackoffMs");
@@ -356,6 +363,7 @@ describe("unsetConfigValue", () => {
     expect(getConfigValue("enableContextGathering")).toBe(DEFAULTS.enableContextGathering);
     expect(getConfigValue("auditLog")).toBe(DEFAULTS.auditLog);
     expect(getConfigValue("reportOutput")).toBe(DEFAULTS.reportOutput);
+    expect(getConfigValue("sarifOutput")).toBe(DEFAULTS.sarifOutput);
     expect(getConfigValue("maxTriageRetries")).toBe(DEFAULTS.maxTriageRetries);
     expect(getConfigValue("maxVerifyRetries")).toBe(DEFAULTS.maxVerifyRetries);
     expect(getConfigValue("retryBackoffMs")).toBe(DEFAULTS.retryBackoffMs);

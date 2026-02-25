@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime, type AgentRuntime } from "../agent-runtime/index.js";
 import type { ScanOpts } from "../types.js";
+import { isRecord } from "../utils.js";
 import type { Finding } from "./types.js";
 import { scoreFindingMetadata } from "./scoring.js";
 
@@ -150,6 +151,7 @@ export function selectClaudeFindings(
       startLine: finding.startLine,
       severity: finding.severity,
       message: finding.message,
+      evidence: finding.evidence || null,
       scannerConfidence: finding.confidence,
       subcategory: finding.subcategory,
       likelihood: finding.likelihood,
@@ -322,8 +324,4 @@ function asString(value: unknown, fallback: string): string {
   if (typeof value === "string") return value;
   if (value == null) return fallback;
   return String(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }

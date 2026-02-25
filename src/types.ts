@@ -80,6 +80,8 @@ export interface KuzushiConfig {
   auditLog?: boolean;
   /** Optional markdown report output path. */
   reportOutput?: string;
+  /** Optional SARIF report output path. */
+  sarifOutput?: string;
   /** Retry count for triage worker transient failures. */
   maxTriageRetries?: number;
   /** Retry count for verification worker transient failures. */

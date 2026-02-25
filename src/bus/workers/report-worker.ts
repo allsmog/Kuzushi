@@ -8,6 +8,7 @@ import {
   printTriageProgress,
 } from "../../report.js";
 import { generateMarkdownReport } from "../../report-markdown.js";
+import { generateSarifReport } from "../../report-sarif.js";
 import type { KuzushiConfig } from "../../types.js";
 import type {
   PipelineStartEvent,
@@ -190,6 +191,21 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
       );
       writeFileSync(deps.config.reportOutput, markdown, "utf-8");
       console.log(`  Report written to ${deps.config.reportOutput}`);
+    }
+
+    if (deps.config.sarifOutput) {
+      const outputDir = path.dirname(deps.config.sarifOutput);
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+      const sarif = generateSarifReport(
+        deps.db,
+        event.payload.context.repoName,
+        event.payload.stats ?? {},
+        event.meta.runId,
+      );
+      writeFileSync(deps.config.sarifOutput, sarif, "utf-8");
+      console.log(`  SARIF report written to ${deps.config.sarifOutput}`);
     }
 
     await bus.publish(

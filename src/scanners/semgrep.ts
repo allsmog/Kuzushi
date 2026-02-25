@@ -48,6 +48,7 @@ export class SemgrepPlugin implements ScannerPlugin {
         `Impact: ${finding.impact}`,
         `CWE: ${finding.cwe.join(", ") || "none"}`,
         `Message: ${finding.message}`,
+        `Evidence: ${finding.evidence || "none"}`,
         `Fingerprint: ${finding.fingerprint}`,
         "",
         "## Investigation instructions",

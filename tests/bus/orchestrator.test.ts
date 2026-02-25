@@ -53,7 +53,7 @@ function makeFinding(fp: string, score: number): Finding {
     fingerprint: fp,
     ruleId: "test.rule",
     filePath: "src/app.ts",
-    startLine: 10,
+    startLine: score,
     severity: "ERROR",
     message: "test",
     scannerConfidence: "HIGH",

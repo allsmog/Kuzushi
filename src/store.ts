@@ -304,10 +304,13 @@ export function getVerificationCounts(
   return { exploitable, notExploitable };
 }
 
-/** Get findings that need human review, ordered by confidence. */
+/** Get triaged findings, ordered by verdict priority and confidence. */
 export function getActionableFindings(
   db: Database.Database,
   repo?: string,
+  options: {
+    includeFalsePositives?: boolean;
+  } = {},
 ): Array<{
   scanner: ScannerId;
   fingerprint: string;
@@ -315,9 +318,11 @@ export function getActionableFindings(
   filePath: string;
   startLine: number;
   severity: string;
+  message: string;
   verdict: Verdict;
   confidence: number;
   rationale: string;
+  fixPatch: string | null;
   verifyExploitable: number | null;
   verifyPocPayload: string | null;
   verifyPocDescription: string | null;
@@ -326,13 +331,19 @@ export function getActionableFindings(
   verifyConfidence: number | null;
   verifyCostUsd: number | null;
 }> {
-  const where = repo
-    ? "WHERE verdict != 'fp' AND repo = ?"
-    : "WHERE verdict != 'fp'";
+  const filters: string[] = [];
+  if (!options.includeFalsePositives) {
+    filters.push("verdict != 'fp'");
+  }
+  if (repo) {
+    filters.push("repo = ?");
+  }
+  const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
 
   const query = `
     SELECT scanner, fingerprint, rule_id as ruleId, file_path as filePath, start_line as startLine,
-           severity, verdict, confidence, rationale,
+           severity, message, verdict, confidence, rationale,
+           fix_patch as fixPatch,
            verify_exploitable as verifyExploitable,
            verify_poc_payload as verifyPocPayload,
            verify_poc_description as verifyPocDescription,
@@ -357,9 +368,11 @@ export function getActionableFindings(
     filePath: string;
     startLine: number;
     severity: string;
+    message: string;
     verdict: Verdict;
     confidence: number;
     rationale: string;
+    fixPatch: string | null;
     verifyExploitable: number | null;
     verifyPocPayload: string | null;
     verifyPocDescription: string | null;

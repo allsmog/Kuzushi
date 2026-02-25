@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { Finding } from "../scanners/types.js";
+import { selectTopFindings } from "../scanners/finding-selection.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
 import {
   getStoredTriageResults,
@@ -14,6 +15,7 @@ import {
   updateRunStatus,
 } from "../store.js";
 import type { KuzushiConfig, RepoContext, ScanOpts, TriageResult, Verdict } from "../types.js";
+import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type {
   BusHandlerErrorEvent,
   PipelineStats,
@@ -371,7 +373,7 @@ export class PipelineOrchestrator {
     try {
       const parsed = JSON.parse(run.findingsJson);
       state.scanFindings = coerceFindings(parsed);
-      state.totalCostUsd = normalizeCost(run.totalCostUsd);
+      state.totalCostUsd = normalizeCostUsd(run.totalCostUsd);
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -680,7 +682,7 @@ export class PipelineOrchestrator {
 
     state.inFlight = Math.max(0, state.inFlight - 1);
     state.triaged += 1;
-    const costUsd = normalizeCost(event.payload.costUsd);
+    const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.totalCostUsd += costUsd;
 
     if (shouldVerifyFinding(state, event.payload.finding, event.payload.result)) {
@@ -715,7 +717,7 @@ export class PipelineOrchestrator {
 
     state.inFlight = Math.max(0, state.inFlight - 1);
     state.triageErrors += 1;
-    const costUsd = normalizeCost(event.payload.costUsd);
+    const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.totalCostUsd += costUsd;
 
     try {
@@ -925,7 +927,7 @@ export class PipelineOrchestrator {
 
     state.verifyInFlight = Math.max(0, state.verifyInFlight - 1);
     state.verified += 1;
-    const costUsd = normalizeCost(event.payload.costUsd);
+    const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.totalCostUsd += costUsd;
     state.verifyCostUsd += costUsd;
 
@@ -954,7 +956,7 @@ export class PipelineOrchestrator {
 
     state.verifyInFlight = Math.max(0, state.verifyInFlight - 1);
     state.verifyErrors += 1;
-    const costUsd = normalizeCost(event.payload.costUsd);
+    const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.totalCostUsd += costUsd;
     state.verifyCostUsd += costUsd;
 
@@ -1130,14 +1132,6 @@ function normalizeConcurrency(raw: number): number {
   return Math.floor(raw);
 }
 
-function normalizeCost(raw: unknown): number {
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
-    return 0;
-  }
-
-  return raw;
-}
-
 function resolveVerifyVerdicts(raw: Verdict[] | undefined): Verdict[] {
   const defaults: Verdict[] = ["tp"];
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -1250,29 +1244,6 @@ function isScannerVerificationEnabled(config: KuzushiConfig, scannerId: string):
   return true;
 }
 
-function selectTopFindings(findings: Finding[], maxFindings?: number): Finding[] {
-  const deduped = new Map<string, Finding>();
-
-  for (const finding of findings) {
-    const existing = deduped.get(finding.fingerprint);
-    if (!existing || finding.score > existing.score) {
-      deduped.set(finding.fingerprint, finding);
-    }
-  }
-
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
-
 function coerceFindings(value: unknown): Finding[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1303,6 +1274,7 @@ function coerceFinding(item: Record<string, unknown>): Finding | null {
   const filePath = asString(item["filePath"]);
   const severity = asString(item["severity"]);
   const message = asString(item["message"]);
+  const evidence = asNullableString(item["evidence"]);
   const scannerConfidence = asString(item["scannerConfidence"]);
   const likelihood = asString(item["likelihood"]);
   const impact = asString(item["impact"]);
@@ -1337,6 +1309,7 @@ function coerceFinding(item: Record<string, unknown>): Finding | null {
     startLine,
     severity,
     message,
+    evidence,
     scannerConfidence,
     subcategory,
     likelihood,
@@ -1352,6 +1325,18 @@ function asString(value: unknown): string | null {
   }
 
   return value;
+}
+
+function asNullableString(value: unknown): string | null | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  return undefined;
 }
 
 function asNumber(value: unknown): number | null {
@@ -1397,8 +1382,4 @@ function asVerdictArray(value: unknown): Verdict[] | null {
   }
 
   return verdicts;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }

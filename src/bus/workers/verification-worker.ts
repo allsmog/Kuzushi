@@ -1,6 +1,7 @@
 import { verifyFindingWithAgent, VerificationExecutionError } from "../../verify.js";
 import { withRetry } from "../../retry.js";
 import type { KuzushiConfig, RepoContext } from "../../types.js";
+import { isRecord, toErrorMessage } from "../../utils.js";
 import type { VerificationFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -90,14 +91,6 @@ export function registerVerificationWorker(
   });
 }
 
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
-
 function asRepoContext(value: unknown): RepoContext | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -132,8 +125,4 @@ function asStringArray(value: unknown): string[] {
   return value
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter(Boolean);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }

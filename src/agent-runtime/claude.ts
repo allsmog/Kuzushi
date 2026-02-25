@@ -10,6 +10,7 @@ import type {
   AgentRuntime,
   AgentToolDecision,
 } from "./types.js";
+import { isRecord } from "../utils.js";
 
 export class ClaudeSdkAgentRuntime implements AgentRuntime {
   readonly id = "claude-sdk";
@@ -128,8 +129,4 @@ function toPermissionResult(decision: AgentToolDecision): PermissionResult {
     behavior: "deny",
     message: decision.message ?? "Permission denied",
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }

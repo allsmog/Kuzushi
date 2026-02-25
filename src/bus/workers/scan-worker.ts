@@ -3,6 +3,7 @@ import type { TaskContext } from "../../agents/types.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, ScannerConfig, ScannerId } from "../../scanners/types.js";
 import type { KuzushiConfig } from "../../types.js";
+import { isRecord, toErrorMessage } from "../../utils.js";
 import type { ScanStartEvent, TaskStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -236,6 +237,7 @@ function asFinding(item: Record<string, unknown>): Finding | null {
   const startLine = asNumber(item["startLine"]);
   const severity = asString(item["severity"]);
   const message = asString(item["message"]);
+  const evidence = asString(item["evidence"]);
   const scannerConfidence = asString(item["scannerConfidence"]);
   const subcategory = asStringArray(item["subcategory"]);
   const likelihood = asString(item["likelihood"]);
@@ -270,6 +272,7 @@ function asFinding(item: Record<string, unknown>): Finding | null {
     startLine,
     severity,
     message,
+    evidence,
     scannerConfidence,
     subcategory,
     likelihood,
@@ -297,16 +300,4 @@ function asStringArray(value: unknown): string[] | null {
   }
 
   return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
 }

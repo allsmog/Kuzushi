@@ -12,6 +12,8 @@ export interface Finding {
   startLine: number;
   severity: string;
   message: string;
+  /** Optional scanner-provided evidence (for example, source-to-sink flow summaries). */
+  evidence?: string | null;
   scannerConfidence: string;
   subcategory: string[];
   likelihood: string;

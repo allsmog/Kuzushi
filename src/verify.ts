@@ -2,6 +2,7 @@ import { getAgentRuntime, type AgentRuntime } from "./agent-runtime/index.js";
 import type { AllowedTriageTool, Finding } from "./scanners/types.js";
 import type { RepoContext, TriageResult, VerificationResult } from "./types.js";
 import type { AgentActivityCallback } from "./triage.js";
+import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 
 export const VERIFICATION_RESULT_SCHEMA = {
   type: "object",
@@ -268,14 +269,6 @@ function looksLikeRuntimeOptions(
   );
 }
 
-function normalizeCostUsd(value: number): number {
-  if (!Number.isFinite(value) || value < 0) {
-    return 0;
-  }
-
-  return value;
-}
-
 function extractJson(text: string): string {
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenceMatch) return fenceMatch[1].trim();
@@ -379,16 +372,4 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   }
 
   return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
 }
