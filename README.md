@@ -39,12 +39,12 @@ Semgrep/Opengrep catches syntactic patterns but can't verify data flow or intent
 
 Under the hood, Kuzushi uses an event-driven architecture with a DAG-based task orchestrator:
 
-1. **Context gathering** — the context-gatherer task analyzes the repo structure (package.json, go.mod, etc.) to identify the tech stack, frameworks, and security-relevant libraries.
+1. **Context gathering** (optional, enabled by default) — the context-gatherer task analyzes the repo structure (package.json, go.mod, etc.) to identify the tech stack, frameworks, and security-relevant libraries.
 2. **Pipeline starts** — the orchestrator resolves enabled tasks into a dependency graph and groups them into parallel stages.
 3. **Scanners run** — scanner tasks (Semgrep, Claude ADK, etc.) execute concurrently within their stage, emitting findings as typed events on the message bus.
 4. **Results gate downstream tasks** — the orchestrator waits for each stage to complete before starting dependent stages. Upstream outputs are forwarded to dependent tasks via `TaskContext`.
 5. **Triage stage** — findings are deduplicated, ranked, and sent to an LLM for semantic verification with configurable concurrency. The repo context from step 1 enriches every triage prompt.
-6. **Verification stage** (optional) — true positives above a confidence threshold are sent to a verification agent that attempts to construct concrete PoC exploit payloads.
+6. **Verification stage** (optional) — triaged findings that pass verification gates (`verifyVerdicts`, scanner-level `scannerConfig.<id>.verify`, and `verifyMinConfidence`) are sent to a verification agent that attempts to construct concrete PoC exploit payloads.
 7. **Report** — final results are persisted, rendered to terminal, and optionally exported as markdown.
 
 All communication happens through a transport-agnostic `MessageBus` interface. The default in-process bus works out of the box; distributed adapters (Redis, Google Pub/Sub, NATS) are planned and scaffolded behind the same interface.
@@ -138,6 +138,7 @@ Global config lives at `~/.kuzushi/config.json`. Optional project overrides can 
 | `verifyMinConfidence` | `0` | Minimum triage confidence to trigger verification (0-1) |
 | `enableContextGathering` | `true` | Run repo context analysis before triage |
 | `auditLog` | `false` | Write agent activity to JSONL audit files |
+| `reportOutput` | _(unset)_ | Write markdown report output to this path |
 | `maxTriageRetries` | `2` | Retry failed triage calls |
 | `maxVerifyRetries` | `2` | Retry failed verification calls |
 | `retryBackoffMs` | `5000` | Initial retry backoff delay in ms |
