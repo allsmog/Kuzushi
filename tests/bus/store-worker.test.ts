@@ -61,6 +61,7 @@ describe("store-worker", () => {
         context,
         finding: makeFinding("fp-1"),
         result: makeResult("fp-1"),
+        costUsd: 0.055,
         index: 1,
         total: 1,
       }),
@@ -71,6 +72,59 @@ describe("store-worker", () => {
 
     const counts = getVerdictCounts(db, "repo");
     expect(counts.tp).toBe(1);
+
+    const row = db.prepare(
+      "SELECT triage_cost_usd as triageCostUsd FROM findings WHERE fingerprint = ?",
+    ).get("fp-1") as { triageCostUsd: number };
+    expect(row.triageCostUsd).toBeCloseTo(0.055, 8);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("persists verification cost from verification:error events", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    registerStoreWorker(bus, { db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const finding = makeFinding("fp-verify-error");
+    const triageResult = makeResult("fp-verify-error");
+
+    await bus.publish(
+      createEvent("triage:result", runId, {
+        context,
+        finding,
+        result: triageResult,
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    await bus.publish(
+      createEvent("verification:error", runId, {
+        context,
+        finding,
+        triageResult,
+        error: "verification agent failed",
+        costUsd: 0.031,
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    const row = db.prepare(
+      "SELECT verify_cost_usd as verifyCostUsd FROM findings WHERE fingerprint = ?",
+    ).get("fp-verify-error") as { verifyCostUsd: number | null };
+    expect(row.verifyCostUsd).toBeCloseTo(0.031, 8);
 
     await bus.close();
     db.close();

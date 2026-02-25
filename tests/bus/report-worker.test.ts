@@ -4,7 +4,7 @@ import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerReportWorker } from "../../src/bus/workers/report-worker.js";
 import { initDb } from "../../src/store.js";
 import type { Finding } from "../../src/scanners/types.js";
-import type { TriageResult } from "../../src/types.js";
+import type { KuzushiConfig, TriageResult } from "../../src/types.js";
 import type { ReportCompleteEvent } from "../../src/bus/events.js";
 
 function makeFinding(fp: string): Finding {
@@ -49,7 +49,19 @@ describe("report-worker", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    registerReportWorker(bus, { db });
+    const config: KuzushiConfig = {
+      model: "claude-sonnet-4-20250514",
+      triageMaxTurns: 10,
+      busBackend: "in-process",
+      triageConcurrency: 1,
+      scanMode: "sequential",
+      scanners: ["semgrep"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      scannerConfig: { semgrep: {} },
+    };
+
+    registerReportWorker(bus, { db, config });
 
     const runId = generateRunId();
     const context = {

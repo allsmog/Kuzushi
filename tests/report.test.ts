@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import { initDb, upsertFinding } from "../src/store.js";
+import { initDb, updateVerificationCost, upsertFinding } from "../src/store.js";
 import {
   printTriageProgress,
   printSummary,
@@ -69,6 +69,14 @@ describe("printTriageProgress", () => {
     printTriageProgress(makeResult("x", "needs_review"), 3, 10);
     expect(console.log).toHaveBeenCalled();
   });
+
+  it("prints retry suffix when attempts > 1", () => {
+    printTriageProgress(makeResult("x", "tp"), 2, 10, 3);
+    const output = (console.log as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls
+      .map((call) => String(call[0] ?? ""))
+      .join("\n");
+    expect(output).toContain("retry #3");
+  });
 });
 
 describe("printSummary", () => {
@@ -120,6 +128,40 @@ describe("printSummary", () => {
     upsertFinding(db, makeFinding("long1"), result, "repo", "HEAD");
     printSummary(db, "repo");
     expect(console.log).toHaveBeenCalled();
+    db.close();
+  });
+
+  it("shows verification cost section when only verification errors were persisted", () => {
+    const dbPath = path.join(TMP_DIR, `summary-verify-cost-${Date.now()}.sqlite3`);
+    const db = initDb(dbPath);
+
+    upsertFinding(db, makeFinding("verify-cost-only"), makeResult("verify-cost-only", "tp"), "repo", "HEAD");
+    updateVerificationCost(db, "verify-cost-only", 0.022);
+
+    printSummary(db, "repo");
+
+    const output = (console.log as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls
+      .map((call) => String(call[0] ?? ""))
+      .join("\n");
+
+    expect(output).toContain("Verification:");
+    expect(output).toContain("Total verification cost");
+    db.close();
+  });
+
+  it("prints skipped low confidence stat when provided", () => {
+    const dbPath = path.join(TMP_DIR, `summary-skip-low-${Date.now()}.sqlite3`);
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("a"), makeResult("a", "tp"), "repo", "HEAD");
+
+    printSummary(db, "repo", {
+      stats: { skippedLowConfidence: 2 },
+    });
+
+    const output = (console.log as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls
+      .map((call) => String(call[0] ?? ""))
+      .join("\n");
+    expect(output).toContain("Skipped (low confidence)");
     db.close();
   });
 });

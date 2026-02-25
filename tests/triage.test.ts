@@ -5,6 +5,7 @@ import {
   parseAgentOutput,
   parseTriageResponse,
   parseVerdict,
+  TriageExecutionError,
   triageFindingWithAgent,
 } from "../src/triage.js";
 import type { Finding, TriageAgentConfig } from "../src/scanners/types.js";
@@ -121,6 +122,11 @@ describe("parseTriageResponse", () => {
     const json = JSON.stringify({ verdict: "fp", confidence: 0.9, rationale: "ok" });
     expect(parseTriageResponse(json, "x").verificationSteps).toEqual([]);
   });
+
+  it("throws a clear error for malformed JSON", () => {
+    expect(() => parseTriageResponse("not-json", "x"))
+      .toThrow("Invalid triage JSON response");
+  });
 });
 
 describe("parseAgentOutput", () => {
@@ -162,6 +168,21 @@ describe("buildDefaultTriageAgentConfig", () => {
     expect(config.prompt).toContain("test.rule");
     expect(config.prompt).toContain("test-fp");
   });
+
+  it("includes repository context when provided", () => {
+    const config = buildDefaultTriageAgentConfig(makeFinding(), "repo", {
+      languages: ["TypeScript"],
+      frameworks: ["Next.js"],
+      authPatterns: ["JWT"],
+      sanitizationLibs: ["helmet"],
+      ormOrDb: ["Prisma"],
+      entryPoints: ["src/pages/api/*"],
+    });
+
+    expect(config.prompt).toContain("## Repository Context");
+    expect(config.prompt).toContain("TypeScript");
+    expect(config.prompt).toContain("Prisma");
+  });
 });
 
 describe("triageFindingWithAgent", () => {
@@ -182,7 +203,7 @@ describe("triageFindingWithAgent", () => {
       },
     ]));
 
-    const result = await triageFindingWithAgent(
+    const output = await triageFindingWithAgent(
       registryWithConfig({ prompt: "custom triage" }) as any,
       makeFinding(),
       "/tmp/repo",
@@ -191,8 +212,9 @@ describe("triageFindingWithAgent", () => {
       12,
     );
 
-    expect(result.verdict).toBe("fp");
-    expect(result.confidence).toBe(0.95);
+    expect(output.result.verdict).toBe("fp");
+    expect(output.result.confidence).toBe(0.95);
+    expect(output.costUsd).toBe(0);
     expect(queryMock).toHaveBeenCalledTimes(1);
     expect(queryMock.mock.calls[0][0]?.options?.maxTurns).toBe(12);
   });
@@ -212,7 +234,7 @@ describe("triageFindingWithAgent", () => {
       },
     ]));
 
-    const result = await triageFindingWithAgent(
+    const output = await triageFindingWithAgent(
       registryWithConfig({ prompt: "custom triage" }) as any,
       makeFinding(),
       "/tmp/repo",
@@ -221,8 +243,8 @@ describe("triageFindingWithAgent", () => {
       7,
     );
 
-    expect(result.verdict).toBe("tp");
-    expect(result.fixPatch).toBe("diff");
+    expect(output.result.verdict).toBe("tp");
+    expect(output.result.fixPatch).toBe("diff");
   });
 
   it("uses default agent config when scanner plugin is missing", async () => {
@@ -240,7 +262,7 @@ describe("triageFindingWithAgent", () => {
       },
     ]));
 
-    const result = await triageFindingWithAgent(
+    const output = await triageFindingWithAgent(
       missingRegistry() as any,
       makeFinding(),
       "/tmp/repo",
@@ -249,8 +271,37 @@ describe("triageFindingWithAgent", () => {
       9,
     );
 
-    expect(result.verdict).toBe("needs_review");
+    expect(output.result.verdict).toBe("needs_review");
     expect(queryMock.mock.calls[0][0]?.prompt).toContain("security triage agent");
+  });
+
+  it("captures total_cost_usd from SDK result messages", async () => {
+    queryMock.mockReturnValue(streamResult([
+      {
+        type: "result",
+        subtype: "success",
+        total_cost_usd: 0.0123,
+        result: JSON.stringify({
+          verdict: "fp",
+          confidence: 0.9,
+          rationale: "safe",
+          verification_steps: ["step"],
+          fix_patch: null,
+        }),
+      },
+    ]));
+
+    const output = await triageFindingWithAgent(
+      registryWithConfig({ prompt: "custom triage" }) as any,
+      makeFinding(),
+      "/tmp/repo",
+      "repo",
+      "claude-sonnet-4-20250514",
+      9,
+    );
+
+    expect(output.result.verdict).toBe("fp");
+    expect(output.costUsd).toBe(0.0123);
   });
 
   it("throws when agent run fails", async () => {
@@ -272,6 +323,59 @@ describe("triageFindingWithAgent", () => {
         9,
       ),
     ).rejects.toThrow("triage agent failed");
+  });
+
+  it("throws TriageExecutionError with cost on failed runs", async () => {
+    queryMock.mockReturnValue(streamResult([
+      {
+        type: "result",
+        subtype: "error_max_turns",
+        errors: ["max turns exceeded"],
+        total_cost_usd: 0.021,
+      },
+    ]));
+
+    try {
+      await triageFindingWithAgent(
+        registryWithConfig({ prompt: "custom triage" }) as any,
+        makeFinding(),
+        "/tmp/repo",
+        "repo",
+        "claude-sonnet-4-20250514",
+        9,
+      );
+      expect.unreachable("Expected triage run to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TriageExecutionError);
+      expect((error as TriageExecutionError).costUsd).toBe(0.021);
+    }
+  });
+
+  it("throws TriageExecutionError with cost when output parsing fails", async () => {
+    queryMock.mockReturnValue(streamResult([
+      {
+        type: "result",
+        subtype: "success",
+        total_cost_usd: 0.017,
+        result: "not-json",
+      },
+    ]));
+
+    try {
+      await triageFindingWithAgent(
+        registryWithConfig({ prompt: "custom triage" }) as any,
+        makeFinding(),
+        "/tmp/repo",
+        "repo",
+        "claude-sonnet-4-20250514",
+        9,
+      );
+      expect.unreachable("Expected triage run to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TriageExecutionError);
+      expect((error as TriageExecutionError).costUsd).toBe(0.017);
+      expect((error as Error).message).toContain("triage output parse failed");
+    }
   });
 
   it("emits activity callbacks for assistant/tool progress/summary messages", async () => {

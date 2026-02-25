@@ -6,10 +6,12 @@ import type { KuzushiConfig } from "../types.js";
 import { createBus } from "./adapters/index.js";
 import { registerOrchestrator } from "./orchestrator.js";
 import type { MessageBus } from "./types.js";
+import { registerAuditWorker } from "./workers/audit-worker.js";
 import { registerReportWorker } from "./workers/report-worker.js";
 import { registerScanWorker } from "./workers/scan-worker.js";
 import { registerStoreWorker } from "./workers/store-worker.js";
 import { registerTriageWorker } from "./workers/triage-worker.js";
+import { registerVerificationWorker } from "./workers/verification-worker.js";
 
 export interface RegisterWorkersDeps {
   registry: ScannerRegistry;
@@ -34,12 +36,23 @@ export function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): 
     config: deps.config,
   });
 
+  registerVerificationWorker(bus, {
+    config: deps.config,
+  });
+
   registerStoreWorker(bus, {
     db: deps.db,
   });
 
+  if (deps.config.auditLog) {
+    registerAuditWorker(bus, {
+      config: deps.config,
+    });
+  }
+
   registerReportWorker(bus, {
     db: deps.db,
+    config: deps.config,
   });
 
   registerOrchestrator(bus, {
@@ -60,5 +73,7 @@ export * from "./adapters/google-pubsub.js";
 export * from "./adapters/nats.js";
 export * from "./workers/scan-worker.js";
 export * from "./workers/triage-worker.js";
+export * from "./workers/verification-worker.js";
 export * from "./workers/store-worker.js";
+export * from "./workers/audit-worker.js";
 export * from "./workers/report-worker.js";

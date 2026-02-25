@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Verdict, TriageResult, ScanOpts } from "../src/types.js";
+import type { RepoContext, Verdict, TriageResult, ScanOpts } from "../src/types.js";
 import type { Finding } from "../src/scanners/types.js";
 
 describe("types", () => {
@@ -48,5 +48,17 @@ describe("types", () => {
       fresh: false,
     };
     expect(opts.severity).toEqual(["ERROR"]);
+  });
+
+  it("RepoContext shape is constructible", () => {
+    const context: RepoContext = {
+      languages: ["TypeScript"],
+      frameworks: ["Express"],
+      authPatterns: ["JWT"],
+      sanitizationLibs: ["helmet"],
+      ormOrDb: ["Prisma"],
+      entryPoints: ["src/pages/api/*"],
+    };
+    expect(context.frameworks).toContain("Express");
   });
 });

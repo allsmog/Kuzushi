@@ -40,6 +40,9 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
     model: "claude-sonnet-4-20250514",
     triageMaxTurns: 10,
+    maxTriageRetries: 0,
+    retryBackoffMs: 0,
+    retryBackoffMultiplier: 2,
     busBackend: "in-process",
     triageConcurrency: 1,
     scanMode: "sequential",
@@ -62,12 +65,15 @@ describe("triage-worker", () => {
     const config = makeConfig();
 
     triageFindingWithAgentMock.mockResolvedValue({
-      fingerprint: "fp-1",
-      verdict: "fp",
-      confidence: 0.8,
-      rationale: "safe",
-      verificationSteps: ["check"],
-      fixPatch: null,
+      result: {
+        fingerprint: "fp-1",
+        verdict: "fp",
+        confidence: 0.8,
+        rationale: "safe",
+        verificationSteps: ["check"],
+        fixPatch: null,
+      },
+      costUsd: 0.0042,
     });
 
     registerTriageWorker(bus, {
@@ -100,6 +106,8 @@ describe("triage-worker", () => {
 
     const result = await resultPromise;
     expect(result.payload.result.verdict).toBe("fp");
+    expect(result.payload.result.triageCostUsd).toBe(0.0042);
+    expect(result.payload.costUsd).toBe(0.0042);
     expect(result.payload.index).toBe(1);
     expect(triageFindingWithAgentMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -111,6 +119,7 @@ describe("triage-worker", () => {
       "repo",
       "claude-sonnet-4-20250514",
       10,
+      undefined,
       expect.objectContaining({
         activityCallback: expect.any(Function),
       }),
@@ -156,6 +165,7 @@ describe("triage-worker", () => {
 
     const errorEvent = await errorPromise;
     expect(errorEvent.payload.error).toContain("agent failed");
+    expect(errorEvent.payload.costUsd).toBeUndefined();
     expect(triageFindingWithAgentMock).toHaveBeenCalledWith(
       expect.objectContaining({
         has: expect.any(Function),
@@ -166,10 +176,54 @@ describe("triage-worker", () => {
       "repo",
       "claude-opus-4-20250514",
       15,
+      undefined,
       expect.objectContaining({
         activityCallback: expect.any(Function),
       }),
     );
+
+    await bus.close();
+  });
+
+  it("propagates cost on triage:error events when provided by runtime error", async () => {
+    const bus = new InProcessBus();
+    const registry = {};
+    const config = makeConfig();
+
+    const errorWithCost = Object.assign(new Error("agent failed"), { costUsd: 0.021 });
+    triageFindingWithAgentMock.mockRejectedValue(errorWithCost);
+
+    registerTriageWorker(bus, {
+      registry: registry as any,
+      config,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const finding = makeFinding();
+    const errorPromise = bus.waitFor<TriageErrorEvent>(
+      "triage:error",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("triage:finding-queued", runId, {
+        context,
+        finding,
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    const errorEvent = await errorPromise;
+    expect(errorEvent.payload.error).toContain("agent failed");
+    expect(errorEvent.payload.costUsd).toBe(0.021);
 
     await bus.close();
   });
@@ -192,12 +246,15 @@ describe("triage-worker", () => {
     const config = makeConfig();
 
     triageFindingWithAgentMock.mockResolvedValue({
-      fingerprint: "fp-1",
-      verdict: "needs_review",
-      confidence: 0.5,
-      rationale: "unknown",
-      verificationSteps: ["step"],
-      fixPatch: null,
+      result: {
+        fingerprint: "fp-1",
+        verdict: "needs_review",
+        confidence: 0.5,
+        rationale: "unknown",
+        verificationSteps: ["step"],
+        fixPatch: null,
+      },
+      costUsd: 0.001,
     });
 
     registerTriageWorker(bus, {
@@ -245,19 +302,22 @@ describe("triage-worker", () => {
     const config = makeConfig();
 
     triageFindingWithAgentMock.mockImplementation(async (...args: any[]) => {
-      const runtimeOptions = args[6];
+      const runtimeOptions = args[7];
       await runtimeOptions?.activityCallback?.({
         kind: "tool-start",
         toolName: "Read",
         toolInput: { file_path: "src/app.ts" },
       });
       return {
-        fingerprint: "fp-1",
-        verdict: "fp",
-        confidence: 0.9,
-        rationale: "safe",
-        verificationSteps: ["check"],
-        fixPatch: null,
+        result: {
+          fingerprint: "fp-1",
+          verdict: "fp",
+          confidence: 0.9,
+          rationale: "safe",
+          verificationSteps: ["check"],
+          fixPatch: null,
+        },
+        costUsd: 0.0025,
       };
     });
 
@@ -293,6 +353,63 @@ describe("triage-worker", () => {
     expect(activity.payload.kind).toBe("tool-start");
     expect(activity.payload.toolName).toBe("Read");
     expect(activity.payload.fingerprint).toBe("fp-1");
+
+    await bus.close();
+  });
+
+  it("retries triage failures and emits triage:result after a successful retry", async () => {
+    const bus = new InProcessBus();
+    const registry = {};
+    const config = makeConfig({
+      maxTriageRetries: 2,
+      retryBackoffMs: 0,
+    });
+
+    triageFindingWithAgentMock
+      .mockRejectedValueOnce(new Error("rate limit"))
+      .mockResolvedValueOnce({
+        result: {
+          fingerprint: "fp-1",
+          verdict: "tp",
+          confidence: 0.83,
+          rationale: "confirmed",
+          verificationSteps: ["trace input"],
+          fixPatch: null,
+        },
+        costUsd: 0.01,
+      });
+
+    registerTriageWorker(bus, {
+      registry: registry as any,
+      config,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const resultPromise = bus.waitFor<TriageResultEvent>(
+      "triage:result",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("triage:finding-queued", runId, {
+        context,
+        finding: makeFinding(),
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    const resultEvent = await resultPromise;
+    expect(resultEvent.payload.result.verdict).toBe("tp");
+    expect(resultEvent.payload.attempts).toBe(2);
+    expect(triageFindingWithAgentMock).toHaveBeenCalledTimes(2);
 
     await bus.close();
   });

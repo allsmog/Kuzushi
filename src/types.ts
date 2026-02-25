@@ -29,6 +29,29 @@ export interface TriageResult {
   rationale: string;
   verificationSteps: string[];
   fixPatch: string | null;
+  triageCostUsd?: number;
+}
+
+/** Result of exploitability verification for a triaged finding. */
+export interface VerificationResult {
+  fingerprint: string;
+  exploitable: boolean;
+  pocPayload: string | null;
+  pocDescription: string;
+  attackVector: string | null;
+  preconditions: string[];
+  confidence: number;
+  verifyCostUsd?: number;
+}
+
+/** Heuristic repository metadata used to enrich triage/verification prompts. */
+export interface RepoContext {
+  languages: string[];
+  frameworks: string[];
+  authPatterns: string[];
+  sanitizationLibs: string[];
+  ormOrDb: string[];
+  entryPoints: string[];
 }
 
 /** User configuration stored at ~/.kuzushi/config.json (and optional project override). */
@@ -39,6 +62,32 @@ export interface KuzushiConfig {
   triageModel?: string;
   /** Max turns for triage agents. */
   triageMaxTurns: number;
+  /** Enable post-triage exploitability verification phase. */
+  verify?: boolean;
+  /** Optional override model for verification agents. */
+  verifyModel?: string;
+  /** Max turns for verification agents. */
+  verifyMaxTurns?: number;
+  /** Number of in-flight verification tasks. */
+  verifyConcurrency?: number;
+  /** Which triage verdicts should enter verification. */
+  verifyVerdicts?: Verdict[];
+  /** Minimum triage confidence required before entering verification. */
+  verifyMinConfidence?: number;
+  /** Enable pre-scan repository context gathering task. */
+  enableContextGathering?: boolean;
+  /** Persist per-run JSONL audit logs. */
+  auditLog?: boolean;
+  /** Optional markdown report output path. */
+  reportOutput?: string;
+  /** Retry count for triage worker transient failures. */
+  maxTriageRetries?: number;
+  /** Retry count for verification worker transient failures. */
+  maxVerifyRetries?: number;
+  /** Initial retry backoff delay in milliseconds. */
+  retryBackoffMs?: number;
+  /** Backoff multiplier applied per retry attempt. */
+  retryBackoffMultiplier?: number;
   /** Message bus backend for pipeline events. */
   busBackend: BusBackend;
   /** Number of in-flight triage tasks. */
@@ -75,6 +124,13 @@ export interface FindingRow {
   rationale: string;
   verificationSteps: string;
   fixPatch: string | null;
+  verifyExploitable?: number | null;
+  verifyPocPayload?: string | null;
+  verifyPocDescription?: string | null;
+  verifyAttackVector?: string | null;
+  verifyPreconditions?: string | null;
+  verifyConfidence?: number | null;
+  verifyCostUsd?: number | null;
   createdAt: string;
   updatedAt: string;
 }

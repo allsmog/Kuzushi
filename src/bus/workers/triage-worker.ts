@@ -1,8 +1,9 @@
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { withRetry } from "../../retry.js";
 import { triageFindingWithAgent } from "../../triage.js";
-import type { KuzushiConfig } from "../../types.js";
+import type { KuzushiConfig, RepoContext } from "../../types.js";
 import type { TriageFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -20,51 +21,69 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
   const triageConfigProvider = createTriageConfigProvider(deps.registry, deps.taskRegistry);
 
   bus.subscribe<TriageFindingQueuedEvent>("triage:finding-queued", async (event) => {
-    const { context, finding, index, total } = event.payload;
+    const { context, finding, repoContext, index, total } = event.payload;
     const runId = event.meta.runId;
+    let attempts = 0;
 
     try {
-      const result = await triageFindingWithAgent(
-        triageConfigProvider,
-        finding,
-        context.repoRoot,
-        context.repoName,
-        deps.config.triageModel ?? deps.config.model,
-        deps.config.triageMaxTurns,
+      const { result, costUsd } = await withRetry(
+        async () => {
+          attempts += 1;
+          return triageFindingWithAgent(
+            triageConfigProvider,
+            finding,
+            context.repoRoot,
+            context.repoName,
+            deps.config.triageModel ?? deps.config.model,
+            deps.config.triageMaxTurns,
+            asRepoContext(repoContext),
+            {
+              activityCallback: async (activity) => {
+                await bus.publish(
+                  createEvent("triage:agent-activity", runId, {
+                    context,
+                    fingerprint: finding.fingerprint,
+                    kind: activity.kind,
+                    toolName: activity.toolName,
+                    toolInput: activity.toolInput,
+                    summary: activity.summary,
+                    elapsedSeconds: activity.elapsedSeconds,
+                    index,
+                    total,
+                  }),
+                );
+              },
+            },
+          );
+        },
         {
-          activityCallback: async (activity) => {
-            await bus.publish(
-              createEvent("triage:agent-activity", runId, {
-                context,
-                fingerprint: finding.fingerprint,
-                kind: activity.kind,
-                toolName: activity.toolName,
-                toolInput: activity.toolInput,
-                summary: activity.summary,
-                elapsedSeconds: activity.elapsedSeconds,
-                index,
-                total,
-              }),
-            );
-          },
+          maxRetries: deps.config.maxTriageRetries ?? 2,
+          backoffMs: deps.config.retryBackoffMs ?? 5000,
+          multiplier: deps.config.retryBackoffMultiplier ?? 2,
         },
       );
+      result.triageCostUsd = costUsd;
 
       await bus.publish(
         createEvent("triage:result", runId, {
           context,
           finding,
           result,
+          costUsd,
+          attempts,
           index,
           total,
         }),
       );
     } catch (error) {
+      const costUsd = getErrorCostUsd(error);
       await bus.publish(
         createEvent("triage:error", runId, {
           context,
           finding,
           error: toErrorMessage(error),
+          costUsd,
+          attempts,
           index,
           total,
         }),
@@ -120,4 +139,57 @@ function toErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function getErrorCostUsd(error: unknown): number | undefined {
+  if (!isRecord(error)) {
+    return undefined;
+  }
+
+  const raw = error["costUsd"];
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
+    return undefined;
+  }
+
+  return raw;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function asRepoContext(value: unknown): RepoContext | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const repoContext: RepoContext = {
+    languages: asStringArray(value["languages"]),
+    frameworks: asStringArray(value["frameworks"]),
+    authPatterns: asStringArray(value["authPatterns"]),
+    sanitizationLibs: asStringArray(value["sanitizationLibs"]),
+    ormOrDb: asStringArray(value["ormOrDb"]),
+    entryPoints: asStringArray(value["entryPoints"]),
+  };
+
+  const hasAnyValue = (
+    repoContext.languages.length > 0
+    || repoContext.frameworks.length > 0
+    || repoContext.authPatterns.length > 0
+    || repoContext.sanitizationLibs.length > 0
+    || repoContext.ormOrDb.length > 0
+    || repoContext.entryPoints.length > 0
+  );
+
+  return hasAnyValue ? repoContext : undefined;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
 }

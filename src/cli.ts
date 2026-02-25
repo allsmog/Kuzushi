@@ -5,7 +5,13 @@ import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { loadConfig, getConfigValue, setConfigValue, unsetConfigValue, configPath } from "./config.js";
-import { initDb, defaultDbPath } from "./store.js";
+import {
+  createRun,
+  defaultDbPath,
+  getLatestResumableRun,
+  getRun,
+  initDb,
+} from "./store.js";
 import { createDefaultRegistry } from "./scanners/index.js";
 import { createDefaultTaskRegistry } from "./agents/index.js";
 import { configureAgentRuntime } from "./agent-runtime/index.js";
@@ -58,8 +64,20 @@ program
   .option("--model <model>", "Model to use for scanners")
   .option("--triage-model <model>", "Override model used by triage agent")
   .option("--triage-max-turns <n>", "Override triage agent max turn budget", parseInt)
+  .option("--verify", "Enable post-triage exploitability verification", false)
+  .option("--verify-model <model>", "Override model used by verification agent")
+  .option("--verify-max-turns <n>", "Override verification agent max turn budget", parseInt)
+  .option("--verify-concurrency <n>", "Override verification concurrency", parseInt)
+  .option("--verify-min-confidence <n>", "Minimum triage confidence required for verification", parseFloat)
+  .option("--max-triage-retries <n>", "Retries for triage agent failures", parseInt)
+  .option("--max-verify-retries <n>", "Retries for verification agent failures", parseInt)
+  .option("--retry-backoff-ms <n>", "Initial retry backoff in milliseconds", parseInt)
+  .option("--no-context", "Disable pre-scan repository context gathering")
+  .option("--audit-log", "Persist per-run audit logs to .kuzushi/runs/<runId>/", false)
+  .option("--output <path>", "Write markdown report to this path")
   .option("--agent-runtime <backend>", "Agent runtime backend (claude-sdk|acp)")
   .option("--fresh", "Clear prior results before scanning", false)
+  .option("--resume [runId]", "Resume a previous run (optionally by run id)")
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
   .action(async (repoPath: string, opts: {
     scanners?: string;
@@ -68,8 +86,20 @@ program
     model?: string;
     triageModel?: string;
     triageMaxTurns?: number;
+    verify: boolean;
+    verifyModel?: string;
+    verifyMaxTurns?: number;
+    verifyConcurrency?: number;
+    verifyMinConfidence?: number;
+    maxTriageRetries?: number;
+    maxVerifyRetries?: number;
+    retryBackoffMs?: number;
+    context: boolean;
+    auditLog: boolean;
+    output?: string;
     agentRuntime?: string;
     fresh: boolean;
+    resume?: string | boolean;
     db?: string;
   }) => {
     if (!process.env["ANTHROPIC_API_KEY"]) {
@@ -84,6 +114,18 @@ program
     const config = loadConfig(repoRoot);
     if (opts.model) config.model = opts.model;
     if (opts.triageModel) config.triageModel = opts.triageModel;
+    if (opts.verify) config.verify = true;
+    if (opts.verifyModel) config.verifyModel = opts.verifyModel;
+    if (opts.verifyMinConfidence !== undefined) {
+      if (!Number.isFinite(opts.verifyMinConfidence) || opts.verifyMinConfidence < 0 || opts.verifyMinConfidence > 1) {
+        console.error("Error: --verify-min-confidence must be a number between 0 and 1.");
+        process.exit(1);
+      }
+      config.verifyMinConfidence = opts.verifyMinConfidence;
+    }
+    if (opts.context === false) config.enableContextGathering = false;
+    if (opts.auditLog) config.auditLog = true;
+    if (opts.output) config.reportOutput = path.resolve(opts.output);
     if (opts.agentRuntime) {
       config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
     }
@@ -93,6 +135,46 @@ program
         process.exit(1);
       }
       config.triageMaxTurns = Math.floor(opts.triageMaxTurns);
+    }
+
+    if (opts.verifyMaxTurns !== undefined) {
+      if (!Number.isFinite(opts.verifyMaxTurns) || opts.verifyMaxTurns < 1) {
+        console.error("Error: --verify-max-turns must be a positive integer.");
+        process.exit(1);
+      }
+      config.verifyMaxTurns = Math.floor(opts.verifyMaxTurns);
+    }
+
+    if (opts.verifyConcurrency !== undefined) {
+      if (!Number.isFinite(opts.verifyConcurrency) || opts.verifyConcurrency < 1) {
+        console.error("Error: --verify-concurrency must be a positive integer.");
+        process.exit(1);
+      }
+      config.verifyConcurrency = Math.floor(opts.verifyConcurrency);
+    }
+
+    if (opts.maxTriageRetries !== undefined) {
+      if (!Number.isFinite(opts.maxTriageRetries) || opts.maxTriageRetries < 0) {
+        console.error("Error: --max-triage-retries must be a non-negative integer.");
+        process.exit(1);
+      }
+      config.maxTriageRetries = Math.floor(opts.maxTriageRetries);
+    }
+
+    if (opts.maxVerifyRetries !== undefined) {
+      if (!Number.isFinite(opts.maxVerifyRetries) || opts.maxVerifyRetries < 0) {
+        console.error("Error: --max-verify-retries must be a non-negative integer.");
+        process.exit(1);
+      }
+      config.maxVerifyRetries = Math.floor(opts.maxVerifyRetries);
+    }
+
+    if (opts.retryBackoffMs !== undefined) {
+      if (!Number.isFinite(opts.retryBackoffMs) || opts.retryBackoffMs < 0) {
+        console.error("Error: --retry-backoff-ms must be a non-negative integer.");
+        process.exit(1);
+      }
+      config.retryBackoffMs = Math.floor(opts.retryBackoffMs);
     }
 
     try {
@@ -136,7 +218,48 @@ program
     const taskRegistry = createDefaultTaskRegistry(registry);
     registerAllWorkers(bus, { registry, taskRegistry, db, config });
 
-    const runId = generateRunId();
+    let resumeRunId: string | undefined;
+    if (opts.resume !== undefined) {
+      if (opts.resume === true) {
+        const latest = getLatestResumableRun(db, repoName);
+        if (!latest) {
+          console.error(`Error: no resumable runs found for repo "${repoName}".`);
+          process.exit(1);
+        }
+        resumeRunId = latest.runId;
+      } else if (typeof opts.resume === "string" && opts.resume.trim().length > 0) {
+        resumeRunId = opts.resume.trim();
+      }
+
+      if (!resumeRunId) {
+        console.error("Error: --resume received an invalid run id.");
+        process.exit(1);
+      }
+
+      const run = getRun(db, resumeRunId);
+      if (!run) {
+        console.error(`Error: run "${resumeRunId}" was not found.`);
+        process.exit(1);
+      }
+
+      if (run.repo !== repoName) {
+        console.error(
+          `Error: run "${resumeRunId}" belongs to repo "${run.repo}", not "${repoName}".`,
+        );
+        process.exit(1);
+      }
+
+      if (run.status === "complete") {
+        console.error(`Error: run "${resumeRunId}" is already complete and cannot be resumed.`);
+        process.exit(1);
+      }
+    }
+
+    const runId = resumeRunId ?? generateRunId();
+    if (!resumeRunId) {
+      createRun(db, runId, repoName, config, scanOpts);
+    }
+
     const context = {
       runId,
       repoRoot,
@@ -164,6 +287,7 @@ program
           context,
           config,
           scanOpts,
+          resumeRunId,
         }),
       );
 

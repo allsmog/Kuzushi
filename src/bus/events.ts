@@ -1,6 +1,12 @@
 import type { Finding, ScannerId } from "../scanners/types.js";
 import type { TaskOutputKind } from "../agents/types.js";
-import type { KuzushiConfig, ScanOpts, TriageResult, Verdict } from "../types.js";
+import type {
+  KuzushiConfig,
+  ScanOpts,
+  TriageResult,
+  VerificationResult,
+  Verdict,
+} from "../types.js";
 import type { EventEnvelope } from "./types.js";
 
 export interface RunContext {
@@ -15,8 +21,13 @@ export interface PipelineStats {
   totalFindings: number;
   queuedForTriage: number;
   skippedAlreadyTriaged: number;
+  skippedLowConfidence?: number;
   triaged: number;
   triageErrors: number;
+  totalCostUsd?: number;
+  verified?: number;
+  verifyErrors?: number;
+  verifyCostUsd?: number;
   startedAt: string;
   completedAt: string;
 }
@@ -27,6 +38,7 @@ export type PipelineStartEvent = EventEnvelope<
     context: RunContext;
     config: KuzushiConfig;
     scanOpts: ScanOpts;
+    resumeRunId?: string;
   }
 >;
 
@@ -85,6 +97,7 @@ export type TaskCompleteEvent = EventEnvelope<
     outputKind: TaskOutputKind;
     output: unknown;
     durationMs: number;
+    costUsd?: number;
   }
 >;
 
@@ -157,6 +170,7 @@ export type TriageFindingQueuedEvent = EventEnvelope<
   {
     context: RunContext;
     finding: Finding;
+    repoContext?: unknown;
     index: number;
     total: number;
   }
@@ -168,6 +182,8 @@ export type TriageResultEvent = EventEnvelope<
     context: RunContext;
     finding: Finding;
     result: TriageResult;
+    costUsd?: number;
+    attempts?: number;
     index: number;
     total: number;
   }
@@ -179,6 +195,8 @@ export type TriageErrorEvent = EventEnvelope<
     context: RunContext;
     finding: Finding;
     error: string;
+    costUsd?: number;
+    attempts?: number;
     index: number;
     total: number;
   }
@@ -205,11 +223,97 @@ export type TriageCompleteEvent = EventEnvelope<
     context: RunContext;
     triaged: number;
     errors: number;
+    totalCostUsd?: number;
   }
 >;
 
 export type TriageQueueDepthEvent = EventEnvelope<
   "triage:queue-depth",
+  {
+    context: RunContext;
+    queued: number;
+    inFlight: number;
+    processed: number;
+    total: number;
+  }
+>;
+
+export type VerificationStartEvent = EventEnvelope<
+  "verification:start",
+  {
+    context: RunContext;
+    findingCount: number;
+    model: string;
+  }
+>;
+
+export type VerificationFindingQueuedEvent = EventEnvelope<
+  "verification:finding-queued",
+  {
+    context: RunContext;
+    finding: Finding;
+    triageResult: TriageResult;
+    repoContext?: unknown;
+    index: number;
+    total: number;
+  }
+>;
+
+export type VerificationResultEvent = EventEnvelope<
+  "verification:result",
+  {
+    context: RunContext;
+    finding: Finding;
+    triageResult: TriageResult;
+    result: VerificationResult;
+    costUsd?: number;
+    attempts?: number;
+    index: number;
+    total: number;
+  }
+>;
+
+export type VerificationErrorEvent = EventEnvelope<
+  "verification:error",
+  {
+    context: RunContext;
+    finding: Finding;
+    triageResult: TriageResult;
+    error: string;
+    costUsd?: number;
+    attempts?: number;
+    index: number;
+    total: number;
+  }
+>;
+
+export type VerificationAgentActivityEvent = EventEnvelope<
+  "verification:agent-activity",
+  {
+    context: RunContext;
+    fingerprint: string;
+    kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
+    toolName?: string;
+    toolInput?: Record<string, unknown>;
+    summary?: string;
+    elapsedSeconds?: number;
+    index: number;
+    total: number;
+  }
+>;
+
+export type VerificationCompleteEvent = EventEnvelope<
+  "verification:complete",
+  {
+    context: RunContext;
+    verified: number;
+    errors: number;
+    totalCostUsd?: number;
+  }
+>;
+
+export type VerificationQueueDepthEvent = EventEnvelope<
+  "verification:queue-depth",
   {
     context: RunContext;
     queued: number;
@@ -232,6 +336,7 @@ export type ReportRequestedEvent = EventEnvelope<
   "report:requested",
   {
     context: RunContext;
+    stats?: Partial<PipelineStats>;
   }
 >;
 
@@ -263,6 +368,13 @@ export type KuzushiEvent =
   | TriageAgentActivityEvent
   | TriageCompleteEvent
   | TriageQueueDepthEvent
+  | VerificationStartEvent
+  | VerificationFindingQueuedEvent
+  | VerificationResultEvent
+  | VerificationErrorEvent
+  | VerificationAgentActivityEvent
+  | VerificationCompleteEvent
+  | VerificationQueueDepthEvent
   | StoreUpsertedEvent
   | ReportRequestedEvent
   | ReportCompleteEvent;

@@ -1,8 +1,16 @@
 import chalk from "chalk";
+import path from "node:path";
 import type { TriageResult, Verdict } from "./types.js";
 import type { ScannerId } from "./scanners/types.js";
 import type Database from "better-sqlite3";
-import { getVerdictCounts, getActionableFindings } from "./store.js";
+import type { PipelineStats } from "./bus/events.js";
+import {
+  getActionableFindings,
+  getTotalCost,
+  getTotalVerificationCost,
+  getVerificationCounts,
+  getVerdictCounts,
+} from "./store.js";
 
 /** Color a verdict string. */
 function colorVerdict(verdict: Verdict): string {
@@ -21,17 +29,41 @@ export function printTriageProgress(
   result: TriageResult,
   index: number,
   total: number,
+  attempts?: number,
 ): void {
   const verdict = colorVerdict(result.verdict);
   const conf = chalk.dim(`(${(result.confidence * 100).toFixed(0)}%)`);
+  const cost = result.triageCostUsd && result.triageCostUsd > 0
+    ? chalk.dim(`$${result.triageCostUsd.toFixed(4)}`)
+    : "";
+  const retry = attempts && attempts > 1
+    ? chalk.dim(`(retry #${attempts})`)
+    : "";
   console.log(
-    `  [${index}/${total}] ${verdict} ${conf} ${chalk.dim(result.fingerprint.slice(0, 12))}...`,
+    `  [${index}/${total}] ${verdict} ${conf}${cost ? ` ${cost}` : ""}${retry ? ` ${retry}` : ""} ${chalk.dim(result.fingerprint.slice(0, 12))}...`,
   );
 }
 
+export interface PrintSummaryOptions {
+  stats?: Partial<PipelineStats>;
+  runId?: string;
+  repoRoot?: string;
+  auditLog?: boolean;
+}
+
 /** Print the final scan summary to terminal. */
-export function printSummary(db: Database.Database, repo: string): void {
+export function printSummary(
+  db: Database.Database,
+  repo: string,
+  options: PrintSummaryOptions = {},
+): void {
   const counts = getVerdictCounts(db, repo);
+  const totalCostUsd = getTotalCost(db, repo);
+  const verificationCostUsd = getTotalVerificationCost(db, repo);
+  const verificationCounts = getVerificationCounts(db, repo);
+  const hasVerificationStats = verificationCounts.exploitable + verificationCounts.notExploitable > 0;
+  const hasVerificationSpend = verificationCostUsd > 0;
+  const hasVerificationData = hasVerificationStats || hasVerificationSpend;
   const total = counts.tp + counts.fp + counts.needs_review;
   const actionable = getActionableFindings(db, repo);
 
@@ -44,6 +76,18 @@ export function printSummary(db: Database.Database, repo: string): void {
   console.log(`  ${chalk.red.bold("True positives:")}   ${counts.tp}`);
   console.log(`  ${chalk.green("False positives:")}  ${counts.fp}`);
   console.log(`  ${chalk.yellow("Needs review:")}     ${counts.needs_review}`);
+  if ((options.stats?.skippedLowConfidence ?? 0) > 0) {
+    console.log(`  ${chalk.dim("Skipped (low confidence):")} ${options.stats?.skippedLowConfidence}`);
+  }
+  if (hasVerificationData) {
+    console.log("");
+    if (hasVerificationStats) {
+      console.log(`  ${chalk.red.bold("Exploitable:")}      ${verificationCounts.exploitable}`);
+      console.log(`  ${chalk.green("Not exploitable:")}  ${verificationCounts.notExploitable}`);
+    } else {
+      console.log(`  ${chalk.yellow("Verification:")}    errors only`);
+    }
+  }
 
   if (actionable.length > 0) {
     console.log("");
@@ -56,16 +100,40 @@ export function printSummary(db: Database.Database, repo: string): void {
       const conf = chalk.dim(`${(f.confidence * 100).toFixed(0)}%`);
       const severity = f.severity === "ERROR" ? chalk.red(f.severity) : chalk.yellow(f.severity);
       const scanner = chalk.dim(`[${f.scanner}]`);
+      const verificationBadge = f.verifyExploitable === 1
+        ? chalk.bgRed.white.bold(" EXPLOITABLE ")
+        : f.verifyExploitable === 0
+          ? chalk.bgGreen.black(" NOT EXPLOITABLE ")
+          : "";
 
-      console.log(`  ${verdict} ${conf}  ${severity} ${scanner}`);
+      console.log(`  ${verdict} ${conf}  ${severity} ${scanner}${verificationBadge ? ` ${verificationBadge}` : ""}`);
       console.log(`    ${location}`);
       console.log(`    ${chalk.dim(f.ruleId)}`);
       console.log(`    ${f.rationale.slice(0, 120)}${f.rationale.length > 120 ? "..." : ""}`);
+      if (f.verifyExploitable === 1 && f.verifyPocPayload) {
+        const payload = f.verifyPocPayload.length > 80
+          ? `${f.verifyPocPayload.slice(0, 77)}...`
+          : f.verifyPocPayload;
+        console.log(`    ${chalk.magenta("PoC:")} ${payload}`);
+      }
+      if (f.verifyAttackVector) {
+        console.log(`    ${chalk.cyan("Vector:")} ${f.verifyAttackVector}`);
+      }
       console.log("");
     }
   } else if (total > 0) {
     console.log("");
     console.log(chalk.green.bold("  All findings triaged as false positives. Code looks clean."));
+  }
+
+  console.log("");
+  console.log(`  ${chalk.dim("Total triage cost:")} $${totalCostUsd.toFixed(4)}`);
+  if (hasVerificationData) {
+    console.log(`  ${chalk.dim("Total verification cost:")} $${verificationCostUsd.toFixed(4)}`);
+  }
+  if (options.auditLog && options.repoRoot && options.runId) {
+    const runDir = path.join(options.repoRoot, ".kuzushi", "runs", options.runId);
+    console.log(`  ${chalk.dim("Audit log:")} ${runDir}/`);
   }
 
   console.log(chalk.bold("─".repeat(60)));

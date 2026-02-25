@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import type { KuzushiConfig } from "./types.js";
+import type { KuzushiConfig, Verdict } from "./types.js";
 import type { ScannerConfig } from "./scanners/types.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".kuzushi");
@@ -22,6 +22,18 @@ const AGENT_RUNTIME_BACKENDS = new Set<string>([
 export const DEFAULTS: KuzushiConfig = {
   model: "claude-sonnet-4-20250514",
   triageMaxTurns: 10,
+  verify: false,
+  verifyMaxTurns: 15,
+  verifyConcurrency: 1,
+  verifyVerdicts: ["tp"],
+  verifyMinConfidence: 0,
+  enableContextGathering: true,
+  auditLog: false,
+  reportOutput: undefined,
+  maxTriageRetries: 2,
+  maxVerifyRetries: 2,
+  retryBackoffMs: 5000,
+  retryBackoffMultiplier: 2,
   busBackend: "in-process",
   triageConcurrency: 1,
   scanMode: "sequential",
@@ -42,6 +54,7 @@ export const DEFAULTS: KuzushiConfig = {
 const VALID_TOP_LEVEL_KEYS = new Set<string>([
   ...Object.keys(DEFAULTS),
   "triageModel",
+  "verifyModel",
 ]);
 
 /** Load config from ~/.kuzushi/config.json + optional <repo>/.kuzushi/config.json. */
@@ -135,6 +148,118 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "verify") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("verify must be true or false");
+    }
+    config.verify = parsed;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "verifyMaxTurns") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("verifyMaxTurns must be a positive number");
+    }
+    config.verifyMaxTurns = Math.floor(n);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "verifyConcurrency") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("verifyConcurrency must be a positive number");
+    }
+    config.verifyConcurrency = Math.floor(n);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "verifyVerdicts") {
+    config.verifyVerdicts = coerceVerdictArray(raw);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "verifyMinConfidence") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 1) {
+      throw new Error("verifyMinConfidence must be a number between 0 and 1");
+    }
+    config.verifyMinConfidence = n;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "enableContextGathering") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("enableContextGathering must be true or false");
+    }
+    config.enableContextGathering = parsed;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "auditLog") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("auditLog must be true or false");
+    }
+    config.auditLog = parsed;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "reportOutput") {
+    config.reportOutput = raw.trim() || undefined;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "maxTriageRetries") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error("maxTriageRetries must be a non-negative number");
+    }
+    config.maxTriageRetries = Math.floor(n);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "maxVerifyRetries") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error("maxVerifyRetries must be a non-negative number");
+    }
+    config.maxVerifyRetries = Math.floor(n);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "retryBackoffMs") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error("retryBackoffMs must be a non-negative number");
+    }
+    config.retryBackoffMs = Math.floor(n);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "retryBackoffMultiplier") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error("retryBackoffMultiplier must be a positive number");
+    }
+    config.retryBackoffMultiplier = n;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
   if (key === "scanMode") {
     const mode = raw.trim();
     if (mode !== "sequential" && mode !== "concurrent") {
@@ -191,6 +316,12 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "verifyModel") {
+    config.verifyModel = raw.trim() || undefined;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
   throw new Error(`Unknown config key: ${key}`);
 }
 
@@ -211,6 +342,21 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
   if (key in DEFAULTS) {
     if (key === "model") config.model = DEFAULTS.model;
     else if (key === "triageMaxTurns") config.triageMaxTurns = DEFAULTS.triageMaxTurns;
+    else if (key === "verify") config.verify = DEFAULTS.verify;
+    else if (key === "verifyMaxTurns") config.verifyMaxTurns = DEFAULTS.verifyMaxTurns;
+    else if (key === "verifyConcurrency") config.verifyConcurrency = DEFAULTS.verifyConcurrency;
+    else if (key === "verifyVerdicts") config.verifyVerdicts = [...(DEFAULTS.verifyVerdicts ?? ["tp"])];
+    else if (key === "verifyMinConfidence") config.verifyMinConfidence = DEFAULTS.verifyMinConfidence;
+    else if (key === "enableContextGathering") {
+      config.enableContextGathering = DEFAULTS.enableContextGathering;
+    } else if (key === "auditLog") config.auditLog = DEFAULTS.auditLog;
+    else if (key === "reportOutput") config.reportOutput = DEFAULTS.reportOutput;
+    else if (key === "maxTriageRetries") config.maxTriageRetries = DEFAULTS.maxTriageRetries;
+    else if (key === "maxVerifyRetries") config.maxVerifyRetries = DEFAULTS.maxVerifyRetries;
+    else if (key === "retryBackoffMs") config.retryBackoffMs = DEFAULTS.retryBackoffMs;
+    else if (key === "retryBackoffMultiplier") {
+      config.retryBackoffMultiplier = DEFAULTS.retryBackoffMultiplier;
+    }
     else if (key === "busBackend") config.busBackend = DEFAULTS.busBackend;
     else if (key === "triageConcurrency") config.triageConcurrency = DEFAULTS.triageConcurrency;
     else if (key === "scanMode") config.scanMode = DEFAULTS.scanMode;
@@ -222,6 +368,8 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
     else if (key === "scannerConfig") config.scannerConfig = cloneScannerConfig(DEFAULTS.scannerConfig);
   } else if (key === "triageModel") {
     config.triageModel = undefined;
+  } else if (key === "verifyModel") {
+    config.verifyModel = undefined;
   }
 
   saveConfig(normalizeConfig(config), repoRoot);
@@ -244,6 +392,46 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const busBackend = normalizeBusBackend(config.busBackend);
   const triageConcurrency = normalizePositiveInt(config.triageConcurrency, DEFAULTS.triageConcurrency);
   const triageMaxTurns = normalizePositiveInt(config.triageMaxTurns, DEFAULTS.triageMaxTurns);
+  const verify = normalizeBoolean(config.verify, DEFAULTS.verify ?? false);
+  const verifyModel = normalizeOptionalString(config.verifyModel);
+  const verifyMaxTurns = normalizePositiveInt(
+    config.verifyMaxTurns,
+    DEFAULTS.verifyMaxTurns ?? 15,
+  );
+  const verifyConcurrency = normalizePositiveInt(
+    config.verifyConcurrency,
+    DEFAULTS.verifyConcurrency ?? 1,
+  );
+  const verifyVerdictsRaw = normalizeVerdictArray(config.verifyVerdicts);
+  const verifyVerdicts = verifyVerdictsRaw.length > 0
+    ? verifyVerdictsRaw
+    : [...(DEFAULTS.verifyVerdicts ?? ["tp"])];
+  const verifyMinConfidence = normalizeUnitInterval(
+    config.verifyMinConfidence,
+    DEFAULTS.verifyMinConfidence ?? 0,
+  );
+  const enableContextGathering = normalizeBoolean(
+    config.enableContextGathering,
+    DEFAULTS.enableContextGathering ?? true,
+  );
+  const auditLog = normalizeBoolean(config.auditLog, DEFAULTS.auditLog ?? false);
+  const reportOutput = normalizeOptionalString(config.reportOutput);
+  const maxTriageRetries = normalizeNonNegativeInt(
+    config.maxTriageRetries,
+    DEFAULTS.maxTriageRetries ?? 2,
+  );
+  const maxVerifyRetries = normalizeNonNegativeInt(
+    config.maxVerifyRetries,
+    DEFAULTS.maxVerifyRetries ?? 2,
+  );
+  const retryBackoffMs = normalizeNonNegativeInt(
+    config.retryBackoffMs,
+    DEFAULTS.retryBackoffMs ?? 5000,
+  );
+  const retryBackoffMultiplier = normalizePositiveNumber(
+    config.retryBackoffMultiplier,
+    DEFAULTS.retryBackoffMultiplier ?? 2,
+  );
   const scanMode = normalizeScanMode(config.scanMode);
   const agentRuntimeBackend = normalizeAgentRuntimeBackend(config.agentRuntimeBackend);
   const triageModel = normalizeOptionalString(config.triageModel);
@@ -251,6 +439,19 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
 
   return {
     ...config,
+    verify,
+    verifyModel,
+    verifyMaxTurns,
+    verifyConcurrency,
+    verifyVerdicts,
+    verifyMinConfidence,
+    enableContextGathering,
+    auditLog,
+    reportOutput,
+    maxTriageRetries,
+    maxVerifyRetries,
+    retryBackoffMs,
+    retryBackoffMultiplier,
     busBackend,
     triageConcurrency,
     triageMaxTurns,
@@ -284,6 +485,76 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
 
     if (typeof layer["triageMaxTurns"] === "number" && Number.isFinite(layer["triageMaxTurns"])) {
       merged.triageMaxTurns = layer["triageMaxTurns"];
+    }
+
+    if (typeof layer["verify"] === "boolean") {
+      merged.verify = layer["verify"];
+    }
+
+    if (typeof layer["verifyModel"] === "string") {
+      merged.verifyModel = layer["verifyModel"];
+    }
+
+    if (typeof layer["verifyMaxTurns"] === "number" && Number.isFinite(layer["verifyMaxTurns"])) {
+      merged.verifyMaxTurns = layer["verifyMaxTurns"];
+    }
+
+    if (typeof layer["verifyConcurrency"] === "number" && Number.isFinite(layer["verifyConcurrency"])) {
+      merged.verifyConcurrency = layer["verifyConcurrency"];
+    }
+
+    if (Array.isArray(layer["verifyVerdicts"])) {
+      const verdicts = normalizeVerdictArray(layer["verifyVerdicts"]);
+      if (verdicts.length > 0) {
+        merged.verifyVerdicts = verdicts;
+      }
+    }
+
+    if (
+      typeof layer["verifyMinConfidence"] === "number"
+      && Number.isFinite(layer["verifyMinConfidence"])
+    ) {
+      merged.verifyMinConfidence = layer["verifyMinConfidence"];
+    }
+
+    if (typeof layer["enableContextGathering"] === "boolean") {
+      merged.enableContextGathering = layer["enableContextGathering"];
+    }
+
+    if (typeof layer["auditLog"] === "boolean") {
+      merged.auditLog = layer["auditLog"];
+    }
+
+    if (typeof layer["reportOutput"] === "string") {
+      merged.reportOutput = layer["reportOutput"];
+    }
+
+    if (
+      typeof layer["maxTriageRetries"] === "number"
+      && Number.isFinite(layer["maxTriageRetries"])
+    ) {
+      merged.maxTriageRetries = layer["maxTriageRetries"];
+    }
+
+    if (
+      typeof layer["maxVerifyRetries"] === "number"
+      && Number.isFinite(layer["maxVerifyRetries"])
+    ) {
+      merged.maxVerifyRetries = layer["maxVerifyRetries"];
+    }
+
+    if (
+      typeof layer["retryBackoffMs"] === "number"
+      && Number.isFinite(layer["retryBackoffMs"])
+    ) {
+      merged.retryBackoffMs = layer["retryBackoffMs"];
+    }
+
+    if (
+      typeof layer["retryBackoffMultiplier"] === "number"
+      && Number.isFinite(layer["retryBackoffMultiplier"])
+    ) {
+      merged.retryBackoffMultiplier = layer["retryBackoffMultiplier"];
     }
 
     if (typeof layer["busBackend"] === "string") {
@@ -369,9 +640,47 @@ function coerceStringArray(raw: string): string[] {
   return values;
 }
 
+function coerceVerdictArray(raw: string): Verdict[] {
+  const parsed = raw.trim().startsWith("[")
+    ? parseFlexibleValue(raw)
+    : raw.split(",").map((part) => part.trim()).filter(Boolean);
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("Expected an array value");
+  }
+
+  const rawValues = parsed.map((v) => String(v).trim()).filter(Boolean);
+  if (rawValues.length === 0) {
+    throw new Error("Value must include at least one item");
+  }
+
+  const normalized = normalizeVerdictArray(rawValues);
+  if (normalized.length !== rawValues.length) {
+    throw new Error("verifyVerdicts must contain only: tp, fp, needs_review");
+  }
+
+  return normalized;
+}
+
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((v) => String(v).trim()).filter(Boolean);
+}
+
+function normalizeVerdictArray(value: unknown): Verdict[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<Verdict>();
+  for (const raw of value) {
+    const verdict = String(raw).trim();
+    if (verdict === "tp" || verdict === "fp" || verdict === "needs_review") {
+      seen.add(verdict);
+    }
+  }
+
+  return [...seen];
 }
 
 function normalizeBusBackend(value: unknown): KuzushiConfig["busBackend"] {
@@ -413,6 +722,38 @@ function normalizePositiveInt(value: unknown, fallback: number): number {
     return fallback;
   }
   return Math.floor(n);
+}
+
+function normalizeNonNegativeInt(value: unknown, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    return fallback;
+  }
+  return Math.floor(n);
+}
+
+function normalizePositiveNumber(value: unknown, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    return fallback;
+  }
+  return n;
+}
+
+function normalizeUnitInterval(value: unknown, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    return fallback;
+  }
+  return n;
+}
+
+function normalizeBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value !== "boolean") {
+    return fallback;
+  }
+
+  return value;
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {

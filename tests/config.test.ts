@@ -45,14 +45,56 @@ describe("loadConfig", () => {
     expect(config.scanMode).toBe(DEFAULTS.scanMode);
     expect(config.triageMaxTurns).toBe(DEFAULTS.triageMaxTurns);
     expect(config.triageModel).toBeUndefined();
+    expect(config.verify).toBe(DEFAULTS.verify);
+    expect(config.verifyMaxTurns).toBe(DEFAULTS.verifyMaxTurns);
+    expect(config.verifyConcurrency).toBe(DEFAULTS.verifyConcurrency);
+    expect(config.verifyVerdicts).toEqual(DEFAULTS.verifyVerdicts);
+    expect(config.verifyMinConfidence).toBe(DEFAULTS.verifyMinConfidence);
+    expect(config.enableContextGathering).toBe(DEFAULTS.enableContextGathering);
+    expect(config.auditLog).toBe(DEFAULTS.auditLog);
+    expect(config.maxTriageRetries).toBe(DEFAULTS.maxTriageRetries);
+    expect(config.maxVerifyRetries).toBe(DEFAULTS.maxVerifyRetries);
+    expect(config.retryBackoffMs).toBe(DEFAULTS.retryBackoffMs);
+    expect(config.retryBackoffMultiplier).toBe(DEFAULTS.retryBackoffMultiplier);
     expect(config.scanners).toEqual(DEFAULTS.scanners);
   });
 
   it("merges global config over defaults", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "custom-model", triageModel: "triage-model" }));
+    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
+      model: "custom-model",
+      triageModel: "triage-model",
+      verify: true,
+      verifyModel: "verify-model",
+      verifyMaxTurns: 25,
+      verifyConcurrency: 2,
+      verifyVerdicts: ["tp", "needs_review"],
+      verifyMinConfidence: 0.7,
+      enableContextGathering: false,
+      auditLog: true,
+      reportOutput: "/tmp/report.md",
+      maxTriageRetries: 4,
+      maxVerifyRetries: 5,
+      retryBackoffMs: 2000,
+      retryBackoffMultiplier: 3,
+      scannerConfig: { semgrep: { verify: false } },
+    }));
     const config = loadConfig();
     expect(config.model).toBe("custom-model");
     expect(config.triageModel).toBe("triage-model");
+    expect(config.verify).toBe(true);
+    expect(config.verifyModel).toBe("verify-model");
+    expect(config.verifyMaxTurns).toBe(25);
+    expect(config.verifyConcurrency).toBe(2);
+    expect(config.verifyVerdicts).toEqual(["tp", "needs_review"]);
+    expect(config.verifyMinConfidence).toBe(0.7);
+    expect(config.enableContextGathering).toBe(false);
+    expect(config.auditLog).toBe(true);
+    expect(config.reportOutput).toBe("/tmp/report.md");
+    expect(config.maxTriageRetries).toBe(4);
+    expect(config.maxVerifyRetries).toBe(5);
+    expect(config.retryBackoffMs).toBe(2000);
+    expect(config.retryBackoffMultiplier).toBe(3);
+    expect(config.scannerConfig.semgrep?.verify).toBe(false);
   });
 
   it("applies project-level override when repoRoot is provided", () => {
@@ -125,6 +167,40 @@ describe("setConfigValue", () => {
     expect(getConfigValue("triageModel")).toBe("claude-opus-4-20250514");
   });
 
+  it("sets verify settings", () => {
+    setConfigValue("verify", "true");
+    setConfigValue("verifyModel", "claude-haiku-4-5-20251001");
+    setConfigValue("verifyMaxTurns", "20");
+    setConfigValue("verifyConcurrency", "3");
+    setConfigValue("verifyVerdicts", "tp,needs_review");
+
+    expect(getConfigValue("verify")).toBe(true);
+    expect(getConfigValue("verifyModel")).toBe("claude-haiku-4-5-20251001");
+    expect(getConfigValue("verifyMaxTurns")).toBe(20);
+    expect(getConfigValue("verifyConcurrency")).toBe(3);
+    expect(getConfigValue("verifyVerdicts")).toEqual(["tp", "needs_review"]);
+  });
+
+  it("sets confidence gate, context, audit, and retry settings", () => {
+    setConfigValue("verifyMinConfidence", "0.6");
+    setConfigValue("enableContextGathering", "false");
+    setConfigValue("auditLog", "true");
+    setConfigValue("reportOutput", "report.md");
+    setConfigValue("maxTriageRetries", "3");
+    setConfigValue("maxVerifyRetries", "4");
+    setConfigValue("retryBackoffMs", "1200");
+    setConfigValue("retryBackoffMultiplier", "2.5");
+
+    expect(getConfigValue("verifyMinConfidence")).toBe(0.6);
+    expect(getConfigValue("enableContextGathering")).toBe(false);
+    expect(getConfigValue("auditLog")).toBe(true);
+    expect(getConfigValue("reportOutput")).toBe("report.md");
+    expect(getConfigValue("maxTriageRetries")).toBe(3);
+    expect(getConfigValue("maxVerifyRetries")).toBe(4);
+    expect(getConfigValue("retryBackoffMs")).toBe(1200);
+    expect(getConfigValue("retryBackoffMultiplier")).toBe(2.5);
+  });
+
   it("sets number values", () => {
     setConfigValue("triageConcurrency", "3");
     setConfigValue("triageMaxTurns", "15");
@@ -157,12 +233,50 @@ describe("setConfigValue", () => {
     expect(getConfigValue("scannerConfig.semgrep.binary")).toBe("opengrep");
   });
 
+  it("sets nested scanner verify flag values", () => {
+    setConfigValue("scannerConfig.semgrep.verify", "false");
+    expect(getConfigValue("scannerConfig.semgrep.verify")).toBe(false);
+  });
+
   it("throws on unknown top-level key", () => {
     expect(() => setConfigValue("bogus", "val")).toThrow("Unknown config key");
   });
 
   it("throws on invalid numeric values", () => {
     expect(() => setConfigValue("triageMaxTurns", "0")).toThrow("triageMaxTurns must be a positive number");
+  });
+
+  it("throws on invalid verify values", () => {
+    expect(() => setConfigValue("verify", "maybe")).toThrow("verify must be true or false");
+    expect(() => setConfigValue("verifyMaxTurns", "0")).toThrow("verifyMaxTurns must be a positive number");
+    expect(() => setConfigValue("verifyConcurrency", "0")).toThrow("verifyConcurrency must be a positive number");
+    expect(() => setConfigValue("verifyVerdicts", "foo")).toThrow(
+      "verifyVerdicts must contain only: tp, fp, needs_review",
+    );
+    expect(() => setConfigValue("verifyMinConfidence", "1.4")).toThrow(
+      "verifyMinConfidence must be a number between 0 and 1",
+    );
+  });
+
+  it("throws on invalid context/audit/retry values", () => {
+    expect(() => setConfigValue("enableContextGathering", "maybe")).toThrow(
+      "enableContextGathering must be true or false",
+    );
+    expect(() => setConfigValue("auditLog", "maybe")).toThrow(
+      "auditLog must be true or false",
+    );
+    expect(() => setConfigValue("maxTriageRetries", "-1")).toThrow(
+      "maxTriageRetries must be a non-negative number",
+    );
+    expect(() => setConfigValue("maxVerifyRetries", "-1")).toThrow(
+      "maxVerifyRetries must be a non-negative number",
+    );
+    expect(() => setConfigValue("retryBackoffMs", "-1")).toThrow(
+      "retryBackoffMs must be a non-negative number",
+    );
+    expect(() => setConfigValue("retryBackoffMultiplier", "0")).toThrow(
+      "retryBackoffMultiplier must be a positive number",
+    );
   });
 
   it("throws on invalid scanMode", () => {
@@ -193,6 +307,59 @@ describe("unsetConfigValue", () => {
     expect(getConfigValue("triageModel")).toBe("claude-opus-4-20250514");
     unsetConfigValue("triageModel");
     expect(getConfigValue("triageModel")).toBeUndefined();
+  });
+
+  it("unsets optional verifyModel", () => {
+    setConfigValue("verifyModel", "claude-haiku-4-5-20251001");
+    expect(getConfigValue("verifyModel")).toBe("claude-haiku-4-5-20251001");
+    unsetConfigValue("verifyModel");
+    expect(getConfigValue("verifyModel")).toBeUndefined();
+  });
+
+  it("resets verify keys to defaults", () => {
+    setConfigValue("verify", "true");
+    setConfigValue("verifyMaxTurns", "25");
+    setConfigValue("verifyConcurrency", "4");
+    setConfigValue("verifyVerdicts", "tp,fp");
+
+    unsetConfigValue("verify");
+    unsetConfigValue("verifyMaxTurns");
+    unsetConfigValue("verifyConcurrency");
+    unsetConfigValue("verifyVerdicts");
+
+    expect(getConfigValue("verify")).toBe(DEFAULTS.verify);
+    expect(getConfigValue("verifyMaxTurns")).toBe(DEFAULTS.verifyMaxTurns);
+    expect(getConfigValue("verifyConcurrency")).toBe(DEFAULTS.verifyConcurrency);
+    expect(getConfigValue("verifyVerdicts")).toEqual(DEFAULTS.verifyVerdicts);
+  });
+
+  it("resets context/audit/retry keys to defaults", () => {
+    setConfigValue("verifyMinConfidence", "0.8");
+    setConfigValue("enableContextGathering", "false");
+    setConfigValue("auditLog", "true");
+    setConfigValue("reportOutput", "report.md");
+    setConfigValue("maxTriageRetries", "9");
+    setConfigValue("maxVerifyRetries", "8");
+    setConfigValue("retryBackoffMs", "42");
+    setConfigValue("retryBackoffMultiplier", "3");
+
+    unsetConfigValue("verifyMinConfidence");
+    unsetConfigValue("enableContextGathering");
+    unsetConfigValue("auditLog");
+    unsetConfigValue("reportOutput");
+    unsetConfigValue("maxTriageRetries");
+    unsetConfigValue("maxVerifyRetries");
+    unsetConfigValue("retryBackoffMs");
+    unsetConfigValue("retryBackoffMultiplier");
+
+    expect(getConfigValue("verifyMinConfidence")).toBe(DEFAULTS.verifyMinConfidence);
+    expect(getConfigValue("enableContextGathering")).toBe(DEFAULTS.enableContextGathering);
+    expect(getConfigValue("auditLog")).toBe(DEFAULTS.auditLog);
+    expect(getConfigValue("reportOutput")).toBe(DEFAULTS.reportOutput);
+    expect(getConfigValue("maxTriageRetries")).toBe(DEFAULTS.maxTriageRetries);
+    expect(getConfigValue("maxVerifyRetries")).toBe(DEFAULTS.maxVerifyRetries);
+    expect(getConfigValue("retryBackoffMs")).toBe(DEFAULTS.retryBackoffMs);
+    expect(getConfigValue("retryBackoffMultiplier")).toBe(DEFAULTS.retryBackoffMultiplier);
   });
 
   it("removes nested key", () => {

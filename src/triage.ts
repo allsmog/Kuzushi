@@ -4,7 +4,7 @@ import type {
   Finding,
   TriageAgentConfig,
 } from "./scanners/types.js";
-import type { TriageResult, Verdict } from "./types.js";
+import type { RepoContext, TriageResult, Verdict } from "./types.js";
 
 export const TRIAGE_RESULT_SCHEMA = {
   type: "object",
@@ -49,6 +49,21 @@ export type AgentActivityCallback = (
   activity: AgentActivity,
 ) => Promise<void> | void;
 
+export interface TriageOutput {
+  result: TriageResult;
+  costUsd: number;
+}
+
+export class TriageExecutionError extends Error {
+  readonly costUsd: number;
+
+  constructor(message: string, costUsd = 0) {
+    super(message);
+    this.name = "TriageExecutionError";
+    this.costUsd = normalizeCostUsd(costUsd);
+  }
+}
+
 export async function triageFindingWithAgent(
   registry: TriageConfigProvider,
   finding: Finding,
@@ -56,9 +71,14 @@ export async function triageFindingWithAgent(
   repoName: string,
   model: string,
   maxTurns: number,
-  runtimeOptions: TriageRuntimeOptions = {},
-): Promise<TriageResult> {
-  const agentConfig = resolveAgentConfig(registry, finding, repoName);
+  repoContextOrRuntimeOptions?: RepoContext | TriageRuntimeOptions,
+  maybeRuntimeOptions: TriageRuntimeOptions = {},
+): Promise<TriageOutput> {
+  const { repoContext, runtimeOptions } = resolveTriageArgs(
+    repoContextOrRuntimeOptions,
+    maybeRuntimeOptions,
+  );
+  const agentConfig = resolveAgentConfig(registry, finding, repoName, repoContext);
   const allowedTools = normalizeAllowedTools(agentConfig.allowedTools);
   const effectiveMaxTurns = normalizeTurns(agentConfig.maxTurns ?? maxTurns);
   const runtime = runtimeOptions.runtime ?? getAgentRuntime();
@@ -66,6 +86,7 @@ export async function triageFindingWithAgent(
   let resultText = "";
   let structuredOutput: unknown = undefined;
   let executionError: string | null = null;
+  let costUsd = 0;
 
   for await (const message of runtime.query({
     prompt: agentConfig.prompt,
@@ -106,6 +127,10 @@ export async function triageFindingWithAgent(
     }
 
     if (message.type !== "result") continue;
+    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+      costUsd = message.totalCostUsd;
+    }
+
     if ("result" in message) {
       resultText = message.result;
       structuredOutput = message.structuredOutput;
@@ -116,10 +141,23 @@ export async function triageFindingWithAgent(
   }
 
   if (executionError) {
-    throw new Error(`triage agent failed: ${executionError}`);
+    throw new TriageExecutionError(`triage agent failed: ${executionError}`, costUsd);
   }
 
-  return parseAgentOutput(structuredOutput ?? resultText, finding.fingerprint);
+  let parsedResult: TriageResult;
+  try {
+    parsedResult = parseAgentOutput(structuredOutput ?? resultText, finding.fingerprint);
+  } catch (error) {
+    throw new TriageExecutionError(
+      `triage output parse failed: ${toErrorMessage(error)}`,
+      costUsd,
+    );
+  }
+
+  return {
+    result: parsedResult,
+    costUsd,
+  };
 }
 
 export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResult {
@@ -144,11 +182,15 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
 export function buildDefaultTriageAgentConfig(
   finding: Finding,
   repoName: string,
+  repoContext?: RepoContext,
 ): TriageAgentConfig {
+  const contextSection = formatRepoContext(repoContext);
+
   return {
     prompt: [
       "You are a security triage agent.",
       "Use available repo tools to investigate whether this finding is a true or false positive.",
+      ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
       "",
       "## Finding",
       `Repo: ${repoName}`,
@@ -181,20 +223,51 @@ function resolveAgentConfig(
   registry: TriageConfigProvider,
   finding: Finding,
   repoName: string,
+  repoContext?: RepoContext,
 ): TriageAgentConfig {
   if (!registry.has(finding.scanner)) {
-    return buildDefaultTriageAgentConfig(finding, repoName);
+    return buildDefaultTriageAgentConfig(finding, repoName, repoContext);
   }
 
   try {
     const config = registry.get(finding.scanner).triageAgentConfig(finding, repoName);
     if (!config.prompt || !config.prompt.trim()) {
-      return buildDefaultTriageAgentConfig(finding, repoName);
+      return buildDefaultTriageAgentConfig(finding, repoName, repoContext);
     }
     return config;
   } catch {
-    return buildDefaultTriageAgentConfig(finding, repoName);
+    return buildDefaultTriageAgentConfig(finding, repoName, repoContext);
   }
+}
+
+function resolveTriageArgs(
+  repoContextOrRuntimeOptions: RepoContext | TriageRuntimeOptions | undefined,
+  maybeRuntimeOptions: TriageRuntimeOptions,
+): { repoContext?: RepoContext; runtimeOptions: TriageRuntimeOptions } {
+  if (!repoContextOrRuntimeOptions) {
+    return { runtimeOptions: maybeRuntimeOptions };
+  }
+
+  if (looksLikeRuntimeOptions(repoContextOrRuntimeOptions)) {
+    return {
+      runtimeOptions: repoContextOrRuntimeOptions,
+    };
+  }
+
+  return {
+    repoContext: repoContextOrRuntimeOptions,
+    runtimeOptions: maybeRuntimeOptions,
+  };
+}
+
+function looksLikeRuntimeOptions(value: RepoContext | TriageRuntimeOptions): value is TriageRuntimeOptions {
+  const runtimeOptions = value as TriageRuntimeOptions;
+  return (
+    "runtime" in runtimeOptions
+    || "abortController" in runtimeOptions
+    || "maxBudgetUsd" in runtimeOptions
+    || "activityCallback" in runtimeOptions
+  );
 }
 
 function normalizeAllowedTools(tools: AllowedTriageTool[] | undefined): AllowedTriageTool[] {
@@ -216,6 +289,14 @@ function normalizeTurns(value: number): number {
   }
 
   return Math.floor(value);
+}
+
+function normalizeCostUsd(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+
+  return value;
 }
 
 /** Parse a verdict string, defaulting to needs_review for unknown values. */
@@ -243,17 +324,21 @@ export function parseTriageResponse(
   text: string,
   fingerprint: string,
 ): TriageResult {
-  const jsonStr = extractJson(text);
-  const parsed = JSON.parse(jsonStr);
+  try {
+    const jsonStr = extractJson(text);
+    const parsed = JSON.parse(jsonStr);
 
-  return {
-    fingerprint: asString(parsed.fingerprint, fingerprint),
-    verdict: parseVerdict(asString(parsed.verdict, "needs_review")),
-    confidence: clampConfidence(parsed.confidence),
-    rationale: asString(parsed.rationale, ""),
-    verificationSteps: normalizeVerificationSteps(parsed.verification_steps),
-    fixPatch: normalizeFixPatch(parsed.fix_patch),
-  };
+    return {
+      fingerprint: asString(parsed.fingerprint, fingerprint),
+      verdict: parseVerdict(asString(parsed.verdict, "needs_review")),
+      confidence: clampConfidence(parsed.confidence),
+      rationale: asString(parsed.rationale, ""),
+      verificationSteps: normalizeVerificationSteps(parsed.verification_steps),
+      fixPatch: normalizeFixPatch(parsed.fix_patch),
+    };
+  } catch (error) {
+    throw new Error(`Invalid triage JSON response: ${toErrorMessage(error)}`);
+  }
 }
 
 function normalizeVerificationSteps(value: unknown): string[] {
@@ -273,6 +358,34 @@ function normalizeFixPatch(value: unknown): string | null {
   if (value == null) return null;
   if (typeof value !== "string") return null;
   return value;
+}
+
+function formatRepoContext(repoContext: RepoContext | undefined): string[] {
+  if (!repoContext) {
+    return [];
+  }
+
+  const lines: string[] = [];
+  if (repoContext.languages.length > 0) {
+    lines.push(`Languages: ${repoContext.languages.join(", ")}`);
+  }
+  if (repoContext.frameworks.length > 0) {
+    lines.push(`Frameworks: ${repoContext.frameworks.join(", ")}`);
+  }
+  if (repoContext.authPatterns.length > 0) {
+    lines.push(`Auth: ${repoContext.authPatterns.join(", ")}`);
+  }
+  if (repoContext.ormOrDb.length > 0) {
+    lines.push(`ORM/DB: ${repoContext.ormOrDb.join(", ")}`);
+  }
+  if (repoContext.sanitizationLibs.length > 0) {
+    lines.push(`Sanitization: ${repoContext.sanitizationLibs.join(", ")}`);
+  }
+  if (repoContext.entryPoints.length > 0) {
+    lines.push(`Entry points: ${repoContext.entryPoints.join(", ")}`);
+  }
+
+  return lines;
 }
 
 async function emitAssistantActivity(
@@ -316,4 +429,12 @@ function asString(value: unknown, fallback: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }

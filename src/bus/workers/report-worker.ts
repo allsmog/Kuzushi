@@ -1,10 +1,14 @@
 import type Database from "better-sqlite3";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import {
   printResumeInfo,
   printScanStart,
   printSummary,
   printTriageProgress,
 } from "../../report.js";
+import { generateMarkdownReport } from "../../report-markdown.js";
+import type { KuzushiConfig } from "../../types.js";
 import type {
   PipelineStartEvent,
   ReportRequestedEvent,
@@ -14,6 +18,9 @@ import type {
   TriageAgentActivityEvent,
   TriageResultEvent,
   TriageStartEvent,
+  VerificationAgentActivityEvent,
+  VerificationResultEvent,
+  VerificationStartEvent,
 } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -27,6 +34,7 @@ interface RunReportState {
 
 export interface ReportWorkerDeps {
   db: Database.Database;
+  config: KuzushiConfig;
 }
 
 /**
@@ -76,11 +84,55 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   });
 
   bus.subscribe<TriageResultEvent>("triage:result", (event) => {
-    const { result, index, total } = event.payload;
-    printTriageProgress(result, index, total);
+    const { result, index, total, attempts } = event.payload;
+    printTriageProgress(result, index, total, attempts);
+  });
+
+  bus.subscribe<VerificationStartEvent>("verification:start", (event) => {
+    if (event.payload.findingCount > 0) {
+      console.log(`  Verifying ${event.payload.findingCount} findings via ${event.payload.model}...\n`);
+    }
+  });
+
+  bus.subscribe<VerificationResultEvent>("verification:result", (event) => {
+    const { result, index, total, attempts } = event.payload;
+    const status = result.exploitable ? "EXPLOITABLE" : "not exploitable";
+    const cost = result.verifyCostUsd && result.verifyCostUsd > 0
+      ? ` $${result.verifyCostUsd.toFixed(4)}`
+      : "";
+    const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
+    console.log(`  [${index}/${total}] ${status}${cost}${retrySuffix} ${result.fingerprint.slice(0, 12)}...`);
   });
 
   bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", (event) => {
+    const prefix = `  [${event.payload.index}/${event.payload.total}]`;
+
+    if (event.payload.kind === "tool-start") {
+      const detail = summarizeToolInput(event.payload.toolName, event.payload.toolInput);
+      console.log(`${prefix} -> ${detail}`);
+      return;
+    }
+
+    if (event.payload.kind === "tool-progress") {
+      const seconds = event.payload.elapsedSeconds ?? 0;
+      const toolName = event.payload.toolName ?? "tool";
+      console.log(`${prefix} ... ${toolName} (${seconds.toFixed(1)}s)`);
+      return;
+    }
+
+    if (event.payload.kind === "tool-complete") {
+      if (event.payload.summary) {
+        console.log(`${prefix} ✓ ${truncate(event.payload.summary, 140)}`);
+      }
+      return;
+    }
+
+    if (event.payload.summary) {
+      console.log(`${prefix} · ${truncate(event.payload.summary, 120)}`);
+    }
+  });
+
+  bus.subscribe<VerificationAgentActivityEvent>("verification:agent-activity", (event) => {
     const prefix = `  [${event.payload.index}/${event.payload.total}]`;
 
     if (event.payload.kind === "tool-start") {
@@ -118,7 +170,27 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
       console.log("  All findings already triaged. Nothing to do.");
     }
 
-    printSummary(deps.db, event.payload.context.repoName);
+    printSummary(deps.db, event.payload.context.repoName, {
+      stats: event.payload.stats,
+      runId: event.meta.runId,
+      repoRoot: event.payload.context.repoRoot,
+      auditLog: deps.config.auditLog === true,
+    });
+
+    if (deps.config.reportOutput) {
+      const outputDir = path.dirname(deps.config.reportOutput);
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+      const markdown = generateMarkdownReport(
+        deps.db,
+        event.payload.context.repoName,
+        event.payload.stats ?? {},
+        event.meta.runId,
+      );
+      writeFileSync(deps.config.reportOutput, markdown, "utf-8");
+      console.log(`  Report written to ${deps.config.reportOutput}`);
+    }
 
     await bus.publish(
       createEvent("report:complete", event.meta.runId, {

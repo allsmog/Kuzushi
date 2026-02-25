@@ -3,10 +3,20 @@ import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { Finding } from "../scanners/types.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
-import { getTriagedFingerprints } from "../store.js";
-import type { KuzushiConfig, ScanOpts } from "../types.js";
+import {
+  getStoredTriageResults,
+  getRun,
+  getTriagedFingerprints,
+  getVerifiedFingerprints,
+  updateRunCost,
+  updateRunContext,
+  updateRunFindings,
+  updateRunStatus,
+} from "../store.js";
+import type { KuzushiConfig, RepoContext, ScanOpts, TriageResult, Verdict } from "../types.js";
 import type {
   BusHandlerErrorEvent,
+  PipelineStats,
   PipelineErrorEvent,
   PipelineStartEvent,
   ReportCompleteEvent,
@@ -17,6 +27,8 @@ import type {
   TaskErrorEvent,
   TriageErrorEvent,
   TriageResultEvent,
+  VerificationErrorEvent,
+  VerificationResultEvent,
 } from "./events.js";
 import { createEvent } from "./helpers.js";
 import type { MessageBus } from "./types.js";
@@ -27,8 +39,20 @@ interface QueuedFinding {
   total: number;
 }
 
+interface VerificationCandidate {
+  finding: Finding;
+  triageResult: TriageResult;
+}
+
+interface QueuedVerification extends VerificationCandidate {
+  index: number;
+  total: number;
+}
+
 interface RunState {
   context: RunContext;
+  checkpointRunId: string;
+  resuming: boolean;
   config: KuzushiConfig;
   scanOpts: ScanOpts;
   scanners: string[];
@@ -36,15 +60,32 @@ interface RunState {
   scanFindings: Finding[];
   totalFindings: number;
   skippedAlreadyTriaged: number;
+  skippedLowConfidence: number;
   triageQueue: QueuedFinding[];
   queueCursor: number;
   triageTotal: number;
   inFlight: number;
   triaged: number;
   triageErrors: number;
+  totalCostUsd: number;
+  verifyEnabled: boolean;
+  verifyVerdicts: Set<Verdict>;
+  verifyCandidates: VerificationCandidate[];
+  verifyQueue: QueuedVerification[];
+  verifyCursor: number;
+  verifyTotal: number;
+  verifyInFlight: number;
+  verified: number;
+  verifyErrors: number;
+  verifyCostUsd: number;
+  verifyDispatching: boolean;
+  verificationStarted: boolean;
+  resumingVerification: boolean;
   reportRequested: boolean;
+  reportEmitted: boolean;
   dispatching: boolean;
   collectScanFindingEvents: boolean;
+  repoContext?: RepoContext;
   taskOutputs: Map<string, unknown>;
 }
 
@@ -92,6 +133,14 @@ export class PipelineOrchestrator {
       await this.handleTriageError(event);
     });
 
+    this.bus.subscribe<VerificationResultEvent>("verification:result", async (event) => {
+      await this.handleVerificationResult(event);
+    });
+
+    this.bus.subscribe<VerificationErrorEvent>("verification:error", async (event) => {
+      await this.handleVerificationError(event);
+    });
+
     this.bus.subscribe<ReportCompleteEvent>("report:complete", async (event) => {
       await this.handleReportComplete(event);
     });
@@ -100,9 +149,16 @@ export class PipelineOrchestrator {
       await this.handleBusHandlerError(event);
     });
 
-    this.bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
+    this.bus.subscribe<PipelineErrorEvent>("pipeline:error", async (event) => {
       if (!event.payload.fatal) {
         return;
+      }
+      const state = this.runs.get(event.meta.runId);
+      const checkpointRunId = state?.checkpointRunId ?? event.meta.runId;
+      try {
+        updateRunStatus(this.deps.db, checkpointRunId, "error");
+      } catch {
+        // Best-effort status persistence for fatal run failures.
       }
       this.runs.delete(event.meta.runId);
     });
@@ -110,7 +166,12 @@ export class PipelineOrchestrator {
 
   private async handlePipelineStart(event: PipelineStartEvent): Promise<void> {
     const runId = event.meta.runId;
-    const { context, config, scanOpts } = event.payload;
+    const {
+      context,
+      config,
+      scanOpts,
+      resumeRunId,
+    } = event.payload;
 
     let scanners: string[];
     try {
@@ -128,6 +189,8 @@ export class PipelineOrchestrator {
 
     const state: RunState = {
       context,
+      checkpointRunId: resumeRunId ?? runId,
+      resuming: false,
       config,
       scanOpts,
       scanners,
@@ -135,19 +198,41 @@ export class PipelineOrchestrator {
       scanFindings: [],
       totalFindings: 0,
       skippedAlreadyTriaged: 0,
+      skippedLowConfidence: 0,
       triageQueue: [],
       queueCursor: 0,
       triageTotal: 0,
       inFlight: 0,
       triaged: 0,
       triageErrors: 0,
+      totalCostUsd: 0,
+      verifyEnabled: config.verify === true,
+      verifyVerdicts: new Set(resolveVerifyVerdicts(config.verifyVerdicts)),
+      verifyCandidates: [],
+      verifyQueue: [],
+      verifyCursor: 0,
+      verifyTotal: 0,
+      verifyInFlight: 0,
+      verified: 0,
+      verifyErrors: 0,
+      verifyCostUsd: 0,
+      verifyDispatching: false,
+      verificationStarted: false,
+      resumingVerification: false,
       reportRequested: false,
+      reportEmitted: false,
       dispatching: false,
-      collectScanFindingEvents: !this.deps.taskRegistry,
+      collectScanFindingEvents: !this.deps.taskRegistry && !resumeRunId,
+      repoContext: undefined,
       taskOutputs: new Map<string, unknown>(),
     };
 
     this.runs.set(runId, state);
+
+    if (resumeRunId) {
+      await this.resumeFromCheckpoint(state, runId, resumeRunId);
+      return;
+    }
 
     if (this.deps.taskRegistry) {
       await this.runTaskDag(state, runId);
@@ -167,14 +252,225 @@ export class PipelineOrchestrator {
     );
   }
 
+  private async resumeFromCheckpoint(
+    state: RunState,
+    runId: string,
+    resumeRunId: string,
+  ): Promise<void> {
+    let run = undefined;
+    try {
+      run = getRun(this.deps.db, resumeRunId);
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: toErrorMessage(error),
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    if (!run) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: `No resumable run found for id "${resumeRunId}"`,
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    if (run.repo !== state.context.repoName) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: `Run "${resumeRunId}" belongs to repo "${run.repo}", not "${state.context.repoName}"`,
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    if (run.status === "complete") {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: `Run "${resumeRunId}" is already complete and cannot be resumed`,
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    if (run.status === "error") {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: `Run "${resumeRunId}" ended in error and cannot be resumed. Re-run without --resume to start fresh.`,
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    try {
+      state.scanOpts = parseScanOptsJson(run.scanOptsJson);
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: `Run "${resumeRunId}" has invalid scan options checkpoint: ${toErrorMessage(error)}`,
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    state.verifyVerdicts = new Set(
+      parseVerifyVerdictsFromConfigJson(run.configJson, [...state.verifyVerdicts]),
+    );
+    if (run.status === "verifying") {
+      state.verifyEnabled = true;
+    }
+
+    if (typeof run.contextJson === "string" && run.contextJson.trim().length > 0) {
+      try {
+        state.repoContext = asRepoContext(JSON.parse(run.contextJson));
+      } catch {
+        state.repoContext = undefined;
+      }
+    }
+
+    if (!run.findingsJson) {
+      if (run.status === "scanning") {
+        state.resuming = false;
+        state.scanFindings = [];
+        state.collectScanFindingEvents = !this.deps.taskRegistry;
+
+        if (this.deps.taskRegistry) {
+          await this.runTaskDag(state, runId);
+          return;
+        }
+
+        await this.startLegacyScan(state, runId);
+        return;
+      }
+
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: `Run "${resumeRunId}" has no scan checkpoint. Re-run without --resume to start fresh.`,
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(run.findingsJson);
+      state.scanFindings = coerceFindings(parsed);
+      state.totalCostUsd = normalizeCost(run.totalCostUsd);
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: `Failed to parse findings checkpoint for run "${resumeRunId}": ${toErrorMessage(error)}`,
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    if (run.status === "verifying") {
+      await this.resumeVerificationFromCheckpoint(state, runId);
+      return;
+    }
+
+    state.resuming = true;
+    await this.handleScanComplete(
+      createEvent("scan:complete", runId, {
+        context: state.context,
+        totalFindings: state.scanFindings.length,
+      }),
+    );
+  }
+
+  private async resumeVerificationFromCheckpoint(state: RunState, runId: string): Promise<void> {
+    let verifiedFingerprints = new Set<string>();
+    let triageByFingerprint = new Map<string, TriageResult>();
+
+    try {
+      verifiedFingerprints = getVerifiedFingerprints(this.deps.db);
+      triageByFingerprint = getStoredTriageResults(
+        this.deps.db,
+        state.scanFindings.map((finding) => finding.fingerprint),
+      );
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: toErrorMessage(error),
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    state.totalFindings = state.scanFindings.length;
+    state.skippedLowConfidence = 0;
+    state.verifyCandidates = [];
+    state.verifyQueue = [];
+    state.verifyCursor = 0;
+    state.verifyInFlight = 0;
+    state.verified = 0;
+    state.verifyErrors = 0;
+    state.verifyCostUsd = 0;
+    state.resumingVerification = true;
+
+    const pendingCandidates: VerificationCandidate[] = [];
+    for (const finding of state.scanFindings) {
+      const triageResult = triageByFingerprint.get(finding.fingerprint);
+      if (!triageResult) {
+        continue;
+      }
+
+      if (!shouldVerifyFinding(state, finding, triageResult)) {
+        continue;
+      }
+
+      if (verifiedFingerprints.has(finding.fingerprint)) {
+        continue;
+      }
+
+      pendingCandidates.push({
+        finding,
+        triageResult,
+      });
+    }
+
+    state.verifyTotal = pendingCandidates.length;
+    state.verifyQueue = pendingCandidates.map((item, idx) => ({
+      ...item,
+      index: idx + 1,
+      total: pendingCandidates.length,
+    }));
+
+    await this.startVerification(state, runId);
+  }
+
   private async runTaskDag(state: RunState, runId: string): Promise<void> {
     if (!this.deps.taskRegistry) {
       await this.startLegacyScan(state, runId);
       return;
     }
 
+    const enableContextTask = state.config.enableContextGathering !== false
+      && this.deps.taskRegistry.has("context-gatherer");
     const enabledTaskIds = normalizeTaskIds([
       ...state.scanners,
+      ...(enableContextTask ? ["context-gatherer"] : []),
       ...(state.config.enabledTasks ?? []),
     ]);
 
@@ -240,6 +536,16 @@ export class PipelineOrchestrator {
       );
     }
 
+    const gatheredContext = asRepoContext(state.taskOutputs.get("context-gatherer"));
+    if (gatheredContext) {
+      state.repoContext = gatheredContext;
+      try {
+        updateRunContext(this.deps.db, state.checkpointRunId, gatheredContext);
+      } catch {
+        // Context checkpoint persistence is best-effort.
+      }
+    }
+
     await this.bus.publish(
       createEvent("scan:complete", runId, {
         context: state.context,
@@ -282,8 +588,27 @@ export class PipelineOrchestrator {
       return;
     }
 
-    const rankedFindings = selectTopFindings(state.scanFindings, state.scanOpts.maxFindings);
+    const rankedFindings = state.resuming
+      ? [...state.scanFindings]
+      : selectTopFindings(state.scanFindings, state.scanOpts.maxFindings);
+    state.scanFindings = rankedFindings;
     state.totalFindings = rankedFindings.length;
+
+    if (!state.resuming) {
+      try {
+        updateRunStatus(this.deps.db, state.checkpointRunId, "triaging");
+        updateRunFindings(this.deps.db, state.checkpointRunId, rankedFindings);
+      } catch (error) {
+        await this.bus.publish(
+          createEvent("pipeline:error", runId, {
+            context: state.context,
+            error: toErrorMessage(error),
+            fatal: true,
+          }),
+        );
+        return;
+      }
+    }
 
     let alreadyTriaged = new Set<string>();
     if (!state.scanOpts.fresh) {
@@ -313,6 +638,20 @@ export class PipelineOrchestrator {
       total: triageCandidates.length,
     }));
     state.queueCursor = 0;
+    state.verifyCandidates = [];
+    state.verifyQueue = [];
+    state.verifyCursor = 0;
+    state.verifyTotal = 0;
+    state.verifyInFlight = 0;
+    state.verified = 0;
+    state.verifyErrors = 0;
+    state.verifyCostUsd = 0;
+    state.skippedLowConfidence = 0;
+    state.verifyDispatching = false;
+    state.verificationStarted = false;
+    state.resumingVerification = false;
+    state.reportRequested = false;
+    state.reportEmitted = false;
 
     await this.bus.publish(
       createEvent("triage:start", runId, {
@@ -341,6 +680,22 @@ export class PipelineOrchestrator {
 
     state.inFlight = Math.max(0, state.inFlight - 1);
     state.triaged += 1;
+    const costUsd = normalizeCost(event.payload.costUsd);
+    state.totalCostUsd += costUsd;
+
+    if (shouldVerifyFinding(state, event.payload.finding, event.payload.result)) {
+      state.verifyCandidates.push({
+        finding: event.payload.finding,
+        triageResult: event.payload.result,
+      });
+    }
+
+    try {
+      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+    } catch {
+      // Cost persistence is best-effort and should not fail the run.
+    }
+
     await this.publishQueueDepth(state, runId);
 
     if (this.isTriageDone(state)) {
@@ -360,6 +715,15 @@ export class PipelineOrchestrator {
 
     state.inFlight = Math.max(0, state.inFlight - 1);
     state.triageErrors += 1;
+    const costUsd = normalizeCost(event.payload.costUsd);
+    state.totalCostUsd += costUsd;
+
+    try {
+      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+    } catch {
+      // Cost persistence is best-effort and should not fail the run.
+    }
+
     await this.publishQueueDepth(state, runId);
 
     if (this.isTriageDone(state)) {
@@ -377,6 +741,21 @@ export class PipelineOrchestrator {
       return;
     }
 
+    try {
+      updateRunStatus(this.deps.db, state.checkpointRunId, "complete", {
+        completedAt: event.meta.timestamp,
+      });
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: toErrorMessage(error),
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
     await this.bus.publish(
       createEvent("pipeline:complete", runId, {
         context: state.context,
@@ -385,8 +764,13 @@ export class PipelineOrchestrator {
           totalFindings: state.totalFindings,
           queuedForTriage: state.triageTotal,
           skippedAlreadyTriaged: state.skippedAlreadyTriaged,
+          skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
           triaged: state.triaged,
           triageErrors: state.triageErrors,
+          totalCostUsd: state.totalCostUsd,
+          verified: state.verifyEnabled ? state.verified : undefined,
+          verifyErrors: state.verifyEnabled ? state.verifyErrors : undefined,
+          verifyCostUsd: state.verifyEnabled ? state.verifyCostUsd : undefined,
           startedAt: state.startedAt,
           completedAt: event.meta.timestamp,
         },
@@ -429,6 +813,7 @@ export class PipelineOrchestrator {
           createEvent("triage:finding-queued", runId, {
             context: state.context,
             finding: item.finding,
+            repoContext: state.repoContext,
             index: item.index,
             total: item.total,
           }),
@@ -461,16 +846,199 @@ export class PipelineOrchestrator {
         context: state.context,
         triaged: state.triaged,
         errors: state.triageErrors,
+        totalCostUsd: state.totalCostUsd,
+      }),
+    );
+
+    if (state.verifyEnabled) {
+      state.reportRequested = true;
+      await this.startVerification(state, runId);
+      return;
+    }
+
+    await this.bus.publish(
+      createEvent("report:requested", runId, {
+        context: state.context,
+        stats: buildReportStats(state),
+      }),
+    );
+
+    state.reportRequested = true;
+    state.reportEmitted = true;
+  }
+
+  private async startVerification(state: RunState, runId: string): Promise<void> {
+    if (state.verificationStarted || state.reportEmitted) {
+      return;
+    }
+
+    if (!state.resumingVerification) {
+      state.verifyTotal = state.verifyCandidates.length;
+      state.verifyQueue = state.verifyCandidates.map((item, idx) => ({
+        ...item,
+        index: idx + 1,
+        total: state.verifyCandidates.length,
+      }));
+      state.verifyCursor = 0;
+    }
+
+    if (!state.resumingVerification) {
+      try {
+        updateRunStatus(this.deps.db, state.checkpointRunId, "verifying");
+      } catch (error) {
+        await this.bus.publish(
+          createEvent("pipeline:error", runId, {
+            context: state.context,
+            error: toErrorMessage(error),
+            fatal: true,
+          }),
+        );
+        return;
+      }
+    }
+
+    await this.bus.publish(
+      createEvent("verification:start", runId, {
+        context: state.context,
+        findingCount: state.verifyTotal,
+        model: state.config.verifyModel ?? state.config.triageModel ?? state.config.model,
+      }),
+    );
+
+    state.verificationStarted = true;
+    await this.publishVerificationQueueDepth(state, runId);
+
+    if (state.verifyTotal === 0) {
+      await this.finishVerificationAndRequestReport(state, runId);
+      return;
+    }
+
+    await this.dispatchVerification(state, runId);
+  }
+
+  private async handleVerificationResult(event: VerificationResultEvent): Promise<void> {
+    const runId = event.meta.runId;
+    const state = this.runs.get(runId);
+    if (!state) {
+      return;
+    }
+
+    state.verifyInFlight = Math.max(0, state.verifyInFlight - 1);
+    state.verified += 1;
+    const costUsd = normalizeCost(event.payload.costUsd);
+    state.totalCostUsd += costUsd;
+    state.verifyCostUsd += costUsd;
+
+    try {
+      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+    } catch {
+      // Cost persistence is best-effort and should not fail the run.
+    }
+
+    await this.publishVerificationQueueDepth(state, runId);
+
+    if (this.isVerificationDone(state)) {
+      await this.finishVerificationAndRequestReport(state, runId);
+      return;
+    }
+
+    await this.dispatchVerification(state, runId);
+  }
+
+  private async handleVerificationError(event: VerificationErrorEvent): Promise<void> {
+    const runId = event.meta.runId;
+    const state = this.runs.get(runId);
+    if (!state) {
+      return;
+    }
+
+    state.verifyInFlight = Math.max(0, state.verifyInFlight - 1);
+    state.verifyErrors += 1;
+    const costUsd = normalizeCost(event.payload.costUsd);
+    state.totalCostUsd += costUsd;
+    state.verifyCostUsd += costUsd;
+
+    try {
+      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+    } catch {
+      // Cost persistence is best-effort and should not fail the run.
+    }
+
+    await this.publishVerificationQueueDepth(state, runId);
+
+    if (this.isVerificationDone(state)) {
+      await this.finishVerificationAndRequestReport(state, runId);
+      return;
+    }
+
+    await this.dispatchVerification(state, runId);
+  }
+
+  private async dispatchVerification(state: RunState, runId: string): Promise<void> {
+    if (state.verifyDispatching) {
+      return;
+    }
+
+    state.verifyDispatching = true;
+    try {
+      const concurrency = normalizeConcurrency(state.config.verifyConcurrency ?? 1);
+
+      while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
+        const item = state.verifyQueue[state.verifyCursor];
+        state.verifyCursor += 1;
+        state.verifyInFlight += 1;
+
+        await this.bus.publish(
+          createEvent("verification:finding-queued", runId, {
+            context: state.context,
+            finding: item.finding,
+            triageResult: item.triageResult,
+            repoContext: state.repoContext,
+            index: item.index,
+            total: item.total,
+          }),
+        );
+      }
+
+      await this.publishVerificationQueueDepth(state, runId);
+    } finally {
+      state.verifyDispatching = false;
+    }
+  }
+
+  private isVerificationDone(state: RunState): boolean {
+    const processed = state.verified + state.verifyErrors;
+    return (
+      state.verifyTotal > 0
+      && processed >= state.verifyTotal
+      && state.verifyInFlight === 0
+      && !state.reportEmitted
+    );
+  }
+
+  private async finishVerificationAndRequestReport(state: RunState, runId: string): Promise<void> {
+    if (state.reportEmitted) {
+      return;
+    }
+
+    await this.bus.publish(
+      createEvent("verification:complete", runId, {
+        context: state.context,
+        verified: state.verified,
+        errors: state.verifyErrors,
+        totalCostUsd: state.verifyCostUsd,
       }),
     );
 
     await this.bus.publish(
       createEvent("report:requested", runId, {
         context: state.context,
+        stats: buildReportStats(state),
       }),
     );
 
     state.reportRequested = true;
+    state.reportEmitted = true;
   }
 
   private async publishQueueDepth(state: RunState, runId: string): Promise<void> {
@@ -487,6 +1055,21 @@ export class PipelineOrchestrator {
       }),
     );
   }
+
+  private async publishVerificationQueueDepth(state: RunState, runId: string): Promise<void> {
+    const queued = Math.max(0, state.verifyQueue.length - state.verifyCursor);
+    const processed = state.verified + state.verifyErrors;
+
+    await this.bus.publish(
+      createEvent("verification:queue-depth", runId, {
+        context: state.context,
+        queued,
+        inFlight: state.verifyInFlight,
+        processed,
+        total: state.verifyTotal,
+      }),
+    );
+  }
 }
 
 export function registerOrchestrator(
@@ -496,12 +1079,175 @@ export function registerOrchestrator(
   return new PipelineOrchestrator(bus, deps);
 }
 
+function buildReportStats(state: RunState): Partial<PipelineStats> {
+  return {
+    scanners: [...state.scanners],
+    totalFindings: state.totalFindings,
+    queuedForTriage: state.triageTotal,
+    skippedAlreadyTriaged: state.skippedAlreadyTriaged,
+    skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
+    triaged: state.triaged,
+    triageErrors: state.triageErrors,
+    totalCostUsd: state.totalCostUsd,
+    verified: state.verifyEnabled ? state.verified : undefined,
+    verifyErrors: state.verifyEnabled ? state.verifyErrors : undefined,
+    verifyCostUsd: state.verifyEnabled ? state.verifyCostUsd : undefined,
+    startedAt: state.startedAt,
+  };
+}
+
+function asRepoContext(value: unknown): RepoContext | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const context: RepoContext = {
+    languages: asStringArray(value["languages"]) ?? [],
+    frameworks: asStringArray(value["frameworks"]) ?? [],
+    authPatterns: asStringArray(value["authPatterns"]) ?? [],
+    sanitizationLibs: asStringArray(value["sanitizationLibs"]) ?? [],
+    ormOrDb: asStringArray(value["ormOrDb"]) ?? [],
+    entryPoints: asStringArray(value["entryPoints"]) ?? [],
+  };
+
+  const hasAnyValue = (
+    context.languages.length > 0
+    || context.frameworks.length > 0
+    || context.authPatterns.length > 0
+    || context.sanitizationLibs.length > 0
+    || context.ormOrDb.length > 0
+    || context.entryPoints.length > 0
+  );
+
+  return hasAnyValue ? context : undefined;
+}
+
 function normalizeConcurrency(raw: number): number {
   if (!Number.isFinite(raw) || raw < 1) {
     return 1;
   }
 
   return Math.floor(raw);
+}
+
+function normalizeCost(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
+    return 0;
+  }
+
+  return raw;
+}
+
+function resolveVerifyVerdicts(raw: Verdict[] | undefined): Verdict[] {
+  const defaults: Verdict[] = ["tp"];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return defaults;
+  }
+
+  const unique = new Set<Verdict>();
+  for (const verdict of raw) {
+    if (verdict === "tp" || verdict === "fp" || verdict === "needs_review") {
+      unique.add(verdict);
+    }
+  }
+
+  return unique.size > 0 ? [...unique] : defaults;
+}
+
+function parseVerifyVerdictsFromConfigJson(raw: string, fallback: Verdict[]): Verdict[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!isRecord(parsed)) {
+      return fallback;
+    }
+
+    return resolveVerifyVerdicts(asVerdictArray(parsed["verifyVerdicts"]) ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function parseScanOptsJson(raw: string): ScanOpts {
+  const parsed = JSON.parse(raw);
+  if (!isRecord(parsed)) {
+    throw new Error("scan opts payload is not an object");
+  }
+
+  const severity = asStringArray(parsed["severity"]);
+  const excludePatterns = asStringArray(parsed["excludePatterns"]);
+  const fresh = asBoolean(parsed["fresh"]);
+
+  if (!severity || !excludePatterns || fresh === null) {
+    throw new Error("scan opts payload is missing required fields");
+  }
+
+  const scannersValue = parsed["scanners"];
+  let scanners: string[] | undefined;
+  if (scannersValue != null) {
+    const parsedScanners = asStringArray(scannersValue);
+    if (!parsedScanners) {
+      throw new Error("scan opts payload has invalid scanners");
+    }
+    scanners = parsedScanners;
+  }
+
+  const maxFindingsValue = parsed["maxFindings"];
+  let maxFindings: number | undefined;
+  if (maxFindingsValue !== undefined) {
+    const parsedMax = asNumber(maxFindingsValue);
+    if (parsedMax === null) {
+      throw new Error("scan opts payload has invalid maxFindings");
+    }
+    maxFindings = Math.floor(parsedMax);
+  }
+
+  return {
+    severity,
+    maxFindings,
+    excludePatterns,
+    scanners,
+    fresh,
+  };
+}
+
+function shouldVerifyFinding(
+  state: RunState,
+  finding: Finding,
+  triageResult: TriageResult,
+): boolean {
+  if (!state.verifyEnabled) {
+    return false;
+  }
+
+  if (!state.verifyVerdicts.has(triageResult.verdict)) {
+    return false;
+  }
+
+  if (!isScannerVerificationEnabled(state.config, finding.scanner)) {
+    return false;
+  }
+
+  const minConfidence = state.config.verifyMinConfidence ?? 0;
+  if (triageResult.confidence < minConfidence) {
+    state.skippedLowConfidence += 1;
+    return false;
+  }
+
+  return true;
+}
+
+function isScannerVerificationEnabled(config: KuzushiConfig, scannerId: string): boolean {
+  const scannerConfig = config.scannerConfig[scannerId];
+  if (!isRecord(scannerConfig)) {
+    return true;
+  }
+
+  const verify = scannerConfig["verify"];
+  if (typeof verify === "boolean") {
+    return verify;
+  }
+
+  return true;
 }
 
 function selectTopFindings(findings: Finding[], maxFindings?: number): Finding[] {
@@ -616,6 +1362,14 @@ function asNumber(value: unknown): number | null {
   return value;
 }
 
+function asBoolean(value: unknown): boolean | null {
+  if (typeof value !== "boolean") {
+    return null;
+  }
+
+  return value;
+}
+
 function asStringArray(value: unknown): string[] | null {
   if (!Array.isArray(value)) {
     return null;
@@ -626,6 +1380,23 @@ function asStringArray(value: unknown): string[] | null {
   }
 
   return value;
+}
+
+function asVerdictArray(value: unknown): Verdict[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const verdicts: Verdict[] = [];
+  for (const item of value) {
+    if (item === "tp" || item === "fp" || item === "needs_review") {
+      verdicts.push(item);
+      continue;
+    }
+    return null;
+  }
+
+  return verdicts;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
