@@ -288,16 +288,23 @@ ANTHROPIC_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model anthropic:cla
 
 The `augur` scanner is a multi-pass CodeQL-based pipeline that uses LLM-assisted classification to label sources, sinks, sanitizers, and summaries. It requires:
 
-1. **Augur repository** — clone from the Augur project (set `AUGUR_PATH` env var or `scannerConfig.augur.augurPath`)
-2. **CodeQL CLI** — same requirement as the `codeql` scanner
-3. **Python 3** — used by Augur's scripts for query generation
+1. **CodeQL CLI** — same requirement as the `codeql` scanner
+2. **Python 3** — used by Augur's scripts for query generation
+
+Augur's templates, references, and scripts are bundled as the [`@kuzushi/augur`](https://www.npmjs.com/package/@kuzushi/augur) npm package and installed automatically with `pnpm install`. No manual clone or `AUGUR_PATH` setup needed.
 
 ```sh
 kuzushi <repo> --scanners augur
 kuzushi <repo> --scanners augur --approve-checkpoint  # auto-approve label review
-kuzushi config set scannerConfig.augur.augurPath /path/to/augur
 kuzushi config set scannerConfig.augur.labelingModel claude-sonnet-4-20250514
 kuzushi config set scannerConfig.augur.passes "[1,2,3,4,5,6]"
+```
+
+To override the bundled augur assets (e.g., for local development), set `AUGUR_PATH` or `scannerConfig.augur.augurPath`:
+
+```sh
+export AUGUR_PATH=/path/to/local/augur
+kuzushi config set scannerConfig.augur.augurPath /path/to/local/augur
 ```
 
 Augur runs in three DAG-ordered stages: **preflight** (database creation, candidate extraction), **label** (LLM classification with checkpoint gate), and **analyze** (library generation, query execution, finding extraction). A human-in-the-loop checkpoint pauses after labeling for review — use `--approve-checkpoint` to auto-approve in CI.
