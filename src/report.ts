@@ -6,7 +6,9 @@ import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
 import {
   getActionableFindings,
+  getPocHarnessCounts,
   getTotalCost,
+  getTotalPocHarnessCost,
   getTotalVerificationCost,
   getVerificationCounts,
   getVerdictCounts,
@@ -60,10 +62,18 @@ export function printSummary(
   const counts = getVerdictCounts(db, repo);
   const totalCostUsd = getTotalCost(db, repo);
   const verificationCostUsd = getTotalVerificationCost(db, repo);
+  const pocHarnessCostUsd = getTotalPocHarnessCost(db, repo);
   const verificationCounts = getVerificationCounts(db, repo);
+  const pocHarnessCounts = getPocHarnessCounts(db, repo);
   const hasVerificationStats = verificationCounts.exploitable + verificationCounts.notExploitable > 0;
   const hasVerificationSpend = verificationCostUsd > 0;
   const hasVerificationData = hasVerificationStats || hasVerificationSpend;
+  const hasPocHarnessData = (
+    pocHarnessCounts.generated > 0
+    || pocHarnessCounts.skipped > 0
+    || (options.stats?.pocHarnessErrors ?? 0) > 0
+    || pocHarnessCostUsd > 0
+  );
   const total = counts.tp + counts.fp + counts.needs_review;
   const actionable = getActionableFindings(db, repo);
 
@@ -86,6 +96,16 @@ export function printSummary(
       console.log(`  ${chalk.green("Not exploitable:")}  ${verificationCounts.notExploitable}`);
     } else {
       console.log(`  ${chalk.yellow("Verification:")}    errors only`);
+    }
+  }
+  if (hasPocHarnessData) {
+    console.log("");
+    console.log(`  ${chalk.cyan("PoC harnesses generated:")} ${pocHarnessCounts.generated}`);
+    console.log(`  ${chalk.yellow("PoC harnesses skipped:")}   ${pocHarnessCounts.skipped}`);
+    console.log(`  ${chalk.red("PoC harness errors:")}     ${options.stats?.pocHarnessErrors ?? 0}`);
+    if (options.repoRoot) {
+      const pocDir = path.join(options.repoRoot, ".kuzushi", "poc");
+      console.log(`  ${chalk.dim("PoC output dir:")} ${pocDir}/`);
     }
   }
 
@@ -119,6 +139,14 @@ export function printSummary(
       if (f.verifyAttackVector) {
         console.log(`    ${chalk.cyan("Vector:")} ${f.verifyAttackVector}`);
       }
+      if (f.pocHarnessPath) {
+        console.log(`    ${chalk.blue("PoC Harness:")} ${f.pocHarnessPath}`);
+      } else if (f.pocHarnessSkipped === 1) {
+        console.log(`    ${chalk.yellow("PoC Harness:")} skipped (${f.pocHarnessSkipReason ?? "no reason provided"})`);
+      }
+      if (f.pocHarnessParsed === 0 && f.pocHarnessParseError) {
+        console.log(`    ${chalk.red("PoC Parse Error:")} ${f.pocHarnessParseError}`);
+      }
       console.log("");
     }
   } else if (total > 0) {
@@ -130,6 +158,9 @@ export function printSummary(
   console.log(`  ${chalk.dim("Total triage cost:")} $${totalCostUsd.toFixed(4)}`);
   if (hasVerificationData) {
     console.log(`  ${chalk.dim("Total verification cost:")} $${verificationCostUsd.toFixed(4)}`);
+  }
+  if (hasPocHarnessData) {
+    console.log(`  ${chalk.dim("Total PoC harness cost:")} $${pocHarnessCostUsd.toFixed(4)}`);
   }
   if (options.auditLog && options.repoRoot && options.runId) {
     const runDir = path.join(options.repoRoot, ".kuzushi", "runs", options.runId);

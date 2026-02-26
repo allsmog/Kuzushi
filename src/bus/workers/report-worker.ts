@@ -12,6 +12,9 @@ import { generateSarifReport } from "../../report-sarif.js";
 import type { KuzushiConfig } from "../../types.js";
 import type {
   PipelineStartEvent,
+  PocHarnessAgentActivityEvent,
+  PocHarnessResultEvent,
+  PocHarnessStartEvent,
   ReportRequestedEvent,
   ScanCompleteEvent,
   ScanStartEvent,
@@ -105,6 +108,25 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
     console.log(`  [${index}/${total}] ${status}${cost}${retrySuffix} ${result.fingerprint.slice(0, 12)}...`);
   });
 
+  bus.subscribe<PocHarnessStartEvent>("poc-harness:start", (event) => {
+    if (event.payload.findingCount > 0) {
+      console.log(`  Generating ${event.payload.findingCount} PoC harnesses via ${event.payload.model}...\n`);
+    }
+  });
+
+  bus.subscribe<PocHarnessResultEvent>("poc-harness:result", (event) => {
+    const { result, index, total, attempts } = event.payload;
+    const status = result.skipped ? "SKIPPED" : "GENERATED";
+    const parsed = result.skipped ? "" : (result.parsed ? " parsed" : " parse-error");
+    const cost = result.costUsd && result.costUsd > 0
+      ? ` $${result.costUsd.toFixed(4)}`
+      : "";
+    const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
+    console.log(
+      `  [${index}/${total}] ${status}${parsed}${cost}${retrySuffix} ${result.fingerprint.slice(0, 12)}...`,
+    );
+  });
+
   bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", (event) => {
     const prefix = `  [${event.payload.index}/${event.payload.total}]`;
 
@@ -134,6 +156,34 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   });
 
   bus.subscribe<VerificationAgentActivityEvent>("verification:agent-activity", (event) => {
+    const prefix = `  [${event.payload.index}/${event.payload.total}]`;
+
+    if (event.payload.kind === "tool-start") {
+      const detail = summarizeToolInput(event.payload.toolName, event.payload.toolInput);
+      console.log(`${prefix} -> ${detail}`);
+      return;
+    }
+
+    if (event.payload.kind === "tool-progress") {
+      const seconds = event.payload.elapsedSeconds ?? 0;
+      const toolName = event.payload.toolName ?? "tool";
+      console.log(`${prefix} ... ${toolName} (${seconds.toFixed(1)}s)`);
+      return;
+    }
+
+    if (event.payload.kind === "tool-complete") {
+      if (event.payload.summary) {
+        console.log(`${prefix} ✓ ${truncate(event.payload.summary, 140)}`);
+      }
+      return;
+    }
+
+    if (event.payload.summary) {
+      console.log(`${prefix} · ${truncate(event.payload.summary, 120)}`);
+    }
+  });
+
+  bus.subscribe<PocHarnessAgentActivityEvent>("poc-harness:agent-activity", (event) => {
     const prefix = `  [${event.payload.index}/${event.payload.total}]`;
 
     if (event.payload.kind === "tool-start") {

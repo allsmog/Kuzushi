@@ -2,6 +2,7 @@ import type { Finding, ScannerId } from "../scanners/types.js";
 import type { TaskOutputKind } from "../agents/types.js";
 import type {
   KuzushiConfig,
+  PocHarnessResult,
   ScanOpts,
   TriageResult,
   VerificationResult,
@@ -28,6 +29,10 @@ export interface PipelineStats {
   verified?: number;
   verifyErrors?: number;
   verifyCostUsd?: number;
+  pocHarnessGenerated?: number;
+  pocHarnessSkipped?: number;
+  pocHarnessErrors?: number;
+  pocHarnessCostUsd?: number;
   startedAt: string;
   completedAt: string;
 }
@@ -117,6 +122,23 @@ export type StageCompleteEvent = EventEnvelope<
     context: RunContext;
     stageIndex: number;
     taskIds: string[];
+  }
+>;
+
+export type AugurCheckpointEvent = EventEnvelope<
+  "augur:checkpoint",
+  {
+    context: RunContext;
+    reviewSummary: string;
+    labelCounts: Record<string, number>;
+  }
+>;
+
+export type AugurCheckpointApprovedEvent = EventEnvelope<
+  "augur:checkpoint-approved",
+  {
+    context: RunContext;
+    reviewer: string;
   }
 >;
 
@@ -323,6 +345,95 @@ export type VerificationQueueDepthEvent = EventEnvelope<
   }
 >;
 
+export type PocHarnessStartEvent = EventEnvelope<
+  "poc-harness:start",
+  {
+    context: RunContext;
+    findingCount: number;
+    model: string;
+  }
+>;
+
+export type PocHarnessFindingQueuedEvent = EventEnvelope<
+  "poc-harness:finding-queued",
+  {
+    context: RunContext;
+    finding: Finding;
+    triageResult: TriageResult;
+    verificationResult: VerificationResult;
+    repoContext?: unknown;
+    index: number;
+    total: number;
+  }
+>;
+
+export type PocHarnessResultEvent = EventEnvelope<
+  "poc-harness:result",
+  {
+    context: RunContext;
+    finding: Finding;
+    triageResult: TriageResult;
+    verificationResult: VerificationResult;
+    result: PocHarnessResult;
+    costUsd?: number;
+    attempts?: number;
+    index: number;
+    total: number;
+  }
+>;
+
+export type PocHarnessErrorEvent = EventEnvelope<
+  "poc-harness:error",
+  {
+    context: RunContext;
+    finding: Finding;
+    triageResult: TriageResult;
+    verificationResult: VerificationResult;
+    error: string;
+    costUsd?: number;
+    attempts?: number;
+    index: number;
+    total: number;
+  }
+>;
+
+export type PocHarnessAgentActivityEvent = EventEnvelope<
+  "poc-harness:agent-activity",
+  {
+    context: RunContext;
+    fingerprint: string;
+    kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
+    toolName?: string;
+    toolInput?: Record<string, unknown>;
+    summary?: string;
+    elapsedSeconds?: number;
+    index: number;
+    total: number;
+  }
+>;
+
+export type PocHarnessCompleteEvent = EventEnvelope<
+  "poc-harness:complete",
+  {
+    context: RunContext;
+    generated: number;
+    skipped: number;
+    errors: number;
+    totalCostUsd?: number;
+  }
+>;
+
+export type PocHarnessQueueDepthEvent = EventEnvelope<
+  "poc-harness:queue-depth",
+  {
+    context: RunContext;
+    queued: number;
+    inFlight: number;
+    processed: number;
+    total: number;
+  }
+>;
+
 export type StoreUpsertedEvent = EventEnvelope<
   "store:upserted",
   {
@@ -357,6 +468,8 @@ export type KuzushiEvent =
   | TaskCompleteEvent
   | TaskErrorEvent
   | StageCompleteEvent
+  | AugurCheckpointEvent
+  | AugurCheckpointApprovedEvent
   | ScanStartEvent
   | ScanFindingEvent
   | ScanScannerCompleteEvent
@@ -375,6 +488,13 @@ export type KuzushiEvent =
   | VerificationAgentActivityEvent
   | VerificationCompleteEvent
   | VerificationQueueDepthEvent
+  | PocHarnessStartEvent
+  | PocHarnessFindingQueuedEvent
+  | PocHarnessResultEvent
+  | PocHarnessErrorEvent
+  | PocHarnessAgentActivityEvent
+  | PocHarnessCompleteEvent
+  | PocHarnessQueueDepthEvent
   | StoreUpsertedEvent
   | ReportRequestedEvent
   | ReportCompleteEvent;

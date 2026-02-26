@@ -37,6 +37,14 @@ describe("agent runtime", () => {
     expect(getAgentRuntime().id).toBe("claude-sdk");
   });
 
+  it("configures pi-ai backend", () => {
+    const runtime = configureAgentRuntime(makeConfig({
+      agentRuntimeBackend: "pi-ai",
+    }));
+    expect(runtime.id).toBe("pi-ai");
+    expect(getAgentRuntime().id).toBe("pi-ai");
+  });
+
   it("throws for acp backend until adapter is implemented", () => {
     expect(() => configureAgentRuntime(makeConfig({
       agentRuntimeBackend: "acp",

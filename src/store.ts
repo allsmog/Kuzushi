@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import path from "node:path";
 import type {
   KuzushiConfig,
+  PocHarnessResult,
   RepoContext,
   ScanOpts,
   TriageResult,
@@ -10,7 +11,13 @@ import type {
 } from "./types.js";
 import type { Finding, ScannerId } from "./scanners/types.js";
 
-export type PipelineRunStatus = "scanning" | "triaging" | "verifying" | "complete" | "error";
+export type PipelineRunStatus =
+  | "scanning"
+  | "triaging"
+  | "verifying"
+  | "poc-harnessing"
+  | "complete"
+  | "error";
 
 export interface PipelineRunRecord {
   runId: string;
@@ -55,6 +62,13 @@ export function initDb(dbPath: string): Database.Database {
       verify_preconditions TEXT,
       verify_confidence REAL,
       verify_cost_usd REAL,
+      poc_harness_path TEXT,
+      poc_harness_language TEXT,
+      poc_harness_parsed INTEGER,
+      poc_harness_parse_error TEXT,
+      poc_harness_skipped INTEGER,
+      poc_harness_skip_reason TEXT,
+      poc_harness_cost_usd REAL,
       created_at         TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -67,7 +81,7 @@ export function initDb(dbPath: string): Database.Database {
       run_id         TEXT PRIMARY KEY,
       repo           TEXT NOT NULL,
       started_at     TEXT NOT NULL,
-      status         TEXT NOT NULL CHECK (status IN ('scanning','triaging','verifying','complete','error')),
+      status         TEXT NOT NULL CHECK (status IN ('scanning','triaging','verifying','poc-harnessing','complete','error')),
       config_json    TEXT NOT NULL,
       scan_opts_json TEXT NOT NULL,
       findings_json  TEXT,
@@ -84,7 +98,8 @@ export function initDb(dbPath: string): Database.Database {
   ensureScannerColumn(db);
   ensureTriageCostColumn(db);
   ensureVerificationColumns(db);
-  ensurePipelineRunsVerifyingStatus(db);
+  ensurePocHarnessColumns(db);
+  ensurePipelineRunsStatusValues(db);
   ensurePipelineRunContextColumn(db);
 
   return db;
@@ -156,6 +171,16 @@ export function getVerifiedFingerprints(db: Database.Database): Set<string> {
   return new Set(rows.map((row) => row.fingerprint));
 }
 
+/** Get set of fingerprints with completed PoC harness generation. */
+export function getPocHarnessedFingerprints(db: Database.Database): Set<string> {
+  const rows = db.prepare(
+    `SELECT fingerprint FROM findings
+     WHERE poc_harness_path IS NOT NULL OR poc_harness_skipped IS NOT NULL`,
+  ).all() as Array<{ fingerprint: string }>;
+
+  return new Set(rows.map((row) => row.fingerprint));
+}
+
 /** Load persisted triage results for a set of fingerprints. */
 export function getStoredTriageResults(
   db: Database.Database,
@@ -208,6 +233,69 @@ export function getStoredTriageResults(
       verificationSteps,
       fixPatch: row.fixPatch,
       triageCostUsd: row.triageCostUsd ?? undefined,
+    });
+  }
+
+  return results;
+}
+
+/** Load persisted verification results for a set of fingerprints. */
+export function getStoredVerificationResults(
+  db: Database.Database,
+  fingerprints: string[],
+): Map<string, VerificationResult> {
+  const uniqueFingerprints = [...new Set(fingerprints.filter(Boolean))];
+  if (uniqueFingerprints.length === 0) {
+    return new Map<string, VerificationResult>();
+  }
+
+  const placeholders = uniqueFingerprints.map(() => "?").join(", ");
+  const rows = db.prepare(`
+    SELECT
+      fingerprint,
+      verify_exploitable as verifyExploitable,
+      verify_poc_payload as verifyPocPayload,
+      verify_poc_description as verifyPocDescription,
+      verify_attack_vector as verifyAttackVector,
+      verify_preconditions as verifyPreconditions,
+      verify_confidence as verifyConfidence,
+      verify_cost_usd as verifyCostUsd
+    FROM findings
+    WHERE fingerprint IN (${placeholders}) AND verify_exploitable IS NOT NULL
+  `).all(...uniqueFingerprints) as Array<{
+    fingerprint: string;
+    verifyExploitable: number;
+    verifyPocPayload: string | null;
+    verifyPocDescription: string | null;
+    verifyAttackVector: string | null;
+    verifyPreconditions: string | null;
+    verifyConfidence: number | null;
+    verifyCostUsd: number | null;
+  }>;
+
+  const results = new Map<string, VerificationResult>();
+  for (const row of rows) {
+    let preconditions: string[] = [];
+    if (row.verifyPreconditions) {
+      try {
+        const parsed = JSON.parse(row.verifyPreconditions);
+        if (Array.isArray(parsed)) {
+          preconditions = parsed.map((item) => String(item).trim()).filter(Boolean);
+        }
+      } catch {
+        preconditions = [];
+      }
+    }
+
+    results.set(row.fingerprint, {
+      fingerprint: row.fingerprint,
+      exploitable: row.verifyExploitable === 1,
+      pocPayload: row.verifyPocPayload,
+      pocDescription: row.verifyPocDescription ?? "",
+      attackVector: row.verifyAttackVector,
+      preconditions,
+      confidence: row.verifyConfidence ?? 0,
+      verifyCostUsd: row.verifyCostUsd ?? undefined,
     });
   }
 
@@ -270,6 +358,21 @@ export function getTotalVerificationCost(db: Database.Database, repo?: string): 
   return row?.total ?? 0;
 }
 
+/** Get total PoC harness generation cost in USD from persisted findings. */
+export function getTotalPocHarnessCost(db: Database.Database, repo?: string): number {
+  const query = repo
+    ? "SELECT COALESCE(SUM(COALESCE(poc_harness_cost_usd, 0)), 0) as total FROM findings WHERE repo = ?"
+    : "SELECT COALESCE(SUM(COALESCE(poc_harness_cost_usd, 0)), 0) as total FROM findings";
+
+  const row = (
+    repo
+      ? db.prepare(query).get(repo)
+      : db.prepare(query).get()
+  ) as { total?: number } | undefined;
+
+  return row?.total ?? 0;
+}
+
 /** Get verification counts grouped by exploitability outcome. */
 export function getVerificationCounts(
   db: Database.Database,
@@ -304,6 +407,34 @@ export function getVerificationCounts(
   return { exploitable, notExploitable };
 }
 
+/** Get PoC harness generation counts. */
+export function getPocHarnessCounts(
+  db: Database.Database,
+  repo?: string,
+): { generated: number; skipped: number } {
+  const query = repo
+    ? `SELECT
+         SUM(CASE WHEN poc_harness_skipped = 1 THEN 1 ELSE 0 END) as skipped,
+         SUM(CASE WHEN poc_harness_path IS NOT NULL AND COALESCE(poc_harness_skipped, 0) = 0 THEN 1 ELSE 0 END) as generated
+       FROM findings
+       WHERE repo = ?`
+    : `SELECT
+         SUM(CASE WHEN poc_harness_skipped = 1 THEN 1 ELSE 0 END) as skipped,
+         SUM(CASE WHEN poc_harness_path IS NOT NULL AND COALESCE(poc_harness_skipped, 0) = 0 THEN 1 ELSE 0 END) as generated
+       FROM findings`;
+
+  const row = (
+    repo
+      ? db.prepare(query).get(repo)
+      : db.prepare(query).get()
+  ) as { generated?: number; skipped?: number } | undefined;
+
+  return {
+    generated: row?.generated ?? 0,
+    skipped: row?.skipped ?? 0,
+  };
+}
+
 /** Get triaged findings, ordered by verdict priority and confidence. */
 export function getActionableFindings(
   db: Database.Database,
@@ -330,6 +461,13 @@ export function getActionableFindings(
   verifyPreconditions: string | null;
   verifyConfidence: number | null;
   verifyCostUsd: number | null;
+  pocHarnessPath: string | null;
+  pocHarnessLanguage: string | null;
+  pocHarnessParsed: number | null;
+  pocHarnessParseError: string | null;
+  pocHarnessSkipped: number | null;
+  pocHarnessSkipReason: string | null;
+  pocHarnessCostUsd: number | null;
 }> {
   const filters: string[] = [];
   if (!options.includeFalsePositives) {
@@ -350,7 +488,14 @@ export function getActionableFindings(
            verify_attack_vector as verifyAttackVector,
            verify_preconditions as verifyPreconditions,
            verify_confidence as verifyConfidence,
-           verify_cost_usd as verifyCostUsd
+           verify_cost_usd as verifyCostUsd,
+           poc_harness_path as pocHarnessPath,
+           poc_harness_language as pocHarnessLanguage,
+           poc_harness_parsed as pocHarnessParsed,
+           poc_harness_parse_error as pocHarnessParseError,
+           poc_harness_skipped as pocHarnessSkipped,
+           poc_harness_skip_reason as pocHarnessSkipReason,
+           poc_harness_cost_usd as pocHarnessCostUsd
     FROM findings ${where}
     ORDER BY
       CASE verdict WHEN 'tp' THEN 0 WHEN 'needs_review' THEN 1 ELSE 2 END,
@@ -380,6 +525,13 @@ export function getActionableFindings(
     verifyPreconditions: string | null;
     verifyConfidence: number | null;
     verifyCostUsd: number | null;
+    pocHarnessPath: string | null;
+    pocHarnessLanguage: string | null;
+    pocHarnessParsed: number | null;
+    pocHarnessParseError: string | null;
+    pocHarnessSkipped: number | null;
+    pocHarnessSkipReason: string | null;
+    pocHarnessCostUsd: number | null;
   }>;
 }
 
@@ -426,7 +578,34 @@ function ensureVerificationColumns(db: Database.Database): void {
   }
 }
 
-function ensurePipelineRunsVerifyingStatus(db: Database.Database): void {
+function ensurePocHarnessColumns(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  if (!columnNames.has("poc_harness_path")) {
+    db.exec("ALTER TABLE findings ADD COLUMN poc_harness_path TEXT");
+  }
+  if (!columnNames.has("poc_harness_language")) {
+    db.exec("ALTER TABLE findings ADD COLUMN poc_harness_language TEXT");
+  }
+  if (!columnNames.has("poc_harness_parsed")) {
+    db.exec("ALTER TABLE findings ADD COLUMN poc_harness_parsed INTEGER");
+  }
+  if (!columnNames.has("poc_harness_parse_error")) {
+    db.exec("ALTER TABLE findings ADD COLUMN poc_harness_parse_error TEXT");
+  }
+  if (!columnNames.has("poc_harness_skipped")) {
+    db.exec("ALTER TABLE findings ADD COLUMN poc_harness_skipped INTEGER");
+  }
+  if (!columnNames.has("poc_harness_skip_reason")) {
+    db.exec("ALTER TABLE findings ADD COLUMN poc_harness_skip_reason TEXT");
+  }
+  if (!columnNames.has("poc_harness_cost_usd")) {
+    db.exec("ALTER TABLE findings ADD COLUMN poc_harness_cost_usd REAL");
+  }
+}
+
+function ensurePipelineRunsStatusValues(db: Database.Database): void {
   const tableSql = db.prepare(
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs'",
   ).get() as { sql?: string } | undefined;
@@ -435,9 +614,11 @@ function ensurePipelineRunsVerifyingStatus(db: Database.Database): void {
     return;
   }
 
-  if (tableSql.sql.includes("'verifying'")) {
+  if (tableSql.sql.includes("'verifying'") && tableSql.sql.includes("'poc-harnessing'")) {
     return;
   }
+
+  const contextSelect = tableSql.sql.includes("context_json") ? "context_json" : "NULL";
 
   db.exec(`
     BEGIN;
@@ -446,7 +627,7 @@ function ensurePipelineRunsVerifyingStatus(db: Database.Database): void {
       run_id         TEXT PRIMARY KEY,
       repo           TEXT NOT NULL,
       started_at     TEXT NOT NULL,
-      status         TEXT NOT NULL CHECK (status IN ('scanning','triaging','verifying','complete','error')),
+      status         TEXT NOT NULL CHECK (status IN ('scanning','triaging','verifying','poc-harnessing','complete','error')),
       config_json    TEXT NOT NULL,
       scan_opts_json TEXT NOT NULL,
       findings_json  TEXT,
@@ -462,7 +643,7 @@ function ensurePipelineRunsVerifyingStatus(db: Database.Database): void {
     )
     SELECT
       run_id, repo, started_at, status, config_json, scan_opts_json,
-      findings_json, NULL, total_cost_usd, completed_at, updated_at
+      findings_json, ${contextSelect}, total_cost_usd, completed_at, updated_at
     FROM pipeline_runs;
 
     DROP TABLE pipeline_runs;
@@ -638,6 +819,55 @@ export function updateVerificationCost(
   `).run(costUsd, fingerprint);
 }
 
+/** Persist PoC harness generation result fields for an existing finding row. */
+export function updatePocHarnessResult(
+  db: Database.Database,
+  fingerprint: string,
+  result: PocHarnessResult,
+): void {
+  db.prepare(`
+    UPDATE findings
+    SET
+      poc_harness_path = ?,
+      poc_harness_language = ?,
+      poc_harness_parsed = ?,
+      poc_harness_parse_error = ?,
+      poc_harness_skipped = ?,
+      poc_harness_skip_reason = ?,
+      poc_harness_cost_usd = ?,
+      updated_at = datetime('now')
+    WHERE fingerprint = ?
+  `).run(
+    result.scriptPath,
+    result.language,
+    result.parsed ? 1 : 0,
+    result.parseError,
+    result.skipped ? 1 : 0,
+    result.skipReason,
+    result.costUsd ?? null,
+    fingerprint,
+  );
+}
+
+/** Persist PoC harness generation cost for a finding even when generation errors. */
+export function updatePocHarnessCost(
+  db: Database.Database,
+  fingerprint: string,
+  costUsd: number,
+): void {
+  if (!Number.isFinite(costUsd) || costUsd < 0) {
+    return;
+  }
+
+  db.prepare(`
+    UPDATE findings
+    SET
+      poc_harness_cost_usd = ?,
+      updated_at = datetime('now')
+    WHERE fingerprint = ?
+  `).run(costUsd, fingerprint);
+}
+
 /** Get latest resumable run for repo, if any. */
 export function getLatestResumableRun(
   db: Database.Database,
@@ -657,7 +887,7 @@ export function getLatestResumableRun(
       completed_at as completedAt,
       updated_at as updatedAt
     FROM pipeline_runs
-    WHERE repo = ? AND status IN ('triaging', 'verifying')
+    WHERE repo = ? AND status IN ('triaging', 'verifying', 'poc-harnessing')
     ORDER BY started_at DESC, rowid DESC
     LIMIT 1
   `).get(repo) as PipelineRunRecord | undefined;

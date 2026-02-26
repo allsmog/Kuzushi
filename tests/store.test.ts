@@ -3,13 +3,16 @@ import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import {
   createRun,
+  getPocHarnessCounts,
   getLatestResumableRun,
   getRun,
   getTotalCost,
+  getTotalPocHarnessCost,
   initDb,
   getTriagedFingerprints,
   getVerdictCounts,
   getActionableFindings,
+  updatePocHarnessResult,
   updateRunCost,
   updateRunContext,
   updateRunFindings,
@@ -131,6 +134,47 @@ describe("initDb", () => {
     expect(columns.some((column) => column.name === "triage_cost_usd")).toBe(true);
     migrated.close();
   });
+
+  it("migrates existing findings table to include poc harness columns", () => {
+    const db = initDb(dbPath);
+    db.exec("DROP TABLE findings");
+    db.exec(`
+      CREATE TABLE findings (
+        fingerprint        TEXT PRIMARY KEY,
+        scanner            TEXT NOT NULL DEFAULT 'semgrep',
+        repo               TEXT NOT NULL,
+        ref                TEXT NOT NULL,
+        rule_id            TEXT NOT NULL,
+        file_path          TEXT NOT NULL,
+        start_line         INTEGER NOT NULL,
+        severity           TEXT NOT NULL,
+        message            TEXT NOT NULL,
+        verdict            TEXT NOT NULL CHECK (verdict IN ('tp','fp','needs_review')),
+        confidence         REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+        rationale          TEXT NOT NULL,
+        verification_steps TEXT NOT NULL,
+        fix_patch          TEXT,
+        triage_cost_usd    REAL,
+        verify_exploitable INTEGER,
+        verify_poc_payload TEXT,
+        verify_poc_description TEXT,
+        verify_attack_vector TEXT,
+        verify_preconditions TEXT,
+        verify_confidence REAL,
+        verify_cost_usd REAL,
+        created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.close();
+
+    const migrated = initDb(dbPath);
+    const columns = migrated.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
+    expect(columns.some((column) => column.name === "poc_harness_path")).toBe(true);
+    expect(columns.some((column) => column.name === "poc_harness_skipped")).toBe(true);
+    expect(columns.some((column) => column.name === "poc_harness_cost_usd")).toBe(true);
+    migrated.close();
+  });
 });
 
 describe("upsertFinding", () => {
@@ -227,6 +271,63 @@ describe("getTotalCost", () => {
   });
 });
 
+describe("PoC harness persistence", () => {
+  it("updates poc harness fields and aggregates counts/cost", () => {
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("poc-a"), makeResult("poc-a", "tp"), "repo", "HEAD");
+    upsertFinding(db, makeFinding("poc-b"), makeResult("poc-b", "tp"), "repo", "HEAD");
+
+    updatePocHarnessResult(db, "poc-a", {
+      fingerprint: "poc-a",
+      scriptPath: "/tmp/repo/.kuzushi/poc/poc-a-cwe79.ts",
+      language: "typescript",
+      scriptContent: "console.log('PASS')",
+      parsed: true,
+      parseError: null,
+      skipped: false,
+      skipReason: null,
+      costUsd: 0.07,
+    });
+    updatePocHarnessResult(db, "poc-b", {
+      fingerprint: "poc-b",
+      scriptPath: null,
+      language: "typescript",
+      scriptContent: null,
+      parsed: false,
+      parseError: null,
+      skipped: true,
+      skipReason: "Cannot isolate function",
+      costUsd: 0.02,
+    });
+
+    const counts = getPocHarnessCounts(db, "repo");
+    expect(counts.generated).toBe(1);
+    expect(counts.skipped).toBe(1);
+    expect(getTotalPocHarnessCost(db, "repo")).toBeCloseTo(0.09, 8);
+
+    const rows = db.prepare(`
+      SELECT
+        poc_harness_path as pocHarnessPath,
+        poc_harness_language as pocHarnessLanguage,
+        poc_harness_parsed as pocHarnessParsed,
+        poc_harness_skipped as pocHarnessSkipped
+      FROM findings
+      WHERE fingerprint = 'poc-a'
+    `).get() as {
+      pocHarnessPath: string | null;
+      pocHarnessLanguage: string | null;
+      pocHarnessParsed: number | null;
+      pocHarnessSkipped: number | null;
+    };
+
+    expect(rows.pocHarnessPath).toContain(".kuzushi/poc");
+    expect(rows.pocHarnessLanguage).toBe("typescript");
+    expect(rows.pocHarnessParsed).toBe(1);
+    expect(rows.pocHarnessSkipped).toBe(0);
+    db.close();
+  });
+});
+
 describe("getActionableFindings", () => {
   it("excludes FP findings", () => {
     const db = initDb(dbPath);
@@ -293,6 +394,18 @@ describe("pipeline_runs", () => {
     updateRunStatus(db, "run-new", "complete");
     updateRunStatus(db, "run-old", "complete");
     expect(getLatestResumableRun(db, "repo")).toBeUndefined();
+    db.close();
+  });
+
+  it("treats poc-harnessing runs as resumable", () => {
+    const db = initDb(dbPath);
+
+    createRun(db, "run-poc", "repo", makeConfig(), makeScanOpts());
+    updateRunStatus(db, "run-poc", "poc-harnessing");
+
+    const latest = getLatestResumableRun(db, "repo");
+    expect(latest?.runId).toBe("run-poc");
+    expect(latest?.status).toBe("poc-harnessing");
     db.close();
   });
 

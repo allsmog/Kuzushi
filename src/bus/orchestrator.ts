@@ -5,7 +5,9 @@ import type { Finding } from "../scanners/types.js";
 import { selectTopFindings } from "../scanners/finding-selection.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
 import {
+  getPocHarnessedFingerprints,
   getStoredTriageResults,
+  getStoredVerificationResults,
   getRun,
   getTriagedFingerprints,
   getVerifiedFingerprints,
@@ -14,13 +16,23 @@ import {
   updateRunFindings,
   updateRunStatus,
 } from "../store.js";
-import type { KuzushiConfig, RepoContext, ScanOpts, TriageResult, Verdict } from "../types.js";
+import type {
+  KuzushiConfig,
+  RepoContext,
+  ScanOpts,
+  TriageResult,
+  VerificationResult,
+  Verdict,
+} from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type {
+  AugurCheckpointApprovedEvent,
   BusHandlerErrorEvent,
   PipelineStats,
   PipelineErrorEvent,
   PipelineStartEvent,
+  PocHarnessErrorEvent,
+  PocHarnessResultEvent,
   ReportCompleteEvent,
   RunContext,
   ScanCompleteEvent,
@@ -47,6 +59,15 @@ interface VerificationCandidate {
 }
 
 interface QueuedVerification extends VerificationCandidate {
+  index: number;
+  total: number;
+}
+
+interface PocHarnessCandidate extends VerificationCandidate {
+  verificationResult: VerificationResult;
+}
+
+interface QueuedPocHarness extends PocHarnessCandidate {
   index: number;
   total: number;
 }
@@ -82,7 +103,20 @@ interface RunState {
   verifyCostUsd: number;
   verifyDispatching: boolean;
   verificationStarted: boolean;
+  verificationCompleted: boolean;
   resumingVerification: boolean;
+  pocHarnessEnabled: boolean;
+  pocHarnessCandidates: PocHarnessCandidate[];
+  pocHarnessQueue: QueuedPocHarness[];
+  pocHarnessCursor: number;
+  pocHarnessTotal: number;
+  pocHarnessInFlight: number;
+  pocHarnessGenerated: number;
+  pocHarnessSkipped: number;
+  pocHarnessErrors: number;
+  pocHarnessCostUsd: number;
+  pocHarnessDispatching: boolean;
+  pocHarnessStarted: boolean;
   reportRequested: boolean;
   reportEmitted: boolean;
   dispatching: boolean;
@@ -141,6 +175,14 @@ export class PipelineOrchestrator {
 
     this.bus.subscribe<VerificationErrorEvent>("verification:error", async (event) => {
       await this.handleVerificationError(event);
+    });
+
+    this.bus.subscribe<PocHarnessResultEvent>("poc-harness:result", async (event) => {
+      await this.handlePocHarnessResult(event);
+    });
+
+    this.bus.subscribe<PocHarnessErrorEvent>("poc-harness:error", async (event) => {
+      await this.handlePocHarnessError(event);
     });
 
     this.bus.subscribe<ReportCompleteEvent>("report:complete", async (event) => {
@@ -220,7 +262,20 @@ export class PipelineOrchestrator {
       verifyCostUsd: 0,
       verifyDispatching: false,
       verificationStarted: false,
+      verificationCompleted: false,
       resumingVerification: false,
+      pocHarnessEnabled: config.pocHarness === true,
+      pocHarnessCandidates: [],
+      pocHarnessQueue: [],
+      pocHarnessCursor: 0,
+      pocHarnessTotal: 0,
+      pocHarnessInFlight: 0,
+      pocHarnessGenerated: 0,
+      pocHarnessSkipped: 0,
+      pocHarnessErrors: 0,
+      pocHarnessCostUsd: 0,
+      pocHarnessDispatching: false,
+      pocHarnessStarted: false,
       reportRequested: false,
       reportEmitted: false,
       dispatching: false,
@@ -333,8 +388,11 @@ export class PipelineOrchestrator {
     state.verifyVerdicts = new Set(
       parseVerifyVerdictsFromConfigJson(run.configJson, [...state.verifyVerdicts]),
     );
-    if (run.status === "verifying") {
+    if (run.status === "verifying" || run.status === "poc-harnessing") {
       state.verifyEnabled = true;
+    }
+    if (run.status === "poc-harnessing") {
+      state.pocHarnessEnabled = true;
     }
 
     if (typeof run.contextJson === "string" && run.contextJson.trim().length > 0) {
@@ -390,6 +448,11 @@ export class PipelineOrchestrator {
       return;
     }
 
+    if (run.status === "poc-harnessing") {
+      await this.resumePocHarnessFromCheckpoint(state, runId);
+      return;
+    }
+
     state.resuming = true;
     await this.handleScanComplete(
       createEvent("scan:complete", runId, {
@@ -429,7 +492,19 @@ export class PipelineOrchestrator {
     state.verified = 0;
     state.verifyErrors = 0;
     state.verifyCostUsd = 0;
+    state.verificationCompleted = false;
     state.resumingVerification = true;
+    state.pocHarnessCandidates = [];
+    state.pocHarnessQueue = [];
+    state.pocHarnessCursor = 0;
+    state.pocHarnessTotal = 0;
+    state.pocHarnessInFlight = 0;
+    state.pocHarnessGenerated = 0;
+    state.pocHarnessSkipped = 0;
+    state.pocHarnessErrors = 0;
+    state.pocHarnessCostUsd = 0;
+    state.pocHarnessDispatching = false;
+    state.pocHarnessStarted = false;
 
     const pendingCandidates: VerificationCandidate[] = [];
     for (const finding of state.scanFindings) {
@@ -460,6 +535,89 @@ export class PipelineOrchestrator {
     }));
 
     await this.startVerification(state, runId);
+  }
+
+  private async resumePocHarnessFromCheckpoint(state: RunState, runId: string): Promise<void> {
+    let triageByFingerprint = new Map<string, TriageResult>();
+    let verificationByFingerprint = new Map<string, VerificationResult>();
+    let pocHarnessedFingerprints = new Set<string>();
+
+    try {
+      triageByFingerprint = getStoredTriageResults(
+        this.deps.db,
+        state.scanFindings.map((finding) => finding.fingerprint),
+      );
+      verificationByFingerprint = getStoredVerificationResults(
+        this.deps.db,
+        state.scanFindings.map((finding) => finding.fingerprint),
+      );
+      pocHarnessedFingerprints = getPocHarnessedFingerprints(this.deps.db);
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: toErrorMessage(error),
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    state.totalFindings = state.scanFindings.length;
+    state.skippedLowConfidence = 0;
+    state.verifyCandidates = [];
+    state.verifyQueue = [];
+    state.verifyCursor = 0;
+    state.verifyInFlight = 0;
+    state.verified = 0;
+    state.verifyErrors = 0;
+    state.verifyCostUsd = 0;
+    state.verifyDispatching = false;
+    state.verificationStarted = false;
+    state.verificationCompleted = true;
+    state.resumingVerification = false;
+    state.pocHarnessCandidates = [];
+    state.pocHarnessQueue = [];
+    state.pocHarnessCursor = 0;
+    state.pocHarnessTotal = 0;
+    state.pocHarnessInFlight = 0;
+    state.pocHarnessGenerated = 0;
+    state.pocHarnessSkipped = 0;
+    state.pocHarnessErrors = 0;
+    state.pocHarnessCostUsd = 0;
+    state.pocHarnessDispatching = false;
+    state.pocHarnessStarted = false;
+    state.reportRequested = true;
+
+    const pendingCandidates: PocHarnessCandidate[] = [];
+    for (const finding of state.scanFindings) {
+      const triageResult = triageByFingerprint.get(finding.fingerprint);
+      if (!triageResult) {
+        continue;
+      }
+
+      if (!shouldVerifyFinding(state, finding, triageResult)) {
+        continue;
+      }
+
+      const verificationResult = verificationByFingerprint.get(finding.fingerprint);
+      if (!verificationResult || !verificationResult.exploitable) {
+        continue;
+      }
+
+      if (pocHarnessedFingerprints.has(finding.fingerprint)) {
+        continue;
+      }
+
+      pendingCandidates.push({
+        finding,
+        triageResult,
+        verificationResult,
+      });
+    }
+
+    state.pocHarnessCandidates = pendingCandidates;
+    await this.startPocHarnessGeneration(state, runId);
   }
 
   private async runTaskDag(state: RunState, runId: string): Promise<void> {
@@ -527,6 +685,38 @@ export class PipelineOrchestrator {
             state.scanFindings.push(...coerceFindings(outcome.event.payload.output));
           }
         }
+      }
+
+      for (const outcome of resolved) {
+        if (outcome.kind !== "complete") {
+          continue;
+        }
+
+        const output = outcome.event.payload.output;
+        if (!isRecord(output) || output["checkpointRequired"] !== true) {
+          continue;
+        }
+
+        const autoApprove = (
+          isRecord(state.config.scannerConfig["augur"])
+          && state.config.scannerConfig["augur"]["autoApproveCheckpoint"] === true
+        );
+        if (autoApprove) {
+          continue;
+        }
+
+        await this.bus.publish(
+          createEvent("augur:checkpoint", runId, {
+            context: state.context,
+            reviewSummary: typeof output["reviewSummary"] === "string" ? output["reviewSummary"] : "",
+            labelCounts: asLabelCountMap(output["labelCounts"]),
+          }),
+        );
+
+        await this.bus.waitFor<AugurCheckpointApprovedEvent>(
+          "augur:checkpoint-approved",
+          (event) => event.meta.runId === runId,
+        );
       }
 
       await this.bus.publish(
@@ -651,7 +841,20 @@ export class PipelineOrchestrator {
     state.skippedLowConfidence = 0;
     state.verifyDispatching = false;
     state.verificationStarted = false;
+    state.verificationCompleted = false;
     state.resumingVerification = false;
+    state.pocHarnessEnabled = state.config.pocHarness === true;
+    state.pocHarnessCandidates = [];
+    state.pocHarnessQueue = [];
+    state.pocHarnessCursor = 0;
+    state.pocHarnessTotal = 0;
+    state.pocHarnessInFlight = 0;
+    state.pocHarnessGenerated = 0;
+    state.pocHarnessSkipped = 0;
+    state.pocHarnessErrors = 0;
+    state.pocHarnessCostUsd = 0;
+    state.pocHarnessDispatching = false;
+    state.pocHarnessStarted = false;
     state.reportRequested = false;
     state.reportEmitted = false;
 
@@ -773,6 +976,10 @@ export class PipelineOrchestrator {
           verified: state.verifyEnabled ? state.verified : undefined,
           verifyErrors: state.verifyEnabled ? state.verifyErrors : undefined,
           verifyCostUsd: state.verifyEnabled ? state.verifyCostUsd : undefined,
+          pocHarnessGenerated: state.pocHarnessEnabled ? state.pocHarnessGenerated : undefined,
+          pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : undefined,
+          pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
+          pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
           startedAt: state.startedAt,
           completedAt: event.meta.timestamp,
         },
@@ -874,6 +1081,8 @@ export class PipelineOrchestrator {
       return;
     }
 
+    state.verificationCompleted = false;
+
     if (!state.resumingVerification) {
       state.verifyTotal = state.verifyCandidates.length;
       state.verifyQueue = state.verifyCandidates.map((item, idx) => ({
@@ -930,6 +1139,14 @@ export class PipelineOrchestrator {
     const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.totalCostUsd += costUsd;
     state.verifyCostUsd += costUsd;
+
+    if (event.payload.result.exploitable) {
+      state.pocHarnessCandidates.push({
+        finding: event.payload.finding,
+        triageResult: event.payload.triageResult,
+        verificationResult: event.payload.result,
+      });
+    }
 
     try {
       updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
@@ -1019,9 +1236,10 @@ export class PipelineOrchestrator {
   }
 
   private async finishVerificationAndRequestReport(state: RunState, runId: string): Promise<void> {
-    if (state.reportEmitted) {
+    if (state.reportEmitted || state.verificationCompleted) {
       return;
     }
+    state.verificationCompleted = true;
 
     await this.bus.publish(
       createEvent("verification:complete", runId, {
@@ -1029,6 +1247,193 @@ export class PipelineOrchestrator {
         verified: state.verified,
         errors: state.verifyErrors,
         totalCostUsd: state.verifyCostUsd,
+      }),
+    );
+
+    if (state.pocHarnessEnabled && state.pocHarnessCandidates.length > 0) {
+      await this.startPocHarnessGeneration(state, runId);
+      return;
+    }
+
+    await this.bus.publish(
+      createEvent("report:requested", runId, {
+        context: state.context,
+        stats: buildReportStats(state),
+      }),
+    );
+
+    state.reportRequested = true;
+    state.reportEmitted = true;
+  }
+
+  private async startPocHarnessGeneration(state: RunState, runId: string): Promise<void> {
+    if (state.pocHarnessStarted || state.reportEmitted) {
+      return;
+    }
+
+    state.pocHarnessTotal = state.pocHarnessCandidates.length;
+    state.pocHarnessQueue = state.pocHarnessCandidates.map((item, idx) => ({
+      ...item,
+      index: idx + 1,
+      total: state.pocHarnessCandidates.length,
+    }));
+    state.pocHarnessCursor = 0;
+
+    try {
+      updateRunStatus(this.deps.db, state.checkpointRunId, "poc-harnessing");
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: toErrorMessage(error),
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    await this.bus.publish(
+      createEvent("poc-harness:start", runId, {
+        context: state.context,
+        findingCount: state.pocHarnessTotal,
+        model: state.config.pocHarnessModel
+          ?? state.config.verifyModel
+          ?? state.config.triageModel
+          ?? state.config.model,
+      }),
+    );
+
+    state.pocHarnessStarted = true;
+    await this.publishPocHarnessQueueDepth(state, runId);
+
+    if (state.pocHarnessTotal === 0) {
+      await this.finishPocHarnessAndRequestReport(state, runId);
+      return;
+    }
+
+    await this.dispatchPocHarness(state, runId);
+  }
+
+  private async handlePocHarnessResult(event: PocHarnessResultEvent): Promise<void> {
+    const runId = event.meta.runId;
+    const state = this.runs.get(runId);
+    if (!state) {
+      return;
+    }
+
+    state.pocHarnessInFlight = Math.max(0, state.pocHarnessInFlight - 1);
+    if (event.payload.result.skipped) {
+      state.pocHarnessSkipped += 1;
+    } else {
+      state.pocHarnessGenerated += 1;
+    }
+    const costUsd = normalizeCostUsd(event.payload.costUsd);
+    state.totalCostUsd += costUsd;
+    state.pocHarnessCostUsd += costUsd;
+
+    try {
+      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+    } catch {
+      // Cost persistence is best-effort and should not fail the run.
+    }
+
+    await this.publishPocHarnessQueueDepth(state, runId);
+
+    if (this.isPocHarnessDone(state)) {
+      await this.finishPocHarnessAndRequestReport(state, runId);
+      return;
+    }
+
+    await this.dispatchPocHarness(state, runId);
+  }
+
+  private async handlePocHarnessError(event: PocHarnessErrorEvent): Promise<void> {
+    const runId = event.meta.runId;
+    const state = this.runs.get(runId);
+    if (!state) {
+      return;
+    }
+
+    state.pocHarnessInFlight = Math.max(0, state.pocHarnessInFlight - 1);
+    state.pocHarnessErrors += 1;
+    const costUsd = normalizeCostUsd(event.payload.costUsd);
+    state.totalCostUsd += costUsd;
+    state.pocHarnessCostUsd += costUsd;
+
+    try {
+      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+    } catch {
+      // Cost persistence is best-effort and should not fail the run.
+    }
+
+    await this.publishPocHarnessQueueDepth(state, runId);
+
+    if (this.isPocHarnessDone(state)) {
+      await this.finishPocHarnessAndRequestReport(state, runId);
+      return;
+    }
+
+    await this.dispatchPocHarness(state, runId);
+  }
+
+  private async dispatchPocHarness(state: RunState, runId: string): Promise<void> {
+    if (state.pocHarnessDispatching) {
+      return;
+    }
+
+    state.pocHarnessDispatching = true;
+    try {
+      const concurrency = normalizeConcurrency(state.config.pocHarnessConcurrency ?? 1);
+
+      while (
+        state.pocHarnessInFlight < concurrency
+        && state.pocHarnessCursor < state.pocHarnessQueue.length
+      ) {
+        const item = state.pocHarnessQueue[state.pocHarnessCursor];
+        state.pocHarnessCursor += 1;
+        state.pocHarnessInFlight += 1;
+
+        await this.bus.publish(
+          createEvent("poc-harness:finding-queued", runId, {
+            context: state.context,
+            finding: item.finding,
+            triageResult: item.triageResult,
+            verificationResult: item.verificationResult,
+            repoContext: state.repoContext,
+            index: item.index,
+            total: item.total,
+          }),
+        );
+      }
+
+      await this.publishPocHarnessQueueDepth(state, runId);
+    } finally {
+      state.pocHarnessDispatching = false;
+    }
+  }
+
+  private isPocHarnessDone(state: RunState): boolean {
+    const processed = state.pocHarnessGenerated + state.pocHarnessSkipped + state.pocHarnessErrors;
+    return (
+      state.pocHarnessTotal > 0
+      && processed >= state.pocHarnessTotal
+      && state.pocHarnessInFlight === 0
+      && !state.reportEmitted
+    );
+  }
+
+  private async finishPocHarnessAndRequestReport(state: RunState, runId: string): Promise<void> {
+    if (state.reportEmitted) {
+      return;
+    }
+
+    await this.bus.publish(
+      createEvent("poc-harness:complete", runId, {
+        context: state.context,
+        generated: state.pocHarnessGenerated,
+        skipped: state.pocHarnessSkipped,
+        errors: state.pocHarnessErrors,
+        totalCostUsd: state.pocHarnessCostUsd,
       }),
     );
 
@@ -1072,6 +1477,21 @@ export class PipelineOrchestrator {
       }),
     );
   }
+
+  private async publishPocHarnessQueueDepth(state: RunState, runId: string): Promise<void> {
+    const queued = Math.max(0, state.pocHarnessQueue.length - state.pocHarnessCursor);
+    const processed = state.pocHarnessGenerated + state.pocHarnessSkipped + state.pocHarnessErrors;
+
+    await this.bus.publish(
+      createEvent("poc-harness:queue-depth", runId, {
+        context: state.context,
+        queued,
+        inFlight: state.pocHarnessInFlight,
+        processed,
+        total: state.pocHarnessTotal,
+      }),
+    );
+  }
 }
 
 export function registerOrchestrator(
@@ -1094,6 +1514,10 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     verified: state.verifyEnabled ? state.verified : undefined,
     verifyErrors: state.verifyEnabled ? state.verifyErrors : undefined,
     verifyCostUsd: state.verifyEnabled ? state.verifyCostUsd : undefined,
+    pocHarnessGenerated: state.pocHarnessEnabled ? state.pocHarnessGenerated : undefined,
+    pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : undefined,
+    pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
+    pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
     startedAt: state.startedAt,
   };
 }
@@ -1317,6 +1741,22 @@ function coerceFinding(item: Record<string, unknown>): Finding | null {
     cwe,
     score,
   };
+}
+
+function asLabelCountMap(value: unknown): Record<string, number> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      continue;
+    }
+    out[key] = raw;
+  }
+
+  return out;
 }
 
 function asString(value: unknown): string | null {

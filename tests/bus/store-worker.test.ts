@@ -129,4 +129,103 @@ describe("store-worker", () => {
     await bus.close();
     db.close();
   });
+
+  it("persists poc harness result fields and error cost", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    registerStoreWorker(bus, { db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const finding = makeFinding("fp-poc-store");
+    const triageResult = makeResult("fp-poc-store");
+
+    await bus.publish(
+      createEvent("triage:result", runId, {
+        context,
+        finding,
+        result: triageResult,
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    await bus.publish(
+      createEvent("poc-harness:result", runId, {
+        context,
+        finding,
+        triageResult,
+        verificationResult: {
+          fingerprint: finding.fingerprint,
+          exploitable: true,
+          pocPayload: "' OR 1=1 --",
+          pocDescription: "inject",
+          attackVector: "http",
+          preconditions: [],
+          confidence: 0.88,
+        },
+        result: {
+          fingerprint: finding.fingerprint,
+          scriptPath: "/tmp/repo/.kuzushi/poc/fp-poc-store-cwe79.ts",
+          language: "typescript",
+          scriptContent: "console.log('PASS')",
+          parsed: true,
+          parseError: null,
+          skipped: false,
+          skipReason: null,
+        },
+        costUsd: 0.012,
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    await bus.publish(
+      createEvent("poc-harness:error", runId, {
+        context,
+        finding,
+        triageResult,
+        verificationResult: {
+          fingerprint: finding.fingerprint,
+          exploitable: true,
+          pocPayload: "' OR 1=1 --",
+          pocDescription: "inject",
+          attackVector: "http",
+          preconditions: [],
+          confidence: 0.88,
+        },
+        error: "generator crashed",
+        costUsd: 0.02,
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    const row = db.prepare(`
+      SELECT
+        poc_harness_path as pocHarnessPath,
+        poc_harness_parsed as pocHarnessParsed,
+        poc_harness_cost_usd as pocHarnessCostUsd
+      FROM findings
+      WHERE fingerprint = ?
+    `).get("fp-poc-store") as {
+      pocHarnessPath: string | null;
+      pocHarnessParsed: number | null;
+      pocHarnessCostUsd: number | null;
+    };
+
+    expect(row.pocHarnessPath).toContain(".kuzushi/poc");
+    expect(row.pocHarnessParsed).toBe(1);
+    expect(row.pocHarnessCostUsd).toBeCloseTo(0.02, 8);
+
+    await bus.close();
+    db.close();
+  });
 });

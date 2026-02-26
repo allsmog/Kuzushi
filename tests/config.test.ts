@@ -50,11 +50,15 @@ describe("loadConfig", () => {
     expect(config.verifyConcurrency).toBe(DEFAULTS.verifyConcurrency);
     expect(config.verifyVerdicts).toEqual(DEFAULTS.verifyVerdicts);
     expect(config.verifyMinConfidence).toBe(DEFAULTS.verifyMinConfidence);
+    expect(config.pocHarness).toBe(DEFAULTS.pocHarness);
+    expect(config.pocHarnessMaxTurns).toBe(DEFAULTS.pocHarnessMaxTurns);
+    expect(config.pocHarnessConcurrency).toBe(DEFAULTS.pocHarnessConcurrency);
     expect(config.enableContextGathering).toBe(DEFAULTS.enableContextGathering);
     expect(config.auditLog).toBe(DEFAULTS.auditLog);
     expect(config.sarifOutput).toBe(DEFAULTS.sarifOutput);
     expect(config.maxTriageRetries).toBe(DEFAULTS.maxTriageRetries);
     expect(config.maxVerifyRetries).toBe(DEFAULTS.maxVerifyRetries);
+    expect(config.maxPocHarnessRetries).toBe(DEFAULTS.maxPocHarnessRetries);
     expect(config.retryBackoffMs).toBe(DEFAULTS.retryBackoffMs);
     expect(config.retryBackoffMultiplier).toBe(DEFAULTS.retryBackoffMultiplier);
     expect(config.scanners).toEqual(DEFAULTS.scanners);
@@ -70,12 +74,17 @@ describe("loadConfig", () => {
       verifyConcurrency: 2,
       verifyVerdicts: ["tp", "needs_review"],
       verifyMinConfidence: 0.7,
+      pocHarness: true,
+      pocHarnessModel: "poc-model",
+      pocHarnessMaxTurns: 30,
+      pocHarnessConcurrency: 4,
       enableContextGathering: false,
       auditLog: true,
       reportOutput: "/tmp/report.md",
       sarifOutput: "/tmp/report.sarif",
       maxTriageRetries: 4,
       maxVerifyRetries: 5,
+      maxPocHarnessRetries: 6,
       retryBackoffMs: 2000,
       retryBackoffMultiplier: 3,
       scannerConfig: { semgrep: { verify: false } },
@@ -89,12 +98,17 @@ describe("loadConfig", () => {
     expect(config.verifyConcurrency).toBe(2);
     expect(config.verifyVerdicts).toEqual(["tp", "needs_review"]);
     expect(config.verifyMinConfidence).toBe(0.7);
+    expect(config.pocHarness).toBe(true);
+    expect(config.pocHarnessModel).toBe("poc-model");
+    expect(config.pocHarnessMaxTurns).toBe(30);
+    expect(config.pocHarnessConcurrency).toBe(4);
     expect(config.enableContextGathering).toBe(false);
     expect(config.auditLog).toBe(true);
     expect(config.reportOutput).toBe("/tmp/report.md");
     expect(config.sarifOutput).toBe("/tmp/report.sarif");
     expect(config.maxTriageRetries).toBe(4);
     expect(config.maxVerifyRetries).toBe(5);
+    expect(config.maxPocHarnessRetries).toBe(6);
     expect(config.retryBackoffMs).toBe(2000);
     expect(config.retryBackoffMultiplier).toBe(3);
     expect(config.scannerConfig.semgrep?.verify).toBe(false);
@@ -184,6 +198,18 @@ describe("setConfigValue", () => {
     expect(getConfigValue("verifyVerdicts")).toEqual(["tp", "needs_review"]);
   });
 
+  it("sets poc harness settings", () => {
+    setConfigValue("pocHarness", "true");
+    setConfigValue("pocHarnessModel", "claude-haiku-4-5-20251001");
+    setConfigValue("pocHarnessMaxTurns", "28");
+    setConfigValue("pocHarnessConcurrency", "2");
+
+    expect(getConfigValue("pocHarness")).toBe(true);
+    expect(getConfigValue("pocHarnessModel")).toBe("claude-haiku-4-5-20251001");
+    expect(getConfigValue("pocHarnessMaxTurns")).toBe(28);
+    expect(getConfigValue("pocHarnessConcurrency")).toBe(2);
+  });
+
   it("sets confidence gate, context, audit, and retry settings", () => {
     setConfigValue("verifyMinConfidence", "0.6");
     setConfigValue("enableContextGathering", "false");
@@ -192,6 +218,7 @@ describe("setConfigValue", () => {
     setConfigValue("sarifOutput", "report.sarif");
     setConfigValue("maxTriageRetries", "3");
     setConfigValue("maxVerifyRetries", "4");
+    setConfigValue("maxPocHarnessRetries", "5");
     setConfigValue("retryBackoffMs", "1200");
     setConfigValue("retryBackoffMultiplier", "2.5");
 
@@ -202,6 +229,7 @@ describe("setConfigValue", () => {
     expect(getConfigValue("sarifOutput")).toBe("report.sarif");
     expect(getConfigValue("maxTriageRetries")).toBe(3);
     expect(getConfigValue("maxVerifyRetries")).toBe(4);
+    expect(getConfigValue("maxPocHarnessRetries")).toBe(5);
     expect(getConfigValue("retryBackoffMs")).toBe(1200);
     expect(getConfigValue("retryBackoffMultiplier")).toBe(2.5);
   });
@@ -226,6 +254,9 @@ describe("setConfigValue", () => {
   it("sets agentRuntimeBackend", () => {
     setConfigValue("agentRuntimeBackend", "claude-sdk");
     expect(getConfigValue("agentRuntimeBackend")).toBe("claude-sdk");
+
+    setConfigValue("agentRuntimeBackend", "pi-ai");
+    expect(getConfigValue("agentRuntimeBackend")).toBe("pi-ai");
   });
 
   it("sets scanners from comma-separated string", () => {
@@ -261,6 +292,15 @@ describe("setConfigValue", () => {
     expect(() => setConfigValue("verifyMinConfidence", "1.4")).toThrow(
       "verifyMinConfidence must be a number between 0 and 1",
     );
+    expect(() => setConfigValue("pocHarness", "maybe")).toThrow(
+      "pocHarness must be true or false",
+    );
+    expect(() => setConfigValue("pocHarnessMaxTurns", "0")).toThrow(
+      "pocHarnessMaxTurns must be a positive number",
+    );
+    expect(() => setConfigValue("pocHarnessConcurrency", "0")).toThrow(
+      "pocHarnessConcurrency must be a positive number",
+    );
   });
 
   it("throws on invalid context/audit/retry values", () => {
@@ -275,6 +315,9 @@ describe("setConfigValue", () => {
     );
     expect(() => setConfigValue("maxVerifyRetries", "-1")).toThrow(
       "maxVerifyRetries must be a non-negative number",
+    );
+    expect(() => setConfigValue("maxPocHarnessRetries", "-1")).toThrow(
+      "maxPocHarnessRetries must be a non-negative number",
     );
     expect(() => setConfigValue("retryBackoffMs", "-1")).toThrow(
       "retryBackoffMs must be a non-negative number",
@@ -321,6 +364,13 @@ describe("unsetConfigValue", () => {
     expect(getConfigValue("verifyModel")).toBeUndefined();
   });
 
+  it("unsets optional pocHarnessModel", () => {
+    setConfigValue("pocHarnessModel", "claude-haiku-4-5-20251001");
+    expect(getConfigValue("pocHarnessModel")).toBe("claude-haiku-4-5-20251001");
+    unsetConfigValue("pocHarnessModel");
+    expect(getConfigValue("pocHarnessModel")).toBeUndefined();
+  });
+
   it("resets verify keys to defaults", () => {
     setConfigValue("verify", "true");
     setConfigValue("verifyMaxTurns", "25");
@@ -338,6 +388,20 @@ describe("unsetConfigValue", () => {
     expect(getConfigValue("verifyVerdicts")).toEqual(DEFAULTS.verifyVerdicts);
   });
 
+  it("resets poc harness keys to defaults", () => {
+    setConfigValue("pocHarness", "true");
+    setConfigValue("pocHarnessMaxTurns", "35");
+    setConfigValue("pocHarnessConcurrency", "3");
+
+    unsetConfigValue("pocHarness");
+    unsetConfigValue("pocHarnessMaxTurns");
+    unsetConfigValue("pocHarnessConcurrency");
+
+    expect(getConfigValue("pocHarness")).toBe(DEFAULTS.pocHarness);
+    expect(getConfigValue("pocHarnessMaxTurns")).toBe(DEFAULTS.pocHarnessMaxTurns);
+    expect(getConfigValue("pocHarnessConcurrency")).toBe(DEFAULTS.pocHarnessConcurrency);
+  });
+
   it("resets context/audit/retry keys to defaults", () => {
     setConfigValue("verifyMinConfidence", "0.8");
     setConfigValue("enableContextGathering", "false");
@@ -346,6 +410,7 @@ describe("unsetConfigValue", () => {
     setConfigValue("sarifOutput", "report.sarif");
     setConfigValue("maxTriageRetries", "9");
     setConfigValue("maxVerifyRetries", "8");
+    setConfigValue("maxPocHarnessRetries", "7");
     setConfigValue("retryBackoffMs", "42");
     setConfigValue("retryBackoffMultiplier", "3");
 
@@ -356,6 +421,7 @@ describe("unsetConfigValue", () => {
     unsetConfigValue("sarifOutput");
     unsetConfigValue("maxTriageRetries");
     unsetConfigValue("maxVerifyRetries");
+    unsetConfigValue("maxPocHarnessRetries");
     unsetConfigValue("retryBackoffMs");
     unsetConfigValue("retryBackoffMultiplier");
 
@@ -366,6 +432,7 @@ describe("unsetConfigValue", () => {
     expect(getConfigValue("sarifOutput")).toBe(DEFAULTS.sarifOutput);
     expect(getConfigValue("maxTriageRetries")).toBe(DEFAULTS.maxTriageRetries);
     expect(getConfigValue("maxVerifyRetries")).toBe(DEFAULTS.maxVerifyRetries);
+    expect(getConfigValue("maxPocHarnessRetries")).toBe(DEFAULTS.maxPocHarnessRetries);
     expect(getConfigValue("retryBackoffMs")).toBe(DEFAULTS.retryBackoffMs);
     expect(getConfigValue("retryBackoffMultiplier")).toBe(DEFAULTS.retryBackoffMultiplier);
   });

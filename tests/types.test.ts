@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { RepoContext, Verdict, TriageResult, ScanOpts } from "../src/types.js";
+import type { PocHarnessResult, RepoContext, Verdict, TriageResult, ScanOpts } from "../src/types.js";
 import type { Finding } from "../src/scanners/types.js";
 
 describe("types", () => {
@@ -60,5 +60,20 @@ describe("types", () => {
       entryPoints: ["src/pages/api/*"],
     };
     expect(context.frameworks).toContain("Express");
+  });
+
+  it("PocHarnessResult shape is constructible", () => {
+    const result: PocHarnessResult = {
+      fingerprint: "abc123",
+      scriptPath: "/tmp/repo/.kuzushi/poc/abc123-cwe89.ts",
+      language: "typescript",
+      scriptContent: "console.log('PASS')",
+      parsed: true,
+      parseError: null,
+      skipped: false,
+      skipReason: null,
+      costUsd: 0.01,
+    };
+    expect(result.parsed).toBe(true);
   });
 });

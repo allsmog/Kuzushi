@@ -141,4 +141,70 @@ describe("report-worker", () => {
     await bus.close();
     db.close();
   });
+
+  it("prints skipped poc harness results without parse-error suffix", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const config: KuzushiConfig = {
+      model: "claude-sonnet-4-20250514",
+      triageMaxTurns: 10,
+      busBackend: "in-process",
+      triageConcurrency: 1,
+      scanMode: "sequential",
+      scanners: ["semgrep"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      scannerConfig: { semgrep: {} },
+    };
+
+    registerReportWorker(bus, { db, config });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(
+      createEvent("poc-harness:result", runId, {
+        context,
+        finding: makeFinding("fp-poc-skip"),
+        triageResult: makeResult("fp-poc-skip"),
+        verificationResult: {
+          fingerprint: "fp-poc-skip",
+          exploitable: true,
+          pocPayload: "' OR 1=1 --",
+          pocDescription: "inject",
+          attackVector: "query",
+          preconditions: [],
+          confidence: 0.8,
+        },
+        result: {
+          fingerprint: "fp-poc-skip",
+          scriptPath: null,
+          language: "typescript",
+          scriptContent: null,
+          parsed: false,
+          parseError: null,
+          skipped: true,
+          skipReason: "cannot isolate",
+          costUsd: 0.01,
+        },
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    const output = vi.mocked(console.log).mock.calls
+      .map((call) => call.map((arg) => String(arg)).join(" "))
+      .join("\n");
+    expect(output).toContain("SKIPPED");
+    expect(output).not.toContain("parse-error");
+
+    await bus.close();
+    db.close();
+  });
 });

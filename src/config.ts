@@ -16,8 +16,11 @@ const BUS_BACKENDS = new Set<string>([
 ]);
 const AGENT_RUNTIME_BACKENDS = new Set<string>([
   "claude-sdk",
+  "pi-ai",
   "acp",
 ]);
+const DEFAULT_AUGUR_PATH = process.env["AUGUR_PATH"]?.trim()
+  || path.join(os.homedir(), "VibeCode", "open-sourced", "augur");
 
 /** Hard defaults — the bottom of the precedence stack. */
 export const DEFAULTS: KuzushiConfig = {
@@ -28,12 +31,16 @@ export const DEFAULTS: KuzushiConfig = {
   verifyConcurrency: 1,
   verifyVerdicts: ["tp"],
   verifyMinConfidence: 0,
+  pocHarness: false,
+  pocHarnessMaxTurns: 20,
+  pocHarnessConcurrency: 1,
   enableContextGathering: true,
   auditLog: false,
   reportOutput: undefined,
   sarifOutput: undefined,
   maxTriageRetries: 2,
   maxVerifyRetries: 2,
+  maxPocHarnessRetries: 2,
   retryBackoffMs: 5000,
   retryBackoffMultiplier: 2,
   busBackend: "in-process",
@@ -51,6 +58,21 @@ export const DEFAULTS: KuzushiConfig = {
     semgrep: { configFlag: "auto" },
     "claude-adk": { model: "claude-sonnet-4-20250514", maxFindings: 20 },
     codeql: {},
+    augur: {
+      augurPath: DEFAULT_AUGUR_PATH,
+      dbPath: undefined,
+      passes: [1, 2, 3, 4, 5, 6],
+      labelingModel: "claude-sonnet-4-20250514",
+      labelingBatchSize: 20,
+      labelingConfidenceThreshold: 0.55,
+      autoApproveCheckpoint: false,
+      workspaceDir: "./iris",
+      codeqlBinary: undefined,
+      python3Binary: "python3",
+      threads: undefined,
+      ram: undefined,
+      maxFindings: undefined,
+    },
   },
 };
 
@@ -58,6 +80,7 @@ const VALID_TOP_LEVEL_KEYS = new Set<string>([
   ...Object.keys(DEFAULTS),
   "triageModel",
   "verifyModel",
+  "pocHarnessModel",
 ]);
 
 /** Load config from ~/.kuzushi/config.json + optional <repo>/.kuzushi/config.json. */
@@ -197,6 +220,36 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "pocHarness") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("pocHarness must be true or false");
+    }
+    config.pocHarness = parsed;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "pocHarnessMaxTurns") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("pocHarnessMaxTurns must be a positive number");
+    }
+    config.pocHarnessMaxTurns = Math.floor(n);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "pocHarnessConcurrency") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("pocHarnessConcurrency must be a positive number");
+    }
+    config.pocHarnessConcurrency = Math.floor(n);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
   if (key === "enableContextGathering") {
     const parsed = parseFlexibleValue(raw);
     if (typeof parsed !== "boolean") {
@@ -245,6 +298,16 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("maxVerifyRetries must be a non-negative number");
     }
     config.maxVerifyRetries = Math.floor(n);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "maxPocHarnessRetries") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error("maxPocHarnessRetries must be a non-negative number");
+    }
+    config.maxPocHarnessRetries = Math.floor(n);
     saveConfig(normalizeConfig(config), repoRoot);
     return;
   }
@@ -331,6 +394,12 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "pocHarnessModel") {
+    config.pocHarnessModel = raw.trim() || undefined;
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
   throw new Error(`Unknown config key: ${key}`);
 }
 
@@ -356,6 +425,11 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
     else if (key === "verifyConcurrency") config.verifyConcurrency = DEFAULTS.verifyConcurrency;
     else if (key === "verifyVerdicts") config.verifyVerdicts = [...(DEFAULTS.verifyVerdicts ?? ["tp"])];
     else if (key === "verifyMinConfidence") config.verifyMinConfidence = DEFAULTS.verifyMinConfidence;
+    else if (key === "pocHarness") config.pocHarness = DEFAULTS.pocHarness;
+    else if (key === "pocHarnessMaxTurns") config.pocHarnessMaxTurns = DEFAULTS.pocHarnessMaxTurns;
+    else if (key === "pocHarnessConcurrency") {
+      config.pocHarnessConcurrency = DEFAULTS.pocHarnessConcurrency;
+    }
     else if (key === "enableContextGathering") {
       config.enableContextGathering = DEFAULTS.enableContextGathering;
     } else if (key === "auditLog") config.auditLog = DEFAULTS.auditLog;
@@ -363,6 +437,9 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
     else if (key === "sarifOutput") config.sarifOutput = DEFAULTS.sarifOutput;
     else if (key === "maxTriageRetries") config.maxTriageRetries = DEFAULTS.maxTriageRetries;
     else if (key === "maxVerifyRetries") config.maxVerifyRetries = DEFAULTS.maxVerifyRetries;
+    else if (key === "maxPocHarnessRetries") {
+      config.maxPocHarnessRetries = DEFAULTS.maxPocHarnessRetries;
+    }
     else if (key === "retryBackoffMs") config.retryBackoffMs = DEFAULTS.retryBackoffMs;
     else if (key === "retryBackoffMultiplier") {
       config.retryBackoffMultiplier = DEFAULTS.retryBackoffMultiplier;
@@ -380,6 +457,8 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
     config.triageModel = undefined;
   } else if (key === "verifyModel") {
     config.verifyModel = undefined;
+  } else if (key === "pocHarnessModel") {
+    config.pocHarnessModel = undefined;
   }
 
   saveConfig(normalizeConfig(config), repoRoot);
@@ -420,6 +499,16 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     config.verifyMinConfidence,
     DEFAULTS.verifyMinConfidence ?? 0,
   );
+  const pocHarness = normalizeBoolean(config.pocHarness, DEFAULTS.pocHarness ?? false);
+  const pocHarnessModel = normalizeOptionalString(config.pocHarnessModel);
+  const pocHarnessMaxTurns = normalizePositiveInt(
+    config.pocHarnessMaxTurns,
+    DEFAULTS.pocHarnessMaxTurns ?? 20,
+  );
+  const pocHarnessConcurrency = normalizePositiveInt(
+    config.pocHarnessConcurrency,
+    DEFAULTS.pocHarnessConcurrency ?? 1,
+  );
   const enableContextGathering = normalizeBoolean(
     config.enableContextGathering,
     DEFAULTS.enableContextGathering ?? true,
@@ -434,6 +523,10 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const maxVerifyRetries = normalizeNonNegativeInt(
     config.maxVerifyRetries,
     DEFAULTS.maxVerifyRetries ?? 2,
+  );
+  const maxPocHarnessRetries = normalizeNonNegativeInt(
+    config.maxPocHarnessRetries,
+    DEFAULTS.maxPocHarnessRetries ?? 2,
   );
   const retryBackoffMs = normalizeNonNegativeInt(
     config.retryBackoffMs,
@@ -456,12 +549,17 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     verifyConcurrency,
     verifyVerdicts,
     verifyMinConfidence,
+    pocHarness,
+    pocHarnessModel,
+    pocHarnessMaxTurns,
+    pocHarnessConcurrency,
     enableContextGathering,
     auditLog,
     reportOutput,
     sarifOutput,
     maxTriageRetries,
     maxVerifyRetries,
+    maxPocHarnessRetries,
     retryBackoffMs,
     retryBackoffMultiplier,
     busBackend,
@@ -529,6 +627,28 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
       merged.verifyMinConfidence = layer["verifyMinConfidence"];
     }
 
+    if (typeof layer["pocHarness"] === "boolean") {
+      merged.pocHarness = layer["pocHarness"];
+    }
+
+    if (typeof layer["pocHarnessModel"] === "string") {
+      merged.pocHarnessModel = layer["pocHarnessModel"];
+    }
+
+    if (
+      typeof layer["pocHarnessMaxTurns"] === "number"
+      && Number.isFinite(layer["pocHarnessMaxTurns"])
+    ) {
+      merged.pocHarnessMaxTurns = layer["pocHarnessMaxTurns"];
+    }
+
+    if (
+      typeof layer["pocHarnessConcurrency"] === "number"
+      && Number.isFinite(layer["pocHarnessConcurrency"])
+    ) {
+      merged.pocHarnessConcurrency = layer["pocHarnessConcurrency"];
+    }
+
     if (typeof layer["enableContextGathering"] === "boolean") {
       merged.enableContextGathering = layer["enableContextGathering"];
     }
@@ -557,6 +677,13 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
       && Number.isFinite(layer["maxVerifyRetries"])
     ) {
       merged.maxVerifyRetries = layer["maxVerifyRetries"];
+    }
+
+    if (
+      typeof layer["maxPocHarnessRetries"] === "number"
+      && Number.isFinite(layer["maxPocHarnessRetries"])
+    ) {
+      merged.maxPocHarnessRetries = layer["maxPocHarnessRetries"];
     }
 
     if (

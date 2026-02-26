@@ -1,6 +1,14 @@
 import type Database from "better-sqlite3";
-import { updateVerificationCost, updateVerificationResult, upsertFinding } from "../../store.js";
+import {
+  updatePocHarnessCost,
+  updatePocHarnessResult,
+  updateVerificationCost,
+  updateVerificationResult,
+  upsertFinding,
+} from "../../store.js";
 import type {
+  PocHarnessErrorEvent,
+  PocHarnessResultEvent,
   TriageResultEvent,
   VerificationErrorEvent,
   VerificationResultEvent,
@@ -72,5 +80,39 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): voi
       deps.ref ?? "HEAD",
     );
     updateVerificationCost(deps.db, finding.fingerprint, costUsd);
+  });
+
+  bus.subscribe<PocHarnessResultEvent>("poc-harness:result", async (event) => {
+    const { context, finding, triageResult, result, costUsd } = event.payload;
+    if (result.costUsd === undefined && typeof costUsd === "number") {
+      result.costUsd = costUsd;
+    }
+
+    updatePocHarnessResult(deps.db, finding.fingerprint, result);
+
+    await bus.publish(
+      createEvent("store:upserted", event.meta.runId, {
+        context,
+        fingerprint: finding.fingerprint,
+        verdict: triageResult.verdict,
+      }),
+    );
+  });
+
+  bus.subscribe<PocHarnessErrorEvent>("poc-harness:error", (event) => {
+    const { context, finding, triageResult, costUsd } = event.payload;
+    if (typeof costUsd !== "number" || !Number.isFinite(costUsd) || costUsd < 0) {
+      return;
+    }
+
+    // Ensure the row exists even if persistence ordering is delayed.
+    upsertFinding(
+      deps.db,
+      finding,
+      triageResult,
+      context.repoName,
+      deps.ref ?? "HEAD",
+    );
+    updatePocHarnessCost(deps.db, finding.fingerprint, costUsd);
   });
 }

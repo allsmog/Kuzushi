@@ -7,7 +7,7 @@ export type BusBackend = "in-process" | "redis" | "google-pubsub" | "nats";
 export type ScanMode = "sequential" | "concurrent";
 
 /** Runtime provider for agent execution. */
-export type AgentRuntimeBackend = "claude-sdk" | "acp";
+export type AgentRuntimeBackend = "claude-sdk" | "pi-ai" | "acp";
 
 /** Verdict assigned by AI triage. */
 export type Verdict = "tp" | "fp" | "needs_review";
@@ -44,6 +44,19 @@ export interface VerificationResult {
   verifyCostUsd?: number;
 }
 
+/** Result of PoC harness generation for a verified-exploitable finding. */
+export interface PocHarnessResult {
+  fingerprint: string;
+  scriptPath: string | null;
+  language: string | null;
+  scriptContent: string | null;
+  parsed: boolean;
+  parseError: string | null;
+  skipped: boolean;
+  skipReason: string | null;
+  costUsd?: number;
+}
+
 /** Heuristic repository metadata used to enrich triage/verification prompts. */
 export interface RepoContext {
   languages: string[];
@@ -74,6 +87,14 @@ export interface KuzushiConfig {
   verifyVerdicts?: Verdict[];
   /** Minimum triage confidence required before entering verification. */
   verifyMinConfidence?: number;
+  /** Enable post-verification PoC harness generation phase. */
+  pocHarness?: boolean;
+  /** Optional override model for PoC harness generation agents. */
+  pocHarnessModel?: string;
+  /** Max turns for PoC harness generation agents. */
+  pocHarnessMaxTurns?: number;
+  /** Number of in-flight PoC harness generation tasks. */
+  pocHarnessConcurrency?: number;
   /** Enable pre-scan repository context gathering task. */
   enableContextGathering?: boolean;
   /** Persist per-run JSONL audit logs. */
@@ -86,6 +107,8 @@ export interface KuzushiConfig {
   maxTriageRetries?: number;
   /** Retry count for verification worker transient failures. */
   maxVerifyRetries?: number;
+  /** Retry count for PoC harness worker transient failures. */
+  maxPocHarnessRetries?: number;
   /** Initial retry backoff delay in milliseconds. */
   retryBackoffMs?: number;
   /** Backoff multiplier applied per retry attempt. */
@@ -133,6 +156,13 @@ export interface FindingRow {
   verifyPreconditions?: string | null;
   verifyConfidence?: number | null;
   verifyCostUsd?: number | null;
+  pocHarnessPath?: string | null;
+  pocHarnessLanguage?: string | null;
+  pocHarnessParsed?: number | null;
+  pocHarnessParseError?: string | null;
+  pocHarnessSkipped?: number | null;
+  pocHarnessSkipReason?: string | null;
+  pocHarnessCostUsd?: number | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -6,8 +6,11 @@ import { registerOrchestrator } from "../../src/bus/orchestrator.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
 import type {
+  AugurCheckpointEvent,
   PipelineCompleteEvent,
   PipelineErrorEvent,
+  PocHarnessFindingQueuedEvent,
+  PocHarnessStartEvent,
   ReportRequestedEvent,
   ScanStartEvent,
   StageCompleteEvent,
@@ -16,6 +19,7 @@ import type {
   TriageFindingQueuedEvent,
   TriageQueueDepthEvent,
   TriageStartEvent,
+  VerificationCompleteEvent,
   VerificationFindingQueuedEvent,
   VerificationStartEvent,
 } from "../../src/bus/events.js";
@@ -23,6 +27,8 @@ import {
   createRun,
   getRun,
   initDb,
+  updatePocHarnessResult,
+  updateVerificationResult,
   updateRunFindings,
   updateRunStatus,
   upsertFinding,
@@ -667,6 +673,615 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
+  it("emits verification:complete only once even if duplicate verification results arrive", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      verify: true,
+      pocHarness: true,
+    };
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    let verificationCompleteCount = 0;
+    bus.subscribe<VerificationCompleteEvent>("verification:complete", (event) => {
+      if (event.meta.runId === runId) {
+        verificationCompleteCount += 1;
+      }
+    });
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: makeFinding("fp-dup-verify", 60),
+        scannerId: "semgrep",
+      }),
+    );
+
+    const triageQueuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
+      "triage:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 1,
+      }),
+    );
+    const triageQueued = await triageQueuedPromise;
+
+    const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
+      "verification:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+    const pocStartPromise = bus.waitFor<PocHarnessStartEvent>(
+      "poc-harness:start",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("triage:result", runId, {
+        context,
+        finding: triageQueued.payload.finding,
+        result: makeResult(triageQueued.payload.finding.fingerprint),
+        index: triageQueued.payload.index,
+        total: triageQueued.payload.total,
+      }),
+    );
+
+    const verificationQueued = await verificationQueuedPromise;
+    const payload = {
+      context,
+      finding: verificationQueued.payload.finding,
+      triageResult: verificationQueued.payload.triageResult,
+      result: {
+        fingerprint: verificationQueued.payload.finding.fingerprint,
+        exploitable: true,
+        pocPayload: "' OR 1=1 --",
+        pocDescription: "inject",
+        attackVector: "http",
+        preconditions: [],
+        confidence: 0.9,
+      },
+      index: verificationQueued.payload.index,
+      total: verificationQueued.payload.total,
+    };
+
+    await bus.publish(createEvent("verification:result", runId, payload));
+    await pocStartPromise;
+    await bus.publish(createEvent("verification:result", runId, payload));
+    await Promise.resolve();
+
+    expect(verificationCompleteCount).toBe(1);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("skips poc-harness phase when disabled", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      verify: true,
+      pocHarness: false,
+    };
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    let sawPocHarnessStart = false;
+    bus.subscribe<PocHarnessStartEvent>("poc-harness:start", (event) => {
+      if (event.meta.runId === runId) {
+        sawPocHarnessStart = true;
+      }
+    });
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: makeFinding("fp-no-poc", 80),
+        scannerId: "semgrep",
+      }),
+    );
+
+    const triageQueuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
+      "triage:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 1,
+      }),
+    );
+
+    const triageQueued = await triageQueuedPromise;
+    const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
+      "verification:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
+      "report:requested",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("triage:result", runId, {
+        context,
+        finding: triageQueued.payload.finding,
+        result: makeResult(triageQueued.payload.finding.fingerprint),
+        index: triageQueued.payload.index,
+        total: triageQueued.payload.total,
+      }),
+    );
+
+    const verificationQueued = await verificationQueuedPromise;
+    await bus.publish(
+      createEvent("verification:result", runId, {
+        context,
+        finding: verificationQueued.payload.finding,
+        triageResult: verificationQueued.payload.triageResult,
+        result: {
+          fingerprint: verificationQueued.payload.finding.fingerprint,
+          exploitable: true,
+          pocPayload: "' OR 1=1 --",
+          pocDescription: "inject input",
+          attackVector: "http",
+          preconditions: [],
+          confidence: 0.9,
+        },
+        index: verificationQueued.payload.index,
+        total: verificationQueued.payload.total,
+      }),
+    );
+
+    await reportRequestedPromise;
+    expect(sawPocHarnessStart).toBe(false);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("skips poc-harness phase when verification finds no exploitable issues", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      verify: true,
+      pocHarness: true,
+    };
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    let sawPocHarnessStart = false;
+    bus.subscribe<PocHarnessStartEvent>("poc-harness:start", (event) => {
+      if (event.meta.runId === runId) {
+        sawPocHarnessStart = true;
+      }
+    });
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: makeFinding("fp-no-exploit", 70),
+        scannerId: "semgrep",
+      }),
+    );
+
+    const triageQueuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
+      "triage:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 1,
+      }),
+    );
+
+    const triageQueued = await triageQueuedPromise;
+    const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
+      "verification:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
+      "report:requested",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("triage:result", runId, {
+        context,
+        finding: triageQueued.payload.finding,
+        result: makeResult(triageQueued.payload.finding.fingerprint),
+        index: triageQueued.payload.index,
+        total: triageQueued.payload.total,
+      }),
+    );
+
+    const verificationQueued = await verificationQueuedPromise;
+    await bus.publish(
+      createEvent("verification:result", runId, {
+        context,
+        finding: verificationQueued.payload.finding,
+        triageResult: verificationQueued.payload.triageResult,
+        result: {
+          fingerprint: verificationQueued.payload.finding.fingerprint,
+          exploitable: false,
+          pocPayload: null,
+          pocDescription: "blocked by input validation",
+          attackVector: null,
+          preconditions: [],
+          confidence: 0.8,
+        },
+        index: verificationQueued.payload.index,
+        total: verificationQueued.payload.total,
+      }),
+    );
+
+    await reportRequestedPromise;
+    expect(sawPocHarnessStart).toBe(false);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("waits for poc-harness completion before requesting report", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      verify: true,
+      pocHarness: true,
+      pocHarnessConcurrency: 1,
+    };
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    let sawReportRequested = false;
+    bus.subscribe<ReportRequestedEvent>("report:requested", (event) => {
+      if (event.meta.runId === runId) {
+        sawReportRequested = true;
+      }
+    });
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: makeFinding("fp-poc-gate", 85),
+        scannerId: "semgrep",
+      }),
+    );
+
+    const triageQueuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
+      "triage:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 1,
+      }),
+    );
+    const triageQueued = await triageQueuedPromise;
+
+    const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
+      "verification:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+    await bus.publish(
+      createEvent("triage:result", runId, {
+        context,
+        finding: triageQueued.payload.finding,
+        result: makeResult(triageQueued.payload.finding.fingerprint),
+        index: triageQueued.payload.index,
+        total: triageQueued.payload.total,
+      }),
+    );
+
+    const verificationQueued = await verificationQueuedPromise;
+    const pocStartPromise = bus.waitFor<PocHarnessStartEvent>(
+      "poc-harness:start",
+      (event) => event.meta.runId === runId,
+    );
+    const pocQueuedPromise = bus.waitFor<PocHarnessFindingQueuedEvent>(
+      "poc-harness:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
+      "report:requested",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("verification:result", runId, {
+        context,
+        finding: verificationQueued.payload.finding,
+        triageResult: verificationQueued.payload.triageResult,
+        result: {
+          fingerprint: verificationQueued.payload.finding.fingerprint,
+          exploitable: true,
+          pocPayload: "' OR 1=1 --",
+          pocDescription: "inject input",
+          attackVector: "http",
+          preconditions: [],
+          confidence: 0.95,
+        },
+        index: verificationQueued.payload.index,
+        total: verificationQueued.payload.total,
+      }),
+    );
+
+    const pocStart = await pocStartPromise;
+    expect(pocStart.payload.findingCount).toBe(1);
+    const pocQueued = await pocQueuedPromise;
+
+    await Promise.resolve();
+    expect(sawReportRequested).toBe(false);
+
+    await bus.publish(
+      createEvent("poc-harness:result", runId, {
+        context,
+        finding: pocQueued.payload.finding,
+        triageResult: pocQueued.payload.triageResult,
+        verificationResult: pocQueued.payload.verificationResult,
+        result: {
+          fingerprint: pocQueued.payload.finding.fingerprint,
+          scriptPath: "/tmp/repo/.kuzushi/poc/fp.ts",
+          language: "typescript",
+          scriptContent: "console.log('PASS')",
+          parsed: true,
+          parseError: null,
+          skipped: false,
+          skipReason: null,
+        },
+        costUsd: 0.02,
+        index: pocQueued.payload.index,
+        total: pocQueued.payload.total,
+      }),
+    );
+
+    await reportRequestedPromise;
+    expect(sawReportRequested).toBe(true);
+
+    const completePromise = bus.waitFor<PipelineCompleteEvent>(
+      "pipeline:complete",
+      (event) => event.meta.runId === runId,
+    );
+    await bus.publish(
+      createEvent("report:complete", runId, {
+        context,
+      }),
+    );
+    const complete = await completePromise;
+    expect(complete.payload.stats.pocHarnessCostUsd).toBeCloseTo(0.02, 8);
+    expect(complete.payload.stats.totalCostUsd).toBeCloseTo(0.02, 8);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("resumes poc-harnessing runs by dispatching only pending harness generation", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      verify: true,
+      pocHarness: true,
+    };
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+
+    const resumeRunId = "resume-poc";
+    createRun(db, resumeRunId, "repo", config, makeScanOpts());
+    updateRunStatus(db, resumeRunId, "poc-harnessing");
+
+    const completed = makeFinding("fp-poc-done", 80);
+    const pending = makeFinding("fp-poc-pending", 70);
+    updateRunFindings(db, resumeRunId, [completed, pending]);
+
+    upsertFinding(db, completed, makeResult(completed.fingerprint), "repo", "HEAD");
+    upsertFinding(db, pending, makeResult(pending.fingerprint), "repo", "HEAD");
+
+    updateVerificationResult(db, completed.fingerprint, {
+      fingerprint: completed.fingerprint,
+      exploitable: true,
+      pocPayload: "' OR 1=1 --",
+      pocDescription: "inject",
+      attackVector: "http",
+      preconditions: [],
+      confidence: 0.9,
+      verifyCostUsd: 0.01,
+    });
+    updateVerificationResult(db, pending.fingerprint, {
+      fingerprint: pending.fingerprint,
+      exploitable: true,
+      pocPayload: "' OR 1=1 --",
+      pocDescription: "inject",
+      attackVector: "http",
+      preconditions: [],
+      confidence: 0.9,
+      verifyCostUsd: 0.01,
+    });
+
+    updatePocHarnessResult(db, completed.fingerprint, {
+      fingerprint: completed.fingerprint,
+      scriptPath: "/tmp/repo/.kuzushi/poc/fp-poc-done-cwe79.ts",
+      language: "typescript",
+      scriptContent: "console.log('PASS')",
+      parsed: true,
+      parseError: null,
+      skipped: false,
+      skipReason: null,
+      costUsd: 0.02,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    let sawScanStart = false;
+    let sawTriageStart = false;
+    let sawVerificationStart = false;
+    bus.subscribe<ScanStartEvent>("scan:start", (event) => {
+      if (event.meta.runId === runId) {
+        sawScanStart = true;
+      }
+    });
+    bus.subscribe<TriageStartEvent>("triage:start", (event) => {
+      if (event.meta.runId === runId) {
+        sawTriageStart = true;
+      }
+    });
+    bus.subscribe<VerificationStartEvent>("verification:start", (event) => {
+      if (event.meta.runId === runId) {
+        sawVerificationStart = true;
+      }
+    });
+
+    const queuedPromise = bus.waitFor<PocHarnessFindingQueuedEvent>(
+      "poc-harness:finding-queued",
+      (event) => event.meta.runId === runId,
+    );
+    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
+      "report:requested",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: makeScanOpts(),
+        resumeRunId,
+      }),
+    );
+
+    const queued = await queuedPromise;
+    expect(queued.payload.finding.fingerprint).toBe("fp-poc-pending");
+    expect(sawScanStart).toBe(false);
+    expect(sawTriageStart).toBe(false);
+    expect(sawVerificationStart).toBe(false);
+
+    await bus.publish(
+      createEvent("poc-harness:result", runId, {
+        context,
+        finding: queued.payload.finding,
+        triageResult: queued.payload.triageResult,
+        verificationResult: queued.payload.verificationResult,
+        result: {
+          fingerprint: queued.payload.finding.fingerprint,
+          scriptPath: "/tmp/repo/.kuzushi/poc/fp-poc-pending-cwe79.ts",
+          language: "typescript",
+          scriptContent: "console.log('PASS')",
+          parsed: true,
+          parseError: null,
+          skipped: false,
+          skipReason: null,
+        },
+        index: queued.payload.index,
+        total: queued.payload.total,
+      }),
+    );
+
+    await reportRequestedPromise;
+
+    await bus.close();
+    db.close();
+  });
+
   it("resumes from checkpointed findings and skips scan phase", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
@@ -1186,6 +1801,234 @@ describe("PipelineOrchestrator", () => {
     expect(taskStartOrder).toEqual(["semgrep", "post-analysis"]);
     expect(Array.isArray(upstreamFromSemgrep)).toBe(true);
     expect((upstreamFromSemgrep as Finding[])[0].fingerprint).toBe("fp-semgrep");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("pauses DAG progression on checkpoint outputs until approval is published", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    const taskRegistry = new TaskRegistry();
+
+    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding("fp-checkpoint", 90)];
+      },
+    };
+
+    const checkpointTask: AgentTask<ScanOpts, Record<string, unknown>> = {
+      id: "checkpoint-task",
+      displayName: "Checkpoint Task",
+      outputKind: "custom",
+      dependsOn: ["semgrep"],
+      async run() {
+        return {
+          checkpointRequired: true,
+          reviewSummary: "checkpoint summary",
+          labelCounts: {
+            "pass1.source": 2,
+          },
+        };
+      },
+    };
+
+    let postStarted = false;
+    const postTask: AgentTask<ScanOpts, { ok: boolean }> = {
+      id: "post-task",
+      displayName: "Post Task",
+      outputKind: "custom",
+      dependsOn: ["checkpoint-task"],
+      async run() {
+        postStarted = true;
+        return { ok: true };
+      },
+    };
+
+    taskRegistry.register(semgrepTask);
+    taskRegistry.register(checkpointTask);
+    taskRegistry.register(postTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const checkpointPromise = bus.waitFor<AugurCheckpointEvent>(
+      "augur:checkpoint",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enabledTasks: ["checkpoint-task", "post-task"],
+        },
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    const checkpoint = await checkpointPromise;
+    expect(checkpoint.payload.reviewSummary).toContain("checkpoint summary");
+
+    await expect(
+      bus.waitFor<TaskStartEvent>(
+        "task:start",
+        (event) => event.meta.runId === runId && event.payload.taskId === "post-task",
+        150,
+      ),
+    ).rejects.toThrow("Timed out");
+    expect(postStarted).toBe(false);
+
+    await bus.publish(
+      createEvent("augur:checkpoint-approved", runId, {
+        context,
+        reviewer: "test-reviewer",
+      }),
+    );
+
+    await bus.waitFor<TaskStartEvent>(
+      "task:start",
+      (event) => event.meta.runId === runId && event.payload.taskId === "post-task",
+    );
+    expect(postStarted).toBe(true);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("skips checkpoint wait when augur auto-approve is enabled", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding("fp-auto-approve", 91)];
+      },
+    };
+
+    const checkpointTask: AgentTask<ScanOpts, Record<string, unknown>> = {
+      id: "checkpoint-task",
+      displayName: "Checkpoint Task",
+      outputKind: "custom",
+      dependsOn: ["semgrep"],
+      async run() {
+        return {
+          checkpointRequired: true,
+          reviewSummary: "checkpoint summary",
+          labelCounts: {
+            "pass1.sink": 3,
+          },
+        };
+      },
+    };
+
+    const postTask: AgentTask<ScanOpts, { ok: boolean }> = {
+      id: "post-task",
+      displayName: "Post Task",
+      outputKind: "custom",
+      dependsOn: ["checkpoint-task"],
+      async run() {
+        return { ok: true };
+      },
+    };
+
+    taskRegistry.register(semgrepTask);
+    taskRegistry.register(checkpointTask);
+    taskRegistry.register(postTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enabledTasks: ["checkpoint-task", "post-task"],
+          scannerConfig: {
+            semgrep: {},
+            augur: {
+              autoApproveCheckpoint: true,
+            },
+          },
+        },
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    await bus.waitFor<TaskStartEvent>(
+      "task:start",
+      (event) => event.meta.runId === runId && event.payload.taskId === "post-task",
+    );
+
+    await expect(
+      bus.waitFor<AugurCheckpointEvent>(
+        "augur:checkpoint",
+        (event) => event.meta.runId === runId,
+        150,
+      ),
+    ).rejects.toThrow("Timed out");
 
     await bus.close();
     db.close();

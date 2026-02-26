@@ -1,8 +1,12 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
 import {
   getActionableFindings,
+  getPocHarnessCounts,
   getTotalCost,
+  getTotalPocHarnessCost,
   getTotalVerificationCost,
   getVerificationCounts,
   getVerdictCounts,
@@ -21,8 +25,10 @@ export function generateMarkdownReport(
 ): string {
   const verdictCounts = getVerdictCounts(db, repo);
   const verificationCounts = getVerificationCounts(db, repo);
+  const pocHarnessCounts = getPocHarnessCounts(db, repo);
   const triageCostUsd = getTotalCost(db, repo);
   const verifyCostUsd = getTotalVerificationCost(db, repo);
+  const pocHarnessCostUsd = getTotalPocHarnessCost(db, repo);
   const actionable = getActionableFindings(db, repo);
 
   const runMeta = db.prepare(`
@@ -54,9 +60,13 @@ export function generateMarkdownReport(
   lines.push(`| False positives | ${verdictCounts.fp} |`);
   lines.push(`| Exploitable | ${verificationCounts.exploitable} |`);
   lines.push(`| Not exploitable | ${verificationCounts.notExploitable} |`);
+  lines.push(`| PoC harnesses generated | ${pocHarnessCounts.generated} |`);
+  lines.push(`| PoC harnesses skipped | ${pocHarnessCounts.skipped} |`);
+  lines.push(`| PoC harness errors | ${stats.pocHarnessErrors ?? 0} |`);
   lines.push(`| Triage cost (USD) | ${triageCostUsd.toFixed(4)} |`);
   lines.push(`| Verification cost (USD) | ${verifyCostUsd.toFixed(4)} |`);
-  lines.push(`| Total cost (USD) | ${(triageCostUsd + verifyCostUsd).toFixed(4)} |`);
+  lines.push(`| PoC harness cost (USD) | ${pocHarnessCostUsd.toFixed(4)} |`);
+  lines.push(`| Total cost (USD) | ${(triageCostUsd + verifyCostUsd + pocHarnessCostUsd).toFixed(4)} |`);
 
   lines.push("");
   lines.push("## Actionable Findings");
@@ -109,6 +119,48 @@ export function generateMarkdownReport(
         }
         lines.push("");
       }
+
+      if (finding.pocHarnessPath) {
+        lines.push(`PoC harness path: \`${finding.pocHarnessPath}\``);
+      } else if (finding.pocHarnessSkipped === 1) {
+        lines.push(`PoC harness: **Skipped** (${finding.pocHarnessSkipReason ?? "no reason provided"})`);
+      } else {
+        lines.push("PoC harness: **Not generated**");
+      }
+      lines.push("");
+      if (finding.pocHarnessParsed === 0 && finding.pocHarnessParseError) {
+        lines.push(`PoC harness parse check: **Failed** (${finding.pocHarnessParseError})`);
+        lines.push("");
+      }
+    }
+  }
+
+  lines.push("## PoC Harnesses");
+  lines.push("");
+  const findingsWithHarness = actionable.filter((finding) => Boolean(finding.pocHarnessPath));
+  if (findingsWithHarness.length === 0) {
+    lines.push("No PoC harnesses generated.");
+  } else {
+    for (const finding of findingsWithHarness) {
+      const scriptPath = finding.pocHarnessPath as string;
+      lines.push(`### ${finding.ruleId} (${finding.fingerprint.slice(0, 12)}...)`);
+      lines.push("");
+      lines.push(`- Path: \`${scriptPath}\``);
+      lines.push(`- Parsed: ${finding.pocHarnessParsed === 1 ? "yes" : "no"}`);
+      lines.push("");
+
+      if (!existsSync(scriptPath)) {
+        lines.push("_Script file not found on disk._");
+        lines.push("");
+        continue;
+      }
+
+      const script = readFileSync(scriptPath, "utf-8");
+      const language = languageFromPath(scriptPath, finding.pocHarnessLanguage);
+      lines.push(`\`\`\`${language}`);
+      lines.push(script);
+      lines.push("```");
+      lines.push("");
     }
   }
 
@@ -120,6 +172,18 @@ export function generateMarkdownReport(
   lines.push(`- Scanners: ${scanners.length > 0 ? scanners.join(", ") : "unknown"}`);
 
   return `${lines.join("\n")}\n`;
+}
+
+function languageFromPath(filePath: string, fallback: string | null): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".ts") return "ts";
+  if (ext === ".js" || ext === ".mjs" || ext === ".cjs") return "js";
+  if (ext === ".py") return "python";
+  if (ext === ".sh") return "sh";
+  if (fallback && fallback.trim().length > 0) {
+    return fallback.trim().toLowerCase();
+  }
+  return "text";
 }
 
 function parsePreconditions(raw: string | null): string[] {

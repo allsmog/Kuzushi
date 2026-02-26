@@ -11,6 +11,7 @@ import { registerReportWorker } from "./workers/report-worker.js";
 import { registerScanWorker } from "./workers/scan-worker.js";
 import { registerStoreWorker } from "./workers/store-worker.js";
 import { registerTriageWorker } from "./workers/triage-worker.js";
+import { registerPocHarnessWorker } from "./workers/poc-harness-worker.js";
 import { registerVerificationWorker } from "./workers/verification-worker.js";
 
 export interface RegisterWorkersDeps {
@@ -39,6 +40,12 @@ export function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): 
   registerVerificationWorker(bus, {
     config: deps.config,
   });
+
+  if (deps.config.pocHarness) {
+    registerPocHarnessWorker(bus, {
+      config: deps.config,
+    });
+  }
 
   registerStoreWorker(bus, {
     db: deps.db,
@@ -74,6 +81,7 @@ export * from "./adapters/nats.js";
 export * from "./workers/scan-worker.js";
 export * from "./workers/triage-worker.js";
 export * from "./workers/verification-worker.js";
+export * from "./workers/poc-harness-worker.js";
 export * from "./workers/store-worker.js";
 export * from "./workers/audit-worker.js";
 export * from "./workers/report-worker.js";
