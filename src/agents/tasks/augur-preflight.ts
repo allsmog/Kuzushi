@@ -9,6 +9,11 @@ import type { ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask } from "../types.js";
 import {
+  generateExtractionQuery,
+  hasBodyPlaceholders,
+} from "./augur-extraction-agent.js";
+import {
+  DEFAULT_AUGUR_TASK_CONFIG,
   mapFrameworkToReference,
   normalizeAugurLanguage,
   resolveAugurConfig,
@@ -16,6 +21,16 @@ import {
   type AugurPreflightOutput,
   type AugurTaskConfig,
 } from "./augur-types.js";
+
+interface ExtractionAgentContext {
+  referenceFiles: string[];
+  augurPath: string;
+  model: string;
+  repoRoot: string;
+  workspaceDir: string;
+  codeqlBinary: string;
+  dbPath: string;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +90,7 @@ export const augurPreflightTask: AgentTask<ScanOpts, AugurPreflightOutput> = {
     const language = normalizeAugurLanguage(detectedLanguage);
     const framework = await detectPrimaryFramework(context.repoRoot, context.upstreamOutputs.get("context-gatherer"));
     const referenceFiles = await resolveReferenceFiles(augurPath, language, framework);
+    const extractionModel = cfg.extractionModel || cfg.labelingModel;
 
     await writeQlpack(workspaceDir, language);
     await runCodeql(
@@ -90,6 +106,7 @@ export const augurPreflightTask: AgentTask<ScanOpts, AugurPreflightOutput> = {
       framework,
       referenceFiles,
       cfg,
+      extractionModel,
     );
 
     const extractionDir = path.join(workspaceDir, "extraction");
@@ -99,15 +116,27 @@ export const augurPreflightTask: AgentTask<ScanOpts, AugurPreflightOutput> = {
     const sourcesTemplatePath = path.join(augurPath, "assets", "extraction", `${language}_sources.ql.tmpl`);
     const sinksTemplatePath = path.join(augurPath, "assets", "extraction", `${language}_sinks.ql.tmpl`);
 
+    const agentCtx: ExtractionAgentContext = {
+      referenceFiles,
+      augurPath,
+      model: extractionModel,
+      repoRoot: context.repoRoot,
+      workspaceDir,
+      codeqlBinary,
+      dbPath,
+    };
+
     const sourcesQuery = await renderExtractionTemplate(
       sourcesTemplatePath,
       language,
       "source",
+      agentCtx,
     );
     const sinksQuery = await renderExtractionTemplate(
       sinksTemplatePath,
       language,
       "sink",
+      agentCtx,
     );
 
     await writeFile(sourcesQueryPath, sourcesQuery, "utf-8");
@@ -244,6 +273,7 @@ async function writeManifestAndDetection(
   framework: string | null,
   referenceFiles: string[],
   cfg: AugurTaskConfig,
+  extractionModel: string,
 ): Promise<void> {
   const generatedAt = new Date().toISOString();
   const manifestPath = path.join(workspaceDir, "exploration", "run_manifest.json");
@@ -256,7 +286,9 @@ async function writeManifestAndDetection(
       dbPath,
       language,
       selectedPasses: cfg.passes,
-      model: cfg.labelingModel,
+      model: extractionModel,
+      extractionModel,
+      labelingModel: cfg.labelingModel,
     }, null, 2),
     "utf-8",
   );
@@ -409,13 +441,37 @@ async function renderExtractionTemplate(
   templatePath: string,
   language: AugurLanguage,
   kind: "source" | "sink",
+  agentCtx?: ExtractionAgentContext,
 ): Promise<string> {
   let template = "";
   if (existsSync(templatePath)) {
     template = await readFile(templatePath, "utf-8");
   }
 
-  if (!template || template.includes("{{SOURCE_HANDLER_PREDICATE}}") || template.includes("{{SINK_CALL_PREDICATE}}")) {
+  if (!template) {
+    return fallbackExtractionQuery(language, kind);
+  }
+
+  // Kind-specific gate: only templates with unresolved body placeholders need
+  // the agent path. Python templates (which have hardcoded predicates) skip this.
+  if (hasBodyPlaceholders(template, kind)) {
+    if (agentCtx) {
+      try {
+        const generated = await generateExtractionQuery({
+          language,
+          kind,
+          template,
+          ...agentCtx,
+        });
+        if (generated) {
+          return generated;
+        }
+      } catch (error) {
+        process.stderr.write(
+          `[augur-preflight] Agent extraction failed for ${language}/${kind}, using fallback: ${toErrorMessage(error)}\n`,
+        );
+      }
+    }
     return fallbackExtractionQuery(language, kind);
   }
 
@@ -538,7 +594,22 @@ function toAbsolutePath(repoRoot: string, candidate: string): string {
 }
 
 export function resolveWorkspaceDir(repoRoot: string, workspaceDir: string): string {
-  return toAbsolutePath(repoRoot, workspaceDir);
+  const absoluteRepoRoot = path.resolve(repoRoot);
+  const resolvedWorkspace = toAbsolutePath(absoluteRepoRoot, workspaceDir);
+  if (isWithinRoot(absoluteRepoRoot, resolvedWorkspace)) {
+    return resolvedWorkspace;
+  }
+
+  const fallbackWorkspace = toAbsolutePath(absoluteRepoRoot, DEFAULT_AUGUR_TASK_CONFIG.workspaceDir);
+  process.stderr.write(
+    `[augur-preflight] Ignoring workspaceDir outside repo root: ${workspaceDir}; using ${fallbackWorkspace}\n`,
+  );
+  return fallbackWorkspace;
+}
+
+function isWithinRoot(rootPath: string, candidatePath: string): boolean {
+  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 export const __augurPreflightInternals = {
@@ -547,4 +618,5 @@ export const __augurPreflightInternals = {
   resolveReferenceFiles,
   resolveWorkspaceDir,
   initializeWorkspace,
+  writeManifestAndDetection,
 };

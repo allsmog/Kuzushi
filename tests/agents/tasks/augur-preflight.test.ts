@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { __augurPreflightInternals } from "../../../src/agents/tasks/augur-preflight.js";
+import { DEFAULT_AUGUR_TASK_CONFIG } from "../../../src/agents/tasks/augur-types.js";
 
 const TMP_ROOT = path.join(import.meta.dirname, "..", "..", ".tmp-augur-preflight");
 
@@ -18,6 +19,14 @@ describe("augur-preflight internals", () => {
   it("resolves workspace path relative to repo root", () => {
     const workspace = __augurPreflightInternals.resolveWorkspaceDir("/tmp/repo", "./iris");
     expect(workspace).toBe(path.resolve("/tmp/repo", "./iris"));
+  });
+
+  it("clamps workspace path to repo root when config escapes upward", () => {
+    const repoRoot = path.join(TMP_ROOT, "repo");
+    mkdirSync(repoRoot, { recursive: true });
+
+    const workspace = __augurPreflightInternals.resolveWorkspaceDir(repoRoot, "../outside-iris");
+    expect(workspace).toBe(path.resolve(repoRoot, "./iris"));
   });
 
   it("creates Augur workspace directory tree", async () => {
@@ -107,5 +116,82 @@ describe("augur-preflight internals", () => {
 
     const rendered = await __augurPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
     expect(rendered).toContain("@id augur/extraction/fallback-source");
+  });
+
+  it("falls back without agentCtx even when body placeholders present", async () => {
+    const templatePath = path.join(TMP_ROOT, "go-source.ql.tmpl");
+    writeFileSync(templatePath, [
+      "import go",
+      "{{SOURCE_HANDLER_PREDICATE}}",
+      "from {{SOURCE_NODE_BINDINGS}}",
+      "where {{SOURCE_WHERE}}",
+      "select {{SOURCE_SELECT}}",
+    ].join("\n"), "utf-8");
+
+    // No agentCtx → should use deterministic fallback
+    const rendered = await __augurPreflightInternals.renderExtractionTemplate(
+      templatePath,
+      "go",
+      "source",
+    );
+    expect(rendered).toContain("@id augur/extraction/fallback-source");
+    expect(rendered).toContain("where false");
+  });
+
+  it("gracefully falls back when agent throws", async () => {
+    const templatePath = path.join(TMP_ROOT, "go-source-err.ql.tmpl");
+    writeFileSync(templatePath, [
+      "import go",
+      "{{SOURCE_HANDLER_PREDICATE}}",
+      "from DataFlow::Node n",
+      "where true",
+      "select n",
+    ].join("\n"), "utf-8");
+
+    // Agent will fail (no runtime configured) but should fall back gracefully
+    const rendered = await __augurPreflightInternals.renderExtractionTemplate(
+      templatePath,
+      "go",
+      "source",
+      {
+        referenceFiles: [],
+        augurPath: TMP_ROOT,
+        model: "nonexistent-model",
+        repoRoot: TMP_ROOT,
+        workspaceDir: path.join(TMP_ROOT, "iris"),
+        codeqlBinary: "/usr/bin/false",
+        dbPath: "/tmp/test.db",
+      },
+    );
+
+    // Should fall back to deterministic fallback
+    expect(rendered).toContain("@id augur/extraction/fallback-source");
+    expect(rendered).toContain("where false");
+  });
+
+  it("writes manifest model fields aligned with effective extraction model", async () => {
+    const workspaceDir = path.join(TMP_ROOT, "iris");
+    mkdirSync(path.join(workspaceDir, "exploration"), { recursive: true });
+
+    await __augurPreflightInternals.writeManifestAndDetection(
+      workspaceDir,
+      "/tmp/db",
+      "python",
+      "fastapi",
+      [],
+      {
+        ...DEFAULT_AUGUR_TASK_CONFIG,
+        labelingModel: "label-model",
+        extractionModel: "extract-model",
+      },
+      "extract-model",
+    );
+
+    const manifestPath = path.join(workspaceDir, "exploration", "run_manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
+
+    expect(manifest["model"]).toBe("extract-model");
+    expect(manifest["extractionModel"]).toBe("extract-model");
+    expect(manifest["labelingModel"]).toBe("label-model");
   });
 });
