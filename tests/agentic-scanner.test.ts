@@ -1,17 +1,17 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  computeClaudeAdkFingerprint,
-  parseClaudeAdkOutput,
-  selectClaudeFindings,
-} from "../src/scanners/run-claude-adk.js";
+  computeAgenticFingerprint,
+  parseAgenticOutput,
+  selectAgenticFindings,
+} from "../src/scanners/run-agentic.js";
 
-describe("parseClaudeAdkOutput", () => {
+describe("parseAgenticOutput", () => {
   it("parses structured object output", () => {
-    const parsed = parseClaudeAdkOutput({
+    const parsed = parseAgenticOutput({
       findings: [
         {
-          ruleId: "claude-adk.sql.injection",
+          ruleId: "agentic.sql.injection",
           filePath: "src/app.ts",
           startLine: 12,
           severity: "ERROR",
@@ -27,11 +27,11 @@ describe("parseClaudeAdkOutput", () => {
     });
 
     expect(parsed.findings).toHaveLength(1);
-    expect(parsed.findings[0].ruleId).toBe("claude-adk.sql.injection");
+    expect(parsed.findings[0].ruleId).toBe("agentic.sql.injection");
   });
 
   it("parses markdown-fenced JSON", () => {
-    const parsed = parseClaudeAdkOutput(
+    const parsed = parseAgenticOutput(
       '```json\n{"findings":[{"ruleId":"x","filePath":"a.ts","startLine":1,"severity":"INFO","message":"msg"}]}\n```',
     );
 
@@ -40,7 +40,7 @@ describe("parseClaudeAdkOutput", () => {
   });
 
   it("normalizes invalid enums to safe defaults", () => {
-    const parsed = parseClaudeAdkOutput({
+    const parsed = parseAgenticOutput({
       findings: [
         {
           ruleId: "x",
@@ -63,14 +63,14 @@ describe("parseClaudeAdkOutput", () => {
   });
 });
 
-describe("selectClaudeFindings", () => {
+describe("selectAgenticFindings", () => {
   it("maps output to Finding with scanner tag", () => {
     const repoRoot = path.resolve("/tmp/repo");
-    const selected = selectClaudeFindings(
+    const selected = selectAgenticFindings(
       {
         findings: [
           {
-            ruleId: "claude-adk.path.traversal",
+            ruleId: "agentic.path.traversal",
             filePath: "/tmp/repo/src/server.ts",
             startLine: 44,
             severity: "ERROR",
@@ -90,12 +90,12 @@ describe("selectClaudeFindings", () => {
     );
 
     expect(selected).toHaveLength(1);
-    expect(selected[0].scanner).toBe("claude-adk");
+    expect(selected[0].scanner).toBe("agentic");
     expect(selected[0].filePath).toBe("src/server.ts");
   });
 });
 
-describe("computeClaudeAdkFingerprint", () => {
+describe("computeAgenticFingerprint", () => {
   it("is deterministic", () => {
     const finding = {
       ruleId: "x",
@@ -111,8 +111,8 @@ describe("computeClaudeAdkFingerprint", () => {
       evidence: "line",
     };
 
-    const a = computeClaudeAdkFingerprint("repo", "HEAD", finding);
-    const b = computeClaudeAdkFingerprint("repo", "HEAD", finding);
+    const a = computeAgenticFingerprint("repo", "HEAD", finding);
+    const b = computeAgenticFingerprint("repo", "HEAD", finding);
     expect(a).toBe(b);
     expect(a).toMatch(/^[0-9a-f]{64}$/);
   });

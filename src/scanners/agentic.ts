@@ -1,23 +1,19 @@
 import path from "node:path";
 import type { ScanOpts } from "../types.js";
 import type { Finding, ScannerConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
-import { runClaudeAdk, selectClaudeFindings } from "./run-claude-adk.js";
+import { runAgentic, selectAgenticFindings } from "./run-agentic.js";
 
 const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 const DEFAULT_MAX_FINDINGS = 20;
 
-export class ClaudeAdkPlugin implements ScannerPlugin {
-  readonly id = "claude-adk";
-  readonly displayName = "Claude Agent SDK";
+export class AgenticPlugin implements ScannerPlugin {
+  readonly id = "agentic";
+  readonly displayName = "Agentic LLM Scanner";
 
   private model = DEFAULT_MODEL;
   private maxFindings = DEFAULT_MAX_FINDINGS;
 
   async init(config: ScannerConfig): Promise<void> {
-    if (!process.env["ANTHROPIC_API_KEY"]) {
-      throw new Error("claude-adk scanner requires ANTHROPIC_API_KEY");
-    }
-
     const configuredModel = asOptionalString(config["model"]);
     const configuredMax = asPositiveInt(config["maxFindings"]);
 
@@ -27,8 +23,8 @@ export class ClaudeAdkPlugin implements ScannerPlugin {
 
   async scan(repoRoot: string, opts: ScanOpts, _config: ScannerConfig): Promise<Finding[]> {
     const repoName = path.basename(repoRoot);
-    const output = await runClaudeAdk(repoRoot, opts, this.model, this.maxFindings);
-    return selectClaudeFindings(output, repoRoot, repoName, "HEAD", opts.maxFindings);
+    const output = await runAgentic(repoRoot, opts, this.model, this.maxFindings);
+    return selectAgenticFindings(output, repoRoot, repoName, "HEAD", opts.maxFindings);
   }
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {

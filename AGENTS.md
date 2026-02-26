@@ -13,7 +13,7 @@
 - Scanners: `src/scanners/` — plugin-based (`ScannerPlugin` stays supported for scanner implementations)
   - Semgrep: `src/scanners/semgrep.ts`, `src/scanners/run-semgrep.ts`, `src/scanners/resolve-semgrep.ts`
   - CodeQL: `src/scanners/codeql.ts`, `src/scanners/run-codeql.ts`, `src/scanners/resolve-codeql.ts`
-  - Claude ADK scanner: `src/scanners/claude-adk.ts`, `src/scanners/run-claude-adk.ts`
+  - Agentic scanner: `src/scanners/agentic.ts`, `src/scanners/run-agentic.ts`
   - Scoring: `src/scanners/scoring.ts`
   - Registry: `src/scanners/registry.ts`
 - Event bus: `src/bus/` — transport-agnostic message bus + coordinator

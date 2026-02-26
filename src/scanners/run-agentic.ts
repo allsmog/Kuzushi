@@ -10,7 +10,7 @@ const SEVERITY_LEVELS = new Set(["ERROR", "WARNING", "INFO"]);
 const CONFIDENCE_LEVELS = new Set(["HIGH", "MEDIUM", "LOW"]);
 const SUBCATEGORIES = new Set(["vuln", "audit"]);
 
-const CLAUDE_ADK_SCHEMA = {
+const AGENTIC_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["findings"],
@@ -45,7 +45,7 @@ const CLAUDE_ADK_SCHEMA = {
   },
 } as const;
 
-interface ClaudeAdkFinding {
+interface AgenticFinding {
   ruleId: string;
   filePath: string;
   startLine: number;
@@ -59,24 +59,24 @@ interface ClaudeAdkFinding {
   evidence: string;
 }
 
-export interface ClaudeAdkOutput {
-  findings: ClaudeAdkFinding[];
+export interface AgenticOutput {
+  findings: AgenticFinding[];
 }
 
-export interface ClaudeAdkRuntimeOptions {
+export interface AgenticRuntimeOptions {
   runtime?: AgentRuntime;
   abortController?: AbortController;
   maxBudgetUsd?: number;
 }
 
-/** Run the Claude Agent SDK scanner and return structured findings. */
-export async function runClaudeAdk(
+/** Run the agentic scanner and return structured findings. */
+export async function runAgentic(
   repoRoot: string,
   opts: ScanOpts,
   model: string,
   defaultMaxFindings: number,
-  runtimeOptions: ClaudeAdkRuntimeOptions = {},
-): Promise<ClaudeAdkOutput> {
+  runtimeOptions: AgenticRuntimeOptions = {},
+): Promise<AgenticOutput> {
   const requestedMax = Math.max(1, opts.maxFindings ?? defaultMaxFindings);
   const prompt = buildPrompt(opts, requestedMax);
   const runtime = runtimeOptions.runtime ?? getAgentRuntime();
@@ -96,7 +96,7 @@ export async function runClaudeAdk(
       abortController: runtimeOptions.abortController,
       outputFormat: {
         type: "json_schema",
-        schema: CLAUDE_ADK_SCHEMA,
+        schema: AGENTIC_SCHEMA,
       },
     },
   })) {
@@ -111,18 +111,18 @@ export async function runClaudeAdk(
   }
 
   if (executionError) {
-    throw new Error(`claude-adk scanner failed: ${executionError}`);
+    throw new Error(`agentic scanner failed: ${executionError}`);
   }
 
-  const parsed = parseClaudeAdkOutput(structuredOutput ?? resultText);
+  const parsed = parseAgenticOutput(structuredOutput ?? resultText);
   return {
     findings: parsed.findings.slice(0, requestedMax),
   };
 }
 
-/** Rank and map Claude ADK findings into Finding records. */
-export function selectClaudeFindings(
-  output: ClaudeAdkOutput,
+/** Rank and map agentic findings into Finding records. */
+export function selectAgenticFindings(
+  output: AgenticOutput,
   repoRoot: string,
   repoName: string,
   ref: string,
@@ -132,7 +132,7 @@ export function selectClaudeFindings(
 
   for (const finding of output.findings) {
     const filePath = normalizeFilePath(repoRoot, finding.filePath);
-    const fingerprint = computeClaudeAdkFingerprint(repoName, ref, {
+    const fingerprint = computeAgenticFingerprint(repoName, ref, {
       ...finding,
       filePath,
     });
@@ -144,7 +144,7 @@ export function selectClaudeFindings(
     });
 
     const normalized: Finding = {
-      scanner: "claude-adk",
+      scanner: "agentic",
       fingerprint,
       ruleId: finding.ruleId,
       filePath,
@@ -171,18 +171,18 @@ export function selectClaudeFindings(
     .slice(0, maxFindings);
 }
 
-/** Parse and normalize structured output from the claude-adk scanner. */
-export function parseClaudeAdkOutput(raw: unknown): ClaudeAdkOutput {
+/** Parse and normalize structured output from the agentic scanner. */
+export function parseAgenticOutput(raw: unknown): AgenticOutput {
   const data = parseRawOutput(raw);
   if (!isRecord(data) || !Array.isArray(data["findings"])) {
-    throw new Error("claude-adk scanner returned invalid output shape");
+    throw new Error("agentic scanner returned invalid output shape");
   }
 
-  const findings: ClaudeAdkFinding[] = [];
+  const findings: AgenticFinding[] = [];
   for (const item of data["findings"]) {
     if (!isRecord(item)) continue;
 
-    const ruleId = asString(item["ruleId"], "claude-adk.security.finding");
+    const ruleId = asString(item["ruleId"], "agentic.security.finding");
     const filePath = asString(item["filePath"], "").trim();
     if (!filePath) continue;
 
@@ -214,16 +214,16 @@ export function parseClaudeAdkOutput(raw: unknown): ClaudeAdkOutput {
   return { findings };
 }
 
-/** Stable fingerprint for claude-adk findings. */
-export function computeClaudeAdkFingerprint(
+/** Stable fingerprint for agentic findings. */
+export function computeAgenticFingerprint(
   repoName: string,
   ref: string,
-  finding: ClaudeAdkFinding,
+  finding: AgenticFinding,
 ): string {
   const source = [
     repoName,
     ref,
-    "claude-adk",
+    "agentic",
     finding.ruleId,
     finding.filePath,
     String(finding.startLine),

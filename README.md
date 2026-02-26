@@ -24,7 +24,7 @@ That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed
 ## What It Does
 
 - **Runs Opengrep/Semgrep** with severity-ranked rule matching
-- **Runs configurable scanners** (`semgrep`, `claude-adk`, `codeql`) in one orchestration flow
+- **Runs configurable scanners** (`semgrep`, `agentic`, `codeql`) in one orchestration flow
 - **Gathers repo context** — auto-detects language, frameworks, auth patterns, ORMs, and sanitization libraries to enrich AI analysis
 - **Scores and deduplicates** findings by severity, likelihood, impact, and subcategory — cross-scanner normalization merges equivalent findings from different scanners at the same location
 - **AI-triages selected findings** — after dedupe/resume/max filters, agent investigates with repo tools, assigns tp/fp/needs_review with confidence and rationale
@@ -51,7 +51,7 @@ Under the hood, Kuzushi uses an event-driven architecture with a DAG-based task 
 
 1. **Context gathering** (optional, enabled by default) — the context-gatherer task analyzes the repo structure (package.json, go.mod, etc.) to identify the tech stack, frameworks, and security-relevant libraries.
 2. **Pipeline starts** — the orchestrator resolves enabled tasks into a dependency graph and groups them into parallel stages.
-3. **Scanners run** — scanner tasks (Semgrep, CodeQL, Claude ADK, etc.) execute concurrently within their stage, emitting findings as typed events on the message bus.
+3. **Scanners run** — scanner tasks (Semgrep, CodeQL, Agentic, etc.) execute concurrently within their stage, emitting findings as typed events on the message bus.
 4. **Results gate downstream tasks** — the orchestrator waits for each stage to complete before starting dependent stages. Upstream outputs are forwarded to dependent tasks via `TaskContext`.
 5. **Triage stage** — findings are deduplicated (fingerprint + cross-scanner location/CWE/rule normalization), ranked, and sent to an LLM for semantic verification with configurable concurrency. The repo context from step 1 enriches every triage prompt.
 6. **Verification stage** (optional) — triaged findings that pass verification gates (`verifyVerdicts`, scanner-level `scannerConfig.<id>.verify`, and `verifyMinConfidence`) are sent to a verification agent that attempts to construct concrete PoC exploit payloads.
@@ -68,7 +68,7 @@ All communication happens through a transport-agnostic `MessageBus` interface. T
 kuzushi <repo>                        # scan with defaults
 kuzushi <repo> --scanners codeql
 kuzushi <repo> --scanners semgrep,codeql
-kuzushi <repo> --scanners semgrep,claude-adk
+kuzushi <repo> --scanners semgrep,agentic
 kuzushi <repo> --severity ERROR       # only ERROR-level findings
 kuzushi <repo> --max 20               # triage top 20 findings only
 kuzushi <repo> --model claude-opus-4-20250514  # use a different model
@@ -134,13 +134,13 @@ kuzushi <repo> --retry-backoff-ms 10000     # initial backoff delay (default: 50
 kuzushi config get                    # show all config
 kuzushi config get model              # show one key
 kuzushi config set model claude-opus-4-20250514
-kuzushi config set scanners semgrep,claude-adk
+kuzushi config set scanners semgrep,agentic
 kuzushi config set scannerConfig.codeql.dbPath ./codeql-db
 kuzushi config set scannerConfig.codeql.suite javascript-security-extended
 kuzushi config set scannerConfig.semgrep.binary opengrep
 kuzushi config set scannerConfig.semgrep.configFlag auto
-kuzushi config set scannerConfig.claude-adk.model claude-sonnet-4-20250514
-kuzushi config set scannerConfig.claude-adk.maxFindings 25
+kuzushi config set scannerConfig.agentic.model claude-sonnet-4-20250514
+kuzushi config set scannerConfig.agentic.maxFindings 25
 kuzushi config set severity ERROR,WARNING,INFO
 kuzushi config set verify true
 kuzushi config set verifyMinConfidence 0.7
@@ -161,7 +161,7 @@ Global config lives at `~/.kuzushi/config.json`. Optional project overrides can 
 | `scanners` | `["semgrep"]` | Scanner plugins to run, in order |
 | `severity` | `["ERROR","WARNING"]` | Semgrep severity filter |
 | `excludePatterns` | `["test","tests","node_modules",...]` | Directories/globs to skip |
-| `scannerConfig` | `{ semgrep: {...}, "claude-adk": {...}, codeql: {...} }` | Per-scanner config blocks keyed by scanner id |
+| `scannerConfig` | `{ semgrep: {...}, agentic: {...}, codeql: {...} }` | Per-scanner config blocks keyed by scanner id |
 | `busBackend` | `"in-process"` | Message bus transport (`in-process`, future: `redis`, `google-pubsub`, `nats`) |
 | `triageConcurrency` | `1` | Parallel LLM triage calls |
 | `scanMode` | `"sequential"` | Scanner execution mode (`sequential` or `concurrent`) |
@@ -191,7 +191,7 @@ Example:
 
 ```json
 {
-  "scanners": ["semgrep", "codeql", "claude-adk"],
+  "scanners": ["semgrep", "codeql", "agentic"],
   "scanMode": "concurrent",
   "triageConcurrency": 3,
   "verify": true,
@@ -201,7 +201,7 @@ Example:
   "scannerConfig": {
     "codeql": { "dbPath": "./codeql-db", "suite": "javascript-security-extended" },
     "semgrep": { "binary": "opengrep", "configFlag": "auto" },
-    "claude-adk": { "model": "claude-sonnet-4-20250514", "maxFindings": 20 }
+    "agentic": { "model": "claude-sonnet-4-20250514", "maxFindings": 20 }
   }
 }
 ```
@@ -218,7 +218,7 @@ Example:
 
 - `semgrep`: traditional SAST via Opengrep/Semgrep binary
 - `codeql`: semantic dataflow/taint analysis via GitHub CodeQL CLI (SARIF output)
-- `claude-adk`: AI-driven scanner via `@anthropic-ai/claude-agent-sdk` with read-only repo tools
+- `agentic`: AI-driven agentic scanner — LLM with read-only repo tools via any supported runtime
 - `augur`: multi-pass CodeQL source/sink labeling pipeline — runs preflight (database creation, candidate extraction), LLM-assisted labeling with human-in-the-loop checkpoint, and deterministic library/query generation + analysis
 
 ## Semgrep Resolution
@@ -373,7 +373,7 @@ Kuzushi is built on three core abstractions:
 
 **Pipeline Phases** — After the DAG completes, the orchestrator drives three sequential phases: triage (classify findings), verification (construct PoC exploits), and report (display results). Each phase has its own concurrency control, cost tracking, and checkpoint support.
 
-Existing `ScannerPlugin` implementations (Semgrep, Claude ADK) are adapted into `AgentTask` via `adaptScannerPlugin()`, so the scanner plugin API remains stable.
+Existing `ScannerPlugin` implementations (Semgrep, Agentic) are adapted into `AgentTask` via `adaptScannerPlugin()`, so the scanner plugin API remains stable.
 
 See [AGENTS.md](AGENTS.md) for the full developer guide on adding new agent tasks.
 

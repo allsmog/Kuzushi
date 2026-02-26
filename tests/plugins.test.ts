@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SemgrepPlugin } from "../src/scanners/semgrep.js";
-import { ClaudeAdkPlugin } from "../src/scanners/claude-adk.js";
+import { AgenticPlugin } from "../src/scanners/agentic.js";
 import { CodeQLPlugin } from "../src/scanners/codeql.js";
 import type { Finding } from "../src/scanners/types.js";
 
@@ -30,9 +30,9 @@ describe("scanner plugin triage prompts", () => {
     expect(config.prompt.toLowerCase()).toContain("pattern");
   });
 
-  it("ClaudeAdkPlugin prompt references prior agentic analysis", () => {
-    const plugin = new ClaudeAdkPlugin();
-    const config = plugin.triageAgentConfig(makeFinding("claude-adk"), "repo");
+  it("AgenticPlugin prompt references prior agentic analysis", () => {
+    const plugin = new AgenticPlugin();
+    const config = plugin.triageAgentConfig(makeFinding("agentic"), "repo");
     expect(config.prompt.toLowerCase()).toContain("prior agentic scan pass");
     expect(config.prompt.toLowerCase()).toContain("correct or mistaken");
   });

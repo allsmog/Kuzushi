@@ -94,9 +94,9 @@ function warnPiAiBackendApiKeys(config: { [key: string]: unknown }): void {
   const scannerConfig = config["scannerConfig"];
   if (scannerConfig && typeof scannerConfig === "object") {
     const scannerConfigRecord = scannerConfig as Record<string, unknown>;
-    const claudeAdk = scannerConfigRecord["claude-adk"];
-    if (claudeAdk && typeof claudeAdk === "object") {
-      pushModel((claudeAdk as Record<string, unknown>)["model"]);
+    const agentic = scannerConfigRecord["agentic"];
+    if (agentic && typeof agentic === "object") {
+      pushModel((agentic as Record<string, unknown>)["model"]);
     }
 
     const augur = scannerConfigRecord["augur"];

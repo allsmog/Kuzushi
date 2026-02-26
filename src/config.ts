@@ -56,7 +56,7 @@ export const DEFAULTS: KuzushiConfig = {
   ],
   scannerConfig: {
     semgrep: { configFlag: "auto" },
-    "claude-adk": { model: "claude-sonnet-4-20250514", maxFindings: 20 },
+    agentic: { model: "claude-sonnet-4-20250514", maxFindings: 20 },
     codeql: {},
     augur: {
       augurPath: DEFAULT_AUGUR_PATH,

@@ -116,11 +116,11 @@ describe("loadConfig", () => {
 
   it("applies project-level override when repoRoot is provided", () => {
     writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "global-model", scanners: ["semgrep"] }));
-    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({ model: "project-model", scanners: ["claude-adk"] }));
+    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({ model: "project-model", scanners: ["agentic"] }));
 
     const config = loadConfig(TMP_REPO);
     expect(config.model).toBe("project-model");
-    expect(config.scanners).toEqual(["claude-adk"]);
+    expect(config.scanners).toEqual(["agentic"]);
   });
 
   it("returns defaults for malformed JSON", () => {
