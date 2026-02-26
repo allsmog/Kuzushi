@@ -4,6 +4,7 @@ import os from "node:os";
 import type { KuzushiConfig, Verdict } from "./types.js";
 import type { ScannerConfig } from "./scanners/types.js";
 import { isRecord } from "./utils.js";
+import { augurRoot } from "@kuzushi/augur";
 
 const CONFIG_DIR = path.join(os.homedir(), ".kuzushi");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
@@ -19,8 +20,7 @@ const AGENT_RUNTIME_BACKENDS = new Set<string>([
   "pi-ai",
   "acp",
 ]);
-const DEFAULT_AUGUR_PATH = process.env["AUGUR_PATH"]?.trim()
-  || path.join(os.homedir(), "VibeCode", "open-sourced", "augur");
+const DEFAULT_AUGUR_PATH = process.env["AUGUR_PATH"]?.trim() || augurRoot;
 
 /** Hard defaults — the bottom of the precedence stack. */
 export const DEFAULTS: KuzushiConfig = {

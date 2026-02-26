@@ -11,8 +11,11 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.2.52
         version: 0.2.52(zod@4.3.6)
+      '@kuzushi/augur':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@mariozechner/pi-ai':
-        specifier: ^0.54.2
+        specifier: ^0.54.1
         version: 0.54.2(ws@8.19.0)(zod@4.3.6)
       better-sqlite3:
         specifier: ^11.8.1
@@ -506,6 +509,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@kuzushi/augur@0.1.0':
+    resolution: {integrity: sha512-YFLJ3N9J5nFzWMEIDFyqE7M/an/fzYyswRJvY5HTPQPXSLl+6OLad+RJvEOwpWgK8Z9up9teUSwsTdL8b8rZcQ==}
 
   '@mariozechner/pi-ai@0.54.2':
     resolution: {integrity: sha512-QKQV8iT7afwdaOiLDPTPyQcsGw4ulxBjAI0GvgvowAuqy9UbDeKFSdQYLmjVt7CtnJD1Z8zMjQQ4SLigdZ6dRQ==}
@@ -2338,6 +2344,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@kuzushi/augur@0.1.0': {}
 
   '@mariozechner/pi-ai@0.54.2(ws@8.19.0)(zod@4.3.6)':
     dependencies:

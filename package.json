@@ -21,7 +21,8 @@
     "@mariozechner/pi-ai": "^0.54.1",
     "better-sqlite3": "^11.8.1",
     "chalk": "^5.4.1",
-    "commander": "^13.1.0"
+    "commander": "^13.1.0",
+    "@kuzushi/augur": "^0.1.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

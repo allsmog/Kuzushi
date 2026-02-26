@@ -1,5 +1,5 @@
-import os from "node:os";
 import path from "node:path";
+import { augurRoot } from "@kuzushi/augur";
 import type { KuzushiConfig } from "../../types.js";
 import { isRecord } from "../../utils.js";
 
@@ -150,7 +150,7 @@ function normalizeDefaultAugurPath(): string {
     return path.normalize(envPath);
   }
 
-  return path.join(os.homedir(), "VibeCode", "open-sourced", "augur");
+  return augurRoot;
 }
 
 export function resolveAugurConfig(config: KuzushiConfig): AugurTaskConfig {
