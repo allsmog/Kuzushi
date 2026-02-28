@@ -30,7 +30,7 @@ export function registerPocHarnessWorker(
             finding,
             triageResult,
             verificationResult,
-            context.repoRoot,
+            context.scanPath ?? context.repoRoot,
             context.repoName,
             deps.config.pocHarnessModel
               ?? deps.config.verifyModel

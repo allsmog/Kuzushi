@@ -1,11 +1,8 @@
 import type { KuzushiConfig } from "../types.js";
-import { ClaudeSdkAgentRuntime } from "./claude.js";
 import { PiAiAgentRuntime } from "./pi-ai.js";
 import type { AgentRuntime } from "./types.js";
 
-const DEFAULT_BACKEND = "claude-sdk";
-
-let currentRuntime: AgentRuntime = new ClaudeSdkAgentRuntime();
+let currentRuntime: AgentRuntime = new PiAiAgentRuntime();
 
 export function getAgentRuntime(): AgentRuntime {
   return currentRuntime;
@@ -16,30 +13,26 @@ export function setAgentRuntime(runtime: AgentRuntime): void {
 }
 
 export function configureAgentRuntime(config: KuzushiConfig): AgentRuntime {
-  const backend = config.agentRuntimeBackend ?? DEFAULT_BACKEND;
-
-  if (backend === "claude-sdk") {
-    currentRuntime = new ClaudeSdkAgentRuntime();
-    return currentRuntime;
-  }
+  const backend = config.agentRuntimeBackend ?? "pi-ai";
+  const runtimeConfig = config.agentRuntimeConfig;
 
   if (backend === "pi-ai") {
-    currentRuntime = new PiAiAgentRuntime();
+    currentRuntime = new PiAiAgentRuntime(runtimeConfig);
     return currentRuntime;
   }
 
   if (backend === "acp") {
     throw new Error(
       "agentRuntimeBackend=acp is not available yet. "
-      + "Use agentRuntimeBackend=claude-sdk or agentRuntimeBackend=pi-ai until ACP runtime adapter is implemented.",
+      + "Use agentRuntimeBackend=pi-ai until ACP runtime adapter is implemented.",
     );
   }
 
   throw new Error(
     `Unknown agent runtime backend: ${String(backend)}. `
-    + "Expected one of: claude-sdk, pi-ai, acp.",
+    + "Expected one of: pi-ai, acp.",
   );
 }
 
 export * from "./types.js";
-export { ClaudeSdkAgentRuntime, PiAiAgentRuntime };
+export { PiAiAgentRuntime };

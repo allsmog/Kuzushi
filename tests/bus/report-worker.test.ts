@@ -50,7 +50,7 @@ describe("report-worker", () => {
     const db = initDb(":memory:");
 
     const config: KuzushiConfig = {
-      model: "claude-sonnet-4-20250514",
+      model: "anthropic:claude-sonnet-4-6",
       triageMaxTurns: 10,
       busBackend: "in-process",
       triageConcurrency: 1,
@@ -94,7 +94,7 @@ describe("report-worker", () => {
       createEvent("triage:start", runId, {
         context,
         findingCount: 1,
-        model: "claude-sonnet-4-20250514",
+        model: "anthropic:claude-sonnet-4-6",
       }),
     );
 
@@ -147,7 +147,7 @@ describe("report-worker", () => {
     const db = initDb(":memory:");
 
     const config: KuzushiConfig = {
-      model: "claude-sonnet-4-20250514",
+      model: "anthropic:claude-sonnet-4-6",
       triageMaxTurns: 10,
       busBackend: "in-process",
       triageConcurrency: 1,

@@ -61,6 +61,7 @@ describe("loadConfig", () => {
     expect(config.maxPocHarnessRetries).toBe(DEFAULTS.maxPocHarnessRetries);
     expect(config.retryBackoffMs).toBe(DEFAULTS.retryBackoffMs);
     expect(config.retryBackoffMultiplier).toBe(DEFAULTS.retryBackoffMultiplier);
+    expect(config.agentRuntimeConfig).toBe(DEFAULTS.agentRuntimeConfig);
     expect(config.scanners).toEqual(DEFAULTS.scanners);
   });
 
@@ -87,6 +88,10 @@ describe("loadConfig", () => {
       maxPocHarnessRetries: 6,
       retryBackoffMs: 2000,
       retryBackoffMultiplier: 3,
+      agentRuntimeConfig: {
+        apiKey: "sk-test",
+        baseUrl: "https://basecamp.stark.acme.com/",
+      },
       scannerConfig: { semgrep: { verify: false } },
     }));
     const config = loadConfig();
@@ -111,6 +116,10 @@ describe("loadConfig", () => {
     expect(config.maxPocHarnessRetries).toBe(6);
     expect(config.retryBackoffMs).toBe(2000);
     expect(config.retryBackoffMultiplier).toBe(3);
+    expect(config.agentRuntimeConfig).toEqual({
+      apiKey: "sk-test",
+      baseUrl: "https://basecamp.stark.acme.com/",
+    });
     expect(config.scannerConfig.semgrep?.verify).toBe(false);
   });
 
@@ -121,6 +130,25 @@ describe("loadConfig", () => {
     const config = loadConfig(TMP_REPO);
     expect(config.model).toBe("project-model");
     expect(config.scanners).toEqual(["agentic"]);
+  });
+
+  it("merges agentRuntimeConfig shallowly across config layers", () => {
+    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
+      agentRuntimeConfig: {
+        apiKey: "global-key",
+      },
+    }));
+    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
+      agentRuntimeConfig: {
+        baseUrl: "https://basecamp.stark.acme.com/",
+      },
+    }));
+
+    const config = loadConfig(TMP_REPO);
+    expect(config.agentRuntimeConfig).toEqual({
+      apiKey: "global-key",
+      baseUrl: "https://basecamp.stark.acme.com/",
+    });
   });
 
   it("returns defaults for malformed JSON", () => {
@@ -252,11 +280,29 @@ describe("setConfigValue", () => {
   });
 
   it("sets agentRuntimeBackend", () => {
-    setConfigValue("agentRuntimeBackend", "claude-sdk");
-    expect(getConfigValue("agentRuntimeBackend")).toBe("claude-sdk");
-
     setConfigValue("agentRuntimeBackend", "pi-ai");
     expect(getConfigValue("agentRuntimeBackend")).toBe("pi-ai");
+
+    setConfigValue("agentRuntimeBackend", "acp");
+    expect(getConfigValue("agentRuntimeBackend")).toBe("acp");
+  });
+
+  it("sets agentRuntimeConfig as an object", () => {
+    setConfigValue(
+      "agentRuntimeConfig",
+      "{\"apiKey\":\"sk-test\",\"baseUrl\":\"https://basecamp.stark.acme.com/\"}",
+    );
+    expect(getConfigValue("agentRuntimeConfig")).toEqual({
+      apiKey: "sk-test",
+      baseUrl: "https://basecamp.stark.acme.com/",
+    });
+  });
+
+  it("sets nested agentRuntimeConfig values", () => {
+    setConfigValue("agentRuntimeConfig.apiKey", "sk-inline");
+    setConfigValue("agentRuntimeConfig.baseUrl", "https://proxy.example/");
+    expect(getConfigValue("agentRuntimeConfig.apiKey")).toBe("sk-inline");
+    expect(getConfigValue("agentRuntimeConfig.baseUrl")).toBe("https://proxy.example/");
   });
 
   it("sets scanners from comma-separated string", () => {
@@ -338,6 +384,12 @@ describe("setConfigValue", () => {
   it("throws on invalid agentRuntimeBackend", () => {
     expect(() => setConfigValue("agentRuntimeBackend", "anthropic")).toThrow(
       "agentRuntimeBackend must be one of",
+    );
+  });
+
+  it("throws on invalid agentRuntimeConfig", () => {
+    expect(() => setConfigValue("agentRuntimeConfig", "not-object")).toThrow(
+      "agentRuntimeConfig must be an object",
     );
   });
 });
@@ -435,6 +487,13 @@ describe("unsetConfigValue", () => {
     expect(getConfigValue("maxPocHarnessRetries")).toBe(DEFAULTS.maxPocHarnessRetries);
     expect(getConfigValue("retryBackoffMs")).toBe(DEFAULTS.retryBackoffMs);
     expect(getConfigValue("retryBackoffMultiplier")).toBe(DEFAULTS.retryBackoffMultiplier);
+  });
+
+  it("resets agentRuntimeConfig to default", () => {
+    setConfigValue("agentRuntimeConfig.apiKey", "sk-inline");
+    setConfigValue("agentRuntimeConfig.baseUrl", "https://proxy.example/");
+    unsetConfigValue("agentRuntimeConfig");
+    expect(getConfigValue("agentRuntimeConfig")).toBe(DEFAULTS.agentRuntimeConfig);
   });
 
   it("removes nested key", () => {

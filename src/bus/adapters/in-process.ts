@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import type { AnyEvent, MessageBus } from "../types.js";
 
-const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_WAIT_TIMEOUT_MS = 60 * 60 * 1000;
 const HANDLER_ERROR_EVENT_TYPE = "bus:handler-error";
 
 type WrappedHandler = (event: AnyEvent) => void;
@@ -98,6 +98,11 @@ export class InProcessBus implements MessageBus {
         cleanup();
         reject(new Error(`Timed out waiting for event: ${key}`));
       }, timeoutMs);
+
+      // Prevent the timeout from keeping the node process alive after bus.close().
+      if (typeof timer === "object" && "unref" in timer) {
+        timer.unref();
+      }
 
       const cleanup = () => {
         clearTimeout(timer);

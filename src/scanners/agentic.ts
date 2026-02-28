@@ -3,7 +3,7 @@ import type { ScanOpts } from "../types.js";
 import type { Finding, ScannerConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
 import { runAgentic, selectAgenticFindings } from "./run-agentic.js";
 
-const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+const DEFAULT_MODEL = "anthropic:claude-sonnet-4-6";
 const DEFAULT_MAX_FINDINGS = 20;
 
 export class AgenticPlugin implements ScannerPlugin {

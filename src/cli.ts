@@ -4,7 +4,6 @@ import { Command } from "commander";
 import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { createInterface } from "node:readline/promises";
 import { loadConfig, getConfigValue, setConfigValue, unsetConfigValue, configPath } from "./config.js";
 import {
   createRun,
@@ -22,7 +21,6 @@ import {
   registerAllWorkers,
   createEvent,
   generateRunId,
-  type AugurCheckpointEvent,
   type PipelineCompleteEvent,
   type PipelineErrorEvent,
 } from "./bus/index.js";
@@ -48,7 +46,32 @@ function parseScannersArg(raw: string): string[] {
     .filter(Boolean);
 }
 
-function maybeWarnPiAiApiKeyForModel(model: string | undefined): void {
+function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
+  let storesApiKey = key === "agentRuntimeConfig.apiKey";
+
+  if (!storesApiKey && key === "agentRuntimeConfig") {
+    try {
+      const parsed = JSON.parse(value);
+      storesApiKey = typeof parsed?.["apiKey"] === "string" && parsed["apiKey"].trim().length > 0;
+    } catch {
+      storesApiKey = false;
+    }
+  }
+
+  if (!storesApiKey) {
+    return;
+  }
+
+  console.warn(
+    `Warning: ${key} stores API credentials in plaintext at ${configPath()}. `
+    + "Prefer --api-key for one-off scans or ANTHROPIC_API_KEY from your shell/secret manager.",
+  );
+}
+
+function maybeWarnPiAiApiKeyForModel(
+  model: string | undefined,
+  options: { anthropicApiKey?: string } = {},
+): void {
   if (!model) {
     return;
   }
@@ -65,7 +88,8 @@ function maybeWarnPiAiApiKeyForModel(model: string | undefined): void {
     return;
   }
 
-  const hasAny = envVars.some((name) => Boolean(process.env[name]));
+  const hasAny = envVars.some((name) => Boolean(process.env[name]))
+    || (provider === "anthropic" && Boolean(options.anthropicApiKey));
   if (hasAny) {
     return;
   }
@@ -78,6 +102,13 @@ function maybeWarnPiAiApiKeyForModel(model: string | undefined): void {
 
 function warnPiAiBackendApiKeys(config: { [key: string]: unknown }): void {
   const modelCandidates = new Set<string>();
+  const runtimeConfig = config["agentRuntimeConfig"];
+  const runtimeConfigRecord = runtimeConfig && typeof runtimeConfig === "object"
+    ? runtimeConfig as Record<string, unknown>
+    : undefined;
+  const runtimeAnthropicApiKey = typeof runtimeConfigRecord?.["apiKey"] === "string"
+    ? runtimeConfigRecord["apiKey"].trim()
+    : undefined;
 
   const pushModel = (value: unknown) => {
     if (typeof value !== "string") return;
@@ -99,14 +130,14 @@ function warnPiAiBackendApiKeys(config: { [key: string]: unknown }): void {
       pushModel((agentic as Record<string, unknown>)["model"]);
     }
 
-    const augur = scannerConfigRecord["augur"];
-    if (augur && typeof augur === "object") {
-      pushModel((augur as Record<string, unknown>)["labelingModel"]);
+    const newaza = scannerConfigRecord["newaza"];
+    if (newaza && typeof newaza === "object") {
+      pushModel((newaza as Record<string, unknown>)["labelingModel"]);
     }
   }
 
   for (const model of modelCandidates) {
-    maybeWarnPiAiApiKeyForModel(model);
+    maybeWarnPiAiApiKeyForModel(model, { anthropicApiKey: runtimeAnthropicApiKey });
   }
 }
 
@@ -162,9 +193,10 @@ program
   .option("--audit-log", "Persist per-run audit logs to .kuzushi/runs/<runId>/", false)
   .option("--output <path>", "Write markdown report to this path")
   .option("--sarif <path>", "Write SARIF v2.1.0 report to this path")
-  .option("--agent-runtime <backend>", "Agent runtime backend (claude-sdk|pi-ai|acp)")
+  .option("--agent-runtime <backend>", "Agent runtime backend (pi-ai|acp)")
+  .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
+  .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
   .option("--enabled-tasks <ids>", "Additional AgentTask IDs to enable (comma-separated)")
-  .option("--approve-checkpoint", "Auto-approve Augur checkpoints for this run", false)
   .option("--fresh", "Clear prior results before scanning", false)
   .option("--resume [runId]", "Resume a previous run (optionally by run id)")
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
@@ -193,12 +225,14 @@ program
     output?: string;
     sarif?: string;
     agentRuntime?: string;
+    apiKey?: string;
+    baseUrl?: string;
     enabledTasks?: string;
-    approveCheckpoint: boolean;
     fresh: boolean;
     resume?: string | boolean;
     db?: string;
   }) => {
+    const scanPath = path.resolve(repoPath);
     const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
 
     // Load config with optional project-level overlay, then apply CLI overrides.
@@ -223,15 +257,25 @@ program
     if (opts.agentRuntime) {
       config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
     }
+    if (opts.apiKey || opts.baseUrl) {
+      const runtimeConfig = {
+        ...(config.agentRuntimeConfig ?? {}),
+      };
+
+      if (opts.apiKey) {
+        const apiKey = opts.apiKey.trim();
+        runtimeConfig.apiKey = apiKey || undefined;
+      }
+
+      if (opts.baseUrl) {
+        const baseUrl = opts.baseUrl.trim();
+        runtimeConfig.baseUrl = baseUrl || undefined;
+      }
+
+      config.agentRuntimeConfig = runtimeConfig;
+    }
     if (opts.enabledTasks) {
       config.enabledTasks = parseScannersArg(opts.enabledTasks);
-    }
-    if (opts.approveCheckpoint) {
-      const augurConfig = config.scannerConfig.augur ?? {};
-      config.scannerConfig.augur = {
-        ...augurConfig,
-        autoApproveCheckpoint: true,
-      };
     }
     if (opts.triageMaxTurns !== undefined) {
       if (!Number.isFinite(opts.triageMaxTurns) || opts.triageMaxTurns < 1) {
@@ -310,10 +354,10 @@ program
       config.retryBackoffMs = Math.floor(opts.retryBackoffMs);
     }
 
-    const runtimeBackend = config.agentRuntimeBackend ?? "claude-sdk";
-    if (runtimeBackend === "claude-sdk" && !process.env["ANTHROPIC_API_KEY"]) {
-      console.error("Error: ANTHROPIC_API_KEY environment variable is required.");
-      console.error("Get one at: https://console.anthropic.com/");
+    const runtimeBackend = config.agentRuntimeBackend ?? "pi-ai";
+    if (!process.env["ANTHROPIC_API_KEY"] && !config.agentRuntimeConfig?.apiKey) {
+      console.error("Error: ANTHROPIC_API_KEY environment variable or agentRuntimeConfig.apiKey is required.");
+      console.error("Get one at: https://console.anthropic.com/ or set via: kuzushi config set agentRuntimeConfig.apiKey <key>");
       process.exit(1);
     }
 
@@ -332,9 +376,22 @@ program
       ? opts.severity.split(",").map((s) => s.trim().toUpperCase())
       : config.severity;
 
-    const scannersOverride = opts.scanners
+    const NEWAZA_TASK_IDS = ["newaza-preflight", "newaza-label", "newaza-analyze"];
+
+    let scannersOverride = opts.scanners
       ? parseScannersArg(opts.scanners)
       : undefined;
+
+    // Auto-expand "--scanners newaza" into the 3-task DAG.
+    // "newaza" is not a ScannerPlugin — it's a set of AgentTasks.
+    // The registry's resolveEnabled() silently filters non-plugin IDs,
+    // so "--scanners newaza" resolves to zero scanner plugins (correct).
+    if (scannersOverride?.includes("newaza")) {
+      config.enabledTasks = [
+        ...(config.enabledTasks ?? []),
+        ...NEWAZA_TASK_IDS,
+      ];
+    }
 
     const scanOpts: ScanOpts = {
       severity,
@@ -407,73 +464,10 @@ program
     const context = {
       runId,
       repoRoot,
+      scanPath,
       repoName,
       dbPath,
     };
-
-    bus.subscribe<AugurCheckpointEvent>("augur:checkpoint", async (event) => {
-      if (event.meta.runId !== runId) {
-        return;
-      }
-
-      if (opts.approveCheckpoint) {
-        await bus.publish(
-          createEvent("augur:checkpoint-approved", runId, {
-            context: event.payload.context,
-            reviewer: "cli-auto-approve",
-          }),
-        );
-        return;
-      }
-
-      console.log("");
-      console.log("  Augur checkpoint reached.");
-      if (event.payload.reviewSummary.trim()) {
-        console.log("");
-        console.log(event.payload.reviewSummary.trim());
-        console.log("");
-      }
-
-      let reviewer = "cli-noninteractive";
-      if (process.stdin.isTTY && process.stdout.isTTY) {
-        const rl = createInterface({ input: process.stdin, output: process.stdout });
-        try {
-          // Keep the gate explicit: continue only on affirmative approval.
-          while (true) {
-            const answer = (await rl.question("  Approve Augur labels and continue? [y/n]: "))
-              .trim()
-              .toLowerCase();
-            if (answer === "y" || answer === "yes") {
-              reviewer = "cli-user";
-              break;
-            }
-
-            if (answer === "n" || answer === "no") {
-              console.log("  Approval required to continue. Press Ctrl+C to abort or approve to proceed.");
-              continue;
-            }
-          }
-        } finally {
-          rl.close();
-        }
-      } else {
-        await bus.publish(
-          createEvent("pipeline:error", runId, {
-            context: event.payload.context,
-            error: "Augur checkpoint requires interactive approval. Re-run with --approve-checkpoint in non-interactive mode.",
-            fatal: true,
-          }),
-        );
-        return;
-      }
-
-      await bus.publish(
-        createEvent("augur:checkpoint-approved", runId, {
-          context: event.payload.context,
-          reviewer,
-        }),
-      );
-    });
 
     const pipelineComplete = bus
       .waitFor<PipelineCompleteEvent>(
@@ -543,6 +537,7 @@ configCmd
     try {
       setConfigValue(key, value);
       console.log(`${key} = ${JSON.stringify(getConfigValue(key))}`);
+      maybeWarnPlaintextApiKeyStorage(key, value);
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);

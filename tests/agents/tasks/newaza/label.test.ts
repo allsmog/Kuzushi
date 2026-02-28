@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { __augurLabelInternals } from "../../../src/agents/tasks/augur-label.js";
-import type { AugurLabelsDocument } from "../../../src/agents/tasks/augur-types.js";
+import { __newazaLabelInternals } from "../../../../src/agents/tasks/newaza/label.js";
+import type { NewazaLabelsDocument } from "../../../../src/agents/tasks/newaza/types.js";
 
-const TMP_DIR = path.join(import.meta.dirname, "..", "..", ".tmp-augur-label");
+const TMP_DIR = path.join(import.meta.dirname, "..", "..", "..", ".tmp-newaza-label");
 
 beforeEach(() => {
   rmSync(TMP_DIR, { recursive: true, force: true });
@@ -15,7 +15,7 @@ afterEach(() => {
   rmSync(TMP_DIR, { recursive: true, force: true });
 });
 
-describe("augur-label internals", () => {
+describe("newaza-label internals", () => {
   it("parses extraction CSV candidate rows", async () => {
     const csvPath = path.join(TMP_DIR, "sources.csv");
     writeFileSync(
@@ -28,7 +28,7 @@ describe("augur-label internals", () => {
       "utf-8",
     );
 
-    const candidates = await __augurLabelInternals.parseCsvCandidates(csvPath, "source_candidate");
+    const candidates = await __newazaLabelInternals.parseCsvCandidates(csvPath, "source_candidate");
     expect(candidates).toHaveLength(2);
     expect(candidates[0].candidateKind).toBe("source_candidate");
     expect(candidates[0].callable).toBe("Query");
@@ -39,14 +39,14 @@ describe("augur-label internals", () => {
   });
 
   it("builds label summary counts and top sinks/sources", () => {
-    const labels: AugurLabelsDocument = {
+    const labels: NewazaLabelsDocument = {
       version: "1.0.0",
       metadata: {
         run_id: "run-1",
         generated_at: new Date().toISOString(),
         language: "python",
         framework: "fastapi",
-        model: "claude-sonnet-4-20250514",
+        model: "anthropic:claude-sonnet-4-6",
         project: "repo",
       },
       passes: [
@@ -92,7 +92,7 @@ describe("augur-label internals", () => {
       ],
     };
 
-    const summary = __augurLabelInternals.summarizeLabels(labels, 0.55);
+    const summary = __newazaLabelInternals.summarizeLabels(labels, 0.55);
     expect(summary.labelCounts["pass1.source"]).toBe(1);
     expect(summary.labelCounts["pass1.sink"]).toBe(1);
     expect(summary.reviewSummary).toContain("low-confidence entries");
@@ -101,7 +101,7 @@ describe("augur-label internals", () => {
   });
 
   it("validates minimal labels document contract", () => {
-    const invalid: AugurLabelsDocument = {
+    const invalid: NewazaLabelsDocument = {
       version: "bad",
       metadata: {
         run_id: "",
@@ -114,7 +114,7 @@ describe("augur-label internals", () => {
       passes: [],
     };
 
-    const error = __augurLabelInternals.validateLabelsDocument(invalid);
+    const error = __newazaLabelInternals.validateLabelsDocument(invalid);
     expect(error).toContain("version");
   });
 });

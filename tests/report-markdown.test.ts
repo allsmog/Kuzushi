@@ -12,7 +12,7 @@ import type { KuzushiConfig, ScanOpts, TriageResult, VerificationResult } from "
 
 function makeConfig(): KuzushiConfig {
   return {
-    model: "claude-sonnet-4-20250514",
+    model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
     triageConcurrency: 1,

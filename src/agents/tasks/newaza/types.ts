@@ -1,34 +1,37 @@
 import path from "node:path";
-import { augurRoot } from "@kuzushi/augur";
-import type { KuzushiConfig } from "../../types.js";
-import { isRecord } from "../../utils.js";
+import { augurRoot as newazaRoot } from "@kuzushi/augur";
+import type { KuzushiConfig } from "../../../types.js";
+import { isRecord } from "../../../utils.js";
 
-export type AugurLanguage = "python" | "go" | "java" | "javascript" | "csharp";
+export type NewazaLanguage = "python" | "go" | "java" | "javascript" | "csharp";
 
-export interface AugurPassDefinition {
+export interface NewazaPassDefinition {
   passId: 1 | 2 | 3 | 4 | 5 | 6;
   passKey: string;
   focus: string;
   cwes: string[];
 }
 
-export interface AugurTaskConfig {
-  augurPath: string;
+export interface NewazaTaskConfig {
+  newazaPath: string;
   dbPath?: string;
   passes: Array<1 | 2 | 3 | 4 | 5 | 6>;
   labelingModel: string;
+  extractionModel?: string;
   labelingBatchSize: number;
   labelingConfidenceThreshold: number;
-  autoApproveCheckpoint: boolean;
   workspaceDir: string;
   codeqlBinary?: string;
   python3Binary: string;
   threads?: number;
   ram?: number;
   maxFindings?: number;
+  codeqlApiProfile?: "auto" | string;
+  codeqlProbeTimeoutMs?: number;
+  codeqlProfileFallbacks?: boolean;
 }
 
-export interface AugurCandidate {
+export interface NewazaCandidate {
   id: string;
   candidateKind: "source_candidate" | "sink_candidate";
   callable: string;
@@ -41,7 +44,7 @@ export interface AugurCandidate {
   snippet?: string;
 }
 
-export interface AugurPassEntry {
+export interface NewazaPassEntry {
   id: string;
   role: "source" | "sink" | "sanitizer" | "summary" | "none";
   classification: "tp" | "fp" | "candidate" | "unknown";
@@ -62,12 +65,12 @@ export interface AugurPassEntry {
   evidence?: string[];
 }
 
-export interface AugurLabelsDocument {
+export interface NewazaLabelsDocument {
   version: string;
   metadata: {
     run_id: string;
     generated_at: string;
-    language: AugurLanguage;
+    language: NewazaLanguage;
     framework: string | null;
     model: string;
     project: string;
@@ -77,16 +80,18 @@ export interface AugurLabelsDocument {
     pass_id: 1 | 2 | 3 | 4 | 5 | 6;
     focus: string;
     cwes: string[];
-    entries: AugurPassEntry[];
+    entries: NewazaPassEntry[];
   }>;
 }
 
-export interface AugurPreflightOutput {
-  augurPath: string;
+export interface NewazaPreflightOutput {
+  newazaPath: string;
   workspaceDir: string;
   dbPath: string;
   codeqlBinary: string;
-  language: AugurLanguage;
+  codeqlVersion: string;
+  codeqlApiProfileId: string;
+  language: NewazaLanguage;
   framework: string | null;
   referenceFiles: string[];
   passes: Array<1 | 2 | 3 | 4 | 5 | 6>;
@@ -100,22 +105,23 @@ export interface AugurPreflightOutput {
   };
 }
 
-export interface AugurLabelOutput {
-  augurPath: string;
+export interface NewazaLabelOutput {
+  newazaPath: string;
   workspaceDir: string;
   dbPath: string;
   codeqlBinary: string;
-  language: AugurLanguage;
+  codeqlVersion: string;
+  codeqlApiProfileId: string;
+  language: NewazaLanguage;
   framework: string | null;
   passes: Array<1 | 2 | 3 | 4 | 5 | 6>;
   labelsPath: string;
-  labels: AugurLabelsDocument;
+  labels: NewazaLabelsDocument;
   reviewSummary: string;
   labelCounts: Record<string, number>;
-  checkpointRequired: true;
 }
 
-export const AUGUR_PASSES: AugurPassDefinition[] = [
+export const NEWAZA_PASSES: NewazaPassDefinition[] = [
   { passId: 1, passKey: "path_traversal", focus: "Path Traversal", cwes: ["022", "023", "036", "073"] },
   { passId: 2, passKey: "command_injection", focus: "Command/Argument Injection", cwes: ["077", "078", "088"] },
   { passId: 3, passKey: "ssrf", focus: "SSRF", cwes: ["918", "099", "610"] },
@@ -124,61 +130,70 @@ export const AUGUR_PASSES: AugurPassDefinition[] = [
   { passId: 6, passKey: "unsafe_deserialization", focus: "Unsafe Deserialization", cwes: ["502"] },
 ];
 
-const AUGUR_PASS_IDS = new Set([1, 2, 3, 4, 5, 6]);
+const NEWAZA_PASS_IDS = new Set([1, 2, 3, 4, 5, 6]);
 
-const DEFAULT_AUGUR_PATH = normalizeDefaultAugurPath();
+const DEFAULT_NEWAZA_PATH = normalizeDefaultNewazaPath();
 
-export const DEFAULT_AUGUR_TASK_CONFIG: AugurTaskConfig = {
-  augurPath: DEFAULT_AUGUR_PATH,
+export const DEFAULT_NEWAZA_TASK_CONFIG: NewazaTaskConfig = {
+  newazaPath: DEFAULT_NEWAZA_PATH,
   dbPath: undefined,
   passes: [1, 2, 3, 4, 5, 6],
-  labelingModel: "claude-sonnet-4-20250514",
+  labelingModel: "anthropic:claude-sonnet-4-6",
+  extractionModel: undefined,
   labelingBatchSize: 20,
   labelingConfidenceThreshold: 0.55,
-  autoApproveCheckpoint: false,
   workspaceDir: "./iris",
   codeqlBinary: undefined,
   python3Binary: "python3",
   threads: undefined,
   ram: undefined,
   maxFindings: undefined,
+  codeqlApiProfile: "auto",
+  codeqlProbeTimeoutMs: 20_000,
+  codeqlProfileFallbacks: true,
 };
 
-function normalizeDefaultAugurPath(): string {
-  const envPath = process.env["AUGUR_PATH"]?.trim();
+function normalizeDefaultNewazaPath(): string {
+  const envPath = process.env["NEWAZA_PATH"]?.trim();
   if (envPath) {
     return path.normalize(envPath);
   }
 
-  return augurRoot;
+  return newazaRoot;
 }
 
-export function resolveAugurConfig(config: KuzushiConfig): AugurTaskConfig {
-  const raw = config.scannerConfig["augur"];
+export function resolveNewazaConfig(config: KuzushiConfig): NewazaTaskConfig {
+  const raw = config.scannerConfig["newaza"];
   const merged = isRecord(raw)
-    ? { ...DEFAULT_AUGUR_TASK_CONFIG, ...raw }
-    : { ...DEFAULT_AUGUR_TASK_CONFIG };
+    ? { ...DEFAULT_NEWAZA_TASK_CONFIG, ...raw }
+    : { ...DEFAULT_NEWAZA_TASK_CONFIG };
 
   return {
-    augurPath: normalizePath(merged["augurPath"], DEFAULT_AUGUR_TASK_CONFIG.augurPath),
+    newazaPath: normalizePath(merged["newazaPath"], DEFAULT_NEWAZA_TASK_CONFIG.newazaPath),
     dbPath: normalizeOptionalPath(merged["dbPath"]),
     passes: normalizePasses(merged["passes"]),
     labelingModel: normalizeString(merged["labelingModel"], config.model),
-    labelingBatchSize: normalizePositiveInt(merged["labelingBatchSize"], DEFAULT_AUGUR_TASK_CONFIG.labelingBatchSize),
+    extractionModel: normalizeOptionalString(merged["extractionModel"]),
+    labelingBatchSize: normalizePositiveInt(merged["labelingBatchSize"], DEFAULT_NEWAZA_TASK_CONFIG.labelingBatchSize),
     labelingConfidenceThreshold: normalizeUnitInterval(
       merged["labelingConfidenceThreshold"],
-      DEFAULT_AUGUR_TASK_CONFIG.labelingConfidenceThreshold,
+      DEFAULT_NEWAZA_TASK_CONFIG.labelingConfidenceThreshold,
     ),
-    autoApproveCheckpoint: normalizeBoolean(
-      merged["autoApproveCheckpoint"],
-      DEFAULT_AUGUR_TASK_CONFIG.autoApproveCheckpoint,
-    ),
-    workspaceDir: normalizePath(merged["workspaceDir"], DEFAULT_AUGUR_TASK_CONFIG.workspaceDir),
+    workspaceDir: normalizePath(merged["workspaceDir"], DEFAULT_NEWAZA_TASK_CONFIG.workspaceDir),
     codeqlBinary: normalizeOptionalPath(merged["codeqlBinary"]),
-    python3Binary: normalizeString(merged["python3Binary"], DEFAULT_AUGUR_TASK_CONFIG.python3Binary),
+    python3Binary: normalizeString(merged["python3Binary"], DEFAULT_NEWAZA_TASK_CONFIG.python3Binary),
     threads: normalizeOptionalPositiveInt(merged["threads"]),
     ram: normalizeOptionalPositiveInt(merged["ram"]),
     maxFindings: normalizeOptionalPositiveInt(merged["maxFindings"]),
+    codeqlApiProfile: normalizeCodeqlApiProfile(merged["codeqlApiProfile"]),
+    codeqlProbeTimeoutMs: normalizePositiveInt(
+      merged["codeqlProbeTimeoutMs"],
+      DEFAULT_NEWAZA_TASK_CONFIG.codeqlProbeTimeoutMs ?? 20_000,
+    ),
+    codeqlProfileFallbacks: normalizeBoolean(
+      merged["codeqlProfileFallbacks"],
+      DEFAULT_NEWAZA_TASK_CONFIG.codeqlProfileFallbacks ?? true,
+    ),
   };
 }
 
@@ -202,33 +217,33 @@ export function mapFrameworkToReference(framework: string): string | null {
   return null;
 }
 
-export function normalizeAugurLanguage(value: string): AugurLanguage {
+export function normalizeNewazaLanguage(value: string): NewazaLanguage {
   const raw = value.trim().toLowerCase();
   if (raw.includes("python")) return "python";
   if (raw.includes("go")) return "go";
-  if (raw.includes("java")) return "java";
   if (raw.includes("javascript") || raw.includes("typescript") || raw === "js" || raw === "ts") {
     return "javascript";
   }
+  if (raw.includes("java")) return "java";
   if (raw.includes("c#") || raw.includes("csharp")) return "csharp";
   return "javascript";
 }
 
 function normalizePasses(value: unknown): Array<1 | 2 | 3 | 4 | 5 | 6> {
   if (!Array.isArray(value)) {
-    return [...DEFAULT_AUGUR_TASK_CONFIG.passes];
+    return [...DEFAULT_NEWAZA_TASK_CONFIG.passes];
   }
 
   const seen = new Set<1 | 2 | 3 | 4 | 5 | 6>();
   for (const item of value) {
     const asInt = Math.floor(Number(item));
-    if (AUGUR_PASS_IDS.has(asInt)) {
+    if (NEWAZA_PASS_IDS.has(asInt)) {
       seen.add(asInt as 1 | 2 | 3 | 4 | 5 | 6);
     }
   }
 
   if (seen.size === 0) {
-    return [...DEFAULT_AUGUR_TASK_CONFIG.passes];
+    return [...DEFAULT_NEWAZA_TASK_CONFIG.passes];
   }
 
   return [...seen].sort((a, b) => a - b);
@@ -283,8 +298,40 @@ function normalizePath(value: unknown, fallback: string): string {
   return trimmed ? path.normalize(trimmed) : fallback;
 }
 
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function normalizeCodeqlApiProfile(value: unknown): "auto" | string {
+  if (typeof value !== "string") {
+    return "auto";
+  }
+
+  const trimmed = value.trim();
+  return trimmed || "auto";
+}
+
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === "true") {
+      return true;
+    }
+    if (trimmed === "false") {
+      return false;
+    }
+  }
+
+  return fallback;
 }
 
 function normalizeUnitInterval(value: unknown, fallback: number): number {

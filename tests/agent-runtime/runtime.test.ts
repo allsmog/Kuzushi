@@ -9,7 +9,7 @@ import type { KuzushiConfig } from "../../src/types.js";
 
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
-    model: "claude-sonnet-4-20250514",
+    model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
     triageConcurrency: 1,
@@ -25,19 +25,11 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
 describe("agent runtime", () => {
   afterEach(() => {
     configureAgentRuntime(makeConfig({
-      agentRuntimeBackend: "claude-sdk",
+      agentRuntimeBackend: "pi-ai",
     }));
   });
 
-  it("configures claude-sdk backend", () => {
-    const runtime = configureAgentRuntime(makeConfig({
-      agentRuntimeBackend: "claude-sdk",
-    }));
-    expect(runtime.id).toBe("claude-sdk");
-    expect(getAgentRuntime().id).toBe("claude-sdk");
-  });
-
-  it("configures pi-ai backend", () => {
+  it("configures pi-ai backend (default)", () => {
     const runtime = configureAgentRuntime(makeConfig({
       agentRuntimeBackend: "pi-ai",
     }));

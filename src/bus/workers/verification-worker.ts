@@ -29,7 +29,7 @@ export function registerVerificationWorker(
           return verifyFindingWithAgent(
             finding,
             triageResult,
-            context.repoRoot,
+            context.scanPath ?? context.repoRoot,
             context.repoName,
             deps.config.verifyModel ?? deps.config.triageModel ?? deps.config.model,
             deps.config.verifyMaxTurns ?? 15,

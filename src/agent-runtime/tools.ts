@@ -1,7 +1,14 @@
-import { globSync, readFileSync, statSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { globSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import { Type, type Tool } from "@mariozechner/pi-ai";
 import { toErrorMessage } from "../utils.js";
+
+const execFileAsync = promisify(execFile);
+const DEFAULT_BASH_TIMEOUT = 120_000;
+const MAX_BASH_TIMEOUT = 300_000;
+const BASH_MAX_BUFFER = 64 * 1024 * 1024;
 
 const DEFAULT_READ_LIMIT = 200;
 const DEFAULT_GLOB_LIMIT = 200;
@@ -28,6 +35,28 @@ const GlobParameters = Type.Object(
     path: Type.Optional(Type.String({ description: "Directory to search from" })),
     exclude: Type.Optional(Type.Array(Type.String(), { maxItems: 200 })),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+  },
+  { additionalProperties: true },
+);
+
+const BashParameters = Type.Object(
+  {
+    command: Type.String({ description: "Shell command to execute" }),
+    timeout: Type.Optional(
+      Type.Integer({
+        minimum: 1000,
+        maximum: 300000,
+        description: "Timeout in ms (default 120000)",
+      }),
+    ),
+  },
+  { additionalProperties: true },
+);
+
+const WriteParameters = Type.Object(
+  {
+    file_path: Type.String({ description: "Absolute path to write to" }),
+    content: Type.String({ description: "File content to write" }),
   },
   { additionalProperties: true },
 );
@@ -62,6 +91,16 @@ export const PI_AI_TOOL_DEFINITIONS: Tool[] = [
     description: "Search file contents by regex across matching files.",
     parameters: GrepParameters,
   },
+  {
+    name: "Bash",
+    description: "Execute a shell command and return its stdout+stderr.",
+    parameters: BashParameters,
+  },
+  {
+    name: "Write",
+    description: "Write content to a file (creates parent directories as needed).",
+    parameters: WriteParameters,
+  },
 ];
 
 export async function executeTool(
@@ -79,6 +118,14 @@ export async function executeTool(
 
   if (name === "Grep") {
     return executeGrep(args, cwd);
+  }
+
+  if (name === "Bash") {
+    return executeBash(args, cwd);
+  }
+
+  if (name === "Write") {
+    return executeWrite(args, cwd);
   }
 
   throw new Error(`Unsupported tool: ${name}`);
@@ -245,6 +292,55 @@ function executeGrep(args: Record<string, unknown>, cwd: string): string {
   }
 
   return output.join("\n");
+}
+
+async function executeBash(args: Record<string, unknown>, cwd: string): Promise<string> {
+  const command = getString(args, ["command"]);
+  if (!command) {
+    throw new Error("Bash requires a command");
+  }
+
+  const timeout = Math.min(
+    toPositiveInt(args["timeout"]) ?? DEFAULT_BASH_TIMEOUT,
+    MAX_BASH_TIMEOUT,
+  );
+
+  try {
+    const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
+      cwd,
+      encoding: "utf-8",
+      timeout,
+      maxBuffer: BASH_MAX_BUFFER,
+    });
+
+    const combined = [stdout, stderr].filter(Boolean).join("\n");
+    return combined || "(no output)";
+  } catch (error) {
+    const err = error as Error & { stdout?: string; stderr?: string; code?: number | string };
+    const combined = [err.stdout, err.stderr].filter(Boolean).join("\n");
+    if (combined) {
+      return combined;
+    }
+    throw error;
+  }
+}
+
+function executeWrite(args: Record<string, unknown>, cwd: string): string {
+  const filePath = getString(args, ["file_path", "filePath", "path"]);
+  if (!filePath) {
+    throw new Error("Write requires a file_path");
+  }
+
+  const content = args["content"];
+  if (typeof content !== "string") {
+    throw new Error("Write requires string content");
+  }
+
+  const absolutePath = resolvePath(cwd, filePath);
+  mkdirSync(path.dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, content, "utf-8");
+
+  return `Wrote ${content.length} bytes to ${filePath}`;
 }
 
 function resolvePath(cwd: string, targetPath: string): string {

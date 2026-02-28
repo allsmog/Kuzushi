@@ -75,7 +75,7 @@ function makeVerificationResult(): VerificationResult {
 
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
-    model: "claude-sonnet-4-20250514",
+    model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     maxVerifyRetries: 0,
     retryBackoffMs: 0,

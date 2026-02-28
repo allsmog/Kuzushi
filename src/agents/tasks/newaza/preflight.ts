@@ -3,38 +3,46 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { ensureDatabase } from "../../scanners/run-codeql.js";
-import { resolveCodeQLBinary } from "../../scanners/resolve-codeql.js";
-import type { ScanOpts } from "../../types.js";
-import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import { ensureDatabase } from "../../../scanners/run-codeql.js";
+import { resolveCodeQLBinary } from "../../../scanners/resolve-codeql.js";
+import type { ScanOpts } from "../../../types.js";
+import { isRecord, toErrorMessage } from "../../../utils.js";
+import type { AgentTask } from "../../types.js";
 import {
   generateExtractionQuery,
   hasBodyPlaceholders,
-} from "./augur-extraction-agent.js";
+} from "./extraction-agent.js";
 import {
-  DEFAULT_AUGUR_TASK_CONFIG,
+  CodeqlProfileDetectionError,
+  detectWorkingProfile,
+  resolveCodeqlVersion,
+} from "./codeql-compat.js";
+import {
+  DEFAULT_NEWAZA_TASK_CONFIG,
   mapFrameworkToReference,
-  normalizeAugurLanguage,
-  resolveAugurConfig,
-  type AugurLanguage,
-  type AugurPreflightOutput,
-  type AugurTaskConfig,
-} from "./augur-types.js";
+  normalizeNewazaLanguage,
+  resolveNewazaConfig,
+  type NewazaLanguage,
+  type NewazaPreflightOutput,
+  type NewazaTaskConfig,
+} from "./types.js";
 
 interface ExtractionAgentContext {
   referenceFiles: string[];
-  augurPath: string;
+  newazaPath: string;
   model: string;
   repoRoot: string;
   workspaceDir: string;
   codeqlBinary: string;
   dbPath: string;
+  codeqlApiProfileId: string;
+  dataFlowImport: string;
+  taintTrackingImport: string;
 }
 
 const execFileAsync = promisify(execFile);
 
-const REQUIRED_AUGUR_PATHS = [
+const REQUIRED_NEWAZA_PATHS = [
   "WORKFLOW.md",
   "references",
   "assets",
@@ -58,19 +66,19 @@ interface FrameworkCandidate {
 }
 
 /**
- * Augur Step 0-2 task: deterministic pre-flight + candidate extraction.
+ * Newaza Step 0-2 task: deterministic pre-flight + candidate extraction.
  */
-export const augurPreflightTask: AgentTask<ScanOpts, AugurPreflightOutput> = {
-  id: "augur-preflight",
-  displayName: "Augur Pre-flight",
+export const newazaPreflightTask: AgentTask<ScanOpts, NewazaPreflightOutput> = {
+  id: "newaza-preflight",
+  displayName: "Newaza Pre-flight",
   outputKind: "custom",
   // Soft dependency: consume context-gatherer output when available, but do not require it.
-  // This keeps Augur usable even when context gathering is disabled.
+  // This keeps Newaza usable even when context gathering is disabled.
   dependsOn: [],
-  async run(_input, context): Promise<AugurPreflightOutput> {
-    const cfg = resolveAugurConfig(context.config);
-    const augurPath = toAbsolutePath(context.repoRoot, cfg.augurPath);
-    await validateAugurPath(augurPath);
+  async run(_input, context): Promise<NewazaPreflightOutput> {
+    const cfg = resolveNewazaConfig(context.config);
+    const newazaPath = toAbsolutePath(context.repoRoot, cfg.newazaPath);
+    await validateNewazaPath(newazaPath);
 
     const workspaceDir = resolveWorkspaceDir(context.repoRoot, cfg.workspaceDir);
     await initializeWorkspace(workspaceDir);
@@ -87,16 +95,61 @@ export const augurPreflightTask: AgentTask<ScanOpts, AugurPreflightOutput> = {
       },
     );
 
-    const language = normalizeAugurLanguage(detectedLanguage);
+    const language = normalizeNewazaLanguage(detectedLanguage);
     const framework = await detectPrimaryFramework(context.repoRoot, context.upstreamOutputs.get("context-gatherer"));
-    const referenceFiles = await resolveReferenceFiles(augurPath, language, framework);
-    const extractionModel = cfg.extractionModel || cfg.labelingModel;
+    const referenceFiles = await resolveReferenceFiles(newazaPath, language, framework);
+    const extractionModelSelection = resolveExtractionModel(cfg);
+    if (extractionModelSelection.usedLabelingFallback) {
+      process.stderr.write(
+        `[newaza-preflight] extractionModel not configured; using labelingModel (${cfg.labelingModel}) for extraction\n`,
+      );
+    }
+    const extractionModel = extractionModelSelection.model;
 
     await writeQlpack(workspaceDir, language);
     await runCodeql(
       codeqlBinary,
       ["pack", "install"],
       workspaceDir,
+    );
+
+    const codeqlVersion = await resolveCodeqlVersion(codeqlBinary);
+    let profileDetection: Awaited<ReturnType<typeof detectWorkingProfile>>;
+    try {
+      profileDetection = await detectWorkingProfile({
+        language,
+        codeqlBinary,
+        workspaceDir,
+        codeqlApiProfile: cfg.codeqlApiProfile,
+        codeqlProfileFallbacks: cfg.codeqlProfileFallbacks,
+        probeTimeoutMs: cfg.codeqlProbeTimeoutMs,
+      });
+    } catch (error) {
+      const tried = error instanceof CodeqlProfileDetectionError
+        ? error.tried
+        : [];
+      await writeCodeqlCompatibility(
+        workspaceDir,
+        language,
+        codeqlVersion,
+        cfg,
+        tried,
+        null,
+        toErrorMessage(error),
+      );
+      throw error;
+    }
+    const codeqlProfile = profileDetection.selected;
+    const codeqlApiProfileId = codeqlProfile.id;
+
+    await writeCodeqlCompatibility(
+      workspaceDir,
+      language,
+      codeqlVersion,
+      cfg,
+      profileDetection.tried,
+      codeqlProfile.id,
+      undefined,
     );
 
     await writeManifestAndDetection(
@@ -107,23 +160,28 @@ export const augurPreflightTask: AgentTask<ScanOpts, AugurPreflightOutput> = {
       referenceFiles,
       cfg,
       extractionModel,
+      codeqlVersion,
+      codeqlApiProfileId,
     );
 
     const extractionDir = path.join(workspaceDir, "extraction");
     const sourcesQueryPath = path.join(extractionDir, "sources.ql");
     const sinksQueryPath = path.join(extractionDir, "sinks.ql");
 
-    const sourcesTemplatePath = path.join(augurPath, "assets", "extraction", `${language}_sources.ql.tmpl`);
-    const sinksTemplatePath = path.join(augurPath, "assets", "extraction", `${language}_sinks.ql.tmpl`);
+    const sourcesTemplatePath = path.join(newazaPath, "assets", "extraction", `${language}_sources.ql.tmpl`);
+    const sinksTemplatePath = path.join(newazaPath, "assets", "extraction", `${language}_sinks.ql.tmpl`);
 
     const agentCtx: ExtractionAgentContext = {
       referenceFiles,
-      augurPath,
+      newazaPath,
       model: extractionModel,
       repoRoot: context.repoRoot,
       workspaceDir,
       codeqlBinary,
       dbPath,
+      codeqlApiProfileId,
+      dataFlowImport: codeqlProfile.dataFlowImport,
+      taintTrackingImport: codeqlProfile.taintTrackingImport,
     };
 
     const sourcesQuery = await renderExtractionTemplate(
@@ -203,10 +261,12 @@ export const augurPreflightTask: AgentTask<ScanOpts, AugurPreflightOutput> = {
     const sinksRowCount = await countCsvRows(sinksCsvPath);
 
     return {
-      augurPath,
+      newazaPath,
       workspaceDir,
       dbPath,
       codeqlBinary,
+      codeqlVersion,
+      codeqlApiProfileId,
       language,
       framework,
       referenceFiles,
@@ -223,7 +283,7 @@ export const augurPreflightTask: AgentTask<ScanOpts, AugurPreflightOutput> = {
   },
 };
 
-function withResources(args: string[], cfg: AugurTaskConfig): string[] {
+function withResources(args: string[], cfg: NewazaTaskConfig): string[] {
   const out = [...args];
   if (cfg.threads && cfg.threads > 0) {
     out.push(`--threads=${cfg.threads}`);
@@ -234,15 +294,15 @@ function withResources(args: string[], cfg: AugurTaskConfig): string[] {
   return out;
 }
 
-async function validateAugurPath(augurPath: string): Promise<void> {
-  if (!existsSync(augurPath)) {
-    throw new Error(`Augur path does not exist: ${augurPath}`);
+async function validateNewazaPath(newazaPath: string): Promise<void> {
+  if (!existsSync(newazaPath)) {
+    throw new Error(`Newaza path does not exist: ${newazaPath}`);
   }
 
-  for (const rel of REQUIRED_AUGUR_PATHS) {
-    const abs = path.join(augurPath, rel);
+  for (const rel of REQUIRED_NEWAZA_PATHS) {
+    const abs = path.join(newazaPath, rel);
     if (!existsSync(abs)) {
-      throw new Error(`Invalid Augur path. Missing required path: ${abs}`);
+      throw new Error(`Invalid Newaza path. Missing required path: ${abs}`);
     }
   }
 }
@@ -254,7 +314,7 @@ async function initializeWorkspace(workspaceDir: string): Promise<void> {
   }
 }
 
-async function writeQlpack(workspaceDir: string, language: AugurLanguage): Promise<void> {
+async function writeQlpack(workspaceDir: string, language: NewazaLanguage): Promise<void> {
   const qlpack = [
     "name: iris/generated",
     "version: 0.0.1",
@@ -269,11 +329,13 @@ async function writeQlpack(workspaceDir: string, language: AugurLanguage): Promi
 async function writeManifestAndDetection(
   workspaceDir: string,
   dbPath: string,
-  language: AugurLanguage,
+  language: NewazaLanguage,
   framework: string | null,
   referenceFiles: string[],
-  cfg: AugurTaskConfig,
+  cfg: NewazaTaskConfig,
   extractionModel: string,
+  codeqlVersion: string,
+  codeqlApiProfileId: string,
 ): Promise<void> {
   const generatedAt = new Date().toISOString();
   const manifestPath = path.join(workspaceDir, "exploration", "run_manifest.json");
@@ -289,6 +351,8 @@ async function writeManifestAndDetection(
       model: extractionModel,
       extractionModel,
       labelingModel: cfg.labelingModel,
+      codeqlVersion,
+      codeqlApiProfileId,
     }, null, 2),
     "utf-8",
   );
@@ -300,6 +364,34 @@ async function writeManifestAndDetection(
       framework,
       referenceFiles,
       generatedAt,
+    }, null, 2),
+    "utf-8",
+  );
+}
+
+async function writeCodeqlCompatibility(
+  workspaceDir: string,
+  language: NewazaLanguage,
+  codeqlVersion: string,
+  cfg: NewazaTaskConfig,
+  tried: Array<{ id: string; ok: boolean; error?: string }>,
+  selectedProfileId: string | null,
+  failureReason?: string,
+): Promise<void> {
+  const compatPath = path.join(workspaceDir, "exploration", "codeql_compat.json");
+  const generatedAt = new Date().toISOString();
+  await writeFile(
+    compatPath,
+    JSON.stringify({
+      generatedAt,
+      language,
+      codeqlVersion,
+      requestedProfile: cfg.codeqlApiProfile ?? "auto",
+      profileFallbacks: cfg.codeqlProfileFallbacks ?? true,
+      probeTimeoutMs: cfg.codeqlProbeTimeoutMs ?? 20_000,
+      selectedProfileId,
+      triedProfiles: tried,
+      ...(failureReason ? { failureReason } : {}),
     }, null, 2),
     "utf-8",
   );
@@ -411,13 +503,13 @@ async function detectFrameworkCandidates(repoRoot: string): Promise<FrameworkCan
 }
 
 async function resolveReferenceFiles(
-  augurPath: string,
-  language: AugurLanguage,
+  newazaPath: string,
+  language: NewazaLanguage,
   framework: string | null,
 ): Promise<string[]> {
   const files: string[] = [];
-  const patternsPath = path.join(augurPath, "references", "patterns.md");
-  const languagePath = path.join(augurPath, "references", `${language}.md`);
+  const patternsPath = path.join(newazaPath, "references", "patterns.md");
+  const languagePath = path.join(newazaPath, "references", `${language}.md`);
 
   if (existsSync(patternsPath)) {
     files.push(patternsPath);
@@ -428,7 +520,7 @@ async function resolveReferenceFiles(
   }
 
   if (framework) {
-    const frameworkPath = path.join(augurPath, "references", `${framework}.md`);
+    const frameworkPath = path.join(newazaPath, "references", `${framework}.md`);
     if (existsSync(frameworkPath)) {
       files.push(frameworkPath);
     }
@@ -439,7 +531,7 @@ async function resolveReferenceFiles(
 
 async function renderExtractionTemplate(
   templatePath: string,
-  language: AugurLanguage,
+  language: NewazaLanguage,
   kind: "source" | "sink",
   agentCtx?: ExtractionAgentContext,
 ): Promise<string> {
@@ -457,6 +549,7 @@ async function renderExtractionTemplate(
   if (hasBodyPlaceholders(template, kind)) {
     if (agentCtx) {
       try {
+        process.stderr.write(`[newaza-preflight] Running extraction agent for ${language}/${kind}...\n`);
         const generated = await generateExtractionQuery({
           language,
           kind,
@@ -464,11 +557,13 @@ async function renderExtractionTemplate(
           ...agentCtx,
         });
         if (generated) {
+          process.stderr.write(`[newaza-preflight] Extraction agent succeeded for ${language}/${kind} (${generated.length} chars)\n`);
           return generated;
         }
+        process.stderr.write(`[newaza-preflight] Extraction agent returned no query for ${language}/${kind}, using fallback\n`);
       } catch (error) {
         process.stderr.write(
-          `[augur-preflight] Agent extraction failed for ${language}/${kind}, using fallback: ${toErrorMessage(error)}\n`,
+          `[newaza-preflight] Agent extraction failed for ${language}/${kind}, using fallback: ${toErrorMessage(error)}\n`,
         );
       }
     }
@@ -476,9 +571,9 @@ async function renderExtractionTemplate(
   }
 
   const rendered = template
-    .replaceAll("{{QUERY_NAME}}", `Augur ${capitalize(kind)} candidate extraction`)
-    .replaceAll("{{QUERY_DESCRIPTION}}", `Extract ${kind} candidates for Augur labeling.`)
-    .replaceAll("{{QUERY_ID}}", `augur/extraction/${kind}`)
+    .replaceAll("{{QUERY_NAME}}", `Newaza ${capitalize(kind)} candidate extraction`)
+    .replaceAll("{{QUERY_DESCRIPTION}}", `Extract ${kind} candidates for Newaza labeling.`)
+    .replaceAll("{{QUERY_ID}}", `newaza/extraction/${kind}`)
     .replaceAll("{{LANGUAGE_IMPORTS}}", `import ${language}`)
     .replaceAll("{{HELPER_PREDICATES}}", "")
     .replaceAll(`{{${kind.toUpperCase()}_CLAUSES}}`, "")
@@ -497,21 +592,21 @@ async function renderExtractionTemplate(
   return rendered;
 }
 
-function fallbackExtractionQuery(language: AugurLanguage, kind: "source" | "sink"): string {
+function fallbackExtractionQuery(language: NewazaLanguage, kind: "source" | "sink"): string {
   const candidateKind = kind === "source" ? "source_candidate" : "sink_candidate";
   return [
     "/**",
-    ` * @name Augur ${capitalize(kind)} candidate extraction`,
+    ` * @name Newaza ${capitalize(kind)} candidate extraction`,
     " * @description Deterministic fallback extraction query generated by Kuzushi.",
     " * @kind problem",
-    ` * @id augur/extraction/fallback-${kind}`,
+    ` * @id newaza/extraction/fallback-${kind}`,
     " * @problem.severity recommendation",
     " */",
     "",
     `import ${language}`,
     "",
-    "from string marker",
-    "where false",
+    "from DataFlow::Node marker",
+    "where 1 = 0",
     "select",
     "  marker,",
     `  \"${candidateKind}\",`,
@@ -585,6 +680,23 @@ function capitalize(value: string): string {
     : value[0].toUpperCase() + value.slice(1);
 }
 
+function resolveExtractionModel(cfg: NewazaTaskConfig): {
+  model: string;
+  usedLabelingFallback: boolean;
+} {
+  if (cfg.extractionModel) {
+    return {
+      model: cfg.extractionModel,
+      usedLabelingFallback: false,
+    };
+  }
+
+  return {
+    model: cfg.labelingModel,
+    usedLabelingFallback: true,
+  };
+}
+
 function toAbsolutePath(repoRoot: string, candidate: string): string {
   if (path.isAbsolute(candidate)) {
     return path.normalize(candidate);
@@ -600,9 +712,9 @@ export function resolveWorkspaceDir(repoRoot: string, workspaceDir: string): str
     return resolvedWorkspace;
   }
 
-  const fallbackWorkspace = toAbsolutePath(absoluteRepoRoot, DEFAULT_AUGUR_TASK_CONFIG.workspaceDir);
+  const fallbackWorkspace = toAbsolutePath(absoluteRepoRoot, DEFAULT_NEWAZA_TASK_CONFIG.workspaceDir);
   process.stderr.write(
-    `[augur-preflight] Ignoring workspaceDir outside repo root: ${workspaceDir}; using ${fallbackWorkspace}\n`,
+    `[newaza-preflight] Ignoring workspaceDir outside repo root: ${workspaceDir}; using ${fallbackWorkspace}\n`,
   );
   return fallbackWorkspace;
 }
@@ -612,11 +724,13 @@ function isWithinRoot(rootPath: string, candidatePath: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export const __augurPreflightInternals = {
+export const __newazaPreflightInternals = {
   detectPrimaryFramework,
   renderExtractionTemplate,
   resolveReferenceFiles,
   resolveWorkspaceDir,
   initializeWorkspace,
   writeManifestAndDetection,
+  writeCodeqlCompatibility,
+  resolveExtractionModel,
 };

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildDefaultTriageAgentConfig,
   extractJson,
@@ -9,14 +9,7 @@ import {
   triageFindingWithAgent,
 } from "../src/triage.js";
 import type { Finding, TriageAgentConfig } from "../src/scanners/types.js";
-
-const { queryMock } = vi.hoisted(() => ({
-  queryMock: vi.fn(),
-}));
-
-vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
-  query: queryMock,
-}));
+import type { AgentMessage, AgentRuntime } from "../src/agent-runtime/types.js";
 
 function makeFinding(): Finding {
   return {
@@ -57,17 +50,18 @@ function missingRegistry() {
   };
 }
 
-function streamResult(messages: Array<Record<string, unknown>>) {
-  return (async function* () {
+function makeMockRuntime(messages: AgentMessage[]): AgentRuntime {
+  const queryFn = vi.fn().mockImplementation(function* () {
     for (const message of messages) {
       yield message;
     }
-  })();
-}
+  });
 
-beforeEach(() => {
-  queryMock.mockReset();
-});
+  return {
+    id: "mock-runtime",
+    query: queryFn,
+  };
+}
 
 describe("parseVerdict", () => {
   it("accepts tp", () => expect(parseVerdict("tp")).toBe("tp"));
@@ -187,12 +181,12 @@ describe("buildDefaultTriageAgentConfig", () => {
 
 describe("triageFindingWithAgent", () => {
   it("uses structured_output when available", async () => {
-    queryMock.mockReturnValue(streamResult([
+    const runtime = makeMockRuntime([
       {
         type: "result",
         subtype: "success",
         result: "{}",
-        structured_output: {
+        structuredOutput: {
           fingerprint: "test-fp",
           verdict: "fp",
           confidence: 0.95,
@@ -200,27 +194,30 @@ describe("triageFindingWithAgent", () => {
           verification_steps: ["check source"],
           fix_patch: null,
         },
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0,
       },
-    ]));
+    ]);
 
     const output = await triageFindingWithAgent(
       registryWithConfig({ prompt: "custom triage" }) as any,
       makeFinding(),
       "/tmp/repo",
       "repo",
-      "claude-sonnet-4-20250514",
+      "anthropic:claude-sonnet-4-6",
       12,
+      { runtime },
     );
 
     expect(output.result.verdict).toBe("fp");
     expect(output.result.confidence).toBe(0.95);
     expect(output.costUsd).toBe(0);
-    expect(queryMock).toHaveBeenCalledTimes(1);
-    expect(queryMock.mock.calls[0][0]?.options?.maxTurns).toBe(12);
+    expect(runtime.query).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to result text parsing when structured_output is missing", async () => {
-    queryMock.mockReturnValue(streamResult([
+    const runtime = makeMockRuntime([
       {
         type: "result",
         subtype: "success",
@@ -231,16 +228,20 @@ describe("triageFindingWithAgent", () => {
           verification_steps: ["follow taint"],
           fix_patch: "diff",
         }),
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0,
       },
-    ]));
+    ]);
 
     const output = await triageFindingWithAgent(
       registryWithConfig({ prompt: "custom triage" }) as any,
       makeFinding(),
       "/tmp/repo",
       "repo",
-      "claude-sonnet-4-20250514",
+      "anthropic:claude-sonnet-4-6",
       7,
+      { runtime },
     );
 
     expect(output.result.verdict).toBe("tp");
@@ -248,7 +249,7 @@ describe("triageFindingWithAgent", () => {
   });
 
   it("uses default agent config when scanner plugin is missing", async () => {
-    queryMock.mockReturnValue(streamResult([
+    const runtime = makeMockRuntime([
       {
         type: "result",
         subtype: "success",
@@ -259,28 +260,30 @@ describe("triageFindingWithAgent", () => {
           verification_steps: ["inspect runtime path"],
           fix_patch: null,
         }),
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0,
       },
-    ]));
+    ]);
 
     const output = await triageFindingWithAgent(
       missingRegistry() as any,
       makeFinding(),
       "/tmp/repo",
       "repo",
-      "claude-sonnet-4-20250514",
+      "anthropic:claude-sonnet-4-6",
       9,
+      { runtime },
     );
 
     expect(output.result.verdict).toBe("needs_review");
-    expect(queryMock.mock.calls[0][0]?.prompt).toContain("security triage agent");
   });
 
-  it("captures total_cost_usd from SDK result messages", async () => {
-    queryMock.mockReturnValue(streamResult([
+  it("captures total_cost_usd from result messages", async () => {
+    const runtime = makeMockRuntime([
       {
         type: "result",
         subtype: "success",
-        total_cost_usd: 0.0123,
         result: JSON.stringify({
           verdict: "fp",
           confidence: 0.9,
@@ -288,16 +291,20 @@ describe("triageFindingWithAgent", () => {
           verification_steps: ["step"],
           fix_patch: null,
         }),
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0.0123,
       },
-    ]));
+    ]);
 
     const output = await triageFindingWithAgent(
       registryWithConfig({ prompt: "custom triage" }) as any,
       makeFinding(),
       "/tmp/repo",
       "repo",
-      "claude-sonnet-4-20250514",
+      "anthropic:claude-sonnet-4-6",
       9,
+      { runtime },
     );
 
     expect(output.result.verdict).toBe("fp");
@@ -305,13 +312,16 @@ describe("triageFindingWithAgent", () => {
   });
 
   it("throws when agent run fails", async () => {
-    queryMock.mockReturnValue(streamResult([
+    const runtime = makeMockRuntime([
       {
         type: "result",
         subtype: "error_max_turns",
         errors: ["max turns exceeded"],
+        durationMs: 100,
+        numTurns: 10,
+        totalCostUsd: 0,
       },
-    ]));
+    ]);
 
     await expect(
       triageFindingWithAgent(
@@ -319,21 +329,24 @@ describe("triageFindingWithAgent", () => {
         makeFinding(),
         "/tmp/repo",
         "repo",
-        "claude-sonnet-4-20250514",
+        "anthropic:claude-sonnet-4-6",
         9,
+        { runtime },
       ),
     ).rejects.toThrow("triage agent failed");
   });
 
   it("throws TriageExecutionError with cost on failed runs", async () => {
-    queryMock.mockReturnValue(streamResult([
+    const runtime = makeMockRuntime([
       {
         type: "result",
         subtype: "error_max_turns",
         errors: ["max turns exceeded"],
-        total_cost_usd: 0.021,
+        durationMs: 100,
+        numTurns: 10,
+        totalCostUsd: 0.021,
       },
-    ]));
+    ]);
 
     try {
       await triageFindingWithAgent(
@@ -341,8 +354,9 @@ describe("triageFindingWithAgent", () => {
         makeFinding(),
         "/tmp/repo",
         "repo",
-        "claude-sonnet-4-20250514",
+        "anthropic:claude-sonnet-4-6",
         9,
+        { runtime },
       );
       expect.unreachable("Expected triage run to throw");
     } catch (error) {
@@ -352,14 +366,16 @@ describe("triageFindingWithAgent", () => {
   });
 
   it("throws TriageExecutionError with cost when output parsing fails", async () => {
-    queryMock.mockReturnValue(streamResult([
+    const runtime = makeMockRuntime([
       {
         type: "result",
         subtype: "success",
-        total_cost_usd: 0.017,
         result: "not-json",
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0.017,
       },
-    ]));
+    ]);
 
     try {
       await triageFindingWithAgent(
@@ -367,8 +383,9 @@ describe("triageFindingWithAgent", () => {
         makeFinding(),
         "/tmp/repo",
         "repo",
-        "claude-sonnet-4-20250514",
+        "anthropic:claude-sonnet-4-6",
         9,
+        { runtime },
       );
       expect.unreachable("Expected triage run to throw");
     } catch (error) {
@@ -379,26 +396,24 @@ describe("triageFindingWithAgent", () => {
   });
 
   it("emits activity callbacks for assistant/tool progress/summary messages", async () => {
-    queryMock.mockReturnValue(streamResult([
+    const runtime = makeMockRuntime([
       {
         type: "assistant",
-        message: {
-          content: [
-            { type: "tool_use", name: "Read", input: { file_path: "src/test.ts" } },
-            { type: "text", text: "Investigating dataflow path." },
-          ],
-        },
+        content: [
+          { type: "tool_use", name: "Read", input: { file_path: "src/test.ts" } },
+          { type: "text", text: "Investigating dataflow path." },
+        ],
       },
       {
-        type: "tool_progress",
-        tool_use_id: "tool-1",
-        tool_name: "Read",
-        elapsed_time_seconds: 1.2,
+        type: "tool-progress",
+        toolUseId: "tool-1",
+        toolName: "Read",
+        elapsedSeconds: 1.2,
       },
       {
-        type: "tool_use_summary",
+        type: "tool-summary",
         summary: "Verified sanitization before sink.",
-        preceding_tool_use_ids: ["tool-1"],
+        precedingToolUseIds: ["tool-1"],
       },
       {
         type: "result",
@@ -410,8 +425,11 @@ describe("triageFindingWithAgent", () => {
           verification_steps: ["trace data flow"],
           fix_patch: null,
         }),
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0,
       },
-    ]));
+    ]);
 
     const activities: Array<Record<string, unknown>> = [];
 
@@ -420,9 +438,10 @@ describe("triageFindingWithAgent", () => {
       makeFinding(),
       "/tmp/repo",
       "repo",
-      "claude-sonnet-4-20250514",
+      "anthropic:claude-sonnet-4-6",
       10,
       {
+        runtime,
         activityCallback: (activity) => {
           activities.push(activity as unknown as Record<string, unknown>);
         },

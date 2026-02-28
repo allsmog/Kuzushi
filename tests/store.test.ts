@@ -56,7 +56,7 @@ function makeResult(fp: string, verdict: "tp" | "fp" | "needs_review" = "fp"): T
 
 function makeConfig(): KuzushiConfig {
   return {
-    model: "claude-sonnet-4-20250514",
+    model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
     triageConcurrency: 2,

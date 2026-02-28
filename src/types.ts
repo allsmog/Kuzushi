@@ -7,7 +7,15 @@ export type BusBackend = "in-process" | "redis" | "google-pubsub" | "nats";
 export type ScanMode = "sequential" | "concurrent";
 
 /** Runtime provider for agent execution. */
-export type AgentRuntimeBackend = "claude-sdk" | "pi-ai" | "acp";
+export type AgentRuntimeBackend = "pi-ai" | "acp";
+
+/** Configuration for agent runtime authentication and endpoint selection. */
+export interface AgentRuntimeConfig {
+  /** API key for the LLM provider. Overrides ANTHROPIC_API_KEY when set. */
+  apiKey?: string;
+  /** Base URL for the LLM API endpoint. Overrides ANTHROPIC_BASE_URL when set. */
+  baseUrl?: string;
+}
 
 /** Verdict assigned by AI triage. */
 export type Verdict = "tp" | "fp" | "needs_review";
@@ -69,7 +77,7 @@ export interface RepoContext {
 
 /** User configuration stored at ~/.kuzushi/config.json (and optional project override). */
 export interface KuzushiConfig {
-  /** Scanner model identifier (e.g. "claude-sonnet-4-20250514"). */
+  /** Scanner model identifier (e.g. "anthropic:claude-sonnet-4-6"). */
   model: string;
   /** Optional override model for triage agents. */
   triageModel?: string;
@@ -121,6 +129,8 @@ export interface KuzushiConfig {
   scanMode: ScanMode;
   /** Backend used for agent execution. */
   agentRuntimeBackend?: AgentRuntimeBackend;
+  /** Optional runtime-level credentials and endpoint overrides. */
+  agentRuntimeConfig?: AgentRuntimeConfig;
   /** Optional list of additional AgentTask IDs to enable in DAG execution. */
   enabledTasks?: string[];
   /** Enabled scanner IDs, in execution order. */

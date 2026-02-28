@@ -12,6 +12,7 @@ import type {
 
 class FakePlugin implements ScannerPlugin {
   initCalled = 0;
+  scanRoots: string[] = [];
 
   constructor(
     readonly id: string,
@@ -24,7 +25,8 @@ class FakePlugin implements ScannerPlugin {
     this.initCalled += 1;
   }
 
-  async scan(_repoRoot: string, _opts: ScanOpts, _config: Record<string, unknown>): Promise<Finding[]> {
+  async scan(repoRoot: string, _opts: ScanOpts, _config: Record<string, unknown>): Promise<Finding[]> {
+    this.scanRoots.push(repoRoot);
     if (this.delayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, this.delayMs));
     }
@@ -56,7 +58,7 @@ function makeFinding(scanner: string, fp: string): Finding {
 
 function makeConfig(scanMode: KuzushiConfig["scanMode"]): KuzushiConfig {
   return {
-    model: "claude-sonnet-4-20250514",
+    model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
     triageConcurrency: 1,
@@ -129,6 +131,8 @@ describe("scan-worker", () => {
 
     expect(a.initCalled).toBe(1);
     expect(b.initCalled).toBe(1);
+    expect(a.scanRoots).toEqual(["/tmp/repo"]);
+    expect(b.scanRoots).toEqual(["/tmp/repo"]);
     expect(findingEvents).toHaveLength(2);
     expect(scannerDoneEvents).toHaveLength(2);
     expect(scanComplete.payload.totalFindings).toBe(2);
@@ -177,6 +181,53 @@ describe("scan-worker", () => {
 
     const scanComplete = await scanCompletePromise;
     expect(scanComplete.payload.totalFindings).toBe(2);
+    expect(a.scanRoots).toEqual(["/tmp/repo"]);
+    expect(b.scanRoots).toEqual(["/tmp/repo"]);
+
+    await bus.close();
+  });
+
+  it("uses scanPath when provided in run context", async () => {
+    const bus = new InProcessBus();
+    const a = new FakePlugin("a", "A", [makeFinding("a", "fp-a")]);
+
+    const registry = {
+      get: () => a,
+    };
+
+    registerScanWorker(bus, {
+      registry: registry as any,
+      config: makeConfig("sequential"),
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      scanPath: "/tmp/repo/subdir",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const scanCompletePromise = bus.waitFor<ScanCompleteEvent>(
+      "scan:complete",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("scan:start", runId, {
+        context,
+        scanners: ["a"],
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          fresh: false,
+        },
+      }),
+    );
+
+    await scanCompletePromise;
+    expect(a.scanRoots).toEqual(["/tmp/repo/subdir"]);
 
     await bus.close();
   });

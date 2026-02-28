@@ -9,6 +9,7 @@ export type TaskOutputKind = "findings" | "threat-model" | "verdict" | "report" 
 export interface TaskContext {
   runId: string;
   repoRoot: string;
+  scanPath?: string;
   repoName: string;
   config: KuzushiConfig;
   bus: MessageBus;

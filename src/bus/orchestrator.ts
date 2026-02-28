@@ -26,7 +26,6 @@ import type {
 } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type {
-  AugurCheckpointApprovedEvent,
   BusHandlerErrorEvent,
   PipelineStats,
   PipelineErrorEvent,
@@ -134,6 +133,48 @@ export interface OrchestratorDeps {
 type TaskOutcome =
   | { kind: "complete"; event: TaskCompleteEvent }
   | { kind: "error"; event: TaskErrorEvent };
+
+function allSettledFailFast(outcomes: Promise<TaskOutcome>[]): Promise<TaskOutcome[]> {
+  if (outcomes.length === 0) {
+    return Promise.resolve([]);
+  }
+
+  return new Promise((resolve, reject) => {
+    const results: Array<TaskOutcome | undefined> = new Array(outcomes.length);
+    let completed = 0;
+    let settled = false;
+
+    outcomes.forEach((outcomePromise, index) => {
+      outcomePromise
+        .then((outcome) => {
+          if (settled) {
+            return;
+          }
+
+          results[index] = outcome;
+          completed += 1;
+
+          if (outcome.kind === "error") {
+            settled = true;
+            resolve(results.filter((result): result is TaskOutcome => result !== undefined));
+            return;
+          }
+
+          if (completed === outcomes.length) {
+            settled = true;
+            resolve(results as TaskOutcome[]);
+          }
+        })
+        .catch((error) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          reject(error);
+        });
+    });
+  });
+}
 
 /**
  * Coordinator-style orchestrator for the event-driven scan pipeline.
@@ -665,7 +706,7 @@ export class PipelineOrchestrator {
         );
       }
 
-      const resolved = await Promise.all(outcomes);
+      const resolved = await allSettledFailFast(outcomes);
       const failed = resolved.find((outcome) => outcome.kind === "error");
       if (failed && failed.kind === "error") {
         await this.bus.publish(
@@ -685,38 +726,6 @@ export class PipelineOrchestrator {
             state.scanFindings.push(...coerceFindings(outcome.event.payload.output));
           }
         }
-      }
-
-      for (const outcome of resolved) {
-        if (outcome.kind !== "complete") {
-          continue;
-        }
-
-        const output = outcome.event.payload.output;
-        if (!isRecord(output) || output["checkpointRequired"] !== true) {
-          continue;
-        }
-
-        const autoApprove = (
-          isRecord(state.config.scannerConfig["augur"])
-          && state.config.scannerConfig["augur"]["autoApproveCheckpoint"] === true
-        );
-        if (autoApprove) {
-          continue;
-        }
-
-        await this.bus.publish(
-          createEvent("augur:checkpoint", runId, {
-            context: state.context,
-            reviewSummary: typeof output["reviewSummary"] === "string" ? output["reviewSummary"] : "",
-            labelCounts: asLabelCountMap(output["labelCounts"]),
-          }),
-        );
-
-        await this.bus.waitFor<AugurCheckpointApprovedEvent>(
-          "augur:checkpoint-approved",
-          (event) => event.meta.runId === runId,
-        );
       }
 
       await this.bus.publish(
@@ -873,7 +882,7 @@ export class PipelineOrchestrator {
       return;
     }
 
-    await this.dispatchTriage(state, runId);
+    await this.dispatchTriageBatch(state, runId, triageCandidates);
   }
 
   private async handleTriageResult(event: TriageResultEvent): Promise<void> {
@@ -1035,6 +1044,26 @@ export class PipelineOrchestrator {
     }
   }
 
+  private async dispatchTriageBatch(
+    state: RunState,
+    runId: string,
+    findings: Finding[],
+  ): Promise<void> {
+    state.inFlight = findings.length;
+    state.queueCursor = findings.length;
+
+    await this.bus.publish(
+      createEvent("triage:batch-queued", runId, {
+        context: state.context,
+        findings,
+        repoContext: state.repoContext,
+        total: findings.length,
+      }),
+    );
+
+    await this.publishQueueDepth(state, runId);
+  }
+
   private isTriageDone(state: RunState): boolean {
     const processed = state.triaged + state.triageErrors;
     return (
@@ -1050,6 +1079,9 @@ export class PipelineOrchestrator {
       return;
     }
 
+    // Set immediately to prevent re-entry from synchronous bus delivery.
+    state.reportRequested = true;
+
     await this.bus.publish(
       createEvent("triage:complete", runId, {
         context: state.context,
@@ -1060,7 +1092,6 @@ export class PipelineOrchestrator {
     );
 
     if (state.verifyEnabled) {
-      state.reportRequested = true;
       await this.startVerification(state, runId);
       return;
     }
@@ -1072,7 +1103,6 @@ export class PipelineOrchestrator {
       }),
     );
 
-    state.reportRequested = true;
     state.reportEmitted = true;
   }
 

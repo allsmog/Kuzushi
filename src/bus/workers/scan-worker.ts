@@ -79,7 +79,8 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
 
       const taskContext: TaskContext = {
         runId,
-        repoRoot: context.repoRoot,
+        repoRoot: context.scanPath ?? context.repoRoot,
+        scanPath: context.scanPath,
         repoName: context.repoName,
         config: deps.config,
         bus,
@@ -157,7 +158,7 @@ async function runSingleScanner(
     await plugin.init(pluginConfig);
   }
 
-  const findings = await plugin.scan(context.repoRoot, scanOpts, pluginConfig);
+  const findings = await plugin.scan(context.scanPath ?? context.repoRoot, scanOpts, pluginConfig);
 
   for (const finding of findings) {
     await bus.publish(

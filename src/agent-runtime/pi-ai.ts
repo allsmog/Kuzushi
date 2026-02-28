@@ -8,33 +8,45 @@ import {
   type ToolCall as PiAiToolCall,
   validateToolCall,
 } from "@mariozechner/pi-ai";
+import type { AgentRuntimeConfig } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
 
 const DEFAULT_MAX_TURNS = 10;
-const KNOWN_TOOL_NAMES = new Set(["Read", "Glob", "Grep"]);
+const KNOWN_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "Bash", "Write"]);
 
 export class PiAiAgentRuntime implements AgentRuntime {
   readonly id = "pi-ai";
+  private readonly runtimeConfig?: AgentRuntimeConfig;
+
+  constructor(runtimeConfig?: AgentRuntimeConfig) {
+    this.runtimeConfig = runtimeConfig;
+  }
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    const restoreRuntimeEnv = applyRuntimeEnvOverrides(this.runtimeConfig);
     const startedAtMs = Date.now();
     const maxTurns = normalizeMaxTurns(request.options.maxTurns);
     const signal = request.options.abortController?.signal;
     const maxBudgetUsd = normalizeBudget(request.options.maxBudgetUsd);
+    const outputFormat = request.options.outputFormat;
+    const strictStructuredOutput = outputFormat?.strict === true;
+    let invalidStructuredOutputRetriesRemaining = normalizeRetryCount(
+      outputFormat?.retryInvalidStructuredOutput,
+    );
     let totalCostUsd = 0;
     let generatedToolCallCounter = 0;
 
     try {
-      const model = resolveModel(request.options.model);
+      const model = resolveModel(request.options.model, this.runtimeConfig?.baseUrl);
       const enabledTools = resolveEnabledTools(
         request.options.allowedTools,
         request.options.disallowedTools,
       );
       const context: PiAiContext = {
-        systemPrompt: buildSystemPrompt(request.options.outputFormat?.schema),
+        systemPrompt: buildSystemPrompt(outputFormat?.schema),
         messages: [
           {
             role: "user",
@@ -47,7 +59,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
 
       const toolsByName = new Map(enabledTools.map((tool) => [tool.name, tool]));
 
-      for (let turn = 1; turn <= maxTurns; turn++) {
+      for (let turn = 1; maxTurns == null || turn <= maxTurns; turn++) {
         if (signal?.aborted) {
           yield errorResult(
             "error_aborted",
@@ -99,15 +111,36 @@ export class PiAiAgentRuntime implements AgentRuntime {
 
         if (toolCalls.length === 0) {
           const resultText = extractText(assistant);
-          const structuredOutput = request.options.outputFormat
+          const structuredResult = outputFormat
             ? parseStructuredOutput(resultText)
-            : undefined;
+            : { structuredOutput: undefined, parseError: null };
+
+          if (outputFormat && strictStructuredOutput && structuredResult.structuredOutput === undefined) {
+            if (invalidStructuredOutputRetriesRemaining > 0) {
+              invalidStructuredOutputRetriesRemaining -= 1;
+              context.messages.push({
+                role: "user",
+                content: buildStructuredOutputRetryMessage(outputFormat.schema),
+                timestamp: Date.now(),
+              });
+              continue;
+            }
+
+            yield errorResult(
+              "error_output_format",
+              `pi-ai structured output parsing failed: ${structuredResult.parseError ?? "response did not contain valid JSON output"}`,
+              startedAtMs,
+              turn,
+              totalCostUsd,
+            );
+            return;
+          }
 
           yield {
             type: "result",
             subtype: "success",
             result: resultText,
-            structuredOutput,
+            structuredOutput: structuredResult.structuredOutput,
             durationMs: Date.now() - startedAtMs,
             numTurns: turn,
             totalCostUsd: normalizeCostUsd(totalCostUsd),
@@ -126,7 +159,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
           return;
         }
 
-        if (turn >= maxTurns) {
+        if (maxTurns != null && turn >= maxTurns) {
           yield errorResult(
             "error_max_turns",
             `pi-ai agent exceeded max turns (${maxTurns}) before producing a final response`,
@@ -204,14 +237,28 @@ export class PiAiAgentRuntime implements AgentRuntime {
           );
 
           if (permission.behavior === "deny") {
-            yield errorResult(
-              "error_permission_denied",
-              permission.message ?? `Permission denied for tool "${toolCall.name}"`,
-              startedAtMs,
-              turn,
-              totalCostUsd,
-            );
-            return;
+            const denyMessage = permission.message ?? `Permission denied for tool "${toolCall.name}"`;
+            const elapsedSecondsDeny = Math.max(0, (Date.now() - startedToolMs) / 1000);
+            yield {
+              type: "tool-progress" as const,
+              toolUseId,
+              toolName: toolCall.name,
+              elapsedSeconds: elapsedSecondsDeny,
+            };
+            yield {
+              type: "tool-summary" as const,
+              summary: summarizeToolResult(toolCall.name, denyMessage, true),
+              precedingToolUseIds: [toolUseId],
+            };
+            context.messages.push({
+              role: "toolResult",
+              toolCallId: toolUseId,
+              toolName: toolCall.name,
+              content: [{ type: "text", text: denyMessage }],
+              isError: true,
+              timestamp: Date.now(),
+            });
+            continue;
           }
 
           let isToolError = false;
@@ -253,9 +300,9 @@ export class PiAiAgentRuntime implements AgentRuntime {
 
       yield errorResult(
         "error_max_turns",
-        `pi-ai agent exceeded max turns (${maxTurns})`,
+        `pi-ai agent exceeded max turns (${maxTurns ?? "unlimited"})`,
         startedAtMs,
-        maxTurns,
+        maxTurns ?? 0,
         totalCostUsd,
       );
     } catch (error) {
@@ -267,15 +314,55 @@ export class PiAiAgentRuntime implements AgentRuntime {
         0,
         totalCostUsd,
       );
+    } finally {
+      restoreRuntimeEnv();
     }
   }
 }
 
-function resolveModel(modelSpec: string) {
+function applyRuntimeEnvOverrides(runtimeConfig: AgentRuntimeConfig | undefined): () => void {
+  const shouldOverrideApiKey = Boolean(runtimeConfig?.apiKey);
+  const shouldOverrideBaseUrl = Boolean(runtimeConfig?.baseUrl);
+
+  const originalApiKey = process.env["ANTHROPIC_API_KEY"];
+  const originalBaseUrl = process.env["ANTHROPIC_BASE_URL"];
+
+  if (shouldOverrideApiKey && runtimeConfig?.apiKey) {
+    process.env["ANTHROPIC_API_KEY"] = runtimeConfig.apiKey;
+  }
+
+  if (shouldOverrideBaseUrl && runtimeConfig?.baseUrl) {
+    process.env["ANTHROPIC_BASE_URL"] = runtimeConfig.baseUrl;
+  }
+
+  return () => {
+    if (shouldOverrideApiKey) {
+      if (originalApiKey === undefined) {
+        delete process.env["ANTHROPIC_API_KEY"];
+      } else {
+        process.env["ANTHROPIC_API_KEY"] = originalApiKey;
+      }
+    }
+
+    if (shouldOverrideBaseUrl) {
+      if (originalBaseUrl === undefined) {
+        delete process.env["ANTHROPIC_BASE_URL"];
+      } else {
+        process.env["ANTHROPIC_BASE_URL"] = originalBaseUrl;
+      }
+    }
+  };
+}
+
+function resolveModel(modelSpec: string, baseUrlOverride?: string) {
   const { provider, modelId } = parsePiAiModelSpec(modelSpec);
 
   try {
-    return getModel(provider as KnownProvider, modelId as never);
+    const model = getModel(provider as KnownProvider, modelId as never);
+    if (baseUrlOverride) {
+      (model as { baseUrl: string }).baseUrl = baseUrlOverride;
+    }
+    return model;
   } catch (error) {
     throw new Error(
       `Unable to resolve pi-ai model "${modelSpec}": ${toErrorMessage(error)}`,
@@ -288,7 +375,7 @@ function resolveEnabledTools(
   disallowedTools: string[] | undefined,
 ): Tool[] {
   const allowSet = new Set<string>();
-  if (Array.isArray(allowedTools) && allowedTools.length > 0) {
+  if (Array.isArray(allowedTools)) {
     for (const toolName of allowedTools) {
       if (KNOWN_TOOL_NAMES.has(toolName)) {
         allowSet.add(toolName);
@@ -309,10 +396,18 @@ function resolveEnabledTools(
   return PI_AI_TOOL_DEFINITIONS.filter((tool) => allowSet.has(tool.name));
 }
 
+function buildStructuredOutputRetryMessage(schema: Record<string, unknown>): string {
+  return [
+    "Return JSON only matching schema; no prose/code fences.",
+    "Schema:",
+    JSON.stringify(schema),
+  ].join("\n");
+}
+
 function buildSystemPrompt(schema: Record<string, unknown> | undefined): string {
   const lines = [
     "You are a code security agent operating on a local repository.",
-    "Use available tools (Read, Glob, Grep) when code inspection is required.",
+    "Use available tools (Read, Glob, Grep, Bash, Write) when code inspection or file manipulation is required.",
     "When you call tools, pass valid JSON arguments.",
   ];
 
@@ -374,16 +469,28 @@ function extractText(assistant: PiAiAssistantMessage): string {
   return textBlocks.join("\n\n");
 }
 
-function parseStructuredOutput(resultText: string): unknown {
+function parseStructuredOutput(resultText: string): {
+  structuredOutput: unknown | undefined;
+  parseError: string | null;
+} {
   const extracted = extractJsonObject(resultText);
   if (!extracted) {
-    return undefined;
+    return {
+      structuredOutput: undefined,
+      parseError: "response was empty",
+    };
   }
 
   try {
-    return JSON.parse(extracted);
-  } catch {
-    return undefined;
+    return {
+      structuredOutput: JSON.parse(extracted),
+      parseError: null,
+    };
+  } catch (error) {
+    return {
+      structuredOutput: undefined,
+      parseError: toErrorMessage(error),
+    };
   }
 }
 
@@ -411,8 +518,11 @@ function extractCostUsd(message: PiAiAssistantMessage): number {
   return normalizeCostUsd(message.usage?.cost?.total);
 }
 
-function normalizeMaxTurns(value: number | undefined): number {
-  if (!Number.isFinite(value) || value == null || value < 1) {
+function normalizeMaxTurns(value: number | undefined): number | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (!Number.isFinite(value) || value < 1) {
     return DEFAULT_MAX_TURNS;
   }
 
@@ -425,6 +535,14 @@ function normalizeBudget(value: number | undefined): number | undefined {
   }
 
   return value;
+}
+
+function normalizeRetryCount(value: number | undefined): number {
+  if (!Number.isFinite(value) || value == null || value < 0) {
+    return 0;
+  }
+
+  return Math.floor(value);
 }
 
 async function canUseTool(

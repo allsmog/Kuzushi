@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { __augurPreflightInternals } from "../../../src/agents/tasks/augur-preflight.js";
-import { DEFAULT_AUGUR_TASK_CONFIG } from "../../../src/agents/tasks/augur-types.js";
+import { __newazaPreflightInternals } from "../../../../src/agents/tasks/newaza/preflight.js";
+import { DEFAULT_NEWAZA_TASK_CONFIG } from "../../../../src/agents/tasks/newaza/types.js";
 
-const TMP_ROOT = path.join(import.meta.dirname, "..", "..", ".tmp-augur-preflight");
+const TMP_ROOT = path.join(import.meta.dirname, "..", "..", "..", ".tmp-newaza-preflight");
 
 beforeEach(() => {
   rmSync(TMP_ROOT, { recursive: true, force: true });
@@ -15,9 +15,9 @@ afterEach(() => {
   rmSync(TMP_ROOT, { recursive: true, force: true });
 });
 
-describe("augur-preflight internals", () => {
+describe("newaza-preflight internals", () => {
   it("resolves workspace path relative to repo root", () => {
-    const workspace = __augurPreflightInternals.resolveWorkspaceDir("/tmp/repo", "./iris");
+    const workspace = __newazaPreflightInternals.resolveWorkspaceDir("/tmp/repo", "./iris");
     expect(workspace).toBe(path.resolve("/tmp/repo", "./iris"));
   });
 
@@ -25,13 +25,39 @@ describe("augur-preflight internals", () => {
     const repoRoot = path.join(TMP_ROOT, "repo");
     mkdirSync(repoRoot, { recursive: true });
 
-    const workspace = __augurPreflightInternals.resolveWorkspaceDir(repoRoot, "../outside-iris");
+    const workspace = __newazaPreflightInternals.resolveWorkspaceDir(repoRoot, "../outside-iris");
     expect(workspace).toBe(path.resolve(repoRoot, "./iris"));
   });
 
-  it("creates Augur workspace directory tree", async () => {
+  it("uses extractionModel when configured", () => {
+    const resolved = __newazaPreflightInternals.resolveExtractionModel({
+      ...DEFAULT_NEWAZA_TASK_CONFIG,
+      labelingModel: "label-model",
+      extractionModel: "extract-model",
+    });
+
+    expect(resolved).toEqual({
+      model: "extract-model",
+      usedLabelingFallback: false,
+    });
+  });
+
+  it("falls back to labelingModel when extractionModel is unset", () => {
+    const resolved = __newazaPreflightInternals.resolveExtractionModel({
+      ...DEFAULT_NEWAZA_TASK_CONFIG,
+      labelingModel: "label-model",
+      extractionModel: undefined,
+    });
+
+    expect(resolved).toEqual({
+      model: "label-model",
+      usedLabelingFallback: true,
+    });
+  });
+
+  it("creates Newaza workspace directory tree", async () => {
     const workspace = path.join(TMP_ROOT, "iris");
-    await __augurPreflightInternals.initializeWorkspace(workspace);
+    await __newazaPreflightInternals.initializeWorkspace(workspace);
 
     const expectedSubdirs = [
       "exploration",
@@ -49,7 +75,7 @@ describe("augur-preflight internals", () => {
   });
 
   it("uses context-gatherer output as a soft framework hint", async () => {
-    const framework = await __augurPreflightInternals.detectPrimaryFramework(
+    const framework = await __newazaPreflightInternals.detectPrimaryFramework(
       TMP_ROOT,
       {
         frameworks: ["Express"],
@@ -66,19 +92,19 @@ describe("augur-preflight internals", () => {
       },
     }), "utf-8");
 
-    const framework = await __augurPreflightInternals.detectPrimaryFramework(TMP_ROOT, undefined);
+    const framework = await __newazaPreflightInternals.detectPrimaryFramework(TMP_ROOT, undefined);
     expect(framework).toBe("express");
   });
 
   it("resolves available reference files for language/framework", async () => {
-    const augurPath = path.join(TMP_ROOT, "augur");
-    const refs = path.join(augurPath, "references");
+    const newazaPath = path.join(TMP_ROOT, "newaza");
+    const refs = path.join(newazaPath, "references");
     mkdirSync(refs, { recursive: true });
     writeFileSync(path.join(refs, "patterns.md"), "patterns", "utf-8");
     writeFileSync(path.join(refs, "python.md"), "python", "utf-8");
     writeFileSync(path.join(refs, "fastapi.md"), "fastapi", "utf-8");
 
-    const files = await __augurPreflightInternals.resolveReferenceFiles(augurPath, "python", "fastapi");
+    const files = await __newazaPreflightInternals.resolveReferenceFiles(newazaPath, "python", "fastapi");
     expect(files).toEqual([
       path.join(refs, "patterns.md"),
       path.join(refs, "python.md"),
@@ -104,9 +130,9 @@ describe("augur-preflight internals", () => {
       "{{SELECT_LINE}}",
     ].join("\n"), "utf-8");
 
-    const rendered = await __augurPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
+    const rendered = await __newazaPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
     expect(rendered).not.toContain("{{");
-    expect(rendered).toContain("Augur Source candidate extraction");
+    expect(rendered).toContain("Newaza Source candidate extraction");
     expect(rendered).toContain("import python");
   });
 
@@ -114,8 +140,8 @@ describe("augur-preflight internals", () => {
     const templatePath = path.join(TMP_ROOT, "starter.ql.tmpl");
     writeFileSync(templatePath, "{{SOURCE_HANDLER_PREDICATE}}", "utf-8");
 
-    const rendered = await __augurPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
-    expect(rendered).toContain("@id augur/extraction/fallback-source");
+    const rendered = await __newazaPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
+    expect(rendered).toContain("@id newaza/extraction/fallback-source");
   });
 
   it("falls back without agentCtx even when body placeholders present", async () => {
@@ -129,13 +155,13 @@ describe("augur-preflight internals", () => {
     ].join("\n"), "utf-8");
 
     // No agentCtx → should use deterministic fallback
-    const rendered = await __augurPreflightInternals.renderExtractionTemplate(
+    const rendered = await __newazaPreflightInternals.renderExtractionTemplate(
       templatePath,
       "go",
       "source",
     );
-    expect(rendered).toContain("@id augur/extraction/fallback-source");
-    expect(rendered).toContain("where false");
+    expect(rendered).toContain("@id newaza/extraction/fallback-source");
+    expect(rendered).toContain("where 1 = 0");
   });
 
   it("gracefully falls back when agent throws", async () => {
@@ -149,42 +175,47 @@ describe("augur-preflight internals", () => {
     ].join("\n"), "utf-8");
 
     // Agent will fail (no runtime configured) but should fall back gracefully
-    const rendered = await __augurPreflightInternals.renderExtractionTemplate(
+    const rendered = await __newazaPreflightInternals.renderExtractionTemplate(
       templatePath,
       "go",
       "source",
       {
         referenceFiles: [],
-        augurPath: TMP_ROOT,
+        newazaPath: TMP_ROOT,
         model: "nonexistent-model",
         repoRoot: TMP_ROOT,
         workspaceDir: path.join(TMP_ROOT, "iris"),
         codeqlBinary: "/usr/bin/false",
         dbPath: "/tmp/test.db",
+        codeqlApiProfileId: "go-dataflow",
+        dataFlowImport: "semmle.go.dataflow.DataFlow",
+        taintTrackingImport: "semmle.go.dataflow.TaintTracking",
       },
     );
 
     // Should fall back to deterministic fallback
-    expect(rendered).toContain("@id augur/extraction/fallback-source");
-    expect(rendered).toContain("where false");
+    expect(rendered).toContain("@id newaza/extraction/fallback-source");
+    expect(rendered).toContain("where 1 = 0");
   });
 
   it("writes manifest model fields aligned with effective extraction model", async () => {
     const workspaceDir = path.join(TMP_ROOT, "iris");
     mkdirSync(path.join(workspaceDir, "exploration"), { recursive: true });
 
-    await __augurPreflightInternals.writeManifestAndDetection(
+    await __newazaPreflightInternals.writeManifestAndDetection(
       workspaceDir,
       "/tmp/db",
       "python",
       "fastapi",
       [],
       {
-        ...DEFAULT_AUGUR_TASK_CONFIG,
+        ...DEFAULT_NEWAZA_TASK_CONFIG,
         labelingModel: "label-model",
         extractionModel: "extract-model",
       },
       "extract-model",
+      "CodeQL CLI 2.20.7",
+      "python-dataflow-new",
     );
 
     const manifestPath = path.join(workspaceDir, "exploration", "run_manifest.json");
@@ -193,5 +224,39 @@ describe("augur-preflight internals", () => {
     expect(manifest["model"]).toBe("extract-model");
     expect(manifest["extractionModel"]).toBe("extract-model");
     expect(manifest["labelingModel"]).toBe("label-model");
+    expect(manifest["codeqlVersion"]).toBe("CodeQL CLI 2.20.7");
+    expect(manifest["codeqlApiProfileId"]).toBe("python-dataflow-new");
+  });
+
+  it("writes codeql compatibility report with attempted profiles", async () => {
+    const workspaceDir = path.join(TMP_ROOT, "iris");
+    mkdirSync(path.join(workspaceDir, "exploration"), { recursive: true });
+
+    await __newazaPreflightInternals.writeCodeqlCompatibility(
+      workspaceDir,
+      "go",
+      "CodeQL CLI 2.20.7",
+      {
+        ...DEFAULT_NEWAZA_TASK_CONFIG,
+        codeqlApiProfile: "auto",
+        codeqlProfileFallbacks: true,
+        codeqlProbeTimeoutMs: 20_000,
+      },
+      [
+        { id: "go-dataflow", ok: false, error: "import missing" },
+        { id: "go-dataflow-new", ok: true },
+      ],
+      "go-dataflow-new",
+    );
+
+    const compatPath = path.join(workspaceDir, "exploration", "codeql_compat.json");
+    const compat = JSON.parse(readFileSync(compatPath, "utf-8")) as Record<string, unknown>;
+    expect(compat["language"]).toBe("go");
+    expect(compat["codeqlVersion"]).toBe("CodeQL CLI 2.20.7");
+    expect(compat["selectedProfileId"]).toBe("go-dataflow-new");
+    expect(compat["triedProfiles"]).toEqual([
+      { id: "go-dataflow", ok: false, error: "import missing" },
+      { id: "go-dataflow-new", ok: true },
+    ]);
   });
 });

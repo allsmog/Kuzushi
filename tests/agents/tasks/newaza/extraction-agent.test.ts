@@ -5,10 +5,10 @@ import {
   hasBodyPlaceholders,
   computeCacheHash,
   readCacheIfValid,
-  __augurExtractionAgentInternals,
-} from "../../../src/agents/tasks/augur-extraction-agent.js";
+  __newazaExtractionAgentInternals,
+} from "../../../../src/agents/tasks/newaza/extraction-agent.js";
 
-const TMP_ROOT = path.join(import.meta.dirname, "..", "..", ".tmp-augur-extraction-agent");
+const TMP_ROOT = path.join(import.meta.dirname, "..", "..", "..", ".tmp-newaza-extraction-agent");
 
 beforeEach(() => {
   rmSync(TMP_ROOT, { recursive: true, force: true });
@@ -181,7 +181,7 @@ describe("extractQueryFromResult", () => {
       "```",
     ].join("\n");
 
-    const query = __augurExtractionAgentInternals.extractQueryFromResult(text);
+    const query = __newazaExtractionAgentInternals.extractQueryFromResult(text);
     expect(query).toContain("import go");
     expect(query).toContain("select marker");
   });
@@ -201,7 +201,7 @@ describe("extractQueryFromResult", () => {
       "This query should compile.",
     ].join("\n");
 
-    const query = __augurExtractionAgentInternals.extractQueryFromResult(text);
+    const query = __newazaExtractionAgentInternals.extractQueryFromResult(text);
     expect(query).toContain("import python");
     expect(query).toContain("select marker");
     expect(query).not.toContain("This query should compile.");
@@ -209,8 +209,29 @@ describe("extractQueryFromResult", () => {
 
   it("returns null when no query-like content exists", () => {
     const text = "No query available. Could not generate candidate.";
-    const query = __augurExtractionAgentInternals.extractQueryFromResult(text);
+    const query = __newazaExtractionAgentInternals.extractQueryFromResult(text);
     expect(query).toBeNull();
+  });
+
+  it("keeps multi-line select clauses with string literals when no trailing blank line exists", () => {
+    const text = [
+      "/**",
+      " * @name Multi-line Select Query",
+      " * @kind problem",
+      " */",
+      "import go",
+      "from string marker",
+      "where marker = marker",
+      "select",
+      "  marker,",
+      "  \"source_candidate\",",
+      "  \"callable\"",
+    ].join("\n");
+
+    const query = __newazaExtractionAgentInternals.extractQueryFromResult(text);
+    expect(query).toContain("select");
+    expect(query).toContain("\"source_candidate\",");
+    expect(query).toContain("\"callable\"");
   });
 });
 
@@ -222,7 +243,7 @@ describe("isAllowedCodeqlCompileCommand", () => {
     const codeqlBinary = "/usr/local/bin/codeql";
     const command = `${codeqlBinary} query compile ${queryPath} --search-path ${workspaceDir}`;
 
-    const allowed = __augurExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
+    const allowed = __newazaExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
       repoRoot,
       codeqlBinary,
       queryPath,
@@ -239,7 +260,7 @@ describe("isAllowedCodeqlCompileCommand", () => {
     const codeqlBinary = "/usr/local/bin/codeql";
     const command = `${codeqlBinary} query compile ${queryPath} --search-path ${workspaceDir} && rm -rf /`;
 
-    const allowed = __augurExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
+    const allowed = __newazaExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
       repoRoot,
       codeqlBinary,
       queryPath,
@@ -256,7 +277,7 @@ describe("isAllowedCodeqlCompileCommand", () => {
     const codeqlBinary = "/usr/local/bin/codeql";
     const command = `${codeqlBinary} query compile ${path.join(TMP_ROOT, "other.ql")} --search-path ${workspaceDir}`;
 
-    const allowed = __augurExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
+    const allowed = __newazaExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
       repoRoot,
       codeqlBinary,
       queryPath,
@@ -264,5 +285,39 @@ describe("isAllowedCodeqlCompileCommand", () => {
     });
 
     expect(allowed).toBe(false);
+  });
+
+  it("allows --search-path=<value> command form", () => {
+    const repoRoot = TMP_ROOT;
+    const queryPath = path.join(TMP_ROOT, "iris", "extraction", "sources.ql");
+    const workspaceDir = path.join(TMP_ROOT, "iris");
+    const codeqlBinary = "/usr/local/bin/codeql";
+    const command = `${codeqlBinary} query compile ${queryPath} --search-path=${workspaceDir}`;
+
+    const allowed = __newazaExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
+      repoRoot,
+      codeqlBinary,
+      queryPath,
+      workspaceDir,
+    });
+
+    expect(allowed).toBe(true);
+  });
+});
+
+describe("splitShellWords", () => {
+  it("treats backslashes as literal characters inside single quotes", () => {
+    const words = __newazaExtractionAgentInternals.splitShellWords(
+      "codeql query compile '/tmp/a\\b.ql' --search-path '/tmp/w\\s'",
+    );
+
+    expect(words).toEqual([
+      "codeql",
+      "query",
+      "compile",
+      "/tmp/a\\b.ql",
+      "--search-path",
+      "/tmp/w\\s",
+    ]);
   });
 });

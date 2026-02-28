@@ -31,7 +31,7 @@ That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed
 - **Verifies exploitability** — optional post-triage phase constructs concrete proof-of-concept payloads for true positives (e.g., SQL injection strings, XSS vectors)
 - **Generates PoC harnesses** — optional post-verification phase produces runnable exploit scripts (TypeScript, Python, etc.) for verified-exploitable findings
 - **Vendor-agnostic LLM runtime** — swap between Anthropic, OpenAI, Google, and 15+ other providers via the `pi-ai` backend with zero consumer-code changes
-- **Augur integration** — multi-pass CodeQL-based source/sink labeling pipeline with LLM-assisted classification, checkpoint gating, and deterministic library generation
+- **Newaza integration** — multi-pass CodeQL-based source/sink labeling pipeline with LLM-assisted classification, checkpoint gating, and deterministic library generation
 - **Tracks cost** — per-finding triage, verification, and PoC harness costs are persisted and displayed in the summary
 - **Event-driven pipeline** — pluggable message bus interface (in-process backend implemented; Redis/Google Pub/Sub/NATS adapters are scaffolded)
 - **DAG-based task orchestration** — tasks declare dependencies, run in parallel groups, pass outputs downstream
@@ -74,6 +74,7 @@ kuzushi <repo> --max 20               # triage top 20 findings only
 kuzushi <repo> --model claude-opus-4-20250514  # use a different model
 kuzushi <repo> --triage-model claude-opus-4-20250514  # separate model for triage
 kuzushi <repo> --triage-max-turns 15  # triage agent turn budget
+kuzushi <repo> --api-key sk-ant-... --base-url https://basecamp.stark.acme.com/
 kuzushi <repo> --fresh                # clear prior results, re-triage everything
 kuzushi <repo> --db ./my.sqlite3      # custom database path
 kuzushi <repo> --resume               # resume the most recent interrupted run
@@ -151,6 +152,8 @@ kuzushi config path                   # print config file location
 
 Global config lives at `~/.kuzushi/config.json`. Optional project overrides can live at `<repo>/.kuzushi/config.json`. CLI flags override config values.
 
+Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config files. Prefer `--api-key` for one-off runs or `ANTHROPIC_API_KEY` from your shell/secret manager.
+
 ## Configuration
 
 | Key | Default | Description |
@@ -219,7 +222,7 @@ Example:
 - `semgrep`: traditional SAST via Opengrep/Semgrep binary
 - `codeql`: semantic dataflow/taint analysis via GitHub CodeQL CLI (SARIF output)
 - `agentic`: AI-driven agentic scanner — LLM with read-only repo tools via any supported runtime
-- `augur`: multi-pass CodeQL source/sink labeling pipeline — runs preflight (database creation, candidate extraction), LLM-assisted labeling with human-in-the-loop checkpoint, and deterministic library/query generation + analysis
+- `newaza`: multi-pass CodeQL source/sink labeling pipeline — runs preflight (database creation, candidate extraction), LLM-assisted labeling with human-in-the-loop checkpoint, and deterministic library/query generation + analysis
 
 ## Semgrep Resolution
 
@@ -284,30 +287,30 @@ GEMINI_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model google:gemini-2.
 ANTHROPIC_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model anthropic:claude-sonnet-4-20250514
 ```
 
-## Augur Setup
+## Newaza Setup
 
-The `augur` scanner is a multi-pass CodeQL-based pipeline that uses LLM-assisted classification to label sources, sinks, sanitizers, and summaries. It requires:
+The `newaza` scanner is a multi-pass CodeQL-based pipeline that uses LLM-assisted classification to label sources, sinks, sanitizers, and summaries. It requires:
 
 1. **CodeQL CLI** — same requirement as the `codeql` scanner
-2. **Python 3** — used by Augur's scripts for query generation
+2. **Python 3** — used by Newaza's scripts for query generation
 
-Augur's templates, references, and scripts are bundled as the [`@kuzushi/augur`](https://www.npmjs.com/package/@kuzushi/augur) npm package and installed automatically with `pnpm install`. No manual clone or `AUGUR_PATH` setup needed.
-
-```sh
-kuzushi <repo> --scanners augur
-kuzushi <repo> --scanners augur --approve-checkpoint  # auto-approve label review
-kuzushi config set scannerConfig.augur.labelingModel claude-sonnet-4-20250514
-kuzushi config set scannerConfig.augur.passes "[1,2,3,4,5,6]"
-```
-
-To override the bundled augur assets (e.g., for local development), set `AUGUR_PATH` or `scannerConfig.augur.augurPath`:
+Newaza's templates, references, and scripts are bundled as the [`@kuzushi/newaza`](https://www.npmjs.com/package/@kuzushi/newaza) npm package and installed automatically with `pnpm install`. No manual clone or `NEWAZA_PATH` setup needed.
 
 ```sh
-export AUGUR_PATH=/path/to/local/augur
-kuzushi config set scannerConfig.augur.augurPath /path/to/local/augur
+kuzushi <repo> --scanners newaza
+kuzushi <repo> --scanners newaza --approve-checkpoint  # auto-approve label review
+kuzushi config set scannerConfig.newaza.labelingModel claude-sonnet-4-20250514
+kuzushi config set scannerConfig.newaza.passes "[1,2,3,4,5,6]"
 ```
 
-Augur runs in three DAG-ordered stages: **preflight** (database creation, candidate extraction), **label** (LLM classification with checkpoint gate), and **analyze** (library generation, query execution, finding extraction). A human-in-the-loop checkpoint pauses after labeling for review — use `--approve-checkpoint` to auto-approve in CI.
+To override the bundled newaza assets (e.g., for local development), set `NEWAZA_PATH` or `scannerConfig.newaza.newazaPath`:
+
+```sh
+export NEWAZA_PATH=/path/to/local/newaza
+kuzushi config set scannerConfig.newaza.newazaPath /path/to/local/newaza
+```
+
+Newaza runs in three DAG-ordered stages: **preflight** (database creation, candidate extraction), **label** (LLM classification with checkpoint gate), and **analyze** (library generation, query execution, finding extraction). A human-in-the-loop checkpoint pauses after labeling for review — use `--approve-checkpoint` to auto-approve in CI.
 
 ## Output
 
@@ -400,7 +403,7 @@ Tests are organized by subsystem: `tests/bus/` for orchestrator, workers, and ev
 - **High triage cost**: Use `--triage-model claude-haiku-4-5-20251001` for cheaper triage, or `--max 10` to limit findings
 - **Verification too expensive**: Use `--verify-min-confidence 0.8` to only verify high-confidence TPs, or `--verify-model claude-haiku-4-5-20251001`
 - **pi-ai model not found**: Ensure the model string uses `provider:modelId` format (e.g., `openai:gpt-4o`, not just `gpt-4o`)
-- **Augur checkpoint blocks CI**: Pass `--approve-checkpoint` to auto-approve label review in non-interactive environments
+- **Newaza checkpoint blocks CI**: Pass `--approve-checkpoint` to auto-approve label review in non-interactive environments
 
 ## License
 

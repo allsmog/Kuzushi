@@ -13,6 +13,7 @@ import type { EventEnvelope } from "./types.js";
 export interface RunContext {
   runId: string;
   repoRoot: string;
+  scanPath?: string;
   repoName: string;
   dbPath: string;
 }
@@ -125,23 +126,6 @@ export type StageCompleteEvent = EventEnvelope<
   }
 >;
 
-export type AugurCheckpointEvent = EventEnvelope<
-  "augur:checkpoint",
-  {
-    context: RunContext;
-    reviewSummary: string;
-    labelCounts: Record<string, number>;
-  }
->;
-
-export type AugurCheckpointApprovedEvent = EventEnvelope<
-  "augur:checkpoint-approved",
-  {
-    context: RunContext;
-    reviewer: string;
-  }
->;
-
 export type ScanStartEvent = EventEnvelope<
   "scan:start",
   {
@@ -194,6 +178,16 @@ export type TriageFindingQueuedEvent = EventEnvelope<
     finding: Finding;
     repoContext?: unknown;
     index: number;
+    total: number;
+  }
+>;
+
+export type TriageBatchQueuedEvent = EventEnvelope<
+  "triage:batch-queued",
+  {
+    context: RunContext;
+    findings: Finding[];
+    repoContext?: unknown;
     total: number;
   }
 >;
@@ -468,14 +462,13 @@ export type KuzushiEvent =
   | TaskCompleteEvent
   | TaskErrorEvent
   | StageCompleteEvent
-  | AugurCheckpointEvent
-  | AugurCheckpointApprovedEvent
   | ScanStartEvent
   | ScanFindingEvent
   | ScanScannerCompleteEvent
   | ScanCompleteEvent
   | TriageStartEvent
   | TriageFindingQueuedEvent
+  | TriageBatchQueuedEvent
   | TriageResultEvent
   | TriageErrorEvent
   | TriageAgentActivityEvent

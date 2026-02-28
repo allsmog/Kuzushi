@@ -55,6 +55,23 @@ export interface TriageOutput {
   costUsd: number;
 }
 
+export interface BatchTriageOutput {
+  results: Map<string, TriageResult>;
+  costUsd: number;
+}
+
+export const BATCH_TRIAGE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["results"],
+  properties: {
+    results: {
+      type: "array",
+      items: TRIAGE_RESULT_SCHEMA,
+    },
+  },
+} as const;
+
 export class TriageExecutionError extends Error {
   readonly costUsd: number;
 
@@ -159,6 +176,189 @@ export async function triageFindingWithAgent(
     result: parsedResult,
     costUsd,
   };
+}
+
+export async function triageFindingsBatch(
+  findings: Finding[],
+  repoRoot: string,
+  repoName: string,
+  model: string,
+  repoContext?: RepoContext,
+  runtimeOptions: TriageRuntimeOptions = {},
+): Promise<BatchTriageOutput> {
+  if (findings.length === 0) {
+    return { results: new Map(), costUsd: 0 };
+  }
+
+  const prompt = buildBatchTriagePrompt(findings, repoName, repoContext);
+  const runtime = runtimeOptions.runtime ?? getAgentRuntime();
+
+  let resultText = "";
+  let structuredOutput: unknown = undefined;
+  let executionError: string | null = null;
+  let costUsd = 0;
+
+  for await (const message of runtime.query({
+    prompt,
+    options: {
+      cwd: repoRoot,
+      model,
+      allowedTools: [...DEFAULT_TOOLS],
+      permissionMode: "dontAsk",
+      maxBudgetUsd: runtimeOptions.maxBudgetUsd,
+      abortController: runtimeOptions.abortController,
+      outputFormat: {
+        type: "json_schema",
+        schema: BATCH_TRIAGE_SCHEMA,
+      },
+    },
+  })) {
+    if (message.type === "assistant") {
+      await emitAssistantActivity(message.content, runtimeOptions.activityCallback);
+      continue;
+    }
+
+    if (message.type === "tool-progress") {
+      await runtimeOptions.activityCallback?.({
+        kind: "tool-progress",
+        toolName: message.toolName,
+        elapsedSeconds: message.elapsedSeconds,
+      });
+      continue;
+    }
+
+    if (message.type === "tool-summary") {
+      await runtimeOptions.activityCallback?.({
+        kind: "tool-complete",
+        summary: message.summary,
+      });
+      continue;
+    }
+
+    if (message.type !== "result") continue;
+    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+      costUsd = message.totalCostUsd;
+    }
+
+    if ("result" in message) {
+      resultText = message.result;
+      structuredOutput = message.structuredOutput;
+      continue;
+    }
+
+    executionError = message.errors.join("; ") || message.subtype;
+  }
+
+  if (executionError) {
+    throw new TriageExecutionError(`batch triage agent failed: ${executionError}`, costUsd);
+  }
+
+  const results = parseBatchTriageOutput(structuredOutput ?? resultText, findings);
+  return { results, costUsd };
+}
+
+function buildBatchTriagePrompt(
+  findings: Finding[],
+  repoName: string,
+  repoContext?: RepoContext,
+): string {
+  const contextSection = formatRepoContext(repoContext);
+  const findingSections = findings.map((f, idx) => [
+    `### Finding ${idx + 1}`,
+    `Scanner: ${f.scanner}`,
+    `Rule: ${f.ruleId}`,
+    `File: ${f.filePath}:${f.startLine}`,
+    `Severity: ${f.severity}`,
+    `Scanner Confidence: ${f.scannerConfidence}`,
+    `Likelihood: ${f.likelihood}`,
+    `Impact: ${f.impact}`,
+    `CWE: ${f.cwe.join(", ") || "none"}`,
+    `Message: ${f.message}`,
+    `Evidence: ${f.evidence || "none"}`,
+    `Fingerprint: ${f.fingerprint}`,
+  ].join("\n"));
+
+  return [
+    "You are a security triage agent. Investigate ALL of the following findings and determine if each is a true positive, false positive, or needs review.",
+    "",
+    `Repo: ${repoName}`,
+    ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
+    "",
+    `## Findings (${findings.length} total)`,
+    "",
+    ...findingSections.flatMap((s) => [s, ""]),
+    "## Investigation instructions",
+    "1. Read the flagged files and surrounding code.",
+    "2. Trace dataflow from source to sink across call boundaries.",
+    "3. Use Grep/Glob to locate sanitization, validation, and guards.",
+    "4. Validate reachability and realistic attacker control.",
+    "5. Decide tp/fp/needs_review per finding with conservative confidence.",
+    "",
+    "## Output requirements",
+    'Return ONLY a JSON object with a "results" array. Each element MUST have:',
+    "fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)",
+    "",
+    `You must return exactly ${findings.length} results, one per finding, using the exact fingerprints listed above.`,
+  ].join("\n");
+}
+
+function parseBatchTriageOutput(
+  raw: unknown,
+  findings: Finding[],
+): Map<string, TriageResult> {
+  const results = new Map<string, TriageResult>();
+  const fingerprintSet = new Set(findings.map((f) => f.fingerprint));
+
+  let items: unknown[] = [];
+
+  if (isRecord(raw) && Array.isArray((raw as Record<string, unknown>)["results"])) {
+    items = (raw as Record<string, unknown>)["results"] as unknown[];
+  } else if (Array.isArray(raw)) {
+    items = raw;
+  } else if (typeof raw === "string") {
+    try {
+      const jsonStr = extractJson(raw);
+      const parsed = JSON.parse(jsonStr);
+      if (isRecord(parsed) && Array.isArray(parsed["results"])) {
+        items = parsed["results"] as unknown[];
+      } else if (Array.isArray(parsed)) {
+        items = parsed;
+      }
+    } catch {
+      // Fall through — missing findings will get needs_review below
+    }
+  }
+
+  for (const item of items) {
+    if (!isRecord(item)) continue;
+    const fp = asString((item as Record<string, unknown>)["fingerprint"], "");
+    if (!fp || !fingerprintSet.has(fp)) continue;
+
+    results.set(fp, {
+      fingerprint: fp,
+      verdict: parseVerdict(asString((item as Record<string, unknown>)["verdict"], "needs_review")),
+      confidence: clampConfidence((item as Record<string, unknown>)["confidence"]),
+      rationale: asString((item as Record<string, unknown>)["rationale"], ""),
+      verificationSteps: normalizeVerificationSteps((item as Record<string, unknown>)["verification_steps"]),
+      fixPatch: normalizeFixPatch((item as Record<string, unknown>)["fix_patch"]),
+    });
+  }
+
+  // Fill in any missing findings with needs_review
+  for (const finding of findings) {
+    if (!results.has(finding.fingerprint)) {
+      results.set(finding.fingerprint, {
+        fingerprint: finding.fingerprint,
+        verdict: "needs_review",
+        confidence: 0,
+        rationale: "Finding was not included in batch triage agent response.",
+        verificationSteps: [],
+        fixPatch: null,
+      });
+    }
+  }
+
+  return results;
 }
 
 export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResult {

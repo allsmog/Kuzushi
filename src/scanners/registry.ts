@@ -27,14 +27,28 @@ export class ScannerRegistry {
   }
 
   resolveEnabled(opts: ScanOpts, config: KuzushiConfig): ScannerId[] {
-    const selected = opts.scanners && opts.scanners.length > 0
-      ? opts.scanners
-      : config.scanners;
+    // When the user explicitly passes --scanners, use that list as-is.
+    // Non-plugin IDs (e.g. "newaza") are silently filtered out — they're
+    // agent tasks, not scanner plugins.  An empty result is valid when the
+    // user only asked for agent tasks.
+    const isExplicitOverride = opts.scanners !== undefined;
+
+    if (isExplicitOverride) {
+      // Keep only IDs that are registered scanner plugins.
+      // An empty result is valid (e.g. "--scanners newaza" → no scanner plugins).
+      const normalized = opts.scanners!
+        .map((id) => id.trim())
+        .filter(Boolean);
+      return [...new Set(normalized.filter((id) => this.has(id)))];
+    }
+
+    const selected = config.scanners;
 
     const normalized = selected
       .map((id) => id.trim())
       .filter(Boolean);
 
+    // Default path (no explicit override): all IDs must be known plugins.
     if (normalized.length === 0) {
       throw new Error("At least one scanner must be configured.");
     }

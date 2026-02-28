@@ -52,7 +52,7 @@ class FakePlugin implements ScannerPlugin {
 
 function makeConfig(): KuzushiConfig {
   return {
-    model: "claude-sonnet-4-20250514",
+    model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
     triageConcurrency: 1,
@@ -79,7 +79,7 @@ describe("ScannerRegistry", () => {
     expect(registry.ids()).toEqual(["a"]);
   });
 
-  it("resolveEnabled validates unknown scanners", () => {
+  it("resolveEnabled filters non-plugin IDs from explicit override", () => {
     const registry = new ScannerRegistry();
     registry.register(new FakePlugin("a", []));
 
@@ -87,7 +87,36 @@ describe("ScannerRegistry", () => {
       severity: ["ERROR"],
       excludePatterns: [],
       fresh: false,
-      scanners: ["a", "missing"],
+      scanners: ["a", "newaza"],
+    };
+
+    // "newaza" is not a registered plugin — it should be silently dropped.
+    expect(registry.resolveEnabled(opts, makeConfig())).toEqual(["a"]);
+  });
+
+  it("resolveEnabled returns empty list when override contains only non-plugin IDs", () => {
+    const registry = new ScannerRegistry();
+    registry.register(new FakePlugin("a", []));
+
+    const opts: ScanOpts = {
+      severity: ["ERROR"],
+      excludePatterns: [],
+      fresh: false,
+      scanners: ["newaza"],
+    };
+
+    expect(registry.resolveEnabled(opts, makeConfig())).toEqual([]);
+  });
+
+  it("resolveEnabled validates unknown scanners in config defaults", () => {
+    const registry = new ScannerRegistry();
+    registry.register(new FakePlugin("a", []));
+
+    // No explicit override — falls through to config.scanners which has unknown "b".
+    const opts: ScanOpts = {
+      severity: ["ERROR"],
+      excludePatterns: [],
+      fresh: false,
     };
 
     expect(() => registry.resolveEnabled(opts, makeConfig())).toThrow("Unknown scanner");

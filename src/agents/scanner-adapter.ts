@@ -11,7 +11,7 @@ export function adaptScannerPlugin(plugin: ScannerPlugin): AgentTask<ScanOpts, F
     dependsOn: [],
     async run(opts, context) {
       const pluginConfig = context.config.scannerConfig[plugin.id] ?? {};
-      return plugin.scan(context.repoRoot, opts, pluginConfig);
+      return plugin.scan(context.scanPath ?? context.repoRoot, opts, pluginConfig);
     },
     init: plugin.init
       ? async (config) => plugin.init?.(config)

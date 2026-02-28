@@ -1,10 +1,10 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import type { KuzushiConfig, Verdict } from "./types.js";
+import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
 import type { ScannerConfig } from "./scanners/types.js";
 import { isRecord } from "./utils.js";
-import { augurRoot } from "@kuzushi/augur";
+import { augurRoot as newazaRoot } from "@kuzushi/augur";
 
 const CONFIG_DIR = path.join(os.homedir(), ".kuzushi");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
@@ -16,15 +16,14 @@ const BUS_BACKENDS = new Set<string>([
   "nats",
 ]);
 const AGENT_RUNTIME_BACKENDS = new Set<string>([
-  "claude-sdk",
   "pi-ai",
   "acp",
 ]);
-const DEFAULT_AUGUR_PATH = process.env["AUGUR_PATH"]?.trim() || augurRoot;
+const DEFAULT_NEWAZA_PATH = process.env["NEWAZA_PATH"]?.trim() || newazaRoot;
 
 /** Hard defaults — the bottom of the precedence stack. */
 export const DEFAULTS: KuzushiConfig = {
-  model: "claude-sonnet-4-20250514",
+  model: "anthropic:claude-sonnet-4-6",
   triageMaxTurns: 10,
   verify: false,
   verifyMaxTurns: 15,
@@ -46,7 +45,8 @@ export const DEFAULTS: KuzushiConfig = {
   busBackend: "in-process",
   triageConcurrency: 1,
   scanMode: "sequential",
-  agentRuntimeBackend: "claude-sdk",
+  agentRuntimeBackend: "pi-ai",
+  agentRuntimeConfig: undefined,
   enabledTasks: [],
   scanners: ["semgrep"],
   severity: ["ERROR", "WARNING"],
@@ -56,16 +56,16 @@ export const DEFAULTS: KuzushiConfig = {
   ],
   scannerConfig: {
     semgrep: { configFlag: "auto" },
-    agentic: { model: "claude-sonnet-4-20250514", maxFindings: 20 },
+    agentic: { model: "anthropic:claude-sonnet-4-6", maxFindings: 20 },
     codeql: {},
-    augur: {
-      augurPath: DEFAULT_AUGUR_PATH,
+    newaza: {
+      newazaPath: DEFAULT_NEWAZA_PATH,
       dbPath: undefined,
       passes: [1, 2, 3, 4, 5, 6],
-      labelingModel: "claude-sonnet-4-20250514",
+      labelingModel: "anthropic:claude-sonnet-4-6",
+      extractionModel: undefined,
       labelingBatchSize: 20,
       labelingConfidenceThreshold: 0.55,
-      autoApproveCheckpoint: false,
       workspaceDir: "./iris",
       codeqlBinary: undefined,
       python3Binary: "python3",
@@ -150,6 +150,16 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("scannerConfig must be an object");
     }
     config.scannerConfig = coerceScannerConfigMap(parsed);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "agentRuntimeConfig") {
+    const parsed = parseFlexibleValue(raw);
+    if (!isRecord(parsed)) {
+      throw new Error("agentRuntimeConfig must be an object");
+    }
+    config.agentRuntimeConfig = normalizeAgentRuntimeConfig(parsed);
     saveConfig(normalizeConfig(config), repoRoot);
     return;
   }
@@ -448,6 +458,7 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
     else if (key === "triageConcurrency") config.triageConcurrency = DEFAULTS.triageConcurrency;
     else if (key === "scanMode") config.scanMode = DEFAULTS.scanMode;
     else if (key === "agentRuntimeBackend") config.agentRuntimeBackend = DEFAULTS.agentRuntimeBackend;
+    else if (key === "agentRuntimeConfig") config.agentRuntimeConfig = DEFAULTS.agentRuntimeConfig;
     else if (key === "enabledTasks") config.enabledTasks = [...(DEFAULTS.enabledTasks ?? [])];
     else if (key === "scanners") config.scanners = [...DEFAULTS.scanners];
     else if (key === "severity") config.severity = [...DEFAULTS.severity];
@@ -538,6 +549,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   );
   const scanMode = normalizeScanMode(config.scanMode);
   const agentRuntimeBackend = normalizeAgentRuntimeBackend(config.agentRuntimeBackend);
+  const agentRuntimeConfig = normalizeAgentRuntimeConfig(config.agentRuntimeConfig);
   const triageModel = normalizeOptionalString(config.triageModel);
   const enabledTasks = normalizeStringArray(config.enabledTasks);
 
@@ -567,6 +579,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     triageMaxTurns,
     scanMode,
     agentRuntimeBackend,
+    agentRuntimeConfig,
     triageModel,
     enabledTasks,
     scanners: scanners.length > 0 ? scanners : [...DEFAULTS.scanners],
@@ -714,6 +727,14 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
 
     if (typeof layer["agentRuntimeBackend"] === "string") {
       merged.agentRuntimeBackend = layer["agentRuntimeBackend"] as KuzushiConfig["agentRuntimeBackend"];
+    }
+
+    if (isRecord(layer["agentRuntimeConfig"])) {
+      const runtimeConfig = normalizeAgentRuntimeConfig(layer["agentRuntimeConfig"]);
+      merged.agentRuntimeConfig = {
+        ...(merged.agentRuntimeConfig ?? {}),
+        ...(runtimeConfig ?? {}),
+      };
     }
 
     if (Array.isArray(layer["enabledTasks"])) {
@@ -903,6 +924,24 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const apiKey = normalizeOptionalString(value["apiKey"]);
+  const baseUrl = normalizeOptionalString(value["baseUrl"]);
+
+  if (!apiKey && !baseUrl) {
+    return undefined;
+  }
+
+  const normalized: AgentRuntimeConfig = {};
+  if (apiKey) normalized.apiKey = apiKey;
+  if (baseUrl) normalized.baseUrl = baseUrl;
+  return normalized;
 }
 
 function parseFlexibleValue(raw: string): unknown {

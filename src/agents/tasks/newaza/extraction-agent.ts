@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
+import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import type {
   AgentResultSuccessMessage,
   AgentToolDecision,
-} from "../../agent-runtime/types.js";
-import { toErrorMessage } from "../../utils.js";
-import type { AugurLanguage } from "./augur-types.js";
+} from "../../../agent-runtime/types.js";
+import { toErrorMessage } from "../../../utils.js";
+import type { NewazaLanguage } from "./types.js";
 
 const SOURCE_BODY_PLACEHOLDERS = ["{{SOURCE_HANDLER_PREDICATE}}"];
 const SINK_BODY_PLACEHOLDERS = ["{{SINK_CALL_PREDICATE}}"];
@@ -16,16 +16,19 @@ const CACHE_PREFIX = "// cache:";
 const QUERY_FENCE_REGEX = /```([a-zA-Z0-9_-]+)?[ \t]*\n([\s\S]*?)```/g;
 
 export interface ExtractionAgentOptions {
-  language: AugurLanguage;
+  language: NewazaLanguage;
   kind: "source" | "sink";
   template: string;
   referenceFiles: string[];
-  augurPath: string;
+  newazaPath: string;
   model: string;
   repoRoot: string;
   workspaceDir: string;
   codeqlBinary: string;
   dbPath: string;
+  codeqlApiProfileId: string;
+  dataFlowImport: string;
+  taintTrackingImport: string;
 }
 
 /**
@@ -53,12 +56,15 @@ export async function generateExtractionQuery(
     kind,
     template,
     referenceFiles,
-    augurPath,
+    newazaPath,
     model,
     repoRoot,
     workspaceDir,
     codeqlBinary,
     dbPath,
+    codeqlApiProfileId,
+    dataFlowImport,
+    taintTrackingImport,
   } = options;
 
   const cacheDir = path.join(workspaceDir, "extraction");
@@ -81,48 +87,82 @@ export async function generateExtractionQuery(
   }
 
   // --- Build system prompt ---
-  const systemPrompt = await buildExtractionPrompt({
-    language,
-    kind,
-    template,
-    referenceContent,
-    augurPath,
-    queryPath,
-    codeqlBinary,
-    workspaceDir,
-    dbPath,
-  });
+    const systemPrompt = await buildExtractionPrompt({
+      language,
+      kind,
+      template,
+      referenceContent,
+      newazaPath,
+      queryPath,
+      codeqlBinary,
+      workspaceDir,
+      dbPath,
+      codeqlApiProfileId,
+      dataFlowImport,
+      taintTrackingImport,
+    });
 
-  // --- Call LLM ---
+  // --- Call LLM (with retry for transient API errors) ---
   const runtime = getAgentRuntime();
+  const MAX_RETRIES = 2;
   let resultText: string | null = null;
 
-  try {
-    for await (const message of runtime.query({
-      prompt: systemPrompt,
-      options: {
-        cwd: repoRoot,
-        model,
-        maxTurns: 15,
-        allowedTools: ["Read", "Glob", "Grep", "Bash", "Write"],
-        permissionMode: "acceptEdits",
-        canUseTool,
-      },
-    })) {
-      if (message.type === "result" && message.subtype === "success") {
-        resultText = (message as AgentResultSuccessMessage).result;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    resultText = null;
+    let lastErrorSubtype: string | null = null;
+
+    try {
+      process.stderr.write(
+        `[newaza-extraction-agent] Starting LLM call for ${language}/${kind} with model ${model}${attempt > 0 ? ` (retry ${attempt}/${MAX_RETRIES})` : ""}\n`,
+      );
+      for await (const message of runtime.query({
+        prompt: systemPrompt,
+        options: {
+          cwd: repoRoot,
+          model,
+          maxTurns: undefined,
+          allowedTools: ["Read", "Glob", "Grep", "Bash", "Write"],
+          permissionMode: "acceptEdits",
+          canUseTool,
+        },
+      })) {
+        if (message.type === "result" && message.subtype === "success") {
+          resultText = (message as AgentResultSuccessMessage).result;
+        } else if (message.type === "result") {
+          lastErrorSubtype = message.subtype;
+          const errMsg = "errors" in message ? (message as { errors: string[] }).errors.join("; ") : message.subtype;
+          process.stderr.write(`[newaza-extraction-agent] Non-success result for ${language}/${kind}: ${message.subtype} — ${errMsg}\n`);
+        }
       }
+    } catch (error) {
+      process.stderr.write(
+        `[newaza-extraction-agent] LLM call failed for ${language}/${kind}: ${toErrorMessage(error)}\n`,
+      );
+      if (attempt < MAX_RETRIES) {
+        continue;
+      }
+      return null;
     }
-  } catch (error) {
-    process.stderr.write(
-      `[augur-extraction-agent] LLM call failed for ${language}/${kind}: ${toErrorMessage(error)}\n`,
-    );
-    return null;
+
+    if (resultText) {
+      break;
+    }
+
+    // Retry on transient runtime errors; don't retry on non-transient failures like max_turns
+    const isTransient = lastErrorSubtype === "error_runtime" || lastErrorSubtype === "error_aborted";
+    if (!isTransient || attempt >= MAX_RETRIES) {
+      break;
+    }
+
+    process.stderr.write(`[newaza-extraction-agent] Transient error for ${language}/${kind}, retrying...\n`);
   }
 
   if (!resultText) {
+    process.stderr.write(`[newaza-extraction-agent] No result text from LLM for ${language}/${kind}\n`);
     return null;
   }
+
+  process.stderr.write(`[newaza-extraction-agent] Got result text for ${language}/${kind} (${resultText.length} chars)\n`);
 
   // --- Extract query from result ---
   let queryText = extractQueryFromResult(resultText);
@@ -155,15 +195,18 @@ export async function generateExtractionQuery(
 // ── Internals ──────────────────────────────────────────────
 
 interface PromptBuildOptions {
-  language: AugurLanguage;
+  language: NewazaLanguage;
   kind: "source" | "sink";
   template: string;
   referenceContent: string;
-  augurPath: string;
+  newazaPath: string;
   queryPath: string;
   codeqlBinary: string;
   workspaceDir: string;
   dbPath: string;
+  codeqlApiProfileId: string;
+  dataFlowImport: string;
+  taintTrackingImport: string;
 }
 
 async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> {
@@ -172,15 +215,18 @@ async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> 
     kind,
     template,
     referenceContent,
-    augurPath,
+    newazaPath,
     queryPath,
     codeqlBinary,
     workspaceDir,
     dbPath,
+    codeqlApiProfileId,
+    dataFlowImport,
+    taintTrackingImport,
   } = opts;
 
-  const workflowSection = await loadWorkflowStep2(augurPath);
-  const pythonExample = await loadPythonExample(augurPath, kind);
+  const workflowSection = await loadWorkflowStep2(newazaPath);
+  const pythonExample = await loadPythonExample(newazaPath, kind);
 
   const candidateKind = kind === "source" ? "source_candidate" : "sink_candidate";
 
@@ -200,6 +246,11 @@ async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> 
     "```ql",
     template,
     "```",
+    "",
+    "## CodeQL compatibility profile (required)",
+    `Use this CodeQL profile: ${codeqlApiProfileId}`,
+    `Required imports: ${dataFlowImport}, ${taintTrackingImport}`,
+    "Do not switch to alternate import variants unless these exact imports compile.",
     "",
   ];
 
@@ -244,8 +295,8 @@ async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> 
   return lines.join("\n");
 }
 
-async function loadWorkflowStep2(augurPath: string): Promise<string> {
-  const workflowPath = path.join(augurPath, "WORKFLOW.md");
+async function loadWorkflowStep2(newazaPath: string): Promise<string> {
+  const workflowPath = path.join(newazaPath, "WORKFLOW.md");
   try {
     const content = await readFile(workflowPath, "utf-8");
     const step2Match = content.match(
@@ -257,8 +308,8 @@ async function loadWorkflowStep2(augurPath: string): Promise<string> {
   }
 }
 
-async function loadPythonExample(augurPath: string, kind: "source" | "sink"): Promise<string | null> {
-  const templatePath = path.join(augurPath, "assets", "extraction", `python_${kind}s.ql.tmpl`);
+async function loadPythonExample(newazaPath: string, kind: "source" | "sink"): Promise<string | null> {
+  const templatePath = path.join(newazaPath, "assets", "extraction", `python_${kind}s.ql.tmpl`);
   try {
     return await readFile(templatePath, "utf-8");
   } catch {
@@ -409,23 +460,39 @@ function splitShellWords(command: string): string[] | null {
   let escaping = false;
 
   for (const char of command.trim()) {
+    // In single-quoted shell strings, backslashes are literal characters.
+    if (quote === "'") {
+      if (char === "'") {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
     if (escaping) {
       current += char;
       escaping = false;
       continue;
     }
 
-    if (char === "\\") {
-      escaping = true;
-      continue;
-    }
-
-    if (quote) {
-      if (char === quote) {
+    if (quote === "\"") {
+      if (char === "\"") {
         quote = null;
         continue;
       }
+
+      if (char === "\\") {
+        escaping = true;
+        continue;
+      }
+
       current += char;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaping = true;
       continue;
     }
 
@@ -609,7 +676,7 @@ function looksLikeCodeqlLine(line: string): boolean {
     return true;
   }
 
-  return /^(?:@|import\b|private\b|module\b|class\b|predicate\b|from\b|where\b|select\b|exists\b|if\b|then\b|else\b|and\b|or\b|not\b|[A-Za-z_][A-Za-z0-9_:.<>()\[\], ]*[,{)]?)$/.test(line);
+  return /^(?:@|import\b|private\b|module\b|class\b|predicate\b|from\b|where\b|select\b|exists\b|if\b|then\b|else\b|and\b|or\b|not\b|[A-Za-z_][A-Za-z0-9_:.<>()\[\], ]*[,{)]?|"(?:[^"\\]|\\.)*"\s*,?|'(?:[^'\\]|\\.)*'\s*,?|-?\d+(?:\.\d+)?\s*,?)$/.test(line);
 }
 
 function isLikelyCodeqlQuery(candidate: string): boolean {
@@ -675,7 +742,7 @@ export async function readCacheIfValid(
   }
 }
 
-export const __augurExtractionAgentInternals = {
+export const __newazaExtractionAgentInternals = {
   extractQueryFromResult,
   isAllowedCodeqlCompileCommand,
   splitShellWords,

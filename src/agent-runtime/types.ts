@@ -21,6 +21,8 @@ export interface AgentQueryOptions {
   outputFormat?: {
     type: "json_schema";
     schema: Record<string, unknown>;
+    strict?: boolean;
+    retryInvalidStructuredOutput?: number;
   };
   canUseTool?: (
     toolName: string,

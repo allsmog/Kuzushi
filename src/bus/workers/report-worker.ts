@@ -49,7 +49,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
 
   bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
-    state.scanners = event.payload.scanOpts.scanners && event.payload.scanOpts.scanners.length > 0
+    state.scanners = event.payload.scanOpts.scanners !== undefined
       ? [...event.payload.scanOpts.scanners]
       : [...event.payload.config.scanners];
   });

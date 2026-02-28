@@ -2,10 +2,10 @@ import type { TaskRegistry } from "../../agents/registry.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
-import { triageFindingWithAgent } from "../../triage.js";
+import { triageFindingWithAgent, triageFindingsBatch } from "../../triage.js";
 import type { KuzushiConfig, RepoContext } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
-import type { TriageFindingQueuedEvent } from "../events.js";
+import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
 
@@ -33,7 +33,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           return triageFindingWithAgent(
             triageConfigProvider,
             finding,
-            context.repoRoot,
+            context.scanPath ?? context.repoRoot,
             context.repoName,
             deps.config.triageModel ?? deps.config.model,
             deps.config.triageMaxTurns,
@@ -89,6 +89,89 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           total,
         }),
       );
+    }
+  });
+
+  bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {
+    const { context, findings, repoContext, total } = event.payload;
+    const runId = event.meta.runId;
+
+    try {
+      const { results, costUsd } = await triageFindingsBatch(
+        findings,
+        context.scanPath ?? context.repoRoot,
+        context.repoName,
+        deps.config.triageModel ?? deps.config.model,
+        asRepoContext(repoContext),
+        {
+          activityCallback: async (activity) => {
+            await bus.publish(
+              createEvent("triage:agent-activity", runId, {
+                context,
+                fingerprint: "batch",
+                kind: activity.kind,
+                toolName: activity.toolName,
+                toolInput: activity.toolInput,
+                summary: activity.summary,
+                elapsedSeconds: activity.elapsedSeconds,
+                index: 0,
+                total,
+              }),
+            );
+          },
+        },
+      );
+
+      const perFindingCost = findings.length > 0 ? costUsd / findings.length : 0;
+
+      for (const [idx, finding] of findings.entries()) {
+        const result = results.get(finding.fingerprint);
+        if (result) {
+          result.triageCostUsd = perFindingCost;
+          await bus.publish(
+            createEvent("triage:result", runId, {
+              context,
+              finding,
+              result,
+              costUsd: perFindingCost,
+              attempts: 1,
+              index: idx + 1,
+              total,
+            }),
+          );
+        } else {
+          await bus.publish(
+            createEvent("triage:error", runId, {
+              context,
+              finding,
+              error: "Finding missing from batch triage response",
+              costUsd: perFindingCost,
+              attempts: 1,
+              index: idx + 1,
+              total,
+            }),
+          );
+        }
+      }
+    } catch (error) {
+      const errorCostUsd = getErrorCostUsd(error);
+      const perFindingCost = findings.length > 0 && errorCostUsd != null
+        ? errorCostUsd / findings.length
+        : undefined;
+
+      for (const [idx, finding] of findings.entries()) {
+        await bus.publish(
+          createEvent("triage:error", runId, {
+            context,
+            finding,
+            error: toErrorMessage(error),
+            costUsd: perFindingCost,
+            attempts: 1,
+            index: idx + 1,
+            total,
+          }),
+        );
+      }
     }
   });
 }

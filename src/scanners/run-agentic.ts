@@ -84,12 +84,14 @@ export async function runAgentic(
   let structuredOutput: unknown = undefined;
   let executionError: string | null = null;
 
+  const tag = "[agentic]";
+  console.error(`${tag} Starting scan (model=${model}, cwd=${repoRoot})`);
+
   for await (const message of runtime.query({
     prompt,
     options: {
       cwd: repoRoot,
       model,
-      maxTurns: 20,
       allowedTools: ["Read", "Glob", "Grep"],
       permissionMode: "dontAsk",
       maxBudgetUsd: runtimeOptions.maxBudgetUsd,
@@ -100,10 +102,39 @@ export async function runAgentic(
       },
     },
   })) {
+    if (message.type === "tool-progress") {
+      console.error(`${tag} [${Math.round(message.elapsedSeconds)}s] Tool: ${message.toolName}`);
+      continue;
+    }
+
+    if (message.type === "tool-summary") {
+      console.error(`${tag} ${message.summary}`);
+      continue;
+    }
+
+    if (message.type === "assistant") {
+      const toolUses = message.content
+        .filter((b: Record<string, unknown>) => b["type"] === "tool_use")
+        .map((b: Record<string, unknown>) => b["name"]);
+      if (toolUses.length > 0) {
+        console.error(`${tag} Using tools: ${toolUses.join(", ")}`);
+      } else {
+        const textBlocks = message.content
+          .filter((b: Record<string, unknown>) => b["type"] === "text")
+          .map((b: Record<string, unknown>) => String(b["text"] ?? "").slice(0, 120));
+        if (textBlocks.length > 0) {
+          console.error(`${tag} ${textBlocks[0]}${textBlocks[0].length >= 120 ? "..." : ""}`);
+        }
+      }
+      continue;
+    }
+
     if (message.type !== "result") continue;
     if ("result" in message) {
       resultText = message.result;
       structuredOutput = message.structuredOutput;
+      const durationSec = message.durationMs ? (message.durationMs / 1000).toFixed(1) : "?";
+      console.error(`${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`);
       continue;
     }
 

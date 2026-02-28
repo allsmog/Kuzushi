@@ -6,7 +6,6 @@ import { registerOrchestrator } from "../../src/bus/orchestrator.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
 import type {
-  AugurCheckpointEvent,
   PipelineCompleteEvent,
   PipelineErrorEvent,
   PocHarnessFindingQueuedEvent,
@@ -15,6 +14,7 @@ import type {
   ScanStartEvent,
   StageCompleteEvent,
   TaskStartEvent,
+  TriageBatchQueuedEvent,
   TriageCompleteEvent,
   TriageFindingQueuedEvent,
   TriageQueueDepthEvent,
@@ -38,7 +38,7 @@ import type { KuzushiConfig, ScanOpts, TriageResult } from "../../src/types.js";
 
 function makeConfig(): KuzushiConfig {
   return {
-    model: "claude-sonnet-4-20250514",
+    model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
     triageConcurrency: 1,
@@ -90,6 +90,29 @@ function makeScanOpts(): ScanOpts {
     scanners: ["semgrep"],
     fresh: false,
   };
+}
+
+function registerMockBatchTriageWorker(
+  bus: InProcessBus,
+  resultFn: (finding: Finding) => TriageResult,
+): void {
+  bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {
+    const { context, findings, total } = event.payload;
+    const runId = event.meta.runId;
+    for (const [idx, finding] of findings.entries()) {
+      await bus.publish(
+        createEvent("triage:result", runId, {
+          context,
+          finding,
+          result: resultFn(finding),
+          costUsd: 0.01,
+          attempts: 1,
+          index: idx + 1,
+          total,
+        }),
+      );
+    }
+  });
 }
 
 describe("PipelineOrchestrator", () => {
@@ -152,6 +175,8 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
+    registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
+
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
@@ -164,8 +189,8 @@ describe("PipelineOrchestrator", () => {
       "triage:start",
       (event) => event.meta.runId === runId,
     );
-    const queuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
+    const batchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
       (event) => event.meta.runId === runId,
     );
     const queueDepthEvents: TriageQueueDepthEvent[] = [];
@@ -199,6 +224,11 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
+    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
+      "report:requested",
+      (event) => event.meta.runId === runId,
+    );
+
     await bus.publish(
       createEvent("scan:complete", runId, {
         context,
@@ -209,23 +239,9 @@ describe("PipelineOrchestrator", () => {
     const triageStart = await triageStartPromise;
     expect(triageStart.payload.findingCount).toBe(1);
 
-    const queued = await queuedPromise;
-    expect(queued.payload.finding.fingerprint).toBe("fp-triage");
-
-    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
-      "report:requested",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("triage:result", runId, {
-        context,
-        finding: queued.payload.finding,
-        result: makeResult(queued.payload.finding.fingerprint),
-        index: queued.payload.index,
-        total: queued.payload.total,
-      }),
-    );
+    const batchQueued = await batchQueuedPromise;
+    expect(batchQueued.payload.findings).toHaveLength(1);
+    expect(batchQueued.payload.findings[0].fingerprint).toBe("fp-triage");
 
     await reportRequestedPromise;
 
@@ -282,6 +298,32 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
+    const costMap: Record<string, number> = {
+      "fp-cost-1": 0.12,
+      "fp-cost-2": 0.08,
+    };
+    bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {
+      const { context: ctx, findings, total } = event.payload;
+      const batchRunId = event.meta.runId;
+      for (const [idx, finding] of findings.entries()) {
+        const cost = costMap[finding.fingerprint] ?? 0;
+        await bus.publish(
+          createEvent("triage:result", batchRunId, {
+            context: ctx,
+            finding,
+            result: {
+              ...makeResult(finding.fingerprint),
+              triageCostUsd: cost,
+            },
+            costUsd: cost,
+            attempts: 1,
+            index: idx + 1,
+            total,
+          }),
+        );
+      }
+    });
+
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
@@ -305,25 +347,6 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const queued1Promise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId && event.payload.index === 1,
-    );
-    const queued2Promise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId && event.payload.index === 2,
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 2,
-      }),
-    );
-
-    const queued1 = await queued1Promise;
-    const queued2 = await queued2Promise;
-
     const triageCompletePromise = bus.waitFor<TriageCompleteEvent>(
       "triage:complete",
       (event) => event.meta.runId === runId,
@@ -334,30 +357,9 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("triage:result", runId, {
+      createEvent("scan:complete", runId, {
         context,
-        finding: queued1.payload.finding,
-        result: {
-          ...makeResult(queued1.payload.finding.fingerprint),
-          triageCostUsd: 0.12,
-        },
-        costUsd: 0.12,
-        index: queued1.payload.index,
-        total: queued1.payload.total,
-      }),
-    );
-
-    await bus.publish(
-      createEvent("triage:result", runId, {
-        context,
-        finding: queued2.payload.finding,
-        result: {
-          ...makeResult(queued2.payload.finding.fingerprint),
-          triageCostUsd: 0.08,
-        },
-        costUsd: 0.08,
-        index: queued2.payload.index,
-        total: queued2.payload.total,
+        totalFindings: 2,
       }),
     );
 
@@ -404,6 +406,8 @@ describe("PipelineOrchestrator", () => {
 
     registerOrchestrator(bus, { registry: registry as any, db });
 
+    registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
+
     const runId = generateRunId();
     const context = {
       runId,
@@ -428,20 +432,6 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const queuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 1,
-      }),
-    );
-
-    const queued = await queuedPromise;
-
     let sawVerificationQueued = false;
     let verificationStartFindingCount = -1;
     bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", (event) => {
@@ -461,12 +451,9 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("triage:result", runId, {
+      createEvent("scan:complete", runId, {
         context,
-        finding: queued.payload.finding,
-        result: makeResult(queued.payload.finding.fingerprint),
-        index: queued.payload.index,
-        total: queued.payload.total,
+        totalFindings: 1,
       }),
     );
 
@@ -507,6 +494,32 @@ describe("PipelineOrchestrator", () => {
 
     registerOrchestrator(bus, { registry: registry as any, db });
 
+    const confidenceMap: Record<string, number> = {
+      "fp-low": 0.3,
+      "fp-mid": 0.7,
+      "fp-high": 0.9,
+    };
+    bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {
+      const { context: ctx, findings, total } = event.payload;
+      const batchRunId = event.meta.runId;
+      for (const [idx, finding] of findings.entries()) {
+        await bus.publish(
+          createEvent("triage:result", batchRunId, {
+            context: ctx,
+            finding,
+            result: {
+              ...makeResult(finding.fingerprint),
+              confidence: confidenceMap[finding.fingerprint] ?? 0.9,
+            },
+            costUsd: 0.01,
+            attempts: 1,
+            index: idx + 1,
+            total,
+          }),
+        );
+      }
+    });
+
     const runId = generateRunId();
     const context = {
       runId,
@@ -545,30 +558,6 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const queued1Promise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId && event.payload.index === 1,
-    );
-    const queued2Promise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId && event.payload.index === 2,
-    );
-    const queued3Promise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId && event.payload.index === 3,
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 3,
-      }),
-    );
-
-    const queued1 = await queued1Promise;
-    const queued2 = await queued2Promise;
-    const queued3 = await queued3Promise;
-
     const verificationQueued: VerificationFindingQueuedEvent[] = [];
     bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", (event) => {
       if (event.meta.runId === runId) {
@@ -586,39 +575,9 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("triage:result", runId, {
+      createEvent("scan:complete", runId, {
         context,
-        finding: queued1.payload.finding,
-        result: {
-          ...makeResult(queued1.payload.finding.fingerprint),
-          confidence: 0.3,
-        },
-        index: queued1.payload.index,
-        total: queued1.payload.total,
-      }),
-    );
-    await bus.publish(
-      createEvent("triage:result", runId, {
-        context,
-        finding: queued2.payload.finding,
-        result: {
-          ...makeResult(queued2.payload.finding.fingerprint),
-          confidence: 0.7,
-        },
-        index: queued2.payload.index,
-        total: queued2.payload.total,
-      }),
-    );
-    await bus.publish(
-      createEvent("triage:result", runId, {
-        context,
-        finding: queued3.payload.finding,
-        result: {
-          ...makeResult(queued3.payload.finding.fingerprint),
-          confidence: 0.9,
-        },
-        index: queued3.payload.index,
-        total: queued3.payload.total,
+        totalFindings: 3,
       }),
     );
 
@@ -688,6 +647,8 @@ describe("PipelineOrchestrator", () => {
 
     registerOrchestrator(bus, { registry: registry as any, db });
 
+    registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
+
     const runId = generateRunId();
     const context = {
       runId,
@@ -719,19 +680,6 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const triageQueuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 1,
-      }),
-    );
-    const triageQueued = await triageQueuedPromise;
-
     const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
       "verification:finding-queued",
       (event) => event.meta.runId === runId,
@@ -742,12 +690,9 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("triage:result", runId, {
+      createEvent("scan:complete", runId, {
         context,
-        finding: triageQueued.payload.finding,
-        result: makeResult(triageQueued.payload.finding.fingerprint),
-        index: triageQueued.payload.index,
-        total: triageQueued.payload.total,
+        totalFindings: 1,
       }),
     );
 
@@ -795,6 +740,8 @@ describe("PipelineOrchestrator", () => {
 
     registerOrchestrator(bus, { registry: registry as any, db });
 
+    registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
+
     const runId = generateRunId();
     const context = {
       runId,
@@ -826,19 +773,6 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const triageQueuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 1,
-      }),
-    );
-
-    const triageQueued = await triageQueuedPromise;
     const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
       "verification:finding-queued",
       (event) => event.meta.runId === runId,
@@ -849,12 +783,9 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("triage:result", runId, {
+      createEvent("scan:complete", runId, {
         context,
-        finding: triageQueued.payload.finding,
-        result: makeResult(triageQueued.payload.finding.fingerprint),
-        index: triageQueued.payload.index,
-        total: triageQueued.payload.total,
+        totalFindings: 1,
       }),
     );
 
@@ -900,6 +831,8 @@ describe("PipelineOrchestrator", () => {
 
     registerOrchestrator(bus, { registry: registry as any, db });
 
+    registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
+
     const runId = generateRunId();
     const context = {
       runId,
@@ -931,19 +864,6 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const triageQueuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 1,
-      }),
-    );
-
-    const triageQueued = await triageQueuedPromise;
     const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
       "verification:finding-queued",
       (event) => event.meta.runId === runId,
@@ -954,12 +874,9 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("triage:result", runId, {
+      createEvent("scan:complete", runId, {
         context,
-        finding: triageQueued.payload.finding,
-        result: makeResult(triageQueued.payload.finding.fingerprint),
-        index: triageQueued.payload.index,
-        total: triageQueued.payload.total,
+        totalFindings: 1,
       }),
     );
 
@@ -1006,6 +923,8 @@ describe("PipelineOrchestrator", () => {
 
     registerOrchestrator(bus, { registry: registry as any, db });
 
+    registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
+
     const runId = generateRunId();
     const context = {
       runId,
@@ -1037,33 +956,10 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const triageQueuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
-      (event) => event.meta.runId === runId,
-    );
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 1,
-      }),
-    );
-    const triageQueued = await triageQueuedPromise;
-
     const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
       "verification:finding-queued",
       (event) => event.meta.runId === runId,
     );
-    await bus.publish(
-      createEvent("triage:result", runId, {
-        context,
-        finding: triageQueued.payload.finding,
-        result: makeResult(triageQueued.payload.finding.fingerprint),
-        index: triageQueued.payload.index,
-        total: triageQueued.payload.total,
-      }),
-    );
-
-    const verificationQueued = await verificationQueuedPromise;
     const pocStartPromise = bus.waitFor<PocHarnessStartEvent>(
       "poc-harness:start",
       (event) => event.meta.runId === runId,
@@ -1076,6 +972,15 @@ describe("PipelineOrchestrator", () => {
       "report:requested",
       (event) => event.meta.runId === runId,
     );
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 1,
+      }),
+    );
+
+    const verificationQueued = await verificationQueuedPromise;
 
     await bus.publish(
       createEvent("verification:result", runId, {
@@ -1139,7 +1044,8 @@ describe("PipelineOrchestrator", () => {
     );
     const complete = await completePromise;
     expect(complete.payload.stats.pocHarnessCostUsd).toBeCloseTo(0.02, 8);
-    expect(complete.payload.stats.totalCostUsd).toBeCloseTo(0.02, 8);
+    // totalCostUsd includes both the mock triage cost (0.01) and poc-harness cost (0.02)
+    expect(complete.payload.stats.totalCostUsd).toBeCloseTo(0.03, 8);
 
     await bus.close();
     db.close();
@@ -1309,6 +1215,27 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
+    bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {
+      const { context: ctx, findings, total } = event.payload;
+      const batchRunId = event.meta.runId;
+      for (const [idx, finding] of findings.entries()) {
+        await bus.publish(
+          createEvent("triage:result", batchRunId, {
+            context: ctx,
+            finding,
+            result: {
+              ...makeResult(finding.fingerprint),
+              triageCostUsd: 0.05,
+            },
+            costUsd: 0.05,
+            attempts: 1,
+            index: idx + 1,
+            total,
+          }),
+        );
+      }
+    });
+
     let sawScanStart = false;
     bus.subscribe<ScanStartEvent>("scan:start", (event) => {
       if (event.meta.runId === runId) {
@@ -1320,8 +1247,13 @@ describe("PipelineOrchestrator", () => {
       "triage:start",
       (event) => event.meta.runId === runId,
     );
-    const queuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
+    const batchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
+      "report:requested",
       (event) => event.meta.runId === runId,
     );
 
@@ -1338,27 +1270,9 @@ describe("PipelineOrchestrator", () => {
     expect(triageStart.payload.findingCount).toBe(1);
     expect(sawScanStart).toBe(false);
 
-    const queued = await queuedPromise;
-    expect(queued.payload.finding.fingerprint).toBe("fp-new");
-
-    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
-      "report:requested",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("triage:result", runId, {
-        context,
-        finding: queued.payload.finding,
-        result: {
-          ...makeResult(queued.payload.finding.fingerprint),
-          triageCostUsd: 0.05,
-        },
-        costUsd: 0.05,
-        index: queued.payload.index,
-        total: queued.payload.total,
-      }),
-    );
+    const batchQueued = await batchQueuedPromise;
+    expect(batchQueued.payload.findings).toHaveLength(1);
+    expect(batchQueued.payload.findings[0].fingerprint).toBe("fp-new");
 
     await reportRequestedPromise;
 
@@ -1536,8 +1450,8 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const queuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
+    const batchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
       (event) => event.meta.runId === runId,
     );
 
@@ -1548,7 +1462,7 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const queued = await queuedPromise;
+    const batchQueued = await batchQueuedPromise;
 
     const errors: PipelineErrorEvent[] = [];
     bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
@@ -1564,17 +1478,18 @@ describe("PipelineOrchestrator", () => {
       (event) => event.meta.runId === runId,
     );
 
+    const finding = batchQueued.payload.findings[0];
     await bus.publish(
       createEvent("triage:result", runId, {
         context,
-        finding: queued.payload.finding,
+        finding,
         result: {
-          ...makeResult(queued.payload.finding.fingerprint),
+          ...makeResult(finding.fingerprint),
           triageCostUsd: 0.11,
         },
         costUsd: 0.11,
-        index: queued.payload.index,
-        total: queued.payload.total,
+        index: 1,
+        total: batchQueued.payload.total,
       }),
     );
 
@@ -1691,8 +1606,8 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    const triageQueuedPromise = bus.waitFor<TriageFindingQueuedEvent>(
-      "triage:finding-queued",
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
       (event) => event.meta.runId === runId,
     );
 
@@ -1704,11 +1619,100 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const triageQueued = await triageQueuedPromise;
-    expect(triageQueued.payload.repoContext).toMatchObject({
+    const triageBatchQueued = await triageBatchQueuedPromise;
+    expect(triageBatchQueued.payload.repoContext).toMatchObject({
       frameworks: ["Express"],
       ormOrDb: ["Prisma"],
     });
+
+    await bus.close();
+    db.close();
+  });
+
+  it("fails a DAG stage immediately when one task errors", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["hang-task", "fail-task"],
+    };
+
+    const taskRegistry = new TaskRegistry();
+
+    const hangingTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "hang-task",
+      displayName: "Hang Task",
+      outputKind: "findings",
+      dependsOn: [],
+      run() {
+        return new Promise<Finding[]>(() => {
+          // Intentionally unresolved to verify fail-fast stage handling.
+        });
+      },
+    };
+
+    const failingTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "fail-task",
+      displayName: "Fail Task",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        throw new Error("intentional failure");
+      },
+    };
+
+    taskRegistry.register(hangingTask);
+    taskRegistry.register(failingTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const pipelineErrorPromise = bus.waitFor<PipelineErrorEvent>(
+      "pipeline:error",
+      (event) => event.meta.runId === runId && event.payload.fatal,
+      1000,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: makeConfig(),
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    const pipelineError = await pipelineErrorPromise;
+    expect(pipelineError.payload.error).toContain("Task \"fail-task\" failed");
+    expect(pipelineError.payload.error).toContain("intentional failure");
+
+    await expect(
+      bus.waitFor<StageCompleteEvent>(
+        "stage:complete",
+        (event) => event.meta.runId === runId,
+        200,
+      ),
+    ).rejects.toThrow("Timed out");
 
     await bus.close();
     db.close();
@@ -1806,231 +1810,4 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
-  it("pauses DAG progression on checkpoint outputs until approval is published", async () => {
-    const bus = new InProcessBus();
-    const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    const taskRegistry = new TaskRegistry();
-
-    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "semgrep",
-      displayName: "Semgrep",
-      outputKind: "findings",
-      dependsOn: [],
-      async run() {
-        return [makeFinding("fp-checkpoint", 90)];
-      },
-    };
-
-    const checkpointTask: AgentTask<ScanOpts, Record<string, unknown>> = {
-      id: "checkpoint-task",
-      displayName: "Checkpoint Task",
-      outputKind: "custom",
-      dependsOn: ["semgrep"],
-      async run() {
-        return {
-          checkpointRequired: true,
-          reviewSummary: "checkpoint summary",
-          labelCounts: {
-            "pass1.source": 2,
-          },
-        };
-      },
-    };
-
-    let postStarted = false;
-    const postTask: AgentTask<ScanOpts, { ok: boolean }> = {
-      id: "post-task",
-      displayName: "Post Task",
-      outputKind: "custom",
-      dependsOn: ["checkpoint-task"],
-      async run() {
-        postStarted = true;
-        return { ok: true };
-      },
-    };
-
-    taskRegistry.register(semgrepTask);
-    taskRegistry.register(checkpointTask);
-    taskRegistry.register(postTask);
-
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
-
-    const runId = generateRunId();
-    const context = {
-      runId,
-      repoRoot: "/tmp/repo",
-      repoName: "repo",
-      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
-    };
-
-    const checkpointPromise = bus.waitFor<AugurCheckpointEvent>(
-      "augur:checkpoint",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config: {
-          ...makeConfig(),
-          enabledTasks: ["checkpoint-task", "post-task"],
-        },
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    const checkpoint = await checkpointPromise;
-    expect(checkpoint.payload.reviewSummary).toContain("checkpoint summary");
-
-    await expect(
-      bus.waitFor<TaskStartEvent>(
-        "task:start",
-        (event) => event.meta.runId === runId && event.payload.taskId === "post-task",
-        150,
-      ),
-    ).rejects.toThrow("Timed out");
-    expect(postStarted).toBe(false);
-
-    await bus.publish(
-      createEvent("augur:checkpoint-approved", runId, {
-        context,
-        reviewer: "test-reviewer",
-      }),
-    );
-
-    await bus.waitFor<TaskStartEvent>(
-      "task:start",
-      (event) => event.meta.runId === runId && event.payload.taskId === "post-task",
-    );
-    expect(postStarted).toBe(true);
-
-    await bus.close();
-    db.close();
-  });
-
-  it("skips checkpoint wait when augur auto-approve is enabled", async () => {
-    const bus = new InProcessBus();
-    const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    const taskRegistry = new TaskRegistry();
-    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "semgrep",
-      displayName: "Semgrep",
-      outputKind: "findings",
-      dependsOn: [],
-      async run() {
-        return [makeFinding("fp-auto-approve", 91)];
-      },
-    };
-
-    const checkpointTask: AgentTask<ScanOpts, Record<string, unknown>> = {
-      id: "checkpoint-task",
-      displayName: "Checkpoint Task",
-      outputKind: "custom",
-      dependsOn: ["semgrep"],
-      async run() {
-        return {
-          checkpointRequired: true,
-          reviewSummary: "checkpoint summary",
-          labelCounts: {
-            "pass1.sink": 3,
-          },
-        };
-      },
-    };
-
-    const postTask: AgentTask<ScanOpts, { ok: boolean }> = {
-      id: "post-task",
-      displayName: "Post Task",
-      outputKind: "custom",
-      dependsOn: ["checkpoint-task"],
-      async run() {
-        return { ok: true };
-      },
-    };
-
-    taskRegistry.register(semgrepTask);
-    taskRegistry.register(checkpointTask);
-    taskRegistry.register(postTask);
-
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
-
-    const runId = generateRunId();
-    const context = {
-      runId,
-      repoRoot: "/tmp/repo",
-      repoName: "repo",
-      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
-    };
-
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config: {
-          ...makeConfig(),
-          enabledTasks: ["checkpoint-task", "post-task"],
-          scannerConfig: {
-            semgrep: {},
-            augur: {
-              autoApproveCheckpoint: true,
-            },
-          },
-        },
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    await bus.waitFor<TaskStartEvent>(
-      "task:start",
-      (event) => event.meta.runId === runId && event.payload.taskId === "post-task",
-    );
-
-    await expect(
-      bus.waitFor<AugurCheckpointEvent>(
-        "augur:checkpoint",
-        (event) => event.meta.runId === runId,
-        150,
-      ),
-    ).rejects.toThrow("Timed out");
-
-    await bus.close();
-    db.close();
-  });
 });

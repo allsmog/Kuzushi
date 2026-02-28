@@ -1,7 +1,7 @@
 import { execFile, type ExecFileException } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
-import { access, readdir } from "node:fs/promises";
+import { access, mkdir, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -131,6 +131,8 @@ export async function ensureDatabase(
 
   const language = normalizeLanguage(config.language) ?? await detectCodeQLLanguage(repoRoot, codeqlBin);
   const dbPath = path.join(repoRoot, ".kuzushi", "codeql-db");
+
+  await mkdir(path.dirname(dbPath), { recursive: true });
 
   const createArgs = [
     "database",
@@ -366,6 +368,14 @@ export async function detectCodeQLLanguageFromHeuristics(
     return "csharp";
   }
 
+  if (topLevel.some((name) => name.endsWith(".go"))) {
+    return "go";
+  }
+
+  if (topLevel.some((name) => name.endsWith(".py"))) {
+    return "python";
+  }
+
   return undefined;
 }
 
@@ -433,6 +443,16 @@ function parseLanguageList(raw: string): string[] {
           .map((item) => normalizeLanguage(item))
           .filter((value): value is string => Boolean(value)),
       );
+    }
+
+    // codeql resolve languages --format=json returns { "go": "/path/...", "java": "/path/..." }
+    if (isRecord(parsed)) {
+      const fromKeys = Object.keys(parsed)
+        .map((key) => normalizeLanguage(key))
+        .filter((value): value is string => Boolean(value));
+      if (fromKeys.length > 0) {
+        return uniqueValues(fromKeys);
+      }
     }
   } catch {
     // Fall back to line-oriented parsing.

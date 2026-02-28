@@ -9,14 +9,16 @@ class FakeScannerPlugin implements ScannerPlugin {
   readonly displayName = "Semgrep";
   initCalled = 0;
   lastConfig: ScannerConfig | undefined;
+  lastScanRoot: string | undefined;
 
   async init(config: ScannerConfig): Promise<void> {
     this.initCalled += 1;
     this.lastConfig = config;
   }
 
-  async scan(_repoRoot: string, _opts: ScanOpts, config: ScannerConfig): Promise<Finding[]> {
+  async scan(repoRoot: string, _opts: ScanOpts, config: ScannerConfig): Promise<Finding[]> {
     this.lastConfig = config;
+    this.lastScanRoot = repoRoot;
     return [
       {
         scanner: "semgrep",
@@ -43,7 +45,7 @@ class FakeScannerPlugin implements ScannerPlugin {
 
 function makeConfig(): KuzushiConfig {
   return {
-    model: "claude-sonnet-4-20250514",
+    model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
     triageConcurrency: 1,
@@ -89,6 +91,7 @@ describe("adaptScannerPlugin", () => {
       {
         runId: "run-1",
         repoRoot: "/tmp/repo",
+        scanPath: "/tmp/repo/subdir",
         repoName: "repo",
         config,
         bus: makeBus(),
@@ -98,6 +101,7 @@ describe("adaptScannerPlugin", () => {
 
     expect(findings).toHaveLength(1);
     expect(plugin.lastConfig).toEqual({ binary: "opengrep" });
+    expect(plugin.lastScanRoot).toBe("/tmp/repo/subdir");
   });
 
   it("forwards init() when plugin supports it", async () => {

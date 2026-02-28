@@ -4,6 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import type { AgentMessage, AgentQueryRequest } from "../../src/agent-runtime/types.js";
 
+const ORIGINAL_ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"];
+const ORIGINAL_ANTHROPIC_BASE_URL = process.env["ANTHROPIC_BASE_URL"];
+
 const { completeMock, getModelMock, validateToolCallMock } = vi.hoisted(() => ({
   completeMock: vi.fn(),
   getModelMock: vi.fn(),
@@ -119,6 +122,18 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+
+  if (ORIGINAL_ANTHROPIC_API_KEY === undefined) {
+    delete process.env["ANTHROPIC_API_KEY"];
+  } else {
+    process.env["ANTHROPIC_API_KEY"] = ORIGINAL_ANTHROPIC_API_KEY;
+  }
+
+  if (ORIGINAL_ANTHROPIC_BASE_URL === undefined) {
+    delete process.env["ANTHROPIC_BASE_URL"];
+  } else {
+    process.env["ANTHROPIC_BASE_URL"] = ORIGINAL_ANTHROPIC_BASE_URL;
+  }
 });
 
 describe("PiAiAgentRuntime", () => {
@@ -143,6 +158,28 @@ describe("PiAiAgentRuntime", () => {
       numTurns: 1,
       totalCostUsd: 0.0123,
     });
+  });
+
+  it("applies configured anthropic credentials from runtime config", async () => {
+    const cwd = makeTempDir();
+    const originalApiKey = process.env["ANTHROPIC_API_KEY"];
+    const originalBaseUrl = process.env["ANTHROPIC_BASE_URL"];
+    completeMock.mockImplementation(async () => {
+      expect(process.env["ANTHROPIC_API_KEY"]).toBe("sk-config");
+      expect(process.env["ANTHROPIC_BASE_URL"]).toBe("https://basecamp.stark.acme.com/");
+      return makeAssistantMessage(
+        [{ type: "text", text: "{\"ok\":true}" }],
+      );
+    });
+
+    const runtime = new PiAiAgentRuntime({
+      apiKey: "sk-config",
+      baseUrl: "https://basecamp.stark.acme.com/",
+    });
+    await collectMessages(runtime, makeRequest(cwd));
+
+    expect(process.env["ANTHROPIC_API_KEY"]).toBe(originalApiKey);
+    expect(process.env["ANTHROPIC_BASE_URL"]).toBe(originalBaseUrl);
   });
 
   it("handles multi-turn tool loop and emits tool events", async () => {
@@ -201,6 +238,50 @@ describe("PiAiAgentRuntime", () => {
     expect(messages[messages.length - 1]).toMatchObject({
       type: "result",
       subtype: "error_max_turns",
+    });
+  });
+
+  it("treats allowedTools=[] as explicit no-tools mode", async () => {
+    const cwd = makeTempDir();
+    completeMock
+      .mockResolvedValueOnce(makeAssistantMessage(
+        [{
+          type: "toolCall",
+          id: "tool-read-1",
+          name: "Read",
+          arguments: { path: "target.ts" },
+        }],
+        { stopReason: "toolUse" },
+      ))
+      .mockResolvedValueOnce(makeAssistantMessage(
+        [{ type: "text", text: "{\"ok\":true}" }],
+      ));
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(
+      runtime,
+      makeRequest(cwd, { allowedTools: [] }),
+    );
+
+    expect(completeMock).toHaveBeenCalledTimes(2);
+    const firstContext = completeMock.mock.calls[0]?.[1];
+    expect(firstContext.tools).toBeUndefined();
+    const secondContext = completeMock.mock.calls[1]?.[1];
+    const deniedToolResult = secondContext.messages.find((message: { role?: string; content?: unknown }) => (
+      message.role === "toolResult"
+      && Array.isArray(message.content)
+      && message.content.some((block) => (
+        typeof block === "object"
+        && block !== null
+        && "text" in block
+        && typeof (block as { text?: unknown }).text === "string"
+        && (block as { text: string }).text.includes("Tool \"Read\" is not enabled")
+      ))
+    ));
+    expect(deniedToolResult).toBeDefined();
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "success",
     });
   });
 
@@ -268,17 +349,21 @@ describe("PiAiAgentRuntime", () => {
     });
   });
 
-  it("hard-stops when canUseTool denies a tool call", async () => {
+  it("returns tool deny as error to LLM instead of hard-stopping", async () => {
     const cwd = makeTempDir();
-    completeMock.mockResolvedValue(makeAssistantMessage(
-      [{
-        type: "toolCall",
-        id: "tool-read-1",
-        name: "Read",
-        arguments: { path: "target.ts" },
-      }],
-      { stopReason: "toolUse", totalCost: 0.01 },
-    ));
+    completeMock
+      .mockResolvedValueOnce(makeAssistantMessage(
+        [{
+          type: "toolCall",
+          id: "tool-read-1",
+          name: "Read",
+          arguments: { path: "target.ts" },
+        }],
+        { stopReason: "toolUse", totalCost: 0.01 },
+      ))
+      .mockResolvedValueOnce(makeAssistantMessage(
+        [{ type: "text", text: "Understood, Read is not allowed." }],
+      ));
 
     const runtime = new PiAiAgentRuntime();
     const messages = await collectMessages(
@@ -291,11 +376,12 @@ describe("PiAiAgentRuntime", () => {
       }),
     );
 
-    expect(completeMock).toHaveBeenCalledTimes(1);
+    expect(completeMock).toHaveBeenCalledTimes(2);
+    const toolSummary = messages.find((m) => m.type === "tool-summary");
+    expect(toolSummary).toBeDefined();
     expect(messages[messages.length - 1]).toMatchObject({
       type: "result",
-      subtype: "error_permission_denied",
-      errors: ["Read is not permitted in this run."],
+      subtype: "success",
     });
   });
 
@@ -378,5 +464,102 @@ describe("PiAiAgentRuntime", () => {
     const firstContext = completeMock.mock.calls[0]?.[1];
     expect(firstContext.systemPrompt).toContain("must match this schema");
     expect(firstContext.systemPrompt).toContain("\"fingerprint\"");
+  });
+
+  it("retries strict structured output when the first response is invalid", async () => {
+    const cwd = makeTempDir();
+    completeMock
+      .mockResolvedValueOnce(makeAssistantMessage([
+        {
+          type: "text",
+          text: "not valid json",
+        },
+      ]))
+      .mockResolvedValueOnce(makeAssistantMessage([
+        {
+          type: "text",
+          text: "{\"fingerprint\":\"abc\",\"verdict\":\"tp\"}",
+        },
+      ]));
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(
+      runtime,
+      makeRequest(cwd, {
+        outputFormat: {
+          type: "json_schema",
+          schema: {
+            type: "object",
+            properties: {
+              fingerprint: { type: "string" },
+              verdict: { type: "string" },
+            },
+            required: ["fingerprint", "verdict"],
+          },
+          strict: true,
+          retryInvalidStructuredOutput: 1,
+        },
+      }),
+    );
+
+    expect(completeMock).toHaveBeenCalledTimes(2);
+    const secondContext = completeMock.mock.calls[1]?.[1];
+    const correctiveUserMessage = secondContext.messages.find((message: { role?: string; content?: unknown }) => (
+      message.role === "user"
+      && typeof message.content === "string"
+      && message.content.includes("Return JSON only matching schema; no prose/code fences.")
+    ));
+    expect(correctiveUserMessage).toBeDefined();
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "success",
+      structuredOutput: {
+        fingerprint: "abc",
+        verdict: "tp",
+      },
+    });
+  });
+
+  it("returns error_output_format when strict structured output retries are exhausted", async () => {
+    const cwd = makeTempDir();
+    completeMock
+      .mockResolvedValueOnce(makeAssistantMessage([
+        {
+          type: "text",
+          text: "still not json",
+        },
+      ]))
+      .mockResolvedValueOnce(makeAssistantMessage([
+        {
+          type: "text",
+          text: "still invalid",
+        },
+      ]));
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(
+      runtime,
+      makeRequest(cwd, {
+        outputFormat: {
+          type: "json_schema",
+          schema: {
+            type: "object",
+            properties: {
+              fingerprint: { type: "string" },
+              verdict: { type: "string" },
+            },
+            required: ["fingerprint", "verdict"],
+          },
+          strict: true,
+          retryInvalidStructuredOutput: 1,
+        },
+      }),
+    );
+
+    expect(completeMock).toHaveBeenCalledTimes(2);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "error_output_format",
+    });
   });
 });
