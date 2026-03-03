@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  BATCH_TRIAGE_FALLBACK_RATIONALE,
   buildDefaultTriageAgentConfig,
+  DEFAULT_BATCH_SIZE,
   extractJson,
   parseAgentOutput,
   parseTriageResponse,
   parseVerdict,
   TriageExecutionError,
+  triageFindingsBatch,
   triageFindingWithAgent,
 } from "../src/triage.js";
 import type { Finding, TriageAgentConfig } from "../src/scanners/types.js";
@@ -152,6 +155,39 @@ describe("parseAgentOutput", () => {
 
     expect(result.fingerprint).toBe("fallback-fp");
     expect(result.verdict).toBe("fp");
+  });
+
+  it("parses extended Taint-analysis source/sink triage fields", () => {
+    const result = parseAgentOutput({
+      fingerprint: "fp-ext",
+      verdict: "fp",
+      confidence: 0.72,
+      rationale: "source is not attacker-controlled",
+      verification_steps: ["trace input origin", "inspect sink usage"],
+      fix_patch: null,
+      source: {
+        why: "Input originates from constant config",
+        is_false_positive: true,
+        evidence: "hardcoded value in config.ts",
+      },
+      sink: {
+        why: "sink requires validated tokenized args",
+        is_false_positive: false,
+        evidence: "wrapper enforces allowlist",
+      },
+      is_vulnerable: false,
+      exploit_scenario: "Not exploitable due to fixed source",
+      recommended_fix: "Tighten source pattern matching",
+      rule_refinement_hint: "constrain source to request-bound values",
+      triage_schema_version: "1.0.0",
+    }, "fallback");
+
+    expect(result.source?.isFalsePositive).toBe(true);
+    expect(result.source?.why).toContain("constant");
+    expect(result.sink?.isFalsePositive).toBe(false);
+    expect(result.isVulnerable).toBe(false);
+    expect(result.ruleRefinementHint).toContain("constrain source");
+    expect(result.triageSchemaVersion).toBe("1.0.0");
   });
 });
 
@@ -452,5 +488,144 @@ describe("triageFindingWithAgent", () => {
     expect(activities.some((a) => a["kind"] === "reasoning")).toBe(true);
     expect(activities.some((a) => a["kind"] === "tool-progress")).toBe(true);
     expect(activities.some((a) => a["kind"] === "tool-complete")).toBe(true);
+  });
+});
+
+function makeFindingWithFp(fp: string): Finding {
+  return {
+    ...makeFinding(),
+    fingerprint: fp,
+  };
+}
+
+function makeBatchRuntime(respondTo: Finding[]): AgentRuntime {
+  const queryFn = vi.fn().mockImplementation(function* () {
+    yield {
+      type: "result",
+      subtype: "success",
+      result: "{}",
+      structuredOutput: {
+        results: respondTo.map((f) => ({
+          fingerprint: f.fingerprint,
+          verdict: "tp",
+          confidence: 0.85,
+          rationale: "confirmed vulnerability",
+          verification_steps: ["step"],
+          fix_patch: null,
+        })),
+      },
+      durationMs: 100,
+      numTurns: 1,
+      totalCostUsd: 0.01,
+    };
+  });
+  return { id: "mock-batch-runtime", query: queryFn };
+}
+
+describe("triageFindingsBatch", () => {
+  it("returns empty results for empty findings", async () => {
+    const runtime = makeBatchRuntime([]);
+    const output = await triageFindingsBatch([], "/tmp", "repo", "model", undefined, { runtime });
+    expect(output.results.size).toBe(0);
+    expect(output.costUsd).toBe(0);
+    expect(runtime.query).not.toHaveBeenCalled();
+  });
+
+  it("processes small batch in a single LLM call", async () => {
+    const findings = Array.from({ length: 5 }, (_, i) => makeFindingWithFp(`fp-${i}`));
+    const runtime = makeBatchRuntime(findings);
+
+    const output = await triageFindingsBatch(findings, "/tmp", "repo", "model", undefined, { runtime });
+    expect(output.results.size).toBe(5);
+    expect(runtime.query).toHaveBeenCalledTimes(1);
+    for (const f of findings) {
+      expect(output.results.get(f.fingerprint)?.verdict).toBe("tp");
+    }
+  });
+
+  it("chunks large batches into multiple LLM calls", async () => {
+    const batchSize = 5;
+    const findings = Array.from({ length: 13 }, (_, i) => makeFindingWithFp(`fp-${i}`));
+
+    // The runtime will be called multiple times (once per chunk)
+    let callCount = 0;
+    const queryFn = vi.fn().mockImplementation(function* (_opts: unknown) {
+      callCount++;
+      // Extract findings from the prompt to respond with correct fingerprints
+      const chunkStart = (callCount - 1) * batchSize;
+      const chunkEnd = Math.min(callCount * batchSize, findings.length);
+      const chunkFindings = findings.slice(chunkStart, chunkEnd);
+
+      yield {
+        type: "result",
+        subtype: "success",
+        result: "{}",
+        structuredOutput: {
+          results: chunkFindings.map((f) => ({
+            fingerprint: f.fingerprint,
+            verdict: "fp",
+            confidence: 0.9,
+            rationale: "safe",
+            verification_steps: ["check"],
+            fix_patch: null,
+          })),
+        },
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0.01,
+      };
+    });
+    const runtime: AgentRuntime = { id: "mock-chunked", query: queryFn };
+
+    const output = await triageFindingsBatch(
+      findings, "/tmp", "repo", "model", undefined, { runtime }, batchSize,
+    );
+
+    // 13 findings / 5 per chunk = 3 chunks
+    expect(runtime.query).toHaveBeenCalledTimes(3);
+    expect(output.results.size).toBe(13);
+    expect(output.costUsd).toBeCloseTo(0.03, 4);
+    for (const f of findings) {
+      expect(output.results.get(f.fingerprint)?.verdict).toBe("fp");
+    }
+  });
+
+  it("uses DEFAULT_BATCH_SIZE when no maxBatchSize provided", () => {
+    expect(DEFAULT_BATCH_SIZE).toBe(15);
+  });
+
+  it("fills missing findings with needs_review fallback", async () => {
+    const findings = Array.from({ length: 3 }, (_, i) => makeFindingWithFp(`fp-${i}`));
+    // Runtime only returns result for fp-0, missing fp-1 and fp-2
+    const queryFn = vi.fn().mockImplementation(function* () {
+      yield {
+        type: "result",
+        subtype: "success",
+        result: "{}",
+        structuredOutput: {
+          results: [{
+            fingerprint: "fp-0",
+            verdict: "tp",
+            confidence: 0.9,
+            rationale: "real",
+            verification_steps: ["check"],
+            fix_patch: null,
+          }],
+        },
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0.01,
+      };
+    });
+    const runtime: AgentRuntime = { id: "mock-partial", query: queryFn };
+
+    const output = await triageFindingsBatch(findings, "/tmp", "repo", "model", undefined, { runtime });
+    expect(output.results.size).toBe(3);
+    expect(output.results.get("fp-0")?.verdict).toBe("tp");
+    expect(output.results.get("fp-1")?.verdict).toBe("needs_review");
+    expect(output.results.get("fp-1")?.confidence).toBe(0);
+    expect(output.results.get("fp-1")?.rationale).toBe(BATCH_TRIAGE_FALLBACK_RATIONALE);
+    expect(output.results.get("fp-2")?.verdict).toBe("needs_review");
+    expect(output.results.get("fp-2")?.rationale).toBe(BATCH_TRIAGE_FALLBACK_RATIONALE);
   });
 });

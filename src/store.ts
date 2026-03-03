@@ -10,6 +10,7 @@ import type {
   Verdict,
 } from "./types.js";
 import type { Finding, ScannerId } from "./scanners/types.js";
+import { BATCH_TRIAGE_FALLBACK_RATIONALE } from "./triage.js";
 
 export type PipelineRunStatus =
   | "scanning"
@@ -55,6 +56,7 @@ export function initDb(dbPath: string): Database.Database {
       verification_steps TEXT NOT NULL,
       fix_patch          TEXT,
       triage_cost_usd    REAL,
+      triage_details_json TEXT,
       verify_exploitable INTEGER,
       verify_poc_payload TEXT,
       verify_poc_description TEXT,
@@ -97,6 +99,7 @@ export function initDb(dbPath: string): Database.Database {
 
   ensureScannerColumn(db);
   ensureTriageCostColumn(db);
+  ensureTriageDetailsColumn(db);
   ensureVerificationColumns(db);
   ensurePocHarnessColumns(db);
   ensurePipelineRunsStatusValues(db);
@@ -122,8 +125,8 @@ export function upsertFinding(
     INSERT INTO findings (
       fingerprint, scanner, repo, ref, rule_id, file_path, start_line,
       severity, message, verdict, confidence,
-      rationale, verification_steps, fix_patch, triage_cost_usd
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      rationale, verification_steps, fix_patch, triage_cost_usd, triage_details_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fingerprint) DO UPDATE SET
       scanner=excluded.scanner,
       verdict=excluded.verdict,
@@ -132,6 +135,7 @@ export function upsertFinding(
       verification_steps=excluded.verification_steps,
       fix_patch=excluded.fix_patch,
       triage_cost_usd=excluded.triage_cost_usd,
+      triage_details_json=excluded.triage_details_json,
       updated_at=datetime('now')
   `);
 
@@ -151,12 +155,25 @@ export function upsertFinding(
     JSON.stringify(triage.verificationSteps),
     triage.fixPatch,
     triage.triageCostUsd ?? null,
+    JSON.stringify({
+      source: triage.source ?? null,
+      sink: triage.sink ?? null,
+      is_vulnerable: triage.isVulnerable ?? null,
+      exploit_scenario: triage.exploitScenario ?? null,
+      recommended_fix: triage.recommendedFix ?? null,
+      rule_refinement_hint: triage.ruleRefinementHint ?? null,
+      triage_schema_version: triage.triageSchemaVersion ?? null,
+    }),
   );
 }
 
-/** Get set of already-triaged fingerprints from the database. */
+/** Get set of already-triaged fingerprints from the database.
+ *  Excludes findings with the batch-drop fallback signature (confidence=0,
+ *  fallback rationale) so they get re-queued on subsequent runs. */
 export function getTriagedFingerprints(db: Database.Database): Set<string> {
-  const rows = db.prepare("SELECT fingerprint FROM findings").all() as Array<{
+  const rows = db.prepare(
+    "SELECT fingerprint FROM findings WHERE NOT (confidence = 0 AND rationale = ?)",
+  ).all(BATCH_TRIAGE_FALLBACK_RATIONALE) as Array<{
     fingerprint: string;
   }>;
   return new Set(rows.map((r) => r.fingerprint));
@@ -200,7 +217,8 @@ export function getStoredTriageResults(
       rationale,
       verification_steps as verificationSteps,
       fix_patch as fixPatch,
-      triage_cost_usd as triageCostUsd
+      triage_cost_usd as triageCostUsd,
+      triage_details_json as triageDetailsJson
     FROM findings
     WHERE fingerprint IN (${placeholders})
   `).all(...uniqueFingerprints) as Array<{
@@ -211,6 +229,7 @@ export function getStoredTriageResults(
     verificationSteps: string;
     fixPatch: string | null;
     triageCostUsd: number | null;
+    triageDetailsJson: string | null;
   }>;
 
   const results = new Map<string, TriageResult>();
@@ -232,11 +251,61 @@ export function getStoredTriageResults(
       rationale: row.rationale,
       verificationSteps,
       fixPatch: row.fixPatch,
+      ...parseTriageDetails(row.triageDetailsJson),
       triageCostUsd: row.triageCostUsd ?? undefined,
     });
   }
 
   return results;
+}
+
+function parseTriageDetails(raw: string | null): Partial<TriageResult> {
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const source = parsePathAssessment(parsed["source"]);
+    const sink = parsePathAssessment(parsed["sink"]);
+    return {
+      source,
+      sink,
+      isVulnerable: typeof parsed["is_vulnerable"] === "boolean" ? parsed["is_vulnerable"] : undefined,
+      exploitScenario: asOptionalString(parsed["exploit_scenario"]),
+      recommendedFix: asOptionalString(parsed["recommended_fix"]),
+      ruleRefinementHint: asOptionalString(parsed["rule_refinement_hint"]),
+      triageSchemaVersion: asOptionalString(parsed["triage_schema_version"]),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function parsePathAssessment(value: unknown): TriageResult["source"] | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const asRecord = value as Record<string, unknown>;
+  const why = asOptionalString(asRecord["why"]);
+  const evidence = asOptionalString(asRecord["evidence"]);
+  const isFalsePositive = asRecord["isFalsePositive"] === true || asRecord["is_false_positive"] === true;
+  if (!why && !evidence) {
+    return undefined;
+  }
+  return {
+    why: why ?? "",
+    evidence: evidence ?? "",
+    isFalsePositive,
+  };
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 /** Load persisted verification results for a set of fingerprints. */
@@ -535,6 +604,118 @@ export function getActionableFindings(
   }>;
 }
 
+export function getTriagedFindingsForRepo(
+  db: Database.Database,
+  repo: string,
+): Array<{
+  scanner: ScannerId;
+  fingerprint: string;
+  ruleId: string;
+  filePath: string;
+  startLine: number;
+  severity: string;
+  message: string;
+  verdict: Verdict;
+  confidence: number;
+  rationale: string;
+  verificationSteps: string[];
+  fixPatch: string | null;
+  triageDetails: Record<string, unknown> | null;
+}> {
+  const rows = db.prepare(`
+    SELECT
+      scanner,
+      fingerprint,
+      rule_id as ruleId,
+      file_path as filePath,
+      start_line as startLine,
+      severity,
+      message,
+      verdict,
+      confidence,
+      rationale,
+      verification_steps as verificationSteps,
+      fix_patch as fixPatch,
+      triage_details_json as triageDetailsJson
+    FROM findings
+    WHERE repo = ?
+    ORDER BY updated_at DESC, confidence DESC
+  `).all(repo) as Array<{
+    scanner: ScannerId;
+    fingerprint: string;
+    ruleId: string;
+    filePath: string;
+    startLine: number;
+    severity: string;
+    message: string;
+    verdict: Verdict;
+    confidence: number;
+    rationale: string;
+    verificationSteps: string;
+    fixPatch: string | null;
+    triageDetailsJson: string | null;
+  }>;
+
+  return rows.map((row) => {
+    let verificationSteps: string[] = [];
+    try {
+      const parsed = JSON.parse(row.verificationSteps);
+      if (Array.isArray(parsed)) {
+        verificationSteps = parsed.map((value) => String(value));
+      }
+    } catch {
+      verificationSteps = [];
+    }
+
+    let triageDetails: Record<string, unknown> | null = null;
+    if (row.triageDetailsJson) {
+      try {
+        const parsed = JSON.parse(row.triageDetailsJson);
+        if (parsed && typeof parsed === "object") {
+          triageDetails = parsed as Record<string, unknown>;
+        }
+      } catch {
+        triageDetails = null;
+      }
+    }
+
+    return {
+      scanner: row.scanner,
+      fingerprint: row.fingerprint,
+      ruleId: row.ruleId,
+      filePath: row.filePath,
+      startLine: row.startLine,
+      severity: row.severity,
+      message: row.message,
+      verdict: row.verdict,
+      confidence: row.confidence,
+      rationale: row.rationale,
+      verificationSteps,
+      fixPatch: row.fixPatch,
+      triageDetails,
+    };
+  });
+}
+
+/** Delete findings by fingerprint for a specific repo. Returns number of deleted rows. */
+export function deleteFindingsByFingerprints(
+  db: Database.Database,
+  repo: string,
+  fingerprints: string[],
+): number {
+  const uniqueFingerprints = [...new Set(fingerprints.filter(Boolean))];
+  if (uniqueFingerprints.length === 0) {
+    return 0;
+  }
+
+  const placeholders = uniqueFingerprints.map(() => "?").join(", ");
+  const result = db
+    .prepare(`DELETE FROM findings WHERE repo = ? AND fingerprint IN (${placeholders})`)
+    .run(repo, ...uniqueFingerprints);
+
+  return result.changes;
+}
+
 function ensureScannerColumn(db: Database.Database): void {
   const columns = db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
   const hasScanner = columns.some((column) => column.name === "scanner");
@@ -548,6 +729,14 @@ function ensureTriageCostColumn(db: Database.Database): void {
   const hasTriageCost = columns.some((column) => column.name === "triage_cost_usd");
   if (!hasTriageCost) {
     db.exec("ALTER TABLE findings ADD COLUMN triage_cost_usd REAL");
+  }
+}
+
+function ensureTriageDetailsColumn(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
+  const hasTriageDetails = columns.some((column) => column.name === "triage_details_json");
+  if (!hasTriageDetails) {
+    db.exec("ALTER TABLE findings ADD COLUMN triage_details_json TEXT");
   }
 }
 

@@ -18,6 +18,31 @@ export const TRIAGE_RESULT_SCHEMA = {
     rationale: { type: "string" },
     verification_steps: { type: "array", items: { type: "string" }, minItems: 1 },
     fix_patch: { type: ["string", "null"] },
+    source: {
+      type: "object",
+      additionalProperties: false,
+      required: ["why", "is_false_positive", "evidence"],
+      properties: {
+        why: { type: "string" },
+        is_false_positive: { type: "boolean" },
+        evidence: { type: "string" },
+      },
+    },
+    sink: {
+      type: "object",
+      additionalProperties: false,
+      required: ["why", "is_false_positive", "evidence"],
+      properties: {
+        why: { type: "string" },
+        is_false_positive: { type: "boolean" },
+        evidence: { type: "string" },
+      },
+    },
+    is_vulnerable: { type: "boolean" },
+    exploit_scenario: { type: "string" },
+    recommended_fix: { type: "string" },
+    rule_refinement_hint: { type: "string" },
+    triage_schema_version: { type: "string" },
   },
 } as const;
 
@@ -178,6 +203,10 @@ export async function triageFindingWithAgent(
   };
 }
 
+export const BATCH_TRIAGE_FALLBACK_RATIONALE = "Finding was not included in batch triage agent response.";
+
+export const DEFAULT_BATCH_SIZE = 15;
+
 export async function triageFindingsBatch(
   findings: Finding[],
   repoRoot: string,
@@ -185,11 +214,49 @@ export async function triageFindingsBatch(
   model: string,
   repoContext?: RepoContext,
   runtimeOptions: TriageRuntimeOptions = {},
+  maxBatchSize: number = DEFAULT_BATCH_SIZE,
 ): Promise<BatchTriageOutput> {
   if (findings.length === 0) {
     return { results: new Map(), costUsd: 0 };
   }
 
+  const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
+
+  if (findings.length <= effectiveBatchSize) {
+    return triageSingleBatch(findings, repoRoot, repoName, model, repoContext, runtimeOptions);
+  }
+
+  const allResults = new Map<string, TriageResult>();
+  let totalCost = 0;
+
+  for (let i = 0; i < findings.length; i += effectiveBatchSize) {
+    const chunk = findings.slice(i, i + effectiveBatchSize);
+    const { results, costUsd } = await triageSingleBatch(
+      chunk,
+      repoRoot,
+      repoName,
+      model,
+      repoContext,
+      runtimeOptions,
+    );
+
+    for (const [fp, result] of results) {
+      allResults.set(fp, result);
+    }
+    totalCost += costUsd;
+  }
+
+  return { results: allResults, costUsd: totalCost };
+}
+
+async function triageSingleBatch(
+  findings: Finding[],
+  repoRoot: string,
+  repoName: string,
+  model: string,
+  repoContext: RepoContext | undefined,
+  runtimeOptions: TriageRuntimeOptions,
+): Promise<BatchTriageOutput> {
   const prompt = buildBatchTriagePrompt(findings, repoName, repoContext);
   const runtime = runtimeOptions.runtime ?? getAgentRuntime();
 
@@ -341,6 +408,13 @@ function parseBatchTriageOutput(
       rationale: asString((item as Record<string, unknown>)["rationale"], ""),
       verificationSteps: normalizeVerificationSteps((item as Record<string, unknown>)["verification_steps"]),
       fixPatch: normalizeFixPatch((item as Record<string, unknown>)["fix_patch"]),
+      source: parsePathAssessment((item as Record<string, unknown>)["source"]),
+      sink: parsePathAssessment((item as Record<string, unknown>)["sink"]),
+      isVulnerable: asOptionalBoolean((item as Record<string, unknown>)["is_vulnerable"]),
+      exploitScenario: asOptionalString((item as Record<string, unknown>)["exploit_scenario"]),
+      recommendedFix: asOptionalString((item as Record<string, unknown>)["recommended_fix"]),
+      ruleRefinementHint: asOptionalString((item as Record<string, unknown>)["rule_refinement_hint"]),
+      triageSchemaVersion: asOptionalString((item as Record<string, unknown>)["triage_schema_version"]),
     });
   }
 
@@ -351,9 +425,16 @@ function parseBatchTriageOutput(
         fingerprint: finding.fingerprint,
         verdict: "needs_review",
         confidence: 0,
-        rationale: "Finding was not included in batch triage agent response.",
+        rationale: BATCH_TRIAGE_FALLBACK_RATIONALE,
         verificationSteps: [],
         fixPatch: null,
+        source: undefined,
+        sink: undefined,
+        isVulnerable: undefined,
+        exploitScenario: undefined,
+        recommendedFix: undefined,
+        ruleRefinementHint: undefined,
+        triageSchemaVersion: undefined,
       });
     }
   }
@@ -370,6 +451,13 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
       rationale: asString(raw["rationale"], ""),
       verificationSteps: normalizeVerificationSteps(raw["verification_steps"]),
       fixPatch: normalizeFixPatch(raw["fix_patch"]),
+      source: parsePathAssessment(raw["source"]),
+      sink: parsePathAssessment(raw["sink"]),
+      isVulnerable: asOptionalBoolean(raw["is_vulnerable"]),
+      exploitScenario: asOptionalString(raw["exploit_scenario"]),
+      recommendedFix: asOptionalString(raw["recommended_fix"]),
+      ruleRefinementHint: asOptionalString(raw["rule_refinement_hint"]),
+      triageSchemaVersion: asOptionalString(raw["triage_schema_version"]),
     };
   }
 
@@ -529,6 +617,13 @@ export function parseTriageResponse(
       rationale: asString(parsed.rationale, ""),
       verificationSteps: normalizeVerificationSteps(parsed.verification_steps),
       fixPatch: normalizeFixPatch(parsed.fix_patch),
+      source: parsePathAssessment(parsed.source),
+      sink: parsePathAssessment(parsed.sink),
+      isVulnerable: asOptionalBoolean(parsed.is_vulnerable),
+      exploitScenario: asOptionalString(parsed.exploit_scenario),
+      recommendedFix: asOptionalString(parsed.recommended_fix),
+      ruleRefinementHint: asOptionalString(parsed.rule_refinement_hint),
+      triageSchemaVersion: asOptionalString(parsed.triage_schema_version),
     };
   } catch (error) {
     throw new Error(`Invalid triage JSON response: ${toErrorMessage(error)}`);
@@ -619,4 +714,38 @@ function asString(value: unknown, fallback: string): string {
   if (typeof value === "string") return value;
   if (value == null) return fallback;
   return String(value);
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function asOptionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value !== "boolean") {
+    return undefined;
+  }
+  return value;
+}
+
+function parsePathAssessment(value: unknown): TriageResult["source"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const why = asString(value["why"], "").trim();
+  const evidence = asString(value["evidence"], "").trim();
+  const isFalsePositive = value["is_false_positive"] === true;
+  if (!why && !evidence) {
+    return undefined;
+  }
+
+  return {
+    why,
+    isFalsePositive,
+    evidence,
+  };
 }

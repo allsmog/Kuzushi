@@ -3,9 +3,11 @@ import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import {
   createRun,
+  deleteFindingsByFingerprints,
   getPocHarnessCounts,
   getLatestResumableRun,
   getRun,
+  getStoredTriageResults,
   getTotalCost,
   getTotalPocHarnessCost,
   initDb,
@@ -21,6 +23,7 @@ import {
 } from "../src/store.js";
 import type { KuzushiConfig, ScanOpts, TriageResult } from "../src/types.js";
 import type { Finding } from "../src/scanners/types.js";
+import { BATCH_TRIAGE_FALLBACK_RATIONALE } from "../src/triage.js";
 
 const TMP_DIR = path.join(import.meta.dirname, ".tmp-store-test");
 let dbPath: string;
@@ -59,6 +62,7 @@ function makeConfig(): KuzushiConfig {
     model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
+    triageBatchSize: 15,
     triageConcurrency: 2,
     scanMode: "sequential",
     enabledTasks: [],
@@ -201,6 +205,37 @@ describe("upsertFinding", () => {
     expect(rows[0].verdict).toBe("tp");
     db.close();
   });
+
+  it("persists extended triage details and restores them", () => {
+    const db = initDb(dbPath);
+    const triage = makeResult("fp-ext", "tp");
+    triage.source = {
+      why: "trusted source",
+      isFalsePositive: true,
+      evidence: "constant assignment",
+    };
+    triage.sink = {
+      why: "dangerous sink still reachable",
+      isFalsePositive: false,
+      evidence: "sink call in handler",
+    };
+    triage.isVulnerable = false;
+    triage.exploitScenario = "not exploitable";
+    triage.recommendedFix = "tighten source pattern";
+    triage.ruleRefinementHint = "constrain source role";
+    triage.triageSchemaVersion = "1.0.0";
+
+    upsertFinding(db, makeFinding("fp-ext"), triage, "repo", "HEAD");
+
+    const restored = getStoredTriageResults(db, ["fp-ext"]).get("fp-ext");
+    expect(restored).toBeDefined();
+    expect(restored?.source?.isFalsePositive).toBe(true);
+    expect(restored?.sink?.isFalsePositive).toBe(false);
+    expect(restored?.isVulnerable).toBe(false);
+    expect(restored?.ruleRefinementHint).toBe("constrain source role");
+
+    db.close();
+  });
 });
 
 describe("getTriagedFingerprints", () => {
@@ -218,6 +253,47 @@ describe("getTriagedFingerprints", () => {
     expect(fps.size).toBe(2);
     expect(fps.has("aaa")).toBe(true);
     expect(fps.has("bbb")).toBe(true);
+    db.close();
+  });
+
+  it("excludes findings with the batch-drop fallback signature", () => {
+    const db = initDb(dbPath);
+
+    // Normal finding — should be included
+    upsertFinding(db, makeFinding("normal"), makeResult("normal", "tp"), "repo", "HEAD");
+
+    // Batch-drop fallback finding — should be excluded
+    const fallback: TriageResult = {
+      fingerprint: "dropped",
+      verdict: "needs_review",
+      confidence: 0,
+      rationale: BATCH_TRIAGE_FALLBACK_RATIONALE,
+      verificationSteps: [],
+      fixPatch: null,
+    };
+    upsertFinding(db, makeFinding("dropped"), fallback, "repo", "HEAD");
+
+    const fps = getTriagedFingerprints(db);
+    expect(fps.has("normal")).toBe(true);
+    expect(fps.has("dropped")).toBe(false);
+    db.close();
+  });
+});
+
+describe("deleteFindingsByFingerprints", () => {
+  it("removes only selected findings for the target repo", () => {
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("keep"), makeResult("keep", "tp"), "repo-a", "HEAD");
+    upsertFinding(db, makeFinding("drop"), makeResult("drop", "tp"), "repo-a", "HEAD");
+    upsertFinding(db, makeFinding("other-repo"), makeResult("other-repo", "tp"), "repo-b", "HEAD");
+
+    const deleted = deleteFindingsByFingerprints(db, "repo-a", ["drop"]);
+    expect(deleted).toBe(1);
+
+    const repoAFingerprints = getTriagedFingerprints(db);
+    expect(repoAFingerprints.has("keep")).toBe(true);
+    expect(repoAFingerprints.has("drop")).toBe(false);
+    expect(repoAFingerprints.has("other-repo")).toBe(true);
     db.close();
   });
 });
