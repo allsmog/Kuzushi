@@ -55,6 +55,7 @@ function makeConfig(): KuzushiConfig {
     model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
+    triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
     scanners: ["a", "b"],
@@ -87,11 +88,25 @@ describe("ScannerRegistry", () => {
       severity: ["ERROR"],
       excludePatterns: [],
       fresh: false,
-      scanners: ["a", "newaza"],
+      scanners: ["a", "taint-analysis"],
     };
 
-    // "newaza" is not a registered plugin — it should be silently dropped.
+    // "taint-analysis" is not a registered plugin — it should be silently dropped.
     expect(registry.resolveEnabled(opts, makeConfig())).toEqual(["a"]);
+  });
+
+  it("resolveEnabled throws for unknown explicit scanner IDs", () => {
+    const registry = new ScannerRegistry();
+    registry.register(new FakePlugin("a", []));
+
+    const opts: ScanOpts = {
+      severity: ["ERROR"],
+      excludePatterns: [],
+      fresh: false,
+      scanners: ["a", "semgrpe"],
+    };
+
+    expect(() => registry.resolveEnabled(opts, makeConfig())).toThrow("Unknown scanner");
   });
 
   it("resolveEnabled returns empty list when override contains only non-plugin IDs", () => {
@@ -102,7 +117,7 @@ describe("ScannerRegistry", () => {
       severity: ["ERROR"],
       excludePatterns: [],
       fresh: false,
-      scanners: ["newaza"],
+      scanners: ["taint-analysis"],
     };
 
     expect(registry.resolveEnabled(opts, makeConfig())).toEqual([]);

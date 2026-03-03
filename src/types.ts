@@ -20,6 +20,12 @@ export interface AgentRuntimeConfig {
 /** Verdict assigned by AI triage. */
 export type Verdict = "tp" | "fp" | "needs_review";
 
+export interface TriagePathAssessment {
+  why: string;
+  isFalsePositive: boolean;
+  evidence: string;
+}
+
 /** Options for running a scan. */
 export interface ScanOpts {
   severity: string[];
@@ -37,6 +43,13 @@ export interface TriageResult {
   rationale: string;
   verificationSteps: string[];
   fixPatch: string | null;
+  source?: TriagePathAssessment;
+  sink?: TriagePathAssessment;
+  isVulnerable?: boolean;
+  exploitScenario?: string;
+  recommendedFix?: string;
+  ruleRefinementHint?: string;
+  triageSchemaVersion?: string;
   triageCostUsd?: number;
 }
 
@@ -123,6 +136,8 @@ export interface KuzushiConfig {
   retryBackoffMultiplier?: number;
   /** Message bus backend for pipeline events. */
   busBackend: BusBackend;
+  /** Maximum findings per batch triage LLM call. */
+  triageBatchSize: number;
   /** Number of in-flight triage tasks. */
   triageConcurrency: number;
   /** Scanner execution strategy. */
@@ -159,6 +174,7 @@ export interface FindingRow {
   rationale: string;
   verificationSteps: string;
   fixPatch: string | null;
+  triageDetailsJson?: string | null;
   verifyExploitable?: number | null;
   verifyPocPayload?: string | null;
   verifyPocDescription?: string | null;

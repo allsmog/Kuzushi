@@ -53,6 +53,7 @@ describe("report-worker", () => {
       model: "anthropic:claude-sonnet-4-6",
       triageMaxTurns: 10,
       busBackend: "in-process",
+      triageBatchSize: 15,
       triageConcurrency: 1,
       scanMode: "sequential",
       scanners: ["semgrep"],
@@ -128,6 +129,7 @@ describe("report-worker", () => {
     await bus.publish(
       createEvent("report:requested", runId, {
         context,
+        fingerprints: ["fp-1"],
       }),
     );
 
@@ -150,6 +152,7 @@ describe("report-worker", () => {
       model: "anthropic:claude-sonnet-4-6",
       triageMaxTurns: 10,
       busBackend: "in-process",
+      triageBatchSize: 15,
       triageConcurrency: 1,
       scanMode: "sequential",
       scanners: ["semgrep"],
@@ -203,6 +206,86 @@ describe("report-worker", () => {
       .join("\n");
     expect(output).toContain("SKIPPED");
     expect(output).not.toContain("parse-error");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("prints triage/verification/poc error progress lines", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      triageMaxTurns: 10,
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 1,
+      scanMode: "sequential",
+      scanners: ["semgrep"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      scannerConfig: { semgrep: {} },
+    };
+
+    registerReportWorker(bus, { db, config });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(
+      createEvent("triage:error", runId, {
+        context,
+        finding: makeFinding("fp-triage-error"),
+        error: "triage failed",
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    await bus.publish(
+      createEvent("verification:error", runId, {
+        context,
+        finding: makeFinding("fp-verify-error"),
+        triageResult: makeResult("fp-verify-error"),
+        error: "verification failed",
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    await bus.publish(
+      createEvent("poc-harness:error", runId, {
+        context,
+        finding: makeFinding("fp-poc-error"),
+        triageResult: makeResult("fp-poc-error"),
+        verificationResult: {
+          fingerprint: "fp-poc-error",
+          exploitable: true,
+          pocPayload: "payload",
+          pocDescription: "desc",
+          attackVector: null,
+          preconditions: [],
+          confidence: 0.8,
+        },
+        error: "poc failed",
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    const output = vi.mocked(console.log).mock.calls
+      .map((call) => call.map((arg) => String(arg)).join(" "))
+      .join("\n");
+
+    expect(output).toContain("TRIAGE ERROR");
+    expect(output).toContain("VERIFY ERROR");
+    expect(output).toContain("POC ERROR");
 
     await bus.close();
     db.close();

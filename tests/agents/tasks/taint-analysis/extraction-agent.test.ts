@@ -5,10 +5,10 @@ import {
   hasBodyPlaceholders,
   computeCacheHash,
   readCacheIfValid,
-  __newazaExtractionAgentInternals,
-} from "../../../../src/agents/tasks/newaza/extraction-agent.js";
+  __taintAnalysisExtractionAgentInternals,
+} from "../../../../src/agents/tasks/taint-analysis/extraction-agent.js";
 
-const TMP_ROOT = path.join(import.meta.dirname, "..", "..", "..", ".tmp-newaza-extraction-agent");
+const TMP_ROOT = path.join(import.meta.dirname, "..", "..", "..", ".tmp-taint-analysis-extraction-agent");
 
 beforeEach(() => {
   rmSync(TMP_ROOT, { recursive: true, force: true });
@@ -181,7 +181,7 @@ describe("extractQueryFromResult", () => {
       "```",
     ].join("\n");
 
-    const query = __newazaExtractionAgentInternals.extractQueryFromResult(text);
+    const query = __taintAnalysisExtractionAgentInternals.extractQueryFromResult(text);
     expect(query).toContain("import go");
     expect(query).toContain("select marker");
   });
@@ -201,7 +201,7 @@ describe("extractQueryFromResult", () => {
       "This query should compile.",
     ].join("\n");
 
-    const query = __newazaExtractionAgentInternals.extractQueryFromResult(text);
+    const query = __taintAnalysisExtractionAgentInternals.extractQueryFromResult(text);
     expect(query).toContain("import python");
     expect(query).toContain("select marker");
     expect(query).not.toContain("This query should compile.");
@@ -209,7 +209,7 @@ describe("extractQueryFromResult", () => {
 
   it("returns null when no query-like content exists", () => {
     const text = "No query available. Could not generate candidate.";
-    const query = __newazaExtractionAgentInternals.extractQueryFromResult(text);
+    const query = __taintAnalysisExtractionAgentInternals.extractQueryFromResult(text);
     expect(query).toBeNull();
   });
 
@@ -228,7 +228,7 @@ describe("extractQueryFromResult", () => {
       "  \"callable\"",
     ].join("\n");
 
-    const query = __newazaExtractionAgentInternals.extractQueryFromResult(text);
+    const query = __taintAnalysisExtractionAgentInternals.extractQueryFromResult(text);
     expect(query).toContain("select");
     expect(query).toContain("\"source_candidate\",");
     expect(query).toContain("\"callable\"");
@@ -243,7 +243,7 @@ describe("isAllowedCodeqlCompileCommand", () => {
     const codeqlBinary = "/usr/local/bin/codeql";
     const command = `${codeqlBinary} query compile ${queryPath} --search-path ${workspaceDir}`;
 
-    const allowed = __newazaExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
+    const allowed = __taintAnalysisExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
       repoRoot,
       codeqlBinary,
       queryPath,
@@ -260,7 +260,7 @@ describe("isAllowedCodeqlCompileCommand", () => {
     const codeqlBinary = "/usr/local/bin/codeql";
     const command = `${codeqlBinary} query compile ${queryPath} --search-path ${workspaceDir} && rm -rf /`;
 
-    const allowed = __newazaExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
+    const allowed = __taintAnalysisExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
       repoRoot,
       codeqlBinary,
       queryPath,
@@ -277,7 +277,7 @@ describe("isAllowedCodeqlCompileCommand", () => {
     const codeqlBinary = "/usr/local/bin/codeql";
     const command = `${codeqlBinary} query compile ${path.join(TMP_ROOT, "other.ql")} --search-path ${workspaceDir}`;
 
-    const allowed = __newazaExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
+    const allowed = __taintAnalysisExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
       repoRoot,
       codeqlBinary,
       queryPath,
@@ -294,7 +294,7 @@ describe("isAllowedCodeqlCompileCommand", () => {
     const codeqlBinary = "/usr/local/bin/codeql";
     const command = `${codeqlBinary} query compile ${queryPath} --search-path=${workspaceDir}`;
 
-    const allowed = __newazaExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
+    const allowed = __taintAnalysisExtractionAgentInternals.isAllowedCodeqlCompileCommand(command, {
       repoRoot,
       codeqlBinary,
       queryPath,
@@ -307,7 +307,7 @@ describe("isAllowedCodeqlCompileCommand", () => {
 
 describe("splitShellWords", () => {
   it("treats backslashes as literal characters inside single quotes", () => {
-    const words = __newazaExtractionAgentInternals.splitShellWords(
+    const words = __taintAnalysisExtractionAgentInternals.splitShellWords(
       "codeql query compile '/tmp/a\\b.ql' --search-path '/tmp/w\\s'",
     );
 

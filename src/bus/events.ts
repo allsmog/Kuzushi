@@ -34,6 +34,7 @@ export interface PipelineStats {
   pocHarnessSkipped?: number;
   pocHarnessErrors?: number;
   pocHarnessCostUsd?: number;
+  failedTasks?: string[];
   startedAt: string;
   completedAt: string;
 }
@@ -437,11 +438,49 @@ export type StoreUpsertedEvent = EventEnvelope<
   }
 >;
 
+export type TaintAnalysisRefinementStartEvent = EventEnvelope<
+  "taint-analysis:refinement-start",
+  {
+    context: RunContext;
+    model: string;
+    iteration: number;
+    totalIterations: number;
+    findings: Finding[];
+    labelOutput?: unknown;
+    repoContext?: unknown;
+    refinementDeltaOnly: boolean;
+  }
+>;
+
+export type TaintAnalysisRefinementResultEvent = EventEnvelope<
+  "taint-analysis:refinement-result",
+  {
+    context: RunContext;
+    iteration: number;
+    affectedPasses: number[];
+    updatedFindings: Finding[];
+    deltaFindings: Finding[];
+    deltaTriaged: number;
+    deltaErrors: number;
+    triageCostUsd: number;
+  }
+>;
+
+export type TaintAnalysisRefinementErrorEvent = EventEnvelope<
+  "taint-analysis:refinement-error",
+  {
+    context: RunContext;
+    iteration: number;
+    error: string;
+  }
+>;
+
 export type ReportRequestedEvent = EventEnvelope<
   "report:requested",
   {
     context: RunContext;
     stats?: Partial<PipelineStats>;
+    fingerprints?: string[];
   }
 >;
 
@@ -489,5 +528,8 @@ export type KuzushiEvent =
   | PocHarnessCompleteEvent
   | PocHarnessQueueDepthEvent
   | StoreUpsertedEvent
+  | TaintAnalysisRefinementStartEvent
+  | TaintAnalysisRefinementResultEvent
+  | TaintAnalysisRefinementErrorEvent
   | ReportRequestedEvent
   | ReportCompleteEvent;

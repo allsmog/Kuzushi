@@ -15,6 +15,7 @@ function makeConfig(): KuzushiConfig {
     model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
+    triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
     scanners: ["semgrep"],
@@ -75,6 +76,35 @@ function makeVerificationResult(): VerificationResult {
 }
 
 describe("generateMarkdownReport", () => {
+  it("scopes report to fingerprints when provided", () => {
+    const db = initDb(":memory:");
+    const runId = "run-md-fp";
+
+    createRun(db, runId, "repo", makeConfig(), makeScanOpts());
+    updateRunStatus(db, runId, "triaging");
+
+    const finding1 = { ...makeFinding(), fingerprint: "fp-current" };
+    const triage1 = { ...makeTriageResult(), fingerprint: "fp-current" };
+    upsertFinding(db, finding1, triage1, "repo", "HEAD");
+
+    const finding2 = { ...makeFinding(), fingerprint: "fp-stale", ruleId: "stale.rule" };
+    const triage2 = { ...makeTriageResult(), fingerprint: "fp-stale" };
+    upsertFinding(db, finding2, triage2, "repo", "HEAD");
+
+    const markdown = generateMarkdownReport(
+      db,
+      "repo",
+      { totalFindings: 1, queuedForTriage: 1, skippedAlreadyTriaged: 0 },
+      runId,
+      ["fp-current"],
+    );
+
+    expect(markdown).toContain("test.rule");
+    expect(markdown).not.toContain("stale.rule");
+
+    db.close();
+  });
+
   it("renders summary and actionable findings sections", () => {
     const db = initDb(":memory:");
     const runId = "run-md-1";
@@ -98,9 +128,9 @@ describe("generateMarkdownReport", () => {
         skippedAlreadyTriaged: 0,
         skippedLowConfidence: 0,
         triaged: 1,
-        triageErrors: 0,
+        triageErrors: 2,
         verified: 1,
-        verifyErrors: 0,
+        verifyErrors: 1,
         startedAt: "2026-01-01T00:00:00.000Z",
         completedAt: "2026-01-01T00:01:00.000Z",
       },
@@ -111,6 +141,8 @@ describe("generateMarkdownReport", () => {
     expect(markdown).toContain("## Summary");
     expect(markdown).toContain("## Actionable Findings");
     expect(markdown).toContain("Verification result: **EXPLOITABLE**");
+    expect(markdown).toContain("| Triage errors | 2 |");
+    expect(markdown).toContain("| Verification errors | 1 |");
     expect(markdown).toContain("```text");
     expect(markdown).toContain("' OR 1=1 --");
 

@@ -31,7 +31,7 @@ That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed
 - **Verifies exploitability** — optional post-triage phase constructs concrete proof-of-concept payloads for true positives (e.g., SQL injection strings, XSS vectors)
 - **Generates PoC harnesses** — optional post-verification phase produces runnable exploit scripts (TypeScript, Python, etc.) for verified-exploitable findings
 - **Vendor-agnostic LLM runtime** — swap between Anthropic, OpenAI, Google, and 15+ other providers via the `pi-ai` backend with zero consumer-code changes
-- **Newaza integration** — multi-pass CodeQL-based source/sink labeling pipeline with LLM-assisted classification, checkpoint gating, and deterministic library generation
+- **Taint analysis integration** — multi-pass CodeQL-based source/sink labeling pipeline with LLM-assisted classification and deterministic library generation
 - **Tracks cost** — per-finding triage, verification, and PoC harness costs are persisted and displayed in the summary
 - **Event-driven pipeline** — pluggable message bus interface (in-process backend implemented; Redis/Google Pub/Sub/NATS adapters are scaffolded)
 - **DAG-based task orchestration** — tasks declare dependencies, run in parallel groups, pass outputs downstream
@@ -71,8 +71,8 @@ kuzushi <repo> --scanners semgrep,codeql
 kuzushi <repo> --scanners semgrep,agentic
 kuzushi <repo> --severity ERROR       # only ERROR-level findings
 kuzushi <repo> --max 20               # triage top 20 findings only
-kuzushi <repo> --model claude-opus-4-20250514  # use a different model
-kuzushi <repo> --triage-model claude-opus-4-20250514  # separate model for triage
+kuzushi <repo> --model anthropic:claude-sonnet-4-6  # use a different model
+kuzushi <repo> --triage-model openai:gpt-4o  # separate model for triage
 kuzushi <repo> --triage-max-turns 15  # triage agent turn budget
 kuzushi <repo> --api-key sk-ant-... --base-url https://basecamp.stark.acme.com/
 kuzushi <repo> --fresh                # clear prior results, re-triage everything
@@ -86,7 +86,7 @@ kuzushi <repo> --resume <run-id>      # resume a specific run by ID
 ```
 kuzushi <repo> --agent-runtime pi-ai --model openai:gpt-4o
 kuzushi <repo> --agent-runtime pi-ai --model google:gemini-2.0-flash
-kuzushi <repo> --agent-runtime pi-ai --model anthropic:claude-sonnet-4-20250514
+kuzushi <repo> --agent-runtime pi-ai --model anthropic:claude-sonnet-4-6
 kuzushi config set agentRuntimeBackend pi-ai
 kuzushi config set model openai:gpt-4o
 ```
@@ -97,7 +97,7 @@ When `agentRuntimeBackend` is `pi-ai`, model strings use `provider:modelId` form
 
 ```
 kuzushi <repo> --verify               # enable exploit verification for TPs
-kuzushi <repo> --verify --verify-model claude-haiku-4-5-20251001  # cheaper model for verification
+kuzushi <repo> --verify --verify-model openai:gpt-4o-mini  # cheaper model for verification
 kuzushi <repo> --verify --verify-max-turns 20
 kuzushi <repo> --verify --verify-concurrency 3
 kuzushi <repo> --verify --verify-min-confidence 0.7  # skip low-confidence TPs
@@ -107,7 +107,7 @@ kuzushi <repo> --verify --verify-min-confidence 0.7  # skip low-confidence TPs
 
 ```
 kuzushi <repo> --verify --poc-harness                          # generate exploit scripts for verified findings
-kuzushi <repo> --verify --poc-harness --poc-harness-model claude-haiku-4-5-20251001
+kuzushi <repo> --verify --poc-harness --poc-harness-model openai:gpt-4o-mini
 kuzushi <repo> --verify --poc-harness --poc-harness-max-turns 25
 kuzushi <repo> --verify --poc-harness --poc-harness-concurrency 2
 ```
@@ -134,13 +134,13 @@ kuzushi <repo> --retry-backoff-ms 10000     # initial backoff delay (default: 50
 ```
 kuzushi config get                    # show all config
 kuzushi config get model              # show one key
-kuzushi config set model claude-opus-4-20250514
+kuzushi config set model anthropic:claude-sonnet-4-6
 kuzushi config set scanners semgrep,agentic
 kuzushi config set scannerConfig.codeql.dbPath ./codeql-db
 kuzushi config set scannerConfig.codeql.suite javascript-security-extended
 kuzushi config set scannerConfig.semgrep.binary opengrep
 kuzushi config set scannerConfig.semgrep.configFlag auto
-kuzushi config set scannerConfig.agentic.model claude-sonnet-4-20250514
+kuzushi config set scannerConfig.agentic.model anthropic:claude-sonnet-4-6
 kuzushi config set scannerConfig.agentic.maxFindings 25
 kuzushi config set severity ERROR,WARNING,INFO
 kuzushi config set verify true
@@ -158,7 +158,7 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `model` | `claude-sonnet-4-20250514` | LLM model for scanners and default triage model |
+| `model` | `anthropic:claude-sonnet-4-6` | LLM model for scanners and default triage model |
 | `triageModel` | _(uses `model`)_ | Override model used by the triage agent |
 | `triageMaxTurns` | `10` | Max agentic turns per triage call |
 | `scanners` | `["semgrep"]` | Scanner plugins to run, in order |
@@ -169,7 +169,7 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `triageConcurrency` | `1` | Parallel LLM triage calls |
 | `scanMode` | `"sequential"` | Scanner execution mode (`sequential` or `concurrent`) |
 | `enabledTasks` | `[]` | Additional agent tasks beyond scanners |
-| `agentRuntimeBackend` | `"claude-sdk"` | Agent runtime backend (`claude-sdk`, `pi-ai`, future: `acp`) |
+| `agentRuntimeBackend` | `"pi-ai"` | Agent runtime backend (`pi-ai`, future: `acp`) |
 | `verify` | `false` | Enable proof-of-exploitability verification |
 | `verifyModel` | _(uses `triageModel` or `model`)_ | Override model for verification agent |
 | `verifyMaxTurns` | `15` | Max turns for verification agent |
@@ -204,7 +204,7 @@ Example:
   "scannerConfig": {
     "codeql": { "dbPath": "./codeql-db", "suite": "javascript-security-extended" },
     "semgrep": { "binary": "opengrep", "configFlag": "auto" },
-    "agentic": { "model": "claude-sonnet-4-20250514", "maxFindings": 20 }
+    "agentic": { "model": "anthropic:claude-sonnet-4-6", "maxFindings": 20 }
   }
 }
 ```
@@ -213,7 +213,7 @@ Example:
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | Yes (claude-sdk backend) | Anthropic API key — required when `agentRuntimeBackend` is `claude-sdk` |
+| `ANTHROPIC_API_KEY` | When using `anthropic:*` models | Anthropic API key for pi-ai backend |
 | `OPENAI_API_KEY` | When using `openai:*` models | OpenAI API key for pi-ai backend |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | When using `google:*` models | Google API key for pi-ai backend |
 
@@ -222,7 +222,7 @@ Example:
 - `semgrep`: traditional SAST via Opengrep/Semgrep binary
 - `codeql`: semantic dataflow/taint analysis via GitHub CodeQL CLI (SARIF output)
 - `agentic`: AI-driven agentic scanner — LLM with read-only repo tools via any supported runtime
-- `newaza`: multi-pass CodeQL source/sink labeling pipeline — runs preflight (database creation, candidate extraction), LLM-assisted labeling with human-in-the-loop checkpoint, and deterministic library/query generation + analysis
+- `taint-analysis`: multi-pass CodeQL source/sink labeling pipeline — runs preflight (database creation, candidate extraction), LLM-assisted labeling, and deterministic library/query generation + analysis
 
 ## Semgrep Resolution
 
@@ -273,7 +273,7 @@ kuzushi config set scannerConfig.codeql.dbPath ./codeql-db
 
 The `pi-ai` backend uses `@mariozechner/pi-ai` to provide vendor-agnostic LLM access. It supports 15+ providers (Anthropic, OpenAI, Google, Groq, Mistral, etc.) through a single interface.
 
-Unlike the Claude SDK backend (which has a built-in agentic loop), the pi-ai backend implements its own:
+Kuzushi implements an internal agentic loop on top of pi-ai:
 
 1. **Tool-calling loop** — call model, parse tool calls, execute tools, feed results back, repeat until stop or max turns
 2. **Local tool implementations** — Read (file reader with line numbers), Glob (Node 22+ `globSync`), Grep (regex search across files)
@@ -284,33 +284,51 @@ Unlike the Claude SDK backend (which has a built-in agentic loop), the pi-ai bac
 # Use with any supported provider:
 OPENAI_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model openai:gpt-4o
 GEMINI_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model google:gemini-2.0-flash
-ANTHROPIC_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model anthropic:claude-sonnet-4-20250514
+ANTHROPIC_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model anthropic:claude-sonnet-4-6
 ```
 
-## Newaza Setup
+## Taint Analysis Setup
 
-The `newaza` scanner is a multi-pass CodeQL-based pipeline that uses LLM-assisted classification to label sources, sinks, sanitizers, and summaries. It requires:
+The `taint-analysis` scanner is a multi-pass CodeQL-based pipeline that uses LLM-assisted classification to label sources, sinks, sanitizers, and summaries. It requires:
 
 1. **CodeQL CLI** — same requirement as the `codeql` scanner
-2. **Python 3** — used by Newaza's scripts for query generation
+2. **Python 3** — used by taint analysis scripts for query generation
 
-Newaza's templates, references, and scripts are bundled as the [`@kuzushi/newaza`](https://www.npmjs.com/package/@kuzushi/newaza) npm package and installed automatically with `pnpm install`. No manual clone or `NEWAZA_PATH` setup needed.
-
-```sh
-kuzushi <repo> --scanners newaza
-kuzushi <repo> --scanners newaza --approve-checkpoint  # auto-approve label review
-kuzushi config set scannerConfig.newaza.labelingModel claude-sonnet-4-20250514
-kuzushi config set scannerConfig.newaza.passes "[1,2,3,4,5,6]"
-```
-
-To override the bundled newaza assets (e.g., for local development), set `NEWAZA_PATH` or `scannerConfig.newaza.newazaPath`:
+Taint analysis templates, references, and scripts are bundled as the [`@kuzushi/augur`](https://www.npmjs.com/package/@kuzushi/augur) npm package and installed automatically with `pnpm install`. No manual clone or `TAINT_ANALYSIS_PATH` setup needed.
 
 ```sh
-export NEWAZA_PATH=/path/to/local/newaza
-kuzushi config set scannerConfig.newaza.newazaPath /path/to/local/newaza
+kuzushi <repo> --scanners taint-analysis
+kuzushi config set scannerConfig["taint-analysis"].labelingModel anthropic:claude-sonnet-4-6
+kuzushi config set scannerConfig["taint-analysis"].passes "[1,2,3,4,5,6]"
 ```
 
-Newaza runs in three DAG-ordered stages: **preflight** (database creation, candidate extraction), **label** (LLM classification with checkpoint gate), and **analyze** (library generation, query execution, finding extraction). A human-in-the-loop checkpoint pauses after labeling for review — use `--approve-checkpoint` to auto-approve in CI.
+To override the bundled taint-analysis assets (e.g., for local development), set `TAINT_ANALYSIS_PATH` or `scannerConfig["taint-analysis"].taintAnalysisPath`:
+
+```sh
+export TAINT_ANALYSIS_PATH=/path/to/local/taint-analysis
+kuzushi config set scannerConfig["taint-analysis"].taintAnalysisPath /path/to/local/taint-analysis
+```
+
+Taint analysis runs in three DAG-ordered stages: **preflight** (database creation, candidate extraction), **label** (LLM classification), and **analyze** (library generation, query execution, finding extraction).
+
+### Taint Analysis TI + Artifact Outputs
+
+Each taint analysis run now emits interoperability artifacts under the workspace (`scannerConfig["taint-analysis"].workspaceDir`, default `./iris`) and run directory:
+
+- `iris/exploration/TI_PRIOR.md` and `iris/exploration/ti_prior.json` — live TI prior (CISA KEV + NVD) with degraded-mode metadata when fetches fail
+- `iris/labels/TAINT_MODEL.json` — per-CWE taint model (`sources/sinks/sanitizers/propagators`) with TI-weighted basis
+- `iris/results/findings.raw.json` — normalized raw findings aggregate from taint analysis pass SARIF outputs
+- `.kuzushi/runs/<runId>/findings.triaged.json` — triaged findings export including optional taint analysis source/sink triage details
+
+Relevant `scannerConfig["taint-analysis"]` options:
+
+- `tiMode`: `"live-required"` (default)
+- `tiFailurePolicy`: `"continue_without_ti"` (default)
+- `tiTimeoutMs`: live TI fetch timeout in milliseconds
+- `refinementEnabled`: enable one post-triage refinement loop (default `false`)
+- `refinementIterations`: max refinement passes when enabled (default `1`)
+- `refinementDeltaOnly`: triage only changed findings after refinement (default `true`)
+- `refinementModel`: optional model override for refinement stage wiring
 
 ## Output
 
@@ -395,15 +413,14 @@ Tests are organized by subsystem: `tests/bus/` for orchestrator, workers, and ev
 
 ## Troubleshooting
 
-- **"Error: ANTHROPIC_API_KEY environment variable is required."**: Export your key — `export ANTHROPIC_API_KEY=sk-ant-...` (only required for `claude-sdk` backend; use `--agent-runtime pi-ai` with other providers)
+- **"Error: missing API credentials for selected model provider(s)."**: Set the provider env var(s) for your selected models (for example `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`)
 - **"No findings from scanner. Code looks clean."**: Your code is clean, or try `--severity ERROR,WARNING,INFO` to include lower-severity rules
 - **Scan interrupted**: Re-run the same command (already-triaged findings are skipped), or use `--resume` to continue from the exact checkpoint
-- **Wrong model**: `kuzushi config set model claude-opus-4-20250514` or pass `--model` per-scan
+- **Wrong model**: `kuzushi config set model anthropic:claude-sonnet-4-6` or pass `--model` per-scan
 - **Scanner download fails**: Install Opengrep or Semgrep manually, ensure it's on your PATH
-- **High triage cost**: Use `--triage-model claude-haiku-4-5-20251001` for cheaper triage, or `--max 10` to limit findings
-- **Verification too expensive**: Use `--verify-min-confidence 0.8` to only verify high-confidence TPs, or `--verify-model claude-haiku-4-5-20251001`
+- **High triage cost**: Use `--triage-model openai:gpt-4o-mini` for cheaper triage, or `--max 10` to limit findings
+- **Verification too expensive**: Use `--verify-min-confidence 0.8` to only verify high-confidence TPs, or `--verify-model openai:gpt-4o-mini`
 - **pi-ai model not found**: Ensure the model string uses `provider:modelId` format (e.g., `openai:gpt-4o`, not just `gpt-4o`)
-- **Newaza checkpoint blocks CI**: Pass `--approve-checkpoint` to auto-approve label review in non-interactive environments
 
 ## License
 

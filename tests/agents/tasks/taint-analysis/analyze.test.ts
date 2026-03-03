@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { __newazaAnalyzeInternals } from "../../../../src/agents/tasks/newaza/analyze.js";
-import { profileById } from "../../../../src/agents/tasks/newaza/codeql-compat.js";
-import type { NewazaLabelsDocument } from "../../../../src/agents/tasks/newaza/types.js";
+import { __taintAnalysisRunInternals } from "../../../../src/agents/tasks/taint-analysis/analyze.js";
+import { profileById } from "../../../../src/agents/tasks/taint-analysis/codeql-compat.js";
+import type { TaintAnalysisLabelsDocument } from "../../../../src/agents/tasks/taint-analysis/types.js";
 import type { Finding } from "../../../../src/scanners/types.js";
 
-function makeLabels(): NewazaLabelsDocument {
+function makeLabels(): TaintAnalysisLabelsDocument {
   return {
     version: "1.0.0",
     metadata: {
@@ -65,7 +65,7 @@ function makeLabels(): NewazaLabelsDocument {
   };
 }
 
-describe("newaza-analyze internals", () => {
+describe("taint-analysis-run internals", () => {
   it("renders deterministic libraries", () => {
     const pythonProfile = profileById("python", "python-dataflow-new");
     expect(pythonProfile).not.toBeNull();
@@ -73,7 +73,7 @@ describe("newaza-analyze internals", () => {
       return;
     }
 
-    const libs = __newazaAnalyzeInternals.renderNewazaLibraries(makeLabels(), pythonProfile);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabels(), pythonProfile);
     expect(libs.sources).toContain("module MySources");
     expect(libs.sources).toContain("passKey = \"path_traversal\"");
     expect(libs.sources).toContain("Query");
@@ -101,15 +101,15 @@ describe("newaza-analyze internals", () => {
       return;
     }
 
-    const query = __newazaAnalyzeInternals.renderTaintQuery(template, {
+    const query = __taintAnalysisRunInternals.renderTaintQuery(template, {
       passId: 1,
       passKey: "path_traversal",
       focus: "Path Traversal",
       cwes: ["022", "023"],
     }, pythonProfile);
 
-    expect(query).toContain("Newaza Pass 1 - Path Traversal");
-    expect(query).toContain("py/newaza/pass1-path-traversal");
+    expect(query).toContain("Taint Analysis Pass 1 - Path Traversal");
+    expect(query).toContain("py/taint-analysis/pass1-path-traversal");
     expect(query).toContain("022");
     expect(query).toContain("MySources");
     expect(query).toContain("path_traversal");
@@ -125,7 +125,7 @@ describe("newaza-analyze internals", () => {
       return;
     }
 
-    const query = __newazaAnalyzeInternals.renderTaintQuery(template, {
+    const query = __taintAnalysisRunInternals.renderTaintQuery(template, {
       passId: 1,
       passKey: "path_traversal",
       focus: "Path Traversal",
@@ -147,7 +147,7 @@ describe("newaza-analyze internals", () => {
       return;
     }
 
-    const libs = __newazaAnalyzeInternals.renderNewazaLibraries(labels, pythonProfile);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, pythonProfile);
 
     expect(libs.sources).toContain("regexpMatch(\".*\\\\bfmt\\\\.Sprintf\\\\b.*\")");
   });
@@ -164,7 +164,7 @@ describe("newaza-analyze internals", () => {
       return;
     }
 
-    const libs = __newazaAnalyzeInternals.renderNewazaLibraries(labels, goProfile);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
 
     expect(libs.sources).toContain("DataFlow::CallNode call");
     expect(libs.sources).toContain('call.getTarget().getName() = "Sprintf"');
@@ -186,7 +186,7 @@ describe("newaza-analyze internals", () => {
       return;
     }
 
-    const libs = __newazaAnalyzeInternals.renderNewazaLibraries(labels, goProfile);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
 
     expect(libs.sinks).toContain("DataFlow::CallNode call");
     expect(libs.sinks).toContain('call.getTarget().getName() = "ExecContext"');
@@ -208,7 +208,7 @@ describe("newaza-analyze internals", () => {
       return;
     }
 
-    const libs = __newazaAnalyzeInternals.renderNewazaLibraries(labels, goProfile);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
 
     expect(libs.sinks).toContain("call.getArgument(1)");
     expect(libs.sinks).not.toContain("getAnArgument");
@@ -221,7 +221,7 @@ describe("newaza-analyze internals", () => {
       return;
     }
 
-    const libs = __newazaAnalyzeInternals.renderNewazaLibraries(makeLabels(), pythonProfile);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabels(), pythonProfile);
 
     expect(libs.sources).toContain("regexpMatch");
     expect(libs.sources).toContain("Query");
@@ -237,7 +237,7 @@ describe("newaza-analyze internals", () => {
       return;
     }
 
-    expect(() => __newazaAnalyzeInternals.renderTaintQuery(
+    expect(() => __taintAnalysisRunInternals.renderTaintQuery(
       "{{QUERY_NAME}}\n{{UNHANDLED_PLACEHOLDER}}",
       {
         passId: 1,
@@ -250,7 +250,7 @@ describe("newaza-analyze internals", () => {
   });
 
   it("tries fallback profiles in order when compile gate fails", async () => {
-    const selected = await __newazaAnalyzeInternals.selectProfileWithCompileGate({
+    const selected = await __taintAnalysisRunInternals.selectProfileWithCompileGate({
       language: "go",
       initialProfileId: "go-dataflow",
       fallbackEnabled: true,
@@ -289,7 +289,7 @@ describe("newaza-analyze internals", () => {
       };
     });
 
-    const selected = await __newazaAnalyzeInternals.selectProfileWithCompileGate({
+    const selected = await __taintAnalysisRunInternals.selectProfileWithCompileGate({
       language: "go",
       initialProfileId: "go-dataflow",
       fallbackEnabled: false,
@@ -303,7 +303,7 @@ describe("newaza-analyze internals", () => {
     ]);
   });
 
-  it("augments findings with Newaza metadata", () => {
+  it("augments findings with Taint Analysis metadata", () => {
     const base: Finding = {
       scanner: "codeql",
       fingerprint: "fp",
@@ -321,17 +321,17 @@ describe("newaza-analyze internals", () => {
       score: 1,
     };
 
-    const augmented = __newazaAnalyzeInternals.augmentFinding(base, {
+    const augmented = __taintAnalysisRunInternals.augmentFinding(base, {
       passId: 1,
       passKey: "path_traversal",
       focus: "Path Traversal",
       cwes: ["022", "023"],
     }, makeLabels());
 
-    expect(augmented.scanner).toBe("newaza-analyze");
-    expect(augmented.ruleId).toContain("newaza/pass1/");
-    expect(augmented.message).toContain("[Newaza Path Traversal]");
+    expect(augmented.scanner).toBe("taint-analysis-run");
+    expect(augmented.ruleId).toContain("taint-analysis/pass1/");
+    expect(augmented.message).toContain("[Taint Analysis Path Traversal]");
     expect(augmented.cwe).toEqual(["CWE-022", "CWE-023"]);
-    expect(augmented.evidence).toContain("Newaza pass 1");
+    expect(augmented.evidence).toContain("Taint Analysis pass 1");
   });
 });

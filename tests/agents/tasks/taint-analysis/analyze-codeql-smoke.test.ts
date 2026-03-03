@@ -3,13 +3,13 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "vitest";
-import { __newazaAnalyzeInternals } from "../../../../src/agents/tasks/newaza/analyze.js";
-import { detectWorkingProfile } from "../../../../src/agents/tasks/newaza/codeql-compat.js";
+import { __taintAnalysisRunInternals } from "../../../../src/agents/tasks/taint-analysis/analyze.js";
+import { detectWorkingProfile } from "../../../../src/agents/tasks/taint-analysis/codeql-compat.js";
 import {
-  DEFAULT_NEWAZA_TASK_CONFIG,
-  NEWAZA_PASSES,
-  type NewazaLabelsDocument,
-} from "../../../../src/agents/tasks/newaza/types.js";
+  DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
+  TAINT_ANALYSIS_PASSES,
+  type TaintAnalysisLabelsDocument,
+} from "../../../../src/agents/tasks/taint-analysis/types.js";
 
 const tempDirs: string[] = [];
 
@@ -23,14 +23,14 @@ afterEach(() => {
   }
 });
 
-describeSmoke("newaza-analyze CodeQL smoke", () => {
+describeSmoke("taint-analysis-run CodeQL smoke", () => {
   it("compiles generated Go libraries and taint query", { timeout: 180_000 }, async () => {
     const codeql = codeqlBinary;
     if (!codeql) {
       return;
     }
 
-    const tmpDir = mkdtempSync(path.join(os.tmpdir(), "kuzushi-newaza-analyze-smoke-"));
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), "kuzushi-taint-analysis-run-smoke-"));
     tempDirs.push(tmpDir);
     mkdirSync(path.join(tmpDir, "libraries"), { recursive: true });
     mkdirSync(path.join(tmpDir, "queries"), { recursive: true });
@@ -38,7 +38,7 @@ describeSmoke("newaza-analyze CodeQL smoke", () => {
     writeFileSync(
       path.join(tmpDir, "qlpack.yml"),
       [
-        "name: smoke/newaza-analyze",
+        "name: smoke/taint-analysis-run",
         "version: 0.0.1",
         "dependencies:",
         "  codeql/go-all: \"*\"",
@@ -59,20 +59,20 @@ describeSmoke("newaza-analyze CodeQL smoke", () => {
     const selectedProfile = profileDetection.selected;
 
     const labels = makeLabels();
-    const libs = __newazaAnalyzeInternals.renderNewazaLibraries(labels, selectedProfile);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, selectedProfile);
     writeFileSync(path.join(tmpDir, "libraries", "MySources.qll"), libs.sources, "utf-8");
     writeFileSync(path.join(tmpDir, "libraries", "MySinks.qll"), libs.sinks, "utf-8");
     writeFileSync(path.join(tmpDir, "libraries", "MySanitizers.qll"), libs.sanitizers, "utf-8");
     writeFileSync(path.join(tmpDir, "libraries", "MySummaries.qll"), libs.summaries, "utf-8");
 
-    const taintTemplatePath = path.join(DEFAULT_NEWAZA_TASK_CONFIG.newazaPath, "assets", "taint_query.ql.tmpl");
+    const taintTemplatePath = path.join(DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.taintAnalysisPath, "assets", "taint_query.ql.tmpl");
     const taintTemplate = readFileSync(taintTemplatePath, "utf-8");
-    const pass1 = NEWAZA_PASSES.find((pass) => pass.passId === 1);
+    const pass1 = TAINT_ANALYSIS_PASSES.find((pass) => pass.passId === 1);
     if (!pass1) {
-      throw new Error("missing Newaza pass definition for pass 1");
+      throw new Error("missing Taint Analysis pass definition for pass 1");
     }
 
-    const queryText = __newazaAnalyzeInternals.renderTaintQuery(taintTemplate, pass1, selectedProfile);
+    const queryText = __taintAnalysisRunInternals.renderTaintQuery(taintTemplate, pass1, selectedProfile);
     const queryPath = path.join(tmpDir, "queries", "Pass1_PathTraversal.ql");
     writeFileSync(queryPath, queryText, "utf-8");
 
@@ -119,7 +119,7 @@ function resolveCodeqlBinary(): string | null {
   return null;
 }
 
-function makeLabels(): NewazaLabelsDocument {
+function makeLabels(): TaintAnalysisLabelsDocument {
   return {
     version: "1.0.0",
     metadata: {

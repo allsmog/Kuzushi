@@ -17,6 +17,82 @@ import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
 const DEFAULT_MAX_TURNS = 10;
 const KNOWN_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "Bash", "Write"]);
 
+const TRANSIENT_RETRY_MAX = 3;
+const TRANSIENT_RETRY_BASE_MS = 5_000;
+
+const TRANSIENT_STATUS_CODES = [500, 502, 503, 529, 429];
+const TRANSIENT_NETWORK_TOKENS = [
+  "ETIMEDOUT",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "socket hang up",
+  "fetch failed",
+];
+const TRANSIENT_API_TOKENS = [
+  "overloaded",
+  "temporarily unavailable",
+  "Service Temporarily Unavailable",
+];
+
+/** Exported for testing. */
+export function isTransientError(error: unknown): boolean {
+  const message = toErrorMessage(error);
+  for (const code of TRANSIENT_STATUS_CODES) {
+    if (message.includes(String(code))) return true;
+  }
+  for (const token of TRANSIENT_NETWORK_TOKENS) {
+    if (message.includes(token)) return true;
+  }
+  for (const token of TRANSIENT_API_TOKENS) {
+    if (message.toLowerCase().includes(token.toLowerCase())) return true;
+  }
+  return false;
+}
+
+function isTransientErrorMessage(errorMessage: string): boolean {
+  return isTransientError(new Error(errorMessage));
+}
+
+async function retryTransient<T>(
+  fn: () => Promise<T>,
+  signal: AbortSignal | undefined,
+  maxRetries = TRANSIENT_RETRY_MAX,
+  backoffMs = TRANSIENT_RETRY_BASE_MS,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientError(error) || attempt === maxRetries) {
+        throw error;
+      }
+      if (signal?.aborted) {
+        throw error;
+      }
+      const delay = backoffMs * 2 ** attempt;
+      console.error(
+        `[pi-ai] Transient error (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay / 1000}s: ${toErrorMessage(error)}`,
+      );
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay);
+        if (signal) {
+          const onAbort = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          signal.addEventListener("abort", onAbort, { once: true });
+        }
+      });
+      if (signal?.aborted) {
+        throw lastError;
+      }
+    }
+  }
+  throw lastError;
+}
+
 export class PiAiAgentRuntime implements AgentRuntime {
   readonly id = "pi-ai";
   private readonly runtimeConfig?: AgentRuntimeConfig;
@@ -71,7 +147,28 @@ export class PiAiAgentRuntime implements AgentRuntime {
           return;
         }
 
-        const assistant = await complete(model, context, { signal });
+        let assistant = await retryTransient(
+          () => complete(model, context, { signal }),
+          signal,
+        );
+
+        // Handle transient soft errors (stopReason === "error" with transient message):
+        // Pop the errored message from context and retry.
+        if (
+          assistant.stopReason === "error"
+          && assistant.errorMessage
+          && isTransientErrorMessage(assistant.errorMessage)
+        ) {
+          try {
+            assistant = await retryTransient(
+              () => complete(model, context, { signal }),
+              signal,
+            );
+          } catch {
+            // Retries exhausted — fall through with the original error response
+          }
+        }
+
         context.messages.push(assistant);
         totalCostUsd += extractCostUsd(assistant);
 

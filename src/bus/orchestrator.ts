@@ -30,6 +30,8 @@ import type {
   PipelineStats,
   PipelineErrorEvent,
   PipelineStartEvent,
+  TaintAnalysisRefinementErrorEvent,
+  TaintAnalysisRefinementResultEvent,
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
   ReportCompleteEvent,
@@ -118,10 +120,16 @@ interface RunState {
   pocHarnessStarted: boolean;
   reportRequested: boolean;
   reportEmitted: boolean;
+  refinementEnabled: boolean;
+  refinementDeltaOnly: boolean;
+  refinementIterations: number;
+  refinementIteration: number;
+  refinementInFlight: boolean;
   dispatching: boolean;
   collectScanFindingEvents: boolean;
   repoContext?: RepoContext;
   taskOutputs: Map<string, unknown>;
+  failedTasks: string[];
 }
 
 export interface OrchestratorDeps {
@@ -134,46 +142,9 @@ type TaskOutcome =
   | { kind: "complete"; event: TaskCompleteEvent }
   | { kind: "error"; event: TaskErrorEvent };
 
-function allSettledFailFast(outcomes: Promise<TaskOutcome>[]): Promise<TaskOutcome[]> {
-  if (outcomes.length === 0) {
-    return Promise.resolve([]);
-  }
-
-  return new Promise((resolve, reject) => {
-    const results: Array<TaskOutcome | undefined> = new Array(outcomes.length);
-    let completed = 0;
-    let settled = false;
-
-    outcomes.forEach((outcomePromise, index) => {
-      outcomePromise
-        .then((outcome) => {
-          if (settled) {
-            return;
-          }
-
-          results[index] = outcome;
-          completed += 1;
-
-          if (outcome.kind === "error") {
-            settled = true;
-            resolve(results.filter((result): result is TaskOutcome => result !== undefined));
-            return;
-          }
-
-          if (completed === outcomes.length) {
-            settled = true;
-            resolve(results as TaskOutcome[]);
-          }
-        })
-        .catch((error) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          reject(error);
-        });
-    });
-  });
+/** Wait for ALL task outcomes (success or error) without aborting early. */
+function allSettledCollect(outcomes: Promise<TaskOutcome>[]): Promise<TaskOutcome[]> {
+  return Promise.all(outcomes);
 }
 
 /**
@@ -228,6 +199,14 @@ export class PipelineOrchestrator {
 
     this.bus.subscribe<ReportCompleteEvent>("report:complete", async (event) => {
       await this.handleReportComplete(event);
+    });
+
+    this.bus.subscribe<TaintAnalysisRefinementResultEvent>("taint-analysis:refinement-result", async (event) => {
+      await this.handleTaintAnalysisRefinementResult(event);
+    });
+
+    this.bus.subscribe<TaintAnalysisRefinementErrorEvent>("taint-analysis:refinement-error", async (event) => {
+      await this.handleTaintAnalysisRefinementError(event);
     });
 
     this.bus.subscribe<BusHandlerErrorEvent>("bus:handler-error", async (event) => {
@@ -319,10 +298,16 @@ export class PipelineOrchestrator {
       pocHarnessStarted: false,
       reportRequested: false,
       reportEmitted: false,
+      refinementEnabled: resolveTaintAnalysisRefinementEnabled(config),
+      refinementDeltaOnly: resolveTaintAnalysisRefinementDeltaOnly(config),
+      refinementIterations: resolveTaintAnalysisRefinementIterations(config),
+      refinementIteration: 0,
+      refinementInFlight: false,
       dispatching: false,
       collectScanFindingEvents: !this.deps.taskRegistry && !resumeRunId,
       repoContext: undefined,
       taskOutputs: new Map<string, unknown>(),
+      failedTasks: [],
     };
 
     this.runs.set(runId, state);
@@ -380,11 +365,11 @@ export class PipelineOrchestrator {
       return;
     }
 
-    if (run.repo !== state.context.repoName) {
+    if (run.repo !== state.context.repoRoot && run.repo !== state.context.repoName) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
           context: state.context,
-          error: `Run "${resumeRunId}" belongs to repo "${run.repo}", not "${state.context.repoName}"`,
+          error: `Run "${resumeRunId}" belongs to repo "${run.repo}", not "${state.context.repoRoot}"`,
           fatal: true,
         }),
       );
@@ -667,13 +652,16 @@ export class PipelineOrchestrator {
       return;
     }
 
-    const enableContextTask = state.config.enableContextGathering !== false
+    const enableContextExplicit = state.config.enableContextGathering !== false
       && this.deps.taskRegistry.has("context-gatherer");
-    const enabledTaskIds = normalizeTaskIds([
+    const candidateIds = normalizeTaskIds([
       ...state.scanners,
-      ...(enableContextTask ? ["context-gatherer"] : []),
+      ...(enableContextExplicit ? ["context-gatherer"] : []),
       ...(state.config.enabledTasks ?? []),
     ]);
+
+    // Auto-inject all transitive dependencies for enabled tasks
+    const enabledTaskIds = collectTransitiveDeps(this.deps.taskRegistry, candidateIds);
 
     let stages: string[][];
     try {
@@ -706,24 +694,63 @@ export class PipelineOrchestrator {
         );
       }
 
-      const resolved = await allSettledFailFast(outcomes);
-      const failed = resolved.find((outcome) => outcome.kind === "error");
-      if (failed && failed.kind === "error") {
+      const resolved = await allSettledCollect(outcomes);
+      const successes = resolved.filter((o) => o.kind === "complete");
+      const failures = resolved.filter((o) => o.kind === "error");
+
+      for (const f of failures) {
+        const taskId = f.event.payload.taskId;
+        const errMsg = f.event.payload.error;
+        state.failedTasks.push(taskId);
+        console.error(`[orchestrator] Task "${taskId}" failed: ${errMsg}`);
         await this.bus.publish(
           createEvent("pipeline:error", runId, {
             context: state.context,
-            error: `Task \"${failed.event.payload.taskId}\" failed: ${failed.event.payload.error}`,
+            error: `Task "${taskId}" failed: ${errMsg}`,
+            fatal: false,
+          }),
+        );
+      }
+
+      // Determine if this stage has any findings-producing tasks
+      const stageHasFindingsProducers = group.some((taskId) => {
+        const task = this.deps.taskRegistry!.get(taskId);
+        return task.outputKind === "findings" || task.outputKind === "threat-model";
+      });
+
+      if (successes.length === 0 && failures.length > 0) {
+        if (stageHasFindingsProducers) {
+          // All findings producers failed — fatal, nothing to triage
+          await this.bus.publish(
+            createEvent("pipeline:error", runId, {
+              context: state.context,
+              error: `All tasks in stage ${stageIndex} failed: ${failures.map((f) => f.event.payload.taskId).join(", ")}`,
+              fatal: true,
+            }),
+          );
+          return;
+        }
+        // Non-findings stage fully failed — downstream tasks can't run, fatal
+        await this.bus.publish(
+          createEvent("pipeline:error", runId, {
+            context: state.context,
+            error: `All tasks in stage ${stageIndex} failed: ${failures.map((f) => f.event.payload.taskId).join(", ")}`,
             fatal: true,
           }),
         );
         return;
       }
 
-      for (const outcome of resolved) {
+      for (const outcome of successes) {
         if (outcome.kind === "complete") {
           state.taskOutputs.set(outcome.event.payload.taskId, outcome.event.payload.output);
           if (outcome.event.payload.outputKind === "findings") {
             state.scanFindings.push(...coerceFindings(outcome.event.payload.output));
+          } else if (outcome.event.payload.outputKind === "threat-model") {
+            const composite = outcome.event.payload.output;
+            if (isRecord(composite) && Array.isArray(composite["findings"])) {
+              state.scanFindings.push(...coerceFindings(composite["findings"]));
+            }
           }
         }
       }
@@ -866,6 +893,11 @@ export class PipelineOrchestrator {
     state.pocHarnessStarted = false;
     state.reportRequested = false;
     state.reportEmitted = false;
+    state.refinementEnabled = resolveTaintAnalysisRefinementEnabled(state.config);
+    state.refinementDeltaOnly = resolveTaintAnalysisRefinementDeltaOnly(state.config);
+    state.refinementIterations = resolveTaintAnalysisRefinementIterations(state.config);
+    state.refinementIteration = 0;
+    state.refinementInFlight = false;
 
     await this.bus.publish(
       createEvent("triage:start", runId, {
@@ -998,6 +1030,55 @@ export class PipelineOrchestrator {
     this.runs.delete(runId);
   }
 
+  private async handleTaintAnalysisRefinementResult(event: TaintAnalysisRefinementResultEvent): Promise<void> {
+    const runId = event.meta.runId;
+    const state = this.runs.get(runId);
+    if (!state) {
+      return;
+    }
+
+    state.refinementInFlight = false;
+    state.refinementIteration = Math.max(state.refinementIteration, event.payload.iteration);
+
+    const nonTaintAnalysis = state.scanFindings.filter((finding) => finding.scanner !== "taint-analysis-run");
+    state.scanFindings = [...nonTaintAnalysis, ...event.payload.updatedFindings]
+      .sort((a, b) => b.score - a.score);
+    state.totalFindings = state.scanFindings.length;
+    state.triaged += event.payload.deltaTriaged;
+    state.triageErrors += event.payload.deltaErrors;
+    state.triageTotal += event.payload.deltaFindings.length;
+    state.totalCostUsd += normalizeCostUsd(event.payload.triageCostUsd);
+
+    try {
+      updateRunFindings(this.deps.db, state.checkpointRunId, state.scanFindings);
+      updateRunCost(this.deps.db, state.checkpointRunId, event.payload.triageCostUsd);
+    } catch {
+      // Checkpoint persistence is best-effort for refinement deltas.
+    }
+
+    if (
+      state.refinementIteration < state.refinementIterations
+      && event.payload.deltaFindings.length > 0
+      && this.shouldRunTaintAnalysisRefinement(state)
+    ) {
+      await this.startTaintAnalysisRefinement(state, runId);
+      return;
+    }
+
+    await this.requestPostTriageFlow(state, runId);
+  }
+
+  private async handleTaintAnalysisRefinementError(event: TaintAnalysisRefinementErrorEvent): Promise<void> {
+    const state = this.runs.get(event.meta.runId);
+    if (!state) {
+      return;
+    }
+
+    state.refinementInFlight = false;
+    state.refinementIteration = Math.max(state.refinementIteration, event.payload.iteration);
+    await this.requestPostTriageFlow(state, event.meta.runId);
+  }
+
   private async handleBusHandlerError(event: BusHandlerErrorEvent): Promise<void> {
     const state = this.runs.get(event.meta.runId);
     if (!state) {
@@ -1075,12 +1156,12 @@ export class PipelineOrchestrator {
   }
 
   private async finishTriageAndRequestReport(state: RunState, runId: string): Promise<void> {
-    if (state.reportRequested) {
+    if (state.reportRequested || state.refinementInFlight) {
+      console.error(
+        `[orchestrator] finishTriageAndRequestReport skipped: reportRequested=${state.reportRequested}, refinementInFlight=${state.refinementInFlight}`,
+      );
       return;
     }
-
-    // Set immediately to prevent re-entry from synchronous bus delivery.
-    state.reportRequested = true;
 
     await this.bus.publish(
       createEvent("triage:complete", runId, {
@@ -1091,23 +1172,84 @@ export class PipelineOrchestrator {
       }),
     );
 
+    if (this.shouldRunTaintAnalysisRefinement(state)) {
+      await this.startTaintAnalysisRefinement(state, runId);
+      return;
+    }
+
+    await this.requestPostTriageFlow(state, runId);
+  }
+
+  private async requestPostTriageFlow(state: RunState, runId: string): Promise<void> {
+    if (state.reportRequested) {
+      console.error("[orchestrator] requestPostTriageFlow skipped: reportRequested=true");
+      return;
+    }
+
+    state.reportRequested = true;
+
     if (state.verifyEnabled) {
+      console.error(
+        `[orchestrator] verification enabled — ${state.verifyCandidates.length} candidates, starting verification`,
+      );
       await this.startVerification(state, runId);
       return;
     }
+
+    console.error("[orchestrator] verification disabled — requesting report directly");
 
     await this.bus.publish(
       createEvent("report:requested", runId, {
         context: state.context,
         stats: buildReportStats(state),
+        fingerprints: state.scanFindings.map((f) => f.fingerprint),
       }),
     );
 
     state.reportEmitted = true;
   }
 
+  private shouldRunTaintAnalysisRefinement(state: RunState): boolean {
+    if (!state.refinementEnabled || state.refinementInFlight) {
+      return false;
+    }
+    if (state.refinementIteration >= state.refinementIterations) {
+      return false;
+    }
+    if (!state.taskOutputs.has("taint-analysis-label")) {
+      return false;
+    }
+    return state.scanFindings.some((finding) => finding.scanner === "taint-analysis-run");
+  }
+
+  private async startTaintAnalysisRefinement(state: RunState, runId: string): Promise<void> {
+    if (state.refinementInFlight) {
+      return;
+    }
+
+    state.refinementInFlight = true;
+    const nextIteration = state.refinementIteration + 1;
+    const refinementModel = resolveTaintAnalysisRefinementModel(state.config);
+
+    await this.bus.publish(
+      createEvent("taint-analysis:refinement-start", runId, {
+        context: state.context,
+        model: refinementModel,
+        iteration: nextIteration,
+        totalIterations: state.refinementIterations,
+        findings: [...state.scanFindings],
+        labelOutput: state.taskOutputs.get("taint-analysis-label"),
+        repoContext: state.repoContext,
+        refinementDeltaOnly: state.refinementDeltaOnly,
+      }),
+    );
+  }
+
   private async startVerification(state: RunState, runId: string): Promise<void> {
     if (state.verificationStarted || state.reportEmitted) {
+      console.error(
+        `[orchestrator] startVerification skipped: verificationStarted=${state.verificationStarted}, reportEmitted=${state.reportEmitted}`,
+      );
       return;
     }
 
@@ -1289,6 +1431,7 @@ export class PipelineOrchestrator {
       createEvent("report:requested", runId, {
         context: state.context,
         stats: buildReportStats(state),
+        fingerprints: state.scanFindings.map((f) => f.fingerprint),
       }),
     );
 
@@ -1471,6 +1614,7 @@ export class PipelineOrchestrator {
       createEvent("report:requested", runId, {
         context: state.context,
         stats: buildReportStats(state),
+        fingerprints: state.scanFindings.map((f) => f.fingerprint),
       }),
     );
 
@@ -1548,8 +1692,44 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : undefined,
     pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
     pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
+    failedTasks: state.failedTasks.length > 0 ? [...state.failedTasks] : undefined,
     startedAt: state.startedAt,
   };
+}
+
+function resolveTaintAnalysisConfig(config: KuzushiConfig): Record<string, unknown> {
+  const raw = config.scannerConfig["taint-analysis"];
+  return isRecord(raw) ? raw : {};
+}
+
+function resolveTaintAnalysisRefinementEnabled(config: KuzushiConfig): boolean {
+  const taintAnalysis = resolveTaintAnalysisConfig(config);
+  return taintAnalysis["refinementEnabled"] === true;
+}
+
+function resolveTaintAnalysisRefinementDeltaOnly(config: KuzushiConfig): boolean {
+  const taintAnalysis = resolveTaintAnalysisConfig(config);
+  if (typeof taintAnalysis["refinementDeltaOnly"] === "boolean") {
+    return taintAnalysis["refinementDeltaOnly"];
+  }
+  return true;
+}
+
+function resolveTaintAnalysisRefinementIterations(config: KuzushiConfig): number {
+  const taintAnalysis = resolveTaintAnalysisConfig(config);
+  const raw = Number(taintAnalysis["refinementIterations"]);
+  if (!Number.isFinite(raw) || raw < 1) {
+    return 1;
+  }
+  return Math.floor(raw);
+}
+
+function resolveTaintAnalysisRefinementModel(config: KuzushiConfig): string {
+  const taintAnalysis = resolveTaintAnalysisConfig(config);
+  if (typeof taintAnalysis["refinementModel"] === "string" && taintAnalysis["refinementModel"].trim()) {
+    return taintAnalysis["refinementModel"].trim();
+  }
+  return config.triageModel ?? config.model;
 }
 
 function asRepoContext(value: unknown): RepoContext | undefined {
@@ -1684,13 +1864,23 @@ function shouldVerifyFinding(
   return true;
 }
 
+const SCANNER_ID_TO_CONFIG_KEY: Record<string, string> = {
+  "crypto-misuse-detect": "crypto-misuse",
+  "auth-access-detect": "auth-access",
+  "race-condition-detect": "race-condition",
+  "invariant-check": "invariant-analysis",
+  "threat-model-stride": "threat-model",
+  "threat-model-pasta": "threat-model",
+};
+
 function isScannerVerificationEnabled(config: KuzushiConfig, scannerId: string): boolean {
-  const scannerConfig = config.scannerConfig[scannerId];
-  if (!isRecord(scannerConfig)) {
+  const configKey = SCANNER_ID_TO_CONFIG_KEY[scannerId] ?? scannerId;
+  const scannerCfg = config.scannerConfig[configKey];
+  if (!isRecord(scannerCfg)) {
     return true;
   }
 
-  const verify = scannerConfig["verify"];
+  const verify = scannerCfg["verify"];
   if (typeof verify === "boolean") {
     return verify;
   }
@@ -1852,4 +2042,22 @@ function asVerdictArray(value: unknown): Verdict[] | null {
   }
 
   return verdicts;
+}
+
+function collectTransitiveDeps(registry: TaskRegistry, candidateIds: string[]): string[] {
+  const all = new Set(candidateIds);
+  const queue = [...candidateIds];
+
+  while (queue.length > 0) {
+    const id = queue.pop()!;
+    if (!registry.has(id)) continue;
+    for (const dep of registry.get(id).dependsOn) {
+      if (!all.has(dep) && registry.has(dep)) {
+        all.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+
+  return normalizeTaskIds([...all]);
 }

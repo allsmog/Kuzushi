@@ -18,18 +18,20 @@ import {
   resolveCodeqlVersion,
 } from "./codeql-compat.js";
 import {
-  DEFAULT_NEWAZA_TASK_CONFIG,
+  DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
+  TAINT_ANALYSIS_PASSES,
   mapFrameworkToReference,
-  normalizeNewazaLanguage,
-  resolveNewazaConfig,
-  type NewazaLanguage,
-  type NewazaPreflightOutput,
-  type NewazaTaskConfig,
+  normalizeTaintAnalysisLanguage,
+  resolveTaintAnalysisConfig,
+  type TaintAnalysisLanguage,
+  type TaintAnalysisPreflightOutput,
+  type TaintAnalysisTaskConfig,
 } from "./types.js";
+import { buildTiPriorArtifacts } from "./ti-prior.js";
 
 interface ExtractionAgentContext {
   referenceFiles: string[];
-  newazaPath: string;
+  taintAnalysisPath: string;
   model: string;
   repoRoot: string;
   workspaceDir: string;
@@ -42,7 +44,7 @@ interface ExtractionAgentContext {
 
 const execFileAsync = promisify(execFile);
 
-const REQUIRED_NEWAZA_PATHS = [
+const REQUIRED_TAINT_ANALYSIS_PATHS = [
   "WORKFLOW.md",
   "references",
   "assets",
@@ -66,19 +68,19 @@ interface FrameworkCandidate {
 }
 
 /**
- * Newaza Step 0-2 task: deterministic pre-flight + candidate extraction.
+ * Taint Analysis Step 0-2 task: deterministic pre-flight + candidate extraction.
  */
-export const newazaPreflightTask: AgentTask<ScanOpts, NewazaPreflightOutput> = {
-  id: "newaza-preflight",
-  displayName: "Newaza Pre-flight",
+export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPreflightOutput> = {
+  id: "taint-analysis-preflight",
+  displayName: "Taint Analysis Pre-flight",
   outputKind: "custom",
   // Soft dependency: consume context-gatherer output when available, but do not require it.
-  // This keeps Newaza usable even when context gathering is disabled.
+  // This keeps taint analysis usable even when context gathering is disabled.
   dependsOn: [],
-  async run(_input, context): Promise<NewazaPreflightOutput> {
-    const cfg = resolveNewazaConfig(context.config);
-    const newazaPath = toAbsolutePath(context.repoRoot, cfg.newazaPath);
-    await validateNewazaPath(newazaPath);
+  async run(_input, context): Promise<TaintAnalysisPreflightOutput> {
+    const cfg = resolveTaintAnalysisConfig(context.config);
+    const taintAnalysisPath = toAbsolutePath(context.repoRoot, cfg.taintAnalysisPath);
+    await validateTaintAnalysisPath(taintAnalysisPath);
 
     const workspaceDir = resolveWorkspaceDir(context.repoRoot, cfg.workspaceDir);
     await initializeWorkspace(workspaceDir);
@@ -95,13 +97,13 @@ export const newazaPreflightTask: AgentTask<ScanOpts, NewazaPreflightOutput> = {
       },
     );
 
-    const language = normalizeNewazaLanguage(detectedLanguage);
+    const language = normalizeTaintAnalysisLanguage(detectedLanguage);
     const framework = await detectPrimaryFramework(context.repoRoot, context.upstreamOutputs.get("context-gatherer"));
-    const referenceFiles = await resolveReferenceFiles(newazaPath, language, framework);
+    const referenceFiles = await resolveReferenceFiles(taintAnalysisPath, language, framework);
     const extractionModelSelection = resolveExtractionModel(cfg);
     if (extractionModelSelection.usedLabelingFallback) {
       process.stderr.write(
-        `[newaza-preflight] extractionModel not configured; using labelingModel (${cfg.labelingModel}) for extraction\n`,
+        `[taint-analysis-preflight] extractionModel not configured; using labelingModel (${cfg.labelingModel}) for extraction\n`,
       );
     }
     const extractionModel = extractionModelSelection.model;
@@ -164,16 +166,27 @@ export const newazaPreflightTask: AgentTask<ScanOpts, NewazaPreflightOutput> = {
       codeqlApiProfileId,
     );
 
+    const explorationDir = path.join(workspaceDir, "exploration");
+    const tiPriorMarkdownPath = path.join(explorationDir, "TI_PRIOR.md");
+    const tiPriorJsonPath = path.join(explorationDir, "ti_prior.json");
+    const selectedPasses = TAINT_ANALYSIS_PASSES.filter((pass) => cfg.passes.includes(pass.passId));
+    const tiPriorArtifacts = await buildTiPriorArtifacts({
+      passes: selectedPasses,
+      timeoutMs: cfg.tiTimeoutMs ?? 15_000,
+    });
+    await writeFile(tiPriorMarkdownPath, tiPriorArtifacts.markdown, "utf-8");
+    await writeFile(tiPriorJsonPath, JSON.stringify(tiPriorArtifacts.document, null, 2), "utf-8");
+
     const extractionDir = path.join(workspaceDir, "extraction");
     const sourcesQueryPath = path.join(extractionDir, "sources.ql");
     const sinksQueryPath = path.join(extractionDir, "sinks.ql");
 
-    const sourcesTemplatePath = path.join(newazaPath, "assets", "extraction", `${language}_sources.ql.tmpl`);
-    const sinksTemplatePath = path.join(newazaPath, "assets", "extraction", `${language}_sinks.ql.tmpl`);
+    const sourcesTemplatePath = path.join(taintAnalysisPath, "assets", "extraction", `${language}_sources.ql.tmpl`);
+    const sinksTemplatePath = path.join(taintAnalysisPath, "assets", "extraction", `${language}_sinks.ql.tmpl`);
 
     const agentCtx: ExtractionAgentContext = {
       referenceFiles,
-      newazaPath,
+      taintAnalysisPath,
       model: extractionModel,
       repoRoot: context.repoRoot,
       workspaceDir,
@@ -261,7 +274,7 @@ export const newazaPreflightTask: AgentTask<ScanOpts, NewazaPreflightOutput> = {
     const sinksRowCount = await countCsvRows(sinksCsvPath);
 
     return {
-      newazaPath,
+      taintAnalysisPath,
       workspaceDir,
       dbPath,
       codeqlBinary,
@@ -271,6 +284,9 @@ export const newazaPreflightTask: AgentTask<ScanOpts, NewazaPreflightOutput> = {
       framework,
       referenceFiles,
       passes: cfg.passes,
+      tiPriorMarkdownPath,
+      tiPriorJsonPath,
+      tiPriorDegraded: tiPriorArtifacts.document.degraded,
       extraction: {
         sourcesQueryPath,
         sinksQueryPath,
@@ -283,7 +299,7 @@ export const newazaPreflightTask: AgentTask<ScanOpts, NewazaPreflightOutput> = {
   },
 };
 
-function withResources(args: string[], cfg: NewazaTaskConfig): string[] {
+function withResources(args: string[], cfg: TaintAnalysisTaskConfig): string[] {
   const out = [...args];
   if (cfg.threads && cfg.threads > 0) {
     out.push(`--threads=${cfg.threads}`);
@@ -294,15 +310,15 @@ function withResources(args: string[], cfg: NewazaTaskConfig): string[] {
   return out;
 }
 
-async function validateNewazaPath(newazaPath: string): Promise<void> {
-  if (!existsSync(newazaPath)) {
-    throw new Error(`Newaza path does not exist: ${newazaPath}`);
+async function validateTaintAnalysisPath(taintAnalysisPath: string): Promise<void> {
+  if (!existsSync(taintAnalysisPath)) {
+    throw new Error(`Taint analysis path does not exist: ${taintAnalysisPath}`);
   }
 
-  for (const rel of REQUIRED_NEWAZA_PATHS) {
-    const abs = path.join(newazaPath, rel);
+  for (const rel of REQUIRED_TAINT_ANALYSIS_PATHS) {
+    const abs = path.join(taintAnalysisPath, rel);
     if (!existsSync(abs)) {
-      throw new Error(`Invalid Newaza path. Missing required path: ${abs}`);
+      throw new Error(`Invalid taint analysis path. Missing required path: ${abs}`);
     }
   }
 }
@@ -314,7 +330,7 @@ async function initializeWorkspace(workspaceDir: string): Promise<void> {
   }
 }
 
-async function writeQlpack(workspaceDir: string, language: NewazaLanguage): Promise<void> {
+async function writeQlpack(workspaceDir: string, language: TaintAnalysisLanguage): Promise<void> {
   const qlpack = [
     "name: iris/generated",
     "version: 0.0.1",
@@ -329,10 +345,10 @@ async function writeQlpack(workspaceDir: string, language: NewazaLanguage): Prom
 async function writeManifestAndDetection(
   workspaceDir: string,
   dbPath: string,
-  language: NewazaLanguage,
+  language: TaintAnalysisLanguage,
   framework: string | null,
   referenceFiles: string[],
-  cfg: NewazaTaskConfig,
+  cfg: TaintAnalysisTaskConfig,
   extractionModel: string,
   codeqlVersion: string,
   codeqlApiProfileId: string,
@@ -371,9 +387,9 @@ async function writeManifestAndDetection(
 
 async function writeCodeqlCompatibility(
   workspaceDir: string,
-  language: NewazaLanguage,
+  language: TaintAnalysisLanguage,
   codeqlVersion: string,
-  cfg: NewazaTaskConfig,
+  cfg: TaintAnalysisTaskConfig,
   tried: Array<{ id: string; ok: boolean; error?: string }>,
   selectedProfileId: string | null,
   failureReason?: string,
@@ -503,13 +519,13 @@ async function detectFrameworkCandidates(repoRoot: string): Promise<FrameworkCan
 }
 
 async function resolveReferenceFiles(
-  newazaPath: string,
-  language: NewazaLanguage,
+  taintAnalysisPath: string,
+  language: TaintAnalysisLanguage,
   framework: string | null,
 ): Promise<string[]> {
   const files: string[] = [];
-  const patternsPath = path.join(newazaPath, "references", "patterns.md");
-  const languagePath = path.join(newazaPath, "references", `${language}.md`);
+  const patternsPath = path.join(taintAnalysisPath, "references", "patterns.md");
+  const languagePath = path.join(taintAnalysisPath, "references", `${language}.md`);
 
   if (existsSync(patternsPath)) {
     files.push(patternsPath);
@@ -520,7 +536,7 @@ async function resolveReferenceFiles(
   }
 
   if (framework) {
-    const frameworkPath = path.join(newazaPath, "references", `${framework}.md`);
+    const frameworkPath = path.join(taintAnalysisPath, "references", `${framework}.md`);
     if (existsSync(frameworkPath)) {
       files.push(frameworkPath);
     }
@@ -531,7 +547,7 @@ async function resolveReferenceFiles(
 
 async function renderExtractionTemplate(
   templatePath: string,
-  language: NewazaLanguage,
+  language: TaintAnalysisLanguage,
   kind: "source" | "sink",
   agentCtx?: ExtractionAgentContext,
 ): Promise<string> {
@@ -549,7 +565,7 @@ async function renderExtractionTemplate(
   if (hasBodyPlaceholders(template, kind)) {
     if (agentCtx) {
       try {
-        process.stderr.write(`[newaza-preflight] Running extraction agent for ${language}/${kind}...\n`);
+        process.stderr.write(`[taint-analysis-preflight] Running extraction agent for ${language}/${kind}...\n`);
         const generated = await generateExtractionQuery({
           language,
           kind,
@@ -557,13 +573,18 @@ async function renderExtractionTemplate(
           ...agentCtx,
         });
         if (generated) {
-          process.stderr.write(`[newaza-preflight] Extraction agent succeeded for ${language}/${kind} (${generated.length} chars)\n`);
-          return generated;
+          process.stderr.write(`[taint-analysis-preflight] Extraction agent succeeded for ${language}/${kind} (${generated.length} chars)\n`);
+          const compileOk = await tryCompileQuery(generated, agentCtx);
+          if (compileOk) {
+            return generated;
+          }
+          process.stderr.write(`[taint-analysis-preflight] Generated query failed compile check for ${language}/${kind}, using fallback\n`);
+        } else {
+          process.stderr.write(`[taint-analysis-preflight] Extraction agent returned no query for ${language}/${kind}, using fallback\n`);
         }
-        process.stderr.write(`[newaza-preflight] Extraction agent returned no query for ${language}/${kind}, using fallback\n`);
       } catch (error) {
         process.stderr.write(
-          `[newaza-preflight] Agent extraction failed for ${language}/${kind}, using fallback: ${toErrorMessage(error)}\n`,
+          `[taint-analysis-preflight] Agent extraction failed for ${language}/${kind}, using fallback: ${toErrorMessage(error)}\n`,
         );
       }
     }
@@ -571,9 +592,9 @@ async function renderExtractionTemplate(
   }
 
   const rendered = template
-    .replaceAll("{{QUERY_NAME}}", `Newaza ${capitalize(kind)} candidate extraction`)
-    .replaceAll("{{QUERY_DESCRIPTION}}", `Extract ${kind} candidates for Newaza labeling.`)
-    .replaceAll("{{QUERY_ID}}", `newaza/extraction/${kind}`)
+    .replaceAll("{{QUERY_NAME}}", `Taint Analysis ${capitalize(kind)} candidate extraction`)
+    .replaceAll("{{QUERY_DESCRIPTION}}", `Extract ${kind} candidates for taint analysis labeling.`)
+    .replaceAll("{{QUERY_ID}}", `taint-analysis/extraction/${kind}`)
     .replaceAll("{{LANGUAGE_IMPORTS}}", `import ${language}`)
     .replaceAll("{{HELPER_PREDICATES}}", "")
     .replaceAll(`{{${kind.toUpperCase()}_CLAUSES}}`, "")
@@ -592,14 +613,14 @@ async function renderExtractionTemplate(
   return rendered;
 }
 
-function fallbackExtractionQuery(language: NewazaLanguage, kind: "source" | "sink"): string {
+function fallbackExtractionQuery(language: TaintAnalysisLanguage, kind: "source" | "sink"): string {
   const candidateKind = kind === "source" ? "source_candidate" : "sink_candidate";
   return [
     "/**",
-    ` * @name Newaza ${capitalize(kind)} candidate extraction`,
+    ` * @name Taint Analysis ${capitalize(kind)} candidate extraction`,
     " * @description Deterministic fallback extraction query generated by Kuzushi.",
     " * @kind problem",
-    ` * @id newaza/extraction/fallback-${kind}`,
+    ` * @id taint-analysis/extraction/fallback-${kind}`,
     " * @problem.severity recommendation",
     " */",
     "",
@@ -618,6 +639,30 @@ function fallbackExtractionQuery(language: NewazaLanguage, kind: "source" | "sin
     "  1",
     "",
   ].join("\n");
+}
+
+async function tryCompileQuery(
+  query: string,
+  ctx: ExtractionAgentContext,
+): Promise<boolean> {
+  const tmpQueryPath = path.join(ctx.workspaceDir, "extraction", "_compile_check.ql");
+  try {
+    await writeFile(tmpQueryPath, query, "utf-8");
+    await execFileAsync(ctx.codeqlBinary, [
+      "query", "compile",
+      tmpQueryPath,
+      "--search-path", ctx.workspaceDir,
+    ], {
+      cwd: ctx.workspaceDir,
+      encoding: "utf-8",
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return true;
+  } catch (error) {
+    const err = error as ExecFileException & { stderr?: string };
+    process.stderr.write(`[taint-analysis-preflight] Compile check failed: ${err.stderr?.trim().split("\n").slice(0, 5).join("; ") || toErrorMessage(error)}\n`);
+    return false;
+  }
 }
 
 async function runCodeql(codeqlBinary: string, args: string[], cwd: string): Promise<void> {
@@ -680,7 +725,7 @@ function capitalize(value: string): string {
     : value[0].toUpperCase() + value.slice(1);
 }
 
-function resolveExtractionModel(cfg: NewazaTaskConfig): {
+function resolveExtractionModel(cfg: TaintAnalysisTaskConfig): {
   model: string;
   usedLabelingFallback: boolean;
 } {
@@ -712,9 +757,9 @@ export function resolveWorkspaceDir(repoRoot: string, workspaceDir: string): str
     return resolvedWorkspace;
   }
 
-  const fallbackWorkspace = toAbsolutePath(absoluteRepoRoot, DEFAULT_NEWAZA_TASK_CONFIG.workspaceDir);
+  const fallbackWorkspace = toAbsolutePath(absoluteRepoRoot, DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.workspaceDir);
   process.stderr.write(
-    `[newaza-preflight] Ignoring workspaceDir outside repo root: ${workspaceDir}; using ${fallbackWorkspace}\n`,
+    `[taint-analysis-preflight] Ignoring workspaceDir outside repo root: ${workspaceDir}; using ${fallbackWorkspace}\n`,
   );
   return fallbackWorkspace;
 }
@@ -724,7 +769,7 @@ function isWithinRoot(rootPath: string, candidatePath: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export const __newazaPreflightInternals = {
+export const __taintAnalysisPreflightInternals = {
   detectPrimaryFramework,
   renderExtractionTemplate,
   resolveReferenceFiles,

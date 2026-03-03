@@ -18,14 +18,15 @@ import {
   type CodeqlProfile,
 } from "./codeql-compat.js";
 import {
-  NEWAZA_PASSES,
-  resolveNewazaConfig,
-  type NewazaLabelOutput,
-  type NewazaLabelsDocument,
-  type NewazaLanguage,
-  type NewazaPassEntry,
-  type NewazaPassDefinition,
-  type NewazaPreflightOutput,
+  TAINT_ANALYSIS_PASSES,
+  resolveTaintAnalysisConfig,
+  type TaintAnalysisLabelOutput,
+  type TaintAnalysisLabelsDocument,
+  type TaintAnalysisLanguage,
+  type TaintAnalysisPassEntry,
+  type TaintAnalysisPassDefinition,
+  type TaintAnalysisPassId,
+  type TaintAnalysisPreflightOutput,
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -37,30 +38,42 @@ interface CallableInfo {
   argIndex: number | null;
 }
 
+interface RawFindingRecord {
+  scanner: string;
+  ruleId: string;
+  filePath: string;
+  startLine: number;
+  severity: string;
+  message: string;
+  evidence?: string | null;
+  cwe: string[];
+  passId?: number;
+}
+
 /**
- * Newaza Step 4-6 task: deterministic library/query generation + analysis + report filtering.
+ * Taint Analysis Step 4-6 task: deterministic library/query generation + analysis + report filtering.
  */
-export const newazaAnalyzeTask: AgentTask<ScanOpts, Finding[]> = {
-  id: "newaza-analyze",
-  displayName: "Newaza Analyze",
+export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
+  id: "taint-analysis-run",
+  displayName: "Taint Analysis Run",
   outputKind: "findings",
-  dependsOn: ["newaza-label"],
+  dependsOn: ["taint-analysis-label"],
   async run(_input, context): Promise<Finding[]> {
-    const cfg = resolveNewazaConfig(context.config);
-    const labelOutput = asLabelOutput(context.upstreamOutputs.get("newaza-label"));
+    const cfg = resolveTaintAnalysisConfig(context.config);
+    const labelOutput = asLabelOutput(context.upstreamOutputs.get("taint-analysis-label"));
     if (!labelOutput) {
-      throw new Error("newaza-analyze requires upstream output from newaza-label");
+      throw new Error("taint-analysis-run requires upstream output from taint-analysis-label");
     }
 
     const labels = labelOutput.labels ?? await loadLabelsFromDisk(labelOutput.labelsPath);
 
-    const taintTemplatePath = path.join(labelOutput.newazaPath, "assets", "taint_query.ql.tmpl");
+    const taintTemplatePath = path.join(labelOutput.taintAnalysisPath, "assets", "taint_query.ql.tmpl");
     const taintTemplate = await readFile(taintTemplatePath, "utf-8");
 
     const resultsDir = path.join(labelOutput.workspaceDir, "results");
     const compatRecordPath = path.join(labelOutput.workspaceDir, "exploration", "codeql_compat.json");
 
-    const enabledPasses = NEWAZA_PASSES.filter((passDef) => labelOutput.passes.includes(passDef.passId));
+    const enabledPasses = TAINT_ANALYSIS_PASSES.filter((passDef) => labelOutput.passes.includes(passDef.passId));
     if (enabledPasses.length === 0) {
       return [];
     }
@@ -138,7 +151,7 @@ export const newazaAnalyzeTask: AgentTask<ScanOpts, Finding[]> = {
       );
     }
 
-    const scriptPath = path.join(labelOutput.newazaPath, "scripts", "filter_and_report.py");
+    const scriptPath = path.join(labelOutput.taintAnalysisPath, "scripts", "filter_and_report.py");
     const reportPath = path.join(labelOutput.workspaceDir, "report", "iris_report.md");
 
     if (existsSync(scriptPath)) {
@@ -157,14 +170,25 @@ export const newazaAnalyzeTask: AgentTask<ScanOpts, Finding[]> = {
       );
     }
 
-    const findings = await convertSarifToNewazaFindings(resultsDir, context.repoName, labels);
+    const rawFindings = await collectRawFindings(resultsDir, labels);
+    await writeFile(
+      path.join(resultsDir, "findings.raw.json"),
+      JSON.stringify({
+        version: "1.0.0",
+        generatedAt: new Date().toISOString(),
+        findings: rawFindings,
+      }, null, 2),
+      "utf-8",
+    );
+
+    const findings = await convertSarifToTaintAnalysisFindings(resultsDir, context.repoName, labels);
     const capped = cfg.maxFindings ? findings.slice(0, cfg.maxFindings) : findings;
     return capped;
   },
   triageAgentConfig(finding, repoName): TriageAgentConfig {
     return {
       prompt: [
-        "You are an Newaza-focused security triage agent.",
+        "You are a taint-analysis-focused security triage agent.",
         "The finding came from a neurosymbolic pipeline: deterministic extraction + LLM API labeling + CodeQL taint analysis.",
         "Use the evidence and code path to confirm exploitability rather than trusting the label blindly.",
         "",
@@ -191,12 +215,14 @@ export const newazaAnalyzeTask: AgentTask<ScanOpts, Finding[]> = {
         "## Output requirements",
         "Return ONLY a JSON object with:",
         "fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null)",
+        "Optional but preferred for taint analysis refinement: source{why,is_false_positive,evidence}, sink{why,is_false_positive,evidence},",
+        "is_vulnerable(boolean), exploit_scenario(string), recommended_fix(string), rule_refinement_hint(string), triage_schema_version(string).",
       ].join("\n"),
     };
   },
 };
 
-function withResources(args: string[], cfg: ReturnType<typeof resolveNewazaConfig>): string[] {
+function withResources(args: string[], cfg: ReturnType<typeof resolveTaintAnalysisConfig>): string[] {
   const out = [...args];
   if (cfg.threads && cfg.threads > 0) {
     out.push(`--threads=${cfg.threads}`);
@@ -207,17 +233,17 @@ function withResources(args: string[], cfg: ReturnType<typeof resolveNewazaConfi
   return out;
 }
 
-async function loadLabelsFromDisk(labelsPath: string): Promise<NewazaLabelsDocument> {
+async function loadLabelsFromDisk(labelsPath: string): Promise<TaintAnalysisLabelsDocument> {
   const raw = await readFile(labelsPath, "utf-8");
   const parsed = JSON.parse(raw);
   if (!isRecord(parsed) || !Array.isArray(parsed["passes"])) {
     throw new Error(`Invalid labels.json at ${labelsPath}`);
   }
 
-  return parsed as unknown as NewazaLabelsDocument;
+  return parsed as unknown as TaintAnalysisLabelsDocument;
 }
 
-function renderNewazaLibraries(labels: NewazaLabelsDocument, profile: CodeqlProfile): {
+function renderTaintAnalysisLibraries(labels: TaintAnalysisLabelsDocument, profile: CodeqlProfile): {
   sources: string;
   sinks: string;
   sanitizers: string;
@@ -261,7 +287,7 @@ function renderNewazaLibraries(labels: NewazaLabelsDocument, profile: CodeqlProf
 
   const summaries = [
     "/**",
-    " * Generated by Kuzushi Newaza integration.",
+    " * Generated by Kuzushi Taint Analysis integration.",
     " */",
     "",
     languageImports,
@@ -288,10 +314,10 @@ function renderMatcherLibrary(
   nodeParamName: string,
   byPass: Map<string, CallableInfo[]>,
   languageImports: string,
-  language: NewazaLanguage,
+  language: TaintAnalysisLanguage,
   role: "source" | "sink" | "sanitizer",
 ): string {
-  const passClauses = NEWAZA_PASSES.map((passDef) => {
+  const passClauses = TAINT_ANALYSIS_PASSES.map((passDef) => {
     const callables = byPass.get(passDef.passKey) ?? [];
     if (callables.length === 0) {
       return `    passKey = \"${passDef.passKey}\" and ${nodeParamName}.toString().regexpMatch(\"a^\")`;
@@ -311,7 +337,7 @@ function renderMatcherLibrary(
 
   return [
     "/**",
-    " * Generated by Kuzushi Newaza integration.",
+    " * Generated by Kuzushi Taint Analysis integration.",
     " */",
     "",
     languageImports,
@@ -325,11 +351,11 @@ function renderMatcherLibrary(
   ].join("\n");
 }
 
-function groupCallables(labels: NewazaLabelsDocument, role: NewazaPassEntry["role"]): Map<string, CallableInfo[]> {
+function groupCallables(labels: TaintAnalysisLabelsDocument, role: TaintAnalysisPassEntry["role"]): Map<string, CallableInfo[]> {
   const out = new Map<string, CallableInfo[]>();
 
   for (const pass of labels.passes) {
-    const passDef = NEWAZA_PASSES.find((candidate) => candidate.passId === pass.pass_id);
+    const passDef = TAINT_ANALYSIS_PASSES.find((candidate) => candidate.passId === pass.pass_id);
     if (!passDef) {
       continue;
     }
@@ -365,7 +391,7 @@ function groupCallables(labels: NewazaLabelsDocument, role: NewazaPassEntry["rol
 
 function renderTaintQuery(
   template: string,
-  passDef: NewazaPassDefinition,
+  passDef: TaintAnalysisPassDefinition,
   profile: CodeqlProfile,
 ): string {
   const queryIdPrefix = languageQueryIdPrefix(profile.language);
@@ -379,9 +405,9 @@ function renderTaintQuery(
     .replaceAll("import {{SINK_MODULE}}", "import libraries.MySinks")
     .replaceAll("import {{SANITIZER_MODULE}}", "import libraries.MySanitizers")
     .replaceAll("import {{SUMMARY_MODULE}}", "import libraries.MySummaries")
-    .replaceAll("{{QUERY_NAME}}", `Newaza Pass ${passDef.passId} - ${passDef.focus}`)
+    .replaceAll("{{QUERY_NAME}}", `Taint Analysis Pass ${passDef.passId} - ${passDef.focus}`)
     .replaceAll("{{QUERY_DESCRIPTION}}", `Detect tainted dataflow for ${passDef.focus}.`)
-    .replaceAll("{{QUERY_ID}}", `${queryIdPrefix}/newaza/pass${passDef.passId}-${passDef.passKey.replaceAll("_", "-")}`)
+    .replaceAll("{{QUERY_ID}}", `${queryIdPrefix}/taint-analysis/pass${passDef.passId}-${passDef.passKey.replaceAll("_", "-")}`)
     .replaceAll("{{PRECISION}}", "medium")
     .replaceAll("{{CWE_PRIMARY}}", passDef.cwes[0] ?? "000")
     .replaceAll("{{EXTRA_TAGS}}", extraTags)
@@ -397,7 +423,7 @@ function renderTaintQuery(
 
   if (rendered.includes("{{")) {
     throw new Error(
-      `Newaza taint query template render failed for pass ${passDef.passId}: unresolved placeholders`,
+      `Taint analysis taint query template render failed for pass ${passDef.passId}: unresolved placeholders`,
     );
   }
 
@@ -405,7 +431,7 @@ function renderTaintQuery(
 }
 
 interface PassQueryArtifact {
-  passId: 1 | 2 | 3 | 4 | 5 | 6;
+  passId: TaintAnalysisPassId;
   queryPath: string;
   resultPath: string;
 }
@@ -417,13 +443,13 @@ interface ProfileCompileAttempt {
 }
 
 async function renderArtifactsForProfile(args: {
-  labels: NewazaLabelsDocument;
+  labels: TaintAnalysisLabelsDocument;
   profile: CodeqlProfile;
   taintTemplate: string;
   workspaceDir: string;
-  enabledPasses: NewazaPassDefinition[];
+  enabledPasses: TaintAnalysisPassDefinition[];
 }): Promise<PassQueryArtifact[]> {
-  const libraries = renderNewazaLibraries(args.labels, args.profile);
+  const libraries = renderTaintAnalysisLibraries(args.labels, args.profile);
   const librariesDir = path.join(args.workspaceDir, "libraries");
   await writeFile(path.join(librariesDir, "MySources.qll"), libraries.sources, "utf-8");
   await writeFile(path.join(librariesDir, "MySinks.qll"), libraries.sinks, "utf-8");
@@ -469,7 +495,7 @@ async function compilePassQueries(
 }
 
 async function selectProfileWithCompileGate(args: {
-  language: NewazaPreflightOutput["language"];
+  language: TaintAnalysisPreflightOutput["language"];
   initialProfileId: string;
   fallbackEnabled: boolean;
   tryProfile: (
@@ -550,10 +576,10 @@ async function runCommand(command: string, args: string[], cwd: string): Promise
   }
 }
 
-async function convertSarifToNewazaFindings(
+async function convertSarifToTaintAnalysisFindings(
   resultsDir: string,
   repoName: string,
-  labels: NewazaLabelsDocument,
+  labels: TaintAnalysisLabelsDocument,
 ): Promise<Finding[]> {
   const files = (await readdir(resultsDir))
     .filter((name) => name.toLowerCase().endsWith(".sarif"))
@@ -564,7 +590,7 @@ async function convertSarifToNewazaFindings(
   for (const fileName of files) {
     const passId = parsePassIdFromName(fileName);
     const passDef = passId
-      ? NEWAZA_PASSES.find((pass) => pass.passId === passId)
+      ? TAINT_ANALYSIS_PASSES.find((pass) => pass.passId === passId)
       : undefined;
 
     const absolutePath = path.join(resultsDir, fileName);
@@ -592,10 +618,55 @@ async function convertSarifToNewazaFindings(
   return [...deduped.values()].sort((a, b) => b.score - a.score);
 }
 
+async function collectRawFindings(
+  resultsDir: string,
+  labels: TaintAnalysisLabelsDocument,
+): Promise<RawFindingRecord[]> {
+  const files = (await readdir(resultsDir))
+    .filter((name) => name.toLowerCase().endsWith(".sarif"))
+    .sort();
+
+  const out: RawFindingRecord[] = [];
+  for (const fileName of files) {
+    const passId = parsePassIdFromName(fileName);
+    const passDef = passId
+      ? TAINT_ANALYSIS_PASSES.find((pass) => pass.passId === passId)
+      : undefined;
+    const absolutePath = path.join(resultsDir, fileName);
+    const content = await readFile(absolutePath, "utf-8");
+    const parsed = JSON.parse(content);
+    if (!isRecord(parsed) || !Array.isArray(parsed["runs"])) {
+      continue;
+    }
+
+    const findings = selectFindings(
+      { runs: parsed["runs"] as CodeQLSarifOutput["runs"] },
+      labels.metadata.project,
+      "HEAD",
+    );
+
+    for (const finding of findings) {
+      out.push({
+        scanner: "taint-analysis-run",
+        ruleId: finding.ruleId,
+        filePath: finding.filePath,
+        startLine: finding.startLine,
+        severity: finding.severity,
+        message: finding.message,
+        evidence: finding.evidence,
+        cwe: passDef ? passDef.cwes.map((cwe) => `CWE-${cwe}`) : finding.cwe,
+        passId: passDef?.passId,
+      });
+    }
+  }
+
+  return out;
+}
+
 function augmentFinding(
   finding: Finding,
-  passDef: NewazaPassDefinition | undefined,
-  labels: NewazaLabelsDocument,
+  passDef: TaintAnalysisPassDefinition | undefined,
+  labels: TaintAnalysisLabelsDocument,
 ): Finding {
   const labelPass = passDef
     ? labels.passes.find((pass) => pass.pass_id === passDef.passId)
@@ -605,18 +676,18 @@ function augmentFinding(
   const sinkCount = labelPass?.entries.filter((entry) => entry.role === "sink").length ?? 0;
 
   const passEvidence = passDef
-    ? `Newaza pass ${passDef.passId} (${passDef.focus}) | labeled sources=${sourceCount} sinks=${sinkCount}`
-    : "Newaza pass metadata unavailable";
+    ? `Taint Analysis pass ${passDef.passId} (${passDef.focus}) | labeled sources=${sourceCount} sinks=${sinkCount}`
+    : "Taint analysis pass metadata unavailable";
 
   const augmented: Finding = {
     ...finding,
-    scanner: "newaza-analyze",
+    scanner: "taint-analysis-run",
     ruleId: passDef
-      ? `newaza/pass${passDef.passId}/${finding.ruleId}`
-      : `newaza/${finding.ruleId}`,
+      ? `taint-analysis/pass${passDef.passId}/${finding.ruleId}`
+      : `taint-analysis/${finding.ruleId}`,
     message: passDef
-      ? `[Newaza ${passDef.focus}] ${finding.message}`
-      : `[Newaza] ${finding.message}`,
+      ? `[Taint Analysis ${passDef.focus}] ${finding.message}`
+      : `[Taint Analysis] ${finding.message}`,
     evidence: finding.evidence
       ? `${finding.evidence} | ${passEvidence}`
       : passEvidence,
@@ -632,16 +703,18 @@ function augmentFinding(
   return augmented;
 }
 
-function parsePassIdFromName(fileName: string): 1 | 2 | 3 | 4 | 5 | 6 | undefined {
-  const match = fileName.toLowerCase().match(/pass\s*([1-6])/);
+function parsePassIdFromName(fileName: string): TaintAnalysisPassId | undefined {
+  const match = fileName.toLowerCase().match(/pass\s*(\d+)/);
   if (!match) {
     return undefined;
   }
 
-  return Number.parseInt(match[1], 10) as 1 | 2 | 3 | 4 | 5 | 6;
+  const id = Number.parseInt(match[1], 10);
+  if (id < 1 || id > 13) return undefined;
+  return id as TaintAnalysisPassId;
 }
 
-function languageQueryIdPrefix(language: NewazaPreflightOutput["language"]): string {
+function languageQueryIdPrefix(language: TaintAnalysisPreflightOutput["language"]): string {
   if (language === "python") return "py";
   if (language === "go") return "go";
   if (language === "java") return "java";
@@ -660,7 +733,7 @@ function queryFilename(passId: number, focus: string): string {
 function buildNodeCallableCheck(
   nodeParamName: string,
   info: CallableInfo,
-  language: NewazaLanguage,
+  language: TaintAnalysisLanguage,
   role: "source" | "sink" | "sanitizer",
 ): string {
   if (language === "go") {
@@ -726,7 +799,7 @@ function escapeQllString(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
-function asLabelOutput(value: unknown): NewazaLabelOutput | null {
+function asLabelOutput(value: unknown): TaintAnalysisLabelOutput | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -759,11 +832,11 @@ function asLabelOutput(value: unknown): NewazaLabelOutput | null {
     return null;
   }
 
-  return value as unknown as NewazaLabelOutput;
+  return value as unknown as TaintAnalysisLabelOutput;
 }
 
-export const __newazaAnalyzeInternals = {
-  renderNewazaLibraries,
+export const __taintAnalysisRunInternals = {
+  renderTaintAnalysisLibraries,
   renderTaintQuery,
   selectProfileWithCompileGate,
   firstErrorExcerpt,

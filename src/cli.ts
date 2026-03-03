@@ -24,7 +24,11 @@ import {
   type PipelineCompleteEvent,
   type PipelineErrorEvent,
 } from "./bus/index.js";
-import type { ScanOpts } from "./types.js";
+import type { KuzushiConfig, ScanOpts } from "./types.js";
+
+const TAINT_ANALYSIS_TASK_IDS = ["taint-analysis-preflight", "taint-analysis-label", "taint-analysis-run"] as const;
+const TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS = ["taint-analysis-discover", "taint-analysis-cross-analyze", "taint-analysis-stitch"] as const;
+const DEFAULT_AGENTIC_MODEL = "anthropic:claude-sonnet-4-6";
 
 function resolveRepo(repoPath: string): { root: string; name: string } {
   const absPath = path.resolve(repoPath);
@@ -100,44 +104,12 @@ function maybeWarnPiAiApiKeyForModel(
   );
 }
 
-function warnPiAiBackendApiKeys(config: { [key: string]: unknown }): void {
-  const modelCandidates = new Set<string>();
-  const runtimeConfig = config["agentRuntimeConfig"];
-  const runtimeConfigRecord = runtimeConfig && typeof runtimeConfig === "object"
-    ? runtimeConfig as Record<string, unknown>
-    : undefined;
-  const runtimeAnthropicApiKey = typeof runtimeConfigRecord?.["apiKey"] === "string"
-    ? runtimeConfigRecord["apiKey"].trim()
-    : undefined;
-
-  const pushModel = (value: unknown) => {
-    if (typeof value !== "string") return;
-    const trimmed = value.trim();
-    if (!trimmed) return;
-    modelCandidates.add(trimmed);
-  };
-
-  pushModel(config["model"]);
-  pushModel(config["triageModel"]);
-  pushModel(config["verifyModel"]);
-  pushModel(config["pocHarnessModel"]);
-
-  const scannerConfig = config["scannerConfig"];
-  if (scannerConfig && typeof scannerConfig === "object") {
-    const scannerConfigRecord = scannerConfig as Record<string, unknown>;
-    const agentic = scannerConfigRecord["agentic"];
-    if (agentic && typeof agentic === "object") {
-      pushModel((agentic as Record<string, unknown>)["model"]);
-    }
-
-    const newaza = scannerConfigRecord["newaza"];
-    if (newaza && typeof newaza === "object") {
-      pushModel((newaza as Record<string, unknown>)["labelingModel"]);
-    }
-  }
-
-  for (const model of modelCandidates) {
-    maybeWarnPiAiApiKeyForModel(model, { anthropicApiKey: runtimeAnthropicApiKey });
+function warnPiAiBackendApiKeys(
+  models: string[],
+  options: { anthropicApiKey?: string } = {},
+): void {
+  for (const model of models) {
+    maybeWarnPiAiApiKeyForModel(model, options);
   }
 }
 
@@ -155,6 +127,123 @@ function requiredEnvVarsForProvider(provider: string): string[] {
   }
 
   return [];
+}
+
+function resolveActivePiAiModels(
+  config: KuzushiConfig,
+  selectedScanners: string[],
+  enabledTaskIds: string[],
+): string[] {
+  const models = new Set<string>();
+  const scannerSet = new Set(selectedScanners);
+  const enabledTaskSet = new Set(enabledTaskIds);
+
+  const triageModel = config.triageModel ?? config.model;
+  models.add(triageModel);
+
+  if (config.verify === true) {
+    models.add(config.verifyModel ?? triageModel);
+  }
+
+  if (config.pocHarness === true) {
+    models.add(
+      config.pocHarnessModel
+      ?? config.verifyModel
+      ?? triageModel,
+    );
+  }
+
+  if (scannerSet.has("agentic")) {
+    const model = asModel(config.scannerConfig["agentic"]?.["model"]) ?? DEFAULT_AGENTIC_MODEL;
+    models.add(model);
+  }
+
+  const usesTaintAnalysis = TAINT_ANALYSIS_TASK_IDS.some((id) => enabledTaskSet.has(id));
+  const usesCrossService = TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS.some((id) => enabledTaskSet.has(id));
+  if (usesTaintAnalysis || usesCrossService) {
+    const taCfg = config.scannerConfig["taint-analysis"];
+    const labelingModel = asModel(taCfg?.["labelingModel"]) ?? config.model;
+    const extractionModel = asModel(taCfg?.["extractionModel"]) ?? labelingModel;
+    models.add(labelingModel);
+    models.add(extractionModel);
+
+    if (usesCrossService) {
+      const boundaryModel = asModel(taCfg?.["crossServiceBoundaryModel"]) ?? labelingModel;
+      const stitchModel = asModel(taCfg?.["crossServiceStitchModel"]) ?? labelingModel;
+      models.add(boundaryModel);
+      models.add(stitchModel);
+    }
+  }
+
+  // Agentic analysis tasks: crypto-misuse, auth-access, race-condition
+  for (const taskId of ["crypto-misuse-detect", "auth-access-detect", "race-condition-detect"]) {
+    if (enabledTaskSet.has(taskId)) {
+      const cfgKey = taskId.replace("-detect", "");
+      const model = asModel(config.scannerConfig[cfgKey]?.["model"]) ?? config.model;
+      models.add(model);
+    }
+  }
+
+  // Invariant analysis tasks
+  if (enabledTaskSet.has("invariant-extract") || enabledTaskSet.has("invariant-check")) {
+    const iaCfg = config.scannerConfig["invariant-analysis"];
+    models.add(asModel(iaCfg?.["extractionModel"]) ?? config.model);
+    models.add(asModel(iaCfg?.["checkModel"]) ?? config.model);
+  }
+
+  // Threat modeling tasks
+  if (enabledTaskSet.has("threat-model-stride") || enabledTaskSet.has("threat-model-pasta")) {
+    const tmCfg = config.scannerConfig["threat-model"];
+    models.add(asModel(tmCfg?.["strideModel"]) ?? config.model);
+    models.add(asModel(tmCfg?.["pastaModel"]) ?? config.model);
+  }
+
+  return [...models];
+}
+
+function validatePiAiProviderCredentials(
+  models: string[],
+  options: { anthropicApiKey?: string } = {},
+): Array<{ provider: string; envVars: string[]; models: string[] }> {
+  const missingByProvider = new Map<string, { envVars: string[]; models: Set<string> }>();
+
+  for (const model of models) {
+    let provider: string;
+    try {
+      provider = parsePiAiModelSpec(model).provider;
+    } catch {
+      continue;
+    }
+
+    const envVars = requiredEnvVarsForProvider(provider);
+    if (envVars.length === 0) {
+      continue;
+    }
+
+    const hasAny = envVars.some((name) => Boolean(process.env[name]))
+      || (provider === "anthropic" && Boolean(options.anthropicApiKey));
+    if (hasAny) {
+      continue;
+    }
+
+    const entry = missingByProvider.get(provider) ?? { envVars, models: new Set<string>() };
+    entry.models.add(model);
+    missingByProvider.set(provider, entry);
+  }
+
+  return [...missingByProvider.entries()].map(([provider, entry]) => ({
+    provider,
+    envVars: entry.envVars,
+    models: [...entry.models],
+  }));
+}
+
+function asModel(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 const program = new Command();
@@ -354,43 +443,55 @@ program
       config.retryBackoffMs = Math.floor(opts.retryBackoffMs);
     }
 
-    const runtimeBackend = config.agentRuntimeBackend ?? "pi-ai";
-    if (!process.env["ANTHROPIC_API_KEY"] && !config.agentRuntimeConfig?.apiKey) {
-      console.error("Error: ANTHROPIC_API_KEY environment variable or agentRuntimeConfig.apiKey is required.");
-      console.error("Get one at: https://console.anthropic.com/ or set via: kuzushi config set agentRuntimeConfig.apiKey <key>");
-      process.exit(1);
-    }
-
-    if (runtimeBackend === "pi-ai") {
-      warnPiAiBackendApiKeys(config as unknown as Record<string, unknown>);
-    }
-
-    try {
-      configureAgentRuntime(config);
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
-    }
-
     const severity = opts.severity
       ? opts.severity.split(",").map((s) => s.trim().toUpperCase())
       : config.severity;
-
-    const NEWAZA_TASK_IDS = ["newaza-preflight", "newaza-label", "newaza-analyze"];
 
     let scannersOverride = opts.scanners
       ? parseScannersArg(opts.scanners)
       : undefined;
 
-    // Auto-expand "--scanners newaza" into the 3-task DAG.
-    // "newaza" is not a ScannerPlugin — it's a set of AgentTasks.
-    // The registry's resolveEnabled() silently filters non-plugin IDs,
-    // so "--scanners newaza" resolves to zero scanner plugins (correct).
-    if (scannersOverride?.includes("newaza")) {
-      config.enabledTasks = [
-        ...(config.enabledTasks ?? []),
-        ...NEWAZA_TASK_IDS,
-      ];
+    // Auto-expand scanner aliases that map to AgentTask DAGs.
+    // These are not ScannerPlugins, so strip them from scanner plugins after expanding.
+    if (scannersOverride?.includes("taint-analysis")) {
+      const crossServiceEnabled = config.scannerConfig["taint-analysis"]?.["crossService"] === true;
+      if (crossServiceEnabled) {
+        config.enabledTasks = [
+          ...(config.enabledTasks ?? []),
+          ...TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS,
+        ];
+      } else {
+        config.enabledTasks = [
+          ...(config.enabledTasks ?? []),
+          ...TAINT_ANALYSIS_TASK_IDS,
+        ];
+      }
+      scannersOverride = scannersOverride.filter((id) => id !== "taint-analysis");
+    }
+
+    if (scannersOverride?.includes("crypto-misuse")) {
+      config.enabledTasks = [...(config.enabledTasks ?? []), "crypto-misuse-detect"];
+      scannersOverride = scannersOverride.filter((id) => id !== "crypto-misuse");
+    }
+
+    if (scannersOverride?.includes("auth-access")) {
+      config.enabledTasks = [...(config.enabledTasks ?? []), "auth-access-detect"];
+      scannersOverride = scannersOverride.filter((id) => id !== "auth-access");
+    }
+
+    if (scannersOverride?.includes("race-condition")) {
+      config.enabledTasks = [...(config.enabledTasks ?? []), "race-condition-detect"];
+      scannersOverride = scannersOverride.filter((id) => id !== "race-condition");
+    }
+
+    if (scannersOverride?.includes("invariant-analysis")) {
+      config.enabledTasks = [...(config.enabledTasks ?? []), "invariant-extract", "invariant-check"];
+      scannersOverride = scannersOverride.filter((id) => id !== "invariant-analysis");
+    }
+
+    if (scannersOverride?.includes("threat-model")) {
+      config.enabledTasks = [...(config.enabledTasks ?? []), "threat-model-stride", "threat-model-pasta"];
+      scannersOverride = scannersOverride.filter((id) => id !== "threat-model");
     }
 
     const scanOpts: ScanOpts = {
@@ -409,22 +510,75 @@ program
       process.exit(1);
     }
 
+    const runtimeBackend = config.agentRuntimeBackend ?? "pi-ai";
+    if (runtimeBackend === "pi-ai") {
+      const activeModels = resolveActivePiAiModels(
+        config,
+        scanOpts.scanners ?? [],
+        config.enabledTasks ?? [],
+      );
+
+      const missingCredentials = validatePiAiProviderCredentials(
+        activeModels,
+        {
+          anthropicApiKey: config.agentRuntimeConfig?.apiKey,
+        },
+      );
+
+      if (missingCredentials.length > 0) {
+        console.error("Error: missing API credentials for selected model provider(s):");
+        for (const entry of missingCredentials) {
+          console.error(
+            `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] `
+            + `(used by: ${entry.models.join(", ")})`,
+          );
+        }
+        if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
+          console.error(
+            "Tip: for Anthropic models, you can also set agentRuntimeConfig.apiKey "
+            + "or pass --api-key for this run.",
+          );
+        }
+        process.exit(1);
+      }
+
+      warnPiAiBackendApiKeys(activeModels, {
+        anthropicApiKey: config.agentRuntimeConfig?.apiKey,
+      });
+    }
+
+    try {
+      configureAgentRuntime(config);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
     // Set up DB.
     const dbPath = opts.db ?? defaultDbPath(repoRoot);
     const dbDir = path.dirname(dbPath);
     if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
 
+    const repoId = path.resolve(repoRoot);
+
     const db = initDb(dbPath);
-    const bus = createBus(config);
-    const taskRegistry = createDefaultTaskRegistry(registry);
-    registerAllWorkers(bus, { registry, taskRegistry, db, config });
+    let bus: ReturnType<typeof createBus> | undefined;
+    try {
+      bus = createBus(config);
+      const taskRegistry = createDefaultTaskRegistry(registry);
+      registerAllWorkers(bus, { registry, taskRegistry, db, config });
+    } catch (err) {
+      db.close();
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
 
     let resumeRunId: string | undefined;
     if (opts.resume !== undefined) {
       if (opts.resume === true) {
-        const latest = getLatestResumableRun(db, repoName);
+        const latest = getLatestResumableRun(db, repoId) ?? getLatestResumableRun(db, repoName);
         if (!latest) {
-          console.error(`Error: no resumable runs found for repo "${repoName}".`);
+          console.error(`Error: no resumable runs found for repo "${repoId}".`);
           process.exit(1);
         }
         resumeRunId = latest.runId;
@@ -443,9 +597,9 @@ program
         process.exit(1);
       }
 
-      if (run.repo !== repoName) {
+      if (run.repo !== repoId && run.repo !== repoName) {
         console.error(
-          `Error: run "${resumeRunId}" belongs to repo "${run.repo}", not "${repoName}".`,
+          `Error: run "${resumeRunId}" belongs to repo "${run.repo}", not "${repoId}".`,
         );
         process.exit(1);
       }
@@ -458,7 +612,7 @@ program
 
     const runId = resumeRunId ?? generateRunId();
     if (!resumeRunId) {
-      createRun(db, runId, repoName, config, scanOpts);
+      createRun(db, runId, repoId, config, scanOpts);
     }
 
     const context = {
@@ -469,14 +623,14 @@ program
       dbPath,
     };
 
-    const pipelineComplete = bus
+    const pipelineComplete = bus!
       .waitFor<PipelineCompleteEvent>(
         "pipeline:complete",
         (event) => event.meta.runId === runId,
       )
       .then((event) => ({ kind: "complete" as const, event }));
 
-    const pipelineError = bus
+    const pipelineError = bus!
       .waitFor<PipelineErrorEvent>(
         "pipeline:error",
         (event) => event.meta.runId === runId && event.payload.fatal,
@@ -484,7 +638,7 @@ program
       .then((event) => ({ kind: "error" as const, event }));
 
     try {
-      await bus.publish(
+      await bus!.publish(
         createEvent("pipeline:start", runId, {
           context,
           config,
@@ -499,7 +653,7 @@ program
         process.exitCode = 1;
       }
     } finally {
-      await bus.close();
+      await bus!.close();
       db.close();
     }
   });

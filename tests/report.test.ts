@@ -164,6 +164,48 @@ describe("printSummary", () => {
     expect(output).toContain("Skipped (low confidence)");
     db.close();
   });
+
+  it("prints triage and verification error counts from pipeline stats", () => {
+    const dbPath = path.join(TMP_DIR, `summary-error-counts-${Date.now()}.sqlite3`);
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("a"), makeResult("a", "tp"), "repo", "HEAD");
+
+    printSummary(db, "repo", {
+      stats: {
+        triageErrors: 2,
+        verifyErrors: 3,
+      },
+    });
+
+    const output = (console.log as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls
+      .map((call) => String(call[0] ?? ""))
+      .join("\n");
+    expect(output).toContain("Triage errors");
+    expect(output).toContain("Verification errors");
+    db.close();
+  });
+
+  it("scopes report to fingerprints when provided", () => {
+    const dbPath = path.join(TMP_DIR, `summary-fp-filter-${Date.now()}.sqlite3`);
+    const db = initDb(dbPath);
+
+    upsertFinding(db, makeFinding("current-1"), makeResult("current-1", "tp"), "repo", "HEAD");
+    upsertFinding(db, makeFinding("current-2"), makeResult("current-2", "needs_review"), "repo", "HEAD");
+    upsertFinding(db, makeFinding("stale-1"), makeResult("stale-1", "tp"), "repo", "HEAD");
+
+    printSummary(db, "repo", {
+      fingerprints: ["current-1", "current-2"],
+    });
+
+    const output = (console.log as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls
+      .map((call) => String(call[0] ?? ""))
+      .join("\n");
+
+    expect(output).toContain("Total triaged:");
+    expect(output).toContain("2");
+    expect(output).not.toContain("3");
+    db.close();
+  });
 });
 
 describe("printScanStart", () => {

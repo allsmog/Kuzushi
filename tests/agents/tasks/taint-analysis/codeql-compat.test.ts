@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeqlProfileDetectionError,
-  __newazaCodeqlCompatInternals,
+  __taintAnalysisCodeqlCompatInternals,
   candidateProfiles,
   detectWorkingProfile,
   formatProfileDiagnostics,
   profileById,
-} from "../../../../src/agents/tasks/newaza/codeql-compat.js";
+} from "../../../../src/agents/tasks/taint-analysis/codeql-compat.js";
 
-describe("newaza-codeql-compat", () => {
+describe("taint-analysis-codeql-compat", () => {
   it("returns candidate profiles in deterministic order per language", () => {
     expect(candidateProfiles("go").map((profile) => profile.id)).toEqual([
       "go-dataflow",
@@ -84,7 +84,7 @@ describe("newaza-codeql-compat", () => {
       return;
     }
 
-    const probe = __newazaCodeqlCompatInternals.renderProbeQuery(profile);
+    const probe = __taintAnalysisCodeqlCompatInternals.renderProbeQuery(profile);
     expect(probe).toContain("import go");
     expect(probe).toContain("import semmle.go.dataflow.DataFlow");
     expect(probe).toContain("import semmle.go.dataflow.TaintTracking");

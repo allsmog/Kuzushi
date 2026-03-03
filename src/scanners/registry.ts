@@ -2,6 +2,15 @@ import type { KuzushiConfig, ScanOpts } from "../types.js";
 import { isRecord } from "../utils.js";
 import type { Finding, ScannerConfig, ScannerId, ScannerPlugin } from "./types.js";
 
+const NON_PLUGIN_SCANNER_ALIASES = new Set([
+  "taint-analysis",
+  "crypto-misuse",
+  "auth-access",
+  "race-condition",
+  "invariant-analysis",
+  "threat-model",
+]);
+
 /** Registry and orchestrator for scanner plugins (throws/waza). */
 export class ScannerRegistry {
   private readonly plugins = new Map<ScannerId, ScannerPlugin>();
@@ -27,19 +36,22 @@ export class ScannerRegistry {
   }
 
   resolveEnabled(opts: ScanOpts, config: KuzushiConfig): ScannerId[] {
-    // When the user explicitly passes --scanners, use that list as-is.
-    // Non-plugin IDs (e.g. "newaza") are silently filtered out — they're
-    // agent tasks, not scanner plugins.  An empty result is valid when the
-    // user only asked for agent tasks.
+    // When the user explicitly passes --scanners, validate unknown IDs.
+    // Keep non-plugin aliases that intentionally map to AgentTasks (e.g. "taint-analysis").
     const isExplicitOverride = opts.scanners !== undefined;
 
     if (isExplicitOverride) {
-      // Keep only IDs that are registered scanner plugins.
-      // An empty result is valid (e.g. "--scanners newaza" → no scanner plugins).
-      const normalized = opts.scanners!
+      const normalized = [...new Set(opts.scanners!
         .map((id) => id.trim())
-        .filter(Boolean);
-      return [...new Set(normalized.filter((id) => this.has(id)))];
+        .filter(Boolean))];
+
+      const unknown = normalized.filter((id) => !this.has(id) && !NON_PLUGIN_SCANNER_ALIASES.has(id));
+      if (unknown.length > 0) {
+        throw new Error(`Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`);
+      }
+
+      // An empty result is valid (e.g. "--scanners taint-analysis" -> no scanner plugins).
+      return normalized.filter((id) => this.has(id));
     }
 
     const selected = config.scanners;

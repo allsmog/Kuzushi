@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { toErrorMessage } from "../../../utils.js";
-import type { NewazaLanguage } from "./types.js";
+import type { TaintAnalysisLanguage } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -11,7 +11,7 @@ export type CodeqlProfileId = string;
 
 export interface CodeqlProfile {
   id: CodeqlProfileId;
-  language: NewazaLanguage;
+  language: TaintAnalysisLanguage;
   dataFlowImport: string;
   taintTrackingImport: string;
 }
@@ -23,7 +23,7 @@ interface ProbeArgs {
 }
 
 interface DetectWorkingProfileArgs extends ProbeArgs {
-  language: NewazaLanguage;
+  language: TaintAnalysisLanguage;
   codeqlApiProfile?: "auto" | string;
   codeqlProfileFallbacks?: boolean;
   validate?: (profile: CodeqlProfile, args: ProbeArgs) => Promise<void>;
@@ -44,7 +44,7 @@ export class CodeqlProfileDetectionError extends Error {
   }
 }
 
-const PROFILE_MATRIX: Record<NewazaLanguage, CodeqlProfile[]> = {
+const PROFILE_MATRIX: Record<TaintAnalysisLanguage, CodeqlProfile[]> = {
   go: [
     {
       id: "go-dataflow",
@@ -117,11 +117,11 @@ const PROFILE_MATRIX: Record<NewazaLanguage, CodeqlProfile[]> = {
   ],
 };
 
-export function candidateProfiles(language: NewazaLanguage): CodeqlProfile[] {
+export function candidateProfiles(language: TaintAnalysisLanguage): CodeqlProfile[] {
   return PROFILE_MATRIX[language].map((profile) => ({ ...profile }));
 }
 
-export function profileById(language: NewazaLanguage, id: string): CodeqlProfile | null {
+export function profileById(language: TaintAnalysisLanguage, id: string): CodeqlProfile | null {
   const match = PROFILE_MATRIX[language].find((profile) => profile.id === id);
   return match ? { ...match } : null;
 }
@@ -222,7 +222,7 @@ export async function validateProfile(profile: CodeqlProfile, args: ProbeArgs): 
   }
 }
 
-export function languageBaseImport(language: NewazaLanguage): string {
+export function languageBaseImport(language: TaintAnalysisLanguage): string {
   if (language === "python") return "import python";
   if (language === "go") return "import go";
   if (language === "java") return "import java";
@@ -246,7 +246,7 @@ export function libraryImportsForProfile(profile: CodeqlProfile): string {
 }
 
 export function formatProfileDiagnostics(args: {
-  language: NewazaLanguage;
+  language: TaintAnalysisLanguage;
   codeqlVersion: string;
   requestedProfile: string;
   selectedProfileId?: string;
@@ -259,7 +259,7 @@ export function formatProfileDiagnostics(args: {
     : [];
 
   return [
-    "Newaza CodeQL compatibility check failed.",
+    "Taint-analysis CodeQL compatibility check failed.",
     `Language: ${args.language}`,
     `CodeQL version: ${args.codeqlVersion}`,
     `Requested profile: ${args.requestedProfile}`,
@@ -276,9 +276,9 @@ export function formatProfileDiagnostics(args: {
 function renderProbeQuery(profile: CodeqlProfile): string {
   return [
     "/**",
-    ` * @name Newaza CodeQL API profile probe (${profile.id})`,
+    ` * @name Taint-analysis CodeQL API profile probe (${profile.id})`,
     " * @kind problem",
-    ` * @id newaza/compat/probe/${profile.id}`,
+    ` * @id taint-analysis/compat/probe/${profile.id}`,
     " * @problem.severity recommendation",
     " */",
     "",
@@ -302,7 +302,7 @@ function normalizeRequestedProfile(value: "auto" | string | undefined): "auto" |
 }
 
 function resolveCandidateOrder(
-  language: NewazaLanguage,
+  language: TaintAnalysisLanguage,
   requestedProfile: "auto" | string,
   fallbackEnabled: boolean,
 ): CodeqlProfile[] {
@@ -352,7 +352,7 @@ function excerptError(value: string): string {
   return lines.slice(0, 4).join(" | ");
 }
 
-export const __newazaCodeqlCompatInternals = {
+export const __taintAnalysisCodeqlCompatInternals = {
   renderProbeQuery,
   resolveCandidateOrder,
 };

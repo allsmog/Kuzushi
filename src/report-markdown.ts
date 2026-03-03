@@ -4,12 +4,6 @@ import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
 import {
   getActionableFindings,
-  getPocHarnessCounts,
-  getTotalCost,
-  getTotalPocHarnessCost,
-  getTotalVerificationCost,
-  getVerificationCounts,
-  getVerdictCounts,
 } from "./store.js";
 
 interface RunMetaRow {
@@ -22,14 +16,31 @@ export function generateMarkdownReport(
   repo: string,
   stats: Partial<PipelineStats>,
   runId: string,
+  fingerprints?: string[],
 ): string {
-  const verdictCounts = getVerdictCounts(db, repo);
-  const verificationCounts = getVerificationCounts(db, repo);
-  const pocHarnessCounts = getPocHarnessCounts(db, repo);
-  const triageCostUsd = getTotalCost(db, repo);
-  const verifyCostUsd = getTotalVerificationCost(db, repo);
-  const pocHarnessCostUsd = getTotalPocHarnessCost(db, repo);
-  const actionable = getActionableFindings(db, repo);
+  const allFindings = getActionableFindings(db, repo, { includeFalsePositives: true, fingerprints });
+
+  const verdictCounts = { tp: 0, fp: 0, needs_review: 0 };
+  let exploitable = 0;
+  let notExploitable = 0;
+  let pocGenerated = 0;
+  let pocSkipped = 0;
+  for (const f of allFindings) {
+    if (f.verdict === "tp") verdictCounts.tp++;
+    else if (f.verdict === "fp") verdictCounts.fp++;
+    else verdictCounts.needs_review++;
+    if (f.verifyExploitable === 1) exploitable++;
+    else if (f.verifyExploitable === 0) notExploitable++;
+    if (f.pocHarnessPath && !f.pocHarnessSkipped) pocGenerated++;
+    if (f.pocHarnessSkipped === 1) pocSkipped++;
+  }
+
+  const verificationCounts = { exploitable, notExploitable };
+  const pocHarnessCounts = { generated: pocGenerated, skipped: pocSkipped };
+  const triageCostUsd = stats.totalCostUsd ?? 0;
+  const verifyCostUsd = stats.verifyCostUsd ?? allFindings.reduce((sum, f) => sum + (f.verifyCostUsd ?? 0), 0);
+  const pocHarnessCostUsd = stats.pocHarnessCostUsd ?? allFindings.reduce((sum, f) => sum + (f.pocHarnessCostUsd ?? 0), 0);
+  const actionable = allFindings.filter((f) => f.verdict !== "fp");
 
   const runMeta = db.prepare(`
     SELECT
@@ -58,8 +69,10 @@ export function generateMarkdownReport(
   lines.push(`| True positives | ${verdictCounts.tp} |`);
   lines.push(`| Needs review | ${verdictCounts.needs_review} |`);
   lines.push(`| False positives | ${verdictCounts.fp} |`);
+  lines.push(`| Triage errors | ${stats.triageErrors ?? 0} |`);
   lines.push(`| Exploitable | ${verificationCounts.exploitable} |`);
   lines.push(`| Not exploitable | ${verificationCounts.notExploitable} |`);
+  lines.push(`| Verification errors | ${stats.verifyErrors ?? 0} |`);
   lines.push(`| PoC harnesses generated | ${pocHarnessCounts.generated} |`);
   lines.push(`| PoC harnesses skipped | ${pocHarnessCounts.skipped} |`);
   lines.push(`| PoC harness errors | ${stats.pocHarnessErrors ?? 0} |`);

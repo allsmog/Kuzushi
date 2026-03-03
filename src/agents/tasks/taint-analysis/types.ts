@@ -1,21 +1,23 @@
 import path from "node:path";
-import { augurRoot as newazaRoot } from "@kuzushi/augur";
+import { augurRoot as taintAnalysisRoot } from "@kuzushi/augur";
 import type { KuzushiConfig } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
 
-export type NewazaLanguage = "python" | "go" | "java" | "javascript" | "csharp";
+export type TaintAnalysisLanguage = "python" | "go" | "java" | "javascript" | "csharp";
 
-export interface NewazaPassDefinition {
-  passId: 1 | 2 | 3 | 4 | 5 | 6;
+export type TaintAnalysisPassId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
+
+export interface TaintAnalysisPassDefinition {
+  passId: TaintAnalysisPassId;
   passKey: string;
   focus: string;
   cwes: string[];
 }
 
-export interface NewazaTaskConfig {
-  newazaPath: string;
+export interface TaintAnalysisTaskConfig {
+  taintAnalysisPath: string;
   dbPath?: string;
-  passes: Array<1 | 2 | 3 | 4 | 5 | 6>;
+  passes: TaintAnalysisPassId[];
   labelingModel: string;
   extractionModel?: string;
   labelingBatchSize: number;
@@ -29,9 +31,25 @@ export interface NewazaTaskConfig {
   codeqlApiProfile?: "auto" | string;
   codeqlProbeTimeoutMs?: number;
   codeqlProfileFallbacks?: boolean;
+  tiMode: "live-required";
+  tiFailurePolicy: "continue_without_ti";
+  tiTimeoutMs?: number;
+  refinementEnabled?: boolean;
+  refinementIterations?: number;
+  refinementDeltaOnly?: boolean;
+  refinementModel?: string;
+  crossService?: boolean;
+  crossServiceBoundaryModel?: string;
+  crossServiceStitchModel?: string;
+  crossServiceMaxServices?: number;
+  crossServiceConcurrency?: number;
+  crossServiceContinueOnError?: boolean;
+  crossServiceBoundaryThreshold?: number;
+  crossServiceStitchThreshold?: number;
+  crossServiceMaxPathDepth?: number;
 }
 
-export interface NewazaCandidate {
+export interface TaintAnalysisCandidate {
   id: string;
   candidateKind: "source_candidate" | "sink_candidate";
   callable: string;
@@ -44,7 +62,7 @@ export interface NewazaCandidate {
   snippet?: string;
 }
 
-export interface NewazaPassEntry {
+export interface TaintAnalysisPassEntry {
   id: string;
   role: "source" | "sink" | "sanitizer" | "summary" | "none";
   classification: "tp" | "fp" | "candidate" | "unknown";
@@ -65,36 +83,39 @@ export interface NewazaPassEntry {
   evidence?: string[];
 }
 
-export interface NewazaLabelsDocument {
+export interface TaintAnalysisLabelsDocument {
   version: string;
   metadata: {
     run_id: string;
     generated_at: string;
-    language: NewazaLanguage;
+    language: TaintAnalysisLanguage;
     framework: string | null;
     model: string;
     project: string;
     notes?: string[];
   };
   passes: Array<{
-    pass_id: 1 | 2 | 3 | 4 | 5 | 6;
+    pass_id: TaintAnalysisPassId;
     focus: string;
     cwes: string[];
-    entries: NewazaPassEntry[];
+    entries: TaintAnalysisPassEntry[];
   }>;
 }
 
-export interface NewazaPreflightOutput {
-  newazaPath: string;
+export interface TaintAnalysisPreflightOutput {
+  taintAnalysisPath: string;
   workspaceDir: string;
   dbPath: string;
   codeqlBinary: string;
   codeqlVersion: string;
   codeqlApiProfileId: string;
-  language: NewazaLanguage;
+  language: TaintAnalysisLanguage;
   framework: string | null;
   referenceFiles: string[];
-  passes: Array<1 | 2 | 3 | 4 | 5 | 6>;
+  passes: TaintAnalysisPassId[];
+  tiPriorMarkdownPath: string;
+  tiPriorJsonPath: string;
+  tiPriorDegraded: boolean;
   extraction: {
     sourcesQueryPath: string;
     sinksQueryPath: string;
@@ -105,39 +126,50 @@ export interface NewazaPreflightOutput {
   };
 }
 
-export interface NewazaLabelOutput {
-  newazaPath: string;
+export interface TaintAnalysisLabelOutput {
+  taintAnalysisPath: string;
   workspaceDir: string;
   dbPath: string;
   codeqlBinary: string;
   codeqlVersion: string;
   codeqlApiProfileId: string;
-  language: NewazaLanguage;
+  language: TaintAnalysisLanguage;
   framework: string | null;
-  passes: Array<1 | 2 | 3 | 4 | 5 | 6>;
+  passes: TaintAnalysisPassId[];
+  tiPriorMarkdownPath: string;
+  tiPriorJsonPath: string;
+  tiPriorDegraded: boolean;
   labelsPath: string;
-  labels: NewazaLabelsDocument;
+  labels: TaintAnalysisLabelsDocument;
+  taintModelPath: string;
   reviewSummary: string;
   labelCounts: Record<string, number>;
 }
 
-export const NEWAZA_PASSES: NewazaPassDefinition[] = [
+export const TAINT_ANALYSIS_PASSES: TaintAnalysisPassDefinition[] = [
   { passId: 1, passKey: "path_traversal", focus: "Path Traversal", cwes: ["022", "023", "036", "073"] },
   { passId: 2, passKey: "command_injection", focus: "Command/Argument Injection", cwes: ["077", "078", "088"] },
   { passId: 3, passKey: "ssrf", focus: "SSRF", cwes: ["918", "099", "610"] },
   { passId: 4, passKey: "code_injection", focus: "Code Injection", cwes: ["094", "095"] },
   { passId: 5, passKey: "sql_injection", focus: "SQL Injection", cwes: ["089"] },
   { passId: 6, passKey: "unsafe_deserialization", focus: "Unsafe Deserialization", cwes: ["502"] },
+  { passId: 7, passKey: "xss", focus: "Cross-Site Scripting (XSS)", cwes: ["079"] },
+  { passId: 8, passKey: "xxe", focus: "XML External Entity (XXE)", cwes: ["611"] },
+  { passId: 9, passKey: "open_redirect", focus: "Open Redirect", cwes: ["601"] },
+  { passId: 10, passKey: "header_injection", focus: "HTTP Header Injection", cwes: ["113"] },
+  { passId: 11, passKey: "log_injection", focus: "Log Injection / Forging", cwes: ["117"] },
+  { passId: 12, passKey: "ldap_injection", focus: "LDAP Injection", cwes: ["090"] },
+  { passId: 13, passKey: "ssti", focus: "Server-Side Template Injection (SSTI)", cwes: ["1336"] },
 ];
 
-const NEWAZA_PASS_IDS = new Set([1, 2, 3, 4, 5, 6]);
+const TAINT_ANALYSIS_PASS_IDS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
 
-const DEFAULT_NEWAZA_PATH = normalizeDefaultNewazaPath();
+const DEFAULT_TAINT_ANALYSIS_PATH = normalizeDefaultTaintAnalysisPath();
 
-export const DEFAULT_NEWAZA_TASK_CONFIG: NewazaTaskConfig = {
-  newazaPath: DEFAULT_NEWAZA_PATH,
+export const DEFAULT_TAINT_ANALYSIS_TASK_CONFIG: TaintAnalysisTaskConfig = {
+  taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
   dbPath: undefined,
-  passes: [1, 2, 3, 4, 5, 6],
+  passes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
   labelingModel: "anthropic:claude-sonnet-4-6",
   extractionModel: undefined,
   labelingBatchSize: 20,
@@ -151,48 +183,110 @@ export const DEFAULT_NEWAZA_TASK_CONFIG: NewazaTaskConfig = {
   codeqlApiProfile: "auto",
   codeqlProbeTimeoutMs: 20_000,
   codeqlProfileFallbacks: true,
+  tiMode: "live-required",
+  tiFailurePolicy: "continue_without_ti",
+  tiTimeoutMs: 15_000,
+  refinementEnabled: false,
+  refinementIterations: 1,
+  refinementDeltaOnly: true,
+  refinementModel: undefined,
+  crossService: false,
+  crossServiceBoundaryModel: undefined,
+  crossServiceStitchModel: undefined,
+  crossServiceMaxServices: 20,
+  crossServiceConcurrency: 3,
+  crossServiceContinueOnError: true,
+  crossServiceBoundaryThreshold: 0.5,
+  crossServiceStitchThreshold: 0.6,
+  crossServiceMaxPathDepth: 5,
 };
 
-function normalizeDefaultNewazaPath(): string {
-  const envPath = process.env["NEWAZA_PATH"]?.trim();
+function normalizeDefaultTaintAnalysisPath(): string {
+  const envPath = process.env["TAINT_ANALYSIS_PATH"]?.trim();
   if (envPath) {
     return path.normalize(envPath);
   }
 
-  return newazaRoot;
+  return taintAnalysisRoot;
 }
 
-export function resolveNewazaConfig(config: KuzushiConfig): NewazaTaskConfig {
-  const raw = config.scannerConfig["newaza"];
+export function resolveTaintAnalysisConfig(config: KuzushiConfig): TaintAnalysisTaskConfig {
+  const raw = config.scannerConfig["taint-analysis"];
   const merged = isRecord(raw)
-    ? { ...DEFAULT_NEWAZA_TASK_CONFIG, ...raw }
-    : { ...DEFAULT_NEWAZA_TASK_CONFIG };
+    ? { ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG, ...raw }
+    : { ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG };
 
   return {
-    newazaPath: normalizePath(merged["newazaPath"], DEFAULT_NEWAZA_TASK_CONFIG.newazaPath),
+    taintAnalysisPath: normalizePath(merged["taintAnalysisPath"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.taintAnalysisPath),
     dbPath: normalizeOptionalPath(merged["dbPath"]),
     passes: normalizePasses(merged["passes"]),
     labelingModel: normalizeString(merged["labelingModel"], config.model),
     extractionModel: normalizeOptionalString(merged["extractionModel"]),
-    labelingBatchSize: normalizePositiveInt(merged["labelingBatchSize"], DEFAULT_NEWAZA_TASK_CONFIG.labelingBatchSize),
+    labelingBatchSize: normalizePositiveInt(merged["labelingBatchSize"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.labelingBatchSize),
     labelingConfidenceThreshold: normalizeUnitInterval(
       merged["labelingConfidenceThreshold"],
-      DEFAULT_NEWAZA_TASK_CONFIG.labelingConfidenceThreshold,
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.labelingConfidenceThreshold,
     ),
-    workspaceDir: normalizePath(merged["workspaceDir"], DEFAULT_NEWAZA_TASK_CONFIG.workspaceDir),
+    workspaceDir: normalizePath(merged["workspaceDir"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.workspaceDir),
     codeqlBinary: normalizeOptionalPath(merged["codeqlBinary"]),
-    python3Binary: normalizeString(merged["python3Binary"], DEFAULT_NEWAZA_TASK_CONFIG.python3Binary),
+    python3Binary: normalizeString(merged["python3Binary"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.python3Binary),
     threads: normalizeOptionalPositiveInt(merged["threads"]),
     ram: normalizeOptionalPositiveInt(merged["ram"]),
     maxFindings: normalizeOptionalPositiveInt(merged["maxFindings"]),
     codeqlApiProfile: normalizeCodeqlApiProfile(merged["codeqlApiProfile"]),
     codeqlProbeTimeoutMs: normalizePositiveInt(
       merged["codeqlProbeTimeoutMs"],
-      DEFAULT_NEWAZA_TASK_CONFIG.codeqlProbeTimeoutMs ?? 20_000,
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.codeqlProbeTimeoutMs ?? 20_000,
     ),
     codeqlProfileFallbacks: normalizeBoolean(
       merged["codeqlProfileFallbacks"],
-      DEFAULT_NEWAZA_TASK_CONFIG.codeqlProfileFallbacks ?? true,
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.codeqlProfileFallbacks ?? true,
+    ),
+    tiMode: normalizeTiMode(merged["tiMode"]),
+    tiFailurePolicy: normalizeTiFailurePolicy(merged["tiFailurePolicy"]),
+    tiTimeoutMs: normalizeOptionalPositiveInt(merged["tiTimeoutMs"]),
+    refinementEnabled: normalizeBoolean(
+      merged["refinementEnabled"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.refinementEnabled ?? false,
+    ),
+    refinementIterations: normalizePositiveInt(
+      merged["refinementIterations"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.refinementIterations ?? 1,
+    ),
+    refinementDeltaOnly: normalizeBoolean(
+      merged["refinementDeltaOnly"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.refinementDeltaOnly ?? true,
+    ),
+    refinementModel: normalizeOptionalString(merged["refinementModel"]),
+    crossService: normalizeBoolean(
+      merged["crossService"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.crossService ?? false,
+    ),
+    crossServiceBoundaryModel: normalizeOptionalString(merged["crossServiceBoundaryModel"]),
+    crossServiceStitchModel: normalizeOptionalString(merged["crossServiceStitchModel"]),
+    crossServiceMaxServices: normalizePositiveInt(
+      merged["crossServiceMaxServices"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.crossServiceMaxServices ?? 20,
+    ),
+    crossServiceConcurrency: normalizePositiveInt(
+      merged["crossServiceConcurrency"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.crossServiceConcurrency ?? 3,
+    ),
+    crossServiceContinueOnError: normalizeBoolean(
+      merged["crossServiceContinueOnError"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.crossServiceContinueOnError ?? true,
+    ),
+    crossServiceBoundaryThreshold: normalizeUnitInterval(
+      merged["crossServiceBoundaryThreshold"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.crossServiceBoundaryThreshold ?? 0.5,
+    ),
+    crossServiceStitchThreshold: normalizeUnitInterval(
+      merged["crossServiceStitchThreshold"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.crossServiceStitchThreshold ?? 0.6,
+    ),
+    crossServiceMaxPathDepth: normalizePositiveInt(
+      merged["crossServiceMaxPathDepth"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.crossServiceMaxPathDepth ?? 5,
     ),
   };
 }
@@ -217,7 +311,7 @@ export function mapFrameworkToReference(framework: string): string | null {
   return null;
 }
 
-export function normalizeNewazaLanguage(value: string): NewazaLanguage {
+export function normalizeTaintAnalysisLanguage(value: string): TaintAnalysisLanguage {
   const raw = value.trim().toLowerCase();
   if (raw.includes("python")) return "python";
   if (raw.includes("go")) return "go";
@@ -229,21 +323,21 @@ export function normalizeNewazaLanguage(value: string): NewazaLanguage {
   return "javascript";
 }
 
-function normalizePasses(value: unknown): Array<1 | 2 | 3 | 4 | 5 | 6> {
+function normalizePasses(value: unknown): TaintAnalysisPassId[] {
   if (!Array.isArray(value)) {
-    return [...DEFAULT_NEWAZA_TASK_CONFIG.passes];
+    return [...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.passes];
   }
 
-  const seen = new Set<1 | 2 | 3 | 4 | 5 | 6>();
+  const seen = new Set<TaintAnalysisPassId>();
   for (const item of value) {
     const asInt = Math.floor(Number(item));
-    if (NEWAZA_PASS_IDS.has(asInt)) {
-      seen.add(asInt as 1 | 2 | 3 | 4 | 5 | 6);
+    if (TAINT_ANALYSIS_PASS_IDS.has(asInt)) {
+      seen.add(asInt as TaintAnalysisPassId);
     }
   }
 
   if (seen.size === 0) {
-    return [...DEFAULT_NEWAZA_TASK_CONFIG.passes];
+    return [...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.passes];
   }
 
   return [...seen].sort((a, b) => a - b);
@@ -314,6 +408,22 @@ function normalizeCodeqlApiProfile(value: unknown): "auto" | string {
 
   const trimmed = value.trim();
   return trimmed || "auto";
+}
+
+function normalizeTiMode(value: unknown): "live-required" {
+  if (typeof value !== "string") {
+    return "live-required";
+  }
+  const trimmed = value.trim().toLowerCase();
+  return trimmed === "live-required" ? "live-required" : "live-required";
+}
+
+function normalizeTiFailurePolicy(value: unknown): "continue_without_ti" {
+  if (typeof value !== "string") {
+    return "continue_without_ti";
+  }
+  const trimmed = value.trim().toLowerCase();
+  return trimmed === "continue_without_ti" ? "continue_without_ti" : "continue_without_ti";
 }
 
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {

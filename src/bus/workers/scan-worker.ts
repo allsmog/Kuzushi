@@ -89,9 +89,14 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
 
       const output = await task.run(input, taskContext);
 
-      if (task.outputKind === "findings") {
-        const findings = asFindings(output);
-        for (const finding of findings) {
+      const emittableFindings = task.outputKind === "findings"
+        ? asFindings(output)
+        : task.outputKind === "threat-model"
+          ? extractThreatModelFindings(output)
+          : [];
+
+      if (emittableFindings.length > 0) {
+        for (const finding of emittableFindings) {
           await bus.publish(
             createEvent("task:progress", runId, {
               context,
@@ -114,7 +119,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
           createEvent("scan:scanner-complete", runId, {
             context,
             scannerId: taskId,
-            findingCount: findings.length,
+            findingCount: emittableFindings.length,
             durationMs: Date.now() - startedAt,
           }),
         );
@@ -207,6 +212,13 @@ function resolveTaskConfig(config: KuzushiConfig, taskId: string): ScannerConfig
     return raw;
   }
   return {};
+}
+
+function extractThreatModelFindings(value: unknown): Finding[] {
+  if (!isRecord(value) || !Array.isArray(value["findings"])) {
+    return [];
+  }
+  return asFindings(value["findings"]);
 }
 
 function asFindings(value: unknown): Finding[] {

@@ -41,6 +41,7 @@ function makeConfig(): KuzushiConfig {
     model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     busBackend: "in-process",
+    triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
     enabledTasks: [],
@@ -1629,40 +1630,38 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
-  it("fails a DAG stage immediately when one task errors", async () => {
+  it("emits fatal error when ALL tasks in a stage fail", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
     const registry = {
-      resolveEnabled: () => ["hang-task", "fail-task"],
+      resolveEnabled: () => ["fail-task-1", "fail-task-2"],
     };
 
     const taskRegistry = new TaskRegistry();
 
-    const hangingTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "hang-task",
-      displayName: "Hang Task",
-      outputKind: "findings",
-      dependsOn: [],
-      run() {
-        return new Promise<Finding[]>(() => {
-          // Intentionally unresolved to verify fail-fast stage handling.
-        });
-      },
-    };
-
-    const failingTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "fail-task",
-      displayName: "Fail Task",
+    const failingTask1: AgentTask<ScanOpts, Finding[]> = {
+      id: "fail-task-1",
+      displayName: "Fail Task 1",
       outputKind: "findings",
       dependsOn: [],
       async run() {
-        throw new Error("intentional failure");
+        throw new Error("intentional failure 1");
       },
     };
 
-    taskRegistry.register(hangingTask);
-    taskRegistry.register(failingTask);
+    const failingTask2: AgentTask<ScanOpts, Finding[]> = {
+      id: "fail-task-2",
+      displayName: "Fail Task 2",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        throw new Error("intentional failure 2");
+      },
+    };
+
+    taskRegistry.register(failingTask1);
+    taskRegistry.register(failingTask2);
 
     registerScanWorker(bus, {
       registry: {
@@ -1703,16 +1702,97 @@ describe("PipelineOrchestrator", () => {
     );
 
     const pipelineError = await pipelineErrorPromise;
-    expect(pipelineError.payload.error).toContain("Task \"fail-task\" failed");
-    expect(pipelineError.payload.error).toContain("intentional failure");
+    expect(pipelineError.payload.error).toContain("All tasks in stage");
 
-    await expect(
-      bus.waitFor<StageCompleteEvent>(
-        "stage:complete",
-        (event) => event.meta.runId === runId,
-        200,
-      ),
-    ).rejects.toThrow("Timed out");
+    await bus.close();
+    db.close();
+  });
+
+  it("continues pipeline with partial findings when one scanner fails but others succeed", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["good-scanner", "bad-scanner"],
+    };
+
+    const taskRegistry = new TaskRegistry();
+
+    const goodScanner: AgentTask<ScanOpts, Finding[]> = {
+      id: "good-scanner",
+      displayName: "Good Scanner",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding("fp-good", 80)];
+      },
+    };
+
+    const badScanner: AgentTask<ScanOpts, Finding[]> = {
+      id: "bad-scanner",
+      displayName: "Bad Scanner",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        throw new Error("scanner crashed");
+      },
+    };
+
+    taskRegistry.register(goodScanner);
+    taskRegistry.register(badScanner);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    // Collect non-fatal pipeline errors
+    const nonFatalErrors: PipelineErrorEvent[] = [];
+    bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
+      if (!event.payload.fatal) nonFatalErrors.push(event);
+    });
+
+    const stageCompletePromise = bus.waitFor<StageCompleteEvent>(
+      "stage:complete",
+      (event) => event.meta.runId === runId,
+      1000,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: makeConfig(),
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    // Stage should complete (not abort)
+    const stageComplete = await stageCompletePromise;
+    expect(stageComplete.payload.taskIds).toContain("good-scanner");
+    expect(stageComplete.payload.taskIds).toContain("bad-scanner");
+
+    // Non-fatal error should have been emitted for the bad scanner
+    expect(nonFatalErrors.length).toBeGreaterThanOrEqual(1);
+    expect(nonFatalErrors.some((e) => e.payload.error.includes("bad-scanner"))).toBe(true);
 
     await bus.close();
     db.close();
@@ -1805,6 +1885,77 @@ describe("PipelineOrchestrator", () => {
     expect(taskStartOrder).toEqual(["semgrep", "post-analysis"]);
     expect(Array.isArray(upstreamFromSemgrep)).toBe(true);
     expect((upstreamFromSemgrep as Finding[])[0].fingerprint).toBe("fp-semgrep");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("triggers verification after batch triage produces TPs with verify enabled", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+
+    registerMockBatchTriageWorker(bus, (finding) => ({
+      ...makeResult(finding.fingerprint),
+      verdict: "tp",
+      confidence: 0.9,
+    }));
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const verificationStartPromise = bus.waitFor<VerificationStartEvent>(
+      "verification:start",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          verify: true,
+          verifyVerdicts: ["tp"],
+        },
+        scanOpts: { ...makeScanOpts(), fresh: true },
+      }),
+    );
+
+    const findings = [
+      makeFinding("fp-verify-1", 80),
+      makeFinding("fp-verify-2", 70),
+      makeFinding("fp-verify-3", 60),
+    ];
+
+    for (const finding of findings) {
+      await bus.publish(
+        createEvent("scan:finding", runId, {
+          context,
+          finding,
+          scannerId: "semgrep",
+        }),
+      );
+    }
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: findings.length,
+      }),
+    );
+
+    const verificationStart = await verificationStartPromise;
+    expect(verificationStart.payload.findingCount).toBe(3);
 
     await bus.close();
     db.close();

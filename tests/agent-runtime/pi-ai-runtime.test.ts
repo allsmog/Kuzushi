@@ -23,7 +23,7 @@ vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
   };
 });
 
-import { PiAiAgentRuntime } from "../../src/agent-runtime/pi-ai.js";
+import { PiAiAgentRuntime, isTransientError } from "../../src/agent-runtime/pi-ai.js";
 
 const tempDirs: string[] = [];
 
@@ -561,5 +561,123 @@ describe("PiAiAgentRuntime", () => {
       type: "result",
       subtype: "error_output_format",
     });
+  });
+
+  it("retries transient errors from complete() and succeeds", async () => {
+    vi.useFakeTimers();
+    try {
+      const cwd = makeTempDir();
+      completeMock
+        .mockRejectedValueOnce(new Error("503 Service Temporarily Unavailable"))
+        .mockResolvedValueOnce(
+          makeAssistantMessage(
+            [{ type: "text", text: "{\"ok\":true}" }],
+            { totalCost: 0.01 },
+          ),
+        );
+
+      const runtime = new PiAiAgentRuntime();
+      const done = collectMessages(runtime, makeRequest(cwd));
+
+      // Advance past the retry backoff delay
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const messages = await done;
+
+      expect(completeMock).toHaveBeenCalledTimes(2);
+      expect(messages[messages.length - 1]).toMatchObject({
+        type: "result",
+        subtype: "success",
+        result: "{\"ok\":true}",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry non-transient errors from complete()", async () => {
+    const cwd = makeTempDir();
+    completeMock.mockRejectedValue(new Error("Invalid API key"));
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    expect(completeMock).toHaveBeenCalledTimes(1);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "error_runtime",
+    });
+  });
+
+  it("retries transient soft errors (stopReason=error) and succeeds", async () => {
+    const cwd = makeTempDir();
+    completeMock
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [{ type: "text", text: "" }],
+          { stopReason: "error", errorMessage: "overloaded" },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [{ type: "text", text: "{\"ok\":true}" }],
+          { totalCost: 0.01 },
+        ),
+      );
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    expect(completeMock).toHaveBeenCalledTimes(2);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "success",
+      result: "{\"ok\":true}",
+    });
+  });
+
+  it("does not retry non-transient soft errors (stopReason=error)", async () => {
+    const cwd = makeTempDir();
+    completeMock.mockResolvedValue(
+      makeAssistantMessage(
+        [{ type: "text", text: "" }],
+        { stopReason: "error", errorMessage: "content policy violation" },
+      ),
+    );
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    expect(completeMock).toHaveBeenCalledTimes(1);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "error_runtime",
+    });
+  });
+});
+
+describe("isTransientError", () => {
+  it("detects HTTP 503 errors", () => {
+    expect(isTransientError(new Error("503 Service Temporarily Unavailable"))).toBe(true);
+  });
+
+  it("detects HTTP 429 errors", () => {
+    expect(isTransientError(new Error("rate limited: 429"))).toBe(true);
+  });
+
+  it("detects network errors", () => {
+    expect(isTransientError(new Error("ETIMEDOUT"))).toBe(true);
+    expect(isTransientError(new Error("ECONNRESET"))).toBe(true);
+    expect(isTransientError(new Error("fetch failed"))).toBe(true);
+    expect(isTransientError(new Error("socket hang up"))).toBe(true);
+  });
+
+  it("detects overloaded errors", () => {
+    expect(isTransientError(new Error("Anthropic API is overloaded"))).toBe(true);
+  });
+
+  it("does not match non-transient errors", () => {
+    expect(isTransientError(new Error("Invalid API key"))).toBe(false);
+    expect(isTransientError(new Error("content policy violation"))).toBe(false);
   });
 });

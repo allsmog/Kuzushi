@@ -2,10 +2,6 @@ import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
 import {
   getActionableFindings,
-  getTotalCost,
-  getTotalVerificationCost,
-  getVerificationCounts,
-  getVerdictCounts,
 } from "./store.js";
 import { isRecord } from "./utils.js";
 
@@ -38,12 +34,23 @@ export function generateSarifReport(
   repo: string,
   stats: Partial<PipelineStats>,
   runId: string,
+  fingerprints?: string[],
 ): string {
-  const verdictCounts = getVerdictCounts(db, repo);
-  const verificationCounts = getVerificationCounts(db, repo);
-  const triageCostUsd = getTotalCost(db, repo);
-  const verifyCostUsd = getTotalVerificationCost(db, repo);
-  const findings = getActionableFindings(db, repo, { includeFalsePositives: true });
+  const findings = getActionableFindings(db, repo, { includeFalsePositives: true, fingerprints });
+
+  const verdictCounts = { tp: 0, fp: 0, needs_review: 0 };
+  let exploitable = 0;
+  let notExploitable = 0;
+  for (const f of findings) {
+    if (f.verdict === "tp") verdictCounts.tp++;
+    else if (f.verdict === "fp") verdictCounts.fp++;
+    else verdictCounts.needs_review++;
+    if (f.verifyExploitable === 1) exploitable++;
+    else if (f.verifyExploitable === 0) notExploitable++;
+  }
+  const verificationCounts = { exploitable, notExploitable };
+  const triageCostUsd = stats.totalCostUsd ?? 0;
+  const verifyCostUsd = stats.verifyCostUsd ?? findings.reduce((sum, f) => sum + (f.verifyCostUsd ?? 0), 0);
 
   const runMeta = db.prepare(`
     SELECT
@@ -73,16 +80,7 @@ export function generateSarifReport(
         text: messageText,
       },
       locations: [
-        {
-          physicalLocation: {
-            artifactLocation: {
-              uri: toRelativeUri(finding.filePath),
-            },
-            region: {
-              startLine: finding.startLine,
-            },
-          },
-        },
+        buildSarifLocation(finding.filePath, finding.startLine),
       ],
       properties: {
         verdict: finding.verdict,
@@ -302,6 +300,18 @@ function toSarifLevel(severity: string): SarifLevel {
     return "warning";
   }
   return "note";
+}
+
+function buildSarifLocation(filePath: string, startLine: number): Record<string, unknown> {
+  const uri = toRelativeUri(filePath);
+  const isDirectory = uri === "." || uri === "" || uri.endsWith("/");
+  const physicalLocation: Record<string, unknown> = {
+    artifactLocation: { uri: uri || "." },
+  };
+  if (!isDirectory) {
+    physicalLocation["region"] = { startLine };
+  }
+  return { physicalLocation };
 }
 
 function toRelativeUri(filePath: string): string {

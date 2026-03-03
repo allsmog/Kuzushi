@@ -258,8 +258,6 @@ export function computeAgenticFingerprint(
     finding.ruleId,
     finding.filePath,
     String(finding.startLine),
-    finding.message,
-    finding.evidence,
   ].join("|");
   return createHash("sha256").update(source).digest("hex");
 }
@@ -299,8 +297,13 @@ function parseRawOutput(raw: unknown): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    const extracted = extractJsonObject(text);
-    return JSON.parse(extracted);
+    try {
+      const extracted = extractJsonObject(text);
+      return JSON.parse(extracted);
+    } catch {
+      console.error("[agentic] Failed to parse output as JSON, returning empty findings");
+      return { findings: [] };
+    }
   }
 }
 

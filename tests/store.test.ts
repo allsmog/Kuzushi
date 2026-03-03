@@ -425,6 +425,37 @@ describe("getActionableFindings", () => {
     expect(actionable[1].verdict).toBe("needs_review");
     db.close();
   });
+
+  it("filters by fingerprints when provided", () => {
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("current-1"), makeResult("current-1", "tp"), "repo", "HEAD");
+    upsertFinding(db, makeFinding("current-2"), makeResult("current-2", "fp"), "repo", "HEAD");
+    upsertFinding(db, makeFinding("stale-1"), makeResult("stale-1", "tp"), "repo", "HEAD");
+    upsertFinding(db, makeFinding("stale-2"), makeResult("stale-2", "needs_review"), "repo", "HEAD");
+
+    const filtered = getActionableFindings(db, "repo", {
+      includeFalsePositives: true,
+      fingerprints: ["current-1", "current-2"],
+    });
+
+    expect(filtered).toHaveLength(2);
+    const fps = filtered.map((f) => f.fingerprint);
+    expect(fps).toContain("current-1");
+    expect(fps).toContain("current-2");
+    expect(fps).not.toContain("stale-1");
+    expect(fps).not.toContain("stale-2");
+    db.close();
+  });
+
+  it("returns all findings when fingerprints is undefined", () => {
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("a"), makeResult("a", "tp"), "repo", "HEAD");
+    upsertFinding(db, makeFinding("b"), makeResult("b", "tp"), "repo", "HEAD");
+
+    const all = getActionableFindings(db, "repo", { fingerprints: undefined });
+    expect(all).toHaveLength(2);
+    db.close();
+  });
 });
 
 describe("pipeline_runs", () => {

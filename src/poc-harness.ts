@@ -207,8 +207,14 @@ export function buildPocHarnessPrompt(
     ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
     "",
     "## Mandatory code-reading gate",
-    `BEFORE generating code, use Read on ${finding.filePath}:${finding.startLine} with at least 50 lines of context.`,
-    "Verify the vulnerable function signature and import path exist in the repository.",
+    ...(finding.filePath !== "."
+      ? [
+          `BEFORE generating code, use Read on ${finding.filePath}:${finding.startLine} with at least 50 lines of context.`,
+          "Verify the vulnerable function signature and import path exist in the repository.",
+        ]
+      : [
+          "This finding is an architectural/threat-model finding without a specific file. Use Glob and Grep to identify the most relevant source files before generating code.",
+        ]),
     "",
     "## Finding",
     `Repo: ${repoName}`,

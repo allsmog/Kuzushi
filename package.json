@@ -1,6 +1,7 @@
 {
   "name": "kuzushi",
   "version": "0.1.0",
+  "private": true,
   "description": "Kuzushi — Agentic SAST scanner with AI triage",
   "type": "module",
   "bin": {

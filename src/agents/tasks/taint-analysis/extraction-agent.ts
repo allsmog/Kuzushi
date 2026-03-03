@@ -8,7 +8,7 @@ import type {
   AgentToolDecision,
 } from "../../../agent-runtime/types.js";
 import { toErrorMessage } from "../../../utils.js";
-import type { NewazaLanguage } from "./types.js";
+import type { TaintAnalysisLanguage } from "./types.js";
 
 const SOURCE_BODY_PLACEHOLDERS = ["{{SOURCE_HANDLER_PREDICATE}}"];
 const SINK_BODY_PLACEHOLDERS = ["{{SINK_CALL_PREDICATE}}"];
@@ -16,11 +16,11 @@ const CACHE_PREFIX = "// cache:";
 const QUERY_FENCE_REGEX = /```([a-zA-Z0-9_-]+)?[ \t]*\n([\s\S]*?)```/g;
 
 export interface ExtractionAgentOptions {
-  language: NewazaLanguage;
+  language: TaintAnalysisLanguage;
   kind: "source" | "sink";
   template: string;
   referenceFiles: string[];
-  newazaPath: string;
+  taintAnalysisPath: string;
   model: string;
   repoRoot: string;
   workspaceDir: string;
@@ -56,7 +56,7 @@ export async function generateExtractionQuery(
     kind,
     template,
     referenceFiles,
-    newazaPath,
+    taintAnalysisPath,
     model,
     repoRoot,
     workspaceDir,
@@ -92,7 +92,7 @@ export async function generateExtractionQuery(
       kind,
       template,
       referenceContent,
-      newazaPath,
+      taintAnalysisPath,
       queryPath,
       codeqlBinary,
       workspaceDir,
@@ -113,7 +113,7 @@ export async function generateExtractionQuery(
 
     try {
       process.stderr.write(
-        `[newaza-extraction-agent] Starting LLM call for ${language}/${kind} with model ${model}${attempt > 0 ? ` (retry ${attempt}/${MAX_RETRIES})` : ""}\n`,
+        `[taint-analysis-extraction-agent] Starting LLM call for ${language}/${kind} with model ${model}${attempt > 0 ? ` (retry ${attempt}/${MAX_RETRIES})` : ""}\n`,
       );
       for await (const message of runtime.query({
         prompt: systemPrompt,
@@ -131,12 +131,12 @@ export async function generateExtractionQuery(
         } else if (message.type === "result") {
           lastErrorSubtype = message.subtype;
           const errMsg = "errors" in message ? (message as { errors: string[] }).errors.join("; ") : message.subtype;
-          process.stderr.write(`[newaza-extraction-agent] Non-success result for ${language}/${kind}: ${message.subtype} — ${errMsg}\n`);
+          process.stderr.write(`[taint-analysis-extraction-agent] Non-success result for ${language}/${kind}: ${message.subtype} — ${errMsg}\n`);
         }
       }
     } catch (error) {
       process.stderr.write(
-        `[newaza-extraction-agent] LLM call failed for ${language}/${kind}: ${toErrorMessage(error)}\n`,
+        `[taint-analysis-extraction-agent] LLM call failed for ${language}/${kind}: ${toErrorMessage(error)}\n`,
       );
       if (attempt < MAX_RETRIES) {
         continue;
@@ -154,15 +154,15 @@ export async function generateExtractionQuery(
       break;
     }
 
-    process.stderr.write(`[newaza-extraction-agent] Transient error for ${language}/${kind}, retrying...\n`);
+    process.stderr.write(`[taint-analysis-extraction-agent] Transient error for ${language}/${kind}, retrying...\n`);
   }
 
   if (!resultText) {
-    process.stderr.write(`[newaza-extraction-agent] No result text from LLM for ${language}/${kind}\n`);
+    process.stderr.write(`[taint-analysis-extraction-agent] No result text from LLM for ${language}/${kind}\n`);
     return null;
   }
 
-  process.stderr.write(`[newaza-extraction-agent] Got result text for ${language}/${kind} (${resultText.length} chars)\n`);
+  process.stderr.write(`[taint-analysis-extraction-agent] Got result text for ${language}/${kind} (${resultText.length} chars)\n`);
 
   // --- Extract query from result ---
   let queryText = extractQueryFromResult(resultText);
@@ -195,11 +195,11 @@ export async function generateExtractionQuery(
 // ── Internals ──────────────────────────────────────────────
 
 interface PromptBuildOptions {
-  language: NewazaLanguage;
+  language: TaintAnalysisLanguage;
   kind: "source" | "sink";
   template: string;
   referenceContent: string;
-  newazaPath: string;
+  taintAnalysisPath: string;
   queryPath: string;
   codeqlBinary: string;
   workspaceDir: string;
@@ -215,7 +215,7 @@ async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> 
     kind,
     template,
     referenceContent,
-    newazaPath,
+    taintAnalysisPath,
     queryPath,
     codeqlBinary,
     workspaceDir,
@@ -225,8 +225,8 @@ async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> 
     taintTrackingImport,
   } = opts;
 
-  const workflowSection = await loadWorkflowStep2(newazaPath);
-  const pythonExample = await loadPythonExample(newazaPath, kind);
+  const workflowSection = await loadWorkflowStep2(taintAnalysisPath);
+  const pythonExample = await loadPythonExample(taintAnalysisPath, kind);
 
   const candidateKind = kind === "source" ? "source_candidate" : "sink_candidate";
 
@@ -295,8 +295,8 @@ async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> 
   return lines.join("\n");
 }
 
-async function loadWorkflowStep2(newazaPath: string): Promise<string> {
-  const workflowPath = path.join(newazaPath, "WORKFLOW.md");
+async function loadWorkflowStep2(taintAnalysisPath: string): Promise<string> {
+  const workflowPath = path.join(taintAnalysisPath, "WORKFLOW.md");
   try {
     const content = await readFile(workflowPath, "utf-8");
     const step2Match = content.match(
@@ -308,8 +308,8 @@ async function loadWorkflowStep2(newazaPath: string): Promise<string> {
   }
 }
 
-async function loadPythonExample(newazaPath: string, kind: "source" | "sink"): Promise<string | null> {
-  const templatePath = path.join(newazaPath, "assets", "extraction", `python_${kind}s.ql.tmpl`);
+async function loadPythonExample(taintAnalysisPath: string, kind: "source" | "sink"): Promise<string | null> {
+  const templatePath = path.join(taintAnalysisPath, "assets", "extraction", `python_${kind}s.ql.tmpl`);
   try {
     return await readFile(templatePath, "utf-8");
   } catch {
@@ -742,7 +742,7 @@ export async function readCacheIfValid(
   }
 }
 
-export const __newazaExtractionAgentInternals = {
+export const __taintAnalysisExtractionAgentInternals = {
   extractQueryFromResult,
   isAllowedCodeqlCompileCommand,
   splitShellWords,

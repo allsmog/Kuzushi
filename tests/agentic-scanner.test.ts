@@ -39,6 +39,11 @@ describe("parseAgenticOutput", () => {
     expect(parsed.findings[0].severity).toBe("INFO");
   });
 
+  it("returns empty findings when output is unparseable non-JSON text", () => {
+    const parsed = parseAgenticOutput("go\nhasAccess := checkPermission(ctx, user)\nif !hasAccess {\n  return\n}");
+    expect(parsed.findings).toHaveLength(0);
+  });
+
   it("normalizes invalid enums to safe defaults", () => {
     const parsed = parseAgenticOutput({
       findings: [
@@ -115,5 +120,32 @@ describe("computeAgenticFingerprint", () => {
     const b = computeAgenticFingerprint("repo", "HEAD", finding);
     expect(a).toBe(b);
     expect(a).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("ignores message/evidence phrasing differences", () => {
+    const base = {
+      ruleId: "x",
+      filePath: "src/a.ts",
+      startLine: 1,
+      severity: "INFO",
+      confidence: "LOW",
+      subcategory: ["audit"],
+      likelihood: "LOW",
+      impact: "LOW",
+      cwe: [],
+    };
+
+    const a = computeAgenticFingerprint("repo", "HEAD", {
+      ...base,
+      message: "first phrasing",
+      evidence: "first evidence",
+    });
+    const b = computeAgenticFingerprint("repo", "HEAD", {
+      ...base,
+      message: "second phrasing",
+      evidence: "second evidence",
+    });
+
+    expect(a).toBe(b);
   });
 });

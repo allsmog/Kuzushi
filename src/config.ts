@@ -4,7 +4,7 @@ import os from "node:os";
 import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
 import type { ScannerConfig } from "./scanners/types.js";
 import { isRecord } from "./utils.js";
-import { augurRoot as newazaRoot } from "@kuzushi/augur";
+import { augurRoot as taintAnalysisRoot } from "@kuzushi/augur";
 
 const CONFIG_DIR = path.join(os.homedir(), ".kuzushi");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
@@ -19,7 +19,7 @@ const AGENT_RUNTIME_BACKENDS = new Set<string>([
   "pi-ai",
   "acp",
 ]);
-const DEFAULT_NEWAZA_PATH = process.env["NEWAZA_PATH"]?.trim() || newazaRoot;
+const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() || taintAnalysisRoot;
 
 /** Hard defaults — the bottom of the precedence stack. */
 export const DEFAULTS: KuzushiConfig = {
@@ -43,6 +43,7 @@ export const DEFAULTS: KuzushiConfig = {
   retryBackoffMs: 5000,
   retryBackoffMultiplier: 2,
   busBackend: "in-process",
+  triageBatchSize: 15,
   triageConcurrency: 1,
   scanMode: "sequential",
   agentRuntimeBackend: "pi-ai",
@@ -58,10 +59,10 @@ export const DEFAULTS: KuzushiConfig = {
     semgrep: { configFlag: "auto" },
     agentic: { model: "anthropic:claude-sonnet-4-6", maxFindings: 20 },
     codeql: {},
-    newaza: {
-      newazaPath: DEFAULT_NEWAZA_PATH,
+    "taint-analysis": {
+      taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
       dbPath: undefined,
-      passes: [1, 2, 3, 4, 5, 6],
+      passes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
       labelingModel: "anthropic:claude-sonnet-4-6",
       extractionModel: undefined,
       labelingBatchSize: 20,
@@ -72,6 +73,13 @@ export const DEFAULTS: KuzushiConfig = {
       threads: undefined,
       ram: undefined,
       maxFindings: undefined,
+      tiMode: "live-required",
+      tiFailurePolicy: "continue_without_ti",
+      tiTimeoutMs: 15_000,
+      refinementEnabled: false,
+      refinementIterations: 1,
+      refinementDeltaOnly: true,
+      refinementModel: undefined,
     },
   },
 };
@@ -160,6 +168,16 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("agentRuntimeConfig must be an object");
     }
     config.agentRuntimeConfig = normalizeAgentRuntimeConfig(parsed);
+    saveConfig(normalizeConfig(config), repoRoot);
+    return;
+  }
+
+  if (key === "triageBatchSize") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("triageBatchSize must be a positive number");
+    }
+    config.triageBatchSize = Math.floor(n);
     saveConfig(normalizeConfig(config), repoRoot);
     return;
   }
@@ -455,6 +473,7 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
       config.retryBackoffMultiplier = DEFAULTS.retryBackoffMultiplier;
     }
     else if (key === "busBackend") config.busBackend = DEFAULTS.busBackend;
+    else if (key === "triageBatchSize") config.triageBatchSize = DEFAULTS.triageBatchSize;
     else if (key === "triageConcurrency") config.triageConcurrency = DEFAULTS.triageConcurrency;
     else if (key === "scanMode") config.scanMode = DEFAULTS.scanMode;
     else if (key === "agentRuntimeBackend") config.agentRuntimeBackend = DEFAULTS.agentRuntimeBackend;
@@ -490,6 +509,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const severity = normalizeStringArray(config.severity);
   const excludePatterns = normalizeStringArray(config.excludePatterns);
   const busBackend = normalizeBusBackend(config.busBackend);
+  const triageBatchSize = normalizePositiveInt(config.triageBatchSize, DEFAULTS.triageBatchSize);
   const triageConcurrency = normalizePositiveInt(config.triageConcurrency, DEFAULTS.triageConcurrency);
   const triageMaxTurns = normalizePositiveInt(config.triageMaxTurns, DEFAULTS.triageMaxTurns);
   const verify = normalizeBoolean(config.verify, DEFAULTS.verify ?? false);
@@ -575,6 +595,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     retryBackoffMs,
     retryBackoffMultiplier,
     busBackend,
+    triageBatchSize,
     triageConcurrency,
     triageMaxTurns,
     scanMode,
@@ -715,6 +736,10 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
 
     if (typeof layer["busBackend"] === "string") {
       merged.busBackend = layer["busBackend"] as KuzushiConfig["busBackend"];
+    }
+
+    if (typeof layer["triageBatchSize"] === "number" && Number.isFinite(layer["triageBatchSize"])) {
+      merged.triageBatchSize = layer["triageBatchSize"];
     }
 
     if (typeof layer["triageConcurrency"] === "number" && Number.isFinite(layer["triageConcurrency"])) {

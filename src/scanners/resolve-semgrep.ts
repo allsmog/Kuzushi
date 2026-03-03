@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createWriteStream, chmodSync, existsSync, mkdirSync } from "node:fs";
+import { createWriteStream, chmodSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { get } from "node:https";
 import path from "node:path";
@@ -9,6 +9,8 @@ import type { IncomingMessage } from "node:http";
 const BIN_DIR = path.join(os.homedir(), ".kuzushi", "bin");
 const GITHUB_RELEASE_URL =
   "https://api.github.com/repos/opengrep/opengrep/releases/latest";
+const MAX_REDIRECTS = 10;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 /** Map Node's process.platform + process.arch to Opengrep asset name. */
 function getAssetName(): string {
@@ -36,15 +38,37 @@ function which(name: string): string | null {
 }
 
 /** Follow redirects and return the final response. */
-function httpsGet(url: string): Promise<IncomingMessage> {
+function httpsGet(url: string, redirectCount: number = 0): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
-    get(url, { headers: { "User-Agent": "kuzushi/0.1" } }, (res) => {
-      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        httpsGet(res.headers.location).then(resolve, reject);
+    const req = get(url, { headers: { "User-Agent": "kuzushi/0.1" } }, (res) => {
+      if (
+        res.statusCode
+        && res.statusCode >= 300
+        && res.statusCode < 400
+        && typeof res.headers.location === "string"
+      ) {
+        if (redirectCount >= MAX_REDIRECTS) {
+          res.resume();
+          reject(new Error(`Too many redirects while fetching ${url}`));
+          return;
+        }
+
+        const redirectUrl = new URL(res.headers.location, url).toString();
+        res.resume();
+        httpsGet(redirectUrl, redirectCount + 1).then(resolve, reject);
         return;
       }
+
+      res.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        res.destroy(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${url}`));
+      });
       resolve(res);
-    }).on("error", reject);
+    });
+
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${url}`));
+    });
+    req.on("error", reject);
   });
 }
 
@@ -72,9 +96,20 @@ async function getLatestReleaseDownloadUrl(assetName: string): Promise<string> {
 async function downloadFile(url: string, dest: string): Promise<void> {
   const res = await httpsGet(url);
   if (res.statusCode !== 200) {
+    res.resume();
     throw new Error(`Download failed: HTTP ${res.statusCode}`);
   }
-  await pipeline(res, createWriteStream(dest));
+
+  try {
+    await pipeline(res, createWriteStream(dest));
+  } catch (error) {
+    try {
+      unlinkSync(dest);
+    } catch {
+      // Best-effort cleanup for partial downloads.
+    }
+    throw error;
+  }
 }
 
 /**

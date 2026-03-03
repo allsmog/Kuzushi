@@ -510,6 +510,7 @@ export function getActionableFindings(
   repo?: string,
   options: {
     includeFalsePositives?: boolean;
+    fingerprints?: string[];
   } = {},
 ): Array<{
   scanner: ScannerId;
@@ -539,11 +540,18 @@ export function getActionableFindings(
   pocHarnessCostUsd: number | null;
 }> {
   const filters: string[] = [];
+  const params: unknown[] = [];
   if (!options.includeFalsePositives) {
     filters.push("verdict != 'fp'");
   }
   if (repo) {
     filters.push("repo = ?");
+    params.push(repo);
+  }
+  if (options.fingerprints && options.fingerprints.length > 0) {
+    const placeholders = options.fingerprints.map(() => "?").join(", ");
+    filters.push(`fingerprint IN (${placeholders})`);
+    params.push(...options.fingerprints);
   }
   const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
 
@@ -571,9 +579,7 @@ export function getActionableFindings(
       confidence DESC
   `;
 
-  const rows = repo
-    ? db.prepare(query).all(repo)
-    : db.prepare(query).all();
+  const rows = db.prepare(query).all(...params);
 
   return rows as Array<{
     scanner: ScannerId;

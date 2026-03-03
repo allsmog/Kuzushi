@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { __newazaLabelInternals } from "../../../../src/agents/tasks/newaza/label.js";
-import type { NewazaLabelsDocument } from "../../../../src/agents/tasks/newaza/types.js";
+import { __taintAnalysisLabelInternals } from "../../../../src/agents/tasks/taint-analysis/label.js";
+import type { TaintAnalysisLabelsDocument } from "../../../../src/agents/tasks/taint-analysis/types.js";
+import type { TiPriorDocument } from "../../../../src/agents/tasks/taint-analysis/ti-prior.js";
 
-const TMP_DIR = path.join(import.meta.dirname, "..", "..", "..", ".tmp-newaza-label");
+const TMP_DIR = path.join(import.meta.dirname, "..", "..", "..", ".tmp-taint-analysis-label");
 
 beforeEach(() => {
   rmSync(TMP_DIR, { recursive: true, force: true });
@@ -15,7 +16,7 @@ afterEach(() => {
   rmSync(TMP_DIR, { recursive: true, force: true });
 });
 
-describe("newaza-label internals", () => {
+describe("taint-analysis-label internals", () => {
   it("parses extraction CSV candidate rows", async () => {
     const csvPath = path.join(TMP_DIR, "sources.csv");
     writeFileSync(
@@ -28,7 +29,7 @@ describe("newaza-label internals", () => {
       "utf-8",
     );
 
-    const candidates = await __newazaLabelInternals.parseCsvCandidates(csvPath, "source_candidate");
+    const candidates = await __taintAnalysisLabelInternals.parseCsvCandidates(csvPath, "source_candidate");
     expect(candidates).toHaveLength(2);
     expect(candidates[0].candidateKind).toBe("source_candidate");
     expect(candidates[0].callable).toBe("Query");
@@ -39,7 +40,7 @@ describe("newaza-label internals", () => {
   });
 
   it("builds label summary counts and top sinks/sources", () => {
-    const labels: NewazaLabelsDocument = {
+    const labels: TaintAnalysisLabelsDocument = {
       version: "1.0.0",
       metadata: {
         run_id: "run-1",
@@ -92,7 +93,7 @@ describe("newaza-label internals", () => {
       ],
     };
 
-    const summary = __newazaLabelInternals.summarizeLabels(labels, 0.55);
+    const summary = __taintAnalysisLabelInternals.summarizeLabels(labels, 0.55);
     expect(summary.labelCounts["pass1.source"]).toBe(1);
     expect(summary.labelCounts["pass1.sink"]).toBe(1);
     expect(summary.reviewSummary).toContain("low-confidence entries");
@@ -101,7 +102,7 @@ describe("newaza-label internals", () => {
   });
 
   it("validates minimal labels document contract", () => {
-    const invalid: NewazaLabelsDocument = {
+    const invalid: TaintAnalysisLabelsDocument = {
       version: "bad",
       metadata: {
         run_id: "",
@@ -114,7 +115,100 @@ describe("newaza-label internals", () => {
       passes: [],
     };
 
-    const error = __newazaLabelInternals.validateLabelsDocument(invalid);
+    const error = __taintAnalysisLabelInternals.validateLabelsDocument(invalid);
     expect(error).toContain("version");
+  });
+
+  it("builds TAINT_MODEL with TI basis and confidence weighting", () => {
+    const labels: TaintAnalysisLabelsDocument = {
+      version: "1.0.0",
+      metadata: {
+        run_id: "run-2",
+        generated_at: new Date().toISOString(),
+        language: "python",
+        framework: "fastapi",
+        model: "anthropic:claude-sonnet-4-6",
+        project: "repo",
+      },
+      passes: [
+        {
+          pass_id: 1,
+          focus: "Path Traversal",
+          cwes: ["022"],
+          entries: [
+            {
+              id: "src-1",
+              role: "source",
+              classification: "tp",
+              confidence: 0.5,
+              signature: {
+                package: null,
+                module: "fastapi",
+                type: null,
+                callable: "Query",
+                arg_index: null,
+                flow_kind: "return",
+              },
+              location: { file: "api.py", line: 12 },
+              rationale: "user input boundary",
+            },
+            {
+              id: "sink-1",
+              role: "sink",
+              classification: "tp",
+              confidence: 0.6,
+              signature: {
+                package: null,
+                module: "os",
+                type: null,
+                callable: "open",
+                arg_index: 0,
+                flow_kind: "argument",
+              },
+              location: { file: "fs.py", line: 23 },
+              rationale: "filesystem access",
+            },
+          ],
+        },
+      ],
+    };
+
+    const tiPrior: TiPriorDocument = {
+      version: "1.0.0",
+      generatedAt: new Date().toISOString(),
+      mode: "live-required",
+      degraded: false,
+      errors: [],
+      cwes: [
+        {
+          cwe: "CWE-22",
+          focus: "Path Traversal",
+          exploitationStory: "story",
+          sourceArchetypes: ["HTTP params"],
+          sinkArchetypes: ["file open"],
+          sanitizers: ["realpath"],
+          references: [
+            {
+              source: "cisa-kev",
+              id: "CVE-2024-12345",
+              url: "https://example.invalid/CVE-2024-12345",
+              title: "example",
+            },
+          ],
+          tiWeight: "HIGH",
+          highPriority: ["download handlers"],
+          commonFalsePositives: ["fixed base dir"],
+          oftenExploitable: ["unsanitized join"],
+        },
+      ],
+    };
+
+    const taintModel = __taintAnalysisLabelInternals.buildTaintModelDocument(labels, tiPrior);
+    const cwe22 = taintModel.cwes.find((entry) => entry.cwe === "CWE-22");
+
+    expect(cwe22).toBeDefined();
+    expect(cwe22?.sources[0]?.ti_basis).toContain("weight=HIGH");
+    expect(cwe22?.sources[0]?.confidence).toBeCloseTo(0.6, 5);
+    expect(cwe22?.sinks[0]?.sink_focus).toBe("argument[0]");
   });
 });

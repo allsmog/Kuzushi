@@ -89,6 +89,7 @@ export async function runSemgrep(
     });
 
     const stdoutChunks: Buffer[] = [];
+    let settled = false;
 
     proc.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
     proc.stderr.on("data", (chunk: Buffer) => {
@@ -96,6 +97,12 @@ export async function runSemgrep(
     });
 
     proc.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+
+      // Semgrep/Opengrep exit code 1 means "findings were found", not a runtime failure.
       if (code !== null && code > 1) {
         reject(new Error(`${binName} failed (exit ${code})`));
         return;
@@ -110,6 +117,10 @@ export async function runSemgrep(
     });
 
     proc.on("error", (err) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       reject(new Error(`Failed to spawn ${binName}: ${err.message}`));
     });
   });

@@ -81,6 +81,7 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
     retryBackoffMs: 0,
     retryBackoffMultiplier: 2,
     busBackend: "in-process",
+    triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
     scanners: ["semgrep"],

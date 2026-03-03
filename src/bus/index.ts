@@ -8,11 +8,13 @@ import { registerOrchestrator } from "./orchestrator.js";
 import type { MessageBus } from "./types.js";
 import { registerAuditWorker } from "./workers/audit-worker.js";
 import { registerReportWorker } from "./workers/report-worker.js";
+import { registerTaintAnalysisArtifactWorker } from "./workers/taint-analysis-artifact-worker.js";
 import { registerScanWorker } from "./workers/scan-worker.js";
 import { registerStoreWorker } from "./workers/store-worker.js";
 import { registerTriageWorker } from "./workers/triage-worker.js";
 import { registerPocHarnessWorker } from "./workers/poc-harness-worker.js";
 import { registerVerificationWorker } from "./workers/verification-worker.js";
+import { registerTaintAnalysisRefinementWorker } from "./workers/taint-analysis-refinement-worker.js";
 
 export interface RegisterWorkersDeps {
   registry: ScannerRegistry;
@@ -51,6 +53,17 @@ export function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): 
     db: deps.db,
   });
 
+  registerTaintAnalysisArtifactWorker(bus, {
+    db: deps.db,
+  });
+
+  registerTaintAnalysisRefinementWorker(bus, {
+    db: deps.db,
+    registry: deps.registry,
+    taskRegistry,
+    config: deps.config,
+  });
+
   if (deps.config.auditLog) {
     registerAuditWorker(bus, {
       config: deps.config,
@@ -85,3 +98,5 @@ export * from "./workers/poc-harness-worker.js";
 export * from "./workers/store-worker.js";
 export * from "./workers/audit-worker.js";
 export * from "./workers/report-worker.js";
+export * from "./workers/taint-analysis-artifact-worker.js";
+export * from "./workers/taint-analysis-refinement-worker.js";

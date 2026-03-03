@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { __newazaPreflightInternals } from "../../../../src/agents/tasks/newaza/preflight.js";
-import { DEFAULT_NEWAZA_TASK_CONFIG } from "../../../../src/agents/tasks/newaza/types.js";
+import { __taintAnalysisPreflightInternals } from "../../../../src/agents/tasks/taint-analysis/preflight.js";
+import { DEFAULT_TAINT_ANALYSIS_TASK_CONFIG } from "../../../../src/agents/tasks/taint-analysis/types.js";
 
-const TMP_ROOT = path.join(import.meta.dirname, "..", "..", "..", ".tmp-newaza-preflight");
+const TMP_ROOT = path.join(import.meta.dirname, "..", "..", "..", ".tmp-taint-analysis-preflight");
 
 beforeEach(() => {
   rmSync(TMP_ROOT, { recursive: true, force: true });
@@ -15,9 +15,9 @@ afterEach(() => {
   rmSync(TMP_ROOT, { recursive: true, force: true });
 });
 
-describe("newaza-preflight internals", () => {
+describe("taint-analysis-preflight internals", () => {
   it("resolves workspace path relative to repo root", () => {
-    const workspace = __newazaPreflightInternals.resolveWorkspaceDir("/tmp/repo", "./iris");
+    const workspace = __taintAnalysisPreflightInternals.resolveWorkspaceDir("/tmp/repo", "./iris");
     expect(workspace).toBe(path.resolve("/tmp/repo", "./iris"));
   });
 
@@ -25,13 +25,13 @@ describe("newaza-preflight internals", () => {
     const repoRoot = path.join(TMP_ROOT, "repo");
     mkdirSync(repoRoot, { recursive: true });
 
-    const workspace = __newazaPreflightInternals.resolveWorkspaceDir(repoRoot, "../outside-iris");
+    const workspace = __taintAnalysisPreflightInternals.resolveWorkspaceDir(repoRoot, "../outside-iris");
     expect(workspace).toBe(path.resolve(repoRoot, "./iris"));
   });
 
   it("uses extractionModel when configured", () => {
-    const resolved = __newazaPreflightInternals.resolveExtractionModel({
-      ...DEFAULT_NEWAZA_TASK_CONFIG,
+    const resolved = __taintAnalysisPreflightInternals.resolveExtractionModel({
+      ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
       labelingModel: "label-model",
       extractionModel: "extract-model",
     });
@@ -43,8 +43,8 @@ describe("newaza-preflight internals", () => {
   });
 
   it("falls back to labelingModel when extractionModel is unset", () => {
-    const resolved = __newazaPreflightInternals.resolveExtractionModel({
-      ...DEFAULT_NEWAZA_TASK_CONFIG,
+    const resolved = __taintAnalysisPreflightInternals.resolveExtractionModel({
+      ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
       labelingModel: "label-model",
       extractionModel: undefined,
     });
@@ -55,9 +55,9 @@ describe("newaza-preflight internals", () => {
     });
   });
 
-  it("creates Newaza workspace directory tree", async () => {
+  it("creates Taint Analysis workspace directory tree", async () => {
     const workspace = path.join(TMP_ROOT, "iris");
-    await __newazaPreflightInternals.initializeWorkspace(workspace);
+    await __taintAnalysisPreflightInternals.initializeWorkspace(workspace);
 
     const expectedSubdirs = [
       "exploration",
@@ -75,7 +75,7 @@ describe("newaza-preflight internals", () => {
   });
 
   it("uses context-gatherer output as a soft framework hint", async () => {
-    const framework = await __newazaPreflightInternals.detectPrimaryFramework(
+    const framework = await __taintAnalysisPreflightInternals.detectPrimaryFramework(
       TMP_ROOT,
       {
         frameworks: ["Express"],
@@ -92,19 +92,19 @@ describe("newaza-preflight internals", () => {
       },
     }), "utf-8");
 
-    const framework = await __newazaPreflightInternals.detectPrimaryFramework(TMP_ROOT, undefined);
+    const framework = await __taintAnalysisPreflightInternals.detectPrimaryFramework(TMP_ROOT, undefined);
     expect(framework).toBe("express");
   });
 
   it("resolves available reference files for language/framework", async () => {
-    const newazaPath = path.join(TMP_ROOT, "newaza");
-    const refs = path.join(newazaPath, "references");
+    const taintAnalysisPath = path.join(TMP_ROOT, "taint-analysis");
+    const refs = path.join(taintAnalysisPath, "references");
     mkdirSync(refs, { recursive: true });
     writeFileSync(path.join(refs, "patterns.md"), "patterns", "utf-8");
     writeFileSync(path.join(refs, "python.md"), "python", "utf-8");
     writeFileSync(path.join(refs, "fastapi.md"), "fastapi", "utf-8");
 
-    const files = await __newazaPreflightInternals.resolveReferenceFiles(newazaPath, "python", "fastapi");
+    const files = await __taintAnalysisPreflightInternals.resolveReferenceFiles(taintAnalysisPath, "python", "fastapi");
     expect(files).toEqual([
       path.join(refs, "patterns.md"),
       path.join(refs, "python.md"),
@@ -130,9 +130,9 @@ describe("newaza-preflight internals", () => {
       "{{SELECT_LINE}}",
     ].join("\n"), "utf-8");
 
-    const rendered = await __newazaPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
+    const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
     expect(rendered).not.toContain("{{");
-    expect(rendered).toContain("Newaza Source candidate extraction");
+    expect(rendered).toContain("Taint Analysis Source candidate extraction");
     expect(rendered).toContain("import python");
   });
 
@@ -140,8 +140,8 @@ describe("newaza-preflight internals", () => {
     const templatePath = path.join(TMP_ROOT, "starter.ql.tmpl");
     writeFileSync(templatePath, "{{SOURCE_HANDLER_PREDICATE}}", "utf-8");
 
-    const rendered = await __newazaPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
-    expect(rendered).toContain("@id newaza/extraction/fallback-source");
+    const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
+    expect(rendered).toContain("@id taint-analysis/extraction/fallback-source");
   });
 
   it("falls back without agentCtx even when body placeholders present", async () => {
@@ -155,12 +155,12 @@ describe("newaza-preflight internals", () => {
     ].join("\n"), "utf-8");
 
     // No agentCtx → should use deterministic fallback
-    const rendered = await __newazaPreflightInternals.renderExtractionTemplate(
+    const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(
       templatePath,
       "go",
       "source",
     );
-    expect(rendered).toContain("@id newaza/extraction/fallback-source");
+    expect(rendered).toContain("@id taint-analysis/extraction/fallback-source");
     expect(rendered).toContain("where 1 = 0");
   });
 
@@ -175,13 +175,13 @@ describe("newaza-preflight internals", () => {
     ].join("\n"), "utf-8");
 
     // Agent will fail (no runtime configured) but should fall back gracefully
-    const rendered = await __newazaPreflightInternals.renderExtractionTemplate(
+    const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(
       templatePath,
       "go",
       "source",
       {
         referenceFiles: [],
-        newazaPath: TMP_ROOT,
+        taintAnalysisPath: TMP_ROOT,
         model: "nonexistent-model",
         repoRoot: TMP_ROOT,
         workspaceDir: path.join(TMP_ROOT, "iris"),
@@ -194,7 +194,7 @@ describe("newaza-preflight internals", () => {
     );
 
     // Should fall back to deterministic fallback
-    expect(rendered).toContain("@id newaza/extraction/fallback-source");
+    expect(rendered).toContain("@id taint-analysis/extraction/fallback-source");
     expect(rendered).toContain("where 1 = 0");
   });
 
@@ -202,14 +202,14 @@ describe("newaza-preflight internals", () => {
     const workspaceDir = path.join(TMP_ROOT, "iris");
     mkdirSync(path.join(workspaceDir, "exploration"), { recursive: true });
 
-    await __newazaPreflightInternals.writeManifestAndDetection(
+    await __taintAnalysisPreflightInternals.writeManifestAndDetection(
       workspaceDir,
       "/tmp/db",
       "python",
       "fastapi",
       [],
       {
-        ...DEFAULT_NEWAZA_TASK_CONFIG,
+        ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
         labelingModel: "label-model",
         extractionModel: "extract-model",
       },
@@ -232,12 +232,12 @@ describe("newaza-preflight internals", () => {
     const workspaceDir = path.join(TMP_ROOT, "iris");
     mkdirSync(path.join(workspaceDir, "exploration"), { recursive: true });
 
-    await __newazaPreflightInternals.writeCodeqlCompatibility(
+    await __taintAnalysisPreflightInternals.writeCodeqlCompatibility(
       workspaceDir,
       "go",
       "CodeQL CLI 2.20.7",
       {
-        ...DEFAULT_NEWAZA_TASK_CONFIG,
+        ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
         codeqlApiProfile: "auto",
         codeqlProfileFallbacks: true,
         codeqlProbeTimeoutMs: 20_000,

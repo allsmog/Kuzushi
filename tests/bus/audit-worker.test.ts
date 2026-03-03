@@ -15,6 +15,7 @@ function makeConfig(): KuzushiConfig {
     triageMaxTurns: 10,
     auditLog: true,
     busBackend: "in-process",
+    triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
     scanners: ["semgrep"],

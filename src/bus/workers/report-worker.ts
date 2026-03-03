@@ -20,11 +20,14 @@ import type {
   ScanStartEvent,
   TaskStartEvent,
   TriageAgentActivityEvent,
+  TriageErrorEvent,
   TriageResultEvent,
   TriageStartEvent,
   VerificationAgentActivityEvent,
+  VerificationErrorEvent,
   VerificationResultEvent,
   VerificationStartEvent,
+  PocHarnessErrorEvent,
 } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -60,7 +63,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   });
 
   bus.subscribe<TaskStartEvent>("task:start", (event) => {
-    if (event.payload.outputKind !== "findings") {
+    if (event.payload.outputKind !== "findings" && event.payload.outputKind !== "threat-model") {
       return;
     }
 
@@ -92,6 +95,13 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
     printTriageProgress(result, index, total, attempts);
   });
 
+  bus.subscribe<TriageErrorEvent>("triage:error", (event) => {
+    const { finding, error, index, total, attempts } = event.payload;
+    const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
+    console.log(`  [${index}/${total}] TRIAGE ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`);
+    console.log(`    ${truncate(error, 160)}`);
+  });
+
   bus.subscribe<VerificationStartEvent>("verification:start", (event) => {
     if (event.payload.findingCount > 0) {
       console.log(`  Verifying ${event.payload.findingCount} findings via ${event.payload.model}...\n`);
@@ -106,6 +116,13 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
       : "";
     const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
     console.log(`  [${index}/${total}] ${status}${cost}${retrySuffix} ${result.fingerprint.slice(0, 12)}...`);
+  });
+
+  bus.subscribe<VerificationErrorEvent>("verification:error", (event) => {
+    const { finding, error, index, total, attempts } = event.payload;
+    const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
+    console.log(`  [${index}/${total}] VERIFY ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`);
+    console.log(`    ${truncate(error, 160)}`);
   });
 
   bus.subscribe<PocHarnessStartEvent>("poc-harness:start", (event) => {
@@ -125,6 +142,13 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
     console.log(
       `  [${index}/${total}] ${status}${parsed}${cost}${retrySuffix} ${result.fingerprint.slice(0, 12)}...`,
     );
+  });
+
+  bus.subscribe<PocHarnessErrorEvent>("poc-harness:error", (event) => {
+    const { finding, error, index, total, attempts } = event.payload;
+    const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
+    console.log(`  [${index}/${total}] POC ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`);
+    console.log(`    ${truncate(error, 160)}`);
   });
 
   bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", (event) => {
@@ -226,6 +250,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
       runId: event.meta.runId,
       repoRoot: event.payload.context.repoRoot,
       auditLog: deps.config.auditLog === true,
+      fingerprints: event.payload.fingerprints,
     });
 
     if (deps.config.reportOutput) {
@@ -238,6 +263,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
         event.payload.context.repoName,
         event.payload.stats ?? {},
         event.meta.runId,
+        event.payload.fingerprints,
       );
       writeFileSync(deps.config.reportOutput, markdown, "utf-8");
       console.log(`  Report written to ${deps.config.reportOutput}`);
@@ -253,6 +279,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
         event.payload.context.repoName,
         event.payload.stats ?? {},
         event.meta.runId,
+        event.payload.fingerprints,
       );
       writeFileSync(deps.config.sarifOutput, sarif, "utf-8");
       console.log(`  SARIF report written to ${deps.config.sarifOutput}`);
