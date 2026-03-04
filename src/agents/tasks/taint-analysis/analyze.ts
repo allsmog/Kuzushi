@@ -59,6 +59,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
   outputKind: "findings",
   dependsOn: ["taint-analysis-label"],
   async run(_input, context): Promise<Finding[]> {
+    process.stderr.write(`[taint-analysis-run] Starting taint analysis run...\n`);
     const cfg = resolveTaintAnalysisConfig(context.config);
     const labelOutput = asLabelOutput(context.upstreamOutputs.get("taint-analysis-label"));
     if (!labelOutput) {
@@ -66,18 +67,34 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
     }
 
     const labels = labelOutput.labels ?? await loadLabelsFromDisk(labelOutput.labelsPath);
-
-    const taintTemplatePath = path.join(labelOutput.taintAnalysisPath, "assets", "taint_query.ql.tmpl");
-    const taintTemplate = await readFile(taintTemplatePath, "utf-8");
-
+    process.stderr.write(`[taint-analysis-run] Loaded labels: ${labels.passes.length} passes\n`);
     const resultsDir = path.join(labelOutput.workspaceDir, "results");
     const compatRecordPath = path.join(labelOutput.workspaceDir, "exploration", "codeql_compat.json");
 
     const enabledPasses = TAINT_ANALYSIS_PASSES.filter((passDef) => labelOutput.passes.includes(passDef.passId));
     if (enabledPasses.length === 0) {
+      process.stderr.write(`[taint-analysis-run] No enabled passes, skipping\n`);
+      return [];
+    }
+    process.stderr.write(`[taint-analysis-run] ${enabledPasses.length} enabled passes\n`);
+    if (!hasUsableRoleForPasses(labels, enabledPasses, "source")) {
+      await writeFile(
+        path.join(resultsDir, "skip_reason.json"),
+        JSON.stringify({
+          reason: "no_sources",
+          detail: "Skipping taint analysis run because no non-fp source labels were available for enabled passes.",
+          enabledPasses: enabledPasses.map((pass) => pass.passId),
+          generatedAt: new Date().toISOString(),
+        }, null, 2),
+        "utf-8",
+      );
       return [];
     }
 
+    const taintTemplatePath = path.join(labelOutput.taintAnalysisPath, "assets", "taint_query.ql.tmpl");
+    const taintTemplate = await readFile(taintTemplatePath, "utf-8");
+
+    process.stderr.write(`[taint-analysis-run] Rendering artifacts and compile-gating queries...\n`);
     const requestedProfile = cfg.codeqlApiProfile ?? "auto";
     const fallbackEnabled = requestedProfile === "auto"
       ? (cfg.codeqlProfileFallbacks ?? true)
@@ -120,6 +137,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
 
     const selectedProfile = profileSelection.selected;
     const passQueries = profileSelection.passQueries;
+    process.stderr.write(`[taint-analysis-run] Profile selected: ${selectedProfile.id}, ${passQueries.length} queries to run\n`);
     await writeFile(
       path.join(resultsDir, "profile_used.json"),
       JSON.stringify({
@@ -136,7 +154,9 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
       "utf-8",
     );
 
-    for (const passQuery of passQueries) {
+    for (let qi = 0; qi < passQueries.length; qi++) {
+      const passQuery = passQueries[qi];
+      process.stderr.write(`[taint-analysis-run] Running query ${qi + 1}/${passQueries.length} (pass ${passQuery.passId})...\n`);
       await runCommand(
         labelOutput.codeqlBinary,
         withResources([
@@ -149,6 +169,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
         ], cfg),
         labelOutput.workspaceDir,
       );
+      process.stderr.write(`[taint-analysis-run] Query ${qi + 1}/${passQueries.length} complete\n`);
     }
 
     const scriptPath = path.join(labelOutput.taintAnalysisPath, "scripts", "filter_and_report.py");
@@ -170,6 +191,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
       );
     }
 
+    process.stderr.write(`[taint-analysis-run] Collecting findings from SARIF results...\n`);
     const rawFindings = await collectRawFindings(resultsDir, labels);
     await writeFile(
       path.join(resultsDir, "findings.raw.json"),
@@ -183,6 +205,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
 
     const findings = await convertSarifToTaintAnalysisFindings(resultsDir, context.repoName, labels);
     const capped = cfg.maxFindings ? findings.slice(0, cfg.maxFindings) : findings;
+    process.stderr.write(`[taint-analysis-run] Complete: ${rawFindings.length} raw findings, ${capped.length} deduplicated findings\n`);
     return capped;
   },
   triageAgentConfig(finding, repoName): TriageAgentConfig {
@@ -397,7 +420,7 @@ function renderTaintQuery(
   const queryIdPrefix = languageQueryIdPrefix(profile.language);
   const extraTags = passDef.cwes
     .slice(1)
-    .map((cwe) => ` *       external/cwe/cwe-${cwe}`)
+    .map((cwe) => ` *       external/cwe/cwe-${Number.parseInt(cwe, 10)}`)
     .join("\n");
 
   const rendered = template
@@ -409,7 +432,7 @@ function renderTaintQuery(
     .replaceAll("{{QUERY_DESCRIPTION}}", `Detect tainted dataflow for ${passDef.focus}.`)
     .replaceAll("{{QUERY_ID}}", `${queryIdPrefix}/taint-analysis/pass${passDef.passId}-${passDef.passKey.replaceAll("_", "-")}`)
     .replaceAll("{{PRECISION}}", "medium")
-    .replaceAll("{{CWE_PRIMARY}}", passDef.cwes[0] ?? "000")
+    .replaceAll("{{CWE_PRIMARY}}", String(Number.parseInt(passDef.cwes[0] ?? "0", 10)))
     .replaceAll("{{EXTRA_TAGS}}", extraTags)
     .replaceAll("{{SOURCE_MODULE}}", "MySources")
     .replaceAll("{{SINK_MODULE}}", "MySinks")
@@ -654,7 +677,7 @@ async function collectRawFindings(
         severity: finding.severity,
         message: finding.message,
         evidence: finding.evidence,
-        cwe: passDef ? passDef.cwes.map((cwe) => `CWE-${cwe}`) : finding.cwe,
+        cwe: passDef ? passDef.cwes.map((cwe) => `CWE-${Number.parseInt(cwe, 10)}`) : finding.cwe,
         passId: passDef?.passId,
       });
     }
@@ -691,7 +714,7 @@ function augmentFinding(
     evidence: finding.evidence
       ? `${finding.evidence} | ${passEvidence}`
       : passEvidence,
-    cwe: passDef ? passDef.cwes.map((cwe) => `CWE-${cwe}`) : finding.cwe,
+    cwe: passDef ? passDef.cwes.map((cwe) => `CWE-${Number.parseInt(cwe, 10)}`) : finding.cwe,
     score: scoreFindingMetadata({
       severity: finding.severity,
       likelihood: finding.likelihood,
@@ -730,73 +753,137 @@ function queryFilename(passId: number, focus: string): string {
   return `Pass${passId}_${focusSlug}.ql`;
 }
 
+const GO_STDLIB_PACKAGES = new Set([
+  "fmt", "log", "os", "io", "net", "sql", "json",
+  "encoding/json", "encoding/xml", "encoding/gob",
+  "database/sql", "os/exec", "net/http", "net/url",
+  "html/template", "text/template", "path", "path/filepath",
+  "crypto", "regexp", "strings", "proto",
+]);
+
+function looksLikeGoPackage(hint: string): boolean {
+  return hint.includes("/") || GO_STDLIB_PACKAGES.has(hint);
+}
+
+/** Per-language CodeQL callable name matching. */
+function buildCallableNameCheck(
+  callable: string,
+  language: TaintAnalysisLanguage,
+  receiverHint: string | null,
+): string {
+  const escaped = escapeQllString(callable);
+
+  if (receiverHint) {
+    const hint = escapeQllString(receiverHint);
+    switch (language) {
+      case "go":
+        if (looksLikeGoPackage(receiverHint)) {
+          return `call.getTarget().hasQualifiedName("${hint}", "${escaped}")`;
+        }
+        return `call.getTarget().getName() = "${escaped}"`;
+      case "python":
+        return `call.getCalleeName() = "${escaped}"`;
+      case "java":
+      case "csharp":
+        return `call.getCallee().getName() = "${escaped}"`;
+      case "javascript":
+        return `call.getCalleeName() = "${escaped}"`;
+    }
+  }
+
+  switch (language) {
+    case "go":
+      return `call.getTarget().getName() = "${escaped}"`;
+    case "python":
+    case "javascript":
+      return `call.getCalleeName() = "${escaped}"`;
+    case "java":
+    case "csharp":
+      return `call.getCallee().getName() = "${escaped}"`;
+  }
+}
+
+const VARIADIC_FORMAT_FUNCS: Record<TaintAnalysisLanguage, Set<string>> = {
+  go: new Set([
+    "Sprintf", "Fprintf", "Printf", "Errorf",
+    "Fatalf", "Panicf", "Logf", "Warnf", "Infof", "Debugf",
+  ]),
+  python: new Set(["format"]),
+  java: new Set(["format", "printf"]),
+  javascript: new Set([]),
+  csharp: new Set(["Format"]),
+};
+
+function wrapCallExists(nameCheck: string, nodeCheck: string): string {
+  return [
+    `exists(DataFlow::CallNode call |`,
+    `        ${nameCheck} and`,
+    `        ${nodeCheck}`,
+    `      )`,
+  ].join("\n");
+}
+
 function buildNodeCallableCheck(
   nodeParamName: string,
   info: CallableInfo,
   language: TaintAnalysisLanguage,
   role: "source" | "sink" | "sanitizer",
 ): string {
-  if (language === "go") {
-    return buildNodeCallableCheckGo(nodeParamName, info, role);
-  }
-
-  const regexPattern = buildCallableRegexPattern(info.callable);
-  return `${nodeParamName}.toString().regexpMatch("${escapeQllString(regexPattern)}")`;
-}
-
-function buildNodeCallableCheckGo(
-  nodeParamName: string,
-  info: CallableInfo,
-  role: "source" | "sink" | "sanitizer",
-): string {
-  const escapedName = escapeQllString(info.callable);
+  const nameCheck = buildCallableNameCheck(info.callable, language, info.receiverHint);
 
   if (role === "source") {
-    return [
-      `exists(DataFlow::CallNode call |`,
-      `        call.getTarget().getName() = "${escapedName}" and`,
-      `        ${nodeParamName} = call.getResult()`,
-      `      )`,
-    ].join("\n");
+    let nodeExpr: string;
+    if (info.argIndex != null && info.flowKind !== "return") {
+      nodeExpr = `call.getArgument(${info.argIndex})`;
+    } else {
+      nodeExpr = "call.getResult()";
+    }
+    return wrapCallExists(nameCheck, `${nodeParamName} = ${nodeExpr}`);
   }
 
   if (role === "sink") {
-    const argExpr = info.argIndex != null
-      ? `call.getArgument(${info.argIndex})`
-      : "call.getAnArgument()";
-
-    return [
-      `exists(DataFlow::CallNode call |`,
-      `        call.getTarget().getName() = "${escapedName}" and`,
-      `        ${nodeParamName} = ${argExpr}`,
-      `      )`,
-    ].join("\n");
+    let argExpr: string;
+    if (info.argIndex != null) {
+      const isVariadicFormat = info.argIndex === 0
+        && VARIADIC_FORMAT_FUNCS[language].has(info.callable);
+      argExpr = isVariadicFormat
+        ? "call.getAnArgument()"
+        : `call.getArgument(${info.argIndex})`;
+    } else {
+      argExpr = "call.getAnArgument()";
+    }
+    return wrapCallExists(nameCheck, `${nodeParamName} = ${argExpr}`);
   }
 
-  // sanitizer: match either direction (return value or argument)
+  // Sanitizer: match either return value or argument
   const argExpr = info.argIndex != null
     ? `call.getArgument(${info.argIndex})`
     : "call.getAnArgument()";
-
-  return [
-    `exists(DataFlow::CallNode call |`,
-    `        call.getTarget().getName() = "${escapedName}" and`,
-    `        (${nodeParamName} = call.getResult() or ${nodeParamName} = ${argExpr})`,
-    `      )`,
-  ].join("\n");
-}
-
-function buildCallableRegexPattern(callable: string): string {
-  const escapedCallable = escapeRegexLiteral(callable);
-  return `.*\\b${escapedCallable}\\b.*`;
-}
-
-function escapeRegexLiteral(value: string): string {
-  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+  return wrapCallExists(
+    nameCheck,
+    `(${nodeParamName} = call.getResult() or ${nodeParamName} = ${argExpr})`,
+  );
 }
 
 function escapeQllString(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function hasUsableRoleForPasses(
+  labels: TaintAnalysisLabelsDocument,
+  enabledPasses: TaintAnalysisPassDefinition[],
+  role: "source" | "sink" | "sanitizer",
+): boolean {
+  const enabledPassIds = new Set(enabledPasses.map((pass) => pass.passId));
+  for (const pass of labels.passes) {
+    if (!enabledPassIds.has(pass.pass_id)) {
+      continue;
+    }
+    if (pass.entries.some((entry) => entry.role === role && entry.classification !== "fp")) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function asLabelOutput(value: unknown): TaintAnalysisLabelOutput | null {
@@ -841,5 +928,7 @@ export const __taintAnalysisRunInternals = {
   selectProfileWithCompileGate,
   firstErrorExcerpt,
   augmentFinding,
-  buildNodeCallableCheckGo,
+  buildCallableNameCheck,
+  wrapCallExists,
+  hasUsableRoleForPasses,
 };
