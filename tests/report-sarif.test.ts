@@ -159,6 +159,71 @@ describe("generateSarifReport", () => {
     db.close();
   });
 
+  it("includes pocHarnessCostUsd in totalCostUsd", () => {
+    const db = initDb(":memory:");
+    const runId = "run-sarif-poc";
+
+    createRun(db, runId, "repo", makeConfig(), makeScanOpts());
+    updateRunStatus(db, runId, "triaging");
+
+    const finding = makeFinding({ fingerprint: "fp-poc-cost" });
+    const triage = makeTriageResult(finding.fingerprint, "tp", 0.9, "Real", "Fix it.");
+    upsertFinding(db, finding, triage, "repo", "HEAD");
+    updateRunFindings(db, runId, [finding]);
+
+    const sarif = generateSarifReport(
+      db,
+      "repo",
+      {
+        totalFindings: 1,
+        totalCostUsd: 0.50,
+        verifyCostUsd: 0.10,
+        pocHarnessCostUsd: 0.05,
+        pocHarnessGenerated: 1,
+        pocHarnessSkipped: 0,
+        pocHarnessErrors: 0,
+      },
+      runId,
+    );
+
+    const parsed = JSON.parse(sarif) as { runs: Array<{ properties: { summary: Record<string, unknown> } }> };
+    const summary = parsed.runs[0].properties.summary;
+    expect(summary.pocHarnessCostUsd).toBe(0.05);
+    expect(summary.pocHarnessGenerated).toBe(1);
+    expect(summary.totalCostUsd).toBeGreaterThan(0.50);
+
+    db.close();
+  });
+
+  it("clamps startLine to >= 1 for all file paths", () => {
+    const db = initDb(":memory:");
+    const runId = "run-sarif-clamp";
+
+    createRun(db, runId, "repo", makeConfig(), makeScanOpts());
+    updateRunStatus(db, runId, "triaging");
+
+    const finding = makeFinding({
+      fingerprint: "fp-sarif-zero-line",
+      filePath: "src/app.ts",
+      startLine: 0,
+    });
+    const triage = makeTriageResult(finding.fingerprint, "tp", 0.9, "Real.", null);
+    upsertFinding(db, finding, triage, "repo", "HEAD");
+    updateRunFindings(db, runId, [finding]);
+
+    const parsed = JSON.parse(generateSarifReport(db, "repo", {}, runId)) as {
+      runs: Array<{
+        results: Array<{
+          locations: Array<{ physicalLocation: { region: { startLine: number } } }>;
+        }>;
+      }>;
+    };
+
+    expect(parsed.runs[0].results[0].locations[0].physicalLocation.region.startLine).toBe(1);
+
+    db.close();
+  });
+
   it("maps severities and marks false positives with suppressions", () => {
     const db = initDb(":memory:");
     const runId = "run-sarif-2";

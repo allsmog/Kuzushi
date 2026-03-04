@@ -7,7 +7,7 @@ const BIN_DIR = path.join(os.homedir(), ".kuzushi", "bin");
 
 function which(name: string): string | null {
   try {
-    return execFileSync("which", [name], { encoding: "utf-8" }).trim() || null;
+    return execFileSync("which", [name], { encoding: "utf-8", timeout: 5000 }).trim() || null;
   } catch {
     return null;
   }

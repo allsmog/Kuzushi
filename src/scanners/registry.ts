@@ -60,17 +60,17 @@ export class ScannerRegistry {
       .map((id) => id.trim())
       .filter(Boolean);
 
-    // Default path (no explicit override): all IDs must be known plugins.
+    // Default path (no explicit override): IDs must be known plugins or non-plugin aliases.
     if (normalized.length === 0) {
       throw new Error("At least one scanner must be configured.");
     }
 
-    const unknown = normalized.filter((id) => !this.has(id));
+    const unknown = normalized.filter((id) => !this.has(id) && !NON_PLUGIN_SCANNER_ALIASES.has(id));
     if (unknown.length > 0) {
       throw new Error(`Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`);
     }
 
-    return [...new Set(normalized)];
+    return [...new Set(normalized.filter((id) => this.has(id)))];
   }
 
   async runAll(repoRoot: string, opts: ScanOpts, config: KuzushiConfig): Promise<Finding[]> {

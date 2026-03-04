@@ -271,6 +271,41 @@ describe("inferCweFromPath", () => {
     expect(inferCweFromPath(path)).toBe("CWE-79");
   });
 
+  it("detects XXE", () => {
+    const path = { ultimateSink: { description: "xxe via xml external entity" } } as CrossServicePath;
+    expect(inferCweFromPath(path)).toBe("CWE-611");
+  });
+
+  it("detects open redirect", () => {
+    const path = { ultimateSink: { description: "open redirect to attacker URL" } } as CrossServicePath;
+    expect(inferCweFromPath(path)).toBe("CWE-601");
+  });
+
+  it("detects header injection", () => {
+    const path = { ultimateSink: { description: "header injection via user input" } } as CrossServicePath;
+    expect(inferCweFromPath(path)).toBe("CWE-113");
+  });
+
+  it("detects log injection", () => {
+    const path = { ultimateSink: { description: "log injection through crafted input" } } as CrossServicePath;
+    expect(inferCweFromPath(path)).toBe("CWE-117");
+  });
+
+  it("detects LDAP injection", () => {
+    const path = { ultimateSink: { description: "ldap query with unsanitized filter" } } as CrossServicePath;
+    expect(inferCweFromPath(path)).toBe("CWE-90");
+  });
+
+  it("detects SSTI", () => {
+    const path = { ultimateSink: { description: "ssti via template rendering" } } as CrossServicePath;
+    expect(inferCweFromPath(path)).toBe("CWE-1336");
+  });
+
+  it("detects code injection (CWE-94)", () => {
+    const path = { ultimateSink: { description: "code injection via eval" } } as CrossServicePath;
+    expect(inferCweFromPath(path)).toBe("CWE-94");
+  });
+
   it("falls back to CWE-346 for unknown patterns", () => {
     const path = { ultimateSink: { description: "some generic finding" } } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-346");

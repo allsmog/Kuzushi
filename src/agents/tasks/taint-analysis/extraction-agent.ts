@@ -29,6 +29,7 @@ export interface ExtractionAgentOptions {
   codeqlApiProfileId: string;
   dataFlowImport: string;
   taintTrackingImport: string;
+  disableCacheRead?: boolean;
 }
 
 /**
@@ -65,6 +66,7 @@ export async function generateExtractionQuery(
     codeqlApiProfileId,
     dataFlowImport,
     taintTrackingImport,
+    disableCacheRead = false,
   } = options;
 
   const cacheDir = path.join(workspaceDir, "extraction");
@@ -81,9 +83,11 @@ export async function generateExtractionQuery(
   const referenceContent = await loadReferenceContent(referenceFiles);
   const cacheHash = computeCacheHash(template, referenceContent);
 
-  const cached = await readCacheIfValid(cachePath, cacheHash);
-  if (cached !== null) {
-    return cached;
+  if (!disableCacheRead) {
+    const cached = await readCacheIfValid(cachePath, cacheHash);
+    if (cached !== null) {
+      return cached;
+    }
   }
 
   // --- Build system prompt ---

@@ -25,7 +25,6 @@ describe("DEFAULT_INVARIANT_ANALYSIS_CONFIG", () => {
   it("has expected defaults", () => {
     expect(DEFAULT_INVARIANT_ANALYSIS_CONFIG.maxInvariants).toBe(200);
     expect(DEFAULT_INVARIANT_ANALYSIS_CONFIG.securityOnly).toBe(true);
-    expect(DEFAULT_INVARIANT_ANALYSIS_CONFIG.maxFilesPerAgent).toBe(20);
     expect(DEFAULT_INVARIANT_ANALYSIS_CONFIG.confidenceThreshold).toBe(0.6);
   });
 });
@@ -47,7 +46,6 @@ describe("resolveInvariantAnalysisConfig", () => {
       checkModel: "openai:gpt-4",
       maxInvariants: 100,
       securityOnly: false,
-      maxFilesPerAgent: 10,
       confidenceThreshold: 0.8,
     };
 
@@ -56,7 +54,6 @@ describe("resolveInvariantAnalysisConfig", () => {
     expect(resolved.checkModel).toBe("openai:gpt-4");
     expect(resolved.maxInvariants).toBe(100);
     expect(resolved.securityOnly).toBe(false);
-    expect(resolved.maxFilesPerAgent).toBe(10);
     expect(resolved.confidenceThreshold).toBe(0.8);
   });
 

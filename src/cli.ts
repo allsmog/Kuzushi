@@ -30,6 +30,35 @@ const TAINT_ANALYSIS_TASK_IDS = ["taint-analysis-preflight", "taint-analysis-lab
 const TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS = ["taint-analysis-discover", "taint-analysis-cross-analyze", "taint-analysis-stitch"] as const;
 const DEFAULT_AGENTIC_MODEL = "anthropic:claude-sonnet-4-6";
 
+function expandScannerAliases(
+  scanners: string[],
+  config: KuzushiConfig,
+): { pluginScanners: string[]; enabledTasks: string[] } {
+  const enabledTasks: string[] = [];
+  const pluginScanners: string[] = [];
+
+  for (const id of scanners) {
+    if (id === "taint-analysis") {
+      const crossServiceEnabled = config.scannerConfig["taint-analysis"]?.["crossService"] === true;
+      enabledTasks.push(...(crossServiceEnabled ? TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS : TAINT_ANALYSIS_TASK_IDS));
+    } else if (id === "crypto-misuse") {
+      enabledTasks.push("crypto-misuse-detect");
+    } else if (id === "auth-access") {
+      enabledTasks.push("auth-access-detect");
+    } else if (id === "race-condition") {
+      enabledTasks.push("race-condition-detect");
+    } else if (id === "invariant-analysis") {
+      enabledTasks.push("invariant-extract", "invariant-check");
+    } else if (id === "threat-model") {
+      enabledTasks.push("threat-model-stride", "threat-model-pasta");
+    } else {
+      pluginScanners.push(id);
+    }
+  }
+
+  return { pluginScanners, enabledTasks };
+}
+
 function resolveRepo(repoPath: string): { root: string; name: string } {
   const absPath = path.resolve(repoPath);
   try {
@@ -364,7 +393,10 @@ program
       config.agentRuntimeConfig = runtimeConfig;
     }
     if (opts.enabledTasks) {
-      config.enabledTasks = parseScannersArg(opts.enabledTasks);
+      config.enabledTasks = [
+        ...(config.enabledTasks ?? []),
+        ...parseScannersArg(opts.enabledTasks),
+      ];
     }
     if (opts.triageMaxTurns !== undefined) {
       if (!Number.isFinite(opts.triageMaxTurns) || opts.triageMaxTurns < 1) {
@@ -452,46 +484,16 @@ program
       : undefined;
 
     // Auto-expand scanner aliases that map to AgentTask DAGs.
-    // These are not ScannerPlugins, so strip them from scanner plugins after expanding.
-    if (scannersOverride?.includes("taint-analysis")) {
-      const crossServiceEnabled = config.scannerConfig["taint-analysis"]?.["crossService"] === true;
-      if (crossServiceEnabled) {
-        config.enabledTasks = [
-          ...(config.enabledTasks ?? []),
-          ...TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS,
-        ];
-      } else {
-        config.enabledTasks = [
-          ...(config.enabledTasks ?? []),
-          ...TAINT_ANALYSIS_TASK_IDS,
-        ];
-      }
-      scannersOverride = scannersOverride.filter((id) => id !== "taint-analysis");
+    // This must run on the effective scanner list whether from CLI or config file.
+    const effectiveScanners = scannersOverride ?? [...config.scanners];
+    const { pluginScanners, enabledTasks: aliasExpandedTasks } = expandScannerAliases(effectiveScanners, config);
+    if (aliasExpandedTasks.length > 0) {
+      config.enabledTasks = [...(config.enabledTasks ?? []), ...aliasExpandedTasks];
     }
-
-    if (scannersOverride?.includes("crypto-misuse")) {
-      config.enabledTasks = [...(config.enabledTasks ?? []), "crypto-misuse-detect"];
-      scannersOverride = scannersOverride.filter((id) => id !== "crypto-misuse");
-    }
-
-    if (scannersOverride?.includes("auth-access")) {
-      config.enabledTasks = [...(config.enabledTasks ?? []), "auth-access-detect"];
-      scannersOverride = scannersOverride.filter((id) => id !== "auth-access");
-    }
-
-    if (scannersOverride?.includes("race-condition")) {
-      config.enabledTasks = [...(config.enabledTasks ?? []), "race-condition-detect"];
-      scannersOverride = scannersOverride.filter((id) => id !== "race-condition");
-    }
-
-    if (scannersOverride?.includes("invariant-analysis")) {
-      config.enabledTasks = [...(config.enabledTasks ?? []), "invariant-extract", "invariant-check"];
-      scannersOverride = scannersOverride.filter((id) => id !== "invariant-analysis");
-    }
-
-    if (scannersOverride?.includes("threat-model")) {
-      config.enabledTasks = [...(config.enabledTasks ?? []), "threat-model-stride", "threat-model-pasta"];
-      scannersOverride = scannersOverride.filter((id) => id !== "threat-model");
+    if (scannersOverride) {
+      scannersOverride = pluginScanners;
+    } else {
+      config.scanners = pluginScanners;
     }
 
     const scanOpts: ScanOpts = {
@@ -653,8 +655,11 @@ program
         process.exitCode = 1;
       }
     } finally {
-      await bus!.close();
-      db.close();
+      try {
+        await bus!.close();
+      } finally {
+        db.close();
+      }
     }
   });
 

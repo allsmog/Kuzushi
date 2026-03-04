@@ -723,7 +723,8 @@ function normalizeLanguage(value: unknown): string | undefined {
     return "rust";
   }
 
-  return normalized;
+  // Reject unknown languages rather than passing unsanitized values to CodeQL CLI
+  return undefined;
 }
 
 function resolveRepoPath(repoRoot: string, candidate: string): string {

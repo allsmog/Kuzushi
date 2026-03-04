@@ -65,7 +65,7 @@ function parseInvariants(raw: unknown, securityOnly: boolean, maxInvariants: num
     if (!isRecord(item)) continue;
     const inv = normalizeInvariant(item);
     if (!inv) continue;
-    if (securityOnly && inv.securityRelevance === "none") continue;
+    if (securityOnly && inv.securityRelevance !== "high" && inv.securityRelevance !== "medium") continue;
     invariants.push(inv);
   }
 
@@ -137,6 +137,7 @@ export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
         options: {
           cwd: context.repoRoot,
           model: cfg.extractionModel,
+          maxTurns: 30,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {

@@ -157,6 +157,20 @@ describe("threatsToFindings", () => {
 
     expect(threatsToFindings(threats, "/tmp/repo", "test-repo", "high")).toHaveLength(0);
     expect(threatsToFindings(threats, "/tmp/repo", "test-repo", "medium")).toHaveLength(1);
+    expect(threatsToFindings(threats, "/tmp/repo", "test-repo", "low")).toHaveLength(1);
+  });
+
+  it("includes low-impact threats when threshold is 'low'", () => {
+    const threats = [
+      {
+        id: "t1", elementId: "e1", category: "repudiation" as const, title: "T1", description: "D1",
+        attackVector: "x", preconditions: [], impact: "low" as const, likelihood: "low" as const,
+        existingMitigations: [], missingMitigations: [], relatedCwe: [],
+        affectedFiles: [{ filePath: "a.ts", startLine: 1 }],
+      },
+    ];
+    expect(threatsToFindings(threats, "/tmp/repo", "test-repo", "low")).toHaveLength(1);
+    expect(threatsToFindings(threats, "/tmp/repo", "test-repo", "medium")).toHaveLength(0);
   });
 
   it("emits synthetic finding for threats without affected files", () => {

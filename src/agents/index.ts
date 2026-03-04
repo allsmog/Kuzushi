@@ -47,6 +47,8 @@ export function createDefaultTaskRegistry(scannerRegistry?: ScannerRegistry): Ta
     tasks.register(adaptScannerPlugin(registry.get(id)));
   }
 
+  tasks.validate();
+
   return tasks;
 }
 

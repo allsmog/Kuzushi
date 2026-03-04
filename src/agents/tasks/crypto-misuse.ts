@@ -129,12 +129,12 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
       scannerConfidence: f.confidence || "MEDIUM",
       subcategory: ["vuln"],
       likelihood: f.confidence || "MEDIUM",
-      impact: f.severity === "ERROR" ? "HIGH" : "MEDIUM",
+      impact: f.severity === "ERROR" ? "HIGH" : f.severity === "INFO" ? "LOW" : "MEDIUM",
       cwe: cweList,
       score: scoreFindingMetadata({
         severity: f.severity,
         likelihood: f.confidence,
-        impact: f.severity === "ERROR" ? "HIGH" : "MEDIUM",
+        impact: f.severity === "ERROR" ? "HIGH" : f.severity === "INFO" ? "LOW" : "MEDIUM",
         subcategory: ["vuln"],
       }),
     };
@@ -186,6 +186,7 @@ export const cryptoMisuseTask: AgentTask<ScanOpts, Finding[]> = {
         options: {
           cwd: context.repoRoot,
           model,
+          maxTurns: 30,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {
@@ -201,8 +202,7 @@ export const cryptoMisuseTask: AgentTask<ScanOpts, Finding[]> = {
         }
       }
     } catch (error) {
-      console.error(`${tag} Error: ${toErrorMessage(error)}`);
-      return [];
+      throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
     return normalizeFindings(

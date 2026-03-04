@@ -31,7 +31,7 @@ function getAssetName(): string {
 /** Check if a binary exists on PATH. */
 function which(name: string): string | null {
   try {
-    return execFileSync("which", [name], { encoding: "utf-8" }).trim() || null;
+    return execFileSync("which", [name], { encoding: "utf-8", timeout: 5000 }).trim() || null;
   } catch {
     return null;
   }
@@ -54,6 +54,11 @@ function httpsGet(url: string, redirectCount: number = 0): Promise<IncomingMessa
         }
 
         const redirectUrl = new URL(res.headers.location, url).toString();
+        if (!redirectUrl.startsWith("https://")) {
+          res.resume();
+          reject(new Error(`Refusing to follow non-HTTPS redirect: ${redirectUrl}`));
+          return;
+        }
         res.resume();
         httpsGet(redirectUrl, redirectCount + 1).then(resolve, reject);
         return;

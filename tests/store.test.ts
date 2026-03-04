@@ -536,3 +536,35 @@ describe("pipeline_runs", () => {
     db.close();
   });
 });
+
+describe("large fingerprint sets (SQLite bind limit)", () => {
+  it("getStoredTriageResults handles >999 fingerprints", () => {
+    const db = initDb(":memory:");
+    const fingerprints: string[] = [];
+    for (let i = 0; i < 1100; i++) {
+      const fp = `fp-large-${String(i).padStart(5, "0")}`;
+      fingerprints.push(fp);
+      upsertFinding(db, makeFinding(fp), makeResult(fp, "tp"), "repo", "HEAD");
+    }
+
+    const results = getStoredTriageResults(db, fingerprints);
+    expect(results.size).toBe(1100);
+    expect(results.get("fp-large-00000")?.verdict).toBe("tp");
+    expect(results.get("fp-large-01099")?.verdict).toBe("tp");
+    db.close();
+  });
+
+  it("deleteFindingsByFingerprints handles >999 fingerprints", () => {
+    const db = initDb(":memory:");
+    const fingerprints: string[] = [];
+    for (let i = 0; i < 1100; i++) {
+      const fp = `fp-del-${String(i).padStart(5, "0")}`;
+      fingerprints.push(fp);
+      upsertFinding(db, makeFinding(fp), makeResult(fp), "repo", "HEAD");
+    }
+
+    const deleted = deleteFindingsByFingerprints(db, "repo", fingerprints);
+    expect(deleted).toBe(1100);
+    db.close();
+  });
+});

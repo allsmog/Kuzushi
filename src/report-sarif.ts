@@ -51,6 +51,7 @@ export function generateSarifReport(
   const verificationCounts = { exploitable, notExploitable };
   const triageCostUsd = stats.totalCostUsd ?? 0;
   const verifyCostUsd = stats.verifyCostUsd ?? findings.reduce((sum, f) => sum + (f.verifyCostUsd ?? 0), 0);
+  const pocHarnessCostUsd = stats.pocHarnessCostUsd ?? findings.reduce((sum, f) => sum + (f.pocHarnessCostUsd ?? 0), 0);
 
   const runMeta = db.prepare(`
     SELECT
@@ -175,7 +176,11 @@ export function generateSarifReport(
             notExploitable: verificationCounts.notExploitable,
             triageCostUsd,
             verificationCostUsd: verifyCostUsd,
-            totalCostUsd: triageCostUsd + verifyCostUsd,
+            pocHarnessGenerated: stats.pocHarnessGenerated ?? 0,
+            pocHarnessSkipped: stats.pocHarnessSkipped ?? 0,
+            pocHarnessErrors: stats.pocHarnessErrors ?? 0,
+            pocHarnessCostUsd,
+            totalCostUsd: triageCostUsd + verifyCostUsd + pocHarnessCostUsd,
           },
         },
       },
@@ -308,9 +313,8 @@ function buildSarifLocation(filePath: string, startLine: number): Record<string,
   const physicalLocation: Record<string, unknown> = {
     artifactLocation: { uri: uri || "." },
   };
-  if (!isDirectory) {
-    physicalLocation["region"] = { startLine };
-  }
+  // Always emit a region for SARIF consumer compatibility; clamp startLine >= 1 per SARIF 2.1.0 spec
+  physicalLocation["region"] = { startLine: Math.max(1, startLine) };
   return { physicalLocation };
 }
 

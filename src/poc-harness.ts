@@ -129,7 +129,7 @@ export async function generatePocHarness(
       continue;
     }
 
-    executionError = message.errors.join("; ") || message.subtype;
+    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
   }
 
   if (executionError) {
@@ -244,6 +244,10 @@ export function buildPocHarnessPrompt(
     "- Command injection (CWE-78): call real command-construction path and assert mocked exec/spawn receives attacker-controlled command.",
     "- Path traversal (CWE-22): call real file/path handler and assert normalized path escapes intended base directory in captured filesystem access.",
     "- XSS (CWE-79): call real render/template function and assert unescaped payload appears in output.",
+    "- Race condition (CWE-362): invoke the real concurrent code path with parallel requests and assert shared state corruption or TOCTOU violation is observable.",
+    "- Weak crypto (CWE-327/328/330): call the real crypto initialization or usage path and assert weak algorithm or insufficient entropy is used.",
+    "- Missing auth/authz (CWE-862/863): call the real endpoint handler with unauthenticated or unauthorized context and assert access is not denied.",
+    "- For other CWEs: identify the vulnerable function, call it with crafted inputs, and assert the vulnerability is observable.",
     "",
     "## Anti-hallucination constraints",
     "- Do NOT simulate the vulnerable function.",

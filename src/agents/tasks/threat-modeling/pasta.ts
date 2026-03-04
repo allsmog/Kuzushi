@@ -115,7 +115,11 @@ function normalizeTree(item: Record<string, unknown>): AttackTree | null {
   return { goal, rootNode, overallRisk };
 }
 
-function normalizeNode(item: Record<string, unknown>): AttackTreeNode | null {
+const MAX_NODE_DEPTH = 20;
+
+function normalizeNode(item: Record<string, unknown>, depth = 0): AttackTreeNode | null {
+  if (depth > MAX_NODE_DEPTH) return null;
+
   const id = typeof item["id"] === "string" ? item["id"].trim() : "";
   const description = typeof item["description"] === "string" ? item["description"].trim() : "";
   if (!id || !description) return null;
@@ -134,7 +138,7 @@ function normalizeNode(item: Record<string, unknown>): AttackTreeNode | null {
   if (Array.isArray(item["children"])) {
     for (const child of item["children"]) {
       if (!isRecord(child)) continue;
-      const node = normalizeNode(child);
+      const node = normalizeNode(child, depth + 1);
       if (node) children.push(node);
     }
   }
@@ -259,6 +263,7 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
         options: {
           cwd: context.repoRoot,
           model: cfg.pastaModel,
+          maxTurns: 30,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {

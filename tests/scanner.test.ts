@@ -155,6 +155,25 @@ describe("selectFindings", () => {
     expect(selected.length).toBe(3);
   });
 
+  it("uses meaningful defaults when metadata is missing", () => {
+    const output: SemgrepOutput = {
+      results: [
+        {
+          check_id: "custom.rule",
+          path: "src/a.ts",
+          start: { line: 1, col: 1 },
+          end: { line: 1, col: 10 },
+        },
+      ],
+    };
+    const [f] = selectFindings(output, "repo", "HEAD");
+    expect(f.severity).toBe("INFO");
+    expect(f.scannerConfidence).toBe("LOW");
+    expect(f.subcategory).toEqual(["audit"]);
+    expect(f.likelihood).toBe("LOW");
+    expect(f.impact).toBe("LOW");
+  });
+
   it("handles empty results", () => {
     const output: SemgrepOutput = { results: [] };
     const selected = selectFindings(output, "repo", "HEAD");

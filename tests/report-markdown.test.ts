@@ -148,4 +148,39 @@ describe("generateMarkdownReport", () => {
 
     db.close();
   });
+
+  it("escapes triple-backtick sequences in PoC payload to prevent fence injection", () => {
+    const db = initDb(":memory:");
+    const runId = "run-md-fence";
+
+    createRun(db, runId, "repo", makeConfig(), makeScanOpts());
+    updateRunStatus(db, runId, "triaging");
+
+    const finding = makeFinding();
+    finding.fingerprint = "fp-md-fence";
+    const triage = makeTriageResult();
+    triage.fingerprint = "fp-md-fence";
+    upsertFinding(db, finding, triage, "repo", "HEAD");
+    // Write a PoC payload that contains triple backticks
+    updateVerificationResult(db, "fp-md-fence", {
+      fingerprint: "fp-md-fence",
+      exploitable: true,
+      pocPayload: "payload here\n```\n# Injected Heading\n```\nmore payload",
+      pocDescription: "desc",
+      attackVector: "HTTP",
+      preconditions: [],
+      confidence: 0.9,
+    });
+
+    const markdown = generateMarkdownReport(db, "repo", {}, runId);
+
+    // The raw triple-backtick should be escaped (not appear as literal ```)
+    // and should NOT produce an injected heading
+    expect(markdown).not.toContain("# Injected Heading\n```\nmore");
+    // The escaped content should still contain the zero-width-space separated backticks
+    expect(markdown).toContain("payload here");
+    expect(markdown).toContain("more payload");
+
+    db.close();
+  });
 });

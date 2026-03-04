@@ -185,11 +185,12 @@ function threatsToFindings(
   threshold: string,
 ): Finding[] {
   const thresholdSet = new Set<string>();
-  if (threshold === "medium") thresholdSet.add("medium").add("high").add("critical");
+  if (threshold === "low") thresholdSet.add("low").add("medium").add("high").add("critical");
+  else if (threshold === "medium") thresholdSet.add("medium").add("high").add("critical");
   else if (threshold === "high") thresholdSet.add("high").add("critical");
   else thresholdSet.add("critical");
 
-  const findings: Finding[] = [];
+  const deduped = new Map<string, Finding>();
   let syntheticIndex = 0;
   for (const threat of threats) {
     if (!thresholdSet.has(threat.impact)) continue;
@@ -204,7 +205,7 @@ function threatsToFindings(
     const cweSegment = cweList.length > 0 ? `/${cweList[0]}` : "";
     const fingerprint = computeFingerprint(repoName, threat);
 
-    findings.push({
+    const finding: Finding = {
       scanner: "threat-model-stride",
       fingerprint,
       ruleId: `threat-model/${threat.category}${cweSegment}`,
@@ -227,10 +228,15 @@ function threatsToFindings(
         impact: threat.impact === "critical" || threat.impact === "high" ? "HIGH" : "MEDIUM",
         subcategory: ["vuln"],
       }),
-    });
+    };
+
+    const existing = deduped.get(fingerprint);
+    if (!existing || finding.score > existing.score) {
+      deduped.set(fingerprint, finding);
+    }
   }
 
-  return findings;
+  return [...deduped.values()];
 }
 
 function computeFingerprint(repoName: string, threat: StrideThreat): string {
@@ -283,6 +289,7 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
         options: {
           cwd: context.repoRoot,
           model: cfg.strideModel,
+          maxTurns: 30,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {

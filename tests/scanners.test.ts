@@ -137,6 +137,26 @@ describe("ScannerRegistry", () => {
     expect(() => registry.resolveEnabled(opts, makeConfig())).toThrow("Unknown scanner");
   });
 
+  it("resolveEnabled accepts non-plugin aliases in config defaults path", () => {
+    const registry = new ScannerRegistry();
+    registry.register(new FakePlugin("semgrep", []));
+
+    const opts: ScanOpts = {
+      severity: ["ERROR"],
+      excludePatterns: [],
+      fresh: false,
+    };
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      scanners: ["semgrep", "crypto-misuse"],
+    };
+
+    // "crypto-misuse" is in NON_PLUGIN_SCANNER_ALIASES — should not throw
+    const enabled = registry.resolveEnabled(opts, config);
+    // Only plugin IDs are returned (crypto-misuse is handled by task DAG, not plugin layer)
+    expect(enabled).toEqual(["semgrep"]);
+  });
+
   it("runAll deduplicates by fingerprint keeping highest score", async () => {
     const registry = new ScannerRegistry();
     const pluginA = new FakePlugin("a", [makeFinding("fp", "a", 1)]);

@@ -1,6 +1,6 @@
 import { execFile, type ExecFileException } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { ensureDatabase } from "../../../scanners/run-codeql.js";
@@ -65,6 +65,42 @@ interface FrameworkCandidate {
   id: string;
   score: number;
   evidence: string[];
+}
+
+interface ExtractionCompileAttempt {
+  attempted: boolean;
+  generatedQuery: boolean;
+  compileOk: boolean | null;
+  compileErrorExcerpt: string | null;
+}
+
+interface ExtractionQueryDiagnostic {
+  kind: "source" | "sink";
+  language: TaintAnalysisLanguage;
+  templatePath: string;
+  templateExists: boolean;
+  templateHadBodyPlaceholders: boolean;
+  selectedQuerySource: "deterministic-template" | "agent-initial" | "agent-retry" | "fallback";
+  fallbackUsed: boolean;
+  fallbackReason: string | null;
+  fallbackDetail: string | null;
+  initialAttempt: ExtractionCompileAttempt;
+  retryAttempt: ExtractionCompileAttempt;
+}
+
+interface ExtractionDiagnosticsDocument {
+  generatedAt: string;
+  language: TaintAnalysisLanguage;
+  counts: {
+    sources: number;
+    sinks: number;
+  };
+  diagnostics: ExtractionQueryDiagnostic[];
+}
+
+interface RenderExtractionTemplateResult {
+  query: string;
+  diagnostic: ExtractionQueryDiagnostic;
 }
 
 /**
@@ -197,27 +233,28 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       taintTrackingImport: codeqlProfile.taintTrackingImport,
     };
 
-    const sourcesQuery = await renderExtractionTemplate(
+    const sourcesQueryResult = await renderExtractionTemplateWithDiagnostic(
       sourcesTemplatePath,
       language,
       "source",
       agentCtx,
     );
-    const sinksQuery = await renderExtractionTemplate(
+    const sinksQueryResult = await renderExtractionTemplateWithDiagnostic(
       sinksTemplatePath,
       language,
       "sink",
       agentCtx,
     );
 
-    await writeFile(sourcesQueryPath, sourcesQuery, "utf-8");
-    await writeFile(sinksQueryPath, sinksQuery, "utf-8");
+    await writeFile(sourcesQueryPath, sourcesQueryResult.query, "utf-8");
+    await writeFile(sinksQueryPath, sinksQueryResult.query, "utf-8");
 
     const sourcesBqrsPath = path.join(extractionDir, "sources.bqrs");
     const sinksBqrsPath = path.join(extractionDir, "sinks.bqrs");
     const sourcesCsvPath = path.join(extractionDir, "sources.csv");
     const sinksCsvPath = path.join(extractionDir, "sinks.csv");
 
+    process.stderr.write(`[taint-analysis-preflight] Running CodeQL query: sources.ql...\n`);
     await runCodeql(
       codeqlBinary,
       withResources([
@@ -232,6 +269,7 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       workspaceDir,
     );
 
+    process.stderr.write(`[taint-analysis-preflight] Running CodeQL query: sinks.ql...\n`);
     await runCodeql(
       codeqlBinary,
       withResources([
@@ -246,6 +284,7 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       workspaceDir,
     );
 
+    process.stderr.write(`[taint-analysis-preflight] Decoding BQRS results...\n`);
     await runCodeql(
       codeqlBinary,
       [
@@ -272,6 +311,16 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
 
     const sourcesRowCount = await countCsvRows(sourcesCsvPath);
     const sinksRowCount = await countCsvRows(sinksCsvPath);
+    process.stderr.write(`[taint-analysis-preflight] Extraction complete: ${sourcesRowCount} sources, ${sinksRowCount} sinks\n`);
+    await writeExtractionDiagnostics(
+      path.join(explorationDir, "extraction_diagnostics.json"),
+      language,
+      {
+        sources: sourcesRowCount,
+        sinks: sinksRowCount,
+      },
+      [sourcesQueryResult.diagnostic, sinksQueryResult.diagnostic],
+    );
 
     return {
       taintAnalysisPath,
@@ -413,6 +462,21 @@ async function writeCodeqlCompatibility(
   );
 }
 
+async function writeExtractionDiagnostics(
+  diagnosticsPath: string,
+  language: TaintAnalysisLanguage,
+  counts: { sources: number; sinks: number },
+  diagnostics: ExtractionQueryDiagnostic[],
+): Promise<void> {
+  const document: ExtractionDiagnosticsDocument = {
+    generatedAt: new Date().toISOString(),
+    language,
+    counts,
+    diagnostics,
+  };
+  await writeFile(diagnosticsPath, JSON.stringify(document, null, 2), "utf-8");
+}
+
 async function detectPrimaryFramework(
   repoRoot: string,
   contextGathererOutput: unknown,
@@ -551,21 +615,52 @@ async function renderExtractionTemplate(
   kind: "source" | "sink",
   agentCtx?: ExtractionAgentContext,
 ): Promise<string> {
+  const result = await renderExtractionTemplateWithDiagnostic(
+    templatePath,
+    language,
+    kind,
+    agentCtx,
+  );
+  return result.query;
+}
+
+async function renderExtractionTemplateWithDiagnostic(
+  templatePath: string,
+  language: TaintAnalysisLanguage,
+  kind: "source" | "sink",
+  agentCtx?: ExtractionAgentContext,
+): Promise<RenderExtractionTemplateResult> {
   let template = "";
-  if (existsSync(templatePath)) {
+  const templateExists = existsSync(templatePath);
+  if (templateExists) {
     template = await readFile(templatePath, "utf-8");
   }
+  const templateHadBodyPlaceholders = hasBodyPlaceholders(template, kind);
+  const diagnostic: ExtractionQueryDiagnostic = {
+    kind,
+    language,
+    templatePath,
+    templateExists,
+    templateHadBodyPlaceholders,
+    selectedQuerySource: "fallback",
+    fallbackUsed: false,
+    fallbackReason: null,
+    fallbackDetail: null,
+    initialAttempt: createEmptyCompileAttempt(),
+    retryAttempt: createEmptyCompileAttempt(),
+  };
 
   if (!template) {
-    return fallbackExtractionQuery(language, kind);
+    return withFallback(diagnostic, language, kind, "missing_template");
   }
 
   // Kind-specific gate: only templates with unresolved body placeholders need
   // the agent path. Python templates (which have hardcoded predicates) skip this.
-  if (hasBodyPlaceholders(template, kind)) {
+  if (templateHadBodyPlaceholders) {
     if (agentCtx) {
       try {
         process.stderr.write(`[taint-analysis-preflight] Running extraction agent for ${language}/${kind}...\n`);
+        diagnostic.initialAttempt.attempted = true;
         const generated = await generateExtractionQuery({
           language,
           kind,
@@ -573,22 +668,90 @@ async function renderExtractionTemplate(
           ...agentCtx,
         });
         if (generated) {
+          diagnostic.initialAttempt.generatedQuery = true;
           process.stderr.write(`[taint-analysis-preflight] Extraction agent succeeded for ${language}/${kind} (${generated.length} chars)\n`);
-          const compileOk = await tryCompileQuery(generated, agentCtx);
-          if (compileOk) {
-            return generated;
+          const compileResult = await tryCompileQuery(generated, agentCtx);
+          diagnostic.initialAttempt.compileOk = compileResult.ok;
+          diagnostic.initialAttempt.compileErrorExcerpt = compileResult.errorExcerpt ?? null;
+          if (compileResult.ok) {
+            diagnostic.selectedQuerySource = "agent-initial";
+            return {
+              query: generated,
+              diagnostic,
+            };
           }
-          process.stderr.write(`[taint-analysis-preflight] Generated query failed compile check for ${language}/${kind}, using fallback\n`);
+          process.stderr.write(
+            `[taint-analysis-preflight] Generated query failed compile check for ${language}/${kind}; retrying without cache\n`,
+          );
+          diagnostic.fallbackReason = "initial_compile_failed";
+          diagnostic.fallbackDetail = compileResult.errorExcerpt ?? null;
+          await clearExtractionCache(agentCtx.workspaceDir, language, kind);
         } else {
-          process.stderr.write(`[taint-analysis-preflight] Extraction agent returned no query for ${language}/${kind}, using fallback\n`);
+          diagnostic.initialAttempt.generatedQuery = false;
+          diagnostic.initialAttempt.compileOk = null;
+          diagnostic.fallbackReason = "agent_returned_no_query";
+          process.stderr.write(
+            `[taint-analysis-preflight] Extraction agent returned no query for ${language}/${kind}; retrying without cache\n`,
+          );
         }
+
+        diagnostic.retryAttempt.attempted = true;
+        const regenerated = await generateExtractionQuery({
+          language,
+          kind,
+          template,
+          ...agentCtx,
+          disableCacheRead: true,
+        });
+        if (regenerated) {
+          diagnostic.retryAttempt.generatedQuery = true;
+          process.stderr.write(
+            `[taint-analysis-preflight] Extraction agent retry succeeded for ${language}/${kind} (${regenerated.length} chars)\n`,
+          );
+          const compileResult = await tryCompileQuery(regenerated, agentCtx);
+          diagnostic.retryAttempt.compileOk = compileResult.ok;
+          diagnostic.retryAttempt.compileErrorExcerpt = compileResult.errorExcerpt ?? null;
+          if (compileResult.ok) {
+            diagnostic.selectedQuerySource = "agent-retry";
+            diagnostic.fallbackUsed = false;
+            diagnostic.fallbackReason = null;
+            diagnostic.fallbackDetail = null;
+            return {
+              query: regenerated,
+              diagnostic,
+            };
+          }
+          process.stderr.write(
+            `[taint-analysis-preflight] Retry query failed compile check for ${language}/${kind}, using fallback\n`,
+          );
+          diagnostic.fallbackReason = "retry_compile_failed";
+          diagnostic.fallbackDetail = compileResult.errorExcerpt ?? null;
+        } else {
+          diagnostic.retryAttempt.generatedQuery = false;
+          diagnostic.retryAttempt.compileOk = null;
+          diagnostic.fallbackReason = "retry_returned_no_query";
+          process.stderr.write(
+            `[taint-analysis-preflight] Extraction agent retry returned no query for ${language}/${kind}, using fallback\n`,
+          );
+        }
+        await clearExtractionCache(agentCtx.workspaceDir, language, kind);
       } catch (error) {
+        diagnostic.fallbackReason = "agent_exception";
+        diagnostic.fallbackDetail = toErrorMessage(error);
         process.stderr.write(
           `[taint-analysis-preflight] Agent extraction failed for ${language}/${kind}, using fallback: ${toErrorMessage(error)}\n`,
         );
       }
+    } else {
+      diagnostic.fallbackReason = "body_placeholders_without_agent_ctx";
     }
-    return fallbackExtractionQuery(language, kind);
+    return withFallback(
+      diagnostic,
+      language,
+      kind,
+      diagnostic.fallbackReason ?? "agent_path_exhausted",
+      diagnostic.fallbackDetail,
+    );
   }
 
   const rendered = template
@@ -607,10 +770,54 @@ async function renderExtractionTemplate(
     .replaceAll("{{SELECT_LINE}}", "1");
 
   if (rendered.includes("{{")) {
-    return fallbackExtractionQuery(language, kind);
+    return withFallback(diagnostic, language, kind, "unresolved_placeholders_after_render");
   }
 
-  return rendered;
+  diagnostic.selectedQuerySource = "deterministic-template";
+  diagnostic.fallbackUsed = false;
+  return {
+    query: rendered,
+    diagnostic,
+  };
+}
+
+function createEmptyCompileAttempt(): ExtractionCompileAttempt {
+  return {
+    attempted: false,
+    generatedQuery: false,
+    compileOk: null,
+    compileErrorExcerpt: null,
+  };
+}
+
+function withFallback(
+  diagnostic: ExtractionQueryDiagnostic,
+  language: TaintAnalysisLanguage,
+  kind: "source" | "sink",
+  reason: string,
+  detail: string | null = null,
+): RenderExtractionTemplateResult {
+  diagnostic.selectedQuerySource = "fallback";
+  diagnostic.fallbackUsed = true;
+  diagnostic.fallbackReason = reason;
+  diagnostic.fallbackDetail = detail;
+  return {
+    query: fallbackExtractionQuery(language, kind),
+    diagnostic,
+  };
+}
+
+async function clearExtractionCache(
+  workspaceDir: string,
+  language: TaintAnalysisLanguage,
+  kind: "source" | "sink",
+): Promise<void> {
+  const cachePath = path.join(workspaceDir, "extraction", `.cache-${language}-${kind}.ql`);
+  try {
+    await rm(cachePath, { force: true });
+  } catch {
+    // Best-effort cache cleanup.
+  }
 }
 
 function fallbackExtractionQuery(language: TaintAnalysisLanguage, kind: "source" | "sink"): string {
@@ -644,7 +851,7 @@ function fallbackExtractionQuery(language: TaintAnalysisLanguage, kind: "source"
 async function tryCompileQuery(
   query: string,
   ctx: ExtractionAgentContext,
-): Promise<boolean> {
+): Promise<{ ok: true; errorExcerpt: null } | { ok: false; errorExcerpt: string }> {
   const tmpQueryPath = path.join(ctx.workspaceDir, "extraction", "_compile_check.ql");
   try {
     await writeFile(tmpQueryPath, query, "utf-8");
@@ -657,11 +864,12 @@ async function tryCompileQuery(
       encoding: "utf-8",
       maxBuffer: 8 * 1024 * 1024,
     });
-    return true;
+    return { ok: true, errorExcerpt: null };
   } catch (error) {
     const err = error as ExecFileException & { stderr?: string };
-    process.stderr.write(`[taint-analysis-preflight] Compile check failed: ${err.stderr?.trim().split("\n").slice(0, 5).join("; ") || toErrorMessage(error)}\n`);
-    return false;
+    const excerpt = err.stderr?.trim().split("\n").slice(0, 5).join("; ") || toErrorMessage(error);
+    process.stderr.write(`[taint-analysis-preflight] Compile check failed: ${excerpt}\n`);
+    return { ok: false, errorExcerpt: excerpt };
   }
 }
 
@@ -772,10 +980,12 @@ function isWithinRoot(rootPath: string, candidatePath: string): boolean {
 export const __taintAnalysisPreflightInternals = {
   detectPrimaryFramework,
   renderExtractionTemplate,
+  renderExtractionTemplateWithDiagnostic,
   resolveReferenceFiles,
   resolveWorkspaceDir,
   initializeWorkspace,
   writeManifestAndDetection,
   writeCodeqlCompatibility,
+  writeExtractionDiagnostics,
   resolveExtractionModel,
 };

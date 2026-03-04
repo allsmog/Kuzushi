@@ -64,6 +64,7 @@ describe("parseInvariants", () => {
       invariants: [
         { id: "inv-1", kind: "security-invariant", filePath: "a.ts", startLine: 1, endLine: 1, statement: "Auth required", confidence: 0.9, derivedFrom: "x", securityRelevance: "high" },
         { id: "inv-2", kind: "data-invariant", filePath: "b.ts", startLine: 1, endLine: 1, statement: "Array not empty", confidence: 0.9, derivedFrom: "x", securityRelevance: "none" },
+        { id: "inv-3", kind: "precondition", filePath: "c.ts", startLine: 1, endLine: 1, statement: "Low relevance", confidence: 0.8, derivedFrom: "x", securityRelevance: "low" },
       ],
     };
 

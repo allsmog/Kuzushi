@@ -661,7 +661,21 @@ export class PipelineOrchestrator {
     ]);
 
     // Auto-inject all transitive dependencies for enabled tasks
-    const enabledTaskIds = collectTransitiveDeps(this.deps.taskRegistry, candidateIds);
+    let enabledTaskIds = collectTransitiveDeps(this.deps.taskRegistry, candidateIds);
+
+    // Respect explicit enableContextGathering: false — only remove context-gatherer
+    // if no other enabled task depends on it (otherwise DAG resolution would throw).
+    if (state.config.enableContextGathering === false && this.deps.taskRegistry) {
+      const othersDepend = enabledTaskIds.some(
+        (id) =>
+          id !== "context-gatherer"
+          && this.deps.taskRegistry!.has(id)
+          && this.deps.taskRegistry!.get(id).dependsOn.includes("context-gatherer"),
+      );
+      if (!othersDepend) {
+        enabledTaskIds = enabledTaskIds.filter((id) => id !== "context-gatherer");
+      }
+    }
 
     let stages: string[][];
     try {
@@ -730,26 +744,29 @@ export class PipelineOrchestrator {
           );
           return;
         }
-        // Non-findings stage fully failed — downstream tasks can't run, fatal
-        await this.bus.publish(
-          createEvent("pipeline:error", runId, {
-            context: state.context,
-            error: `All tasks in stage ${stageIndex} failed: ${failures.map((f) => f.event.payload.taskId).join(", ")}`,
-            fatal: true,
-          }),
-        );
-        return;
+        // Non-findings stage fully failed — continue with empty upstream outputs
+        console.error(`[orchestrator] Stage ${stageIndex} (non-findings) fully failed, continuing`);
       }
 
       for (const outcome of successes) {
         if (outcome.kind === "complete") {
-          state.taskOutputs.set(outcome.event.payload.taskId, outcome.event.payload.output);
-          if (outcome.event.payload.outputKind === "findings") {
-            state.scanFindings.push(...coerceFindings(outcome.event.payload.output));
-          } else if (outcome.event.payload.outputKind === "threat-model") {
-            const composite = outcome.event.payload.output;
-            if (isRecord(composite) && Array.isArray(composite["findings"])) {
-              state.scanFindings.push(...coerceFindings(composite["findings"]));
+          const { taskId, outputKind, output, costUsd } = outcome.event.payload;
+          state.taskOutputs.set(taskId, output);
+
+          // Accumulate scan-phase task LLM costs
+          const normalizedCost = normalizeCostUsd(costUsd);
+          if (normalizedCost > 0) {
+            state.totalCostUsd += normalizedCost;
+            try {
+              updateRunCost(this.deps.db, state.checkpointRunId, normalizedCost);
+            } catch { /* best-effort cost persistence */ }
+          }
+
+          if (outputKind === "findings") {
+            state.scanFindings.push(...coerceFindings(output));
+          } else if (outputKind === "threat-model") {
+            if (isRecord(output) && Array.isArray(output["findings"])) {
+              state.scanFindings.push(...coerceFindings(output["findings"]));
             }
           }
         }
@@ -1085,11 +1102,23 @@ export class PipelineOrchestrator {
       return;
     }
 
+    // Non-critical source events (report output, audit logging, artifact persistence)
+    // should not kill the entire pipeline.
+    const nonFatalSources = new Set([
+      "report:requested",
+      "report:complete",
+      "store:upserted",
+      "triage:agent-activity",
+      "verification:agent-activity",
+      "poc-harness:agent-activity",
+    ]);
+    const fatal = !nonFatalSources.has(event.payload.sourceEventType);
+
     await this.bus.publish(
       createEvent("pipeline:error", event.meta.runId, {
         context: state.context,
         error: `Bus handler failure on ${event.payload.sourceEventType}: ${event.payload.error}`,
-        fatal: true,
+        fatal,
       }),
     );
   }
@@ -1694,6 +1723,7 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
     failedTasks: state.failedTasks.length > 0 ? [...state.failedTasks] : undefined,
     startedAt: state.startedAt,
+    completedAt: new Date().toISOString(),
   };
 }
 
@@ -1871,6 +1901,7 @@ const SCANNER_ID_TO_CONFIG_KEY: Record<string, string> = {
   "invariant-check": "invariant-analysis",
   "threat-model-stride": "threat-model",
   "threat-model-pasta": "threat-model",
+  "taint-analysis-run": "taint-analysis",
 };
 
 function isScannerVerificationEnabled(config: KuzushiConfig, scannerId: string): boolean {

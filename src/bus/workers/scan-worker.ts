@@ -65,6 +65,14 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
     const runId = event.meta.runId;
 
     if (!deps.taskRegistry.has(taskId)) {
+      await bus.publish(
+        createEvent("task:error", runId, {
+          context,
+          taskId,
+          outputKind: "findings",
+          error: `Task "${taskId}" not found in registry`,
+        }),
+      );
       return;
     }
 
@@ -95,26 +103,26 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
           ? extractThreatModelFindings(output)
           : [];
 
-      if (emittableFindings.length > 0) {
-        for (const finding of emittableFindings) {
-          await bus.publish(
-            createEvent("task:progress", runId, {
-              context,
-              taskId,
-              outputKind: task.outputKind,
-              progress: finding,
-            }),
-          );
+      for (const finding of emittableFindings) {
+        await bus.publish(
+          createEvent("task:progress", runId, {
+            context,
+            taskId,
+            outputKind: task.outputKind,
+            progress: finding,
+          }),
+        );
 
-          await bus.publish(
-            createEvent("scan:finding", runId, {
-              context,
-              finding,
-              scannerId: taskId,
-            }),
-          );
-        }
+        await bus.publish(
+          createEvent("scan:finding", runId, {
+            context,
+            finding,
+            scannerId: taskId,
+          }),
+        );
+      }
 
+      if (task.outputKind === "findings" || task.outputKind === "threat-model") {
         await bus.publish(
           createEvent("scan:scanner-complete", runId, {
             context,
@@ -275,7 +283,8 @@ function asFinding(item: Record<string, unknown>): Finding | null {
     return null;
   }
 
-  const scanner = asString(item["scanner"]) ?? "unknown";
+  const scanner = asString(item["scanner"]);
+  if (!scanner) return null;
 
   return {
     scanner,

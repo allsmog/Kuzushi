@@ -164,6 +164,27 @@ describe("taint-analysis-preflight internals", () => {
     expect(rendered).toContain("where 1 = 0");
   });
 
+  it("records fallback diagnostics when body placeholders have no agent context", async () => {
+    const templatePath = path.join(TMP_ROOT, "go-source-diag.ql.tmpl");
+    writeFileSync(templatePath, [
+      "import go",
+      "{{SOURCE_HANDLER_PREDICATE}}",
+      "from {{SOURCE_NODE_BINDINGS}}",
+      "where {{SOURCE_WHERE}}",
+      "select {{SOURCE_SELECT}}",
+    ].join("\n"), "utf-8");
+
+    const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplateWithDiagnostic(
+      templatePath,
+      "go",
+      "source",
+    );
+    expect(rendered.query).toContain("@id taint-analysis/extraction/fallback-source");
+    expect(rendered.diagnostic.fallbackUsed).toBe(true);
+    expect(rendered.diagnostic.fallbackReason).toBe("body_placeholders_without_agent_ctx");
+    expect(rendered.diagnostic.retryAttempt.attempted).toBe(false);
+  });
+
   it("gracefully falls back when agent throws", async () => {
     const templatePath = path.join(TMP_ROOT, "go-source-err.ql.tmpl");
     writeFileSync(templatePath, [
@@ -258,5 +279,49 @@ describe("taint-analysis-preflight internals", () => {
       { id: "go-dataflow", ok: false, error: "import missing" },
       { id: "go-dataflow-new", ok: true },
     ]);
+  });
+
+  it("writes extraction diagnostics report with fallback details and row counts", async () => {
+    const workspaceDir = path.join(TMP_ROOT, "iris");
+    mkdirSync(path.join(workspaceDir, "exploration"), { recursive: true });
+    const diagnosticsPath = path.join(workspaceDir, "exploration", "extraction_diagnostics.json");
+
+    await __taintAnalysisPreflightInternals.writeExtractionDiagnostics(
+      diagnosticsPath,
+      "go",
+      { sources: 0, sinks: 954 },
+      [
+        {
+          kind: "source",
+          language: "go",
+          templatePath: "/tmp/sources.tmpl",
+          templateExists: true,
+          templateHadBodyPlaceholders: true,
+          selectedQuerySource: "fallback",
+          fallbackUsed: true,
+          fallbackReason: "retry_compile_failed",
+          fallbackDetail: "ERROR: unresolved variable node",
+          initialAttempt: {
+            attempted: true,
+            generatedQuery: true,
+            compileOk: false,
+            compileErrorExcerpt: "ERROR: unresolved variable node",
+          },
+          retryAttempt: {
+            attempted: true,
+            generatedQuery: true,
+            compileOk: false,
+            compileErrorExcerpt: "ERROR: unresolved variable callable",
+          },
+        },
+      ],
+    );
+
+    const report = JSON.parse(readFileSync(diagnosticsPath, "utf-8")) as Record<string, unknown>;
+    expect(report["language"]).toBe("go");
+    expect(report["counts"]).toEqual({ sources: 0, sinks: 954 });
+    const diagnostics = report["diagnostics"] as Array<Record<string, unknown>>;
+    expect(diagnostics[0]?.["fallbackReason"]).toBe("retry_compile_failed");
+    expect(String(diagnostics[0]?.["fallbackDetail"] ?? "")).toContain("unresolved variable");
   });
 });

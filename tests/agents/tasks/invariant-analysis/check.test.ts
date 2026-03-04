@@ -82,6 +82,18 @@ describe("normalizeViolation", () => {
     expect(normalizeViolation({ invariantId: "inv-1" })).toBeNull();
   });
 
+  it("returns null for empty invariantStatement", () => {
+    expect(normalizeViolation({
+      invariantId: "inv-1",
+      invariantStatement: "",
+      violatingFilePath: "a.ts",
+      violatingStartLine: 1,
+      violationDescription: "desc",
+      severity: "ERROR",
+      confidence: 0.9,
+    })).toBeNull();
+  });
+
   it("normalizes valid violation", () => {
     const v = normalizeViolation({
       invariantId: "inv-1",

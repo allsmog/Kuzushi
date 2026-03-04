@@ -131,7 +131,9 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
   const config = loadConfig(repoRoot);
 
   if (key.includes(".")) {
-    setByPath(config, key.split("."), parseFlexibleValue(raw));
+    const parts = key.split(".");
+    validatePathParts(parts);
+    setByPath(config, parts, parseFlexibleValue(raw));
     saveConfig(normalizeConfig(config), repoRoot);
     return;
   }
@@ -436,7 +438,9 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
   const config = loadConfig(repoRoot);
 
   if (key.includes(".")) {
-    unsetByPath(config, key.split("."));
+    const parts = key.split(".");
+    validatePathParts(parts);
+    unsetByPath(config, parts);
     saveConfig(normalizeConfig(config), repoRoot);
     return;
   }
@@ -779,10 +783,13 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
     }
 
     if (isRecord(layer["scannerConfig"])) {
-      merged.scannerConfig = {
-        ...merged.scannerConfig,
-        ...coerceScannerConfigMap(layer["scannerConfig"]),
-      };
+      const layerConfig = coerceScannerConfigMap(layer["scannerConfig"]);
+      for (const [key, value] of Object.entries(layerConfig)) {
+        merged.scannerConfig[key] = {
+          ...(merged.scannerConfig[key] ?? {}),
+          ...value,
+        };
+      }
     }
   }
 
@@ -790,12 +797,13 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
 }
 
 function readConfigFile(configFilePath: string): Record<string, unknown> {
-  if (!existsSync(configFilePath)) return {};
-
   try {
-    const parsed = JSON.parse(readFileSync(configFilePath, "utf-8"));
+    const content = readFileSync(configFilePath, "utf-8");
+    const parsed = JSON.parse(content);
     return isRecord(parsed) ? parsed : {};
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+    console.warn(`Warning: config file ${configFilePath} is corrupt and will be ignored: ${err}`);
     return {};
   }
 }
@@ -974,7 +982,11 @@ function parseFlexibleValue(raw: string): unknown {
 
   if (!trimmed) return "";
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    return JSON.parse(trimmed);
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      throw new Error(`Invalid JSON value: ${trimmed.slice(0, 80)}`);
+    }
   }
 
   if (trimmed === "true") return true;
@@ -984,6 +996,16 @@ function parseFlexibleValue(raw: string): unknown {
   if (!Number.isNaN(num) && trimmed !== "") return num;
 
   return raw;
+}
+
+const UNSAFE_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
+function validatePathParts(pathParts: string[]): void {
+  for (const part of pathParts) {
+    if (UNSAFE_PATH_SEGMENTS.has(part)) {
+      throw new Error(`Invalid config key segment: ${part}`);
+    }
+  }
 }
 
 function getByPath(root: unknown, pathParts: string[]): unknown {

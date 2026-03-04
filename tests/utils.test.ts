@@ -12,6 +12,12 @@ describe("utils", () => {
       expect(isRecord("x")).toBe(false);
       expect(isRecord(1)).toBe(false);
     });
+
+    it("returns false for arrays", () => {
+      expect(isRecord([])).toBe(false);
+      expect(isRecord([1, 2, 3])).toBe(false);
+      expect(isRecord(["a"])).toBe(false);
+    });
   });
 
   describe("toErrorMessage", () => {

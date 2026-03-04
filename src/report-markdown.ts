@@ -114,7 +114,7 @@ export function generateMarkdownReport(
         lines.push("PoC payload:");
         lines.push("");
         lines.push("```text");
-        lines.push(finding.verifyPocPayload);
+        lines.push(escapeFenceContent(finding.verifyPocPayload));
         lines.push("```");
         lines.push("");
       }
@@ -169,9 +169,9 @@ export function generateMarkdownReport(
       }
 
       const script = readFileSync(scriptPath, "utf-8");
-      const language = languageFromPath(scriptPath, finding.pocHarnessLanguage);
+      const language = sanitizeLanguageId(languageFromPath(scriptPath, finding.pocHarnessLanguage));
       lines.push(`\`\`\`${language}`);
-      lines.push(script);
+      lines.push(escapeFenceContent(script));
       lines.push("```");
       lines.push("");
     }
@@ -197,6 +197,16 @@ function languageFromPath(filePath: string, fallback: string | null): string {
     return fallback.trim().toLowerCase();
   }
   return "text";
+}
+
+/** Escape sequences of 3+ backticks inside fenced code blocks to prevent fence injection. */
+function escapeFenceContent(s: string): string {
+  return s.replace(/`{3,}/g, (m) => m.split("").join("\u200B"));
+}
+
+/** Restrict language identifier to safe characters only. */
+function sanitizeLanguageId(lang: string): string {
+  return lang.replace(/[^a-z0-9+#.\-]/gi, "").slice(0, 20) || "text";
 }
 
 function parsePreconditions(raw: string | null): string[] {

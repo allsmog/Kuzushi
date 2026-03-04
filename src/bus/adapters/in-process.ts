@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import type { AnyEvent, MessageBus } from "../types.js";
 
-const DEFAULT_WAIT_TIMEOUT_MS = 60 * 60 * 1000;
+const DEFAULT_WAIT_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 const HANDLER_ERROR_EVENT_TYPE = "bus:handler-error";
 
 type WrappedHandler = (event: AnyEvent) => void;

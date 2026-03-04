@@ -58,7 +58,7 @@ function normalizeViolation(item: Record<string, unknown>): InvariantViolation |
   const violatingFilePath = typeof item["violatingFilePath"] === "string" ? item["violatingFilePath"].trim() : "";
   const violationDescription = typeof item["violationDescription"] === "string" ? item["violationDescription"].trim() : "";
 
-  if (!invariantId || !violatingFilePath || !violationDescription) return null;
+  if (!invariantId || !invariantStatement || !violatingFilePath || !violationDescription) return null;
 
   const violatingStartLine = Math.max(1, Math.floor(Number(item["violatingStartLine"]) || 1));
   const severity = normalizeSeverity(item["severity"]);
@@ -100,12 +100,12 @@ function violationToFinding(
     scannerConfidence: confidenceLabel,
     subcategory: ["vuln"],
     likelihood: confidenceLabel,
-    impact: violation.severity === "ERROR" ? "HIGH" : "MEDIUM",
+    impact: violation.severity === "ERROR" ? "HIGH" : violation.severity === "INFO" ? "LOW" : "MEDIUM",
     cwe: cweList,
     score: scoreFindingMetadata({
       severity: violation.severity,
       likelihood: confidenceLabel,
-      impact: violation.severity === "ERROR" ? "HIGH" : "MEDIUM",
+      impact: violation.severity === "ERROR" ? "HIGH" : violation.severity === "INFO" ? "LOW" : "MEDIUM",
       subcategory: ["vuln"],
     }),
   };
@@ -146,28 +146,33 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
     const cfg = resolveInvariantAnalysisConfig(context.config);
     const doc = context.upstreamOutputs.get("invariant-extract") as InvariantDocument | undefined;
 
-    if (!doc || doc.invariants.length === 0) {
+    if (doc === undefined) {
+      throw new Error("[invariant-check] Upstream invariant-extract failed or produced no output");
+    }
+    if (doc.invariants.length === 0) {
       console.error("[invariant-check] No invariants to check");
       return [];
     }
 
-    const securityInvariants = doc.invariants.filter(
-      (inv) => inv.securityRelevance === "high" || inv.securityRelevance === "medium",
-    );
+    const invariantsToCheck = cfg.securityOnly
+      ? doc.invariants.filter(
+          (inv) => inv.securityRelevance === "high" || inv.securityRelevance === "medium",
+        )
+      : doc.invariants;
 
-    if (securityInvariants.length === 0) {
-      console.error("[invariant-check] No security-relevant invariants to check");
+    if (invariantsToCheck.length === 0) {
+      console.error("[invariant-check] No invariants to check after filtering");
       return [];
     }
 
-    const prompt = buildCheckPrompt(securityInvariants);
+    const prompt = buildCheckPrompt(invariantsToCheck);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;
     let resultText = "";
 
     const tag = "[invariant-check]";
-    console.error(`${tag} Checking ${securityInvariants.length} invariants (model=${cfg.checkModel})`);
+    console.error(`${tag} Checking ${invariantsToCheck.length} invariants (model=${cfg.checkModel})`);
 
     try {
       for await (const message of runtime.query({
@@ -175,6 +180,7 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
         options: {
           cwd: context.repoRoot,
           model: cfg.checkModel,
+          maxTurns: 30,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {

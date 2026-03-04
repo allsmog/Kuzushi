@@ -8,7 +8,10 @@ import type {
   ScanCompleteEvent,
   ScanFindingEvent,
   ScanScannerCompleteEvent,
+  TaskErrorEvent,
 } from "../../src/bus/events.js";
+import { TaskRegistry } from "../../src/agents/registry.js";
+import type { AgentTask } from "../../src/agents/types.js";
 
 class FakePlugin implements ScannerPlugin {
   initCalled = 0;
@@ -229,6 +232,42 @@ describe("scan-worker", () => {
 
     await scanCompletePromise;
     expect(a.scanRoots).toEqual(["/tmp/repo/subdir"]);
+
+    await bus.close();
+  });
+
+  it("emits task:error when taskId is not in registry", async () => {
+    const bus = new InProcessBus();
+    const registry = new TaskRegistry();
+    registerScanWorker(bus, {
+      scannerPlugins: [],
+      config: makeConfig("sequential"),
+      taskRegistry: registry,
+    });
+
+    const errors: TaskErrorEvent[] = [];
+    bus.subscribe<TaskErrorEvent>("task:error", (event) => {
+      errors.push(event);
+    });
+
+    const runId = generateRunId();
+    const context = { repoRoot: "/tmp/repo", repoName: "test-repo" };
+
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "nonexistent-task",
+        input: {},
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    // Give async subscriber a tick
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].payload.taskId).toBe("nonexistent-task");
+    expect(errors[0].payload.error).toContain("not found in registry");
 
     await bus.close();
   });

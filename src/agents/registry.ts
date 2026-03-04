@@ -93,7 +93,7 @@ export class TaskRegistry {
       for (const id of group) {
         processed.add(id);
         for (const dependent of edges.get(id) ?? []) {
-          indegree.set(dependent, (indegree.get(dependent) ?? 1) - 1);
+          indegree.set(dependent, (indegree.get(dependent) ?? 0) - 1);
         }
       }
     }

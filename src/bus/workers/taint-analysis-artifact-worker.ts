@@ -29,43 +29,47 @@ export function registerTaintAnalysisArtifactWorker(
   });
 
   bus.subscribe<ReportRequestedEvent>("report:requested", (event) => {
-    const state = runs.get(event.meta.runId);
-    const repoRoot = state?.repoRoot ?? event.payload.context.repoRoot;
-    const runDir = path.join(repoRoot, ".kuzushi", "runs", event.meta.runId);
-    if (!existsSync(runDir)) {
-      mkdirSync(runDir, { recursive: true });
+    try {
+      const state = runs.get(event.meta.runId);
+      const repoRoot = state?.repoRoot ?? event.payload.context.repoRoot;
+      const runDir = path.join(repoRoot, ".kuzushi", "runs", event.meta.runId);
+      if (!existsSync(runDir)) {
+        mkdirSync(runDir, { recursive: true });
+      }
+
+      const rows = getTriagedFindingsForRepo(deps.db, event.payload.context.repoName);
+      const findings = rows.map((row) => ({
+        id: row.fingerprint,
+        scanner: row.scanner,
+        rule_id: row.ruleId,
+        location: {
+          file: row.filePath,
+          line: row.startLine,
+        },
+        severity: row.severity,
+        message: row.message,
+        verdict: row.verdict,
+        confidence: row.confidence,
+        rationale: row.rationale,
+        verification_steps: row.verificationSteps,
+        fix_patch: row.fixPatch,
+        ...(row.triageDetails ?? {}),
+      }));
+
+      writeFileSync(
+        path.join(runDir, "findings.triaged.json"),
+        JSON.stringify({
+          version: "1.0.0",
+          generatedAt: new Date().toISOString(),
+          runId: event.meta.runId,
+          repo: event.payload.context.repoName,
+          findings,
+        }, null, 2),
+        "utf-8",
+      );
+    } catch (error) {
+      console.error(`[taint-analysis-artifact-worker] Failed to write artifact: ${error}`);
     }
-
-    const rows = getTriagedFindingsForRepo(deps.db, event.payload.context.repoName);
-    const findings = rows.map((row) => ({
-      id: row.fingerprint,
-      scanner: row.scanner,
-      rule_id: row.ruleId,
-      location: {
-        file: row.filePath,
-        line: row.startLine,
-      },
-      severity: row.severity,
-      message: row.message,
-      verdict: row.verdict,
-      confidence: row.confidence,
-      rationale: row.rationale,
-      verification_steps: row.verificationSteps,
-      fix_patch: row.fixPatch,
-      ...(row.triageDetails ?? {}),
-    }));
-
-    writeFileSync(
-      path.join(runDir, "findings.triaged.json"),
-      JSON.stringify({
-        version: "1.0.0",
-        generatedAt: new Date().toISOString(),
-        runId: event.meta.runId,
-        repo: event.payload.context.repoName,
-        findings,
-      }, null, 2),
-      "utf-8",
-    );
 
     runs.delete(event.meta.runId);
   });

@@ -1961,4 +1961,84 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
+  it("keeps context-gatherer when enableContextGathering is false but tasks depend on it", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["dependent-task"],
+    };
+
+    const taskRegistry = new TaskRegistry();
+
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["TypeScript"] };
+      },
+    };
+
+    const dependentTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "dependent-task",
+      displayName: "Dependent Task",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-dep", 80)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(dependentTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const config = { ...makeConfig(), enableContextGathering: false, enabledTasks: ["dependent-task"] };
+
+    // Pipeline should NOT crash — context-gatherer kept because dependent-task needs it
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+    expect(triageBatchQueued.payload.findings).toHaveLength(1);
+
+    await bus.close();
+    db.close();
+  });
+
 });

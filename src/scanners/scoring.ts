@@ -10,9 +10,9 @@ export function scoreFindingMetadata(input: {
   impact?: string;
   subcategory?: string[];
 }): number {
-  const severity = SEVERITY_SCORE[input.severity ?? "INFO"] ?? 1;
-  const likelihood = LIKELIHOOD_SCORE[input.likelihood ?? "LOW"] ?? 1;
-  const impact = IMPACT_SCORE[input.impact ?? "LOW"] ?? 1;
+  const severity = SEVERITY_SCORE[(input.severity ?? "INFO").toUpperCase()] ?? 1;
+  const likelihood = LIKELIHOOD_SCORE[(input.likelihood ?? "LOW").toUpperCase()] ?? 1;
+  const impact = IMPACT_SCORE[(input.impact ?? "LOW").toUpperCase()] ?? 1;
   const subcategories = input.subcategory ?? ["audit"];
   const subcategory = Math.max(...subcategories.map((s) => SUBCATEGORY_SCORE[s] ?? 0), 1);
   return severity * likelihood * impact * subcategory;

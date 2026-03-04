@@ -89,10 +89,10 @@ export const taintAnalysisCrossAnalyzeTask: AgentTask<ScanOpts, CrossServiceAnal
       }
     });
 
-    if (crossCfg.continueOnError) {
-      await Promise.allSettled(promises);
-    } else {
-      await Promise.all(promises);
+    const settled = await Promise.allSettled(promises);
+    if (!crossCfg.continueOnError) {
+      const rejection = settled.find((r) => r.status === "rejected");
+      if (rejection) throw (rejection as PromiseRejectedResult).reason;
     }
 
     return { services: results, allBoundaries };

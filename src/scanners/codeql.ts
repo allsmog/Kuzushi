@@ -44,7 +44,9 @@ export class CodeQLPlugin implements ScannerPlugin {
       ram: this.ram,
     });
 
-    return selectFindings(sarif, repoName, "HEAD", opts.maxFindings);
+    // Do not apply maxFindings here — the registry's dedupeFindings applies
+    // the single final cap across all scanners to avoid double-capping.
+    return selectFindings(sarif, repoName, "HEAD");
   }
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {

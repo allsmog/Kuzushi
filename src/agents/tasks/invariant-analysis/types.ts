@@ -54,7 +54,6 @@ export interface InvariantAnalysisConfig {
   checkModel: string;
   maxInvariants: number;
   securityOnly: boolean;
-  maxFilesPerAgent: number;
   confidenceThreshold: number;
 }
 
@@ -63,7 +62,6 @@ export const DEFAULT_INVARIANT_ANALYSIS_CONFIG: InvariantAnalysisConfig = {
   checkModel: "anthropic:claude-sonnet-4-6",
   maxInvariants: 200,
   securityOnly: true,
-  maxFilesPerAgent: 20,
   confidenceThreshold: 0.6,
 };
 
@@ -76,7 +74,6 @@ export function resolveInvariantAnalysisConfig(config: KuzushiConfig): Invariant
     checkModel: normalizeString(raw["checkModel"], config.model),
     maxInvariants: normalizePositiveInt(raw["maxInvariants"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.maxInvariants),
     securityOnly: normalizeBoolean(raw["securityOnly"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.securityOnly),
-    maxFilesPerAgent: normalizePositiveInt(raw["maxFilesPerAgent"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.maxFilesPerAgent),
     confidenceThreshold: normalizeUnitInterval(raw["confidenceThreshold"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.confidenceThreshold),
   };
 }

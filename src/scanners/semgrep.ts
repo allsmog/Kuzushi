@@ -27,7 +27,9 @@ export class SemgrepPlugin implements ScannerPlugin {
   async scan(repoRoot: string, opts: ScanOpts, _config: ScannerConfig): Promise<Finding[]> {
     const repoName = path.basename(repoRoot);
     const output = await runSemgrep(repoRoot, opts, this.scannerBin, this.configFlag);
-    return selectFindings(output, repoName, "HEAD", opts.maxFindings);
+    // Do not apply maxFindings here — the registry's dedupeFindings applies
+    // the single final cap across all scanners to avoid double-capping.
+    return selectFindings(output, repoName, "HEAD");
   }
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {

@@ -87,6 +87,18 @@ describe("extractJson", () => {
   it("returns trimmed text when no JSON found", () => {
     expect(extractJson("  just text  ")).toBe("just text");
   });
+
+  it("handles nested code fences inside JSON values", () => {
+    const text = [
+      "Here is the result:",
+      "```json",
+      '{"verdict":"tp","fix_patch":"```python\\nprint(1)\\n```"}',
+      "```",
+      "",
+    ].join("\n");
+    const extracted = extractJson(text);
+    expect(extracted).toContain('"verdict":"tp"');
+  });
 });
 
 describe("parseTriageResponse", () => {

@@ -1,6 +1,6 @@
-/** True when value is a non-null object record. */
+/** True when value is a non-null, non-array object record. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** Normalize unknown errors into a readable message string. */

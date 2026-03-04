@@ -297,7 +297,6 @@ async function triageDeltaFindings(args: {
       costUsd: normalizeCostUsd(costUsd),
     };
   } catch {
-    let triaged = 0;
     for (const finding of args.deltaFindings) {
       const fallback: TriageResult = {
         fingerprint: finding.fingerprint,
@@ -308,11 +307,10 @@ async function triageDeltaFindings(args: {
         fixPatch: null,
       };
       upsertFinding(args.deps.db, finding, fallback, args.context.repoName, "HEAD");
-      triaged += 1;
     }
 
     return {
-      triaged,
+      triaged: 0,
       errors: args.deltaFindings.length,
       costUsd: 0,
     };
@@ -369,8 +367,15 @@ function asLabelOutput(value: unknown): TaintAnalysisLabelOutput | null {
   if (!isRecord(value)) {
     return null;
   }
-  if (!value["labels"] || !value["workspaceDir"] || !value["labelsPath"] || !value["dbPath"]
-    || !value["taintModelPath"] || !Array.isArray(value["passes"])) {
+  if (
+    !isRecord(value["labels"])
+    || typeof value["workspaceDir"] !== "string"
+    || typeof value["labelsPath"] !== "string"
+    || typeof value["dbPath"] !== "string"
+    || typeof value["taintModelPath"] !== "string"
+    || !Array.isArray(value["passes"])
+    || !Array.isArray((value["labels"] as Record<string, unknown>)["passes"])
+  ) {
     return null;
   }
   return value as unknown as TaintAnalysisLabelOutput;

@@ -198,6 +198,9 @@ export function getPocHarnessedFingerprints(db: Database.Database): Set<string> 
   return new Set(rows.map((row) => row.fingerprint));
 }
 
+/** SQLite max bind parameters per query — stay under the 999 default. */
+const SQLITE_BIND_LIMIT = 900;
+
 /** Load persisted triage results for a set of fingerprints. */
 export function getStoredTriageResults(
   db: Database.Database,
@@ -208,20 +211,7 @@ export function getStoredTriageResults(
     return new Map<string, TriageResult>();
   }
 
-  const placeholders = uniqueFingerprints.map(() => "?").join(", ");
-  const rows = db.prepare(`
-    SELECT
-      fingerprint,
-      verdict,
-      confidence,
-      rationale,
-      verification_steps as verificationSteps,
-      fix_patch as fixPatch,
-      triage_cost_usd as triageCostUsd,
-      triage_details_json as triageDetailsJson
-    FROM findings
-    WHERE fingerprint IN (${placeholders})
-  `).all(...uniqueFingerprints) as Array<{
+  const allRows: Array<{
     fingerprint: string;
     verdict: Verdict;
     confidence: number;
@@ -230,10 +220,29 @@ export function getStoredTriageResults(
     fixPatch: string | null;
     triageCostUsd: number | null;
     triageDetailsJson: string | null;
-  }>;
+  }> = [];
+
+  for (let i = 0; i < uniqueFingerprints.length; i += SQLITE_BIND_LIMIT) {
+    const chunk = uniqueFingerprints.slice(i, i + SQLITE_BIND_LIMIT);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = db.prepare(`
+      SELECT
+        fingerprint,
+        verdict,
+        confidence,
+        rationale,
+        verification_steps as verificationSteps,
+        fix_patch as fixPatch,
+        triage_cost_usd as triageCostUsd,
+        triage_details_json as triageDetailsJson
+      FROM findings
+      WHERE fingerprint IN (${placeholders})
+    `).all(...chunk) as typeof allRows;
+    allRows.push(...rows);
+  }
 
   const results = new Map<string, TriageResult>();
-  for (const row of rows) {
+  for (const row of allRows) {
     let verificationSteps: string[] = [];
     try {
       const parsed = JSON.parse(row.verificationSteps);
@@ -318,20 +327,7 @@ export function getStoredVerificationResults(
     return new Map<string, VerificationResult>();
   }
 
-  const placeholders = uniqueFingerprints.map(() => "?").join(", ");
-  const rows = db.prepare(`
-    SELECT
-      fingerprint,
-      verify_exploitable as verifyExploitable,
-      verify_poc_payload as verifyPocPayload,
-      verify_poc_description as verifyPocDescription,
-      verify_attack_vector as verifyAttackVector,
-      verify_preconditions as verifyPreconditions,
-      verify_confidence as verifyConfidence,
-      verify_cost_usd as verifyCostUsd
-    FROM findings
-    WHERE fingerprint IN (${placeholders}) AND verify_exploitable IS NOT NULL
-  `).all(...uniqueFingerprints) as Array<{
+  type VerifyRow = {
     fingerprint: string;
     verifyExploitable: number;
     verifyPocPayload: string | null;
@@ -340,10 +336,30 @@ export function getStoredVerificationResults(
     verifyPreconditions: string | null;
     verifyConfidence: number | null;
     verifyCostUsd: number | null;
-  }>;
+  };
+
+  const allRows: VerifyRow[] = [];
+  for (let i = 0; i < uniqueFingerprints.length; i += SQLITE_BIND_LIMIT) {
+    const chunk = uniqueFingerprints.slice(i, i + SQLITE_BIND_LIMIT);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = db.prepare(`
+      SELECT
+        fingerprint,
+        verify_exploitable as verifyExploitable,
+        verify_poc_payload as verifyPocPayload,
+        verify_poc_description as verifyPocDescription,
+        verify_attack_vector as verifyAttackVector,
+        verify_preconditions as verifyPreconditions,
+        verify_confidence as verifyConfidence,
+        verify_cost_usd as verifyCostUsd
+      FROM findings
+      WHERE fingerprint IN (${placeholders}) AND verify_exploitable IS NOT NULL
+    `).all(...chunk) as VerifyRow[];
+    allRows.push(...rows);
+  }
 
   const results = new Map<string, VerificationResult>();
-  for (const row of rows) {
+  for (const row of allRows) {
     let preconditions: string[] = [];
     if (row.verifyPreconditions) {
       try {
@@ -548,10 +564,19 @@ export function getActionableFindings(
     filters.push("repo = ?");
     params.push(repo);
   }
-  if (options.fingerprints && options.fingerprints.length > 0) {
+  if (options.fingerprints && options.fingerprints.length > 0 && options.fingerprints.length <= SQLITE_BIND_LIMIT - params.length) {
     const placeholders = options.fingerprints.map(() => "?").join(", ");
     filters.push(`fingerprint IN (${placeholders})`);
     params.push(...options.fingerprints);
+  } else if (options.fingerprints && options.fingerprints.length > 0) {
+    // For large fingerprint sets, use a temp table to avoid SQLite bind limit
+    db.prepare("CREATE TEMP TABLE IF NOT EXISTS _fp_filter (fingerprint TEXT PRIMARY KEY)").run();
+    db.prepare("DELETE FROM _fp_filter").run();
+    const insert = db.prepare("INSERT OR IGNORE INTO _fp_filter (fingerprint) VALUES (?)");
+    for (const fp of options.fingerprints) {
+      insert.run(fp);
+    }
+    filters.push("fingerprint IN (SELECT fingerprint FROM _fp_filter)");
   }
   const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
 
@@ -714,12 +739,17 @@ export function deleteFindingsByFingerprints(
     return 0;
   }
 
-  const placeholders = uniqueFingerprints.map(() => "?").join(", ");
-  const result = db
-    .prepare(`DELETE FROM findings WHERE repo = ? AND fingerprint IN (${placeholders})`)
-    .run(repo, ...uniqueFingerprints);
+  let totalChanges = 0;
+  for (let i = 0; i < uniqueFingerprints.length; i += SQLITE_BIND_LIMIT - 1) {
+    const chunk = uniqueFingerprints.slice(i, i + SQLITE_BIND_LIMIT - 1);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = db
+      .prepare(`DELETE FROM findings WHERE repo = ? AND fingerprint IN (${placeholders})`)
+      .run(repo, ...chunk);
+    totalChanges += result.changes;
+  }
 
-  return result.changes;
+  return totalChanges;
 }
 
 function ensureScannerColumn(db: Database.Database): void {
@@ -815,40 +845,41 @@ function ensurePipelineRunsStatusValues(db: Database.Database): void {
 
   const contextSelect = tableSql.sql.includes("context_json") ? "context_json" : "NULL";
 
-  db.exec(`
-    BEGIN;
+  const migrate = db.transaction(() => {
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS pipeline_runs_v2 (
+        run_id         TEXT PRIMARY KEY,
+        repo           TEXT NOT NULL,
+        started_at     TEXT NOT NULL,
+        status         TEXT NOT NULL CHECK (status IN ('scanning','triaging','verifying','poc-harnessing','complete','error')),
+        config_json    TEXT NOT NULL,
+        scan_opts_json TEXT NOT NULL,
+        findings_json  TEXT,
+        context_json   TEXT,
+        total_cost_usd REAL NOT NULL DEFAULT 0,
+        completed_at   TEXT,
+        updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `).run();
 
-    CREATE TABLE IF NOT EXISTS pipeline_runs_v2 (
-      run_id         TEXT PRIMARY KEY,
-      repo           TEXT NOT NULL,
-      started_at     TEXT NOT NULL,
-      status         TEXT NOT NULL CHECK (status IN ('scanning','triaging','verifying','poc-harnessing','complete','error')),
-      config_json    TEXT NOT NULL,
-      scan_opts_json TEXT NOT NULL,
-      findings_json  TEXT,
-      context_json   TEXT,
-      total_cost_usd REAL NOT NULL DEFAULT 0,
-      completed_at   TEXT,
-      updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
-    );
+    db.prepare(`
+      INSERT INTO pipeline_runs_v2 (
+        run_id, repo, started_at, status, config_json, scan_opts_json,
+        findings_json, context_json, total_cost_usd, completed_at, updated_at
+      )
+      SELECT
+        run_id, repo, started_at, status, config_json, scan_opts_json,
+        findings_json, ${contextSelect}, total_cost_usd, completed_at, updated_at
+      FROM pipeline_runs
+    `).run();
 
-    INSERT INTO pipeline_runs_v2 (
-      run_id, repo, started_at, status, config_json, scan_opts_json,
-      findings_json, context_json, total_cost_usd, completed_at, updated_at
-    )
-    SELECT
-      run_id, repo, started_at, status, config_json, scan_opts_json,
-      findings_json, ${contextSelect}, total_cost_usd, completed_at, updated_at
-    FROM pipeline_runs;
+    db.prepare("DROP TABLE pipeline_runs").run();
+    db.prepare("ALTER TABLE pipeline_runs_v2 RENAME TO pipeline_runs").run();
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_pipeline_runs_repo_status ON pipeline_runs(repo, status)").run();
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started_at ON pipeline_runs(started_at DESC)").run();
+  });
 
-    DROP TABLE pipeline_runs;
-    ALTER TABLE pipeline_runs_v2 RENAME TO pipeline_runs;
-
-    CREATE INDEX IF NOT EXISTS idx_pipeline_runs_repo_status ON pipeline_runs(repo, status);
-    CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started_at ON pipeline_runs(started_at DESC);
-
-    COMMIT;
-  `);
+  migrate();
 }
 
 function ensurePipelineRunContextColumn(db: Database.Database): void {
@@ -1082,7 +1113,7 @@ export function getLatestResumableRun(
       completed_at as completedAt,
       updated_at as updatedAt
     FROM pipeline_runs
-    WHERE repo = ? AND status IN ('triaging', 'verifying', 'poc-harnessing')
+    WHERE repo = ? AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing')
     ORDER BY started_at DESC, rowid DESC
     LIMIT 1
   `).get(repo) as PipelineRunRecord | undefined;

@@ -180,7 +180,7 @@ export async function triageFindingWithAgent(
       continue;
     }
 
-    executionError = message.errors.join("; ") || message.subtype;
+    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
   }
 
   if (executionError) {
@@ -215,6 +215,7 @@ export async function triageFindingsBatch(
   repoContext?: RepoContext,
   runtimeOptions: TriageRuntimeOptions = {},
   maxBatchSize: number = DEFAULT_BATCH_SIZE,
+  maxTurns: number = DEFAULT_MAX_TURNS,
 ): Promise<BatchTriageOutput> {
   if (findings.length === 0) {
     return { results: new Map(), costUsd: 0 };
@@ -223,7 +224,7 @@ export async function triageFindingsBatch(
   const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
 
   if (findings.length <= effectiveBatchSize) {
-    return triageSingleBatch(findings, repoRoot, repoName, model, repoContext, runtimeOptions);
+    return triageSingleBatch(findings, repoRoot, repoName, model, repoContext, runtimeOptions, maxTurns);
   }
 
   const allResults = new Map<string, TriageResult>();
@@ -238,6 +239,7 @@ export async function triageFindingsBatch(
       model,
       repoContext,
       runtimeOptions,
+      maxTurns,
     );
 
     for (const [fp, result] of results) {
@@ -256,9 +258,11 @@ async function triageSingleBatch(
   model: string,
   repoContext: RepoContext | undefined,
   runtimeOptions: TriageRuntimeOptions,
+  maxTurns: number = DEFAULT_MAX_TURNS,
 ): Promise<BatchTriageOutput> {
   const prompt = buildBatchTriagePrompt(findings, repoName, repoContext);
   const runtime = runtimeOptions.runtime ?? getAgentRuntime();
+  const effectiveMaxTurns = normalizeTurns(maxTurns);
 
   let resultText = "";
   let structuredOutput: unknown = undefined;
@@ -270,6 +274,7 @@ async function triageSingleBatch(
     options: {
       cwd: repoRoot,
       model,
+      maxTurns: effectiveMaxTurns,
       allowedTools: [...DEFAULT_TOOLS],
       permissionMode: "dontAsk",
       maxBudgetUsd: runtimeOptions.maxBudgetUsd,
@@ -277,6 +282,8 @@ async function triageSingleBatch(
       outputFormat: {
         type: "json_schema",
         schema: BATCH_TRIAGE_SCHEMA,
+        strict: true,
+        retryInvalidStructuredOutput: 2,
       },
     },
   })) {
@@ -313,7 +320,7 @@ async function triageSingleBatch(
       continue;
     }
 
-    executionError = message.errors.join("; ") || message.subtype;
+    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
   }
 
   if (executionError) {
@@ -583,13 +590,16 @@ function normalizeTurns(value: number): number {
 
 /** Parse a verdict string, defaulting to needs_review for unknown values. */
 export function parseVerdict(v: string): Verdict {
-  if (v === "tp" || v === "fp" || v === "needs_review") return v;
+  const normalized = v.trim().toLowerCase();
+  if (normalized === "tp" || normalized === "fp" || normalized === "needs_review") return normalized;
   return "needs_review";
 }
 
 /** Extract JSON from LLM response, handling markdown fences and preamble. */
 export function extractJson(text: string): string {
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  // Use a greedy match that requires the closing fence at the start of a line
+  // to avoid breaking on nested code fences inside JSON string values.
+  const fenceMatch = text.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/);
   if (fenceMatch) return fenceMatch[1].trim();
 
   const braceStart = text.indexOf("{");

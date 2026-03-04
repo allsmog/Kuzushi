@@ -124,7 +124,7 @@ export async function verifyFindingWithAgent(
       continue;
     }
 
-    executionError = message.errors.join("; ") || message.subtype;
+    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
   }
 
   if (executionError) {
@@ -177,12 +177,24 @@ export function buildVerificationPrompt(
     `Verification steps: ${triageResult.verificationSteps.join(" | ") || "none"}`,
     "",
     "## Verification instructions",
-    "1. Trace attacker-controlled input sources to vulnerable sinks through real call paths.",
-    "2. Identify sanitization, encoding, validation, authz, feature flags, and reachability constraints.",
-    "3. Decide whether the issue is exploitable with a concrete input payload under realistic conditions.",
-    "4. If exploitable, provide a concise PoC payload and attack vector.",
-    "5. If not exploitable, explain precisely why (for example: sanitization, validation, unreachable path).",
-    "6. List any preconditions required to reproduce impact.",
+    ...(finding.filePath !== "."
+      ? [
+          "1. Trace attacker-controlled input sources to vulnerable sinks through real call paths.",
+          "2. Identify sanitization, encoding, validation, authz, feature flags, and reachability constraints.",
+          "3. Decide whether the issue is exploitable with a concrete input payload under realistic conditions.",
+          "4. If exploitable, provide a concise PoC payload and attack vector.",
+          "5. If not exploitable, explain precisely why (for example: sanitization, validation, unreachable path).",
+          "6. List any preconditions required to reproduce impact.",
+        ]
+      : [
+          "This is an architectural/threat-model finding without a specific file. Use Glob and Grep to identify relevant source files.",
+          "1. Verify the described threat is realistic given the actual system architecture and code.",
+          "2. Check whether existing mitigations (auth, validation, rate limiting, encryption) address the threat.",
+          "3. Decide whether the issue is concretely exploitable under realistic conditions.",
+          "4. If exploitable, describe a concrete attack vector and payload.",
+          "5. If not exploitable, explain precisely which mitigations prevent it.",
+          "6. List any preconditions required to reproduce impact.",
+        ]),
     "",
     "## Output requirements",
     "Return ONLY a JSON object with keys:",

@@ -110,6 +110,10 @@ export async function runSemgrep(
 
       try {
         const json = JSON.parse(Buffer.concat(stdoutChunks).toString());
+        if (!json || typeof json !== "object" || !Array.isArray(json.results)) {
+          resolve({ results: [], errors: [], paths: { scanned: [] } } as SemgrepOutput);
+          return;
+        }
         resolve(json as SemgrepOutput);
       } catch (err) {
         reject(new Error(`Failed to parse ${binName} output: ${err}`));
@@ -162,13 +166,13 @@ export function selectFindings(
       ruleId: finding.check_id,
       filePath: finding.path,
       startLine: finding.start.line,
-      severity: extra.severity ?? "UNKNOWN",
+      severity: extra.severity ?? "INFO",
       message: extra.message ?? "",
       evidence: normalizeEvidence(extra.lines),
-      scannerConfidence: meta.confidence ?? "UNKNOWN",
-      subcategory: meta.subcategory ?? ["unknown"],
-      likelihood: meta.likelihood ?? "UNKNOWN",
-      impact: meta.impact ?? "UNKNOWN",
+      scannerConfidence: meta.confidence ?? "LOW",
+      subcategory: meta.subcategory ?? ["audit"],
+      likelihood: meta.likelihood ?? "LOW",
+      impact: meta.impact ?? "LOW",
       cwe: meta.cwe ?? [],
       score,
     };

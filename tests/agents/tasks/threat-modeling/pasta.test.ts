@@ -140,6 +140,25 @@ describe("normalizeNode", () => {
     const node = normalizeNode({ id: "n1", description: "test", type: "INVALID", probability: 0.5, impact: "high", children: [] });
     expect(node!.type).toBe("LEAF");
   });
+
+  it("truncates deeply nested trees beyond depth limit", () => {
+    // Build a tree 25 levels deep — should be truncated at depth 20
+    let innermost: Record<string, unknown> = { id: "n-25", description: "deep leaf", type: "LEAF", probability: 0.1, impact: "low", children: [] };
+    for (let i = 24; i >= 0; i--) {
+      innermost = { id: `n-${i}`, description: `level ${i}`, type: "AND", probability: 0.5, impact: "high", children: [innermost] };
+    }
+    const root = normalizeNode(innermost);
+    expect(root).not.toBeNull();
+    // Walk to find the deepest node
+    let node = root;
+    let depth = 0;
+    while (node && node.children.length > 0) {
+      node = node.children[0];
+      depth++;
+    }
+    // Should be truncated before reaching depth 25
+    expect(depth).toBeLessThanOrEqual(20);
+  });
 });
 
 describe("treesToFindings", () => {

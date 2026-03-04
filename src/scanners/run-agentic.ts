@@ -67,6 +67,7 @@ export interface AgenticRuntimeOptions {
   runtime?: AgentRuntime;
   abortController?: AbortController;
   maxBudgetUsd?: number;
+  maxTurns?: number;
 }
 
 /** Run the agentic scanner and return structured findings. */
@@ -94,6 +95,7 @@ export async function runAgentic(
       model,
       allowedTools: ["Read", "Glob", "Grep"],
       permissionMode: "dontAsk",
+      maxTurns: runtimeOptions.maxTurns ?? 30,
       maxBudgetUsd: runtimeOptions.maxBudgetUsd,
       abortController: runtimeOptions.abortController,
       outputFormat: {
@@ -135,10 +137,10 @@ export async function runAgentic(
       structuredOutput = message.structuredOutput;
       const durationSec = message.durationMs ? (message.durationMs / 1000).toFixed(1) : "?";
       console.error(`${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`);
-      continue;
+      break;
     }
 
-    executionError = message.errors.join("; ") || message.subtype;
+    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
   }
 
   if (executionError) {
@@ -146,9 +148,7 @@ export async function runAgentic(
   }
 
   const parsed = parseAgenticOutput(structuredOutput ?? resultText);
-  return {
-    findings: parsed.findings.slice(0, requestedMax),
-  };
+  return { findings: parsed.findings };
 }
 
 /** Rank and map agentic findings into Finding records. */

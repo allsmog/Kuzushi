@@ -68,6 +68,7 @@ describe("buildPrompt", () => {
     );
     expect(prompt).toContain("JWT");
     expect(prompt).toContain("src/index.ts");
+    expect(prompt).toContain("25");
   });
 });
 

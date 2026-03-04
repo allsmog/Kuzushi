@@ -596,11 +596,19 @@ function inferCweFromPath(crossPath: CrossServicePath): string {
   // Try to infer CWE from the sink finding's existing CWE tags
   const sinkDesc = crossPath.ultimateSink.description.toLowerCase();
   if (sinkDesc.includes("sql")) return "CWE-89";
-  if (sinkDesc.includes("command") || sinkDesc.includes("injection")) return "CWE-78";
+  if (sinkDesc.includes("command")) return "CWE-78";
   if (sinkDesc.includes("path") || sinkDesc.includes("traversal")) return "CWE-22";
   if (sinkDesc.includes("ssrf")) return "CWE-918";
   if (sinkDesc.includes("deserialization")) return "CWE-502";
-  if (sinkDesc.includes("xss") || sinkDesc.includes("script")) return "CWE-79";
+  if (sinkDesc.includes("xss") || sinkDesc.includes("cross-site scripting")) return "CWE-79";
+  if (sinkDesc.includes("xxe") || sinkDesc.includes("xml external")) return "CWE-611";
+  if (sinkDesc.includes("redirect")) return "CWE-601";
+  if (sinkDesc.includes("header injection") || sinkDesc.includes("response splitting")) return "CWE-113";
+  if (sinkDesc.includes("log injection") || sinkDesc.includes("log forging")) return "CWE-117";
+  if (sinkDesc.includes("ldap")) return "CWE-90";
+  if (sinkDesc.includes("ssti") || sinkDesc.includes("template injection")) return "CWE-1336";
+  if (sinkDesc.includes("code injection") || sinkDesc.includes("eval") || sinkDesc.includes("code execution")) return "CWE-94";
+  if (sinkDesc.includes("injection")) return "CWE-78";
   return "CWE-346"; // Origin Validation Error (generic cross-service)
 }
 

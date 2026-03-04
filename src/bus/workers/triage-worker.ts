@@ -2,7 +2,7 @@ import type { TaskRegistry } from "../../agents/registry.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
-import { triageFindingWithAgent, triageFindingsBatch } from "../../triage.js";
+import { triageFindingWithAgent, triageFindingsBatch, BATCH_TRIAGE_FALLBACK_RATIONALE } from "../../triage.js";
 import type { KuzushiConfig, RepoContext } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
@@ -121,13 +121,17 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           },
         },
         deps.config.triageBatchSize,
+        deps.config.triageMaxTurns ?? 10,
       );
 
       const perFindingCost = findings.length > 0 ? costUsd / findings.length : 0;
 
       for (const [idx, finding] of findings.entries()) {
         const result = results.get(finding.fingerprint);
-        if (result) {
+        const isFallback = result?.confidence === 0
+          && result?.rationale === BATCH_TRIAGE_FALLBACK_RATIONALE;
+
+        if (result && !isFallback) {
           result.triageCostUsd = perFindingCost;
           await bus.publish(
             createEvent("triage:result", runId, {
@@ -145,7 +149,9 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             createEvent("triage:error", runId, {
               context,
               finding,
-              error: "Finding missing from batch triage response",
+              error: isFallback
+                ? "Finding omitted from batch triage response"
+                : "Finding missing from batch triage response",
               costUsd: perFindingCost,
               attempts: 1,
               index: idx + 1,

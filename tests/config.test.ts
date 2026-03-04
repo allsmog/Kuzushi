@@ -507,6 +507,24 @@ describe("unsetConfigValue", () => {
   });
 });
 
+describe("prototype pollution prevention", () => {
+  it("rejects __proto__ in dotted path for set", () => {
+    expect(() => setConfigValue("__proto__.polluted", "true")).toThrow("Invalid config key segment");
+  });
+
+  it("rejects constructor in dotted path for set", () => {
+    expect(() => setConfigValue("constructor.prototype.polluted", "true")).toThrow("Invalid config key segment");
+  });
+
+  it("rejects prototype in dotted path for set", () => {
+    expect(() => setConfigValue("scannerConfig.prototype.x", "true")).toThrow("Invalid config key segment");
+  });
+
+  it("rejects __proto__ in dotted path for unset", () => {
+    expect(() => unsetConfigValue("__proto__.polluted")).toThrow("Invalid config key segment");
+  });
+});
+
 describe("paths", () => {
   it("returns global config path", () => {
     expect(configPath()).toMatch(/config\.json$/);

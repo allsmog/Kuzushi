@@ -165,7 +165,15 @@ export class PiAiAgentRuntime implements AgentRuntime {
               signal,
             );
           } catch {
-            // Retries exhausted — fall through with the original error response
+            // Retries exhausted — yield error and stop rather than pushing errored message into context
+            yield errorResult(
+              "error_runtime",
+              assistant.errorMessage ?? "pi-ai transient error retries exhausted",
+              startedAtMs,
+              turn,
+              totalCostUsd,
+            );
+            return;
           }
         }
 

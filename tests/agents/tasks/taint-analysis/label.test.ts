@@ -17,6 +17,54 @@ afterEach(() => {
 });
 
 describe("taint-analysis-label internals", () => {
+  it("flags no-sources when preflight reports zero source rows", () => {
+    const status = __taintAnalysisLabelInternals.resolveSourceAvailability(
+      {
+        extraction: { sourcesRowCount: 0 },
+      } as unknown as Parameters<typeof __taintAnalysisLabelInternals.resolveSourceAvailability>[0],
+      [
+        {
+          id: "sink-1",
+          candidateKind: "sink_candidate",
+          callable: "open",
+          flowKind: "argument",
+          receiverHint: null,
+          moduleHint: "app.py",
+          argIndex: 0,
+          locationFile: "app.py",
+          locationLine: 12,
+        },
+      ],
+    );
+
+    expect(status.noSourcesExtracted).toBe(true);
+    expect(status.parsedSourceCount).toBe(0);
+  });
+
+  it("flags no-sources when parsed candidates contain no source markers", () => {
+    const status = __taintAnalysisLabelInternals.resolveSourceAvailability(
+      {
+        extraction: { sourcesRowCount: 5 },
+      } as unknown as Parameters<typeof __taintAnalysisLabelInternals.resolveSourceAvailability>[0],
+      [
+        {
+          id: "sink-1",
+          candidateKind: "sink_candidate",
+          callable: "open",
+          flowKind: "argument",
+          receiverHint: null,
+          moduleHint: "app.py",
+          argIndex: 0,
+          locationFile: "app.py",
+          locationLine: 12,
+        },
+      ],
+    );
+
+    expect(status.noSourcesExtracted).toBe(true);
+    expect(status.parsedSourceCount).toBe(0);
+  });
+
   it("parses extraction CSV candidate rows", async () => {
     const csvPath = path.join(TMP_DIR, "sources.csv");
     writeFileSync(

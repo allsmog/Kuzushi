@@ -9,6 +9,10 @@ export async function readFileContext(
   line: number,
   radius: number = 30,
 ): Promise<string> {
+  if (!filePath || filePath === ".") {
+    return "// Architectural finding: no specific source file location.";
+  }
+
   try {
     const content = await readFile(filePath, "utf-8");
     const lines = content.split("\n");
