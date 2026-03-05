@@ -33,7 +33,7 @@ function buildCheckPrompt(invariants: Invariant[]): string {
     "4. Assess severity: ERROR for security-critical violations, WARNING for significant, INFO for minor.",
     "5. If possible, describe an attack scenario that exploits the violation.",
     "",
-    "Only report violations you can verify in code. Do not report speculative violations.",
+    "Report violations with supporting evidence from the code. Include the specific file and line where the violation occurs. If you are uncertain, still report the violation but set confidence below 0.5.",
   ].join("\n");
 }
 
@@ -165,45 +165,58 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
       return [];
     }
 
-    const prompt = buildCheckPrompt(invariantsToCheck);
     const runtime = getAgentRuntime();
-
-    let structuredOutput: unknown;
-    let resultText = "";
-
     const tag = "[invariant-check]";
-    console.error(`${tag} Checking ${invariantsToCheck.length} invariants (model=${cfg.checkModel})`);
+    const batches = chunkArray(invariantsToCheck, cfg.checkBatchSize);
 
-    try {
-      for await (const message of runtime.query({
-        prompt,
-        options: {
-          cwd: context.repoRoot,
-          model: cfg.checkModel,
-          maxTurns: 30,
-          allowedTools: ["Read", "Glob", "Grep"],
-          permissionMode: "dontAsk",
-          outputFormat: {
-            type: "json_schema",
-            schema: INVARIANT_CHECK_SCHEMA,
+    console.error(`${tag} Checking ${invariantsToCheck.length} invariants in ${batches.length} batch(es) (model=${cfg.checkModel})`);
+
+    const allViolations: InvariantViolation[] = [];
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      const prompt = buildCheckPrompt(batch);
+      const maxTurns = Math.max(30, batch.length * 3);
+
+      let structuredOutput: unknown;
+      let resultText = "";
+
+      try {
+        for await (const message of runtime.query({
+          prompt,
+          options: {
+            cwd: context.repoRoot,
+            model: cfg.checkModel,
+            maxTurns,
+            allowedTools: ["Read", "Glob", "Grep"],
+            permissionMode: "dontAsk",
+            outputFormat: {
+              type: "json_schema",
+              schema: INVARIANT_CHECK_SCHEMA,
+            },
           },
-        },
-      })) {
-        if (message.type !== "result") continue;
-        if ("result" in message) {
-          resultText = message.result;
-          structuredOutput = message.structuredOutput;
+        })) {
+          if (message.type !== "result") continue;
+          if ("result" in message) {
+            resultText = message.result;
+            structuredOutput = message.structuredOutput;
+          }
         }
+      } catch (error) {
+        console.error(`${tag} Batch ${i + 1}/${batches.length} error: ${toErrorMessage(error)}`);
+        continue;
       }
-    } catch (error) {
-      console.error(`${tag} Error: ${toErrorMessage(error)}`);
-      return [];
+
+      const parsed = structuredOutput ?? parseJson(resultText);
+      const batchViolations = parseViolations(parsed, cfg.confidenceThreshold);
+
+      console.error(`${tag} Batch ${i + 1}/${batches.length}: resultLen=${resultText.length} structured=${structuredOutput !== undefined} preThreshold=${countPreThreshold(parsed)} postThreshold=${batchViolations.length}`);
+
+      allViolations.push(...batchViolations);
     }
 
-    const parsed = structuredOutput ?? parseJson(resultText);
-    const violations = parseViolations(parsed, cfg.confidenceThreshold);
-
-    console.error(`${tag} Found ${violations.length} violations`);
+    const violations = allViolations;
+    console.error(`${tag} Found ${violations.length} violations total`);
 
     return violations.map((v) => violationToFinding(v, context.repoRoot, context.repoName));
   },
@@ -231,6 +244,19 @@ function parseJson(text: string): unknown {
   } catch {
     return { violations: [] };
   }
+}
+
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function countPreThreshold(raw: unknown): number {
+  if (!isRecord(raw) || !Array.isArray(raw["violations"])) return 0;
+  return (raw["violations"] as unknown[]).length;
 }
 
 export const __invariantCheckInternals = {

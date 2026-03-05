@@ -113,7 +113,7 @@ export async function triageFindingWithAgent(
   repoRoot: string,
   repoName: string,
   model: string,
-  maxTurns: number,
+  maxTurns: number | null,
   repoContextOrRuntimeOptions?: RepoContext | TriageRuntimeOptions,
   maybeRuntimeOptions: TriageRuntimeOptions = {},
 ): Promise<TriageOutput> {
@@ -215,7 +215,7 @@ export async function triageFindingsBatch(
   repoContext?: RepoContext,
   runtimeOptions: TriageRuntimeOptions = {},
   maxBatchSize: number = DEFAULT_BATCH_SIZE,
-  maxTurns: number = DEFAULT_MAX_TURNS,
+  maxTurns: number | null = null,
 ): Promise<BatchTriageOutput> {
   if (findings.length === 0) {
     return { results: new Map(), costUsd: 0 };
@@ -258,7 +258,7 @@ async function triageSingleBatch(
   model: string,
   repoContext: RepoContext | undefined,
   runtimeOptions: TriageRuntimeOptions,
-  maxTurns: number = DEFAULT_MAX_TURNS,
+  maxTurns: number | null = null,
 ): Promise<BatchTriageOutput> {
   const prompt = buildBatchTriagePrompt(findings, repoName, repoContext);
   const runtime = runtimeOptions.runtime ?? getAgentRuntime();
@@ -580,11 +580,9 @@ function normalizeAllowedTools(tools: AllowedTriageTool[] | undefined): AllowedT
   return normalized.length > 0 ? normalized : [...DEFAULT_TOOLS];
 }
 
-function normalizeTurns(value: number): number {
-  if (!Number.isFinite(value) || value < 1) {
-    return DEFAULT_MAX_TURNS;
-  }
-
+function normalizeTurns(value: number | null | undefined): number | null {
+  if (value == null) return null;
+  if (!Number.isFinite(value) || value < 1) return null;
   return Math.floor(value);
 }
 

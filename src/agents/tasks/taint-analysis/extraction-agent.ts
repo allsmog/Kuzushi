@@ -258,6 +258,17 @@ async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> 
     "",
   ];
 
+  if (kind === "sink") {
+    lines.push(
+      "## Sink prioritization guidance (Balanced mode)",
+      "- Prioritize terminal security-sensitive actions: command execution, database query execution, outbound network requests, filesystem writes, template/code execution, LDAP/filter construction, and HTTP redirect/header setters.",
+      "- Include ORM/raw-query entrypoints where attacker-controlled text becomes executable query text (for example raw SQL APIs or query-builder raw fragment APIs).",
+      "- For SQL-focused sink coverage, ensure first-argument query text entrypoints are represented when applicable (for example `Raw(query, ...)` and `From(query)`).",
+      "- Do not prioritize pure string formatting or logging helpers as sinks; those are labeling false-positive traps.",
+      "",
+    );
+  }
+
   if (pythonExample) {
     lines.push(
       `## Working Python ${kind} example (for reference)`,

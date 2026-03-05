@@ -149,8 +149,8 @@ describe("taint-analysis-run internals", () => {
 
     const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, pythonProfile);
 
-    expect(libs.sources).toContain("DataFlow::CallNode call");
-    expect(libs.sources).toContain('getCalleeName() = "fmt.Sprintf"');
+    expect(libs.sources).toContain("DataFlow::CallCfgNode call");
+    expect(libs.sources).toContain('matches("%fmt.Sprintf%")');
   });
 
   it("Go sources use getTarget().getName() + getResult()", () => {
@@ -215,7 +215,7 @@ describe("taint-analysis-run internals", () => {
     expect(libs.sinks).not.toContain("getAnArgument");
   });
 
-  it("Python uses structured DataFlow::CallNode predicates", () => {
+  it("Python uses structured CallCfgNode predicates (not DataFlow::CallNode)", () => {
     const pythonProfile = profileById("python", "python-dataflow-new");
     expect(pythonProfile).not.toBeNull();
     if (!pythonProfile) {
@@ -224,15 +224,18 @@ describe("taint-analysis-run internals", () => {
 
     const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabels(), pythonProfile);
 
-    expect(libs.sources).toContain("DataFlow::CallNode call");
-    expect(libs.sources).toContain('getCalleeName() = "Query"');
-    expect(libs.sources).toContain("call.getResult()");
+    // Python must use CallCfgNode (top-level), NOT DataFlow::CallNode
+    expect(libs.sources).toContain("DataFlow::CallCfgNode call");
+    expect(libs.sources).not.toContain("DataFlow::CallNode call");
+    expect(libs.sources).toContain('matches("%Query%")');
+    expect(libs.sources).toContain("call");
     // The path_traversal pass clause uses structured predicates, not regexpMatch
     const srcClause = libs.sources.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
     expect(srcClause).not.toContain("regexpMatch");
-    expect(libs.sinks).toContain("DataFlow::CallNode call");
-    expect(libs.sinks).toContain('getCalleeName() = "open"');
-    expect(libs.sinks).toContain("call.getArgument(0)");
+    expect(libs.sinks).toContain("DataFlow::CallCfgNode call");
+    expect(libs.sinks).not.toContain("DataFlow::CallNode call");
+    expect(libs.sinks).toContain('matches("%open%")');
+    expect(libs.sinks).toContain("call.getArg(0)");
     const sinkClause = libs.sinks.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
     expect(sinkClause).not.toContain("regexpMatch");
   });
@@ -361,6 +364,71 @@ describe("taint-analysis-run internals", () => {
     expect(libs.sources).toContain('hasQualifiedName("encoding/json", "Unmarshal")');
   });
 
+  it("preserves callable variants with distinct arg positions", () => {
+    const labels = makeLabels();
+    labels.metadata.language = "go";
+    labels.passes[0].entries[1].signature.callable = "ExecContext";
+    labels.passes[0].entries[1].signature.arg_index = 0;
+    labels.passes[0].entries[1].signature.flow_kind = "argument";
+    labels.passes[0].entries.push({
+      ...labels.passes[0].entries[1],
+      id: "p1-sink-variant",
+      signature: {
+        ...labels.passes[0].entries[1].signature,
+        arg_index: 1,
+      },
+    });
+
+    const goProfile = profileById("go", "go-dataflow");
+    expect(goProfile).not.toBeNull();
+    if (!goProfile) return;
+
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
+
+    expect(libs.sinks).toContain('call.getTarget().getName() = "ExecContext"');
+    expect(libs.sinks).toContain("call.getArgument(0)");
+    expect(libs.sinks).toContain("call.getArgument(1)");
+  });
+
+  it("skips synthetic callable names in generated predicates", () => {
+    const labels = makeLabels();
+    labels.metadata.language = "go";
+    labels.passes[0].entries[0].signature.callable = "<mq_handler>";
+    labels.passes[0].entries[0].signature.flow_kind = "param";
+    labels.passes[0].entries[0].signature.arg_index = 1;
+
+    const goProfile = profileById("go", "go-dataflow");
+    expect(goProfile).not.toBeNull();
+    if (!goProfile) return;
+
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
+    const pathTraversalClause = libs.sources.split("passKey = \"path_traversal\"")[1]?.split("or\n")[0] ?? "";
+
+    expect(libs.sources).not.toContain("<mq_handler>");
+    expect(pathTraversalClause).toContain("regexpMatch(\"a^\")");
+  });
+
+  it("Go param sources use parameter-node matching", () => {
+    const labels = makeLabels();
+    labels.metadata.language = "go";
+    labels.passes[0].entries[0].signature.callable = "HandleRequest";
+    labels.passes[0].entries[0].signature.flow_kind = "param";
+    labels.passes[0].entries[0].signature.arg_index = 1;
+    labels.passes[0].entries[0].signature.type = "AuthzService";
+
+    const goProfile = profileById("go", "go-dataflow");
+    expect(goProfile).not.toBeNull();
+    if (!goProfile) return;
+
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
+    const pathTraversalClause = libs.sources.split("passKey = \"path_traversal\"")[1]?.split("or\n")[0] ?? "";
+
+    expect(pathTraversalClause).toContain("exists(Method m |");
+    expect(pathTraversalClause).toContain('m.getName() = "HandleRequest"');
+    expect(pathTraversalClause).toContain("node.asParameter() = m.getParameter(1)");
+    expect(pathTraversalClause).not.toContain("call.getArgument(1)");
+  });
+
   it("Go source with return flowKind uses getResult() even if argIndex set", () => {
     const labels = makeLabels();
     labels.metadata.language = "go";
@@ -411,6 +479,46 @@ describe("taint-analysis-run internals", () => {
     expect(libs.sinks).not.toContain("call.getAnArgument()");
   });
 
+  it("Go SQL query-builder sinks Raw/From default to argument 0 when arg_index is unknown", () => {
+    const labels = makeLabels();
+    labels.metadata.language = "go";
+    labels.passes[0].entries[1].role = "sink";
+    labels.passes[0].entries[1].signature.callable = "queries.Raw";
+    labels.passes[0].entries[1].signature.module = "github.com/volatiletech/sqlboiler/v4/queries";
+    labels.passes[0].entries[1].signature.arg_index = null;
+    labels.passes[0].entries[1].signature.flow_kind = "unknown";
+    labels.passes[0].entries.push({
+      ...labels.passes[0].entries[1],
+      id: "p1-sink-from",
+      signature: {
+        ...labels.passes[0].entries[1].signature,
+        callable: "qm.From",
+        module: "github.com/volatiletech/sqlboiler/v4/queries/qm",
+      },
+    });
+
+    const goProfile = profileById("go", "go-dataflow");
+    expect(goProfile).not.toBeNull();
+    if (!goProfile) return;
+
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
+
+    expect(libs.sinks).toContain('hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries", "Raw")');
+    expect(libs.sinks).toContain('hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries/qm", "From")');
+    expect(libs.sinks).toContain("call.getArgument(0)");
+  });
+
+  it("Go sink matching keeps package-qualified callable checks for SQL executors", () => {
+    const goProfile = profileById("go", "go-dataflow")!;
+    const nameCheck = __taintAnalysisRunInternals.buildCallableNameCheck(
+      "queries.Raw",
+      "go",
+      "github.com/volatiletech/sqlboiler/v4/queries",
+      goProfile,
+    );
+    expect(nameCheck).toContain('hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries", "Raw")');
+  });
+
   it("Java uses structured getCallee().getName() predicates", () => {
     const labels = makeLabels();
     labels.metadata.language = "java";
@@ -438,13 +546,14 @@ describe("taint-analysis-run internals", () => {
   });
 
   it("Go qualified name matching for stdlib packages", () => {
+    const goProfile = profileById("go", "go-dataflow")!;
     const nameCheck = __taintAnalysisRunInternals.buildCallableNameCheck(
-      "Unmarshal", "go", "encoding/json",
+      "Unmarshal", "go", "encoding/json", goProfile,
     );
     expect(nameCheck).toContain('hasQualifiedName("encoding/json", "Unmarshal")');
 
     const bareCheck = __taintAnalysisRunInternals.buildCallableNameCheck(
-      "MyFunc", "go", null,
+      "MyFunc", "go", null, goProfile,
     );
     expect(bareCheck).toContain('call.getTarget().getName() = "MyFunc"');
     expect(bareCheck).not.toContain("hasQualifiedName");

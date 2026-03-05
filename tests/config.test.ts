@@ -325,7 +325,7 @@ describe("setConfigValue", () => {
   });
 
   it("throws on invalid numeric values", () => {
-    expect(() => setConfigValue("triageMaxTurns", "0")).toThrow("triageMaxTurns must be a positive number");
+    expect(() => setConfigValue("triageMaxTurns", "-2")).toThrow("triageMaxTurns must be a positive number");
   });
 
   it("throws on invalid verify values", () => {

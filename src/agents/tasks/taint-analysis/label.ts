@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import type { AgentRuntime } from "../../../agent-runtime/types.js";
@@ -8,10 +9,17 @@ import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
 import {
+  countCandidateCsvRecords,
+  isCsvRecordBlank,
+  normalizeCandidateMarker,
+  parseCsvRecords,
+} from "./csv.js";
+import {
   TAINT_ANALYSIS_PASSES,
   resolveTaintAnalysisConfig,
   type TaintAnalysisCandidate,
   type TaintAnalysisLabelOutput,
+  type TaintAnalysisLanguage,
   type TaintAnalysisLabelsDocument,
   type TaintAnalysisPassDefinition,
   type TaintAnalysisPassEntry,
@@ -19,6 +27,32 @@ import {
   type TaintAnalysisPreflightOutput,
 } from "./types.js";
 import type { TiPriorCwe, TiPriorDocument } from "./ti-prior.js";
+
+export const SINK_DENY_LIST: Record<TaintAnalysisLanguage, Set<string>> = {
+  go: new Set([
+    "Sprintf", "Fprintf", "Printf", "Errorf",
+    "Fatalf", "Panicf", "Logf", "Warnf", "Infof", "Debugf", "Tracef",
+    "Sprint", "Fprint", "Print", "Sprintln", "Fprintln", "Println",
+    "Warnw", "Infow", "Debugw",
+  ]),
+  python: new Set([
+    "format", "join", "print",
+    "debug", "info", "warning", "error", "critical", "exception",
+  ]),
+  java: new Set([
+    "format", "printf",
+    "log", "fine", "finer", "finest", "info", "warning", "severe",
+    "debug", "warn", "error", "trace", "valueOf",
+  ]),
+  javascript: new Set([
+    "log", "warn", "error", "info", "debug", "trace", "format",
+  ]),
+  csharp: new Set([
+    "Format",
+    "LogDebug", "LogInformation", "LogWarning", "LogError", "LogCritical",
+    "Debug", "Information", "Warning", "Error", "Fatal",
+  ]),
+};
 
 interface TaintModelIntentEntry {
   pattern_intent: string;
@@ -85,6 +119,34 @@ interface LabelResponse {
   entries: LabelResponseEntry[];
 }
 
+export const LABEL_CHECKPOINT_VERSION = 2;
+export const LABEL_PARSER_VERSION = 2;
+
+interface LabelPassCheckpointV2 {
+  version: typeof LABEL_CHECKPOINT_VERSION;
+  parserVersion: typeof LABEL_PARSER_VERSION;
+  passId: TaintAnalysisPassId;
+  language: TaintAnalysisLanguage;
+  candidateFingerprint: string;
+  generatedAt: string;
+  entries: TaintAnalysisPassEntry[];
+}
+
+type LabelCheckpointFormat = "v2" | "legacy";
+
+type LoadPassCheckpointResult =
+  | {
+    hit: true;
+    format: LabelCheckpointFormat;
+    entries: TaintAnalysisPassEntry[];
+    deniedCount: number;
+    needsRewrite: boolean;
+  }
+  | {
+    hit: false;
+    reason: string;
+  };
+
 /**
  * Taint Analysis Step 3 task: LLM labeling + checkpoint payload generation.
  */
@@ -105,6 +167,11 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
       preflight.extraction.sourcesCsvPath,
       preflight.extraction.sinksCsvPath,
     );
+    const extractionCounts = summarizeExtractionCounts(preflight, allCandidates);
+    assertExtractionCountConsistency(extractionCounts, preflight.workspaceDir);
+    emitExtractionQualityDiagnostics(extractionCounts);
+    assertExtractionQualityThresholds(extractionCounts, preflight.workspaceDir);
+    const candidateFingerprint = computeCandidatesFingerprint(allCandidates);
     process.stderr.write(`[taint-analysis-label] Loaded ${allCandidates.length} candidates (${preflight.extraction.sourcesRowCount} sources, ${preflight.extraction.sinksRowCount} sinks)\n`);
     const sourceStatus = resolveSourceAvailability(preflight, allCandidates);
     const noSourcesExtracted = sourceStatus.noSourcesExtracted;
@@ -125,11 +192,14 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
     const labelsByPass = new Map<number, TaintAnalysisPassEntry[]>();
     if (noSourcesExtracted) {
       for (const passId of preflight.passes) {
+        const checkpointPath = path.join(preflight.workspaceDir, "labels", `labels_raw_pass${passId}.json`);
         labelsByPass.set(passId, []);
-        await writeFile(
-          path.join(preflight.workspaceDir, "labels", `labels_raw_pass${passId}.json`),
-          "[]",
-          "utf-8",
+        await writePassCheckpointV2(
+          checkpointPath,
+          passId,
+          preflight.language,
+          candidateFingerprint,
+          [],
         );
       }
     } else {
@@ -140,13 +210,37 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
         }
 
         const checkpointPath = path.join(preflight.workspaceDir, "labels", `labels_raw_pass${passId}.json`);
-        const cached = loadPassCheckpoint(checkpointPath, allCandidates.length);
-        if (cached) {
-          process.stderr.write(`[taint-analysis-label] Pass ${passId} (${passDef.focus}): loaded ${cached.length} entries from checkpoint\n`);
-          labelsByPass.set(passId, cached);
+        const cached = loadPassCheckpoint({
+          checkpointPath,
+          passId,
+          language: preflight.language,
+          candidates: allCandidates,
+          candidateFingerprint,
+        });
+        if (cached.hit) {
+          process.stderr.write(`[taint-analysis-label] Pass ${passId} (${passDef.focus}): loaded ${cached.entries.length} entries from ${cached.format} checkpoint\n`);
+          if (cached.deniedCount > 0) {
+            process.stderr.write(
+              `[taint-analysis-label]   Deny-list reclassified ${cached.deniedCount} formatting/logging sink(s) as non-sinks during checkpoint load\n`,
+            );
+          }
+          labelsByPass.set(passId, cached.entries);
+          if (cached.needsRewrite) {
+            await writePassCheckpointV2(
+              checkpointPath,
+              passId,
+              preflight.language,
+              candidateFingerprint,
+              cached.entries,
+            );
+            process.stderr.write(
+              `[taint-analysis-label] Pass ${passId} (${passDef.focus}): rewrote checkpoint to v${LABEL_CHECKPOINT_VERSION}\n`,
+            );
+          }
           continue;
         }
 
+        process.stderr.write(`[taint-analysis-label] Pass ${passId} (${passDef.focus}): checkpoint miss (${cached.reason})\n`);
         process.stderr.write(`[taint-analysis-label] Labeling pass ${passId} (${passDef.focus})...\n`);
         const passEntries = await labelPass(
           runtime,
@@ -166,10 +260,12 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
         labelsByPass.set(passId, passEntries);
         process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${passEntries.length} entries labeled\n`);
 
-        await writeFile(
+        await writePassCheckpointV2(
           checkpointPath,
-          JSON.stringify(passEntries, null, 2),
-          "utf-8",
+          passId,
+          preflight.language,
+          candidateFingerprint,
+          passEntries,
         );
       }
     }
@@ -187,6 +283,8 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
         notes: [
           "Generated by Kuzushi taint-analysis-label task.",
           "Labels generated by Kuzushi taint-analysis-label task.",
+          `internal.label_checkpoint_version=${LABEL_CHECKPOINT_VERSION}`,
+          `internal.label_parser_version=${LABEL_PARSER_VERSION}`,
           ...(noSourcesExtracted
             ? [
               `Labeling skipped because source extraction returned zero source candidates (${preflight.extraction.sourcesRowCount} rows).`,
@@ -300,10 +398,21 @@ async function labelPass(
     }
   }
 
-  return candidates.map((candidate) => {
+  const entries = candidates.map((candidate) => {
     const entry = byCandidateId.get(candidate.id);
     return normalizePassEntry(candidate, entry);
   });
+
+  const validated = applySinkDenyList(entries, language);
+  const deniedCount = entries.filter((entry) => entry.role === "sink").length
+    - validated.filter((entry) => entry.role === "sink").length;
+  if (deniedCount > 0) {
+    process.stderr.write(
+      `[taint-analysis-label]   Deny-list reclassified ${deniedCount} formatting/logging sink(s) as non-sinks during fresh labeling\n`,
+    );
+  }
+
+  return validated;
 }
 
 async function queryLabelBatch(
@@ -431,6 +540,41 @@ function normalizePassEntry(candidate: TaintAnalysisCandidate, entry: LabelRespo
   };
 }
 
+function applySinkDenyList(
+  entries: TaintAnalysisPassEntry[],
+  language: TaintAnalysisLanguage,
+): TaintAnalysisPassEntry[] {
+  const denySet = SINK_DENY_LIST[language];
+  if (!denySet || denySet.size === 0) {
+    return entries;
+  }
+
+  return entries.map((entry) => {
+    if (entry.role !== "sink") {
+      return entry;
+    }
+
+    const callable = entry.signature.callable.trim();
+    const callableParts = callable
+      .split(/[.:#]/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const basename = callableParts.at(-1) ?? callable;
+
+    if (!denySet.has(callable) && !denySet.has(basename)) {
+      return entry;
+    }
+
+    const baseRationale = entry.rationale.trim() || "Deny-list override.";
+    return {
+      ...entry,
+      role: "none",
+      classification: "fp",
+      rationale: `${baseRationale} [Overridden: ${callable} is a formatting/logging function, not a security-sensitive sink.]`,
+    };
+  });
+}
+
 function buildLabelPrompt(
   passDef: TaintAnalysisPassDefinition,
   candidates: TaintAnalysisCandidate[],
@@ -471,6 +615,12 @@ function buildLabelPrompt(
     "- role: source|sink|sanitizer|summary|none",
     "- classification: tp|fp|candidate|unknown",
     "- confidence: number in [0,1]",
+    "",
+    "Sink classification constraints (hard rules):",
+    "- A sink MUST be a function that performs a security-sensitive action: executing commands, querying databases, making network requests, writing to filesystems, evaluating code, rendering templates, constructing LDAP filters, or setting HTTP headers/redirects.",
+    "- String formatting functions (Sprintf, Errorf, String.format, etc.) are NOT sinks - they produce strings but do not execute, query, or transmit anything.",
+    "- Logging functions (log.Printf, logger.info, console.log, etc.) are NOT injection sinks for command/SQL/SSRF/LDAP injection passes.",
+    "- If a candidate is a formatting or logging function, classify it as role=none, classification=fp.",
     "",
     "Threat-intelligence prior (use as weighting guidance, not as proof):",
     JSON.stringify(passTiPrior, null, 2),
@@ -542,31 +692,292 @@ function selectTiPriorForPass(
   return tiPrior.cwes.filter((entry) => target.has(normalizeCweId(entry.cwe)));
 }
 
-function loadPassCheckpoint(
-  checkpointPath: string,
-  expectedCount: number,
-): TaintAnalysisPassEntry[] | null {
+interface LoadPassCheckpointArgs {
+  checkpointPath: string;
+  passId: TaintAnalysisPassId;
+  language: TaintAnalysisLanguage;
+  candidates: TaintAnalysisCandidate[];
+  candidateFingerprint: string;
+}
+
+function loadPassCheckpoint({
+  checkpointPath,
+  passId,
+  language,
+  candidates,
+  candidateFingerprint,
+}: LoadPassCheckpointArgs): LoadPassCheckpointResult {
   if (!existsSync(checkpointPath)) {
-    return null;
+    return { hit: false, reason: "missing checkpoint file" };
   }
 
+  const computedFingerprint = computeCandidatesFingerprint(candidates);
+  if (computedFingerprint !== candidateFingerprint) {
+    return { hit: false, reason: "internal candidate fingerprint mismatch" };
+  }
+
+  let parsed: unknown;
   try {
     const raw = readFileSync(checkpointPath, "utf-8");
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length !== expectedCount) {
-      return null;
-    }
-
-    // Quick structural check on the first entry.
-    const first = parsed[0];
-    if (!isRecord(first) || typeof first["id"] !== "string" || !isRecord(first["signature"])) {
-      return null;
-    }
-
-    return parsed as TaintAnalysisPassEntry[];
+    parsed = JSON.parse(raw);
   } catch {
+    return { hit: false, reason: "checkpoint parse error" };
+  }
+
+  if (Array.isArray(parsed)) {
+    return loadLegacyPassCheckpoint(parsed, language, candidateFingerprint);
+  }
+
+  if (!isRecord(parsed)) {
+    return { hit: false, reason: "checkpoint root is not an object or array" };
+  }
+
+  const version = Number(parsed["version"]);
+  if (!Number.isFinite(version) || version !== LABEL_CHECKPOINT_VERSION) {
+    return { hit: false, reason: `version mismatch (found ${String(parsed["version"])})` };
+  }
+
+  const parserVersion = Number(parsed["parserVersion"]);
+  if (!Number.isFinite(parserVersion) || parserVersion !== LABEL_PARSER_VERSION) {
+    return { hit: false, reason: `parser version mismatch (expected ${LABEL_PARSER_VERSION}, found ${String(parsed["parserVersion"]) || "unknown"})` };
+  }
+
+  const parsedPassId = Number(parsed["passId"]);
+  if (!Number.isFinite(parsedPassId) || parsedPassId !== passId) {
+    return { hit: false, reason: `pass mismatch (expected ${passId}, found ${String(parsed["passId"])})` };
+  }
+
+  const parsedLanguage = asString(parsed["language"]).trim();
+  if (parsedLanguage !== language) {
+    return { hit: false, reason: `language mismatch (expected ${language}, found ${parsedLanguage || "unknown"})` };
+  }
+
+  const storedFingerprint = asString(parsed["candidateFingerprint"]).trim();
+  if (!storedFingerprint || storedFingerprint !== candidateFingerprint) {
+    return {
+      hit: false,
+      reason: `fingerprint mismatch (parserVersion=${parserVersion})`,
+    };
+  }
+
+  const entries = parseCheckpointEntries(parsed["entries"]);
+  if (!entries) {
+    return { hit: false, reason: "shape invalid" };
+  }
+
+  const validated = applySinkDenyList(entries, language);
+  const deniedCount = entries.filter((entry) => entry.role === "sink").length
+    - validated.filter((entry) => entry.role === "sink").length;
+  return {
+    hit: true,
+    format: "v2",
+    entries: validated,
+    deniedCount,
+    needsRewrite: deniedCount > 0,
+  };
+}
+
+function loadLegacyPassCheckpoint(
+  value: unknown[],
+  language: TaintAnalysisLanguage,
+  candidateFingerprint: string,
+): LoadPassCheckpointResult {
+  const entries = parseCheckpointEntries(value);
+  if (!entries) {
+    return { hit: false, reason: "shape invalid" };
+  }
+
+  const entriesFingerprint = computeEntriesFingerprint(entries);
+  if (entriesFingerprint !== candidateFingerprint) {
+    return { hit: false, reason: `legacy fingerprint mismatch (parserVersion=legacy-unknown, expected=${LABEL_PARSER_VERSION})` };
+  }
+
+  const validated = applySinkDenyList(entries, language);
+  const deniedCount = entries.filter((entry) => entry.role === "sink").length
+    - validated.filter((entry) => entry.role === "sink").length;
+  return {
+    hit: true,
+    format: "legacy",
+    entries: validated,
+    deniedCount,
+    needsRewrite: true,
+  };
+}
+
+function parseCheckpointEntries(value: unknown): TaintAnalysisPassEntry[] | null {
+  if (!Array.isArray(value)) {
     return null;
   }
+
+  const entries: TaintAnalysisPassEntry[] = [];
+  for (const item of value) {
+    const entry = parseCheckpointEntry(item);
+    if (!entry) {
+      return null;
+    }
+    entries.push(entry);
+  }
+
+  return entries;
+}
+
+function parseCheckpointEntry(value: unknown): TaintAnalysisPassEntry | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = asString(value["id"]).trim();
+  const role = asRole(value["role"]);
+  const classification = asClassification(value["classification"]);
+  const confidence = clamp(Number(value["confidence"]));
+  const rationale = asString(value["rationale"]).trim();
+  if (!id || !role || !classification || !rationale) {
+    return null;
+  }
+
+  const signature = value["signature"];
+  if (!isRecord(signature)) {
+    return null;
+  }
+  const callable = asString(signature["callable"]).trim();
+  const flowKind = asFlowKind(signature["flow_kind"]);
+  if (!callable || !flowKind) {
+    return null;
+  }
+
+  const location = value["location"];
+  if (!isRecord(location)) {
+    return null;
+  }
+  const locationFile = asString(location["file"]).trim();
+  const locationLine = Number(location["line"]);
+  if (!locationFile || !Number.isFinite(locationLine) || locationLine < 1) {
+    return null;
+  }
+
+  let evidence: string[] | undefined;
+  if (value["evidence"] != null) {
+    if (!Array.isArray(value["evidence"])) {
+      return null;
+    }
+    evidence = value["evidence"].map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  return {
+    id,
+    role,
+    classification,
+    confidence,
+    signature: {
+      package: asOptionalString(signature["package"]),
+      module: asOptionalString(signature["module"]),
+      type: asOptionalString(signature["type"]),
+      callable,
+      arg_index: asNullableIndex(signature["arg_index"]),
+      flow_kind: flowKind,
+    },
+    location: {
+      file: locationFile,
+      line: Math.floor(locationLine),
+    },
+    rationale,
+    evidence,
+  };
+}
+
+async function writePassCheckpointV2(
+  checkpointPath: string,
+  passId: TaintAnalysisPassId,
+  language: TaintAnalysisLanguage,
+  candidateFingerprint: string,
+  entries: TaintAnalysisPassEntry[],
+): Promise<void> {
+  const payload: LabelPassCheckpointV2 = {
+    version: LABEL_CHECKPOINT_VERSION,
+    parserVersion: LABEL_PARSER_VERSION,
+    passId,
+    language,
+    candidateFingerprint,
+    generatedAt: new Date().toISOString(),
+    entries,
+  };
+  await writeFile(checkpointPath, JSON.stringify(payload, null, 2), "utf-8");
+}
+
+function canonicalizeCandidateForFingerprint(candidate: TaintAnalysisCandidate): string {
+  return [
+    normalizeFingerprintField(candidate.id),
+    normalizeFingerprintField(candidate.candidateKind),
+    normalizeFingerprintField(candidate.callable),
+    normalizeFingerprintField(candidate.moduleHint),
+    normalizeFingerprintField(candidate.receiverHint),
+    normalizeFingerprintNumber(candidate.argIndex),
+    normalizeFingerprintField(candidate.flowKind),
+    normalizeFingerprintField(candidate.locationFile),
+    normalizeFingerprintNumber(candidate.locationLine),
+  ].join("|");
+}
+
+function canonicalizeEntryForFingerprint(entry: TaintAnalysisPassEntry): string {
+  return [
+    normalizeFingerprintField(entry.id),
+    inferCandidateKindFromEntryId(entry.id),
+    normalizeFingerprintField(entry.signature.callable),
+    normalizeFingerprintField(entry.signature.module),
+    normalizeFingerprintField(entry.signature.type),
+    normalizeFingerprintNumber(entry.signature.arg_index),
+    normalizeFingerprintField(entry.signature.flow_kind),
+    normalizeFingerprintField(entry.location.file),
+    normalizeFingerprintNumber(entry.location.line),
+  ].join("|");
+}
+
+function computeCandidatesFingerprint(candidates: TaintAnalysisCandidate[]): string {
+  const canonical = candidates
+    .map(canonicalizeCandidateForFingerprint)
+    .sort()
+    .join("\n");
+  return sha256Hex(canonical);
+}
+
+function computeEntriesFingerprint(entries: TaintAnalysisPassEntry[]): string {
+  const canonical = entries
+    .map(canonicalizeEntryForFingerprint)
+    .sort()
+    .join("\n");
+  return sha256Hex(canonical);
+}
+
+function inferCandidateKindFromEntryId(entryId: string): string {
+  const normalized = entryId.trim();
+  if (normalized.startsWith("src-")) {
+    return "source_candidate";
+  }
+  if (normalized.startsWith("sink-")) {
+    return "sink_candidate";
+  }
+  return "<unknown>";
+}
+
+function normalizeFingerprintField(value: unknown): string {
+  if (value == null) {
+    return "<null>";
+  }
+
+  const trimmed = String(value).trim();
+  return trimmed || "<null>";
+}
+
+function normalizeFingerprintNumber(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "<null>";
+  }
+
+  return String(Math.floor(value));
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 async function loadCandidates(sourcesCsvPath: string, sinksCsvPath: string): Promise<TaintAnalysisCandidate[]> {
@@ -591,35 +1002,139 @@ function resolveSourceAvailability(
   };
 }
 
+interface ExtractionCountSummary {
+  expectedSources: number;
+  expectedSinks: number;
+  parsedSources: number;
+  parsedSinks: number;
+  expectedTotal: number;
+  parsedTotal: number;
+  sourceParsedRatio: number;
+  sinkParsedRatio: number;
+  parsedTotalRatio: number;
+  unknownFlowCount: number;
+  lineOneCount: number;
+  unknownFlowRatio: number;
+  lineOneRatio: number;
+}
+
+function summarizeExtractionCounts(
+  preflight: TaintAnalysisPreflightOutput,
+  candidates: TaintAnalysisCandidate[],
+): ExtractionCountSummary {
+  const expectedSources = Math.max(0, Math.floor(preflight.extraction.sourcesRowCount));
+  const expectedSinks = Math.max(0, Math.floor(preflight.extraction.sinksRowCount));
+  const parsedSources = candidates.filter((candidate) => candidate.candidateKind === "source_candidate").length;
+  const parsedSinks = candidates.filter((candidate) => candidate.candidateKind === "sink_candidate").length;
+  const expectedTotal = expectedSources + expectedSinks;
+  const parsedTotal = parsedSources + parsedSinks;
+  const unknownFlowCount = candidates.filter((candidate) => candidate.flowKind === "unknown").length;
+  const lineOneCount = candidates.filter((candidate) => candidate.locationLine === 1).length;
+
+  return {
+    expectedSources,
+    expectedSinks,
+    parsedSources,
+    parsedSinks,
+    expectedTotal,
+    parsedTotal,
+    sourceParsedRatio: ratio(parsedSources, expectedSources),
+    sinkParsedRatio: ratio(parsedSinks, expectedSinks),
+    parsedTotalRatio: ratio(parsedTotal, expectedTotal),
+    unknownFlowCount,
+    lineOneCount,
+    unknownFlowRatio: parsedTotal > 0 ? unknownFlowCount / parsedTotal : 0,
+    lineOneRatio: parsedTotal > 0 ? lineOneCount / parsedTotal : 0,
+  };
+}
+
+function assertExtractionCountConsistency(
+  summary: ExtractionCountSummary,
+  workspaceDir: string,
+): void {
+  const sourceMismatch = summary.parsedSources !== summary.expectedSources;
+  const sinkMismatch = summary.parsedSinks !== summary.expectedSinks;
+  if (!sourceMismatch && !sinkMismatch) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "[taint-analysis-label] Candidate parse mismatch with preflight extraction counts.",
+      `sources expected=${summary.expectedSources} parsed=${summary.parsedSources}; sinks expected=${summary.expectedSinks} parsed=${summary.parsedSinks}.`,
+      `This usually indicates malformed CSV records or stale extraction artifacts in ${workspaceDir}/extraction.`,
+      "Remediation: delete the workspace extraction/labels artifacts and rerun taint-analysis preflight + label.",
+    ].join(" "),
+  );
+}
+
+function emitExtractionQualityDiagnostics(summary: ExtractionCountSummary): void {
+  process.stderr.write(
+    `[taint-analysis-label] Extraction quality: parsed_ratio=${summary.parsedTotalRatio.toFixed(3)} source_ratio=${summary.sourceParsedRatio.toFixed(3)} sink_ratio=${summary.sinkParsedRatio.toFixed(3)} unknown_flow_ratio=${summary.unknownFlowRatio.toFixed(3)} line_one_ratio=${summary.lineOneRatio.toFixed(3)}\n`,
+  );
+
+  if (summary.unknownFlowRatio >= 0.9) {
+    process.stderr.write(
+      `[taint-analysis-label] Warning: ${summary.unknownFlowCount}/${summary.parsedTotal} candidates have flow_kind=unknown; extraction metadata may be degraded\n`,
+    );
+  }
+
+  if (summary.lineOneRatio >= 0.9) {
+    process.stderr.write(
+      `[taint-analysis-label] Warning: ${summary.lineOneCount}/${summary.parsedTotal} candidates resolve to line=1; extraction metadata may be degraded\n`,
+    );
+  }
+}
+
+function assertExtractionQualityThresholds(summary: ExtractionCountSummary, workspaceDir: string): void {
+  const minSampleSize = 50;
+  if (summary.parsedTotal < minSampleSize) {
+    return;
+  }
+
+  const hardFailRatio = 0.97;
+  if (summary.unknownFlowRatio >= hardFailRatio || summary.lineOneRatio >= hardFailRatio) {
+    throw new Error(
+      [
+        "[taint-analysis-label] Extraction metadata collapsed (hard quality gate).",
+        `unknown_flow_ratio=${summary.unknownFlowRatio.toFixed(3)} line_one_ratio=${summary.lineOneRatio.toFixed(3)} parsed_total=${summary.parsedTotal}.`,
+        `Artifacts under ${workspaceDir}/extraction are not trustworthy for labeling.`,
+        "Remediation: regenerate extraction outputs and verify the extraction query preserves flow_kind/line metadata.",
+      ].join(" "),
+    );
+  }
+}
+
+function ratio(numerator: number, denominator: number): number {
+  if (denominator <= 0) {
+    return numerator <= 0 ? 1 : 0;
+  }
+  return numerator / denominator;
+}
+
 async function parseCsvCandidates(
   csvPath: string,
   fallbackKind: TaintAnalysisCandidate["candidateKind"],
 ): Promise<TaintAnalysisCandidate[]> {
   const csvContent = await readFile(csvPath, "utf-8");
-  const lines = csvContent
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const records = parseCsvRecords(csvContent);
 
   const out: TaintAnalysisCandidate[] = [];
   let counter = 0;
 
-  for (const line of lines) {
-    const cols = parseCsvLine(line);
-    if (cols.length < 2) {
+  for (const cols of records) {
+    if (cols.length < 2 || isCsvRecordBlank(cols)) {
       continue;
     }
 
-    const marker = cols[1]?.toLowerCase();
-    if (marker !== "source_candidate" && marker !== "sink_candidate") {
+    const marker = normalizeCandidateMarker(cols[1]);
+    if (!marker) {
       continue;
     }
 
     counter += 1;
 
-    const candidateKind = marker === "source_candidate" || marker === "sink_candidate"
-      ? marker
-      : fallbackKind;
+    const candidateKind = marker ?? fallbackKind;
 
     const callable = sanitizeString(cols[2]) || "unknown";
     const flowKind = parseFlowKind(cols[3]);
@@ -628,6 +1143,7 @@ async function parseCsvCandidates(
     const argIndex = parseArgIndex(cols[6]);
     const locationLine = parseLine(cols[7]);
     const locationFile = moduleHint || "unknown";
+    const snippet = sanitizeString(cols[0]);
 
     out.push({
       id: `${candidateKind === "source_candidate" ? "src" : "sink"}-${counter}`,
@@ -639,6 +1155,7 @@ async function parseCsvCandidates(
       argIndex,
       locationFile,
       locationLine,
+      snippet: snippet || undefined,
     });
   }
 
@@ -930,52 +1447,49 @@ function extractJson(value: string): string {
   return value;
 }
 
-function parseCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let idx = 0; idx < line.length; idx += 1) {
-    const char = line[idx];
-
-    if (char === '"') {
-      const next = line[idx + 1];
-      if (inQuotes && next === '"') {
-        current += '"';
-        idx += 1;
-        continue;
-      }
-
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      out.push(current);
-      current = "";
-      continue;
-    }
-
-    current += char;
-  }
-
-  out.push(current);
-  return out;
-}
-
 function parseFlowKind(value: string | undefined): TaintAnalysisCandidate["flowKind"] {
   const normalized = parseKeyValue(value, "flow_kind")?.toLowerCase() ?? "unknown";
+  const canonical = normalized === "arg"
+    ? "argument"
+    : normalized === "parameter"
+      ? "param"
+      : normalized === "result" || normalized === "ret"
+        ? "return"
+        : normalized;
   if (
-    normalized === "param"
-    || normalized === "argument"
-    || normalized === "return"
-    || normalized === "receiver"
-    || normalized === "field"
+    canonical === "param"
+    || canonical === "argument"
+    || canonical === "return"
+    || canonical === "receiver"
+    || canonical === "field"
   ) {
-    return normalized;
+    return canonical;
   }
 
   return "unknown";
+}
+
+function asFlowKind(value: unknown): TaintAnalysisCandidate["flowKind"] | null {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  const canonical = normalized === "arg"
+    ? "argument"
+    : normalized === "parameter"
+      ? "param"
+      : normalized === "result" || normalized === "ret"
+        ? "return"
+        : normalized;
+  if (
+    canonical === "param"
+    || canonical === "argument"
+    || canonical === "return"
+    || canonical === "receiver"
+    || canonical === "field"
+    || canonical === "unknown"
+  ) {
+    return canonical;
+  }
+
+  return null;
 }
 
 function parseArgIndex(value: string | undefined): number | null {
@@ -988,8 +1502,22 @@ function parseArgIndex(value: string | undefined): number | null {
   return Math.floor(numeric);
 }
 
-function parseLine(value: string | undefined): number {
+function asNullableIndex(value: unknown): number | null {
+  if (value == null || value === "") {
+    return null;
+  }
+
   const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return null;
+  }
+
+  return Math.floor(numeric);
+}
+
+function parseLine(value: string | undefined): number {
+  const raw = parseKeyValue(value, "line") ?? value ?? "";
+  const numeric = Number(raw);
   if (!Number.isFinite(numeric) || numeric < 1) {
     return 1;
   }
@@ -1122,9 +1650,19 @@ function chunk<T>(values: T[], size: number): T[][] {
 }
 
 export const __taintAnalysisLabelInternals = {
+  LABEL_CHECKPOINT_VERSION,
+  LABEL_PARSER_VERSION,
   buildLabelPrompt,
+  applySinkDenyList,
+  loadPassCheckpoint,
+  writePassCheckpointV2,
+  canonicalizeCandidateForFingerprint,
+  canonicalizeEntryForFingerprint,
+  computeCandidatesFingerprint,
+  computeEntriesFingerprint,
   resolveSourceAvailability,
   parseCsvCandidates,
+  countCandidateCsvRecords,
   summarizeLabels,
   validateLabelsDocument,
   buildTaintModelDocument,

@@ -30,6 +30,10 @@ import {
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+const EXPECTED_LABEL_CHECKPOINT_VERSION = 2;
+const EXPECTED_LABEL_PARSER_VERSION = 2;
+const LABEL_CHECKPOINT_VERSION_NOTE_PREFIX = "internal.label_checkpoint_version=";
+const LABEL_PARSER_VERSION_NOTE_PREFIX = "internal.label_parser_version=";
 
 interface CallableInfo {
   callable: string;
@@ -68,6 +72,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
 
     const labels = labelOutput.labels ?? await loadLabelsFromDisk(labelOutput.labelsPath);
     process.stderr.write(`[taint-analysis-run] Loaded labels: ${labels.passes.length} passes\n`);
+    enforceLabelArtifactCompatibility(labels);
     const resultsDir = path.join(labelOutput.workspaceDir, "results");
     const compatRecordPath = path.join(labelOutput.workspaceDir, "exploration", "codeql_compat.json");
 
@@ -77,6 +82,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
       return [];
     }
     process.stderr.write(`[taint-analysis-run] ${enabledPasses.length} enabled passes\n`);
+    emitSinkCoverageDiagnostics(labels, enabledPasses);
     if (!hasUsableRoleForPasses(labels, enabledPasses, "source")) {
       await writeFile(
         path.join(resultsDir, "skip_reason.json"),
@@ -266,6 +272,69 @@ async function loadLabelsFromDisk(labelsPath: string): Promise<TaintAnalysisLabe
   return parsed as unknown as TaintAnalysisLabelsDocument;
 }
 
+function enforceLabelArtifactCompatibility(labels: TaintAnalysisLabelsDocument): void {
+  const notes = labels.metadata.notes ?? [];
+  const checkpointVersion = parseVersionFromNotes(notes, LABEL_CHECKPOINT_VERSION_NOTE_PREFIX);
+  const parserVersion = parseVersionFromNotes(notes, LABEL_PARSER_VERSION_NOTE_PREFIX);
+
+  if (checkpointVersion == null || parserVersion == null) {
+    process.stderr.write(
+      `[taint-analysis-run] Warning: labels metadata does not include internal parser/checkpoint versions; stale-artifact verification is partial\n`,
+    );
+    return;
+  }
+
+  if (checkpointVersion !== EXPECTED_LABEL_CHECKPOINT_VERSION) {
+    throw new Error(
+      `[taint-analysis-run] Incompatible labels metadata: checkpoint version ${checkpointVersion} (expected ${EXPECTED_LABEL_CHECKPOINT_VERSION}). Regenerate taint-analysis labels/checkpoints.`,
+    );
+  }
+
+  if (parserVersion !== EXPECTED_LABEL_PARSER_VERSION) {
+    throw new Error(
+      `[taint-analysis-run] Incompatible labels metadata: parser version ${parserVersion} (expected ${EXPECTED_LABEL_PARSER_VERSION}). Regenerate taint-analysis labels/checkpoints.`,
+    );
+  }
+}
+
+function parseVersionFromNotes(notes: string[], prefix: string): number | null {
+  for (const note of notes) {
+    const trimmed = note.trim();
+    if (!trimmed.startsWith(prefix)) {
+      continue;
+    }
+    const rawValue = trimmed.slice(prefix.length).trim();
+    const parsed = Number(rawValue);
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed);
+    }
+  }
+  return null;
+}
+
+function emitSinkCoverageDiagnostics(
+  labels: TaintAnalysisLabelsDocument,
+  enabledPasses: TaintAnalysisPassDefinition[],
+): void {
+  const enabledSet = new Set(enabledPasses.map((pass) => pass.passId));
+  for (const pass of labels.passes) {
+    if (!enabledSet.has(pass.pass_id)) {
+      continue;
+    }
+    const sinksBeforeFiltering = pass.entries.filter((entry) => entry.role === "sink").length;
+    const sinksAfterFiltering = pass.entries.filter((entry) => entry.role === "sink" && entry.classification !== "fp").length;
+    const uniqueCallables = new Set(
+      pass.entries
+        .filter((entry) => entry.role === "sink" && entry.classification !== "fp")
+        .map((entry) => entry.signature.callable.trim())
+        .filter(Boolean),
+    ).size;
+    process.stderr.write(
+      `[taint-analysis-run] pass ${pass.pass_id} (${pass.focus}): sinks before_fp=${sinksBeforeFiltering} after_fp=${sinksAfterFiltering} unique_callables=${uniqueCallables}\n`,
+    );
+  }
+}
+
 function renderTaintAnalysisLibraries(labels: TaintAnalysisLabelsDocument, profile: CodeqlProfile): {
   sources: string;
   sinks: string;
@@ -284,7 +353,7 @@ function renderTaintAnalysisLibraries(labels: TaintAnalysisLabelsDocument, profi
     "node",
     sourceByPass,
     languageImports,
-    profile.language,
+    profile,
     "source",
   );
 
@@ -294,7 +363,7 @@ function renderTaintAnalysisLibraries(labels: TaintAnalysisLabelsDocument, profi
     "node",
     sinkByPass,
     languageImports,
-    profile.language,
+    profile,
     "sink",
   );
 
@@ -304,7 +373,7 @@ function renderTaintAnalysisLibraries(labels: TaintAnalysisLabelsDocument, profi
     "node",
     sanitizerByPass,
     languageImports,
-    profile.language,
+    profile,
     "sanitizer",
   );
 
@@ -337,7 +406,7 @@ function renderMatcherLibrary(
   nodeParamName: string,
   byPass: Map<string, CallableInfo[]>,
   languageImports: string,
-  language: TaintAnalysisLanguage,
+  profile: CodeqlProfile,
   role: "source" | "sink" | "sanitizer",
 ): string {
   const passClauses = TAINT_ANALYSIS_PASSES.map((passDef) => {
@@ -347,7 +416,7 @@ function renderMatcherLibrary(
     }
 
     const callableChecks = callables
-      .map((info) => buildNodeCallableCheck(nodeParamName, info, language, role))
+      .map((info) => buildNodeCallableCheck(nodeParamName, info, profile, role))
       .join("\n      or ");
 
     return [
@@ -385,6 +454,7 @@ function groupCallables(labels: TaintAnalysisLabelsDocument, role: TaintAnalysis
 
     const seen = new Set<string>();
     const infos: CallableInfo[] = [];
+    let skippedSynthetic = 0;
 
     for (const entry of pass.entries) {
       if (entry.role !== role || entry.classification === "fp") {
@@ -392,24 +462,77 @@ function groupCallables(labels: TaintAnalysisLabelsDocument, role: TaintAnalysis
       }
 
       const callable = entry.signature.callable.trim();
-      if (!callable || seen.has(callable)) {
+      if (!callable) {
+        continue;
+      }
+      if (isSyntheticCallableName(callable)) {
+        skippedSynthetic += 1;
         continue;
       }
 
-      seen.add(callable);
+      const receiverHint = entry.signature.type ?? entry.signature.module ?? null;
+      const flowKind = entry.signature.flow_kind;
+      const argIndex = entry.signature.arg_index ?? null;
+      const variantKey = buildCallableVariantKey(callable, receiverHint, flowKind, argIndex);
+      if (seen.has(variantKey)) {
+        continue;
+      }
+
+      seen.add(variantKey);
       infos.push({
         callable,
-        flowKind: entry.signature.flow_kind,
-        receiverHint: entry.signature.type ?? entry.signature.module ?? null,
-        argIndex: entry.signature.arg_index ?? null,
+        flowKind,
+        receiverHint,
+        argIndex,
       });
     }
 
-    infos.sort((a, b) => a.callable.localeCompare(b.callable));
+    if (skippedSynthetic > 0) {
+      process.stderr.write(
+        `[taint-analysis-run] pass ${pass.pass_id} (${passDef.focus}): skipped ${skippedSynthetic} synthetic ${role} callable entr${skippedSynthetic === 1 ? "y" : "ies"}\n`,
+      );
+    }
+
+    infos.sort(compareCallableInfo);
     out.set(passDef.passKey, infos);
   }
 
   return out;
+}
+
+function isSyntheticCallableName(callable: string): boolean {
+  const trimmed = callable.trim();
+  return trimmed.startsWith("<") && trimmed.endsWith(">");
+}
+
+function buildCallableVariantKey(
+  callable: string,
+  receiverHint: string | null,
+  flowKind: CallableInfo["flowKind"],
+  argIndex: number | null,
+): string {
+  return [
+    callable,
+    receiverHint ?? "<null>",
+    flowKind,
+    argIndex == null ? "<null>" : String(argIndex),
+  ].join("|");
+}
+
+function compareCallableInfo(a: CallableInfo, b: CallableInfo): number {
+  const byCallable = a.callable.localeCompare(b.callable);
+  if (byCallable !== 0) {
+    return byCallable;
+  }
+  const byReceiver = (a.receiverHint ?? "").localeCompare(b.receiverHint ?? "");
+  if (byReceiver !== 0) {
+    return byReceiver;
+  }
+  const byFlow = a.flowKind.localeCompare(b.flowKind);
+  if (byFlow !== 0) {
+    return byFlow;
+  }
+  return (a.argIndex ?? -1) - (b.argIndex ?? -1);
 }
 
 function renderTaintQuery(
@@ -770,8 +893,17 @@ function buildCallableNameCheck(
   callable: string,
   language: TaintAnalysisLanguage,
   receiverHint: string | null,
+  profile: CodeqlProfile,
 ): string {
-  const escaped = escapeQllString(callable);
+  const effectiveCallable = language === "go"
+    ? callableBasename(callable)
+    : callable;
+  const escaped = escapeQllString(effectiveCallable);
+
+  // If the profile provides a custom callee name pattern, use it.
+  if (profile.calleeNamePattern) {
+    return profile.calleeNamePattern.replaceAll("{NAME}", escaped);
+  }
 
   if (receiverHint) {
     const hint = escapeQllString(receiverHint);
@@ -782,7 +914,7 @@ function buildCallableNameCheck(
         }
         return `call.getTarget().getName() = "${escaped}"`;
       case "python":
-        return `call.getCalleeName() = "${escaped}"`;
+        return `call.getFunction().toString().matches("%${escaped}%")`;
       case "java":
       case "csharp":
         return `call.getCallee().getName() = "${escaped}"`;
@@ -795,12 +927,25 @@ function buildCallableNameCheck(
     case "go":
       return `call.getTarget().getName() = "${escaped}"`;
     case "python":
+      return `call.getFunction().toString().matches("%${escaped}%")`;
     case "javascript":
       return `call.getCalleeName() = "${escaped}"`;
     case "java":
     case "csharp":
       return `call.getCallee().getName() = "${escaped}"`;
   }
+}
+
+function callableBasename(callable: string): string {
+  const trimmed = callable.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  const pieces = trimmed
+    .split(/[.:#]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return pieces.at(-1) ?? trimmed;
 }
 
 const VARIADIC_FORMAT_FUNCS: Record<TaintAnalysisLanguage, Set<string>> = {
@@ -814,54 +959,92 @@ const VARIADIC_FORMAT_FUNCS: Record<TaintAnalysisLanguage, Set<string>> = {
   csharp: new Set(["Format"]),
 };
 
-function wrapCallExists(nameCheck: string, nodeCheck: string): string {
+const GO_SQL_QUERY_TEXT_ARG0_CALLABLES = new Set(["Raw", "From"]);
+
+function wrapCallExists(nameCheck: string, nodeCheck: string, profile: CodeqlProfile): string {
+  const callType = profile.callNodeType ?? "DataFlow::CallNode";
   return [
-    `exists(DataFlow::CallNode call |`,
+    `exists(${callType} call |`,
     `        ${nameCheck} and`,
     `        ${nodeCheck}`,
     `      )`,
   ].join("\n");
 }
 
+function buildGoParamSourceCheck(nodeParamName: string, info: CallableInfo): string | null {
+  if (info.argIndex == null || info.argIndex < 0) {
+    return null;
+  }
+
+  const escapedCallable = escapeQllString(info.callable);
+  return [
+    "exists(Method m |",
+    `        m.getName() = "${escapedCallable}" and`,
+    `        m.getNumParameter() > ${info.argIndex} and`,
+    `        ${nodeParamName}.asParameter() = m.getParameter(${info.argIndex})`,
+    "      )",
+  ].join("\n");
+}
+
 function buildNodeCallableCheck(
   nodeParamName: string,
   info: CallableInfo,
-  language: TaintAnalysisLanguage,
+  profile: CodeqlProfile,
   role: "source" | "sink" | "sanitizer",
 ): string {
-  const nameCheck = buildCallableNameCheck(info.callable, language, info.receiverHint);
+  const language = profile.language;
+  const nameCheck = buildCallableNameCheck(info.callable, language, info.receiverHint, profile);
+
+  const getArg = profile.getArgumentMethod ?? "getArgument";
+  const getAnyArg = profile.getAnArgumentExpr ?? "call.getAnArgument()";
+  const resultExpr = profile.callResultExpr ?? "call.getResult()";
+
+  const callGetArg = (idx: number) => `call.${getArg}(${idx})`;
 
   if (role === "source") {
+    if (language === "go" && info.flowKind === "param") {
+      const paramCheck = buildGoParamSourceCheck(nodeParamName, info);
+      if (paramCheck) {
+        return paramCheck;
+      }
+    }
+
     let nodeExpr: string;
     if (info.argIndex != null && info.flowKind !== "return") {
-      nodeExpr = `call.getArgument(${info.argIndex})`;
+      nodeExpr = callGetArg(info.argIndex);
     } else {
-      nodeExpr = "call.getResult()";
+      nodeExpr = resultExpr;
     }
-    return wrapCallExists(nameCheck, `${nodeParamName} = ${nodeExpr}`);
+    return wrapCallExists(nameCheck, `${nodeParamName} = ${nodeExpr}`, profile);
   }
 
   if (role === "sink") {
+    const callableName = language === "go"
+      ? callableBasename(info.callable)
+      : info.callable;
     let argExpr: string;
     if (info.argIndex != null) {
       const isVariadicFormat = info.argIndex === 0
-        && VARIADIC_FORMAT_FUNCS[language].has(info.callable);
+        && VARIADIC_FORMAT_FUNCS[language].has(callableName);
       argExpr = isVariadicFormat
-        ? "call.getAnArgument()"
-        : `call.getArgument(${info.argIndex})`;
+        ? getAnyArg
+        : callGetArg(info.argIndex);
+    } else if (language === "go" && GO_SQL_QUERY_TEXT_ARG0_CALLABLES.has(callableName)) {
+      argExpr = callGetArg(0);
     } else {
-      argExpr = "call.getAnArgument()";
+      argExpr = getAnyArg;
     }
-    return wrapCallExists(nameCheck, `${nodeParamName} = ${argExpr}`);
+    return wrapCallExists(nameCheck, `${nodeParamName} = ${argExpr}`, profile);
   }
 
   // Sanitizer: match either return value or argument
   const argExpr = info.argIndex != null
-    ? `call.getArgument(${info.argIndex})`
-    : "call.getAnArgument()";
+    ? callGetArg(info.argIndex)
+    : getAnyArg;
   return wrapCallExists(
     nameCheck,
-    `(${nodeParamName} = call.getResult() or ${nodeParamName} = ${argExpr})`,
+    `(${nodeParamName} = ${resultExpr} or ${nodeParamName} = ${argExpr})`,
+    profile,
   );
 }
 

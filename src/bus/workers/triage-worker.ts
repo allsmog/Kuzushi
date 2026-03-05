@@ -121,7 +121,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           },
         },
         deps.config.triageBatchSize,
-        deps.config.triageMaxTurns ?? 10,
+        deps.config.triageMaxTurns,
       );
 
       const perFindingCost = findings.length > 0 ? costUsd / findings.length : 0;

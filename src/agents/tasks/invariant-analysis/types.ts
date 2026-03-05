@@ -55,6 +55,7 @@ export interface InvariantAnalysisConfig {
   maxInvariants: number;
   securityOnly: boolean;
   confidenceThreshold: number;
+  checkBatchSize: number;
 }
 
 export const DEFAULT_INVARIANT_ANALYSIS_CONFIG: InvariantAnalysisConfig = {
@@ -62,7 +63,8 @@ export const DEFAULT_INVARIANT_ANALYSIS_CONFIG: InvariantAnalysisConfig = {
   checkModel: "anthropic:claude-sonnet-4-6",
   maxInvariants: 200,
   securityOnly: true,
-  confidenceThreshold: 0.6,
+  confidenceThreshold: 0.4,
+  checkBatchSize: 15,
 };
 
 export function resolveInvariantAnalysisConfig(config: KuzushiConfig): InvariantAnalysisConfig {
@@ -75,6 +77,7 @@ export function resolveInvariantAnalysisConfig(config: KuzushiConfig): Invariant
     maxInvariants: normalizePositiveInt(raw["maxInvariants"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.maxInvariants),
     securityOnly: normalizeBoolean(raw["securityOnly"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.securityOnly),
     confidenceThreshold: normalizeUnitInterval(raw["confidenceThreshold"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.confidenceThreshold),
+    checkBatchSize: normalizePositiveInt(raw["checkBatchSize"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.checkBatchSize),
   };
 }
 

@@ -24,7 +24,7 @@ const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() |
 /** Hard defaults — the bottom of the precedence stack. */
 export const DEFAULTS: KuzushiConfig = {
   model: "anthropic:claude-sonnet-4-6",
-  triageMaxTurns: 10,
+  triageMaxTurns: null,
   verify: false,
   verifyMaxTurns: 15,
   verifyConcurrency: 1,
@@ -195,11 +195,15 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
   }
 
   if (key === "triageMaxTurns") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("triageMaxTurns must be a positive number");
+    if (raw === "null" || raw === "unlimited" || raw === "0") {
+      config.triageMaxTurns = null;
+    } else {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 1) {
+        throw new Error("triageMaxTurns must be a positive number, 0, or 'unlimited'");
+      }
+      config.triageMaxTurns = Math.floor(n);
     }
-    config.triageMaxTurns = Math.floor(n);
     saveConfig(normalizeConfig(config), repoRoot);
     return;
   }
@@ -515,7 +519,9 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const busBackend = normalizeBusBackend(config.busBackend);
   const triageBatchSize = normalizePositiveInt(config.triageBatchSize, DEFAULTS.triageBatchSize);
   const triageConcurrency = normalizePositiveInt(config.triageConcurrency, DEFAULTS.triageConcurrency);
-  const triageMaxTurns = normalizePositiveInt(config.triageMaxTurns, DEFAULTS.triageMaxTurns);
+  const triageMaxTurns = config.triageMaxTurns == null
+    ? null
+    : normalizePositiveInt(config.triageMaxTurns, DEFAULTS.triageMaxTurns ?? 10);
   const verify = normalizeBoolean(config.verify, DEFAULTS.verify ?? false);
   const verifyModel = normalizeOptionalString(config.verifyModel);
   const verifyMaxTurns = normalizePositiveInt(

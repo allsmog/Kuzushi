@@ -12,7 +12,7 @@ export type AgentToolDecision =
 export interface AgentQueryOptions {
   cwd: string;
   model: string;
-  maxTurns?: number;
+  maxTurns?: number | null;
   allowedTools?: string[];
   disallowedTools?: string[];
   permissionMode?: AgentPermissionMode;

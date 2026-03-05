@@ -623,7 +623,7 @@ function extractCostUsd(message: PiAiAssistantMessage): number {
   return normalizeCostUsd(message.usage?.cost?.total);
 }
 
-function normalizeMaxTurns(value: number | undefined): number | undefined {
+function normalizeMaxTurns(value: number | null | undefined): number | undefined {
   if (value == null) {
     return undefined;
   }

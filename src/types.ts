@@ -94,8 +94,8 @@ export interface KuzushiConfig {
   model: string;
   /** Optional override model for triage agents. */
   triageModel?: string;
-  /** Max turns for triage agents. */
-  triageMaxTurns: number;
+  /** Max turns for triage agents. null = unlimited. */
+  triageMaxTurns: number | null;
   /** Enable post-triage exploitability verification phase. */
   verify?: boolean;
   /** Optional override model for verification agents. */

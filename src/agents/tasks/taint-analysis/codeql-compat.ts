@@ -14,6 +14,38 @@ export interface CodeqlProfile {
   language: TaintAnalysisLanguage;
   dataFlowImport: string;
   taintTrackingImport: string;
+  /**
+   * The CodeQL type used for call nodes in `exists(...)` clauses.
+   * Defaults to `"DataFlow::CallNode"` (Go, Java, C#).
+   * Python uses `"CallCfgNode"` (top-level, not under `DataFlow::`).
+   * JavaScript uses `"DataFlow::InvokeNode"`.
+   */
+  callNodeType?: string;
+  /**
+   * Method name for getting a positional argument.
+   * Defaults to `"getArgument"` (Go, Java, C#, JS).
+   * Python uses `"getArg"`.
+   */
+  getArgumentMethod?: string;
+  /**
+   * Method name for getting any argument.
+   * Defaults to `"getAnArgument"` (Go, Java, C#, JS).
+   * Python uses `"getAnArg"` — but it doesn't exist, so we use `"getArg(_)"`.
+   */
+  getAnArgumentExpr?: string;
+  /**
+   * Expression to get the call's return/result value as a DataFlow::Node.
+   * Defaults to `"call.getResult()"` (Go).
+   * Python: `"call"` (the CallCfgNode itself is a DataFlow::Node).
+   * JavaScript: `"call"` (InvokeNode extends Node).
+   */
+  callResultExpr?: string;
+  /**
+   * How to match a callee name. Uses `{NAME}` as placeholder.
+   * Defaults to `"call.getCalleeName() = \"{NAME}\""`.
+   * Python: match via MethodCallNode or function attribute.
+   */
+  calleeNamePattern?: string;
 }
 
 interface ProbeArgs {
@@ -65,12 +97,22 @@ const PROFILE_MATRIX: Record<TaintAnalysisLanguage, CodeqlProfile[]> = {
       language: "python",
       dataFlowImport: "semmle.python.dataflow.new.DataFlow",
       taintTrackingImport: "semmle.python.dataflow.new.TaintTracking",
+      callNodeType: "DataFlow::CallCfgNode",
+      getArgumentMethod: "getArg",
+      getAnArgumentExpr: "call.getArg(_)",
+      callResultExpr: "call",
+      calleeNamePattern: "call.getFunction().toString().matches(\"%{NAME}%\")",
     },
     {
       id: "python-dataflow-old",
       language: "python",
       dataFlowImport: "semmle.python.dataflow.old.DataFlow",
       taintTrackingImport: "semmle.python.dataflow.old.TaintTracking",
+      callNodeType: "DataFlow::CallCfgNode",
+      getArgumentMethod: "getArg",
+      getAnArgumentExpr: "call.getArg(_)",
+      callResultExpr: "call",
+      calleeNamePattern: "call.getFunction().toString().matches(\"%{NAME}%\")",
     },
   ],
   java: [
@@ -93,12 +135,16 @@ const PROFILE_MATRIX: Record<TaintAnalysisLanguage, CodeqlProfile[]> = {
       language: "javascript",
       dataFlowImport: "semmle.javascript.dataflow.DataFlow",
       taintTrackingImport: "semmle.javascript.dataflow.TaintTracking",
+      callNodeType: "DataFlow::InvokeNode",
+      callResultExpr: "call",
     },
     {
       id: "javascript-dataflow-new",
       language: "javascript",
       dataFlowImport: "semmle.javascript.dataflow.new.DataFlow",
       taintTrackingImport: "semmle.javascript.dataflow.new.TaintTracking",
+      callNodeType: "DataFlow::InvokeNode",
+      callResultExpr: "call",
     },
   ],
   csharp: [
