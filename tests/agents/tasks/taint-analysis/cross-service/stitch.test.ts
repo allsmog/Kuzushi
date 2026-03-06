@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { __stitchInternals, matchBoundariesHeuristically } from "../../../../../src/agents/tasks/taint-analysis/cross-service/stitch.js";
+import { attachTaskOutputMeta, getTaskOutputMeta } from "../../../../../src/task-output-meta.js";
 import type {
   BoundaryManifest,
   BoundaryPoint,
@@ -456,11 +457,8 @@ describe("parseStitchResponse", () => {
     expect(response.paths[0].cwe).toBe("CWE-89");
   });
 
-  it("returns empty for unparseable input", () => {
-    const response = parseStitchResponse("not valid json {{{");
-    expect(response.validatedEdges).toEqual([]);
-    expect(response.additionalEdges).toEqual([]);
-    expect(response.paths).toEqual([]);
+  it("throws for unparseable input", () => {
+    expect(() => parseStitchResponse("not valid json {{{")).toThrow(/Could not parse stitch response JSON/i);
   });
 });
 
@@ -721,5 +719,28 @@ describe("taintAnalysisStitchTask metadata", () => {
     expect(taintAnalysisStitchTask.outputKind).toBe("findings");
     expect(taintAnalysisStitchTask.dependsOn).toEqual(["taint-analysis-cross-analyze"]);
     expect(typeof taintAnalysisStitchTask.triageAgentConfig).toBe("function");
+  });
+});
+
+describe("stitch degradation metadata", () => {
+  it("attaches and retrieves degradation via TaskOutputMeta", () => {
+    const findings = [{ scanner: "taint-analysis-stitch", fingerprint: "abc" }];
+    const meta = {
+      costUsd: 0.01,
+      degradation: {
+        type: "stitch-degradation",
+        reason: "llm_validation_failed",
+        message: "Stitch LLM failed: timeout",
+        heuristicEdgeCount: 3,
+      },
+    };
+    const result = attachTaskOutputMeta(findings, meta);
+    const retrieved = getTaskOutputMeta(result);
+    expect(retrieved).toBeDefined();
+    expect(retrieved!.degradation).toBeDefined();
+    expect(retrieved!.degradation!.type).toBe("stitch-degradation");
+    expect(retrieved!.degradation!.reason).toBe("llm_validation_failed");
+    expect(retrieved!.degradation!.message).toBe("Stitch LLM failed: timeout");
+    expect(retrieved!.degradation!.heuristicEdgeCount).toBe(3);
   });
 });

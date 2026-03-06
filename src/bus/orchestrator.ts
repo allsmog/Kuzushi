@@ -24,6 +24,8 @@ import type {
   VerificationResult,
   Verdict,
 } from "../types.js";
+import { coerceRepoContext } from "../repo-context.js";
+import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type {
   BusHandlerErrorEvent,
@@ -423,7 +425,7 @@ export class PipelineOrchestrator {
 
     if (typeof run.contextJson === "string" && run.contextJson.trim().length > 0) {
       try {
-        state.repoContext = asRepoContext(JSON.parse(run.contextJson));
+        state.repoContext = coerceRepoContext(JSON.parse(run.contextJson));
       } catch {
         state.repoContext = undefined;
       }
@@ -781,7 +783,7 @@ export class PipelineOrchestrator {
       );
     }
 
-    const gatheredContext = asRepoContext(state.taskOutputs.get("context-gatherer"));
+    const gatheredContext = coerceRepoContext(state.taskOutputs.get("context-gatherer"));
     if (gatheredContext) {
       state.repoContext = gatheredContext;
       try {
@@ -1705,6 +1707,37 @@ export function registerOrchestrator(
 }
 
 function buildReportStats(state: RunState): Partial<PipelineStats> {
+  let extractionDegradation: PipelineStats["extractionDegradation"];
+  let tiPriorDegraded: boolean | undefined;
+  const preflightOutput = state.taskOutputs.get("taint-analysis-preflight");
+  if (isRecord(preflightOutput)) {
+    if (
+      isRecord(preflightOutput["extractionDegradation"])
+      && typeof preflightOutput["extractionDegradation"]["status"] === "string"
+      && preflightOutput["extractionDegradation"]["status"] !== "ok"
+    ) {
+      const deg = preflightOutput["extractionDegradation"];
+      extractionDegradation = {
+        status: deg["status"] as string,
+        reasons: Array.isArray(deg["reasons"]) ? (deg["reasons"] as unknown[]).filter((r): r is string => typeof r === "string") : [],
+      };
+    }
+    if (preflightOutput["tiPriorDegraded"] === true) {
+      tiPriorDegraded = true;
+    }
+  }
+
+  let stitchDegradation: PipelineStats["stitchDegradation"];
+  const stitchOutput = state.taskOutputs.get("taint-analysis-stitch");
+  const stitchMeta = getTaskOutputMeta(stitchOutput);
+  if (stitchMeta?.degradation && stitchMeta.degradation.type === "stitch-degradation") {
+    stitchDegradation = {
+      type: stitchMeta.degradation.type,
+      reason: stitchMeta.degradation.reason,
+      message: stitchMeta.degradation.message,
+    };
+  }
+
   return {
     scanners: [...state.scanners],
     totalFindings: state.totalFindings,
@@ -1722,6 +1755,9 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
     pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
     failedTasks: state.failedTasks.length > 0 ? [...state.failedTasks] : undefined,
+    extractionDegradation,
+    stitchDegradation,
+    tiPriorDegraded,
     startedAt: state.startedAt,
     completedAt: new Date().toISOString(),
   };
@@ -1760,32 +1796,6 @@ function resolveTaintAnalysisRefinementModel(config: KuzushiConfig): string {
     return taintAnalysis["refinementModel"].trim();
   }
   return config.triageModel ?? config.model;
-}
-
-function asRepoContext(value: unknown): RepoContext | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const context: RepoContext = {
-    languages: asStringArray(value["languages"]) ?? [],
-    frameworks: asStringArray(value["frameworks"]) ?? [],
-    authPatterns: asStringArray(value["authPatterns"]) ?? [],
-    sanitizationLibs: asStringArray(value["sanitizationLibs"]) ?? [],
-    ormOrDb: asStringArray(value["ormOrDb"]) ?? [],
-    entryPoints: asStringArray(value["entryPoints"]) ?? [],
-  };
-
-  const hasAnyValue = (
-    context.languages.length > 0
-    || context.frameworks.length > 0
-    || context.authPatterns.length > 0
-    || context.sanitizationLibs.length > 0
-    || context.ormOrDb.length > 0
-    || context.entryPoints.length > 0
-  );
-
-  return hasAnyValue ? context : undefined;
 }
 
 function normalizeConcurrency(raw: number): number {

@@ -35,6 +35,9 @@ export interface PipelineStats {
   pocHarnessErrors?: number;
   pocHarnessCostUsd?: number;
   failedTasks?: string[];
+  extractionDegradation?: { status: string; reasons: string[] };
+  stitchDegradation?: { type: string; reason: string; message: string };
+  tiPriorDegraded?: boolean;
   startedAt: string;
   completedAt: string;
 }

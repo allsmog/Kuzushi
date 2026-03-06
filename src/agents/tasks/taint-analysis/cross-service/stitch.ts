@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { getAgentRuntime } from "../../../../agent-runtime/index.js";
+import type { AgentResultErrorMessage, AgentResultSuccessMessage } from "../../../../agent-runtime/types.js";
 import { scoreFindingMetadata } from "../../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../../scanners/types.js";
+import { attachTaskOutputMeta, getTaskOutputMeta, type TaskOutputMeta } from "../../../../task-output-meta.js";
 import type { ScanOpts } from "../../../../types.js";
-import { isRecord, toErrorMessage } from "../../../../utils.js";
+import { isRecord, normalizeCostUsd, toErrorMessage } from "../../../../utils.js";
 import type { AgentTask } from "../../../types.js";
 import { resolveTaintAnalysisConfig } from "../types.js";
 import {
@@ -31,9 +33,9 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
     const cfg = resolveTaintAnalysisConfig(context.config);
     const crossCfg = resolveCrossServiceConfig(cfg);
 
-    const analyzeOutput = context.upstreamOutputs.get("taint-analysis-cross-analyze") as
-      | CrossServiceAnalysisOutput
-      | undefined;
+    const analyzeOutput = asCrossServiceAnalysisOutput(
+      context.upstreamOutputs.get("taint-analysis-cross-analyze"),
+    );
     if (!analyzeOutput) {
       throw new Error("taint-analysis-stitch requires upstream output from taint-analysis-cross-analyze");
     }
@@ -49,6 +51,8 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
 
     // Step 2: LLM semantic validation + gap-filling
     let validatedEdges = heuristicEdges;
+    let validationCostUsd = 0;
+    let stitchDegradation: TaskOutputMeta["degradation"];
     try {
       validatedEdges = await validateAndEnrichWithLlm(
         allBoundaries,
@@ -56,10 +60,19 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
         crossCfg.stitchModel,
         context.repoRoot,
       );
+      validationCostUsd = normalizeCostUsd(getTaskOutputMeta(validatedEdges)?.costUsd);
     } catch (error) {
+      validationCostUsd = getErrorCostUsd(error);
+      const stitchDegradationMessage = toErrorMessage(error);
       process.stderr.write(
-        `[taint-analysis-stitch] LLM validation failed, using heuristic edges only: ${toErrorMessage(error)}\n`,
+        `[taint-analysis-stitch] LLM validation failed, using heuristic edges only: ${stitchDegradationMessage}\n`,
       );
+      stitchDegradation = {
+        type: "stitch-degradation",
+        reason: "llm_validation_failed",
+        message: stitchDegradationMessage,
+        heuristicEdgeCount: heuristicEdges.length,
+      };
     }
 
     // Step 3: Build paths and generate findings
@@ -74,7 +87,14 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
     const crossServiceFindings = paths.map((p) => pathToFinding(p, context.repoName));
     const intraFindings = collectIntraServiceFindings(analyzeOutput);
 
-    return [...intraFindings, ...crossServiceFindings];
+    const meta: TaskOutputMeta = { costUsd: validationCostUsd };
+    if (stitchDegradation) {
+      meta.degradation = stitchDegradation;
+    }
+    return attachTaskOutputMeta(
+      [...intraFindings, ...crossServiceFindings],
+      meta,
+    );
   },
   triageAgentConfig(finding, repoName): TriageAgentConfig {
     return {
@@ -108,6 +128,157 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
     };
   },
 };
+
+function asCrossServiceAnalysisOutput(value: unknown): CrossServiceAnalysisOutput | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value["services"]) || !Array.isArray(value["allBoundaries"])) {
+    return undefined;
+  }
+
+  return {
+    services: value["services"].flatMap((service) => normalizePerServiceAnalysis(service)),
+    allBoundaries: value["allBoundaries"].flatMap((boundary) => normalizeBoundaryManifest(boundary)),
+  };
+}
+
+function normalizePerServiceAnalysis(value: unknown): CrossServiceAnalysisOutput["services"] {
+  if (!isRecord(value) || !isRecord(value["service"])) {
+    return [];
+  }
+
+  const service = value["service"];
+  const id = typeof service["id"] === "string" ? service["id"] : "";
+  const rootPath = typeof service["rootPath"] === "string" ? service["rootPath"] : "";
+  const language = typeof service["language"] === "string" ? service["language"] : "";
+  const boundary = normalizeBoundaryManifest(value["boundary"]).at(0);
+  if (!id || !rootPath || !language || !boundary) {
+    return [];
+  }
+
+  return [{
+    service: {
+      id,
+      displayName: typeof service["displayName"] === "string" ? service["displayName"] : id,
+      rootPath,
+      language,
+      framework: typeof service["framework"] === "string" ? service["framework"] : null,
+      discoveryMethod: service["discoveryMethod"] === "manifest" ? "manifest" : "auto",
+      manifestFiles: Array.isArray(service["manifestFiles"])
+        ? service["manifestFiles"].map((item) => String(item))
+        : [],
+    },
+    boundary,
+    intraServiceFindings: normalizeFindingArray(value["intraServiceFindings"]),
+    taintAnalysisSkipped: Boolean(value["taintAnalysisSkipped"]),
+    taintAnalysisSkipReason: typeof value["taintAnalysisSkipReason"] === "string"
+      ? value["taintAnalysisSkipReason"]
+      : undefined,
+    durationMs: Math.max(0, Number(value["durationMs"]) || 0),
+  }];
+}
+
+function normalizeBoundaryManifest(value: unknown): BoundaryManifest[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const serviceId = typeof value["serviceId"] === "string" ? value["serviceId"] : "";
+  const servicePath = typeof value["servicePath"] === "string" ? value["servicePath"] : "";
+  if (!serviceId || !servicePath) {
+    return [];
+  }
+
+  return [{
+    serviceId,
+    servicePath,
+    entryPoints: normalizeBoundaryPoints(value["entryPoints"], "entry"),
+    exitPoints: normalizeBoundaryPoints(value["exitPoints"], "exit"),
+    errors: Array.isArray(value["errors"]) ? value["errors"].map((item) => String(item)) : [],
+  }];
+}
+
+function normalizeBoundaryPoints(
+  value: unknown,
+  direction: BoundaryPoint["direction"],
+): BoundaryPoint[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((point, index) => {
+    if (!isRecord(point)) {
+      return [];
+    }
+
+    const filePath = typeof point["filePath"] === "string" ? point["filePath"] : "";
+    const callable = typeof point["callable"] === "string" ? point["callable"] : "";
+    if (!filePath || !callable) {
+      return [];
+    }
+
+    return [{
+      id: typeof point["id"] === "string" ? point["id"] : `${direction}-${index + 1}`,
+      direction,
+      protocol: typeof point["protocol"] === "string" ? point["protocol"] as BoundaryPoint["protocol"] : "unknown",
+      filePath,
+      startLine: Math.max(1, Number(point["startLine"]) || 1),
+      callable,
+      routePath: typeof point["routePath"] === "string" ? point["routePath"] : undefined,
+      httpMethod: typeof point["httpMethod"] === "string" ? point["httpMethod"] : undefined,
+      topicOrQueue: typeof point["topicOrQueue"] === "string" ? point["topicOrQueue"] : undefined,
+      grpcMethod: typeof point["grpcMethod"] === "string" ? point["grpcMethod"] : undefined,
+      dataEntity: typeof point["dataEntity"] === "string" ? point["dataEntity"] : undefined,
+      dataDescription: typeof point["dataDescription"] === "string" ? point["dataDescription"] : "data",
+      taintedParameters: Array.isArray(point["taintedParameters"])
+        ? point["taintedParameters"].map((item) => String(item))
+        : [],
+      confidence: Number.isFinite(Number(point["confidence"])) ? Number(point["confidence"]) : 0,
+      rationale: typeof point["rationale"] === "string" ? point["rationale"] : "",
+    }];
+  });
+}
+
+function normalizeFindingArray(value: unknown): Finding[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((finding) => {
+    if (!isRecord(finding)) {
+      return [];
+    }
+
+    const fingerprint = typeof finding["fingerprint"] === "string" ? finding["fingerprint"] : "";
+    const ruleId = typeof finding["ruleId"] === "string" ? finding["ruleId"] : "";
+    const filePath = typeof finding["filePath"] === "string" ? finding["filePath"] : "";
+    const startLine = Number(finding["startLine"]);
+    const severity = typeof finding["severity"] === "string" ? finding["severity"] : "";
+    const message = typeof finding["message"] === "string" ? finding["message"] : "";
+    if (!fingerprint || !ruleId || !filePath || !Number.isFinite(startLine) || !severity || !message) {
+      return [];
+    }
+
+    return [{
+      scanner: typeof finding["scanner"] === "string" ? finding["scanner"] : "unknown",
+      fingerprint,
+      ruleId,
+      filePath,
+      startLine,
+      severity,
+      message,
+      evidence: typeof finding["evidence"] === "string" ? finding["evidence"] : null,
+      scannerConfidence: typeof finding["scannerConfidence"] === "string" ? finding["scannerConfidence"] : "MEDIUM",
+      subcategory: Array.isArray(finding["subcategory"]) ? finding["subcategory"].map((item) => String(item)) : [],
+      likelihood: typeof finding["likelihood"] === "string" ? finding["likelihood"] : "MEDIUM",
+      impact: typeof finding["impact"] === "string" ? finding["impact"] : "MEDIUM",
+      cwe: Array.isArray(finding["cwe"]) ? finding["cwe"].map((item) => String(item)) : [],
+      score: Number.isFinite(Number(finding["score"])) ? Number(finding["score"]) : 0,
+    }];
+  });
+}
 
 // ── Heuristic Matching ──────────────────────────────────────────────────
 
@@ -257,6 +428,7 @@ async function validateAndEnrichWithLlm(
   let structuredOutput: unknown;
   let resultText = "";
   let executionError: string | null = null;
+  let costUsd = 0;
 
   for await (const message of runtime.query({
     prompt,
@@ -275,14 +447,16 @@ async function validateAndEnrichWithLlm(
     },
   })) {
     if (message.type !== "result") continue;
-    if (message.subtype === "success" && "result" in message) {
-      resultText = (message as { result: string; structuredOutput?: unknown }).result;
-      structuredOutput = (message as { result: string; structuredOutput?: unknown }).structuredOutput;
+    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+      costUsd = message.totalCostUsd;
+    }
+    if (message.subtype === "success") {
+      const success = message as AgentResultSuccessMessage;
+      resultText = success.result;
+      structuredOutput = success.structuredOutput;
       executionError = null;
     } else {
-      const errMsg = "errors" in message
-        ? (message as { errors: string[] }).errors.join("; ")
-        : message.subtype;
+      const errMsg = (message as AgentResultErrorMessage).errors.join("; ") || message.subtype;
       executionError = errMsg;
       structuredOutput = undefined;
       resultText = "";
@@ -290,10 +464,18 @@ async function validateAndEnrichWithLlm(
   }
 
   if (executionError && !structuredOutput && !resultText) {
-    throw new Error(`Stitch LLM failed: ${executionError}`);
+    throw withCost(new Error(`Stitch LLM failed: ${executionError}`), costUsd);
   }
 
-  const response = parseStitchResponse(structuredOutput ?? resultText);
+  let response: StitchLlmResponse;
+  try {
+    response = parseStitchResponse(structuredOutput ?? resultText);
+  } catch (error) {
+    throw withCost(
+      new Error(`Stitch response parse failed: ${toErrorMessage(error)}`),
+      costUsd,
+    );
+  }
 
   // Apply LLM validation to heuristic edges
   const validatedEdges: StitchedEdge[] = [];
@@ -344,7 +526,7 @@ async function validateAndEnrichWithLlm(
     });
   }
 
-  return validatedEdges;
+  return attachTaskOutputMeta(validatedEdges, { costUsd });
 }
 
 function buildStitchPrompt(
@@ -627,12 +809,24 @@ function parseStitchResponse(value: unknown): StitchLlmResponse {
     try {
       const parsed = JSON.parse(extractJson(value));
       return parseStitchResponse(parsed);
-    } catch {
-      return { validatedEdges: [], additionalEdges: [], paths: [] };
+    } catch (error) {
+      throw new Error(`Could not parse stitch response JSON: ${toErrorMessage(error)}`);
     }
   }
 
-  return { validatedEdges: [], additionalEdges: [], paths: [] };
+  throw new Error("Unexpected stitch response shape");
+}
+
+function withCost<T extends Error>(error: T, costUsd: number): T & { costUsd: number } {
+  return Object.assign(error, { costUsd });
+}
+
+function getErrorCostUsd(error: unknown): number {
+  if (!isRecord(error)) {
+    return 0;
+  }
+
+  return normalizeCostUsd(error["costUsd"]);
 }
 
 function parseValidatedEdges(value: unknown): StitchLlmResponse["validatedEdges"] {

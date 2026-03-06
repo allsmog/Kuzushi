@@ -102,6 +102,21 @@ export function printSummary(
     console.log(`  ${chalk.red("Scanners failed:")}  ${failedTasks.join(", ")} ${chalk.dim("(results may be incomplete)")}`);
     console.log("");
   }
+  const extractionDeg = options.stats?.extractionDegradation;
+  if (extractionDeg && extractionDeg.status !== "ok") {
+    const colorFn = extractionDeg.status === "failed" ? chalk.red : chalk.yellow;
+    console.log(`  ${colorFn("Extraction status:")}  ${extractionDeg.status} [${extractionDeg.reasons.join(", ")}]`);
+    console.log("");
+  }
+  const stitchDeg = options.stats?.stitchDegradation;
+  if (stitchDeg) {
+    console.log(`  ${chalk.yellow("Stitch status:")}     degraded [${stitchDeg.reason}]`);
+    console.log("");
+  }
+  if (options.stats?.tiPriorDegraded) {
+    console.log(`  ${chalk.yellow("TI Prior status:")}   degraded`);
+    console.log("");
+  }
   console.log(`  ${chalk.dim("Total triaged:")}    ${total}`);
   console.log(`  ${chalk.red.bold("True positives:")}   ${counts.tp}`);
   console.log(`  ${chalk.green("False positives:")}  ${counts.fp}`);
