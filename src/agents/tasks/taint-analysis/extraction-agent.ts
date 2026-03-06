@@ -35,8 +35,6 @@ export interface ExtractionAgentOptions {
 /**
  * Returns true when the template contains unresolved body placeholders
  * that prevent deterministic rendering (i.e. the agent path is needed).
- *
- * Python templates have fully hardcoded predicates, so this returns false for them.
  */
 export function hasBodyPlaceholders(template: string, kind: "source" | "sink"): boolean {
   const placeholders = kind === "source" ? SOURCE_BODY_PLACEHOLDERS : SINK_BODY_PLACEHOLDERS;
@@ -324,9 +322,9 @@ async function loadWorkflowStep2(taintAnalysisPath: string): Promise<string> {
 }
 
 async function loadPythonExample(taintAnalysisPath: string, kind: "source" | "sink"): Promise<string | null> {
-  const templatePath = path.join(taintAnalysisPath, "assets", "extraction", `python_${kind}s.ql.tmpl`);
+  const referencePath = path.join(taintAnalysisPath, "assets", "extraction", `python_${kind}s_reference.ql`);
   try {
-    return await readFile(templatePath, "utf-8");
+    return await readFile(referencePath, "utf-8");
   } catch {
     return null;
   }
