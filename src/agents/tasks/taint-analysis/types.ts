@@ -47,6 +47,7 @@ export interface TaintAnalysisTaskConfig {
   crossServiceBoundaryThreshold?: number;
   crossServiceStitchThreshold?: number;
   crossServiceMaxPathDepth?: number;
+  refinementConfidenceCap?: number;
 }
 
 export interface TaintAnalysisCandidate {
@@ -60,6 +61,19 @@ export interface TaintAnalysisCandidate {
   locationFile: string;
   locationLine: number;
   snippet?: string;
+}
+
+export type ExtractionDegradationReason =
+  | "sources_used_fallback_template"
+  | "sinks_used_fallback_template"
+  | "sources_agent_returned_no_query"
+  | "sinks_agent_returned_no_query"
+  | "zero_usable_sources"
+  | "zero_usable_sinks";
+
+export interface ExtractionDegradation {
+  status: "ok" | "degraded" | "failed";
+  reasons: ExtractionDegradationReason[];
 }
 
 export interface TaintAnalysisPassEntry {
@@ -124,6 +138,7 @@ export interface TaintAnalysisPreflightOutput {
     sourcesRowCount: number;
     sinksRowCount: number;
   };
+  extractionDegradation: ExtractionDegradation;
 }
 
 export interface TaintAnalysisLabelOutput {
@@ -139,10 +154,13 @@ export interface TaintAnalysisLabelOutput {
   tiPriorMarkdownPath: string;
   tiPriorJsonPath: string;
   tiPriorDegraded: boolean;
+  extractionDegradation: ExtractionDegradation;
   labelsPath: string;
   labels: TaintAnalysisLabelsDocument;
   taintModelPath: string;
+  /** Advisory only — for human review. No downstream pipeline stage gates on this value. */
   reviewSummary: string;
+  /** Advisory only — for human review. No downstream pipeline stage gates on this value. */
   labelCounts: Record<string, number>;
 }
 
@@ -162,7 +180,9 @@ export const TAINT_ANALYSIS_PASSES: TaintAnalysisPassDefinition[] = [
   { passId: 13, passKey: "ssti", focus: "Server-Side Template Injection (SSTI)", cwes: ["1336"] },
 ];
 
-const TAINT_ANALYSIS_PASS_IDS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+export const TAINT_ANALYSIS_PASS_IDS: ReadonlySet<number> = new Set(
+  TAINT_ANALYSIS_PASSES.map((p) => p.passId),
+);
 
 const DEFAULT_TAINT_ANALYSIS_PATH = normalizeDefaultTaintAnalysisPath();
 
@@ -199,6 +219,7 @@ export const DEFAULT_TAINT_ANALYSIS_TASK_CONFIG: TaintAnalysisTaskConfig = {
   crossServiceBoundaryThreshold: 0.5,
   crossServiceStitchThreshold: 0.6,
   crossServiceMaxPathDepth: 5,
+  refinementConfidenceCap: 0.3,
 };
 
 function normalizeDefaultTaintAnalysisPath(): string {
@@ -287,6 +308,10 @@ export function resolveTaintAnalysisConfig(config: KuzushiConfig): TaintAnalysis
     crossServiceMaxPathDepth: normalizePositiveInt(
       merged["crossServiceMaxPathDepth"],
       DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.crossServiceMaxPathDepth ?? 5,
+    ),
+    refinementConfidenceCap: normalizeUnitInterval(
+      merged["refinementConfidenceCap"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.refinementConfidenceCap ?? 0.3,
     ),
   };
 }

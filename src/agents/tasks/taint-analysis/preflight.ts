@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { ensureDatabase } from "../../../scanners/run-codeql.js";
 import { resolveCodeQLBinary } from "../../../scanners/resolve-codeql.js";
+import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
@@ -30,6 +31,8 @@ import {
   mapFrameworkToReference,
   normalizeTaintAnalysisLanguage,
   resolveTaintAnalysisConfig,
+  type ExtractionDegradation,
+  type ExtractionDegradationReason,
   type TaintAnalysisLanguage,
   type TaintAnalysisPreflightOutput,
   type TaintAnalysisTaskConfig,
@@ -112,6 +115,7 @@ interface ExtractionDiagnosticsDocument {
 interface RenderExtractionTemplateResult {
   query: string;
   diagnostic: ExtractionQueryDiagnostic;
+  costUsd: number;
 }
 
 interface DeterministicSinkSupplementSpec {
@@ -340,6 +344,7 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       "sink",
       agentCtx,
     );
+    const extractionCostUsd = sourcesQueryResult.costUsd + sinksQueryResult.costUsd;
     const sinkSupplementQuery = renderDeterministicSinkSupplementQuery(language);
 
     await writeFile(sourcesQueryPath, sourcesQueryResult.query, "utf-8");
@@ -479,7 +484,19 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       [sourcesQueryResult.diagnostic, sinksQueryResult.diagnostic],
     );
 
-    return {
+    const extractionDegradation = computeExtractionDegradation(
+      [sourcesQueryResult.diagnostic, sinksQueryResult.diagnostic],
+      sourcesRowCount,
+      sinksRowCount,
+    );
+
+    if (tiPriorArtifacts.document.degraded) {
+      process.stderr.write(
+        "[taint-analysis-preflight] TI Prior data is degraded; threat intelligence coverage may be incomplete.\n",
+      );
+    }
+
+    return attachTaskOutputMeta({
       taintAnalysisPath,
       workspaceDir,
       dbPath,
@@ -501,7 +518,8 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
         sourcesRowCount,
         sinksRowCount,
       },
-    };
+      extractionDegradation,
+    }, { costUsd: extractionCostUsd });
   },
 };
 
@@ -632,6 +650,44 @@ async function writeExtractionDiagnostics(
     diagnostics,
   };
   await writeFile(diagnosticsPath, JSON.stringify(document, null, 2), "utf-8");
+}
+
+function computeExtractionDegradation(
+  diagnostics: ExtractionQueryDiagnostic[],
+  sourcesRowCount: number,
+  sinksRowCount: number,
+): ExtractionDegradation {
+  const reasons: ExtractionDegradationReason[] = [];
+
+  for (const diag of diagnostics) {
+    if (diag.fallbackUsed) {
+      reasons.push(diag.kind === "source" ? "sources_used_fallback_template" : "sinks_used_fallback_template");
+    }
+    if (
+      diag.fallbackReason?.includes("agent_returned_no_query")
+      || diag.fallbackReason?.includes("retry_returned_no_query")
+    ) {
+      reasons.push(diag.kind === "source" ? "sources_agent_returned_no_query" : "sinks_agent_returned_no_query");
+    }
+  }
+
+  if (sourcesRowCount <= 0) {
+    reasons.push("zero_usable_sources");
+  }
+  if (sinksRowCount <= 0) {
+    reasons.push("zero_usable_sinks");
+  }
+
+  let status: ExtractionDegradation["status"];
+  if (reasons.length === 0) {
+    status = "ok";
+  } else if (sourcesRowCount <= 0 && sinksRowCount <= 0) {
+    status = "failed";
+  } else {
+    status = "degraded";
+  }
+
+  return { status, reasons };
 }
 
 async function detectPrimaryFramework(
@@ -788,6 +844,7 @@ async function renderExtractionTemplateWithDiagnostic(
   agentCtx?: ExtractionAgentContext,
 ): Promise<RenderExtractionTemplateResult> {
   let template = "";
+  let costUsd = 0;
   const templateExists = existsSync(templatePath);
   if (templateExists) {
     template = await readFile(templatePath, "utf-8");
@@ -808,7 +865,7 @@ async function renderExtractionTemplateWithDiagnostic(
   };
 
   if (!template) {
-    return withFallback(diagnostic, language, kind, "missing_template");
+    return withFallback(diagnostic, language, kind, "missing_template", null, costUsd);
   }
 
   // Kind-specific gate: only templates with unresolved body placeholders need
@@ -824,17 +881,19 @@ async function renderExtractionTemplateWithDiagnostic(
           template,
           ...agentCtx,
         });
-        if (generated) {
+        costUsd += generated.costUsd;
+        if (generated.query) {
           diagnostic.initialAttempt.generatedQuery = true;
-          process.stderr.write(`[taint-analysis-preflight] Extraction agent succeeded for ${language}/${kind} (${generated.length} chars)\n`);
-          const compileResult = await tryCompileQuery(generated, agentCtx);
+          process.stderr.write(`[taint-analysis-preflight] Extraction agent succeeded for ${language}/${kind} (${generated.query.length} chars)\n`);
+          const compileResult = await tryCompileQuery(generated.query, agentCtx);
           diagnostic.initialAttempt.compileOk = compileResult.ok;
           diagnostic.initialAttempt.compileErrorExcerpt = compileResult.errorExcerpt ?? null;
           if (compileResult.ok) {
             diagnostic.selectedQuerySource = "agent-initial";
             return {
-              query: generated,
+              query: generated.query,
               diagnostic,
+              costUsd,
             };
           }
           process.stderr.write(
@@ -860,12 +919,13 @@ async function renderExtractionTemplateWithDiagnostic(
           ...agentCtx,
           disableCacheRead: true,
         });
-        if (regenerated) {
+        costUsd += regenerated.costUsd;
+        if (regenerated.query) {
           diagnostic.retryAttempt.generatedQuery = true;
           process.stderr.write(
-            `[taint-analysis-preflight] Extraction agent retry succeeded for ${language}/${kind} (${regenerated.length} chars)\n`,
+            `[taint-analysis-preflight] Extraction agent retry succeeded for ${language}/${kind} (${regenerated.query.length} chars)\n`,
           );
-          const compileResult = await tryCompileQuery(regenerated, agentCtx);
+          const compileResult = await tryCompileQuery(regenerated.query, agentCtx);
           diagnostic.retryAttempt.compileOk = compileResult.ok;
           diagnostic.retryAttempt.compileErrorExcerpt = compileResult.errorExcerpt ?? null;
           if (compileResult.ok) {
@@ -874,8 +934,9 @@ async function renderExtractionTemplateWithDiagnostic(
             diagnostic.fallbackReason = null;
             diagnostic.fallbackDetail = null;
             return {
-              query: regenerated,
+              query: regenerated.query,
               diagnostic,
+              costUsd,
             };
           }
           process.stderr.write(
@@ -908,6 +969,7 @@ async function renderExtractionTemplateWithDiagnostic(
       kind,
       diagnostic.fallbackReason ?? "agent_path_exhausted",
       diagnostic.fallbackDetail,
+      costUsd,
     );
   }
 
@@ -927,7 +989,7 @@ async function renderExtractionTemplateWithDiagnostic(
     .replaceAll("{{SELECT_LINE}}", "1");
 
   if (rendered.includes("{{")) {
-    return withFallback(diagnostic, language, kind, "unresolved_placeholders_after_render");
+    return withFallback(diagnostic, language, kind, "unresolved_placeholders_after_render", null, costUsd);
   }
 
   diagnostic.selectedQuerySource = "deterministic-template";
@@ -935,6 +997,7 @@ async function renderExtractionTemplateWithDiagnostic(
   return {
     query: rendered,
     diagnostic,
+    costUsd,
   };
 }
 
@@ -953,6 +1016,7 @@ function withFallback(
   kind: "source" | "sink",
   reason: string,
   detail: string | null = null,
+  costUsd = 0,
 ): RenderExtractionTemplateResult {
   diagnostic.selectedQuerySource = "fallback";
   diagnostic.fallbackUsed = true;
@@ -961,6 +1025,7 @@ function withFallback(
   return {
     query: fallbackExtractionQuery(language, kind),
     diagnostic,
+    costUsd,
   };
 }
 
@@ -1019,7 +1084,7 @@ async function tryCompileQuery(
     ], {
       cwd: ctx.workspaceDir,
       encoding: "utf-8",
-      maxBuffer: 8 * 1024 * 1024,
+      maxBuffer: 32 * 1024 * 1024,
     });
     return { ok: true, errorExcerpt: null };
   } catch (error) {
@@ -1317,4 +1382,5 @@ export const __taintAnalysisPreflightInternals = {
   writeCodeqlCompatibility,
   writeExtractionDiagnostics,
   resolveExtractionModel,
+  computeExtractionDegradation,
 };

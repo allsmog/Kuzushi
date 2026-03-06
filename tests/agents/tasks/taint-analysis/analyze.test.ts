@@ -588,4 +588,135 @@ describe("taint-analysis-run internals", () => {
 
     expect(hasSources).toBe(false);
   });
+
+  describe("escapeQllString", () => {
+    const { escapeQllString } = __taintAnalysisRunInternals;
+
+    it("escapes backslash and double quote", () => {
+      expect(escapeQllString('a\\b"c')).toBe('a\\\\b\\"c');
+    });
+
+    it("escapes newline characters", () => {
+      expect(escapeQllString("line1\nline2")).toBe("line1\\nline2");
+    });
+
+    it("escapes carriage return", () => {
+      expect(escapeQllString("line1\rline2")).toBe("line1\\rline2");
+    });
+
+    it("escapes tab characters", () => {
+      expect(escapeQllString("col1\tcol2")).toBe("col1\\tcol2");
+    });
+
+    it("escapes null bytes", () => {
+      expect(escapeQllString("before\0after")).toBe("before\\0after");
+    });
+
+    it("handles combined special characters", () => {
+      expect(escapeQllString('a\n"b\t\0c\\')).toBe('a\\n\\"b\\t\\0c\\\\');
+    });
+
+    it("returns empty string unchanged", () => {
+      expect(escapeQllString("")).toBe("");
+    });
+
+    it("does not double-escape literal backslash-n", () => {
+      // A string containing a literal backslash followed by 'n' (2 chars)
+      expect(escapeQllString("\\n")).toBe("\\\\n");
+    });
+  });
+
+  describe("summary propagation", () => {
+    function makeLabelsWithSummary(): TaintAnalysisLabelsDocument {
+      const base = makeLabels();
+      base.passes[0].entries.push({
+        id: "p1-summary",
+        role: "summary",
+        classification: "candidate",
+        confidence: 0.85,
+        signature: {
+          package: null,
+          module: "builtins",
+          type: null,
+          callable: "json_decode",
+          arg_index: null,
+          flow_kind: "return",
+        },
+        location: { file: "a.py", line: 5 },
+        rationale: "propagator",
+      });
+      return base;
+    }
+
+    it("renders none() when no summary entries exist", () => {
+      const pythonProfile = profileById("python", "python-dataflow-new")!;
+      const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabels(), pythonProfile);
+      expect(libs.summaries).toContain("none()");
+      expect(libs.summaries).toContain("module MySummaries");
+    });
+
+    it("renders populated predicates with summary entries", () => {
+      const pythonProfile = profileById("python", "python-dataflow-new")!;
+      const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabelsWithSummary(), pythonProfile);
+      expect(libs.summaries).not.toContain("none()");
+      expect(libs.summaries).toContain("module MySummaries");
+      expect(libs.summaries).toContain("nodeFrom");
+      expect(libs.summaries).toContain("nodeTo");
+      expect(libs.summaries).toContain("json_decode");
+      expect(libs.summaries).toContain("passKey = \"path_traversal\"");
+    });
+
+    it("excludes FP summaries", () => {
+      const labels = makeLabelsWithSummary();
+      const summaryEntry = labels.passes[0].entries.find((e) => e.role === "summary")!;
+      summaryEntry.classification = "fp";
+
+      const pythonProfile = profileById("python", "python-dataflow-new")!;
+      const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, pythonProfile);
+      expect(libs.summaries).toContain("none()");
+    });
+
+    it("renders per-language profiles correctly for Go", () => {
+      const labels = makeLabelsWithSummary();
+      labels.metadata.language = "go";
+      labels.passes[0].entries.find((e) => e.role === "summary")!.signature.callable = "Unmarshal";
+      const goProfile = profileById("go", "go-dataflow")!;
+      const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
+      expect(libs.summaries).toContain("DataFlow::CallNode call");
+      expect(libs.summaries).toContain("Unmarshal");
+      expect(libs.summaries).toContain("nodeFrom");
+      expect(libs.summaries).toContain("nodeTo");
+    });
+
+    it("buildSummaryTaintStep binds nodeFrom and nodeTo for return flow", () => {
+      const pythonProfile = profileById("python", "python-dataflow-new")!;
+      const step = __taintAnalysisRunInternals.buildSummaryTaintStep(
+        { callable: "json_decode", flowKind: "return", receiverHint: null, argIndex: null },
+        pythonProfile,
+      );
+      expect(step).toContain("nodeFrom =");
+      expect(step).toContain("nodeTo =");
+      // return flow → nodeTo should use result expr
+      expect(step).toContain("call");
+    });
+
+    it("buildSummaryTaintStep uses arg position for non-return flow", () => {
+      const goProfile = profileById("go", "go-dataflow")!;
+      const step = __taintAnalysisRunInternals.buildSummaryTaintStep(
+        { callable: "Transform", flowKind: "argument", receiverHint: null, argIndex: 1 },
+        goProfile,
+      );
+      expect(step).toContain("nodeTo = call.getArgument(1)");
+      expect(step).toContain("nodeFrom = call.getAnArgument()");
+    });
+
+    it("uses impossible-match for empty passes alongside populated ones", () => {
+      const pythonProfile = profileById("python", "python-dataflow-new")!;
+      const labels = makeLabelsWithSummary();
+      const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, pythonProfile);
+      // pass 1 has summary, other passes should use regexpMatch impossible
+      expect(libs.summaries).toContain("regexpMatch(\"a^\")");
+      expect(libs.summaries).toContain("json_decode");
+    });
+  });
 });
