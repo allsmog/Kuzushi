@@ -64,8 +64,11 @@ describe("taint-analysis refinement internals", () => {
       new Map([[1, {
         sourceFalsePositive: true,
         sinkFalsePositive: false,
+        sourceFpCount: 1,
+        sinkFpCount: 0,
         hints: [],
       }]]),
+      0.3,
     );
 
     const pass = refined.passes[0];
@@ -76,8 +79,90 @@ describe("taint-analysis refinement internals", () => {
     expect(sink?.classification).toBe("tp");
   });
 
+  it("proportional downgrade: 1 signal downgrades exactly 1 entry", () => {
+    const labels = makeLabels();
+    // Add extra source entries so there are multiple candidates
+    labels.passes[0].entries.push(
+      { ...labels.passes[0].entries[0], id: "src-b", confidence: 0.5 },
+      { ...labels.passes[0].entries[0], id: "src-c", confidence: 0.6 },
+    );
+
+    const refined = __taintAnalysisRefinementInternals.applyDeterministicPatch(
+      labels,
+      new Map([[1, {
+        sourceFalsePositive: true,
+        sinkFalsePositive: false,
+        sourceFpCount: 1,
+        sinkFpCount: 0,
+        hints: [],
+      }]]),
+      0.3,
+    );
+
+    const sources = refined.passes[0].entries.filter((e) => e.role === "source");
+    const downgraded = sources.filter((e) => e.classification === "fp");
+    expect(downgraded).toHaveLength(1);
+  });
+
+  it("proportional downgrade: 2 signals downgrade exactly 2 entries", () => {
+    const labels = makeLabels();
+    labels.passes[0].entries.push(
+      { ...labels.passes[0].entries[0], id: "src-b", confidence: 0.5 },
+      { ...labels.passes[0].entries[0], id: "src-c", confidence: 0.6 },
+    );
+
+    const refined = __taintAnalysisRefinementInternals.applyDeterministicPatch(
+      labels,
+      new Map([[1, {
+        sourceFalsePositive: true,
+        sinkFalsePositive: false,
+        sourceFpCount: 2,
+        sinkFpCount: 0,
+        hints: [],
+      }]]),
+      0.3,
+    );
+
+    const sources = refined.passes[0].entries.filter((e) => e.role === "source");
+    const downgraded = sources.filter((e) => e.classification === "fp");
+    expect(downgraded).toHaveLength(2);
+  });
+
+  it("respects custom confidence cap", () => {
+    const refined = __taintAnalysisRefinementInternals.applyDeterministicPatch(
+      makeLabels(),
+      new Map([[1, {
+        sourceFalsePositive: true,
+        sinkFalsePositive: false,
+        sourceFpCount: 1,
+        sinkFpCount: 0,
+        hints: [],
+      }]]),
+      0.15,
+    );
+
+    const source = refined.passes[0].entries.find((e) => e.id === "src-a");
+    expect((source?.confidence ?? 1) <= 0.15).toBe(true);
+  });
+
   it("extracts pass id from taint-analysis rule ids", () => {
     expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass2/js/path-traversal")).toBe(2);
     expect(__taintAnalysisRefinementInternals.extractPassId("semgrep/rule")).toBeUndefined();
+  });
+
+  it("rejects pass id 0 (below valid range)", () => {
+    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass0/test")).toBeUndefined();
+  });
+
+  it("rejects pass id 14 (above valid range)", () => {
+    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass14/test")).toBeUndefined();
+  });
+
+  it("accepts pass id 1 (lower bound)", () => {
+    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass1/test")).toBe(1);
+  });
+
+  it("accepts pass id 13 (upper bound)", () => {
+    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass13/test")).toBe(13);
   });
 });

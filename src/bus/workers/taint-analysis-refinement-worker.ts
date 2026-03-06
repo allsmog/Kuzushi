@@ -6,10 +6,12 @@ import type { TaskContext } from "../../agents/types.js";
 import { taintAnalysisRunTask } from "../../agents/tasks/taint-analysis/analyze.js";
 import { buildTaintModelDocument } from "../../agents/tasks/taint-analysis/label.js";
 import type { TiPriorDocument } from "../../agents/tasks/taint-analysis/ti-prior.js";
+import { TAINT_ANALYSIS_PASS_IDS, resolveTaintAnalysisConfig } from "../../agents/tasks/taint-analysis/types.js";
 import type { TaintAnalysisLabelOutput, TaintAnalysisLabelsDocument, TaintAnalysisPassEntry, TaintAnalysisPassId } from "../../agents/tasks/taint-analysis/types.js";
 import type { ScanOpts, TriageResult, KuzushiConfig, RepoContext } from "../../types.js";
 import type { Finding } from "../../scanners/types.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
+import { coerceRepoContext } from "../../repo-context.js";
 import { triageFindingsBatch } from "../../triage.js";
 import {
   deleteFindingsByFingerprints,
@@ -31,6 +33,8 @@ export interface TaintAnalysisRefinementWorkerDeps {
 interface RefinementSignals {
   sourceFalsePositive: boolean;
   sinkFalsePositive: boolean;
+  sourceFpCount: number;
+  sinkFpCount: number;
   hints: string[];
 }
 
@@ -63,6 +67,15 @@ export function registerTaintAnalysisRefinementWorker(
         context.repoName,
         currentTaintAnalysisFingerprints,
       );
+      const allHints: string[] = [];
+      for (const [passId, signal] of signalsByPass.entries()) {
+        if (signal.hints.length > 0) {
+          process.stderr.write(
+            `[taint-analysis-refinement] Pass ${passId}: ${signal.hints.length} hint(s): ${signal.hints.join("; ")}\n`,
+          );
+          allHints.push(...signal.hints);
+        }
+      }
       const affectedPasses = resolveAffectedPasses(signalsByPass);
       if (affectedPasses.length === 0) {
         await bus.publish(
@@ -80,7 +93,9 @@ export function registerTaintAnalysisRefinementWorker(
         return;
       }
 
-      const refinedLabels = applyDeterministicPatch(labelOutput.labels, signalsByPass);
+      const taintCfg = resolveTaintAnalysisConfig(deps.config);
+      const confidenceCap = taintCfg.refinementConfidenceCap ?? 0.3;
+      const refinedLabels = applyDeterministicPatch(labelOutput.labels, signalsByPass, confidenceCap);
       const patchPath = path.join(labelOutput.workspaceDir, "labels", `refinement.patch.iter${iteration}.json`);
       await writeFile(
         patchPath,
@@ -92,6 +107,10 @@ export function registerTaintAnalysisRefinementWorker(
         }, null, 2),
         "utf-8",
       );
+      if (allHints.length > 0) {
+        const hintsPath = path.join(labelOutput.workspaceDir, "labels", `refinement_hints.iter${iteration}.json`);
+        await writeFile(hintsPath, JSON.stringify(allHints, null, 2), "utf-8");
+      }
       await writeFile(labelOutput.labelsPath, JSON.stringify(refinedLabels, null, 2), "utf-8");
       const tiPrior = await loadTiPriorDocument(labelOutput.tiPriorJsonPath);
       const taintModel = buildTaintModelDocument(refinedLabels, tiPrior);
@@ -136,7 +155,7 @@ export function registerTaintAnalysisRefinementWorker(
         deps,
         deltaFindings,
         context,
-        repoContext: asRepoContext(event.payload.repoContext),
+        repoContext: coerceRepoContext(event.payload.repoContext),
       });
 
       await bus.publish(
@@ -193,14 +212,18 @@ function collectSignalsByPass(
     const signal = byPass.get(passId) ?? {
       sourceFalsePositive: false,
       sinkFalsePositive: false,
+      sourceFpCount: 0,
+      sinkFpCount: 0,
       hints: [],
     };
 
     if (source && source["is_false_positive"] === true) {
       signal.sourceFalsePositive = true;
+      signal.sourceFpCount += 1;
     }
     if (sink && sink["is_false_positive"] === true) {
       signal.sinkFalsePositive = true;
+      signal.sinkFpCount += 1;
     }
     if (hint) {
       signal.hints.push(hint);
@@ -228,6 +251,7 @@ function resolveAffectedPasses(signalsByPass: Map<number, RefinementSignals>): T
 function applyDeterministicPatch(
   labels: TaintAnalysisLabelsDocument,
   signalsByPass: Map<number, RefinementSignals>,
+  confidenceCap: number,
 ): TaintAnalysisLabelsDocument {
   const cloned = JSON.parse(JSON.stringify(labels)) as TaintAnalysisLabelsDocument;
   for (const pass of cloned.passes) {
@@ -236,26 +260,32 @@ function applyDeterministicPatch(
       continue;
     }
     if (signal.sourceFalsePositive) {
-      downgradeEntries(pass.entries, "source");
+      downgradeEntries(pass.entries, "source", signal.sourceFpCount, confidenceCap);
     }
     if (signal.sinkFalsePositive) {
-      downgradeEntries(pass.entries, "sink");
+      downgradeEntries(pass.entries, "sink", signal.sinkFpCount, confidenceCap);
     }
     if (!signal.sourceFalsePositive && !signal.sinkFalsePositive && signal.hints.length > 0) {
-      downgradeEntries(pass.entries, "sink");
+      downgradeEntries(pass.entries, "sink", signal.hints.length, confidenceCap);
     }
   }
   return cloned;
 }
 
-function downgradeEntries(entries: TaintAnalysisPassEntry[], role: TaintAnalysisPassEntry["role"]): void {
+function downgradeEntries(
+  entries: TaintAnalysisPassEntry[],
+  role: TaintAnalysisPassEntry["role"],
+  signalCount: number,
+  confidenceCap: number,
+): void {
   const candidates = entries
     .filter((entry) => entry.role === role && entry.classification !== "fp")
     .sort((a, b) => a.confidence - b.confidence);
-  for (const entry of candidates.slice(0, 3)) {
+  const limit = Math.min(signalCount, candidates.length);
+  for (const entry of candidates.slice(0, limit)) {
     entry.classification = "fp";
     entry.rationale = `${entry.rationale} [refinement: downgraded due to triage false-positive signals]`;
-    entry.confidence = Math.min(entry.confidence, 0.3);
+    entry.confidence = Math.min(entry.confidence, confidenceCap);
   }
 }
 
@@ -317,41 +347,9 @@ async function triageDeltaFindings(args: {
   }
 }
 
-function asRepoContext(value: unknown): RepoContext | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const repoContext: RepoContext = {
-    languages: asStringArray(value["languages"]),
-    frameworks: asStringArray(value["frameworks"]),
-    authPatterns: asStringArray(value["authPatterns"]),
-    sanitizationLibs: asStringArray(value["sanitizationLibs"]),
-    ormOrDb: asStringArray(value["ormOrDb"]),
-    entryPoints: asStringArray(value["entryPoints"]),
-  };
-
-  const hasAny = repoContext.languages.length
-    || repoContext.frameworks.length
-    || repoContext.authPatterns.length
-    || repoContext.sanitizationLibs.length
-    || repoContext.ormOrDb.length
-    || repoContext.entryPoints.length;
-
-  return hasAny ? repoContext : undefined;
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
-}
 
 function isPassId(value: number): value is TaintAnalysisPassId {
-  return value >= 1 && value <= 13;
+  return TAINT_ANALYSIS_PASS_IDS.has(value);
 }
 
 function extractPassId(ruleId: string): number | undefined {
