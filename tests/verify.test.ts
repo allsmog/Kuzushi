@@ -64,7 +64,7 @@ describe("buildVerificationPrompt", () => {
   it("includes finding details and triage context", () => {
     const prompt = buildVerificationPrompt(makeFinding(), makeTriageResult(), "repo");
 
-    expect(prompt).toContain("application security verification agent");
+    expect(prompt).toContain("exploit engineer");
     expect(prompt).toContain("Repo: repo");
     expect(prompt).toContain("Rule: test.rule");
     expect(prompt).toContain("Fingerprint: verify-fp");
@@ -90,6 +90,33 @@ describe("buildVerificationPrompt", () => {
     expect(prompt).toContain("## Repository Context");
     expect(prompt).toContain("Languages: TypeScript");
     expect(prompt).toContain("ORM/DB: Prisma");
+  });
+
+  it("includes Proof Level Framework and Bypass Exhaustion Protocol", () => {
+    const prompt = buildVerificationPrompt(makeFinding(), makeTriageResult(), "repo");
+
+    expect(prompt).toContain("Proof Level Framework");
+    expect(prompt).toContain("Level 1: Theoretical weakness identified");
+    expect(prompt).toContain("Level 4: Account takeover demonstrated");
+    expect(prompt).toContain("Bypass Exhaustion Protocol");
+    expect(prompt).toContain("Direct exploitation with obvious payload");
+    expect(prompt).toContain("Encoding bypass");
+  });
+
+  it("includes bypass techniques for SQLi CWE", () => {
+    const prompt = buildVerificationPrompt(makeFinding(), makeTriageResult(), "repo");
+
+    expect(prompt).toContain("Category-Specific Bypass Techniques");
+    expect(prompt).toContain("SQL Injection");
+    expect(prompt).toContain("Comment injection");
+    expect(prompt).toContain("Wide-byte injection");
+  });
+
+  it("includes Confidence Escalation Protocol for verification", () => {
+    const prompt = buildVerificationPrompt(makeFinding(), makeTriageResult(), "repo");
+
+    expect(prompt).toContain("Confidence Escalation Protocol");
+    expect(prompt).toContain("Start at 0.1");
   });
 });
 
@@ -135,6 +162,58 @@ describe("parseVerificationOutput", () => {
   it("throws a clear error for malformed JSON", () => {
     expect(() => parseVerificationOutput("not-json", "fallback-fp"))
       .toThrow("Invalid verification JSON response");
+  });
+
+  it("parses proof_level and proof_verdict from output", () => {
+    const parsed = parseVerificationOutput({
+      fingerprint: "verify-fp",
+      exploitable: true,
+      poc_payload: "payload",
+      poc_description: "desc",
+      attack_vector: "network",
+      preconditions: [],
+      confidence: 0.9,
+      proof_level: 3,
+      proof_verdict: "exploited",
+      bypass_attempts: ["Direct injection", "Encoding bypass"],
+    }, "fallback");
+
+    expect(parsed.proofLevel).toBe(3);
+    expect(parsed.proofVerdict).toBe("exploited");
+    expect(parsed.bypassAttempts).toEqual(["Direct injection", "Encoding bypass"]);
+  });
+
+  it("handles missing proof fields gracefully", () => {
+    const parsed = parseVerificationOutput({
+      fingerprint: "verify-fp",
+      exploitable: false,
+      poc_payload: null,
+      poc_description: "not exploitable",
+      attack_vector: null,
+      preconditions: [],
+      confidence: 0.3,
+    }, "fallback");
+
+    expect(parsed.proofLevel).toBeUndefined();
+    expect(parsed.proofVerdict).toBeUndefined();
+    expect(parsed.bypassAttempts).toBeUndefined();
+  });
+
+  it("normalizes invalid proof_verdict to undefined", () => {
+    const parsed = parseVerificationOutput({
+      fingerprint: "verify-fp",
+      exploitable: false,
+      poc_payload: null,
+      poc_description: "desc",
+      attack_vector: null,
+      preconditions: [],
+      confidence: 0.5,
+      proof_level: 5,
+      proof_verdict: "invalid_verdict",
+    }, "fallback");
+
+    expect(parsed.proofLevel).toBeUndefined(); // 5 is out of range
+    expect(parsed.proofVerdict).toBeUndefined();
   });
 });
 

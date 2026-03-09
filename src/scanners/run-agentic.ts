@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime, type AgentRuntime } from "../agent-runtime/index.js";
 import type { ScanOpts } from "../types.js";
-import { isRecord } from "../utils.js";
+import { isRecord, toErrorMessage } from "../utils.js";
 import type { Finding } from "./types.js";
 import { scoreFindingMetadata } from "./scoring.js";
 
@@ -61,6 +61,7 @@ interface AgenticFinding {
 
 export interface AgenticOutput {
   findings: AgenticFinding[];
+  costUsd?: number;
 }
 
 export interface AgenticRuntimeOptions {
@@ -84,6 +85,7 @@ export async function runAgentic(
   let resultText = "";
   let structuredOutput: unknown = undefined;
   let executionError: string | null = null;
+  let costUsd = 0;
 
   const tag = "[agentic]";
   console.error(`${tag} Starting scan (model=${model}, cwd=${repoRoot})`);
@@ -95,12 +97,14 @@ export async function runAgentic(
       model,
       allowedTools: ["Read", "Glob", "Grep"],
       permissionMode: "dontAsk",
-      maxTurns: runtimeOptions.maxTurns ?? 30,
+      maxTurns: runtimeOptions.maxTurns ?? undefined,
       maxBudgetUsd: runtimeOptions.maxBudgetUsd,
       abortController: runtimeOptions.abortController,
       outputFormat: {
         type: "json_schema",
         schema: AGENTIC_SCHEMA,
+        strict: true,
+        retryInvalidStructuredOutput: 2,
       },
     },
   })) {
@@ -132,6 +136,9 @@ export async function runAgentic(
     }
 
     if (message.type !== "result") continue;
+    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+      costUsd = message.totalCostUsd;
+    }
     if ("result" in message) {
       resultText = message.result;
       structuredOutput = message.structuredOutput;
@@ -148,7 +155,7 @@ export async function runAgentic(
   }
 
   const parsed = parseAgenticOutput(structuredOutput ?? resultText);
-  return { findings: parsed.findings };
+  return { findings: parsed.findings, costUsd };
 }
 
 /** Rank and map agentic findings into Finding records. */
@@ -264,13 +271,36 @@ export function computeAgenticFingerprint(
 
 function buildPrompt(opts: ScanOpts, maxFindings: number): string {
   return [
-    "You are a static analysis security scanner.",
-    "Analyze the repository for concrete application security issues.",
-    "Return only findings with enough evidence in code.",
+    "You are a senior application security researcher with deep expertise in vulnerability discovery.",
+    "You think like an attacker: you map attack surfaces, trace data flows, and verify exploitability",
+    "before reporting. You know that most static analysis findings are false positives.",
     "",
     `Severity filter: ${opts.severity.join(", ") || "ERROR, WARNING, INFO"}`,
     `Max findings: ${maxFindings}`,
     `Exclude paths/globs: ${opts.excludePatterns.join(", ") || "(none)"}`,
+    "",
+    "## Phase 1: Context research",
+    "Map the application's attack surface:",
+    "1. Identify candidate surfaces: request handlers, auth middleware, deserializers, template/rendering code, filesystem access, process execution, DB/query code, redirects, and outbound HTTP.",
+    "2. Understand the auth/middleware stack and framework protections in place.",
+    "3. Identify sanitization libraries, validation layers, and security utilities.",
+    "",
+    "## Phase 2: Comparative analysis",
+    "For each candidate surface from Phase 1:",
+    "1. Confirm a concrete sink and the attacker-controlled input that reaches it.",
+    "2. Check for sanitization, validation, allowlists, authz, feature flags, and router-level middleware.",
+    "3. If the issue depends on the absence of a guard, inspect the exact handler/router/middleware chain rather than inferring from one file.",
+    "",
+    "## Phase 3: Vulnerability assessment",
+    "For each confirmed issue from Phase 2:",
+    "1. Verify exploitability — can an attacker actually trigger this?",
+    "2. Assign confidence: only report HIGH or MEDIUM confidence findings.",
+    "3. Document evidence: name the source, sink, and missing guard.",
+    "",
+    "## Evidence requirements for every reported finding",
+    "- Include a precise file and start line for the vulnerable code path.",
+    "- The evidence field must name the source/sink/guard fact that justifies the finding.",
+    "- Omit the finding entirely if you cannot verify the path in code.",
     "",
     "For each finding return:",
     "- ruleId (string)",
@@ -285,14 +315,20 @@ function buildPrompt(opts: ScanOpts, maxFindings: number): string {
     "- cwe (array of CWE strings, optional)",
     "- evidence (short evidence snippet)",
     "",
-    "Do not propose remediations. Do not include non-security style issues.",
+    "## Anti-hallucination constraints",
+    "- Do not propose remediations. Do not include non-security style issues.",
+    "- Do not return placeholders or hypothetical findings.",
+    "- Only report what you can verify exists in actual code.",
+    "- If unsure, do NOT report — false negatives are better than false positives.",
   ].join("\n");
 }
 
 function parseRawOutput(raw: unknown): unknown {
   if (typeof raw !== "string") return raw;
   const text = raw.trim();
-  if (!text) return { findings: [] };
+  if (!text) {
+    throw new Error("agentic scanner returned empty output");
+  }
 
   try {
     return JSON.parse(text);
@@ -300,9 +336,8 @@ function parseRawOutput(raw: unknown): unknown {
     try {
       const extracted = extractJsonObject(text);
       return JSON.parse(extracted);
-    } catch {
-      console.error("[agentic] Failed to parse output as JSON, returning empty findings");
-      return { findings: [] };
+    } catch (error) {
+      throw new Error(`agentic scanner returned invalid JSON output: ${toErrorMessage(error)}`);
     }
   }
 }

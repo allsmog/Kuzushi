@@ -70,6 +70,17 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("src/index.ts");
     expect(prompt).toContain("25");
   });
+
+  it("requires concrete middleware and authorization evidence", () => {
+    const prompt = buildPrompt(
+      { languages: ["TypeScript"], frameworks: ["Express"], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: ["src/routes.ts"] },
+      10,
+    );
+
+    expect(prompt).toContain("router/app/controller-level middleware");
+    expect(prompt).toContain("exact file paths and line numbers");
+    expect(prompt).toContain("Do not report a finding just because one file lacks a check");
+  });
 });
 
 describe("normalizeFindings", () => {

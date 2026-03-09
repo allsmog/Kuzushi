@@ -1,7 +1,8 @@
 import { verifyFindingWithAgent, VerificationExecutionError } from "../../verify.js";
 import { withRetry } from "../../retry.js";
-import type { KuzushiConfig, RepoContext } from "../../types.js";
-import { isRecord, toErrorMessage } from "../../utils.js";
+import { coerceRepoContext } from "../../repo-context.js";
+import type { KuzushiConfig } from "../../types.js";
+import { toErrorMessage } from "../../utils.js";
 import type { VerificationFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -33,7 +34,7 @@ export function registerVerificationWorker(
             context.repoName,
             deps.config.verifyModel ?? deps.config.triageModel ?? deps.config.model,
             deps.config.verifyMaxTurns ?? 15,
-            asRepoContext(repoContext),
+            coerceRepoContext(repoContext),
             {
               activityCallback: async (activity) => {
                 await bus.publish(
@@ -89,40 +90,4 @@ export function registerVerificationWorker(
       );
     }
   });
-}
-
-function asRepoContext(value: unknown): RepoContext | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const repoContext: RepoContext = {
-    languages: asStringArray(value["languages"]),
-    frameworks: asStringArray(value["frameworks"]),
-    authPatterns: asStringArray(value["authPatterns"]),
-    sanitizationLibs: asStringArray(value["sanitizationLibs"]),
-    ormOrDb: asStringArray(value["ormOrDb"]),
-    entryPoints: asStringArray(value["entryPoints"]),
-  };
-
-  const hasAnyValue = (
-    repoContext.languages.length > 0
-    || repoContext.frameworks.length > 0
-    || repoContext.authPatterns.length > 0
-    || repoContext.sanitizationLibs.length > 0
-    || repoContext.ormOrDb.length > 0
-    || repoContext.entryPoints.length > 0
-  );
-
-  return hasAnyValue ? repoContext : undefined;
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
 }

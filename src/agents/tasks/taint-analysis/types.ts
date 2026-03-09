@@ -48,6 +48,9 @@ export interface TaintAnalysisTaskConfig {
   crossServiceStitchThreshold?: number;
   crossServiceMaxPathDepth?: number;
   refinementConfidenceCap?: number;
+  summarySupplementsDisabled?: boolean;
+  extractionSupplementsDisabled?: boolean;
+  renderingHintsDisabled?: boolean;
 }
 
 export interface TaintAnalysisCandidate {
@@ -69,7 +72,8 @@ export type ExtractionDegradationReason =
   | "sources_agent_returned_no_query"
   | "sinks_agent_returned_no_query"
   | "zero_usable_sources"
-  | "zero_usable_sinks";
+  | "zero_usable_sinks"
+  | "low_source_count_for_framework";
 
 export interface ExtractionDegradation {
   status: "ok" | "degraded" | "failed";
@@ -220,6 +224,9 @@ export const DEFAULT_TAINT_ANALYSIS_TASK_CONFIG: TaintAnalysisTaskConfig = {
   crossServiceStitchThreshold: 0.6,
   crossServiceMaxPathDepth: 5,
   refinementConfidenceCap: 0.3,
+  summarySupplementsDisabled: false,
+  extractionSupplementsDisabled: false,
+  renderingHintsDisabled: false,
 };
 
 function normalizeDefaultTaintAnalysisPath(): string {
@@ -312,6 +319,18 @@ export function resolveTaintAnalysisConfig(config: KuzushiConfig): TaintAnalysis
     refinementConfidenceCap: normalizeUnitInterval(
       merged["refinementConfidenceCap"],
       DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.refinementConfidenceCap ?? 0.3,
+    ),
+    summarySupplementsDisabled: normalizeBoolean(
+      merged["summarySupplementsDisabled"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.summarySupplementsDisabled ?? false,
+    ),
+    extractionSupplementsDisabled: normalizeBoolean(
+      merged["extractionSupplementsDisabled"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.extractionSupplementsDisabled ?? false,
+    ),
+    renderingHintsDisabled: normalizeBoolean(
+      merged["renderingHintsDisabled"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.renderingHintsDisabled ?? false,
     ),
   };
 }

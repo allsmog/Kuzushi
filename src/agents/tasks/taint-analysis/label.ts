@@ -5,6 +5,7 @@ import path from "node:path";
 import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import type { AgentRuntime } from "../../../agent-runtime/types.js";
 import { withRetry } from "../../../retry.js";
+import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
@@ -17,6 +18,7 @@ import {
 import {
   TAINT_ANALYSIS_PASSES,
   resolveTaintAnalysisConfig,
+  type ExtractionDegradation,
   type TaintAnalysisCandidate,
   type TaintAnalysisLabelOutput,
   type TaintAnalysisLanguage,
@@ -190,6 +192,7 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
       : getAgentRuntime();
 
     const labelsByPass = new Map<number, TaintAnalysisPassEntry[]>();
+    let totalCostUsd = 0;
     if (noSourcesExtracted) {
       for (const passId of preflight.passes) {
         const checkpointPath = path.join(preflight.workspaceDir, "labels", `labels_raw_pass${passId}.json`);
@@ -257,15 +260,16 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
           preflight.framework,
         );
 
-        labelsByPass.set(passId, passEntries);
-        process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${passEntries.length} entries labeled\n`);
+        labelsByPass.set(passId, passEntries.entries);
+        totalCostUsd += passEntries.costUsd;
+        process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${passEntries.entries.length} entries labeled\n`);
 
         await writePassCheckpointV2(
           checkpointPath,
           passId,
           preflight.language,
           candidateFingerprint,
-          passEntries,
+          passEntries.entries,
         );
       }
     }
@@ -329,7 +333,7 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
       "utf-8",
     );
 
-    return {
+    return attachTaskOutputMeta({
       taintAnalysisPath: preflight.taintAnalysisPath,
       workspaceDir: preflight.workspaceDir,
       dbPath: preflight.dbPath,
@@ -342,12 +346,13 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
       tiPriorMarkdownPath: preflight.tiPriorMarkdownPath,
       tiPriorJsonPath: preflight.tiPriorJsonPath,
       tiPriorDegraded: preflight.tiPriorDegraded,
+      extractionDegradation: preflight.extractionDegradation,
       labelsPath,
       labels,
       taintModelPath,
       reviewSummary,
       labelCounts,
-    };
+    }, { costUsd: totalCostUsd });
   },
 };
 
@@ -361,9 +366,10 @@ async function labelPass(
   repoRoot: string,
   language: TaintAnalysisPreflightOutput["language"],
   framework: string | null,
-): Promise<TaintAnalysisPassEntry[]> {
+): Promise<{ entries: TaintAnalysisPassEntry[]; costUsd: number }> {
   const byCandidateId = new Map<string, LabelResponseEntry>();
   const batches = chunk(candidates, cfg.labelingBatchSize);
+  let totalCostUsd = 0;
   process.stderr.write(`[taint-analysis-label]   ${batches.length} batch(es) of up to ${cfg.labelingBatchSize} candidates\n`);
 
   for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
@@ -374,13 +380,14 @@ async function labelPass(
       () => queryLabelBatch(runtime, prompt, repoRoot, cfg.labelingModel),
       { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
     );
+    totalCostUsd += initial.costUsd;
 
-    process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: LLM returned ${initial.entries.length} entries\n`);
-    for (const entry of initial.entries) {
+    process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: LLM returned ${initial.response.entries.length} entries\n`);
+    for (const entry of initial.response.entries) {
       byCandidateId.set(entry.id, entry);
     }
 
-    const lowConfidenceIds = initial.entries
+    const lowConfidenceIds = initial.response.entries
       .filter((entry) => entry.confidence < cfg.labelingConfidenceThreshold)
       .map((entry) => entry.id);
 
@@ -392,7 +399,8 @@ async function labelPass(
         () => queryLabelBatch(runtime, retryPrompt, repoRoot, cfg.labelingModel),
         { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
       );
-      for (const entry of retry.entries) {
+      totalCostUsd += retry.costUsd;
+      for (const entry of retry.response.entries) {
         byCandidateId.set(entry.id, entry);
       }
     }
@@ -412,7 +420,10 @@ async function labelPass(
     );
   }
 
-  return validated;
+  return {
+    entries: validated,
+    costUsd: totalCostUsd,
+  };
 }
 
 async function queryLabelBatch(
@@ -420,11 +431,12 @@ async function queryLabelBatch(
   prompt: string,
   repoRoot: string,
   model: string,
-): Promise<LabelResponse> {
+): Promise<{ response: LabelResponse; costUsd: number }> {
   let rawResult: unknown;
   let rawText = "";
   let resultError: string | null = null;
   let resultErrorSubtype: string | null = null;
+  let costUsd = 0;
 
   for await (const message of runtime.query({
     prompt,
@@ -446,6 +458,10 @@ async function queryLabelBatch(
       continue;
     }
 
+    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+      costUsd = message.totalCostUsd;
+    }
+
     if ("result" in message) {
       rawText = message.result;
       rawResult = message.structuredOutput;
@@ -464,7 +480,10 @@ async function queryLabelBatch(
   }
 
   const parsed = parseLabelResponse(rawResult ?? rawText);
-  return parsed;
+  return {
+    response: parsed,
+    costUsd,
+  };
 }
 
 function parseLabelResponse(value: unknown): LabelResponse {
@@ -485,7 +504,7 @@ function parseLabelResponse(value: unknown): LabelResponse {
     }
   }
 
-  return { entries: [] };
+  throw new Error("Unexpected taint analysis label response shape");
 }
 
 function normalizeLabelResponseEntry(value: unknown): LabelResponseEntry | null {
@@ -1324,6 +1343,8 @@ function summarizeLabels(
     .join(", ") || "none";
 
   const reviewSummary = [
+    "> **Advisory only** — this report is for human review. No pipeline stage gates on approval.",
+    "",
     "# Taint Analysis checkpoint summary",
     "",
     "## Label counts by pass/role",
@@ -1411,6 +1432,7 @@ function asPreflightOutput(value: unknown): TaintAnalysisPreflightOutput | null 
       sourcesRowCount: asNumber(extraction["sourcesRowCount"]),
       sinksRowCount: asNumber(extraction["sinksRowCount"]),
     },
+    extractionDegradation: asExtractionDegradation(value["extractionDegradation"]),
   };
 
   if (
@@ -1620,6 +1642,16 @@ function asNumber(value: unknown): number {
 
 function asBoolean(value: unknown): boolean {
   return value === true;
+}
+
+function asExtractionDegradation(value: unknown): ExtractionDegradation {
+  if (isRecord(value) && typeof value["status"] === "string" && Array.isArray(value["reasons"])) {
+    const status = value["status"];
+    if (status === "ok" || status === "degraded" || status === "failed") {
+      return { status, reasons: value["reasons"].filter((r): r is string => typeof r === "string") as ExtractionDegradation["reasons"] };
+    }
+  }
+  return { status: "ok", reasons: [] };
 }
 
 function trimTo(value: string, maxLength: number): string {

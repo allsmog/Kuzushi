@@ -24,6 +24,8 @@ export interface PipelineStats {
   queuedForTriage: number;
   skippedAlreadyTriaged: number;
   skippedLowConfidence?: number;
+  skippedByFpFilter?: number;
+  skippedByLlmRescore?: number;
   triaged: number;
   triageErrors: number;
   totalCostUsd?: number;
@@ -181,6 +183,7 @@ export type TriageFindingQueuedEvent = EventEnvelope<
     context: RunContext;
     finding: Finding;
     repoContext?: unknown;
+    precedents?: unknown;
     index: number;
     total: number;
   }
@@ -192,6 +195,7 @@ export type TriageBatchQueuedEvent = EventEnvelope<
     context: RunContext;
     findings: Finding[];
     repoContext?: unknown;
+    precedents?: unknown;
     total: number;
   }
 >;
@@ -274,6 +278,7 @@ export type VerificationFindingQueuedEvent = EventEnvelope<
     finding: Finding;
     triageResult: TriageResult;
     repoContext?: unknown;
+    precedents?: unknown;
     index: number;
     total: number;
   }
@@ -478,6 +483,42 @@ export type TaintAnalysisRefinementErrorEvent = EventEnvelope<
   }
 >;
 
+export type VariantAnalysisStartEvent = EventEnvelope<
+  "variant-analysis:start",
+  {
+    context: RunContext;
+    confirmedCount: number;
+    model: string;
+  }
+>;
+
+export type VariantAnalysisCompleteEvent = EventEnvelope<
+  "variant-analysis:complete",
+  {
+    context: RunContext;
+    variantFindings: number;
+    costUsd: number;
+  }
+>;
+
+export type ChainAnalysisStartEvent = EventEnvelope<
+  "chain-analysis:start",
+  {
+    context: RunContext;
+    confirmedCount: number;
+    model: string;
+  }
+>;
+
+export type ChainAnalysisCompleteEvent = EventEnvelope<
+  "chain-analysis:complete",
+  {
+    context: RunContext;
+    chainCount: number;
+    costUsd: number;
+  }
+>;
+
 export type ReportRequestedEvent = EventEnvelope<
   "report:requested",
   {
@@ -534,5 +575,9 @@ export type KuzushiEvent =
   | TaintAnalysisRefinementStartEvent
   | TaintAnalysisRefinementResultEvent
   | TaintAnalysisRefinementErrorEvent
+  | VariantAnalysisStartEvent
+  | VariantAnalysisCompleteEvent
+  | ChainAnalysisStartEvent
+  | ChainAnalysisCompleteEvent
   | ReportRequestedEvent
   | ReportCompleteEvent;

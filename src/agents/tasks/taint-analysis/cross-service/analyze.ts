@@ -1,8 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { executeAgentTask, type ExecutedTaskResult } from "../../../../bus/task-execution.js";
+import type { ScannerConfig } from "../../../../scanners/types.js";
+import { attachTaskOutputMeta, getTaskOutputMeta } from "../../../../task-output-meta.js";
 import type { Finding } from "../../../../scanners/types.js";
 import type { ScanOpts } from "../../../../types.js";
-import { toErrorMessage } from "../../../../utils.js";
+import { isRecord, normalizeCostUsd, toErrorMessage } from "../../../../utils.js";
 import type { AgentTask, TaskContext } from "../../../types.js";
 import { taintAnalysisPreflightTask } from "../preflight.js";
 import { taintAnalysisLabelTask } from "../label.js";
@@ -35,21 +38,22 @@ export const taintAnalysisCrossAnalyzeTask: AgentTask<ScanOpts, CrossServiceAnal
     const cfg = resolveTaintAnalysisConfig(context.config);
     const crossCfg = resolveCrossServiceConfig(cfg);
 
-    const discoverOutput = context.upstreamOutputs.get("taint-analysis-discover") as
-      | CrossServiceDiscoverOutput
-      | undefined;
+    const discoverOutput = asCrossServiceDiscoverOutput(
+      context.upstreamOutputs.get("taint-analysis-discover"),
+    );
     if (!discoverOutput) {
       throw new Error("taint-analysis-cross-analyze requires upstream output from taint-analysis-discover");
     }
 
     const services = discoverOutput.services;
     if (services.length === 0) {
-      return { services: [], allBoundaries: [] };
+      return attachTaskOutputMeta({ services: [], allBoundaries: [] }, { costUsd: 0 });
     }
 
     // Process services with concurrency control
     const results: PerServiceAnalysis[] = [];
     const allBoundaries: BoundaryManifest[] = [];
+    let totalCostUsd = 0;
 
     const semaphore = new Semaphore(crossCfg.concurrency);
 
@@ -64,9 +68,11 @@ export const taintAnalysisCrossAnalyzeTask: AgentTask<ScanOpts, CrossServiceAnal
           crossCfg.boundaryThreshold,
           crossCfg.continueOnError,
         );
-        results.push(result);
-        allBoundaries.push(result.boundary);
+        results.push(result.analysis);
+        allBoundaries.push(result.analysis.boundary);
+        totalCostUsd += result.costUsd;
       } catch (error) {
+        totalCostUsd += getErrorCostUsd(error);
         if (!crossCfg.continueOnError) throw error;
         const degraded: PerServiceAnalysis = {
           service,
@@ -95,11 +101,57 @@ export const taintAnalysisCrossAnalyzeTask: AgentTask<ScanOpts, CrossServiceAnal
       if (rejection) throw (rejection as PromiseRejectedResult).reason;
     }
 
-    return { services: results, allBoundaries };
+    return attachTaskOutputMeta({ services: results, allBoundaries }, { costUsd: totalCostUsd });
   },
 };
 
+function asCrossServiceDiscoverOutput(value: unknown): CrossServiceDiscoverOutput | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value["services"])) {
+    return undefined;
+  }
+
+  return {
+    services: value["services"].flatMap((service) => {
+      if (!isRecord(service)) {
+        return [];
+      }
+
+      const id = typeof service["id"] === "string" ? service["id"] : "";
+      const rootPath = typeof service["rootPath"] === "string" ? service["rootPath"] : "";
+      const language = typeof service["language"] === "string" ? service["language"] : "";
+      if (!id || !rootPath || !language) {
+        return [];
+      }
+
+      return [{
+        id,
+        displayName: typeof service["displayName"] === "string" ? service["displayName"] : id,
+        rootPath,
+        language,
+        framework: typeof service["framework"] === "string" ? service["framework"] : null,
+        discoveryMethod: service["discoveryMethod"] === "manifest" ? "manifest" : "auto",
+        manifestFiles: Array.isArray(service["manifestFiles"])
+          ? service["manifestFiles"].map((item) => String(item))
+          : [],
+      }];
+    }),
+    usedManifest: Boolean(value["usedManifest"]),
+    autoDetectedPaths: Array.isArray(value["autoDetectedPaths"])
+      ? value["autoDetectedPaths"].map((item) => String(item))
+      : [],
+  };
+}
+
 // ── Per-Service Analysis ────────────────────────────────────────────────
+
+interface AnalyzedServiceResult {
+  analysis: PerServiceAnalysis;
+  costUsd: number;
+}
 
 async function analyzeService(
   service: ServiceDescriptor,
@@ -108,8 +160,9 @@ async function analyzeService(
   boundaryModel: string,
   boundaryThreshold: number,
   continueOnError: boolean,
-): Promise<PerServiceAnalysis> {
+): Promise<AnalyzedServiceResult> {
   const startTime = Date.now();
+  let totalCostUsd = 0;
 
   // Step 1: Run boundary detection
   let boundary: BoundaryManifest;
@@ -120,7 +173,9 @@ async function analyzeService(
       model: boundaryModel,
       confidenceThreshold: boundaryThreshold,
     });
+    totalCostUsd += normalizeCostUsd(getTaskOutputMeta(boundary)?.costUsd);
   } catch (error) {
+    totalCostUsd += getErrorCostUsd(error);
     if (!continueOnError) throw error;
     boundary = {
       serviceId: service.id,
@@ -141,8 +196,11 @@ async function analyzeService(
     taintAnalysisSkipReason = `Language "${service.language}" not supported by taint analysis`;
   } else {
     try {
-      intraServiceFindings = await runTaintAnalysisForService(service, input, context);
+      const taintAnalysis = await runTaintAnalysisForService(service, input, context);
+      intraServiceFindings = taintAnalysis.findings;
+      totalCostUsd += taintAnalysis.costUsd;
     } catch (error) {
+      totalCostUsd += getErrorCostUsd(error);
       if (!continueOnError) throw error;
       taintAnalysisSkipped = true;
       taintAnalysisSkipReason = `Taint analysis failed: ${toErrorMessage(error)}`;
@@ -150,12 +208,15 @@ async function analyzeService(
   }
 
   return {
-    service,
-    boundary,
-    intraServiceFindings,
-    taintAnalysisSkipped,
-    taintAnalysisSkipReason,
-    durationMs: Date.now() - startTime,
+    analysis: {
+      service,
+      boundary,
+      intraServiceFindings,
+      taintAnalysisSkipped,
+      taintAnalysisSkipReason,
+      durationMs: Date.now() - startTime,
+    },
+    costUsd: totalCostUsd,
   };
 }
 
@@ -169,7 +230,7 @@ async function runTaintAnalysisForService(
   service: ServiceDescriptor,
   input: ScanOpts,
   parentContext: TaskContext,
-): Promise<Finding[]> {
+): Promise<{ findings: Finding[]; costUsd: number }> {
   const serviceRoot = path.resolve(parentContext.repoRoot, service.rootPath);
 
   // Set up isolated workspace per service
@@ -205,7 +266,13 @@ async function runTaintAnalysisForService(
     upstreamOutputs: new Map(),
   };
 
-  const preflightOutput = await taintAnalysisPreflightTask.run(input, preflightContext);
+  const preflight = await executeNestedTask(
+    taintAnalysisPreflightTask,
+    input,
+    preflightContext,
+    service.id,
+  );
+  const preflightOutput = preflight.output;
 
   // Step 2: Label
   const labelContext: TaskContext = {
@@ -213,7 +280,13 @@ async function runTaintAnalysisForService(
     upstreamOutputs: new Map([["taint-analysis-preflight", preflightOutput]]),
   };
 
-  const labelOutput = await taintAnalysisLabelTask.run(input, labelContext);
+  const label = await executeNestedTask(
+    taintAnalysisLabelTask,
+    input,
+    labelContext,
+    service.id,
+  );
+  const labelOutput = label.output;
 
   // Step 3: Run (produces Finding[])
   const runContext: TaskContext = {
@@ -221,7 +294,62 @@ async function runTaintAnalysisForService(
     upstreamOutputs: new Map([["taint-analysis-label", labelOutput]]),
   };
 
-  return await taintAnalysisRunTask.run(input, runContext);
+  const run = await executeNestedTask(
+    taintAnalysisRunTask,
+    input,
+    runContext,
+    service.id,
+  );
+
+  return {
+    findings: run.emittedFindings,
+    costUsd: preflight.costUsd + label.costUsd + run.costUsd,
+  };
+}
+
+async function executeNestedTask<TOutput>(
+  task: AgentTask<ScanOpts, TOutput>,
+  input: ScanOpts,
+  context: TaskContext,
+  serviceId: string,
+): Promise<ExecutedTaskResult & { output: TOutput }> {
+  process.stderr.write(`[taint-analysis-cross-analyze] [${serviceId}] Starting nested task ${task.id}\n`);
+
+  try {
+    const executed = await executeAgentTask(
+      task,
+      input,
+      context,
+      resolveTaskConfig(context.config, task.id),
+    );
+
+    process.stderr.write(
+      `[taint-analysis-cross-analyze] [${serviceId}] Completed nested task ${task.id} in ${executed.durationMs}ms (cost $${executed.costUsd.toFixed(4)})\n`,
+    );
+
+    return executed as ExecutedTaskResult & { output: TOutput };
+  } catch (error) {
+    process.stderr.write(
+      `[taint-analysis-cross-analyze] [${serviceId}] Nested task ${task.id} failed: ${toErrorMessage(error)}\n`,
+    );
+    throw error;
+  }
+}
+
+function resolveTaskConfig(config: TaskContext["config"], taskId: string): ScannerConfig {
+  const raw = config.scannerConfig[taskId];
+  if (isRecord(raw)) {
+    return raw;
+  }
+  return {};
+}
+
+function getErrorCostUsd(error: unknown): number {
+  if (!isRecord(error)) {
+    return 0;
+  }
+
+  return normalizeCostUsd(error["costUsd"]);
 }
 
 // ── Semaphore ───────────────────────────────────────────────────────────

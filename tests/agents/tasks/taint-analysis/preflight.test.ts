@@ -281,6 +281,90 @@ describe("taint-analysis-preflight internals", () => {
     ]);
   });
 
+  describe("computeExtractionDegradation", () => {
+    const { computeExtractionDegradation } = __taintAnalysisPreflightInternals;
+
+    function makeDiagnostic(overrides: Partial<{
+      kind: "source" | "sink";
+      fallbackUsed: boolean;
+      fallbackReason: string | null;
+    }> = {}) {
+      return {
+        kind: overrides.kind ?? "source",
+        language: "go" as const,
+        templatePath: "/tmp/t.tmpl",
+        templateExists: true,
+        templateHadBodyPlaceholders: true,
+        selectedQuerySource: "agent-initial" as const,
+        fallbackUsed: overrides.fallbackUsed ?? false,
+        fallbackReason: overrides.fallbackReason ?? null,
+        fallbackDetail: null,
+        initialAttempt: { attempted: true, generatedQuery: true, compileOk: true, compileErrorExcerpt: null },
+        retryAttempt: { attempted: false, generatedQuery: false, compileOk: null, compileErrorExcerpt: null },
+      };
+    }
+
+    it("returns ok when no fallback and non-zero rows", () => {
+      const result = computeExtractionDegradation(
+        [makeDiagnostic({ kind: "source" }), makeDiagnostic({ kind: "sink" })],
+        10,
+        20,
+      );
+      expect(result.status).toBe("ok");
+      expect(result.reasons).toEqual([]);
+    });
+
+    it("returns degraded when fallback used for sources", () => {
+      const result = computeExtractionDegradation(
+        [makeDiagnostic({ kind: "source", fallbackUsed: true }), makeDiagnostic({ kind: "sink" })],
+        5,
+        10,
+      );
+      expect(result.status).toBe("degraded");
+      expect(result.reasons).toContain("sources_used_fallback_template");
+    });
+
+    it("returns degraded when agent returned no query", () => {
+      const result = computeExtractionDegradation(
+        [
+          makeDiagnostic({ kind: "source", fallbackUsed: true, fallbackReason: "agent_returned_no_query" }),
+          makeDiagnostic({ kind: "sink" }),
+        ],
+        5,
+        10,
+      );
+      expect(result.status).toBe("degraded");
+      expect(result.reasons).toContain("sources_agent_returned_no_query");
+      expect(result.reasons).toContain("sources_used_fallback_template");
+    });
+
+    it("returns failed when both sources and sinks are zero", () => {
+      const result = computeExtractionDegradation(
+        [makeDiagnostic({ kind: "source" }), makeDiagnostic({ kind: "sink" })],
+        0,
+        0,
+      );
+      expect(result.status).toBe("failed");
+      expect(result.reasons).toContain("zero_usable_sources");
+      expect(result.reasons).toContain("zero_usable_sinks");
+    });
+
+    it("returns degraded for mixed scenario (one fallback + one zero)", () => {
+      const result = computeExtractionDegradation(
+        [
+          makeDiagnostic({ kind: "source", fallbackUsed: true }),
+          makeDiagnostic({ kind: "sink" }),
+        ],
+        0,
+        10,
+      );
+      expect(result.status).toBe("degraded");
+      expect(result.reasons).toContain("sources_used_fallback_template");
+      expect(result.reasons).toContain("zero_usable_sources");
+      expect(result.reasons).not.toContain("zero_usable_sinks");
+    });
+  });
+
   it("writes extraction diagnostics report with fallback details and row counts", async () => {
     const workspaceDir = path.join(TMP_ROOT, "iris");
     mkdirSync(path.join(workspaceDir, "exploration"), { recursive: true });

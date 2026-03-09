@@ -1,8 +1,11 @@
 import path from "node:path";
 import { getAgentRuntime } from "../../../../agent-runtime/index.js";
 import type {
+  AgentResultErrorMessage,
+  AgentResultSuccessMessage,
   AgentToolDecision,
 } from "../../../../agent-runtime/types.js";
+import { attachTaskOutputMeta } from "../../../../task-output-meta.js";
 import { isRecord, toErrorMessage } from "../../../../utils.js";
 import {
   BOUNDARY_RESPONSE_SCHEMA,
@@ -43,6 +46,7 @@ export async function detectServiceBoundaries(
   let resultText = "";
   let structuredOutput: unknown;
   let executionError: string | null = null;
+  let costUsd = 0;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     resultText = "";
@@ -69,13 +73,16 @@ export async function detectServiceBoundaries(
       })) {
         if (message.type !== "result") continue;
 
-        if (message.subtype === "success" && "result" in message) {
-          resultText = (message as { result: string; structuredOutput?: unknown }).result;
-          structuredOutput = (message as { result: string; structuredOutput?: unknown }).structuredOutput;
+        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
+
+        if (message.subtype === "success") {
+          const success = message as AgentResultSuccessMessage;
+          resultText = success.result;
+          structuredOutput = success.structuredOutput;
         } else {
-          const errMsg = "errors" in message
-            ? (message as { errors: string[] }).errors.join("; ")
-            : message.subtype;
+          const errMsg = (message as AgentResultErrorMessage).errors.join("; ") || message.subtype;
           executionError = errMsg;
         }
       }
@@ -88,20 +95,35 @@ export async function detectServiceBoundaries(
     if (executionError && attempt >= MAX_RETRIES) break;
   }
 
+  if (executionError && !structuredOutput && !resultText) {
+    throw withCost(
+      new Error(`Boundary detection error: ${executionError}`),
+      costUsd,
+    );
+  }
+
   const errors: string[] = [];
   if (executionError) {
     errors.push(`Boundary detection error: ${executionError}`);
   }
 
-  const parsed = parseBoundaryResponse(structuredOutput ?? resultText, confidenceThreshold);
+  let parsed: BoundaryAgentRawResponse;
+  try {
+    parsed = parseBoundaryResponse(structuredOutput ?? resultText, confidenceThreshold);
+  } catch (error) {
+    throw withCost(
+      new Error(`Boundary detection response parse failed: ${toErrorMessage(error)}`),
+      costUsd,
+    );
+  }
 
-  return {
+  return attachTaskOutputMeta({
     serviceId: service.id,
     servicePath: service.rootPath,
     entryPoints: parsed.entryPoints,
     exitPoints: parsed.exitPoints,
     errors,
-  };
+  }, { costUsd });
 }
 
 // ── Prompt ───────────────────────────────────────────────────────────────
@@ -205,12 +227,16 @@ function parseBoundaryResponse(
     try {
       const parsed = JSON.parse(extractJson(value));
       return parseBoundaryResponse(parsed, confidenceThreshold);
-    } catch {
-      return { entryPoints: [], exitPoints: [] };
+    } catch (error) {
+      throw new Error(`Could not parse boundary detection JSON: ${toErrorMessage(error)}`);
     }
   }
 
-  return { entryPoints: [], exitPoints: [] };
+  throw new Error("Unexpected boundary detection response shape");
+}
+
+function withCost<T extends Error>(error: T, costUsd: number): T & { costUsd: number } {
+  return Object.assign(error, { costUsd });
 }
 
 function parsePointArray(

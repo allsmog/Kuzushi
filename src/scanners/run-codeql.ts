@@ -134,6 +134,10 @@ export async function ensureDatabase(
 
   await mkdir(path.dirname(dbPath), { recursive: true });
 
+  if (language === "go") {
+    await resolveGoDependencies(repoRoot);
+  }
+
   const createArgs = [
     "database",
     "create",
@@ -663,6 +667,38 @@ async function isCodeQLDatabaseDir(dbPath: string): Promise<boolean> {
 
   const children = await safeReadDir(dbPath);
   return children.some((child) => existsSync(path.join(dbPath, child, "codeql-database.yml")));
+}
+
+async function findGoMod(startDir: string): Promise<string | null> {
+  let dir = path.resolve(startDir);
+  for (let i = 0; i < 4; i++) {
+    const candidate = path.join(dir, "go.mod");
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+async function resolveGoDependencies(repoRoot: string): Promise<void> {
+  const goModPath = await findGoMod(repoRoot);
+  if (!goModPath) return;
+
+  const goModDir = path.dirname(goModPath);
+  try {
+    await execFileAsync("go", ["mod", "download"], {
+      cwd: goModDir,
+      encoding: "utf-8",
+      timeout: 120_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    process.stderr.write(`[codeql] Pre-fetched Go modules from ${goModDir}\n`);
+  } catch (error) {
+    process.stderr.write(
+      `[codeql] go mod download failed (non-fatal): ${toErrorMessage(error)}\n`,
+    );
+  }
 }
 
 async function execCodeQL(

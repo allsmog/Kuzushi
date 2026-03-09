@@ -169,6 +169,26 @@ describe("parseAgentOutput", () => {
     expect(result.verdict).toBe("fp");
   });
 
+  it("parses evidence_trail from structured output", () => {
+    const result = parseAgentOutput({
+      fingerprint: "fp-trail",
+      verdict: "tp",
+      confidence: 0.75,
+      rationale: "confirmed",
+      verification_steps: ["step"],
+      fix_patch: null,
+      evidence_trail: [
+        { level: "0.3", evidence: "Traced source to sink" },
+        { level: "0.75", evidence: "Verified guards absent" },
+      ],
+    }, "fallback");
+
+    expect(result.evidenceTrail).toBeDefined();
+    expect(result.evidenceTrail).toHaveLength(2);
+    expect(result.evidenceTrail![0].level).toBe("0.3");
+    expect(result.evidenceTrail![1].evidence).toBe("Verified guards absent");
+  });
+
   it("parses extended Taint-analysis source/sink triage fields", () => {
     const result = parseAgentOutput({
       fingerprint: "fp-ext",
@@ -206,9 +226,23 @@ describe("parseAgentOutput", () => {
 describe("buildDefaultTriageAgentConfig", () => {
   it("builds a fallback prompt with finding metadata", () => {
     const config = buildDefaultTriageAgentConfig(makeFinding(), "repo");
-    expect(config.prompt).toContain("security triage agent");
+    expect(config.prompt).toContain("security engineer");
     expect(config.prompt).toContain("test.rule");
     expect(config.prompt).toContain("test-fp");
+  });
+
+  it("includes False-Dismissal Patterns section", () => {
+    const config = buildDefaultTriageAgentConfig(makeFinding(), "repo");
+    expect(config.prompt).toContain("Common False-Dismissal Patterns");
+    expect(config.prompt).toContain("WAF will catch it");
+    expect(config.prompt).toContain("parameterized queries");
+    expect(config.prompt).toContain("framework handles XSS");
+  });
+
+  it("includes Confidence Escalation Protocol", () => {
+    const config = buildDefaultTriageAgentConfig(makeFinding(), "repo");
+    expect(config.prompt).toContain("Confidence Escalation Protocol");
+    expect(config.prompt).toContain("Start at 0.1");
   });
 
   it("includes repository context when provided", () => {

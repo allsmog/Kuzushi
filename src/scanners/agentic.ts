@@ -1,4 +1,5 @@
 import path from "node:path";
+import { attachTaskOutputMeta } from "../task-output-meta.js";
 import type { ScanOpts } from "../types.js";
 import type { Finding, ScannerConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
 import { runAgentic, selectAgenticFindings } from "./run-agentic.js";
@@ -26,7 +27,10 @@ export class AgenticPlugin implements ScannerPlugin {
     const output = await runAgentic(repoRoot, opts, this.model, this.maxFindings);
     // Do not apply maxFindings here — the registry's dedupeFindings applies
     // the single final cap across all scanners to avoid double-capping.
-    return selectAgenticFindings(output, repoRoot, repoName, "HEAD");
+    return attachTaskOutputMeta(
+      selectAgenticFindings(output, repoRoot, repoName, "HEAD"),
+      { costUsd: output.costUsd },
+    );
   }
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {

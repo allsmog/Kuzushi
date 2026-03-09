@@ -1,7 +1,15 @@
-import { getAgentRuntime, type AgentRuntime } from "./agent-runtime/index.js";
+import {
+  DEFAULT_READ_ONLY_TOOLS,
+  extractJson,
+  resolveRepoContextAndRuntimeOptions,
+  runStructuredAgentQuery,
+  type AgentActivityCallback,
+  type AgentRuntimeOptions,
+} from "./agent-runtime/execution.js";
 import type { AllowedTriageTool, Finding } from "./scanners/types.js";
-import type { RepoContext, TriageResult, VerificationResult } from "./types.js";
-import type { AgentActivityCallback } from "./triage.js";
+import type { ProofVerdict, RepoContext, TriageResult, VerificationResult } from "./types.js";
+import { getBypassKnowledge, formatBypassForPrompt } from "./bypass-knowledge.js";
+import { formatRepoContext } from "./repo-context.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 
 export const VERIFICATION_RESULT_SCHEMA = {
@@ -24,18 +32,19 @@ export const VERIFICATION_RESULT_SCHEMA = {
     attack_vector: { type: ["string", "null"] },
     preconditions: { type: "array", items: { type: "string" } },
     confidence: { type: "number", minimum: 0, maximum: 1 },
+    proof_level: { type: "integer", minimum: 1, maximum: 4 },
+    proof_verdict: {
+      type: "string",
+      enum: ["exploited", "blocked_by_security", "out_of_scope", "false_positive"],
+    },
+    bypass_attempts: { type: "array", items: { type: "string" } },
   },
 } as const;
 
-export const DEFAULT_TOOLS: AllowedTriageTool[] = ["Read", "Glob", "Grep"];
+export const DEFAULT_TOOLS: AllowedTriageTool[] = [...DEFAULT_READ_ONLY_TOOLS];
 export const DEFAULT_MAX_TURNS = 15;
 
-export interface VerificationRuntimeOptions {
-  runtime?: AgentRuntime;
-  abortController?: AbortController;
-  maxBudgetUsd?: number;
-  activityCallback?: AgentActivityCallback;
-}
+export interface VerificationRuntimeOptions extends AgentRuntimeOptions {}
 
 export interface VerificationOutput {
   result: VerificationResult;
@@ -62,70 +71,21 @@ export async function verifyFindingWithAgent(
   repoContextOrRuntimeOptions?: RepoContext | VerificationRuntimeOptions,
   maybeRuntimeOptions: VerificationRuntimeOptions = {},
 ): Promise<VerificationOutput> {
-  const { repoContext, runtimeOptions } = resolveVerificationArgs(
+  const { repoContext, runtimeOptions } = resolveRepoContextAndRuntimeOptions(
     repoContextOrRuntimeOptions,
     maybeRuntimeOptions,
   );
-  const runtime = runtimeOptions.runtime ?? getAgentRuntime();
   const prompt = buildVerificationPrompt(finding, triageResult, repoName, repoContext);
   const effectiveMaxTurns = normalizeTurns(maxTurns);
-
-  let resultText = "";
-  let structuredOutput: unknown = undefined;
-  let executionError: string | null = null;
-  let costUsd = 0;
-
-  for await (const message of runtime.query({
+  const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
-    options: {
-      cwd: repoRoot,
-      model,
-      maxTurns: effectiveMaxTurns,
-      allowedTools: [...DEFAULT_TOOLS],
-      permissionMode: "dontAsk",
-      maxBudgetUsd: runtimeOptions.maxBudgetUsd,
-      abortController: runtimeOptions.abortController,
-      outputFormat: {
-        type: "json_schema",
-        schema: VERIFICATION_RESULT_SCHEMA,
-      },
-    },
-  })) {
-    if (message.type === "assistant") {
-      await emitAssistantActivity(message.content, runtimeOptions.activityCallback);
-      continue;
-    }
-
-    if (message.type === "tool-progress") {
-      await runtimeOptions.activityCallback?.({
-        kind: "tool-progress",
-        toolName: message.toolName,
-        elapsedSeconds: message.elapsedSeconds,
-      });
-      continue;
-    }
-
-    if (message.type === "tool-summary") {
-      await runtimeOptions.activityCallback?.({
-        kind: "tool-complete",
-        summary: message.summary,
-      });
-      continue;
-    }
-
-    if (message.type !== "result") continue;
-    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-      costUsd = message.totalCostUsd;
-    }
-
-    if ("result" in message) {
-      resultText = message.result;
-      structuredOutput = message.structuredOutput;
-      continue;
-    }
-
-    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
-  }
+    cwd: repoRoot,
+    model,
+    maxTurns: effectiveMaxTurns,
+    allowedTools: DEFAULT_TOOLS,
+    runtimeOptions,
+    schema: VERIFICATION_RESULT_SCHEMA,
+  });
 
   if (executionError) {
     throw new VerificationExecutionError(`verification agent failed: ${executionError}`, costUsd);
@@ -155,10 +115,17 @@ export function buildVerificationPrompt(
 ): string {
   const contextSection = formatRepoContext(repoContext);
 
+  // Inject category-specific bypass techniques if available
+  const bypassEntry = getBypassKnowledge(finding.cwe, finding.ruleId);
+  const bypassSection = bypassEntry ? formatBypassForPrompt(bypassEntry) : [];
+
   return [
-    "You are an application security verification agent.",
-    "Determine if the reported issue is concretely exploitable in practice.",
+    "You are a senior exploit engineer and penetration tester. Your job is to determine if a",
+    "reported vulnerability is concretely exploitable in practice — not just theoretically possible.",
+    "You think like an attacker: you craft payloads, trace execution paths, and identify the exact",
+    "conditions needed for exploitation.",
     ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
+    ...(bypassSection.length > 0 ? ["", ...bypassSection] : []),
     "",
     "## Finding",
     `Repo: ${repoName}`,
@@ -196,9 +163,42 @@ export function buildVerificationPrompt(
           "6. List any preconditions required to reproduce impact.",
         ]),
     "",
+    "## Proof Level Framework",
+    "Classify your findings using these proof levels:",
+    "Level 1: Theoretical weakness identified",
+    "Level 2: Partial bypass achieved (e.g., UI access without function)",
+    "Level 3: Full bypass confirmed (unauthorized protected functionality)",
+    "Level 4: Account takeover demonstrated",
+    "",
+    "## Bypass Exhaustion Protocol",
+    "Before classifying as not-exploitable, you MUST try:",
+    "- Direct exploitation with obvious payload",
+    "- Parameter pollution / type juggling",
+    "- Encoding bypass (URL, Unicode, double-encoding)",
+    "- Race condition / timing attack",
+    "- Chained exploitation with another weakness",
+    "Document each attempt and its result in bypass_attempts.",
+    "",
+    "## Verdicts",
+    "EXPLOITED: Level 3+ with concrete evidence",
+    "BLOCKED_BY_SECURITY: Valid vuln but blocked by WAF/defense (document what blocks it)",
+    "OUT_OF_SCOPE: Requires internal/physical access",
+    "FALSE_POSITIVE: Exhausted all bypass techniques, confirmed safe",
+    "",
+    "## Confidence Escalation Protocol",
+    "Start at 0.1. Escalate only with evidence:",
+    "- 0.1-0.3: Identified theoretical weakness only",
+    "- 0.3-0.5: Partial bypass achieved but blocked by defense",
+    "- 0.5-0.7: Defense bypass feasible with specific technique",
+    "- 0.7-0.9: Full bypass confirmed with concrete payload",
+    "- 0.9-1.0: Complete exploitation demonstrated with account takeover",
+    "",
     "## Output requirements",
     "Return ONLY a JSON object with keys:",
-    "fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(string), attack_vector(string|null), preconditions(string[]), confidence(0..1)",
+    "fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(string),",
+    "attack_vector(string|null), preconditions(string[]), confidence(0..1),",
+    "proof_level(1-4, optional), proof_verdict(exploited|blocked_by_security|out_of_scope|false_positive, optional),",
+    "bypass_attempts(string[], optional)",
   ].join("\n");
 }
 
@@ -212,6 +212,9 @@ export function parseVerificationOutput(raw: unknown, fingerprint: string): Veri
       attackVector: normalizeNullableString(raw["attack_vector"]),
       preconditions: normalizeStringArray(raw["preconditions"]),
       confidence: clampConfidence(raw["confidence"]),
+      proofLevel: parseProofLevel(raw["proof_level"]),
+      proofVerdict: parseProofVerdict(raw["proof_verdict"]),
+      bypassAttempts: parseOptionalStringArray(raw["bypass_attempts"]),
     };
   }
 
@@ -235,6 +238,9 @@ function parseVerificationResponse(text: string, fingerprint: string): Verificat
       attackVector: normalizeNullableString(parsed.attack_vector),
       preconditions: normalizeStringArray(parsed.preconditions),
       confidence: clampConfidence(parsed.confidence),
+      proofLevel: parseProofLevel(parsed.proof_level),
+      proofVerdict: parseProofVerdict(parsed.proof_verdict),
+      bypassAttempts: parseOptionalStringArray(parsed.bypass_attempts),
     };
   } catch (error) {
     throw new Error(`Invalid verification JSON response: ${toErrorMessage(error)}`);
@@ -247,51 +253,6 @@ function normalizeTurns(value: number): number {
   }
 
   return Math.floor(value);
-}
-
-function resolveVerificationArgs(
-  repoContextOrRuntimeOptions: RepoContext | VerificationRuntimeOptions | undefined,
-  maybeRuntimeOptions: VerificationRuntimeOptions,
-): { repoContext?: RepoContext; runtimeOptions: VerificationRuntimeOptions } {
-  if (!repoContextOrRuntimeOptions) {
-    return { runtimeOptions: maybeRuntimeOptions };
-  }
-
-  if (looksLikeRuntimeOptions(repoContextOrRuntimeOptions)) {
-    return {
-      runtimeOptions: repoContextOrRuntimeOptions,
-    };
-  }
-
-  return {
-    repoContext: repoContextOrRuntimeOptions,
-    runtimeOptions: maybeRuntimeOptions,
-  };
-}
-
-function looksLikeRuntimeOptions(
-  value: RepoContext | VerificationRuntimeOptions,
-): value is VerificationRuntimeOptions {
-  const runtimeOptions = value as VerificationRuntimeOptions;
-  return (
-    "runtime" in runtimeOptions
-    || "abortController" in runtimeOptions
-    || "maxBudgetUsd" in runtimeOptions
-    || "activityCallback" in runtimeOptions
-  );
-}
-
-function extractJson(text: string): string {
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (fenceMatch) return fenceMatch[1].trim();
-
-  const braceStart = text.indexOf("{");
-  const braceEnd = text.lastIndexOf("}");
-  if (braceStart !== -1 && braceEnd > braceStart) {
-    return text.slice(braceStart, braceEnd + 1);
-  }
-
-  return text.trim();
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -311,67 +272,6 @@ function clampConfidence(value: unknown): number {
   return Math.max(0, Math.min(1, numeric));
 }
 
-function formatRepoContext(repoContext: RepoContext | undefined): string[] {
-  if (!repoContext) {
-    return [];
-  }
-
-  const lines: string[] = [];
-  if (repoContext.languages.length > 0) {
-    lines.push(`Languages: ${repoContext.languages.join(", ")}`);
-  }
-  if (repoContext.frameworks.length > 0) {
-    lines.push(`Frameworks: ${repoContext.frameworks.join(", ")}`);
-  }
-  if (repoContext.authPatterns.length > 0) {
-    lines.push(`Auth: ${repoContext.authPatterns.join(", ")}`);
-  }
-  if (repoContext.ormOrDb.length > 0) {
-    lines.push(`ORM/DB: ${repoContext.ormOrDb.join(", ")}`);
-  }
-  if (repoContext.sanitizationLibs.length > 0) {
-    lines.push(`Sanitization: ${repoContext.sanitizationLibs.join(", ")}`);
-  }
-  if (repoContext.entryPoints.length > 0) {
-    lines.push(`Entry points: ${repoContext.entryPoints.join(", ")}`);
-  }
-
-  return lines;
-}
-
-async function emitAssistantActivity(
-  blocks: Array<Record<string, unknown>>,
-  callback: AgentActivityCallback | undefined,
-): Promise<void> {
-  if (!callback) {
-    return;
-  }
-
-  for (const block of blocks) {
-    const blockType = asString(block["type"], "");
-
-    if (blockType === "tool_use") {
-      const toolName = asString(block["name"], "");
-      const input = isRecord(block["input"]) ? block["input"] : undefined;
-      await callback({
-        kind: "tool-start",
-        toolName: toolName || undefined,
-        toolInput: input,
-      });
-      continue;
-    }
-
-    if (blockType === "text") {
-      const text = asString(block["text"], "").trim();
-      if (!text) continue;
-      await callback({
-        kind: "reasoning",
-        summary: text,
-      });
-    }
-  }
-}
-
 function asString(value: unknown, fallback: string): string {
   if (typeof value === "string") return value;
   if (value == null) return fallback;
@@ -384,4 +284,29 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   }
 
   return value;
+}
+
+const VALID_PROOF_VERDICTS = new Set<ProofVerdict>([
+  "exploited",
+  "blocked_by_security",
+  "out_of_scope",
+  "false_positive",
+]);
+
+function parseProofLevel(value: unknown): VerificationResult["proofLevel"] {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 1 || n > 4) return undefined;
+  return Math.floor(n) as 1 | 2 | 3 | 4;
+}
+
+function parseProofVerdict(value: unknown): ProofVerdict | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase() as ProofVerdict;
+  return VALID_PROOF_VERDICTS.has(normalized) ? normalized : undefined;
+}
+
+function parseOptionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result = value.map((item) => String(item).trim()).filter(Boolean);
+  return result.length > 0 ? result : undefined;
 }

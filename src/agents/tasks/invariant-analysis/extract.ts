@@ -1,4 +1,6 @@
 import { getAgentRuntime } from "../../../agent-runtime/index.js";
+import { coerceRepoContext } from "../../../repo-context.js";
+import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts, RepoContext } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
@@ -121,12 +123,13 @@ export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
 
   async run(_input, context): Promise<InvariantDocument> {
     const cfg = resolveInvariantAnalysisConfig(context.config);
-    const repoContext = context.upstreamOutputs.get("context-gatherer") as RepoContext | undefined;
+    const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const prompt = buildExtractionPrompt(repoContext, cfg.securityOnly, cfg.maxInvariants);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;
     let resultText = "";
+    let costUsd = 0;
 
     const tag = "[invariant-extract]";
     console.error(`${tag} Starting extraction (model=${cfg.extractionModel})`);
@@ -137,48 +140,55 @@ export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
         options: {
           cwd: context.repoRoot,
           model: cfg.extractionModel,
-          maxTurns: 30,
+          maxTurns: undefined,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",
             schema: INVARIANT_EXTRACT_SCHEMA,
+            strict: true,
+            retryInvalidStructuredOutput: 2,
           },
         },
       })) {
         if (message.type !== "result") continue;
+        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
         if ("result" in message) {
           resultText = message.result;
           structuredOutput = message.structuredOutput;
         }
       }
     } catch (error) {
-      console.error(`${tag} Error: ${toErrorMessage(error)}`);
-      return { version: "1.0", invariants: [], coverage: { filesAnalyzed: 0, functionsAnalyzed: 0, invariantsFound: 0 } };
+      throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
-    const parsed = structuredOutput ?? parseJson(resultText);
+    const parsed = structuredOutput ?? parseJson(resultText, tag);
     const invariants = parseInvariants(parsed, cfg.securityOnly, cfg.maxInvariants);
 
     console.error(`${tag} Extracted ${invariants.length} invariants`);
 
-    return {
-      version: "1.0",
-      invariants,
-      coverage: {
-        filesAnalyzed: new Set(invariants.map((inv) => inv.scope.filePath)).size,
-        functionsAnalyzed: new Set(invariants.filter((inv) => inv.scope.functionName).map((inv) => `${inv.scope.filePath}:${inv.scope.functionName}`)).size,
-        invariantsFound: invariants.length,
+    return attachTaskOutputMeta(
+      {
+        version: "1.0",
+        invariants,
+        coverage: {
+          filesAnalyzed: new Set(invariants.map((inv) => inv.scope.filePath)).size,
+          functionsAnalyzed: new Set(invariants.filter((inv) => inv.scope.functionName).map((inv) => `${inv.scope.filePath}:${inv.scope.functionName}`)).size,
+          invariantsFound: invariants.length,
+        },
       },
-    };
+      { costUsd },
+    );
   },
 };
 
-function parseJson(text: string): unknown {
+function parseJson(text: string, tag: string): unknown {
   try {
     return JSON.parse(text);
-  } catch {
-    return { invariants: [] };
+  } catch (error) {
+    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
   }
 }
 

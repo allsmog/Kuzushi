@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
+import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
 
 const CRYPTO_MISUSE_SCHEMA = {
@@ -62,7 +65,7 @@ function resolveConfig(ctx: TaskContext): CryptoMisuseConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -73,10 +76,15 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number):
     : [];
 
   return [
-    "You are a cryptographic misuse detection agent.",
-    "Analyze the repository for insecure cryptographic practices.",
+    "You are a senior cryptography engineer and security auditor with deep expertise in applied",
+    "cryptographic protocols. You have reviewed hundreds of codebases for crypto misuse and know",
+    "the difference between textbook vulnerabilities and real-world exploitable weaknesses.",
+    "",
+    "Analyze the repository for insecure cryptographic practices. Only report findings where you",
+    "have HIGH or MEDIUM confidence the usage is genuinely insecure — not merely suboptimal.",
     "",
     ...contextLines,
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
     "## Categories to check",
     "",
     "### hash-for-auth (CWE-328)",
@@ -100,8 +108,15 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number):
     "3. Classify each usage by category and safety.",
     `4. Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
-    "Only report concrete misuse you can verify in code. Do not report secure patterns.",
-  ].join("\n");
+    "## Anti-hallucination constraints",
+    "- Only report concrete misuse you can verify in code. Do not report secure patterns.",
+    "- Do NOT infer or speculate about code you haven't read.",
+    "- If a crypto library is used correctly per its documentation, do not flag it.",
+    "- Confidence must reflect your actual certainty: HIGH only if misuse is unambiguous.",
+    repoContext?.frameworks.length
+      ? `- Account for framework defaults: ${repoContext.frameworks.join(", ")} may provide secure defaults.`
+      : "",
+  ].filter(Boolean).join("\n");
 }
 
 function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
@@ -170,12 +185,17 @@ export const cryptoMisuseTask: AgentTask<ScanOpts, Finding[]> = {
 
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
-    const repoContext = context.upstreamOutputs.get("context-gatherer") as RepoContext | undefined;
-    const prompt = buildPrompt(repoContext, maxFindings);
+    const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const profiles = context.securityProfiles
+      ? getProfilesForTask(context.securityProfiles, "crypto-misuse-detect")
+      : [];
+    const profileLines = formatProfilesForPrompt(profiles);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;
     let resultText = "";
+    let costUsd = 0;
 
     const tag = "[crypto-misuse]";
     console.error(`${tag} Starting scan (model=${model})`);
@@ -186,16 +206,21 @@ export const cryptoMisuseTask: AgentTask<ScanOpts, Finding[]> = {
         options: {
           cwd: context.repoRoot,
           model,
-          maxTurns: 30,
+          maxTurns: undefined,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",
             schema: CRYPTO_MISUSE_SCHEMA,
+            strict: true,
+            retryInvalidStructuredOutput: 2,
           },
         },
       })) {
         if (message.type !== "result") continue;
+        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
         if ("result" in message) {
           resultText = message.result;
           structuredOutput = message.structuredOutput;
@@ -205,11 +230,14 @@ export const cryptoMisuseTask: AgentTask<ScanOpts, Finding[]> = {
       throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
-    return normalizeFindings(
-      structuredOutput ?? parseJson(resultText),
-      context.repoRoot,
-      context.repoName,
-      maxFindings,
+    return attachTaskOutputMeta(
+      normalizeFindings(
+        structuredOutput ?? parseJson(resultText, tag),
+        context.repoRoot,
+        context.repoName,
+        maxFindings,
+      ),
+      { costUsd },
     );
   },
 
@@ -230,11 +258,11 @@ export const cryptoMisuseTask: AgentTask<ScanOpts, Finding[]> = {
   },
 };
 
-function parseJson(text: string): unknown {
+function parseJson(text: string, tag: string): unknown {
   try {
     return JSON.parse(text);
-  } catch {
-    return { findings: [] };
+  } catch (error) {
+    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
   }
 }
 

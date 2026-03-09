@@ -9,9 +9,12 @@ import { taintAnalysisStitchTask } from "./tasks/taint-analysis/cross-service/st
 import { taintAnalysisLabelTask } from "./tasks/taint-analysis/label.js";
 import { taintAnalysisPreflightTask } from "./tasks/taint-analysis/preflight.js";
 import { contextGathererTask } from "./tasks/context-gatherer.js";
+import { contextEnricherTask } from "./tasks/context-enricher.js";
 import { cryptoMisuseTask } from "./tasks/crypto-misuse.js";
 import { authAccessTask } from "./tasks/auth-access.js";
 import { raceConditionTask } from "./tasks/race-condition.js";
+import { dangerousApiTask } from "./tasks/dangerous-api.js";
+import { diffReviewTask } from "./tasks/diff-review.js";
 import { invariantExtractTask } from "./tasks/invariant-analysis/extract.js";
 import { invariantCheckTask } from "./tasks/invariant-analysis/check.js";
 import { threatModelStrideTask } from "./tasks/threat-modeling/stride.js";
@@ -34,6 +37,11 @@ export function createDefaultTaskRegistry(scannerRegistry?: ScannerRegistry): Ta
   tasks.register(cryptoMisuseTask);
   tasks.register(authAccessTask);
   tasks.register(raceConditionTask);
+  tasks.register(dangerousApiTask);
+  tasks.register(diffReviewTask);
+
+  // LLM context enrichment
+  tasks.register(contextEnricherTask);
 
   // Invariant analysis tasks
   tasks.register(invariantExtractTask);

@@ -14,7 +14,7 @@ import { parsePiAiModelSpec } from "./model-spec.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
 
-const DEFAULT_MAX_TURNS = 10;
+const DEFAULT_MAX_TURNS: number | undefined = undefined;
 const KNOWN_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "Bash", "Write"]);
 
 const TRANSIENT_RETRY_MAX = 3;
@@ -27,6 +27,7 @@ const TRANSIENT_NETWORK_TOKENS = [
   "ECONNRESET",
   "socket hang up",
   "fetch failed",
+  "Request timed out",
 ];
 const TRANSIENT_API_TOKENS = [
   "overloaded",
@@ -152,20 +153,36 @@ export class PiAiAgentRuntime implements AgentRuntime {
           signal,
         );
 
-        // Handle transient soft errors (stopReason === "error" with transient message):
-        // Pop the errored message from context and retry.
+        // Handle transient soft errors (stopReason === "error" with transient message).
+        // pi-ai's complete() never throws on API errors — it returns them as soft errors
+        // (stopReason === "error"). We must retry by checking the return value.
         if (
           assistant.stopReason === "error"
           && assistant.errorMessage
           && isTransientErrorMessage(assistant.errorMessage)
         ) {
-          try {
-            assistant = await retryTransient(
-              () => complete(model, context, { signal }),
-              signal,
+          let retried = false;
+          for (let softRetry = 0; softRetry < TRANSIENT_RETRY_MAX; softRetry++) {
+            if (signal?.aborted) break;
+            const delay = TRANSIENT_RETRY_BASE_MS * 2 ** softRetry;
+            console.error(
+              `[pi-ai] Transient soft error (attempt ${softRetry + 1}/${TRANSIENT_RETRY_MAX}), retrying in ${delay / 1000}s: ${assistant.errorMessage}`,
             );
-          } catch {
-            // Retries exhausted — yield error and stop rather than pushing errored message into context
+            await new Promise<void>((resolve) => {
+              const timer = setTimeout(resolve, delay);
+              if (signal) {
+                const onAbort = () => { clearTimeout(timer); resolve(); };
+                signal.addEventListener("abort", onAbort, { once: true });
+              }
+            });
+            if (signal?.aborted) break;
+            assistant = await complete(model, context, { signal });
+            if (assistant.stopReason !== "error" || !assistant.errorMessage || !isTransientErrorMessage(assistant.errorMessage)) {
+              retried = true;
+              break;
+            }
+          }
+          if (!retried && assistant.stopReason === "error") {
             yield errorResult(
               "error_runtime",
               assistant.errorMessage ?? "pi-ai transient error retries exhausted",

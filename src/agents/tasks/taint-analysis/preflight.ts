@@ -8,6 +8,7 @@ import { resolveCodeQLBinary } from "../../../scanners/resolve-codeql.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
+import { DEFAULT_READ_ONLY_TOOLS, runStructuredAgentQuery } from "../../../agent-runtime/execution.js";
 import type { AgentTask } from "../../types.js";
 import {
   generateExtractionQuery,
@@ -106,8 +107,8 @@ interface ExtractionDiagnosticsDocument {
     sinks: number;
     sourcesDecodedRows?: number;
     sinksDecodedRows?: number;
-    sinksSupplementRows?: number;
-    sinksSupplementAddedRows?: number;
+    agenticSupplementSources?: number;
+    agenticSupplementSinks?: number;
   };
   diagnostics: ExtractionQueryDiagnostic[];
 }
@@ -118,89 +119,160 @@ interface RenderExtractionTemplateResult {
   costUsd: number;
 }
 
-interface DeterministicSinkSupplementSpec {
-  kind: "function" | "method";
-  packagePath: string;
+interface ExtractionSupplementCandidate {
+  candidateKind: "source_candidate" | "sink_candidate";
   callable: string;
-  argIndex: number;
+  flowKind: "param" | "arg" | "return" | "receiver" | "field" | "unknown";
   receiverHint: string;
-  receivers?: string[];
+  argIndex: number | null;
+  rationale: string;
 }
 
-const DETERMINISTIC_SINK_SUPPLEMENTS: Record<TaintAnalysisLanguage, DeterministicSinkSupplementSpec[]> = {
-  go: [
-    {
-      kind: "function",
-      packagePath: "github.com/volatiletech/sqlboiler/v4/queries",
-      callable: "Raw",
-      argIndex: 0,
-      receiverHint: "queries",
+const EXTRACTION_SUPPLEMENT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["candidates"],
+  properties: {
+    candidates: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["candidateKind", "callable", "flowKind", "receiverHint", "argIndex", "rationale"],
+        properties: {
+          candidateKind: { type: "string", enum: ["source_candidate", "sink_candidate"] },
+          callable: { type: "string" },
+          flowKind: { type: "string", enum: ["param", "arg", "return", "receiver", "field", "unknown"] },
+          receiverHint: { type: "string" },
+          argIndex: { type: ["integer", "null"] },
+          rationale: { type: "string" },
+        },
+      },
     },
-    {
-      kind: "function",
-      packagePath: "github.com/volatiletech/sqlboiler/queries",
-      callable: "Raw",
-      argIndex: 0,
-      receiverHint: "queries",
-    },
-    {
-      kind: "function",
-      packagePath: "github.com/volatiletech/sqlboiler/v4/queries/qm",
-      callable: "SQL",
-      argIndex: 0,
-      receiverHint: "qm",
-    },
-    {
-      kind: "function",
-      packagePath: "github.com/volatiletech/sqlboiler/queries/qm",
-      callable: "SQL",
-      argIndex: 0,
-      receiverHint: "qm",
-    },
-    {
-      kind: "function",
-      packagePath: "github.com/volatiletech/sqlboiler/v4/queries/qm",
-      callable: "From",
-      argIndex: 0,
-      receiverHint: "qm",
-    },
-    {
-      kind: "function",
-      packagePath: "github.com/volatiletech/sqlboiler/queries/qm",
-      callable: "From",
-      argIndex: 0,
-      receiverHint: "qm",
-    },
-    {
-      kind: "method",
-      packagePath: "database/sql",
-      callable: "Exec",
-      argIndex: 0,
-      receiverHint: "database/sql",
-      receivers: ["DB", "Tx", "Stmt", "Conn"],
-    },
-    {
-      kind: "method",
-      packagePath: "database/sql",
-      callable: "ExecContext",
-      argIndex: 1,
-      receiverHint: "database/sql",
-      receivers: ["DB", "Tx", "Stmt", "Conn"],
-    },
-    {
-      kind: "method",
-      packagePath: "database/sql",
-      callable: "QueryRow",
-      argIndex: 0,
-      receiverHint: "database/sql",
-      receivers: ["DB", "Tx", "Stmt", "Conn"],
-    },
-  ],
-  python: [],
-  java: [],
-  javascript: [],
-  csharp: [],
-};
+  },
+} as const;
+
+interface DiscoverExtractionSupplementsArgs {
+  language: TaintAnalysisLanguage;
+  framework: string | null;
+  repoRoot: string;
+  model: string;
+  sourcesRowCount: number;
+  sinksRowCount: number;
+}
+
+async function discoverExtractionSupplements(
+  args: DiscoverExtractionSupplementsArgs,
+): Promise<{ candidates: ExtractionSupplementCandidate[]; costUsd: number }> {
+  const { language, framework, repoRoot, model, sourcesRowCount, sinksRowCount } = args;
+
+  const coverageNote = (sourcesRowCount < 5 || sinksRowCount < 5)
+    ? `\n\nNOTE: The main extraction found very few results (${sourcesRowCount} sources, ${sinksRowCount} sinks). ` +
+      `This means CodeQL's type resolution may be incomplete — extra discovery is especially important.`
+    : `\n\nThe main extraction found ${sourcesRowCount} sources and ${sinksRowCount} sinks.`;
+
+  const prompt = `You are a security-focused code analysis agent. Your job is to identify additional **taint sources** and **taint sinks** in this ${language} codebase${framework ? ` (${framework} framework)` : ""} that automated CodeQL extraction may have missed.
+${coverageNote}
+
+## What to look for
+
+**Sources** (entry points where attacker-controlled data enters):
+- HTTP handler parameters, request body/query/header readers
+- gRPC handler parameters, proto message field reads
+- Environment variable reads (os.Getenv, os.LookupEnv, etc.)
+- Message queue consumers, event handler parameters
+- File/stdin readers in CLI tools
+- Database reads that serve as secondary sources
+
+**Sinks** (dangerous operations where tainted data should not reach):
+- SQL execution: raw query builders, exec/query methods
+- Command execution: os/exec, subprocess calls
+- File writes: open/create with user-controlled paths
+- Template rendering with user data
+- Network requests with user-controlled URLs (SSRF)
+- Deserialization of untrusted data
+
+## Instructions
+
+1. Use Grep and Glob to explore the codebase and find functions matching the patterns above
+2. Focus on framework-specific patterns and project-specific wrappers
+3. For each candidate, determine the flow kind and argument semantics
+4. Return your findings as structured JSON
+
+For each candidate provide:
+- candidateKind: "source_candidate" or "sink_candidate"
+- callable: the function/method name
+- flowKind: how data flows ("param", "arg", "return", "receiver", "field", "unknown")
+- receiverHint: the package/module/type qualifier
+- argIndex: the specific argument index (null if not applicable)
+- rationale: brief explanation of why this is a source/sink`;
+
+  const result = await runStructuredAgentQuery({
+    prompt,
+    cwd: repoRoot,
+    model,
+    maxTurns: undefined,
+    allowedTools: [...DEFAULT_READ_ONLY_TOOLS],
+    schema: EXTRACTION_SUPPLEMENT_SCHEMA as Record<string, unknown>,
+    strict: true,
+    retryInvalidStructuredOutput: 2,
+  });
+
+  if (result.executionError) {
+    throw new Error(`Extraction supplement discovery agent error: ${result.executionError}`);
+  }
+
+  const parsed = result.structuredOutput as { candidates?: unknown[] } | null;
+  if (!parsed || !Array.isArray(parsed.candidates)) {
+    return { candidates: [], costUsd: result.costUsd };
+  }
+
+  const validFlowKinds = new Set(["param", "arg", "return", "receiver", "field", "unknown"]);
+  const candidates: ExtractionSupplementCandidate[] = [];
+  for (const item of parsed.candidates) {
+    if (!isRecord(item)) continue;
+    const callable = typeof item["callable"] === "string" ? item["callable"].trim() : "";
+    if (!callable) continue;
+    const candidateKind = item["candidateKind"];
+    if (candidateKind !== "source_candidate" && candidateKind !== "sink_candidate") continue;
+    const flowKind = typeof item["flowKind"] === "string" ? item["flowKind"] : "unknown";
+    candidates.push({
+      candidateKind,
+      callable,
+      flowKind: validFlowKinds.has(flowKind) ? flowKind as ExtractionSupplementCandidate["flowKind"] : "unknown",
+      receiverHint: typeof item["receiverHint"] === "string" ? item["receiverHint"] : "",
+      argIndex: typeof item["argIndex"] === "number" && Number.isInteger(item["argIndex"]) ? item["argIndex"] : null,
+      rationale: typeof item["rationale"] === "string" ? item["rationale"] : "",
+    });
+  }
+
+  return { candidates, costUsd: result.costUsd };
+}
+
+function supplementCandidatesToCsvRows(
+  candidates: ExtractionSupplementCandidate[],
+): { sourceRows: string[]; sinkRows: string[] } {
+  const sourceRows: string[] = [];
+  const sinkRows: string[] = [];
+  for (const c of candidates) {
+    const row = toCsvRow([
+      "[agentic-supplement]",
+      c.candidateKind,
+      c.callable,
+      `flow_kind=${c.flowKind}`,
+      c.receiverHint,
+      `module=${c.receiverHint}`,
+      `arg_index=${c.argIndex ?? -1}`,
+      "line=0",
+    ]);
+    if (c.candidateKind === "source_candidate") {
+      sourceRows.push(row);
+    } else {
+      sinkRows.push(row);
+    }
+  }
+  return { sourceRows, sinkRows };
+}
 
 /**
  * Taint Analysis Step 0-2 task: deterministic pre-flight + candidate extraction.
@@ -344,25 +416,15 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       "sink",
       agentCtx,
     );
-    const extractionCostUsd = sourcesQueryResult.costUsd + sinksQueryResult.costUsd;
-    const sinkSupplementQuery = renderDeterministicSinkSupplementQuery(language);
+    let extractionCostUsd = sourcesQueryResult.costUsd + sinksQueryResult.costUsd;
 
     await writeFile(sourcesQueryPath, sourcesQueryResult.query, "utf-8");
     await writeFile(sinksQueryPath, sinksQueryResult.query, "utf-8");
-    const sinksSupplementQueryPath = path.join(extractionDir, "sinks_supplement.ql");
-    if (sinkSupplementQuery) {
-      await writeFile(sinksSupplementQueryPath, sinkSupplementQuery, "utf-8");
-      process.stderr.write(
-        `[taint-analysis-preflight] Appended deterministic sink supplement coverage for ${language}\n`,
-      );
-    }
 
     const sourcesBqrsPath = path.join(extractionDir, "sources.bqrs");
     const sinksBqrsPath = path.join(extractionDir, "sinks.bqrs");
-    const sinksSupplementBqrsPath = path.join(extractionDir, "sinks_supplement.bqrs");
     const sourcesCsvPath = path.join(extractionDir, "sources.csv");
     const sinksCsvPath = path.join(extractionDir, "sinks.csv");
-    const sinksSupplementCsvPath = path.join(extractionDir, "sinks_supplement.csv");
 
     process.stderr.write(`[taint-analysis-preflight] Running CodeQL query: sources.ql...\n`);
     await runCodeql(
@@ -394,23 +456,6 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       workspaceDir,
     );
 
-    if (sinkSupplementQuery) {
-      process.stderr.write(`[taint-analysis-preflight] Running CodeQL query: sinks_supplement.ql...\n`);
-      await runCodeql(
-        codeqlBinary,
-        withResources([
-          "query",
-          "run",
-          sinksSupplementQueryPath,
-          "--database",
-          dbPath,
-          "--output",
-          sinksSupplementBqrsPath,
-        ], cfg),
-        workspaceDir,
-      );
-    }
-
     process.stderr.write(`[taint-analysis-preflight] Decoding BQRS results...\n`);
     await runCodeql(
       codeqlBinary,
@@ -436,40 +481,91 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       workspaceDir,
     );
 
-    if (sinkSupplementQuery) {
-      await runCodeql(
-        codeqlBinary,
-        [
-          "bqrs",
-          "decode",
-          sinksSupplementBqrsPath,
-          "--format=csv",
-          `--output=${sinksSupplementCsvPath}`,
-        ],
-        workspaceDir,
-      );
-    }
-
     const sourcesDecodedRows = await countCsvCandidateRows(sourcesCsvPath, "source_candidate");
     const sinksDecodedRows = await countCsvCandidateRows(sinksCsvPath, "sink_candidate");
-    let sinksSupplementRows = 0;
-    let sinksSupplementAddedRows = 0;
-    if (sinkSupplementQuery) {
-      const merged = await mergeCandidateCsvFiles(
-        sinksCsvPath,
-        sinksSupplementCsvPath,
-        "sink_candidate",
-      );
-      sinksSupplementRows = merged.supplementRows;
-      sinksSupplementAddedRows = merged.addedRows;
-      process.stderr.write(
-        `[taint-analysis-preflight] Deterministic sink supplements: decoded=${sinksSupplementRows} added=${sinksSupplementAddedRows} merged_total=${merged.mergedRows}\n`,
-      );
+
+    let agenticSupplementSources = 0;
+    let agenticSupplementSinks = 0;
+    if (!cfg.extractionSupplementsDisabled) {
+      try {
+        const supplementResult = await discoverExtractionSupplements({
+          language,
+          framework,
+          repoRoot: context.repoRoot,
+          model: extractionModel,
+          sourcesRowCount: sourcesDecodedRows,
+          sinksRowCount: sinksDecodedRows,
+        });
+        extractionCostUsd += supplementResult.costUsd;
+        const csvRows = supplementCandidatesToCsvRows(supplementResult.candidates);
+        agenticSupplementSources = csvRows.sourceRows.length;
+        agenticSupplementSinks = csvRows.sinkRows.length;
+
+        await writeFile(
+          path.join(extractionDir, "extraction_supplements.json"),
+          JSON.stringify({
+            generatedAt: new Date().toISOString(),
+            language,
+            framework,
+            costUsd: supplementResult.costUsd,
+            candidates: supplementResult.candidates,
+          }, null, 2),
+          "utf-8",
+        );
+
+        if (csvRows.sourceRows.length > 0) {
+          const existing = existsSync(sourcesCsvPath) ? await readFile(sourcesCsvPath, "utf-8") : "";
+          const existingKeys = new Set(
+            parseCsvRecords(existing)
+              .filter((r) => !isCsvRecordBlank(r))
+              .map((r) => r.join("\u001F")),
+          );
+          const newRows = csvRows.sourceRows.filter((row) => {
+            const parsed = parseCsvRecords(row);
+            return parsed.length > 0 && !existingKeys.has(parsed[0].join("\u001F"));
+          });
+          if (newRows.length > 0) {
+            const suffix = newRows.join("\n") + "\n";
+            await writeFile(sourcesCsvPath, existing.trimEnd() + "\n" + suffix, "utf-8");
+          }
+        }
+
+        if (csvRows.sinkRows.length > 0) {
+          const existing = existsSync(sinksCsvPath) ? await readFile(sinksCsvPath, "utf-8") : "";
+          const existingKeys = new Set(
+            parseCsvRecords(existing)
+              .filter((r) => !isCsvRecordBlank(r))
+              .map((r) => r.join("\u001F")),
+          );
+          const newRows = csvRows.sinkRows.filter((row) => {
+            const parsed = parseCsvRecords(row);
+            return parsed.length > 0 && !existingKeys.has(parsed[0].join("\u001F"));
+          });
+          if (newRows.length > 0) {
+            const suffix = newRows.join("\n") + "\n";
+            await writeFile(sinksCsvPath, existing.trimEnd() + "\n" + suffix, "utf-8");
+          }
+        }
+
+        process.stderr.write(
+          `[taint-analysis-preflight] Agentic extraction supplements: sources=${agenticSupplementSources} sinks=${agenticSupplementSinks}\n`,
+        );
+      } catch (error) {
+        process.stderr.write(`[taint-analysis-preflight] Extraction supplement discovery failed (non-fatal): ${toErrorMessage(error)}\n`);
+      }
     }
 
     const sourcesRowCount = await countCsvRows(sourcesCsvPath);
     const sinksRowCount = await countCsvRows(sinksCsvPath);
     process.stderr.write(`[taint-analysis-preflight] Extraction complete: ${sourcesRowCount} sources, ${sinksRowCount} sinks\n`);
+
+    if (language === "go" && framework && isGrpcOrProtoFramework(framework) && sourcesRowCount < 5) {
+      process.stderr.write(
+        `[taint-analysis-preflight] WARNING: Detected Go gRPC service but found ${sourcesRowCount} sources.\n` +
+        `  CodeQL may have incomplete type resolution. Agentic extraction supplements may provide additional coverage.\n`,
+      );
+    }
+
     await writeExtractionDiagnostics(
       path.join(explorationDir, "extraction_diagnostics.json"),
       language,
@@ -478,8 +574,8 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
         sinks: sinksRowCount,
         sourcesDecodedRows,
         sinksDecodedRows,
-        sinksSupplementRows,
-        sinksSupplementAddedRows,
+        agenticSupplementSources,
+        agenticSupplementSinks,
       },
       [sourcesQueryResult.diagnostic, sinksQueryResult.diagnostic],
     );
@@ -488,6 +584,8 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       [sourcesQueryResult.diagnostic, sinksQueryResult.diagnostic],
       sourcesRowCount,
       sinksRowCount,
+      language,
+      framework,
     );
 
     if (tiPriorArtifacts.document.degraded) {
@@ -656,6 +754,8 @@ function computeExtractionDegradation(
   diagnostics: ExtractionQueryDiagnostic[],
   sourcesRowCount: number,
   sinksRowCount: number,
+  language?: TaintAnalysisLanguage,
+  framework?: string | null,
 ): ExtractionDegradation {
   const reasons: ExtractionDegradationReason[] = [];
 
@@ -676,6 +776,16 @@ function computeExtractionDegradation(
   }
   if (sinksRowCount <= 0) {
     reasons.push("zero_usable_sinks");
+  }
+
+  if (
+    language === "go"
+    && framework
+    && isGrpcOrProtoFramework(framework)
+    && sourcesRowCount < 5
+    && sourcesRowCount > 0
+  ) {
+    reasons.push("low_source_count_for_framework");
   }
 
   let status: ExtractionDegradation["status"];
@@ -1109,91 +1219,11 @@ async function runCodeql(codeqlBinary: string, args: string[], cwd: string): Pro
   }
 }
 
-function renderDeterministicSinkSupplementQuery(language: TaintAnalysisLanguage): string | null {
-  const specs = DETERMINISTIC_SINK_SUPPLEMENTS[language];
-  if (!specs || specs.length === 0) {
-    return null;
-  }
-
-  if (language !== "go") {
-    return null;
-  }
-
-  const clauses = specs.map((spec) => renderGoSinkSupplementClause(spec)).join("\n  or\n");
-  return [
-    "/**",
-    " * @name Taint Analysis Sink Candidate Extraction Supplement",
-    " * @description Deterministic supplemental sink extraction coverage.",
-    " * @kind problem",
-    ` * @id taint-analysis/extraction/sinks-supplement-${language}`,
-    " * @problem.severity recommendation",
-    " */",
-    "",
-    "import go",
-    "import semmle.go.dataflow.DataFlow",
-    "",
-    "private predicate deterministicSinkCandidate(",
-    "  DataFlow::Node node, string callable, string flowKind,",
-    "  string receiverHint, string modulePath, int argIndex, int line",
-    ") {",
-    `  ${clauses}`,
-    "}",
-    "",
-    "from",
-    "  DataFlow::Node node, string callable, string flowKind,",
-    "  string receiverHint, string modulePath, int argIndex, int line",
-    "where",
-    "  deterministicSinkCandidate(node, callable, flowKind, receiverHint, modulePath, argIndex, line)",
-    "select",
-    "  node,",
-    "  \"sink_candidate\",",
-    "  callable,",
-    "  \"flow_kind=\" + flowKind,",
-    "  receiverHint,",
-    "  \"module=\" + modulePath,",
-    "  \"arg_index=\" + argIndex.toString(),",
-    "  \"line=\" + line.toString()",
-    "",
-  ].join("\n");
-}
-
-function renderGoSinkSupplementClause(spec: DeterministicSinkSupplementSpec): string {
-  const escapedPackage = escapeQllString(spec.packagePath);
-  const escapedCallable = escapeQllString(spec.callable);
-  const escapedReceiverHint = escapeQllString(`receiver=${spec.receiverHint}`);
-  if (spec.kind === "method") {
-    const receivers = (spec.receivers ?? [])
-      .map((receiver) => `m.hasQualifiedName("${escapedPackage}", "${escapeQllString(receiver)}", "${escapedCallable}")`)
-      .join("\n      or ");
-    return [
-      "exists(DataFlow::CallNode call, Method m |",
-      "      m = call.getTarget() and",
-      "      (",
-      `        ${receivers}`,
-      "      ) and",
-      `      node = call.getArgument(${spec.argIndex}) and`,
-      `      callable = \"${escapedCallable}\" and`,
-      "      flowKind = \"arg\" and",
-      `      receiverHint = \"${escapedReceiverHint}\" and`,
-      "      modulePath = call.getFile().getRelativePath() and",
-      `      argIndex = ${spec.argIndex} and`,
-      "      line = call.getStartLine()",
-      "    )",
-    ].join("\n");
-  }
-
-  return [
-    "exists(DataFlow::CallNode call |",
-    `      call.getTarget().hasQualifiedName("${escapedPackage}", "${escapedCallable}") and`,
-    `      node = call.getArgument(${spec.argIndex}) and`,
-    `      callable = \"${escapedCallable}\" and`,
-    "      flowKind = \"arg\" and",
-    `      receiverHint = \"${escapedReceiverHint}\" and`,
-    "      modulePath = call.getFile().getRelativePath() and",
-    `      argIndex = ${spec.argIndex} and`,
-    "      line = call.getStartLine()",
-    "    )",
-  ].join("\n");
+function isGrpcOrProtoFramework(framework: string): boolean {
+  const normalized = framework.trim().toLowerCase();
+  return normalized.includes("grpc")
+    || normalized.includes("proto")
+    || normalized.includes("protobuf");
 }
 
 function escapeQllString(value: string): string {
@@ -1383,4 +1413,5 @@ export const __taintAnalysisPreflightInternals = {
   writeExtractionDiagnostics,
   resolveExtractionModel,
   computeExtractionDegradation,
+  isGrpcOrProtoFramework,
 };

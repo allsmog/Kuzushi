@@ -320,6 +320,26 @@ describe("setConfigValue", () => {
     expect(getConfigValue("scannerConfig.semgrep.verify")).toBe(false);
   });
 
+  it("preserves repo-local layering when writing project config", () => {
+    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
+      model: "global-model",
+      verify: true,
+      verifyMaxTurns: 25,
+    }));
+
+    setConfigValue("scanMode", "concurrent", TMP_REPO);
+
+    expect(loadConfig(TMP_REPO)).toMatchObject({
+      model: "global-model",
+      verify: true,
+      verifyMaxTurns: 25,
+      scanMode: "concurrent",
+    });
+    expect(JSON.parse(readFileSync(TMP_PROJECT_CONFIG_PATH, "utf-8"))).toEqual({
+      scanMode: "concurrent",
+    });
+  });
+
   it("throws on unknown top-level key", () => {
     expect(() => setConfigValue("bogus", "val")).toThrow("Unknown config key");
   });
@@ -500,6 +520,28 @@ describe("unsetConfigValue", () => {
     setConfigValue("scannerConfig.semgrep.binary", "opengrep");
     unsetConfigValue("scannerConfig.semgrep.binary");
     expect(getConfigValue("scannerConfig.semgrep.binary")).toBeUndefined();
+  });
+
+  it("restores inherited values when removing a project override", () => {
+    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
+      model: "global-model",
+      verify: true,
+    }));
+    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
+      model: "project-model",
+      scanMode: "concurrent",
+    }));
+
+    unsetConfigValue("model", TMP_REPO);
+
+    expect(loadConfig(TMP_REPO)).toMatchObject({
+      model: "global-model",
+      verify: true,
+      scanMode: "concurrent",
+    });
+    expect(JSON.parse(readFileSync(TMP_PROJECT_CONFIG_PATH, "utf-8"))).toEqual({
+      scanMode: "concurrent",
+    });
   });
 
   it("throws on unknown key", () => {

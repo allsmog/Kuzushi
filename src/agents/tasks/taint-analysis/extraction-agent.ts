@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import type {
+  AgentResultErrorMessage,
   AgentResultSuccessMessage,
   AgentToolDecision,
 } from "../../../agent-runtime/types.js";
@@ -32,6 +33,11 @@ export interface ExtractionAgentOptions {
   disableCacheRead?: boolean;
 }
 
+export interface ExtractionQueryResult {
+  query: string | null;
+  costUsd: number;
+}
+
 /**
  * Returns true when the template contains unresolved body placeholders
  * that prevent deterministic rendering (i.e. the agent path is needed).
@@ -49,7 +55,7 @@ export function hasBodyPlaceholders(template: string, kind: "source" | "sink"): 
  */
 export async function generateExtractionQuery(
   options: ExtractionAgentOptions,
-): Promise<string | null> {
+): Promise<ExtractionQueryResult> {
   const {
     language,
     kind,
@@ -84,7 +90,10 @@ export async function generateExtractionQuery(
   if (!disableCacheRead) {
     const cached = await readCacheIfValid(cachePath, cacheHash);
     if (cached !== null) {
-      return cached;
+      return {
+        query: cached,
+        costUsd: 0,
+      };
     }
   }
 
@@ -108,6 +117,7 @@ export async function generateExtractionQuery(
   const runtime = getAgentRuntime();
   const MAX_RETRIES = 2;
   let resultText: string | null = null;
+  let costUsd = 0;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     resultText = null;
@@ -128,11 +138,14 @@ export async function generateExtractionQuery(
           canUseTool,
         },
       })) {
+        if (message.type === "result" && typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
         if (message.type === "result" && message.subtype === "success") {
           resultText = (message as AgentResultSuccessMessage).result;
         } else if (message.type === "result") {
           lastErrorSubtype = message.subtype;
-          const errMsg = "errors" in message ? (message as { errors: string[] }).errors.join("; ") : message.subtype;
+          const errMsg = (message as AgentResultErrorMessage).errors.join("; ") || message.subtype;
           process.stderr.write(`[taint-analysis-extraction-agent] Non-success result for ${language}/${kind}: ${message.subtype} — ${errMsg}\n`);
         }
       }
@@ -143,7 +156,10 @@ export async function generateExtractionQuery(
       if (attempt < MAX_RETRIES) {
         continue;
       }
-      return null;
+      return {
+        query: null,
+        costUsd,
+      };
     }
 
     if (resultText) {
@@ -161,7 +177,10 @@ export async function generateExtractionQuery(
 
   if (!resultText) {
     process.stderr.write(`[taint-analysis-extraction-agent] No result text from LLM for ${language}/${kind}\n`);
-    return null;
+    return {
+      query: null,
+      costUsd,
+    };
   }
 
   process.stderr.write(`[taint-analysis-extraction-agent] Got result text for ${language}/${kind} (${resultText.length} chars)\n`);
@@ -179,7 +198,10 @@ export async function generateExtractionQuery(
   }
 
   if (!queryText) {
-    return null;
+    return {
+      query: null,
+      costUsd,
+    };
   }
 
   // --- Cache the result ---
@@ -191,7 +213,10 @@ export async function generateExtractionQuery(
     // Cache write failure is non-fatal
   }
 
-  return queryText;
+  return {
+    query: queryText,
+    costUsd,
+  };
 }
 
 // ── Internals ──────────────────────────────────────────────

@@ -1,9 +1,11 @@
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { TaskContext } from "../../agents/types.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
-import type { Finding, ScannerConfig, ScannerId } from "../../scanners/types.js";
+import type { ScannerConfig, ScannerId } from "../../scanners/types.js";
 import type { KuzushiConfig } from "../../types.js";
-import { isRecord, toErrorMessage } from "../../utils.js";
+import { loadSecurityProfiles } from "../../security-profiles.js";
+import { toErrorMessage } from "../../utils.js";
+import { executeAgentTask, executeScannerPlugin } from "../task-execution.js";
 import type { ScanStartEvent, TaskStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -77,12 +79,15 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
     }
 
     const task = deps.taskRegistry.get(taskId);
-    const startedAt = Date.now();
 
     try {
       const taskConfig = resolveTaskConfig(deps.config, taskId);
-      if (task.init) {
-        await task.init(taskConfig);
+
+      let securityProfiles;
+      try {
+        securityProfiles = loadSecurityProfiles(context.repoRoot);
+      } catch {
+        // Security profiles loading is best-effort.
       }
 
       const taskContext: TaskContext = {
@@ -93,17 +98,13 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
         config: deps.config,
         bus,
         upstreamOutputs,
+        securityProfiles,
       };
 
-      const output = await task.run(input, taskContext);
+      const executed = await executeAgentTask(task, input, taskContext, taskConfig);
+      const { output, emittedFindings, durationMs, costUsd } = executed;
 
-      const emittableFindings = task.outputKind === "findings"
-        ? asFindings(output)
-        : task.outputKind === "threat-model"
-          ? extractThreatModelFindings(output)
-          : [];
-
-      for (const finding of emittableFindings) {
+      for (const finding of emittedFindings) {
         await bus.publish(
           createEvent("task:progress", runId, {
             context,
@@ -127,8 +128,8 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
           createEvent("scan:scanner-complete", runId, {
             context,
             scannerId: taskId,
-            findingCount: emittableFindings.length,
-            durationMs: Date.now() - startedAt,
+            findingCount: emittedFindings.length,
+            durationMs,
           }),
         );
       }
@@ -139,7 +140,8 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
           taskId,
           outputKind: task.outputKind,
           output,
-          durationMs: Date.now() - startedAt,
+          durationMs,
+          costUsd,
         }),
       );
     } catch (error) {
@@ -165,13 +167,12 @@ async function runSingleScanner(
 ): Promise<number> {
   const plugin = deps.registry.get(scannerId);
   const pluginConfig = resolveTaskConfig(deps.config, scannerId);
-  const startedAt = Date.now();
-
-  if (plugin.init) {
-    await plugin.init(pluginConfig);
-  }
-
-  const findings = await plugin.scan(context.scanPath ?? context.repoRoot, scanOpts, pluginConfig);
+  const { findings, durationMs, costUsd } = await executeScannerPlugin(
+    plugin,
+    context.scanPath ?? context.repoRoot,
+    scanOpts,
+    pluginConfig,
+  );
 
   for (const finding of findings) {
     await bus.publish(
@@ -197,7 +198,7 @@ async function runSingleScanner(
       context,
       scannerId,
       findingCount: findings.length,
-      durationMs: Date.now() - startedAt,
+      durationMs,
     }),
   );
 
@@ -207,7 +208,8 @@ async function runSingleScanner(
       taskId: scannerId,
       outputKind: "findings",
       output: findings,
-      durationMs: Date.now() - startedAt,
+      durationMs,
+      costUsd,
     }),
   );
 
@@ -216,110 +218,8 @@ async function runSingleScanner(
 
 function resolveTaskConfig(config: KuzushiConfig, taskId: string): ScannerConfig {
   const raw = config.scannerConfig[taskId];
-  if (isRecord(raw)) {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     return raw;
   }
   return {};
-}
-
-function extractThreatModelFindings(value: unknown): Finding[] {
-  if (!isRecord(value) || !Array.isArray(value["findings"])) {
-    return [];
-  }
-  return asFindings(value["findings"]);
-}
-
-function asFindings(value: unknown): Finding[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const findings: Finding[] = [];
-  for (const item of value) {
-    if (!isRecord(item)) {
-      continue;
-    }
-
-    const finding = asFinding(item);
-    if (!finding) {
-      continue;
-    }
-
-    findings.push(finding);
-  }
-
-  return findings;
-}
-
-function asFinding(item: Record<string, unknown>): Finding | null {
-  const fingerprint = asString(item["fingerprint"]);
-  const ruleId = asString(item["ruleId"]);
-  const filePath = asString(item["filePath"]);
-  const startLine = asNumber(item["startLine"]);
-  const severity = asString(item["severity"]);
-  const message = asString(item["message"]);
-  const evidence = asString(item["evidence"]);
-  const scannerConfidence = asString(item["scannerConfidence"]);
-  const subcategory = asStringArray(item["subcategory"]);
-  const likelihood = asString(item["likelihood"]);
-  const impact = asString(item["impact"]);
-  const cwe = asStringArray(item["cwe"]);
-  const score = asNumber(item["score"]);
-
-  if (
-    !fingerprint ||
-    !ruleId ||
-    !filePath ||
-    startLine === null ||
-    !severity ||
-    !message ||
-    !scannerConfidence ||
-    !subcategory ||
-    !likelihood ||
-    !impact ||
-    !cwe ||
-    score === null
-  ) {
-    return null;
-  }
-
-  const scanner = asString(item["scanner"]);
-  if (!scanner) return null;
-
-  return {
-    scanner,
-    fingerprint,
-    ruleId,
-    filePath,
-    startLine,
-    severity,
-    message,
-    evidence,
-    scannerConfidence,
-    subcategory,
-    likelihood,
-    impact,
-    cwe,
-    score,
-  };
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function asStringArray(value: unknown): string[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  if (!value.every((item) => typeof item === "string")) {
-    return null;
-  }
-
-  return value;
 }

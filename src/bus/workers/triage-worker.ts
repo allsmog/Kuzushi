@@ -2,8 +2,9 @@ import type { TaskRegistry } from "../../agents/registry.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
+import { coerceRepoContext } from "../../repo-context.js";
 import { triageFindingWithAgent, triageFindingsBatch, BATCH_TRIAGE_FALLBACK_RATIONALE } from "../../triage.js";
-import type { KuzushiConfig, RepoContext } from "../../types.js";
+import type { KuzushiConfig } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
@@ -37,7 +38,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             context.repoName,
             deps.config.triageModel ?? deps.config.model,
             deps.config.triageMaxTurns,
-            asRepoContext(repoContext),
+            coerceRepoContext(repoContext),
             {
               activityCallback: async (activity) => {
                 await bus.publish(
@@ -102,7 +103,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
         context.scanPath ?? context.repoRoot,
         context.repoName,
         deps.config.triageModel ?? deps.config.model,
-        asRepoContext(repoContext),
+        coerceRepoContext(repoContext),
         {
           activityCallback: async (activity) => {
             await bus.publish(
@@ -235,40 +236,4 @@ function getErrorCostUsd(error: unknown): number | undefined {
   }
 
   return normalizeCostUsd(raw);
-}
-
-function asRepoContext(value: unknown): RepoContext | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const repoContext: RepoContext = {
-    languages: asStringArray(value["languages"]),
-    frameworks: asStringArray(value["frameworks"]),
-    authPatterns: asStringArray(value["authPatterns"]),
-    sanitizationLibs: asStringArray(value["sanitizationLibs"]),
-    ormOrDb: asStringArray(value["ormOrDb"]),
-    entryPoints: asStringArray(value["entryPoints"]),
-  };
-
-  const hasAnyValue = (
-    repoContext.languages.length > 0
-    || repoContext.frameworks.length > 0
-    || repoContext.authPatterns.length > 0
-    || repoContext.sanitizationLibs.length > 0
-    || repoContext.ormOrDb.length > 0
-    || repoContext.entryPoints.length > 0
-  );
-
-  return hasAnyValue ? repoContext : undefined;
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
 }

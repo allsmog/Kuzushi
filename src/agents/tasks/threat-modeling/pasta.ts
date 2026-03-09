@@ -3,6 +3,7 @@ import path from "node:path";
 import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
+import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
@@ -52,7 +53,7 @@ function collectUpstreamContext(context: TaskContext): { strideThreats: string[]
   const strideThreats: string[] = [];
   const upstreamFindings: string[] = [];
 
-  const strideOutput = context.upstreamOutputs.get("threat-model-stride") as { document?: ThreatModelDocument; findings?: Finding[] } | undefined;
+  const strideOutput = asStrideTaskOutput(context.upstreamOutputs.get("threat-model-stride"));
   if (strideOutput?.document?.threats) {
     for (const threat of strideOutput.document.threats) {
       strideThreats.push(`[${threat.id}] ${threat.category}: ${threat.title} (impact: ${threat.impact})`);
@@ -71,15 +72,47 @@ function collectUpstreamContext(context: TaskContext): { strideThreats: string[]
 
     if (Array.isArray(output)) {
       for (const item of output) {
-        if (isRecord(item) && typeof item["fingerprint"] === "string" && typeof item["ruleId"] === "string") {
-          const f = item as unknown as Finding;
-          upstreamFindings.push(`[${f.fingerprint.slice(0, 8)}] ${f.ruleId}: ${f.message}`);
+        if (isFindingRecord(item)) {
+          upstreamFindings.push(`[${item.fingerprint.slice(0, 8)}] ${item.ruleId}: ${item.message}`);
         }
       }
     }
   }
 
   return { strideThreats, upstreamFindings };
+}
+
+function asStrideTaskOutput(
+  value: unknown,
+): { document: ThreatModelDocument; findings: Finding[] } | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const document = value["document"];
+  const findings = value["findings"];
+  if (!isThreatModelDocument(document) || !Array.isArray(findings)) {
+    return undefined;
+  }
+
+  return {
+    document,
+    findings: findings.filter(isFindingRecord) as Finding[],
+  };
+}
+
+function isThreatModelDocument(value: unknown): value is ThreatModelDocument {
+  return isRecord(value)
+    && Array.isArray(value["threats"])
+    && isRecord(value["dfd"])
+    && isRecord(value["summary"]);
+}
+
+function isFindingRecord(value: unknown): value is Finding {
+  return isRecord(value)
+    && typeof value["fingerprint"] === "string"
+    && typeof value["ruleId"] === "string"
+    && typeof value["message"] === "string";
 }
 
 function parsePastaResponse(raw: unknown, maxTrees: number): AttackTree[] {
@@ -253,6 +286,7 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
 
     let structuredOutput: unknown;
     let resultText = "";
+    let costUsd = 0;
 
     const tag = "[threat-model-pasta]";
     console.error(`${tag} Starting PASTA analysis (model=${cfg.pastaModel})`);
@@ -263,30 +297,31 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
         options: {
           cwd: context.repoRoot,
           model: cfg.pastaModel,
-          maxTurns: 30,
+          maxTurns: undefined,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",
             schema: PASTA_RESPONSE_SCHEMA,
+            strict: true,
+            retryInvalidStructuredOutput: 2,
           },
         },
       })) {
         if (message.type !== "result") continue;
+        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
         if ("result" in message) {
           resultText = message.result;
           structuredOutput = message.structuredOutput;
         }
       }
     } catch (error) {
-      console.error(`${tag} Error: ${toErrorMessage(error)}`);
-      return {
-        document: { version: "1.0", trees: [], summary: { totalTrees: 0, criticalPaths: 0 } },
-        findings: [],
-      };
+      throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
-    const parsed = structuredOutput ?? parseJson(resultText);
+    const parsed = structuredOutput ?? parseJson(resultText, tag);
     const trees = parsePastaResponse(parsed, cfg.maxTrees);
     const criticalPaths = trees.filter((t) => t.overallRisk === "critical" || t.overallRisk === "high").length;
 
@@ -302,7 +337,7 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
       ? treesToFindings(trees, context.repoRoot, context.repoName)
       : [];
 
-    return { document, findings };
+    return attachTaskOutputMeta({ document, findings }, { costUsd });
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
@@ -321,11 +356,11 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
   },
 };
 
-function parseJson(text: string): unknown {
+function parseJson(text: string, tag: string): unknown {
   try {
     return JSON.parse(text);
-  } catch {
-    return { trees: [] };
+  } catch (error) {
+    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
   }
 }
 

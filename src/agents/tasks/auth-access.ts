@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
+import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
 
 const AUTH_ACCESS_SCHEMA = {
@@ -64,7 +67,7 @@ function resolveConfig(ctx: TaskContext): AuthAccessConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -77,19 +80,24 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number):
     : [];
 
   return [
-    "You are an authentication and access control analysis agent.",
-    "Analyze the repository for auth/access control vulnerabilities using a two-phase approach.",
+    "You are a senior application security engineer specializing in authentication and authorization.",
+    "You have audited hundreds of web applications and APIs for access control flaws. You know that",
+    "most auth-related scanner findings are false positives because they miss router-level middleware,",
+    "framework guards, or decorator-based protection.",
+    "",
+    "Analyze the repository for concrete auth/access control vulnerabilities only after verifying the real router, middleware, and ownership-check path in code.",
     "",
     ...contextLines,
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
     "## Phase 1: Map auth architecture",
     "Use Glob to find middleware, decorators, guards, and auth-related files.",
     "Identify the auth patterns used (JWT, session, OAuth, etc.).",
-    "Build a mental model of which routes are protected and how.",
+    "Build a map of which route groups and handlers are protected, including router/app/controller-level middleware and other framework-level guards.",
     "",
     "## Phase 2: Find violations",
     "Use Glob to find all route handlers and API endpoints.",
-    "Check if auth middleware is applied consistently.",
-    "Flag gaps and inconsistencies.",
+    "Check whether auth middleware or ownership checks are actually applied at the handler, router, controller, or framework decorator level.",
+    "Only flag a violation after you inspect the exact endpoint implementation and the surrounding registration path.",
     "",
     "## Patterns to detect",
     "",
@@ -105,9 +113,22 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number):
     "### default-credentials (CWE-798)",
     "Hardcoded passwords in seed/migration/config files.",
     "",
+    "## Evidence requirements",
+    "- Every finding must point to the exact endpoint or code path you inspected, with exact file paths and line numbers.",
+    "- The rationale must mention the missing auth check, missing role check, or missing ownership validation you verified in code.",
+    "- Do not report a finding just because one file lacks a check; router-level or app-level middleware may still apply.",
+    "",
     `Return at most ${maxFindings} findings, prioritized by severity.`,
-    "Only report concrete issues with evidence in code.",
-  ].join("\n");
+    "",
+    "## Anti-hallucination constraints",
+    "- Only report concrete issues with evidence in code.",
+    "- Do NOT infer or speculate about code you haven't read.",
+    "- If unsure whether middleware protects a route, READ the middleware registration.",
+    "- Confidence must reflect your actual certainty: HIGH only if you verified the full auth chain.",
+    repoContext?.frameworks.length
+      ? `- Account for framework auth: ${repoContext.frameworks.join(", ")} may apply auth at router/app level.`
+      : "",
+  ].filter(Boolean).join("\n");
 }
 
 function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
@@ -180,12 +201,17 @@ export const authAccessTask: AgentTask<ScanOpts, Finding[]> = {
 
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
-    const repoContext = context.upstreamOutputs.get("context-gatherer") as RepoContext | undefined;
-    const prompt = buildPrompt(repoContext, maxFindings);
+    const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const profiles = context.securityProfiles
+      ? getProfilesForTask(context.securityProfiles, "auth-access-detect")
+      : [];
+    const profileLines = formatProfilesForPrompt(profiles);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;
     let resultText = "";
+    let costUsd = 0;
 
     const tag = "[auth-access]";
     console.error(`${tag} Starting scan (model=${model})`);
@@ -196,16 +222,21 @@ export const authAccessTask: AgentTask<ScanOpts, Finding[]> = {
         options: {
           cwd: context.repoRoot,
           model,
-          maxTurns: 30,
+          maxTurns: undefined,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",
             schema: AUTH_ACCESS_SCHEMA,
+            strict: true,
+            retryInvalidStructuredOutput: 2,
           },
         },
       })) {
         if (message.type !== "result") continue;
+        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
         if ("result" in message) {
           resultText = message.result;
           structuredOutput = message.structuredOutput;
@@ -215,11 +246,14 @@ export const authAccessTask: AgentTask<ScanOpts, Finding[]> = {
       throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
-    return normalizeFindings(
-      structuredOutput ?? parseJson(resultText),
-      context.repoRoot,
-      context.repoName,
-      maxFindings,
+    return attachTaskOutputMeta(
+      normalizeFindings(
+        structuredOutput ?? parseJson(resultText, tag),
+        context.repoRoot,
+        context.repoName,
+        maxFindings,
+      ),
+      { costUsd },
     );
   },
 
@@ -240,11 +274,11 @@ export const authAccessTask: AgentTask<ScanOpts, Finding[]> = {
   },
 };
 
-function parseJson(text: string): unknown {
+function parseJson(text: string, tag: string): unknown {
   try {
     return JSON.parse(text);
-  } catch {
-    return { findings: [] };
+  } catch (error) {
+    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
   }
 }
 

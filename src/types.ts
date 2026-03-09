@@ -33,6 +33,8 @@ export interface ScanOpts {
   excludePatterns: string[];
   scanners?: ScannerId[];
   fresh: boolean;
+  /** Git ref to diff against for differential review (e.g. "main", "HEAD~5"). */
+  diffBase?: string;
 }
 
 /** Result of AI triage for a single finding. */
@@ -50,8 +52,12 @@ export interface TriageResult {
   recommendedFix?: string;
   ruleRefinementHint?: string;
   triageSchemaVersion?: string;
+  evidenceTrail?: Array<{ level: string; evidence: string }>;
   triageCostUsd?: number;
 }
+
+/** Proof-level verdict for verification. */
+export type ProofVerdict = "exploited" | "blocked_by_security" | "out_of_scope" | "false_positive";
 
 /** Result of exploitability verification for a triaged finding. */
 export interface VerificationResult {
@@ -62,6 +68,9 @@ export interface VerificationResult {
   attackVector: string | null;
   preconditions: string[];
   confidence: number;
+  proofLevel?: 1 | 2 | 3 | 4;
+  proofVerdict?: ProofVerdict;
+  bypassAttempts?: string[];
   verifyCostUsd?: number;
 }
 
@@ -86,6 +95,46 @@ export interface RepoContext {
   sanitizationLibs: string[];
   ormOrDb: string[];
   entryPoints: string[];
+}
+
+/** Extended repository context produced by the LLM context enricher. */
+export interface EnrichedRepoContext {
+  base: RepoContext;
+  enrichment: {
+    customMiddleware: Array<{ name: string; filePath: string; purpose: string; appliesTo?: string }>;
+    customSanitizers: Array<{ name: string; filePath: string; sanitizationType: string; usedBy?: string }>;
+    trustBoundaries: Array<{ name: string; description: string; entryPoints?: string[] }>;
+    dataClassifications: Array<{ dataType: string; sensitivity: "public" | "internal" | "confidential" | "restricted"; locations?: string[] }>;
+    architecturalNotes: string[];
+  };
+}
+
+/** Parsed organization precedents for triage/verification prompt injection. */
+export interface Precedents {
+  hardExclusions: string[];
+  signalCriteria: string[];
+  architecturalPrecedents: string[];
+}
+
+/** A domain-specific security vulnerability category profile. */
+export interface SecurityProfile {
+  name: string;
+  items: string[];
+  appliesTo?: string[];
+}
+
+/** An exploitation chain linking multiple findings into a critical attack path. */
+export interface ExploitChain {
+  id: string;
+  name: string;
+  steps: Array<{
+    findingFingerprint: string;
+    role: string;
+    description: string;
+  }>;
+  overallSeverity: "CRITICAL" | "HIGH" | "MEDIUM";
+  preconditions: string[];
+  impactDescription: string;
 }
 
 /** User configuration stored at ~/.kuzushi/config.json (and optional project override). */
@@ -156,6 +205,36 @@ export interface KuzushiConfig {
   excludePatterns: string[];
   /** Scanner-specific config blocks keyed by scanner id. */
   scannerConfig: Record<string, ScannerConfig>;
+  /** Enable pre-triage FP suppression filter. */
+  fpFilterEnabled?: boolean;
+  /** Additional regex patterns for FP suppression. */
+  fpFilterCustomExclusions?: string[];
+  /** Enable post-triage variant analysis. */
+  variantAnalysis?: boolean;
+  /** Optional override model for variant analysis. */
+  variantAnalysisModel?: string;
+  /** Max variant findings per confirmed TP. */
+  variantAnalysisMaxFindings?: number;
+  /** Enable LLM context enrichment task. */
+  enableContextEnrichment?: boolean;
+  /** Optional override model for context enrichment. */
+  contextEnrichmentModel?: string;
+  /** Git ref for differential review (e.g. "main"). */
+  diffBase?: string;
+  /** Enable two-stage LLM re-scoring after hard FP filter. */
+  llmRescoreEnabled?: boolean;
+  /** Model for LLM re-scoring (defaults to haiku for cost efficiency). */
+  llmRescoreModel?: string;
+  /** Minimum score (1-10) to keep a finding after LLM re-score. Default 4. */
+  llmRescoreThreshold?: number;
+  /** Enable post-triage exploitation chain analysis. Default false. */
+  chainAnalysis?: boolean;
+  /** Optional override model for chain analysis. */
+  chainAnalysisModel?: string;
+  /** Path to organization precedents file. */
+  precedentsPath?: string;
+  /** Path to security profiles file. */
+  securityProfilesPath?: string;
 }
 
 /** A persisted finding row from SQLite. */

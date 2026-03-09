@@ -3,6 +3,7 @@ import path from "node:path";
 import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
+import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
@@ -144,7 +145,7 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
 
   async run(_input, context): Promise<Finding[]> {
     const cfg = resolveInvariantAnalysisConfig(context.config);
-    const doc = context.upstreamOutputs.get("invariant-extract") as InvariantDocument | undefined;
+    const doc = asInvariantDocument(context.upstreamOutputs.get("invariant-extract"));
 
     if (doc === undefined) {
       throw new Error("[invariant-check] Upstream invariant-extract failed or produced no output");
@@ -172,14 +173,16 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
     console.error(`${tag} Checking ${invariantsToCheck.length} invariants in ${batches.length} batch(es) (model=${cfg.checkModel})`);
 
     const allViolations: InvariantViolation[] = [];
+    let totalCostUsd = 0;
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
       const prompt = buildCheckPrompt(batch);
-      const maxTurns = Math.max(30, batch.length * 3);
+      const maxTurns = undefined;
 
       let structuredOutput: unknown;
       let resultText = "";
+      let batchCostUsd = 0;
 
       try {
         for await (const message of runtime.query({
@@ -193,22 +196,27 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
             outputFormat: {
               type: "json_schema",
               schema: INVARIANT_CHECK_SCHEMA,
+              strict: true,
+              retryInvalidStructuredOutput: 2,
             },
           },
         })) {
           if (message.type !== "result") continue;
+          if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+            batchCostUsd = message.totalCostUsd;
+          }
           if ("result" in message) {
             resultText = message.result;
             structuredOutput = message.structuredOutput;
           }
         }
       } catch (error) {
-        console.error(`${tag} Batch ${i + 1}/${batches.length} error: ${toErrorMessage(error)}`);
-        continue;
+        throw new Error(`${tag} Batch ${i + 1}/${batches.length} error: ${toErrorMessage(error)}`);
       }
 
-      const parsed = structuredOutput ?? parseJson(resultText);
+      const parsed = structuredOutput ?? parseJson(resultText, tag);
       const batchViolations = parseViolations(parsed, cfg.confidenceThreshold);
+      totalCostUsd += batchCostUsd;
 
       console.error(`${tag} Batch ${i + 1}/${batches.length}: resultLen=${resultText.length} structured=${structuredOutput !== undefined} preThreshold=${countPreThreshold(parsed)} postThreshold=${batchViolations.length}`);
 
@@ -218,7 +226,10 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
     const violations = allViolations;
     console.error(`${tag} Found ${violations.length} violations total`);
 
-    return violations.map((v) => violationToFinding(v, context.repoRoot, context.repoName));
+    return attachTaskOutputMeta(
+      violations.map((v) => violationToFinding(v, context.repoRoot, context.repoName)),
+      { costUsd: totalCostUsd },
+    );
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
@@ -238,11 +249,67 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
   },
 };
 
-function parseJson(text: string): unknown {
+function asInvariantDocument(value: unknown): InvariantDocument | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value["invariants"]) || !isRecord(value["coverage"])) {
+    return undefined;
+  }
+
+  const coverage = value["coverage"];
+
+  return {
+    version: typeof value["version"] === "string" ? value["version"] : "1.0",
+    invariants: value["invariants"].flatMap((item) => {
+      if (!isRecord(item) || !isRecord(item["scope"])) {
+        return [];
+      }
+
+      const scope = item["scope"];
+      const id = typeof item["id"] === "string" ? item["id"] : "";
+      const statement = typeof item["statement"] === "string" ? item["statement"] : "";
+      const derivedFrom = typeof item["derivedFrom"] === "string" ? item["derivedFrom"] : "";
+      if (!id || !statement || !derivedFrom) {
+        return [];
+      }
+
+      return [{
+        id,
+        kind: typeof item["kind"] === "string"
+          ? item["kind"] as InvariantDocument["invariants"][number]["kind"]
+          : "data-invariant",
+        scope: {
+          filePath: typeof scope["filePath"] === "string" ? scope["filePath"] : "",
+          startLine: Math.max(1, Number(scope["startLine"]) || 1),
+          endLine: Math.max(1, Number(scope["endLine"]) || 1),
+          functionName: typeof scope["functionName"] === "string" ? scope["functionName"] : undefined,
+          className: typeof scope["className"] === "string" ? scope["className"] : undefined,
+        },
+        statement,
+        formalExpression: typeof item["formalExpression"] === "string" ? item["formalExpression"] : undefined,
+        confidence: Number.isFinite(Number(item["confidence"])) ? Number(item["confidence"]) : 0,
+        derivedFrom,
+        securityRelevance: typeof item["securityRelevance"] === "string"
+          ? item["securityRelevance"] as InvariantDocument["invariants"][number]["securityRelevance"]
+          : "none",
+        category: typeof item["category"] === "string" ? item["category"] : undefined,
+      }];
+    }),
+    coverage: {
+      filesAnalyzed: Math.max(0, Number(coverage["filesAnalyzed"]) || 0),
+      functionsAnalyzed: Math.max(0, Number(coverage["functionsAnalyzed"]) || 0),
+      invariantsFound: Math.max(0, Number(coverage["invariantsFound"]) || 0),
+    },
+  };
+}
+
+function parseJson(text: string, tag: string): unknown {
   try {
     return JSON.parse(text);
-  } catch {
-    return { violations: [] };
+  } catch (error) {
+    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
   }
 }
 

@@ -72,7 +72,7 @@ describe("buildPrompt", () => {
 
   it("works without repo context", () => {
     const prompt = buildPrompt(undefined, 50);
-    expect(prompt).toContain("cryptographic misuse");
+    expect(prompt).toContain("cryptographic practices");
     expect(prompt).toContain("50");
   });
 });

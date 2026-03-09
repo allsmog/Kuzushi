@@ -1,11 +1,23 @@
-import { getAgentRuntime, type AgentRuntime } from "./agent-runtime/index.js";
+import {
+  DEFAULT_READ_ONLY_TOOLS,
+  extractJson,
+  resolveRepoContextAndRuntimeOptions,
+  runStructuredAgentQuery,
+  type AgentActivity,
+  type AgentActivityCallback,
+  type AgentRuntimeOptions,
+} from "./agent-runtime/execution.js";
 import type {
   AllowedTriageTool,
   Finding,
   TriageAgentConfig,
 } from "./scanners/types.js";
+import { formatRepoContext } from "./repo-context.js";
 import type { RepoContext, TriageResult, Verdict } from "./types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
+
+export type { AgentActivity, AgentActivityCallback } from "./agent-runtime/execution.js";
+export { extractJson } from "./agent-runtime/execution.js";
 
 export const TRIAGE_RESULT_SCHEMA = {
   type: "object",
@@ -43,18 +55,25 @@ export const TRIAGE_RESULT_SCHEMA = {
     recommended_fix: { type: "string" },
     rule_refinement_hint: { type: "string" },
     triage_schema_version: { type: "string" },
+    evidence_trail: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["level", "evidence"],
+        properties: {
+          level: { type: "string" },
+          evidence: { type: "string" },
+        },
+      },
+    },
   },
 } as const;
 
-export const DEFAULT_TOOLS: AllowedTriageTool[] = ["Read", "Glob", "Grep"];
+export const DEFAULT_TOOLS: AllowedTriageTool[] = [...DEFAULT_READ_ONLY_TOOLS];
 export const DEFAULT_MAX_TURNS = 10;
 
-export interface TriageRuntimeOptions {
-  runtime?: AgentRuntime;
-  abortController?: AbortController;
-  maxBudgetUsd?: number;
-  activityCallback?: AgentActivityCallback;
-}
+export interface TriageRuntimeOptions extends AgentRuntimeOptions {}
 
 export interface TriageConfigProvider {
   has(id: string): boolean;
@@ -62,18 +81,6 @@ export interface TriageConfigProvider {
     triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig;
   };
 }
-
-export interface AgentActivity {
-  kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
-  summary?: string;
-  elapsedSeconds?: number;
-}
-
-export type AgentActivityCallback = (
-  activity: AgentActivity,
-) => Promise<void> | void;
 
 export interface TriageOutput {
   result: TriageResult;
@@ -117,71 +124,22 @@ export async function triageFindingWithAgent(
   repoContextOrRuntimeOptions?: RepoContext | TriageRuntimeOptions,
   maybeRuntimeOptions: TriageRuntimeOptions = {},
 ): Promise<TriageOutput> {
-  const { repoContext, runtimeOptions } = resolveTriageArgs(
+  const { repoContext, runtimeOptions } = resolveRepoContextAndRuntimeOptions(
     repoContextOrRuntimeOptions,
     maybeRuntimeOptions,
   );
   const agentConfig = resolveAgentConfig(registry, finding, repoName, repoContext);
   const allowedTools = normalizeAllowedTools(agentConfig.allowedTools);
   const effectiveMaxTurns = normalizeTurns(agentConfig.maxTurns ?? maxTurns);
-  const runtime = runtimeOptions.runtime ?? getAgentRuntime();
-
-  let resultText = "";
-  let structuredOutput: unknown = undefined;
-  let executionError: string | null = null;
-  let costUsd = 0;
-
-  for await (const message of runtime.query({
+  const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt: agentConfig.prompt,
-    options: {
-      cwd: repoRoot,
-      model,
-      maxTurns: effectiveMaxTurns,
-      allowedTools,
-      permissionMode: "dontAsk",
-      maxBudgetUsd: runtimeOptions.maxBudgetUsd,
-      abortController: runtimeOptions.abortController,
-      outputFormat: {
-        type: "json_schema",
-        schema: TRIAGE_RESULT_SCHEMA,
-      },
-    },
-  })) {
-    if (message.type === "assistant") {
-      await emitAssistantActivity(message.content, runtimeOptions.activityCallback);
-      continue;
-    }
-
-    if (message.type === "tool-progress") {
-      await runtimeOptions.activityCallback?.({
-        kind: "tool-progress",
-        toolName: message.toolName,
-        elapsedSeconds: message.elapsedSeconds,
-      });
-      continue;
-    }
-
-    if (message.type === "tool-summary") {
-      await runtimeOptions.activityCallback?.({
-        kind: "tool-complete",
-        summary: message.summary,
-      });
-      continue;
-    }
-
-    if (message.type !== "result") continue;
-    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-      costUsd = message.totalCostUsd;
-    }
-
-    if ("result" in message) {
-      resultText = message.result;
-      structuredOutput = message.structuredOutput;
-      continue;
-    }
-
-    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
-  }
+    cwd: repoRoot,
+    model,
+    maxTurns: effectiveMaxTurns,
+    allowedTools,
+    runtimeOptions,
+    schema: TRIAGE_RESULT_SCHEMA,
+  });
 
   if (executionError) {
     throw new TriageExecutionError(`triage agent failed: ${executionError}`, costUsd);
@@ -261,67 +219,18 @@ async function triageSingleBatch(
   maxTurns: number | null = null,
 ): Promise<BatchTriageOutput> {
   const prompt = buildBatchTriagePrompt(findings, repoName, repoContext);
-  const runtime = runtimeOptions.runtime ?? getAgentRuntime();
   const effectiveMaxTurns = normalizeTurns(maxTurns);
-
-  let resultText = "";
-  let structuredOutput: unknown = undefined;
-  let executionError: string | null = null;
-  let costUsd = 0;
-
-  for await (const message of runtime.query({
+  const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
-    options: {
-      cwd: repoRoot,
-      model,
-      maxTurns: effectiveMaxTurns,
-      allowedTools: [...DEFAULT_TOOLS],
-      permissionMode: "dontAsk",
-      maxBudgetUsd: runtimeOptions.maxBudgetUsd,
-      abortController: runtimeOptions.abortController,
-      outputFormat: {
-        type: "json_schema",
-        schema: BATCH_TRIAGE_SCHEMA,
-        strict: true,
-        retryInvalidStructuredOutput: 2,
-      },
-    },
-  })) {
-    if (message.type === "assistant") {
-      await emitAssistantActivity(message.content, runtimeOptions.activityCallback);
-      continue;
-    }
-
-    if (message.type === "tool-progress") {
-      await runtimeOptions.activityCallback?.({
-        kind: "tool-progress",
-        toolName: message.toolName,
-        elapsedSeconds: message.elapsedSeconds,
-      });
-      continue;
-    }
-
-    if (message.type === "tool-summary") {
-      await runtimeOptions.activityCallback?.({
-        kind: "tool-complete",
-        summary: message.summary,
-      });
-      continue;
-    }
-
-    if (message.type !== "result") continue;
-    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-      costUsd = message.totalCostUsd;
-    }
-
-    if ("result" in message) {
-      resultText = message.result;
-      structuredOutput = message.structuredOutput;
-      continue;
-    }
-
-    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
-  }
+    cwd: repoRoot,
+    model,
+    maxTurns: effectiveMaxTurns,
+    allowedTools: DEFAULT_TOOLS,
+    runtimeOptions,
+    schema: BATCH_TRIAGE_SCHEMA,
+    strict: true,
+    retryInvalidStructuredOutput: 2,
+  });
 
   if (executionError) {
     throw new TriageExecutionError(`batch triage agent failed: ${executionError}`, costUsd);
@@ -353,7 +262,11 @@ function buildBatchTriagePrompt(
   ].join("\n"));
 
   return [
-    "You are a security triage agent. Investigate ALL of the following findings and determine if each is a true positive, false positive, or needs review.",
+    "You are a skeptical senior security engineer performing batch triage. Assume each finding is a",
+    "false positive until you can prove otherwise with concrete code evidence. Most scanner findings",
+    "are FPs due to missing context about middleware, framework protections, and sanitization.",
+    "",
+    "Investigate ALL of the following findings and determine if each is a true positive, false positive, or needs review.",
     "",
     `Repo: ${repoName}`,
     ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
@@ -366,7 +279,27 @@ function buildBatchTriagePrompt(
     "2. Trace dataflow from source to sink across call boundaries.",
     "3. Use Grep/Glob to locate sanitization, validation, and guards.",
     "4. Validate reachability and realistic attacker control.",
-    "5. Decide tp/fp/needs_review per finding with conservative confidence.",
+    "5. Decide tp/fp/needs_review per finding using the confidence escalation protocol below.",
+    "",
+    "## Confidence Escalation Protocol",
+    "Start at 0.1. Escalate only with evidence:",
+    "- 0.1-0.3: Read flagged code but haven't traced full path",
+    "- 0.3-0.5: Traced source-to-sink but haven't verified guards",
+    "- 0.5-0.7: Verified guards absent AND input is attacker-controlled",
+    "- 0.7-0.9: Full path verified with concrete exploit scenario",
+    "- 0.9-1.0: Verified exploitable with specific payload",
+    "Your rationale MUST cite the evidence that justifies your confidence level.",
+    "",
+    "## Common False-Dismissal Patterns",
+    "Do NOT dismiss a finding based solely on these rationalizations:",
+    '"The WAF will catch it" — WAFs are bypassable; test the application logic',
+    '"We use parameterized queries" — check for ORM misuse, stored procedures with dynamic SQL, and second-order injection',
+    '"The framework handles XSS" — template engines have raw output modes, JS contexts bypass HTML encoding, DOM XSS is client-side',
+    '"File uploads are safe because we check the extension" — null bytes, double extensions, parser discrepancies bypass extension checks',
+    '"We validate on the frontend" — client-side validation is UX, not security',
+    '"It\'s internal, auth doesn\'t matter" — internal apps get compromised via SSRF and lateral movement',
+    '"Low severity, not worth flagging" — low-severity findings chain into critical attack paths',
+    "If your FP rationale matches any of these patterns, re-investigate before concluding.",
     "",
     "## Output requirements",
     'Return ONLY a JSON object with a "results" array. Each element MUST have:',
@@ -465,6 +398,7 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
       recommendedFix: asOptionalString(raw["recommended_fix"]),
       ruleRefinementHint: asOptionalString(raw["rule_refinement_hint"]),
       triageSchemaVersion: asOptionalString(raw["triage_schema_version"]),
+      evidenceTrail: parseEvidenceTrail(raw["evidence_trail"]),
     };
   }
 
@@ -484,7 +418,11 @@ export function buildDefaultTriageAgentConfig(
 
   return {
     prompt: [
-      "You are a security triage agent.",
+      "You are a skeptical senior security engineer performing triage. Assume every finding is a",
+      "false positive until you can prove otherwise with concrete evidence from the code. You have",
+      "seen thousands of scanner findings and know that 60-80% are false positives due to missing",
+      "context about middleware, framework protections, and sanitization.",
+      "",
       "Use available repo tools to investigate whether this finding is a true or false positive.",
       ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
       "",
@@ -507,11 +445,32 @@ export function buildDefaultTriageAgentConfig(
       "2. Trace dataflow to source/sink across call boundaries.",
       "3. Use Grep/Glob to locate sanitization, validation, and guards.",
       "4. Validate reachability and realistic attacker control.",
-      "5. Decide tp/fp/needs_review with conservative confidence.",
+      "5. Decide tp/fp/needs_review using the confidence escalation protocol below.",
+      "",
+      "## Confidence Escalation Protocol",
+      "Start at 0.1. Escalate only with evidence:",
+      "- 0.1-0.3: Read flagged code but haven't traced full path",
+      "- 0.3-0.5: Traced source-to-sink but haven't verified guards",
+      "- 0.5-0.7: Verified guards absent AND input is attacker-controlled",
+      "- 0.7-0.9: Full path verified with concrete exploit scenario",
+      "- 0.9-1.0: Verified exploitable with specific payload",
+      "Your rationale MUST cite the evidence that justifies your confidence level.",
+      "",
+      "## Common False-Dismissal Patterns",
+      "Do NOT dismiss a finding based solely on these rationalizations:",
+      '- "The WAF will catch it" — WAFs are bypassable; test the application logic',
+      '- "We use parameterized queries" — check for ORM misuse, stored procedures with dynamic SQL, and second-order injection',
+      '- "The framework handles XSS" — template engines have raw output modes, JS contexts bypass HTML encoding, DOM XSS is client-side',
+      '- "File uploads are safe because we check the extension" — null bytes, double extensions, parser discrepancies bypass extension checks',
+      '- "We validate on the frontend" — client-side validation is UX, not security',
+      '- "It\'s internal, auth doesn\'t matter" — internal apps get compromised via SSRF and lateral movement',
+      '- "Low severity, not worth flagging" — low-severity findings chain into critical attack paths',
+      "If your FP rationale matches any of these patterns, re-investigate before concluding.",
       "",
       "## Output requirements",
       "Return ONLY a JSON object with:",
-      "fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null)",
+      "fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null),",
+      "evidence_trail(optional array of {level: string, evidence: string})",
     ].join("\n"),
   };
 }
@@ -535,36 +494,6 @@ function resolveAgentConfig(
   } catch {
     return buildDefaultTriageAgentConfig(finding, repoName, repoContext);
   }
-}
-
-function resolveTriageArgs(
-  repoContextOrRuntimeOptions: RepoContext | TriageRuntimeOptions | undefined,
-  maybeRuntimeOptions: TriageRuntimeOptions,
-): { repoContext?: RepoContext; runtimeOptions: TriageRuntimeOptions } {
-  if (!repoContextOrRuntimeOptions) {
-    return { runtimeOptions: maybeRuntimeOptions };
-  }
-
-  if (looksLikeRuntimeOptions(repoContextOrRuntimeOptions)) {
-    return {
-      runtimeOptions: repoContextOrRuntimeOptions,
-    };
-  }
-
-  return {
-    repoContext: repoContextOrRuntimeOptions,
-    runtimeOptions: maybeRuntimeOptions,
-  };
-}
-
-function looksLikeRuntimeOptions(value: RepoContext | TriageRuntimeOptions): value is TriageRuntimeOptions {
-  const runtimeOptions = value as TriageRuntimeOptions;
-  return (
-    "runtime" in runtimeOptions
-    || "abortController" in runtimeOptions
-    || "maxBudgetUsd" in runtimeOptions
-    || "activityCallback" in runtimeOptions
-  );
 }
 
 function normalizeAllowedTools(tools: AllowedTriageTool[] | undefined): AllowedTriageTool[] {
@@ -593,22 +522,6 @@ export function parseVerdict(v: string): Verdict {
   return "needs_review";
 }
 
-/** Extract JSON from LLM response, handling markdown fences and preamble. */
-export function extractJson(text: string): string {
-  // Use a greedy match that requires the closing fence at the start of a line
-  // to avoid breaking on nested code fences inside JSON string values.
-  const fenceMatch = text.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/);
-  if (fenceMatch) return fenceMatch[1].trim();
-
-  const braceStart = text.indexOf("{");
-  const braceEnd = text.lastIndexOf("}");
-  if (braceStart !== -1 && braceEnd > braceStart) {
-    return text.slice(braceStart, braceEnd + 1);
-  }
-
-  return text.trim();
-}
-
 /** Parse raw LLM text into a TriageResult. */
 export function parseTriageResponse(
   text: string,
@@ -632,6 +545,7 @@ export function parseTriageResponse(
       recommendedFix: asOptionalString(parsed.recommended_fix),
       ruleRefinementHint: asOptionalString(parsed.rule_refinement_hint),
       triageSchemaVersion: asOptionalString(parsed.triage_schema_version),
+      evidenceTrail: parseEvidenceTrail(parsed.evidence_trail),
     };
   } catch (error) {
     throw new Error(`Invalid triage JSON response: ${toErrorMessage(error)}`);
@@ -657,67 +571,6 @@ function normalizeFixPatch(value: unknown): string | null {
   return value;
 }
 
-function formatRepoContext(repoContext: RepoContext | undefined): string[] {
-  if (!repoContext) {
-    return [];
-  }
-
-  const lines: string[] = [];
-  if (repoContext.languages.length > 0) {
-    lines.push(`Languages: ${repoContext.languages.join(", ")}`);
-  }
-  if (repoContext.frameworks.length > 0) {
-    lines.push(`Frameworks: ${repoContext.frameworks.join(", ")}`);
-  }
-  if (repoContext.authPatterns.length > 0) {
-    lines.push(`Auth: ${repoContext.authPatterns.join(", ")}`);
-  }
-  if (repoContext.ormOrDb.length > 0) {
-    lines.push(`ORM/DB: ${repoContext.ormOrDb.join(", ")}`);
-  }
-  if (repoContext.sanitizationLibs.length > 0) {
-    lines.push(`Sanitization: ${repoContext.sanitizationLibs.join(", ")}`);
-  }
-  if (repoContext.entryPoints.length > 0) {
-    lines.push(`Entry points: ${repoContext.entryPoints.join(", ")}`);
-  }
-
-  return lines;
-}
-
-async function emitAssistantActivity(
-  blocks: Array<Record<string, unknown>>,
-  callback: AgentActivityCallback | undefined,
-): Promise<void> {
-  if (!callback) {
-    return;
-  }
-
-  for (const block of blocks) {
-    const blockType = asString(block["type"], "");
-
-    if (blockType === "tool_use") {
-      const toolName = asString(block["name"], "");
-      const input = isRecord(block["input"]) ? block["input"] : undefined;
-      await callback({
-        kind: "tool-start",
-        toolName: toolName || undefined,
-        toolInput: input,
-      });
-      continue;
-    }
-
-    if (blockType === "text") {
-      const text = asString(block["text"], "").trim();
-      if (!text) continue;
-      await callback({
-        kind: "reasoning",
-        summary: text,
-      });
-    }
-  }
-}
-
 function asString(value: unknown, fallback: string): string {
   if (typeof value === "string") return value;
   if (value == null) return fallback;
@@ -737,6 +590,20 @@ function asOptionalBoolean(value: unknown): boolean | undefined {
     return undefined;
   }
   return value;
+}
+
+function parseEvidenceTrail(value: unknown): Array<{ level: string; evidence: string }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const trail: Array<{ level: string; evidence: string }> = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const level = typeof item["level"] === "string" ? item["level"].trim() : "";
+    const evidence = typeof item["evidence"] === "string" ? item["evidence"].trim() : "";
+    if (level && evidence) {
+      trail.push({ level, evidence });
+    }
+  }
+  return trail.length > 0 ? trail : undefined;
 }
 
 function parsePathAssessment(value: unknown): TriageResult["source"] | undefined {

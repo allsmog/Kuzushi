@@ -834,4 +834,33 @@ describe("taint-analysis-label internals", () => {
     expect(prompt).toContain("NOT sinks");
     expect(prompt).toContain("role=none, classification=fp");
   });
+
+  it("summarizeLabels includes advisory header", () => {
+    const labels: TaintAnalysisLabelsDocument = {
+      version: "1.0.0",
+      metadata: {
+        run_id: "test",
+        generated_at: new Date().toISOString(),
+        language: "python",
+        framework: null,
+        model: "test-model",
+        project: "test-repo",
+      },
+      passes: [
+        {
+          pass_id: 1,
+          focus: "Path Traversal",
+          cwes: ["022"],
+          entries: [
+            makePassEntry({ id: "s1", role: "source", callable: "Query" }),
+            makePassEntry({ id: "s2", role: "sink", callable: "open" }),
+          ],
+        },
+      ],
+    };
+
+    const { reviewSummary } = __taintAnalysisLabelInternals.summarizeLabels(labels, 0.55);
+    expect(reviewSummary).toContain("> **Advisory only**");
+    expect(reviewSummary).toContain("No pipeline stage gates on approval");
+  });
 });

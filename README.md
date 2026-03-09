@@ -160,7 +160,7 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | --- | --- | --- |
 | `model` | `anthropic:claude-sonnet-4-6` | LLM model for scanners and default triage model |
 | `triageModel` | _(uses `model`)_ | Override model used by the triage agent |
-| `triageMaxTurns` | `10` | Max agentic turns per triage call |
+| `triageMaxTurns` | `null` (uses runtime default: `10`) | Max agentic turns per triage call |
 | `scanners` | `["semgrep"]` | Scanner plugins to run, in order |
 | `severity` | `["ERROR","WARNING"]` | Semgrep severity filter |
 | `excludePatterns` | `["test","tests","node_modules",...]` | Directories/globs to skip |

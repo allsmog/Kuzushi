@@ -4,10 +4,12 @@ import type { ScanOpts, KuzushiConfig } from "../../src/types.js";
 import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
+import { attachTaskOutputMeta } from "../../src/task-output-meta.js";
 import type {
   ScanCompleteEvent,
   ScanFindingEvent,
   ScanScannerCompleteEvent,
+  TaskCompleteEvent,
   TaskErrorEvent,
 } from "../../src/bus/events.js";
 import { TaskRegistry } from "../../src/agents/registry.js";
@@ -268,6 +270,111 @@ describe("scan-worker", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].payload.taskId).toBe("nonexistent-task");
     expect(errors[0].payload.error).toContain("not found in registry");
+
+    await bus.close();
+  });
+
+  it("propagates scanner cost metadata on task:complete", async () => {
+    const bus = new InProcessBus();
+    const a = new FakePlugin(
+      "a",
+      "A",
+      attachTaskOutputMeta([makeFinding("a", "fp-a")], { costUsd: 0.0125 }),
+    );
+
+    const registry = {
+      get: () => a,
+    };
+
+    registerScanWorker(bus, {
+      registry: registry as any,
+      config: makeConfig("sequential"),
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const completePromise = bus.waitFor<TaskCompleteEvent>(
+      "task:complete",
+      (event) => event.meta.runId === runId && event.payload.taskId === "a",
+    );
+
+    await bus.publish(
+      createEvent("scan:start", runId, {
+        context,
+        scanners: ["a"],
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          fresh: false,
+        },
+      }),
+    );
+
+    const complete = await completePromise;
+    expect(complete.payload.costUsd).toBeCloseTo(0.0125, 8);
+
+    await bus.close();
+  });
+
+  it("propagates task cost metadata on task:complete", async () => {
+    const bus = new InProcessBus();
+    const registry = {
+      get: () => new FakePlugin("a", "A", []),
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const task: AgentTask<ScanOpts, Finding[]> = {
+      id: "costed-task",
+      displayName: "Costed Task",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return attachTaskOutputMeta([makeFinding("costed-task", "fp-task")], { costUsd: 0.034 });
+      },
+    };
+    taskRegistry.register(task);
+
+    registerScanWorker(bus, {
+      registry: registry as any,
+      config: makeConfig("sequential"),
+      taskRegistry,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const completePromise = bus.waitFor<TaskCompleteEvent>(
+      "task:complete",
+      (event) => event.meta.runId === runId && event.payload.taskId === "costed-task",
+    );
+
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "costed-task",
+        outputKind: "findings",
+        input: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          fresh: false,
+        } satisfies ScanOpts,
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    const complete = await completePromise;
+    expect(complete.payload.costUsd).toBeCloseTo(0.034, 8);
 
     await bus.close();
   });

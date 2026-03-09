@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../../agent-runtime/index.js";
+import { coerceRepoContext } from "../../../repo-context.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
+import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
@@ -273,12 +275,13 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
 
   async run(_input, context): Promise<{ document: ThreatModelDocument; findings: Finding[] }> {
     const cfg = resolveThreatModelConfig(context.config);
-    const repoContext = context.upstreamOutputs.get("context-gatherer") as RepoContext | undefined;
+    const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const prompt = buildStridePrompt(repoContext, cfg.maxElements, cfg.maxThreats);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;
     let resultText = "";
+    let costUsd = 0;
 
     const tag = "[threat-model-stride]";
     console.error(`${tag} Starting STRIDE analysis (model=${cfg.strideModel})`);
@@ -289,34 +292,32 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
         options: {
           cwd: context.repoRoot,
           model: cfg.strideModel,
-          maxTurns: 30,
+          maxTurns: undefined,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",
             schema: STRIDE_RESPONSE_SCHEMA,
+            strict: true,
+            retryInvalidStructuredOutput: 2,
           },
         },
       })) {
         if (message.type !== "result") continue;
+        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
         if ("result" in message) {
           resultText = message.result;
           structuredOutput = message.structuredOutput;
         }
       }
     } catch (error) {
-      console.error(`${tag} Error: ${toErrorMessage(error)}`);
-      const emptyDoc: ThreatModelDocument = {
-        version: "1.0",
-        dfd: { elements: [], trustBoundaries: [] },
-        threats: [],
-        summary: { total: 0, bySeverity: {}, byCategory: {} as Record<StrideCategory, number> },
-      };
-      return { document: emptyDoc, findings: [] };
+      throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
     const parsed = parseStrideResponse(
-      structuredOutput ?? parseJson(resultText),
+      structuredOutput ?? parseJson(resultText, tag),
       cfg.maxElements,
       cfg.maxThreats,
     );
@@ -334,7 +335,7 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
       ? threatsToFindings(parsed.threats, context.repoRoot, context.repoName, cfg.findingThreshold)
       : [];
 
-    return { document, findings };
+    return attachTaskOutputMeta({ document, findings }, { costUsd });
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
@@ -354,11 +355,11 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
   },
 };
 
-function parseJson(text: string): unknown {
+function parseJson(text: string, tag: string): unknown {
   try {
     return JSON.parse(text);
-  } catch {
-    return { elements: [], trustBoundaries: [], threats: [] };
+  } catch (error) {
+    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
   }
 }
 

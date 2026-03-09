@@ -1,6 +1,6 @@
 import type { MessageBus } from "../bus/types.js";
 import type { Finding, TriageAgentConfig } from "../scanners/types.js";
-import type { KuzushiConfig } from "../types.js";
+import type { KuzushiConfig, SecurityProfile } from "../types.js";
 
 /** What kind of output this task produces. */
 export type TaskOutputKind = "findings" | "threat-model" | "verdict" | "report" | "custom";
@@ -15,6 +15,8 @@ export interface TaskContext {
   bus: MessageBus;
   /** Outputs from completed dependency tasks, keyed by task ID. */
   upstreamOutputs: Map<string, unknown>;
+  /** Domain-specific security profiles loaded from project config. */
+  securityProfiles?: SecurityProfile[];
 }
 
 /**

@@ -3,6 +3,7 @@ import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { Finding } from "../scanners/types.js";
 import { selectTopFindings } from "../scanners/finding-selection.js";
+import { HardExclusionFilter } from "../scanners/fp-filter.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
 import {
   getPocHarnessedFingerprints,
@@ -25,6 +26,7 @@ import type {
   Verdict,
 } from "../types.js";
 import { coerceRepoContext } from "../repo-context.js";
+import { loadPrecedents, type Precedents } from "../precedents.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type {
@@ -87,6 +89,7 @@ interface RunState {
   totalFindings: number;
   skippedAlreadyTriaged: number;
   skippedLowConfidence: number;
+  skippedByFpFilter: number;
   triageQueue: QueuedFinding[];
   queueCursor: number;
   triageTotal: number;
@@ -130,6 +133,7 @@ interface RunState {
   dispatching: boolean;
   collectScanFindingEvents: boolean;
   repoContext?: RepoContext;
+  precedents?: Precedents;
   taskOutputs: Map<string, unknown>;
   failedTasks: string[];
 }
@@ -265,6 +269,7 @@ export class PipelineOrchestrator {
       totalFindings: 0,
       skippedAlreadyTriaged: 0,
       skippedLowConfidence: 0,
+      skippedByFpFilter: 0,
       triageQueue: [],
       queueCursor: 0,
       triageTotal: 0,
@@ -311,6 +316,13 @@ export class PipelineOrchestrator {
       taskOutputs: new Map<string, unknown>(),
       failedTasks: [],
     };
+
+    // Load organization precedents
+    try {
+      state.precedents = loadPrecedents(context.repoRoot);
+    } catch {
+      // Precedents loading is best-effort.
+    }
 
     this.runs.set(runId, state);
 
@@ -873,11 +885,28 @@ export class PipelineOrchestrator {
       }
     }
 
-    const triageCandidates = rankedFindings.filter(
+    // Apply FP filter before triage queue
+    let filteredFindings = rankedFindings;
+    state.skippedByFpFilter = 0;
+    if (state.config.fpFilterEnabled !== false) {
+      const customExclusions = [
+        ...(state.config.fpFilterCustomExclusions ?? []),
+        ...(state.precedents?.hardExclusions ?? []),
+      ];
+      const fpFilter = new HardExclusionFilter(customExclusions);
+      const filterResult = fpFilter.filterFindings(rankedFindings);
+      filteredFindings = filterResult.kept;
+      state.skippedByFpFilter = filterResult.excluded.length;
+      if (filterResult.excluded.length > 0) {
+        console.error(`[fp-filter] Excluded ${filterResult.excluded.length} findings`);
+      }
+    }
+
+    const triageCandidates = filteredFindings.filter(
       (finding) => !alreadyTriaged.has(finding.fingerprint),
     );
 
-    state.skippedAlreadyTriaged = rankedFindings.length - triageCandidates.length;
+    state.skippedAlreadyTriaged = filteredFindings.length - triageCandidates.length;
     state.triageTotal = triageCandidates.length;
     state.triageQueue = triageCandidates.map((finding, idx) => ({
       finding,
@@ -1030,6 +1059,7 @@ export class PipelineOrchestrator {
           queuedForTriage: state.triageTotal,
           skippedAlreadyTriaged: state.skippedAlreadyTriaged,
           skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
+          skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
           triaged: state.triaged,
           triageErrors: state.triageErrors,
           totalCostUsd: state.totalCostUsd,
@@ -1144,6 +1174,7 @@ export class PipelineOrchestrator {
             context: state.context,
             finding: item.finding,
             repoContext: state.repoContext,
+            precedents: state.precedents,
             index: item.index,
             total: item.total,
           }),
@@ -1169,6 +1200,7 @@ export class PipelineOrchestrator {
         context: state.context,
         findings,
         repoContext: state.repoContext,
+        precedents: state.precedents,
         total: findings.length,
       }),
     );
@@ -1416,6 +1448,7 @@ export class PipelineOrchestrator {
             finding: item.finding,
             triageResult: item.triageResult,
             repoContext: state.repoContext,
+            precedents: state.precedents,
             index: item.index,
             total: item.total,
           }),
@@ -1744,6 +1777,7 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     queuedForTriage: state.triageTotal,
     skippedAlreadyTriaged: state.skippedAlreadyTriaged,
     skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
+    skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
     triaged: state.triaged,
     triageErrors: state.triageErrors,
     totalCostUsd: state.totalCostUsd,

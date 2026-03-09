@@ -1,7 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { getAgentRuntime, type AgentRuntime } from "./agent-runtime/index.js";
+import {
+  DEFAULT_READ_ONLY_TOOLS,
+  extractJson,
+  resolveRepoContextAndRuntimeOptions,
+  runStructuredAgentQuery,
+  type AgentActivityCallback,
+  type AgentRuntimeOptions,
+} from "./agent-runtime/execution.js";
 import type { AllowedTriageTool, Finding } from "./scanners/types.js";
 import type {
   PocHarnessResult,
@@ -9,7 +16,7 @@ import type {
   TriageResult,
   VerificationResult,
 } from "./types.js";
-import type { AgentActivityCallback } from "./triage.js";
+import { formatRepoContext } from "./repo-context.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 
 export const POC_HARNESS_RESULT_SCHEMA = {
@@ -25,15 +32,10 @@ export const POC_HARNESS_RESULT_SCHEMA = {
   },
 } as const;
 
-export const DEFAULT_TOOLS: AllowedTriageTool[] = ["Read", "Glob", "Grep"];
+export const DEFAULT_TOOLS: AllowedTriageTool[] = [...DEFAULT_READ_ONLY_TOOLS];
 export const DEFAULT_MAX_TURNS = 20;
 
-export interface PocHarnessRuntimeOptions {
-  runtime?: AgentRuntime;
-  abortController?: AbortController;
-  maxBudgetUsd?: number;
-  activityCallback?: AgentActivityCallback;
-}
+export interface PocHarnessRuntimeOptions extends AgentRuntimeOptions {}
 
 export interface PocHarnessOutput {
   result: PocHarnessResult;
@@ -61,11 +63,10 @@ export async function generatePocHarness(
   repoContextOrRuntimeOptions?: RepoContext | PocHarnessRuntimeOptions,
   maybeRuntimeOptions: PocHarnessRuntimeOptions = {},
 ): Promise<PocHarnessOutput> {
-  const { repoContext, runtimeOptions } = resolvePocHarnessArgs(
+  const { repoContext, runtimeOptions } = resolveRepoContextAndRuntimeOptions(
     repoContextOrRuntimeOptions,
     maybeRuntimeOptions,
   );
-  const runtime = runtimeOptions.runtime ?? getAgentRuntime();
   const prompt = buildPocHarnessPrompt(
     finding,
     triageResult,
@@ -74,63 +75,15 @@ export async function generatePocHarness(
     repoContext,
   );
   const effectiveMaxTurns = normalizeTurns(maxTurns);
-
-  let resultText = "";
-  let structuredOutput: unknown = undefined;
-  let executionError: string | null = null;
-  let costUsd = 0;
-
-  for await (const message of runtime.query({
+  const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
-    options: {
-      cwd: repoRoot,
-      model,
-      maxTurns: effectiveMaxTurns,
-      allowedTools: [...DEFAULT_TOOLS],
-      permissionMode: "dontAsk",
-      maxBudgetUsd: runtimeOptions.maxBudgetUsd,
-      abortController: runtimeOptions.abortController,
-      outputFormat: {
-        type: "json_schema",
-        schema: POC_HARNESS_RESULT_SCHEMA,
-      },
-    },
-  })) {
-    if (message.type === "assistant") {
-      await emitAssistantActivity(message.content, runtimeOptions.activityCallback);
-      continue;
-    }
-
-    if (message.type === "tool-progress") {
-      await runtimeOptions.activityCallback?.({
-        kind: "tool-progress",
-        toolName: message.toolName,
-        elapsedSeconds: message.elapsedSeconds,
-      });
-      continue;
-    }
-
-    if (message.type === "tool-summary") {
-      await runtimeOptions.activityCallback?.({
-        kind: "tool-complete",
-        summary: message.summary,
-      });
-      continue;
-    }
-
-    if (message.type !== "result") continue;
-    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-      costUsd = message.totalCostUsd;
-    }
-
-    if ("result" in message) {
-      resultText = message.result;
-      structuredOutput = message.structuredOutput;
-      continue;
-    }
-
-    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
-  }
+    cwd: repoRoot,
+    model,
+    maxTurns: effectiveMaxTurns,
+    allowedTools: DEFAULT_TOOLS,
+    runtimeOptions,
+    schema: POC_HARNESS_RESULT_SCHEMA,
+  });
 
   if (executionError) {
     throw new PocHarnessExecutionError(`poc harness agent failed: ${executionError}`, costUsd);
@@ -379,38 +332,6 @@ function normalizeTurns(value: number): number {
   return Math.floor(value);
 }
 
-function resolvePocHarnessArgs(
-  repoContextOrRuntimeOptions: RepoContext | PocHarnessRuntimeOptions | undefined,
-  maybeRuntimeOptions: PocHarnessRuntimeOptions,
-): { repoContext?: RepoContext; runtimeOptions: PocHarnessRuntimeOptions } {
-  if (!repoContextOrRuntimeOptions) {
-    return { runtimeOptions: maybeRuntimeOptions };
-  }
-
-  if (looksLikeRuntimeOptions(repoContextOrRuntimeOptions)) {
-    return {
-      runtimeOptions: repoContextOrRuntimeOptions,
-    };
-  }
-
-  return {
-    repoContext: repoContextOrRuntimeOptions,
-    runtimeOptions: maybeRuntimeOptions,
-  };
-}
-
-function looksLikeRuntimeOptions(
-  value: RepoContext | PocHarnessRuntimeOptions,
-): value is PocHarnessRuntimeOptions {
-  const runtimeOptions = value as PocHarnessRuntimeOptions;
-  return (
-    "runtime" in runtimeOptions
-    || "abortController" in runtimeOptions
-    || "maxBudgetUsd" in runtimeOptions
-    || "activityCallback" in runtimeOptions
-  );
-}
-
 function buildHarnessFileName(fingerprint: string, cwes: string[], extension: string): string {
   const prefix = fingerprint.slice(0, 16).toLowerCase();
   const cwe = firstCwe(cwes);
@@ -451,84 +372,10 @@ function normalizeLanguage(value: unknown): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function extractJson(text: string): string {
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (fenceMatch) return fenceMatch[1].trim();
-
-  const braceStart = text.indexOf("{");
-  const braceEnd = text.lastIndexOf("}");
-  if (braceStart !== -1 && braceEnd > braceStart) {
-    return text.slice(braceStart, braceEnd + 1);
-  }
-
-  return text.trim();
-}
-
 function normalizeNullableString(value: unknown): string | null {
   if (value == null) return null;
   if (typeof value !== "string") return null;
   return value;
-}
-
-function formatRepoContext(repoContext: RepoContext | undefined): string[] {
-  if (!repoContext) {
-    return [];
-  }
-
-  const lines: string[] = [];
-  if (repoContext.languages.length > 0) {
-    lines.push(`Languages: ${repoContext.languages.join(", ")}`);
-  }
-  if (repoContext.frameworks.length > 0) {
-    lines.push(`Frameworks: ${repoContext.frameworks.join(", ")}`);
-  }
-  if (repoContext.authPatterns.length > 0) {
-    lines.push(`Auth: ${repoContext.authPatterns.join(", ")}`);
-  }
-  if (repoContext.ormOrDb.length > 0) {
-    lines.push(`ORM/DB: ${repoContext.ormOrDb.join(", ")}`);
-  }
-  if (repoContext.sanitizationLibs.length > 0) {
-    lines.push(`Sanitization: ${repoContext.sanitizationLibs.join(", ")}`);
-  }
-  if (repoContext.entryPoints.length > 0) {
-    lines.push(`Entry points: ${repoContext.entryPoints.join(", ")}`);
-  }
-
-  return lines;
-}
-
-async function emitAssistantActivity(
-  blocks: Array<Record<string, unknown>>,
-  callback: AgentActivityCallback | undefined,
-): Promise<void> {
-  if (!callback) {
-    return;
-  }
-
-  for (const block of blocks) {
-    const blockType = asString(block["type"], "");
-
-    if (blockType === "tool_use") {
-      const toolName = asString(block["name"], "");
-      const input = isRecord(block["input"]) ? block["input"] : undefined;
-      await callback({
-        kind: "tool-start",
-        toolName: toolName || undefined,
-        toolInput: input,
-      });
-      continue;
-    }
-
-    if (blockType === "text") {
-      const text = asString(block["text"], "").trim();
-      if (!text) continue;
-      await callback({
-        kind: "reasoning",
-        summary: text,
-      });
-    }
-  }
 }
 
 function asString(value: unknown, fallback: string): string {

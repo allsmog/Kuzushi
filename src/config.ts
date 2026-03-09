@@ -20,6 +20,8 @@ const AGENT_RUNTIME_BACKENDS = new Set<string>([
   "acp",
 ]);
 const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() || taintAnalysisRoot;
+type ConfigLayer = Record<string, unknown>;
+type WritableConfigLayer = Partial<KuzushiConfig> & ConfigLayer;
 
 /** Hard defaults — the bottom of the precedence stack. */
 export const DEFAULTS: KuzushiConfig = {
@@ -55,10 +57,17 @@ export const DEFAULTS: KuzushiConfig = {
     "test", "tests", "spec", "vendor",
     "node_modules", "__tests__", "*.min.js", "*.min.css",
   ],
+  fpFilterEnabled: true,
+  fpFilterCustomExclusions: [],
+  variantAnalysis: false,
+  variantAnalysisMaxFindings: 10,
+  enableContextEnrichment: false,
+  diffBase: undefined,
   scannerConfig: {
     semgrep: { configFlag: "auto" },
     agentic: { model: "anthropic:claude-sonnet-4-6", maxFindings: 20 },
     codeql: {},
+    "dangerous-api": { maxFindings: 50 },
     "taint-analysis": {
       taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
       dbPath: undefined,
@@ -89,22 +98,39 @@ const VALID_TOP_LEVEL_KEYS = new Set<string>([
   "triageModel",
   "verifyModel",
   "pocHarnessModel",
+  "variantAnalysisModel",
+  "contextEnrichmentModel",
+  "llmRescoreEnabled",
+  "llmRescoreModel",
+  "llmRescoreThreshold",
+  "chainAnalysis",
+  "chainAnalysisModel",
+  "precedentsPath",
+  "securityProfilesPath",
 ]);
 
 /** Load config from ~/.kuzushi/config.json + optional <repo>/.kuzushi/config.json. */
 export function loadConfig(repoRoot?: string): KuzushiConfig {
-  const globalRaw = readConfigFile(CONFIG_PATH);
-  const projectRaw = repoRoot
-    ? readConfigFile(projectConfigPath(repoRoot))
-    : {};
-
-  const merged = mergeConfigLayers(DEFAULTS, globalRaw, projectRaw);
-  return normalizeConfig(merged);
+  const { globalRaw, projectRaw } = loadConfigLayers(repoRoot);
+  return mergeConfigLayers(globalRaw, projectRaw);
 }
 
 /** Save config. If repoRoot is provided, writes project config. */
 export function saveConfig(config: KuzushiConfig, repoRoot?: string): void {
-  const targetPath = repoRoot ? projectConfigPath(repoRoot) : CONFIG_PATH;
+  writeConfigFile(
+    repoRoot ? projectConfigPath(repoRoot) : CONFIG_PATH,
+    normalizeConfig(config),
+  );
+}
+
+function saveConfigLayer(config: ConfigLayer, repoRoot?: string): void {
+  writeConfigFile(
+    repoRoot ? projectConfigPath(repoRoot) : CONFIG_PATH,
+    sanitizeConfigLayer(config),
+  );
+}
+
+function writeConfigFile(targetPath: string, config: unknown): void {
   const targetDir = path.dirname(targetPath);
 
   if (!existsSync(targetDir)) {
@@ -128,13 +154,13 @@ export function getConfigValue(key: string, repoRoot?: string): unknown {
 
 /** Set a config value by key (supports dotted paths like scannerConfig.semgrep.binary). */
 export function setConfigValue(key: string, raw: string, repoRoot?: string): void {
-  const config = loadConfig(repoRoot);
+  const config = loadWritableConfigLayer(repoRoot);
 
   if (key.includes(".")) {
     const parts = key.split(".");
     validatePathParts(parts);
     setByPath(config, parts, parseFlexibleValue(raw));
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -144,13 +170,13 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
 
   if (key === "scanners") {
     config.scanners = coerceStringArray(raw);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "enabledTasks") {
     config.enabledTasks = coerceStringArray(raw);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -160,7 +186,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("scannerConfig must be an object");
     }
     config.scannerConfig = coerceScannerConfigMap(parsed);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -170,7 +196,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("agentRuntimeConfig must be an object");
     }
     config.agentRuntimeConfig = normalizeAgentRuntimeConfig(parsed);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -180,7 +206,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("triageBatchSize must be a positive number");
     }
     config.triageBatchSize = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -190,7 +216,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("triageConcurrency must be a positive number");
     }
     config.triageConcurrency = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -204,7 +230,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       }
       config.triageMaxTurns = Math.floor(n);
     }
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -214,7 +240,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("verify must be true or false");
     }
     config.verify = parsed;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -224,7 +250,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("verifyMaxTurns must be a positive number");
     }
     config.verifyMaxTurns = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -234,13 +260,13 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("verifyConcurrency must be a positive number");
     }
     config.verifyConcurrency = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "verifyVerdicts") {
     config.verifyVerdicts = coerceVerdictArray(raw);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -250,7 +276,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("verifyMinConfidence must be a number between 0 and 1");
     }
     config.verifyMinConfidence = n;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -260,7 +286,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("pocHarness must be true or false");
     }
     config.pocHarness = parsed;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -270,7 +296,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("pocHarnessMaxTurns must be a positive number");
     }
     config.pocHarnessMaxTurns = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -280,7 +306,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("pocHarnessConcurrency must be a positive number");
     }
     config.pocHarnessConcurrency = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -290,7 +316,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("enableContextGathering must be true or false");
     }
     config.enableContextGathering = parsed;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -300,19 +326,19 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("auditLog must be true or false");
     }
     config.auditLog = parsed;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "reportOutput") {
     config.reportOutput = raw.trim() || undefined;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "sarifOutput") {
     config.sarifOutput = raw.trim() || undefined;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -322,7 +348,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("maxTriageRetries must be a non-negative number");
     }
     config.maxTriageRetries = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -332,7 +358,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("maxVerifyRetries must be a non-negative number");
     }
     config.maxVerifyRetries = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -342,7 +368,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("maxPocHarnessRetries must be a non-negative number");
     }
     config.maxPocHarnessRetries = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -352,7 +378,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("retryBackoffMs must be a non-negative number");
     }
     config.retryBackoffMs = Math.floor(n);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -362,7 +388,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("retryBackoffMultiplier must be a positive number");
     }
     config.retryBackoffMultiplier = n;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -372,7 +398,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("scanMode must be one of: sequential, concurrent");
     }
     config.scanMode = mode;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -384,7 +410,7 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       );
     }
     config.agentRuntimeBackend = backend as KuzushiConfig["agentRuntimeBackend"];
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -394,43 +420,43 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error(`busBackend must be one of: ${[...BUS_BACKENDS].join(", ")}`);
     }
     config.busBackend = backend as KuzushiConfig["busBackend"];
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "severity") {
     config.severity = coerceStringArray(raw);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "excludePatterns") {
     config.excludePatterns = coerceStringArray(raw);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "model") {
     config.model = raw;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "triageModel") {
     config.triageModel = raw.trim() || undefined;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "verifyModel") {
     config.verifyModel = raw.trim() || undefined;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
   if (key === "pocHarnessModel") {
     config.pocHarnessModel = raw.trim() || undefined;
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -439,13 +465,13 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
 
 /** Unset a config key (supports dotted paths). */
 export function unsetConfigValue(key: string, repoRoot?: string): void {
-  const config = loadConfig(repoRoot);
+  const config = loadWritableConfigLayer(repoRoot);
 
   if (key.includes(".")) {
     const parts = key.split(".");
     validatePathParts(parts);
     unsetByPath(config, parts);
-    saveConfig(normalizeConfig(config), repoRoot);
+    saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
@@ -453,53 +479,8 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
     throw new Error(`Unknown config key: ${key}. Valid keys: ${[...VALID_TOP_LEVEL_KEYS].join(", ")}`);
   }
 
-  if (key in DEFAULTS) {
-    if (key === "model") config.model = DEFAULTS.model;
-    else if (key === "triageMaxTurns") config.triageMaxTurns = DEFAULTS.triageMaxTurns;
-    else if (key === "verify") config.verify = DEFAULTS.verify;
-    else if (key === "verifyMaxTurns") config.verifyMaxTurns = DEFAULTS.verifyMaxTurns;
-    else if (key === "verifyConcurrency") config.verifyConcurrency = DEFAULTS.verifyConcurrency;
-    else if (key === "verifyVerdicts") config.verifyVerdicts = [...(DEFAULTS.verifyVerdicts ?? ["tp"])];
-    else if (key === "verifyMinConfidence") config.verifyMinConfidence = DEFAULTS.verifyMinConfidence;
-    else if (key === "pocHarness") config.pocHarness = DEFAULTS.pocHarness;
-    else if (key === "pocHarnessMaxTurns") config.pocHarnessMaxTurns = DEFAULTS.pocHarnessMaxTurns;
-    else if (key === "pocHarnessConcurrency") {
-      config.pocHarnessConcurrency = DEFAULTS.pocHarnessConcurrency;
-    }
-    else if (key === "enableContextGathering") {
-      config.enableContextGathering = DEFAULTS.enableContextGathering;
-    } else if (key === "auditLog") config.auditLog = DEFAULTS.auditLog;
-    else if (key === "reportOutput") config.reportOutput = DEFAULTS.reportOutput;
-    else if (key === "sarifOutput") config.sarifOutput = DEFAULTS.sarifOutput;
-    else if (key === "maxTriageRetries") config.maxTriageRetries = DEFAULTS.maxTriageRetries;
-    else if (key === "maxVerifyRetries") config.maxVerifyRetries = DEFAULTS.maxVerifyRetries;
-    else if (key === "maxPocHarnessRetries") {
-      config.maxPocHarnessRetries = DEFAULTS.maxPocHarnessRetries;
-    }
-    else if (key === "retryBackoffMs") config.retryBackoffMs = DEFAULTS.retryBackoffMs;
-    else if (key === "retryBackoffMultiplier") {
-      config.retryBackoffMultiplier = DEFAULTS.retryBackoffMultiplier;
-    }
-    else if (key === "busBackend") config.busBackend = DEFAULTS.busBackend;
-    else if (key === "triageBatchSize") config.triageBatchSize = DEFAULTS.triageBatchSize;
-    else if (key === "triageConcurrency") config.triageConcurrency = DEFAULTS.triageConcurrency;
-    else if (key === "scanMode") config.scanMode = DEFAULTS.scanMode;
-    else if (key === "agentRuntimeBackend") config.agentRuntimeBackend = DEFAULTS.agentRuntimeBackend;
-    else if (key === "agentRuntimeConfig") config.agentRuntimeConfig = DEFAULTS.agentRuntimeConfig;
-    else if (key === "enabledTasks") config.enabledTasks = [...(DEFAULTS.enabledTasks ?? [])];
-    else if (key === "scanners") config.scanners = [...DEFAULTS.scanners];
-    else if (key === "severity") config.severity = [...DEFAULTS.severity];
-    else if (key === "excludePatterns") config.excludePatterns = [...DEFAULTS.excludePatterns];
-    else if (key === "scannerConfig") config.scannerConfig = cloneScannerConfig(DEFAULTS.scannerConfig);
-  } else if (key === "triageModel") {
-    config.triageModel = undefined;
-  } else if (key === "verifyModel") {
-    config.verifyModel = undefined;
-  } else if (key === "pocHarnessModel") {
-    config.pocHarnessModel = undefined;
-  }
-
-  saveConfig(normalizeConfig(config), repoRoot);
+  delete config[key];
+  saveUpdatedConfigLayer(config, repoRoot);
 }
 
 /** Return global config file path. */
@@ -623,186 +604,96 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
 function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
   const merged: KuzushiConfig = {
     ...DEFAULTS,
-    scannerConfig: { ...DEFAULTS.scannerConfig },
+    scannerConfig: cloneScannerConfig(DEFAULTS.scannerConfig),
+    enabledTasks: [...(DEFAULTS.enabledTasks ?? [])],
+    scanners: [...DEFAULTS.scanners],
+    severity: [...DEFAULTS.severity],
+    excludePatterns: [...DEFAULTS.excludePatterns],
+    verifyVerdicts: [...(DEFAULTS.verifyVerdicts ?? [])],
   };
 
   for (const layer of layers) {
-    if (!isRecord(layer)) continue;
-
-    if (typeof layer["model"] === "string") {
-      merged.model = layer["model"];
+    if (!isRecord(layer)) {
+      continue;
     }
 
-    if (typeof layer["triageModel"] === "string") {
-      merged.triageModel = layer["triageModel"];
-    }
-
-    if (typeof layer["triageMaxTurns"] === "number" && Number.isFinite(layer["triageMaxTurns"])) {
-      merged.triageMaxTurns = layer["triageMaxTurns"];
-    }
-
-    if (typeof layer["verify"] === "boolean") {
-      merged.verify = layer["verify"];
-    }
-
-    if (typeof layer["verifyModel"] === "string") {
-      merged.verifyModel = layer["verifyModel"];
-    }
-
-    if (typeof layer["verifyMaxTurns"] === "number" && Number.isFinite(layer["verifyMaxTurns"])) {
-      merged.verifyMaxTurns = layer["verifyMaxTurns"];
-    }
-
-    if (typeof layer["verifyConcurrency"] === "number" && Number.isFinite(layer["verifyConcurrency"])) {
-      merged.verifyConcurrency = layer["verifyConcurrency"];
-    }
-
-    if (Array.isArray(layer["verifyVerdicts"])) {
-      const verdicts = normalizeVerdictArray(layer["verifyVerdicts"]);
-      if (verdicts.length > 0) {
-        merged.verifyVerdicts = verdicts;
+    for (const [key, value] of Object.entries(layer)) {
+      if (!VALID_TOP_LEVEL_KEYS.has(key)) {
+        continue;
       }
-    }
 
-    if (
-      typeof layer["verifyMinConfidence"] === "number"
-      && Number.isFinite(layer["verifyMinConfidence"])
-    ) {
-      merged.verifyMinConfidence = layer["verifyMinConfidence"];
-    }
+      if (key === "scannerConfig") {
+        if (!isRecord(value)) {
+          continue;
+        }
 
-    if (typeof layer["pocHarness"] === "boolean") {
-      merged.pocHarness = layer["pocHarness"];
-    }
+        const layerConfig = coerceScannerConfigMap(value);
+        for (const [scannerId, scannerConfig] of Object.entries(layerConfig)) {
+          merged.scannerConfig[scannerId] = {
+            ...(merged.scannerConfig[scannerId] ?? {}),
+            ...scannerConfig,
+          };
+        }
+        continue;
+      }
 
-    if (typeof layer["pocHarnessModel"] === "string") {
-      merged.pocHarnessModel = layer["pocHarnessModel"];
-    }
+      if (key === "agentRuntimeConfig") {
+        if (value == null) {
+          merged.agentRuntimeConfig = undefined;
+          continue;
+        }
 
-    if (
-      typeof layer["pocHarnessMaxTurns"] === "number"
-      && Number.isFinite(layer["pocHarnessMaxTurns"])
-    ) {
-      merged.pocHarnessMaxTurns = layer["pocHarnessMaxTurns"];
-    }
+        if (!isRecord(value)) {
+          continue;
+        }
 
-    if (
-      typeof layer["pocHarnessConcurrency"] === "number"
-      && Number.isFinite(layer["pocHarnessConcurrency"])
-    ) {
-      merged.pocHarnessConcurrency = layer["pocHarnessConcurrency"];
-    }
-
-    if (typeof layer["enableContextGathering"] === "boolean") {
-      merged.enableContextGathering = layer["enableContextGathering"];
-    }
-
-    if (typeof layer["auditLog"] === "boolean") {
-      merged.auditLog = layer["auditLog"];
-    }
-
-    if (typeof layer["reportOutput"] === "string") {
-      merged.reportOutput = layer["reportOutput"];
-    }
-
-    if (typeof layer["sarifOutput"] === "string") {
-      merged.sarifOutput = layer["sarifOutput"];
-    }
-
-    if (
-      typeof layer["maxTriageRetries"] === "number"
-      && Number.isFinite(layer["maxTriageRetries"])
-    ) {
-      merged.maxTriageRetries = layer["maxTriageRetries"];
-    }
-
-    if (
-      typeof layer["maxVerifyRetries"] === "number"
-      && Number.isFinite(layer["maxVerifyRetries"])
-    ) {
-      merged.maxVerifyRetries = layer["maxVerifyRetries"];
-    }
-
-    if (
-      typeof layer["maxPocHarnessRetries"] === "number"
-      && Number.isFinite(layer["maxPocHarnessRetries"])
-    ) {
-      merged.maxPocHarnessRetries = layer["maxPocHarnessRetries"];
-    }
-
-    if (
-      typeof layer["retryBackoffMs"] === "number"
-      && Number.isFinite(layer["retryBackoffMs"])
-    ) {
-      merged.retryBackoffMs = layer["retryBackoffMs"];
-    }
-
-    if (
-      typeof layer["retryBackoffMultiplier"] === "number"
-      && Number.isFinite(layer["retryBackoffMultiplier"])
-    ) {
-      merged.retryBackoffMultiplier = layer["retryBackoffMultiplier"];
-    }
-
-    if (typeof layer["busBackend"] === "string") {
-      merged.busBackend = layer["busBackend"] as KuzushiConfig["busBackend"];
-    }
-
-    if (typeof layer["triageBatchSize"] === "number" && Number.isFinite(layer["triageBatchSize"])) {
-      merged.triageBatchSize = layer["triageBatchSize"];
-    }
-
-    if (typeof layer["triageConcurrency"] === "number" && Number.isFinite(layer["triageConcurrency"])) {
-      merged.triageConcurrency = layer["triageConcurrency"];
-    }
-
-    if (typeof layer["scanMode"] === "string") {
-      merged.scanMode = layer["scanMode"] as KuzushiConfig["scanMode"];
-    }
-
-    if (typeof layer["agentRuntimeBackend"] === "string") {
-      merged.agentRuntimeBackend = layer["agentRuntimeBackend"] as KuzushiConfig["agentRuntimeBackend"];
-    }
-
-    if (isRecord(layer["agentRuntimeConfig"])) {
-      const runtimeConfig = normalizeAgentRuntimeConfig(layer["agentRuntimeConfig"]);
-      merged.agentRuntimeConfig = {
-        ...(merged.agentRuntimeConfig ?? {}),
-        ...(runtimeConfig ?? {}),
-      };
-    }
-
-    if (Array.isArray(layer["enabledTasks"])) {
-      merged.enabledTasks = layer["enabledTasks"].map(String);
-    }
-
-    if (Array.isArray(layer["scanners"])) {
-      merged.scanners = layer["scanners"].map(String);
-    }
-
-    if (Array.isArray(layer["severity"])) {
-      merged.severity = layer["severity"].map(String);
-    }
-
-    if (Array.isArray(layer["excludePatterns"])) {
-      merged.excludePatterns = layer["excludePatterns"].map(String);
-    }
-
-    if (isRecord(layer["scannerConfig"])) {
-      const layerConfig = coerceScannerConfigMap(layer["scannerConfig"]);
-      for (const [key, value] of Object.entries(layerConfig)) {
-        merged.scannerConfig[key] = {
-          ...(merged.scannerConfig[key] ?? {}),
-          ...value,
+        merged.agentRuntimeConfig = {
+          ...(merged.agentRuntimeConfig ?? {}),
+          ...cloneLayerValue(value),
         };
+        continue;
       }
+
+      Reflect.set(merged as object, key, cloneLayerValue(value));
     }
   }
 
-  return merged;
+  return normalizeConfig(merged);
 }
 
-function readConfigFile(configFilePath: string): Record<string, unknown> {
+function loadConfigLayers(repoRoot?: string): {
+  globalRaw: WritableConfigLayer;
+  projectRaw: WritableConfigLayer;
+} {
+  return {
+    globalRaw: readConfigFile(CONFIG_PATH),
+    projectRaw: repoRoot ? readConfigFile(projectConfigPath(repoRoot)) : {},
+  };
+}
+
+function loadWritableConfigLayer(repoRoot?: string): WritableConfigLayer {
+  return repoRoot
+    ? readConfigFile(projectConfigPath(repoRoot))
+    : readConfigFile(CONFIG_PATH);
+}
+
+function saveUpdatedConfigLayer(config: WritableConfigLayer, repoRoot?: string): void {
+  const layer = sanitizeConfigLayer(config) as WritableConfigLayer;
+  validateConfigLayer(layer, repoRoot);
+  saveConfigLayer(layer, repoRoot);
+}
+
+function validateConfigLayer(layer: WritableConfigLayer, repoRoot?: string): void {
+  if (!repoRoot) {
+    mergeConfigLayers(layer);
+    return;
+  }
+
+  const globalRaw = readConfigFile(CONFIG_PATH);
+  mergeConfigLayers(globalRaw, layer);
+}
+
+function readConfigFile(configFilePath: string): WritableConfigLayer {
   try {
     const content = readFileSync(configFilePath, "utf-8");
     const parsed = JSON.parse(content);
@@ -812,6 +703,53 @@ function readConfigFile(configFilePath: string): Record<string, unknown> {
     console.warn(`Warning: config file ${configFilePath} is corrupt and will be ignored: ${err}`);
     return {};
   }
+}
+
+function sanitizeConfigLayer(value: unknown): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeConfigLayer(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isRecord(value)) {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const cleaned = sanitizeConfigLayer(entry);
+      if (cleaned === undefined) {
+        continue;
+      }
+
+      if (isRecord(cleaned) && Object.keys(cleaned).length === 0) {
+        continue;
+      }
+
+      sanitized[key] = cleaned;
+    }
+    return sanitized;
+  }
+
+  return value;
+}
+
+function cloneLayerValue<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneLayerValue(item)) as T;
+  }
+
+  if (isRecord(value)) {
+    const cloned: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      cloned[key] = cloneLayerValue(entry);
+    }
+    return cloned as T;
+  }
+
+  return value;
 }
 
 function coerceScannerConfigMap(value: unknown): Record<string, ScannerConfig> {

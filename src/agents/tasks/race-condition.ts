@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
+import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
 
 const RACE_CONDITION_SCHEMA = {
@@ -64,7 +67,7 @@ function resolveConfig(ctx: TaskContext): RaceConditionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -75,10 +78,15 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number):
     : [];
 
   return [
-    "You are a race condition detection agent.",
+    "You are a senior concurrency security specialist who has triaged hundreds of race condition",
+    "and TOCTOU bugs. You understand that most concurrency patterns are benign — only flag issues",
+    "where concurrent access has concrete security impact (data corruption, privilege escalation,",
+    "financial loss), not mere functional bugs.",
+    "",
     "Analyze the repository for security-relevant race conditions and concurrency issues.",
     "",
     ...contextLines,
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
     "## Detection strategy",
     "1. Identify concurrent execution patterns (goroutines, async/await, threads, worker_threads, multiprocessing).",
     "2. For each concurrent section, identify shared state (globals, DB rows, files, cache entries).",
@@ -100,7 +108,12 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number):
     "Examples: global counters, shared maps/dicts, file writes from multiple goroutines/threads.",
     "",
     `Return at most ${maxFindings} findings, prioritized by severity.`,
-    "Only report issues where concurrent access is plausible and has security impact.",
+    "",
+    "## Anti-hallucination constraints",
+    "- Only report issues where concurrent access is plausible and has security impact.",
+    "- Do NOT infer or speculate about code you haven't read.",
+    "- Verify that the code is actually executed concurrently before reporting.",
+    "- Confidence must reflect your actual certainty: HIGH only if race is clearly exploitable.",
   ].join("\n");
 }
 
@@ -172,12 +185,17 @@ export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
 
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
-    const repoContext = context.upstreamOutputs.get("context-gatherer") as RepoContext | undefined;
-    const prompt = buildPrompt(repoContext, maxFindings);
+    const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const profiles = context.securityProfiles
+      ? getProfilesForTask(context.securityProfiles, "race-condition-detect")
+      : [];
+    const profileLines = formatProfilesForPrompt(profiles);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;
     let resultText = "";
+    let costUsd = 0;
 
     const tag = "[race-condition]";
     console.error(`${tag} Starting scan (model=${model})`);
@@ -188,16 +206,21 @@ export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
         options: {
           cwd: context.repoRoot,
           model,
-          maxTurns: 30,
+          maxTurns: undefined,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",
             schema: RACE_CONDITION_SCHEMA,
+            strict: true,
+            retryInvalidStructuredOutput: 2,
           },
         },
       })) {
         if (message.type !== "result") continue;
+        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
         if ("result" in message) {
           resultText = message.result;
           structuredOutput = message.structuredOutput;
@@ -207,11 +230,14 @@ export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
       throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
-    return normalizeFindings(
-      structuredOutput ?? parseJson(resultText),
-      context.repoRoot,
-      context.repoName,
-      maxFindings,
+    return attachTaskOutputMeta(
+      normalizeFindings(
+        structuredOutput ?? parseJson(resultText, tag),
+        context.repoRoot,
+        context.repoName,
+        maxFindings,
+      ),
+      { costUsd },
     );
   },
 
@@ -234,11 +260,11 @@ export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
   },
 };
 
-function parseJson(text: string): unknown {
+function parseJson(text: string, tag: string): unknown {
   try {
     return JSON.parse(text);
-  } catch {
-    return { findings: [] };
+  } catch (error) {
+    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
   }
 }
 

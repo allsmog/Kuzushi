@@ -39,9 +39,10 @@ describe("parseAgenticOutput", () => {
     expect(parsed.findings[0].severity).toBe("INFO");
   });
 
-  it("returns empty findings when output is unparseable non-JSON text", () => {
-    const parsed = parseAgenticOutput("go\nhasAccess := checkPermission(ctx, user)\nif !hasAccess {\n  return\n}");
-    expect(parsed.findings).toHaveLength(0);
+  it("throws when output is unparseable non-JSON text", () => {
+    expect(() =>
+      parseAgenticOutput("go\nhasAccess := checkPermission(ctx, user)\nif !hasAccess {\n  return\n}"),
+    ).toThrow(/invalid JSON output/i);
   });
 
   it("normalizes invalid enums to safe defaults", () => {

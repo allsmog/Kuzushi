@@ -457,7 +457,9 @@ describe("taint-analysis-run internals", () => {
     expect(goProfile).not.toBeNull();
     if (!goProfile) return;
 
-    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
+    const hints = __taintAnalysisRunInternals.defaultRenderingHints();
+    hints.variadicFormatFuncs.add("Sprintf");
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile, undefined, hints);
 
     expect(libs.sinks).toContain("call.getAnArgument()");
     expect(libs.sinks).not.toContain("call.getArgument(0)");
@@ -501,7 +503,10 @@ describe("taint-analysis-run internals", () => {
     expect(goProfile).not.toBeNull();
     if (!goProfile) return;
 
-    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
+    const hints = __taintAnalysisRunInternals.defaultRenderingHints();
+    hints.sqlQueryTextArg0Callables.add("Raw");
+    hints.sqlQueryTextArg0Callables.add("From");
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile, undefined, hints);
 
     expect(libs.sinks).toContain('hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries", "Raw")');
     expect(libs.sinks).toContain('hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries/qm", "From")');
