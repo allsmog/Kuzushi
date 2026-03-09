@@ -13,6 +13,7 @@ import {
   type AttackSimulationDocument,
   type AttackTree,
   type AttackTreeNode,
+  type EvidenceAnchor,
   type ThreatModelDocument,
 } from "./types.js";
 
@@ -46,6 +47,10 @@ function buildPastaPrompt(
     "",
     "Focus on realistic multi-step attacks that chain 2+ vulnerabilities.",
     "Each tree needs nodes with unique ids like 'node-1', 'node-2', etc.",
+    "",
+    "IMPORTANT: Every node MUST reference at least one specific file path as evidence.",
+    "For each node, provide evidence_anchors: [{file_path, start_line, description}].",
+    "Claims without evidence anchors are invalid.",
   ].join("\n");
 }
 
@@ -150,6 +155,20 @@ function normalizeTree(item: Record<string, unknown>): AttackTree | null {
 
 const MAX_NODE_DEPTH = 20;
 
+function parseEvidenceAnchors(value: unknown): EvidenceAnchor[] {
+  if (!Array.isArray(value)) return [];
+  const out: EvidenceAnchor[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const filePath = typeof item["file_path"] === "string" ? item["file_path"].trim() : "";
+    const startLine = Math.max(1, Math.floor(Number(item["start_line"]) || 1));
+    const description = typeof item["description"] === "string" ? item["description"].trim() : "";
+    if (!filePath || !description) continue;
+    out.push({ filePath, startLine, description });
+  }
+  return out;
+}
+
 function normalizeNode(item: Record<string, unknown>, depth = 0): AttackTreeNode | null {
   if (depth > MAX_NODE_DEPTH) return null;
 
@@ -176,7 +195,8 @@ function normalizeNode(item: Record<string, unknown>, depth = 0): AttackTreeNode
     }
   }
 
-  return { id, description, type, probability, impact, children, technique, relatedFindings, relatedThreats };
+  const evidenceAnchors = parseEvidenceAnchors(item["evidence_anchors"]);
+  return { id, description, type, probability, impact, children, technique, relatedFindings, relatedThreats, ...(evidenceAnchors.length > 0 ? { evidenceAnchors } : {}) };
 }
 
 function treesToFindings(

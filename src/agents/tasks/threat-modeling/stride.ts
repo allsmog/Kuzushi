@@ -12,6 +12,7 @@ import {
   resolveThreatModelConfig,
   STRIDE_RESPONSE_SCHEMA,
   type DfdElement,
+  type EvidenceAnchor,
   type StrideThreat,
   type StrideCategory,
   type ThreatModelDocument,
@@ -71,6 +72,10 @@ function buildStridePrompt(repoContext: RepoContext | undefined, maxElements: nu
     "Each threat needs a unique id like 'threat-1', 'threat-2', etc.",
     "Each DFD element needs a unique id like 'elem-1', 'elem-2', etc.",
     "Each trust boundary needs a unique id like 'tb-1', 'tb-2', etc.",
+    "",
+    "IMPORTANT: Every threat and trust boundary MUST reference at least one specific file path as evidence.",
+    "For each threat and trust boundary, provide evidence_anchors: [{file_path, start_line, description}].",
+    "Claims without evidence anchors are invalid.",
   ].join("\n");
 }
 
@@ -115,6 +120,20 @@ function parseElements(value: unknown, max: number): DfdElement[] {
   return out;
 }
 
+function parseEvidenceAnchors(value: unknown): EvidenceAnchor[] {
+  if (!Array.isArray(value)) return [];
+  const out: EvidenceAnchor[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const filePath = asString(item["file_path"]);
+    const startLine = Math.max(1, Math.floor(Number(item["start_line"]) || 1));
+    const description = asString(item["description"]);
+    if (!filePath || !description) continue;
+    out.push({ filePath, startLine, description });
+  }
+  return out;
+}
+
 function parseTrustBoundaries(value: unknown): TrustBoundary[] {
   if (!Array.isArray(value)) return [];
   const out: TrustBoundary[] = [];
@@ -124,12 +143,14 @@ function parseTrustBoundaries(value: unknown): TrustBoundary[] {
     const name = asString(item["name"]);
     if (!id || !name) continue;
 
+    const evidenceAnchors = parseEvidenceAnchors(item["evidence_anchors"]);
     out.push({
       id,
       name,
       innerZone: asString(item["innerZone"]) || "internal",
       outerZone: asString(item["outerZone"]) || "external",
       crossingFlows: asStringArray(item["crossingFlows"]),
+      ...(evidenceAnchors.length > 0 ? { evidenceAnchors } : {}),
     });
   }
   return out;
@@ -149,6 +170,7 @@ function parseThreats(value: unknown, max: number): StrideThreat[] {
     const impact = asString(item["impact"]);
     const likelihood = asString(item["likelihood"]);
 
+    const evidenceAnchors = parseEvidenceAnchors(item["evidence_anchors"]);
     out.push({
       id,
       elementId: asString(item["elementId"]) || "unknown",
@@ -163,6 +185,7 @@ function parseThreats(value: unknown, max: number): StrideThreat[] {
       missingMitigations: asStringArray(item["missingMitigations"]),
       relatedCwe: asStringArray(item["relatedCwe"]),
       affectedFiles: parseAffectedFiles(item["affectedFiles"]),
+      ...(evidenceAnchors.length > 0 ? { evidenceAnchors } : {}),
     });
     if (out.length >= max) break;
   }
@@ -218,6 +241,7 @@ function threatsToFindings(
       evidence: [
         `Attack vector: ${threat.attackVector}`,
         threat.missingMitigations.length > 0 ? `Missing mitigations: ${threat.missingMitigations.join(", ")}` : "",
+        ...(threat.evidenceAnchors ?? []).map((a) => `Evidence: ${a.filePath}:${a.startLine} — ${a.description}`),
       ].filter(Boolean).join(". "),
       scannerConfidence: threat.likelihood === "high" ? "HIGH" : threat.likelihood === "medium" ? "MEDIUM" : "LOW",
       subcategory: ["vuln"],
@@ -381,6 +405,7 @@ function asStringArray(value: unknown): string[] {
 export const __strideInternals = {
   buildStridePrompt,
   parseStrideResponse,
+  parseEvidenceAnchors,
   threatsToFindings,
   computeFingerprint,
   buildSummary,

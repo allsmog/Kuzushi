@@ -21,6 +21,7 @@ export interface TrustBoundary {
   innerZone: string;
   outerZone: string;
   crossingFlows: string[];
+  evidenceAnchors?: EvidenceAnchor[];
 }
 
 // ── STRIDE ──
@@ -32,6 +33,12 @@ export type StrideCategory =
   | "information-disclosure"
   | "denial-of-service"
   | "elevation-of-privilege";
+
+export interface EvidenceAnchor {
+  filePath: string;
+  startLine: number;
+  description: string;
+}
 
 export interface StrideThreat {
   id: string;
@@ -47,6 +54,7 @@ export interface StrideThreat {
   missingMitigations: string[];
   relatedCwe: string[];
   affectedFiles: Array<{ filePath: string; startLine: number }>;
+  evidenceAnchors?: EvidenceAnchor[];
 }
 
 export interface ThreatModelDocument {
@@ -75,6 +83,7 @@ export interface AttackTreeNode {
   technique?: string;
   relatedFindings?: string[];
   relatedThreats?: string[];
+  evidenceAnchors?: EvidenceAnchor[];
 }
 
 export interface AttackTree {
@@ -167,6 +176,19 @@ export const STRIDE_RESPONSE_SCHEMA = {
           innerZone: { type: "string" },
           outerZone: { type: "string" },
           crossingFlows: { type: "array", items: { type: "string" } },
+          evidence_anchors: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["file_path", "start_line", "description"],
+              properties: {
+                file_path: { type: "string" },
+                start_line: { type: "integer", minimum: 1 },
+                description: { type: "string" },
+              },
+            },
+          },
         },
       },
     },
@@ -198,6 +220,19 @@ export const STRIDE_RESPONSE_SCHEMA = {
               properties: {
                 filePath: { type: "string" },
                 startLine: { type: "integer", minimum: 1 },
+              },
+            },
+          },
+          evidence_anchors: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["file_path", "start_line", "description"],
+              properties: {
+                file_path: { type: "string" },
+                start_line: { type: "integer", minimum: 1 },
+                description: { type: "string" },
               },
             },
           },
@@ -234,6 +269,19 @@ export const PASTA_RESPONSE_SCHEMA = {
               technique: { type: "string" },
               relatedFindings: { type: "array", items: { type: "string" } },
               relatedThreats: { type: "array", items: { type: "string" } },
+              evidence_anchors: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["file_path", "start_line", "description"],
+                  properties: {
+                    file_path: { type: "string" },
+                    start_line: { type: "integer", minimum: 1 },
+                    description: { type: "string" },
+                  },
+                },
+              },
               children: {
                 type: "array",
                 items: {
@@ -248,6 +296,7 @@ export const PASTA_RESPONSE_SCHEMA = {
                     technique: { type: "string" },
                     relatedFindings: { type: "array", items: { type: "string" } },
                     relatedThreats: { type: "array", items: { type: "string" } },
+                    evidence_anchors: { type: "array" },
                     children: { type: "array" },
                   },
                 },

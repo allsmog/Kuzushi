@@ -62,6 +62,7 @@ export const DEFAULTS: KuzushiConfig = {
   variantAnalysis: false,
   variantAnalysisMaxFindings: 10,
   enableContextEnrichment: false,
+  prioritizeFindings: true,
   diffBase: undefined,
   scannerConfig: {
     semgrep: { configFlag: "auto" },
@@ -107,6 +108,8 @@ const VALID_TOP_LEVEL_KEYS = new Set<string>([
   "chainAnalysisModel",
   "precedentsPath",
   "securityProfilesPath",
+  "prioritizeFindings",
+  "costBudgetUsd",
 ]);
 
 /** Load config from ~/.kuzushi/config.json + optional <repo>/.kuzushi/config.json. */
@@ -456,6 +459,26 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
 
   if (key === "pocHarnessModel") {
     config.pocHarnessModel = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "costBudgetUsd") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error("costBudgetUsd must be a positive number");
+    }
+    config.costBudgetUsd = n;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "prioritizeFindings") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("prioritizeFindings must be true or false");
+    }
+    config.prioritizeFindings = parsed;
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }

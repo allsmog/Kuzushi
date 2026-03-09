@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { threatModelStrideTask, __strideInternals } from "../../../../src/agents/tasks/threat-modeling/stride.js";
 
-const { buildStridePrompt, parseStrideResponse, threatsToFindings, computeFingerprint, buildSummary } = __strideInternals;
+const { buildStridePrompt, parseStrideResponse, parseEvidenceAnchors, threatsToFindings, computeFingerprint, buildSummary } = __strideInternals;
 
 describe("threatModelStrideTask", () => {
   it("has correct metadata", () => {
@@ -264,6 +264,56 @@ describe("computeFingerprint", () => {
     const fp1 = computeFingerprint("repo", { ...base, category: "spoofing" as const });
     const fp2 = computeFingerprint("repo", { ...base, category: "tampering" as const });
     expect(fp1).not.toBe(fp2);
+  });
+});
+
+describe("evidence anchors", () => {
+  it("prompt includes evidence keyword", () => {
+    const prompt = buildStridePrompt(undefined, 50, 100);
+    expect(prompt).toContain("evidence");
+    expect(prompt).toContain("evidence_anchors");
+  });
+
+  it("parseEvidenceAnchors parses valid anchors", () => {
+    const anchors = parseEvidenceAnchors([
+      { file_path: "src/auth.ts", start_line: 10, description: "JWT signing" },
+      { file_path: "src/db.ts", start_line: 20, description: "DB connection" },
+    ]);
+    expect(anchors).toHaveLength(2);
+    expect(anchors[0].filePath).toBe("src/auth.ts");
+    expect(anchors[0].startLine).toBe(10);
+    expect(anchors[0].description).toBe("JWT signing");
+  });
+
+  it("parseEvidenceAnchors filters invalid entries", () => {
+    const anchors = parseEvidenceAnchors([
+      { file_path: "", start_line: 10, description: "missing path" },
+      { file_path: "src/auth.ts", start_line: 10, description: "" },
+      "not-an-object",
+      null,
+    ]);
+    expect(anchors).toHaveLength(0);
+  });
+
+  it("parseEvidenceAnchors returns empty for non-array", () => {
+    expect(parseEvidenceAnchors(null)).toEqual([]);
+    expect(parseEvidenceAnchors("not-array")).toEqual([]);
+  });
+
+  it("threatsToFindings includes evidence anchor text", () => {
+    const threats = [
+      {
+        id: "t1", elementId: "e1", category: "spoofing" as const, title: "JWT spoofing",
+        description: "D", attackVector: "x", preconditions: [], impact: "high" as const,
+        likelihood: "high" as const, existingMitigations: [], missingMitigations: [],
+        relatedCwe: ["347"],
+        affectedFiles: [{ filePath: "src/auth.ts", startLine: 15 }],
+        evidenceAnchors: [{ filePath: "src/auth.ts", startLine: 15, description: "JWT signing with weak key" }],
+      },
+    ];
+    const findings = threatsToFindings(threats, "/tmp/repo", "test-repo", "high");
+    expect(findings).toHaveLength(1);
+    expect(findings[0].evidence).toContain("JWT signing with weak key");
   });
 });
 

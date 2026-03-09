@@ -275,6 +275,45 @@ describe("computeFingerprint", () => {
   });
 });
 
+describe("evidence anchors", () => {
+  it("prompt includes evidence keyword", () => {
+    const prompt = buildPastaPrompt(["[t1] spoofing: JWT spoofing"], [], 10);
+    expect(prompt).toContain("evidence");
+    expect(prompt).toContain("evidence_anchors");
+  });
+
+  it("normalizeNode parses evidence anchors", () => {
+    const node = normalizeNode({
+      id: "n1",
+      description: "SQL injection",
+      type: "LEAF",
+      probability: 0.5,
+      impact: "high",
+      children: [],
+      evidence_anchors: [
+        { file_path: "src/db.ts", start_line: 42, description: "Unsanitized query" },
+      ],
+    });
+    expect(node).not.toBeNull();
+    expect(node!.evidenceAnchors).toHaveLength(1);
+    expect(node!.evidenceAnchors![0].filePath).toBe("src/db.ts");
+    expect(node!.evidenceAnchors![0].startLine).toBe(42);
+  });
+
+  it("normalizeNode omits evidence anchors when empty", () => {
+    const node = normalizeNode({
+      id: "n1",
+      description: "test",
+      type: "LEAF",
+      probability: 0.5,
+      impact: "high",
+      children: [],
+    });
+    expect(node).not.toBeNull();
+    expect(node!.evidenceAnchors).toBeUndefined();
+  });
+});
+
 describe("triageAgentConfig", () => {
   it("returns a prompt mentioning PASTA", () => {
     const finding: Finding = {

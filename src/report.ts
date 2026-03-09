@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import path from "node:path";
-import type { TriageResult, Verdict } from "./types.js";
+import type { ExploitChain, TriageResult, Verdict } from "./types.js";
 import type { ScannerId } from "./scanners/types.js";
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
@@ -46,6 +46,7 @@ export interface PrintSummaryOptions {
   repoRoot?: string;
   auditLog?: boolean;
   fingerprints?: string[];
+  exploitChains?: ExploitChain[];
 }
 
 /** Print the final scan summary to terminal. */
@@ -127,6 +128,9 @@ export function printSummary(
   if ((options.stats?.skippedLowConfidence ?? 0) > 0) {
     console.log(`  ${chalk.dim("Skipped (low confidence):")} ${options.stats?.skippedLowConfidence}`);
   }
+  if ((options.stats?.skippedByLlmRescore ?? 0) > 0) {
+    console.log(`  ${chalk.dim("Skipped (LLM rescore):")} ${options.stats?.skippedByLlmRescore}`);
+  }
   if (hasVerificationData) {
     const verifyErrors = options.stats?.verifyErrors ?? 0;
     console.log("");
@@ -148,6 +152,31 @@ export function printSummary(
     if (options.repoRoot) {
       const pocDir = path.join(options.repoRoot, ".kuzushi", "poc");
       console.log(`  ${chalk.dim("PoC output dir:")} ${pocDir}/`);
+    }
+  }
+
+  if ((options.stats?.variantFindings ?? 0) > 0) {
+    console.log("");
+    console.log(`  ${chalk.cyan("Variant findings:")}  ${options.stats?.variantFindings}`);
+  }
+
+  const chains = options.exploitChains;
+  if (chains && chains.length > 0) {
+    console.log("");
+    console.log(chalk.bold("  Exploitation Chains:"));
+    console.log("");
+    for (const chain of chains) {
+      const sevColor = chain.overallSeverity === "CRITICAL" ? chalk.red.bold
+        : chain.overallSeverity === "HIGH" ? chalk.red : chalk.yellow;
+      console.log(`  ${sevColor(chain.overallSeverity)} ${chalk.bold(chain.name)}`);
+      for (const step of chain.steps) {
+        console.log(`    ${chalk.dim(step.role + ":")} ${step.description} ${chalk.dim(`[${step.findingFingerprint.slice(0, 8)}]`)}`);
+      }
+      if (chain.preconditions.length > 0) {
+        console.log(`    ${chalk.dim("Preconditions:")} ${chain.preconditions.join(", ")}`);
+      }
+      console.log(`    ${chalk.dim("Impact:")} ${chain.impactDescription}`);
+      console.log("");
     }
   }
 
@@ -213,6 +242,13 @@ export function printSummary(
   }
   if (hasPocHarnessData) {
     console.log(`  ${chalk.dim("Total PoC harness cost:")} $${pocHarnessCostUsd.toFixed(4)}`);
+  }
+  if ((options.stats?.variantAnalysisCostUsd ?? 0) > 0) {
+    console.log(`  ${chalk.dim("Total variant analysis cost:")} $${options.stats!.variantAnalysisCostUsd!.toFixed(4)}`);
+  }
+  if (options.stats?.budgetExceeded) {
+    console.log("");
+    console.log(`  ${chalk.yellow.bold("Budget exceeded:")} pipeline stopped early to stay within cost limit`);
   }
   if (options.auditLog && options.repoRoot && options.runId) {
     const runDir = path.join(options.repoRoot, ".kuzushi", "runs", options.runId);

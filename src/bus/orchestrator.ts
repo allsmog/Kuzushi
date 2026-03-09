@@ -1,9 +1,12 @@
 import type Database from "better-sqlite3";
 import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
+import type { TaskContext as AgentTaskContext } from "../agents/types.js";
+import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
 import type { Finding } from "../scanners/types.js";
 import { selectTopFindings } from "../scanners/finding-selection.js";
 import { HardExclusionFilter } from "../scanners/fp-filter.js";
+import { rescoreFindings } from "../scanners/llm-rescore.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
 import {
   getPocHarnessedFingerprints,
@@ -18,6 +21,7 @@ import {
   updateRunStatus,
 } from "../store.js";
 import type {
+  ExploitChain,
   KuzushiConfig,
   RepoContext,
   ScanOpts,
@@ -29,6 +33,7 @@ import { coerceRepoContext } from "../repo-context.js";
 import { loadPrecedents, type Precedents } from "../precedents.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { runVariantAnalysis } from "./workers/variant-analysis-worker.js";
 import type {
   BusHandlerErrorEvent,
   PipelineStats,
@@ -136,6 +141,12 @@ interface RunState {
   precedents?: Precedents;
   taskOutputs: Map<string, unknown>;
   failedTasks: string[];
+  skippedByLlmRescore: number;
+  variantFindings: number;
+  variantAnalysisCostUsd: number;
+  exploitChains: ExploitChain[];
+  chainAnalysisCostUsd: number;
+  budgetExceeded: boolean;
 }
 
 export interface OrchestratorDeps {
@@ -315,6 +326,12 @@ export class PipelineOrchestrator {
       repoContext: undefined,
       taskOutputs: new Map<string, unknown>(),
       failedTasks: [],
+      skippedByLlmRescore: 0,
+      variantFindings: 0,
+      variantAnalysisCostUsd: 0,
+      exploitChains: [],
+      chainAnalysisCostUsd: 0,
+      budgetExceeded: false,
     };
 
     // Load organization precedents
@@ -902,6 +919,32 @@ export class PipelineOrchestrator {
       }
     }
 
+    // LLM rescore: two-stage filtering with cheap model
+    state.skippedByLlmRescore = 0;
+    if (state.config.llmRescoreEnabled) {
+      const rescoreResults = await rescoreFindings(filteredFindings, {
+        model: state.config.llmRescoreModel,
+        threshold: state.config.llmRescoreThreshold,
+        repoRoot: state.context.repoRoot,
+      });
+      const keptFingerprints = new Set(
+        rescoreResults.filter((r) => r.keep).map((r) => r.fingerprint),
+      );
+      const before = filteredFindings.length;
+      filteredFindings = filteredFindings.filter(
+        (f) => keptFingerprints.has(f.fingerprint),
+      );
+      state.skippedByLlmRescore = before - filteredFindings.length;
+      if (state.skippedByLlmRescore > 0) {
+        console.error(`[llm-rescore] Excluded ${state.skippedByLlmRescore} findings`);
+      }
+    }
+
+    // Priority sort: highest-score findings first for budget-limited runs
+    if (state.config.prioritizeFindings !== false) {
+      filteredFindings.sort((a, b) => b.score - a.score);
+    }
+
     const triageCandidates = filteredFindings.filter(
       (finding) => !alreadyTriaged.has(finding.fingerprint),
     );
@@ -1060,6 +1103,7 @@ export class PipelineOrchestrator {
           skippedAlreadyTriaged: state.skippedAlreadyTriaged,
           skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
           skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
+          skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
           triaged: state.triaged,
           triageErrors: state.triageErrors,
           totalCostUsd: state.totalCostUsd,
@@ -1070,6 +1114,11 @@ export class PipelineOrchestrator {
           pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : undefined,
           pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
           pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
+          variantFindings: state.variantFindings > 0 ? state.variantFindings : undefined,
+          variantAnalysisCostUsd: state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
+          chainCount: state.exploitChains.length > 0 ? state.exploitChains.length : undefined,
+          chainAnalysisCostUsd: state.chainAnalysisCostUsd > 0 ? state.chainAnalysisCostUsd : undefined,
+          budgetExceeded: state.budgetExceeded || undefined,
           startedAt: state.startedAt,
           completedAt: event.meta.timestamp,
         },
@@ -1165,6 +1214,10 @@ export class PipelineOrchestrator {
       const concurrency = normalizeConcurrency(state.config.triageConcurrency);
 
       while (state.inFlight < concurrency && state.queueCursor < state.triageQueue.length) {
+        if (this.isBudgetExceeded(state)) {
+          await this.emitBudgetExceeded(state, runId);
+          break;
+        }
         const item = state.triageQueue[state.queueCursor];
         state.queueCursor += 1;
         state.inFlight += 1;
@@ -1249,6 +1302,82 @@ export class PipelineOrchestrator {
       return;
     }
 
+    // Variant analysis phase (runs before verification)
+    if (state.config.variantAnalysis) {
+      const confirmedTPs = this.collectConfirmedTPs(state);
+      if (confirmedTPs.length > 0) {
+        const model = state.config.variantAnalysisModel || state.config.model;
+        await this.bus.publish(
+          createEvent("variant-analysis:start", runId, {
+            context: state.context,
+            confirmedCount: confirmedTPs.length,
+            model,
+          }),
+        );
+        try {
+          const result = await runVariantAnalysis(confirmedTPs, state.context, state.config);
+          state.variantFindings = result.findings.length;
+          state.variantAnalysisCostUsd = result.costUsd;
+          state.totalCostUsd += result.costUsd;
+          updateRunCost(this.deps.db, state.checkpointRunId, state.totalCostUsd);
+        } catch (error) {
+          console.error(`[orchestrator] Variant analysis error: ${toErrorMessage(error)}`);
+        }
+        await this.bus.publish(
+          createEvent("variant-analysis:complete", runId, {
+            context: state.context,
+            variantFindings: state.variantFindings,
+            costUsd: state.variantAnalysisCostUsd,
+          }),
+        );
+      }
+    }
+
+    // Chain analysis phase
+    if (state.config.chainAnalysis) {
+      const confirmedTPs = this.collectConfirmedTPs(state);
+      if (confirmedTPs.length >= 2) {
+        const model = state.config.chainAnalysisModel || state.config.model;
+        await this.bus.publish(
+          createEvent("chain-analysis:start", runId, {
+            context: state.context,
+            confirmedCount: confirmedTPs.length,
+            model,
+          }),
+        );
+        try {
+          const taskContext: AgentTaskContext = {
+            runId,
+            repoRoot: state.context.repoRoot,
+            repoName: state.context.repoName,
+            config: state.config,
+            bus: this.bus,
+            upstreamOutputs: state.taskOutputs,
+          };
+          const output = await chainAnalysisTask.run(
+            { confirmedFindings: confirmedTPs },
+            taskContext,
+          );
+          state.exploitChains = output.chains;
+          const chainMeta = getTaskOutputMeta(output);
+          if (chainMeta?.costUsd) {
+            state.chainAnalysisCostUsd = chainMeta.costUsd;
+            state.totalCostUsd += chainMeta.costUsd;
+            updateRunCost(this.deps.db, state.checkpointRunId, state.totalCostUsd);
+          }
+        } catch (error) {
+          console.error(`[orchestrator] Chain analysis error: ${toErrorMessage(error)}`);
+        }
+        await this.bus.publish(
+          createEvent("chain-analysis:complete", runId, {
+            context: state.context,
+            chainCount: state.exploitChains.length,
+            costUsd: state.chainAnalysisCostUsd,
+          }),
+        );
+      }
+    }
+
     state.reportRequested = true;
 
     if (state.verifyEnabled) {
@@ -1266,10 +1395,43 @@ export class PipelineOrchestrator {
         context: state.context,
         stats: buildReportStats(state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
+        exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
       }),
     );
 
     state.reportEmitted = true;
+  }
+
+  private collectConfirmedTPs(state: RunState): Array<{ finding: Finding; triageResult: TriageResult }> {
+    const fingerprints = state.scanFindings.map((f) => f.fingerprint);
+    const triageResults = getStoredTriageResults(this.deps.db, fingerprints);
+    const confirmed: Array<{ finding: Finding; triageResult: TriageResult }> = [];
+    for (const finding of state.scanFindings) {
+      const tr = triageResults.get(finding.fingerprint);
+      if (tr && tr.verdict === "tp") {
+        confirmed.push({ finding, triageResult: tr });
+      }
+    }
+    return confirmed;
+  }
+
+  private isBudgetExceeded(state: RunState): boolean {
+    const budget = state.config.costBudgetUsd;
+    return typeof budget === "number" && budget > 0 && state.totalCostUsd >= budget;
+  }
+
+  private async emitBudgetExceeded(state: RunState, runId: string): Promise<void> {
+    if (state.budgetExceeded) return;
+    state.budgetExceeded = true;
+    const budget = state.config.costBudgetUsd!;
+    console.error(`[orchestrator] Budget exceeded: $${state.totalCostUsd.toFixed(4)} >= $${budget.toFixed(4)}`);
+    await this.bus.publish(
+      createEvent("budget:exceeded", runId, {
+        context: state.context,
+        totalCostUsd: state.totalCostUsd,
+        budgetUsd: budget,
+      }),
+    );
   }
 
   private shouldRunTaintAnalysisRefinement(state: RunState): boolean {
@@ -1438,6 +1600,10 @@ export class PipelineOrchestrator {
       const concurrency = normalizeConcurrency(state.config.verifyConcurrency ?? 1);
 
       while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
+        if (this.isBudgetExceeded(state)) {
+          await this.emitBudgetExceeded(state, runId);
+          break;
+        }
         const item = state.verifyQueue[state.verifyCursor];
         state.verifyCursor += 1;
         state.verifyInFlight += 1;
@@ -1496,6 +1662,7 @@ export class PipelineOrchestrator {
         context: state.context,
         stats: buildReportStats(state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
+        exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
       }),
     );
 
@@ -1626,6 +1793,10 @@ export class PipelineOrchestrator {
         state.pocHarnessInFlight < concurrency
         && state.pocHarnessCursor < state.pocHarnessQueue.length
       ) {
+        if (this.isBudgetExceeded(state)) {
+          await this.emitBudgetExceeded(state, runId);
+          break;
+        }
         const item = state.pocHarnessQueue[state.pocHarnessCursor];
         state.pocHarnessCursor += 1;
         state.pocHarnessInFlight += 1;
@@ -1679,6 +1850,7 @@ export class PipelineOrchestrator {
         context: state.context,
         stats: buildReportStats(state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
+        exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
       }),
     );
 
@@ -1778,6 +1950,7 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     skippedAlreadyTriaged: state.skippedAlreadyTriaged,
     skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
     skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
+    skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
     triaged: state.triaged,
     triageErrors: state.triageErrors,
     totalCostUsd: state.totalCostUsd,
@@ -1788,6 +1961,11 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : undefined,
     pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
     pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
+    variantFindings: state.variantFindings > 0 ? state.variantFindings : undefined,
+    variantAnalysisCostUsd: state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
+    chainCount: state.exploitChains.length > 0 ? state.exploitChains.length : undefined,
+    chainAnalysisCostUsd: state.chainAnalysisCostUsd > 0 ? state.chainAnalysisCostUsd : undefined,
+    budgetExceeded: state.budgetExceeded || undefined,
     failedTasks: state.failedTasks.length > 0 ? [...state.failedTasks] : undefined,
     extractionDegradation,
     stitchDegradation,

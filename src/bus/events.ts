@@ -1,6 +1,7 @@
 import type { Finding, ScannerId } from "../scanners/types.js";
 import type { TaskOutputKind } from "../agents/types.js";
 import type {
+  ExploitChain,
   KuzushiConfig,
   PocHarnessResult,
   ScanOpts,
@@ -36,6 +37,11 @@ export interface PipelineStats {
   pocHarnessSkipped?: number;
   pocHarnessErrors?: number;
   pocHarnessCostUsd?: number;
+  variantFindings?: number;
+  variantAnalysisCostUsd?: number;
+  chainCount?: number;
+  chainAnalysisCostUsd?: number;
+  budgetExceeded?: boolean;
   failedTasks?: string[];
   extractionDegradation?: { status: string; reasons: string[] };
   stitchDegradation?: { type: string; reason: string; message: string };
@@ -519,12 +525,18 @@ export type ChainAnalysisCompleteEvent = EventEnvelope<
   }
 >;
 
+export type BudgetExceededEvent = EventEnvelope<
+  "budget:exceeded",
+  { context: RunContext; totalCostUsd: number; budgetUsd: number }
+>;
+
 export type ReportRequestedEvent = EventEnvelope<
   "report:requested",
   {
     context: RunContext;
     stats?: Partial<PipelineStats>;
     fingerprints?: string[];
+    exploitChains?: ExploitChain[];
   }
 >;
 
@@ -579,5 +591,6 @@ export type KuzushiEvent =
   | VariantAnalysisCompleteEvent
   | ChainAnalysisStartEvent
   | ChainAnalysisCompleteEvent
+  | BudgetExceededEvent
   | ReportRequestedEvent
   | ReportCompleteEvent;

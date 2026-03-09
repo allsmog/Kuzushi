@@ -4,6 +4,7 @@ import {
 } from "../../agent-runtime/execution.js";
 import type { Finding } from "../../scanners/types.js";
 import type { TriageResult } from "../../types.js";
+import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask, TaskContext } from "../types.js";
 
@@ -227,14 +228,17 @@ export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
 
       if (executionError) {
         console.error(`${tag} Agent error: ${executionError}`);
-        return { chains: [], analysisNotes: `Agent error: ${executionError}` };
+        return attachTaskOutputMeta(
+          { chains: [], analysisNotes: `Agent error: ${executionError}` },
+          { costUsd },
+        );
       }
 
       const output = parseOutput(structuredOutput ?? resultText);
       console.error(
         `${tag} Found ${output.chains.length} exploitation chains ($${costUsd.toFixed(4)})`,
       );
-      return output;
+      return attachTaskOutputMeta(output, { costUsd });
     } catch (error) {
       console.error(`${tag} Error: ${toErrorMessage(error)}`);
       return { chains: [], analysisNotes: `Error: ${toErrorMessage(error)}` };

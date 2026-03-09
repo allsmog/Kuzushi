@@ -19,6 +19,9 @@ import { invariantExtractTask } from "./tasks/invariant-analysis/extract.js";
 import { invariantCheckTask } from "./tasks/invariant-analysis/check.js";
 import { threatModelStrideTask } from "./tasks/threat-modeling/stride.js";
 import { threatModelPastaTask } from "./tasks/threat-modeling/pasta.js";
+import { secretsDetectionTask } from "./tasks/secrets-detection.js";
+import { securityMisconfigTask } from "./tasks/security-misconfig.js";
+import { ssrfDetectionTask } from "./tasks/ssrf-detection.js";
 
 /** Create task registry populated with adapted scanner plugins. */
 export function createDefaultTaskRegistry(scannerRegistry?: ScannerRegistry): TaskRegistry {
@@ -50,6 +53,11 @@ export function createDefaultTaskRegistry(scannerRegistry?: ScannerRegistry): Ta
   // Threat modeling tasks
   tasks.register(threatModelStrideTask);
   tasks.register(threatModelPastaTask);
+
+  // Additional agentic detection tasks
+  tasks.register(secretsDetectionTask);
+  tasks.register(securityMisconfigTask);
+  tasks.register(ssrfDetectionTask);
 
   for (const id of registry.ids()) {
     tasks.register(adaptScannerPlugin(registry.get(id)));

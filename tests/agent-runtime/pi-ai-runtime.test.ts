@@ -610,30 +610,40 @@ describe("PiAiAgentRuntime", () => {
   });
 
   it("retries transient soft errors (stopReason=error) and succeeds", async () => {
-    const cwd = makeTempDir();
-    completeMock
-      .mockResolvedValueOnce(
-        makeAssistantMessage(
-          [{ type: "text", text: "" }],
-          { stopReason: "error", errorMessage: "overloaded" },
-        ),
-      )
-      .mockResolvedValueOnce(
-        makeAssistantMessage(
-          [{ type: "text", text: "{\"ok\":true}" }],
-          { totalCost: 0.01 },
-        ),
-      );
+    vi.useFakeTimers();
+    try {
+      const cwd = makeTempDir();
+      completeMock
+        .mockResolvedValueOnce(
+          makeAssistantMessage(
+            [{ type: "text", text: "" }],
+            { stopReason: "error", errorMessage: "overloaded" },
+          ),
+        )
+        .mockResolvedValueOnce(
+          makeAssistantMessage(
+            [{ type: "text", text: "{\"ok\":true}" }],
+            { totalCost: 0.01 },
+          ),
+        );
 
-    const runtime = new PiAiAgentRuntime();
-    const messages = await collectMessages(runtime, makeRequest(cwd));
+      const runtime = new PiAiAgentRuntime();
+      const done = collectMessages(runtime, makeRequest(cwd));
 
-    expect(completeMock).toHaveBeenCalledTimes(2);
-    expect(messages[messages.length - 1]).toMatchObject({
-      type: "result",
-      subtype: "success",
-      result: "{\"ok\":true}",
-    });
+      // Advance past the retry backoff delay
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const messages = await done;
+
+      expect(completeMock).toHaveBeenCalledTimes(2);
+      expect(messages[messages.length - 1]).toMatchObject({
+        type: "result",
+        subtype: "success",
+        result: "{\"ok\":true}",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not retry non-transient soft errors (stopReason=error)", async () => {

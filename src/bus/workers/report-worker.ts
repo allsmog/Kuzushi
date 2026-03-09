@@ -251,6 +251,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
       repoRoot: event.payload.context.repoRoot,
       auditLog: deps.config.auditLog === true,
       fingerprints: event.payload.fingerprints,
+      exploitChains: event.payload.exploitChains,
     });
 
     if (deps.config.reportOutput) {

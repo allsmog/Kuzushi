@@ -235,6 +235,10 @@ export interface KuzushiConfig {
   precedentsPath?: string;
   /** Path to security profiles file. */
   securityProfilesPath?: string;
+  /** Sort findings by score descending before triage. Default true. */
+  prioritizeFindings?: boolean;
+  /** Maximum cost budget in USD. Pipeline stops early when exceeded. */
+  costBudgetUsd?: number;
 }
 
 /** A persisted finding row from SQLite. */
