@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { ensureDatabase } from "../../../scanners/run-codeql.js";
+import { ensureDatabase, withCodeQLDatabase } from "../../../scanners/run-codeql.js";
 import { resolveCodeQLBinary } from "../../../scanners/resolve-codeql.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
@@ -1206,16 +1206,29 @@ async function tryCompileQuery(
 }
 
 async function runCodeql(codeqlBinary: string, args: string[], cwd: string): Promise<void> {
-  try {
-    await execFileAsync(codeqlBinary, args, {
-      cwd,
-      encoding: "utf-8",
-      maxBuffer: 64 * 1024 * 1024,
-    });
-  } catch (error) {
-    const err = error as ExecFileException & { stderr?: string; stdout?: string };
-    const details = err.stderr?.trim() || err.stdout?.trim() || toErrorMessage(error);
-    throw new Error(`CodeQL command failed: ${codeqlBinary} ${args.join(" ")}\n${details}`);
+  // Extract --database path from args to serialize access via the operation queue.
+  const dbFlagIndex = args.indexOf("--database");
+  const dbPath = dbFlagIndex !== -1 ? args[dbFlagIndex + 1] : undefined;
+
+  const exec = async () => {
+    try {
+      // Using execFile (not exec) with array args — safe from shell injection.
+      await execFileAsync(codeqlBinary, args, {
+        cwd,
+        encoding: "utf-8",
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    } catch (error) {
+      const err = error as ExecFileException & { stderr?: string; stdout?: string };
+      const details = err.stderr?.trim() || err.stdout?.trim() || toErrorMessage(error);
+      throw new Error(`CodeQL command failed: ${codeqlBinary} ${args.join(" ")}\n${details}`);
+    }
+  };
+
+  if (dbPath) {
+    await withCodeQLDatabase(dbPath, exec);
+  } else {
+    await exec();
   }
 }
 

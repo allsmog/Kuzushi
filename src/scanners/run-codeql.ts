@@ -9,6 +9,28 @@ import { isRecord, toErrorMessage } from "../utils.js";
 import { scoreFindingMetadata } from "./scoring.js";
 import type { Finding } from "./types.js";
 
+/**
+ * In-process lock map to prevent concurrent `ensureDatabase` calls from racing
+ * on the same dbPath. The first caller creates the database; subsequent callers
+ * wait for the promise to resolve and reuse the result.
+ */
+const dbCreationLocks = new Map<string, Promise<EnsureCodeQLDatabaseResult>>();
+
+/**
+ * Per-database operation mutex. CodeQL holds a JVM file lock on the DB cache
+ * directory, so concurrent operations (analyze, query run) on the same DB will
+ * fail with OverlappingFileLockException. This serializes all CodeQL operations
+ * that target the same database path.
+ */
+const dbOperationQueues = new Map<string, Promise<unknown>>();
+
+function enqueueDbOperation<T>(dbPath: string, fn: () => Promise<T>): Promise<T> {
+  const previous = dbOperationQueues.get(dbPath) ?? Promise.resolve();
+  const next = previous.then(fn, fn);
+  dbOperationQueues.set(dbPath, next);
+  return next;
+}
+
 const execFileAsync = promisify(execFile);
 const COMPILED_LANGUAGES = new Set(["go", "java", "cpp", "csharp", "swift", "rust"]);
 
@@ -132,7 +154,44 @@ export async function ensureDatabase(
   const language = normalizeLanguage(config.language) ?? await detectCodeQLLanguage(repoRoot, codeqlBin);
   const dbPath = path.join(repoRoot, ".kuzushi", "codeql-db");
 
+  // If another caller is already creating this database, wait for it.
+  const existing = dbCreationLocks.get(dbPath);
+  if (existing) {
+    return existing;
+  }
+
+  // If a valid database already exists on disk, reuse it.
+  if (await isCodeQLDatabaseDir(dbPath)) {
+    return { dbPath, language };
+  }
+
+  // Serialize creation through the same operation queue used by runCodeQL
+  // to prevent creation from overlapping with analysis operations.
+  const creationPromise = enqueueDbOperation(
+    dbPath,
+    () => createCodeQLDatabase(repoRoot, codeqlBin, dbPath, language),
+  );
+  dbCreationLocks.set(dbPath, creationPromise);
+
+  try {
+    return await creationPromise;
+  } finally {
+    dbCreationLocks.delete(dbPath);
+  }
+}
+
+async function createCodeQLDatabase(
+  repoRoot: string,
+  codeqlBin: string,
+  dbPath: string,
+  language: string,
+): Promise<EnsureCodeQLDatabaseResult> {
   await mkdir(path.dirname(dbPath), { recursive: true });
+
+  // Clean up any partial/corrupted database left from a previous failed run.
+  if (existsSync(dbPath) && !(await isCodeQLDatabaseDir(dbPath))) {
+    rmSync(dbPath, { recursive: true, force: true });
+  }
 
   if (language === "go") {
     await resolveGoDependencies(repoRoot);
@@ -163,8 +222,26 @@ export async function ensureDatabase(
   };
 }
 
+/**
+ * Serialize an arbitrary CodeQL operation on a given database path.
+ * Use this to wrap any `codeql query run` or similar command that accesses
+ * a database, preventing OverlappingFileLockException from concurrent access.
+ */
+export function withCodeQLDatabase<T>(dbPath: string, fn: () => Promise<T>): Promise<T> {
+  return enqueueDbOperation(dbPath, fn);
+}
+
 /** Run CodeQL analysis against a prepared database and parse SARIF output. */
 export async function runCodeQL(
+  dbPath: string,
+  codeqlBin: string,
+  suite: string,
+  opts: RunCodeQLOptions = {},
+): Promise<CodeQLSarifOutput> {
+  return enqueueDbOperation(dbPath, () => runCodeQLImpl(dbPath, codeqlBin, suite, opts));
+}
+
+async function runCodeQLImpl(
   dbPath: string,
   codeqlBin: string,
   suite: string,

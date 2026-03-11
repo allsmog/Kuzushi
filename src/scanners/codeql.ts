@@ -87,14 +87,14 @@ export class CodeQLPlugin implements ScannerPlugin {
 
 function resolveSuite(configuredSuite: string | undefined, language: string): string {
   if (!configuredSuite) {
-    return `${language}-security-extended.qls`;
+    return `codeql/${language}-queries:codeql-suites/${language}-security-extended.qls`;
   }
 
   if (configuredSuite.includes("/") || configuredSuite.includes(":") || configuredSuite.includes(".")) {
     return configuredSuite;
   }
 
-  return `${configuredSuite}.qls`;
+  return `codeql/${language}-queries:codeql-suites/${configuredSuite}.qls`;
 }
 
 function asOptionalString(value: unknown): string | undefined {
