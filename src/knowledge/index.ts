@@ -1,0 +1,32 @@
+import { InMemoryKnowledgeRegistry } from "./registry.js";
+import { sqliModule } from "./modules/sqli.js";
+import { xssModule } from "./modules/xss.js";
+import { ssrfModule } from "./modules/ssrf.js";
+import { cryptoModule } from "./modules/crypto.js";
+import { commandInjectionModule } from "./modules/command-injection.js";
+import { pathTraversalModule } from "./modules/path-traversal.js";
+import { authBypassModule } from "./modules/auth-bypass.js";
+import { deserializationModule } from "./modules/deserialization.js";
+import { raceConditionModule } from "./modules/race-condition.js";
+
+export type { KnowledgeModule, KnowledgeQuery, KnowledgeRegistry } from "./types.js";
+export { InMemoryKnowledgeRegistry } from "./registry.js";
+
+/**
+ * Create the default knowledge registry populated with all built-in modules.
+ */
+export function createDefaultKnowledgeRegistry(): InMemoryKnowledgeRegistry {
+  const registry = new InMemoryKnowledgeRegistry();
+
+  registry.register(sqliModule);
+  registry.register(xssModule);
+  registry.register(ssrfModule);
+  registry.register(cryptoModule);
+  registry.register(commandInjectionModule);
+  registry.register(pathTraversalModule);
+  registry.register(authBypassModule);
+  registry.register(deserializationModule);
+  registry.register(raceConditionModule);
+
+  return registry;
+}

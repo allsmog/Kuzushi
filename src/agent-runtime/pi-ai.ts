@@ -15,7 +15,7 @@ import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
 
 const DEFAULT_MAX_TURNS: number | undefined = undefined;
-const KNOWN_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "Bash", "Write"]);
+const KNOWN_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "Bash", "Write", "GetCallers", "GetCallees", "GetFunctionBody"]);
 
 const TRANSIENT_RETRY_MAX = 3;
 const TRANSIENT_RETRY_BASE_MS = 5_000;
@@ -529,7 +529,7 @@ function buildStructuredOutputRetryMessage(schema: Record<string, unknown>): str
 function buildSystemPrompt(schema: Record<string, unknown> | undefined): string {
   const lines = [
     "You are a code security agent operating on a local repository.",
-    "Use available tools (Read, Glob, Grep, Bash, Write) when code inspection or file manipulation is required.",
+    "Use available tools (Read, Glob, Grep, Bash, Write, GetCallers, GetCallees, GetFunctionBody) when code inspection or file manipulation is required.",
     "When you call tools, pass valid JSON arguments.",
   ];
 

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import { antiHallucinationModule } from "../../prompts/modules.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -140,11 +141,12 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "4. Check for sanitization, validation, allowlists, or other guards between source and sink.",
     "5. Only report findings where you can verify the dangerous API call AND the attacker-controlled input path.",
     "",
-    "## Anti-hallucination constraints",
-    "- Only report what you can verify exists in the actual code.",
-    "- Do NOT infer or speculate about code you haven't read.",
-    "- If unsure whether input is attacker-controlled, do NOT report.",
-    "- Confidence must reflect your actual certainty: HIGH only if source-to-sink is fully verified.",
+    antiHallucinationModule({
+      extra: [
+        "If unsure whether input is attacker-controlled, do NOT report.",
+        "Confidence HIGH only if source-to-sink is fully verified.",
+      ],
+    }),
     "",
     `Return at most ${maxFindings} findings, prioritized by severity and confidence.`,
     "Filter out any finding where your confidence would be below MEDIUM.",

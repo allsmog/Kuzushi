@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import {
+  antiHallucinationModule,
+  frameworkAwarenessModule,
+} from "../../prompts/modules.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -108,14 +112,8 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "3. Classify each usage by category and safety.",
     `4. Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
-    "## Anti-hallucination constraints",
-    "- Only report concrete misuse you can verify in code. Do not report secure patterns.",
-    "- Do NOT infer or speculate about code you haven't read.",
-    "- If a crypto library is used correctly per its documentation, do not flag it.",
-    "- Confidence must reflect your actual certainty: HIGH only if misuse is unambiguous.",
-    repoContext?.frameworks.length
-      ? `- Account for framework defaults: ${repoContext.frameworks.join(", ")} may provide secure defaults.`
-      : "",
+    antiHallucinationModule(),
+    frameworkAwarenessModule(repoContext),
   ].filter(Boolean).join("\n");
 }
 

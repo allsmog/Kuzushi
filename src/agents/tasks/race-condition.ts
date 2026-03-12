@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import { antiHallucinationModule } from "../../prompts/modules.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -109,11 +110,13 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "",
     `Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
-    "## Anti-hallucination constraints",
-    "- Only report issues where concurrent access is plausible and has security impact.",
-    "- Do NOT infer or speculate about code you haven't read.",
-    "- Verify that the code is actually executed concurrently before reporting.",
-    "- Confidence must reflect your actual certainty: HIGH only if race is clearly exploitable.",
+    antiHallucinationModule({
+      extra: [
+        "Only report issues where concurrent access is plausible and has security impact.",
+        "Verify that the code is actually executed concurrently before reporting.",
+        "Confidence HIGH only if race is clearly exploitable.",
+      ],
+    }),
   ].join("\n");
 }
 

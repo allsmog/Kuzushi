@@ -10,6 +10,11 @@ import type { AllowedTriageTool, Finding } from "./scanners/types.js";
 import type { ProofVerdict, RepoContext, TriageResult, VerificationResult } from "./types.js";
 import { getBypassKnowledge, formatBypassForPrompt } from "./bypass-knowledge.js";
 import { formatRepoContext } from "./repo-context.js";
+import {
+  bypassExhaustionModule,
+  confidenceEscalationModule,
+  proofLevelModule,
+} from "./prompts/modules.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 
 export const VERIFICATION_RESULT_SCHEMA = {
@@ -163,35 +168,11 @@ export function buildVerificationPrompt(
           "6. List any preconditions required to reproduce impact.",
         ]),
     "",
-    "## Proof Level Framework",
-    "Classify your findings using these proof levels:",
-    "Level 1: Theoretical weakness identified",
-    "Level 2: Partial bypass achieved (e.g., UI access without function)",
-    "Level 3: Full bypass confirmed (unauthorized protected functionality)",
-    "Level 4: Account takeover demonstrated",
+    proofLevelModule(),
     "",
-    "## Bypass Exhaustion Protocol",
-    "Before classifying as not-exploitable, you MUST try:",
-    "- Direct exploitation with obvious payload",
-    "- Parameter pollution / type juggling",
-    "- Encoding bypass (URL, Unicode, double-encoding)",
-    "- Race condition / timing attack",
-    "- Chained exploitation with another weakness",
-    "Document each attempt and its result in bypass_attempts.",
+    bypassExhaustionModule(),
     "",
-    "## Verdicts",
-    "EXPLOITED: Level 3+ with concrete evidence",
-    "BLOCKED_BY_SECURITY: Valid vuln but blocked by WAF/defense (document what blocks it)",
-    "OUT_OF_SCOPE: Requires internal/physical access",
-    "FALSE_POSITIVE: Exhausted all bypass techniques, confirmed safe",
-    "",
-    "## Confidence Escalation Protocol",
-    "Start at 0.1. Escalate only with evidence:",
-    "- 0.1-0.3: Identified theoretical weakness only",
-    "- 0.3-0.5: Partial bypass achieved but blocked by defense",
-    "- 0.5-0.7: Defense bypass feasible with specific technique",
-    "- 0.7-0.9: Full bypass confirmed with concrete payload",
-    "- 0.9-1.0: Complete exploitation demonstrated with account takeover",
+    confidenceEscalationModule("verification"),
     "",
     "## Output requirements",
     "Return ONLY a JSON object with keys:",

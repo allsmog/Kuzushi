@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import { antiHallucinationModule } from "../../prompts/modules.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -117,13 +118,15 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "3. Use Read to inspect files with potential secrets",
     `4. Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
-    "## Anti-hallucination constraints",
-    "- Only report secrets you can verify exist in the actual code.",
-    "- Do NOT report test fixtures, example configs, documentation samples, or placeholder values.",
-    "- Strings like `YOUR_API_KEY`, `xxx`, `changeme`, `placeholder`, `example` are NOT real secrets.",
-    "- Files in `test/`, `tests/`, `__tests__/`, `spec/`, `fixtures/`, `mocks/` are test fixtures — be extra skeptical.",
-    "- `.env.example` and `.env.sample` files contain placeholders, not real secrets.",
-    "- Confidence must reflect your actual certainty: HIGH only if the secret appears genuine.",
+    antiHallucinationModule({
+      extra: [
+        "Only report secrets you can verify exist in the actual code.",
+        "Do NOT report test fixtures, example configs, documentation samples, or placeholder values.",
+        "Strings like `YOUR_API_KEY`, `xxx`, `changeme`, `placeholder`, `example` are NOT real secrets.",
+        "Files in `test/`, `tests/`, `__tests__/`, `spec/`, `fixtures/`, `mocks/` are test fixtures — be extra skeptical.",
+        "`.env.example` and `.env.sample` files contain placeholders, not real secrets.",
+      ],
+    }),
   ].filter(Boolean).join("\n");
 }
 

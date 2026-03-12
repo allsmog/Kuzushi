@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import {
+  antiHallucinationModule,
+  frameworkAwarenessModule,
+} from "../../prompts/modules.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -120,14 +124,13 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "",
     `Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
-    "## Anti-hallucination constraints",
-    "- Only report concrete issues with evidence in code.",
-    "- Do NOT infer or speculate about code you haven't read.",
-    "- If unsure whether middleware protects a route, READ the middleware registration.",
-    "- Confidence must reflect your actual certainty: HIGH only if you verified the full auth chain.",
-    repoContext?.frameworks.length
-      ? `- Account for framework auth: ${repoContext.frameworks.join(", ")} may apply auth at router/app level.`
-      : "",
+    antiHallucinationModule({
+      extra: [
+        "If unsure whether middleware protects a route, READ the middleware registration.",
+        "Confidence HIGH only if you verified the full auth chain.",
+      ],
+    }),
+    frameworkAwarenessModule(repoContext),
   ].filter(Boolean).join("\n");
 }
 

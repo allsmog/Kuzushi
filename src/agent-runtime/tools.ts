@@ -75,6 +75,32 @@ const GrepParameters = Type.Object(
   { additionalProperties: true },
 );
 
+const GetFunctionBodyParameters = Type.Object(
+  {
+    name: Type.String({ description: "Function or method name to find" }),
+    file_path: Type.Optional(Type.String({ description: "File to search in (searches repo if omitted)" })),
+    language: Type.Optional(Type.String({ description: "Language hint (js, ts, py, go, java, rust, rb, php, cs)" })),
+  },
+  { additionalProperties: true },
+);
+
+const GetCallersParameters = Type.Object(
+  {
+    name: Type.String({ description: "Function or method name to find callers of" }),
+    path: Type.Optional(Type.String({ description: "Directory to scope the search" })),
+    max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description: "Max results (default 20)" })),
+  },
+  { additionalProperties: true },
+);
+
+const GetCalleesParameters = Type.Object(
+  {
+    name: Type.String({ description: "Function or method name to analyze" }),
+    file_path: Type.String({ description: "File containing the function" }),
+  },
+  { additionalProperties: true },
+);
+
 export const PI_AI_TOOL_DEFINITIONS: Tool[] = [
   {
     name: "Read",
@@ -101,6 +127,21 @@ export const PI_AI_TOOL_DEFINITIONS: Tool[] = [
     description: "Write content to a file (creates parent directories as needed).",
     parameters: WriteParameters,
   },
+  {
+    name: "GetFunctionBody",
+    description: "Find a function/method definition by name and return its body with surrounding context (~50 lines before and after).",
+    parameters: GetFunctionBodyParameters,
+  },
+  {
+    name: "GetCallers",
+    description: "Find all call sites of a function/method across the codebase. Returns file:line:content for each call site.",
+    parameters: GetCallersParameters,
+  },
+  {
+    name: "GetCallees",
+    description: "Given a function, list all functions/methods it calls. Returns deduplicated list of callee names.",
+    parameters: GetCalleesParameters,
+  },
 ];
 
 export async function executeTool(
@@ -126,6 +167,18 @@ export async function executeTool(
 
   if (name === "Write") {
     return executeWrite(args, cwd);
+  }
+
+  if (name === "GetFunctionBody") {
+    return executeGetFunctionBody(args, cwd);
+  }
+
+  if (name === "GetCallers") {
+    return executeGetCallers(args, cwd);
+  }
+
+  if (name === "GetCallees") {
+    return executeGetCallees(args, cwd);
   }
 
   throw new Error(`Unsupported tool: ${name}`);
@@ -341,6 +394,382 @@ function executeWrite(args: Record<string, unknown>, cwd: string): string {
   writeFileSync(absolutePath, content, "utf-8");
 
   return `Wrote ${content.length} bytes to ${filePath}`;
+}
+
+const FUNCTION_DEF_CONTEXT_LINES = 50;
+const DEFAULT_GET_CALLERS_LIMIT = 20;
+
+const TEXT_FILE_EXTENSIONS = new Set([
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
+  "py", "pyi", "pyw",
+  "go",
+  "java", "kt", "kts", "scala",
+  "cs", "fs", "vb",
+  "rs",
+  "rb", "erb",
+  "php",
+  "c", "h", "cpp", "hpp", "cc", "cxx", "hxx",
+  "swift", "m", "mm",
+  "lua", "pl", "pm", "r", "R", "jl",
+  "sh", "bash", "zsh", "fish",
+  "sql", "graphql", "gql",
+  "html", "htm", "xml", "xsl", "xslt", "svg",
+  "css", "scss", "sass", "less",
+  "json", "yaml", "yml", "toml", "ini", "cfg", "conf",
+  "md", "txt", "rst", "adoc",
+  "vue", "svelte", "astro",
+  "tf", "hcl",
+  "proto", "thrift", "avsc",
+  "ex", "exs", "erl", "hrl",
+  "hs", "lhs", "ml", "mli", "clj", "cljs", "cljc", "el", "lisp", "scm",
+  "dart", "nim", "zig", "v",
+]);
+
+function extToLangHint(ext: string): string | undefined {
+  switch (ext) {
+    case "ts": case "tsx": case "mts": case "cts": return "ts";
+    case "js": case "jsx": case "mjs": case "cjs": return "js";
+    case "py": case "pyi": case "pyw": return "py";
+    case "go": return "go";
+    case "java": return "java";
+    case "kt": case "kts": return "kotlin";
+    case "cs": return "cs";
+    case "rs": return "rust";
+    case "rb": case "erb": return "rb";
+    case "php": return "php";
+    default: return undefined;
+  }
+}
+
+// Generic patterns that match any function definition (used for body-end detection)
+const GENERIC_FUNCTION_DEF_PATTERNS: RegExp[] = [
+  /\bfunction\s+[\w$]+\s*\(/,
+  /\b(?:const|let|var)\s+[\w$]+\s*=\s*(?:async\s+)?(?:\([^)]*\)|[\w$]+)\s*=>/,
+  /^\s*(?:export\s+)?(?:async\s+)?function\s+[\w$]+/,
+  /^\s*(?:async\s+)?def\s+[\w$]+\s*\(/,
+  /^\s*class\s+[\w$]+\s*[:(]/,
+  /^\s*func\s+[\w$]*\s*\(/,
+  /^\s*func\s+\([^)]+\)\s+[\w$]+\s*\(/,
+  /^\s*(?:pub\s+)?(?:async\s+)?fn\s+[\w$]+\s*[<(]/,
+  /^\s*def\s+(?:self\.)?[\w$]+/,
+  /^\s*(?:public|private|protected|static)?\s*function\s+[\w$]+\s*\(/,
+];
+
+const LANGUAGE_KEYWORDS = new Set([
+  "if", "else", "for", "while", "do", "switch", "case", "catch", "throw",
+  "return", "new", "delete", "typeof", "instanceof", "void", "in", "of",
+  "try", "finally", "break", "continue", "default", "with", "yield", "await",
+  "import", "export", "from", "as", "class", "extends", "super", "this",
+  "const", "let", "var", "static", "async", "function",
+  "print", "assert", "raise", "pass", "lambda", "elif", "except", "not", "and", "or", "is",
+  "range", "len", "type", "list", "dict", "set", "tuple", "str", "int", "float", "bool",
+  "fmt", "make", "append", "panic", "recover", "defer", "go", "select", "chan",
+  "match", "enum", "impl", "trait", "pub", "mod", "use", "crate", "self", "Self",
+  "require", "require_once", "include", "include_once", "echo", "isset", "unset", "empty",
+  "puts", "attr_accessor", "attr_reader", "attr_writer",
+  "System", "String", "Integer", "Boolean", "Object", "Array", "Map", "Set",
+  "console", "Math", "JSON", "Promise", "Error", "RegExp", "Date", "Number",
+]);
+
+function buildFunctionDefPatterns(name: string, language?: string): RegExp[] {
+  const escapedName = escapeRegex(name);
+  const patterns: RegExp[] = [];
+
+  const lang = (language ?? "").toLowerCase();
+
+  // JS/TS patterns
+  if (!lang || lang === "js" || lang === "ts" || lang === "javascript" || lang === "typescript") {
+    patterns.push(
+      new RegExp(`\\bfunction\\s+${escapedName}\\s*\\(`),
+      new RegExp(`\\b(?:const|let|var)\\s+${escapedName}\\s*=`),
+      new RegExp(`^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+${escapedName}\\b`),
+    );
+  }
+
+  // Python patterns
+  if (!lang || lang === "py" || lang === "python") {
+    patterns.push(
+      new RegExp(`^\\s*(?:async\\s+)?def\\s+${escapedName}\\s*\\(`),
+      new RegExp(`^\\s*class\\s+${escapedName}\\s*[:(]`),
+    );
+  }
+
+  // Go patterns
+  if (!lang || lang === "go" || lang === "golang") {
+    patterns.push(
+      new RegExp(`^\\s*func\\s+${escapedName}\\s*\\(`),
+      new RegExp(`^\\s*func\\s+\\([^)]+\\)\\s+${escapedName}\\s*\\(`),
+    );
+  }
+
+  // Java/Kotlin/C# patterns
+  if (!lang || lang === "java" || lang === "kotlin" || lang === "kt" || lang === "cs" || lang === "csharp") {
+    patterns.push(
+      new RegExp(`(?:public|private|protected|internal|static|final|abstract|override|suspend|synchronized)\\s+.*\\b${escapedName}\\s*\\(`),
+      new RegExp(`^\\s*(?:fun|void|int|long|double|float|boolean|char|byte|short|string|var|val|dynamic|object|Task|async)\\s+${escapedName}\\s*[<(]`),
+    );
+  }
+
+  // Rust patterns
+  if (!lang || lang === "rust" || lang === "rs") {
+    patterns.push(
+      new RegExp(`^\\s*(?:pub\\s+)?(?:async\\s+)?fn\\s+${escapedName}\\s*[<(]`),
+    );
+  }
+
+  // Ruby patterns
+  if (!lang || lang === "ruby" || lang === "rb") {
+    patterns.push(
+      new RegExp(`^\\s*def\\s+(?:self\\.)?${escapedName}\\b`),
+    );
+  }
+
+  // PHP patterns
+  if (!lang || lang === "php") {
+    patterns.push(
+      new RegExp(`^\\s*(?:public|private|protected|static)?\\s*function\\s+${escapedName}\\s*\\(`),
+    );
+  }
+
+  return patterns;
+}
+
+function executeGetFunctionBody(args: Record<string, unknown>, cwd: string): string {
+  const name = getString(args, ["name"]);
+  if (!name) {
+    throw new Error("GetFunctionBody requires a function name");
+  }
+
+  const filePath = getString(args, ["file_path", "filePath"]);
+  const language = getString(args, ["language"]);
+  const patterns = buildFunctionDefPatterns(name, language);
+
+  const filesToSearch: string[] = [];
+
+  if (filePath) {
+    const absolutePath = resolvePath(cwd, filePath);
+    const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
+    if (!fileStats || !fileStats.isFile()) {
+      throw new Error(`GetFunctionBody file not found: ${filePath}`);
+    }
+    filesToSearch.push(absolutePath);
+  } else {
+    const allFiles = globSync("**/*", {
+      cwd,
+      exclude: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
+    });
+    for (const file of allFiles) {
+      const ext = path.extname(file).slice(1).toLowerCase();
+      if (!TEXT_FILE_EXTENSIONS.has(ext)) {
+        continue;
+      }
+      const absolutePath = path.resolve(cwd, file);
+      const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
+      if (fileStats && fileStats.isFile()) {
+        filesToSearch.push(absolutePath);
+      }
+    }
+  }
+
+  for (const absolutePath of filesToSearch) {
+    let fileContent: string;
+    try {
+      fileContent = readFileSync(absolutePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    const lines = fileContent.split(/\r?\n/);
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex];
+      const matched = patterns.some((pattern) => pattern.test(line));
+
+      if (!matched) {
+        continue;
+      }
+
+      const startOffset = Math.max(0, lineIndex - FUNCTION_DEF_CONTEXT_LINES);
+      const endOffset = Math.min(lines.length, lineIndex + FUNCTION_DEF_CONTEXT_LINES + 1);
+      const selected = lines.slice(startOffset, endOffset);
+
+      const displayPath = normalizeForDisplay(path.relative(cwd, absolutePath));
+      const maxLineNumber = startOffset + selected.length;
+      const width = Math.max(1, String(maxLineNumber).length);
+
+      const numbered = selected.map((l, idx) => {
+        const lineNumber = String(startOffset + idx + 1).padStart(width, " ");
+        return `${lineNumber} | ${l}`;
+      });
+
+      const header = `${displayPath}:${lineIndex + 1}`;
+      return `${header}\n${numbered.join("\n")}`;
+    }
+  }
+
+  return `Function "${name}" not found.`;
+}
+
+function executeGetCallers(args: Record<string, unknown>, cwd: string): string {
+  const name = getString(args, ["name"]);
+  if (!name) {
+    throw new Error("GetCallers requires a function name");
+  }
+
+  const searchPath = getString(args, ["path"]) ?? ".";
+  const searchRoot = resolvePath(cwd, searchPath);
+  const searchRootStats = statSync(searchRoot, { throwIfNoEntry: false });
+  if (!searchRootStats || !searchRootStats.isDirectory()) {
+    throw new Error(`GetCallers path is not a directory: ${searchPath}`);
+  }
+
+  const maxResults = toPositiveInt(args["max_results"] ?? args["maxResults"]) ?? DEFAULT_GET_CALLERS_LIMIT;
+
+  const callPattern = new RegExp(`(?<![\\w$])${escapeRegex(name)}\\s*\\(`, "g");
+
+  const files = globSync("**/*", {
+    cwd: searchRoot,
+    exclude: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
+  });
+
+  const output: string[] = [];
+
+  for (const file of files) {
+    const absolutePath = path.resolve(searchRoot, file);
+    const ext = path.extname(absolutePath).slice(1).toLowerCase();
+    if (!TEXT_FILE_EXTENSIONS.has(ext)) {
+      continue;
+    }
+    const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
+    if (!fileStats || !fileStats.isFile()) {
+      continue;
+    }
+
+    let fileContent: string;
+    try {
+      fileContent = readFileSync(absolutePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    const langHint = extToLangHint(ext);
+    const defPatterns = buildFunctionDefPatterns(name, langHint);
+
+    const lines = fileContent.split(/\r?\n/);
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex];
+
+      callPattern.lastIndex = 0;
+      if (!callPattern.test(line)) {
+        continue;
+      }
+
+      // Filter out definition lines
+      const isDefinition = defPatterns.some((pattern) => pattern.test(line));
+      if (isDefinition) {
+        continue;
+      }
+
+      const displayPath = normalizeForDisplay(path.relative(cwd, absolutePath));
+      output.push(`${displayPath}:${lineIndex + 1}:${line}`);
+
+      if (output.length >= maxResults) {
+        output.push(`... (truncated to ${maxResults} results)`);
+        return output.join("\n");
+      }
+    }
+  }
+
+  if (output.length === 0) {
+    return `No callers found for "${name}".`;
+  }
+
+  return output.join("\n");
+}
+
+function executeGetCallees(args: Record<string, unknown>, cwd: string): string {
+  const name = getString(args, ["name"]);
+  if (!name) {
+    throw new Error("GetCallees requires a function name");
+  }
+
+  const filePath = getString(args, ["file_path", "filePath"]);
+  if (!filePath) {
+    throw new Error("GetCallees requires a file_path");
+  }
+
+  const absolutePath = resolvePath(cwd, filePath);
+  const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
+  if (!fileStats || !fileStats.isFile()) {
+    throw new Error(`GetCallees file not found: ${filePath}`);
+  }
+
+  let fileContent: string;
+  try {
+    fileContent = readFileSync(absolutePath, "utf8");
+  } catch {
+    throw new Error(`GetCallees could not read file: ${filePath}`);
+  }
+
+  // Find the function body — derive language from file extension for accuracy
+  const fileExt = path.extname(absolutePath).slice(1).toLowerCase();
+  const patterns = buildFunctionDefPatterns(name, extToLangHint(fileExt));
+  const lines = fileContent.split(/\r?\n/);
+  let functionStartLine = -1;
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    const matched = patterns.some((pattern) => pattern.test(line));
+    if (matched) {
+      functionStartLine = lineIndex;
+      break;
+    }
+  }
+
+  if (functionStartLine === -1) {
+    return `Function "${name}" not found in ${filePath}.`;
+  }
+
+  // Extract function body heuristically: from definition to the next function definition or 100 lines
+  let bodyEnd = Math.min(lines.length, functionStartLine + 100);
+  for (let i = functionStartLine + 1; i < bodyEnd; i++) {
+    const isNextDef = GENERIC_FUNCTION_DEF_PATTERNS.some((p) => p.test(lines[i]));
+    if (isNextDef) {
+      bodyEnd = i;
+      break;
+    }
+  }
+  const bodyLines = lines.slice(functionStartLine, bodyEnd);
+  const bodyText = bodyLines.join("\n");
+
+  // Extract function calls
+  const functionCallPattern = /\b([a-zA-Z_$][\w$]*)\s*\(/g;
+  const methodCallPattern = /\.([a-zA-Z_$][\w$]*)\s*\(/g;
+
+  const callees = new Set<string>();
+  let fnMatch: RegExpExecArray | null;
+
+  // biome-ignore lint/suspicious/noAssignInExpressions: regex exec loop
+  while ((fnMatch = functionCallPattern.exec(bodyText)) !== null) {
+    const calleeName = fnMatch[1];
+    if (!LANGUAGE_KEYWORDS.has(calleeName) && calleeName !== name) {
+      callees.add(calleeName);
+    }
+  }
+
+  // biome-ignore lint/suspicious/noAssignInExpressions: regex exec loop
+  while ((fnMatch = methodCallPattern.exec(bodyText)) !== null) {
+    const calleeName = fnMatch[1];
+    if (!LANGUAGE_KEYWORDS.has(calleeName)) {
+      callees.add(calleeName);
+    }
+  }
+
+  if (callees.size === 0) {
+    return `No callees found in function "${name}".`;
+  }
+
+  const sorted = [...callees].sort((a, b) => a.localeCompare(b));
+  return sorted.join("\n");
 }
 
 function resolvePath(cwd: string, targetPath: string): string {

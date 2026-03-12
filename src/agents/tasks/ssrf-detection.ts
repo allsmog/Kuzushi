@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import {
+  antiHallucinationModule,
+  frameworkAwarenessModule,
+} from "../../prompts/modules.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -121,14 +125,14 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "3. Check for URL validation, allowlists, and redirect configuration",
     `4. Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
-    "## Anti-hallucination constraints",
-    "- Only report SSRF where you can verify user input reaches an HTTP request sink.",
-    "- Do NOT report internal-only HTTP calls with hardcoded URLs.",
-    "- Do NOT report HTTP calls in test files or development scripts.",
-    "- Confidence must reflect your actual certainty: HIGH only if the data flow is clear.",
-    repoContext?.frameworks.length
-      ? `- Account for framework protections: ${repoContext.frameworks.join(", ")} may have built-in SSRF mitigations.`
-      : "",
+    antiHallucinationModule({
+      extra: [
+        "Only report SSRF where you can verify user input reaches an HTTP request sink.",
+        "Do NOT report internal-only HTTP calls with hardcoded URLs.",
+        "Do NOT report HTTP calls in test files or development scripts.",
+      ],
+    }),
+    frameworkAwarenessModule(repoContext),
   ].filter(Boolean).join("\n");
 }
 

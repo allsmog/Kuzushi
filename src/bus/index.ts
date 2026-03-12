@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { createDefaultTaskRegistry } from "../agents/index.js";
 import type { TaskRegistry } from "../agents/registry.js";
+import { createDefaultKnowledgeRegistry } from "../knowledge/index.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
 import type { KuzushiConfig } from "../types.js";
 import { createBus } from "./adapters/index.js";
@@ -26,11 +27,13 @@ export interface RegisterWorkersDeps {
 /** Register orchestrator + all built-in workers on a bus instance. */
 export function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): void {
   const taskRegistry = deps.taskRegistry ?? createDefaultTaskRegistry(deps.registry);
+  const knowledgeRegistry = createDefaultKnowledgeRegistry();
 
   registerScanWorker(bus, {
     registry: deps.registry,
     taskRegistry,
     config: deps.config,
+    knowledgeRegistry,
   });
 
   registerTriageWorker(bus, {

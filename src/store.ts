@@ -11,6 +11,8 @@ import type {
 } from "./types.js";
 import type { Finding, ScannerId } from "./scanners/types.js";
 import { BATCH_TRIAGE_FALLBACK_RATIONALE } from "./triage.js";
+import { ensureCalibrationSchema } from "./confidence-calibration.js";
+import { ensureTrajectoryTable } from "./trajectory-memory.js";
 
 export type PipelineRunStatus =
   | "scanning"
@@ -102,8 +104,11 @@ export function initDb(dbPath: string): Database.Database {
   ensureTriageDetailsColumn(db);
   ensureVerificationColumns(db);
   ensurePocHarnessColumns(db);
+  ensurePocExecutionColumns(db);
   ensurePipelineRunsStatusValues(db);
   ensurePipelineRunContextColumn(db);
+  ensureCalibrationSchema(db);
+  ensureTrajectoryTable(db);
 
   return db;
 }
@@ -827,6 +832,24 @@ function ensurePocHarnessColumns(db: Database.Database): void {
   }
   if (!columnNames.has("poc_harness_cost_usd")) {
     db.exec("ALTER TABLE findings ADD COLUMN poc_harness_cost_usd REAL");
+  }
+}
+
+function ensurePocExecutionColumns(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+
+  const migrations: Array<[string, string]> = [
+    ["poc_run_exit_code", "INTEGER"],
+    ["poc_run_stdout", "TEXT"],
+    ["poc_run_stderr", "TEXT"],
+    ["poc_run_verdict", "TEXT"],
+    ["poc_run_duration_ms", "REAL"],
+  ];
+  for (const [col, typ] of migrations) {
+    if (!names.has(col)) {
+      db.prepare(`ALTER TABLE findings ADD COLUMN ${col} ${typ}`).run();
+    }
   }
 }
 

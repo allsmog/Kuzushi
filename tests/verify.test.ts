@@ -252,7 +252,7 @@ describe("verifyFindingWithAgent", () => {
     expect(output.result.exploitable).toBe(true);
     expect(output.costUsd).toBe(0.0142);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep"]);
+    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody"]);
     expect(requests[0]?.options?.outputFormat?.schema).toBe(VERIFICATION_RESULT_SCHEMA);
     expect(requests[0]?.options?.maxTurns).toBe(12);
   });

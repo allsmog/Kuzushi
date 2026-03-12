@@ -22,6 +22,7 @@ import { threatModelPastaTask } from "./tasks/threat-modeling/pasta.js";
 import { secretsDetectionTask } from "./tasks/secrets-detection.js";
 import { securityMisconfigTask } from "./tasks/security-misconfig.js";
 import { ssrfDetectionTask } from "./tasks/ssrf-detection.js";
+import { taskSelectorTask } from "./tasks/task-selector.js";
 
 /** Create task registry populated with adapted scanner plugins. */
 export function createDefaultTaskRegistry(scannerRegistry?: ScannerRegistry): TaskRegistry {
@@ -58,6 +59,9 @@ export function createDefaultTaskRegistry(scannerRegistry?: ScannerRegistry): Ta
   tasks.register(secretsDetectionTask);
   tasks.register(securityMisconfigTask);
   tasks.register(ssrfDetectionTask);
+
+  // Dynamic task selection
+  tasks.register(taskSelectorTask);
 
   for (const id of registry.ids()) {
     tasks.register(adaptScannerPlugin(registry.get(id)));

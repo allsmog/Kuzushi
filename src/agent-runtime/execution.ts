@@ -2,7 +2,7 @@ import type { RepoContext } from "../types.js";
 import { isRecord } from "../utils.js";
 import { getAgentRuntime, type AgentRuntime } from "./index.js";
 
-export const DEFAULT_READ_ONLY_TOOLS = ["Read", "Glob", "Grep"] as const;
+export const DEFAULT_READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody"] as const;
 
 export interface AgentActivity {
   kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";

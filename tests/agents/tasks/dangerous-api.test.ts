@@ -78,7 +78,7 @@ describe("buildPrompt", () => {
 
   it("includes anti-hallucination constraints", () => {
     const prompt = buildPrompt(undefined, 25);
-    expect(prompt).toContain("Only report what you can verify");
+    expect(prompt).toContain("Anti-hallucination constraints");
   });
 
   it("includes framework guidance when context provided", () => {

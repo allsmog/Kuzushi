@@ -3,6 +3,9 @@ import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { TaskContext as AgentTaskContext } from "../agents/types.js";
 import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
+import type { TaskSelectionResult } from "../agents/tasks/task-selector.js";
+import { createDefaultKnowledgeRegistry } from "../knowledge/index.js";
+import type { KnowledgeRegistry } from "../knowledge/types.js";
 import type { Finding } from "../scanners/types.js";
 import { selectTopFindings } from "../scanners/finding-selection.js";
 import { HardExclusionFilter } from "../scanners/fp-filter.js";
@@ -689,6 +692,10 @@ export class PipelineOrchestrator {
       ...state.scanners,
       ...(enableContextExplicit ? ["context-gatherer"] : []),
       ...(state.config.enabledTasks ?? []),
+      // Auto-add task-selector when dynamic task selection is enabled
+      ...(state.config.enableDynamicTaskSelection && this.deps.taskRegistry.has("task-selector")
+        ? ["task-selector"]
+        : []),
     ]);
 
     // Auto-inject all transitive dependencies for enabled tasks
@@ -707,6 +714,9 @@ export class PipelineOrchestrator {
         enabledTaskIds = enabledTaskIds.filter((id) => id !== "context-gatherer");
       }
     }
+
+    // Track already-completed tasks for dynamic re-resolution
+    const completedTaskIds = new Set<string>();
 
     let stages: string[][];
     try {
@@ -783,6 +793,7 @@ export class PipelineOrchestrator {
         if (outcome.kind === "complete") {
           const { taskId, outputKind, output, costUsd } = outcome.event.payload;
           state.taskOutputs.set(taskId, output);
+          completedTaskIds.add(taskId);
 
           // Accumulate scan-phase task LLM costs
           const normalizedCost = normalizeCostUsd(costUsd);
@@ -798,6 +809,47 @@ export class PipelineOrchestrator {
           } else if (outputKind === "threat-model") {
             if (isRecord(output) && Array.isArray(output["findings"])) {
               state.scanFindings.push(...coerceFindings(output["findings"]));
+            }
+          }
+        }
+      }
+
+      // Dynamic task selection: check if any completed task produced a TaskSelectionResult
+      // (duck-type check: has recommendedTasks array). If so, merge and re-resolve.
+      if (state.config.enableDynamicTaskSelection) {
+        const dynamicTasks = this.extractDynamicTasks(state, completedTaskIds);
+        if (dynamicTasks.length > 0) {
+          const newTaskIds = dynamicTasks.filter(
+            (id) =>
+              !enabledTaskIds.includes(id)
+              && this.deps.taskRegistry!.has(id),
+          );
+
+          if (newTaskIds.length > 0) {
+            console.error(
+              `[orchestrator] Dynamic task selection added: ${newTaskIds.join(", ")}`,
+            );
+            enabledTaskIds = [
+              ...enabledTaskIds,
+              ...collectTransitiveDeps(this.deps.taskRegistry, newTaskIds)
+                .filter((id) => !enabledTaskIds.includes(id)),
+            ];
+
+            // Re-resolve remaining stages
+            try {
+              const fullStages = this.deps.taskRegistry.resolveOrder(enabledTaskIds);
+              // Replace remaining stages — skip stages already completed
+              const remaining = fullStages.filter((stage) =>
+                stage.some((id) => !completedTaskIds.has(id)),
+              ).map((stage) => stage.filter((id) => !completedTaskIds.has(id)));
+              stages = [
+                ...stages.slice(0, stageIndex + 1),
+                ...remaining,
+              ];
+            } catch (error) {
+              console.error(
+                `[orchestrator] Dynamic DAG re-resolution failed: ${toErrorMessage(error)}`,
+              );
             }
           }
         }
@@ -828,6 +880,32 @@ export class PipelineOrchestrator {
         totalFindings: state.scanFindings.length,
       }),
     );
+  }
+
+  /**
+   * Duck-type check: extract recommended tasks from any completed task
+   * that produced a TaskSelectionResult (has `recommendedTasks` array).
+   */
+  private extractDynamicTasks(
+    state: RunState,
+    completedTaskIds: Set<string>,
+  ): string[] {
+    const dynamicTasks: string[] = [];
+    for (const taskId of completedTaskIds) {
+      const output = state.taskOutputs.get(taskId);
+      if (
+        isRecord(output)
+        && Array.isArray(output["recommendedTasks"])
+      ) {
+        const recommended = output["recommendedTasks"] as unknown[];
+        for (const t of recommended) {
+          if (typeof t === "string" && t.trim()) {
+            dynamicTasks.push(t.trim());
+          }
+        }
+      }
+    }
+    return dynamicTasks;
   }
 
   private waitForTaskOutcome(runId: string, taskId: string): Promise<TaskOutcome> {
@@ -1739,6 +1817,24 @@ export class PipelineOrchestrator {
       updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
     } catch {
       // Cost persistence is best-effort and should not fail the run.
+    }
+
+    // Queue PoC execution if enabled and harness was successfully generated
+    if (
+      state.config.pocExecute
+      && !event.payload.result.skipped
+      && event.payload.result.parsed
+      && event.payload.result.scriptPath
+      && event.payload.result.language
+    ) {
+      await this.bus.publish(
+        createEvent("poc-execution:queued", runId, {
+          context: state.context,
+          fingerprint: event.payload.result.fingerprint,
+          scriptPath: event.payload.result.scriptPath,
+          language: event.payload.result.language,
+        }),
+      );
     }
 
     await this.publishPocHarnessQueueDepth(state, runId);

@@ -2,6 +2,11 @@ import type { EnrichedRepoContext, RepoContext } from "./types.js";
 import { isRecord } from "./utils.js";
 
 export function coerceRepoContext(value: unknown): RepoContext | undefined {
+  // Unwrap TaskHandoff envelope if present
+  if (isRecord(value) && value["__handoff"] === true && "output" in value) {
+    return coerceRepoContext(value["output"]);
+  }
+
   if (!isRecord(value)) {
     return undefined;
   }

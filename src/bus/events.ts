@@ -525,6 +525,39 @@ export type ChainAnalysisCompleteEvent = EventEnvelope<
   }
 >;
 
+export type PocExecutionQueuedEvent = EventEnvelope<
+  "poc-execution:queued",
+  {
+    context: RunContext;
+    fingerprint: string;
+    scriptPath: string;
+    language: string;
+  }
+>;
+
+export type PocExecutionResultEvent = EventEnvelope<
+  "poc-execution:result",
+  {
+    context: RunContext;
+    fingerprint: string;
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+    timedOut: boolean;
+    durationMs: number;
+    verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+  }
+>;
+
+export type PocExecutionErrorEvent = EventEnvelope<
+  "poc-execution:error",
+  {
+    context: RunContext;
+    fingerprint: string;
+    error: string;
+  }
+>;
+
 export type BudgetExceededEvent = EventEnvelope<
   "budget:exceeded",
   { context: RunContext; totalCostUsd: number; budgetUsd: number }
@@ -591,6 +624,9 @@ export type KuzushiEvent =
   | VariantAnalysisCompleteEvent
   | ChainAnalysisStartEvent
   | ChainAnalysisCompleteEvent
+  | PocExecutionQueuedEvent
+  | PocExecutionResultEvent
+  | PocExecutionErrorEvent
   | BudgetExceededEvent
   | ReportRequestedEvent
   | ReportCompleteEvent;

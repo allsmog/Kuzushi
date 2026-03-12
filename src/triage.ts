@@ -13,6 +13,10 @@ import type {
   TriageAgentConfig,
 } from "./scanners/types.js";
 import { formatRepoContext } from "./repo-context.js";
+import {
+  confidenceEscalationModule,
+  falseDismissalModule,
+} from "./prompts/modules.js";
 import type { RepoContext, TriageResult, Verdict } from "./types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 
@@ -63,6 +67,27 @@ export const TRIAGE_RESULT_SCHEMA = {
         required: ["level", "evidence"],
         properties: {
           level: { type: "string" },
+          evidence: { type: "string" },
+        },
+      },
+    },
+    evidence_chain: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["step_type", "description", "confidence", "evidence"],
+        properties: {
+          step_type: {
+            type: "string",
+            enum: [
+              "source-reachability", "sink-danger", "sanitization-check",
+              "config-review", "dataflow-trace", "exploit-feasibility",
+              "framework-protection",
+            ],
+          },
+          description: { type: "string" },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
           evidence: { type: "string" },
         },
       },
@@ -123,16 +148,21 @@ export async function triageFindingWithAgent(
   maxTurns: number | null,
   repoContextOrRuntimeOptions?: RepoContext | TriageRuntimeOptions,
   maybeRuntimeOptions: TriageRuntimeOptions = {},
+  /** Optional extra context appended to the triage prompt (trajectories, evidence chain instructions). */
+  extraPromptContext?: string,
 ): Promise<TriageOutput> {
   const { repoContext, runtimeOptions } = resolveRepoContextAndRuntimeOptions(
     repoContextOrRuntimeOptions,
     maybeRuntimeOptions,
   );
   const agentConfig = resolveAgentConfig(registry, finding, repoName, repoContext);
+  const prompt = extraPromptContext
+    ? agentConfig.prompt + "\n\n" + extraPromptContext
+    : agentConfig.prompt;
   const allowedTools = normalizeAllowedTools(agentConfig.allowedTools);
   const effectiveMaxTurns = normalizeTurns(agentConfig.maxTurns ?? maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
-    prompt: agentConfig.prompt,
+    prompt,
     cwd: repoRoot,
     model,
     maxTurns: effectiveMaxTurns,
@@ -281,25 +311,9 @@ function buildBatchTriagePrompt(
     "4. Validate reachability and realistic attacker control.",
     "5. Decide tp/fp/needs_review per finding using the confidence escalation protocol below.",
     "",
-    "## Confidence Escalation Protocol",
-    "Start at 0.1. Escalate only with evidence:",
-    "- 0.1-0.3: Read flagged code but haven't traced full path",
-    "- 0.3-0.5: Traced source-to-sink but haven't verified guards",
-    "- 0.5-0.7: Verified guards absent AND input is attacker-controlled",
-    "- 0.7-0.9: Full path verified with concrete exploit scenario",
-    "- 0.9-1.0: Verified exploitable with specific payload",
-    "Your rationale MUST cite the evidence that justifies your confidence level.",
+    confidenceEscalationModule("triage"),
     "",
-    "## Common False-Dismissal Patterns",
-    "Do NOT dismiss a finding based solely on these rationalizations:",
-    '"The WAF will catch it" — WAFs are bypassable; test the application logic',
-    '"We use parameterized queries" — check for ORM misuse, stored procedures with dynamic SQL, and second-order injection',
-    '"The framework handles XSS" — template engines have raw output modes, JS contexts bypass HTML encoding, DOM XSS is client-side',
-    '"File uploads are safe because we check the extension" — null bytes, double extensions, parser discrepancies bypass extension checks',
-    '"We validate on the frontend" — client-side validation is UX, not security',
-    '"It\'s internal, auth doesn\'t matter" — internal apps get compromised via SSRF and lateral movement',
-    '"Low severity, not worth flagging" — low-severity findings chain into critical attack paths',
-    "If your FP rationale matches any of these patterns, re-investigate before concluding.",
+    falseDismissalModule(),
     "",
     "## Output requirements",
     'Return ONLY a JSON object with a "results" array. Each element MUST have:',
@@ -399,6 +413,7 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
       ruleRefinementHint: asOptionalString(raw["rule_refinement_hint"]),
       triageSchemaVersion: asOptionalString(raw["triage_schema_version"]),
       evidenceTrail: parseEvidenceTrail(raw["evidence_trail"]),
+      evidenceChain: parseEvidenceChain(raw["evidence_chain"]),
     };
   }
 
@@ -445,27 +460,14 @@ export function buildDefaultTriageAgentConfig(
       "2. Trace dataflow to source/sink across call boundaries.",
       "3. Use Grep/Glob to locate sanitization, validation, and guards.",
       "4. Validate reachability and realistic attacker control.",
-      "5. Decide tp/fp/needs_review using the confidence escalation protocol below.",
+      "5. Use GetCallers to find who calls the vulnerable function and trace attacker-controlled input.",
+      "6. Use GetCallees to understand what downstream functions the vulnerable code invokes.",
+      "7. Use GetFunctionBody to inspect specific sanitizers, validators, or middleware functions.",
+      "8. Decide tp/fp/needs_review using the confidence escalation protocol below.",
       "",
-      "## Confidence Escalation Protocol",
-      "Start at 0.1. Escalate only with evidence:",
-      "- 0.1-0.3: Read flagged code but haven't traced full path",
-      "- 0.3-0.5: Traced source-to-sink but haven't verified guards",
-      "- 0.5-0.7: Verified guards absent AND input is attacker-controlled",
-      "- 0.7-0.9: Full path verified with concrete exploit scenario",
-      "- 0.9-1.0: Verified exploitable with specific payload",
-      "Your rationale MUST cite the evidence that justifies your confidence level.",
+      confidenceEscalationModule("triage"),
       "",
-      "## Common False-Dismissal Patterns",
-      "Do NOT dismiss a finding based solely on these rationalizations:",
-      '- "The WAF will catch it" — WAFs are bypassable; test the application logic',
-      '- "We use parameterized queries" — check for ORM misuse, stored procedures with dynamic SQL, and second-order injection',
-      '- "The framework handles XSS" — template engines have raw output modes, JS contexts bypass HTML encoding, DOM XSS is client-side',
-      '- "File uploads are safe because we check the extension" — null bytes, double extensions, parser discrepancies bypass extension checks',
-      '- "We validate on the frontend" — client-side validation is UX, not security',
-      '- "It\'s internal, auth doesn\'t matter" — internal apps get compromised via SSRF and lateral movement',
-      '- "Low severity, not worth flagging" — low-severity findings chain into critical attack paths',
-      "If your FP rationale matches any of these patterns, re-investigate before concluding.",
+      falseDismissalModule(),
       "",
       "## Output requirements",
       "Return ONLY a JSON object with:",
@@ -504,6 +506,7 @@ function normalizeAllowedTools(tools: AllowedTriageTool[] | undefined): AllowedT
   const normalized = tools
     .filter((tool): tool is AllowedTriageTool => (
       tool === "Read" || tool === "Glob" || tool === "Grep"
+      || tool === "GetCallers" || tool === "GetCallees" || tool === "GetFunctionBody"
     ));
 
   return normalized.length > 0 ? normalized : [...DEFAULT_TOOLS];
@@ -546,6 +549,7 @@ export function parseTriageResponse(
       ruleRefinementHint: asOptionalString(parsed.rule_refinement_hint),
       triageSchemaVersion: asOptionalString(parsed.triage_schema_version),
       evidenceTrail: parseEvidenceTrail(parsed.evidence_trail),
+      evidenceChain: parseEvidenceChain(parsed.evidence_chain),
     };
   } catch (error) {
     throw new Error(`Invalid triage JSON response: ${toErrorMessage(error)}`);
@@ -604,6 +608,22 @@ function parseEvidenceTrail(value: unknown): Array<{ level: string; evidence: st
     }
   }
   return trail.length > 0 ? trail : undefined;
+}
+
+function parseEvidenceChain(value: unknown): import("./types.js").EvidenceStep[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const chain: import("./types.js").EvidenceStep[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const stepType = typeof item["step_type"] === "string" ? item["step_type"].trim() : "";
+    const description = typeof item["description"] === "string" ? item["description"].trim() : "";
+    const confidence = clampConfidence(item["confidence"]);
+    const evidence = typeof item["evidence"] === "string" ? item["evidence"].trim() : "";
+    if (stepType && description) {
+      chain.push({ stepType, description, confidence, evidence });
+    }
+  }
+  return chain.length > 0 ? chain : undefined;
 }
 
 function parsePathAssessment(value: unknown): TriageResult["source"] | undefined {

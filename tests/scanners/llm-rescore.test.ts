@@ -4,7 +4,7 @@ import type { Finding } from "../../src/scanners/types.js";
 // Mock the agent runtime execution
 vi.mock("../../src/agent-runtime/execution.js", () => ({
   runStructuredAgentQuery: vi.fn(),
-  DEFAULT_READ_ONLY_TOOLS: ["Read", "Glob", "Grep"],
+  DEFAULT_READ_ONLY_TOOLS: ["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody"],
 }));
 
 // Mock fs

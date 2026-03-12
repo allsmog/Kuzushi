@@ -59,9 +59,18 @@ export const DEFAULTS: KuzushiConfig = {
   ],
   fpFilterEnabled: true,
   fpFilterCustomExclusions: [],
+  enableDynamicTaskSelection: false,
+  pocExecute: false,
+  pocSandbox: "docker",
+  pocExecTimeoutMs: 30_000,
   variantAnalysis: false,
   variantAnalysisMaxFindings: 10,
   enableContextEnrichment: false,
+  confidenceCalibration: false,
+  trajectoryMemory: false,
+  trajectoryMaxExemplars: 2,
+  triageStrategy: "single",
+  triageSpecialistMaxTurns: null,
   prioritizeFindings: true,
   diffBase: undefined,
   scannerConfig: {
@@ -110,6 +119,16 @@ const VALID_TOP_LEVEL_KEYS = new Set<string>([
   "securityProfilesPath",
   "prioritizeFindings",
   "costBudgetUsd",
+  "enableDynamicTaskSelection",
+  "pocExecute",
+  "pocSandbox",
+  "pocExecTimeoutMs",
+  "confidenceCalibration",
+  "trajectoryMemory",
+  "trajectoryMaxExemplars",
+  "triageStrategy",
+  "triageSpecialistModel",
+  "triageSpecialistMaxTurns",
 ]);
 
 /** Load config from ~/.kuzushi/config.json + optional <repo>/.kuzushi/config.json. */
@@ -479,6 +498,66 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("prioritizeFindings must be true or false");
     }
     config.prioritizeFindings = parsed;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "confidenceCalibration") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("confidenceCalibration must be true or false");
+    }
+    config.confidenceCalibration = parsed;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "trajectoryMemory") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("trajectoryMemory must be true or false");
+    }
+    config.trajectoryMemory = parsed;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "trajectoryMaxExemplars") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error("trajectoryMaxExemplars must be a non-negative number");
+    }
+    config.trajectoryMaxExemplars = Math.floor(n);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "triageStrategy") {
+    const strategy = raw.trim();
+    if (strategy !== "single" && strategy !== "multi-agent") {
+      throw new Error("triageStrategy must be one of: single, multi-agent");
+    }
+    config.triageStrategy = strategy;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "triageSpecialistModel") {
+    config.triageSpecialistModel = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "triageSpecialistMaxTurns") {
+    if (raw === "null" || raw === "unlimited" || raw === "0") {
+      config.triageSpecialistMaxTurns = null;
+    } else {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 1) {
+        throw new Error("triageSpecialistMaxTurns must be a positive number, 0, or 'unlimited'");
+      }
+      config.triageSpecialistMaxTurns = Math.floor(n);
+    }
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }

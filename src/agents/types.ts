@@ -1,6 +1,7 @@
 import type { MessageBus } from "../bus/types.js";
 import type { Finding, TriageAgentConfig } from "../scanners/types.js";
 import type { KuzushiConfig, SecurityProfile } from "../types.js";
+import type { KnowledgeRegistry } from "../knowledge/types.js";
 
 /** What kind of output this task produces. */
 export type TaskOutputKind = "findings" | "threat-model" | "verdict" | "report" | "custom";
@@ -17,6 +18,8 @@ export interface TaskContext {
   upstreamOutputs: Map<string, unknown>;
   /** Domain-specific security profiles loaded from project config. */
   securityProfiles?: SecurityProfile[];
+  /** Knowledge base registry for domain-specific vulnerability knowledge. */
+  knowledgeRegistry?: KnowledgeRegistry;
 }
 
 /**

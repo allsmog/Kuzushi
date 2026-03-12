@@ -1,4 +1,5 @@
 import type { AgentTask, TaskContext } from "../agents/types.js";
+import { isHandoff } from "../agents/handoff.js";
 import type { ScannerConfig, ScannerPlugin, Finding } from "../scanners/types.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd } from "../utils.js";
@@ -63,15 +64,18 @@ export function extractTaskFindings(
   outputKind: AgentTask["outputKind"],
   output: unknown,
 ): Finding[] {
+  // Unwrap TaskHandoff envelope if present
+  const unwrapped = isHandoff(output) ? output.output : output;
+
   if (outputKind === "findings") {
-    return asFindings(output);
+    return asFindings(unwrapped);
   }
 
   if (outputKind === "threat-model") {
-    if (!isRecord(output) || !Array.isArray(output["findings"])) {
+    if (!isRecord(unwrapped) || !Array.isArray(unwrapped["findings"])) {
       return [];
     }
-    return asFindings(output["findings"]);
+    return asFindings(unwrapped["findings"]);
   }
 
   return [];

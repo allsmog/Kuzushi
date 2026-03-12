@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
+import {
+  antiHallucinationModule,
+  frameworkAwarenessModule,
+} from "../../prompts/modules.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -119,14 +123,13 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "3. Use Grep to search for debug flags, CORS config, cookie settings, and error handlers.",
     `4. Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
-    "## Anti-hallucination constraints",
-    "- Only report misconfigurations you can verify in code. Do not assume defaults.",
-    "- Do NOT infer or speculate about code you haven't read.",
-    "- Account for framework defaults that may provide secure configuration automatically.",
-    "- Confidence must reflect your actual certainty: HIGH only if misconfiguration is unambiguous.",
-    repoContext?.frameworks.length
-      ? `- Account for framework defaults: ${repoContext.frameworks.join(", ")} may provide secure defaults.`
-      : "",
+    antiHallucinationModule({
+      extra: [
+        "Only report misconfigurations you can verify in code. Do not assume defaults.",
+        "Account for framework defaults that may provide secure configuration automatically.",
+      ],
+    }),
+    frameworkAwarenessModule(repoContext),
   ].filter(Boolean).join("\n");
 }
 

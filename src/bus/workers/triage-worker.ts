@@ -1,3 +1,5 @@
+import type Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -9,11 +11,28 @@ import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
+import { triageFindingMultiAgent } from "../../multi-agent-triage.js";
+import {
+  computeCalibratedConfidence,
+  extractRuleFamily,
+  loadCalibrationWeights,
+  updateFindingCalibration,
+} from "../../confidence-calibration.js";
+import { evidenceChainModule } from "../../prompts/modules.js";
+import {
+  TrajectoryCollector,
+  formatTrajectoriesForPrompt,
+  retrieveTrajectories,
+  saveTrajectory,
+  summarizeTrajectory,
+} from "../../trajectory-memory.js";
 
 export interface TriageWorkerDeps {
   registry: ScannerRegistry;
   taskRegistry?: TaskRegistry;
   config: KuzushiConfig;
+  /** Optional database handle for trajectory memory and calibration features. */
+  db?: Database.Database;
 }
 
 /**
@@ -21,6 +40,9 @@ export interface TriageWorkerDeps {
  */
 export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): void {
   const triageConfigProvider = createTriageConfigProvider(deps.registry, deps.taskRegistry);
+  const useMultiAgent = deps.config.triageStrategy === "multi-agent";
+  const useTrajectoryMemory = deps.config.trajectoryMemory === true && deps.db != null;
+  const useCalibration = deps.config.confidenceCalibration === true && deps.db != null;
 
   bus.subscribe<TriageFindingQueuedEvent>("triage:finding-queued", async (event) => {
     const { context, finding, repoContext, index, total } = event.payload;
@@ -31,32 +53,135 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
       const { result, costUsd } = await withRetry(
         async () => {
           attempts += 1;
-          return triageFindingWithAgent(
-            triageConfigProvider,
-            finding,
-            context.scanPath ?? context.repoRoot,
-            context.repoName,
-            deps.config.triageModel ?? deps.config.model,
-            deps.config.triageMaxTurns,
-            coerceRepoContext(repoContext),
-            {
-              activityCallback: async (activity) => {
-                await bus.publish(
-                  createEvent("triage:agent-activity", runId, {
-                    context,
-                    fingerprint: finding.fingerprint,
-                    kind: activity.kind,
-                    toolName: activity.toolName,
-                    toolInput: activity.toolInput,
-                    summary: activity.summary,
-                    elapsedSeconds: activity.elapsedSeconds,
-                    index,
-                    total,
-                  }),
-                );
-              },
-            },
-          );
+
+          // Build extra prompt context from enabled features
+          const extraSections: string[] = [];
+
+          // Trajectory memory: retrieve exemplars and format for injection
+          if (useTrajectoryMemory && deps.db) {
+            const maxExemplars = deps.config.trajectoryMaxExemplars ?? 2;
+            const exemplars = retrieveTrajectories(
+              deps.db,
+              finding.ruleId,
+              finding.cwe,
+              maxExemplars,
+            );
+            const trajectoryPrompt = formatTrajectoriesForPrompt(exemplars);
+            if (trajectoryPrompt) {
+              extraSections.push(trajectoryPrompt);
+            }
+          }
+
+          // Confidence calibration: inject evidence chain instructions
+          if (useCalibration) {
+            extraSections.push(evidenceChainModule());
+          }
+
+          const extraPromptContext = extraSections.length > 0
+            ? extraSections.join("\n\n")
+            : undefined;
+
+          // Set up trajectory collector wrapping the activity callback
+          const collector = useTrajectoryMemory ? new TrajectoryCollector() : null;
+          const baseActivityCallback = async (activity: Parameters<typeof bus.publish>[0] extends never ? never : {
+            kind: string;
+            toolName?: string;
+            toolInput?: Record<string, unknown>;
+            summary?: string;
+            elapsedSeconds?: number;
+          }) => {
+            await bus.publish(
+              createEvent("triage:agent-activity", runId, {
+                context,
+                fingerprint: finding.fingerprint,
+                kind: activity.kind as "tool-start" | "tool-progress" | "tool-complete" | "reasoning",
+                toolName: activity.toolName,
+                toolInput: activity.toolInput,
+                summary: activity.summary,
+                elapsedSeconds: activity.elapsedSeconds,
+                index,
+                total,
+              }),
+            );
+          };
+
+          const activityCallback = collector
+            ? collector.wrapCallback(baseActivityCallback)
+            : baseActivityCallback;
+
+          let triageOutput;
+
+          if (useMultiAgent) {
+            triageOutput = await triageFindingMultiAgent(
+              triageConfigProvider,
+              finding,
+              context.scanPath ?? context.repoRoot,
+              context.repoName,
+              deps.config.triageModel ?? deps.config.model,
+              deps.config.triageSpecialistModel ?? deps.config.triageModel ?? deps.config.model,
+              deps.config.triageMaxTurns,
+              deps.config.triageSpecialistMaxTurns ?? null,
+              coerceRepoContext(repoContext),
+              { activityCallback },
+            );
+          } else {
+            triageOutput = await triageFindingWithAgent(
+              triageConfigProvider,
+              finding,
+              context.scanPath ?? context.repoRoot,
+              context.repoName,
+              deps.config.triageModel ?? deps.config.model,
+              deps.config.triageMaxTurns,
+              coerceRepoContext(repoContext),
+              { activityCallback },
+              extraPromptContext,
+            );
+          }
+
+          // Save trajectory after triage completes
+          if (collector && deps.db && collector.length > 0) {
+            const steps = collector.getSteps();
+            try {
+              saveTrajectory(deps.db, {
+                id: randomUUID(),
+                ruleId: finding.ruleId,
+                cwes: finding.cwe,
+                scanner: finding.scanner,
+                verdict: triageOutput.result.verdict,
+                confidence: triageOutput.result.confidence,
+                steps,
+                summary: summarizeTrajectory(steps, triageOutput.result.verdict),
+                repo: context.repoName,
+                fingerprint: finding.fingerprint,
+              });
+            } catch {
+              // Non-fatal: trajectory save failure shouldn't break triage
+            }
+          }
+
+          // Compute calibrated confidence
+          if (useCalibration && deps.db && triageOutput.result.evidenceChain?.length) {
+            try {
+              const ruleFamily = extractRuleFamily(finding.ruleId);
+              const weights = loadCalibrationWeights(deps.db, ruleFamily);
+              const calibrated = computeCalibratedConfidence(
+                triageOutput.result.evidenceChain,
+                weights,
+              );
+              triageOutput.result.calibratedConfidence = calibrated;
+
+              updateFindingCalibration(
+                deps.db,
+                finding.fingerprint,
+                calibrated,
+                triageOutput.result.evidenceChain,
+              );
+            } catch {
+              // Non-fatal: calibration failure shouldn't break triage
+            }
+          }
+
+          return triageOutput;
         },
         {
           maxRetries: deps.config.maxTriageRetries ?? 2,

@@ -1,5 +1,6 @@
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { TaskContext } from "../../agents/types.js";
+import type { KnowledgeRegistry } from "../../knowledge/types.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { ScannerConfig, ScannerId } from "../../scanners/types.js";
 import type { KuzushiConfig } from "../../types.js";
@@ -14,6 +15,7 @@ export interface ScanWorkerDeps {
   registry: ScannerRegistry;
   taskRegistry?: TaskRegistry;
   config: KuzushiConfig;
+  knowledgeRegistry?: KnowledgeRegistry;
 }
 
 /**
@@ -99,6 +101,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
         bus,
         upstreamOutputs,
         securityProfiles,
+        knowledgeRegistry: deps.knowledgeRegistry,
       };
 
       const executed = await executeAgentTask(task, input, taskContext, taskConfig);

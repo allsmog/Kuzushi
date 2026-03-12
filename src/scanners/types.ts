@@ -22,7 +22,7 @@ export interface Finding {
   score: number;
 }
 
-export type AllowedTriageTool = "Read" | "Glob" | "Grep";
+export type AllowedTriageTool = "Read" | "Glob" | "Grep" | "GetCallers" | "GetCallees" | "GetFunctionBody";
 
 export interface TriageAgentConfig {
   /** Prompt for the Agent SDK query(). Finding metadata + investigation instructions. */

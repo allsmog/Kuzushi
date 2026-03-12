@@ -37,6 +37,14 @@ export interface ScanOpts {
   diffBase?: string;
 }
 
+/** A single step in the fine-grained evidence chain produced during triage. */
+export interface EvidenceStep {
+  stepType: string;
+  description: string;
+  confidence: number;
+  evidence: string;
+}
+
 /** Result of AI triage for a single finding. */
 export interface TriageResult {
   fingerprint: string;
@@ -54,6 +62,10 @@ export interface TriageResult {
   triageSchemaVersion?: string;
   evidenceTrail?: Array<{ level: string; evidence: string }>;
   triageCostUsd?: number;
+  /** Calibrated confidence computed from per-step evidence weights. */
+  calibratedConfidence?: number;
+  /** Per-step evidence chain for fine-grained confidence calibration. */
+  evidenceChain?: EvidenceStep[];
 }
 
 /** Proof-level verdict for verification. */
@@ -85,6 +97,12 @@ export interface PocHarnessResult {
   skipped: boolean;
   skipReason: string | null;
   costUsd?: number;
+  /** PoC execution results (populated when pocExecute is enabled). */
+  pocExecExitCode?: number;
+  pocExecStdout?: string;
+  pocExecStderr?: string;
+  pocExecVerdict?: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+  pocExecDurationMs?: number;
 }
 
 /** Heuristic repository metadata used to enrich triage/verification prompts. */
@@ -239,6 +257,26 @@ export interface KuzushiConfig {
   prioritizeFindings?: boolean;
   /** Maximum cost budget in USD. Pipeline stops early when exceeded. */
   costBudgetUsd?: number;
+  /** Enable dynamic task selection based on repo context. Default false. */
+  enableDynamicTaskSelection?: boolean;
+  /** Enable PoC harness execution after generation. Default false. */
+  pocExecute?: boolean;
+  /** Sandbox backend for PoC execution. Default "docker". */
+  pocSandbox?: "docker" | "process";
+  /** Timeout for PoC execution in milliseconds. Default 30000. */
+  pocExecTimeoutMs?: number;
+  /** Enable fine-grained per-step confidence calibration. Default false. */
+  confidenceCalibration?: boolean;
+  /** Enable trajectory memory for cross-run learning. Default false. */
+  trajectoryMemory?: boolean;
+  /** Max exemplar trajectories injected into triage prompt. Default 2. */
+  trajectoryMaxExemplars?: number;
+  /** Triage strategy: single agent or multi-agent panel. Default "single". */
+  triageStrategy?: "single" | "multi-agent";
+  /** Model for multi-agent triage specialists. Defaults to triageModel. */
+  triageSpecialistModel?: string;
+  /** Max turns for each specialist sub-agent. null = unlimited. */
+  triageSpecialistMaxTurns?: number | null;
 }
 
 /** A persisted finding row from SQLite. */

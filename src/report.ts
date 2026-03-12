@@ -228,6 +228,18 @@ export function printSummary(
       if (f.pocHarnessParsed === 0 && f.pocHarnessParseError) {
         console.log(`    ${chalk.red("PoC Parse Error:")} ${f.pocHarnessParseError}`);
       }
+      const pocRunVerdict = (f as Record<string, unknown>)["pocRunVerdict"];
+      const pocRunDurationMs = (f as Record<string, unknown>)["pocRunDurationMs"];
+      if (typeof pocRunVerdict === "string" && pocRunVerdict) {
+        const verdictColor = pocRunVerdict === "PASS" ? chalk.green.bold
+          : pocRunVerdict === "FAIL" ? chalk.red.bold
+          : pocRunVerdict === "TIMEOUT" ? chalk.yellow.bold
+          : chalk.red;
+        const durationStr = typeof pocRunDurationMs === "number"
+          ? chalk.dim(` (${(pocRunDurationMs / 1000).toFixed(1)}s)`)
+          : "";
+        console.log(`    ${verdictColor(`PoC Execution: ${pocRunVerdict}`)}${durationStr}`);
+      }
       console.log("");
     }
   } else if (total > 0) {

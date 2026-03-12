@@ -181,7 +181,7 @@ describe("generatePocHarness", () => {
     expect(output.result.scriptPath).toBeNull();
     expect(output.costUsd).toBe(0.0112);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep"]);
+    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody"]);
     expect(requests[0]?.options?.outputFormat?.schema).toBe(POC_HARNESS_RESULT_SCHEMA);
     expect(requests[0]?.options?.maxTurns).toBe(22);
   });
