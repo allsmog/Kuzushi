@@ -22,7 +22,6 @@ import {
   type TriageOutput,
   type TriageRuntimeOptions,
 } from "./triage.js";
-import { formatRepoContext } from "./repo-context.js";
 import {
   confidenceEscalationModule,
   falseDismissalModule,
@@ -191,9 +190,7 @@ function buildManagerPrompt(
   finding: Finding,
   repoName: string,
   reports: SpecialistReport[],
-  repoContext?: RepoContext,
 ): string {
-  const contextSection = formatRepoContext(repoContext);
   const reportSections = reports
     .filter((r) => !r.error)
     .map((r) => [
@@ -216,7 +213,6 @@ function buildManagerPrompt(
     "Your job: synthesize their findings into a single, definitive verdict.",
     "",
     `Repo: ${repoName}`,
-    ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
     "",
     formatFindingContext(finding),
     `Fingerprint: ${finding.fingerprint}`,
@@ -326,7 +322,7 @@ export async function triageFindingMultiAgent(
   }
 
   // Run manager synthesis
-  const managerPrompt = buildManagerPrompt(finding, repoName, reports, repoContext);
+  const managerPrompt = buildManagerPrompt(finding, repoName, reports);
 
   const { structuredOutput, resultText, executionError, costUsd: managerCost } =
     await runStructuredAgentQuery({

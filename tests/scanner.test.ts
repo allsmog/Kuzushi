@@ -30,9 +30,11 @@ function makeFinding(overrides: Partial<SemgrepResult> = {}): SemgrepResult {
 }
 
 describe("scoreSemgrepFinding", () => {
-  it("scores a high-severity vuln finding as 54", () => {
+  it("scores a high-severity vuln finding with CWE-79 multiplier", () => {
     const finding = makeFinding();
-    expect(scoreSemgrepFinding(finding)).toBe(54);
+    // Base: severity(3) * likelihood(3) * impact(3) * subcategory(2) = 54
+    // CWE-79 multiplier: 1.1x → 59.4
+    expect(scoreSemgrepFinding(finding)).toBeCloseTo(59.4, 1);
   });
 
   it("scores a low-severity audit finding as 1", () => {

@@ -10,6 +10,7 @@ import {
   TriageExecutionError,
   triageFindingsBatch,
   triageFindingWithAgent,
+  triageSystemPromptPrefix,
 } from "../src/triage.js";
 import type { Finding, TriageAgentConfig } from "../src/scanners/types.js";
 import type { AgentMessage, AgentRuntime } from "../src/agent-runtime/types.js";
@@ -231,22 +232,34 @@ describe("buildDefaultTriageAgentConfig", () => {
     expect(config.prompt).toContain("test-fp");
   });
 
-  it("includes False-Dismissal Patterns section", () => {
+  it("does not include False-Dismissal Patterns in user prompt (moved to system prompt)", () => {
     const config = buildDefaultTriageAgentConfig(makeFinding(), "repo");
-    expect(config.prompt).toContain("Common False-Dismissal Patterns");
-    expect(config.prompt).toContain("WAF will catch it");
-    expect(config.prompt).toContain("parameterized queries");
-    expect(config.prompt).toContain("framework handles XSS");
+    expect(config.prompt).not.toContain("Common False-Dismissal Patterns");
   });
 
-  it("includes Confidence Escalation Protocol", () => {
+  it("does not include Confidence Escalation Protocol in user prompt (moved to system prompt)", () => {
     const config = buildDefaultTriageAgentConfig(makeFinding(), "repo");
-    expect(config.prompt).toContain("Confidence Escalation Protocol");
-    expect(config.prompt).toContain("Start at 0.1");
+    expect(config.prompt).not.toContain("Confidence Escalation Protocol");
   });
 
-  it("includes repository context when provided", () => {
-    const config = buildDefaultTriageAgentConfig(makeFinding(), "repo", {
+  it("triageSystemPromptPrefix includes False-Dismissal Patterns and Confidence Escalation Protocol", () => {
+    const prefix = triageSystemPromptPrefix();
+    expect(prefix).toContain("Common False-Dismissal Patterns");
+    expect(prefix).toContain("WAF will catch it");
+    expect(prefix).toContain("parameterized queries");
+    expect(prefix).toContain("framework handles XSS");
+    expect(prefix).toContain("Confidence Escalation Protocol");
+    expect(prefix).toContain("Start at 0.1");
+  });
+
+  it("does not include repository context in user prompt (moved to system prompt)", () => {
+    const config = buildDefaultTriageAgentConfig(makeFinding(), "repo");
+
+    expect(config.prompt).not.toContain("## Repository Context");
+  });
+
+  it("triageSystemPromptPrefix includes repository context when provided", () => {
+    const prefix = triageSystemPromptPrefix({
       languages: ["TypeScript"],
       frameworks: ["Next.js"],
       authPatterns: ["JWT"],
@@ -255,9 +268,9 @@ describe("buildDefaultTriageAgentConfig", () => {
       entryPoints: ["src/pages/api/*"],
     });
 
-    expect(config.prompt).toContain("## Repository Context");
-    expect(config.prompt).toContain("TypeScript");
-    expect(config.prompt).toContain("Prisma");
+    expect(prefix).toContain("## Repository Context");
+    expect(prefix).toContain("TypeScript");
+    expect(prefix).toContain("Prisma");
   });
 });
 

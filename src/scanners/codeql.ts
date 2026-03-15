@@ -2,7 +2,7 @@ import path from "node:path";
 import type { ScanOpts } from "../types.js";
 import type { Finding, ScannerConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
 import { resolveCodeQLBinary } from "./resolve-codeql.js";
-import { ensureDatabase, runCodeQL, selectFindings } from "./run-codeql.js";
+import { ensureDatabase, runCodeQL, selectFindings, detectAllCodeQLLanguages } from "./run-codeql.js";
 
 export class CodeQLPlugin implements ScannerPlugin {
   readonly id = "codeql";
@@ -14,6 +14,7 @@ export class CodeQLPlugin implements ScannerPlugin {
   private suite: string | undefined;
   private threads: number | undefined;
   private ram: number | undefined;
+  private multiLanguage = false;
 
   async init(config: ScannerConfig): Promise<void> {
     const configuredBinary = asOptionalString(config["binary"]);
@@ -22,6 +23,7 @@ export class CodeQLPlugin implements ScannerPlugin {
     this.suite = asOptionalString(config["suite"]);
     this.threads = asPositiveInt(config["threads"]);
     this.ram = asPositiveInt(config["ram"]);
+    this.multiLanguage = config["multiLanguage"] === true;
 
     if (configuredBinary) {
       this.codeqlBin = configuredBinary;
@@ -33,6 +35,11 @@ export class CodeQLPlugin implements ScannerPlugin {
 
   async scan(repoRoot: string, opts: ScanOpts, _config: ScannerConfig): Promise<Finding[]> {
     const repoName = path.basename(repoRoot);
+
+    if (this.multiLanguage && !this.language) {
+      return this.scanMultiLanguage(repoRoot, repoName);
+    }
+
     const { dbPath, language } = await ensureDatabase(repoRoot, this.codeqlBin, {
       dbPath: this.dbPath,
       language: this.language,
@@ -47,6 +54,29 @@ export class CodeQLPlugin implements ScannerPlugin {
     // Do not apply maxFindings here — the registry's dedupeFindings applies
     // the single final cap across all scanners to avoid double-capping.
     return selectFindings(sarif, repoName, "HEAD");
+  }
+
+  private async scanMultiLanguage(repoRoot: string, repoName: string): Promise<Finding[]> {
+    const languages = await detectAllCodeQLLanguages(repoRoot, this.codeqlBin);
+    const allFindings: Finding[] = [];
+
+    for (const language of languages) {
+      try {
+        const { dbPath } = await ensureDatabase(repoRoot, this.codeqlBin, {
+          language,
+        });
+        const suite = resolveSuite(this.suite, language);
+        const sarif = await runCodeQL(dbPath, this.codeqlBin, suite, {
+          threads: this.threads,
+          ram: this.ram,
+        });
+        allFindings.push(...selectFindings(sarif, repoName, "HEAD"));
+      } catch (err) {
+        console.error(`[codeql] Failed to analyze language "${language}": ${err}`);
+      }
+    }
+
+    return allFindings;
   }
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
@@ -87,7 +117,8 @@ export class CodeQLPlugin implements ScannerPlugin {
 
 function resolveSuite(configuredSuite: string | undefined, language: string): string {
   if (!configuredSuite) {
-    return `codeql/${language}-queries:codeql-suites/${language}-security-extended.qls`;
+    // security-and-quality adds ~20-30% more rules than security-extended
+    return `codeql/${language}-queries:codeql-suites/${language}-security-and-quality.qls`;
   }
 
   if (configuredSuite.includes("/") || configuredSuite.includes(":") || configuredSuite.includes(".")) {

@@ -5,7 +5,7 @@ import { isRecord } from "../../../utils.js";
 
 export type TaintAnalysisLanguage = "python" | "go" | "java" | "javascript" | "csharp";
 
-export type TaintAnalysisPassId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
+export type TaintAnalysisPassId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
 
 export interface TaintAnalysisPassDefinition {
   passId: TaintAnalysisPassId;
@@ -182,6 +182,12 @@ export const TAINT_ANALYSIS_PASSES: TaintAnalysisPassDefinition[] = [
   { passId: 11, passKey: "log_injection", focus: "Log Injection / Forging", cwes: ["117"] },
   { passId: 12, passKey: "ldap_injection", focus: "LDAP Injection", cwes: ["090"] },
   { passId: 13, passKey: "ssti", focus: "Server-Side Template Injection (SSTI)", cwes: ["1336"] },
+  { passId: 14, passKey: "prototype_pollution", focus: "Prototype Pollution", cwes: ["1321"] },
+  { passId: 15, passKey: "mass_assignment", focus: "Mass Assignment / Autobinding", cwes: ["915"] },
+  { passId: 16, passKey: "file_upload", focus: "Insecure File Upload", cwes: ["434"] },
+  { passId: 17, passKey: "integer_overflow", focus: "Integer Overflow in Security-Critical Computation", cwes: ["190"] },
+  { passId: 18, passKey: "regex_injection", focus: "Regex Injection (ReDoS)", cwes: ["1333"] },
+  { passId: 19, passKey: "second_order_injection", focus: "Second-Order Injection (Stored Taint)", cwes: ["089", "079"] },
 ];
 
 export const TAINT_ANALYSIS_PASS_IDS: ReadonlySet<number> = new Set(
@@ -193,7 +199,7 @@ const DEFAULT_TAINT_ANALYSIS_PATH = normalizeDefaultTaintAnalysisPath();
 export const DEFAULT_TAINT_ANALYSIS_TASK_CONFIG: TaintAnalysisTaskConfig = {
   taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
   dbPath: undefined,
-  passes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+  passes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
   labelingModel: "anthropic:claude-sonnet-4-6",
   extractionModel: undefined,
   labelingBatchSize: 20,
@@ -210,8 +216,8 @@ export const DEFAULT_TAINT_ANALYSIS_TASK_CONFIG: TaintAnalysisTaskConfig = {
   tiMode: "live-required",
   tiFailurePolicy: "continue_without_ti",
   tiTimeoutMs: 15_000,
-  refinementEnabled: false,
-  refinementIterations: 1,
+  refinementEnabled: true,
+  refinementIterations: 2,
   refinementDeltaOnly: true,
   refinementModel: undefined,
   crossService: false,
@@ -223,7 +229,7 @@ export const DEFAULT_TAINT_ANALYSIS_TASK_CONFIG: TaintAnalysisTaskConfig = {
   crossServiceBoundaryThreshold: 0.5,
   crossServiceStitchThreshold: 0.6,
   crossServiceMaxPathDepth: 5,
-  refinementConfidenceCap: 0.3,
+  refinementConfidenceCap: 0.5,
   summarySupplementsDisabled: false,
   extractionSupplementsDisabled: false,
   renderingHintsDisabled: false,

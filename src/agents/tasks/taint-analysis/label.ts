@@ -36,24 +36,61 @@ export const SINK_DENY_LIST: Record<TaintAnalysisLanguage, Set<string>> = {
     "Fatalf", "Panicf", "Logf", "Warnf", "Infof", "Debugf", "Tracef",
     "Sprint", "Fprint", "Print", "Sprintln", "Fprintln", "Println",
     "Warnw", "Infow", "Debugw",
+    "String", "Error", "GoString", "Format",
   ]),
   python: new Set([
     "format", "join", "print",
     "debug", "info", "warning", "error", "critical", "exception",
+    "repr", "str", "__str__", "__repr__", "encode", "decode",
   ]),
   java: new Set([
     "format", "printf",
     "log", "fine", "finer", "finest", "info", "warning", "severe",
     "debug", "warn", "error", "trace", "valueOf",
+    "toString", "hashCode", "equals", "getClass", "getName",
   ]),
   javascript: new Set([
     "log", "warn", "error", "info", "debug", "trace", "format",
+    "toString", "valueOf", "JSON.stringify", "String", "Number", "Boolean",
   ]),
   csharp: new Set([
     "Format",
     "LogDebug", "LogInformation", "LogWarning", "LogError", "LogCritical",
     "Debug", "Information", "Warning", "Error", "Fatal",
+    "ToString", "GetType", "GetHashCode", "Equals",
   ]),
+};
+
+export const FRAMEWORK_SANITIZER_CATALOG: Record<TaintAnalysisLanguage, string[]> = {
+  go: [
+    "html.EscapeString", "url.QueryEscape", "url.PathEscape",
+    "filepath.Clean", "filepath.Base", "strconv.Quote",
+    "template.HTMLEscapeString", "template.JSEscapeString",
+  ],
+  python: [
+    "escape", "mark_safe", "bleach.clean", "bleach.linkify",
+    "html.escape", "markupsafe.escape", "Markup.escape",
+    "urllib.parse.quote", "shlex.quote",
+    "django.utils.html.escape", "django.utils.http.urlencode",
+  ],
+  java: [
+    "HtmlUtils.htmlEscape", "StringEscapeUtils.escapeHtml4",
+    "StringEscapeUtils.escapeXml", "URLEncoder.encode",
+    "ESAPI.encoder().encodeForHTML", "Jsoup.clean",
+    "PreparedStatement.setString", "PreparedStatement.setInt",
+  ],
+  javascript: [
+    "encodeURIComponent", "encodeURI",
+    "DOMPurify.sanitize", "sanitizeHtml",
+    "escape", "validator.escape", "xss",
+    "helmet", "csurf",
+  ],
+  csharp: [
+    "HtmlEncoder.Encode", "UrlEncoder.Encode", "JavaScriptEncoder.Encode",
+    "HttpUtility.HtmlEncode", "HttpUtility.UrlEncode",
+    "AntiXssEncoder.HtmlEncode",
+    "WebUtility.HtmlEncode", "WebUtility.UrlEncode",
+  ],
 };
 
 interface TaintModelIntentEntry {
@@ -174,6 +211,8 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
     emitExtractionQualityDiagnostics(extractionCounts);
     assertExtractionQualityThresholds(extractionCounts, preflight.workspaceDir);
     const candidateFingerprint = computeCandidatesFingerprint(allCandidates);
+    // Enrich candidates with code snippets from source files
+    await enrichCandidateSnippets(allCandidates, context.repoRoot);
     process.stderr.write(`[taint-analysis-label] Loaded ${allCandidates.length} candidates (${preflight.extraction.sourcesRowCount} sources, ${preflight.extraction.sinksRowCount} sinks)\n`);
     const sourceStatus = resolveSourceAvailability(preflight, allCandidates);
     const noSourcesExtracted = sourceStatus.noSourcesExtracted;
@@ -272,6 +311,11 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
           passEntries.entries,
         );
       }
+    }
+
+    // ── Cross-pass label sharing: merge highest-confidence classifications ──
+    if (!noSourcesExtracted) {
+      mergeCrossPassLabels(labelsByPass);
     }
 
     const generatedAt = new Date().toISOString();
@@ -444,7 +488,7 @@ async function queryLabelBatch(
       cwd: repoRoot,
       model,
       maxTurns: undefined,
-      allowedTools: [],
+      allowedTools: ["Read", "Grep", "Glob"],
       permissionMode: "dontAsk",
       outputFormat: {
         type: "json_schema",
@@ -594,6 +638,116 @@ function applySinkDenyList(
   });
 }
 
+/**
+ * Cross-pass label sharing: for each candidate, propagate the highest-confidence
+ * classification across all passes. If a function was labeled as a source in pass 1
+ * with confidence 0.9, it should also be available as a source in pass 3.
+ */
+function mergeCrossPassLabels(labelsByPass: Map<number, TaintAnalysisPassEntry[]>): void {
+  // Build a merged index: candidateId -> best entry per role
+  const bestByCandidate = new Map<string, TaintAnalysisPassEntry>();
+
+  for (const entries of labelsByPass.values()) {
+    for (const entry of entries) {
+      if (entry.role === "none" || entry.classification === "fp") {
+        continue;
+      }
+      const existing = bestByCandidate.get(entry.id);
+      if (!existing || entry.confidence > existing.confidence) {
+        bestByCandidate.set(entry.id, entry);
+      }
+    }
+  }
+
+  // Apply merged labels back to each pass
+  for (const entries of labelsByPass.values()) {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const best = bestByCandidate.get(entry.id);
+      if (!best) {
+        continue;
+      }
+      // If this pass has a lower-confidence or "none" label, upgrade it
+      if (
+        (entry.role === "none" || entry.classification === "fp" || entry.confidence < best.confidence)
+        && best.role !== "none"
+        && best.classification !== "fp"
+      ) {
+        entries[i] = {
+          ...entry,
+          role: best.role,
+          classification: best.classification,
+          confidence: best.confidence,
+          rationale: `${entry.rationale} [Cross-pass upgrade from ${best.role}@${best.confidence.toFixed(2)}]`,
+        };
+      }
+    }
+  }
+
+  const upgradedCount = [...labelsByPass.values()]
+    .flat()
+    .filter((e) => e.rationale.includes("[Cross-pass upgrade"))
+    .length;
+  if (upgradedCount > 0) {
+    process.stderr.write(
+      `[taint-analysis-label] Cross-pass label sharing: upgraded ${upgradedCount} entries across passes\n`,
+    );
+  }
+}
+
+/**
+ * Snippet enrichment: read source files and attach 5-10 lines of code context
+ * around each candidate's location. This dramatically improves labeling accuracy
+ * by giving the LLM actual code to examine rather than just function names.
+ */
+async function enrichCandidateSnippets(
+  candidates: TaintAnalysisCandidate[],
+  repoRoot: string,
+): Promise<void> {
+  // Group candidates by file to minimize file reads
+  const byFile = new Map<string, TaintAnalysisCandidate[]>();
+  for (const candidate of candidates) {
+    if (candidate.snippet) continue; // Already has a snippet
+    const filePath = candidate.locationFile;
+    if (!filePath) continue;
+    const group = byFile.get(filePath) ?? [];
+    group.push(candidate);
+    byFile.set(filePath, group);
+  }
+
+  let enrichedCount = 0;
+  for (const [relativeFile, fileCandidates] of byFile) {
+    const absolutePath = path.isAbsolute(relativeFile)
+      ? relativeFile
+      : path.join(repoRoot, relativeFile);
+    let lines: string[];
+    try {
+      const content = await readFile(absolutePath, "utf-8");
+      lines = content.split("\n");
+    } catch {
+      continue; // File not readable, skip
+    }
+
+    for (const candidate of fileCandidates) {
+      const line = candidate.locationLine;
+      if (line < 1 || line > lines.length) continue;
+      const start = Math.max(0, line - 4); // 3 lines before
+      const end = Math.min(lines.length, line + 6); // 6 lines after
+      const snippet = lines.slice(start, end).join("\n").trim();
+      if (snippet) {
+        candidate.snippet = snippet;
+        enrichedCount++;
+      }
+    }
+  }
+
+  if (enrichedCount > 0) {
+    process.stderr.write(
+      `[taint-analysis-label] Snippet enrichment: added code context to ${enrichedCount} candidates\n`,
+    );
+  }
+}
+
 function buildLabelPrompt(
   passDef: TaintAnalysisPassDefinition,
   candidates: TaintAnalysisCandidate[],
@@ -640,6 +794,9 @@ function buildLabelPrompt(
     "- String formatting functions (Sprintf, Errorf, String.format, etc.) are NOT sinks - they produce strings but do not execute, query, or transmit anything.",
     "- Logging functions (log.Printf, logger.info, console.log, etc.) are NOT injection sinks for command/SQL/SSRF/LDAP injection passes.",
     "- If a candidate is a formatting or logging function, classify it as role=none, classification=fp.",
+    "",
+    `Known sanitizer functions for ${language} (classify as role=sanitizer when encountered):`,
+    JSON.stringify(FRAMEWORK_SANITIZER_CATALOG[language as TaintAnalysisLanguage] ?? [], null, 2),
     "",
     "Threat-intelligence prior (use as weighting guidance, not as proof):",
     JSON.stringify(passTiPrior, null, 2),

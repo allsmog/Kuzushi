@@ -15,12 +15,14 @@ const DOS_PATTERNS = /\b(dos|denial.of.service|resource.exhaustion|amplification
 const RATE_LIMIT_PATTERNS = /(rate.limit|throttl|service.overload|brute.?force|account.lockout)/i;
 const RESOURCE_LEAK_PATTERNS = /\b(resource.leak|memory.leak|file.descriptor.leak|connection.leak|handle.leak|unclosed)\b/i;
 const OPEN_REDIRECT_PATTERNS = /\b(open.redirect|url.redirect|unvalidated.redirect)\b/i;
+const AUTH_REDIRECT_CONTEXT = /\b(oauth|redirect_uri|login|saml|callback|sso|oidc|auth)\b/i;
 const MEMORY_SAFETY_PATTERNS = /\b(buffer.overflow|use.after.free|double.free|heap.overflow|stack.overflow|out.of.bounds|null.pointer.deref)\b/i;
 const REGEX_INJECTION_PATTERNS = /\b(regex.injection|redos|regular.expression.denial)\b/i;
 const NON_C_LANGUAGES = /\.(ts|tsx|js|jsx|py|rb|java|kt|go|rs|cs|php|swift|scala|dart|lua|pl|r|ex|exs|clj|erl|hs|ml|fs|jl)$/i;
 const TEST_PATH_PATTERNS = /(?:^|[/\\])(?:test|tests|spec|specs|__tests__|__mocks__|__fixtures__|fixtures|mocks|e2e|cypress|playwright|vitest|jest)[/\\]/i;
 const DOC_PATH_PATTERNS = /(?:^|[/\\])(?:docs?|documentation|README|CHANGELOG|CONTRIBUTING|wiki)[/\\]|\.(?:md|mdx|rst|txt|adoc)$/i;
 const CLIENT_SIDE_PATTERNS = /(?:^|[/\\])(?:public|static|assets|dist|build|out|client|frontend|www)[/\\]/i;
+const GENERATED_VENDORED_PATTERNS = /(?:^|[/\\])(?:dist|build|\.next|\.nuxt|vendor|third_party|\.generated|node_modules)[/\\]|\.bundle\.js$/i;
 
 const EXCLUSION_RULES: ExclusionRule[] = [
   {
@@ -40,8 +42,12 @@ const EXCLUSION_RULES: ExclusionRule[] = [
   },
   {
     id: "open-redirect",
-    description: "Open redirects (low impact in most contexts)",
-    match: (f) => OPEN_REDIRECT_PATTERNS.test(f.message) || OPEN_REDIRECT_PATTERNS.test(f.ruleId),
+    description: "Open redirects (low impact in most contexts) — except auth-related redirects",
+    match: (f) =>
+      (OPEN_REDIRECT_PATTERNS.test(f.message) || OPEN_REDIRECT_PATTERNS.test(f.ruleId))
+      && !AUTH_REDIRECT_CONTEXT.test(f.message)
+      && !AUTH_REDIRECT_CONTEXT.test(f.filePath)
+      && !AUTH_REDIRECT_CONTEXT.test(f.evidence ?? ""),
   },
   {
     id: "memory-safety-non-native",
@@ -71,6 +77,11 @@ const EXCLUSION_RULES: ExclusionRule[] = [
     id: "test-files",
     description: "Findings in test/spec directories",
     match: (f) => TEST_PATH_PATTERNS.test(f.filePath),
+  },
+  {
+    id: "generated-vendored",
+    description: "Findings in generated, vendored, or build output directories",
+    match: (f) => GENERATED_VENDORED_PATTERNS.test(f.filePath),
   },
 ];
 

@@ -37,7 +37,7 @@ export function registerPocHarnessWorker(
               ?? deps.config.verifyModel
               ?? deps.config.triageModel
               ?? deps.config.model,
-            deps.config.pocHarnessMaxTurns ?? 20,
+            deps.config.pocHarnessMaxTurns,
             coerceRepoContext(repoContext),
             {
               activityCallback: async (activity) => {

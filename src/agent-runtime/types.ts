@@ -24,6 +24,8 @@ export interface AgentQueryOptions {
     strict?: boolean;
     retryInvalidStructuredOutput?: number;
   };
+  /** Static content prepended to the system prompt. Cached by Anthropic's prompt caching. */
+  systemPromptPrefix?: string;
   canUseTool?: (
     toolName: string,
     input: Record<string, unknown>,

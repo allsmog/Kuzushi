@@ -72,8 +72,8 @@ describe("isUserFacingEntry", () => {
     expect(isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "message-consume" }))).toBe(true);
   });
 
-  it("returns false for database-read entries", () => {
-    expect(isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "database-read" }))).toBe(false);
+  it("returns true for database-read entries (second-order source)", () => {
+    expect(isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "database-read" }))).toBe(true);
   });
 });
 
@@ -167,7 +167,7 @@ describe("matchPair — heuristic matching", () => {
     const result = matchPair(exit, entry, "reader-service");
     expect(result).not.toBeNull();
     expect(result!.method).toBe("data-entity");
-    expect(result!.confidence).toBe(0.6);
+    expect(result!.confidence).toBe(0.8);
   });
 
   it("matches service name in URL with confidence 0.5", () => {

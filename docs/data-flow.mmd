@@ -1,0 +1,175 @@
+---
+title: "Kuzushi — Pipeline Data Flow"
+---
+flowchart TD
+    %% ═══════════════ ENTRY ═══════════════
+    USER(["kuzushi scan repo/"]):::entry
+
+    %% ═══════════════ INIT ═══════════════
+    subgraph INIT["Phase 1 — Initialization"]
+        loadCfg["Load Config\n(defaults → global → project → CLI)"]
+        initDB["Init SQLite DB"]
+        createBus["Create MessageBus + Workers"]
+        configRT["Configure AgentRuntime"]
+        resume{"Resume?"}
+        restore["Restore checkpoint"]
+
+        loadCfg --> initDB --> createBus --> configRT --> resume
+        resume -->|"--resume"| restore
+    end
+    USER --> INIT
+
+    %% ═══════════════ PIPELINE START ═══════════════
+    start([pipeline:start]):::event
+    resume -->|"fresh"| start
+    restore --> start
+
+    %% ═══════════════ DAG ═══════════════
+    subgraph DAG["Phase 2 — Task DAG Resolution"]
+        collect["Collect enabled tasks\n+ expand aliases"]
+        resolve["TaskRegistry.resolveOrder()\n→ parallel stage groups"]
+
+        collect --> resolve
+    end
+    start --> DAG
+
+    %% ═══════════════ SCANNING ═══════════════
+    subgraph SCAN["Phase 3 — Scanning (parallel stages)"]
+        subgraph S0["Stage 0 — Independent"]
+            semgrep["Semgrep\nJSON findings"]
+            codeql["CodeQL\nSARIF findings"]
+            agentic["Agentic LLM\nAI findings"]
+            ctxGather["Context Gatherer\nlang · framework · auth"]
+        end
+
+        subgraph S1["Stage 1+ — Dependent"]
+            ctxEnrich["Context Enricher\nLLM-enhanced context"]
+            taint["Taint Analysis Pipeline\n(6 sub-tasks)"]
+            detectors["Agentic Detectors\nSecrets · SSRF · Misconfig\nCrypto · Auth · Race"]
+            threat["Threat Models\nSTRIDE · PASTA"]
+            invariant["Invariant Analysis\nExtract · Check"]
+        end
+
+        S0 -->|"upstream outputs\nforwarded"| S1
+    end
+    resolve --> SCAN
+
+    %% ═══════════════ FILTER ═══════════════
+    subgraph FILTER["Phase 4 — Finding Collection & Filtering"]
+        direction LR
+        dedup["Deduplicate\n(SHA256 fingerprint)"]
+        score["Score\n(sev × likelihood × impact\n× CWE multiplier)"]
+        fpFilter["Exclude known FPs\n& already-triaged"]
+        llmRescore["LLM Rescore\n(optional)"]
+        sort["Priority Sort"]
+
+        dedup --> score --> fpFilter --> llmRescore --> sort
+    end
+    SCAN -->|"scan:complete\nall findings"| FILTER
+
+    %% ═══════════════ TRIAGE ═══════════════
+    subgraph TRIAGE["Phase 5 — AI Triage"]
+        triageQ["Queue with\nconcurrency control"]
+        triageAgent["Triage Agent\n(skeptical engineer prompt)\nTools: Read · Glob · Grep"]
+        triageOut["Output per finding:\nverdict: tp | fp | needs_review\nconfidence: 0-1\nrationale + evidence chain"]
+        triagePersist["Persist to SQLite\nupsertFinding()"]
+
+        triageQ --> triageAgent --> triageOut --> triagePersist
+        triagePersist -->|"next finding"| triageQ
+    end
+    sort --> TRIAGE
+
+    %% ═══════════════ BUDGET ═══════════════
+    budget{"Budget OK?"}:::decision
+    triagePersist --> budget
+    exceeded(["budget:exceeded — halt"]):::error
+    budget -->|"over"| exceeded
+
+    %% ═══════════════ REFINEMENT ═══════════════
+    subgraph REFINE["Phase 5b — Taint Refinement Loop (optional)"]
+        collectFP["Collect FP signals"]
+        patchLabels["Patch source/sink labels"]
+        rerunTaint["Re-run taint analysis"]
+        delta["Compute delta findings"]
+        moreIter{"More\niterations?"}
+
+        collectFP --> patchLabels --> rerunTaint --> delta --> moreIter
+        moreIter -->|"yes"| collectFP
+    end
+    budget -->|"OK + taint enabled"| REFINE
+
+    %% ═══════════════ POST-TRIAGE ═══════════════
+    subgraph POST["Phase 6 — Post-Triage Analysis"]
+        direction LR
+        variant["Variant Analysis\nsearch similar patterns"]
+        chain["Chain Analysis\nlink exploit paths\nsource → sink chains"]
+    end
+    REFINE --> POST
+    budget -->|"OK, no refinement"| POST
+    moreIter -->|"done"| POST
+
+    %% ═══════════════ VERIFY DECISION ═══════════════
+    verifyQ{"Verify\nenabled?"}:::decision
+    POST --> verifyQ
+
+    %% ═══════════════ VERIFICATION ═══════════════
+    subgraph VERIFY["Phase 7 — Exploitability Verification"]
+        verifyCandidates["Select candidates\n(verdict ∈ verifyVerdicts)"]
+        verifyAgent["Verification Agent\nBypass knowledge injection\nTools: Read · Glob · Grep"]
+        verifyOut["Output per finding:\nexploitable: bool\nproof_level: 1-4\nattack_vector\npoc_payload"]
+        verifyPersist["Persist to SQLite\nupdateVerificationResult()"]
+
+        verifyCandidates --> verifyAgent --> verifyOut --> verifyPersist
+        verifyPersist -->|"next finding"| verifyCandidates
+    end
+    verifyQ -->|"yes"| VERIFY
+
+    %% ═══════════════ POC DECISION ═══════════════
+    pocQ{"PoC Harness\nenabled?"}:::decision
+    verifyPersist --> pocQ
+
+    %% ═══════════════ POC GENERATION ═══════════════
+    subgraph POC["Phase 8 — PoC Harness Generation"]
+        pocCandidates["Select exploitable findings"]
+        pocAgent["PoC Agent\nCWE-specific templates\nTools: Read · Glob · Grep"]
+        pocWrite["Write script to\n.kuzushi/poc/"]
+        pocValidate["Syntax validation\n(node --check | tsc\npython3 ast | sh -n)"]
+        pocPersist["Persist to SQLite\nupdatePocHarnessResult()"]
+
+        pocCandidates --> pocAgent --> pocWrite --> pocValidate --> pocPersist
+        pocPersist -->|"next finding"| pocCandidates
+    end
+    pocQ -->|"yes"| POC
+
+    %% ═══════════════ POC EXECUTION ═══════════════
+    subgraph EXEC["Phase 9 — PoC Execution (optional)"]
+        sandbox["Sandbox execute script"]
+        execResult["Result:\nPASS | FAIL | ERROR | TIMEOUT\nexit code · stdout · stderr"]
+        sandbox --> execResult
+    end
+    pocPersist --> EXEC
+
+    %% ═══════════════ REPORT ═══════════════
+    subgraph REPORT["Phase 10 — Report Generation"]
+        direction LR
+        terminal["Terminal Output\nverdict counts · colors\nverification badges\ncost breakdown\nexploit chains"]
+        markdown["Markdown Report\n.kuzushi/report.md"]
+        sarif["SARIF Export\n.kuzushi/report.sarif"]
+        audit["Audit Trail\ntriage.jsonl\nverify.jsonl\nstats.json"]
+    end
+
+    verifyQ -->|"no"| REPORT
+    pocQ -->|"no"| REPORT
+    EXEC --> REPORT
+    POC -->|"done"| REPORT
+
+    %% ═══════════════ END ═══════════════
+    done([pipeline:complete]):::event
+    REPORT --> done
+
+    %% ═══════════════ STYLING ═══════════════
+    classDef entry fill:#2C3E50,stroke:#1A252F,color:#ECF0F1,stroke-width:3px
+    classDef event fill:#8E44AD,stroke:#6C3483,color:#fff,stroke-width:2px
+    classDef error fill:#E74C3C,stroke:#B33A2E,color:#fff,stroke-width:2px
+    classDef decision fill:#F39C12,stroke:#C77E0E,color:#fff,stroke-width:2px
+    classDef default fill:#3498DB,stroke:#2471A3,color:#fff

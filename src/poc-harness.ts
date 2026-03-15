@@ -19,6 +19,30 @@ import type {
 import { formatRepoContext } from "./repo-context.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 
+export function pocHarnessSystemPromptPrefix(repoContext?: RepoContext): string {
+  const repoSection = formatRepoContext(repoContext);
+  const repoBlock = repoSection.length > 0
+    ? "## Repository Context\n" + repoSection.join("\n") + "\n\n"
+    : "";
+  return repoBlock + [
+    "## Harness strategy templates (pick the best matching CWE)",
+    "- SQL injection (CWE-89): call real query builder/data-access function and assert injected SQL fragment reaches DB adapter mock capture.",
+    "- Command injection (CWE-78): call real command-construction path and assert mocked exec/spawn receives attacker-controlled command.",
+    "- Path traversal (CWE-22): call real file/path handler and assert normalized path escapes intended base directory in captured filesystem access.",
+    "- XSS (CWE-79): call real render/template function and assert unescaped payload appears in output.",
+    "- Race condition (CWE-362): invoke the real concurrent code path with parallel requests and assert shared state corruption or TOCTOU violation is observable.",
+    "- Weak crypto (CWE-327/328/330): call the real crypto initialization or usage path and assert weak algorithm or insufficient entropy is used.",
+    "- Missing auth/authz (CWE-862/863): call the real endpoint handler with unauthenticated or unauthorized context and assert access is not denied.",
+    "- For other CWEs: identify the vulnerable function, call it with crafted inputs, and assert the vulnerability is observable.",
+    "",
+    "## Anti-hallucination constraints",
+    "- Do NOT simulate the vulnerable function.",
+    "- Import the REAL function from the repository.",
+    "- If the function cannot be isolated with simple mocks, set skipped=true and explain why.",
+    "- Do not invent files, exports, or APIs.",
+  ].join("\n");
+}
+
 export const POC_HARNESS_RESULT_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -59,7 +83,7 @@ export async function generatePocHarness(
   repoRoot: string,
   repoName: string,
   model: string,
-  maxTurns: number,
+  maxTurns: number | undefined,
   repoContextOrRuntimeOptions?: RepoContext | PocHarnessRuntimeOptions,
   maybeRuntimeOptions: PocHarnessRuntimeOptions = {},
 ): Promise<PocHarnessOutput> {
@@ -72,7 +96,6 @@ export async function generatePocHarness(
     triageResult,
     verificationResult,
     repoName,
-    repoContext,
   );
   const effectiveMaxTurns = normalizeTurns(maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
@@ -82,6 +105,7 @@ export async function generatePocHarness(
     maxTurns: effectiveMaxTurns,
     allowedTools: DEFAULT_TOOLS,
     runtimeOptions,
+    systemPromptPrefix: pocHarnessSystemPromptPrefix(repoContext),
     schema: POC_HARNESS_RESULT_SCHEMA,
   });
 
@@ -149,15 +173,12 @@ export function buildPocHarnessPrompt(
   triageResult: TriageResult,
   verificationResult: VerificationResult,
   repoName: string,
-  repoContext?: RepoContext,
 ): string {
-  const contextSection = formatRepoContext(repoContext);
   const cweList = finding.cwe.join(", ") || "none";
 
   return [
     "You are a security PoC harness generator.",
     "Generate a runnable exploit harness that imports and executes REAL repository code.",
-    ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
     "",
     "## Mandatory code-reading gate",
     ...(finding.filePath !== "."
@@ -191,22 +212,6 @@ export function buildPocHarnessPrompt(
     `PoC description: ${verificationResult.pocDescription}`,
     `Attack vector: ${verificationResult.attackVector ?? "unknown"}`,
     `Preconditions: ${verificationResult.preconditions.join(" | ") || "none"}`,
-    "",
-    "## Harness strategy templates (pick the best matching CWE)",
-    "- SQL injection (CWE-89): call real query builder/data-access function and assert injected SQL fragment reaches DB adapter mock capture.",
-    "- Command injection (CWE-78): call real command-construction path and assert mocked exec/spawn receives attacker-controlled command.",
-    "- Path traversal (CWE-22): call real file/path handler and assert normalized path escapes intended base directory in captured filesystem access.",
-    "- XSS (CWE-79): call real render/template function and assert unescaped payload appears in output.",
-    "- Race condition (CWE-362): invoke the real concurrent code path with parallel requests and assert shared state corruption or TOCTOU violation is observable.",
-    "- Weak crypto (CWE-327/328/330): call the real crypto initialization or usage path and assert weak algorithm or insufficient entropy is used.",
-    "- Missing auth/authz (CWE-862/863): call the real endpoint handler with unauthenticated or unauthorized context and assert access is not denied.",
-    "- For other CWEs: identify the vulnerable function, call it with crafted inputs, and assert the vulnerability is observable.",
-    "",
-    "## Anti-hallucination constraints",
-    "- Do NOT simulate the vulnerable function.",
-    "- Import the REAL function from the repository.",
-    "- If the function cannot be isolated with simple mocks, set skipped=true and explain why.",
-    "- Do not invent files, exports, or APIs.",
     "",
     "## Script requirements",
     "- Include a header comment with CWE and run instructions.",
@@ -324,7 +329,8 @@ function parsePocHarnessResponse(text: string, fingerprint: string): PocHarnessR
   }
 }
 
-function normalizeTurns(value: number): number {
+function normalizeTurns(value: number | undefined): number | undefined {
+  if (value == null) return undefined;
   if (!Number.isFinite(value) || value < 1) {
     return DEFAULT_MAX_TURNS;
   }

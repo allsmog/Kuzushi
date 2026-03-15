@@ -22,6 +22,11 @@ import { threatModelPastaTask } from "./tasks/threat-modeling/pasta.js";
 import { secretsDetectionTask } from "./tasks/secrets-detection.js";
 import { securityMisconfigTask } from "./tasks/security-misconfig.js";
 import { ssrfDetectionTask } from "./tasks/ssrf-detection.js";
+import { prototypePollutionTask } from "./tasks/prototype-pollution.js";
+import { nosqlInjectionTask } from "./tasks/nosql-injection.js";
+import { templateInjectionTask } from "./tasks/template-injection.js";
+import { supplyChainTask } from "./tasks/supply-chain.js";
+import { graphqlSecurityTask } from "./tasks/graphql-security.js";
 import { taskSelectorTask } from "./tasks/task-selector.js";
 
 /** Create task registry populated with adapted scanner plugins. */
@@ -59,6 +64,11 @@ export function createDefaultTaskRegistry(scannerRegistry?: ScannerRegistry): Ta
   tasks.register(secretsDetectionTask);
   tasks.register(securityMisconfigTask);
   tasks.register(ssrfDetectionTask);
+  tasks.register(prototypePollutionTask);
+  tasks.register(nosqlInjectionTask);
+  tasks.register(templateInjectionTask);
+  tasks.register(supplyChainTask);
+  tasks.register(graphqlSecurityTask);
 
   // Dynamic task selection
   tasks.register(taskSelectorTask);

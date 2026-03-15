@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { isRecord, toErrorMessage } from "../utils.js";
-import { scoreFindingMetadata } from "./scoring.js";
+import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
 import type { Finding } from "./types.js";
 
 /**
@@ -333,6 +333,8 @@ export function selectFindings(
         likelihood,
         impact,
         subcategory,
+        cwe,
+        parameterRiskBoost: detectParameterRiskBoost(message),
       });
 
       const fingerprint = computeCodeQLFingerprint(repoName, ref, {
@@ -387,6 +389,50 @@ export function computeCodeQLFingerprint(
   ].join("|");
 
   return createHash("sha256").update(source).digest("hex");
+}
+
+/** Detect all CodeQL languages present in a polyglot repo. */
+export async function detectAllCodeQLLanguages(repoRoot: string, codeqlBin: string): Promise<string[]> {
+  const languages: string[] = [];
+
+  const markers: Array<{ check: () => Promise<boolean>; lang: string }> = [
+    { check: () => pathExists(path.join(repoRoot, "package.json")), lang: "javascript" },
+    { check: () => pathExists(path.join(repoRoot, "go.mod")), lang: "go" },
+    { check: async () =>
+      await pathExists(path.join(repoRoot, "pom.xml"))
+      || await pathExists(path.join(repoRoot, "build.gradle"))
+      || await pathExists(path.join(repoRoot, "build.gradle.kts")),
+      lang: "java",
+    },
+    { check: async () =>
+      await pathExists(path.join(repoRoot, "requirements.txt"))
+      || await pathExists(path.join(repoRoot, "pyproject.toml"))
+      || await pathExists(path.join(repoRoot, "setup.py")),
+      lang: "python",
+    },
+    { check: () => pathExists(path.join(repoRoot, "Cargo.toml")), lang: "rust" },
+    { check: () => pathExists(path.join(repoRoot, "Gemfile")), lang: "ruby" },
+  ];
+
+  for (const marker of markers) {
+    if (await marker.check()) {
+      languages.push(marker.lang);
+    }
+  }
+
+  // Check top-level files for additional signals
+  const topLevel = await safeReadDir(repoRoot);
+  if (topLevel.some((n) => n.endsWith(".sln") || n.endsWith(".csproj")) && !languages.includes("csharp")) {
+    languages.push("csharp");
+  }
+
+  // Fallback: if no markers found, try single language detection
+  if (languages.length === 0) {
+    const single = await detectCodeQLLanguage(repoRoot, codeqlBin);
+    return [single];
+  }
+
+  return languages;
 }
 
 /** Detect CodeQL language from repo markers, with resolve-language fallback. */
@@ -596,7 +642,7 @@ function extractCodeFlowEvidence(result: CodeQLSarifResult): string | null {
           : `${filePath}:${startLine}`;
 
         segments.push(segment);
-        if (segments.length >= 8) {
+        if (segments.length >= 16) {
           return `Code flow: ${segments.join(" -> ")}`;
         }
       }

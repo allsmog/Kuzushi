@@ -7,6 +7,7 @@ import {
   parseVerificationOutput,
   VERIFICATION_RESULT_SCHEMA,
   VerificationExecutionError,
+  verificationSystemPromptPrefix,
   verifyFindingWithAgent,
 } from "../src/verify.js";
 
@@ -72,35 +73,43 @@ describe("buildVerificationPrompt", () => {
     expect(prompt).toContain("User input appears attacker-controlled");
   });
 
-  it("includes repository context when provided", () => {
-    const prompt = buildVerificationPrompt(
-      makeFinding(),
-      makeTriageResult(),
-      "repo",
-      {
-        languages: ["TypeScript"],
-        frameworks: ["Express"],
-        authPatterns: ["JWT"],
-        sanitizationLibs: ["helmet"],
-        ormOrDb: ["Prisma"],
-        entryPoints: ["src/pages/api/*"],
-      },
-    );
-
-    expect(prompt).toContain("## Repository Context");
-    expect(prompt).toContain("Languages: TypeScript");
-    expect(prompt).toContain("ORM/DB: Prisma");
-  });
-
-  it("includes Proof Level Framework and Bypass Exhaustion Protocol", () => {
+  it("does not include repository context in user prompt (moved to system prompt)", () => {
     const prompt = buildVerificationPrompt(makeFinding(), makeTriageResult(), "repo");
 
-    expect(prompt).toContain("Proof Level Framework");
-    expect(prompt).toContain("Level 1: Theoretical weakness identified");
-    expect(prompt).toContain("Level 4: Account takeover demonstrated");
-    expect(prompt).toContain("Bypass Exhaustion Protocol");
-    expect(prompt).toContain("Direct exploitation with obvious payload");
-    expect(prompt).toContain("Encoding bypass");
+    expect(prompt).not.toContain("## Repository Context");
+  });
+
+  it("verificationSystemPromptPrefix includes repository context when provided", () => {
+    const prefix = verificationSystemPromptPrefix({
+      languages: ["TypeScript"],
+      frameworks: ["Express"],
+      authPatterns: ["JWT"],
+      sanitizationLibs: ["helmet"],
+      ormOrDb: ["Prisma"],
+      entryPoints: ["src/pages/api/*"],
+    });
+
+    expect(prefix).toContain("## Repository Context");
+    expect(prefix).toContain("Languages: TypeScript");
+    expect(prefix).toContain("ORM/DB: Prisma");
+  });
+
+  it("does not include Proof Level Framework and Bypass Exhaustion Protocol in user prompt (moved to system prompt)", () => {
+    const prompt = buildVerificationPrompt(makeFinding(), makeTriageResult(), "repo");
+
+    expect(prompt).not.toContain("Proof Level Framework");
+    expect(prompt).not.toContain("Bypass Exhaustion Protocol");
+  });
+
+  it("verificationSystemPromptPrefix includes Proof Level Framework and Bypass Exhaustion Protocol", () => {
+    const prefix = verificationSystemPromptPrefix();
+
+    expect(prefix).toContain("Proof Level Framework");
+    expect(prefix).toContain("Level 1: Theoretical weakness identified");
+    expect(prefix).toContain("Level 4: Account takeover demonstrated");
+    expect(prefix).toContain("Bypass Exhaustion Protocol");
+    expect(prefix).toContain("Direct exploitation with obvious payload");
+    expect(prefix).toContain("Encoding bypass");
   });
 
   it("includes bypass techniques for SQLi CWE", () => {
@@ -112,11 +121,17 @@ describe("buildVerificationPrompt", () => {
     expect(prompt).toContain("Wide-byte injection");
   });
 
-  it("includes Confidence Escalation Protocol for verification", () => {
+  it("does not include Confidence Escalation Protocol in user prompt (moved to system prompt)", () => {
     const prompt = buildVerificationPrompt(makeFinding(), makeTriageResult(), "repo");
 
-    expect(prompt).toContain("Confidence Escalation Protocol");
-    expect(prompt).toContain("Start at 0.1");
+    expect(prompt).not.toContain("Confidence Escalation Protocol");
+  });
+
+  it("verificationSystemPromptPrefix includes Confidence Escalation Protocol for verification", () => {
+    const prefix = verificationSystemPromptPrefix();
+
+    expect(prefix).toContain("Confidence Escalation Protocol");
+    expect(prefix).toContain("Start at 0.1");
   });
 });
 

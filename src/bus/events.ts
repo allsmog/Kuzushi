@@ -290,6 +290,20 @@ export type VerificationFindingQueuedEvent = EventEnvelope<
   }
 >;
 
+export type VerificationBatchQueuedEvent = EventEnvelope<
+  "verification:batch-queued",
+  {
+    context: RunContext;
+    items: Array<{
+      finding: Finding;
+      triageResult: TriageResult;
+      index: number;
+      total: number;
+    }>;
+    repoContext?: unknown;
+  }
+>;
+
 export type VerificationResultEvent = EventEnvelope<
   "verification:result",
   {
@@ -604,6 +618,7 @@ export type KuzushiEvent =
   | TriageQueueDepthEvent
   | VerificationStartEvent
   | VerificationFindingQueuedEvent
+  | VerificationBatchQueuedEvent
   | VerificationResultEvent
   | VerificationErrorEvent
   | VerificationAgentActivityEvent

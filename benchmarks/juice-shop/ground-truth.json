@@ -1,0 +1,208 @@
+{
+  "name": "OWASP Juice Shop",
+  "language": "TypeScript",
+  "repoUrl": "https://github.com/juice-shop/juice-shop",
+  "repoRef": "v17.1.1",
+  "entries": [
+    {
+      "id": "juice-sqli-login",
+      "file": "routes/login.ts",
+      "line": 49,
+      "cwe": "CWE-089",
+      "isVulnerable": true,
+      "category": "SQL Injection"
+    },
+    {
+      "id": "juice-sqli-search",
+      "file": "routes/search.ts",
+      "line": 38,
+      "cwe": "CWE-089",
+      "isVulnerable": true,
+      "category": "SQL Injection"
+    },
+    {
+      "id": "juice-xss-search",
+      "file": "routes/search.ts",
+      "line": 52,
+      "cwe": "CWE-079",
+      "isVulnerable": true,
+      "category": "Cross-site Scripting (Reflected)"
+    },
+    {
+      "id": "juice-xss-chatbot",
+      "file": "routes/chatbot.ts",
+      "line": 65,
+      "cwe": "CWE-079",
+      "isVulnerable": true,
+      "category": "Cross-site Scripting (Stored)"
+    },
+    {
+      "id": "juice-deser-profile",
+      "file": "routes/profile.ts",
+      "line": 62,
+      "cwe": "CWE-502",
+      "isVulnerable": true,
+      "category": "Insecure Deserialization"
+    },
+    {
+      "id": "juice-bac-basket",
+      "file": "routes/basket.ts",
+      "line": 24,
+      "cwe": "CWE-284",
+      "isVulnerable": true,
+      "category": "Broken Access Control"
+    },
+    {
+      "id": "juice-bac-order",
+      "file": "routes/order.ts",
+      "line": 31,
+      "cwe": "CWE-284",
+      "isVulnerable": true,
+      "category": "Broken Access Control"
+    },
+    {
+      "id": "juice-path-fileserver",
+      "file": "routes/fileServer.ts",
+      "line": 23,
+      "cwe": "CWE-022",
+      "isVulnerable": true,
+      "category": "Path Traversal"
+    },
+    {
+      "id": "juice-path-keyserver",
+      "file": "routes/keyServer.ts",
+      "line": 18,
+      "cwe": "CWE-022",
+      "isVulnerable": true,
+      "category": "Path Traversal"
+    },
+    {
+      "id": "juice-ssrf-profileimage",
+      "file": "routes/profileImageUrl.ts",
+      "line": 19,
+      "cwe": "CWE-918",
+      "isVulnerable": true,
+      "category": "Server-Side Request Forgery"
+    },
+    {
+      "id": "juice-redirect-open",
+      "file": "routes/redirect.ts",
+      "line": 18,
+      "cwe": "CWE-601",
+      "isVulnerable": true,
+      "category": "Open Redirect"
+    },
+    {
+      "id": "juice-sensitive-admincreds",
+      "file": "data/datacreator.ts",
+      "line": 55,
+      "cwe": "CWE-200",
+      "isVulnerable": true,
+      "category": "Sensitive Data Exposure"
+    },
+    {
+      "id": "juice-sensitive-defaultpasswords",
+      "file": "data/datacreator.ts",
+      "line": 78,
+      "cwe": "CWE-200",
+      "isVulnerable": true,
+      "category": "Sensitive Data Exposure"
+    },
+    {
+      "id": "juice-cmdi-videohandler",
+      "file": "routes/videoHandler.ts",
+      "line": 30,
+      "cwe": "CWE-078",
+      "isVulnerable": true,
+      "category": "Command Injection"
+    },
+    {
+      "id": "juice-xxe-fileupload",
+      "file": "routes/fileUpload.ts",
+      "line": 58,
+      "cwe": "CWE-611",
+      "isVulnerable": true,
+      "category": "XML External Entity"
+    },
+    {
+      "id": "juice-sqli-login-email-param",
+      "file": "routes/login.ts",
+      "line": 32,
+      "cwe": "CWE-089",
+      "isVulnerable": true,
+      "category": "SQL Injection"
+    },
+    {
+      "id": "juice-bac-basket-item",
+      "file": "routes/basket.ts",
+      "line": 58,
+      "cwe": "CWE-284",
+      "isVulnerable": true,
+      "category": "Broken Access Control"
+    },
+    {
+      "id": "juice-xss-fileupload-name",
+      "file": "routes/fileUpload.ts",
+      "line": 42,
+      "cwe": "CWE-079",
+      "isVulnerable": true,
+      "category": "Cross-site Scripting (Stored)"
+    },
+    {
+      "id": "juice-deser-profile-b2b",
+      "file": "routes/profile.ts",
+      "line": 45,
+      "cwe": "CWE-502",
+      "isVulnerable": true,
+      "category": "Insecure Deserialization"
+    },
+    {
+      "id": "juice-safe-captcha",
+      "file": "routes/captcha.ts",
+      "line": 14,
+      "cwe": "CWE-089",
+      "isVulnerable": false,
+      "category": "SQL Injection (safe parameterized query)"
+    },
+    {
+      "id": "juice-safe-updateuser",
+      "file": "routes/updateProductReviews.ts",
+      "line": 20,
+      "cwe": "CWE-089",
+      "isVulnerable": false,
+      "category": "SQL Injection (safe ORM usage)"
+    },
+    {
+      "id": "juice-safe-delivery",
+      "file": "routes/delivery.ts",
+      "line": 18,
+      "cwe": "CWE-284",
+      "isVulnerable": false,
+      "category": "Access Control (properly gated)"
+    },
+    {
+      "id": "juice-safe-verify",
+      "file": "routes/verify.ts",
+      "line": 55,
+      "cwe": "CWE-079",
+      "isVulnerable": false,
+      "category": "XSS (output properly encoded)"
+    },
+    {
+      "id": "juice-safe-securityquestion",
+      "file": "routes/securityQuestion.ts",
+      "line": 12,
+      "cwe": "CWE-200",
+      "isVulnerable": false,
+      "category": "Sensitive Data (no credential leak)"
+    },
+    {
+      "id": "juice-safe-countrymap",
+      "file": "routes/countryMapping.ts",
+      "line": 10,
+      "cwe": "CWE-022",
+      "isVulnerable": false,
+      "category": "Path Traversal (static mapping, no user input)"
+    }
+  ]
+}

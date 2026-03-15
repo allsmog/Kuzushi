@@ -19,6 +19,7 @@ import type {
   TriageFindingQueuedEvent,
   TriageQueueDepthEvent,
   TriageStartEvent,
+  VerificationBatchQueuedEvent,
   VerificationCompleteEvent,
   VerificationFindingQueuedEvent,
   VerificationStartEvent,
@@ -559,20 +560,23 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const verificationQueued: VerificationFindingQueuedEvent[] = [];
+    const verificationQueued: Array<{ finding: any; triageResult: any; index: number; total: number }> = [];
     bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", (event) => {
       if (event.meta.runId === runId) {
-        verificationQueued.push(event);
+        verificationQueued.push(event.payload);
+      }
+    });
+    bus.subscribe<VerificationBatchQueuedEvent>("verification:batch-queued", (event) => {
+      if (event.meta.runId === runId) {
+        for (const item of event.payload.items) {
+          verificationQueued.push(item);
+        }
       }
     });
 
     const verificationStartPromise = bus.waitFor<VerificationStartEvent>(
       "verification:start",
       (event) => event.meta.runId === runId,
-    );
-    const verificationSecondQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
-      "verification:finding-queued",
-      (event) => event.meta.runId === runId && event.payload.index === 2,
     );
 
     await bus.publish(
@@ -584,7 +588,8 @@ describe("PipelineOrchestrator", () => {
 
     const verificationStart = await verificationStartPromise;
     expect(verificationStart.payload.findingCount).toBe(2);
-    await verificationSecondQueuedPromise;
+    // Wait briefly for batch/individual dispatch to complete
+    await new Promise((r) => setTimeout(r, 50));
     expect(verificationQueued).toHaveLength(2);
 
     const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
@@ -596,10 +601,10 @@ describe("PipelineOrchestrator", () => {
       await bus.publish(
         createEvent("verification:result", runId, {
           context,
-          finding: queued.payload.finding,
-          triageResult: queued.payload.triageResult,
+          finding: queued.finding,
+          triageResult: queued.triageResult,
           result: {
-            fingerprint: queued.payload.finding.fingerprint,
+            fingerprint: queued.finding.fingerprint,
             exploitable: false,
             pocPayload: null,
             pocDescription: "not exploitable",
@@ -607,8 +612,8 @@ describe("PipelineOrchestrator", () => {
             preconditions: [],
             confidence: 0.8,
           },
-          index: queued.payload.index,
-          total: queued.payload.total,
+          index: queued.index,
+          total: queued.total,
         }),
       );
     }

@@ -374,17 +374,41 @@ function matchPair(
     };
   }
 
-  // Data entity match (shared DB table)
+  // Database shared-table match: write → read on same entity gets higher confidence
   if (
     exit.dataEntity
     && entry.dataEntity
     && exit.dataEntity.toLowerCase() === entry.dataEntity.toLowerCase()
   ) {
+    const isDbWriteToRead =
+      exit.protocol === "database-write" && entry.protocol === "database-read";
     return {
       method: "data-entity",
-      confidence: 0.6,
-      rationale: `Shared data entity: ${exit.dataEntity}`,
+      confidence: isDbWriteToRead ? 0.8 : 0.6,
+      rationale: isDbWriteToRead
+        ? `Shared database table (write→read): ${exit.dataEntity}`
+        : `Shared data entity: ${exit.dataEntity}`,
     };
+  }
+
+  // Fuzzy database entity match: normalize table names (strip schema prefix, pluralization)
+  if (
+    exit.dataEntity
+    && entry.dataEntity
+    && (exit.protocol === "database-write" || exit.protocol === "database-read")
+    && (entry.protocol === "database-write" || entry.protocol === "database-read")
+  ) {
+    const normalizedExit = normalizeDbEntity(exit.dataEntity);
+    const normalizedEntry = normalizeDbEntity(entry.dataEntity);
+    if (normalizedExit === normalizedEntry && normalizedExit.length > 0) {
+      const isWriteToRead =
+        exit.protocol === "database-write" && entry.protocol === "database-read";
+      return {
+        method: "data-entity",
+        confidence: isWriteToRead ? 0.65 : 0.5,
+        rationale: `Fuzzy database entity match (${exit.dataEntity} ≈ ${entry.dataEntity})${isWriteToRead ? " write→read" : ""}`,
+      };
+    }
   }
 
   // Service name in URL
@@ -712,6 +736,7 @@ function isUserFacingEntry(point: BoundaryPoint): boolean {
     point.protocol === "http-server"
     || point.protocol === "grpc-server"
     || point.protocol === "message-consume"
+    || point.protocol === "database-read"
   );
 }
 
@@ -932,6 +957,25 @@ function extractJson(value: string): string {
   return value;
 }
 
+/** Normalize a database entity name for fuzzy matching: strip schema prefix, lowercase, de-pluralize. */
+function normalizeDbEntity(entity: string): string {
+  let normalized = entity.toLowerCase().trim();
+  // Strip schema prefix (e.g., "public.users" → "users", "dbo.orders" → "orders")
+  const dotIdx = normalized.lastIndexOf(".");
+  if (dotIdx >= 0) {
+    normalized = normalized.slice(dotIdx + 1);
+  }
+  // Simple de-pluralization (handles common cases)
+  if (normalized.endsWith("ies")) {
+    normalized = normalized.slice(0, -3) + "y";
+  } else if (normalized.endsWith("ses") || normalized.endsWith("xes") || normalized.endsWith("zes")) {
+    normalized = normalized.slice(0, -2);
+  } else if (normalized.endsWith("s") && !normalized.endsWith("ss")) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
+}
+
 export const __stitchInternals = {
   matchBoundariesHeuristically,
   matchPair,
@@ -941,4 +985,5 @@ export const __stitchInternals = {
   parseStitchResponse,
   isUserFacingEntry,
   normalizeRoute,
+  normalizeDbEntity,
 };

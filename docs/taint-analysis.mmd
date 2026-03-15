@@ -1,0 +1,125 @@
+---
+title: "Kuzushi — Taint Analysis Pipeline"
+---
+flowchart TD
+    START(["taint-analysis enabled"]):::entry
+
+    %% ═══════════════ STAGE 1: PREFLIGHT ═══════════════
+    subgraph PF["Stage 1 — Preflight"]
+        workspace["Create .kuzushi/iris/ workspace"]
+        codeql["Resolve CodeQL binary\n+ detect version & API profile"]
+        db["Ensure CodeQL database\n(language auto-detection)"]
+        fw["Detect framework\n(Express · Gin · FastAPI · Spring ...)"]
+        refs["Collect framework reference docs"]
+        workspace --> codeql --> db --> fw --> refs
+    end
+    START --> PF
+
+    %% ═══════════════ TI PRIOR ═══════════════
+    subgraph TI["Threat Intelligence Prior"]
+        cisaKev["Fetch CISA KEV + NVD data"]
+        tiDoc["Build ti_prior.json per CWE:\nexploitation story · source archetypes\nsink archetypes · sanitizer patterns\ntiWeight · references"]
+        cisaKev --> tiDoc
+    end
+    refs --> TI
+
+    %% ═══════════════ STAGE 2: EXTRACTION ═══════════════
+    subgraph EXT["Stage 2 — Source/Sink Extraction"]
+        tmpl["Load language-specific\nQL stub templates"]
+        extAgent["LLM Extraction Agent\nexplores codebase via Read/Glob/Grep\nfills {{PLACEHOLDER}} markers\ngenerates sources.ql & sinks.ql"]
+        compile["CodeQL compile check\n(retry with fallback profiles)"]
+        execExt["Execute extraction queries\n→ sources.csv + sinks.csv\n(8 cols: node · candidate · callable\nflow_kind · receiver · module · arg · line)"]
+        tmpl --> extAgent --> compile --> execExt
+    end
+    tiDoc --> EXT
+
+    %% ═══════════════ STAGE 3: LABELING ═══════════════
+    subgraph LABEL["Stage 3 — LLM Labeling"]
+        parse["Parse CSVs → candidate list"]
+
+        subgraph PerPass["For Each Pass (1-13 vulnerability classes)"]
+            batch["Batch candidates\n(size: 20)"]
+            labelAgent["LLM Labeling Agent per batch\nPrompt includes:\n• TI prior exploitation story\n• Source/sink archetypes\n• Code snippets"]
+            labelOut["Per candidate output:\nrole: source | sink | sanitizer | summary | none\nclass: tp | fp | candidate | unknown\nconfidence: 0.0–1.0\nrationale + evidence"]
+            deny["Apply sink deny list\n(Go: Sprintf,Printf...\nPy: format,print...\nJS: log,warn...)"]
+            batch --> labelAgent --> labelOut --> deny
+        end
+
+        ckpt["Checkpoint: labels_raw_pass{N}.json\nHash: SHA256(sources+sinks csv)"]
+        supplements["Optional: LLM summary supplements\n(taint-propagating wrappers)\n+ rendering hints\n(variadic fns · SQL arg0 callables)"]
+        labelsJson["Output: labels.json\nper-pass entries with role ·\nclassification · confidence ·\nsignature · location · rationale"]
+
+        parse --> PerPass --> ckpt --> supplements --> labelsJson
+    end
+    execExt --> LABEL
+
+    %% ═══════════════ STAGE 4: RUN ═══════════════
+    subgraph RUN["Stage 4 — Taint Query Execution"]
+        render["Render taint-tracking QL per pass\nfrom labels + template:\n• Source predicates (tp/candidate)\n• Sink predicates (tp/candidate)\n• Sanitizer predicates\n• Summary propagation"]
+        compileQ["Compile pass queries\ncodeql query compile"]
+        runQ["Execute: codeql query run\n→ SARIF 2.1 per pass"]
+        parseSarif["Parse SARIF output\nExtract source→sink flow paths\nthread flows · CWE mappings"]
+        genFind["Generate Findings\nscanner: taint-analysis-run\nfingerprint: SHA256(file:line:src→sink)\nseverity · confidence · evidence"]
+        filterFind["Filter: confidence ≥ 0.55\nDeduplicate by fingerprint"]
+        render --> compileQ --> runQ --> parseSarif --> genFind --> filterFind
+    end
+    labelsJson --> RUN
+
+    %% ═══════════════ FINDINGS ═══════════════
+    intraFindings["Intra-Service Findings"]:::output
+    filterFind --> intraFindings
+
+    %% ═══════════════ CROSS-SERVICE DECISION ═══════════════
+    crossQ{"Cross-service\nenabled?"}:::decision
+    intraFindings --> crossQ
+
+    %% ═══════════════ STAGE 5: CROSS-SERVICE ═══════════════
+    subgraph CROSS["Stage 5 — Cross-Service Analysis"]
+        discover["5a: Service Discovery\nauto-detect via manifest files\nor .kuzushi/services.json\n(max 20 services)"]
+        boundary["5b: LLM Boundary Agent per service\nDetect entry points:\nHTTP routes · gRPC · message consumers\nDetect exit points:\nHTTP clients · gRPC stubs · DB writes\n→ BoundaryPoint[] with taintedParameters"]
+        perSvc["Run full taint pipeline\nper service (isolated workspace)\npreflight → label → run"]
+        heuristic["5c: Heuristic edge matching\nURL path · topic name\ngRPC method · data entity"]
+        llmStitch["LLM validates edges +\nfinds semantic connections\nBuilds multi-hop paths:\nsvc-A → svc-B → svc-C"]
+        crossFind["Cross-Service Findings\nscanner: taint-analysis-cross-service\nevidence: service chain + edges"]
+        discover --> boundary --> perSvc --> heuristic --> llmStitch --> crossFind
+    end
+    crossQ -->|"yes"| CROSS
+
+    %% ═══════════════ MERGE ═══════════════
+    merge["Merge Findings\nintra + cross-service"]:::output
+    crossFind --> merge
+    crossQ -->|"no"| merge
+    intraFindings -.-> merge
+
+    %% ═══════════════ TO TRIAGE ═══════════════
+    toTriage(["→ Main Pipeline Triage"]):::exit
+    merge --> toTriage
+
+    %% ═══════════════ STAGE 6: REFINEMENT ═══════════════
+    subgraph REFINE["Stage 6 — Refinement Loop (post-triage)"]
+        signals["Collect FP signals from triage\nsource.is_false_positive\nsink.is_false_positive\nrule_refinement_hint"]
+        patch["Deterministic label patching\nDowngrade lowest-confidence entries → fp\nCap confidence to 0.3\nUpdate rationale"]
+        rerun["Re-run affected passes only\nrender → compile → execute → parse"]
+        delta["Compute delta findings\n(new + removed)"]
+        triageDelta["Triage delta findings\ntriageFindingsBatch()"]
+        moreQ{"More iterations\n& new signals?"}
+        signals --> patch --> rerun --> delta --> triageDelta --> moreQ
+        moreQ -->|"yes"| signals
+    end
+    toTriage -.->|"refinementEnabled"| REFINE
+    moreQ -->|"done"| toReport(["→ Continue to Report"]):::exit
+
+    %% ═══════════════ PASSES REFERENCE ═══════════════
+    subgraph PASSES["13 Vulnerability Passes"]
+        direction LR
+        p15["1 PathTraversal · 2 CmdInject\n3 SSRF · 4 CodeInject · 5 SQLi"]
+        p610["6 UnsafeDeser · 7 XSS · 8 XXE\n9 OpenRedirect · 10 HeaderInj"]
+        p1113["11 LogInject · 12 LDAPInject\n13 SSTI"]
+    end
+
+    %% ═══════════════ STYLING ═══════════════
+    classDef entry fill:#2C3E50,stroke:#1A252F,color:#ECF0F1,stroke-width:3px
+    classDef exit fill:#8E44AD,stroke:#6C3483,color:#fff,stroke-width:2px
+    classDef output fill:#27AE60,stroke:#1E8449,color:#fff,stroke-width:2px
+    classDef decision fill:#F39C12,stroke:#C77E0E,color:#fff,stroke-width:2px
+    classDef default fill:#3498DB,stroke:#2471A3,color:#fff

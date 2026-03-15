@@ -120,6 +120,15 @@ These are functions like:
 - Builder pattern methods (e.g. strings.Builder.WriteString → receiver)
 - Type conversion functions (e.g. strconv.Itoa, fmt.Sprintf)
 - Internal helper functions that pass user data through
+- Async/callback boundaries that propagate taint:
+  - Go: goroutine closures capturing tainted variables, channel send/receive
+  - JavaScript/TypeScript: Promise.then/catch callbacks, async/await chains, EventEmitter handlers
+  - Python: asyncio coroutine parameters, callback functions passed to async APIs
+  - Java: CompletableFuture.thenApply/thenAccept, Callable/Runnable lambdas, ExecutorService submissions
+- Data structure operations that propagate taint:
+  - Map/dict lookups, array/list indexing, struct/object field access
+  - JSON marshaling/unmarshaling, protobuf serialization
+  - ORM model field access (e.g. model.field, rows.Scan)
 
 ${degradationNote}
 
@@ -1287,13 +1296,23 @@ function buildCallableNameCheck(
           return `call.getTarget().hasQualifiedName("${hint}", "${escaped}")`;
         }
         return `call.getTarget().getName() = "${escaped}"`;
-      case "python":
-        return `call.getFunction().toString().matches("%${escaped}%")`;
       case "java":
+        // Use type-qualified matching when receiver hint contains a package-like path
+        if (receiverHint.includes(".")) {
+          return `call.getCallee().getDeclaringType().hasQualifiedName("${hint.substring(0, hint.lastIndexOf("."))}", "${hint.substring(hint.lastIndexOf(".") + 1)}") and call.getCallee().getName() = "${escaped}"`;
+        }
+        return `call.getCallee().getDeclaringType().hasName("${hint}") and call.getCallee().getName() = "${escaped}"`;
       case "csharp":
-        return `call.getCallee().getName() = "${escaped}"`;
+        if (receiverHint.includes(".")) {
+          return `call.getCallee().getDeclaringType().hasQualifiedName("${hint.substring(0, hint.lastIndexOf("."))}", "${hint.substring(hint.lastIndexOf(".") + 1)}") and call.getCallee().getName() = "${escaped}"`;
+        }
+        return `call.getCallee().getDeclaringType().hasName("${hint}") and call.getCallee().getName() = "${escaped}"`;
+      case "python":
+        // Python: use attribute access matching with module hint
+        return `call.getFunction().toString().matches("%${hint}.${escaped}%")`;
       case "javascript":
-        return `call.getCalleeName() = "${escaped}"`;
+        // JS: use receiver type matching when available
+        return `call.getReceiver().toString().matches("%${hint}%") and call.getCalleeName() = "${escaped}"`;
     }
   }
 
@@ -1431,6 +1450,133 @@ function buildSummaryTaintStep(info: CallableInfo, profile: CodeqlProfile, hints
   ].join("\n");
 }
 
+/**
+ * Generate CodeQL isAdditionalTaintStep predicates for implicit data structure
+ * propagation: map lookups, struct field access, JSON unmarshaling, proto getters, etc.
+ * These catch taint flows through data transformations that callable-name matching misses.
+ */
+function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string {
+  // Each clause is a passKey-independent taint step (applies to all passes)
+  const clauses: string[] = [];
+
+  switch (language) {
+    case "go":
+      clauses.push(
+        // Map index: m[key] propagates taint from map to value
+        `    // Implicit: map index propagation
+    exists(DataFlow::Node mapNode |
+      nodeTo.asExpr().(IndexExpr).getBase() = nodeFrom.asExpr() and
+      passKey = passKey
+    )`,
+        // Struct field read: s.Field propagates taint from struct to field
+        `    // Implicit: struct field read propagation
+    exists(DataFlow::Node structNode |
+      nodeTo.asExpr().(SelectorExpr).getBase() = nodeFrom.asExpr() and
+      passKey = passKey
+    )`,
+        // json.Unmarshal: taints the target pointer
+        `    // Implicit: json.Unmarshal propagates taint to target
+    exists(DataFlow::CallNode call |
+      call.getTarget().hasQualifiedName("encoding/json", "Unmarshal") and
+      nodeFrom = call.getArgument(0) and
+      nodeTo = call.getArgument(1) and
+      passKey = passKey
+    )`,
+        // json.NewDecoder().Decode: taints the target
+        `    // Implicit: json.Decoder.Decode propagates taint
+    exists(DataFlow::CallNode call |
+      call.getTarget().getName() = "Decode" and
+      nodeFrom = call.getReceiver() and
+      nodeTo = call.getArgument(0) and
+      passKey = passKey
+    )`,
+      );
+      break;
+
+    case "python":
+      clauses.push(
+        // Dict access: d[key] / d.get(key)
+        `    // Implicit: dict subscript propagation
+    exists(DataFlow::CallNode call |
+      call.getCalleeName() = "get" and
+      nodeFrom = call.getObject() and
+      nodeTo = call and
+      passKey = passKey
+    )`,
+        // json.loads: propagates taint from string to parsed object
+        `    // Implicit: json.loads propagation
+    exists(DataFlow::CallNode call |
+      call.getFunction().toString().matches("%json.loads%") and
+      nodeFrom = call.getArgument(0) and
+      nodeTo = call and
+      passKey = passKey
+    )`,
+      );
+      break;
+
+    case "java":
+      clauses.push(
+        // Map.get: propagates taint from map to value
+        `    // Implicit: Map.get propagation
+    exists(DataFlow::CallNode call |
+      call.getCallee().getName() = "get" and
+      call.getCallee().getDeclaringType().getASupertype*().hasQualifiedName("java.util", "Map") and
+      nodeFrom = call.getReceiver() and
+      nodeTo = call and
+      passKey = passKey
+    )`,
+        // ObjectMapper.readValue: propagates taint from JSON string to deserialized object
+        `    // Implicit: ObjectMapper.readValue propagation
+    exists(DataFlow::CallNode call |
+      call.getCallee().getName() = "readValue" and
+      nodeFrom = call.getArgument(0) and
+      nodeTo = call and
+      passKey = passKey
+    )`,
+      );
+      break;
+
+    case "javascript":
+      clauses.push(
+        // JSON.parse: propagates taint from string to parsed object
+        `    // Implicit: JSON.parse propagation
+    exists(DataFlow::CallNode call |
+      call.getCalleeName() = "parse" and
+      nodeFrom = call.getArgument(0) and
+      nodeTo = call and
+      passKey = passKey
+    )`,
+        // Property access: obj.prop / obj[key]
+        `    // Implicit: property read propagation
+    exists(DataFlow::PropRead read |
+      nodeFrom = read.getBase() and
+      nodeTo = read and
+      passKey = passKey
+    )`,
+      );
+      break;
+
+    case "csharp":
+      clauses.push(
+        // JsonSerializer.Deserialize
+        `    // Implicit: JsonSerializer.Deserialize propagation
+    exists(DataFlow::CallNode call |
+      call.getCallee().getName() = "Deserialize" and
+      nodeFrom = call.getArgument(0) and
+      nodeTo = call and
+      passKey = passKey
+    )`,
+      );
+      break;
+  }
+
+  if (clauses.length === 0) {
+    return "";
+  }
+
+  return clauses.join("\n    or\n");
+}
+
 function renderSummaryLibrary(
   byPass: Map<string, CallableInfo[]>,
   languageImports: string,
@@ -1440,6 +1586,8 @@ function renderSummaryLibrary(
   const hasAnySummary = [...byPass.values()].some((callables) => callables.length > 0);
 
   if (!hasAnySummary) {
+    const implicitSteps = renderImplicitPropagationSteps(profile.language);
+    const body = implicitSteps || "    none()";
     return [
       "/**",
       " * Generated by Kuzushi Taint Analysis integration.",
@@ -1449,7 +1597,7 @@ function renderSummaryLibrary(
       "",
       "module MySummaries {",
       "  predicate isAdditionalTaintStep(DataFlow::Node nodeFrom, DataFlow::Node nodeTo, string passKey) {",
-      "    none()",
+      body,
       "  }",
       "}",
       "",
@@ -1474,6 +1622,8 @@ function renderSummaryLibrary(
     ].join("\n");
   }).join("\n    or\n");
 
+  const implicitSteps = renderImplicitPropagationSteps(profile.language);
+
   return [
     "/**",
     " * Generated by Kuzushi Taint Analysis integration.",
@@ -1484,6 +1634,7 @@ function renderSummaryLibrary(
     "module MySummaries {",
     "  predicate isAdditionalTaintStep(DataFlow::Node nodeFrom, DataFlow::Node nodeTo, string passKey) {",
     passClauses,
+    implicitSteps ? `    or\n${implicitSteps}` : "",
     "  }",
     "}",
     "",

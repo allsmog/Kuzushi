@@ -1,0 +1,167 @@
+{
+  "name": "GoVWA",
+  "language": "Go",
+  "repoUrl": "https://github.com/0c34/govwa",
+  "entries": [
+    {
+      "id": "govwa-sqli-user-login",
+      "file": "user/user.go",
+      "line": 42,
+      "cwe": "CWE-089",
+      "isVulnerable": true,
+      "category": "SQL Injection"
+    },
+    {
+      "id": "govwa-sqli-user-register",
+      "file": "user/user.go",
+      "line": 78,
+      "cwe": "CWE-089",
+      "isVulnerable": true,
+      "category": "SQL Injection"
+    },
+    {
+      "id": "govwa-sqli-sqli-handler",
+      "file": "vulnerability/sqli/sqli.go",
+      "line": 28,
+      "cwe": "CWE-089",
+      "isVulnerable": true,
+      "category": "SQL Injection"
+    },
+    {
+      "id": "govwa-sqli-sqli-search",
+      "file": "vulnerability/sqli/sqli.go",
+      "line": 56,
+      "cwe": "CWE-089",
+      "isVulnerable": true,
+      "category": "SQL Injection"
+    },
+    {
+      "id": "govwa-xss-reflected",
+      "file": "vulnerability/xss/xss.go",
+      "line": 22,
+      "cwe": "CWE-079",
+      "isVulnerable": true,
+      "category": "Cross-site Scripting (Reflected)"
+    },
+    {
+      "id": "govwa-xss-stored",
+      "file": "vulnerability/xss/xss.go",
+      "line": 48,
+      "cwe": "CWE-079",
+      "isVulnerable": true,
+      "category": "Cross-site Scripting (Stored)"
+    },
+    {
+      "id": "govwa-idor-profile",
+      "file": "vulnerability/idor/idor.go",
+      "line": 25,
+      "cwe": "CWE-639",
+      "isVulnerable": true,
+      "category": "Insecure Direct Object Reference"
+    },
+    {
+      "id": "govwa-idor-edit",
+      "file": "vulnerability/idor/idor.go",
+      "line": 58,
+      "cwe": "CWE-639",
+      "isVulnerable": true,
+      "category": "Insecure Direct Object Reference"
+    },
+    {
+      "id": "govwa-cmdi-handler",
+      "file": "vulnerability/cmdi/cmdi.go",
+      "line": 20,
+      "cwe": "CWE-078",
+      "isVulnerable": true,
+      "category": "Command Injection"
+    },
+    {
+      "id": "govwa-cmdi-exec",
+      "file": "vulnerability/cmdi/cmdi.go",
+      "line": 35,
+      "cwe": "CWE-078",
+      "isVulnerable": true,
+      "category": "Command Injection"
+    },
+    {
+      "id": "govwa-csrf-form",
+      "file": "vulnerability/csrf/csrf.go",
+      "line": 18,
+      "cwe": "CWE-352",
+      "isVulnerable": true,
+      "category": "Cross-Site Request Forgery"
+    },
+    {
+      "id": "govwa-csrf-submit",
+      "file": "vulnerability/csrf/csrf.go",
+      "line": 42,
+      "cwe": "CWE-352",
+      "isVulnerable": true,
+      "category": "Cross-Site Request Forgery"
+    },
+    {
+      "id": "govwa-redirect-open",
+      "file": "vulnerability/redirect/redirect.go",
+      "line": 15,
+      "cwe": "CWE-601",
+      "isVulnerable": true,
+      "category": "Open Redirect"
+    },
+    {
+      "id": "govwa-sqli-user-update",
+      "file": "user/user.go",
+      "line": 105,
+      "cwe": "CWE-089",
+      "isVulnerable": true,
+      "category": "SQL Injection"
+    },
+    {
+      "id": "govwa-xss-dom",
+      "file": "vulnerability/xss/xss.go",
+      "line": 70,
+      "cwe": "CWE-079",
+      "isVulnerable": true,
+      "category": "Cross-site Scripting (DOM)"
+    },
+    {
+      "id": "govwa-safe-main",
+      "file": "main.go",
+      "line": 15,
+      "cwe": "CWE-089",
+      "isVulnerable": false,
+      "category": "SQL Injection (no user input in DB init)"
+    },
+    {
+      "id": "govwa-safe-setup-db",
+      "file": "setup/setup.go",
+      "line": 22,
+      "cwe": "CWE-089",
+      "isVulnerable": false,
+      "category": "SQL Injection (static DDL statements)"
+    },
+    {
+      "id": "govwa-safe-config",
+      "file": "config/config.go",
+      "line": 10,
+      "cwe": "CWE-200",
+      "isVulnerable": false,
+      "category": "Sensitive Data (config loading, no exposure)"
+    },
+    {
+      "id": "govwa-safe-util-session",
+      "file": "util/middleware.go",
+      "line": 30,
+      "cwe": "CWE-284",
+      "isVulnerable": false,
+      "category": "Access Control (session middleware, safe)"
+    },
+    {
+      "id": "govwa-safe-pathtraversal-absent",
+      "file": "vulnerability/redirect/redirect.go",
+      "line": 10,
+      "cwe": "CWE-022",
+      "isVulnerable": false,
+      "category": "Path Traversal (not present in this module)"
+    }
+  ]
+}

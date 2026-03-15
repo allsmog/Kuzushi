@@ -14,6 +14,8 @@ import { parsePiAiModelSpec } from "./model-spec.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
 
+process.env.PI_CACHE_RETENTION ??= "long";
+
 const DEFAULT_MAX_TURNS: number | undefined = undefined;
 const KNOWN_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "Bash", "Write", "GetCallers", "GetCallees", "GetFunctionBody"]);
 
@@ -115,6 +117,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
     );
     let totalCostUsd = 0;
     let generatedToolCallCounter = 0;
+    const truncatedTextParts: string[] = [];
 
     try {
       const model = resolveModel(request.options.model, this.runtimeConfig?.baseUrl);
@@ -123,7 +126,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
         request.options.disallowedTools,
       );
       const context: PiAiContext = {
-        systemPrompt: buildSystemPrompt(outputFormat?.schema),
+        systemPrompt: buildSystemPrompt(outputFormat?.schema, request.options.systemPromptPrefix),
         messages: [
           {
             role: "user",
@@ -227,12 +230,37 @@ export class PiAiAgentRuntime implements AgentRuntime {
           return;
         }
 
+        // Handle output truncation (hit max output tokens).
+        // When expecting structured JSON output, accumulate the partial text
+        // and signal the LLM to continue where it left off.
+        if (assistant.stopReason === "length") {
+          const hasToolCalls = assistant.content.some(
+            (block) => block.type === "toolCall",
+          );
+          if (!hasToolCalls && outputFormat) {
+            truncatedTextParts.push(extractText(assistant));
+            // Re-send with a continuation prompt so the LLM finishes its JSON.
+            context.messages.push(
+              assistant as unknown as PiAiContext["messages"][number],
+            );
+            context.messages.push({
+              role: "user",
+              content: "Your response was truncated due to length. Please continue your JSON output exactly where you left off. Do not restart — just continue from the cut-off point.",
+              timestamp: Date.now(),
+            });
+            continue;
+          }
+        }
+
         const toolCalls = assistant.content.filter((block): block is PiAiToolCall => (
           block.type === "toolCall"
         ));
 
         if (toolCalls.length === 0) {
-          const resultText = extractText(assistant);
+          const currentText = extractText(assistant);
+          const resultText = truncatedTextParts.length > 0
+            ? truncatedTextParts.join("") + currentText
+            : currentText;
           const structuredResult = outputFormat
             ? parseStructuredOutput(resultText)
             : { structuredOutput: undefined, parseError: null };
@@ -526,12 +554,18 @@ function buildStructuredOutputRetryMessage(schema: Record<string, unknown>): str
   ].join("\n");
 }
 
-function buildSystemPrompt(schema: Record<string, unknown> | undefined): string {
-  const lines = [
+function buildSystemPrompt(schema: Record<string, unknown> | undefined, prefix?: string): string {
+  const lines: string[] = [];
+
+  if (prefix) {
+    lines.push(prefix, "");
+  }
+
+  lines.push(
     "You are a code security agent operating on a local repository.",
     "Use available tools (Read, Glob, Grep, Bash, Write, GetCallers, GetCallees, GetFunctionBody) when code inspection or file manipulation is required.",
     "When you call tools, pass valid JSON arguments.",
-  ];
+  );
 
   if (schema) {
     lines.push(

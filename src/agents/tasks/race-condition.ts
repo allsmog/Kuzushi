@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
-import { antiHallucinationModule } from "../../prompts/modules.js";
+import {
+  antiHallucinationModule,
+  frameworkAwarenessModule,
+} from "../../prompts/modules.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -23,7 +26,7 @@ const RACE_CONDITION_SCHEMA = {
         additionalProperties: false,
         required: ["pattern", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
         properties: {
-          pattern: { type: "string", enum: ["toctou", "double-spend", "unprotected-shared-state"] },
+          pattern: { type: "string", enum: ["toctou", "double-spend", "unprotected-shared-state", "rate-limit-bypass", "file-race"] },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -108,6 +111,18 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "Shared mutable state accessed concurrently without synchronization.",
     "Examples: global counters, shared maps/dicts, file writes from multiple goroutines/threads.",
     "",
+    "### rate-limit-bypass (CWE-362)",
+    "Non-atomic rate limit check-then-increment:",
+    "- Read counter, compare to limit, then increment — concurrent requests bypass the limit",
+    "- In-memory rate limiters without atomic operations",
+    "- Redis rate limiters using separate GET and INCR instead of Lua script or MULTI",
+    "",
+    "### file-race (CWE-367)",
+    "File system TOCTOU:",
+    "- Check file existence/permissions then read/write without locking",
+    "- Temporary file creation in shared directories without exclusive flags",
+    "- Symlink races: checking target then following link",
+    "",
     `Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
     antiHallucinationModule({
@@ -117,7 +132,8 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Confidence HIGH only if race is clearly exploitable.",
       ],
     }),
-  ].join("\n");
+    frameworkAwarenessModule(repoContext),
+  ].filter(Boolean).join("\n");
 }
 
 function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
@@ -154,6 +170,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
         likelihood: f.confidence,
         impact: f.severity === "ERROR" ? "HIGH" : f.severity === "INFO" ? "LOW" : "MEDIUM",
         subcategory: ["vuln"],
+        cwe: cweList,
       }),
     };
 

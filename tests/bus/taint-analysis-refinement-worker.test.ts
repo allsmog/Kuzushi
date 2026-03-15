@@ -154,15 +154,15 @@ describe("taint-analysis refinement internals", () => {
     expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass0/test")).toBeUndefined();
   });
 
-  it("rejects pass id 14 (above valid range)", () => {
-    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass14/test")).toBeUndefined();
+  it("rejects pass id 20 (above valid range)", () => {
+    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass20/test")).toBeUndefined();
   });
 
   it("accepts pass id 1 (lower bound)", () => {
     expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass1/test")).toBe(1);
   });
 
-  it("accepts pass id 13 (upper bound)", () => {
-    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass13/test")).toBe(13);
+  it("accepts pass id 19 (upper bound)", () => {
+    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass19/test")).toBe(19);
   });
 });

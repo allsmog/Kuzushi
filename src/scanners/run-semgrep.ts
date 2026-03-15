@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { ScanOpts } from "../types.js";
 import type { Finding } from "./types.js";
-import { scoreFindingMetadata } from "./scoring.js";
+import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
 
 /** Raw Semgrep JSON result shape (partial). */
 export interface SemgrepResult {
@@ -35,11 +35,14 @@ export interface SemgrepOutput {
 export function scoreSemgrepFinding(finding: SemgrepResult): number {
   const extra = finding.extra ?? {};
   const meta = extra.metadata ?? {};
+  const messageText = extra.message ?? "";
   return scoreFindingMetadata({
     severity: extra.severity,
     likelihood: meta.likelihood,
     impact: meta.impact,
     subcategory: meta.subcategory,
+    cwe: meta.cwe,
+    parameterRiskBoost: detectParameterRiskBoost(messageText),
   });
 }
 
@@ -63,18 +66,20 @@ export async function runSemgrep(
   repoRoot: string,
   opts: ScanOpts,
   scannerBin: string = "semgrep",
-  configFlag: string = "auto",
+  configFlag: string | string[] = "auto",
 ): Promise<SemgrepOutput> {
   const binName = scannerBin.split("/").pop() ?? "scanner";
-  const args = [
-    "--config", configFlag,
-    "--json",
-    "--metrics", "on",
-  ];
-
-  for (const sev of opts.severity) {
-    args.push("--severity", sev);
+  const configs = Array.isArray(configFlag) ? configFlag : [configFlag];
+  const args: string[] = [];
+  for (const cfg of configs) {
+    args.push("--config", cfg);
   }
+  args.push("--json", "--metrics", "on");
+
+  // Send all severities to Semgrep — let the scoring pipeline prioritize.
+  // This ensures INFO-severity findings with high CWE multipliers are not
+  // filtered before they can be scored.
+  args.push("--severity", "ERROR", "--severity", "WARNING", "--severity", "INFO");
 
   for (const pattern of opts.excludePatterns) {
     args.push("--exclude", pattern);

@@ -12,7 +12,11 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "benchmark": "tsx benchmarks/harness.ts",
+    "benchmark:diff": "tsx benchmarks/sarif-diff.ts",
+    "benchmark:regression": "tsx benchmarks/regression-check.ts",
+    "typecheck:benchmarks": "tsc -p benchmarks/tsconfig.json --noEmit"
   },
   "files": [
     "dist",

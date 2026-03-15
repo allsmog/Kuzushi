@@ -7,6 +7,7 @@ import type { TaskSelectionResult } from "../agents/tasks/task-selector.js";
 import { createDefaultKnowledgeRegistry } from "../knowledge/index.js";
 import type { KnowledgeRegistry } from "../knowledge/types.js";
 import type { Finding } from "../scanners/types.js";
+import { deduplicateFindings } from "../scanners/dedup.js";
 import { selectTopFindings } from "../scanners/finding-selection.js";
 import { HardExclusionFilter } from "../scanners/fp-filter.js";
 import { rescoreFindings } from "../scanners/llm-rescore.js";
@@ -945,8 +946,9 @@ export class PipelineOrchestrator {
     const rankedFindings = state.resuming
       ? [...state.scanFindings]
       : selectTopFindings(state.scanFindings, state.scanOpts.maxFindings);
-    state.scanFindings = rankedFindings;
-    state.totalFindings = rankedFindings.length;
+    const dedupedFindings = deduplicateFindings(rankedFindings);
+    state.scanFindings = dedupedFindings;
+    state.totalFindings = dedupedFindings.length;
 
     if (!state.resuming) {
       try {
@@ -1676,27 +1678,62 @@ export class PipelineOrchestrator {
     state.verifyDispatching = true;
     try {
       const concurrency = normalizeConcurrency(state.config.verifyConcurrency ?? 1);
+      const batchSize = Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
 
       while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
         if (this.isBudgetExceeded(state)) {
           await this.emitBudgetExceeded(state, runId);
           break;
         }
-        const item = state.verifyQueue[state.verifyCursor];
-        state.verifyCursor += 1;
-        state.verifyInFlight += 1;
 
-        await this.bus.publish(
-          createEvent("verification:finding-queued", runId, {
-            context: state.context,
+        // Collect a batch of items
+        const batchItems: Array<{
+          finding: typeof state.verifyQueue[0]["finding"];
+          triageResult: typeof state.verifyQueue[0]["triageResult"];
+          index: number;
+          total: number;
+        }> = [];
+        while (
+          batchItems.length < batchSize
+          && state.verifyCursor < state.verifyQueue.length
+        ) {
+          const item = state.verifyQueue[state.verifyCursor];
+          state.verifyCursor += 1;
+          batchItems.push({
             finding: item.finding,
             triageResult: item.triageResult,
-            repoContext: state.repoContext,
-            precedents: state.precedents,
             index: item.index,
             total: item.total,
-          }),
-        );
+          });
+        }
+
+        if (batchItems.length === 0) break;
+
+        state.verifyInFlight += batchItems.length;
+
+        if (batchItems.length === 1) {
+          // Single-item dispatch for efficiency
+          const item = batchItems[0];
+          await this.bus.publish(
+            createEvent("verification:finding-queued", runId, {
+              context: state.context,
+              finding: item.finding,
+              triageResult: item.triageResult,
+              repoContext: state.repoContext,
+              precedents: state.precedents,
+              index: item.index,
+              total: item.total,
+            }),
+          );
+        } else {
+          await this.bus.publish(
+            createEvent("verification:batch-queued", runId, {
+              context: state.context,
+              items: batchItems,
+              repoContext: state.repoContext,
+            }),
+          );
+        }
       }
 
       await this.publishVerificationQueueDepth(state, runId);

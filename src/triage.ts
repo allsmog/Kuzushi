@@ -14,6 +14,7 @@ import type {
 } from "./scanners/types.js";
 import { formatRepoContext } from "./repo-context.js";
 import {
+  composePromptModules,
   confidenceEscalationModule,
   falseDismissalModule,
 } from "./prompts/modules.js";
@@ -139,6 +140,17 @@ export class TriageExecutionError extends Error {
   }
 }
 
+export function triageSystemPromptPrefix(repoContext?: RepoContext): string {
+  const repoSection = formatRepoContext(repoContext);
+  const repoBlock = repoSection.length > 0
+    ? "## Repository Context\n" + repoSection.join("\n") + "\n\n"
+    : "";
+  return repoBlock + composePromptModules(
+    confidenceEscalationModule("triage"),
+    falseDismissalModule(),
+  );
+}
+
 export async function triageFindingWithAgent(
   registry: TriageConfigProvider,
   finding: Finding,
@@ -155,7 +167,7 @@ export async function triageFindingWithAgent(
     repoContextOrRuntimeOptions,
     maybeRuntimeOptions,
   );
-  const agentConfig = resolveAgentConfig(registry, finding, repoName, repoContext);
+  const agentConfig = resolveAgentConfig(registry, finding, repoName);
   const prompt = extraPromptContext
     ? agentConfig.prompt + "\n\n" + extraPromptContext
     : agentConfig.prompt;
@@ -168,6 +180,7 @@ export async function triageFindingWithAgent(
     maxTurns: effectiveMaxTurns,
     allowedTools,
     runtimeOptions,
+    systemPromptPrefix: triageSystemPromptPrefix(repoContext),
     schema: TRIAGE_RESULT_SCHEMA,
   });
 
@@ -248,7 +261,7 @@ async function triageSingleBatch(
   runtimeOptions: TriageRuntimeOptions,
   maxTurns: number | null = null,
 ): Promise<BatchTriageOutput> {
-  const prompt = buildBatchTriagePrompt(findings, repoName, repoContext);
+  const prompt = buildBatchTriagePrompt(findings, repoName);
   const effectiveMaxTurns = normalizeTurns(maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
@@ -257,6 +270,7 @@ async function triageSingleBatch(
     maxTurns: effectiveMaxTurns,
     allowedTools: DEFAULT_TOOLS,
     runtimeOptions,
+    systemPromptPrefix: triageSystemPromptPrefix(repoContext),
     schema: BATCH_TRIAGE_SCHEMA,
     strict: true,
     retryInvalidStructuredOutput: 2,
@@ -273,9 +287,7 @@ async function triageSingleBatch(
 function buildBatchTriagePrompt(
   findings: Finding[],
   repoName: string,
-  repoContext?: RepoContext,
 ): string {
-  const contextSection = formatRepoContext(repoContext);
   const findingSections = findings.map((f, idx) => [
     `### Finding ${idx + 1}`,
     `Scanner: ${f.scanner}`,
@@ -299,7 +311,6 @@ function buildBatchTriagePrompt(
     "Investigate ALL of the following findings and determine if each is a true positive, false positive, or needs review.",
     "",
     `Repo: ${repoName}`,
-    ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
     "",
     `## Findings (${findings.length} total)`,
     "",
@@ -310,10 +321,6 @@ function buildBatchTriagePrompt(
     "3. Use Grep/Glob to locate sanitization, validation, and guards.",
     "4. Validate reachability and realistic attacker control.",
     "5. Decide tp/fp/needs_review per finding using the confidence escalation protocol below.",
-    "",
-    confidenceEscalationModule("triage"),
-    "",
-    falseDismissalModule(),
     "",
     "## Output requirements",
     'Return ONLY a JSON object with a "results" array. Each element MUST have:',
@@ -427,10 +434,7 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
 export function buildDefaultTriageAgentConfig(
   finding: Finding,
   repoName: string,
-  repoContext?: RepoContext,
 ): TriageAgentConfig {
-  const contextSection = formatRepoContext(repoContext);
-
   return {
     prompt: [
       "You are a skeptical senior security engineer performing triage. Assume every finding is a",
@@ -439,7 +443,6 @@ export function buildDefaultTriageAgentConfig(
       "context about middleware, framework protections, and sanitization.",
       "",
       "Use available repo tools to investigate whether this finding is a true or false positive.",
-      ...(contextSection.length > 0 ? ["", "## Repository Context", ...contextSection] : []),
       "",
       "## Finding",
       `Repo: ${repoName}`,
@@ -465,10 +468,6 @@ export function buildDefaultTriageAgentConfig(
       "7. Use GetFunctionBody to inspect specific sanitizers, validators, or middleware functions.",
       "8. Decide tp/fp/needs_review using the confidence escalation protocol below.",
       "",
-      confidenceEscalationModule("triage"),
-      "",
-      falseDismissalModule(),
-      "",
       "## Output requirements",
       "Return ONLY a JSON object with:",
       "fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null),",
@@ -481,20 +480,19 @@ function resolveAgentConfig(
   registry: TriageConfigProvider,
   finding: Finding,
   repoName: string,
-  repoContext?: RepoContext,
 ): TriageAgentConfig {
   if (!registry.has(finding.scanner)) {
-    return buildDefaultTriageAgentConfig(finding, repoName, repoContext);
+    return buildDefaultTriageAgentConfig(finding, repoName);
   }
 
   try {
     const config = registry.get(finding.scanner).triageAgentConfig(finding, repoName);
     if (!config.prompt || !config.prompt.trim()) {
-      return buildDefaultTriageAgentConfig(finding, repoName, repoContext);
+      return buildDefaultTriageAgentConfig(finding, repoName);
     }
     return config;
   } catch {
-    return buildDefaultTriageAgentConfig(finding, repoName, repoContext);
+    return buildDefaultTriageAgentConfig(finding, repoName);
   }
 }
 

@@ -28,13 +28,14 @@ export const DEFAULTS: KuzushiConfig = {
   model: "anthropic:claude-sonnet-4-6",
   triageMaxTurns: null,
   verify: false,
-  verifyMaxTurns: 15,
-  verifyConcurrency: 1,
+  verifyMaxTurns: undefined,
+  verifyConcurrency: 3,
+  verifyBatchSize: 5,
   verifyVerdicts: ["tp"],
   verifyMinConfidence: 0,
   pocHarness: false,
-  pocHarnessMaxTurns: 20,
-  pocHarnessConcurrency: 1,
+  pocHarnessMaxTurns: undefined,
+  pocHarnessConcurrency: 2,
   enableContextGathering: true,
   auditLog: false,
   reportOutput: undefined,
@@ -46,7 +47,7 @@ export const DEFAULTS: KuzushiConfig = {
   retryBackoffMultiplier: 2,
   busBackend: "in-process",
   triageBatchSize: 15,
-  triageConcurrency: 1,
+  triageConcurrency: 3,
   scanMode: "sequential",
   agentRuntimeBackend: "pi-ai",
   agentRuntimeConfig: undefined,
@@ -57,6 +58,7 @@ export const DEFAULTS: KuzushiConfig = {
     "test", "tests", "spec", "vendor",
     "node_modules", "__tests__", "*.min.js", "*.min.css",
   ],
+  llmRescoreEnabled: true,
   fpFilterEnabled: true,
   fpFilterCustomExclusions: [],
   enableDynamicTaskSelection: false,
@@ -74,7 +76,7 @@ export const DEFAULTS: KuzushiConfig = {
   prioritizeFindings: true,
   diffBase: undefined,
   scannerConfig: {
-    semgrep: { configFlag: "auto" },
+    semgrep: { configFlag: ["auto", "p/security-audit", "p/owasp-top-ten", "p/cwe-top-25"] },
     agentic: { model: "anthropic:claude-sonnet-4-6", maxFindings: 20 },
     codeql: {},
     "dangerous-api": { maxFindings: 50 },
@@ -82,7 +84,7 @@ export const DEFAULTS: KuzushiConfig = {
       taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
       dbPath: undefined,
       passes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-      labelingModel: "anthropic:claude-sonnet-4-6",
+      labelingModel: "anthropic:claude-haiku-4-5-20251001",
       extractionModel: undefined,
       labelingBatchSize: 20,
       labelingConfidenceThreshold: 0.55,
@@ -107,6 +109,7 @@ const VALID_TOP_LEVEL_KEYS = new Set<string>([
   ...Object.keys(DEFAULTS),
   "triageModel",
   "verifyModel",
+  "verifyBatchSize",
   "pocHarnessModel",
   "variantAnalysisModel",
   "contextEnrichmentModel",
@@ -562,6 +565,38 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "llmRescoreEnabled") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") throw new Error("llmRescoreEnabled must be true or false");
+    config.llmRescoreEnabled = parsed;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "llmRescoreModel") {
+    config.llmRescoreModel = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "llmRescoreThreshold") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 10) throw new Error("llmRescoreThreshold must be 0-10");
+    config.llmRescoreThreshold = n;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "verifyBatchSize") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("verifyBatchSize must be a positive number");
+    }
+    config.verifyBatchSize = Math.floor(n);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   throw new Error(`Unknown config key: ${key}`);
 }
 
@@ -607,13 +642,16 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     : normalizePositiveInt(config.triageMaxTurns, DEFAULTS.triageMaxTurns ?? 10);
   const verify = normalizeBoolean(config.verify, DEFAULTS.verify ?? false);
   const verifyModel = normalizeOptionalString(config.verifyModel);
-  const verifyMaxTurns = normalizePositiveInt(
-    config.verifyMaxTurns,
-    DEFAULTS.verifyMaxTurns ?? 15,
-  );
+  const verifyMaxTurns = config.verifyMaxTurns == null
+    ? undefined
+    : normalizePositiveInt(config.verifyMaxTurns, 15);
   const verifyConcurrency = normalizePositiveInt(
     config.verifyConcurrency,
     DEFAULTS.verifyConcurrency ?? 1,
+  );
+  const verifyBatchSize = normalizePositiveInt(
+    config.verifyBatchSize,
+    DEFAULTS.verifyBatchSize ?? 5,
   );
   const verifyVerdictsRaw = normalizeVerdictArray(config.verifyVerdicts);
   const verifyVerdicts = verifyVerdictsRaw.length > 0
@@ -625,10 +663,9 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   );
   const pocHarness = normalizeBoolean(config.pocHarness, DEFAULTS.pocHarness ?? false);
   const pocHarnessModel = normalizeOptionalString(config.pocHarnessModel);
-  const pocHarnessMaxTurns = normalizePositiveInt(
-    config.pocHarnessMaxTurns,
-    DEFAULTS.pocHarnessMaxTurns ?? 20,
-  );
+  const pocHarnessMaxTurns = config.pocHarnessMaxTurns == null
+    ? undefined
+    : normalizePositiveInt(config.pocHarnessMaxTurns, 20);
   const pocHarnessConcurrency = normalizePositiveInt(
     config.pocHarnessConcurrency,
     DEFAULTS.pocHarnessConcurrency ?? 1,
@@ -672,6 +709,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     verifyModel,
     verifyMaxTurns,
     verifyConcurrency,
+    verifyBatchSize,
     verifyVerdicts,
     verifyMinConfidence,
     pocHarness,

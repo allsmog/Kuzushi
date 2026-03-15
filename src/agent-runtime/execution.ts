@@ -37,6 +37,7 @@ export interface StructuredAgentQueryArgs {
   maxTurns?: number | null;
   allowedTools: string[];
   runtimeOptions?: AgentRuntimeOptions;
+  systemPromptPrefix?: string;
   schema: Record<string, unknown>;
   strict?: boolean;
   retryInvalidStructuredOutput?: number;
@@ -77,6 +78,7 @@ export async function runStructuredAgentQuery(
       permissionMode: "dontAsk",
       maxBudgetUsd: args.runtimeOptions?.maxBudgetUsd,
       abortController: args.runtimeOptions?.abortController,
+      systemPromptPrefix: args.systemPromptPrefix,
       outputFormat: {
         type: "json_schema",
         schema: args.schema,

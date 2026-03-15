@@ -35,6 +35,8 @@ export interface ScanOpts {
   fresh: boolean;
   /** Git ref to diff against for differential review (e.g. "main", "HEAD~5"). */
   diffBase?: string;
+  /** Injected summary of first-pass findings for agentic two-pass review mode. */
+  agenticReviewContext?: string;
 }
 
 /** A single step in the fine-grained evidence chain produced during triage. */
@@ -171,6 +173,8 @@ export interface KuzushiConfig {
   verifyMaxTurns?: number;
   /** Number of in-flight verification tasks. */
   verifyConcurrency?: number;
+  /** Maximum findings per batch verification LLM call. */
+  verifyBatchSize?: number;
   /** Which triage verdicts should enter verification. */
   verifyVerdicts?: Verdict[];
   /** Minimum triage confidence required before entering verification. */

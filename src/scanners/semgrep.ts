@@ -9,13 +9,19 @@ export class SemgrepPlugin implements ScannerPlugin {
   readonly displayName = "Semgrep/Opengrep";
 
   private scannerBin: string = "semgrep";
-  private configFlag: string = "auto";
+  private configFlag: string | string[] = "auto";
 
   async init(config: ScannerConfig): Promise<void> {
     const configuredBinary = asOptionalString(config["binary"]);
-    const configuredFlag = asOptionalString(config["configFlag"]);
+    const rawFlag = config["configFlag"];
 
-    this.configFlag = configuredFlag || "auto";
+    if (Array.isArray(rawFlag)) {
+      const flags = rawFlag.map((v) => String(v).trim()).filter(Boolean);
+      this.configFlag = flags.length > 0 ? flags : "auto";
+    } else {
+      const configuredFlag = asOptionalString(rawFlag);
+      this.configFlag = configuredFlag || "auto";
+    }
     if (configuredBinary) {
       this.scannerBin = configuredBinary;
       return;

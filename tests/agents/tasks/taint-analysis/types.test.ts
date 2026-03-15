@@ -28,7 +28,7 @@ describe("resolveTaintAnalysisConfig", () => {
   it('returns defaults when scannerConfig["taint-analysis"] is not configured', () => {
     const resolved = resolveTaintAnalysisConfig(makeConfig());
 
-    expect(resolved.passes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    expect(resolved.passes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     expect(resolved.labelingBatchSize).toBe(20);
     expect(resolved.labelingConfidenceThreshold).toBe(0.55);
     expect(resolved.workspaceDir).toBe("iris");
@@ -39,8 +39,8 @@ describe("resolveTaintAnalysisConfig", () => {
     expect(resolved.tiMode).toBe("live-required");
     expect(resolved.tiFailurePolicy).toBe("continue_without_ti");
     expect(resolved.tiTimeoutMs).toBe(15_000);
-    expect(resolved.refinementEnabled).toBe(false);
-    expect(resolved.refinementIterations).toBe(1);
+    expect(resolved.refinementEnabled).toBe(true);
+    expect(resolved.refinementIterations).toBe(2);
     expect(resolved.refinementDeltaOnly).toBe(true);
   });
 
@@ -49,7 +49,7 @@ describe("resolveTaintAnalysisConfig", () => {
     config.scannerConfig["taint-analysis"] = {
       taintAnalysisPath: "./custom-taint-analysis",
       dbPath: "/tmp/db",
-      passes: [0, 1, 2, 6, 14],
+      passes: [0, 1, 2, 6, 14, 20],
       labelingModel: "anthropic:claude-sonnet-4-6",
       labelingBatchSize: 7,
       labelingConfidenceThreshold: 0.8,
@@ -75,7 +75,7 @@ describe("resolveTaintAnalysisConfig", () => {
 
     expect(resolved.taintAnalysisPath).toBe("custom-taint-analysis");
     expect(resolved.dbPath).toBe("/tmp/db");
-    expect(resolved.passes).toEqual([1, 2, 6]);
+    expect(resolved.passes).toEqual([1, 2, 6, 14]);
     expect(resolved.labelingBatchSize).toBe(7);
     expect(resolved.labelingConfidenceThreshold).toBe(0.8);
     expect(resolved.workspaceDir).toBe("iris-custom");
@@ -106,27 +106,27 @@ describe("resolveTaintAnalysisConfig", () => {
     expect(resolved.passes).toEqual([7, 8, 9, 10, 11, 12, 13]);
   });
 
-  it("normalizePasses filters out ids above 13", () => {
+  it("normalizePasses filters out ids above 19", () => {
     const config = makeConfig();
     config.scannerConfig["taint-analysis"] = {
-      passes: [1, 13, 14, 99],
+      passes: [1, 13, 19, 20, 99],
     };
 
     const resolved = resolveTaintAnalysisConfig(config);
-    expect(resolved.passes).toEqual([1, 13]);
+    expect(resolved.passes).toEqual([1, 13, 19]);
   });
 });
 
 describe("TAINT_ANALYSIS_PASSES", () => {
-  it("contains all 13 passes", () => {
-    expect(TAINT_ANALYSIS_PASSES).toHaveLength(13);
+  it("contains all 19 passes", () => {
+    expect(TAINT_ANALYSIS_PASSES).toHaveLength(19);
     const ids = TAINT_ANALYSIS_PASSES.map((p) => p.passId);
-    expect(ids).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    expect(ids).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
   });
 
   it("each pass has a unique passKey", () => {
     const keys = TAINT_ANALYSIS_PASSES.map((p) => p.passKey);
-    expect(new Set(keys).size).toBe(13);
+    expect(new Set(keys).size).toBe(19);
   });
 
   it("each pass has non-empty cwes", () => {
@@ -147,7 +147,7 @@ describe("TAINT_ANALYSIS_PASSES", () => {
 });
 
 describe("DEFAULT_TAINT_ANALYSIS_TASK_CONFIG", () => {
-  it("includes all 13 pass ids in defaults", () => {
-    expect(DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.passes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  it("includes all 19 pass ids in defaults", () => {
+    expect(DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.passes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
   });
 });

@@ -9,6 +9,7 @@ import {
   buildPocHarnessPrompt,
   generatePocHarness,
   parsePocHarnessOutput,
+  pocHarnessSystemPromptPrefix,
   POC_HARNESS_RESULT_SCHEMA,
   PocHarnessExecutionError,
 } from "../src/poc-harness.js";
@@ -90,7 +91,7 @@ afterEach(() => {
 });
 
 describe("buildPocHarnessPrompt", () => {
-  it("includes finding, verification context, and anti-hallucination directives", () => {
+  it("includes finding and verification context but not static directives (moved to system prompt)", () => {
     const prompt = buildPocHarnessPrompt(
       makeFinding(),
       makeTriageResult(),
@@ -100,10 +101,20 @@ describe("buildPocHarnessPrompt", () => {
 
     expect(prompt).toContain("security PoC harness generator");
     expect(prompt).toContain("BEFORE generating code, use Read");
-    expect(prompt).toContain("Import the REAL function");
-    expect(prompt).toContain("SQL injection (CWE-89)");
+    expect(prompt).not.toContain("Import the REAL function");
+    expect(prompt).not.toContain("SQL injection (CWE-89)");
     expect(prompt).toContain("PoC payload: ' OR 1=1 --");
     expect(prompt).toContain("Fingerprint: poc-fp-1");
+  });
+
+  it("pocHarnessSystemPromptPrefix includes harness strategy templates and anti-hallucination constraints", () => {
+    const prefix = pocHarnessSystemPromptPrefix();
+
+    expect(prefix).toContain("Import the REAL function");
+    expect(prefix).toContain("SQL injection (CWE-89)");
+    expect(prefix).toContain("Anti-hallucination constraints");
+    expect(prefix).toContain("Do NOT simulate the vulnerable function");
+    expect(prefix).toContain("Harness strategy templates");
   });
 });
 

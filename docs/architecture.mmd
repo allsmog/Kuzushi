@@ -1,0 +1,164 @@
+---
+title: "Kuzushi — System Architecture"
+---
+graph TD
+    %% ═══════════════ LAYER 1: CLI ═══════════════
+    subgraph L1["CLI Layer"]
+        cli["cli.ts — Commander.js Entry Point"]
+        cfg["config.ts — Layered Config Merge\n(defaults → global → project → CLI flags)"]
+    end
+
+    %% ═══════════════ LAYER 2: EVENT BUS ═══════════════
+    subgraph L2["Event Bus & Orchestration Layer"]
+        bus["MessageBus\n(in-process · Redis · Pub/Sub · NATS)"]
+        orch["PipelineOrchestrator\nRunState machine · DAG execution\nConcurrency control · Budget gating · Resume"]
+        events["~40 Event Types\npipeline · task · scan · triage\nverification · poc · report · budget"]
+    end
+
+    %% ═══════════════ LAYER 3: WORKERS ═══════════════
+    subgraph L3["Worker Layer (Event Subscribers)"]
+        scanW["Scan Worker\nExecute scanner plugins\n& agent tasks"]
+        triageW["Triage Worker\nInvoke triage agent\nTrajectory memory\nConfidence calibration"]
+        verifyW["Verification Worker\nInvoke verify agent\nBypass knowledge"]
+        pocW["PoC Harness Worker\nInvoke harness agent\nCWE templates"]
+        pocExecW["PoC Executor Worker\nSandbox execution"]
+        storeW["Store Worker\nPersist all results"]
+        reportW["Report Worker\nTerminal · Markdown · SARIF"]
+        auditW["Audit Worker\nJSONL audit trail"]
+        taintRefW["Taint Refinement Worker\nIterative label patching"]
+    end
+
+    %% ═══════════════ LAYER 4: TASK SYSTEM ═══════════════
+    subgraph L4["Task & Scanner Layer"]
+        subgraph TaskFramework["Agent Task Framework"]
+            taskReg["TaskRegistry — DAG Resolver\nKahn's algorithm · Cycle detection"]
+            scanAdapt["Scanner Adapter\nadaptScannerPlugin()"]
+        end
+
+        subgraph ScannerPlugins["Scanner Plugins"]
+            semgrep["Semgrep/Opengrep\nJSON output · Auto-download"]
+            codeql["CodeQL\nSARIF output · DB management"]
+            agenticScan["Agentic LLM Scanner\n3-phase AI discovery"]
+        end
+
+        subgraph AgenticTasks["~32 Agent Tasks"]
+            ctxTasks["Context Gatherer · Enricher"]
+            taintTasks["Taint Analysis (6 tasks)\nPreflight · Label · Run\nDiscover · Cross-Analyze · Stitch"]
+            threatTasks["Threat Modeling\nSTRIDE · PASTA"]
+            detectionTasks["Agentic Detectors\nSecrets · Misconfig · SSRF\nCrypto · Auth · Race\nDangerous API · Diff Review"]
+            invTasks["Invariant Analysis\nExtract · Check"]
+            metaTasks["Task Selector · Chain Analysis"]
+        end
+    end
+
+    %% ═══════════════ LAYER 5: LLM AGENTS ═══════════════
+    subgraph L5["LLM Analysis Agents"]
+        triage["triage.ts\nSkeptical engineer prompt\nBatch & single modes\nEvidence chain schema"]
+        verify["verify.ts\nExploitability verification\nProof levels 1-4\nBypass exhaustion"]
+        pocGen["poc-harness.ts\nExploit script generation\nSyntax validation\nAnti-hallucination guards"]
+    end
+
+    %% ═══════════════ LAYER 6: RUNTIME ═══════════════
+    subgraph L6["Agent Runtime Abstraction"]
+        rtIface["AgentRuntime Interface\nAsync iterable messages"]
+        exec["runStructuredAgentQuery()\nJSON schema enforcement · Activity callbacks"]
+        piAi["PiAiAgentRuntime\nClaude SDK adapter · Streaming\nRetry with backoff · Cost tracking"]
+        tools["8 Tools\nRead · Glob · Grep · Bash\nWrite · GetFunctionBody\nGetCallers · GetCallees"]
+    end
+
+    %% ═══════════════ LAYER 7: PERSISTENCE ═══════════════
+    subgraph L7["Persistence & Output"]
+        store["store.ts — SQLite\nfindings table (fingerprint PK)\npipeline_runs table\nResume checkpoints"]
+        report["report.ts\nChalk terminal output\nVerdict colors · Cost breakdown\nExploit chain display"]
+        context["context.ts\nSource code snippets\naround finding location"]
+    end
+
+    %% ═══════════════ EXTERNAL ═══════════════
+    subgraph EXT["External Systems"]
+        claude["Claude API\n(Anthropic)"]
+        semgrepBin["Semgrep Binary"]
+        codeqlBin["CodeQL CLI"]
+        sqlite[("SQLite DB")]
+        repo[("Target\nRepository")]
+    end
+
+    %% ═══════════════ CONNECTIONS ═══════════════
+
+    cli -->|"load config"| cfg
+    cli -->|"init pipeline"| bus
+    cfg -->|"KuzushiConfig"| orch
+
+    bus --- events
+    orch -->|"publish/subscribe"| bus
+
+    %% Workers subscribe to bus
+    bus -->|"events"| scanW
+    bus -->|"events"| triageW
+    bus -->|"events"| verifyW
+    bus -->|"events"| pocW
+    bus -->|"events"| pocExecW
+    bus -->|"events"| storeW
+    bus -->|"events"| reportW
+    bus -->|"events"| auditW
+    bus -->|"events"| taintRefW
+
+    %% Scan worker → Task/Scanner layer
+    scanW -->|"execute"| taskReg
+    scanW -->|"execute"| ScannerPlugins
+    taskReg -->|"resolve DAG"| AgenticTasks
+
+    scanAdapt -.->|"wraps"| ScannerPlugins
+
+    %% Workers → LLM Agents
+    triageW -->|"invoke"| triage
+    verifyW -->|"invoke"| verify
+    pocW -->|"invoke"| pocGen
+
+    %% LLM Agents → Runtime
+    triage -->|"structured query"| exec
+    verify -->|"structured query"| exec
+    pocGen -->|"structured query"| exec
+    agenticScan -->|"structured query"| exec
+
+    exec --> piAi
+    piAi --> rtIface
+    piAi -->|"execute"| tools
+
+    %% AgenticTasks → Runtime
+    detectionTasks -->|"LLM queries"| exec
+    taintTasks -->|"LLM queries"| exec
+    ctxTasks -->|"LLM queries"| exec
+
+    %% Store worker → Persistence
+    storeW -->|"persist"| store
+    reportW -->|"format"| report
+    report -->|"snippets"| context
+
+    %% External connections
+    piAi -->|"API"| claude
+    semgrep -->|"spawn"| semgrepBin
+    codeql -->|"spawn"| codeqlBin
+    store -->|"read/write"| sqlite
+    tools -->|"file ops"| repo
+    semgrepBin -->|"scan"| repo
+    codeqlBin -->|"analyze"| repo
+
+    %% ═══════════════ STYLING ═══════════════
+    classDef cliStyle fill:#4A90D9,stroke:#2C5F8A,color:#fff,stroke-width:2px
+    classDef busStyle fill:#E67E22,stroke:#B35F17,color:#fff,stroke-width:2px
+    classDef workerStyle fill:#F39C12,stroke:#C77E0E,color:#fff,stroke-width:2px
+    classDef taskStyle fill:#2ECC71,stroke:#1A9B52,color:#fff,stroke-width:2px
+    classDef agentStyle fill:#E74C3C,stroke:#B33A2E,color:#fff,stroke-width:2px
+    classDef rtStyle fill:#7B68EE,stroke:#4B3BBF,color:#fff,stroke-width:2px
+    classDef persistStyle fill:#1ABC9C,stroke:#148F77,color:#fff,stroke-width:2px
+    classDef extStyle fill:#95A5A6,stroke:#707B7C,color:#fff,stroke-width:2px
+
+    class cli,cfg cliStyle
+    class bus,orch,events busStyle
+    class scanW,triageW,verifyW,pocW,pocExecW,storeW,reportW,auditW,taintRefW workerStyle
+    class taskReg,scanAdapt,semgrep,codeql,agenticScan taskStyle
+    class ctxTasks,taintTasks,threatTasks,detectionTasks,invTasks,metaTasks taskStyle
+    class triage,verify,pocGen agentStyle
+    class rtIface,exec,piAi,tools rtStyle
+    class store,report,context persistStyle
+    class claude,semgrepBin,codeqlBin,sqlite,repo extStyle

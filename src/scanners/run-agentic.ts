@@ -4,7 +4,7 @@ import { getAgentRuntime, type AgentRuntime } from "../agent-runtime/index.js";
 import type { ScanOpts } from "../types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
 import type { Finding } from "./types.js";
-import { scoreFindingMetadata } from "./scoring.js";
+import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
 
 const SEVERITY_LEVELS = new Set(["ERROR", "WARNING", "INFO"]);
 const CONFIDENCE_LEVELS = new Set(["HIGH", "MEDIUM", "LOW"]);
@@ -179,6 +179,8 @@ export function selectAgenticFindings(
       likelihood: finding.likelihood,
       impact: finding.impact,
       subcategory: finding.subcategory,
+      cwe: finding.cwe,
+      parameterRiskBoost: detectParameterRiskBoost(finding.message),
     });
 
     const normalized: Finding = {
@@ -270,11 +272,23 @@ export function computeAgenticFingerprint(
 }
 
 function buildPrompt(opts: ScanOpts, maxFindings: number): string {
+  const reviewContext = opts.agenticReviewContext
+    ? [
+        "",
+        opts.agenticReviewContext,
+        "",
+        "Your task in this second pass: validate the above findings and discover vulnerability",
+        "classes that were MISSED in the first pass. Do NOT simply re-report the same findings.",
+        "",
+      ]
+    : [];
+
   return [
     "You are a senior application security researcher with deep expertise in vulnerability discovery.",
     "You think like an attacker: you map attack surfaces, trace data flows, and verify exploitability",
     "before reporting. You know that most static analysis findings are false positives.",
     "",
+    ...reviewContext,
     `Severity filter: ${opts.severity.join(", ") || "ERROR, WARNING, INFO"}`,
     `Max findings: ${maxFindings}`,
     `Exclude paths/globs: ${opts.excludePatterns.join(", ") || "(none)"}`,
@@ -314,6 +328,28 @@ function buildPrompt(opts: ScanOpts, maxFindings: number): string {
     "- impact (HIGH|MEDIUM|LOW)",
     "- cwe (array of CWE strings, optional)",
     "- evidence (short evidence snippet)",
+    "",
+    "## Few-shot examples",
+    "",
+    "### Example 1: True positive (SQL injection)",
+    "```json",
+    '{"ruleId": "sql-injection", "filePath": "src/api/users.ts", "startLine": 42,',
+    ' "severity": "ERROR", "message": "User-supplied id parameter concatenated into SQL query without parameterization",',
+    ' "confidence": "HIGH", "subcategory": ["vuln"], "likelihood": "HIGH", "impact": "HIGH",',
+    ' "cwe": ["CWE-89"], "evidence": "Source: req.params.id (line 38) -> Sink: db.query(template literal with id) (line 42). No parameterization or sanitization."}',
+    "```",
+    "",
+    "### Example 2: Correctly rejected false positive",
+    "A shell command call was found, but the command string is fully hardcoded with no user input.",
+    "Example: running `git rev-parse HEAD` with a static string — no user input reaches the shell. Do NOT report this.",
+    "",
+    "### Example 3: Nuanced finding (partial validation)",
+    "```json",
+    '{"ruleId": "path-traversal", "filePath": "src/files/download.ts", "startLine": 15,',
+    ' "severity": "WARNING", "message": "User-controlled filename passed to fs.readFile with path.join but no startsWith check against base directory",',
+    ' "confidence": "MEDIUM", "subcategory": ["vuln"], "likelihood": "MEDIUM", "impact": "HIGH",',
+    ' "cwe": ["CWE-22"], "evidence": "Source: req.query.file (line 10) -> path.join(uploadDir, file) (line 15) -> fs.readFile (line 16). path.join normalizes but does not prevent traversal without a startsWith guard."}',
+    "```",
     "",
     "## Anti-hallucination constraints",
     "- Do not propose remediations. Do not include non-security style issues.",

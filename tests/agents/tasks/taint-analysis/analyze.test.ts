@@ -653,11 +653,13 @@ describe("taint-analysis-run internals", () => {
       return base;
     }
 
-    it("renders none() when no summary entries exist", () => {
+    it("renders implicit propagation steps when no labeled summary entries exist", () => {
       const pythonProfile = profileById("python", "python-dataflow-new")!;
       const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabels(), pythonProfile);
-      expect(libs.summaries).toContain("none()");
       expect(libs.summaries).toContain("module MySummaries");
+      expect(libs.summaries).toContain("isAdditionalTaintStep");
+      // Implicit steps include Python-specific data structure propagation
+      expect(libs.summaries).toMatch(/json\.loads|"get"/);
     });
 
     it("renders populated predicates with summary entries", () => {
@@ -678,7 +680,10 @@ describe("taint-analysis-run internals", () => {
 
       const pythonProfile = profileById("python", "python-dataflow-new")!;
       const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, pythonProfile);
-      expect(libs.summaries).toContain("none()");
+      // FP summary is excluded; only implicit propagation steps remain
+      expect(libs.summaries).toContain("module MySummaries");
+      expect(libs.summaries).toContain("isAdditionalTaintStep");
+      expect(libs.summaries).not.toContain("json_decode");
     });
 
     it("renders per-language profiles correctly for Go", () => {
