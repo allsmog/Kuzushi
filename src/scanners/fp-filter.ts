@@ -98,6 +98,13 @@ const EXCLUSION_RULES: ExclusionRule[] = [
     kind: "hard",
     match: (f) => GENERATED_VENDORED_PATTERNS.test(f.filePath),
   },
+  {
+    id: "unreachable-code",
+    description: "Findings in code tagged as unreachable by reachability analysis",
+    kind: "soft",
+    scorePenalty: 15,
+    match: (f) => (f as any).reachable === "false",
+  },
 ];
 
 /**

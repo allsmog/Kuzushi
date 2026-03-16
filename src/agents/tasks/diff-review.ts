@@ -5,6 +5,7 @@ import { getAgentRuntime } from "../../agent-runtime/index.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { getFixedFindingsForFiles } from "../../store.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
@@ -51,6 +52,39 @@ interface DiffReviewFinding {
   rationale: string;
   cwe?: string[];
   evidence?: string;
+}
+
+const REGRESSION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["regressions"],
+  properties: {
+    regressions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["originalFingerprint", "ruleId", "filePath", "startLine", "message", "confidence"],
+        properties: {
+          originalFingerprint: { type: "string" },
+          ruleId: { type: "string" },
+          filePath: { type: "string" },
+          startLine: { type: "integer", minimum: 1 },
+          message: { type: "string" },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+      },
+    },
+  },
+} as const;
+
+interface RegressionEntry {
+  originalFingerprint: string;
+  ruleId: string;
+  filePath: string;
+  startLine: number;
+  message: string;
+  confidence: number;
 }
 
 interface DiffReviewConfig {
@@ -241,6 +275,120 @@ function normalizeFilePath(repoRoot: string, filePath: string): string {
   return relative || filePath;
 }
 
+function buildRegressionPrompt(
+  diff: string,
+  previousFindings: Array<{ fingerprint: string; ruleId: string; filePath: string; startLine: number; message: string }>,
+): string {
+  const findingsList = previousFindings
+    .map((f, i) => `${i + 1}. [${f.ruleId}] ${f.filePath}:${f.startLine} — ${f.message}`)
+    .join("\n");
+
+  return [
+    "You are checking whether a code diff re-introduces previously-fixed security vulnerabilities.",
+    "",
+    "## Previously confirmed vulnerabilities in these files:",
+    findingsList,
+    "",
+    "## Current diff:",
+    "```diff",
+    diff.length > 50_000 ? diff.slice(0, 50_000) + "\n... [truncated]" : diff,
+    "```",
+    "",
+    "## Task",
+    "For each previously-confirmed vulnerability above, check if this diff REVERTS the fix",
+    "or RE-INTRODUCES the same vulnerability pattern. Only report regressions you can confirm",
+    "by comparing the diff against the known vulnerability.",
+    "",
+    "Return a JSON object with a 'regressions' array. Each entry should have:",
+    "- originalFingerprint: the fingerprint of the original finding",
+    "- ruleId: the rule ID",
+    "- filePath: the file where the regression occurs",
+    "- startLine: approximate line number in the new code",
+    "- message: description of how the fix was reverted",
+    "- confidence: 0.0-1.0",
+    "",
+    "If no regressions are found, return { regressions: [] }",
+  ].join("\n");
+}
+
+async function detectRegressions(
+  context: TaskContext,
+  previousFindings: Array<{ fingerprint: string; ruleId: string; filePath: string; startLine: number; message: string }>,
+  diff: string,
+  model: string,
+): Promise<Finding[]> {
+  const prompt = buildRegressionPrompt(diff, previousFindings);
+  const runtime = getAgentRuntime();
+
+  let structuredOutput: unknown;
+  let resultText = "";
+
+  for await (const message of runtime.query({
+    prompt,
+    options: {
+      cwd: context.repoRoot,
+      model,
+      maxTurns: undefined,
+      allowedTools: ["Read", "Glob", "Grep"],
+      permissionMode: "dontAsk",
+      outputFormat: {
+        type: "json_schema",
+        schema: REGRESSION_SCHEMA,
+        strict: true,
+        retryInvalidStructuredOutput: 2,
+      },
+    },
+  })) {
+    if (message.type !== "result") continue;
+    if ("result" in message) {
+      resultText = message.result;
+      structuredOutput = message.structuredOutput;
+    }
+  }
+
+  const parsed = structuredOutput ?? (() => {
+    try { return JSON.parse(resultText); } catch { return { regressions: [] }; }
+  })();
+
+  if (!isRecord(parsed) || !Array.isArray(parsed["regressions"])) return [];
+
+  const findings: Finding[] = [];
+  for (const entry of parsed["regressions"] as unknown[]) {
+    if (!isRecord(entry)) continue;
+    const r = entry as unknown as RegressionEntry;
+    if (!r.filePath?.trim() || typeof r.confidence !== "number" || r.confidence < 0.5) continue;
+
+    const filePath = normalizeFilePath(context.repoRoot, r.filePath);
+    const fingerprint = createHash("sha256")
+      .update([context.repoName, "regression", r.originalFingerprint, filePath, String(r.startLine)].join("|"))
+      .digest("hex");
+
+    findings.push({
+      scanner: "diff-review",
+      fingerprint,
+      ruleId: `regression/${r.ruleId}`,
+      filePath,
+      startLine: Math.max(1, Math.floor(Number(r.startLine) || 1)),
+      severity: "ERROR",
+      message: `[REGRESSION] ${r.message}`,
+      evidence: `Re-introduction of previously-fixed vulnerability (original: ${r.originalFingerprint})`,
+      scannerConfidence: confidenceToLevel(r.confidence),
+      subcategory: ["vuln", "regression"],
+      likelihood: confidenceToLevel(r.confidence),
+      impact: "HIGH",
+      cwe: [],
+      score: scoreFindingMetadata({
+        severity: "ERROR",
+        likelihood: confidenceToLevel(r.confidence),
+        impact: "HIGH",
+        subcategory: ["vuln", "regression"],
+      }),
+    });
+  }
+
+  return findings;
+}
+
 export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
   id: "diff-review",
   displayName: "Differential Review",
@@ -311,16 +459,29 @@ export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
       throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
-    return attachTaskOutputMeta(
-      normalizeFindings(
-        structuredOutput ?? parseJson(resultText, tag),
-        context.repoRoot,
-        context.repoName,
-        diffBase,
-        maxFindings,
-      ),
-      { costUsd },
+    const findings = normalizeFindings(
+      structuredOutput ?? parseJson(resultText, tag),
+      context.repoRoot,
+      context.repoName,
+      diffBase,
+      maxFindings,
     );
+
+    // Regression detection — check if diff reverts previously-fixed vulnerabilities
+    if (context.db && changedFiles.length > 0) {
+      try {
+        const previousFindings = getFixedFindingsForFiles(context.db, changedFiles);
+        if (previousFindings.length > 0) {
+          log.info(`Checking ${previousFindings.length} previous TP findings for regressions`);
+          const regressions = await detectRegressions(context, previousFindings, diff, model);
+          findings.push(...regressions);
+        }
+      } catch (error) {
+        log.error(`Regression detection failed: ${toErrorMessage(error)}`);
+      }
+    }
+
+    return attachTaskOutputMeta(findings, { costUsd });
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
@@ -351,7 +512,9 @@ function parseJson(text: string, tag: string): unknown {
 export const __diffReviewInternals = {
   resolveConfig,
   buildPrompt,
+  buildRegressionPrompt,
   normalizeFindings,
   computeFingerprint,
   getDiffContent,
+  detectRegressions,
 };

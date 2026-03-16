@@ -151,6 +151,7 @@ describe("verification-worker", () => {
       expect.objectContaining({
         activityCallback: expect.any(Function),
       }),
+      expect.any(String),
     );
 
     await bus.close();

@@ -3,7 +3,7 @@ import type { ScannerRegistry } from "../scanners/registry.js";
 import type { KuzushiConfig } from "../types.js";
 import { adaptScannerPlugin } from "./scanner-adapter.js";
 import { TaskRegistry } from "./registry.js";
-import { loadAllExternalTasks } from "./task-loader.js";
+import { loadAllExternalTasksWithManifest } from "./task-loader.js";
 import { taintAnalysisRunTask } from "./tasks/taint-analysis/analyze.js";
 import { taintAnalysisCrossAnalyzeTask } from "./tasks/taint-analysis/cross-service/analyze.js";
 import { taintAnalysisDiscoverTask } from "./tasks/taint-analysis/cross-service/discover.js";
@@ -30,6 +30,7 @@ import { templateInjectionTask } from "./tasks/template-injection.js";
 import { supplyChainTask } from "./tasks/supply-chain.js";
 import { graphqlSecurityTask } from "./tasks/graphql-security.js";
 import { taskSelectorTask } from "./tasks/task-selector.js";
+import { reachabilityCheckTask } from "./tasks/reachability-check.js";
 
 /** Create task registry populated with adapted scanner plugins. */
 export async function createDefaultTaskRegistry(
@@ -76,6 +77,9 @@ export async function createDefaultTaskRegistry(
   tasks.register(supplyChainTask);
   tasks.register(graphqlSecurityTask);
 
+  // Reachability pre-filter
+  tasks.register(reachabilityCheckTask);
+
   // Dynamic task selection
   tasks.register(taskSelectorTask);
 
@@ -87,9 +91,12 @@ export async function createDefaultTaskRegistry(
   if (config?.externalTasks && config.externalTasks.length > 0) {
     if (config.enableExternalTasks) {
       const resolvedRoot = repoRoot ?? process.cwd();
-      const externalTasks = await loadAllExternalTasks(config.externalTasks, resolvedRoot);
-      for (const task of externalTasks) {
-        tasks.register(task);
+      const loaded = await loadAllExternalTasksWithManifest(config.externalTasks, resolvedRoot);
+      for (const info of loaded) {
+        tasks.register(info.task);
+        if (info.manifest) {
+          tasks.setManifest(info.task.id, info.manifest);
+        }
       }
     } else {
       console.warn(

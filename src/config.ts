@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, realpathSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
@@ -638,6 +638,18 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "triagePromptFile") {
+    config.triagePromptFile = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "verifyPromptFile") {
+    config.verifyPromptFile = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   if (key === "qualityGates") {
     const parsed = parseFlexibleValue(raw);
     if (!isRecord(parsed)) {
@@ -941,20 +953,70 @@ function validateConfigLayer(layer: WritableConfigLayer, repoRoot?: string): voi
   mergeConfigLayers(globalRaw, layer);
 }
 
+/** Maximum config file size (1MB). */
+const MAX_CONFIG_FILE_BYTES = 1_024 * 1_024;
+
+/** Track config files being loaded to detect circular includes. */
+const configLoadStack = new Set<string>();
+
 function readConfigFile(configFilePath: string): WritableConfigLayer {
   try {
-    const content = readFileSync(configFilePath, "utf-8");
-    const format: ConfigFormat = detectConfigFormat(configFilePath);
-    const parsed = parseConfigFile(content, format);
-    if (!isRecord(parsed)) return {};
-    // Resolve any file:// references relative to the config file's directory
-    const resolved = resolveFileReferences(parsed, path.dirname(configFilePath));
-    return isRecord(resolved) ? resolved : {};
+    const resolvedPath = path.resolve(configFilePath);
+
+    // Guard: circular reference detection
+    if (configLoadStack.has(resolvedPath)) {
+      console.warn(`Warning: circular config reference detected for ${resolvedPath}, skipping`);
+      return {};
+    }
+
+    // Guard: file size cap
+    try {
+      const stats = statSync(resolvedPath);
+      if (stats.size > MAX_CONFIG_FILE_BYTES) {
+        console.warn(`Warning: config file ${resolvedPath} exceeds 1MB limit, skipping`);
+        return {};
+      }
+      // Guard: symlink check — resolve and verify target is in expected location
+      if (stats.isSymbolicLink?.()) {
+        const realPath = realpathSync(resolvedPath);
+        if (!isPathWithinAllowedRoots(realPath)) {
+          console.warn(`Warning: config symlink ${resolvedPath} points outside allowed directories, skipping`);
+          return {};
+        }
+      }
+    } catch (statErr) {
+      if ((statErr as NodeJS.ErrnoException).code === "ENOENT") return {};
+      throw statErr;
+    }
+
+    configLoadStack.add(resolvedPath);
+    try {
+      const content = readFileSync(resolvedPath, "utf-8");
+      const format: ConfigFormat = detectConfigFormat(resolvedPath);
+      const parsed = parseConfigFile(content, format);
+      if (!isRecord(parsed)) return {};
+      // Resolve any file:// references relative to the config file's directory
+      const resolved = resolveFileReferences(parsed, path.dirname(resolvedPath));
+      return isRecord(resolved) ? resolved : {};
+    } finally {
+      configLoadStack.delete(resolvedPath);
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
     console.warn(`Warning: config file ${configFilePath} is corrupt and will be ignored: ${err}`);
     return {};
   }
+}
+
+/** Check if a path is within ~/.kuzushi/ or current working directory. */
+function isPathWithinAllowedRoots(filePath: string): boolean {
+  const resolved = path.resolve(filePath);
+  const homeConfig = path.resolve(CONFIG_DIR);
+  const cwd = path.resolve(".");
+  return resolved.startsWith(homeConfig + path.sep)
+    || resolved === homeConfig
+    || resolved.startsWith(cwd + path.sep)
+    || resolved === cwd;
 }
 
 function sanitizeConfigLayer(value: unknown): unknown {

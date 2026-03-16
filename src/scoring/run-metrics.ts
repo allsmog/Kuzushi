@@ -26,6 +26,13 @@ export interface RunMetrics {
   durationBreakdown: DurationBreakdown;
   costBreakdown: CostBreakdown;
   exploitabilityRate?: number;
+  assertionSummary?: {
+    totalAssertions: number;
+    passedAssertions: number;
+    averageQualityScore: number;
+    perAssertion: Record<string, { passed: number; failed: number; avgScore: number }>;
+  };
+  promptHash?: string;
 }
 
 export interface StageTimestamps {

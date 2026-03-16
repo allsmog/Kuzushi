@@ -17,7 +17,12 @@ import {
   composePromptModules,
   confidenceEscalationModule,
   falseDismissalModule,
+  frameworkAwarenessModule,
 } from "./prompts/modules.js";
+import { renderTemplate } from "./prompts/template.js";
+import { TRIAGE_TEMPLATE } from "./prompts/templates/triage.js";
+import { BATCH_TRIAGE_TEMPLATE } from "./prompts/templates/triage.js";
+import { buildTriageContext, buildBatchTriageContext } from "./prompts/context.js";
 import type { EnrichedRepoContext, RepoContext, TriageResult, Verdict } from "./types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 import { RawTriageOutputSchema, RawBatchTriageOutputSchema, formatZodErrors } from "./schemas.js";
@@ -156,6 +161,7 @@ export function triageSystemPromptPrefix(
     ? "## Enriched Repository Context\n" + enrichedSection.join("\n") + "\n\n"
     : "";
   return repoBlock + enrichedBlock + composePromptModules(
+    frameworkAwarenessModule(repoContext),
     confidenceEscalationModule("triage"),
     falseDismissalModule(),
   );
@@ -172,12 +178,14 @@ export async function triageFindingWithAgent(
   maybeRuntimeOptions: TriageRuntimeOptions = {},
   /** Optional extra context appended to the triage prompt (trajectories, evidence chain instructions). */
   extraPromptContext?: string,
+  /** Optional custom triage template override (loaded from config). */
+  triageTemplate?: string,
 ): Promise<TriageOutput> {
   const { repoContext, runtimeOptions } = resolveRepoContextAndRuntimeOptions(
     repoContextOrRuntimeOptions,
     maybeRuntimeOptions,
   );
-  const agentConfig = resolveAgentConfig(registry, finding, repoName);
+  const agentConfig = resolveAgentConfig(registry, finding, repoName, triageTemplate);
   const prompt = extraPromptContext
     ? agentConfig.prompt + "\n\n" + extraPromptContext
     : agentConfig.prompt;
@@ -227,6 +235,7 @@ export async function triageFindingsBatch(
   runtimeOptions: TriageRuntimeOptions = {},
   maxBatchSize: number = DEFAULT_BATCH_SIZE,
   maxTurns: number | null = null,
+  batchTemplate?: string,
 ): Promise<BatchTriageOutput> {
   if (findings.length === 0) {
     return { results: new Map(), costUsd: 0 };
@@ -235,7 +244,7 @@ export async function triageFindingsBatch(
   const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
 
   if (findings.length <= effectiveBatchSize) {
-    return triageSingleBatch(findings, repoRoot, repoName, model, repoContext, runtimeOptions, maxTurns);
+    return triageSingleBatch(findings, repoRoot, repoName, model, repoContext, runtimeOptions, maxTurns, batchTemplate);
   }
 
   const allResults = new Map<string, TriageResult>();
@@ -251,6 +260,7 @@ export async function triageFindingsBatch(
       repoContext,
       runtimeOptions,
       maxTurns,
+      batchTemplate,
     );
 
     for (const [fp, result] of results) {
@@ -270,8 +280,9 @@ async function triageSingleBatch(
   repoContext: RepoContext | undefined,
   runtimeOptions: TriageRuntimeOptions,
   maxTurns: number | null = null,
+  batchTemplate?: string,
 ): Promise<BatchTriageOutput> {
-  const prompt = buildBatchTriagePrompt(findings, repoName);
+  const prompt = buildBatchTriagePrompt(findings, repoName, batchTemplate);
   const effectiveMaxTurns = normalizeTurns(maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
@@ -297,47 +308,10 @@ async function triageSingleBatch(
 function buildBatchTriagePrompt(
   findings: Finding[],
   repoName: string,
+  template?: string,
 ): string {
-  const findingSections = findings.map((f, idx) => [
-    `### Finding ${idx + 1}`,
-    `Scanner: ${f.scanner}`,
-    `Rule: ${f.ruleId}`,
-    `File: ${f.filePath}:${f.startLine}`,
-    `Severity: ${f.severity}`,
-    `Scanner Confidence: ${f.scannerConfidence}`,
-    `Likelihood: ${f.likelihood}`,
-    `Impact: ${f.impact}`,
-    `CWE: ${f.cwe.join(", ") || "none"}`,
-    `Message: ${f.message}`,
-    `Evidence: ${f.evidence || "none"}`,
-    `Fingerprint: ${f.fingerprint}`,
-  ].join("\n"));
-
-  return [
-    "You are a skeptical senior security engineer performing batch triage. Assume each finding is a",
-    "false positive until you can prove otherwise with concrete code evidence. Most scanner findings",
-    "are FPs due to missing context about middleware, framework protections, and sanitization.",
-    "",
-    "Investigate ALL of the following findings and determine if each is a true positive, false positive, or needs review.",
-    "",
-    `Repo: ${repoName}`,
-    "",
-    `## Findings (${findings.length} total)`,
-    "",
-    ...findingSections.flatMap((s) => [s, ""]),
-    "## Investigation instructions",
-    "1. Read the flagged files and surrounding code.",
-    "2. Trace dataflow from source to sink across call boundaries.",
-    "3. Use Grep/Glob to locate sanitization, validation, and guards.",
-    "4. Validate reachability and realistic attacker control.",
-    "5. Decide tp/fp/needs_review per finding using the confidence escalation protocol below.",
-    "",
-    "## Output requirements",
-    'Return ONLY a JSON object with a "results" array. Each element MUST have:',
-    "fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)",
-    "",
-    `You must return exactly ${findings.length} results, one per finding, using the exact fingerprints listed above.`,
-  ].join("\n");
+  const context = buildBatchTriageContext(findings, repoName);
+  return renderTemplate(template ?? BATCH_TRIAGE_TEMPLATE, context as any);
 }
 
 function parseBatchTriageOutput(
@@ -467,45 +441,11 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
 export function buildDefaultTriageAgentConfig(
   finding: Finding,
   repoName: string,
+  template?: string,
 ): TriageAgentConfig {
+  const context = buildTriageContext(finding, repoName);
   return {
-    prompt: [
-      "You are a skeptical senior security engineer performing triage. Assume every finding is a",
-      "false positive until you can prove otherwise with concrete evidence from the code. You have",
-      "seen thousands of scanner findings and know that 60-80% are false positives due to missing",
-      "context about middleware, framework protections, and sanitization.",
-      "",
-      "Use available repo tools to investigate whether this finding is a true or false positive.",
-      "",
-      "## Finding",
-      `Repo: ${repoName}`,
-      `Scanner: ${finding.scanner}`,
-      `Rule: ${finding.ruleId}`,
-      `File: ${finding.filePath}:${finding.startLine}`,
-      `Severity: ${finding.severity}`,
-      `Scanner Confidence: ${finding.scannerConfidence}`,
-      `Likelihood: ${finding.likelihood}`,
-      `Impact: ${finding.impact}`,
-      `CWE: ${finding.cwe.join(", ") || "none"}`,
-      `Message: ${finding.message}`,
-      `Evidence: ${finding.evidence || "none"}`,
-      `Fingerprint: ${finding.fingerprint}`,
-      "",
-      "## Investigation instructions",
-      "1. Read the flagged file and surrounding code.",
-      "2. Trace dataflow to source/sink across call boundaries.",
-      "3. Use Grep/Glob to locate sanitization, validation, and guards.",
-      "4. Validate reachability and realistic attacker control.",
-      "5. Use GetCallers to find who calls the vulnerable function and trace attacker-controlled input.",
-      "6. Use GetCallees to understand what downstream functions the vulnerable code invokes.",
-      "7. Use GetFunctionBody to inspect specific sanitizers, validators, or middleware functions.",
-      "8. Decide tp/fp/needs_review using the confidence escalation protocol below.",
-      "",
-      "## Output requirements",
-      "Return ONLY a JSON object with:",
-      "fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null),",
-      "evidence_trail(optional array of {level: string, evidence: string})",
-    ].join("\n"),
+    prompt: renderTemplate(template ?? TRIAGE_TEMPLATE, context as any),
   };
 }
 
@@ -513,19 +453,20 @@ function resolveAgentConfig(
   registry: TriageConfigProvider,
   finding: Finding,
   repoName: string,
+  template?: string,
 ): TriageAgentConfig {
   if (!registry.has(finding.scanner)) {
-    return buildDefaultTriageAgentConfig(finding, repoName);
+    return buildDefaultTriageAgentConfig(finding, repoName, template);
   }
 
   try {
     const config = registry.get(finding.scanner).triageAgentConfig(finding, repoName);
     if (!config.prompt || !config.prompt.trim()) {
-      return buildDefaultTriageAgentConfig(finding, repoName);
+      return buildDefaultTriageAgentConfig(finding, repoName, template);
     }
     return config;
   } catch {
-    return buildDefaultTriageAgentConfig(finding, repoName);
+    return buildDefaultTriageAgentConfig(finding, repoName, template);
   }
 }
 

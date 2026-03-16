@@ -1,5 +1,4 @@
 import type Database from "better-sqlite3";
-import { createDefaultTaskRegistry } from "../agents/index.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import { createDefaultKnowledgeRegistry } from "../knowledge/index.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
@@ -19,15 +18,22 @@ import { registerTaintAnalysisRefinementWorker } from "./workers/taint-analysis-
 
 export interface RegisterWorkersDeps {
   registry: ScannerRegistry;
-  taskRegistry?: TaskRegistry;
+  taskRegistry: TaskRegistry;
   db: Database.Database;
   config: KuzushiConfig;
 }
 
 /** Register orchestrator + all built-in workers on a bus instance. */
-export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): Promise<void> {
-  const taskRegistry = deps.taskRegistry ?? await createDefaultTaskRegistry(deps.registry);
+export function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): void {
+  const { taskRegistry } = deps;
   const knowledgeRegistry = createDefaultKnowledgeRegistry();
+
+  // Register orchestrator first so workers can reference it for hook resolution
+  const orchestrator = registerOrchestrator(bus, {
+    registry: deps.registry,
+    taskRegistry,
+    db: deps.db,
+  });
 
   registerScanWorker(bus, {
     registry: deps.registry,
@@ -40,10 +46,15 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
     registry: deps.registry,
     taskRegistry,
     config: deps.config,
+    db: deps.db,
+    knowledgeRegistry,
+    getRunHooks: (runId) => orchestrator.getRunHooks(runId),
   });
 
   registerVerificationWorker(bus, {
     config: deps.config,
+    knowledgeRegistry,
+    db: deps.db,
   });
 
   if (deps.config.pocHarness) {
@@ -76,12 +87,6 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
   registerReportWorker(bus, {
     db: deps.db,
     config: deps.config,
-  });
-
-  registerOrchestrator(bus, {
-    registry: deps.registry,
-    taskRegistry,
-    db: deps.db,
   });
 }
 

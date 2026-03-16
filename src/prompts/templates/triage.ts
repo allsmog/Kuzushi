@@ -106,3 +106,46 @@ Return ONLY a JSON object with a "results" array. Each element MUST have:
 fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)
 
 You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;
+
+/**
+ * Unified batch triage prompt template using {% for %} loop.
+ *
+ * Expected context shape: BatchTriageTemplateContext
+ *
+ * Equivalent to: buildBatchTriagePrompt() in src/triage.ts
+ */
+export const BATCH_TRIAGE_TEMPLATE = `You are a skeptical senior security engineer performing batch triage. Assume each finding is a
+false positive until you can prove otherwise with concrete code evidence. Most scanner findings
+are FPs due to missing context about middleware, framework protections, and sanitization.
+
+Investigate ALL of the following findings and determine if each is a true positive, false positive, or needs review.
+
+Repo: {{ repoName }}
+
+## Findings ({{ findingCount }} total)
+
+{% for finding in findings %}### Finding {{ loop.index }}
+Scanner: {{ finding.scanner }}
+Rule: {{ finding.ruleId }}
+File: {{ finding.filePath }}:{{ finding.startLine }}
+Severity: {{ finding.severity }}
+Scanner Confidence: {{ finding.scannerConfidence }}
+Likelihood: {{ finding.likelihood }}
+Impact: {{ finding.impact }}
+CWE: {{ finding.cweDisplay }}
+Message: {{ finding.message }}
+Evidence: {{ finding.evidence }}
+Fingerprint: {{ finding.fingerprint }}
+
+{% endfor %}## Investigation instructions
+1. Read the flagged files and surrounding code.
+2. Trace dataflow from source to sink across call boundaries.
+3. Use Grep/Glob to locate sanitization, validation, and guards.
+4. Validate reachability and realistic attacker control.
+5. Decide tp/fp/needs_review per finding using the confidence escalation protocol below.
+
+## Output requirements
+Return ONLY a JSON object with a "results" array. Each element MUST have:
+fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)
+
+You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;

@@ -124,7 +124,8 @@ describe("triage-worker", () => {
       expect.objectContaining({
         activityCallback: expect.any(Function),
       }),
-      undefined,
+      expect.any(String),
+      expect.any(String),
     );
 
     await bus.close();
@@ -182,7 +183,8 @@ describe("triage-worker", () => {
       expect.objectContaining({
         activityCallback: expect.any(Function),
       }),
-      undefined,
+      expect.any(String),
+      expect.any(String),
     );
 
     await bus.close();

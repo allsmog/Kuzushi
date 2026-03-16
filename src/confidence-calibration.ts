@@ -242,3 +242,38 @@ export function updateFindingCalibration(
     WHERE fingerprint = ?
   `).run(calibratedConfidence, safeJsonStringify(evidenceChain), fingerprint);
 }
+
+/**
+ * Format calibration weights into a prompt section showing investigation priorities.
+ * Returns empty string if no weights are available.
+ */
+export function formatCalibrationWeightsForPrompt(
+  weights: Map<string, CalibrationWeight>,
+): string {
+  if (weights.size === 0) {
+    return "";
+  }
+
+  // Sort by weight descending to show most predictive steps first
+  const sorted = [...weights.values()]
+    .filter((w) => w.sampleCount >= 2)
+    .sort((a, b) => b.weight - a.weight);
+
+  if (sorted.length === 0) {
+    return "";
+  }
+
+  const lines = [
+    "## Investigation Priority (Learned)",
+    "Based on historical accuracy, these investigation steps are most predictive for this vulnerability type:",
+  ];
+
+  for (const w of sorted) {
+    const label = w.stepType.replace(/-/g, " ");
+    lines.push(`- ${label} (weight ${w.weight.toFixed(2)}, ${w.sampleCount} samples)`);
+  }
+
+  lines.push("", "Prioritize higher-weighted investigation steps for more accurate triage.");
+
+  return lines.join("\n");
+}

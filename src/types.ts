@@ -52,6 +52,12 @@ export interface TriageAssertionConfig {
     verificationStepsActionable?: number;
     confidenceMatchesEvidence?: number;
     noEmptyRationale?: number;
+    cweMentionsRelevant?: number;
+    fixPatchValid?: number;
+    severityVerdictAlignment?: number;
+    verdictConsistency?: number;
+    costEfficiency?: number;
+    latencyReasonable?: number;
   };
 }
 
@@ -104,6 +110,8 @@ export interface TriageResult {
   triageCostUsd?: number;
   /** Calibrated confidence computed from per-step evidence weights. */
   calibratedConfidence?: number;
+  /** Composite confidence blending scanner and triage signals. */
+  compositeConfidence?: number;
   /** Per-step evidence chain for fine-grained confidence calibration. */
   evidenceChain?: EvidenceStep[];
 }
@@ -124,6 +132,8 @@ export interface VerificationResult {
   proofVerdict?: ProofVerdict;
   bypassAttempts?: string[];
   verifyCostUsd?: number;
+  /** Composite confidence combining multiple signals (self-reported, calibrated, verification). */
+  compositeConfidence?: number;
 }
 
 /** Result of PoC harness generation for a verified-exploitable finding. */
@@ -339,6 +349,28 @@ export interface KuzushiConfig {
   hooks?: { files?: string[] };
   /** Security opt-in required for loading external hook files. Default false. */
   enableExternalHooks?: boolean;
+  /** Path to custom triage prompt template file. */
+  triagePromptFile?: string;
+  /** Path to custom verify prompt template file. */
+  verifyPromptFile?: string;
+  /** Command to spawn the ACP adapter process. */
+  acpAdapterCommand?: string;
+  /** Enable multi-turn session persistence for ACP. */
+  acpSessionPersist?: boolean;
+  /** Bootstrap files injected into system prompts. */
+  bootstrapFiles?: {
+    files?: string[];
+    maxCharsPerFile?: number;
+    totalMaxChars?: number;
+  };
+  /** Tool policy overrides keyed by policy name. */
+  toolPolicies?: Record<string, { allow?: string[]; deny?: string[] }>;
+  /** Model fallback chains: maps primary model to ordered list of fallback models. */
+  modelFallbacks?: Record<string, string[]>;
+  /** Cooldown duration (ms) before retrying a failed model. Default 60000. */
+  modelFallbackCooldownMs?: number;
+  /** Enable incremental scanner result caching across runs. Default false. */
+  incrementalCache?: boolean;
 }
 
 /** A persisted finding row from SQLite. */

@@ -717,15 +717,37 @@ function resolveModel(modelSpec: string, baseUrlOverride?: string) {
 
   try {
     const model = getModel(provider as KnownProvider, modelId as never);
-    if (baseUrlOverride) {
-      (model as { baseUrl: string }).baseUrl = baseUrlOverride;
+    if (model) {
+      if (baseUrlOverride) {
+        (model as { baseUrl: string }).baseUrl = baseUrlOverride;
+      }
+      return model;
     }
-    return model;
-  } catch (error) {
+  } catch {
+    // Fall through to custom model construction below.
+  }
+
+  // Model not in pi-ai registry — construct a custom model object.
+  // This supports Ollama and other OpenAI-compatible endpoints.
+  if (!baseUrlOverride) {
     throw new Error(
-      `Unable to resolve pi-ai model "${modelSpec}": ${toErrorMessage(error)}`,
+      `Unable to resolve pi-ai model "${modelSpec}": model not found in registry. `
+      + "Provide agentRuntimeConfig.baseUrl (or --base-url) for custom model endpoints.",
     );
   }
+
+  return {
+    id: modelId,
+    name: modelId,
+    api: "openai-completions" as const,
+    provider,
+    baseUrl: baseUrlOverride,
+    reasoning: false,
+    input: ["text"] as ("text" | "image")[],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 32768,
+    maxTokens: 8192,
+  };
 }
 
 function resolveEnabledTools(

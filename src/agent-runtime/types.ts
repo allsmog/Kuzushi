@@ -55,7 +55,7 @@ export interface AgentResultSuccessMessage {
 
 export interface AgentResultErrorMessage {
   type: "result";
-  subtype: Exclude<string, "success">;
+  subtype: Exclude<string, "success"> | "error_tool_loop" | "error_timeout";
   errors: string[];
   durationMs?: number;
   numTurns?: number;

@@ -5,6 +5,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { cleanup as cleanupHttpAgents } from "./http-agent.js";
+import { registerShutdownHook, initiateShutdown } from "./lifecycle.js";
 import { loadConfig, getConfigValue, setConfigValue, unsetConfigValue, configPath } from "./config.js";
 import {
   createRun,
@@ -16,6 +17,7 @@ import {
 import { createDefaultRegistry } from "./scanners/index.js";
 import { createDefaultTaskRegistry } from "./agents/index.js";
 import { configureAgentRuntime } from "./agent-runtime/index.js";
+import { configureRateLimitRegistry } from "./scheduler/index.js";
 import { parsePiAiModelSpec } from "./agent-runtime/model-spec.js";
 import {
   createBus,
@@ -567,6 +569,9 @@ program
       process.exit(1);
     }
 
+    // Configure rate limit registry with triage concurrency as the initial seed.
+    configureRateLimitRegistry(config.triageConcurrency);
+
     // Disable LLM result cache when --fresh or --no-cache is passed.
     if (opts.fresh || opts.cache === false) {
       inflightCache.enabled = false;
@@ -591,6 +596,16 @@ program
       console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
+
+    // Register shutdown hooks for bus draining and DB close.
+    registerShutdownHook("bus-drain", async () => {
+      if (bus) {
+        try { await bus.close(); } catch { /* best-effort */ }
+      }
+    }, 1);
+    registerShutdownHook("db-close", async () => {
+      try { db.close(); } catch { /* best-effort */ }
+    }, 2);
 
     let resumeRunId: string | undefined;
     if (opts.resume !== undefined) {
@@ -668,12 +683,25 @@ program
 
       const outcome = await Promise.race([pipelineComplete, pipelineError]);
       if (outcome.kind === "error") {
-        console.error(`Error: ${outcome.event.payload.error}`);
+        const { error: errMsg, errorCategory } = outcome.event.payload;
+        console.error(`Error: ${errMsg}`);
+        if (errorCategory === "auth") {
+          console.error("Hint: Check your API key or credentials.");
+        } else if (errorCategory === "rate_limit") {
+          console.error("Hint: Reduce concurrency or wait before retrying.");
+        } else if (errorCategory === "budget") {
+          console.error("Hint: Increase your cost budget or use a cheaper model.");
+        }
         process.exitCode = 1;
       } else if (outcome.kind === "complete") {
-        const qgResult = outcome.event.payload.stats.qualityGateResult;
-        if (qgResult) {
-          printQualityGateResult(qgResult);
+        const { stats } = outcome.event.payload;
+        if (stats.qualityGateResult) {
+          printQualityGateResult(stats.qualityGateResult);
+        }
+        if (stats.deadLetterCount && stats.deadLetterCount > 0) {
+          console.error(
+            `\n${stats.deadLetterCount} finding(s) failed all triage retries. Run \`kuzushi explain <fingerprint>\` for details.`,
+          );
         }
       }
     } finally {
@@ -682,6 +710,88 @@ program
       } finally {
         db.close();
       }
+    }
+  });
+
+// ── compare-runs ──────────────────────────────────────────────────────────
+
+function fmt(n: number | undefined): string {
+  return n != null ? (n * 100).toFixed(1) + "%" : "n/a";
+}
+
+function delta(a: number | undefined, b: number | undefined): string {
+  if (a == null || b == null) return "n/a";
+  const d = (b - a) * 100;
+  return (d >= 0 ? "+" : "") + d.toFixed(1) + "pp";
+}
+
+program
+  .command("compare-runs <id1> <id2>")
+  .description("Compare metrics and assertions between two pipeline runs")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .action(async (id1: string, id2: string, options: { repo: string }) => {
+    const { root } = resolveRepo(options.repo);
+    const dbPath = defaultDbPath(root);
+    const db = initDb(dbPath);
+    try {
+      const run1 = getRun(db, id1);
+      const run2 = getRun(db, id2);
+      if (!run1 || !run2) {
+        console.error(`Run not found: ${!run1 ? id1 : id2}`);
+        process.exit(1);
+      }
+      // Parse metrics
+      const metrics1 = run1.metricsJson ? JSON.parse(run1.metricsJson) : null;
+      const metrics2 = run2.metricsJson ? JSON.parse(run2.metricsJson) : null;
+
+      // Print comparison
+      console.log("Pipeline Run Comparison");
+      console.log("=".repeat(60));
+      console.log(`Run 1: ${id1} (${run1.status})`);
+      console.log(`Run 2: ${id2} (${run2.status})`);
+      console.log(`Prompt hash: ${run1.promptHash ?? "n/a"} vs ${run2.promptHash ?? "n/a"}`);
+      if (run1.promptHash && run2.promptHash && run1.promptHash !== run2.promptHash) {
+        console.log("  Warning: Prompt templates changed between runs");
+      }
+      console.log("");
+
+      if (metrics1 && metrics2) {
+        console.log("Metrics Comparison:");
+        console.log(`  TP Rate: ${fmt(metrics1.tpRate)} -> ${fmt(metrics2.tpRate)} (${delta(metrics1.tpRate, metrics2.tpRate)})`);
+        console.log(`  FP Rate: ${fmt(metrics1.fpRate)} -> ${fmt(metrics2.fpRate)} (${delta(metrics1.fpRate, metrics2.fpRate)})`);
+        console.log(`  Avg Confidence: ${fmt(metrics1.averageConfidence)} -> ${fmt(metrics2.averageConfidence)} (${delta(metrics1.averageConfidence, metrics2.averageConfidence)})`);
+        console.log(`  Total Cost: $${metrics1.costBreakdown?.total?.toFixed(4) ?? "?"} -> $${metrics2.costBreakdown?.total?.toFixed(4) ?? "?"}`);
+      }
+
+      // Compare assertions
+      const assertions1 = run1.assertionsJson ? JSON.parse(run1.assertionsJson) : null;
+      const assertions2 = run2.assertionsJson ? JSON.parse(run2.assertionsJson) : null;
+      if (assertions1 || assertions2) {
+        console.log("\nAssertion Comparison:");
+        if (assertions1?.totalAssertions != null && assertions2?.totalAssertions != null) {
+          console.log(`  Pass rate: ${assertions1.passedAssertions}/${assertions1.totalAssertions} -> ${assertions2.passedAssertions}/${assertions2.totalAssertions}`);
+          console.log(`  Avg quality: ${fmt(assertions1.averageQualityScore)} -> ${fmt(assertions2.averageQualityScore)}`);
+        } else {
+          console.log(`  Run 1: ${assertions1 ? JSON.stringify(assertions1) : "n/a"}`);
+          console.log(`  Run 2: ${assertions2 ? JSON.stringify(assertions2) : "n/a"}`);
+        }
+      }
+
+      // Flag regressions
+      if (metrics1 && metrics2) {
+        const regressions: string[] = [];
+        if (metrics2.tpRate < metrics1.tpRate * 0.9) regressions.push("TP rate dropped >10%");
+        if (metrics2.fpRate > metrics1.fpRate * 1.1) regressions.push("FP rate increased >10%");
+        if (metrics2.averageConfidence < metrics1.averageConfidence * 0.9) regressions.push("Average confidence dropped >10%");
+        if (regressions.length > 0) {
+          console.log("\nREGRESSIONS DETECTED:");
+          for (const r of regressions) console.log(`  - ${r}`);
+        } else {
+          console.log("\nNo regressions detected");
+        }
+      }
+    } finally {
+      db.close();
     }
   });
 
@@ -746,13 +856,193 @@ configCmd
     console.log(configPath());
   });
 
-// Graceful shutdown: destroy cached HTTP agents and undici dispatcher.
-async function shutdown(code = 0): Promise<void> {
+// ── task list/info/validate ────────────────────────────────────────────────
+
+const taskCmd = program
+  .command("task")
+  .description("Manage and inspect pipeline tasks");
+
+taskCmd
+  .command("list")
+  .description("List all registered tasks with their metadata")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--filter <outputKind>", "Filter by output kind (findings|threat-model|verdict|report|custom)")
+  .action(async (opts: { repo: string; filter?: string }) => {
+    const { root } = resolveRepo(opts.repo);
+    const config = loadConfig(root);
+    const registry = createDefaultRegistry();
+    const taskRegistry = await createDefaultTaskRegistry(registry, config, root);
+
+    let tasks = taskRegistry.list();
+    if (opts.filter) {
+      tasks = tasks.filter((t) => t.outputKind === opts.filter);
+    }
+
+    if (tasks.length === 0) {
+      console.log("No tasks registered.");
+      return;
+    }
+
+    // Show DAG stages
+    const allIds = tasks.map((t) => t.id);
+    let stages: string[][] = [];
+    try {
+      stages = taskRegistry.resolveOrder(allIds);
+    } catch {
+      // DAG resolution may fail if not all deps are in the list
+    }
+
+    console.log(`Registered tasks: ${tasks.length}\n`);
+
+    for (const task of tasks) {
+      const deps = task.dependsOn.length > 0 ? task.dependsOn.join(", ") : "none";
+      const version = task.manifest?.version ?? "-";
+      console.log(`  ${task.id}`);
+      console.log(`    Name:       ${task.displayName}`);
+      console.log(`    Output:     ${task.outputKind}`);
+      console.log(`    Depends on: ${deps}`);
+      console.log(`    Version:    ${version}`);
+      console.log();
+    }
+
+    if (stages.length > 0) {
+      console.log("DAG execution stages:");
+      for (let i = 0; i < stages.length; i++) {
+        console.log(`  Stage ${i}: ${stages[i].join(", ")}`);
+      }
+    }
+  });
+
+taskCmd
+  .command("info")
+  .description("Show detailed information about a task")
+  .argument("<id>", "Task ID")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .action(async (id: string, opts: { repo: string }) => {
+    const { root } = resolveRepo(opts.repo);
+    const config = loadConfig(root);
+    const registry = createDefaultRegistry();
+    const taskRegistry = await createDefaultTaskRegistry(registry, config, root);
+
+    if (!taskRegistry.has(id)) {
+      console.error(`Task "${id}" not found.`);
+      process.exit(1);
+    }
+
+    const task = taskRegistry.get(id);
+    const manifest = taskRegistry.getManifest(id);
+
+    console.log(`Task: ${task.id}`);
+    console.log(`  Display Name: ${task.displayName}`);
+    console.log(`  Output Kind:  ${task.outputKind}`);
+    console.log(`  Depends On:   ${task.dependsOn.length > 0 ? task.dependsOn.join(", ") : "none"}`);
+    console.log(`  Has Condition: ${task.condition ? "yes" : "no"}`);
+    console.log(`  Prompt Mode:  ${task.promptMode ?? "full"}`);
+
+    if (manifest) {
+      console.log(`\n  Manifest:`);
+      console.log(`    Version:     ${manifest.version}`);
+      console.log(`    Description: ${manifest.description}`);
+      if (manifest.author) console.log(`    Author:      ${manifest.author}`);
+      if (manifest.license) console.log(`    License:     ${manifest.license}`);
+      if (manifest.requires) {
+        if (manifest.requires.env?.length) {
+          console.log(`    Requires env: ${manifest.requires.env.join(", ")}`);
+        }
+        if (manifest.requires.bins?.length) {
+          console.log(`    Requires bins: ${manifest.requires.bins.join(", ")}`);
+        }
+        if (manifest.requires.nodeVersion) {
+          console.log(`    Node version: ${manifest.requires.nodeVersion}`);
+        }
+      }
+      if (manifest.config) {
+        console.log(`    Config schema:`);
+        for (const [key, entry] of Object.entries(manifest.config)) {
+          const defaultVal = entry.default !== undefined ? ` (default: ${JSON.stringify(entry.default)})` : "";
+          console.log(`      ${key}: ${entry.type}${defaultVal} — ${entry.description}`);
+        }
+      }
+    }
+  });
+
+taskCmd
+  .command("validate")
+  .description("Validate an external task file and its manifest")
+  .argument("<path>", "Path to task file")
+  .action(async (filePath: string) => {
+    const { parseTaskSpecifier, loadExternalTask } = await import("./agents/task-loader.js");
+    const { loadManifestForTaskFile, checkRequirements } = await import("./agents/task-manifest.js");
+
+    const absPath = path.resolve(filePath);
+
+    // Validate manifest if present
+    const manifestResult = loadManifestForTaskFile(absPath);
+    if (manifestResult) {
+      if (!manifestResult.valid) {
+        console.error("Manifest validation failed:");
+        for (const err of manifestResult.errors ?? []) {
+          console.error(`  - ${err}`);
+        }
+        process.exit(1);
+      }
+      console.log(`Manifest: valid (${manifestResult.manifest!.id} v${manifestResult.manifest!.version})`);
+
+      // Check requirements
+      const reqCheck = checkRequirements(manifestResult.manifest!);
+      if (!reqCheck.satisfied) {
+        console.warn("Requirements not fully satisfied:");
+        if (reqCheck.missing.env.length > 0) {
+          console.warn(`  Missing env: ${reqCheck.missing.env.join(", ")}`);
+        }
+        if (reqCheck.missing.bins.length > 0) {
+          console.warn(`  Missing bins: ${reqCheck.missing.bins.join(", ")}`);
+        }
+        if (reqCheck.missing.nodeVersion) {
+          console.warn(`  Node version: ${reqCheck.missing.nodeVersion}`);
+        }
+      } else {
+        console.log("Requirements: all satisfied");
+      }
+    } else {
+      console.log("Manifest: not found (optional)");
+    }
+
+    // Validate the task module loads correctly
+    try {
+      const specifier = `file://${absPath}`;
+      const spec = parseTaskSpecifier(specifier);
+      await loadExternalTask(spec, path.dirname(absPath));
+      console.log("Task module: valid");
+    } catch (err) {
+      console.error(`Task module validation failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+// ── list-tasks (shorthand) ────────────────────────────────────────────────
+
+program
+  .command("list-tasks")
+  .description("List all registered tasks (shorthand for 'task list')")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--filter <outputKind>", "Filter by output kind")
+  .action(async (opts: { repo: string; filter?: string }) => {
+    // Delegate to the task list command
+    await taskCmd.commands.find((c) => c.name() === "list")!.parseAsync(
+      ["list", ...(opts.filter ? ["--filter", opts.filter] : []), "-r", opts.repo],
+      { from: "user" },
+    );
+  });
+
+// Graceful shutdown via lifecycle coordinator.
+// Hooks are registered with priority: bus drain (1), DB close (2), HTTP cleanup (3).
+registerShutdownHook("http-cleanup", async () => {
   await Promise.resolve(cleanupHttpAgents());
-  process.exit(code);
-}
-process.on("SIGINT", () => void shutdown(130));
-process.on("SIGTERM", () => void shutdown(143));
+}, 10);
+
+process.on("SIGINT", () => void initiateShutdown(130));
+process.on("SIGTERM", () => void initiateShutdown(143));
 process.on("exit", cleanupHttpAgents);
 
 program.parse();

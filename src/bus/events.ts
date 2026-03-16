@@ -13,6 +13,7 @@ import type {
 import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
 import type { EventEnvelope } from "./types.js";
+import type { ErrorCategory } from "../errors.js";
 
 export interface RunContext {
   runId: string;
@@ -48,6 +49,7 @@ export interface PipelineStats {
   chainAnalysisCostUsd?: number;
   budgetExceeded?: boolean;
   failedTasks?: string[];
+  deadLetterCount?: number;
   extractionDegradation?: { status: string; reasons: string[] };
   stitchDegradation?: { type: string; reason: string; message: string };
   tiPriorDegraded?: boolean;
@@ -81,6 +83,7 @@ export type PipelineErrorEvent = EventEnvelope<
     context: RunContext;
     error: string;
     fatal: boolean;
+    errorCategory?: ErrorCategory;
   }
 >;
 
@@ -133,6 +136,16 @@ export type TaskErrorEvent = EventEnvelope<
     taskId: string;
     outputKind: TaskOutputKind;
     error: string;
+    errorCategory?: ErrorCategory;
+  }
+>;
+
+export type TaskSkippedEvent = EventEnvelope<
+  "task:skipped",
+  {
+    context: RunContext;
+    taskId: string;
+    reason: string;
   }
 >;
 
@@ -238,6 +251,7 @@ export type TriageErrorEvent = EventEnvelope<
     attempts?: number;
     index: number;
     total: number;
+    errorCategory?: ErrorCategory;
   }
 >;
 
@@ -253,6 +267,16 @@ export type TriageAgentActivityEvent = EventEnvelope<
     elapsedSeconds?: number;
     index: number;
     total: number;
+  }
+>;
+
+export type TriageAssertionsEvent = EventEnvelope<
+  "triage:assertions",
+  {
+    context: RunContext;
+    fingerprint: string;
+    assertions: Array<{ name: string; passed: boolean; score: number; weight: number; reason: string }>;
+    qualityScore: number;
   }
 >;
 
@@ -340,6 +364,7 @@ export type VerificationErrorEvent = EventEnvelope<
     attempts?: number;
     index: number;
     total: number;
+    errorCategory?: ErrorCategory;
   }
 >;
 
@@ -689,6 +714,27 @@ export type ReportCompleteEvent = EventEnvelope<
   }
 >;
 
+export type PromptReportEvent = EventEnvelope<
+  "prompt:report",
+  {
+    context: RunContext;
+    taskId: string;
+    sections: Array<{ name: string; charCount: number; estimatedTokens: number }>;
+    totalChars: number;
+    totalEstimatedTokens: number;
+    warnings: string[];
+  }
+>;
+
+export type TaskApprovalRequestedEvent = EventEnvelope<
+  "task:approval-requested",
+  {
+    context: RunContext;
+    taskId: string;
+    description: string;
+  }
+>;
+
 export type KuzushiEvent =
   | PipelineStartEvent
   | PipelineCompleteEvent
@@ -698,6 +744,7 @@ export type KuzushiEvent =
   | TaskProgressEvent
   | TaskCompleteEvent
   | TaskErrorEvent
+  | TaskSkippedEvent
   | StageCompleteEvent
   | ScanStartEvent
   | ScanFindingEvent
@@ -709,6 +756,7 @@ export type KuzushiEvent =
   | TriageResultEvent
   | TriageErrorEvent
   | TriageAgentActivityEvent
+  | TriageAssertionsEvent
   | TriageCompleteEvent
   | TriageQueueDepthEvent
   | VerificationStartEvent
@@ -747,4 +795,6 @@ export type KuzushiEvent =
   | BudgetCheckEvent
   | BudgetWarningEvent
   | ReportRequestedEvent
-  | ReportCompleteEvent;
+  | ReportCompleteEvent
+  | PromptReportEvent
+  | TaskApprovalRequestedEvent;

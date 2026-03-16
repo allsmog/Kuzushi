@@ -328,6 +328,32 @@ export function formatTrajectoriesForPrompt(
 }
 
 /**
+ * Compute historical accuracy rate for a specialist role on a given rule family.
+ * Returns accuracy as a number in [0, 1], or undefined if no data available.
+ */
+export function getSpecialistAccuracy(
+  db: Database.Database,
+  ruleId: string,
+  role: string,
+): number | undefined {
+  // Query trajectories that have been verified (was_correct IS NOT NULL)
+  // and match the rule pattern
+  const rows = db.prepare(`
+    SELECT was_correct FROM trajectories
+    WHERE rule_id = ? AND was_correct IS NOT NULL
+    ORDER BY updated_at DESC
+    LIMIT 20
+  `).all(ruleId) as Array<{ was_correct: number }>;
+
+  if (rows.length < 3) {
+    return undefined;
+  }
+
+  const correct = rows.filter((r) => r.was_correct === 1).length;
+  return correct / rows.length;
+}
+
+/**
  * Prune old trajectories for a rule_id, keeping the newest N.
  */
 function pruneTrajectories(

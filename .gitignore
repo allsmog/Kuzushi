@@ -10,3 +10,6 @@ dist/
 .semgrep-triage.jsonl
 coverage/
 .claude/worktrees/
+.DS_Store
+*.tsbuildinfo
+.kuzushi/

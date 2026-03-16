@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import {
+  saveAssertionResults,
   updatePocHarnessCost,
   updatePocHarnessResult,
   updateVerificationCost,
@@ -9,6 +10,7 @@ import {
 import type {
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
+  TriageAssertionsEvent,
   TriageResultEvent,
   VerificationErrorEvent,
   VerificationResultEvent,
@@ -53,6 +55,12 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): voi
         verdict: result.verdict,
       }),
     );
+  });
+
+  bus.subscribe<TriageAssertionsEvent>("triage:assertions", (event) => {
+    const { fingerprint, assertions } = event.payload;
+    const runId = event.meta.runId;
+    saveAssertionResults(deps.db, runId, fingerprint, assertions);
   });
 
   bus.subscribe<VerificationResultEvent>("verification:result", async (event) => {

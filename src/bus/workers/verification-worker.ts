@@ -6,9 +6,25 @@ import { toErrorMessage } from "../../utils.js";
 import type { VerificationBatchQueuedEvent, VerificationFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
+import { resolveTemplates } from "../../prompts/loader.js";
+import type Database from "better-sqlite3";
+import type { KnowledgeRegistry } from "../../knowledge/types.js";
+import { knowledgeInjectionModule } from "../../prompts/modules.js";
+import { getBypassKnowledge, formatBypassForPrompt } from "../../bypass-knowledge.js";
+import { formatPrecedentsForPrompt, type Precedents } from "../../precedents.js";
+import {
+  extractScannerSignal,
+  extractTriageSignal,
+  extractVerificationSignal,
+  computeCompositeConfidence,
+} from "../../scoring/composite-confidence.js";
 
 export interface VerificationWorkerDeps {
   config: KuzushiConfig;
+  /** Optional knowledge registry for domain-specific verification prompt enrichment. */
+  knowledgeRegistry?: KnowledgeRegistry;
+  /** Optional database handle for composite confidence features. */
+  db?: Database.Database;
 }
 
 /**
@@ -18,12 +34,48 @@ export function registerVerificationWorker(
   bus: MessageBus,
   deps: VerificationWorkerDeps,
 ): void {
+  const resolvedTemplates = resolveTemplates(deps.config);
+
   bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", async (event) => {
     const { context, finding, triageResult, repoContext, enrichedContext, index, total } = event.payload;
     const runId = event.meta.runId;
     let attempts = 0;
 
     try {
+      // Build extra prompt context for verification enrichment
+      const extraSections: string[] = [];
+
+      // Knowledge registry — inject CWE-specific domain knowledge
+      if (deps.knowledgeRegistry) {
+        const modules = deps.knowledgeRegistry.query({ cwes: finding.cwe });
+        if (modules.length > 0) {
+          const sections = deps.knowledgeRegistry.formatForPrompt(modules);
+          const knowledgeSection = knowledgeInjectionModule(sections);
+          if (knowledgeSection) {
+            extraSections.push(knowledgeSection);
+          }
+        }
+      }
+
+      // Precedents — inject org-specific architectural facts
+      {
+        const precedents = event.payload.precedents as Precedents | undefined;
+        if (precedents) {
+          const precedentLines = formatPrecedentsForPrompt(precedents);
+          if (precedentLines.length > 0) {
+            extraSections.push(precedentLines.join("\n"));
+          }
+        }
+      }
+
+      const extraPromptContext = extraSections.length > 0
+        ? extraSections.join("\n\n")
+        : undefined;
+
+      // TODO: Pass extraPromptContext to verifyFindingWithAgent once verify.ts
+      // is updated to accept an additional optional extraPromptContext parameter.
+      void extraPromptContext;
+
       const { result, costUsd } = await withRetry(
         async () => {
           attempts += 1;
@@ -53,6 +105,7 @@ export function registerVerificationWorker(
                 );
               },
             },
+            resolvedTemplates.verify,
           );
         },
         {
@@ -62,6 +115,15 @@ export function registerVerificationWorker(
         },
       );
       result.verifyCostUsd = costUsd;
+
+      // Compute composite confidence from scanner + triage + verification signals
+      {
+        const scannerSignal = extractScannerSignal(finding);
+        const triageSignal = extractTriageSignal(triageResult.confidence);
+        const verificationSignal = extractVerificationSignal(result.exploitable);
+        const composite = computeCompositeConfidence([scannerSignal, triageSignal, verificationSignal]);
+        result.compositeConfidence = composite.composite;
+      }
 
       await bus.publish(
         createEvent("verification:result", runId, {
@@ -113,6 +175,7 @@ export function registerVerificationWorker(
             { enrichedContext: coerceContextEnrichment(enrichedContext) },
             deps.config.verifyBatchSize ?? 5,
             deps.config.verifyMaxTurns,
+            resolvedTemplates.verify,
           ),
         {
           maxRetries: deps.config.maxVerifyRetries ?? 2,

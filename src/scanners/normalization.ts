@@ -143,10 +143,66 @@ function mergeCorroboration(primary: Finding, corroborating: Finding[]): Corrobo
   return result;
 }
 
+/**
+ * Extract dataflow source and sink from finding message/evidence for clustering.
+ * Returns source|sink key if both can be extracted, undefined otherwise.
+ */
+export function normalizeDataflowForKey(finding: Finding): string | undefined {
+  const text = `${finding.message} ${finding.evidence ?? ""}`.toLowerCase();
+
+  // Extract source: input parameters, request properties, user-controlled data
+  const sourcePatterns = [
+    /(?:from|source|input|param(?:eter)?|user[- ]?(?:input|controlled|supplied))\s*[:\-=]?\s*[`"']?(\w[\w.[\]]*)/i,
+    /(?:req|request)\.(query|body|params|headers|cookies)(?:\.(\w+)|\[["'](\w+)["']\])?/i,
+    /(?:tainted|untrusted|external)\s+(?:data|input|value)\s+[`"']?(\w[\w.]*)/i,
+  ];
+
+  let source: string | undefined;
+  for (const pattern of sourcePatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      source = (match[3] ?? match[2] ?? match[1] ?? "").trim().toLowerCase();
+      if (source.length > 1) break;
+      source = undefined;
+    }
+  }
+
+  // Extract sink: dangerous function calls, SQL queries, command execution
+  const sinkPatterns = [
+    /(?:to|sink|into|passed to|flows? to)\s*[:\-=]?\s*[`"']?(\w[\w.]*\(\)?)'/i,
+    /(?:exec|execute|query|eval|innerHTML|write|send|render|spawn|system)\s*\(/i,
+    /(?:sql|command|shell|template|html)\s+(?:injection|execution)/i,
+  ];
+
+  let sink: string | undefined;
+  for (const pattern of sinkPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      sink = (match[1] ?? match[0] ?? "").trim().toLowerCase().replace(/[()]/g, "");
+      if (sink.length > 1) break;
+      sink = undefined;
+    }
+  }
+
+  if (source && sink) {
+    return `${source}|${sink}`;
+  }
+
+  return undefined;
+}
+
 function buildClusterKey(finding: Finding): string {
   const filePath = normalizePathForKey(finding.filePath);
   const line = Number.isFinite(finding.startLine) ? Math.max(1, Math.floor(finding.startLine)) : 1;
+
+  // Try dataflow-based clustering: same source→sink at different callsites
+  const dataflowKey = normalizeDataflowForKey(finding);
   const normalizedCwe = normalizeCweForKey(finding.cwe);
+  if (dataflowKey && normalizedCwe.length > 0) {
+    return `loc+dataflow|${dataflowKey}|${normalizedCwe.join(",")}`;
+  }
+
+  // Fall back to location-based clustering
   if (normalizedCwe.length > 0) {
     return `loc+cwe|${filePath}|${line}|${normalizedCwe.join(",")}`;
   }

@@ -196,14 +196,21 @@ function buildManagerPrompt(
   finding: Finding,
   repoName: string,
   reports: SpecialistReport[],
+  extraPromptContext?: string,
+  specialistAccuracies?: Map<string, number>,
 ): string {
   const reportSections = reports
     .filter((r) => !r.error)
-    .map((r) => [
-      `### ${formatRoleName(r.role)} (confidence: ${r.confidence}${r.isFalsePositive ? ", says FP" : ""})`,
-      `Evidence: ${r.evidence}`,
-      r.findings ? `Findings: ${r.findings}` : "",
-    ].filter(Boolean).join("\n"));
+    .map((r) => {
+      const accuracyNote = specialistAccuracies?.get(r.role) != null
+        ? `, historical accuracy: ${(specialistAccuracies.get(r.role)! * 100).toFixed(0)}%`
+        : "";
+      return [
+        `### ${formatRoleName(r.role)} (confidence: ${r.confidence}${r.isFalsePositive ? ", says FP" : ""}${accuracyNote})`,
+        `Evidence: ${r.evidence}`,
+        r.findings ? `Findings: ${r.findings}` : "",
+      ].filter(Boolean).join("\n");
+    });
 
   const errorReports = reports.filter((r) => r.error);
   const errorSection = errorReports.length > 0
@@ -212,6 +219,30 @@ function buildManagerPrompt(
         ...errorReports.map((r) => `- ${formatRoleName(r.role)}: ${r.error}`),
       ].join("\n")
     : "";
+
+  // Detect specialist disagreements
+  const successfulReports = reports.filter((r) => !r.error);
+  const confidences = successfulReports.map((r) => r.confidence);
+  const maxConf = Math.max(...confidences, 0);
+  const minConf = Math.min(...confidences, 0);
+  const confidenceSpread = maxConf - minConf;
+  const hasFpDisagreement = successfulReports.some((r) => r.isFalsePositive)
+    && successfulReports.some((r) => !r.isFalsePositive);
+  const hasDisagreement = confidenceSpread > 0.3 || hasFpDisagreement;
+
+  let conflictSection = "";
+  if (hasDisagreement) {
+    conflictSection = [
+      "## CONFLICT DETECTED — Specialists DISAGREE",
+      "For each conflict, you MUST resolve it explicitly:",
+      "1. Which specialist cited specific file:line evidence?",
+      "2. Which specialist's claim is falsifiable by reading code?",
+      "3. Does the evidence chain connect end-to-end from source to sink?",
+      "4. If one specialist found guards/sanitization and another didn't, verify the guards actually protect this specific path.",
+      "",
+      "Include a 'conflict_resolution' field in your JSON output explaining how each disagreement was resolved.",
+    ].join("\n");
+  }
 
   return [
     "You are a senior security engineer synthesizing specialist reports for a triage decision.",
@@ -227,6 +258,8 @@ function buildManagerPrompt(
     ...reportSections,
     errorSection,
     "",
+    conflictSection,
+    "",
     "## Your Task",
     "Synthesize these reports into a single verdict. Resolve disagreements by evidence quality.",
     "If specialists disagree, weight concrete code evidence over speculation.",
@@ -239,7 +272,8 @@ function buildManagerPrompt(
     "## Output requirements",
     "Return ONLY a JSON object with:",
     "fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null),",
-    "source, sink, evidence_trail",
+    "source, sink, evidence_trail, conflict_resolution(string, explain how disagreements were resolved)",
+    ...(extraPromptContext ? ["", extraPromptContext] : []),
   ].join("\n");
 }
 
@@ -268,6 +302,8 @@ export async function triageFindingMultiAgent(
   specialistMaxTurns: number | null,
   repoContext?: RepoContext,
   runtimeOptions?: TriageRuntimeOptions,
+  extraPromptContext?: string,
+  specialistAccuracies?: Map<string, number>,
 ): Promise<TriageOutput> {
   const roles: SpecialistRole[] = [
     "source-tracer",
@@ -329,7 +365,7 @@ export async function triageFindingMultiAgent(
   }
 
   // Run manager synthesis
-  const managerPrompt = buildManagerPrompt(finding, repoName, reports);
+  const managerPrompt = buildManagerPrompt(finding, repoName, reports, extraPromptContext, specialistAccuracies);
 
   const { structuredOutput, resultText, executionError, costUsd: managerCost } =
     await runStructuredAgentQuery({

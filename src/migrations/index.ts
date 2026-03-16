@@ -13,6 +13,9 @@ import { migration009 } from "./009_add_pipeline_runs_context.js";
 import { migration010 } from "./010_add_calibration_schema.js";
 import { migration011 } from "./011_add_trajectories_table.js";
 import { migration012 } from "./012_add_finding_provenance_columns.js";
+import { migration013 } from "./013_add_composite_confidence_columns.js";
+import { migration014 } from "./014_add_metrics_column.js";
+import { migration015 } from "./015_add_assertion_tracking.js";
 import type { Migration } from "./types.js";
 
 /** All registered migrations in version order. */
@@ -29,4 +32,7 @@ export const allMigrations: Migration[] = [
   migration010,
   migration011,
   migration012,
+  migration013,
+  migration014,
+  migration015,
 ];

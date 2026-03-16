@@ -1,5 +1,6 @@
 import type { KuzushiConfig } from "../types.js";
 import { PiAiAgentRuntime } from "./pi-ai.js";
+import { AcpAgentRuntime } from "./acp.js";
 import type { AgentRuntime } from "./types.js";
 
 let currentRuntime: AgentRuntime = new PiAiAgentRuntime();
@@ -22,10 +23,15 @@ export function configureAgentRuntime(config: KuzushiConfig): AgentRuntime {
   }
 
   if (backend === "acp") {
-    throw new Error(
-      "agentRuntimeBackend=acp is not available yet. "
-      + "Use agentRuntimeBackend=pi-ai until ACP runtime adapter is implemented.",
-    );
+    const adapterCommand = config.acpAdapterCommand;
+    if (!adapterCommand) {
+      throw new Error(
+        "agentRuntimeBackend=acp requires acpAdapterCommand to be set. "
+        + "Set it in config or pass --acp-adapter-command.",
+      );
+    }
+    currentRuntime = new AcpAgentRuntime(adapterCommand, runtimeConfig);
+    return currentRuntime;
   }
 
   throw new Error(
@@ -36,3 +42,4 @@ export function configureAgentRuntime(config: KuzushiConfig): AgentRuntime {
 
 export * from "./types.js";
 export { PiAiAgentRuntime };
+export { AcpAgentRuntime };

@@ -14,8 +14,14 @@ import {
   selectFindingsForRescore,
 } from "../scanners/normalization.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
+import {
+  computeRunMetrics,
+  type StageTimestamps,
+  type StageCosts,
+} from "../scoring/run-metrics.js";
 import { resolveCapabilityConfigKey } from "../capabilities.js";
 import {
+  getActionableFindings,
   getPocHarnessedFingerprints,
   getStoredTriageResults,
   getStoredVerificationResults,
@@ -25,6 +31,7 @@ import {
   updateRunCost,
   updateRunContext,
   updateRunFindings,
+  updateRunMetrics,
   updateRunStatus,
 } from "../store.js";
 import type {
@@ -37,6 +44,7 @@ import type {
   VerificationResult,
   Verdict,
 } from "../types.js";
+import { evaluateQualityGates, type QualityGateResult } from "../quality-gate.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../repo-context.js";
 import { loadPrecedents, type Precedents } from "../precedents.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
@@ -66,6 +74,9 @@ import type {
 } from "./events.js";
 import { createEvent } from "./helpers.js";
 import type { MessageBus } from "./types.js";
+import { PipelineHookChain } from "../hooks/chain.js";
+import type { HookContext } from "../hooks/types.js";
+import { loadHooksFromFile } from "../hooks/loader.js";
 
 interface QueuedFinding {
   finding: Finding;
@@ -162,6 +173,11 @@ interface RunState {
   chainAnalysisCostUsd: number;
   budgetExceeded: boolean;
   budgetWarningEmitted: boolean;
+  stageTimestamps: StageTimestamps;
+  hookChain?: PipelineHookChain;
+  deadLetterFindings: Array<{ fingerprint: string; error: string; attempts: number; lastAttempt: string }>;
+  /** Per-finding attempt counts for retry tracking (fingerprint → total attempts). */
+  triageAttempts: Map<string, number>;
 }
 
 export interface OrchestratorDeps {
@@ -185,11 +201,64 @@ function allSettledCollect(outcomes: Promise<TaskOutcome>[]): Promise<TaskOutcom
 export class PipelineOrchestrator {
   private readonly runs = new Map<string, RunState>();
 
+  private draining = false;
+
   constructor(
     private readonly bus: MessageBus,
     private readonly deps: OrchestratorDeps,
   ) {
     this.registerHandlers();
+  }
+
+  /**
+   * Drain all in-flight work: stop dispatching new items
+   * and wait for current in-flight items to complete (with timeout).
+   */
+  async drain(timeoutMs: number = 10_000): Promise<void> {
+    this.draining = true;
+    const deadline = Date.now() + timeoutMs;
+
+    for (const [runId, state] of this.runs) {
+      // Wait for all in-flight queues to reach 0
+      while (
+        (state.inFlight > 0 || state.verifyInFlight > 0 || state.pocHarnessInFlight > 0)
+        && Date.now() < deadline
+      ) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      // Persist interrupted state
+      try {
+        updateRunStatus(this.deps.db, state.checkpointRunId, "error");
+      } catch {
+        // Best-effort persistence during shutdown.
+      }
+    }
+
+    this.draining = false;
+  }
+
+  private buildHookContext(state: RunState): HookContext {
+    return {
+      repo: state.context.repoRoot,
+      config: state.config as unknown as Record<string, unknown>,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Retrieve the pipeline hook chain and context for a given run.
+   * Used by the triage worker to apply beforeTriage/afterTriage hooks.
+   */
+  getRunHooks(runId: string): { hookChain: PipelineHookChain; hookContext: HookContext } | undefined {
+    const state = this.runs.get(runId);
+    if (!state?.hookChain) {
+      return undefined;
+    }
+    return {
+      hookChain: state.hookChain,
+      hookContext: this.buildHookContext(state),
+    };
   }
 
   private registerHandlers(): void {
@@ -352,6 +421,13 @@ export class PipelineOrchestrator {
       chainAnalysisCostUsd: 0,
       budgetExceeded: false,
       budgetWarningEmitted: false,
+      deadLetterFindings: [],
+      triageAttempts: new Map(),
+      stageTimestamps: {
+        pipelineStart: event.meta.timestamp,
+        pipelineEnd: "",
+        scanStart: event.meta.timestamp,
+      },
     };
 
     // Load organization precedents
@@ -359,6 +435,26 @@ export class PipelineOrchestrator {
       state.precedents = loadPrecedents(context.repoRoot);
     } catch {
       // Precedents loading is best-effort.
+    }
+
+    // Load pipeline hooks if configured and external hooks are enabled
+    if (config.enableExternalHooks && config.hooks?.files?.length) {
+      try {
+        const hookObjects = await Promise.all(
+          config.hooks.files.map((file) => loadHooksFromFile(file, context.repoRoot)),
+        );
+        state.hookChain = new PipelineHookChain(hookObjects);
+        console.error(`[orchestrator] Loaded ${hookObjects.length} pipeline hook file(s)`);
+      } catch (error) {
+        await this.bus.publish(
+          createEvent("pipeline:error", runId, {
+            context,
+            error: `Failed to load pipeline hooks: ${toErrorMessage(error)}`,
+            fatal: true,
+          }),
+        );
+        return;
+      }
     }
 
     this.runs.set(runId, state);
@@ -377,6 +473,15 @@ export class PipelineOrchestrator {
   }
 
   private async startLegacyScan(state: RunState, runId: string): Promise<void> {
+    // Invoke beforeScan hook
+    if (state.hookChain) {
+      try {
+        await state.hookChain.beforeScan(this.buildHookContext(state));
+      } catch (error) {
+        console.error(`[hooks] beforeScan hook error: ${toErrorMessage(error)}`);
+      }
+    }
+
     await this.bus.publish(
       createEvent("scan:start", runId, {
         context: state.context,
@@ -753,11 +858,58 @@ export class PipelineOrchestrator {
       return;
     }
 
+    // Invoke beforeScan hook before DAG execution
+    if (state.hookChain) {
+      try {
+        await state.hookChain.beforeScan(this.buildHookContext(state));
+      } catch (error) {
+        console.error(`[hooks] beforeScan hook error: ${toErrorMessage(error)}`);
+      }
+    }
+
     for (let stageIndex = 0; stageIndex < stages.length; stageIndex += 1) {
       const group = stages[stageIndex];
-      const outcomes = group.map((taskId) => this.waitForTaskOutcome(runId, taskId));
 
+      // Evaluate conditions: split group into tasks to run vs skip
+      const tasksToRun: string[] = [];
+      const tasksToSkip: string[] = [];
       for (const taskId of group) {
+        const task = this.deps.taskRegistry.get(taskId);
+        if (task.condition && !task.condition(state.taskOutputs, state.config)) {
+          tasksToSkip.push(taskId);
+        } else {
+          tasksToRun.push(taskId);
+        }
+      }
+
+      // Emit skip events for conditionally skipped tasks
+      for (const taskId of tasksToSkip) {
+        console.error(`[orchestrator] Task "${taskId}" skipped: condition returned false`);
+        await this.bus.publish(
+          createEvent("task:skipped", runId, {
+            context: state.context,
+            taskId,
+            reason: "condition returned false",
+          }),
+        );
+        completedTaskIds.add(taskId);
+      }
+
+      if (tasksToRun.length === 0) {
+        // All tasks in stage were skipped — emit stage:complete and continue
+        await this.bus.publish(
+          createEvent("stage:complete", runId, {
+            context: state.context,
+            stageIndex,
+            taskIds: [...group],
+          }),
+        );
+        continue;
+      }
+
+      const outcomes = tasksToRun.map((taskId) => this.waitForTaskOutcome(runId, taskId));
+
+      for (const taskId of tasksToRun) {
         const task = this.deps.taskRegistry.get(taskId);
         await this.bus.publish(
           createEvent("task:start", runId, {
@@ -974,6 +1126,8 @@ export class PipelineOrchestrator {
       return;
     }
 
+    state.stageTimestamps.scanEnd = event.meta.timestamp;
+
     const clustered = clusterFindings(state.scanFindings);
     state.scanFindings = clustered.findings;
     state.totalFindings = clustered.findings.length;
@@ -1060,6 +1214,21 @@ export class PipelineOrchestrator {
       filteredFindings.sort((a, b) => getRankingScore(b) - getRankingScore(a));
     }
 
+    // Invoke afterScan hook — allows hooks to filter/enrich findings
+    if (state.hookChain) {
+      try {
+        filteredFindings = await state.hookChain.afterScan(
+          this.buildHookContext(state),
+          filteredFindings,
+        );
+      } catch (error) {
+        console.error(`[hooks] afterScan hook error: ${toErrorMessage(error)}`);
+      }
+    }
+
+    state.scanFindings = filteredFindings;
+    state.totalFindings = filteredFindings.length;
+
     const pendingFindings = filteredFindings.filter(
       (finding) => !alreadyTriaged.has(finding.fingerprint),
     );
@@ -1105,6 +1274,8 @@ export class PipelineOrchestrator {
     state.refinementIterations = resolveTaintAnalysisRefinementIterations(state.config);
     state.refinementIteration = 0;
     state.refinementInFlight = false;
+
+    state.stageTimestamps.triageStart = new Date().toISOString();
 
     await this.bus.publish(
       createEvent("triage:start", runId, {
@@ -1171,6 +1342,30 @@ export class PipelineOrchestrator {
     const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.totalCostUsd += costUsd;
 
+    const fp = event.payload.finding.fingerprint;
+    const maxRetries = state.config.maxTriageRetries ?? 2;
+    const priorAttempts = state.triageAttempts.get(fp) ?? 0;
+    const totalAttempts = Math.max(priorAttempts, event.payload.attempts ?? 1);
+    state.triageAttempts.set(fp, totalAttempts);
+
+    if (totalAttempts >= maxRetries) {
+      // Exhausted all retries — dead-letter the finding.
+      state.deadLetterFindings.push({
+        fingerprint: fp,
+        error: event.payload.error,
+        attempts: totalAttempts,
+        lastAttempt: new Date().toISOString(),
+      });
+    } else {
+      // Re-enqueue for individual retry via dispatchTriage.
+      state.triageErrors -= 1; // undo error count — this is a retry, not a terminal failure
+      state.triageQueue.push({
+        finding: event.payload.finding,
+        index: event.payload.index ?? 0,
+        total: event.payload.total ?? state.triageTotal,
+      });
+    }
+
     try {
       updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
     } catch {
@@ -1209,37 +1404,91 @@ export class PipelineOrchestrator {
       return;
     }
 
+    // Evaluate quality gates if configured
+    let qualityGateResult: QualityGateResult | undefined;
+    if (state.config.qualityGates) {
+      const fingerprints = state.scanFindings.map((f) => f.fingerprint);
+      const findings = getActionableFindings(this.deps.db, state.context.repoName, {
+        includeFalsePositives: true,
+        fingerprints,
+      });
+      qualityGateResult = evaluateQualityGates(findings, state.config.qualityGates);
+
+      if (!qualityGateResult.passed) {
+        process.exitCode = 1;
+      }
+    }
+
+    // Compute final run metrics for the pipeline:complete event
+    state.stageTimestamps.pipelineEnd = event.meta.timestamp;
+    const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
+    const finalMetrics = computeRunMetrics(
+      state.scanFindings,
+      state.stageTimestamps,
+      {
+        triage: Math.max(0, triageCost),
+        verify: state.verifyCostUsd,
+        pocHarness: state.pocHarnessCostUsd,
+        variantAnalysis: state.variantAnalysisCostUsd,
+      },
+    );
+
+    // Persist metrics to database
+    try {
+      updateRunMetrics(this.deps.db, state.checkpointRunId, finalMetrics);
+    } catch {
+      // Metrics persistence is best-effort.
+    }
+
+    const pipelineStats = {
+      scanners: [...state.scanners],
+      totalFindings: state.totalFindings,
+      queuedForTriage: state.triageTotal,
+      skippedAlreadyTriaged: state.skippedAlreadyTriaged,
+      skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
+      skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
+      softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
+      skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
+      corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
+      triaged: state.triaged,
+      triageErrors: state.triageErrors,
+      totalCostUsd: state.totalCostUsd,
+      verified: state.verifyEnabled ? state.verified : undefined,
+      verifyErrors: state.verifyEnabled ? state.verifyErrors : undefined,
+      verifyCostUsd: state.verifyEnabled ? state.verifyCostUsd : undefined,
+      pocHarnessGenerated: state.pocHarnessEnabled ? state.pocHarnessGenerated : undefined,
+      pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : undefined,
+      pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
+      pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
+      variantFindings: state.variantFindings > 0 ? state.variantFindings : undefined,
+      variantAnalysisCostUsd: state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
+      chainCount: state.exploitChains.length > 0 ? state.exploitChains.length : undefined,
+      chainAnalysisCostUsd: state.chainAnalysisCostUsd > 0 ? state.chainAnalysisCostUsd : undefined,
+      budgetExceeded: state.budgetExceeded || undefined,
+      failedTasks: state.failedTasks.length > 0 ? [...state.failedTasks] : undefined,
+      deadLetterCount: state.deadLetterFindings.length > 0 ? state.deadLetterFindings.length : undefined,
+      qualityGateResult,
+      runMetrics: finalMetrics,
+      startedAt: state.startedAt,
+      completedAt: event.meta.timestamp,
+    };
+
+    // Invoke afterAll hook before emitting pipeline:complete
+    if (state.hookChain) {
+      try {
+        await state.hookChain.afterAll(this.buildHookContext(state), {
+          findings: state.scanFindings,
+          stats: pipelineStats as unknown as Record<string, unknown>,
+        });
+      } catch (error) {
+        console.error(`[hooks] afterAll hook error: ${toErrorMessage(error)}`);
+      }
+    }
+
     await this.bus.publish(
       createEvent("pipeline:complete", runId, {
         context: state.context,
-        stats: {
-          scanners: [...state.scanners],
-          totalFindings: state.totalFindings,
-          queuedForTriage: state.triageTotal,
-          skippedAlreadyTriaged: state.skippedAlreadyTriaged,
-          skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
-          skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
-          softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
-          skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
-          corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
-          triaged: state.triaged,
-          triageErrors: state.triageErrors,
-          totalCostUsd: state.totalCostUsd,
-          verified: state.verifyEnabled ? state.verified : undefined,
-          verifyErrors: state.verifyEnabled ? state.verifyErrors : undefined,
-          verifyCostUsd: state.verifyEnabled ? state.verifyCostUsd : undefined,
-          pocHarnessGenerated: state.pocHarnessEnabled ? state.pocHarnessGenerated : undefined,
-          pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : undefined,
-          pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
-          pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
-          variantFindings: state.variantFindings > 0 ? state.variantFindings : undefined,
-          variantAnalysisCostUsd: state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
-          chainCount: state.exploitChains.length > 0 ? state.exploitChains.length : undefined,
-          chainAnalysisCostUsd: state.chainAnalysisCostUsd > 0 ? state.chainAnalysisCostUsd : undefined,
-          budgetExceeded: state.budgetExceeded || undefined,
-          startedAt: state.startedAt,
-          completedAt: event.meta.timestamp,
-        },
+        stats: pipelineStats,
       }),
     );
 
@@ -1407,6 +1656,8 @@ export class PipelineOrchestrator {
       );
       return;
     }
+
+    state.stageTimestamps.triageEnd = new Date().toISOString();
 
     await this.bus.publish(
       createEvent("triage:complete", runId, {
@@ -1750,6 +2001,8 @@ export class PipelineOrchestrator {
       }
     }
 
+    state.stageTimestamps.verifyStart = new Date().toISOString();
+
     await this.bus.publish(
       createEvent("verification:start", runId, {
         context: state.context,
@@ -1925,6 +2178,7 @@ export class PipelineOrchestrator {
       return;
     }
     state.verificationCompleted = true;
+    state.stageTimestamps.verifyEnd = new Date().toISOString();
 
     await this.bus.publish(
       createEvent("verification:complete", runId, {
@@ -1980,6 +2234,8 @@ export class PipelineOrchestrator {
       );
       return;
     }
+
+    state.stageTimestamps.pocStart = new Date().toISOString();
 
     await this.bus.publish(
       createEvent("poc-harness:start", runId, {
@@ -2139,6 +2395,8 @@ export class PipelineOrchestrator {
       return;
     }
 
+    state.stageTimestamps.pocEnd = new Date().toISOString();
+
     await this.bus.publish(
       createEvent("poc-harness:complete", runId, {
         context: state.context,
@@ -2249,6 +2507,24 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     };
   }
 
+  const completedAt = new Date().toISOString();
+  state.stageTimestamps.pipelineEnd = completedAt;
+
+  // Compute aggregate run metrics
+  const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
+  const costs: StageCosts = {
+    triage: Math.max(0, triageCost),
+    verify: state.verifyCostUsd,
+    pocHarness: state.pocHarnessCostUsd,
+    variantAnalysis: state.variantAnalysisCostUsd,
+  };
+
+  const runMetrics = computeRunMetrics(
+    state.scanFindings,
+    state.stageTimestamps,
+    costs,
+  );
+
   return {
     scanners: [...state.scanners],
     totalFindings: state.totalFindings,
@@ -2278,8 +2554,9 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     extractionDegradation,
     stitchDegradation,
     tiPriorDegraded,
+    runMetrics,
     startedAt: state.startedAt,
-    completedAt: new Date().toISOString(),
+    completedAt,
   };
 }
 

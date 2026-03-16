@@ -14,16 +14,21 @@ import type {
   TriageResult,
   VerificationResult,
 } from "./types.js";
-import { getBypassKnowledge, formatBypassForPrompt } from "./bypass-knowledge.js";
+import { getBypassKnowledge } from "./bypass-knowledge.js";
 import { formatEnrichedRepoContext, formatRepoContext } from "./repo-context.js";
 import {
   bypassExhaustionModule,
   composePromptModules,
   confidenceEscalationModule,
+  frameworkAwarenessModule,
   proofLevelModule,
 } from "./prompts/modules.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 import { RawVerificationOutputSchema, RawBatchVerificationOutputSchema, formatZodErrors } from "./schemas.js";
+import { renderTemplate } from "./prompts/template.js";
+import { VERIFY_UNIFIED_TEMPLATE } from "./prompts/templates/verify.js";
+import { BATCH_VERIFY_TEMPLATE } from "./prompts/templates/verify.js";
+import { buildVerifyContext, buildBatchVerifyContext } from "./prompts/context.js";
 
 export const VERIFICATION_RESULT_SCHEMA = {
   type: "object",
@@ -89,6 +94,7 @@ export function verificationSystemPromptPrefix(
     ? "## Enriched Repository Context\n" + enrichedSection.join("\n") + "\n\n"
     : "";
   return repoBlock + enrichedBlock + composePromptModules(
+    frameworkAwarenessModule(repoContext),
     proofLevelModule(),
     bypassExhaustionModule(),
     confidenceEscalationModule("verification"),
@@ -104,12 +110,14 @@ export async function verifyFindingWithAgent(
   maxTurns: number | undefined,
   repoContextOrRuntimeOptions?: RepoContext | VerificationRuntimeOptions,
   maybeRuntimeOptions: VerificationRuntimeOptions = {},
+  /** Optional custom verify template override (loaded from config). */
+  verifyTemplate?: string,
 ): Promise<VerificationOutput> {
   const { repoContext, runtimeOptions } = resolveRepoContextAndRuntimeOptions(
     repoContextOrRuntimeOptions,
     maybeRuntimeOptions,
   );
-  const prompt = buildVerificationPrompt(finding, triageResult, repoName);
+  const prompt = buildVerificationPrompt(finding, triageResult, repoName, verifyTemplate);
   const effectiveMaxTurns = normalizeTurns(maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
@@ -146,61 +154,11 @@ export function buildVerificationPrompt(
   finding: Finding,
   triageResult: TriageResult,
   repoName: string,
+  template?: string,
 ): string {
-  // Inject category-specific bypass techniques if available
   const bypassEntry = getBypassKnowledge(finding.cwe, finding.ruleId);
-  const bypassSection = bypassEntry ? formatBypassForPrompt(bypassEntry) : [];
-
-  return [
-    "You are a senior exploit engineer and penetration tester. Your job is to determine if a",
-    "reported vulnerability is concretely exploitable in practice — not just theoretically possible.",
-    "You think like an attacker: you craft payloads, trace execution paths, and identify the exact",
-    "conditions needed for exploitation.",
-    ...(bypassSection.length > 0 ? ["", ...bypassSection] : []),
-    "",
-    "## Finding",
-    `Repo: ${repoName}`,
-    `Scanner: ${finding.scanner}`,
-    `Rule: ${finding.ruleId}`,
-    `File: ${finding.filePath}:${finding.startLine}`,
-    `Severity: ${finding.severity}`,
-    `CWE: ${finding.cwe.join(", ") || "none"}`,
-    `Message: ${finding.message}`,
-    `Fingerprint: ${finding.fingerprint}`,
-    "",
-    "## Prior triage assessment",
-    `Verdict: ${triageResult.verdict}`,
-    `Confidence: ${triageResult.confidence}`,
-    `Rationale: ${triageResult.rationale}`,
-    `Verification steps: ${triageResult.verificationSteps.join(" | ") || "none"}`,
-    "",
-    "## Verification instructions",
-    ...(finding.filePath !== "."
-      ? [
-          "1. Trace attacker-controlled input sources to vulnerable sinks through real call paths.",
-          "2. Identify sanitization, encoding, validation, authz, feature flags, and reachability constraints.",
-          "3. Decide whether the issue is exploitable with a concrete input payload under realistic conditions.",
-          "4. If exploitable, provide a concise PoC payload and attack vector.",
-          "5. If not exploitable, explain precisely why (for example: sanitization, validation, unreachable path).",
-          "6. List any preconditions required to reproduce impact.",
-        ]
-      : [
-          "This is an architectural/threat-model finding without a specific file. Use Glob and Grep to identify relevant source files.",
-          "1. Verify the described threat is realistic given the actual system architecture and code.",
-          "2. Check whether existing mitigations (auth, validation, rate limiting, encryption) address the threat.",
-          "3. Decide whether the issue is concretely exploitable under realistic conditions.",
-          "4. If exploitable, describe a concrete attack vector and payload.",
-          "5. If not exploitable, explain precisely which mitigations prevent it.",
-          "6. List any preconditions required to reproduce impact.",
-        ]),
-    "",
-    "## Output requirements",
-    "Return ONLY a JSON object with keys:",
-    "fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(string),",
-    "attack_vector(string|null), preconditions(string[]), confidence(0..1),",
-    "proof_level(1-4, optional), proof_verdict(exploited|blocked_by_security|out_of_scope|false_positive, optional),",
-    "bypass_attempts(string[], optional)",
-  ].join("\n");
+  const context = buildVerifyContext(finding, triageResult, repoName, bypassEntry);
+  return renderTemplate(template ?? VERIFY_UNIFIED_TEMPLATE, context as any);
 }
 
 export function parseVerificationOutput(raw: unknown, fingerprint: string): VerificationResult {
@@ -366,6 +324,7 @@ export async function verifyFindingsBatch(
   runtimeOptions: VerificationRuntimeOptions = {},
   maxBatchSize: number = DEFAULT_VERIFY_BATCH_SIZE,
   maxTurns: number | undefined = undefined,
+  verifyTemplate?: string,
 ): Promise<BatchVerificationOutput> {
   if (items.length === 0) {
     return { results: new Map(), costUsd: 0 };
@@ -374,7 +333,7 @@ export async function verifyFindingsBatch(
   const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
 
   if (items.length <= effectiveBatchSize) {
-    return verifySingleBatch(items, repoRoot, repoName, model, repoContext, runtimeOptions, maxTurns);
+    return verifySingleBatch(items, repoRoot, repoName, model, repoContext, runtimeOptions, maxTurns, verifyTemplate);
   }
 
   const allResults = new Map<string, VerificationResult>();
@@ -390,6 +349,7 @@ export async function verifyFindingsBatch(
       repoContext,
       runtimeOptions,
       maxTurns,
+      verifyTemplate,
     );
 
     for (const [fp, result] of results) {
@@ -409,8 +369,9 @@ async function verifySingleBatch(
   repoContext: RepoContext | undefined,
   runtimeOptions: VerificationRuntimeOptions,
   maxTurns: number | undefined,
+  verifyTemplate?: string,
 ): Promise<BatchVerificationOutput> {
-  const prompt = buildBatchVerificationPrompt(items, repoName);
+  const prompt = buildBatchVerificationPrompt(items, repoName, verifyTemplate);
   const effectiveMaxTurns = normalizeTurns(maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
@@ -436,55 +397,10 @@ async function verifySingleBatch(
 function buildBatchVerificationPrompt(
   items: Array<{ finding: Finding; triageResult: TriageResult }>,
   repoName: string,
+  template?: string,
 ): string {
-  const findingSections = items.map((item, idx) => {
-    const { finding, triageResult } = item;
-    return [
-      `### Finding ${idx + 1}`,
-      `Scanner: ${finding.scanner}`,
-      `Rule: ${finding.ruleId}`,
-      `File: ${finding.filePath}:${finding.startLine}`,
-      `Severity: ${finding.severity}`,
-      `CWE: ${finding.cwe.join(", ") || "none"}`,
-      `Message: ${finding.message}`,
-      `Fingerprint: ${finding.fingerprint}`,
-      `Triage verdict: ${triageResult.verdict}`,
-      `Triage confidence: ${triageResult.confidence}`,
-      `Triage rationale: ${triageResult.rationale}`,
-      `Triage verification steps: ${triageResult.verificationSteps.join(" | ") || "none"}`,
-    ].join("\n");
-  });
-
-  return [
-    "You are a senior exploit engineer and penetration tester. Your job is to determine if",
-    "reported vulnerabilities are concretely exploitable in practice — not just theoretically possible.",
-    "You think like an attacker: you craft payloads, trace execution paths, and identify the exact",
-    "conditions needed for exploitation.",
-    "",
-    "Investigate ALL of the following findings and determine exploitability for each.",
-    "",
-    `Repo: ${repoName}`,
-    "",
-    `## Findings (${items.length} total)`,
-    "",
-    ...findingSections.flatMap((s) => [s, ""]),
-    "## Verification instructions",
-    "For each finding:",
-    "1. Trace attacker-controlled input sources to vulnerable sinks through real call paths.",
-    "2. Identify sanitization, encoding, validation, authz, feature flags, and reachability constraints.",
-    "3. Decide whether the issue is exploitable with a concrete input payload under realistic conditions.",
-    "4. If exploitable, provide a concise PoC payload and attack vector.",
-    "5. If not exploitable, explain precisely why.",
-    "6. List any preconditions required to reproduce impact.",
-    "",
-    "## Output requirements",
-    'Return ONLY a JSON object with a "results" array. Each element MUST have:',
-    "fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(string),",
-    "attack_vector(string|null), preconditions(string[]), confidence(0..1),",
-    "proof_level(1-4, optional), proof_verdict(optional), bypass_attempts(string[], optional)",
-    "",
-    `You must return exactly ${items.length} results, one per finding, using the exact fingerprints listed above.`,
-  ].join("\n");
+  const context = buildBatchVerifyContext(items, repoName);
+  return renderTemplate(template ?? BATCH_VERIFY_TEMPLATE, context as any);
 }
 
 function parseBatchVerificationOutput(

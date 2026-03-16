@@ -14,6 +14,7 @@ import type {
   ScannerId,
   SuppressionReason,
 } from "./scanners/types.js";
+import type { RunMetrics } from "./scoring/run-metrics.js";
 import { BATCH_TRIAGE_FALLBACK_RATIONALE } from "./triage.js";
 import { runMigrations, allMigrations } from "./migrations/index.js";
 import { safeJsonStringify, safeJsonParse } from "./utils/safe-json.js";
@@ -38,6 +39,9 @@ export interface PipelineRunRecord {
   totalCostUsd: number;
   completedAt: string | null;
   updatedAt: string;
+  metricsJson: string | null;
+  assertionsJson: string | null;
+  promptHash: string | null;
 }
 
 /** Initialize the SQLite database with the findings schema. */
@@ -908,6 +912,33 @@ export function updateRunCost(
   `).run(costUsd, runId);
 }
 
+/** Persist composite confidence result on a finding row. */
+export function updateFindingCompositeConfidence(
+  db: Database.Database,
+  fingerprint: string,
+  compositeConfidence: number,
+  signalsJson: string,
+): void {
+  db.prepare(`
+    UPDATE findings
+    SET composite_confidence = ?, confidence_signals_json = ?, updated_at = datetime('now')
+    WHERE fingerprint = ?
+  `).run(compositeConfidence, signalsJson, fingerprint);
+}
+
+/** Persist run metrics JSON for a pipeline run. */
+export function updateRunMetrics(
+  db: Database.Database,
+  runId: string,
+  metrics: RunMetrics,
+): void {
+  db.prepare(`
+    UPDATE pipeline_runs
+    SET metrics_json = ?, updated_at = datetime('now')
+    WHERE run_id = ?
+  `).run(safeJsonStringify(metrics), runId);
+}
+
 /** Persist verification result fields for an existing finding row. */
 export function updateVerificationResult(
   db: Database.Database,
@@ -1023,7 +1054,10 @@ export function getLatestResumableRun(
       context_json as contextJson,
       total_cost_usd as totalCostUsd,
       completed_at as completedAt,
-      updated_at as updatedAt
+      updated_at as updatedAt,
+      metrics_json as metricsJson,
+      assertions_json as assertionsJson,
+      prompt_hash as promptHash
     FROM pipeline_runs
     WHERE repo = ? AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing')
     ORDER BY started_at DESC, rowid DESC
@@ -1050,11 +1084,108 @@ export function getRun(
       context_json as contextJson,
       total_cost_usd as totalCostUsd,
       completed_at as completedAt,
-      updated_at as updatedAt
+      updated_at as updatedAt,
+      metrics_json as metricsJson,
+      assertions_json as assertionsJson,
+      prompt_hash as promptHash
     FROM pipeline_runs
     WHERE run_id = ?
     LIMIT 1
   `).get(runId) as PipelineRunRecord | undefined;
 
   return row;
+}
+
+/** Save assertion results for a finding in a specific run. */
+export function saveAssertionResults(
+  db: Database.Database,
+  runId: string,
+  fingerprint: string,
+  assertions: Array<{ name: string; passed: boolean; score: number; weight: number; reason: string }>,
+): void {
+  const stmt = db.prepare(`
+    INSERT INTO finding_assertions (run_id, fingerprint, assertion_name, passed, score, weight, reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertAll = db.transaction(() => {
+    for (const a of assertions) {
+      stmt.run(runId, fingerprint, a.name, a.passed ? 1 : 0, a.score, a.weight, a.reason);
+    }
+  });
+  insertAll();
+}
+
+/** Get assertion results for a specific run. */
+export function getRunAssertions(
+  db: Database.Database,
+  runId: string,
+): Array<{ fingerprint: string; assertionName: string; passed: boolean; score: number; weight: number; reason: string }> {
+  const rows = db.prepare(`
+    SELECT fingerprint, assertion_name as assertionName, passed, score, weight, reason
+    FROM finding_assertions
+    WHERE run_id = ?
+  `).all(runId) as Array<{ fingerprint: string; assertionName: string; passed: number; score: number; weight: number; reason: string }>;
+
+  return rows.map((row) => ({
+    ...row,
+    passed: row.passed === 1,
+  }));
+}
+
+/** Update prompt hash for a pipeline run. */
+export function updatePromptHash(
+  db: Database.Database,
+  runId: string,
+  promptHash: string,
+): void {
+  db.prepare(`
+    UPDATE pipeline_runs SET prompt_hash = ?, updated_at = datetime('now') WHERE run_id = ?
+  `).run(promptHash, runId);
+}
+
+/** Update assertions JSON summary for a pipeline run. */
+export function updateRunAssertions(
+  db: Database.Database,
+  runId: string,
+  assertionsJson: string,
+): void {
+  db.prepare(`
+    UPDATE pipeline_runs SET assertions_json = ?, updated_at = datetime('now') WHERE run_id = ?
+  `).run(assertionsJson, runId);
+}
+
+/**
+ * Get previously-triaged TP findings in the specified files.
+ * Used by regression detection to check if a diff re-introduces a fixed vulnerability.
+ */
+export function getFixedFindingsForFiles(
+  db: Database.Database,
+  filePaths: string[],
+): Array<{ fingerprint: string; ruleId: string; filePath: string; startLine: number; message: string; verdict: string }> {
+  if (filePaths.length === 0) return [];
+
+  const placeholders = filePaths.map(() => "?").join(", ");
+  const rows = db.prepare(`
+    SELECT fingerprint, rule_id, file_path, start_line, message, verdict
+    FROM findings
+    WHERE file_path IN (${placeholders})
+      AND verdict = 'tp'
+    ORDER BY updated_at DESC
+  `).all(...filePaths) as Array<{
+    fingerprint: string;
+    rule_id: string;
+    file_path: string;
+    start_line: number;
+    message: string;
+    verdict: string;
+  }>;
+
+  return rows.map((row) => ({
+    fingerprint: row.fingerprint,
+    ruleId: row.rule_id,
+    filePath: row.file_path,
+    startLine: row.start_line,
+    message: row.message,
+    verdict: row.verdict,
+  }));
 }

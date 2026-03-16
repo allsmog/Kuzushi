@@ -38,10 +38,18 @@ describe("agent runtime", () => {
     expect(getAgentRuntime().id).toBe("pi-ai");
   });
 
-  it("throws for acp backend until adapter is implemented", () => {
+  it("throws for acp backend when adapter command is missing", () => {
     expect(() => configureAgentRuntime(makeConfig({
       agentRuntimeBackend: "acp",
-    }))).toThrow("agentRuntimeBackend=acp is not available yet");
+    }))).toThrow("agentRuntimeBackend=acp requires acpAdapterCommand");
+  });
+
+  it("configures acp backend with adapter command", () => {
+    const runtime = configureAgentRuntime(makeConfig({
+      agentRuntimeBackend: "acp",
+      acpAdapterCommand: "echo test",
+    }));
+    expect(runtime.id).toBe("acp");
   });
 
   it("allows tests/extensions to inject a custom runtime", () => {

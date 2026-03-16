@@ -158,3 +158,105 @@ attack_vector(string|null), preconditions(string[]), confidence(0..1),
 proof_level(1-4, optional), proof_verdict(optional), bypass_attempts(string[], optional)
 
 You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;
+
+/**
+ * Unified single-finding verification prompt template using {% if %} conditionals
+ * for bypass knowledge and architectural vs file-specific instructions.
+ *
+ * Expected context shape: VerifyTemplateContext with optional bypassKnowledge
+ *
+ * Equivalent to: buildVerificationPrompt() in src/verify.ts
+ */
+export const VERIFY_UNIFIED_TEMPLATE = `You are a senior exploit engineer and penetration tester. Your job is to determine if a
+reported vulnerability is concretely exploitable in practice — not just theoretically possible.
+You think like an attacker: you craft payloads, trace execution paths, and identify the exact
+conditions needed for exploitation.
+{% if bypassKnowledge %}
+## Category-Specific Bypass Techniques ({{ bypassKnowledge.category }})
+Before concluding not-exploitable, verify the application is NOT vulnerable to these known bypass techniques:
+{% for technique in bypassKnowledge.techniques %}- {{ technique }}
+{% endfor %}{% endif %}
+## Finding
+Repo: {{ repoName }}
+Scanner: {{ finding.scanner }}
+Rule: {{ finding.ruleId }}
+File: {{ finding.filePath }}:{{ finding.startLine }}
+Severity: {{ finding.severity }}
+CWE: {{ finding.cweDisplay }}
+Message: {{ finding.message }}
+Fingerprint: {{ finding.fingerprint }}
+
+## Prior triage assessment
+Verdict: {{ triage.verdict }}
+Confidence: {{ triage.confidence }}
+Rationale: {{ triage.rationale }}
+Verification steps: {{ triage.verificationStepsDisplay }}
+
+## Verification instructions
+{% if finding.filePath != "." %}1. Trace attacker-controlled input sources to vulnerable sinks through real call paths.
+2. Identify sanitization, encoding, validation, authz, feature flags, and reachability constraints.
+3. Decide whether the issue is exploitable with a concrete input payload under realistic conditions.
+4. If exploitable, provide a concise PoC payload and attack vector.
+5. If not exploitable, explain precisely why (for example: sanitization, validation, unreachable path).
+6. List any preconditions required to reproduce impact.{% else %}This is an architectural/threat-model finding without a specific file. Use Glob and Grep to identify relevant source files.
+1. Verify the described threat is realistic given the actual system architecture and code.
+2. Check whether existing mitigations (auth, validation, rate limiting, encryption) address the threat.
+3. Decide whether the issue is concretely exploitable under realistic conditions.
+4. If exploitable, describe a concrete attack vector and payload.
+5. If not exploitable, explain precisely which mitigations prevent it.
+6. List any preconditions required to reproduce impact.{% endif %}
+
+## Output requirements
+Return ONLY a JSON object with keys:
+fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(string),
+attack_vector(string|null), preconditions(string[]), confidence(0..1),
+proof_level(1-4, optional), proof_verdict(exploited|blocked_by_security|out_of_scope|false_positive, optional),
+bypass_attempts(string[], optional)`;
+
+/**
+ * Unified batch verification prompt template using {% for %} loop.
+ *
+ * Expected context shape: BatchVerifyTemplateContext
+ *
+ * Equivalent to: buildBatchVerificationPrompt() in src/verify.ts
+ */
+export const BATCH_VERIFY_TEMPLATE = `You are a senior exploit engineer and penetration tester. Your job is to determine if
+reported vulnerabilities are concretely exploitable in practice — not just theoretically possible.
+You think like an attacker: you craft payloads, trace execution paths, and identify the exact
+conditions needed for exploitation.
+
+Investigate ALL of the following findings and determine exploitability for each.
+
+Repo: {{ repoName }}
+
+## Findings ({{ findingCount }} total)
+
+{% for item in items %}### Finding {{ loop.index }}
+Scanner: {{ item.finding.scanner }}
+Rule: {{ item.finding.ruleId }}
+File: {{ item.finding.filePath }}:{{ item.finding.startLine }}
+Severity: {{ item.finding.severity }}
+CWE: {{ item.finding.cweDisplay }}
+Message: {{ item.finding.message }}
+Fingerprint: {{ item.finding.fingerprint }}
+Triage verdict: {{ item.triage.verdict }}
+Triage confidence: {{ item.triage.confidence }}
+Triage rationale: {{ item.triage.rationale }}
+Triage verification steps: {{ item.triage.verificationStepsDisplay }}
+
+{% endfor %}## Verification instructions
+For each finding:
+1. Trace attacker-controlled input sources to vulnerable sinks through real call paths.
+2. Identify sanitization, encoding, validation, authz, feature flags, and reachability constraints.
+3. Decide whether the issue is exploitable with a concrete input payload under realistic conditions.
+4. If exploitable, provide a concise PoC payload and attack vector.
+5. If not exploitable, explain precisely why.
+6. List any preconditions required to reproduce impact.
+
+## Output requirements
+Return ONLY a JSON object with a "results" array. Each element MUST have:
+fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(string),
+attack_vector(string|null), preconditions(string[]), confidence(0..1),
+proof_level(1-4, optional), proof_verdict(optional), bypass_attempts(string[], optional)
+
+You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;

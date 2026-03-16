@@ -1,12 +1,33 @@
-import type { AgentTask } from "./types.js";
+import type { AgentTask, TaskOutputKind } from "./types.js";
+import type { TaskManifest } from "./task-manifest.js";
 import { normalizeTaskCapabilityIds } from "../capabilities.js";
+
+/** Summary info returned by TaskRegistry.list(). */
+export interface TaskInfo {
+  id: string;
+  displayName: string;
+  outputKind: TaskOutputKind;
+  dependsOn: string[];
+  manifest?: TaskManifest;
+}
 
 /** Registry and DAG resolver for generic agent tasks. */
 export class TaskRegistry {
   private readonly tasks = new Map<string, AgentTask>();
+  private readonly manifests = new Map<string, TaskManifest>();
 
   register(task: AgentTask): void {
     this.tasks.set(task.id, task);
+  }
+
+  /** Associate a manifest with a task ID. */
+  setManifest(taskId: string, manifest: TaskManifest): void {
+    this.manifests.set(taskId, manifest);
+  }
+
+  /** Get the manifest for a task, if any. */
+  getManifest(taskId: string): TaskManifest | undefined {
+    return this.manifests.get(taskId);
   }
 
   get(id: string): AgentTask {
@@ -23,6 +44,17 @@ export class TaskRegistry {
 
   ids(): string[] {
     return [...this.tasks.keys()];
+  }
+
+  /** List all registered tasks with their metadata and optional manifests. */
+  list(): TaskInfo[] {
+    return [...this.tasks.values()].map((task) => ({
+      id: task.id,
+      displayName: task.displayName,
+      outputKind: task.outputKind,
+      dependsOn: [...task.dependsOn],
+      manifest: this.manifests.get(task.id),
+    }));
   }
 
   /** Validate all dependsOn references exist. */

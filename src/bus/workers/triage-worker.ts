@@ -9,16 +9,27 @@ import { triageFindingWithAgent, triageFindingsBatch, BATCH_TRIAGE_FALLBACK_RATI
 import type { KuzushiConfig } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
+import { runTriageAssertions, computeTriageQualityScore } from "../../scoring/triage-assertions.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
 import { triageFindingMultiAgent } from "../../multi-agent-triage.js";
 import {
   computeCalibratedConfidence,
   extractRuleFamily,
+  formatCalibrationWeightsForPrompt,
   loadCalibrationWeights,
   updateFindingCalibration,
 } from "../../confidence-calibration.js";
-import { evidenceChainModule } from "../../prompts/modules.js";
+import { getBypassKnowledge, formatBypassForPrompt } from "../../bypass-knowledge.js";
+import { formatPrecedentsForPrompt, type Precedents } from "../../precedents.js";
+import type { KnowledgeRegistry } from "../../knowledge/types.js";
+import { evidenceChainModule, knowledgeInjectionModule } from "../../prompts/modules.js";
+import {
+  extractScannerSignal,
+  extractTriageSignal,
+  computeCompositeConfidence,
+  type CompositeConfidenceResult,
+} from "../../scoring/composite-confidence.js";
 import {
   TrajectoryCollector,
   formatTrajectoriesForPrompt,
@@ -26,6 +37,9 @@ import {
   saveTrajectory,
   summarizeTrajectory,
 } from "../../trajectory-memory.js";
+import type { PipelineHookChain } from "../../hooks/chain.js";
+import type { HookContext } from "../../hooks/types.js";
+import { resolveTemplates } from "../../prompts/loader.js";
 
 export interface TriageWorkerDeps {
   registry: ScannerRegistry;
@@ -33,6 +47,13 @@ export interface TriageWorkerDeps {
   config: KuzushiConfig;
   /** Optional database handle for trajectory memory and calibration features. */
   db?: Database.Database;
+  /** Optional knowledge registry for domain-specific triage prompt enrichment. */
+  knowledgeRegistry?: KnowledgeRegistry;
+  /**
+   * Optional function that resolves the pipeline hook chain for a given run.
+   * Returns undefined if no hooks are configured for this run.
+   */
+  getRunHooks?: (runId: string) => { hookChain: PipelineHookChain; hookContext: HookContext } | undefined;
 }
 
 /**
@@ -40,14 +61,50 @@ export interface TriageWorkerDeps {
  */
 export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): void {
   const triageConfigProvider = createTriageConfigProvider(deps.registry, deps.taskRegistry);
+  const resolvedTemplates = resolveTemplates(deps.config);
   const useMultiAgent = deps.config.triageStrategy === "multi-agent";
   const useTrajectoryMemory = deps.config.trajectoryMemory === true && deps.db != null;
   const useCalibration = deps.config.confidenceCalibration === true && deps.db != null;
 
   bus.subscribe<TriageFindingQueuedEvent>("triage:finding-queued", async (event) => {
-    const { context, finding, repoContext, enrichedContext, index, total } = event.payload;
+    const { context, repoContext, enrichedContext, index, total } = event.payload;
+    let finding = event.payload.finding;
     const runId = event.meta.runId;
     let attempts = 0;
+
+    // Invoke beforeTriage hook — allows hooks to modify or skip the finding
+    const runHooks = deps.getRunHooks?.(runId);
+    if (runHooks) {
+      try {
+        const hookResult = await runHooks.hookChain.beforeTriage(runHooks.hookContext, finding);
+        if (hookResult === null) {
+          // Hook requested to skip this finding
+          console.error(`[hooks] beforeTriage hook skipped finding ${finding.fingerprint}`);
+          await bus.publish(
+            createEvent("triage:result", runId, {
+              context,
+              finding,
+              result: {
+                fingerprint: finding.fingerprint,
+                verdict: "fp" as const,
+                confidence: 1,
+                rationale: "Skipped by pipeline hook (beforeTriage returned null)",
+                verificationSteps: [],
+                fixPatch: null,
+              },
+              costUsd: 0,
+              attempts: 0,
+              index,
+              total,
+            }),
+          );
+          return;
+        }
+        finding = hookResult;
+      } catch (error) {
+        console.error(`[hooks] beforeTriage hook error: ${toErrorMessage(error)}`);
+      }
+    }
 
     try {
       const { result, costUsd } = await withRetry(
@@ -75,6 +132,55 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           // Confidence calibration: inject evidence chain instructions
           if (useCalibration) {
             extraSections.push(evidenceChainModule());
+          }
+
+          // 1A: Knowledge registry — inject CWE-specific domain knowledge
+          if (deps.knowledgeRegistry) {
+            const modules = deps.knowledgeRegistry.query({ cwes: finding.cwe });
+            if (modules.length > 0) {
+              const sections = deps.knowledgeRegistry.formatForPrompt(modules);
+              const knowledgeSection = knowledgeInjectionModule(sections);
+              if (knowledgeSection) {
+                extraSections.push(knowledgeSection);
+              }
+            }
+          }
+
+          // 1B: Bypass knowledge — inject CWE-specific bypass techniques
+          {
+            const bypassEntry = getBypassKnowledge(finding.cwe, finding.ruleId);
+            if (bypassEntry) {
+              const bypassLines = formatBypassForPrompt(bypassEntry);
+              extraSections.push(
+                bypassLines.join("\n") +
+                "\n\nBefore concluding FP, verify that these bypass techniques don't apply.",
+              );
+            }
+          }
+
+          // 1C: Precedents — inject org-specific architectural facts and signal criteria
+          {
+            const precedents = event.payload.precedents as Precedents | undefined;
+            if (precedents) {
+              const precedentLines = formatPrecedentsForPrompt(precedents);
+              if (precedentLines.length > 0) {
+                extraSections.push(precedentLines.join("\n"));
+              }
+            }
+          }
+
+          // 1F: Calibration weights — inject learned investigation priorities
+          if (useCalibration && deps.db) {
+            try {
+              const ruleFamily = extractRuleFamily(finding.ruleId);
+              const weights = loadCalibrationWeights(deps.db, ruleFamily);
+              const formatted = formatCalibrationWeightsForPrompt(weights);
+              if (formatted) {
+                extraSections.push(formatted);
+              }
+            } catch {
+              // Non-fatal: calibration weight formatting failure shouldn't break triage
+            }
           }
 
           const extraPromptContext = extraSections.length > 0
@@ -126,6 +232,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
                 activityCallback,
                 enrichedContext: coerceContextEnrichment(enrichedContext),
               },
+              extraPromptContext,
             );
           } else {
             triageOutput = await triageFindingWithAgent(
@@ -141,6 +248,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
                 enrichedContext: coerceContextEnrichment(enrichedContext),
               },
               extraPromptContext,
+              resolvedTemplates.triage,
             );
           }
 
@@ -187,6 +295,14 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             }
           }
 
+          // Compute composite confidence from scanner + triage signals
+          {
+            const scannerSignal = extractScannerSignal(finding);
+            const triageSignal = extractTriageSignal(triageOutput.result.confidence);
+            const composite = computeCompositeConfidence([scannerSignal, triageSignal]);
+            triageOutput.result.compositeConfidence = composite.composite;
+          }
+
           return triageOutput;
         },
         {
@@ -196,6 +312,23 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
         },
       );
       result.triageCostUsd = costUsd;
+
+      // Invoke afterTriage hook — allows hooks to override verdict/confidence
+      const afterRunHooks = deps.getRunHooks?.(runId);
+      if (afterRunHooks) {
+        try {
+          const hookResult = await afterRunHooks.hookChain.afterTriage(
+            afterRunHooks.hookContext,
+            finding,
+            { verdict: result.verdict, confidence: result.confidence, rationale: result.rationale },
+          );
+          result.verdict = hookResult.verdict as typeof result.verdict;
+          result.confidence = hookResult.confidence;
+          result.rationale = hookResult.rationale;
+        } catch (error) {
+          console.error(`[hooks] afterTriage hook error: ${toErrorMessage(error)}`);
+        }
+      }
 
       await bus.publish(
         createEvent("triage:result", runId, {
@@ -208,6 +341,38 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           total,
         }),
       );
+
+      // Run triage quality assertions
+      if (deps.config.triageAssertions?.enabled !== false) {
+        try {
+          const assertions = runTriageAssertions(
+            {
+              verdict: result.verdict,
+              confidence: result.confidence,
+              rationale: result.rationale,
+              verificationSteps: result.verificationSteps,
+            },
+            deps.config.triageAssertions,
+          );
+          const qualityScore = computeTriageQualityScore(assertions);
+          await bus.publish(
+            createEvent("triage:assertions", runId, {
+              context,
+              fingerprint: finding.fingerprint,
+              assertions: assertions.map(a => ({
+                name: a.name,
+                passed: a.passed,
+                score: a.score,
+                weight: a.weight,
+                reason: a.reason,
+              })),
+              qualityScore,
+            }),
+          );
+        } catch {
+          // Non-fatal: assertion failures shouldn't break triage
+        }
+      }
     } catch (error) {
       const costUsd = getErrorCostUsd(error);
       await bus.publish(
@@ -255,6 +420,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
         },
         deps.config.triageBatchSize,
         deps.config.triageMaxTurns,
+        resolvedTemplates.triage,
       );
 
       const perFindingCost = findings.length > 0 ? costUsd / findings.length : 0;
