@@ -14,6 +14,7 @@ import {
 } from "../errors.js";
 import type { AgentRuntimeConfig } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { getRateLimitRegistry } from "../scheduler/index.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
@@ -63,6 +64,53 @@ export function isTransientError(error: unknown): boolean {
 
 function isTransientErrorMessage(errorMessage: string): boolean {
   return isTransientError(new Error(errorMessage));
+}
+
+/** Check whether an error (thrown or soft) indicates a rate-limit (429) specifically. */
+function isRateLimitError(error: unknown): boolean {
+  const message = typeof error === "string" ? error : toErrorMessage(error);
+  return message.includes("429");
+}
+
+/**
+ * Call `complete()` with rate-limit gating.
+ *
+ * Acquires a concurrency slot from the global `RateLimitRegistry` before
+ * invoking the LLM, and releases it afterward with the appropriate
+ * success/failure signal so adaptive concurrency can adjust.
+ */
+async function rateLimitedComplete(
+  modelSpec: string,
+  model: Parameters<typeof complete>[0],
+  context: PiAiContext,
+  options: { signal?: AbortSignal },
+): Promise<PiAiAssistantMessage> {
+  const registry = getRateLimitRegistry();
+  // acquire() returns a safety-net release function, but we call
+  // registry.release() explicitly so we can pass the success flag.
+  // We intentionally ignore the returned function to avoid double-release.
+  await registry.acquire(modelSpec);
+  let success = true;
+
+  try {
+    const result = await complete(model, context, options);
+
+    // Detect rate-limit soft errors returned by pi-ai.
+    if (
+      result.stopReason === "error"
+      && result.errorMessage
+      && isRateLimitError(result.errorMessage)
+    ) {
+      success = false;
+    }
+
+    return result;
+  } catch (error) {
+    success = !isRateLimitError(error);
+    throw error;
+  } finally {
+    registry.release(modelSpec, success);
+  }
 }
 
 async function retryTransient<T>(
@@ -136,7 +184,8 @@ export class PiAiAgentRuntime implements AgentRuntime {
     const truncatedTextParts: string[] = [];
 
     try {
-      const model = resolveModel(request.options.model, this.runtimeConfig?.baseUrl);
+      const modelSpec = request.options.model;
+      const model = resolveModel(modelSpec, this.runtimeConfig?.baseUrl);
       const enabledTools = resolveEnabledTools(
         request.options.allowedTools,
         request.options.disallowedTools,
@@ -168,7 +217,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
         }
 
         let assistant = await retryTransient(
-          () => complete(model, context, { signal }),
+          () => rateLimitedComplete(modelSpec, model, context, { signal }),
           signal,
         );
 
@@ -197,7 +246,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
               }
             });
             if (signal?.aborted) break;
-            assistant = await complete(model, context, { signal });
+            assistant = await rateLimitedComplete(modelSpec, model, context, { signal });
             if (assistant.stopReason !== "error" || !assistant.errorMessage || !isTransientErrorMessage(assistant.errorMessage)) {
               retried = true;
               break;
