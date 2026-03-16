@@ -4,6 +4,7 @@ import type { KnowledgeRegistry } from "../../knowledge/types.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { ScannerConfig, ScannerId } from "../../scanners/types.js";
 import type { KuzushiConfig } from "../../types.js";
+import { resolveScannerConfig } from "../../capabilities.js";
 import { loadSecurityProfiles } from "../../security-profiles.js";
 import { toErrorMessage } from "../../utils.js";
 import { executeAgentTask, executeScannerPlugin } from "../task-execution.js";
@@ -220,9 +221,5 @@ async function runSingleScanner(
 }
 
 function resolveTaskConfig(config: KuzushiConfig, taskId: string): ScannerConfig {
-  const raw = config.scannerConfig[taskId];
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    return raw;
-  }
-  return {};
+  return resolveScannerConfig(config, taskId);
 }

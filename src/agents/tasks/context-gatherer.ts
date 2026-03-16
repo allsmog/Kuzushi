@@ -93,6 +93,7 @@ async function gatherFromPackageJson(repoRoot: string, out: MutableRepoContext):
   maybeAdd(out.frameworks, depNames, ["express"], "Express");
   maybeAdd(out.frameworks, depNames, ["react"], "React");
   maybeAdd(out.frameworks, depNames, ["@nestjs/core"], "NestJS");
+  maybeAdd(out.frameworks, depNames, ["graphql", "@apollo/server", "apollo-server", "mercurius"], "GraphQL");
 
   maybeAdd(out.authPatterns, depNames, ["jsonwebtoken", "jose", "passport-jwt"], "JWT");
   maybeAdd(out.authPatterns, depNames, ["express-session", "iron-session"], "session-based");
@@ -173,6 +174,9 @@ async function gatherFromPython(repoRoot: string, out: MutableRepoContext): Prom
   }
   if (combined.includes("fastapi")) {
     out.frameworks.add("FastAPI");
+  }
+  if (combined.includes("graphene") || combined.includes("ariadne")) {
+    out.frameworks.add("GraphQL");
   }
 
   if (combined.includes("pyjwt") || combined.includes("jwt")) {

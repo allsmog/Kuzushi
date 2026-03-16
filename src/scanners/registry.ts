@@ -1,15 +1,7 @@
 import type { KuzushiConfig, ScanOpts } from "../types.js";
+import { isKnownScannerSelectionId } from "../capabilities.js";
 import { isRecord } from "../utils.js";
 import type { Finding, ScannerConfig, ScannerId, ScannerPlugin } from "./types.js";
-
-const NON_PLUGIN_SCANNER_ALIASES = new Set([
-  "taint-analysis",
-  "crypto-misuse",
-  "auth-access",
-  "race-condition",
-  "invariant-analysis",
-  "threat-model",
-]);
 
 /** Registry and orchestrator for scanner plugins (throws/waza). */
 export class ScannerRegistry {
@@ -45,7 +37,7 @@ export class ScannerRegistry {
         .map((id) => id.trim())
         .filter(Boolean))];
 
-      const unknown = normalized.filter((id) => !this.has(id) && !NON_PLUGIN_SCANNER_ALIASES.has(id));
+      const unknown = normalized.filter((id) => !this.has(id) && !isKnownScannerSelectionId(id));
       if (unknown.length > 0) {
         throw new Error(`Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`);
       }
@@ -65,7 +57,7 @@ export class ScannerRegistry {
       throw new Error("At least one scanner must be configured.");
     }
 
-    const unknown = normalized.filter((id) => !this.has(id) && !NON_PLUGIN_SCANNER_ALIASES.has(id));
+    const unknown = normalized.filter((id) => !this.has(id) && !isKnownScannerSelectionId(id));
     if (unknown.length > 0) {
       throw new Error(`Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`);
     }

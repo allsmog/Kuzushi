@@ -24,8 +24,9 @@ const { values: args } = parseArgs({
     baseline: { type: "string", default: "benchmarks/baseline.json" },
     results: { type: "string" },
     "update-baseline": { type: "boolean", default: false },
-    "precision-threshold": { type: "string", default: "0.05" },
+    "precision-threshold": { type: "string", default: "0.03" },
     "recall-threshold": { type: "string", default: "0.03" },
+    "cost-threshold": { type: "string", default: "0.25" },
     help: { type: "boolean", short: "h", default: false },
   },
   strict: true,
@@ -42,8 +43,9 @@ ${chalk.yellow("Options:")}
   --baseline <path>              Path to baseline JSON (default: benchmarks/baseline.json)
   --results <path,...>           Comma-separated paths to metrics JSON files (from harness.ts)
   --update-baseline              Update the baseline file on success
-  --precision-threshold <n>      Max precision drop allowed (default: 0.05 = 5%)
+  --precision-threshold <n>      Max precision drop allowed (default: 0.03 = 3%)
   --recall-threshold <n>         Max recall drop allowed (default: 0.03 = 3%)
+  --cost-threshold <n>           Max cost increase allowed unless TP count improves (default: 0.25 = 25%)
   -h, --help                     Show this help
 `);
   process.exit(0);
@@ -54,8 +56,9 @@ if (!args.results) {
   process.exit(1);
 }
 
-const PRECISION_THRESHOLD = parseFloat(args["precision-threshold"] ?? "0.05");
+const PRECISION_THRESHOLD = parseFloat(args["precision-threshold"] ?? "0.03");
 const RECALL_THRESHOLD = parseFloat(args["recall-threshold"] ?? "0.03");
+const COST_THRESHOLD = parseFloat(args["cost-threshold"] ?? "0.25");
 const baselinePath = resolve(args.baseline ?? "benchmarks/baseline.json");
 const resultPaths = args.results.split(",").map((p) => resolve(p.trim()));
 
@@ -85,8 +88,10 @@ interface RegressionResult {
   precisionDelta: number;
   recallDelta: number;
   f1Delta: number;
+  costDeltaRatio: number;
   precisionFail: boolean;
   recallFail: boolean;
+  costFail: boolean;
   cweWarnings: string[];
   before: BenchmarkMetrics | null;
   after: BenchmarkMetrics;
@@ -104,8 +109,10 @@ function compareDataset(
       precisionDelta: 0,
       recallDelta: 0,
       f1Delta: 0,
+      costDeltaRatio: 0,
       precisionFail: false,
       recallFail: false,
+      costFail: false,
       cweWarnings: [],
       before: null,
       after: current,
@@ -117,9 +124,15 @@ function compareDataset(
   const precisionDelta = roundDelta(current.precision - baseline.precision);
   const recallDelta = roundDelta(current.recall - baseline.recall);
   const f1Delta = roundDelta(current.f1 - baseline.f1);
+  const costDeltaRatio = baseline.costUsd > 0
+    ? roundDelta((current.costUsd - baseline.costUsd) / baseline.costUsd)
+    : 0;
 
   const precisionFail = precisionDelta < -PRECISION_THRESHOLD;
   const recallFail = recallDelta < -RECALL_THRESHOLD;
+  const costFail = baseline.costUsd > 0
+    && costDeltaRatio > COST_THRESHOLD
+    && current.tp <= baseline.tp;
 
   // Per-CWE warnings: flag any CWE where precision or recall dropped by more
   // than double the aggregate thresholds (significant per-CWE regression).
@@ -149,12 +162,14 @@ function compareDataset(
 
   return {
     dataset: current.dataset,
-    passed: !precisionFail && !recallFail,
+    passed: !precisionFail && !recallFail && !costFail,
     precisionDelta,
     recallDelta,
     f1Delta,
+    costDeltaRatio,
     precisionFail,
     recallFail,
+    costFail,
     cweWarnings,
     before: baseline,
     after: current,
@@ -186,6 +201,19 @@ function colorDelta(delta: number, threshold: number): string {
   return chalk.dim(text);
 }
 
+function formatCostDelta(deltaRatio: number): string {
+  const sign = deltaRatio >= 0 ? "+" : "";
+  return `${sign}${(deltaRatio * 100).toFixed(1)}%`;
+}
+
+function colorCostDelta(deltaRatio: number, threshold: number, failed: boolean): string {
+  const text = formatCostDelta(deltaRatio);
+  if (failed) return chalk.red(text);
+  if (deltaRatio > threshold) return chalk.yellow(text);
+  if (deltaRatio > 0) return chalk.green(text);
+  return chalk.dim(text);
+}
+
 // ── Table rendering ──
 
 function printComparisonTable(results: RegressionResult[]): void {
@@ -193,7 +221,7 @@ function printComparisonTable(results: RegressionResult[]): void {
   console.log(chalk.bold.underline("Regression Check Results"));
   console.log();
 
-  const headers = ["Dataset", "Precision (before)", "Precision (after)", "Prec Delta", "Recall (before)", "Recall (after)", "Rec Delta", "F1 Delta", "Status"];
+  const headers = ["Dataset", "Precision (before)", "Precision (after)", "Prec Delta", "Recall (before)", "Recall (after)", "Rec Delta", "Cost Delta", "F1 Delta", "Status"];
   const rows: string[][] = [];
 
   for (const r of results) {
@@ -204,6 +232,9 @@ function printComparisonTable(results: RegressionResult[]): void {
     const recBefore = r.before ? formatPct(r.before.recall) : chalk.dim("n/a");
     const recAfter = formatPct(r.after.recall);
     const recDelta = r.before ? colorDelta(r.recallDelta, RECALL_THRESHOLD) : chalk.dim("new");
+    const costDelta = r.before
+      ? colorCostDelta(r.costDeltaRatio, COST_THRESHOLD, r.costFail)
+      : chalk.dim("new");
 
     const f1Delta = r.before ? colorDelta(r.f1Delta, 0) : chalk.dim("new");
 
@@ -216,10 +247,11 @@ function printComparisonTable(results: RegressionResult[]): void {
       const reasons: string[] = [];
       if (r.precisionFail) reasons.push("precision");
       if (r.recallFail) reasons.push("recall");
+      if (r.costFail) reasons.push("cost");
       status = chalk.red(`FAIL (${reasons.join(", ")})`);
     }
 
-    rows.push([r.dataset, precBefore, precAfter, precDelta, recBefore, recAfter, recDelta, f1Delta, status]);
+    rows.push([r.dataset, precBefore, precAfter, precDelta, recBefore, recAfter, recDelta, costDelta, f1Delta, status]);
   }
 
   printTable(headers, rows);
@@ -274,6 +306,7 @@ function main(): void {
   console.log(`  Results: ${resultPaths.join(", ")}`);
   console.log(`  Precision threshold: ${formatPct(PRECISION_THRESHOLD)} drop`);
   console.log(`  Recall threshold: ${formatPct(RECALL_THRESHOLD)} drop`);
+  console.log(`  Cost threshold: ${(COST_THRESHOLD * 100).toFixed(1)}% increase unless TP count improves`);
 
   const baseline = loadBaseline(baselinePath);
   const metricsFiles = resultPaths.map(loadMetrics);
@@ -310,6 +343,14 @@ function main(): void {
           chalk.red(
             `  ${f.dataset}: recall dropped ${formatDelta(f.recallDelta)} ` +
             `(threshold: ${formatPct(RECALL_THRESHOLD)})`,
+          ),
+        );
+      }
+      if (f.costFail) {
+        console.log(
+          chalk.red(
+            `  ${f.dataset}: cost increased ${formatCostDelta(f.costDeltaRatio)} ` +
+            `without TP improvement (threshold: ${(COST_THRESHOLD * 100).toFixed(1)}%)`,
           ),
         );
       }

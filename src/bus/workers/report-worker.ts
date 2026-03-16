@@ -9,6 +9,9 @@ import {
 } from "../../report.js";
 import { generateMarkdownReport } from "../../report-markdown.js";
 import { generateSarifReport } from "../../report-sarif.js";
+import { writeJsonReport } from "../../report-json.js";
+import { writeCsvReport } from "../../report-csv.js";
+import { writeJsonlReport } from "../../report-jsonl.js";
 import type { KuzushiConfig } from "../../types.js";
 import type {
   PipelineStartEvent,
@@ -284,6 +287,51 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
       );
       writeFileSync(deps.config.sarifOutput, sarif, "utf-8");
       console.log(`  SARIF report written to ${deps.config.sarifOutput}`);
+    }
+
+    if (deps.config.jsonOutput) {
+      const outputDir = path.dirname(deps.config.jsonOutput);
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+      writeJsonReport(
+        deps.config.jsonOutput,
+        deps.db,
+        event.payload.context.repoName,
+        event.payload.stats ?? {},
+        event.payload.exploitChains ?? [],
+        deps.config.scanMode,
+        event.payload.fingerprints,
+      );
+      console.log(`  JSON report written to ${deps.config.jsonOutput}`);
+    }
+
+    if (deps.config.csvOutput) {
+      const outputDir = path.dirname(deps.config.csvOutput);
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+      writeCsvReport(
+        deps.config.csvOutput,
+        deps.db,
+        event.payload.context.repoName,
+        event.payload.fingerprints,
+      );
+      console.log(`  CSV report written to ${deps.config.csvOutput}`);
+    }
+
+    if (deps.config.jsonlOutput) {
+      const outputDir = path.dirname(deps.config.jsonlOutput);
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+      writeJsonlReport(
+        deps.config.jsonlOutput,
+        deps.db,
+        event.payload.context.repoName,
+        event.payload.fingerprints,
+      );
+      console.log(`  JSONL report written to ${deps.config.jsonlOutput}`);
     }
 
     await bus.publish(

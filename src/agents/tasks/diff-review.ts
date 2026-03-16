@@ -8,8 +8,11 @@ import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
+import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+
+const log = createLogger({ stage: "diff-review" });
 
 const DIFF_REVIEW_SCHEMA = {
   type: "object",
@@ -253,23 +256,23 @@ export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
     const profileLines = formatProfilesForPrompt(profiles);
 
     const tag = "[diff-review]";
-    console.error(`${tag} Getting diff ${diffBase}...HEAD`);
+    log.info(`Getting diff ${diffBase}...HEAD`);
 
     let changedFiles: string[];
     let diff: string;
     try {
       ({ changedFiles, diff } = getDiffContent(context.repoRoot, diffBase));
     } catch (error) {
-      console.error(`${tag} ${toErrorMessage(error)}`);
+      log.error(toErrorMessage(error));
       return [];
     }
 
     if (changedFiles.length === 0) {
-      console.error(`${tag} No changed files, skipping`);
+      log.info(`No changed files, skipping`);
       return [];
     }
 
-    console.error(`${tag} ${changedFiles.length} changed files, starting review (model=${model})`);
+    log.info(`${changedFiles.length} changed files, starting review (model=${model})`);
 
     const prompt = buildPrompt(repoContext, changedFiles, diff, diffBase, maxFindings, profileLines);
     const runtime = getAgentRuntime();

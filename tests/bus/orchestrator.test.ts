@@ -276,6 +276,85 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
+  it("builds the triage queue from clustered findings instead of the pre-dedup scan list", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const triageStartPromise = bus.waitFor<TriageStartEvent>(
+      "triage:start",
+      (event) => event.meta.runId === runId,
+    );
+    const batchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: makeConfig(),
+        scanOpts: { ...makeScanOpts(), fresh: true },
+      }),
+    );
+
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: {
+          ...makeFinding("fp-semgrep", 70),
+          filePath: "src/db.ts",
+          startLine: 44,
+          cwe: ["CWE-89"],
+        },
+        scannerId: "semgrep",
+      }),
+    );
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: {
+          ...makeFinding("fp-codeql", 90),
+          scanner: "codeql",
+          ruleId: "js/sql-injection",
+          filePath: "src/db.ts",
+          startLine: 44,
+          cwe: ["CWE-89"],
+        },
+        scannerId: "codeql",
+      }),
+    );
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 2,
+      }),
+    );
+
+    const triageStart = await triageStartPromise;
+    const batchQueued = await batchQueuedPromise;
+    expect(triageStart.payload.findingCount).toBe(1);
+    expect(batchQueued.payload.findings).toHaveLength(1);
+    expect(batchQueued.payload.findings[0].fingerprint).toBe("fp-codeql");
+
+    await bus.close();
+    db.close();
+  });
+
   it("accumulates triage costs into triage:complete and pipeline stats", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
@@ -1414,7 +1493,14 @@ describe("PipelineOrchestrator", () => {
     expect(triageStart.payload.findingCount).toBe(2);
 
     const run = getRun(db, resumeRunId);
-    expect(run?.findingsJson).toBe(JSON.stringify(checkpointFindings));
+    expect(run?.findingsJson).toBeDefined();
+    const persistedCheckpoint = JSON.parse(run!.findingsJson!);
+    expect(persistedCheckpoint).toHaveLength(2);
+    expect(persistedCheckpoint.map((finding: Finding) => finding.fingerprint)).toEqual([
+      "fp-first",
+      "fp-second",
+    ]);
+    expect(persistedCheckpoint.every((finding: Finding) => typeof finding.adjustedScore === "number")).toBe(true);
 
     await bus.close();
     db.close();
@@ -1630,6 +1716,243 @@ describe("PipelineOrchestrator", () => {
       frameworks: ["Express"],
       ormOrDb: ["Prisma"],
     });
+
+    await bus.close();
+    db.close();
+  });
+
+  it("threads context-enricher output into triage queue events when enabled", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding("fp-enriched", 80)];
+      },
+    };
+
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return {
+          languages: ["TypeScript"],
+          frameworks: ["Express"],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: ["src/pages/api/*"],
+        };
+      },
+    };
+
+    const enrichmentTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-enricher",
+      displayName: "Context Enricher",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return {
+          customMiddleware: [{ name: "auth", filePath: "src/middleware/auth.ts", purpose: "auth gate" }],
+          customSanitizers: [],
+          trustBoundaries: [],
+          dataClassifications: [],
+          architecturalNotes: ["Background jobs process user uploads."],
+        };
+      },
+    };
+
+    taskRegistry.register(semgrepTask);
+    taskRegistry.register(contextTask);
+    taskRegistry.register(enrichmentTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableContextEnrichment: true,
+        },
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+    expect(triageBatchQueued.payload.enrichedContext).toMatchObject({
+      customMiddleware: [
+        { name: "auth", filePath: "src/middleware/auth.ts" },
+      ],
+      architecturalNotes: ["Background jobs process user uploads."],
+    });
+
+    await bus.close();
+    db.close();
+  });
+
+  it("normalizes dynamic task selections into runnable task ids", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return {
+          languages: ["TypeScript"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
+      },
+    };
+    const selectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return {
+          recommendedTasks: ["dangerous-api", "secrets", "security-misconfig"],
+          reasoning: {},
+        };
+      },
+    };
+    const dangerousApiTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "dangerous-api-detect",
+      displayName: "Dangerous API",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-dynamic", 91)];
+      },
+    };
+    const secretsTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-detect",
+      displayName: "Secrets",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [];
+      },
+    };
+    const misconfigTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "security-misconfig-detect",
+      displayName: "Misconfig",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(selectorTask);
+    taskRegistry.register(dangerousApiTask);
+    taskRegistry.register(secretsTask);
+    taskRegistry.register(misconfigTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+    expect(taskStarts).toContain("task-selector");
+    expect(taskStarts).toContain("dangerous-api-detect");
+    expect(taskStarts).toContain("secrets-detect");
+    expect(taskStarts).toContain("security-misconfig-detect");
+    expect(triageBatchQueued.payload.findings.map((finding) => finding.fingerprint)).toEqual(["fp-dynamic"]);
 
     await bus.close();
     db.close();

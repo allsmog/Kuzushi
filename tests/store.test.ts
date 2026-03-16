@@ -241,6 +241,45 @@ describe("upsertFinding", () => {
 
     db.close();
   });
+
+  it("persists finding provenance metadata", () => {
+    const db = initDb(dbPath);
+    const finding = makeFinding("fp-provenance");
+    finding.adjustedScore = 42;
+    finding.corroboratingSignals = [
+      {
+        scanner: "codeql",
+        fingerprint: "fp-other",
+        ruleId: "js/sql-injection",
+        filePath: "src/test.ts",
+        startLine: 10,
+        cwe: ["CWE-89"],
+        score: 91,
+      },
+    ];
+    finding.suppressionReasons = [
+      {
+        id: "open-redirect",
+        kind: "soft",
+        description: "Low-impact redirect outside auth context",
+        scorePenalty: 15,
+      },
+    ];
+
+    upsertFinding(db, finding, makeResult("fp-provenance", "tp"), "repo", "HEAD");
+
+    const actionable = getActionableFindings(db, "repo", { includeFalsePositives: true });
+    expect(actionable).toHaveLength(1);
+    expect(actionable[0].adjustedScore).toBe(42);
+    expect(actionable[0].corroboratingSignals).toEqual([
+      expect.objectContaining({ fingerprint: "fp-other", scanner: "codeql" }),
+    ]);
+    expect(actionable[0].suppressionReasons).toEqual([
+      expect.objectContaining({ id: "open-redirect", kind: "soft" }),
+    ]);
+
+    db.close();
+  });
 });
 
 describe("getTriagedFingerprints", () => {
@@ -538,6 +577,36 @@ describe("pipeline_runs", () => {
     const run = getRun(db, runId);
     expect(run?.contextJson).toContain("TypeScript");
     expect(run?.contextJson).toContain("Prisma");
+    db.close();
+  });
+
+  it("persists wrapped base and enriched context checkpoints", () => {
+    const db = initDb(dbPath);
+    const runId = "run-context-enriched";
+
+    createRun(db, runId, "repo", makeConfig(), makeScanOpts());
+    updateRunContext(db, runId, {
+      base: {
+        languages: ["TypeScript"],
+        frameworks: ["Express"],
+        authPatterns: ["JWT"],
+        sanitizationLibs: ["helmet"],
+        ormOrDb: ["Prisma"],
+        entryPoints: ["src/pages/api/*"],
+      },
+      enrichment: {
+        customMiddleware: [{ name: "auth", filePath: "src/middleware/auth.ts", purpose: "auth gate" }],
+        customSanitizers: [],
+        trustBoundaries: [],
+        dataClassifications: [],
+        architecturalNotes: ["Jobs handle uploaded files."],
+      },
+    });
+
+    const run = getRun(db, runId);
+    expect(run?.contextJson).toContain("\"base\"");
+    expect(run?.contextJson).toContain("\"enrichment\"");
+    expect(run?.contextJson).toContain("Jobs handle uploaded files.");
     db.close();
   });
 });

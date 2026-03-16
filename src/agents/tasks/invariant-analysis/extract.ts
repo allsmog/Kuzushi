@@ -2,6 +2,7 @@ import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts, RepoContext } from "../../../types.js";
+import { createLogger } from "../../../logger.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
 import {
@@ -11,6 +12,8 @@ import {
   type InvariantDocument,
   type InvariantKind,
 } from "./types.js";
+
+const log = createLogger({ stage: "invariant-extract" });
 
 const VALID_KINDS = new Set<InvariantKind>([
   "precondition", "postcondition", "class-invariant",
@@ -132,7 +135,7 @@ export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
     let costUsd = 0;
 
     const tag = "[invariant-extract]";
-    console.error(`${tag} Starting extraction (model=${cfg.extractionModel})`);
+    log.info(`Starting extraction (model=${cfg.extractionModel})`);
 
     try {
       for await (const message of runtime.query({
@@ -167,7 +170,7 @@ export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
     const parsed = structuredOutput ?? parseJson(resultText, tag);
     const invariants = parseInvariants(parsed, cfg.securityOnly, cfg.maxInvariants);
 
-    console.error(`${tag} Extracted ${invariants.length} invariants`);
+    log.info(`Extracted ${invariants.length} invariants`);
 
     return attachTaskOutputMeta(
       {

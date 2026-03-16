@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
+import type { RunMetrics } from "./scoring/run-metrics.js";
 import {
   getActionableFindings,
 } from "./store.js";
@@ -177,6 +178,11 @@ export function generateMarkdownReport(
     }
   }
 
+  const runMetrics = stats.runMetrics;
+  if (runMetrics) {
+    appendMetricsSection(lines, runMetrics);
+  }
+
   lines.push("## Metadata");
   lines.push("");
   lines.push(`- Scan started: ${runMeta?.startedAt ?? stats.startedAt ?? "unknown"}`);
@@ -247,4 +253,99 @@ function parseRunConfig(raw: string | undefined): { model?: string; scanners: st
   } catch {
     return { model: undefined, scanners: [] };
   }
+}
+
+function formatDurationMs(ms: number): string {
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds.toFixed(0)}s`;
+}
+
+function appendMetricsSection(lines: string[], metrics: RunMetrics): void {
+  lines.push("## Run Metrics");
+  lines.push("");
+
+  // Verdict breakdown table
+  lines.push("### Verdict Breakdown");
+  lines.push("");
+  lines.push("| Verdict | Count | Rate |");
+  lines.push("| --- | ---: | ---: |");
+  const verdictTotal = Object.values(metrics.verdictCounts).reduce((s, n) => s + n, 0);
+  for (const [verdict, count] of Object.entries(metrics.verdictCounts)) {
+    const pct = verdictTotal > 0 ? ((count / verdictTotal) * 100).toFixed(1) : "0.0";
+    lines.push(`| ${verdict} | ${count} | ${pct}% |`);
+  }
+  lines.push(`| **TP Rate** | | **${(metrics.tpRate * 100).toFixed(1)}%** |`);
+  lines.push(`| **FP Rate** | | **${(metrics.fpRate * 100).toFixed(1)}%** |`);
+  lines.push("");
+
+  // Severity distribution
+  const sevEntries = Object.entries(metrics.severityCounts);
+  if (sevEntries.length > 0) {
+    lines.push("### Severity Distribution");
+    lines.push("");
+    lines.push("| Severity | Count |");
+    lines.push("| --- | ---: |");
+    for (const [severity, count] of sevEntries) {
+      lines.push(`| ${severity} | ${count} |`);
+    }
+    lines.push("");
+  }
+
+  // Scanner yield
+  const yieldEntries = Object.entries(metrics.scannerYield);
+  if (yieldEntries.length > 0) {
+    lines.push("### Scanner Yield");
+    lines.push("");
+    lines.push("| Scanner | Findings |");
+    lines.push("| --- | ---: |");
+    for (const [scanner, count] of yieldEntries) {
+      lines.push(`| ${scanner} | ${count} |`);
+    }
+    lines.push("");
+  }
+
+  // Confidence & exploitability
+  lines.push("### Quality Metrics");
+  lines.push("");
+  lines.push(`- Average Confidence: ${(metrics.averageConfidence * 100).toFixed(1)}%`);
+  if (metrics.exploitabilityRate != null) {
+    lines.push(`- Exploitability Rate: ${(metrics.exploitabilityRate * 100).toFixed(1)}%`);
+  }
+  lines.push("");
+
+  // Duration breakdown
+  lines.push("### Duration Breakdown");
+  lines.push("");
+  lines.push("| Stage | Duration |");
+  lines.push("| --- | ---: |");
+  lines.push(`| Scan | ${formatDurationMs(metrics.durationBreakdown.scan)} |`);
+  lines.push(`| Triage | ${formatDurationMs(metrics.durationBreakdown.triage)} |`);
+  if (metrics.durationBreakdown.verify != null) {
+    lines.push(`| Verify | ${formatDurationMs(metrics.durationBreakdown.verify)} |`);
+  }
+  if (metrics.durationBreakdown.pocHarness != null) {
+    lines.push(`| PoC Harness | ${formatDurationMs(metrics.durationBreakdown.pocHarness)} |`);
+  }
+  lines.push(`| **Total** | **${formatDurationMs(metrics.durationBreakdown.total)}** |`);
+  lines.push("");
+
+  // Cost breakdown
+  lines.push("### Cost Breakdown");
+  lines.push("");
+  lines.push("| Category | Cost (USD) |");
+  lines.push("| --- | ---: |");
+  lines.push(`| Triage | $${metrics.costBreakdown.triage.toFixed(4)} |`);
+  lines.push(`| Verify | $${metrics.costBreakdown.verify.toFixed(4)} |`);
+  lines.push(`| PoC Harness | $${metrics.costBreakdown.pocHarness.toFixed(4)} |`);
+  lines.push(`| Variant Analysis | $${metrics.costBreakdown.variantAnalysis.toFixed(4)} |`);
+  lines.push(`| **Total** | **$${metrics.costBreakdown.total.toFixed(4)}** |`);
+  lines.push("");
 }

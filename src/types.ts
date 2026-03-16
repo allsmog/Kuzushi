@@ -1,4 +1,6 @@
 import type { ScannerConfig, ScannerId } from "./scanners/types.js";
+import type { QualityGateConfig } from "./quality-gate.js";
+import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 
 // Re-export Zod schemas for consumers that need runtime validation.
 export {
@@ -38,6 +40,19 @@ export interface AgentRuntimeConfig {
   apiKey?: string;
   /** Base URL for the LLM API endpoint. Overrides ANTHROPIC_BASE_URL when set. */
   baseUrl?: string;
+}
+
+/** Configuration for triage quality assertion checks. */
+export interface TriageAssertionConfig {
+  /** Whether triage assertions are enabled. Default true (informational only). */
+  enabled?: boolean;
+  /** Custom weights for individual assertion checks. */
+  weights?: {
+    rationaleHasEvidence?: number;
+    verificationStepsActionable?: number;
+    confidenceMatchesEvidence?: number;
+    noEmptyRationale?: number;
+  };
 }
 
 /** Verdict assigned by AI triage. */
@@ -218,6 +233,12 @@ export interface KuzushiConfig {
   reportOutput?: string;
   /** Optional SARIF report output path. */
   sarifOutput?: string;
+  /** Optional JSON report output path. */
+  jsonOutput?: string;
+  /** Optional CSV report output path. */
+  csvOutput?: string;
+  /** Optional JSONL report output path. */
+  jsonlOutput?: string;
   /** Retry count for triage worker transient failures. */
   maxTriageRetries?: number;
   /** Retry count for verification worker transient failures. */
@@ -294,6 +315,8 @@ export interface KuzushiConfig {
   pocExecTimeoutMs?: number;
   /** Enable fine-grained per-step confidence calibration. Default false. */
   confidenceCalibration?: boolean;
+  /** Per-signal weights for multi-signal composite confidence scoring. */
+  confidenceSignalWeights?: ConfidenceSignalWeights;
   /** Enable trajectory memory for cross-run learning. Default false. */
   trajectoryMemory?: boolean;
   /** Max exemplar trajectories injected into triage prompt. Default 2. */
@@ -304,6 +327,18 @@ export interface KuzushiConfig {
   triageSpecialistModel?: string;
   /** Max turns for each specialist sub-agent. null = unlimited. */
   triageSpecialistMaxTurns?: number | null;
+  /** Configuration for triage quality assertion checks. Non-blocking, informational only. */
+  triageAssertions?: TriageAssertionConfig;
+  /** Quality gate configuration for CI/CD enforcement. */
+  qualityGates?: QualityGateConfig;
+  /** External task specifiers to load at runtime (file:// or package: URIs). */
+  externalTasks?: string[];
+  /** Enable loading of external tasks. Must be true for externalTasks to take effect. Default false. */
+  enableExternalTasks?: boolean;
+  /** Pipeline hooks configuration. */
+  hooks?: { files?: string[] };
+  /** Security opt-in required for loading external hook files. Default false. */
+  enableExternalHooks?: boolean;
 }
 
 /** A persisted finding row from SQLite. */
@@ -337,6 +372,8 @@ export interface FindingRow {
   pocHarnessSkipped?: number | null;
   pocHarnessSkipReason?: string | null;
   pocHarnessCostUsd?: number | null;
+  compositeConfidence?: number | null;
+  confidenceSignalsJson?: string | null;
   createdAt: string;
   updatedAt: string;
 }

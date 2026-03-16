@@ -11,8 +11,11 @@ import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
+import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+
+const log = createLogger({ stage: "security-misconfig" });
 
 const SECURITY_MISCONFIG_SCHEMA = {
   type: "object",
@@ -238,7 +241,7 @@ export const securityMisconfigTask: AgentTask<ScanOpts, Finding[]> = {
     let costUsd = 0;
 
     const tag = "[security-misconfig]";
-    console.error(`${tag} Starting scan (model=${model})`);
+    log.info(`Starting scan (model=${model})`);
 
     try {
       for await (const message of runtime.query({

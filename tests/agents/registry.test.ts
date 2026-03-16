@@ -26,24 +26,24 @@ describe("TaskRegistry", () => {
 
   it("resolves DAG into parallel execution groups", () => {
     const registry = new TaskRegistry();
-    registry.register(task("semgrep"));
-    registry.register(task("codeql"));
-    registry.register(task("threat-model"));
-    registry.register(task("fp-verification", ["semgrep", "codeql", "threat-model"]));
-    registry.register(task("report-generation", ["fp-verification"]));
+    registry.register(task("scanner-a"));
+    registry.register(task("scanner-b"));
+    registry.register(task("analyzer"));
+    registry.register(task("verifier", ["scanner-a", "scanner-b", "analyzer"]));
+    registry.register(task("reporter", ["verifier"]));
 
     const order = registry.resolveOrder([
-      "semgrep",
-      "codeql",
-      "threat-model",
-      "fp-verification",
-      "report-generation",
+      "scanner-a",
+      "scanner-b",
+      "analyzer",
+      "verifier",
+      "reporter",
     ]);
 
     expect(order).toEqual([
-      ["semgrep", "codeql", "threat-model"],
-      ["fp-verification"],
-      ["report-generation"],
+      ["scanner-a", "scanner-b", "analyzer"],
+      ["verifier"],
+      ["reporter"],
     ]);
   });
 

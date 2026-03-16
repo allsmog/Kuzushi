@@ -26,40 +26,16 @@ import {
   type PipelineErrorEvent,
 } from "./bus/index.js";
 import type { KuzushiConfig, ScanOpts } from "./types.js";
+import { printQualityGateResult } from "./report.js";
 import { inflightCache } from "./cache.js";
+import {
+  expandScannerSelections,
+  resolveScannerConfig,
+  TAINT_ANALYSIS_TASK_IDS,
+  TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS,
+} from "./capabilities.js";
 
-const TAINT_ANALYSIS_TASK_IDS = ["taint-analysis-preflight", "taint-analysis-label", "taint-analysis-run"] as const;
-const TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS = ["taint-analysis-discover", "taint-analysis-cross-analyze", "taint-analysis-stitch"] as const;
 const DEFAULT_AGENTIC_MODEL = "anthropic:claude-sonnet-4-6";
-
-function expandScannerAliases(
-  scanners: string[],
-  config: KuzushiConfig,
-): { pluginScanners: string[]; enabledTasks: string[] } {
-  const enabledTasks: string[] = [];
-  const pluginScanners: string[] = [];
-
-  for (const id of scanners) {
-    if (id === "taint-analysis") {
-      const crossServiceEnabled = config.scannerConfig["taint-analysis"]?.["crossService"] === true;
-      enabledTasks.push(...(crossServiceEnabled ? TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS : TAINT_ANALYSIS_TASK_IDS));
-    } else if (id === "crypto-misuse") {
-      enabledTasks.push("crypto-misuse-detect");
-    } else if (id === "auth-access") {
-      enabledTasks.push("auth-access-detect");
-    } else if (id === "race-condition") {
-      enabledTasks.push("race-condition-detect");
-    } else if (id === "invariant-analysis") {
-      enabledTasks.push("invariant-extract", "invariant-check");
-    } else if (id === "threat-model") {
-      enabledTasks.push("threat-model-stride", "threat-model-pasta");
-    } else {
-      pluginScanners.push(id);
-    }
-  }
-
-  return { pluginScanners, enabledTasks };
-}
 
 function resolveRepo(repoPath: string): { root: string; name: string } {
   const absPath = path.resolve(repoPath);
@@ -185,7 +161,7 @@ function resolveActivePiAiModels(
   }
 
   if (scannerSet.has("agentic")) {
-    const model = asModel(config.scannerConfig["agentic"]?.["model"]) ?? DEFAULT_AGENTIC_MODEL;
+    const model = asModel(resolveScannerConfig(config, "agentic")["model"]) ?? DEFAULT_AGENTIC_MODEL;
     models.add(model);
   }
 
@@ -210,24 +186,24 @@ function resolveActivePiAiModels(
   for (const taskId of ["crypto-misuse-detect", "auth-access-detect", "race-condition-detect"]) {
     if (enabledTaskSet.has(taskId)) {
       const cfgKey = taskId.replace("-detect", "");
-      const model = asModel(config.scannerConfig[cfgKey]?.["model"]) ?? config.model;
+      const model = asModel(resolveScannerConfig(config, cfgKey)["model"]) ?? config.model;
       models.add(model);
     }
   }
 
   // Invariant analysis tasks
   if (enabledTaskSet.has("invariant-extract") || enabledTaskSet.has("invariant-check")) {
-    const iaCfg = config.scannerConfig["invariant-analysis"];
-    models.add(asModel(iaCfg?.["extractionModel"]) ?? config.model);
-    models.add(asModel(iaCfg?.["checkModel"]) ?? config.model);
-  }
+      const iaCfg = resolveScannerConfig(config, "invariant-analysis");
+      models.add(asModel(iaCfg?.["extractionModel"]) ?? config.model);
+      models.add(asModel(iaCfg?.["checkModel"]) ?? config.model);
+    }
 
   // Threat modeling tasks
   if (enabledTaskSet.has("threat-model-stride") || enabledTaskSet.has("threat-model-pasta")) {
-    const tmCfg = config.scannerConfig["threat-model"];
-    models.add(asModel(tmCfg?.["strideModel"]) ?? config.model);
-    models.add(asModel(tmCfg?.["pastaModel"]) ?? config.model);
-  }
+      const tmCfg = resolveScannerConfig(config, "threat-model");
+      models.add(asModel(tmCfg?.["strideModel"]) ?? config.model);
+      models.add(asModel(tmCfg?.["pastaModel"]) ?? config.model);
+    }
 
   return [...models];
 }
@@ -313,10 +289,16 @@ program
   .option("--audit-log", "Persist per-run audit logs to .kuzushi/runs/<runId>/", false)
   .option("--output <path>", "Write markdown report to this path")
   .option("--sarif <path>", "Write SARIF v2.1.0 report to this path")
+  .option("--json <path>", "Write JSON report to this path")
+  .option("--csv <path>", "Write CSV report to this path")
+  .option("--jsonl <path>", "Write JSONL report to this path")
   .option("--agent-runtime <backend>", "Agent runtime backend (pi-ai|acp)")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
   .option("--enabled-tasks <ids>", "Additional AgentTask IDs to enable (comma-separated)")
+  .option("--enable-external-tasks", "Enable loading of external tasks from config", false)
+  .option("--quality-gate", "Enable quality gates (fail CI on threshold violations)", false)
+  .option("--fail-on-tp", "Shorthand: fail if any high/critical severity true positive is found", false)
   .option("--fresh", "Clear prior results before scanning", false)
   .option("--no-cache", "Disable inflight request deduplication and LLM result caching")
   .option("--resume [runId]", "Resume a previous run (optionally by run id)")
@@ -345,10 +327,16 @@ program
     auditLog: boolean;
     output?: string;
     sarif?: string;
+    json?: string;
+    csv?: string;
+    jsonl?: string;
     agentRuntime?: string;
     apiKey?: string;
     baseUrl?: string;
+    enableExternalTasks: boolean;
     enabledTasks?: string;
+    qualityGate: boolean;
+    failOnTp: boolean;
     fresh: boolean;
     cache: boolean;
     resume?: string | boolean;
@@ -376,6 +364,9 @@ program
     if (opts.auditLog) config.auditLog = true;
     if (opts.output) config.reportOutput = path.resolve(opts.output);
     if (opts.sarif) config.sarifOutput = path.resolve(opts.sarif);
+    if (opts.json) config.jsonOutput = path.resolve(opts.json);
+    if (opts.csv) config.csvOutput = path.resolve(opts.csv);
+    if (opts.jsonl) config.jsonlOutput = path.resolve(opts.jsonl);
     if (opts.agentRuntime) {
       config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
     }
@@ -396,11 +387,27 @@ program
 
       config.agentRuntimeConfig = runtimeConfig;
     }
+    if (opts.enableExternalTasks) config.enableExternalTasks = true;
     if (opts.enabledTasks) {
       config.enabledTasks = [
         ...(config.enabledTasks ?? []),
         ...parseScannersArg(opts.enabledTasks),
       ];
+    }
+
+    // Quality gate CLI overrides
+    if (opts.qualityGate) {
+      config.qualityGates = {
+        failOnHighSeverityTP: true,
+        failOnExploitable: true,
+        ...(config.qualityGates ?? {}),
+      };
+    }
+    if (opts.failOnTp) {
+      config.qualityGates = {
+        ...(config.qualityGates ?? {}),
+        failOnHighSeverityTP: true,
+      };
     }
     if (opts.triageMaxTurns !== undefined) {
       if (!Number.isFinite(opts.triageMaxTurns) || opts.triageMaxTurns < 1) {
@@ -490,7 +497,7 @@ program
     // Auto-expand scanner aliases that map to AgentTask DAGs.
     // This must run on the effective scanner list whether from CLI or config file.
     const effectiveScanners = scannersOverride ?? [...config.scanners];
-    const { pluginScanners, enabledTasks: aliasExpandedTasks } = expandScannerAliases(effectiveScanners, config);
+    const { pluginScanners, enabledTasks: aliasExpandedTasks } = expandScannerSelections(effectiveScanners, config);
     if (aliasExpandedTasks.length > 0) {
       config.enabledTasks = [...(config.enabledTasks ?? []), ...aliasExpandedTasks];
     }
@@ -577,8 +584,8 @@ program
     let bus: ReturnType<typeof createBus> | undefined;
     try {
       bus = createBus(config);
-      const taskRegistry = createDefaultTaskRegistry(registry);
-      registerAllWorkers(bus, { registry, taskRegistry, db, config });
+      const taskRegistry = await createDefaultTaskRegistry(registry, config, repoRoot);
+      await registerAllWorkers(bus, { registry, taskRegistry, db, config });
     } catch (err) {
       db.close();
       console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);

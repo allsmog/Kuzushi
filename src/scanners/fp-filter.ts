@@ -1,13 +1,16 @@
-import type { Finding } from "./types.js";
+import type { Finding, SuppressionReason } from "./types.js";
 
 export interface FpFilterResult {
   kept: Finding[];
-  excluded: Finding[];
+  hardExcluded: Finding[];
+  softSuppressed: Finding[];
 }
 
 interface ExclusionRule {
   id: string;
   description: string;
+  kind: "hard" | "soft";
+  scorePenalty?: number;
   match: (finding: Finding) => boolean;
 }
 
@@ -28,21 +31,26 @@ const EXCLUSION_RULES: ExclusionRule[] = [
   {
     id: "dos-resource-exhaustion",
     description: "DoS / resource exhaustion findings (low exploitability in most contexts)",
+    kind: "hard",
     match: (f) => DOS_PATTERNS.test(f.message) || DOS_PATTERNS.test(f.ruleId),
   },
   {
     id: "rate-limiting",
     description: "Rate limiting / service overload findings",
+    kind: "hard",
     match: (f) => RATE_LIMIT_PATTERNS.test(f.message) || RATE_LIMIT_PATTERNS.test(f.ruleId),
   },
   {
     id: "resource-leak",
     description: "Resource leaks (memory, file, connection) — functional bugs, not security",
+    kind: "hard",
     match: (f) => RESOURCE_LEAK_PATTERNS.test(f.message) || RESOURCE_LEAK_PATTERNS.test(f.ruleId),
   },
   {
     id: "open-redirect",
     description: "Open redirects (low impact in most contexts) — except auth-related redirects",
+    kind: "soft",
+    scorePenalty: 15,
     match: (f) =>
       (OPEN_REDIRECT_PATTERNS.test(f.message) || OPEN_REDIRECT_PATTERNS.test(f.ruleId))
       && !AUTH_REDIRECT_CONTEXT.test(f.message)
@@ -52,6 +60,7 @@ const EXCLUSION_RULES: ExclusionRule[] = [
   {
     id: "memory-safety-non-native",
     description: "Memory safety findings in non-C/C++ code",
+    kind: "hard",
     match: (f) =>
       (MEMORY_SAFETY_PATTERNS.test(f.message) || MEMORY_SAFETY_PATTERNS.test(f.ruleId))
       && NON_C_LANGUAGES.test(f.filePath),
@@ -59,11 +68,14 @@ const EXCLUSION_RULES: ExclusionRule[] = [
   {
     id: "regex-injection",
     description: "Regex injection / ReDoS findings",
+    kind: "hard",
     match: (f) => REGEX_INJECTION_PATTERNS.test(f.message) || REGEX_INJECTION_PATTERNS.test(f.ruleId),
   },
   {
     id: "ssrf-client-side",
     description: "SSRF in HTML/client-side files",
+    kind: "soft",
+    scorePenalty: 15,
     match: (f) =>
       (/\bssrf\b/i.test(f.message) || /\bssrf\b/i.test(f.ruleId))
       && (CLIENT_SIDE_PATTERNS.test(f.filePath) || /\.html?$/i.test(f.filePath)),
@@ -71,16 +83,19 @@ const EXCLUSION_RULES: ExclusionRule[] = [
   {
     id: "doc-files",
     description: "Findings in documentation/markdown files",
+    kind: "hard",
     match: (f) => DOC_PATH_PATTERNS.test(f.filePath),
   },
   {
     id: "test-files",
     description: "Findings in test/spec directories",
+    kind: "hard",
     match: (f) => TEST_PATH_PATTERNS.test(f.filePath),
   },
   {
     id: "generated-vendored",
     description: "Findings in generated, vendored, or build output directories",
+    kind: "hard",
     match: (f) => GENERATED_VENDORED_PATTERNS.test(f.filePath),
   },
 ];
@@ -102,26 +117,76 @@ export class HardExclusionFilter {
 
   filterFindings(findings: Finding[]): FpFilterResult {
     const kept: Finding[] = [];
-    const excluded: Finding[] = [];
+    const hardExcluded: Finding[] = [];
+    const softSuppressed: Finding[] = [];
 
     for (const finding of findings) {
-      if (this.shouldExclude(finding)) {
-        excluded.push(finding);
-      } else {
-        kept.push(finding);
+      const matches = this.matchRules(finding);
+      if (matches.length === 0) {
+        kept.push(ensureAdjustedScore(finding));
+        continue;
+      }
+
+      const hardMatches = matches.filter((rule) => rule.kind === "hard");
+      if (hardMatches.length > 0) {
+        hardExcluded.push(applySuppressionMetadata(finding, hardMatches));
+        continue;
+      }
+
+      const suppressed = applySuppressionMetadata(finding, matches);
+      softSuppressed.push(suppressed);
+      kept.push(suppressed);
+    }
+
+    return { kept, hardExcluded, softSuppressed };
+  }
+
+  private matchRules(finding: Finding): ExclusionRule[] {
+    const matches: ExclusionRule[] = [];
+
+    for (const rule of this.rules) {
+      if (rule.match(finding)) {
+        matches.push(rule);
+      }
+    }
+    for (const pattern of this.customPatterns) {
+      if (pattern.test(finding.message) || pattern.test(finding.ruleId)) {
+        matches.push({
+          id: `custom:${pattern.source}`,
+          description: `Custom exclusion matched: /${pattern.source}/i`,
+          kind: "hard",
+          match: () => true,
+        });
       }
     }
 
-    return { kept, excluded };
+    return matches;
   }
+}
 
-  private shouldExclude(finding: Finding): boolean {
-    for (const rule of this.rules) {
-      if (rule.match(finding)) return true;
-    }
-    for (const pattern of this.customPatterns) {
-      if (pattern.test(finding.message) || pattern.test(finding.ruleId)) return true;
-    }
-    return false;
-  }
+function ensureAdjustedScore(finding: Finding): Finding {
+  return {
+    ...finding,
+    adjustedScore: finding.adjustedScore ?? finding.score,
+  };
+}
+
+function applySuppressionMetadata(finding: Finding, rules: ExclusionRule[]): Finding {
+  const base = ensureAdjustedScore(finding);
+  const suppressionReasons: SuppressionReason[] = [
+    ...(base.suppressionReasons ?? []),
+    ...rules.map((rule) => ({
+      id: rule.id,
+      kind: rule.kind,
+      description: rule.description,
+      scorePenalty: rule.scorePenalty,
+    })),
+  ];
+
+  const totalPenalty = rules.reduce((sum, rule) => sum + (rule.kind === "soft" ? rule.scorePenalty ?? 0 : 0), 0);
+  return {
+    ...base,
+    adjustedScore: Math.max(0, (base.adjustedScore ?? base.score) - totalPenalty),
+    suppressionReasons,
+  };
 }

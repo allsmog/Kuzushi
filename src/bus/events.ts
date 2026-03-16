@@ -1,6 +1,7 @@
 import type { Finding, ScannerId } from "../scanners/types.js";
 import type { TaskOutputKind } from "../agents/types.js";
 import type {
+  EnrichedRepoContext,
   ExploitChain,
   KuzushiConfig,
   PocHarnessResult,
@@ -9,6 +10,8 @@ import type {
   VerificationResult,
   Verdict,
 } from "../types.js";
+import type { QualityGateResult } from "../quality-gate.js";
+import type { RunMetrics } from "../scoring/run-metrics.js";
 import type { EventEnvelope } from "./types.js";
 
 export interface RunContext {
@@ -26,7 +29,9 @@ export interface PipelineStats {
   skippedAlreadyTriaged: number;
   skippedLowConfidence?: number;
   skippedByFpFilter?: number;
+  softSuppressedFindings?: number;
   skippedByLlmRescore?: number;
+  corroboratedClusters?: number;
   triaged: number;
   triageErrors: number;
   totalCostUsd?: number;
@@ -46,6 +51,8 @@ export interface PipelineStats {
   extractionDegradation?: { status: string; reasons: string[] };
   stitchDegradation?: { type: string; reason: string; message: string };
   tiPriorDegraded?: boolean;
+  qualityGateResult?: QualityGateResult;
+  runMetrics?: RunMetrics;
   startedAt: string;
   completedAt: string;
 }
@@ -189,6 +196,7 @@ export type TriageFindingQueuedEvent = EventEnvelope<
     context: RunContext;
     finding: Finding;
     repoContext?: unknown;
+    enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
     index: number;
     total: number;
@@ -201,6 +209,7 @@ export type TriageBatchQueuedEvent = EventEnvelope<
     context: RunContext;
     findings: Finding[];
     repoContext?: unknown;
+    enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
     total: number;
   }
@@ -284,6 +293,7 @@ export type VerificationFindingQueuedEvent = EventEnvelope<
     finding: Finding;
     triageResult: TriageResult;
     repoContext?: unknown;
+    enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
     index: number;
     total: number;
@@ -301,6 +311,7 @@ export type VerificationBatchQueuedEvent = EventEnvelope<
       total: number;
     }>;
     repoContext?: unknown;
+    enrichedContext?: EnrichedRepoContext["enrichment"];
   }
 >;
 

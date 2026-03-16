@@ -65,6 +65,26 @@ export const FindingSchema = z.object({
   impact: z.string(),
   cwe: z.array(z.string()),
   score: z.number(),
+  adjustedScore: z.number().optional(),
+  corroboratingSignals: z.array(
+    z.object({
+      scanner: z.string(),
+      fingerprint: z.string(),
+      ruleId: z.string(),
+      filePath: z.string(),
+      startLine: z.number(),
+      cwe: z.array(z.string()),
+      score: z.number(),
+    }),
+  ).optional(),
+  suppressionReasons: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(["hard", "soft"]),
+      description: z.string(),
+      scorePenalty: z.number().optional(),
+    }),
+  ).optional(),
 });
 
 export type FindingZ = z.infer<typeof FindingSchema>;

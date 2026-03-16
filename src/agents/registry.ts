@@ -1,4 +1,5 @@
 import type { AgentTask } from "./types.js";
+import { normalizeTaskCapabilityIds } from "../capabilities.js";
 
 /** Registry and DAG resolver for generic agent tasks. */
 export class TaskRegistry {
@@ -37,7 +38,7 @@ export class TaskRegistry {
 
   /** Resolve execution order as parallel groups. Throws on cycles. */
   resolveOrder(enabledIds: string[]): string[][] {
-    const enabled = normalizeTaskIds(enabledIds);
+    const enabled = dedupePreservingRegisteredIds(this, enabledIds);
     if (enabled.length === 0) return [];
 
     for (const id of enabled) {
@@ -103,15 +104,19 @@ export class TaskRegistry {
 }
 
 export function normalizeTaskIds(ids: string[]): string[] {
-  const out: string[] = [];
+  return normalizeTaskCapabilityIds(ids);
+}
+
+function dedupePreservingRegisteredIds(registry: TaskRegistry, ids: string[]): string[] {
+  const expanded = ids.flatMap((id) => (registry.has(id) ? [id] : normalizeTaskCapabilityIds([id])));
+  const result: string[] = [];
   const seen = new Set<string>();
-
-  for (const raw of ids) {
-    const id = raw.trim();
-    if (!id || seen.has(id)) continue;
+  for (const id of expanded) {
+    if (!id || seen.has(id)) {
+      continue;
+    }
     seen.add(id);
-    out.push(id);
+    result.push(id);
   }
-
-  return out;
+  return result;
 }

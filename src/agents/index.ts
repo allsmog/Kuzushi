@@ -1,7 +1,9 @@
 import { createDefaultRegistry } from "../scanners/index.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
+import type { KuzushiConfig } from "../types.js";
 import { adaptScannerPlugin } from "./scanner-adapter.js";
 import { TaskRegistry } from "./registry.js";
+import { loadAllExternalTasks } from "./task-loader.js";
 import { taintAnalysisRunTask } from "./tasks/taint-analysis/analyze.js";
 import { taintAnalysisCrossAnalyzeTask } from "./tasks/taint-analysis/cross-service/analyze.js";
 import { taintAnalysisDiscoverTask } from "./tasks/taint-analysis/cross-service/discover.js";
@@ -30,7 +32,11 @@ import { graphqlSecurityTask } from "./tasks/graphql-security.js";
 import { taskSelectorTask } from "./tasks/task-selector.js";
 
 /** Create task registry populated with adapted scanner plugins. */
-export function createDefaultTaskRegistry(scannerRegistry?: ScannerRegistry): TaskRegistry {
+export async function createDefaultTaskRegistry(
+  scannerRegistry?: ScannerRegistry,
+  config?: KuzushiConfig,
+  repoRoot?: string,
+): Promise<TaskRegistry> {
   const tasks = new TaskRegistry();
   const registry = scannerRegistry ?? createDefaultRegistry();
 
@@ -75,6 +81,22 @@ export function createDefaultTaskRegistry(scannerRegistry?: ScannerRegistry): Ta
 
   for (const id of registry.ids()) {
     tasks.register(adaptScannerPlugin(registry.get(id)));
+  }
+
+  // Load external tasks from config
+  if (config?.externalTasks && config.externalTasks.length > 0) {
+    if (config.enableExternalTasks) {
+      const resolvedRoot = repoRoot ?? process.cwd();
+      const externalTasks = await loadAllExternalTasks(config.externalTasks, resolvedRoot);
+      for (const task of externalTasks) {
+        tasks.register(task);
+      }
+    } else {
+      console.warn(
+        "Warning: externalTasks are configured but enableExternalTasks is not true. "
+        + "Set enableExternalTasks to true or pass --enable-external-tasks to load them.",
+      );
+    }
   }
 
   tasks.validate();

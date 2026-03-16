@@ -5,7 +5,10 @@ import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, TriageResult } from "../../types.js";
+import { createLogger } from "../../logger.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
+
+const log = createLogger({ stage: "variant-analysis" });
 
 const VARIANT_SCHEMA = {
   type: "object",
@@ -193,7 +196,7 @@ export async function analyzeVariants(
   let costUsd = 0;
 
   const tag = "[variant-analysis]";
-  console.error(`${tag} Searching for variants of ${finding.ruleId} in ${finding.filePath}:${finding.startLine}`);
+  log.info(`Searching for variants of ${finding.ruleId} in ${finding.filePath}:${finding.startLine}`);
 
   try {
     for await (const message of runtime.query({

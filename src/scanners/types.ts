@@ -3,6 +3,23 @@ import type { ScanOpts } from "../types.js";
 export type ScannerId = string;
 export type ScannerConfig = Record<string, unknown>;
 
+export interface CorroboratingSignal {
+  scanner: ScannerId;
+  fingerprint: string;
+  ruleId: string;
+  filePath: string;
+  startLine: number;
+  cwe: string[];
+  score: number;
+}
+
+export interface SuppressionReason {
+  id: string;
+  kind: "hard" | "soft";
+  description: string;
+  scorePenalty?: number;
+}
+
 // Single finding type shared by all scanners.
 export interface Finding {
   scanner: ScannerId;
@@ -20,6 +37,9 @@ export interface Finding {
   impact: string;
   cwe: string[];
   score: number;
+  adjustedScore?: number;
+  corroboratingSignals?: CorroboratingSignal[];
+  suppressionReasons?: SuppressionReason[];
 }
 
 export type AllowedTriageTool = "Read" | "Glob" | "Grep" | "GetCallers" | "GetCallees" | "GetFunctionBody";

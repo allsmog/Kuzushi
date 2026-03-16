@@ -11,6 +11,10 @@ export function coerceRepoContext(value: unknown): RepoContext | undefined {
     return undefined;
   }
 
+  if ("base" in value) {
+    return coerceRepoContext(value["base"]);
+  }
+
   const repoContext: RepoContext = {
     languages: asStringArray(value["languages"]),
     frameworks: asStringArray(value["frameworks"]),
@@ -30,6 +34,67 @@ export function coerceRepoContext(value: unknown): RepoContext | undefined {
   );
 
   return hasAnyValue ? repoContext : undefined;
+}
+
+export function coerceContextEnrichment(
+  value: unknown,
+): EnrichedRepoContext["enrichment"] | undefined {
+  if (isRecord(value) && value["__handoff"] === true && "output" in value) {
+    return coerceContextEnrichment(value["output"]);
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const candidate = "enrichment" in value && isRecord(value["enrichment"])
+    ? value["enrichment"]
+    : value;
+
+  if (!isRecord(candidate)) {
+    return undefined;
+  }
+
+  const enrichment: EnrichedRepoContext["enrichment"] = {
+    customMiddleware: asObjectArray(candidate["customMiddleware"], (item) => ({
+      name: asString(item["name"]),
+      filePath: asString(item["filePath"]),
+      purpose: asString(item["purpose"]),
+      appliesTo: asOptionalString(item["appliesTo"]),
+    })),
+    customSanitizers: asObjectArray(candidate["customSanitizers"], (item) => ({
+      name: asString(item["name"]),
+      filePath: asString(item["filePath"]),
+      sanitizationType: asString(item["sanitizationType"]),
+      usedBy: asOptionalString(item["usedBy"]),
+    })),
+    trustBoundaries: asObjectArray(candidate["trustBoundaries"], (item) => ({
+      name: asString(item["name"]),
+      description: asString(item["description"]),
+      entryPoints: asStringArray(item["entryPoints"]),
+    })),
+    dataClassifications: asObjectArray(candidate["dataClassifications"], (item) => {
+      const sensitivity = asString(item["sensitivity"]);
+      if (!["public", "internal", "confidential", "restricted"].includes(sensitivity)) {
+        return null;
+      }
+      return {
+        dataType: asString(item["dataType"]),
+        sensitivity: sensitivity as "public" | "internal" | "confidential" | "restricted",
+        locations: asStringArray(item["locations"]),
+      };
+    }),
+    architecturalNotes: asStringArray(candidate["architecturalNotes"]),
+  };
+
+  const hasAnyValue =
+    enrichment.customMiddleware.length > 0 ||
+    enrichment.customSanitizers.length > 0 ||
+    enrichment.trustBoundaries.length > 0 ||
+    enrichment.dataClassifications.length > 0 ||
+    enrichment.architecturalNotes.length > 0;
+
+  return hasAnyValue ? enrichment : undefined;
 }
 
 export function formatRepoContext(repoContext: RepoContext | undefined): string[] {
@@ -111,4 +176,34 @@ function asStringArray(value: unknown): string[] {
   return value
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter(Boolean);
+}
+
+function asObjectArray<T>(
+  value: unknown,
+  map: (item: Record<string, unknown>) => T | null,
+): T[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const result: T[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const mapped = map(item);
+    if (mapped) {
+      result.push(mapped);
+    }
+  }
+  return result;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  const normalized = asString(value);
+  return normalized || undefined;
 }

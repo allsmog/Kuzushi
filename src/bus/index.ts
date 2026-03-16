@@ -25,8 +25,8 @@ export interface RegisterWorkersDeps {
 }
 
 /** Register orchestrator + all built-in workers on a bus instance. */
-export function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): void {
-  const taskRegistry = deps.taskRegistry ?? createDefaultTaskRegistry(deps.registry);
+export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): Promise<void> {
+  const taskRegistry = deps.taskRegistry ?? await createDefaultTaskRegistry(deps.registry);
   const knowledgeRegistry = createDefaultKnowledgeRegistry();
 
   registerScanWorker(bus, {

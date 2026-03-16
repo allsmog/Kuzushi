@@ -87,6 +87,14 @@ export function generateSarifReport(
         verdict: finding.verdict,
         confidence: finding.confidence,
         rationale: finding.rationale,
+        adjustedScore: finding.adjustedScore ?? undefined,
+        corroboratingSignalCount: finding.corroboratingSignals.length || undefined,
+        corroboratingSignals: finding.corroboratingSignals.length > 0
+          ? finding.corroboratingSignals
+          : undefined,
+        suppressionReasons: finding.suppressionReasons.length > 0
+          ? finding.suppressionReasons
+          : undefined,
         exploitable: toExploitableFlag(finding.verifyExploitable),
         pocPayload: finding.verifyPocPayload ?? undefined,
       },
@@ -169,6 +177,10 @@ export function generateSarifReport(
             queuedForTriage: stats.queuedForTriage ?? 0,
             skippedAlreadyTriaged: stats.skippedAlreadyTriaged ?? 0,
             skippedLowConfidence: stats.skippedLowConfidence ?? 0,
+            skippedByFpFilter: stats.skippedByFpFilter ?? 0,
+            softSuppressedFindings: stats.softSuppressedFindings ?? 0,
+            skippedByLlmRescore: stats.skippedByLlmRescore ?? 0,
+            corroboratedClusters: stats.corroboratedClusters ?? 0,
             truePositives: verdictCounts.tp,
             needsReview: verdictCounts.needs_review,
             falsePositives: verdictCounts.fp,
@@ -180,6 +192,8 @@ export function generateSarifReport(
             pocHarnessSkipped: stats.pocHarnessSkipped ?? 0,
             pocHarnessErrors: stats.pocHarnessErrors ?? 0,
             pocHarnessCostUsd,
+            variantFindings: stats.variantFindings ?? 0,
+            variantAnalysisCostUsd: stats.variantAnalysisCostUsd ?? 0,
             totalCostUsd: triageCostUsd + verifyCostUsd + pocHarnessCostUsd,
           },
         },

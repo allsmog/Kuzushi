@@ -7,9 +7,15 @@ import {
   type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
 import type { AllowedTriageTool, Finding } from "./scanners/types.js";
-import type { ProofVerdict, RepoContext, TriageResult, VerificationResult } from "./types.js";
+import type {
+  EnrichedRepoContext,
+  ProofVerdict,
+  RepoContext,
+  TriageResult,
+  VerificationResult,
+} from "./types.js";
 import { getBypassKnowledge, formatBypassForPrompt } from "./bypass-knowledge.js";
-import { formatRepoContext } from "./repo-context.js";
+import { formatEnrichedRepoContext, formatRepoContext } from "./repo-context.js";
 import {
   bypassExhaustionModule,
   composePromptModules,
@@ -51,7 +57,9 @@ export const VERIFICATION_RESULT_SCHEMA = {
 export const DEFAULT_TOOLS: AllowedTriageTool[] = [...DEFAULT_READ_ONLY_TOOLS];
 export const DEFAULT_MAX_TURNS = 15;
 
-export interface VerificationRuntimeOptions extends AgentRuntimeOptions {}
+export interface VerificationRuntimeOptions extends AgentRuntimeOptions {
+  enrichedContext?: EnrichedRepoContext["enrichment"];
+}
 
 export interface VerificationOutput {
   result: VerificationResult;
@@ -68,12 +76,19 @@ export class VerificationExecutionError extends Error {
   }
 }
 
-export function verificationSystemPromptPrefix(repoContext?: RepoContext): string {
+export function verificationSystemPromptPrefix(
+  repoContext?: RepoContext,
+  enrichedContext?: EnrichedRepoContext["enrichment"],
+): string {
   const repoSection = formatRepoContext(repoContext);
+  const enrichedSection = formatEnrichedRepoContext(enrichedContext);
   const repoBlock = repoSection.length > 0
     ? "## Repository Context\n" + repoSection.join("\n") + "\n\n"
     : "";
-  return repoBlock + composePromptModules(
+  const enrichedBlock = enrichedSection.length > 0
+    ? "## Enriched Repository Context\n" + enrichedSection.join("\n") + "\n\n"
+    : "";
+  return repoBlock + enrichedBlock + composePromptModules(
     proofLevelModule(),
     bypassExhaustionModule(),
     confidenceEscalationModule("verification"),
@@ -103,7 +118,7 @@ export async function verifyFindingWithAgent(
     maxTurns: effectiveMaxTurns,
     allowedTools: DEFAULT_TOOLS,
     runtimeOptions,
-    systemPromptPrefix: verificationSystemPromptPrefix(repoContext),
+    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
     schema: VERIFICATION_RESULT_SCHEMA,
   });
 
@@ -404,7 +419,7 @@ async function verifySingleBatch(
     maxTurns: effectiveMaxTurns,
     allowedTools: DEFAULT_TOOLS,
     runtimeOptions,
-    systemPromptPrefix: verificationSystemPromptPrefix(repoContext),
+    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
     schema: BATCH_VERIFICATION_SCHEMA,
     strict: true,
     retryInvalidStructuredOutput: 2,

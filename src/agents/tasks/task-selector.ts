@@ -1,4 +1,5 @@
 import { coerceRepoContext } from "../../repo-context.js";
+import { normalizeTaskCapabilityIds } from "../../capabilities.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import type { AgentTask, TaskContext } from "../types.js";
 
@@ -31,33 +32,41 @@ interface SelectionRule {
 const SELECTION_RULES: SelectionRule[] = [
   {
     languages: ["TypeScript", "JavaScript", "tsx", "jsx"],
-    tasks: ["dangerous-api", "ssrf-detect", "crypto-misuse-detect", "secrets-detection"],
-    reason: "JS/TS ecosystem: check for dangerous APIs, SSRF, crypto misuse, and hardcoded secrets",
+    tasks: [
+      "dangerous-api",
+      "ssrf",
+      "crypto-misuse",
+      "secrets",
+      "prototype-pollution",
+      "template-injection",
+      "supply-chain",
+    ],
+    reason: "JS/TS ecosystem: prioritize dangerous APIs, SSRF, prototype pollution, templating, and package supply-chain risk",
   },
   {
     languages: ["Go", "golang"],
-    tasks: ["race-condition-detect", "crypto-misuse-detect"],
-    reason: "Go: goroutine race conditions and crypto misuse are common",
+    tasks: ["race-condition", "crypto-misuse", "supply-chain"],
+    reason: "Go: goroutine races, crypto misuse, and dependency risk are common review targets",
   },
   {
     languages: ["Python"],
-    tasks: ["dangerous-api", "secrets-detection", "security-misconfig"],
-    reason: "Python: check for dangerous APIs, secrets, and security misconfiguration",
+    tasks: ["dangerous-api", "secrets", "security-misconfig", "template-injection", "supply-chain"],
+    reason: "Python: check for dangerous APIs, secrets, misconfiguration, templating risk, and dependency exposure",
   },
   {
     languages: ["Java", "Kotlin"],
-    tasks: ["dangerous-api", "crypto-misuse-detect", "secrets-detection"],
-    reason: "JVM: check for dangerous APIs, crypto misuse, and hardcoded secrets",
+    tasks: ["dangerous-api", "crypto-misuse", "secrets", "supply-chain"],
+    reason: "JVM: check for dangerous APIs, crypto misuse, secrets, and dependency exposure",
   },
   {
     languages: ["Ruby"],
-    tasks: ["dangerous-api", "secrets-detection", "security-misconfig"],
-    reason: "Ruby: check for dangerous APIs, secrets, and misconfiguration",
+    tasks: ["dangerous-api", "secrets", "security-misconfig", "template-injection", "supply-chain"],
+    reason: "Ruby: check for dangerous APIs, secrets, misconfiguration, ERB-like templating issues, and gem risk",
   },
   {
     languages: ["PHP"],
-    tasks: ["dangerous-api", "ssrf-detect", "secrets-detection"],
-    reason: "PHP: high risk for injection, SSRF, and hardcoded secrets",
+    tasks: ["dangerous-api", "ssrf", "secrets", "template-injection", "supply-chain"],
+    reason: "PHP: high risk for injection, SSRF, templating issues, and hardcoded secrets",
   },
   {
     condition: (ctx) => ctx.authPatterns.length > 0,
@@ -70,6 +79,19 @@ const SELECTION_RULES: SelectionRule[] = [
     reason: "ORM/DB detected — check for dangerous database API usage",
   },
   {
+    condition: (ctx) =>
+      ctx.ormOrDb.some((item) => /mongo|mongoose|dynamo|cosmos/i.test(item)),
+    tasks: ["nosql-injection"],
+    reason: "Document or key-value database usage detected — check for NoSQL injection patterns",
+  },
+  {
+    condition: (ctx) =>
+      ctx.frameworks.some((item) => /graphql|apollo|graphene|ariadne|mercurius/i.test(item))
+      || ctx.entryPoints.some((item) => /graphql/i.test(item)),
+    tasks: ["graphql-security"],
+    reason: "GraphQL stack detected — run GraphQL-specific security checks",
+  },
+  {
     condition: (ctx) => ctx.languages.length > 1,
     tasks: ["threat-model-stride"],
     reason: "Multi-language repo — STRIDE threat model for cross-boundary analysis",
@@ -77,7 +99,7 @@ const SELECTION_RULES: SelectionRule[] = [
 ];
 
 /** Tasks always recommended regardless of context. */
-const ALWAYS_RECOMMENDED = ["secrets-detection", "security-misconfig"];
+const ALWAYS_RECOMMENDED = ["secrets", "security-misconfig"];
 
 /**
  * Deterministic task selector — no LLM, pure rule-based mapping
@@ -85,15 +107,14 @@ const ALWAYS_RECOMMENDED = ["secrets-detection", "security-misconfig"];
  */
 function selectTasks(repoContext: RepoContext | undefined): TaskSelectionResult {
   const recommended = new Set<string>(ALWAYS_RECOMMENDED);
-  const reasoning: Record<string, string> = {
-    "secrets-detection": "Always recommended: secrets detection",
-    "security-misconfig": "Always recommended: security misconfiguration checks",
-  };
+  const reasoning: Record<string, string> = {};
   const skipped: Array<{ id: string; reason: string }> = [];
+  const recommendedTasks = normalizeTaskCapabilityIds([...recommended]);
 
   if (!repoContext) {
+    applyDefaultReasoning(recommendedTasks, reasoning);
     return {
-      recommendedTasks: [...recommended],
+      recommendedTasks,
       reasoning,
       skippedTasks: [{ id: "*", reason: "No repo context available — using defaults only" }],
     };
@@ -125,17 +146,46 @@ function selectTasks(repoContext: RepoContext | undefined): TaskSelectionResult 
       for (const taskId of rule.tasks) {
         if (!recommended.has(taskId)) {
           recommended.add(taskId);
-          reasoning[taskId] = rule.reason;
         }
       }
     }
   }
 
+  const normalizedRecommendedTasks = normalizeTaskCapabilityIds([...recommended]);
+  applyDefaultReasoning(normalizedRecommendedTasks, reasoning);
+
+  for (const rule of SELECTION_RULES) {
+    const normalizedTasks = normalizeTaskCapabilityIds(rule.tasks);
+    for (const taskId of normalizedTasks) {
+      if (normalizedRecommendedTasks.includes(taskId)) {
+        reasoning[taskId] = reasoning[taskId] === "Always recommended: secrets detection"
+          || reasoning[taskId] === "Always recommended: security misconfiguration checks"
+          ? reasoning[taskId]
+          : rule.reason;
+      }
+    }
+  }
+
   return {
-    recommendedTasks: [...recommended],
+    recommendedTasks: normalizedRecommendedTasks,
     reasoning,
     skippedTasks: skipped.length > 0 ? skipped : undefined,
   };
+}
+
+function applyDefaultReasoning(
+  recommendedTasks: string[],
+  reasoning: Record<string, string>,
+): void {
+  for (const taskId of recommendedTasks) {
+    if (!reasoning[taskId]) {
+      reasoning[taskId] = taskId === "secrets-detect"
+        ? "Always recommended: secrets detection"
+        : taskId === "security-misconfig-detect"
+          ? "Always recommended: security misconfiguration checks"
+          : "Recommended from repository context";
+    }
+  }
 }
 
 export const taskSelectorTask: AgentTask<ScanOpts, TaskSelectionResult> = {

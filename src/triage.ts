@@ -12,13 +12,13 @@ import type {
   Finding,
   TriageAgentConfig,
 } from "./scanners/types.js";
-import { formatRepoContext } from "./repo-context.js";
+import { formatEnrichedRepoContext, formatRepoContext } from "./repo-context.js";
 import {
   composePromptModules,
   confidenceEscalationModule,
   falseDismissalModule,
 } from "./prompts/modules.js";
-import type { RepoContext, TriageResult, Verdict } from "./types.js";
+import type { EnrichedRepoContext, RepoContext, TriageResult, Verdict } from "./types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 import { RawTriageOutputSchema, RawBatchTriageOutputSchema, formatZodErrors } from "./schemas.js";
 
@@ -100,7 +100,9 @@ export const TRIAGE_RESULT_SCHEMA = {
 export const DEFAULT_TOOLS: AllowedTriageTool[] = [...DEFAULT_READ_ONLY_TOOLS];
 export const DEFAULT_MAX_TURNS = 10;
 
-export interface TriageRuntimeOptions extends AgentRuntimeOptions {}
+export interface TriageRuntimeOptions extends AgentRuntimeOptions {
+  enrichedContext?: EnrichedRepoContext["enrichment"];
+}
 
 export interface TriageConfigProvider {
   has(id: string): boolean;
@@ -141,12 +143,19 @@ export class TriageExecutionError extends Error {
   }
 }
 
-export function triageSystemPromptPrefix(repoContext?: RepoContext): string {
+export function triageSystemPromptPrefix(
+  repoContext?: RepoContext,
+  enrichedContext?: EnrichedRepoContext["enrichment"],
+): string {
   const repoSection = formatRepoContext(repoContext);
+  const enrichedSection = formatEnrichedRepoContext(enrichedContext);
   const repoBlock = repoSection.length > 0
     ? "## Repository Context\n" + repoSection.join("\n") + "\n\n"
     : "";
-  return repoBlock + composePromptModules(
+  const enrichedBlock = enrichedSection.length > 0
+    ? "## Enriched Repository Context\n" + enrichedSection.join("\n") + "\n\n"
+    : "";
+  return repoBlock + enrichedBlock + composePromptModules(
     confidenceEscalationModule("triage"),
     falseDismissalModule(),
   );
@@ -181,7 +190,7 @@ export async function triageFindingWithAgent(
     maxTurns: effectiveMaxTurns,
     allowedTools,
     runtimeOptions,
-    systemPromptPrefix: triageSystemPromptPrefix(repoContext),
+    systemPromptPrefix: triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
     schema: TRIAGE_RESULT_SCHEMA,
   });
 
@@ -271,7 +280,7 @@ async function triageSingleBatch(
     maxTurns: effectiveMaxTurns,
     allowedTools: DEFAULT_TOOLS,
     runtimeOptions,
-    systemPromptPrefix: triageSystemPromptPrefix(repoContext),
+    systemPromptPrefix: triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
     schema: BATCH_TRIAGE_SCHEMA,
     strict: true,
     retryInvalidStructuredOutput: 2,

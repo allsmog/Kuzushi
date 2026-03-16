@@ -1,6 +1,6 @@
 import { verifyFindingWithAgent, verifyFindingsBatch, VerificationExecutionError } from "../../verify.js";
 import { withRetry } from "../../retry.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
 import type { KuzushiConfig } from "../../types.js";
 import { toErrorMessage } from "../../utils.js";
 import type { VerificationBatchQueuedEvent, VerificationFindingQueuedEvent } from "../events.js";
@@ -19,7 +19,7 @@ export function registerVerificationWorker(
   deps: VerificationWorkerDeps,
 ): void {
   bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", async (event) => {
-    const { context, finding, triageResult, repoContext, index, total } = event.payload;
+    const { context, finding, triageResult, repoContext, enrichedContext, index, total } = event.payload;
     const runId = event.meta.runId;
     let attempts = 0;
 
@@ -36,6 +36,7 @@ export function registerVerificationWorker(
             deps.config.verifyMaxTurns,
             coerceRepoContext(repoContext),
             {
+              enrichedContext: coerceContextEnrichment(enrichedContext),
               activityCallback: async (activity) => {
                 await bus.publish(
                   createEvent("verification:agent-activity", runId, {
@@ -92,7 +93,7 @@ export function registerVerificationWorker(
   });
 
   bus.subscribe<VerificationBatchQueuedEvent>("verification:batch-queued", async (event) => {
-    const { context, items, repoContext } = event.payload;
+    const { context, items, repoContext, enrichedContext } = event.payload;
     const runId = event.meta.runId;
 
     const batchItems = items.map((item) => ({
@@ -109,7 +110,7 @@ export function registerVerificationWorker(
             context.repoName,
             deps.config.verifyModel ?? deps.config.triageModel ?? deps.config.model,
             coerceRepoContext(repoContext),
-            {},
+            { enrichedContext: coerceContextEnrichment(enrichedContext) },
             deps.config.verifyBatchSize ?? 5,
             deps.config.verifyMaxTurns,
           ),

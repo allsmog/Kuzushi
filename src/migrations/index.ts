@@ -12,6 +12,7 @@ import { migration008 } from "./008_pipeline_runs_status_values.js";
 import { migration009 } from "./009_add_pipeline_runs_context.js";
 import { migration010 } from "./010_add_calibration_schema.js";
 import { migration011 } from "./011_add_trajectories_table.js";
+import { migration012 } from "./012_add_finding_provenance_columns.js";
 import type { Migration } from "./types.js";
 
 /** All registered migrations in version order. */
@@ -27,4 +28,5 @@ export const allMigrations: Migration[] = [
   migration009,
   migration010,
   migration011,
+  migration012,
 ];

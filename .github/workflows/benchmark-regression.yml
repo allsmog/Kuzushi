@@ -1,0 +1,31 @@
+name: Benchmark Regression
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  benchmark-regression:
+    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck:benchmarks
+      - run: bash benchmarks/govwa/setup.sh
+      - run: bash benchmarks/juice-shop/setup.sh
+      - run: pnpm benchmark:freeze -- --results-dir benchmarks/results-ci --output benchmarks/results-ci/current-baseline.json
+      - run: pnpm benchmark:regression -- --results benchmarks/results-ci/govwa.json,benchmarks/results-ci/juice-shop.json --precision-threshold 0.03 --recall-threshold 0.03 --cost-threshold 0.25

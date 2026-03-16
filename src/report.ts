@@ -2,11 +2,36 @@ import chalk from "chalk";
 import path from "node:path";
 import type { ExploitChain, TriageResult, Verdict } from "./types.js";
 import type { ScannerId } from "./scanners/types.js";
+import type { QualityGateResult } from "./quality-gate.js";
+import type { RunMetrics } from "./scoring/run-metrics.js";
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
 import {
   getActionableFindings,
 } from "./store.js";
+
+/** Print quality gate results to terminal. */
+export function printQualityGateResult(result: QualityGateResult): void {
+  console.log("");
+  if (result.passed) {
+    console.log(`  ${chalk.green.bold("Quality Gates: PASSED")}`);
+  } else {
+    console.log(`  ${chalk.red.bold("Quality Gates: FAILED")}`);
+    for (const violation of result.violations) {
+      console.log(`    ${chalk.red("x")} ${chalk.bold(violation.rule)}: ${violation.message}`);
+      if (violation.fingerprints && violation.fingerprints.length > 0) {
+        const shown = violation.fingerprints.slice(0, 5);
+        for (const fp of shown) {
+          console.log(`      ${chalk.dim(fp.slice(0, 16))}...`);
+        }
+        if (violation.fingerprints.length > 5) {
+          console.log(`      ${chalk.dim(`... and ${violation.fingerprints.length - 5} more`)}`);
+        }
+      }
+    }
+  }
+  console.log(chalk.bold("─".repeat(60)));
+}
 
 /** Color a verdict string. */
 function colorVerdict(verdict: Verdict): string {
@@ -128,8 +153,17 @@ export function printSummary(
   if ((options.stats?.skippedLowConfidence ?? 0) > 0) {
     console.log(`  ${chalk.dim("Skipped (low confidence):")} ${options.stats?.skippedLowConfidence}`);
   }
+  if ((options.stats?.skippedByFpFilter ?? 0) > 0) {
+    console.log(`  ${chalk.dim("Skipped (hard exclusions):")} ${options.stats?.skippedByFpFilter}`);
+  }
+  if ((options.stats?.softSuppressedFindings ?? 0) > 0) {
+    console.log(`  ${chalk.dim("Soft-suppressed findings:")} ${options.stats?.softSuppressedFindings}`);
+  }
   if ((options.stats?.skippedByLlmRescore ?? 0) > 0) {
     console.log(`  ${chalk.dim("Skipped (LLM rescore):")} ${options.stats?.skippedByLlmRescore}`);
+  }
+  if ((options.stats?.corroboratedClusters ?? 0) > 0) {
+    console.log(`  ${chalk.dim("Corroborated clusters:")} ${options.stats?.corroboratedClusters}`);
   }
   if (hasVerificationData) {
     const verifyErrors = options.stats?.verifyErrors ?? 0;
@@ -210,6 +244,13 @@ export function printSummary(
       if (f.verifyAttackVector) {
         console.log(`    ${chalk.cyan("Vector:")} ${f.verifyAttackVector}`);
       }
+      if (f.corroboratingSignals.length > 0) {
+        const scanners = [...new Set(f.corroboratingSignals.map((signal) => signal.scanner))];
+        console.log(`    ${chalk.dim("Corroborated by:")} ${scanners.join(", ")} (+${f.corroboratingSignals.length})`);
+      }
+      if (f.suppressionReasons.length > 0) {
+        console.log(`    ${chalk.dim("Suppression notes:")} ${f.suppressionReasons.map((reason) => reason.id).join(", ")}`);
+      }
       const proofLevel = (f as Record<string, unknown>)["verifyProofLevel"];
       const proofVerdict = (f as Record<string, unknown>)["verifyProofVerdict"];
       if (typeof proofLevel === "number" && proofLevel >= 1 && proofLevel <= 4) {
@@ -267,7 +308,76 @@ export function printSummary(
     console.log(`  ${chalk.dim("Audit log:")} ${runDir}/`);
   }
 
+  const runMetrics = options.stats?.runMetrics;
+  if (runMetrics) {
+    printMetricsSummary(runMetrics);
+  }
+
   console.log(chalk.bold("─".repeat(60)));
+}
+
+function formatDurationMs(ms: number): string {
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds.toFixed(0)}s`;
+}
+
+function printMetricsSummary(metrics: RunMetrics): void {
+  console.log("");
+  console.log(chalk.bold("  Run Metrics"));
+  console.log("");
+
+  // Verdict rates
+  const verdictTotal = Object.values(metrics.verdictCounts).reduce((s, n) => s + n, 0);
+  if (verdictTotal > 0) {
+    for (const [verdict, count] of Object.entries(metrics.verdictCounts)) {
+      const pct = ((count / verdictTotal) * 100).toFixed(1);
+      console.log(`  ${chalk.dim(`${verdict}:`)} ${count} (${pct}%)`);
+    }
+    console.log(`  ${chalk.dim("TP Rate:")} ${(metrics.tpRate * 100).toFixed(1)}%`);
+    console.log(`  ${chalk.dim("FP Rate:")} ${(metrics.fpRate * 100).toFixed(1)}%`);
+    console.log("");
+  }
+
+  // Severity distribution
+  const sevEntries = Object.entries(metrics.severityCounts);
+  if (sevEntries.length > 0) {
+    console.log(`  ${chalk.dim("Severity:")} ${sevEntries.map(([s, c]) => `${s}=${c}`).join(", ")}`);
+  }
+
+  // Scanner yield
+  const yieldEntries = Object.entries(metrics.scannerYield);
+  if (yieldEntries.length > 0) {
+    console.log(`  ${chalk.dim("Scanner yield:")} ${yieldEntries.map(([s, c]) => `${s}=${c}`).join(", ")}`);
+  }
+
+  // Average confidence
+  if (metrics.averageConfidence > 0) {
+    console.log(`  ${chalk.dim("Avg confidence:")} ${(metrics.averageConfidence * 100).toFixed(1)}%`);
+  }
+
+  // Exploitability rate
+  if (metrics.exploitabilityRate != null) {
+    console.log(`  ${chalk.dim("Exploitability rate:")} ${(metrics.exploitabilityRate * 100).toFixed(1)}%`);
+  }
+
+  // Duration breakdown
+  console.log("");
+  console.log(`  ${chalk.dim("Duration:")} scan=${formatDurationMs(metrics.durationBreakdown.scan)} triage=${formatDurationMs(metrics.durationBreakdown.triage)}${
+    metrics.durationBreakdown.verify != null ? ` verify=${formatDurationMs(metrics.durationBreakdown.verify)}` : ""
+  }${
+    metrics.durationBreakdown.pocHarness != null ? ` poc=${formatDurationMs(metrics.durationBreakdown.pocHarness)}` : ""
+  } total=${formatDurationMs(metrics.durationBreakdown.total)}`);
+
+  // Cost breakdown
+  console.log(`  ${chalk.dim("Cost:")} triage=$${metrics.costBreakdown.triage.toFixed(4)} verify=$${metrics.costBreakdown.verify.toFixed(4)} poc=$${metrics.costBreakdown.pocHarness.toFixed(4)} variant=$${metrics.costBreakdown.variantAnalysis.toFixed(4)} total=$${metrics.costBreakdown.total.toFixed(4)}`);
 }
 
 /** Print a short line when starting a scan. */

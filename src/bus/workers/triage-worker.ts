@@ -4,7 +4,7 @@ import type { TaskRegistry } from "../../agents/registry.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
 import { triageFindingWithAgent, triageFindingsBatch, BATCH_TRIAGE_FALLBACK_RATIONALE } from "../../triage.js";
 import type { KuzushiConfig } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
@@ -45,7 +45,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
   const useCalibration = deps.config.confidenceCalibration === true && deps.db != null;
 
   bus.subscribe<TriageFindingQueuedEvent>("triage:finding-queued", async (event) => {
-    const { context, finding, repoContext, index, total } = event.payload;
+    const { context, finding, repoContext, enrichedContext, index, total } = event.payload;
     const runId = event.meta.runId;
     let attempts = 0;
 
@@ -122,7 +122,10 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               deps.config.triageMaxTurns,
               deps.config.triageSpecialistMaxTurns ?? null,
               coerceRepoContext(repoContext),
-              { activityCallback },
+              {
+                activityCallback,
+                enrichedContext: coerceContextEnrichment(enrichedContext),
+              },
             );
           } else {
             triageOutput = await triageFindingWithAgent(
@@ -133,7 +136,10 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               deps.config.triageModel ?? deps.config.model,
               deps.config.triageMaxTurns,
               coerceRepoContext(repoContext),
-              { activityCallback },
+              {
+                activityCallback,
+                enrichedContext: coerceContextEnrichment(enrichedContext),
+              },
               extraPromptContext,
             );
           }
@@ -219,7 +225,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
   });
 
   bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {
-    const { context, findings, repoContext, total } = event.payload;
+    const { context, findings, repoContext, enrichedContext, total } = event.payload;
     const runId = event.meta.runId;
 
     try {
@@ -230,6 +236,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
         deps.config.triageModel ?? deps.config.model,
         coerceRepoContext(repoContext),
         {
+          enrichedContext: coerceContextEnrichment(enrichedContext),
           activityCallback: async (activity) => {
             await bus.publish(
               createEvent("triage:agent-activity", runId, {

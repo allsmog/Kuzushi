@@ -5,6 +5,7 @@ import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
+import { createLogger } from "../../../logger.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
 import {
@@ -14,6 +15,8 @@ import {
   type InvariantDocument,
   type InvariantViolation,
 } from "./types.js";
+
+const log = createLogger({ stage: "invariant-check" });
 
 function buildCheckPrompt(invariants: Invariant[]): string {
   const invariantDescriptions = invariants.map((inv) =>
@@ -151,7 +154,7 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
       throw new Error("[invariant-check] Upstream invariant-extract failed or produced no output");
     }
     if (doc.invariants.length === 0) {
-      console.error("[invariant-check] No invariants to check");
+      log.info("No invariants to check");
       return [];
     }
 
@@ -162,7 +165,7 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
       : doc.invariants;
 
     if (invariantsToCheck.length === 0) {
-      console.error("[invariant-check] No invariants to check after filtering");
+      log.info("No invariants to check after filtering");
       return [];
     }
 
@@ -170,7 +173,7 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
     const tag = "[invariant-check]";
     const batches = chunkArray(invariantsToCheck, cfg.checkBatchSize);
 
-    console.error(`${tag} Checking ${invariantsToCheck.length} invariants in ${batches.length} batch(es) (model=${cfg.checkModel})`);
+    log.info(`Checking ${invariantsToCheck.length} invariants in ${batches.length} batch(es) (model=${cfg.checkModel})`);
 
     const allViolations: InvariantViolation[] = [];
     let totalCostUsd = 0;
@@ -218,13 +221,13 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
       const batchViolations = parseViolations(parsed, cfg.confidenceThreshold);
       totalCostUsd += batchCostUsd;
 
-      console.error(`${tag} Batch ${i + 1}/${batches.length}: resultLen=${resultText.length} structured=${structuredOutput !== undefined} preThreshold=${countPreThreshold(parsed)} postThreshold=${batchViolations.length}`);
+      log.info(`Batch ${i + 1}/${batches.length}: resultLen=${resultText.length} structured=${structuredOutput !== undefined} preThreshold=${countPreThreshold(parsed)} postThreshold=${batchViolations.length}`);
 
       allViolations.push(...batchViolations);
     }
 
     const violations = allViolations;
-    console.error(`${tag} Found ${violations.length} violations total`);
+    log.info(`Found ${violations.length} violations total`);
 
     return attachTaskOutputMeta(
       violations.map((v) => violationToFinding(v, context.repoRoot, context.repoName)),

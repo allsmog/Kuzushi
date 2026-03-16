@@ -6,6 +6,7 @@ import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
+import { createLogger } from "../../../logger.js";
 import type { AgentTask, TaskContext } from "../../types.js";
 import {
   resolveThreatModelConfig,
@@ -16,6 +17,8 @@ import {
   type EvidenceAnchor,
   type ThreatModelDocument,
 } from "./types.js";
+
+const log = createLogger({ stage: "threat-model-pasta" });
 
 function buildPastaPrompt(
   strideThreats: string[],
@@ -294,7 +297,7 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
     const { strideThreats, upstreamFindings } = collectUpstreamContext(context);
 
     if (strideThreats.length === 0 && upstreamFindings.length === 0) {
-      console.error("[threat-model-pasta] No upstream threats or findings to build attack trees from");
+      log.info("No upstream threats or findings to build attack trees from");
       return {
         document: { version: "1.0", trees: [], summary: { totalTrees: 0, criticalPaths: 0 } },
         findings: [],
@@ -309,7 +312,7 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
     let costUsd = 0;
 
     const tag = "[threat-model-pasta]";
-    console.error(`${tag} Starting PASTA analysis (model=${cfg.pastaModel})`);
+    log.info(`Starting PASTA analysis (model=${cfg.pastaModel})`);
 
     try {
       for await (const message of runtime.query({
@@ -345,7 +348,7 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
     const trees = parsePastaResponse(parsed, cfg.maxTrees);
     const criticalPaths = trees.filter((t) => t.overallRisk === "critical" || t.overallRisk === "high").length;
 
-    console.error(`${tag} Built ${trees.length} attack trees (${criticalPaths} critical/high)`);
+    log.info(`Built ${trees.length} attack trees (${criticalPaths} critical/high)`);
 
     const document: AttackSimulationDocument = {
       version: "1.0",

@@ -7,6 +7,7 @@ import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
+import { createLogger } from "../../../logger.js";
 import type { AgentTask, TaskContext } from "../../types.js";
 import {
   resolveThreatModelConfig,
@@ -18,6 +19,8 @@ import {
   type ThreatModelDocument,
   type TrustBoundary,
 } from "./types.js";
+
+const log = createLogger({ stage: "threat-model-stride" });
 
 const VALID_ELEMENT_TYPES = new Set(["external-entity", "process", "data-store", "data-flow"]);
 const VALID_STRIDE_CATEGORIES = new Set<StrideCategory>([
@@ -308,7 +311,7 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
     let costUsd = 0;
 
     const tag = "[threat-model-stride]";
-    console.error(`${tag} Starting STRIDE analysis (model=${cfg.strideModel})`);
+    log.info(`Starting STRIDE analysis (model=${cfg.strideModel})`);
 
     try {
       for await (const message of runtime.query({
@@ -346,7 +349,7 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
       cfg.maxThreats,
     );
 
-    console.error(`${tag} Found ${parsed.elements.length} elements, ${parsed.threats.length} threats`);
+    log.info(`Found ${parsed.elements.length} elements, ${parsed.threats.length} threats`);
 
     const document: ThreatModelDocument = {
       version: "1.0",

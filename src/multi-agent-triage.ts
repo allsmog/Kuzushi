@@ -18,6 +18,7 @@ import {
   parseAgentOutput,
   TriageExecutionError,
   triageFindingWithAgent,
+  triageSystemPromptPrefix,
   type TriageConfigProvider,
   type TriageOutput,
   type TriageRuntimeOptions,
@@ -133,6 +134,7 @@ async function runSpecialist(
   repoName: string,
   model: string,
   maxTurns: number | null,
+  repoContext?: RepoContext,
   runtimeOptions?: AgentRuntimeOptions,
 ): Promise<SpecialistReport> {
   const prompt = SPECIALIST_PROMPTS[role](finding, repoName);
@@ -146,6 +148,10 @@ async function runSpecialist(
         maxTurns,
         allowedTools: Array.from<string>(DEFAULT_READ_ONLY_TOOLS),
         runtimeOptions,
+        systemPromptPrefix: triageSystemPromptPrefix(
+          repoContext,
+          (runtimeOptions as TriageRuntimeOptions | undefined)?.enrichedContext,
+        ),
         schema: SPECIALIST_SCHEMA,
       });
 
@@ -280,6 +286,7 @@ export async function triageFindingMultiAgent(
         repoName,
         specialistModel,
         specialistMaxTurns,
+        repoContext,
         runtimeOptions,
       ),
     ),
@@ -332,6 +339,10 @@ export async function triageFindingMultiAgent(
       maxTurns: managerMaxTurns,
       allowedTools: Array.from<string>(DEFAULT_READ_ONLY_TOOLS),
       runtimeOptions,
+      systemPromptPrefix: triageSystemPromptPrefix(
+        repoContext,
+        runtimeOptions?.enrichedContext,
+      ),
       schema: TRIAGE_RESULT_SCHEMA,
     });
 

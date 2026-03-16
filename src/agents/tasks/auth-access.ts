@@ -11,8 +11,11 @@ import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
+import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+
+const log = createLogger({ stage: "auth-access" });
 
 const AUTH_ACCESS_SCHEMA = {
   type: "object",
@@ -237,7 +240,7 @@ export const authAccessTask: AgentTask<ScanOpts, Finding[]> = {
     let costUsd = 0;
 
     const tag = "[auth-access]";
-    console.error(`${tag} Starting scan (model=${model})`);
+    log.info(`Starting scan (model=${model})`);
 
     try {
       for await (const message of runtime.query({

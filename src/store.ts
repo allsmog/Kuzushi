@@ -3,13 +3,17 @@ import path from "node:path";
 import type {
   KuzushiConfig,
   PocHarnessResult,
-  RepoContext,
   ScanOpts,
   TriageResult,
   VerificationResult,
   Verdict,
 } from "./types.js";
-import type { Finding, ScannerId } from "./scanners/types.js";
+import type {
+  CorroboratingSignal,
+  Finding,
+  ScannerId,
+  SuppressionReason,
+} from "./scanners/types.js";
 import { BATCH_TRIAGE_FALLBACK_RATIONALE } from "./triage.js";
 import { runMigrations, allMigrations } from "./migrations/index.js";
 import { safeJsonStringify, safeJsonParse } from "./utils/safe-json.js";
@@ -62,11 +66,21 @@ export function upsertFinding(
   const stmt = db.prepare(`
     INSERT INTO findings (
       fingerprint, scanner, repo, ref, rule_id, file_path, start_line,
-      severity, message, verdict, confidence,
+      severity, message, adjusted_score, corroboration_json, suppression_json, verdict, confidence,
       rationale, verification_steps, fix_patch, triage_cost_usd, triage_details_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fingerprint) DO UPDATE SET
       scanner=excluded.scanner,
+      repo=excluded.repo,
+      ref=excluded.ref,
+      rule_id=excluded.rule_id,
+      file_path=excluded.file_path,
+      start_line=excluded.start_line,
+      severity=excluded.severity,
+      message=excluded.message,
+      adjusted_score=excluded.adjusted_score,
+      corroboration_json=excluded.corroboration_json,
+      suppression_json=excluded.suppression_json,
       verdict=excluded.verdict,
       confidence=excluded.confidence,
       rationale=excluded.rationale,
@@ -87,6 +101,9 @@ export function upsertFinding(
     finding.startLine,
     finding.severity,
     finding.message,
+    finding.adjustedScore ?? finding.score,
+    finding.corroboratingSignals ? safeJsonStringify(finding.corroboratingSignals) : null,
+    finding.suppressionReasons ? safeJsonStringify(finding.suppressionReasons) : null,
     triage.verdict,
     triage.confidence,
     triage.rationale,
@@ -249,6 +266,13 @@ function asOptionalString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return value;
 }
 
 /** Load persisted verification results for a set of fingerprints. */
@@ -484,6 +508,9 @@ export function getActionableFindings(
   pocHarnessSkipped: number | null;
   pocHarnessSkipReason: string | null;
   pocHarnessCostUsd: number | null;
+  adjustedScore: number | null;
+  corroboratingSignals: CorroboratingSignal[];
+  suppressionReasons: SuppressionReason[];
 }> {
   const filters: string[] = [];
   const params: unknown[] = [];
@@ -513,6 +540,9 @@ export function getActionableFindings(
   const query = `
     SELECT scanner, fingerprint, rule_id as ruleId, file_path as filePath, start_line as startLine,
            severity, message, verdict, confidence, rationale,
+           adjusted_score as adjustedScore,
+           corroboration_json as corroborationJson,
+           suppression_json as suppressionJson,
            fix_patch as fixPatch,
            verify_exploitable as verifyExploitable,
            verify_poc_payload as verifyPocPayload,
@@ -534,9 +564,7 @@ export function getActionableFindings(
       confidence DESC
   `;
 
-  const rows = db.prepare(query).all(...params);
-
-  return rows as Array<{
+  const rows = db.prepare(query).all(...params) as Array<{
     scanner: ScannerId;
     fingerprint: string;
     ruleId: string;
@@ -547,6 +575,9 @@ export function getActionableFindings(
     verdict: Verdict;
     confidence: number;
     rationale: string;
+    adjustedScore: number | null;
+    corroborationJson: string | null;
+    suppressionJson: string | null;
     fixPatch: string | null;
     verifyExploitable: number | null;
     verifyPocPayload: string | null;
@@ -563,6 +594,37 @@ export function getActionableFindings(
     pocHarnessSkipReason: string | null;
     pocHarnessCostUsd: number | null;
   }>;
+
+  return rows.map((row) => ({
+    scanner: row.scanner,
+    fingerprint: row.fingerprint,
+    ruleId: row.ruleId,
+    filePath: row.filePath,
+    startLine: row.startLine,
+    severity: row.severity,
+    message: row.message,
+    verdict: row.verdict,
+    confidence: row.confidence,
+    rationale: row.rationale,
+    adjustedScore: row.adjustedScore,
+    corroboratingSignals: parseCorroboratingSignals(row.corroborationJson),
+    suppressionReasons: parseSuppressionReasons(row.suppressionJson),
+    fixPatch: row.fixPatch,
+    verifyExploitable: row.verifyExploitable,
+    verifyPocPayload: row.verifyPocPayload,
+    verifyPocDescription: row.verifyPocDescription,
+    verifyAttackVector: row.verifyAttackVector,
+    verifyPreconditions: row.verifyPreconditions,
+    verifyConfidence: row.verifyConfidence,
+    verifyCostUsd: row.verifyCostUsd,
+    pocHarnessPath: row.pocHarnessPath,
+    pocHarnessLanguage: row.pocHarnessLanguage,
+    pocHarnessParsed: row.pocHarnessParsed,
+    pocHarnessParseError: row.pocHarnessParseError,
+    pocHarnessSkipped: row.pocHarnessSkipped,
+    pocHarnessSkipReason: row.pocHarnessSkipReason,
+    pocHarnessCostUsd: row.pocHarnessCostUsd,
+  }));
 }
 
 export function getTriagedFindingsForRepo(
@@ -753,13 +815,80 @@ export function updateRunFindings(
 export function updateRunContext(
   db: Database.Database,
   runId: string,
-  repoContext: RepoContext,
+  repoContext: unknown,
 ): void {
   db.prepare(`
     UPDATE pipeline_runs
     SET context_json = ?, updated_at = datetime('now')
     WHERE run_id = ?
-  `).run(safeJsonStringify(repoContext), runId);
+  `).run(safeJsonStringify(repoContext ?? null), runId);
+}
+
+function parseCorroboratingSignals(raw: string | null): CorroboratingSignal[] {
+  const parsed = safeJsonParse<unknown>(raw ?? "", []);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  const signals: CorroboratingSignal[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const scanner = asOptionalString(record["scanner"]);
+    const fingerprint = asOptionalString(record["fingerprint"]);
+    const ruleId = asOptionalString(record["ruleId"]);
+    const filePath = asOptionalString(record["filePath"]);
+    const startLine = asFiniteNumber(record["startLine"]);
+    const score = asFiniteNumber(record["score"]);
+    if (!scanner || !fingerprint || !ruleId || !filePath || startLine == null || score == null) {
+      continue;
+    }
+    const cwe = Array.isArray(record["cwe"])
+      ? record["cwe"].map((value) => String(value).trim()).filter(Boolean)
+      : [];
+    signals.push({
+      scanner,
+      fingerprint,
+      ruleId,
+      filePath,
+      startLine,
+      cwe,
+      score,
+    });
+  }
+  return signals;
+}
+
+function parseSuppressionReasons(raw: string | null): SuppressionReason[] {
+  const parsed = safeJsonParse<unknown>(raw ?? "", []);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  const reasons: SuppressionReason[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const id = asOptionalString(record["id"]);
+    const description = asOptionalString(record["description"]);
+    const kind = record["kind"] === "hard" || record["kind"] === "soft"
+      ? record["kind"]
+      : undefined;
+    if (!id || !description || !kind) {
+      continue;
+    }
+    reasons.push({
+      id,
+      description,
+      kind,
+      scorePenalty: asFiniteNumber(record["scorePenalty"]) ?? undefined,
+    });
+  }
+  return reasons;
 }
 
 /** Increment persisted run cost in USD. */

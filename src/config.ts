@@ -2,14 +2,26 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
+import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
+import type { QualityGateConfig } from "./quality-gate.js";
 import type { ScannerConfig } from "./scanners/types.js";
 import { isRecord } from "./utils.js";
 import { augurRoot as taintAnalysisRoot } from "@kuzushi/augur";
-import { KuzushiConfigSchema, formatZodErrors, formatValidationErrorMessage } from "./schemas.js";
+import { normalizeScannerConfigAliases } from "./capabilities.js";
+import { KuzushiConfigSchema } from "./schemas.js";
+import {
+  detectConfigFormat,
+  parseConfigFile,
+  serializeConfig,
+  discoverConfigFile,
+  resolveFileReferences,
+  type ConfigFormat,
+} from "./config-io.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".kuzushi");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
-const PROJECT_CONFIG_REL_PATH = path.join(".kuzushi", "config.json");
+const PROJECT_CONFIG_DIR = ".kuzushi";
+const CONFIG_BASENAME = "config";
 const BUS_BACKENDS = new Set<string>([
   "in-process",
   "redis",
@@ -41,6 +53,9 @@ export const DEFAULTS: KuzushiConfig = {
   auditLog: false,
   reportOutput: undefined,
   sarifOutput: undefined,
+  jsonOutput: undefined,
+  csvOutput: undefined,
+  jsonlOutput: undefined,
   maxTriageRetries: 2,
   maxVerifyRetries: 2,
   maxPocHarnessRetries: 2,
@@ -70,11 +85,14 @@ export const DEFAULTS: KuzushiConfig = {
   variantAnalysisMaxFindings: 10,
   enableContextEnrichment: false,
   confidenceCalibration: false,
+  confidenceSignalWeights: undefined,
   trajectoryMemory: false,
   trajectoryMaxExemplars: 2,
   triageStrategy: "single",
   triageSpecialistMaxTurns: null,
   prioritizeFindings: true,
+  externalTasks: [],
+  enableExternalTasks: false,
   diffBase: undefined,
   scannerConfig: {
     semgrep: { configFlag: ["auto", "p/security-audit", "p/owasp-top-ten", "p/cwe-top-25"] },
@@ -106,49 +124,16 @@ export const DEFAULTS: KuzushiConfig = {
   },
 };
 
-const VALID_TOP_LEVEL_KEYS = new Set<string>([
-  ...Object.keys(DEFAULTS),
-  "triageModel",
-  "verifyModel",
-  "verifyBatchSize",
-  "pocHarnessModel",
-  "variantAnalysisModel",
-  "contextEnrichmentModel",
-  "llmRescoreEnabled",
-  "llmRescoreModel",
-  "llmRescoreThreshold",
-  "chainAnalysis",
-  "chainAnalysisModel",
-  "precedentsPath",
-  "securityProfilesPath",
-  "prioritizeFindings",
-  "costBudgetUsd",
-  "enableDynamicTaskSelection",
-  "pocExecute",
-  "pocSandbox",
-  "pocExecTimeoutMs",
-  "confidenceCalibration",
-  "trajectoryMemory",
-  "trajectoryMaxExemplars",
-  "triageStrategy",
-  "triageSpecialistModel",
-  "triageSpecialistMaxTurns",
-]);
+/** Derived from KuzushiConfigSchema so that adding a new config key to the
+ *  interface automatically makes it valid here — no manual list to maintain. */
+const VALID_TOP_LEVEL_KEYS = new Set<string>(
+  Object.keys(KuzushiConfigSchema.shape),
+);
 
 /** Load config from ~/.kuzushi/config.json + optional <repo>/.kuzushi/config.json. */
 export function loadConfig(repoRoot?: string): KuzushiConfig {
   const { globalRaw, projectRaw } = loadConfigLayers(repoRoot);
-  const merged = mergeConfigLayers(globalRaw, projectRaw);
-
-  // Validate the merged config against the Zod schema
-  const result = KuzushiConfigSchema.safeParse(merged);
-  if (!result.success) {
-    const errors = formatZodErrors(result.error.issues);
-    const message = formatValidationErrorMessage("Config", errors);
-    throw new Error(message);
-  }
-
-  return result.data;
+  return mergeConfigLayers(globalRaw, projectRaw);
 }
 
 /** Save config. If repoRoot is provided, writes project config. */
@@ -173,7 +158,8 @@ function writeConfigFile(targetPath: string, config: unknown): void {
     mkdirSync(targetDir, { recursive: true });
   }
 
-  writeFileSync(targetPath, JSON.stringify(config, null, 2) + "\n");
+  const format: ConfigFormat = detectConfigFormat(targetPath);
+  writeFileSync(targetPath, serializeConfig(config, format));
 }
 
 /** Get a config value by key (supports dotted paths like scannerConfig.semgrep.binary). */
@@ -378,6 +364,24 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "jsonOutput") {
+    config.jsonOutput = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "csvOutput") {
+    config.csvOutput = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "jsonlOutput") {
+    config.jsonlOutput = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   if (key === "maxTriageRetries") {
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) {
@@ -526,6 +530,16 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "confidenceSignalWeights") {
+    const parsed = parseFlexibleValue(raw);
+    if (!isRecord(parsed)) {
+      throw new Error("confidenceSignalWeights must be an object");
+    }
+    config.confidenceSignalWeights = normalizeConfidenceSignalWeights(parsed);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   if (key === "trajectoryMemory") {
     const parsed = parseFlexibleValue(raw);
     if (typeof parsed !== "boolean") {
@@ -608,6 +622,32 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "externalTasks") {
+    config.externalTasks = coerceStringArray(raw);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "enableExternalTasks") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("enableExternalTasks must be true or false");
+    }
+    config.enableExternalTasks = parsed;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "qualityGates") {
+    const parsed = parseFlexibleValue(raw);
+    if (!isRecord(parsed)) {
+      throw new Error("qualityGates must be an object");
+    }
+    config.qualityGates = normalizeQualityGateConfig(parsed);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   throw new Error(`Unknown config key: ${key}`);
 }
 
@@ -631,14 +671,24 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
   saveUpdatedConfigLayer(config, repoRoot);
 }
 
-/** Return global config file path. */
+/** Return global config file path.
+ *  Auto-discovers config.json, config.yaml, or config.yml (in that order).
+ *  Falls back to config.json if none exists yet. */
 export function configPath(): string {
+  const discovered = discoverConfigFile(CONFIG_DIR, CONFIG_BASENAME);
+  if (discovered) return discovered.path;
   return CONFIG_PATH;
 }
 
-/** Return project config file path. */
+/** Return project config file path.
+ *  Auto-discovers config.json, config.yaml, or config.yml (in that order).
+ *  Falls back to config.json if none exists yet. */
 export function projectConfigPath(repoRoot: string): string {
-  return path.join(repoRoot, PROJECT_CONFIG_REL_PATH);
+  const dir = path.join(repoRoot, PROJECT_CONFIG_DIR);
+  const discovered = discoverConfigFile(dir, CONFIG_BASENAME);
+  if (discovered) return discovered.path;
+  // Default to JSON when creating a new project config
+  return path.join(dir, `${CONFIG_BASENAME}.json`);
 }
 
 function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
@@ -688,6 +738,9 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const auditLog = normalizeBoolean(config.auditLog, DEFAULTS.auditLog ?? false);
   const reportOutput = normalizeOptionalString(config.reportOutput);
   const sarifOutput = normalizeOptionalString(config.sarifOutput);
+  const jsonOutput = normalizeOptionalString(config.jsonOutput);
+  const csvOutput = normalizeOptionalString(config.csvOutput);
+  const jsonlOutput = normalizeOptionalString(config.jsonlOutput);
   const maxTriageRetries = normalizeNonNegativeInt(
     config.maxTriageRetries,
     DEFAULTS.maxTriageRetries ?? 2,
@@ -711,8 +764,11 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const scanMode = normalizeScanMode(config.scanMode);
   const agentRuntimeBackend = normalizeAgentRuntimeBackend(config.agentRuntimeBackend);
   const agentRuntimeConfig = normalizeAgentRuntimeConfig(config.agentRuntimeConfig);
+  const confidenceSignalWeights = normalizeConfidenceSignalWeights(config.confidenceSignalWeights);
   const triageModel = normalizeOptionalString(config.triageModel);
   const enabledTasks = normalizeStringArray(config.enabledTasks);
+  const externalTasks = normalizeStringArray(config.externalTasks);
+  const enableExternalTasks = normalizeBoolean(config.enableExternalTasks, DEFAULTS.enableExternalTasks ?? false);
 
   return {
     ...config,
@@ -731,6 +787,9 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     auditLog,
     reportOutput,
     sarifOutput,
+    jsonOutput,
+    csvOutput,
+    jsonlOutput,
     maxTriageRetries,
     maxVerifyRetries,
     maxPocHarnessRetries,
@@ -743,12 +802,15 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     scanMode,
     agentRuntimeBackend,
     agentRuntimeConfig,
+    confidenceSignalWeights,
     triageModel,
     enabledTasks,
+    externalTasks,
+    enableExternalTasks,
     scanners: scanners.length > 0 ? scanners : [...DEFAULTS.scanners],
     severity: severity.length > 0 ? severity : [...DEFAULTS.severity],
     excludePatterns,
-    scannerConfig: coerceScannerConfigMap(config.scannerConfig),
+    scannerConfig: normalizeScannerConfigAliases(coerceScannerConfigMap(config.scannerConfig)),
   };
 }
 
@@ -757,6 +819,7 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
     ...DEFAULTS,
     scannerConfig: cloneScannerConfig(DEFAULTS.scannerConfig),
     enabledTasks: [...(DEFAULTS.enabledTasks ?? [])],
+    externalTasks: [...(DEFAULTS.externalTasks ?? [])],
     scanners: [...DEFAULTS.scanners],
     severity: [...DEFAULTS.severity],
     excludePatterns: [...DEFAULTS.excludePatterns],
@@ -805,6 +868,40 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
         continue;
       }
 
+      if (key === "confidenceSignalWeights") {
+        if (value == null) {
+          merged.confidenceSignalWeights = undefined;
+          continue;
+        }
+
+        if (!isRecord(value)) {
+          continue;
+        }
+
+        merged.confidenceSignalWeights = {
+          ...(merged.confidenceSignalWeights ?? {}),
+          ...normalizeConfidenceSignalWeights(value),
+        };
+        continue;
+      }
+
+      if (key === "qualityGates") {
+        if (value == null) {
+          merged.qualityGates = undefined;
+          continue;
+        }
+
+        if (!isRecord(value)) {
+          continue;
+        }
+
+        merged.qualityGates = normalizeQualityGateConfig({
+          ...(merged.qualityGates ?? {}),
+          ...cloneLayerValue(value),
+        });
+        continue;
+      }
+
       Reflect.set(merged as object, key, cloneLayerValue(value));
     }
   }
@@ -817,7 +914,7 @@ function loadConfigLayers(repoRoot?: string): {
   projectRaw: WritableConfigLayer;
 } {
   return {
-    globalRaw: readConfigFile(CONFIG_PATH),
+    globalRaw: readConfigFile(configPath()),
     projectRaw: repoRoot ? readConfigFile(projectConfigPath(repoRoot)) : {},
   };
 }
@@ -825,7 +922,7 @@ function loadConfigLayers(repoRoot?: string): {
 function loadWritableConfigLayer(repoRoot?: string): WritableConfigLayer {
   return repoRoot
     ? readConfigFile(projectConfigPath(repoRoot))
-    : readConfigFile(CONFIG_PATH);
+    : readConfigFile(configPath());
 }
 
 function saveUpdatedConfigLayer(config: WritableConfigLayer, repoRoot?: string): void {
@@ -840,15 +937,19 @@ function validateConfigLayer(layer: WritableConfigLayer, repoRoot?: string): voi
     return;
   }
 
-  const globalRaw = readConfigFile(CONFIG_PATH);
+  const globalRaw = readConfigFile(configPath());
   mergeConfigLayers(globalRaw, layer);
 }
 
 function readConfigFile(configFilePath: string): WritableConfigLayer {
   try {
     const content = readFileSync(configFilePath, "utf-8");
-    const parsed = JSON.parse(content);
-    return isRecord(parsed) ? parsed : {};
+    const format: ConfigFormat = detectConfigFormat(configFilePath);
+    const parsed = parseConfigFile(content, format);
+    if (!isRecord(parsed)) return {};
+    // Resolve any file:// references relative to the config file's directory
+    const resolved = resolveFileReferences(parsed, path.dirname(configFilePath));
+    return isRecord(resolved) ? resolved : {};
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
     console.warn(`Warning: config file ${configFilePath} is corrupt and will be ignored: ${err}`);
@@ -1054,6 +1155,30 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+const VALID_SIGNAL_WEIGHT_KEYS = new Set<string>(["scanner", "triage", "verification", "history", "context"]);
+
+function normalizeConfidenceSignalWeights(value: unknown): ConfidenceSignalWeights | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const result: ConfidenceSignalWeights = {};
+  let hasAny = false;
+
+  for (const [key, raw] of Object.entries(value)) {
+    if (!VALID_SIGNAL_WEIGHT_KEYS.has(key)) {
+      continue;
+    }
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) {
+      result[key as keyof ConfidenceSignalWeights] = n;
+      hasAny = true;
+    }
+  }
+
+  return hasAny ? result : undefined;
+}
+
 function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -1070,6 +1195,43 @@ function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undef
   if (apiKey) normalized.apiKey = apiKey;
   if (baseUrl) normalized.baseUrl = baseUrl;
   return normalized;
+}
+
+function normalizeQualityGateConfig(value: unknown): QualityGateConfig | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const config: QualityGateConfig = {};
+  let hasAnyField = false;
+
+  if (typeof value["failOnHighSeverityTP"] === "boolean") {
+    config.failOnHighSeverityTP = value["failOnHighSeverityTP"];
+    hasAnyField = true;
+  }
+
+  if (value["maxOpenFindings"] != null) {
+    const n = Number(value["maxOpenFindings"]);
+    if (Number.isFinite(n) && n >= 0) {
+      config.maxOpenFindings = Math.floor(n);
+      hasAnyField = true;
+    }
+  }
+
+  if (value["minTriageConfidence"] != null) {
+    const n = Number(value["minTriageConfidence"]);
+    if (Number.isFinite(n) && n >= 0 && n <= 1) {
+      config.minTriageConfidence = n;
+      hasAnyField = true;
+    }
+  }
+
+  if (typeof value["failOnExploitable"] === "boolean") {
+    config.failOnExploitable = value["failOnExploitable"];
+    hasAnyField = true;
+  }
+
+  return hasAnyField ? config : undefined;
 }
 
 function parseFlexibleValue(raw: string): unknown {

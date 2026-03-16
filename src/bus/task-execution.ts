@@ -1,6 +1,12 @@
 import type { AgentTask, TaskContext } from "../agents/types.js";
 import { isHandoff } from "../agents/handoff.js";
-import type { ScannerConfig, ScannerPlugin, Finding } from "../scanners/types.js";
+import type {
+  CorroboratingSignal,
+  ScannerConfig,
+  ScannerPlugin,
+  Finding,
+  SuppressionReason,
+} from "../scanners/types.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd } from "../utils.js";
 
@@ -130,6 +136,9 @@ function asFinding(item: Record<string, unknown>): Finding | null {
     impact: asString(item["impact"]) || "MEDIUM",
     cwe: asStringArray(item["cwe"]),
     score: asNumber(item["score"]) || 0,
+    adjustedScore: asOptionalNumber(item["adjustedScore"]),
+    corroboratingSignals: asCorroboratingSignals(item["corroboratingSignals"]),
+    suppressionReasons: asSuppressionReasons(item["suppressionReasons"]),
   };
 }
 
@@ -160,4 +169,63 @@ function asStringArray(value: unknown): string[] {
   }
 
   return value.map((item) => String(item));
+}
+
+function asOptionalNumber(value: unknown): number | undefined {
+  const parsed = asNumber(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function asCorroboratingSignals(value: unknown): CorroboratingSignal[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const signals: CorroboratingSignal[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const fingerprint = asString(item["fingerprint"]);
+    const ruleId = asString(item["ruleId"]);
+    const filePath = asString(item["filePath"]);
+    const startLine = asNumber(item["startLine"]);
+    if (!fingerprint || !ruleId || !filePath || !Number.isFinite(startLine)) {
+      continue;
+    }
+    signals.push({
+      scanner: asString(item["scanner"]) || "unknown",
+      fingerprint,
+      ruleId,
+      filePath,
+      startLine,
+      cwe: asStringArray(item["cwe"]),
+      score: asNumber(item["score"]) || 0,
+    });
+  }
+
+  return signals.length > 0 ? signals : undefined;
+}
+
+function asSuppressionReasons(value: unknown): SuppressionReason[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const reasons: SuppressionReason[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const id = asString(item["id"]);
+    const description = asString(item["description"]);
+    const kind = asString(item["kind"]);
+    if (!id || !description || (kind !== "hard" && kind !== "soft")) {
+      continue;
+    }
+    reasons.push({
+      id,
+      kind,
+      description,
+      scorePenalty: asOptionalNumber(item["scorePenalty"]),
+    });
+  }
+
+  return reasons.length > 0 ? reasons : undefined;
 }

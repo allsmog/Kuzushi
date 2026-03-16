@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { taskCapabilityMatches } from "./capabilities.js";
 
 /** A domain-specific security vulnerability category profile. */
 export interface SecurityProfile {
@@ -31,7 +32,7 @@ export function getProfilesForTask(
       !p.appliesTo ||
       p.appliesTo.length === 0 ||
       p.appliesTo.includes("*") ||
-      p.appliesTo.includes(taskId),
+      p.appliesTo.some((id) => taskCapabilityMatches(id, taskId)),
   );
 }
 

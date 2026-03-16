@@ -322,7 +322,7 @@ describe("poc-harness-worker", () => {
     });
 
     generatePocHarnessMock
-      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockRejectedValueOnce(new Error("service temporarily unavailable"))
       .mockResolvedValueOnce({
         result: makePocHarnessResult(),
         costUsd: 0.003,

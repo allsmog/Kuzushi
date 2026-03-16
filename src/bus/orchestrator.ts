@@ -3,15 +3,18 @@ import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { TaskContext as AgentTaskContext } from "../agents/types.js";
 import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
-import type { TaskSelectionResult } from "../agents/tasks/task-selector.js";
-import { createDefaultKnowledgeRegistry } from "../knowledge/index.js";
-import type { KnowledgeRegistry } from "../knowledge/types.js";
 import type { Finding } from "../scanners/types.js";
-import { deduplicateFindings } from "../scanners/dedup.js";
-import { selectTopFindings } from "../scanners/finding-selection.js";
 import { HardExclusionFilter } from "../scanners/fp-filter.js";
 import { rescoreFindings } from "../scanners/llm-rescore.js";
+import {
+  applyRescoreResults,
+  capFindingsForTriage,
+  clusterFindings,
+  getRankingScore,
+  selectFindingsForRescore,
+} from "../scanners/normalization.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
+import { resolveCapabilityConfigKey } from "../capabilities.js";
 import {
   getPocHarnessedFingerprints,
   getStoredTriageResults,
@@ -25,6 +28,7 @@ import {
   updateRunStatus,
 } from "../store.js";
 import type {
+  EnrichedRepoContext,
   ExploitChain,
   KuzushiConfig,
   RepoContext,
@@ -33,7 +37,7 @@ import type {
   VerificationResult,
   Verdict,
 } from "../types.js";
-import { coerceRepoContext } from "../repo-context.js";
+import { coerceContextEnrichment, coerceRepoContext } from "../repo-context.js";
 import { loadPrecedents, type Precedents } from "../precedents.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
@@ -144,10 +148,14 @@ interface RunState {
   dispatching: boolean;
   collectScanFindingEvents: boolean;
   repoContext?: RepoContext;
+  enrichedRepoContext?: EnrichedRepoContext["enrichment"];
   precedents?: Precedents;
   taskOutputs: Map<string, unknown>;
   failedTasks: string[];
   skippedByLlmRescore: number;
+  softSuppressedFindings: number;
+  corroboratedClusters: number;
+  variantAnalysisCompleted: boolean;
   variantFindings: number;
   variantAnalysisCostUsd: number;
   exploitChains: ExploitChain[];
@@ -331,9 +339,13 @@ export class PipelineOrchestrator {
       dispatching: false,
       collectScanFindingEvents: !this.deps.taskRegistry && !resumeRunId,
       repoContext: undefined,
+      enrichedRepoContext: undefined,
       taskOutputs: new Map<string, unknown>(),
       failedTasks: [],
       skippedByLlmRescore: 0,
+      softSuppressedFindings: 0,
+      corroboratedClusters: 0,
+      variantAnalysisCompleted: false,
       variantFindings: 0,
       variantAnalysisCostUsd: 0,
       exploitChains: [],
@@ -462,9 +474,10 @@ export class PipelineOrchestrator {
 
     if (typeof run.contextJson === "string" && run.contextJson.trim().length > 0) {
       const parsedContext = safeJsonParse<unknown>(run.contextJson, undefined);
-      state.repoContext = parsedContext !== undefined
-        ? coerceRepoContext(parsedContext)
-        : undefined;
+      if (parsedContext !== undefined) {
+        state.repoContext = coerceRepoContext(parsedContext);
+        state.enrichedRepoContext = coerceContextEnrichment(parsedContext);
+      }
     }
 
     if (!run.findingsJson) {
@@ -494,7 +507,8 @@ export class PipelineOrchestrator {
 
     try {
       const parsed = safeJsonParse<unknown>(run.findingsJson);
-      state.scanFindings = coerceFindings(parsed);
+      state.scanFindings = clusterFindings(coerceFindings(parsed)).findings;
+      state.totalFindings = state.scanFindings.length;
       state.totalCostUsd = normalizeCostUsd(run.totalCostUsd);
     } catch (error) {
       await this.bus.publish(
@@ -692,9 +706,12 @@ export class PipelineOrchestrator {
 
     const enableContextExplicit = state.config.enableContextGathering !== false
       && this.deps.taskRegistry.has("context-gatherer");
+    const enableContextEnrichment = state.config.enableContextEnrichment === true
+      && this.deps.taskRegistry.has("context-enricher");
     const candidateIds = normalizeTaskIds([
       ...state.scanners,
       ...(enableContextExplicit ? ["context-gatherer"] : []),
+      ...(enableContextEnrichment ? ["context-enricher"] : []),
       ...(state.config.enabledTasks ?? []),
       // Auto-add task-selector when dynamic task selection is enabled
       ...(state.config.enableDynamicTaskSelection && this.deps.taskRegistry.has("task-selector")
@@ -871,8 +888,19 @@ export class PipelineOrchestrator {
     const gatheredContext = coerceRepoContext(state.taskOutputs.get("context-gatherer"));
     if (gatheredContext) {
       state.repoContext = gatheredContext;
+    }
+
+    const enrichedContext = coerceContextEnrichment(state.taskOutputs.get("context-enricher"));
+    if (enrichedContext) {
+      state.enrichedRepoContext = enrichedContext;
+    }
+
+    if (state.repoContext || state.enrichedRepoContext) {
       try {
-        updateRunContext(this.deps.db, state.checkpointRunId, gatheredContext);
+        updateRunContext(this.deps.db, state.checkpointRunId, {
+          base: state.repoContext,
+          enrichment: state.enrichedRepoContext,
+        });
       } catch {
         // Context checkpoint persistence is best-effort.
       }
@@ -909,7 +937,7 @@ export class PipelineOrchestrator {
         }
       }
     }
-    return dynamicTasks;
+    return normalizeTaskIds(dynamicTasks);
   }
 
   private waitForTaskOutcome(runId: string, taskId: string): Promise<TaskOutcome> {
@@ -946,27 +974,25 @@ export class PipelineOrchestrator {
       return;
     }
 
-    const rankedFindings = state.resuming
-      ? [...state.scanFindings]
-      : selectTopFindings(state.scanFindings, state.scanOpts.maxFindings);
-    const dedupedFindings = deduplicateFindings(rankedFindings);
-    state.scanFindings = dedupedFindings;
-    state.totalFindings = dedupedFindings.length;
+    const clustered = clusterFindings(state.scanFindings);
+    state.scanFindings = clustered.findings;
+    state.totalFindings = clustered.findings.length;
+    state.corroboratedClusters = clustered.corroboratedClusters;
 
-    if (!state.resuming) {
-      try {
+    try {
+      if (!state.resuming) {
         updateRunStatus(this.deps.db, state.checkpointRunId, "triaging");
-        updateRunFindings(this.deps.db, state.checkpointRunId, rankedFindings);
-      } catch (error) {
-        await this.bus.publish(
-          createEvent("pipeline:error", runId, {
-            context: state.context,
-            error: toErrorMessage(error),
-            fatal: true,
-          }),
-        );
-        return;
       }
+      updateRunFindings(this.deps.db, state.checkpointRunId, state.scanFindings);
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: toErrorMessage(error),
+          fatal: true,
+        }),
+      );
+      return;
     }
 
     let alreadyTriaged = new Set<string>();
@@ -985,54 +1011,61 @@ export class PipelineOrchestrator {
       }
     }
 
-    // Apply FP filter before triage queue
-    let filteredFindings = rankedFindings;
+    // Apply hard/soft filtering after clustering so corroborating evidence is preserved.
+    let filteredFindings = [...state.scanFindings];
     state.skippedByFpFilter = 0;
+    state.softSuppressedFindings = 0;
     if (state.config.fpFilterEnabled !== false) {
       const customExclusions = [
         ...(state.config.fpFilterCustomExclusions ?? []),
         ...(state.precedents?.hardExclusions ?? []),
       ];
       const fpFilter = new HardExclusionFilter(customExclusions);
-      const filterResult = fpFilter.filterFindings(rankedFindings);
+      const filterResult = fpFilter.filterFindings(state.scanFindings);
       filteredFindings = filterResult.kept;
-      state.skippedByFpFilter = filterResult.excluded.length;
-      if (filterResult.excluded.length > 0) {
-        console.error(`[fp-filter] Excluded ${filterResult.excluded.length} findings`);
+      state.skippedByFpFilter = filterResult.hardExcluded.length;
+      state.softSuppressedFindings = filterResult.softSuppressed.length;
+      if (filterResult.hardExcluded.length > 0) {
+        console.error(`[fp-filter] Excluded ${filterResult.hardExcluded.length} findings`);
       }
     }
 
-    // LLM rescore: two-stage filtering with cheap model
+    filteredFindings.sort((a, b) => getRankingScore(b) - getRankingScore(a));
+
+    // LLM rescore: bounded to top 2x maxFindings when capped.
     state.skippedByLlmRescore = 0;
     if (state.config.llmRescoreEnabled) {
-      const rescoreResults = await rescoreFindings(filteredFindings, {
+      const rescoreWindow = selectFindingsForRescore(filteredFindings, state.scanOpts.maxFindings);
+      const rescoredFingerprints = new Set(rescoreWindow.map((finding) => finding.fingerprint));
+      const untouched = filteredFindings.filter(
+        (finding) => !rescoredFingerprints.has(finding.fingerprint),
+      );
+      const rescoreResults = await rescoreFindings(rescoreWindow, {
         model: state.config.llmRescoreModel,
         threshold: state.config.llmRescoreThreshold,
         repoRoot: state.context.repoRoot,
       });
-      const keptFingerprints = new Set(
-        rescoreResults.filter((r) => r.keep).map((r) => r.fingerprint),
-      );
-      const before = filteredFindings.length;
-      filteredFindings = filteredFindings.filter(
-        (f) => keptFingerprints.has(f.fingerprint),
-      );
-      state.skippedByLlmRescore = before - filteredFindings.length;
+      const applied = applyRescoreResults(rescoreWindow, rescoreResults);
+      filteredFindings = [...applied.findings, ...untouched]
+        .sort((a, b) => getRankingScore(b) - getRankingScore(a));
+      state.skippedByLlmRescore = applied.skippedByLlmRescore;
       if (state.skippedByLlmRescore > 0) {
         console.error(`[llm-rescore] Excluded ${state.skippedByLlmRescore} findings`);
       }
     }
 
-    // Priority sort: highest-score findings first for budget-limited runs
-    if (state.config.prioritizeFindings !== false) {
-      filteredFindings.sort((a, b) => b.score - a.score);
+    if (state.config.prioritizeFindings === false) {
+      filteredFindings = [...filteredFindings];
+    } else {
+      filteredFindings.sort((a, b) => getRankingScore(b) - getRankingScore(a));
     }
 
-    const triageCandidates = filteredFindings.filter(
+    const pendingFindings = filteredFindings.filter(
       (finding) => !alreadyTriaged.has(finding.fingerprint),
     );
+    const triageCandidates = capFindingsForTriage(pendingFindings, state.scanOpts.maxFindings);
 
-    state.skippedAlreadyTriaged = filteredFindings.length - triageCandidates.length;
+    state.skippedAlreadyTriaged = filteredFindings.length - pendingFindings.length;
     state.triageTotal = triageCandidates.length;
     state.triageQueue = triageCandidates.map((finding, idx) => ({
       finding,
@@ -1186,7 +1219,9 @@ export class PipelineOrchestrator {
           skippedAlreadyTriaged: state.skippedAlreadyTriaged,
           skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
           skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
+          softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
           skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
+          corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
           triaged: state.triaged,
           triageErrors: state.triageErrors,
           totalCostUsd: state.totalCostUsd,
@@ -1319,6 +1354,7 @@ export class PipelineOrchestrator {
             context: state.context,
             finding: item.finding,
             repoContext: state.repoContext,
+            enrichedContext: state.enrichedRepoContext,
             precedents: state.precedents,
             index: item.index,
             total: item.total,
@@ -1345,6 +1381,7 @@ export class PipelineOrchestrator {
         context: state.context,
         findings,
         repoContext: state.repoContext,
+        enrichedContext: state.enrichedRepoContext,
         precedents: state.precedents,
         total: findings.length,
       }),
@@ -1394,35 +1431,8 @@ export class PipelineOrchestrator {
       return;
     }
 
-    // Variant analysis phase (runs before verification)
-    if (state.config.variantAnalysis) {
-      const confirmedTPs = this.collectConfirmedTPs(state);
-      if (confirmedTPs.length > 0) {
-        const model = state.config.variantAnalysisModel || state.config.model;
-        await this.bus.publish(
-          createEvent("variant-analysis:start", runId, {
-            context: state.context,
-            confirmedCount: confirmedTPs.length,
-            model,
-          }),
-        );
-        try {
-          const result = await runVariantAnalysis(confirmedTPs, state.context, state.config);
-          state.variantFindings = result.findings.length;
-          state.variantAnalysisCostUsd = result.costUsd;
-          state.totalCostUsd += result.costUsd;
-          updateRunCost(this.deps.db, state.checkpointRunId, state.totalCostUsd);
-        } catch (error) {
-          console.error(`[orchestrator] Variant analysis error: ${toErrorMessage(error)}`);
-        }
-        await this.bus.publish(
-          createEvent("variant-analysis:complete", runId, {
-            context: state.context,
-            variantFindings: state.variantFindings,
-            costUsd: state.variantAnalysisCostUsd,
-          }),
-        );
-      }
+    if (!state.verifyEnabled) {
+      await this.runVariantAnalysisPhase(state, runId);
     }
 
     // Chain analysis phase
@@ -1455,7 +1465,7 @@ export class PipelineOrchestrator {
           if (chainMeta?.costUsd) {
             state.chainAnalysisCostUsd = chainMeta.costUsd;
             state.totalCostUsd += chainMeta.costUsd;
-            updateRunCost(this.deps.db, state.checkpointRunId, state.totalCostUsd);
+            updateRunCost(this.deps.db, state.checkpointRunId, chainMeta.costUsd);
           }
         } catch (error) {
           console.error(`[orchestrator] Chain analysis error: ${toErrorMessage(error)}`);
@@ -1505,6 +1515,115 @@ export class PipelineOrchestrator {
       }
     }
     return confirmed;
+  }
+
+  private collectVariantAnalysisSeeds(
+    state: RunState,
+  ): Array<{ finding: Finding; triageResult: TriageResult }> {
+    const fingerprints = state.scanFindings.map((finding) => finding.fingerprint);
+    const triageResults = getStoredTriageResults(this.deps.db, fingerprints);
+    const verificationResults = state.verifyEnabled
+      ? getStoredVerificationResults(this.deps.db, fingerprints)
+      : new Map<string, VerificationResult>();
+
+    const seeds: Array<{ finding: Finding; triageResult: TriageResult }> = [];
+    for (const finding of state.scanFindings) {
+      const triageResult = triageResults.get(finding.fingerprint);
+      if (!triageResult || triageResult.verdict !== "tp") {
+        continue;
+      }
+
+      if (state.verifyEnabled) {
+        const verificationResult = verificationResults.get(finding.fingerprint);
+        if (!verificationResult?.exploitable) {
+          continue;
+        }
+      } else if (triageResult.confidence < 0.9) {
+        continue;
+      }
+
+      seeds.push({ finding, triageResult });
+    }
+
+    return seeds;
+  }
+
+  private async runVariantAnalysisPhase(state: RunState, runId: string): Promise<void> {
+    if (!state.config.variantAnalysis || state.variantAnalysisCompleted) {
+      return;
+    }
+    state.variantAnalysisCompleted = true;
+
+    const confirmedTPs = this.collectVariantAnalysisSeeds(state);
+    if (confirmedTPs.length === 0) {
+      return;
+    }
+
+    const model = state.config.variantAnalysisModel || state.config.model;
+    await this.bus.publish(
+      createEvent("variant-analysis:start", runId, {
+        context: state.context,
+        confirmedCount: confirmedTPs.length,
+        model,
+      }),
+    );
+
+    try {
+      const result = await runVariantAnalysis(confirmedTPs, state.context, {
+        ...state.config,
+        variantAnalysisMaxFindings: Math.min(state.config.variantAnalysisMaxFindings ?? 5, 5),
+      });
+      const normalizedVariants = await this.normalizeFindingsForVariantAnalysis(state, result.findings);
+      state.variantFindings = normalizedVariants.length;
+      state.variantAnalysisCostUsd = result.costUsd;
+      state.totalCostUsd += result.costUsd;
+      updateRunCost(this.deps.db, state.checkpointRunId, result.costUsd);
+    } catch (error) {
+      console.error(`[orchestrator] Variant analysis error: ${toErrorMessage(error)}`);
+    }
+
+    await this.bus.publish(
+      createEvent("variant-analysis:complete", runId, {
+        context: state.context,
+        variantFindings: state.variantFindings,
+        costUsd: state.variantAnalysisCostUsd,
+      }),
+    );
+  }
+
+  private async normalizeFindingsForVariantAnalysis(
+    state: RunState,
+    findings: Finding[],
+  ): Promise<Finding[]> {
+    let normalized = clusterFindings(findings).findings;
+    if (normalized.length === 0) {
+      return normalized;
+    }
+
+    if (state.config.fpFilterEnabled !== false) {
+      const customExclusions = [
+        ...(state.config.fpFilterCustomExclusions ?? []),
+        ...(state.precedents?.hardExclusions ?? []),
+      ];
+      normalized = new HardExclusionFilter(customExclusions).filterFindings(normalized).kept;
+    }
+
+    normalized.sort((a, b) => getRankingScore(b) - getRankingScore(a));
+
+    if (state.config.llmRescoreEnabled) {
+      const rescoreWindow = selectFindingsForRescore(normalized, state.scanOpts.maxFindings);
+      const rescoredFingerprints = new Set(rescoreWindow.map((finding) => finding.fingerprint));
+      const untouched = normalized.filter((finding) => !rescoredFingerprints.has(finding.fingerprint));
+      const rescoreResults = await rescoreFindings(rescoreWindow, {
+        model: state.config.llmRescoreModel,
+        threshold: state.config.llmRescoreThreshold,
+        repoRoot: state.context.repoRoot,
+      });
+      normalized = [...applyRescoreResults(rescoreWindow, rescoreResults).findings, ...untouched]
+        .sort((a, b) => getRankingScore(b) - getRankingScore(a));
+    }
+
+    return normalized;
   }
 
   private isBudgetExceeded(state: RunState): boolean {
@@ -1767,6 +1886,7 @@ export class PipelineOrchestrator {
               finding: item.finding,
               triageResult: item.triageResult,
               repoContext: state.repoContext,
+              enrichedContext: state.enrichedRepoContext,
               precedents: state.precedents,
               index: item.index,
               total: item.total,
@@ -1778,6 +1898,7 @@ export class PipelineOrchestrator {
               context: state.context,
               items: batchItems,
               repoContext: state.repoContext,
+              enrichedContext: state.enrichedRepoContext,
             }),
           );
         }
@@ -1818,6 +1939,8 @@ export class PipelineOrchestrator {
       await this.startPocHarnessGeneration(state, runId);
       return;
     }
+
+    await this.runVariantAnalysisPhase(state, runId);
 
     await this.bus.publish(
       createEvent("report:requested", runId, {
@@ -2026,6 +2149,8 @@ export class PipelineOrchestrator {
       }),
     );
 
+    await this.runVariantAnalysisPhase(state, runId);
+
     await this.bus.publish(
       createEvent("report:requested", runId, {
         context: state.context,
@@ -2131,7 +2256,9 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     skippedAlreadyTriaged: state.skippedAlreadyTriaged,
     skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
     skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
+    softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
     skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
+    corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
     triaged: state.triaged,
     triageErrors: state.triageErrors,
     totalCostUsd: state.totalCostUsd,
@@ -2293,18 +2420,8 @@ function shouldVerifyFinding(
   return true;
 }
 
-const SCANNER_ID_TO_CONFIG_KEY: Record<string, string> = {
-  "crypto-misuse-detect": "crypto-misuse",
-  "auth-access-detect": "auth-access",
-  "race-condition-detect": "race-condition",
-  "invariant-check": "invariant-analysis",
-  "threat-model-stride": "threat-model",
-  "threat-model-pasta": "threat-model",
-  "taint-analysis-run": "taint-analysis",
-};
-
 function isScannerVerificationEnabled(config: KuzushiConfig, scannerId: string): boolean {
-  const configKey = SCANNER_ID_TO_CONFIG_KEY[scannerId] ?? scannerId;
+  const configKey = resolveCapabilityConfigKey(scannerId);
   const scannerCfg = config.scannerConfig[configKey];
   if (!isRecord(scannerCfg)) {
     return true;
