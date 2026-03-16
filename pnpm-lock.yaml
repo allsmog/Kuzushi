@@ -10,13 +10,13 @@ importers:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.2.52
-        version: 0.2.52(zod@4.3.6)
+        version: 0.2.52(zod@3.25.76)
       '@kuzushi/augur':
         specifier: ^0.1.0
         version: 0.1.0
       '@mariozechner/pi-ai':
         specifier: ^0.57.1
-        version: 0.57.1(ws@8.19.0)(zod@4.3.6)
+        version: 0.57.1(ws@8.19.0)(zod@3.25.76)
       better-sqlite3:
         specifier: ^11.8.1
         version: 11.10.0
@@ -26,6 +26,9 @@ importers:
       commander:
         specifier: ^13.1.0
         version: 13.1.0
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -1745,8 +1748,8 @@ packages:
     peerDependencies:
       zod: ^3.25 || ^4
 
-  zod@4.3.6:
-    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
 
@@ -1755,9 +1758,9 @@ snapshots:
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
 
-  '@anthropic-ai/claude-agent-sdk@0.2.52(zod@4.3.6)':
+  '@anthropic-ai/claude-agent-sdk@0.2.52(zod@3.25.76)':
     dependencies:
-      zod: 4.3.6
+      zod: 3.25.76
     optionalDependencies:
       '@img/sharp-darwin-arm64': 0.34.5
       '@img/sharp-darwin-x64': 0.34.5
@@ -1769,11 +1772,11 @@ snapshots:
       '@img/sharp-win32-arm64': 0.34.5
       '@img/sharp-win32-x64': 0.34.5
 
-  '@anthropic-ai/sdk@0.73.0(zod@4.3.6)':
+  '@anthropic-ai/sdk@0.73.0(zod@3.25.76)':
     dependencies:
       json-schema-to-ts: 3.1.1
     optionalDependencies:
-      zod: 4.3.6
+      zod: 3.25.76
 
   '@aws-crypto/crc32@5.2.0':
     dependencies:
@@ -2344,9 +2347,9 @@ snapshots:
 
   '@kuzushi/augur@0.1.0': {}
 
-  '@mariozechner/pi-ai@0.57.1(ws@8.19.0)(zod@4.3.6)':
+  '@mariozechner/pi-ai@0.57.1(ws@8.19.0)(zod@3.25.76)':
     dependencies:
-      '@anthropic-ai/sdk': 0.73.0(zod@4.3.6)
+      '@anthropic-ai/sdk': 0.73.0(zod@3.25.76)
       '@aws-sdk/client-bedrock-runtime': 3.998.0
       '@google/genai': 1.43.0
       '@mistralai/mistralai': 1.14.1
@@ -2354,11 +2357,11 @@ snapshots:
       ajv: 8.18.0
       ajv-formats: 3.0.1(ajv@8.18.0)
       chalk: 5.6.2
-      openai: 6.26.0(ws@8.19.0)(zod@4.3.6)
+      openai: 6.26.0(ws@8.19.0)(zod@3.25.76)
       partial-json: 0.1.7
       proxy-agent: 6.5.0
       undici: 7.22.0
-      zod-to-json-schema: 3.25.1(zod@4.3.6)
+      zod-to-json-schema: 3.25.1(zod@3.25.76)
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
       - aws-crt
@@ -2371,8 +2374,8 @@ snapshots:
   '@mistralai/mistralai@1.14.1':
     dependencies:
       ws: 8.19.0
-      zod: 4.3.6
-      zod-to-json-schema: 3.25.1(zod@4.3.6)
+      zod: 3.25.76
+      zod-to-json-schema: 3.25.1(zod@3.25.76)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -3291,10 +3294,10 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openai@6.26.0(ws@8.19.0)(zod@4.3.6):
+  openai@6.26.0(ws@8.19.0)(zod@3.25.76):
     optionalDependencies:
       ws: 8.19.0
-      zod: 4.3.6
+      zod: 3.25.76
 
   p-retry@4.6.2:
     dependencies:
@@ -3691,8 +3694,8 @@ snapshots:
 
   ws@8.19.0: {}
 
-  zod-to-json-schema@3.25.1(zod@4.3.6):
+  zod-to-json-schema@3.25.1(zod@3.25.76):
     dependencies:
-      zod: 4.3.6
+      zod: 3.25.76
 
-  zod@4.3.6: {}
+  zod@3.25.76: {}

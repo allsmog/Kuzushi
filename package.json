@@ -32,7 +32,8 @@
     "@mariozechner/pi-ai": "^0.57.1",
     "better-sqlite3": "^11.8.1",
     "chalk": "^5.4.1",
-    "commander": "^13.1.0"
+    "commander": "^13.1.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

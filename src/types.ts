@@ -1,5 +1,28 @@
 import type { ScannerConfig, ScannerId } from "./scanners/types.js";
 
+// Re-export Zod schemas for consumers that need runtime validation.
+export {
+  FindingSchema,
+  TriageResultSchema,
+  VerificationResultSchema,
+  KuzushiConfigSchema,
+  PocHarnessResultSchema,
+  RepoContextSchema,
+  EnrichedRepoContextSchema,
+  ExploitChainSchema,
+  PrecedentsSchema,
+  SecurityProfileSchema,
+  FindingRowSchema,
+  VerdictSchema,
+  EvidenceStepSchema,
+  TriagePathAssessmentSchema,
+  RawTriageOutputSchema,
+  RawVerificationOutputSchema,
+  RawPocHarnessOutputSchema,
+  formatZodErrors,
+  formatValidationErrorMessage,
+} from "./schemas.js";
+
 /** Pluggable message bus backend. */
 export type BusBackend = "in-process" | "redis" | "google-pubsub" | "nats";
 
