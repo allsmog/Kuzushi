@@ -1,5 +1,4 @@
 import type { TaintAnalysisPassDefinition } from "./types.js";
-
 interface KevVulnerability {
   cveID?: string;
   vendorProject?: string;

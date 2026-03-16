@@ -13,8 +13,13 @@ import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
+import { installGlobalDispatcher } from "../http-agent.js";
 
 process.env.PI_CACHE_RETENTION ??= "long";
+
+// Install the global undici dispatcher early so that all fetch() calls made by
+// pi-ai (and transitively by the Anthropic SDK) reuse a shared connection pool.
+installGlobalDispatcher();
 
 const DEFAULT_MAX_TURNS: number | undefined = undefined;
 const KNOWN_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "Bash", "Write", "GetCallers", "GetCallees", "GetFunctionBody"]);
