@@ -20,6 +20,7 @@ import {
 } from "./prompts/modules.js";
 import type { RepoContext, TriageResult, Verdict } from "./types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
+import { RawTriageOutputSchema, RawBatchTriageOutputSchema, formatZodErrors } from "./schemas.js";
 
 export type { AgentActivity, AgentActivityCallback } from "./agent-runtime/execution.js";
 export { extractJson } from "./agent-runtime/execution.js";
@@ -339,8 +340,21 @@ function parseBatchTriageOutput(
 
   let items: unknown[] = [];
 
-  if (isRecord(raw) && Array.isArray((raw as Record<string, unknown>)["results"])) {
-    items = (raw as Record<string, unknown>)["results"] as unknown[];
+  // First try structured Zod validation for the batch envelope
+  if (isRecord(raw)) {
+    const batchValidation = RawBatchTriageOutputSchema.safeParse(raw);
+    if (batchValidation.success) {
+      items = batchValidation.data.results;
+    } else {
+      // Fall back to lenient extraction
+      if (Array.isArray((raw as Record<string, unknown>)["results"])) {
+        items = (raw as Record<string, unknown>)["results"] as unknown[];
+      }
+      const errors = formatZodErrors(batchValidation.error.issues);
+      console.warn(
+        `[triage] Batch triage output has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+      );
+    }
   } else if (Array.isArray(raw)) {
     items = raw;
   } else if (typeof raw === "string") {
@@ -405,6 +419,16 @@ function parseBatchTriageOutput(
 
 export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResult {
   if (isRecord(raw)) {
+    // Validate raw LLM output against schema; log warnings but proceed
+    // with lenient parsing to handle partial/non-conforming outputs gracefully.
+    const validation = RawTriageOutputSchema.safeParse(raw);
+    if (!validation.success) {
+      const errors = formatZodErrors(validation.error.issues);
+      console.warn(
+        `[triage] LLM output for ${fingerprint} has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+      );
+    }
+
     return {
       fingerprint: asString(raw["fingerprint"], fingerprint),
       verdict: parseVerdict(asString(raw["verdict"], "needs_review")),
@@ -531,6 +555,15 @@ export function parseTriageResponse(
   try {
     const jsonStr = extractJson(text);
     const parsed = JSON.parse(jsonStr);
+
+    // Validate parsed JSON against schema; log warnings but proceed leniently
+    const validation = RawTriageOutputSchema.safeParse(parsed);
+    if (!validation.success) {
+      const errors = formatZodErrors(validation.error.issues);
+      console.warn(
+        `[triage] LLM text output for ${fingerprint} has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+      );
+    }
 
     return {
       fingerprint: asString(parsed.fingerprint, fingerprint),

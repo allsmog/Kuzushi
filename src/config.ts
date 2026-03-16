@@ -5,6 +5,7 @@ import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
 import type { ScannerConfig } from "./scanners/types.js";
 import { isRecord } from "./utils.js";
 import { augurRoot as taintAnalysisRoot } from "@kuzushi/augur";
+import { KuzushiConfigSchema, formatZodErrors, formatValidationErrorMessage } from "./schemas.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".kuzushi");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
@@ -137,7 +138,17 @@ const VALID_TOP_LEVEL_KEYS = new Set<string>([
 /** Load config from ~/.kuzushi/config.json + optional <repo>/.kuzushi/config.json. */
 export function loadConfig(repoRoot?: string): KuzushiConfig {
   const { globalRaw, projectRaw } = loadConfigLayers(repoRoot);
-  return mergeConfigLayers(globalRaw, projectRaw);
+  const merged = mergeConfigLayers(globalRaw, projectRaw);
+
+  // Validate the merged config against the Zod schema
+  const result = KuzushiConfigSchema.safeParse(merged);
+  if (!result.success) {
+    const errors = formatZodErrors(result.error.issues);
+    const message = formatValidationErrorMessage("Config", errors);
+    throw new Error(message);
+  }
+
+  return result.data;
 }
 
 /** Save config. If repoRoot is provided, writes project config. */

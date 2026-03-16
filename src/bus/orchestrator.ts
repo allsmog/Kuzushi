@@ -37,6 +37,7 @@ import { coerceRepoContext } from "../repo-context.js";
 import { loadPrecedents, type Precedents } from "../precedents.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { FindingSchema, formatZodErrors } from "../schemas.js";
 import { runVariantAnalysis } from "./workers/variant-analysis-worker.js";
 import type {
   BusHandlerErrorEvent,
@@ -2298,55 +2299,17 @@ function coerceFindings(value: unknown): Finding[] {
 }
 
 function coerceFinding(item: Record<string, unknown>): Finding | null {
-  const scanner = asString(item["scanner"]);
-  const fingerprint = asString(item["fingerprint"]);
-  const ruleId = asString(item["ruleId"]);
-  const filePath = asString(item["filePath"]);
-  const severity = asString(item["severity"]);
-  const message = asString(item["message"]);
-  const evidence = asNullableString(item["evidence"]);
-  const scannerConfidence = asString(item["scannerConfidence"]);
-  const likelihood = asString(item["likelihood"]);
-  const impact = asString(item["impact"]);
-  const startLine = asNumber(item["startLine"]);
-  const score = asNumber(item["score"]);
-  const subcategory = asStringArray(item["subcategory"]);
-  const cwe = asStringArray(item["cwe"]);
-
-  if (
-    !scanner
-    || !fingerprint
-    || !ruleId
-    || !filePath
-    || startLine === null
-    || !severity
-    || !message
-    || !scannerConfidence
-    || !subcategory
-    || !likelihood
-    || !impact
-    || !cwe
-    || score === null
-  ) {
+  const result = FindingSchema.safeParse(item);
+  if (!result.success) {
+    const errors = formatZodErrors(result.error.issues);
+    const fingerprint = typeof item["fingerprint"] === "string" ? item["fingerprint"] : "<unknown>";
+    console.warn(
+      `[orchestrator] Skipping malformed finding (${fingerprint}): ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+    );
     return null;
   }
 
-  return {
-    scanner,
-    fingerprint,
-    ruleId,
-    filePath,
-    startLine,
-    severity,
-    message,
-    evidence,
-    scannerConfidence,
-    subcategory,
-    likelihood,
-    impact,
-    cwe,
-    score,
-  };
+  return result.data;
 }
 
 function asLabelCountMap(value: unknown): Record<string, number> {

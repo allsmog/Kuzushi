@@ -17,6 +17,7 @@ import {
   proofLevelModule,
 } from "./prompts/modules.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
+import { RawVerificationOutputSchema, RawBatchVerificationOutputSchema, formatZodErrors } from "./schemas.js";
 
 export const VERIFICATION_RESULT_SCHEMA = {
   type: "object",
@@ -189,6 +190,16 @@ export function buildVerificationPrompt(
 
 export function parseVerificationOutput(raw: unknown, fingerprint: string): VerificationResult {
   if (isRecord(raw)) {
+    // Validate raw LLM output against schema; log warnings but proceed
+    // with lenient parsing to handle partial/non-conforming outputs gracefully.
+    const validation = RawVerificationOutputSchema.safeParse(raw);
+    if (!validation.success) {
+      const errors = formatZodErrors(validation.error.issues);
+      console.warn(
+        `[verify] LLM output for ${fingerprint} has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+      );
+    }
+
     return {
       fingerprint: asString(raw["fingerprint"], fingerprint),
       exploitable: asBoolean(raw["exploitable"], false),
@@ -214,6 +225,15 @@ function parseVerificationResponse(text: string, fingerprint: string): Verificat
   try {
     const jsonStr = extractJson(text);
     const parsed = JSON.parse(jsonStr);
+
+    // Validate parsed JSON against schema; log warnings but proceed leniently
+    const validation = RawVerificationOutputSchema.safeParse(parsed);
+    if (!validation.success) {
+      const errors = formatZodErrors(validation.error.issues);
+      console.warn(
+        `[verify] LLM text output for ${fingerprint} has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+      );
+    }
 
     return {
       fingerprint: asString(parsed.fingerprint, fingerprint),
@@ -461,8 +481,21 @@ function parseBatchVerificationOutput(
 
   let rawItems: unknown[] = [];
 
-  if (isRecord(raw) && Array.isArray((raw as Record<string, unknown>)["results"])) {
-    rawItems = (raw as Record<string, unknown>)["results"] as unknown[];
+  // First try structured Zod validation for the batch envelope
+  if (isRecord(raw)) {
+    const batchValidation = RawBatchVerificationOutputSchema.safeParse(raw);
+    if (batchValidation.success) {
+      rawItems = batchValidation.data.results;
+    } else {
+      // Fall back to lenient extraction
+      if (Array.isArray((raw as Record<string, unknown>)["results"])) {
+        rawItems = (raw as Record<string, unknown>)["results"] as unknown[];
+      }
+      const errors = formatZodErrors(batchValidation.error.issues);
+      console.warn(
+        `[verify] Batch verification output has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+      );
+    }
   } else if (Array.isArray(raw)) {
     rawItems = raw;
   } else if (typeof raw === "string") {

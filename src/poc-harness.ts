@@ -18,6 +18,7 @@ import type {
 } from "./types.js";
 import { formatRepoContext } from "./repo-context.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
+import { RawPocHarnessOutputSchema, formatZodErrors } from "./schemas.js";
 
 export function pocHarnessSystemPromptPrefix(repoContext?: RepoContext): string {
   const repoSection = formatRepoContext(repoContext);
@@ -226,6 +227,16 @@ export function buildPocHarnessPrompt(
 
 export function parsePocHarnessOutput(raw: unknown, fingerprint: string): PocHarnessResult {
   if (isRecord(raw)) {
+    // Validate raw LLM output against schema; log warnings but proceed
+    // with lenient parsing to handle partial/non-conforming outputs gracefully.
+    const validation = RawPocHarnessOutputSchema.safeParse(raw);
+    if (!validation.success) {
+      const errors = formatZodErrors(validation.error.issues);
+      console.warn(
+        `[poc-harness] LLM output for ${fingerprint} has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+      );
+    }
+
     return parsePocHarnessObject(raw, fingerprint);
   }
 
