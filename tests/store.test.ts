@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
+import Database from "better-sqlite3";
 import {
   createRun,
   deleteFindingsByFingerprints,
@@ -108,10 +109,12 @@ describe("initDb", () => {
     db2.close();
   });
 
-  it("migrates existing findings table to include triage_cost_usd", () => {
-    const db = initDb(dbPath);
-    db.exec("DROP TABLE findings");
-    db.exec(`
+  it("migrates legacy findings table to include triage_cost_usd", () => {
+    // Simulate a legacy database (no schema_version table) with an older
+    // findings schema that is missing the triage_cost_usd column.
+    const legacyDb = new Database(dbPath);
+    legacyDb.pragma("journal_mode = WAL");
+    legacyDb.prepare(`
       CREATE TABLE findings (
         fingerprint        TEXT PRIMARY KEY,
         scanner            TEXT NOT NULL DEFAULT 'semgrep',
@@ -130,8 +133,8 @@ describe("initDb", () => {
         created_at         TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
       )
-    `);
-    db.close();
+    `).run();
+    legacyDb.close();
 
     const migrated = initDb(dbPath);
     const columns = migrated.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
@@ -139,10 +142,12 @@ describe("initDb", () => {
     migrated.close();
   });
 
-  it("migrates existing findings table to include poc harness columns", () => {
-    const db = initDb(dbPath);
-    db.exec("DROP TABLE findings");
-    db.exec(`
+  it("migrates legacy findings table to include poc harness columns", () => {
+    // Simulate a legacy database (no schema_version table) with an older
+    // findings schema that has verification columns but no poc harness columns.
+    const legacyDb = new Database(dbPath);
+    legacyDb.pragma("journal_mode = WAL");
+    legacyDb.prepare(`
       CREATE TABLE findings (
         fingerprint        TEXT PRIMARY KEY,
         scanner            TEXT NOT NULL DEFAULT 'semgrep',
@@ -169,8 +174,8 @@ describe("initDb", () => {
         created_at         TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
       )
-    `);
-    db.close();
+    `).run();
+    legacyDb.close();
 
     const migrated = initDb(dbPath);
     const columns = migrated.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
