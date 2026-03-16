@@ -26,6 +26,7 @@ import {
   type PipelineErrorEvent,
 } from "./bus/index.js";
 import type { KuzushiConfig, ScanOpts } from "./types.js";
+import { inflightCache } from "./cache.js";
 
 const TAINT_ANALYSIS_TASK_IDS = ["taint-analysis-preflight", "taint-analysis-label", "taint-analysis-run"] as const;
 const TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS = ["taint-analysis-discover", "taint-analysis-cross-analyze", "taint-analysis-stitch"] as const;
@@ -317,6 +318,7 @@ program
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
   .option("--enabled-tasks <ids>", "Additional AgentTask IDs to enable (comma-separated)")
   .option("--fresh", "Clear prior results before scanning", false)
+  .option("--no-cache", "Disable inflight request deduplication and LLM result caching")
   .option("--resume [runId]", "Resume a previous run (optionally by run id)")
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
   .action(async (repoPath: string, opts: {
@@ -348,6 +350,7 @@ program
     baseUrl?: string;
     enabledTasks?: string;
     fresh: boolean;
+    cache: boolean;
     resume?: string | boolean;
     db?: string;
   }) => {
@@ -555,6 +558,12 @@ program
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
+    }
+
+    // Disable LLM result cache when --fresh or --no-cache is passed.
+    if (opts.fresh || opts.cache === false) {
+      inflightCache.enabled = false;
+      inflightCache.invalidate();
     }
 
     // Set up DB.
