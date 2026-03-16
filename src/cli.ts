@@ -670,6 +670,11 @@ program
       if (outcome.kind === "error") {
         console.error(`Error: ${outcome.event.payload.error}`);
         process.exitCode = 1;
+      } else if (outcome.kind === "complete") {
+        const qgResult = outcome.event.payload.stats.qualityGateResult;
+        if (qgResult) {
+          printQualityGateResult(qgResult);
+        }
       }
     } finally {
       try {
