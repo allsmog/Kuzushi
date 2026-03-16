@@ -5,6 +5,7 @@ import { get } from "node:https";
 import path from "node:path";
 import os from "node:os";
 import type { IncomingMessage } from "node:http";
+import { getHttpsAgent } from "../http-agent.js";
 
 const BIN_DIR = path.join(os.homedir(), ".kuzushi", "bin");
 const GITHUB_RELEASE_URL =
@@ -40,7 +41,7 @@ function which(name: string): string | null {
 /** Follow redirects and return the final response. */
 function httpsGet(url: string, redirectCount: number = 0): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
-    const req = get(url, { headers: { "User-Agent": "kuzushi/0.1" } }, (res) => {
+    const req = get(url, { agent: getHttpsAgent(), headers: { "User-Agent": "kuzushi/0.1" } }, (res) => {
       if (
         res.statusCode
         && res.statusCode >= 300

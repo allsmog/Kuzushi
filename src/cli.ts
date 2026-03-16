@@ -4,6 +4,7 @@ import { Command } from "commander";
 import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { cleanup as cleanupHttpAgents } from "./http-agent.js";
 import { loadConfig, getConfigValue, setConfigValue, unsetConfigValue, configPath } from "./config.js";
 import {
   createRun,
@@ -723,5 +724,14 @@ configCmd
   .action(() => {
     console.log(configPath());
   });
+
+// Graceful shutdown: destroy cached HTTP agents and undici dispatcher.
+async function shutdown(code = 0): Promise<void> {
+  await Promise.resolve(cleanupHttpAgents());
+  process.exit(code);
+}
+process.on("SIGINT", () => void shutdown(130));
+process.on("SIGTERM", () => void shutdown(143));
+process.on("exit", cleanupHttpAgents);
 
 program.parse();
