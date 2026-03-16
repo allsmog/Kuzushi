@@ -533,6 +533,233 @@ test_f() {
   info "Scanner cache entries after run 2: $cache_count_after"
 }
 
+# ─── Test G: Taint analysis pipeline ──────────────────────────────────
+
+test_g() {
+  header "Test G: Taint analysis pipeline (preflight → label → run)"
+
+  rm -rf "$TEST_APP_DIR/.kuzushi/runs" "$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+
+  local exit_code=0
+  run_kuzushi "$TEST_APP_DIR" \
+    --fresh \
+    --audit-log \
+    --max 3 \
+    --enabled-tasks taint-analysis-preflight,taint-analysis-label,taint-analysis-run \
+    2>&1 | tee "$TEST_LOG_DIR/test-g.log" || exit_code=$?
+
+  if [[ $exit_code -ne 0 ]]; then
+    fail "Taint analysis pipeline exited with code $exit_code"
+    info "Check $TEST_LOG_DIR/test-g.log for details"
+    return
+  fi
+  pass "Taint analysis pipeline completed"
+
+  # Check that taint tasks were recognized.
+  if grep -q "taint-analysis" "$TEST_LOG_DIR/test-g.log" 2>/dev/null; then
+    pass "Taint analysis tasks appeared in pipeline"
+  else
+    info "Taint analysis tasks not visible in log (may have been skipped — requires CodeQL)"
+  fi
+
+  # Check for taint-specific findings.
+  local db="$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+  local taint_count
+  taint_count=$(db_count "SELECT COUNT(*) FROM findings WHERE scanner LIKE '%taint%'" "$db")
+  if [[ "$taint_count" -gt 0 ]]; then
+    pass "Taint analysis produced $taint_count findings"
+  else
+    info "No taint findings (CodeQL may not be installed — taint-analysis requires it)"
+  fi
+}
+
+# ─── Test H: Cross-service taint analysis ─────────────────────────────
+
+test_h() {
+  header "Test H: Cross-service taint analysis (discover → cross-analyze → stitch)"
+
+  rm -rf "$TEST_APP_DIR/.kuzushi/runs" "$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+
+  local exit_code=0
+  run_kuzushi "$TEST_APP_DIR" \
+    --fresh \
+    --audit-log \
+    --max 3 \
+    --enabled-tasks taint-analysis-discover,taint-analysis-cross-analyze,taint-analysis-stitch \
+    2>&1 | tee "$TEST_LOG_DIR/test-h.log" || exit_code=$?
+
+  if [[ $exit_code -ne 0 ]]; then
+    fail "Cross-service taint pipeline exited with code $exit_code"
+    info "Check $TEST_LOG_DIR/test-h.log for details"
+    return
+  fi
+  pass "Cross-service taint pipeline completed"
+
+  if grep -q "taint-analysis-discover\|Cross-Service" "$TEST_LOG_DIR/test-h.log" 2>/dev/null; then
+    pass "Cross-service discovery task appeared in pipeline"
+  else
+    info "Cross-service tasks not visible in log"
+  fi
+}
+
+# ─── Test I: Security detectors (crypto, auth, race, dangerous-api) ──
+
+test_i() {
+  header "Test I: Security detectors (crypto, auth, race-condition, dangerous-api, secrets, misconfig)"
+
+  rm -rf "$TEST_APP_DIR/.kuzushi/runs" "$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+
+  local exit_code=0
+  run_kuzushi "$TEST_APP_DIR" \
+    --fresh \
+    --audit-log \
+    --max 2 \
+    --enabled-tasks crypto-misuse-detect,auth-access-detect,race-condition-detect,dangerous-api-detect,secrets-detect,security-misconfig-detect \
+    2>&1 | tee "$TEST_LOG_DIR/test-i.log" || exit_code=$?
+
+  if [[ $exit_code -ne 0 ]]; then
+    fail "Security detectors pipeline exited with code $exit_code"
+    info "Check $TEST_LOG_DIR/test-i.log for details"
+    return
+  fi
+  pass "Security detectors pipeline completed"
+
+  # Check which detectors ran.
+  local db="$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+  for detector in crypto-misuse auth-access race-condition dangerous-api secrets security-misconfig; do
+    if grep -qi "$detector" "$TEST_LOG_DIR/test-i.log" 2>/dev/null; then
+      pass "Detector $detector appeared in pipeline"
+    else
+      info "Detector $detector not visible in log"
+    fi
+  done
+
+  # Check for any detector findings.
+  local total
+  total=$(findings_count "$db")
+  info "Total findings from detectors: $total"
+}
+
+# ─── Test J: Injection detectors (ssrf, nosql, template, prototype, supply-chain, graphql) ─
+
+test_j() {
+  header "Test J: Injection & supply-chain detectors (ssrf, nosql, template, prototype-pollution, supply-chain, graphql)"
+
+  rm -rf "$TEST_APP_DIR/.kuzushi/runs" "$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+
+  local exit_code=0
+  run_kuzushi "$TEST_APP_DIR" \
+    --fresh \
+    --audit-log \
+    --max 2 \
+    --enabled-tasks ssrf-detect,nosql-injection-detect,template-injection-detect,prototype-pollution-detect,supply-chain-detect,graphql-security-detect \
+    2>&1 | tee "$TEST_LOG_DIR/test-j.log" || exit_code=$?
+
+  if [[ $exit_code -ne 0 ]]; then
+    fail "Injection detectors pipeline exited with code $exit_code"
+    info "Check $TEST_LOG_DIR/test-j.log for details"
+    return
+  fi
+  pass "Injection detectors pipeline completed"
+
+  for detector in ssrf nosql template prototype supply-chain graphql; do
+    if grep -qi "$detector" "$TEST_LOG_DIR/test-j.log" 2>/dev/null; then
+      pass "Detector $detector appeared in pipeline"
+    else
+      info "Detector $detector not visible in log"
+    fi
+  done
+
+  local db="$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+  local total
+  total=$(findings_count "$db")
+  info "Total findings from injection detectors: $total"
+}
+
+# ─── Test K: Invariant analysis + threat modeling ─────────────────────
+
+test_k() {
+  header "Test K: Invariant analysis (extract → check) + threat modeling (STRIDE → PASTA)"
+
+  rm -rf "$TEST_APP_DIR/.kuzushi/runs" "$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+
+  local exit_code=0
+  run_kuzushi "$TEST_APP_DIR" \
+    --fresh \
+    --audit-log \
+    --max 2 \
+    --enabled-tasks invariant-extract,invariant-check,threat-model-stride,threat-model-pasta \
+    2>&1 | tee "$TEST_LOG_DIR/test-k.log" || exit_code=$?
+
+  if [[ $exit_code -ne 0 ]]; then
+    fail "Invariant + threat model pipeline exited with code $exit_code"
+    info "Check $TEST_LOG_DIR/test-k.log for details"
+    return
+  fi
+  pass "Invariant + threat model pipeline completed"
+
+  # Check invariant tasks.
+  if grep -qi "invariant" "$TEST_LOG_DIR/test-k.log" 2>/dev/null; then
+    pass "Invariant analysis tasks appeared in pipeline"
+  else
+    info "Invariant tasks not visible in log"
+  fi
+
+  # Check threat model tasks.
+  if grep -qi "threat-model\|stride\|pasta" "$TEST_LOG_DIR/test-k.log" 2>/dev/null; then
+    pass "Threat modeling tasks appeared in pipeline"
+  else
+    info "Threat modeling tasks not visible in log"
+  fi
+
+  # Check for invariant violations.
+  local db="$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+  local invariant_count
+  invariant_count=$(db_count "SELECT COUNT(*) FROM findings WHERE scanner LIKE '%invariant%'" "$db")
+  if [[ "$invariant_count" -gt 0 ]]; then
+    pass "Invariant analysis produced $invariant_count violation findings"
+  else
+    info "No invariant violation findings (may be expected for small test app)"
+  fi
+}
+
+# ─── Test L: Context enricher + dynamic task selector ─────────────────
+
+test_l() {
+  header "Test L: Context enricher + dynamic task selector"
+
+  rm -rf "$TEST_APP_DIR/.kuzushi/runs" "$TEST_APP_DIR/.kuzushi/findings.sqlite3"
+
+  local exit_code=0
+  run_kuzushi "$TEST_APP_DIR" \
+    --fresh \
+    --audit-log \
+    --max 2 \
+    --enabled-tasks context-enricher,task-selector \
+    2>&1 | tee "$TEST_LOG_DIR/test-l.log" || exit_code=$?
+
+  if [[ $exit_code -ne 0 ]]; then
+    fail "Context enricher + task selector pipeline exited with code $exit_code"
+    info "Check $TEST_LOG_DIR/test-l.log for details"
+    return
+  fi
+  pass "Context enricher + task selector pipeline completed"
+
+  # Check context enricher ran.
+  if grep -qi "context-enricher\|Context Enricher\|enricher" "$TEST_LOG_DIR/test-l.log" 2>/dev/null; then
+    pass "Context enricher task appeared in pipeline"
+  else
+    info "Context enricher not visible in log"
+  fi
+
+  # Check task selector ran.
+  if grep -qi "task-selector\|Task Selector\|Dynamic" "$TEST_LOG_DIR/test-l.log" 2>/dev/null; then
+    pass "Task selector appeared in pipeline"
+  else
+    info "Task selector not visible in log"
+  fi
+}
+
 # ─── Main ─────────────────────────────────────────────────────────────
 
 main() {
@@ -552,7 +779,7 @@ main() {
   # Determine which tests to run.
   local tests_to_run=("$@")
   if [[ ${#tests_to_run[@]} -eq 0 ]]; then
-    tests_to_run=(A B C D E F)
+    tests_to_run=(A B C D E F G H I J K L)
   fi
 
   for t in "${tests_to_run[@]}"; do
@@ -563,8 +790,14 @@ main() {
       D) test_d ;;
       E) test_e ;;
       F) test_f ;;
+      G) test_g ;;
+      H) test_h ;;
+      I) test_i ;;
+      J) test_j ;;
+      K) test_k ;;
+      L) test_l ;;
       *)
-        echo "Unknown test: $t (valid: A B C D E F)"
+        echo "Unknown test: $t (valid: A B C D E F G H I J K L)"
         ;;
     esac
   done
