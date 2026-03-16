@@ -8,6 +8,13 @@ import {
   type ToolCall as PiAiToolCall,
   validateToolCall,
 } from "@mariozechner/pi-ai";
+import type { MessageBus } from "../bus/types.js";
+import type {
+  LlmCallStartEvent,
+  LlmCallCompleteEvent,
+  LlmCallErrorEvent,
+  LlmRetryEvent,
+} from "../bus/events.js";
 import type { AgentRuntimeConfig } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
@@ -61,6 +68,7 @@ async function retryTransient<T>(
   signal: AbortSignal | undefined,
   maxRetries = TRANSIENT_RETRY_MAX,
   backoffMs = TRANSIENT_RETRY_BASE_MS,
+  observability?: { bus?: MessageBus; model?: string; runId?: string },
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -78,6 +86,31 @@ async function retryTransient<T>(
       console.error(
         `[pi-ai] Transient error (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay / 1000}s: ${toErrorMessage(error)}`,
       );
+
+      // Emit llm:retry event
+      if (observability?.bus) {
+        try {
+          const retryRunId = observability.runId ?? "";
+          await observability.bus.publish<LlmRetryEvent>({
+            type: "llm:retry",
+            meta: {
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              runId: retryRunId,
+            },
+            payload: {
+              model: observability.model ?? "unknown",
+              attempt: attempt + 1,
+              maxAttempts: maxRetries + 1,
+              delayMs: delay,
+              runId: retryRunId,
+            },
+          });
+        } catch {
+          // Non-fatal: observability emission should never break retry logic
+        }
+      }
+
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, delay);
         if (signal) {
@@ -99,6 +132,10 @@ async function retryTransient<T>(
 export class PiAiAgentRuntime implements AgentRuntime {
   readonly id = "pi-ai";
   private readonly runtimeConfig?: AgentRuntimeConfig;
+  /** Optional message bus for LLM observability events. */
+  bus?: MessageBus;
+  /** Optional run ID for correlating observability events. */
+  runId?: string;
 
   constructor(runtimeConfig?: AgentRuntimeConfig) {
     this.runtimeConfig = runtimeConfig;
@@ -151,9 +188,43 @@ export class PiAiAgentRuntime implements AgentRuntime {
           return;
         }
 
+        const observability = { bus: this.bus, model: request.options.model, runId: this.runId };
+
+        // Capture timing BEFORE the bus publish so llm:call-complete durationMs
+        // is symmetric with llm:call-start.
+        const turnStartMs = Date.now();
+
+        // Emit llm:call-start for each turn's LLM call
+        if (this.bus) {
+          try {
+            const turnRunId = this.runId ?? "";
+            const promptLength = context.messages.reduce((len, m) => {
+              const content = typeof m.content === "string" ? m.content : "";
+              return len + content.length;
+            }, 0);
+            await this.bus.publish<LlmCallStartEvent>({
+              type: "llm:call-start",
+              meta: {
+                id: crypto.randomUUID(),
+                timestamp: new Date().toISOString(),
+                runId: turnRunId,
+              },
+              payload: {
+                model: request.options.model,
+                promptLength,
+                runId: turnRunId,
+              },
+            });
+          } catch {
+            // Non-fatal
+          }
+        }
         let assistant = await retryTransient(
           () => complete(model, context, { signal }),
           signal,
+          TRANSIENT_RETRY_MAX,
+          TRANSIENT_RETRY_BASE_MS,
+          observability,
         );
 
         // Handle transient soft errors (stopReason === "error" with transient message).
@@ -171,6 +242,31 @@ export class PiAiAgentRuntime implements AgentRuntime {
             console.error(
               `[pi-ai] Transient soft error (attempt ${softRetry + 1}/${TRANSIENT_RETRY_MAX}), retrying in ${delay / 1000}s: ${assistant.errorMessage}`,
             );
+
+            // Emit llm:retry for soft error retry
+            if (this.bus) {
+              try {
+                const retryRunId = this.runId ?? "";
+                await this.bus.publish<LlmRetryEvent>({
+                  type: "llm:retry",
+                  meta: {
+                    id: crypto.randomUUID(),
+                    timestamp: new Date().toISOString(),
+                    runId: retryRunId,
+                  },
+                  payload: {
+                    model: request.options.model,
+                    attempt: softRetry + 1,
+                    maxAttempts: TRANSIENT_RETRY_MAX,
+                    delayMs: delay,
+                    runId: retryRunId,
+                  },
+                });
+              } catch {
+                // Non-fatal
+              }
+            }
+
             await new Promise<void>((resolve) => {
               const timer = setTimeout(resolve, delay);
               if (signal) {
@@ -198,7 +294,51 @@ export class PiAiAgentRuntime implements AgentRuntime {
         }
 
         context.messages.push(assistant);
-        totalCostUsd += extractCostUsd(assistant);
+        const turnCostUsd = extractCostUsd(assistant);
+        totalCostUsd += turnCostUsd;
+
+        // Emit llm:call-complete or llm:call-error for this turn
+        if (this.bus) {
+          const turnDurationMs = Date.now() - turnStartMs;
+          const turnRunId = this.runId ?? "";
+          try {
+            if (assistant.stopReason === "error") {
+              await this.bus.publish<LlmCallErrorEvent>({
+                type: "llm:call-error",
+                meta: {
+                  id: crypto.randomUUID(),
+                  timestamp: new Date().toISOString(),
+                  runId: turnRunId,
+                },
+                payload: {
+                  model: request.options.model,
+                  error: assistant.errorMessage ?? "pi-ai request failed",
+                  retryable: assistant.errorMessage ? isTransientErrorMessage(assistant.errorMessage) : false,
+                  runId: turnRunId,
+                },
+              });
+            } else {
+              const tokensUsed = (assistant.usage?.input ?? 0) + (assistant.usage?.output ?? 0);
+              await this.bus.publish<LlmCallCompleteEvent>({
+                type: "llm:call-complete",
+                meta: {
+                  id: crypto.randomUUID(),
+                  timestamp: new Date().toISOString(),
+                  runId: turnRunId,
+                },
+                payload: {
+                  model: request.options.model,
+                  durationMs: turnDurationMs,
+                  tokensUsed,
+                  costUsd: turnCostUsd,
+                  runId: turnRunId,
+                },
+              });
+            }
+          } catch {
+            // Non-fatal
+          }
+        }
 
         const assistantContent = mapAssistantContent(assistant);
         if (assistantContent.length > 0) {
