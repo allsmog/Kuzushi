@@ -1,4 +1,5 @@
 import type { RepoContext } from "../types.js";
+import { inflightCache } from "../cache.js";
 import { isRecord } from "../utils.js";
 import { getAgentRuntime, type AgentRuntime } from "./index.js";
 
@@ -60,6 +61,35 @@ export function extractJson(text: string): string {
 }
 
 export async function runStructuredAgentQuery(
+  args: StructuredAgentQueryArgs,
+): Promise<AgentQueryExecutionResult> {
+  // Include schema, allowedTools, and maxTurns in the cache key to prevent
+  // different-shaped queries with identical prompts from colliding.
+  const extraKeyParts = [
+    JSON.stringify(args.schema ?? ""),
+    JSON.stringify(args.allowedTools ?? []),
+    String(args.maxTurns ?? ""),
+  ].join("\x00");
+  const cacheKey = inflightCache.generateKey(
+    args.model,
+    args.systemPromptPrefix ?? "",
+    args.prompt + "\x00" + extraKeyParts,
+    args.cwd,
+  );
+
+  try {
+    return await inflightCache.getOrExecute(cacheKey, () => executeStructuredAgentQuery(args));
+  } catch (error) {
+    // executeStructuredAgentQuery throws a sentinel error for soft errors (e.g., LLM
+    // returned an error result) to prevent caching. Extract the result from it.
+    if (error instanceof Error && error.message === "__kuzushi_soft_error__") {
+      return (error as unknown as Record<string, unknown>).__result as AgentQueryExecutionResult;
+    }
+    throw error;
+  }
+}
+
+async function executeStructuredAgentQuery(
   args: StructuredAgentQueryArgs,
 ): Promise<AgentQueryExecutionResult> {
   const runtime = args.runtimeOptions?.runtime ?? getAgentRuntime();
@@ -128,12 +158,22 @@ export async function runStructuredAgentQuery(
       || "unknown error";
   }
 
-  return {
+  const result: AgentQueryExecutionResult = {
     resultText,
     structuredOutput,
     executionError,
     costUsd,
   };
+
+  // Do not cache error results — throw so getOrExecute's error path prevents caching.
+  // The caller (runStructuredAgentQuery) catches and returns the result.
+  if (executionError) {
+    const err = new Error("__kuzushi_soft_error__");
+    (err as unknown as Record<string, unknown>).__result = result;
+    throw err;
+  }
+
+  return result;
 }
 
 export function resolveRepoContextAndRuntimeOptions<T extends AgentRuntimeOptions>(
