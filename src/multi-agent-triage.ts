@@ -144,7 +144,7 @@ async function runSpecialist(
         cwd: repoRoot,
         model,
         maxTurns,
-        allowedTools: [...DEFAULT_READ_ONLY_TOOLS] as unknown as string[],
+        allowedTools: Array.from<string>(DEFAULT_READ_ONLY_TOOLS),
         runtimeOptions,
         schema: SPECIALIST_SCHEMA,
       });
@@ -330,7 +330,7 @@ export async function triageFindingMultiAgent(
       cwd: repoRoot,
       model: managerModel,
       maxTurns: managerMaxTurns,
-      allowedTools: [...DEFAULT_READ_ONLY_TOOLS] as unknown as string[],
+      allowedTools: Array.from<string>(DEFAULT_READ_ONLY_TOOLS),
       runtimeOptions,
       schema: TRIAGE_RESULT_SCHEMA,
     });

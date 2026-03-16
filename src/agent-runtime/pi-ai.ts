@@ -8,6 +8,10 @@ import {
   type ToolCall as PiAiToolCall,
   validateToolCall,
 } from "@mariozechner/pi-ai";
+import {
+  KuzushiError,
+  wrapError,
+} from "../errors.js";
 import type { AgentRuntimeConfig } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
@@ -68,15 +72,22 @@ async function retryTransient<T>(
       return await fn();
     } catch (error) {
       lastError = error;
-      if (!isTransientError(error) || attempt === maxRetries) {
-        throw error;
+      // Wrap non-KuzushiError instances so callers always get typed errors.
+      const wrapped = error instanceof KuzushiError
+        ? error
+        : wrapError(error);
+
+      if (!wrapped.retryable || attempt === maxRetries) {
+        throw wrapped;
       }
       if (signal?.aborted) {
-        throw error;
+        throw wrapped;
       }
-      const delay = backoffMs * 2 ** attempt;
+      // Rate-limit errors get longer backoff.
+      const factor = wrapped.category === "rate_limit" ? 3 : 1;
+      const delay = backoffMs * factor * 2 ** attempt;
       console.error(
-        `[pi-ai] Transient error (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay / 1000}s: ${toErrorMessage(error)}`,
+        `[pi-ai] ${wrapped.name} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay / 1000}s: ${wrapped.message}`,
       );
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, delay);
@@ -89,11 +100,11 @@ async function retryTransient<T>(
         }
       });
       if (signal?.aborted) {
-        throw lastError;
+        throw wrapped;
       }
     }
   }
-  throw lastError;
+  throw wrapError(lastError);
 }
 
 export class PiAiAgentRuntime implements AgentRuntime {
@@ -167,7 +178,9 @@ export class PiAiAgentRuntime implements AgentRuntime {
           let retried = false;
           for (let softRetry = 0; softRetry < TRANSIENT_RETRY_MAX; softRetry++) {
             if (signal?.aborted) break;
-            const delay = TRANSIENT_RETRY_BASE_MS * 2 ** softRetry;
+            const isRateLimit = /\b429\b|rate.?limit/i.test(assistant.errorMessage ?? "");
+            const rateFactor = isRateLimit ? 3 : 1;
+            const delay = TRANSIENT_RETRY_BASE_MS * rateFactor * 2 ** softRetry;
             console.error(
               `[pi-ai] Transient soft error (attempt ${softRetry + 1}/${TRANSIENT_RETRY_MAX}), retrying in ${delay / 1000}s: ${assistant.errorMessage}`,
             );
@@ -457,9 +470,10 @@ export class PiAiAgentRuntime implements AgentRuntime {
       );
     } catch (error) {
       const aborted = signal?.aborted === true;
+      const wrapped = error instanceof KuzushiError ? error : wrapError(error);
       yield errorResult(
         aborted ? "error_aborted" : "error_runtime",
-        toErrorMessage(error),
+        wrapped.message,
         startedAtMs,
         0,
         totalCostUsd,

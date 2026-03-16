@@ -1,8 +1,21 @@
+import { KuzushiError, classifyError, type ErrorCategory } from "./errors.js";
+
 export interface RetryOptions {
   maxRetries: number;
   backoffMs: number;
   multiplier: number;
 }
+
+/** Categories that should never be retried. */
+const NON_RETRYABLE: ReadonlySet<ErrorCategory> = new Set<ErrorCategory>([
+  "auth",
+  "validation",
+  "budget",
+  "fatal",
+]);
+
+/** Multiplier applied on top of the normal backoff for rate-limit errors. */
+const RATE_LIMIT_BACKOFF_FACTOR = 3;
 
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -15,8 +28,25 @@ export async function withRetry<T>(
       return await fn();
     } catch (error) {
       lastError = error;
+
+      // Classify the error — works for both KuzushiError and plain errors.
+      const category: ErrorCategory = error instanceof KuzushiError
+        ? error.category
+        : classifyError(error);
+
+      // Non-retryable categories should fail immediately.
+      if (NON_RETRYABLE.has(category)) {
+        throw error;
+      }
+
       if (attempt < options.maxRetries) {
-        const delay = options.backoffMs * Math.pow(options.multiplier, attempt);
+        let delay = options.backoffMs * Math.pow(options.multiplier, attempt);
+
+        // Rate-limit errors get extra breathing room.
+        if (category === "rate_limit") {
+          delay *= RATE_LIMIT_BACKOFF_FACTOR;
+        }
+
         await sleep(delay);
       }
     }
