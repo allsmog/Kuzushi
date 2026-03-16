@@ -9,3 +9,4 @@ dist/
 .semgrep-findings.json
 .semgrep-triage.jsonl
 coverage/
+.claude/worktrees/
