@@ -152,6 +152,7 @@ interface RunState {
   exploitChains: ExploitChain[];
   chainAnalysisCostUsd: number;
   budgetExceeded: boolean;
+  budgetWarningEmitted: boolean;
 }
 
 export interface OrchestratorDeps {
@@ -337,6 +338,7 @@ export class PipelineOrchestrator {
       exploitChains: [],
       chainAnalysisCostUsd: 0,
       budgetExceeded: false,
+      budgetWarningEmitted: false,
     };
 
     // Load organization precedents
@@ -1272,6 +1274,14 @@ export class PipelineOrchestrator {
       "triage:agent-activity",
       "verification:agent-activity",
       "poc-harness:agent-activity",
+      "budget:check",
+      "budget:warning",
+      "llm:call-start",
+      "llm:call-complete",
+      "llm:call-error",
+      "llm:retry",
+      "retry:attempt",
+      "retry:exhausted",
     ]);
     const fatal = !nonFatalSources.has(event.payload.sourceEventType);
 
@@ -1294,6 +1304,7 @@ export class PipelineOrchestrator {
       const concurrency = normalizeConcurrency(state.config.triageConcurrency);
 
       while (state.inFlight < concurrency && state.queueCursor < state.triageQueue.length) {
+        await this.emitBudgetCheck(state, runId);
         if (this.isBudgetExceeded(state)) {
           await this.emitBudgetExceeded(state, runId);
           break;
@@ -1500,6 +1511,40 @@ export class PipelineOrchestrator {
     return typeof budget === "number" && budget > 0 && state.totalCostUsd >= budget;
   }
 
+  /**
+   * Emit budget:check (always) and budget:warning (at 80%+) observability events.
+   * Call this whenever cost changes and a budget is configured.
+   */
+  private async emitBudgetCheck(state: RunState, runId: string): Promise<void> {
+    const budget = state.config.costBudgetUsd;
+    if (typeof budget !== "number" || budget <= 0) return;
+
+    const percentUsed = (state.totalCostUsd / budget) * 100;
+
+    try {
+      await this.bus.publish(
+        createEvent("budget:check", runId, {
+          currentSpend: state.totalCostUsd,
+          maxBudget: budget,
+          percentUsed,
+        }),
+      );
+
+      if (percentUsed >= 80 && !state.budgetWarningEmitted) {
+        state.budgetWarningEmitted = true;
+        await this.bus.publish(
+          createEvent("budget:warning", runId, {
+            currentSpend: state.totalCostUsd,
+            maxBudget: budget,
+            percentUsed,
+          }),
+        );
+      }
+    } catch {
+      // Non-fatal: observability emission should never break orchestration
+    }
+  }
+
   private async emitBudgetExceeded(state: RunState, runId: string): Promise<void> {
     if (state.budgetExceeded) return;
     state.budgetExceeded = true;
@@ -1681,6 +1726,7 @@ export class PipelineOrchestrator {
       const batchSize = Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
 
       while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
+        await this.emitBudgetCheck(state, runId);
         if (this.isBudgetExceeded(state)) {
           await this.emitBudgetExceeded(state, runId);
           break;
@@ -1926,6 +1972,7 @@ export class PipelineOrchestrator {
         state.pocHarnessInFlight < concurrency
         && state.pocHarnessCursor < state.pocHarnessQueue.length
       ) {
+        await this.emitBudgetCheck(state, runId);
         if (this.isBudgetExceeded(state)) {
           await this.emitBudgetExceeded(state, runId);
           break;

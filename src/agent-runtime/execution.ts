@@ -1,3 +1,9 @@
+import type { MessageBus } from "../bus/types.js";
+import type {
+  LlmCallStartEvent,
+  LlmCallCompleteEvent,
+  LlmCallErrorEvent,
+} from "../bus/events.js";
 import type { RepoContext } from "../types.js";
 import { inflightCache } from "../cache.js";
 import { isRecord } from "../utils.js";
@@ -22,6 +28,10 @@ export interface AgentRuntimeOptions {
   abortController?: AbortController;
   maxBudgetUsd?: number;
   activityCallback?: AgentActivityCallback;
+  /** Optional message bus for emitting LLM observability events. */
+  bus?: MessageBus;
+  /** Optional run ID for correlating observability events. */
+  runId?: string;
 }
 
 export interface AgentQueryExecutionResult {
@@ -93,69 +103,160 @@ async function executeStructuredAgentQuery(
   args: StructuredAgentQueryArgs,
 ): Promise<AgentQueryExecutionResult> {
   const runtime = args.runtimeOptions?.runtime ?? getAgentRuntime();
+  const bus = args.runtimeOptions?.bus;
+  const runId = args.runtimeOptions?.runId ?? "";
   let resultText = "";
   let structuredOutput: unknown = undefined;
   let executionError: string | null = null;
   let costUsd = 0;
+  const startedAtMs = Date.now();
 
-  for await (const message of runtime.query({
-    prompt: args.prompt,
-    options: {
-      cwd: args.cwd,
-      model: args.model,
-      maxTurns: args.maxTurns,
-      allowedTools: [...args.allowedTools],
-      permissionMode: "dontAsk",
-      maxBudgetUsd: args.runtimeOptions?.maxBudgetUsd,
-      abortController: args.runtimeOptions?.abortController,
-      systemPromptPrefix: args.systemPromptPrefix,
-      outputFormat: {
-        type: "json_schema",
-        schema: args.schema,
-        strict: args.strict,
-        retryInvalidStructuredOutput: args.retryInvalidStructuredOutput,
+  // Emit llm:call-start
+  if (bus) {
+    try {
+      await bus.publish<LlmCallStartEvent>({
+        type: "llm:call-start",
+        meta: {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          runId,
+        },
+        payload: {
+          model: args.model,
+          promptLength: args.prompt.length,
+          runId,
+        },
+      });
+    } catch {
+      // Non-fatal: observability emission should never break execution
+    }
+  }
+
+  try {
+    for await (const message of runtime.query({
+      prompt: args.prompt,
+      options: {
+        cwd: args.cwd,
+        model: args.model,
+        maxTurns: args.maxTurns,
+        allowedTools: [...args.allowedTools],
+        permissionMode: "dontAsk",
+        maxBudgetUsd: args.runtimeOptions?.maxBudgetUsd,
+        abortController: args.runtimeOptions?.abortController,
+        systemPromptPrefix: args.systemPromptPrefix,
+        outputFormat: {
+          type: "json_schema",
+          schema: args.schema,
+          strict: args.strict,
+          retryInvalidStructuredOutput: args.retryInvalidStructuredOutput,
+        },
       },
-    },
-  })) {
-    if (message.type === "assistant") {
-      await emitAssistantActivity(message.content, args.runtimeOptions?.activityCallback);
-      continue;
+    })) {
+      if (message.type === "assistant") {
+        await emitAssistantActivity(message.content, args.runtimeOptions?.activityCallback);
+        continue;
+      }
+
+      if (message.type === "tool-progress") {
+        await args.runtimeOptions?.activityCallback?.({
+          kind: "tool-progress",
+          toolName: message.toolName,
+          elapsedSeconds: message.elapsedSeconds,
+        });
+        continue;
+      }
+
+      if (message.type === "tool-summary") {
+        await args.runtimeOptions?.activityCallback?.({
+          kind: "tool-complete",
+          summary: message.summary,
+        });
+        continue;
+      }
+
+      if (message.type !== "result") {
+        continue;
+      }
+
+      if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+        costUsd = message.totalCostUsd;
+      }
+
+      if ("result" in message) {
+        resultText = message.result;
+        structuredOutput = message.structuredOutput;
+        continue;
+      }
+
+      executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "")
+        || message.subtype
+        || "unknown error";
     }
 
-    if (message.type === "tool-progress") {
-      await args.runtimeOptions?.activityCallback?.({
-        kind: "tool-progress",
-        toolName: message.toolName,
-        elapsedSeconds: message.elapsedSeconds,
-      });
-      continue;
+    // Emit llm:call-complete on success or non-throwing error
+    if (bus) {
+      const durationMs = Date.now() - startedAtMs;
+      try {
+        if (executionError) {
+          await bus.publish<LlmCallErrorEvent>({
+            type: "llm:call-error",
+            meta: {
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              runId,
+            },
+            payload: {
+              model: args.model,
+              error: executionError,
+              retryable: false,
+              runId,
+            },
+          });
+        } else {
+          await bus.publish<LlmCallCompleteEvent>({
+            type: "llm:call-complete",
+            meta: {
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              runId,
+            },
+            payload: {
+              model: args.model,
+              durationMs,
+              tokensUsed: 0, // Token count not available at this abstraction level
+              costUsd,
+              runId,
+            },
+          });
+        }
+      } catch {
+        // Non-fatal: observability emission should never break execution
+      }
     }
-
-    if (message.type === "tool-summary") {
-      await args.runtimeOptions?.activityCallback?.({
-        kind: "tool-complete",
-        summary: message.summary,
-      });
-      continue;
+  } catch (error) {
+    // Emit llm:call-error on thrown error
+    if (bus) {
+      try {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        await bus.publish<LlmCallErrorEvent>({
+          type: "llm:call-error",
+          meta: {
+            id: crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+            runId,
+          },
+          payload: {
+            model: args.model,
+            error: errorMessage,
+            retryable: false,
+            runId,
+          },
+        });
+      } catch {
+        // Non-fatal
+      }
     }
-
-    if (message.type !== "result") {
-      continue;
-    }
-
-    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-      costUsd = message.totalCostUsd;
-    }
-
-    if ("result" in message) {
-      resultText = message.result;
-      structuredOutput = message.structuredOutput;
-      continue;
-    }
-
-    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "")
-      || message.subtype
-      || "unknown error";
+    throw error;
   }
 
   const result: AgentQueryExecutionResult = {
@@ -205,6 +306,8 @@ function looksLikeRuntimeOptions<T extends AgentRuntimeOptions>(
     || "abortController" in runtimeOptions
     || "maxBudgetUsd" in runtimeOptions
     || "activityCallback" in runtimeOptions
+    || "bus" in runtimeOptions
+    || "runId" in runtimeOptions
   );
 }
 

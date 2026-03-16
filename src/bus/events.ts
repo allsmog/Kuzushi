@@ -577,6 +577,90 @@ export type BudgetExceededEvent = EventEnvelope<
   { context: RunContext; totalCostUsd: number; budgetUsd: number }
 >;
 
+/* ── LLM observability events ─────────────────────────────────────── */
+
+export type LlmCallStartEvent = EventEnvelope<
+  "llm:call-start",
+  {
+    model: string;
+    promptLength: number;
+    runId: string;
+  }
+>;
+
+export type LlmCallCompleteEvent = EventEnvelope<
+  "llm:call-complete",
+  {
+    model: string;
+    durationMs: number;
+    tokensUsed: number;
+    costUsd: number;
+    runId: string;
+  }
+>;
+
+export type LlmCallErrorEvent = EventEnvelope<
+  "llm:call-error",
+  {
+    model: string;
+    error: string;
+    retryable: boolean;
+    runId: string;
+  }
+>;
+
+export type LlmRetryEvent = EventEnvelope<
+  "llm:retry",
+  {
+    model: string;
+    attempt: number;
+    maxAttempts: number;
+    delayMs: number;
+    runId: string;
+  }
+>;
+
+/* ── Retry observability events ───────────────────────────────────── */
+
+export type RetryAttemptEvent = EventEnvelope<
+  "retry:attempt",
+  {
+    operation: string;
+    attempt: number;
+    maxAttempts: number;
+    error: string;
+  }
+>;
+
+export type RetryExhaustedEvent = EventEnvelope<
+  "retry:exhausted",
+  {
+    operation: string;
+    attempts: number;
+    finalError: string;
+  }
+>;
+
+/* ── Budget observability events ──────────────────────────────────── */
+
+export type BudgetCheckEvent = EventEnvelope<
+  "budget:check",
+  {
+    currentSpend: number;
+    maxBudget: number;
+    percentUsed: number;
+  }
+>;
+
+export type BudgetWarningEvent = EventEnvelope<
+  "budget:warning",
+  {
+    currentSpend: number;
+    maxBudget: number;
+    percentUsed: number;
+  }
+>;
+
 export type ReportRequestedEvent = EventEnvelope<
   "report:requested",
   {
@@ -643,5 +727,13 @@ export type KuzushiEvent =
   | PocExecutionResultEvent
   | PocExecutionErrorEvent
   | BudgetExceededEvent
+  | LlmCallStartEvent
+  | LlmCallCompleteEvent
+  | LlmCallErrorEvent
+  | LlmRetryEvent
+  | RetryAttemptEvent
+  | RetryExhaustedEvent
+  | BudgetCheckEvent
+  | BudgetWarningEvent
   | ReportRequestedEvent
   | ReportCompleteEvent;
