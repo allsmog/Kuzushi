@@ -8,6 +8,7 @@
 
 import type Database from "better-sqlite3";
 import type { EvidenceStep } from "./types.js";
+import { safeJsonStringify } from "./utils/safe-json.js";
 
 /** Recognized evidence step types for calibration. */
 export const EVIDENCE_STEP_TYPES = [
@@ -239,5 +240,5 @@ export function updateFindingCalibration(
     UPDATE findings
     SET calibrated_confidence = ?, evidence_chain_json = ?, updated_at = datetime('now')
     WHERE fingerprint = ?
-  `).run(calibratedConfidence, JSON.stringify(evidenceChain), fingerprint);
+  `).run(calibratedConfidence, safeJsonStringify(evidenceChain), fingerprint);
 }

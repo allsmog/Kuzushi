@@ -6,6 +6,7 @@
 
 import type Database from "better-sqlite3";
 import type { AgentActivity } from "./agent-runtime/execution.js";
+import { safeJsonStringify, safeJsonParse } from "./utils/safe-json.js";
 
 /** A single tool-call step recorded during triage. */
 export interface TrajectoryStep {
@@ -111,7 +112,7 @@ export function summarizeTrajectory(
 
   return [
     `Used ${toolNames.join(", ")} across ${steps.length} steps.`,
-    `Started by ${firstStep.toolName}(${JSON.stringify(Object.values(firstStep.toolInput)[0] ?? "").slice(0, 60)}).`,
+    `Started by ${firstStep.toolName}(${safeJsonStringify(Object.values(firstStep.toolInput)[0] ?? "").slice(0, 60)}).`,
     `Final step: ${lastStep.toolName} → ${lastStep.outcome.slice(0, 100)}.`,
     `Verdict: ${verdict}.`,
   ].join(" ");
@@ -171,11 +172,11 @@ export function saveTrajectory(
   `).run(
     trajectory.id,
     trajectory.ruleId,
-    JSON.stringify(trajectory.cwes),
+    safeJsonStringify(trajectory.cwes),
     trajectory.scanner,
     trajectory.verdict,
     trajectory.confidence,
-    JSON.stringify(trajectory.steps),
+    safeJsonStringify(trajectory.steps),
     trajectory.summary,
     trajectory.repo,
     trajectory.fingerprint,
@@ -302,16 +303,14 @@ export function formatTrajectoriesForPrompt(
         ? " [VERIFIED INCORRECT]"
         : "";
 
-    let steps: TrajectoryStep[] = [];
-    try {
-      steps = JSON.parse(t.stepsJson) as TrajectoryStep[];
-    } catch {
-      steps = [];
-    }
+    const parsedSteps = safeJsonParse<unknown>(t.stepsJson, []);
+    const steps: TrajectoryStep[] = Array.isArray(parsedSteps)
+      ? (parsedSteps as TrajectoryStep[])
+      : [];
 
     const stepsStr = steps
       .slice(0, 5)
-      .map((s, i) => `${i + 1}. ${s.toolName}(${JSON.stringify(Object.values(s.toolInput)[0] ?? "").slice(0, 60)}) → ${s.outcome.slice(0, 80)}`)
+      .map((s, i) => `${i + 1}. ${s.toolName}(${safeJsonStringify(Object.values(s.toolInput)[0] ?? "").slice(0, 60)}) → ${s.outcome.slice(0, 80)}`)
       .join("\n");
 
     return [

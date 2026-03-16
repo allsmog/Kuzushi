@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { KuzushiConfig } from "../../types.js";
+import { safeJsonStringify } from "../../utils/safe-json.js";
 import type {
   PipelineCompleteEvent,
   PipelineStartEvent,
@@ -45,14 +46,14 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
 
     runState.set(event.meta.runId, state);
 
-    writeFileSync(path.join(runDir, "run.json"), JSON.stringify({
+    writeFileSync(path.join(runDir, "run.json"), safeJsonStringify({
       runId: event.meta.runId,
       timestamp: event.meta.timestamp,
       resumeRunId: event.payload.resumeRunId,
       context: event.payload.context,
       config: event.payload.config,
       scanOpts: event.payload.scanOpts,
-    }, null, 2));
+    }, 2));
   });
 
   bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", (event) => {
@@ -133,10 +134,10 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
       return;
     }
 
-    writeFileSync(path.join(state.runDir, "stats.json"), JSON.stringify({
+    writeFileSync(path.join(state.runDir, "stats.json"), safeJsonStringify({
       timestamp: event.meta.timestamp,
       stats: event.payload.stats,
-    }, null, 2));
+    }, 2));
 
     runState.delete(event.meta.runId);
   });
@@ -159,7 +160,7 @@ function appendAuditLine(
   }
 
   const filePath = stream === "triage" ? state.triageLogPath : state.verifyLogPath;
-  appendFileSync(filePath, `${JSON.stringify({
+  appendFileSync(filePath, `${safeJsonStringify({
     timestamp,
     eventType,
     fingerprint: details.fingerprint,
