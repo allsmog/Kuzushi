@@ -13,6 +13,7 @@ import type { Finding, ScannerId } from "./scanners/types.js";
 import { BATCH_TRIAGE_FALLBACK_RATIONALE } from "./triage.js";
 import { ensureCalibrationSchema } from "./confidence-calibration.js";
 import { ensureTrajectoryTable } from "./trajectory-memory.js";
+import { safeJsonStringify, safeJsonParse } from "./utils/safe-json.js";
 
 export type PipelineRunStatus =
   | "scanning"
@@ -157,10 +158,10 @@ export function upsertFinding(
     triage.verdict,
     triage.confidence,
     triage.rationale,
-    JSON.stringify(triage.verificationSteps),
+    safeJsonStringify(triage.verificationSteps),
     triage.fixPatch,
     triage.triageCostUsd ?? null,
-    JSON.stringify({
+    safeJsonStringify({
       source: triage.source ?? null,
       sink: triage.sink ?? null,
       is_vulnerable: triage.isVulnerable ?? null,
@@ -248,15 +249,10 @@ export function getStoredTriageResults(
 
   const results = new Map<string, TriageResult>();
   for (const row of allRows) {
-    let verificationSteps: string[] = [];
-    try {
-      const parsed = JSON.parse(row.verificationSteps);
-      if (Array.isArray(parsed)) {
-        verificationSteps = parsed.map((step) => String(step)).filter(Boolean);
-      }
-    } catch {
-      verificationSteps = [];
-    }
+    const parsedSteps = safeJsonParse<unknown>(row.verificationSteps, []);
+    const verificationSteps = Array.isArray(parsedSteps)
+      ? parsedSteps.map((step) => String(step)).filter(Boolean)
+      : [];
 
     results.set(row.fingerprint, {
       fingerprint: row.fingerprint,
@@ -278,22 +274,23 @@ function parseTriageDetails(raw: string | null): Partial<TriageResult> {
     return {};
   }
 
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const source = parsePathAssessment(parsed["source"]);
-    const sink = parsePathAssessment(parsed["sink"]);
-    return {
-      source,
-      sink,
-      isVulnerable: typeof parsed["is_vulnerable"] === "boolean" ? parsed["is_vulnerable"] : undefined,
-      exploitScenario: asOptionalString(parsed["exploit_scenario"]),
-      recommendedFix: asOptionalString(parsed["recommended_fix"]),
-      ruleRefinementHint: asOptionalString(parsed["rule_refinement_hint"]),
-      triageSchemaVersion: asOptionalString(parsed["triage_schema_version"]),
-    };
-  } catch {
+  const parsed = safeJsonParse<unknown>(raw, null);
+  if (!parsed || typeof parsed !== "object") {
     return {};
   }
+
+  const record = parsed as Record<string, unknown>;
+  const source = parsePathAssessment(record["source"]);
+  const sink = parsePathAssessment(record["sink"]);
+  return {
+    source,
+    sink,
+    isVulnerable: typeof record["is_vulnerable"] === "boolean" ? record["is_vulnerable"] : undefined,
+    exploitScenario: asOptionalString(record["exploit_scenario"]),
+    recommendedFix: asOptionalString(record["recommended_fix"]),
+    ruleRefinementHint: asOptionalString(record["rule_refinement_hint"]),
+    triageSchemaVersion: asOptionalString(record["triage_schema_version"]),
+  };
 }
 
 function parsePathAssessment(value: unknown): TriageResult["source"] | undefined {
@@ -367,13 +364,9 @@ export function getStoredVerificationResults(
   for (const row of allRows) {
     let preconditions: string[] = [];
     if (row.verifyPreconditions) {
-      try {
-        const parsed = JSON.parse(row.verifyPreconditions);
-        if (Array.isArray(parsed)) {
-          preconditions = parsed.map((item) => String(item).trim()).filter(Boolean);
-        }
-      } catch {
-        preconditions = [];
+      const parsed = safeJsonParse<unknown>(row.verifyPreconditions, []);
+      if (Array.isArray(parsed)) {
+        preconditions = parsed.map((item) => String(item).trim()).filter(Boolean);
       }
     }
 
@@ -693,25 +686,16 @@ export function getTriagedFindingsForRepo(
   }>;
 
   return rows.map((row) => {
-    let verificationSteps: string[] = [];
-    try {
-      const parsed = JSON.parse(row.verificationSteps);
-      if (Array.isArray(parsed)) {
-        verificationSteps = parsed.map((value) => String(value));
-      }
-    } catch {
-      verificationSteps = [];
-    }
+    const parsedSteps = safeJsonParse<unknown>(row.verificationSteps, []);
+    const verificationSteps = Array.isArray(parsedSteps)
+      ? parsedSteps.map((value) => String(value))
+      : [];
 
     let triageDetails: Record<string, unknown> | null = null;
     if (row.triageDetailsJson) {
-      try {
-        const parsed = JSON.parse(row.triageDetailsJson);
-        if (parsed && typeof parsed === "object") {
-          triageDetails = parsed as Record<string, unknown>;
-        }
-      } catch {
-        triageDetails = null;
+      const parsed = safeJsonParse<unknown>(row.triageDetailsJson, null);
+      if (parsed && typeof parsed === "object") {
+        triageDetails = parsed as Record<string, unknown>;
       }
     }
 
@@ -931,8 +915,8 @@ export function createRun(
     runId,
     repo,
     new Date().toISOString(),
-    JSON.stringify(config),
-    JSON.stringify(scanOpts),
+    safeJsonStringify(config),
+    safeJsonStringify(scanOpts),
   );
 }
 
@@ -986,7 +970,7 @@ export function updateRunFindings(
     UPDATE pipeline_runs
     SET findings_json = ?, updated_at = datetime('now')
     WHERE run_id = ?
-  `).run(JSON.stringify(findings), runId);
+  `).run(safeJsonStringify(findings), runId);
 }
 
 /** Persist gathered repository context for resume support. */
@@ -999,7 +983,7 @@ export function updateRunContext(
     UPDATE pipeline_runs
     SET context_json = ?, updated_at = datetime('now')
     WHERE run_id = ?
-  `).run(JSON.stringify(repoContext), runId);
+  `).run(safeJsonStringify(repoContext), runId);
 }
 
 /** Increment persisted run cost in USD. */
@@ -1042,7 +1026,7 @@ export function updateVerificationResult(
     result.pocPayload,
     result.pocDescription,
     result.attackVector,
-    JSON.stringify(result.preconditions),
+    safeJsonStringify(result.preconditions),
     result.confidence,
     result.verifyCostUsd ?? null,
     fingerprint,

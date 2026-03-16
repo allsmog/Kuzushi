@@ -37,6 +37,7 @@ import { coerceRepoContext } from "../repo-context.js";
 import { loadPrecedents, type Precedents } from "../precedents.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { safeJsonParse } from "../utils/safe-json.js";
 import { runVariantAnalysis } from "./workers/variant-analysis-worker.js";
 import type {
   BusHandlerErrorEvent,
@@ -457,11 +458,10 @@ export class PipelineOrchestrator {
     }
 
     if (typeof run.contextJson === "string" && run.contextJson.trim().length > 0) {
-      try {
-        state.repoContext = coerceRepoContext(JSON.parse(run.contextJson));
-      } catch {
-        state.repoContext = undefined;
-      }
+      const parsedContext = safeJsonParse<unknown>(run.contextJson, undefined);
+      state.repoContext = parsedContext !== undefined
+        ? coerceRepoContext(parsedContext)
+        : undefined;
     }
 
     if (!run.findingsJson) {
@@ -490,7 +490,7 @@ export class PipelineOrchestrator {
     }
 
     try {
-      const parsed = JSON.parse(run.findingsJson);
+      const parsed = safeJsonParse<unknown>(run.findingsJson);
       state.scanFindings = coerceFindings(parsed);
       state.totalCostUsd = normalizeCostUsd(run.totalCostUsd);
     } catch (error) {
@@ -2168,20 +2168,16 @@ function resolveVerifyVerdicts(raw: Verdict[] | undefined): Verdict[] {
 }
 
 function parseVerifyVerdictsFromConfigJson(raw: string, fallback: Verdict[]): Verdict[] {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!isRecord(parsed)) {
-      return fallback;
-    }
-
-    return resolveVerifyVerdicts(asVerdictArray(parsed["verifyVerdicts"]) ?? fallback);
-  } catch {
+  const parsed = safeJsonParse<unknown>(raw, null);
+  if (!isRecord(parsed)) {
     return fallback;
   }
+
+  return resolveVerifyVerdicts(asVerdictArray(parsed["verifyVerdicts"]) ?? fallback);
 }
 
 function parseScanOptsJson(raw: string): ScanOpts {
-  const parsed = JSON.parse(raw);
+  const parsed = safeJsonParse<unknown>(raw);
   if (!isRecord(parsed)) {
     throw new Error("scan opts payload is not an object");
   }
