@@ -196,7 +196,21 @@ cat > "$TARGET_DIR/.kuzushi/config.json" << 'CONFIG'
   "triageBatchSize": 1,
   "maxTriageRetries": 2,
   "maxVerifyRetries": 1,
-  "auditLog": true
+  "auditLog": true,
+  "scannerConfig": {
+    "taint-analysis": {
+      "labelingModel": "openai:qwen3:8b",
+      "extractionModel": "openai:qwen3:8b"
+    },
+    "threat-modeling": {
+      "strideModel": "openai:qwen3:8b",
+      "pastaModel": "openai:qwen3:8b"
+    },
+    "invariant-analysis": {
+      "extractionModel": "openai:qwen3:8b",
+      "checkModel": "openai:qwen3:8b"
+    }
+  }
 }
 CONFIG
 

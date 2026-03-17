@@ -215,6 +215,15 @@ check_semgrep() {
   fi
 }
 
+# Check if codeql is installed.
+check_codeql() {
+  if command -v codeql &>/dev/null; then
+    echo "ok"
+  else
+    echo "missing"
+  fi
+}
+
 # ─── Run kuzushi with timeout ────────────────────────────────────────
 
 # Runs kuzushi with a timeout. Returns exit code.

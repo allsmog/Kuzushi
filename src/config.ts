@@ -103,7 +103,6 @@ export const DEFAULTS: KuzushiConfig = {
       taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
       dbPath: undefined,
       passes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-      labelingModel: "anthropic:claude-haiku-4-5-20251001",
       extractionModel: undefined,
       labelingBatchSize: 20,
       labelingConfidenceThreshold: 0.55,

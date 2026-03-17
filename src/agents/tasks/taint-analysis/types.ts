@@ -254,8 +254,8 @@ export function resolveTaintAnalysisConfig(config: KuzushiConfig): TaintAnalysis
     taintAnalysisPath: normalizePath(merged["taintAnalysisPath"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.taintAnalysisPath),
     dbPath: normalizeOptionalPath(merged["dbPath"]),
     passes: normalizePasses(merged["passes"]),
-    labelingModel: normalizeString(merged["labelingModel"], config.model),
-    extractionModel: normalizeOptionalString(merged["extractionModel"]),
+    labelingModel: normalizeString(isRecord(raw) ? raw["labelingModel"] : undefined, config.model),
+    extractionModel: normalizeOptionalString(isRecord(raw) ? raw["extractionModel"] : undefined),
     labelingBatchSize: normalizePositiveInt(merged["labelingBatchSize"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.labelingBatchSize),
     labelingConfidenceThreshold: normalizeUnitInterval(
       merged["labelingConfidenceThreshold"],
