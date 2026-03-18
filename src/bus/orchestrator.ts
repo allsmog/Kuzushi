@@ -178,6 +178,8 @@ interface RunState {
   deadLetterFindings: Array<{ fingerprint: string; error: string; attempts: number; lastAttempt: string }>;
   /** Per-finding attempt counts for retry tracking (fingerprint → total attempts). */
   triageAttempts: Map<string, number>;
+  /** Per-finding verification attempt counts (fingerprint → total attempts). */
+  verifyAttempts: Map<string, number>;
 }
 
 export interface OrchestratorDeps {
@@ -423,6 +425,7 @@ export class PipelineOrchestrator {
       budgetWarningEmitted: false,
       deadLetterFindings: [],
       triageAttempts: new Map(),
+      verifyAttempts: new Map(),
       stageTimestamps: {
         pipelineStart: event.meta.timestamp,
         pipelineEnd: "",
@@ -813,11 +816,15 @@ export class PipelineOrchestrator {
       && this.deps.taskRegistry.has("context-gatherer");
     const enableContextEnrichment = state.config.enableContextEnrichment === true
       && this.deps.taskRegistry.has("context-enricher");
+    // When enabledTasks is empty (default), enable ALL registered tasks.
+    // When explicitly set, use only those tasks.
+    const explicitTasks = state.config.enabledTasks ?? [];
+    const allRegisteredTasks = this.deps.taskRegistry ? this.deps.taskRegistry.ids() : [];
     const candidateIds = normalizeTaskIds([
       ...state.scanners,
       ...(enableContextExplicit ? ["context-gatherer"] : []),
       ...(enableContextEnrichment ? ["context-enricher"] : []),
-      ...(state.config.enabledTasks ?? []),
+      ...(explicitTasks.length > 0 ? explicitTasks : allRegisteredTasks),
       // Auto-add task-selector when dynamic task selection is enabled
       ...(state.config.enableDynamicTaskSelection && this.deps.taskRegistry.has("task-selector")
         ? ["task-selector"]
@@ -2071,6 +2078,23 @@ export class PipelineOrchestrator {
     const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.totalCostUsd += costUsd;
     state.verifyCostUsd += costUsd;
+
+    const fp = event.payload.finding.fingerprint;
+    const maxRetries = state.config.maxVerifyRetries ?? 2;
+    const priorAttempts = state.verifyAttempts.get(fp) ?? 0;
+    const totalAttempts = Math.max(priorAttempts, event.payload.attempts ?? 1);
+    state.verifyAttempts.set(fp, totalAttempts);
+
+    if (totalAttempts < maxRetries) {
+      // Re-enqueue for individual retry via dispatchVerification.
+      state.verifyErrors -= 1; // undo error count — this is a retry, not terminal
+      state.verifyQueue.push({
+        finding: event.payload.finding,
+        triageResult: event.payload.triageResult,
+        index: event.payload.index ?? 0,
+        total: event.payload.total ?? state.verifyTotal,
+      });
+    }
 
     try {
       updateRunCost(this.deps.db, state.checkpointRunId, costUsd);

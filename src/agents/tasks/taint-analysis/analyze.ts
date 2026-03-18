@@ -1456,7 +1456,11 @@ function buildSummaryTaintStep(info: CallableInfo, profile: CodeqlProfile, hints
  * These catch taint flows through data transformations that callable-name matching misses.
  */
 function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string {
-  // Each clause is a passKey-independent taint step (applies to all passes)
+  // Each clause is a passKey-independent taint step (applies to all passes).
+  // CodeQL requires every disjunction branch to bind output parameters, so we bind
+  // passKey via set membership over all known pass keys instead of the reflexive
+  // `passKey = passKey` (which CodeQL treats as unbound).
+  const passKeyBinding = "(" + TAINT_ANALYSIS_PASSES.map((p) => `passKey = "${p.passKey}"`).join(" or ") + ")";
   const clauses: string[] = [];
 
   switch (language) {
@@ -1464,15 +1468,15 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
       clauses.push(
         // Map index: m[key] propagates taint from map to value
         `    // Implicit: map index propagation
-    exists(DataFlow::Node mapNode |
+    (
       nodeTo.asExpr().(IndexExpr).getBase() = nodeFrom.asExpr() and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
         // Struct field read: s.Field propagates taint from struct to field
         `    // Implicit: struct field read propagation
-    exists(DataFlow::Node structNode |
+    (
       nodeTo.asExpr().(SelectorExpr).getBase() = nodeFrom.asExpr() and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
         // json.Unmarshal: taints the target pointer
         `    // Implicit: json.Unmarshal propagates taint to target
@@ -1480,7 +1484,7 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
       call.getTarget().hasQualifiedName("encoding/json", "Unmarshal") and
       nodeFrom = call.getArgument(0) and
       nodeTo = call.getArgument(1) and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
         // json.NewDecoder().Decode: taints the target
         `    // Implicit: json.Decoder.Decode propagates taint
@@ -1488,7 +1492,7 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
       call.getTarget().getName() = "Decode" and
       nodeFrom = call.getReceiver() and
       nodeTo = call.getArgument(0) and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
       );
       break;
@@ -1501,7 +1505,7 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
       call.getCalleeName() = "get" and
       nodeFrom = call.getObject() and
       nodeTo = call and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
         // json.loads: propagates taint from string to parsed object
         `    // Implicit: json.loads propagation
@@ -1509,7 +1513,7 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
       call.getFunction().toString().matches("%json.loads%") and
       nodeFrom = call.getArgument(0) and
       nodeTo = call and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
       );
       break;
@@ -1523,7 +1527,7 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
       call.getCallee().getDeclaringType().getASupertype*().hasQualifiedName("java.util", "Map") and
       nodeFrom = call.getReceiver() and
       nodeTo = call and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
         // ObjectMapper.readValue: propagates taint from JSON string to deserialized object
         `    // Implicit: ObjectMapper.readValue propagation
@@ -1531,7 +1535,7 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
       call.getCallee().getName() = "readValue" and
       nodeFrom = call.getArgument(0) and
       nodeTo = call and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
       );
       break;
@@ -1544,14 +1548,14 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
       call.getCalleeName() = "parse" and
       nodeFrom = call.getArgument(0) and
       nodeTo = call and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
         // Property access: obj.prop / obj[key]
         `    // Implicit: property read propagation
     exists(DataFlow::PropRead read |
       nodeFrom = read.getBase() and
       nodeTo = read and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
       );
       break;
@@ -1564,7 +1568,7 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
       call.getCallee().getName() = "Deserialize" and
       nodeFrom = call.getArgument(0) and
       nodeTo = call and
-      passKey = passKey
+      ${passKeyBinding}
     )`,
       );
       break;

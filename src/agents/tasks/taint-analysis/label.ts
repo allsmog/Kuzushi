@@ -284,32 +284,41 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
 
         process.stderr.write(`[taint-analysis-label] Pass ${passId} (${passDef.focus}): checkpoint miss (${cached.reason})\n`);
         process.stderr.write(`[taint-analysis-label] Labeling pass ${passId} (${passDef.focus})...\n`);
-        const passEntries = await labelPass(
-          runtime,
-          passDef,
-          allCandidates,
-          references,
-          tiPrior,
-          {
-            ...cfg,
-            workspaceDir: preflight.workspaceDir,
-          },
-          context.repoRoot,
-          preflight.language,
-          preflight.framework,
-        );
+        try {
+          const passEntries = await labelPass(
+            runtime,
+            passDef,
+            allCandidates,
+            references,
+            tiPrior,
+            {
+              ...cfg,
+              workspaceDir: preflight.workspaceDir,
+            },
+            context.repoRoot,
+            preflight.language,
+            preflight.framework,
+          );
 
-        labelsByPass.set(passId, passEntries.entries);
-        totalCostUsd += passEntries.costUsd;
-        process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${passEntries.entries.length} entries labeled\n`);
+          labelsByPass.set(passId, passEntries.entries);
+          totalCostUsd += passEntries.costUsd;
+          process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${passEntries.entries.length} entries labeled\n`);
 
-        await writePassCheckpointV2(
-          checkpointPath,
-          passId,
-          preflight.language,
-          candidateFingerprint,
-          passEntries.entries,
-        );
+          await writePassCheckpointV2(
+            checkpointPath,
+            passId,
+            preflight.language,
+            candidateFingerprint,
+            passEntries.entries,
+          );
+        } catch (passError) {
+          // A single pass failure (e.g. malformed JSON from the LLM) should not kill
+          // all previously completed passes. Log the error and continue with empty
+          // entries for this pass — the run stage will simply skip it.
+          const msg = passError instanceof Error ? passError.message : String(passError);
+          process.stderr.write(`[taint-analysis-label] Pass ${passId} (${passDef.focus}) failed (non-fatal): ${msg}\n`);
+          labelsByPass.set(passId, []);
+        }
       }
     }
 

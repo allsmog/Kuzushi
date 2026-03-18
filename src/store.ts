@@ -71,8 +71,9 @@ export function upsertFinding(
     INSERT INTO findings (
       fingerprint, scanner, repo, ref, rule_id, file_path, start_line,
       severity, message, adjusted_score, corroboration_json, suppression_json, verdict, confidence,
-      rationale, verification_steps, fix_patch, triage_cost_usd, triage_details_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      rationale, verification_steps, fix_patch, triage_cost_usd, triage_details_json,
+      composite_confidence, confidence_signals_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fingerprint) DO UPDATE SET
       scanner=excluded.scanner,
       repo=excluded.repo,
@@ -92,6 +93,8 @@ export function upsertFinding(
       fix_patch=excluded.fix_patch,
       triage_cost_usd=excluded.triage_cost_usd,
       triage_details_json=excluded.triage_details_json,
+      composite_confidence=excluded.composite_confidence,
+      confidence_signals_json=excluded.confidence_signals_json,
       updated_at=datetime('now')
   `);
 
@@ -123,6 +126,8 @@ export function upsertFinding(
       rule_refinement_hint: triage.ruleRefinementHint ?? null,
       triage_schema_version: triage.triageSchemaVersion ?? null,
     }),
+    triage.compositeConfidence ?? null,
+    null, // confidence_signals_json — populated by updateFindingCompositeConfidence if needed
   );
 }
 
