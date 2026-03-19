@@ -18,10 +18,10 @@ Prereqs: Node 22+, an API key for at least one supported LLM provider.
 2. Set it: `export ANTHROPIC_API_KEY=sk-ant-...`
 3. Scan: `npx kuzushi /path/to/your/repo`
 
-**With OpenAI, Google, or any pi-ai-supported provider:**
+**With OpenAI, Google, or other providers:**
 
 1. Set the provider key: `export OPENAI_API_KEY=sk-...` (or `GEMINI_API_KEY`, etc.)
-2. Scan: `npx kuzushi /path/to/repo --agent-runtime pi-ai --model openai:gpt-4o`
+2. Scan: `npx kuzushi /path/to/repo --model openai:gpt-4o`
 
 That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed. To add CodeQL, see [CodeQL Setup](#codeql-setup).
 
@@ -44,7 +44,7 @@ That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed
 - **Resumable runs** — checkpoint pipeline state to SQLite; `--resume` picks up where a crashed or interrupted scan left off
 - **Retry with backoff** — transient agent failures are retried automatically with exponential backoff
 - **Audit logging** — optional JSONL audit trail of every agent decision for debugging and accountability
-- **Markdown reports** — export a shareable `.md` report for CI pipelines and team review
+- **Multiple export formats** — markdown, SARIF v2.1.0, JSON, CSV, and JSONL reports for CI pipelines and team review
 - **Prints a styled report** showing only what matters: true positives, needs-review items, and verified exploits with PoC payloads
 
 ## How It Works
@@ -60,7 +60,7 @@ Under the hood, Kuzushi uses an event-driven architecture with a DAG-based task 
 5. **Triage stage** — findings are deduplicated (fingerprint + cross-scanner location/CWE/rule normalization), ranked, and sent to an LLM for semantic verification with configurable concurrency. The repo context from step 1 enriches every triage prompt.
 6. **Verification stage** (optional) — triaged findings that pass verification gates (`verifyVerdicts`, scanner-level `scannerConfig.<id>.verify`, and `verifyMinConfidence`) are sent to a verification agent that attempts to construct concrete PoC exploit payloads.
 7. **PoC harness generation** (optional) — verified-exploitable findings are sent to a harness generator that produces runnable exploit scripts with syntax validation.
-8. **Report** — final results are persisted, rendered to terminal, and optionally exported as markdown.
+8. **Report** — final results are persisted, rendered to terminal, and optionally exported as markdown, SARIF, JSON, CSV, or JSONL.
 
 All communication happens through a transport-agnostic `MessageBus` interface. The default in-process bus works out of the box; distributed adapters (Redis, Google Pub/Sub, NATS) are planned and scaffolded behind the same interface.
 
@@ -78,7 +78,7 @@ kuzushi <repo> --max 20               # triage top 20 findings only
 kuzushi <repo> --model anthropic:claude-sonnet-4-6  # use a different model
 kuzushi <repo> --triage-model openai:gpt-4o  # separate model for triage
 kuzushi <repo> --triage-max-turns 15  # triage agent turn budget
-kuzushi <repo> --api-key sk-ant-... --base-url https://api.example.com/
+kuzushi <repo> --api-key sk-ant-... --base-url https://api.example.com/  # custom API endpoint
 kuzushi <repo> --fresh                # clear prior results, re-triage everything
 kuzushi <repo> --db ./my.sqlite3      # custom database path
 kuzushi <repo> --resume               # resume the most recent interrupted run
@@ -88,14 +88,13 @@ kuzushi <repo> --resume <run-id>      # resume a specific run by ID
 ### Vendor-Agnostic Runtime
 
 ```
-kuzushi <repo> --agent-runtime pi-ai --model openai:gpt-4o
-kuzushi <repo> --agent-runtime pi-ai --model google:gemini-2.0-flash
-kuzushi <repo> --agent-runtime pi-ai --model anthropic:claude-sonnet-4-6
-kuzushi config set agentRuntimeBackend pi-ai
+kuzushi <repo> --model openai:gpt-4o
+kuzushi <repo> --model google:gemini-2.0-flash
+kuzushi <repo> --model anthropic:claude-sonnet-4-6
 kuzushi config set model openai:gpt-4o
 ```
 
-When `agentRuntimeBackend` is `pi-ai`, model strings use `provider:modelId` format. The pi-ai backend implements its own agentic tool-calling loop with local Read/Glob/Grep tools, structured output enforcement, budget tracking, and abort support. All consumer code (triage, verify, PoC harness, scanners) works unchanged — the `AgentRuntime` abstraction handles it.
+Model strings use `provider:modelId` format. The default `pi-ai` backend implements its own agentic tool-calling loop with local Read/Glob/Grep tools, structured output enforcement, budget tracking, and abort support. All consumer code (triage, verify, PoC harness, scanners) works unchanged — the `AgentRuntime` abstraction handles it.
 
 ### Verification
 
@@ -175,6 +174,7 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | --- | --- | --- |
 | `model` | `anthropic:claude-sonnet-4-6` | LLM model for scanners and default triage model |
 | `triageModel` | _(uses `model`)_ | Override model used by the triage agent |
+| `triageBatchModel` | `anthropic:claude-haiku-4-5` | Model for batch triage (falls back to `triageModel`, then `model`) |
 | `triageMaxTurns` | `null` (uses runtime default: `10`) | Max agentic turns per triage call |
 | `scanners` | `["semgrep"]` | Scanner plugins to run, in order |
 | `severity` | `["ERROR","WARNING"]` | Semgrep severity filter |
@@ -218,7 +218,7 @@ Example:
   "verify": true,
   "verifyMinConfidence": 0.7,
   "auditLog": true,
-  "enabledTasks": [],
+  "enabledTasks": ["context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect"],
   "scannerConfig": {
     "codeql": { "dbPath": "./codeql-db", "suite": "javascript-security-extended" },
     "semgrep": { "binary": "opengrep", "configFlag": "auto" },
@@ -331,7 +331,7 @@ Taint analysis runs in three DAG-ordered stages: **preflight** (database creatio
 
 ### Taint Analysis TI + Artifact Outputs
 
-Each taint analysis run now emits interoperability artifacts under the workspace (`scannerConfig["taint-analysis"].workspaceDir`, default `./iris`) and run directory:
+Each taint analysis run emits interoperability artifacts under the workspace (`scannerConfig["taint-analysis"].workspaceDir`, default `./iris`) and run directory:
 
 - `iris/exploration/TI_PRIOR.md` and `iris/exploration/ti_prior.json` — live TI prior (CISA KEV + NVD) with degraded-mode metadata when fetches fail
 - `iris/labels/TAINT_MODEL.json` — per-CWE taint model (`sources/sinks/sanitizers/propagators`) with TI-weighted basis
@@ -362,8 +362,7 @@ Results are stored in SQLite at `<repo>/.kuzushi/findings.sqlite3`. Each finding
 
 The terminal report shows true positives first, then needs-review items. False positives are counted but hidden. Verified exploitable findings are highlighted with their PoC payloads.
 
-Use `--output report.md` to export a shareable markdown report.
-Use `--sarif results.sarif` to export SARIF v2.1.0 for code scanning platforms.
+Export options: `--output report.md` (markdown), `--sarif results.sarif` (SARIF v2.1.0), `--json results.json`, `--csv results.csv`, `--jsonl results.jsonl`.
 
 ## SARIF / GitHub Code Scanning
 
