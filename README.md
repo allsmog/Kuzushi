@@ -132,7 +132,7 @@ kuzushi <repo> --no-context           # disable repo context gathering
 ```
 kuzushi <repo> --quality-gate         # fail CI on threshold violations
 kuzushi <repo> --fail-on-tp           # fail if any high/critical TP is found
-kuzushi <repo> --enabled-tasks taint-analysis-preflight,taint-analysis-label,taint-analysis-run
+kuzushi <repo> --enabled-tasks taint-analysis-preflight,taint-analysis-label,taint-analysis-run  # enable specific tasks
 ```
 
 ### Retry
@@ -300,9 +300,9 @@ Kuzushi implements an internal agentic loop on top of pi-ai:
 
 ```sh
 # Use with any supported provider:
-OPENAI_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model openai:gpt-4o
-GEMINI_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model google:gemini-2.0-flash
-ANTHROPIC_API_KEY=... kuzushi <repo> --agent-runtime pi-ai --model anthropic:claude-sonnet-4-6
+OPENAI_API_KEY=... kuzushi <repo> --model openai:gpt-4o
+GEMINI_API_KEY=... kuzushi <repo> --model google:gemini-2.0-flash
+ANTHROPIC_API_KEY=... kuzushi <repo> --model anthropic:claude-sonnet-4-6
 ```
 
 ## Taint Analysis Setup
