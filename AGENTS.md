@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-- Repo: https://github.com/kuzushi-dev/kuzushi
+- Repo: https://github.com/allsmog/Kuzushi
 
 ## Project Structure & Module Organization
 

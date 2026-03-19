@@ -152,7 +152,7 @@ export function generateSarifReport(
         tool: {
           driver: {
             name: "kuzushi",
-            informationUri: "https://github.com/kuzushi-dev/kuzushi",
+            informationUri: "https://github.com/allsmog/Kuzushi",
             rules,
           },
         },

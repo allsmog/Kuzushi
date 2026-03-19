@@ -2,6 +2,10 @@
 
 # Kuzushi — Agentic SAST Orchestrator
 
+[![CI](https://github.com/allsmog/Kuzushi/actions/workflows/ci.yml/badge.svg)](https://github.com/allsmog/Kuzushi/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/kuzushi)](https://www.npmjs.com/package/kuzushi)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Agentic SAST orchestrator. Runs security analysis tasks — scanners, AI triage, exploit verification, and more — as a dependency graph on an event-driven pipeline, then tells you what's actually dangerous.
 
 ## Quick Start
@@ -117,8 +121,19 @@ kuzushi <repo> --verify --poc-harness --poc-harness-concurrency 2
 ```
 kuzushi <repo> --output report.md     # export markdown report
 kuzushi <repo> --sarif results.sarif  # export SARIF v2.1.0
+kuzushi <repo> --json results.json    # export JSON report
+kuzushi <repo> --csv results.csv      # export CSV report
+kuzushi <repo> --jsonl results.jsonl  # export JSONL report
 kuzushi <repo> --audit-log            # write agent activity to .kuzushi/runs/{runId}/
 kuzushi <repo> --no-context           # disable repo context gathering
+```
+
+### CI / Quality Gates
+
+```
+kuzushi <repo> --quality-gate         # fail CI on threshold violations
+kuzushi <repo> --fail-on-tp           # fail if any high/critical TP is found
+kuzushi <repo> --enabled-tasks taint-analysis-preflight,taint-analysis-label,taint-analysis-run
 ```
 
 ### Retry
@@ -166,24 +181,27 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `excludePatterns` | `["test","tests","node_modules",...]` | Directories/globs to skip |
 | `scannerConfig` | `{ semgrep: {...}, agentic: {...}, codeql: {...} }` | Per-scanner config blocks keyed by scanner id |
 | `busBackend` | `"in-process"` | Message bus transport (`in-process`, future: `redis`, `google-pubsub`, `nats`) |
-| `triageConcurrency` | `1` | Parallel LLM triage calls |
-| `scanMode` | `"sequential"` | Scanner execution mode (`sequential` or `concurrent`) |
-| `enabledTasks` | `[]` | Additional agent tasks beyond scanners |
+| `triageConcurrency` | `5` | Parallel LLM triage calls |
+| `scanMode` | `"concurrent"` | Scanner execution mode (`sequential` or `concurrent`) |
+| `enabledTasks` | `["context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect", ...]` | Agent tasks to enable beyond scanners |
 | `agentRuntimeBackend` | `"pi-ai"` | Agent runtime backend (`pi-ai`, future: `acp`) |
 | `verify` | `false` | Enable proof-of-exploitability verification |
 | `verifyModel` | _(uses `triageModel` or `model`)_ | Override model for verification agent |
 | `verifyMaxTurns` | `15` | Max turns for verification agent |
-| `verifyConcurrency` | `1` | Parallel verification calls |
+| `verifyConcurrency` | `3` | Parallel verification calls |
 | `verifyVerdicts` | `["tp"]` | Which triage verdicts to verify |
 | `verifyMinConfidence` | `0` | Minimum triage confidence to trigger verification (0-1) |
 | `pocHarness` | `false` | Enable post-verification PoC harness generation (requires `--verify`) |
 | `pocHarnessModel` | _(uses `triageModel` or `model`)_ | Override model for PoC harness agent |
 | `pocHarnessMaxTurns` | `20` | Max turns for PoC harness agent |
-| `pocHarnessConcurrency` | `1` | Parallel PoC harness generation calls |
+| `pocHarnessConcurrency` | `2` | Parallel PoC harness generation calls |
 | `enableContextGathering` | `true` | Run repo context analysis before triage |
 | `auditLog` | `false` | Write agent activity to JSONL audit files |
 | `reportOutput` | _(unset)_ | Write markdown report output to this path |
 | `sarifOutput` | _(unset)_ | Write SARIF v2.1.0 output to this path |
+| `jsonOutput` | _(unset)_ | Write JSON report to this path |
+| `csvOutput` | _(unset)_ | Write CSV report to this path |
+| `jsonlOutput` | _(unset)_ | Write JSONL report to this path |
 | `maxTriageRetries` | `2` | Retry failed triage calls |
 | `maxVerifyRetries` | `2` | Retry failed verification calls |
 | `maxPocHarnessRetries` | `2` | Retry failed PoC harness generation calls |
@@ -404,7 +422,7 @@ See [AGENTS.md](AGENTS.md) for the full developer guide on adding new agent task
 pnpm install                          # install deps
 pnpm dev -- /path/to/repo             # run in dev mode
 pnpm typecheck                        # type check
-pnpm test                             # run tests (214 tests across 31 files)
+pnpm test                             # run tests
 pnpm test:coverage                    # tests + coverage (70% threshold)
 pnpm build                            # compile to dist/
 ```
@@ -422,6 +440,10 @@ Tests are organized by subsystem: `tests/bus/` for orchestrator, workers, and ev
 - **Verification too expensive**: Use `--verify-min-confidence 0.8` to only verify high-confidence TPs, or `--verify-model openai:gpt-4o-mini`
 - **pi-ai model not found**: Ensure the model string uses `provider:modelId` format (e.g., `openai:gpt-4o`, not just `gpt-4o`)
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
 ## License
 
-MIT
+[MIT](LICENSE)
