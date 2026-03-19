@@ -39,6 +39,7 @@ type WritableConfigLayer = Partial<KuzushiConfig> & ConfigLayer;
 /** Hard defaults — the bottom of the precedence stack. */
 export const DEFAULTS: KuzushiConfig = {
   model: "anthropic:claude-sonnet-4-6",
+  triageBatchModel: "anthropic:claude-haiku-4-5",
   triageMaxTurns: null,
   verify: false,
   verifyMaxTurns: undefined,
@@ -62,12 +63,20 @@ export const DEFAULTS: KuzushiConfig = {
   retryBackoffMs: 5000,
   retryBackoffMultiplier: 2,
   busBackend: "in-process",
-  triageBatchSize: 15,
-  triageConcurrency: 3,
-  scanMode: "sequential",
+  triageBatchSize: 40,
+  triageConcurrency: 5,
+  scanMode: "concurrent",
   agentRuntimeBackend: "pi-ai",
   agentRuntimeConfig: undefined,
-  enabledTasks: [],
+  enabledTasks: [
+    "context-gatherer",
+    "context-enricher",
+    "secrets-crypto-detect",
+    "code-config-detect",
+    "taint-analysis-preflight",
+    "taint-analysis-label",
+    "taint-analysis-run",
+  ],
   scanners: ["semgrep"],
   severity: ["ERROR", "WARNING"],
   excludePatterns: [
@@ -77,13 +86,15 @@ export const DEFAULTS: KuzushiConfig = {
   llmRescoreEnabled: true,
   fpFilterEnabled: true,
   fpFilterCustomExclusions: [],
+  taskMaxTurns: 10,
   enableDynamicTaskSelection: false,
   pocExecute: false,
   pocSandbox: "docker",
   pocExecTimeoutMs: 30_000,
   variantAnalysis: false,
   variantAnalysisMaxFindings: 10,
-  enableContextEnrichment: false,
+  contextEnrichmentModel: "anthropic:claude-haiku-4-5",
+  enableContextEnrichment: true,
   confidenceCalibration: false,
   confidenceSignalWeights: undefined,
   trajectoryMemory: false,
@@ -94,16 +105,18 @@ export const DEFAULTS: KuzushiConfig = {
   externalTasks: [],
   enableExternalTasks: false,
   diffBase: undefined,
+  skipTriageForHighConfidenceAgentic: true,
   scannerConfig: {
     semgrep: { configFlag: ["auto", "p/security-audit", "p/owasp-top-ten", "p/cwe-top-25"] },
     agentic: { model: "anthropic:claude-sonnet-4-6", maxFindings: 20 },
     codeql: {},
-    "dangerous-api": { maxFindings: 50 },
+    "secrets-crypto-detect": { model: "anthropic:claude-haiku-4-5" },
+    "code-config-detect": { model: "anthropic:claude-haiku-4-5", maxFindings: 50 },
     "taint-analysis": {
       taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
       dbPath: undefined,
-      passes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-      extractionModel: undefined,
+      passes: [1, 2, 3, 4, 5],
+      extractionModel: "anthropic:claude-haiku-4-5",
       labelingBatchSize: 20,
       labelingConfidenceThreshold: 0.55,
       workspaceDir: "./iris",
@@ -487,6 +500,12 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "triageBatchModel") {
+    config.triageBatchModel = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   if (key === "verifyModel") {
     config.verifyModel = raw.trim() || undefined;
     saveUpdatedConfigLayer(config, repoRoot);
@@ -637,6 +656,26 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "taskMaxTurns") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("taskMaxTurns must be a positive number");
+    }
+    config.taskMaxTurns = Math.floor(n);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "skipTriageForHighConfidenceAgentic") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("skipTriageForHighConfidenceAgentic must be true or false");
+    }
+    config.skipTriageForHighConfidenceAgentic = parsed;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   if (key === "triagePromptFile") {
     config.triagePromptFile = raw.trim() || undefined;
     saveUpdatedConfigLayer(config, repoRoot);
@@ -777,9 +816,17 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const agentRuntimeConfig = normalizeAgentRuntimeConfig(config.agentRuntimeConfig);
   const confidenceSignalWeights = normalizeConfidenceSignalWeights(config.confidenceSignalWeights);
   const triageModel = normalizeOptionalString(config.triageModel);
+  const triageBatchModel = normalizeOptionalString(config.triageBatchModel);
   const enabledTasks = normalizeStringArray(config.enabledTasks);
   const externalTasks = normalizeStringArray(config.externalTasks);
   const enableExternalTasks = normalizeBoolean(config.enableExternalTasks, DEFAULTS.enableExternalTasks ?? false);
+  const taskMaxTurns = config.taskMaxTurns == null
+    ? DEFAULTS.taskMaxTurns
+    : normalizePositiveInt(config.taskMaxTurns, DEFAULTS.taskMaxTurns ?? 15);
+  const skipTriageForHighConfidenceAgentic = normalizeBoolean(
+    config.skipTriageForHighConfidenceAgentic,
+    DEFAULTS.skipTriageForHighConfidenceAgentic ?? false,
+  );
 
   return {
     ...config,
@@ -815,9 +862,12 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     agentRuntimeConfig,
     confidenceSignalWeights,
     triageModel,
+    triageBatchModel,
     enabledTasks,
     externalTasks,
     enableExternalTasks,
+    taskMaxTurns,
+    skipTriageForHighConfidenceAgentic,
     scanners: scanners.length > 0 ? scanners : [...DEFAULTS.scanners],
     severity: severity.length > 0 ? severity : [...DEFAULTS.severity],
     excludePatterns,

@@ -166,7 +166,7 @@ describe("PiAiAgentRuntime", () => {
     const originalBaseUrl = process.env["ANTHROPIC_BASE_URL"];
     completeMock.mockImplementation(async () => {
       expect(process.env["ANTHROPIC_API_KEY"]).toBe("sk-config");
-      expect(process.env["ANTHROPIC_BASE_URL"]).toBe("https://basecamp.stark.acme.com/");
+      expect(process.env["ANTHROPIC_BASE_URL"]).toBe("https://api.example.com/");
       return makeAssistantMessage(
         [{ type: "text", text: "{\"ok\":true}" }],
       );
@@ -174,7 +174,7 @@ describe("PiAiAgentRuntime", () => {
 
     const runtime = new PiAiAgentRuntime({
       apiKey: "sk-config",
-      baseUrl: "https://basecamp.stark.acme.com/",
+      baseUrl: "https://api.example.com/",
     });
     await collectMessages(runtime, makeRequest(cwd));
 

@@ -181,7 +181,7 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
       const prompt = buildCheckPrompt(batch);
-      const maxTurns = undefined;
+      const maxTurns = context.config.taskMaxTurns ?? 15;
 
       let structuredOutput: unknown;
       let resultText = "";

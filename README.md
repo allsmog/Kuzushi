@@ -74,7 +74,7 @@ kuzushi <repo> --max 20               # triage top 20 findings only
 kuzushi <repo> --model anthropic:claude-sonnet-4-6  # use a different model
 kuzushi <repo> --triage-model openai:gpt-4o  # separate model for triage
 kuzushi <repo> --triage-max-turns 15  # triage agent turn budget
-kuzushi <repo> --api-key sk-ant-... --base-url https://basecamp.stark.acme.com/
+kuzushi <repo> --api-key sk-ant-... --base-url https://api.example.com/
 kuzushi <repo> --fresh                # clear prior results, re-triage everything
 kuzushi <repo> --db ./my.sqlite3      # custom database path
 kuzushi <repo> --resume               # resume the most recent interrupted run

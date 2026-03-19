@@ -17,18 +17,18 @@ function makeContext(overrides: Partial<RepoContext> = {}): RepoContext {
 }
 
 describe("selectTasks", () => {
-  it("always includes runnable secrets and security-misconfig tasks", () => {
+  it("always includes runnable secrets-crypto and code-config tasks", () => {
     const result = selectTasks(undefined);
-    expect(result.recommendedTasks).toContain("secrets-detect");
-    expect(result.recommendedTasks).toContain("security-misconfig-detect");
+    expect(result.recommendedTasks).toContain("secrets-crypto-detect");
+    expect(result.recommendedTasks).toContain("code-config-detect");
   });
 
   it("recommends JS-specific tasks for TypeScript repos", () => {
     const ctx = makeContext({ languages: ["TypeScript"] });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("dangerous-api-detect");
+    expect(result.recommendedTasks).toContain("code-config-detect");
     expect(result.recommendedTasks).toContain("ssrf-detect");
-    expect(result.recommendedTasks).toContain("crypto-misuse-detect");
+    expect(result.recommendedTasks).toContain("secrets-crypto-detect");
     expect(result.recommendedTasks).toContain("prototype-pollution-detect");
     expect(result.recommendedTasks).toContain("template-injection-detect");
     expect(result.recommendedTasks).toContain("supply-chain-detect");
@@ -38,22 +38,21 @@ describe("selectTasks", () => {
     const ctx = makeContext({ languages: ["Go"] });
     const result = selectTasks(ctx);
     expect(result.recommendedTasks).toContain("race-condition-detect");
-    expect(result.recommendedTasks).toContain("crypto-misuse-detect");
+    expect(result.recommendedTasks).toContain("secrets-crypto-detect");
     expect(result.recommendedTasks).toContain("supply-chain-detect");
   });
 
   it("recommends Python-specific tasks", () => {
     const ctx = makeContext({ languages: ["Python"] });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("dangerous-api-detect");
-    expect(result.recommendedTasks).toContain("security-misconfig-detect");
+    expect(result.recommendedTasks).toContain("code-config-detect");
     expect(result.recommendedTasks).toContain("template-injection-detect");
   });
 
-  it("recommends auth-access when auth patterns detected", () => {
+  it("recommends code-config-detect when auth patterns detected", () => {
     const ctx = makeContext({ authPatterns: ["JWT", "passport"] });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("auth-access-detect");
+    expect(result.recommendedTasks).toContain("code-config-detect");
   });
 
   it("recommends NoSQL injection and GraphQL checks when matching context is present", () => {
@@ -77,7 +76,7 @@ describe("selectTasks", () => {
     const ctx = makeContext({ languages: ["Go"] });
     const result = selectTasks(ctx);
     expect(result.reasoning["race-condition-detect"]).toBeDefined();
-    expect(result.reasoning["secrets-detect"]).toBeDefined();
+    expect(result.reasoning["secrets-crypto-detect"]).toBeDefined();
   });
 
   it("handles undefined context gracefully", () => {

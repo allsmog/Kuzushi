@@ -1866,27 +1866,18 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const dangerousApiTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "dangerous-api-detect",
-      displayName: "Dangerous API",
+    const codeConfigTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "code-config-detect",
+      displayName: "Code & Config",
       outputKind: "findings",
       dependsOn: ["context-gatherer"],
       async run() {
         return [makeFinding("fp-dynamic", 91)];
       },
     };
-    const secretsTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-detect",
-      displayName: "Secrets",
-      outputKind: "findings",
-      dependsOn: ["context-gatherer"],
-      async run() {
-        return [];
-      },
-    };
-    const misconfigTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "security-misconfig-detect",
-      displayName: "Misconfig",
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
       outputKind: "findings",
       dependsOn: ["context-gatherer"],
       async run() {
@@ -1896,9 +1887,8 @@ describe("PipelineOrchestrator", () => {
 
     taskRegistry.register(contextTask);
     taskRegistry.register(selectorTask);
-    taskRegistry.register(dangerousApiTask);
-    taskRegistry.register(secretsTask);
-    taskRegistry.register(misconfigTask);
+    taskRegistry.register(codeConfigTask);
+    taskRegistry.register(secretsCryptoTask);
 
     registerScanWorker(bus, {
       registry: {
@@ -1949,9 +1939,8 @@ describe("PipelineOrchestrator", () => {
 
     const triageBatchQueued = await triageBatchQueuedPromise;
     expect(taskStarts).toContain("task-selector");
-    expect(taskStarts).toContain("dangerous-api-detect");
-    expect(taskStarts).toContain("secrets-detect");
-    expect(taskStarts).toContain("security-misconfig-detect");
+    expect(taskStarts).toContain("code-config-detect");
+    expect(taskStarts).toContain("secrets-crypto-detect");
     expect(triageBatchQueued.payload.findings.map((finding) => finding.fingerprint)).toEqual(["fp-dynamic"]);
 
     await bus.close();

@@ -1,20 +1,25 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { getAgentRuntime } from "../../agent-runtime/index.js";
-import { antiHallucinationModule } from "../../prompts/modules.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import {
+  antiHallucinationModule,
+  frameworkAwarenessModule,
+} from "../../prompts/modules.js";
+import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { RepoContext, ScanOpts } from "../../types.js";
+import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 
-const log = createLogger({ stage: "secrets-detect" });
+const log = createLogger({ stage: "secrets-crypto-detect" });
 
-const SECRETS_DETECTION_SCHEMA = {
+const SECRETS_CRYPTO_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["findings"],
@@ -24,9 +29,10 @@ const SECRETS_DETECTION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["secretType", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: ["detectorId", "category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
         properties: {
-          secretType: { type: "string", enum: ["api-key", "private-key", "password", "token", "connection-string", "webhook-url", "cloud-credential", "package-registry-token"] },
+          detectorId: { type: "string", enum: ["secrets-detect", "crypto-misuse-detect"] },
+          category: { type: "string" },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -40,8 +46,9 @@ const SECRETS_DETECTION_SCHEMA = {
   },
 } as const;
 
-interface SecretsDetectionFinding {
-  secretType: string;
+interface SecretsCryptoFinding {
+  detectorId: string;
+  category: string;
   filePath: string;
   startLine: number;
   severity: string;
@@ -51,13 +58,13 @@ interface SecretsDetectionFinding {
   rationale: string;
 }
 
-interface SecretsDetectionConfig {
+interface SecretsCryptoConfig {
   model: string;
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): SecretsDetectionConfig {
-  const raw = ctx.config.scannerConfig["secrets-detect"];
+function resolveConfig(ctx: TaskContext): SecretsCryptoConfig {
+  const raw = ctx.config.scannerConfig["secrets-crypto-detect"];
   const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
     ? raw["model"].trim()
     : ctx.config.model;
@@ -67,7 +74,7 @@ function resolveConfig(ctx: TaskContext): SecretsDetectionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -78,15 +85,19 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     : [];
 
   return [
-    "You are a secrets detection specialist with deep expertise in identifying hardcoded credentials,",
-    "API keys, and sensitive tokens in source code. You have reviewed hundreds of data breaches caused",
-    "by leaked secrets and know how to distinguish real secrets from test fixtures and placeholders.",
+    "You are a combined secrets detection and cryptography security specialist. You have deep expertise in",
+    "identifying hardcoded credentials, API keys, and sensitive tokens, as well as insecure cryptographic",
+    "practices in source code. You have reviewed hundreds of data breaches and crypto misuse incidents.",
     "",
-    "Analyze the repository for hardcoded secrets and credentials. Only report findings where you",
-    "have HIGH or MEDIUM confidence the secret is genuine — not a placeholder or test fixture.",
+    "Analyze the repository for both hardcoded secrets/credentials AND insecure cryptographic practices.",
+    "Only report findings where you have HIGH or MEDIUM confidence the issue is genuine.",
     "",
     ...contextLines,
     ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    "# Part 1: Secrets Detection",
+    "",
+    "For secrets findings, set `detectorId: \"secrets-detect\"` and `category` to the secret type.",
+    "",
     "## Secret patterns to detect",
     "",
     "### api-key (CWE-798)",
@@ -136,11 +147,64 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "High-entropy strings (>4.0 bits/char Shannon entropy) in config files are likely real secrets.",
     "Low-entropy strings or dictionary words are likely placeholders. Use this as an additional signal.",
     "",
+    "# Part 2: Cryptographic Misuse Detection",
+    "",
+    "For crypto findings, set `detectorId: \"crypto-misuse-detect\"` and `category` to the crypto category.",
+    "",
+    "## Categories to check",
+    "",
+    "### hash-for-auth (CWE-328)",
+    "Bad: MD5, SHA1 for passwords/tokens. Good: bcrypt, scrypt, Argon2.",
+    "",
+    "### symmetric-cipher (CWE-327)",
+    "Bad: ECB mode, DES, RC4, Blowfish. Good: AES-GCM, ChaCha20-Poly1305.",
+    "",
+    "### key-generation (CWE-330, CWE-798)",
+    "Bad: Math.random(), hardcoded keys/secrets. Good: crypto.randomBytes(), KMS.",
+    "",
+    "### tls-config (CWE-295)",
+    "Bad: Disabled cert verification, TLS < 1.2. Good: TLS 1.3, proper CA validation.",
+    "",
+    "### password-storage (CWE-916)",
+    "Bad: Plaintext, unsalted, fast hash. Good: bcrypt/Argon2 with work factor.",
+    "",
+    "### key-length (CWE-326)",
+    "Bad: RSA key < 2048 bits, AES-128 where AES-256 is feasible, DSA keys < 2048.",
+    "Check key generation parameters and constants.",
+    "",
+    "### ecb-mode (CWE-327)",
+    "Bad: AES-ECB mode for anything beyond single-block encryption. Leaks patterns in data.",
+    "Check cipher mode parameters: `AES/ECB`, `createCipheriv('aes-128-ecb', ...)`.",
+    "",
+    "### insecure-prng (CWE-338)",
+    "Bad: Math.random() for security-sensitive values (tokens, session IDs, nonces, salts).",
+    "Good: crypto.randomBytes(), crypto.getRandomValues(), secrets module.",
+    "",
+    "### timing-attack (CWE-208)",
+    "Bad: String comparison (`===`, `==`, `strcmp`) for HMAC verification, password comparison,",
+    "or token validation. Leaks length information via timing side-channel.",
+    "Good: crypto.timingSafeEqual(), hmac.compare(), constant-time comparison libraries.",
+    "",
+    "### cert-validation (CWE-295)",
+    "Bad: TLS certificate verification disabled (`rejectUnauthorized: false`, `verify=False`,",
+    "`InsecureSkipVerify: true`), custom trust stores that accept self-signed certs in production.",
+    "",
+    formatFileTreeForPrompt(fileIndex),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    formatPatternMatchesForPrompt(fileIndex, ["secret-pattern", "crypto-import"]),
     "## Instructions",
-    "1. Use Glob to find config files (.env*, *.yml, *.yaml, *.json, *.toml, *.ini, *.conf)",
-    "2. Use Grep to search for common secret patterns (AKIA, BEGIN.*PRIVATE KEY, password, secret, token)",
-    "3. Use Read to inspect files with potential secrets",
-    `4. Return at most ${maxFindings} findings, prioritized by severity.`,
+    ...(preRead && preRead.files.length > 0
+      ? [
+          "1. Start by analyzing the pre-loaded files above for hardcoded secrets AND cryptographic misuse.",
+          "2. Use Glob/Grep only for additional files not already provided.",
+          "3. Use Read to inspect any additional files with potential issues.",
+        ]
+      : [
+          "1. Use Glob to find config files (.env*, *.yml, *.yaml, *.json, *.toml, *.ini, *.conf) and files with crypto imports.",
+          "2. Use Grep to search for common secret patterns and crypto API calls.",
+          "3. Use Read to inspect files with potential secrets or crypto callsites.",
+        ]),
+    `4. Return at most ${maxFindings} findings total (both categories combined), prioritized by severity.`,
     "",
     antiHallucinationModule({
       extra: [
@@ -149,8 +213,10 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Strings like `YOUR_API_KEY`, `xxx`, `changeme`, `placeholder`, `example` are NOT real secrets.",
         "Files in `test/`, `tests/`, `__tests__/`, `spec/`, `fixtures/`, `mocks/` are test fixtures — be extra skeptical.",
         "`.env.example` and `.env.sample` files contain placeholders, not real secrets.",
+        "For crypto findings, only report genuinely insecure usage — not merely suboptimal.",
       ],
     }),
+    frameworkAwarenessModule(repoContext),
   ].filter(Boolean).join("\n");
 }
 
@@ -160,32 +226,38 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
   const deduped = new Map<string, Finding>();
   for (const item of raw["findings"] as unknown[]) {
     if (!isRecord(item)) continue;
-    const f = item as unknown as SecretsDetectionFinding;
+    const f = item as unknown as SecretsCryptoFinding;
     if (!f.filePath?.trim()) continue;
 
+    const isSecrets = f.detectorId === "secrets-detect";
+    const scanner = isSecrets ? "secrets-detect" : "crypto-misuse-detect";
+    const rulePrefix = isSecrets ? "secrets" : "crypto-misuse";
+    const fingerprintPrefix = isSecrets ? "secrets-detect" : "crypto-misuse";
+
     const filePath = normalizeFilePath(repoRoot, f.filePath);
-    const fingerprint = computeFingerprint(repoName, filePath, f);
+    const cweList = f.cwe ? [f.cwe] : [];
+    const fingerprint = computeFingerprint(repoName, fingerprintPrefix, f.category, filePath, f.startLine);
 
     const finding: Finding = {
-      scanner: "secrets-detect",
+      scanner,
       fingerprint,
-      ruleId: `secrets/${f.secretType || "unknown"}`,
+      ruleId: `${rulePrefix}/${f.category || "unknown"}`,
       filePath,
       startLine: Math.max(1, Math.floor(Number(f.startLine) || 1)),
-      severity: f.severity || "ERROR",
-      message: `${f.description || "Potential hardcoded secret"}`,
+      severity: f.severity || (isSecrets ? "ERROR" : "WARNING"),
+      message: `${f.description || (isSecrets ? "Potential hardcoded secret" : "Potential cryptographic misuse")}`,
       evidence: f.rationale || null,
       scannerConfidence: f.confidence || "MEDIUM",
       subcategory: ["vuln"],
       likelihood: f.confidence || "MEDIUM",
       impact: f.severity === "ERROR" ? "HIGH" : f.severity === "INFO" ? "LOW" : "MEDIUM",
-      cwe: ["CWE-798"],
+      cwe: cweList.length > 0 ? cweList : (isSecrets ? ["CWE-798"] : []),
       score: scoreFindingMetadata({
         severity: f.severity,
         likelihood: f.confidence,
         impact: f.severity === "ERROR" ? "HIGH" : f.severity === "INFO" ? "LOW" : "MEDIUM",
         subcategory: ["vuln"],
-        cwe: ["CWE-798"],
+        cwe: cweList.length > 0 ? cweList : (isSecrets ? ["CWE-798"] : []),
       }),
     };
 
@@ -200,8 +272,8 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     .slice(0, maxFindings);
 }
 
-function computeFingerprint(repoName: string, filePath: string, f: SecretsDetectionFinding): string {
-  const source = [repoName, "secrets-detect", f.secretType, filePath, String(f.startLine)].join("|");
+function computeFingerprint(repoName: string, prefix: string, category: string, filePath: string, startLine: number): string {
+  const source = [repoName, prefix, category, filePath, String(startLine)].join("|");
   return createHash("sha256").update(source).digest("hex");
 }
 
@@ -212,27 +284,33 @@ function normalizeFilePath(repoRoot: string, filePath: string): string {
   return relative || filePath;
 }
 
-export const secretsDetectionTask: AgentTask<ScanOpts, Finding[]> = {
-  id: "secrets-detect",
-  displayName: "Secrets Detector",
+export const secretsCryptoDetectTask: AgentTask<ScanOpts, Finding[]> = {
+  id: "secrets-crypto-detect",
+  displayName: "Secrets & Crypto Misuse Detector",
   outputKind: "findings",
-  dependsOn: [],
+  dependsOn: ["context-gatherer"],
 
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
+    const preRead = await preReadFilesForTask("secrets-crypto-detect", fileIndex, context.repoRoot);
     const profiles = context.securityProfiles
-      ? getProfilesForTask(context.securityProfiles, "secrets-detect")
+      ? [
+          ...getProfilesForTask(context.securityProfiles, "secrets-crypto-detect"),
+          ...getProfilesForTask(context.securityProfiles, "secrets-detect"),
+          ...getProfilesForTask(context.securityProfiles, "crypto-misuse-detect"),
+        ]
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;
     let resultText = "";
     let costUsd = 0;
 
-    const tag = "[secrets-detect]";
+    const tag = "[secrets-crypto-detect]";
     log.info(`Starting scan (model=${model})`);
 
     try {
@@ -241,12 +319,12 @@ export const secretsDetectionTask: AgentTask<ScanOpts, Finding[]> = {
         options: {
           cwd: context.repoRoot,
           model,
-          maxTurns: undefined,
+          maxTurns: context.config.taskMaxTurns ?? 15,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",
-            schema: SECRETS_DETECTION_SCHEMA,
+            schema: SECRETS_CRYPTO_SCHEMA,
             strict: true,
             retryInvalidStructuredOutput: 2,
           },
@@ -277,18 +355,34 @@ export const secretsDetectionTask: AgentTask<ScanOpts, Finding[]> = {
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
+    if (finding.ruleId.startsWith("secrets/")) {
+      return {
+        prompt: [
+          `You are triaging a secrets detection finding in "${repoName}".`,
+          "",
+          `Rule: ${finding.ruleId}`,
+          `File: ${finding.filePath}:${finding.startLine}`,
+          `Message: ${finding.message}`,
+          finding.evidence ? `Rationale: ${finding.evidence}` : "",
+          "",
+          "Verify if the detected secret is a real credential or a placeholder/test fixture.",
+          "Check if it's in a test file, example config, or documentation.",
+          "Check if the value looks like a real secret (sufficient entropy, proper format).",
+        ].filter(Boolean).join("\n"),
+      };
+    }
+
     return {
       prompt: [
-        `You are triaging a secrets detection finding in "${repoName}".`,
+        `You are triaging a crypto misuse finding in "${repoName}".`,
         "",
         `Rule: ${finding.ruleId}`,
         `File: ${finding.filePath}:${finding.startLine}`,
         `Message: ${finding.message}`,
-        finding.evidence ? `Rationale: ${finding.evidence}` : "",
+        finding.evidence ? `Recommendation: ${finding.evidence}` : "",
         "",
-        "Verify if the detected secret is a real credential or a placeholder/test fixture.",
-        "Check if it's in a test file, example config, or documentation.",
-        "Check if the value looks like a real secret (sufficient entropy, proper format).",
+        "Verify the cryptographic usage is genuinely insecure in context.",
+        "Check if there are compensating controls or if the usage is non-security-critical.",
       ].filter(Boolean).join("\n"),
     };
   },
@@ -302,7 +396,7 @@ function parseJson(text: string, tag: string): unknown {
   }
 }
 
-export const __secretsDetectionInternals = {
+export const __secretsCryptoDetectInternals = {
   resolveConfig,
   buildPrompt,
   normalizeFindings,

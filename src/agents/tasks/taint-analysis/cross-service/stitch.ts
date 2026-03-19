@@ -459,7 +459,7 @@ async function validateAndEnrichWithLlm(
     options: {
       cwd: repoRoot,
       model,
-      maxTurns: undefined,
+      maxTurns: 15,
       allowedTools: [],
       permissionMode: "dontAsk",
       outputFormat: {

@@ -1,4 +1,4 @@
-import type { EnrichedRepoContext, RepoContext } from "./types.js";
+import type { EnrichedRepoContext, FileIndex, RepoContext } from "./types.js";
 import { isRecord } from "./utils.js";
 
 export function coerceRepoContext(value: unknown): RepoContext | undefined {
@@ -9,6 +9,11 @@ export function coerceRepoContext(value: unknown): RepoContext | undefined {
 
   if (!isRecord(value)) {
     return undefined;
+  }
+
+  // Unwrap ContextGathererOutput composite shape
+  if ("repoContext" in value && isRecord(value["repoContext"])) {
+    return coerceRepoContext(value["repoContext"]);
   }
 
   if ("base" in value) {
@@ -206,4 +211,18 @@ function asString(value: unknown): string {
 function asOptionalString(value: unknown): string | undefined {
   const normalized = asString(value);
   return normalized || undefined;
+}
+
+export function coerceFileIndex(value: unknown): FileIndex | undefined {
+  if (isRecord(value) && value["__handoff"] === true && "output" in value) {
+    return coerceFileIndex(value["output"]);
+  }
+  if (!isRecord(value)) return undefined;
+  if ("fileIndex" in value && isRecord(value["fileIndex"])) {
+    return value["fileIndex"] as unknown as FileIndex;
+  }
+  if ("tree" in value && Array.isArray(value["tree"])) {
+    return value as unknown as FileIndex;
+  }
+  return undefined;
 }

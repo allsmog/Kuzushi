@@ -220,7 +220,7 @@ export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
           prompt,
           cwd: context.repoRoot,
           model,
-          maxTurns: null,
+          maxTurns: context.config.taskMaxTurns ?? 15,
           allowedTools: [...DEFAULT_READ_ONLY_TOOLS],
           runtimeOptions: {},
           schema: CHAIN_ANALYSIS_SCHEMA,

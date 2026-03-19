@@ -319,7 +319,7 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
         options: {
           cwd: context.repoRoot,
           model: cfg.strideModel,
-          maxTurns: undefined,
+          maxTurns: context.config.taskMaxTurns ?? 15,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {

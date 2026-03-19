@@ -103,6 +103,7 @@ export const TRIAGE_RESULT_SCHEMA = {
 } as const;
 
 export const DEFAULT_TOOLS: AllowedTriageTool[] = [...DEFAULT_READ_ONLY_TOOLS];
+export const BATCH_TRIAGE_TOOLS: AllowedTriageTool[] = ["Read", "Glob", "Grep"];
 export const DEFAULT_MAX_TURNS = 10;
 
 export interface TriageRuntimeOptions extends AgentRuntimeOptions {
@@ -180,6 +181,8 @@ export async function triageFindingWithAgent(
   extraPromptContext?: string,
   /** Optional custom triage template override (loaded from config). */
   triageTemplate?: string,
+  /** Optional pre-computed system prompt prefix (for prompt caching across findings). */
+  precomputedSystemPromptPrefix?: string,
 ): Promise<TriageOutput> {
   const { repoContext, runtimeOptions } = resolveRepoContextAndRuntimeOptions(
     repoContextOrRuntimeOptions,
@@ -198,7 +201,7 @@ export async function triageFindingWithAgent(
     maxTurns: effectiveMaxTurns,
     allowedTools,
     runtimeOptions,
-    systemPromptPrefix: triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
+    systemPromptPrefix: precomputedSystemPromptPrefix ?? triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
     schema: TRIAGE_RESULT_SCHEMA,
   });
 
@@ -289,7 +292,7 @@ async function triageSingleBatch(
     cwd: repoRoot,
     model,
     maxTurns: effectiveMaxTurns,
-    allowedTools: DEFAULT_TOOLS,
+    allowedTools: BATCH_TRIAGE_TOOLS,
     runtimeOptions,
     systemPromptPrefix: triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
     schema: BATCH_TRIAGE_SCHEMA,

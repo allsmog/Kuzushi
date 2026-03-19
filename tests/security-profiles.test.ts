@@ -21,7 +21,7 @@ const SAMPLE_PROFILES = `## GDPR Data Protection
 - Verify data retention limits are enforced
 - Ensure right-to-deletion endpoints exist and function
 
-## Financial Transaction Security [appliesTo: auth-access-detect, race-condition-detect]
+## Financial Transaction Security [appliesTo: code-config-detect, race-condition-detect]
 - Double-spend prevention on all monetary operations
 - Transaction atomicity with proper DB isolation levels
 - Audit trail for all financial state changes
@@ -45,7 +45,7 @@ describe("loadSecurityProfiles", () => {
     expect(profiles[0].appliesTo).toBeUndefined();
 
     expect(profiles[1].name).toBe("Financial Transaction Security");
-    expect(profiles[1].appliesTo).toEqual(["auth-access-detect", "race-condition-detect"]);
+    expect(profiles[1].appliesTo).toEqual(["code-config-detect", "race-condition-detect"]);
 
     expect(profiles[2].name).toBe("E-Commerce Specific");
     expect(profiles[2].appliesTo).toEqual(["*"]);
@@ -71,9 +71,9 @@ describe("loadSecurityProfiles", () => {
 describe("getProfilesForTask", () => {
   const profiles: SecurityProfile[] = [
     { name: "Global", items: ["g1"] },
-    { name: "Specific", items: ["s1"], appliesTo: ["auth-access-detect"] },
+    { name: "Specific", items: ["s1"], appliesTo: ["code-config-detect"] },
     { name: "Wildcard", items: ["w1"], appliesTo: ["*"] },
-    { name: "Other", items: ["o1"], appliesTo: ["crypto-misuse-detect"] },
+    { name: "Other", items: ["o1"], appliesTo: ["secrets-crypto-detect"] },
   ];
 
   it("returns profiles with no appliesTo (global)", () => {
@@ -82,7 +82,7 @@ describe("getProfilesForTask", () => {
   });
 
   it("returns profiles matching the task ID", () => {
-    const result = getProfilesForTask(profiles, "auth-access-detect");
+    const result = getProfilesForTask(profiles, "code-config-detect");
     expect(result.map((p) => p.name)).toContain("Specific");
   });
 
@@ -92,7 +92,7 @@ describe("getProfilesForTask", () => {
   });
 
   it("excludes non-matching specific profiles", () => {
-    const result = getProfilesForTask(profiles, "auth-access-detect");
+    const result = getProfilesForTask(profiles, "code-config-detect");
     expect(result.map((p) => p.name)).not.toContain("Other");
   });
 });

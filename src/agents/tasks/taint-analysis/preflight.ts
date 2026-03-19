@@ -211,7 +211,7 @@ For each candidate provide:
     prompt,
     cwd: repoRoot,
     model,
-    maxTurns: undefined,
+    maxTurns: 15,
     allowedTools: [...DEFAULT_READ_ONLY_TOOLS],
     schema: EXTRACTION_SUPPLEMENT_SCHEMA as Record<string, unknown>,
     strict: true,

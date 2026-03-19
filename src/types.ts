@@ -205,12 +205,35 @@ export interface ExploitChain {
   impactDescription: string;
 }
 
+/** A file entry in the pre-computed file index. */
+export interface FileIndexEntry {
+  path: string; // relative to repo root
+}
+
+/** A security-relevant pattern match found during file indexing. */
+export interface SecurityPatternMatch {
+  pattern: string;
+  filePath: string;
+  lineNumber: number;
+  lineContent: string;
+}
+
+/** Pre-computed file tree and security pattern matches from context-gatherer. */
+export interface FileIndex {
+  tree: FileIndexEntry[];
+  totalFiles: number;
+  truncated: boolean;
+  patternMatches: Record<string, SecurityPatternMatch[]>;
+}
+
 /** User configuration stored at ~/.kuzushi/config.json (and optional project override). */
 export interface KuzushiConfig {
   /** Scanner model identifier (e.g. "anthropic:claude-sonnet-4-6"). */
   model: string;
   /** Optional override model for triage agents. */
   triageModel?: string;
+  /** Optional override model for batch triage (classification). Defaults to Haiku. */
+  triageBatchModel?: string;
   /** Max turns for triage agents. null = unlimited. */
   triageMaxTurns: number | null;
   /** Enable post-triage exploitability verification phase. */
@@ -315,6 +338,8 @@ export interface KuzushiConfig {
   prioritizeFindings?: boolean;
   /** Maximum cost budget in USD. Pipeline stops early when exceeded. */
   costBudgetUsd?: number;
+  /** Max turns for agentic task executions in the DAG. Default 15. */
+  taskMaxTurns?: number;
   /** Enable dynamic task selection based on repo context. Default false. */
   enableDynamicTaskSelection?: boolean;
   /** Enable PoC harness execution after generation. Default false. */
@@ -371,6 +396,8 @@ export interface KuzushiConfig {
   modelFallbackCooldownMs?: number;
   /** Enable incremental scanner result caching across runs. Default false. */
   incrementalCache?: boolean;
+  /** Skip triage for high-confidence agentic findings (score >= 7, confidence HIGH). Default false. */
+  skipTriageForHighConfidenceAgentic?: boolean;
 }
 
 /** A persisted finding row from SQLite. */

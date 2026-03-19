@@ -5,7 +5,7 @@ import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
-import { triageFindingWithAgent, triageFindingsBatch, BATCH_TRIAGE_FALLBACK_RATIONALE } from "../../triage.js";
+import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, BATCH_TRIAGE_FALLBACK_RATIONALE } from "../../triage.js";
 import type { KuzushiConfig } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
@@ -65,6 +65,12 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
   const useMultiAgent = deps.config.triageStrategy === "multi-agent";
   const useTrajectoryMemory = deps.config.trajectoryMemory === true && deps.db != null;
   const useCalibration = deps.config.confidenceCalibration === true && deps.db != null;
+
+  // Cache per-run prompt fragments: these are pure functions of (repoContext, enrichedContext)
+  // which are fixed for the entire run. Caching maximizes Anthropic API prompt cache hits.
+  let cachedSystemPromptPrefix: string | undefined;
+  let cachedSystemPromptKey: string | undefined;
+  const cachedEvidenceChain = useCalibration ? evidenceChainModule() : undefined;
 
   bus.subscribe<TriageFindingQueuedEvent>("triage:finding-queued", async (event) => {
     const { context, repoContext, enrichedContext, index, total } = event.payload;
@@ -129,9 +135,9 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             }
           }
 
-          // Confidence calibration: inject evidence chain instructions
-          if (useCalibration) {
-            extraSections.push(evidenceChainModule());
+          // Confidence calibration: inject evidence chain instructions (cached)
+          if (useCalibration && cachedEvidenceChain) {
+            extraSections.push(cachedEvidenceChain);
           }
 
           // 1A: Knowledge registry — inject CWE-specific domain knowledge
@@ -217,6 +223,15 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
 
           let triageOutput;
 
+          // Cache system prompt prefix on first event (same for all findings in a run).
+          // repoContext is invariant per run, so keying on runId alone is stable.
+          const coercedRepoContext = coerceRepoContext(repoContext);
+          const coercedEnrichedContext = coerceContextEnrichment(enrichedContext);
+          if (cachedSystemPromptPrefix === undefined || cachedSystemPromptKey !== runId) {
+            cachedSystemPromptPrefix = triageSystemPromptPrefix(coercedRepoContext, coercedEnrichedContext);
+            cachedSystemPromptKey = runId;
+          }
+
           if (useMultiAgent) {
             triageOutput = await triageFindingMultiAgent(
               triageConfigProvider,
@@ -227,10 +242,10 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               deps.config.triageSpecialistModel ?? deps.config.triageModel ?? deps.config.model,
               deps.config.triageMaxTurns,
               deps.config.triageSpecialistMaxTurns ?? null,
-              coerceRepoContext(repoContext),
+              coercedRepoContext,
               {
                 activityCallback,
-                enrichedContext: coerceContextEnrichment(enrichedContext),
+                enrichedContext: coercedEnrichedContext,
               },
               extraPromptContext,
             );
@@ -242,13 +257,14 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               context.repoName,
               deps.config.triageModel ?? deps.config.model,
               deps.config.triageMaxTurns,
-              coerceRepoContext(repoContext),
+              coercedRepoContext,
               {
                 activityCallback,
-                enrichedContext: coerceContextEnrichment(enrichedContext),
+                enrichedContext: coercedEnrichedContext,
               },
               extraPromptContext,
               resolvedTemplates.triage,
+              cachedSystemPromptPrefix,
             );
           }
 
@@ -398,7 +414,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
         findings,
         context.scanPath ?? context.repoRoot,
         context.repoName,
-        deps.config.triageModel ?? deps.config.model,
+        deps.config.triageBatchModel ?? deps.config.triageModel ?? deps.config.model,
         coerceRepoContext(repoContext),
         {
           enrichedContext: coerceContextEnrichment(enrichedContext),

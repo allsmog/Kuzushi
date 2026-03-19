@@ -12,17 +12,14 @@ import { taintAnalysisLabelTask } from "./tasks/taint-analysis/label.js";
 import { taintAnalysisPreflightTask } from "./tasks/taint-analysis/preflight.js";
 import { contextGathererTask } from "./tasks/context-gatherer.js";
 import { contextEnricherTask } from "./tasks/context-enricher.js";
-import { cryptoMisuseTask } from "./tasks/crypto-misuse.js";
-import { authAccessTask } from "./tasks/auth-access.js";
+import { secretsCryptoDetectTask } from "./tasks/secrets-crypto-detect.js";
+import { codeConfigDetectTask } from "./tasks/code-config-detect.js";
 import { raceConditionTask } from "./tasks/race-condition.js";
-import { dangerousApiTask } from "./tasks/dangerous-api.js";
 import { diffReviewTask } from "./tasks/diff-review.js";
 import { invariantExtractTask } from "./tasks/invariant-analysis/extract.js";
 import { invariantCheckTask } from "./tasks/invariant-analysis/check.js";
 import { threatModelStrideTask } from "./tasks/threat-modeling/stride.js";
 import { threatModelPastaTask } from "./tasks/threat-modeling/pasta.js";
-import { secretsDetectionTask } from "./tasks/secrets-detection.js";
-import { securityMisconfigTask } from "./tasks/security-misconfig.js";
 import { ssrfDetectionTask } from "./tasks/ssrf-detection.js";
 import { prototypePollutionTask } from "./tasks/prototype-pollution.js";
 import { nosqlInjectionTask } from "./tasks/nosql-injection.js";
@@ -49,11 +46,12 @@ export async function createDefaultTaskRegistry(
   tasks.register(taintAnalysisCrossAnalyzeTask);
   tasks.register(taintAnalysisStitchTask);
 
+  // Merged agentic detection tasks
+  tasks.register(secretsCryptoDetectTask);
+  tasks.register(codeConfigDetectTask);
+
   // Agentic analysis tasks
-  tasks.register(cryptoMisuseTask);
-  tasks.register(authAccessTask);
   tasks.register(raceConditionTask);
-  tasks.register(dangerousApiTask);
   tasks.register(diffReviewTask);
 
   // LLM context enrichment
@@ -68,8 +66,6 @@ export async function createDefaultTaskRegistry(
   tasks.register(threatModelPastaTask);
 
   // Additional agentic detection tasks
-  tasks.register(secretsDetectionTask);
-  tasks.register(securityMisconfigTask);
   tasks.register(ssrfDetectionTask);
   tasks.register(prototypePollutionTask);
   tasks.register(nosqlInjectionTask);

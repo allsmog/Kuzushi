@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import type { ScanOpts, RepoContext } from "../../types.js";
+import type { ScanOpts, RepoContext, FileIndex, SecurityPatternMatch } from "../../types.js";
 import { isRecord } from "../../utils.js";
 import type { AgentTask } from "../types.js";
 
@@ -19,6 +19,47 @@ const IGNORED_DIRS = new Set([
   ".next",
 ]);
 
+const MAX_FILE_INDEX_ENTRIES = 500;
+
+const SOURCE_EXTENSIONS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+  ".py", ".go", ".rs", ".java", ".kt", ".rb",
+  ".php", ".cs", ".c", ".cpp", ".h", ".hpp",
+  ".swift", ".scala", ".sh", ".bash",
+  ".yml", ".yaml", ".json", ".toml", ".ini",
+  ".conf", ".cfg", ".env", ".xml", ".html",
+  ".vue", ".svelte", ".dockerfile", ".tf",
+]);
+
+const MAX_GREP_FILE_SIZE = 100_000;
+const MAX_MATCHES_PER_DOMAIN = 50;
+
+const SECURITY_GREP_PATTERNS: Record<string, { fileFilter?: (p: string) => boolean; patterns: RegExp[] }> = {
+  "crypto-import": {
+    patterns: [/require\(['"]crypto['"]\)/, /from\s+['"]crypto['"]/, /hashlib/, /javax\.crypto/, /bcrypt/, /argon2/],
+  },
+  "eval-exec": {
+    patterns: [/\beval\s*\(/, /\bexec\s*\(/, /\bspawn\s*\(/, /\bFunction\s*\(/, /child_process/, /subprocess/, /os\.system/],
+  },
+  "auth-session": {
+    patterns: [/\bpassport\b/, /\bjwt\b/i, /\bsession\b/, /\bmiddleware\b/],
+    fileFilter: (p) => /\.(ts|js|py|go|java|rb|php)$/i.test(p),
+  },
+  "secret-pattern": {
+    patterns: [/AKIA[A-Z0-9]{16}/, /BEGIN\s+(RSA|EC|OPENSSH)\s+PRIVATE\s+KEY/, /password\s*[:=]/i, /api[_-]?key\s*[:=]/i],
+    fileFilter: (p) => /\.(env|json|yml|yaml|toml|ini|conf|cfg|ts|js|py)$/i.test(p),
+  },
+  "config-security": {
+    fileFilter: (p) => /\.(yml|yaml|json|toml|ini|conf|cfg|env)$/i.test(p) || /config/i.test(p),
+    patterns: [/\bcors\b/i, /\bhelmet\b/, /\bcsrf\b/i, /debug\s*[:=]\s*true/i],
+  },
+};
+
+export interface ContextGathererOutput {
+  repoContext: RepoContext;
+  fileIndex: FileIndex;
+}
+
 interface MutableRepoContext {
   languages: Set<string>;
   frameworks: Set<string>;
@@ -28,20 +69,23 @@ interface MutableRepoContext {
   entryPoints: Set<string>;
 }
 
+interface WalkEntry { relPath: string; }
+
 interface PathSignals {
-  files: Set<string>;
+  files: WalkEntry[];
+  fileSet: Set<string>;
   dirs: Set<string>;
 }
 
 /**
  * Deterministic, non-AI pre-scan repository context gathering task.
  */
-export const contextGathererTask: AgentTask<ScanOpts, RepoContext> = {
+export const contextGathererTask: AgentTask<ScanOpts, ContextGathererOutput> = {
   id: "context-gatherer",
   displayName: "Context Gatherer",
   outputKind: "custom",
   dependsOn: [],
-  async run(_input, context): Promise<RepoContext> {
+  async run(_input, context): Promise<ContextGathererOutput> {
     const aggregate = createMutableRepoContext();
 
     await Promise.all([
@@ -54,7 +98,16 @@ export const contextGathererTask: AgentTask<ScanOpts, RepoContext> = {
     const pathSignals = await walkRepo(context.repoRoot);
     gatherFromPathSignals(pathSignals, aggregate);
 
-    return {
+    const sourceFiles = pathSignals.files
+      .filter(f => SOURCE_EXTENSIONS.has(path.extname(f.relPath).toLowerCase()));
+
+    const tree = sourceFiles
+      .slice(0, MAX_FILE_INDEX_ENTRIES)
+      .map(f => ({ path: f.relPath }));
+
+    const patternMatches = await grepSecurityPatterns(context.repoRoot, sourceFiles);
+
+    const repoContext: RepoContext = {
       languages: sortValues(aggregate.languages),
       frameworks: sortValues(aggregate.frameworks),
       authPatterns: sortValues(aggregate.authPatterns),
@@ -62,8 +115,74 @@ export const contextGathererTask: AgentTask<ScanOpts, RepoContext> = {
       ormOrDb: sortValues(aggregate.ormOrDb),
       entryPoints: sortValues(aggregate.entryPoints),
     };
+
+    return {
+      repoContext,
+      fileIndex: {
+        tree,
+        totalFiles: sourceFiles.length,
+        truncated: sourceFiles.length > MAX_FILE_INDEX_ENTRIES,
+        patternMatches,
+      },
+    };
   },
 };
+
+async function grepSecurityPatterns(
+  repoRoot: string,
+  files: WalkEntry[],
+): Promise<Record<string, SecurityPatternMatch[]>> {
+  const result: Record<string, SecurityPatternMatch[]> = {};
+
+  for (const domain of Object.keys(SECURITY_GREP_PATTERNS)) {
+    result[domain] = [];
+  }
+
+  for (const file of files) {
+    const absPath = path.join(repoRoot, file.relPath);
+
+    let fileSize: number;
+    try {
+      const s = await stat(absPath);
+      fileSize = s.size;
+    } catch {
+      continue;
+    }
+    if (fileSize > MAX_GREP_FILE_SIZE) continue;
+
+    let content: string;
+    try {
+      content = await readFile(absPath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    const lines = content.split("\n");
+
+    for (const [domain, spec] of Object.entries(SECURITY_GREP_PATTERNS)) {
+      if (result[domain].length >= MAX_MATCHES_PER_DOMAIN) continue;
+      if (spec.fileFilter && !spec.fileFilter(file.relPath)) continue;
+
+      for (let i = 0; i < lines.length; i++) {
+        if (result[domain].length >= MAX_MATCHES_PER_DOMAIN) break;
+        const line = lines[i];
+        for (const pattern of spec.patterns) {
+          if (pattern.test(line)) {
+            result[domain].push({
+              pattern: pattern.source,
+              filePath: file.relPath,
+              lineNumber: i + 1,
+              lineContent: line.slice(0, 200),
+            });
+            break; // one match per line per domain
+          }
+        }
+      }
+    }
+  }
+
+  return result;
+}
 
 function createMutableRepoContext(): MutableRepoContext {
   return {
@@ -241,13 +360,13 @@ async function gatherFromCargoToml(repoRoot: string, out: MutableRepoContext): P
 }
 
 function gatherFromPathSignals(signals: PathSignals, out: MutableRepoContext): void {
-  if (signals.files.has(".env") || signals.files.has(".env.local") || signals.files.has(".env.production")) {
+  if (signals.fileSet.has(".env") || signals.fileSet.has(".env.local") || signals.fileSet.has(".env.production")) {
     out.entryPoints.add(".env*");
   }
-  if (signals.files.has("docker-compose.yml") || signals.files.has("docker-compose.yaml")) {
+  if (signals.fileSet.has("docker-compose.yml") || signals.fileSet.has("docker-compose.yaml")) {
     out.entryPoints.add("docker-compose.yml");
   }
-  if (signals.files.has("Dockerfile")) {
+  if (signals.fileSet.has("Dockerfile")) {
     out.entryPoints.add("Dockerfile");
   }
 
@@ -263,19 +382,20 @@ function gatherFromPathSignals(signals: PathSignals, out: MutableRepoContext): v
     out.authPatterns.add("middleware-guards");
   }
 
-  if ([...signals.files].some((file) => file.startsWith("src/pages/api/"))) {
+  if ([...signals.fileSet].some((file) => file.startsWith("src/pages/api/"))) {
     out.entryPoints.add("src/pages/api/*");
   }
-  if ([...signals.files].some((file) => file.startsWith("src/app/api/"))) {
+  if ([...signals.fileSet].some((file) => file.startsWith("src/app/api/"))) {
     out.entryPoints.add("src/app/api/*");
   }
-  if (signals.files.has("cmd/server/main.go")) {
+  if (signals.fileSet.has("cmd/server/main.go")) {
     out.entryPoints.add("cmd/server/main.go");
   }
 }
 
 async function walkRepo(repoRoot: string): Promise<PathSignals> {
-  const files = new Set<string>();
+  const files: WalkEntry[] = [];
+  const fileSet = new Set<string>();
   const dirs = new Set<string>();
   const stack: Array<{ relDir: string; depth: number }> = [{ relDir: "", depth: 0 }];
   let visited = 0;
@@ -317,12 +437,13 @@ async function walkRepo(repoRoot: string): Promise<PathSignals> {
       }
 
       if (entry.isFile()) {
-        files.add(relPath);
+        files.push({ relPath });
+        fileSet.add(relPath);
       }
     }
   }
 
-  return { files, dirs };
+  return { files, fileSet, dirs };
 }
 
 async function readJson(filePath: string): Promise<Record<string, unknown> | undefined> {

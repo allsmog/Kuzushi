@@ -65,11 +65,14 @@ describe("context-gatherer task", () => {
       upstreamOutputs: new Map(),
     });
 
-    expect(output.frameworks).toContain("Express");
-    expect(output.ormOrDb).toContain("Prisma");
-    expect(output.authPatterns).toContain("JWT");
-    expect(output.sanitizationLibs).toContain("helmet");
-    expect(output.entryPoints).toContain("src/pages/api/*");
+    expect(output.repoContext.frameworks).toContain("Express");
+    expect(output.repoContext.ormOrDb).toContain("Prisma");
+    expect(output.repoContext.authPatterns).toContain("JWT");
+    expect(output.repoContext.sanitizationLibs).toContain("helmet");
+    expect(output.repoContext.entryPoints).toContain("src/pages/api/*");
+    expect(output.fileIndex).toBeDefined();
+    expect(output.fileIndex.tree.length).toBeGreaterThan(0);
+    expect(output.fileIndex.totalFiles).toBeGreaterThan(0);
 
     await bus.close();
   });

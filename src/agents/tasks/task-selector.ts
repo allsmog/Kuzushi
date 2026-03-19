@@ -179,10 +179,10 @@ function applyDefaultReasoning(
 ): void {
   for (const taskId of recommendedTasks) {
     if (!reasoning[taskId]) {
-      reasoning[taskId] = taskId === "secrets-detect"
-        ? "Always recommended: secrets detection"
-        : taskId === "security-misconfig-detect"
-          ? "Always recommended: security misconfiguration checks"
+      reasoning[taskId] = taskId === "secrets-crypto-detect"
+        ? "Always recommended: secrets and crypto detection"
+        : taskId === "code-config-detect"
+          ? "Always recommended: code and config security checks"
           : "Recommended from repository context";
     }
   }

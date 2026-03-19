@@ -126,7 +126,7 @@ export const reachabilityCheckTask: AgentTask<Finding[], Finding[]> = {
           options: {
             cwd: context.repoRoot,
             model,
-            maxTurns: undefined,
+            maxTurns: context.config.taskMaxTurns ?? 15,
             allowedTools: ["Read", "Glob", "Grep", "GetCallers"],
             permissionMode: "dontAsk",
             outputFormat: {

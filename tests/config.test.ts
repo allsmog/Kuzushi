@@ -90,7 +90,7 @@ describe("loadConfig", () => {
       retryBackoffMultiplier: 3,
       agentRuntimeConfig: {
         apiKey: "sk-test",
-        baseUrl: "https://basecamp.stark.acme.com/",
+        baseUrl: "https://api.example.com/",
       },
       scannerConfig: { semgrep: { verify: false } },
     }));
@@ -118,7 +118,7 @@ describe("loadConfig", () => {
     expect(config.retryBackoffMultiplier).toBe(3);
     expect(config.agentRuntimeConfig).toEqual({
       apiKey: "sk-test",
-      baseUrl: "https://basecamp.stark.acme.com/",
+      baseUrl: "https://api.example.com/",
     });
     expect(config.scannerConfig.semgrep?.verify).toBe(false);
   });
@@ -140,14 +140,14 @@ describe("loadConfig", () => {
     }));
     writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
       agentRuntimeConfig: {
-        baseUrl: "https://basecamp.stark.acme.com/",
+        baseUrl: "https://api.example.com/",
       },
     }));
 
     const config = loadConfig(TMP_REPO);
     expect(config.agentRuntimeConfig).toEqual({
       apiKey: "global-key",
-      baseUrl: "https://basecamp.stark.acme.com/",
+      baseUrl: "https://api.example.com/",
     });
   });
 
@@ -290,11 +290,11 @@ describe("setConfigValue", () => {
   it("sets agentRuntimeConfig as an object", () => {
     setConfigValue(
       "agentRuntimeConfig",
-      "{\"apiKey\":\"sk-test\",\"baseUrl\":\"https://basecamp.stark.acme.com/\"}",
+      "{\"apiKey\":\"sk-test\",\"baseUrl\":\"https://api.example.com/\"}",
     );
     expect(getConfigValue("agentRuntimeConfig")).toEqual({
       apiKey: "sk-test",
-      baseUrl: "https://basecamp.stark.acme.com/",
+      baseUrl: "https://api.example.com/",
     });
   });
 

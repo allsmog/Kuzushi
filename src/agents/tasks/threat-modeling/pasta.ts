@@ -320,7 +320,7 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
         options: {
           cwd: context.repoRoot,
           model: cfg.pastaModel,
-          maxTurns: undefined,
+          maxTurns: context.config.taskMaxTurns ?? 15,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {

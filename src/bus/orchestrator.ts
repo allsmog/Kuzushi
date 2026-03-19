@@ -78,6 +78,9 @@ import { PipelineHookChain } from "../hooks/chain.js";
 import type { HookContext } from "../hooks/types.js";
 import { loadHooksFromFile } from "../hooks/loader.js";
 
+/** Scanners whose findings come from static analysis tools, not LLM assessment. */
+const NON_LLM_SCANNERS = new Set(["semgrep", "codeql"]);
+
 interface QueuedFinding {
   finding: Finding;
   index: number;
@@ -180,6 +183,8 @@ interface RunState {
   triageAttempts: Map<string, number>;
   /** Per-finding verification attempt counts (fingerprint → total attempts). */
   verifyAttempts: Map<string, number>;
+  /** Fingerprints of findings auto-passed by skipTriageForHighConfidenceAgentic. */
+  autoPassedFingerprints: Set<string>;
 }
 
 export interface OrchestratorDeps {
@@ -426,6 +431,7 @@ export class PipelineOrchestrator {
       deadLetterFindings: [],
       triageAttempts: new Map(),
       verifyAttempts: new Map(),
+      autoPassedFingerprints: new Set(),
       stageTimestamps: {
         pipelineStart: event.meta.timestamp,
         pipelineEnd: "",
@@ -816,15 +822,17 @@ export class PipelineOrchestrator {
       && this.deps.taskRegistry.has("context-gatherer");
     const enableContextEnrichment = state.config.enableContextEnrichment === true
       && this.deps.taskRegistry.has("context-enricher");
-    // When enabledTasks is empty (default), enable ALL registered tasks.
-    // When explicitly set, use only those tasks.
+    // When enabledTasks is empty, enable ALL registered tasks.
+    // When set to ["*"], also enable all tasks (explicit opt-in to full suite).
+    // When explicitly set to specific task IDs, use only those tasks.
     const explicitTasks = state.config.enabledTasks ?? [];
     const allRegisteredTasks = this.deps.taskRegistry ? this.deps.taskRegistry.ids() : [];
+    const useAllTasks = explicitTasks.length === 1 && explicitTasks[0] === "*";
     const candidateIds = normalizeTaskIds([
       ...state.scanners,
       ...(enableContextExplicit ? ["context-gatherer"] : []),
       ...(enableContextEnrichment ? ["context-enricher"] : []),
-      ...(explicitTasks.length > 0 ? explicitTasks : allRegisteredTasks),
+      ...(useAllTasks || explicitTasks.length === 0 ? allRegisteredTasks : explicitTasks),
       // Auto-add task-selector when dynamic task selection is enabled
       ...(state.config.enableDynamicTaskSelection && this.deps.taskRegistry.has("task-selector")
         ? ["task-selector"]
@@ -1042,6 +1050,12 @@ export class PipelineOrchestrator {
           taskIds: [...group],
         }),
       );
+
+      // Budget guard: stop DAG execution if budget is exceeded after this stage
+      if (this.isBudgetExceeded(state)) {
+        await this.emitBudgetExceeded(state, runId);
+        break;
+      }
     }
 
     const gatheredContext = coerceRepoContext(state.taskOutputs.get("context-gatherer"));
@@ -1239,7 +1253,26 @@ export class PipelineOrchestrator {
     const pendingFindings = filteredFindings.filter(
       (finding) => !alreadyTriaged.has(finding.fingerprint),
     );
-    const triageCandidates = capFindingsForTriage(pendingFindings, state.scanOpts.maxFindings);
+    let triageCandidates = capFindingsForTriage(pendingFindings, state.scanOpts.maxFindings);
+
+    // PR 5: Auto-pass high-confidence agentic findings when enabled
+    const autoPassFindings: Finding[] = [];
+    if (state.config.skipTriageForHighConfidenceAgentic) {
+      triageCandidates = triageCandidates.filter((finding) => {
+        if (
+          !NON_LLM_SCANNERS.has(finding.scanner)
+          && finding.scannerConfidence === "HIGH"
+          && finding.score >= 8
+        ) {
+          autoPassFindings.push(finding);
+          return false;
+        }
+        return true;
+      });
+    }
+
+    // Track auto-passed fingerprints so handleTriageResult can skip counter manipulation
+    state.autoPassedFingerprints = new Set(autoPassFindings.map((f) => f.fingerprint));
 
     state.skippedAlreadyTriaged = filteredFindings.length - pendingFindings.length;
     state.triageTotal = triageCandidates.length;
@@ -1294,18 +1327,62 @@ export class PipelineOrchestrator {
 
     await this.publishQueueDepth(state, runId);
 
-    if (triageCandidates.length === 0) {
+    if (triageCandidates.length === 0 && autoPassFindings.length === 0) {
       await this.finishTriageAndRequestReport(state, runId);
       return;
     }
 
-    await this.dispatchTriageBatch(state, runId, triageCandidates);
+    // Dispatch real triage FIRST — before emitting auto-pass events
+    if (triageCandidates.length > 0) {
+      await this.dispatchTriageBatch(state, runId, triageCandidates);
+    }
+
+    // Emit synthetic triage results for auto-passed findings AFTER dispatch.
+    // handleTriageResult detects these via autoPassedFingerprints and skips
+    // counter manipulation (inFlight/triaged), only pushing to verifyCandidates.
+    for (const [idx, finding] of autoPassFindings.entries()) {
+      await this.bus.publish(
+        createEvent("triage:result", runId, {
+          context: state.context,
+          finding,
+          result: {
+            fingerprint: finding.fingerprint,
+            verdict: "tp" as const,
+            confidence: 0.9,
+            rationale: "Auto-passed: high-confidence LLM-generated finding (skipTriageForHighConfidenceAgentic)",
+            verificationSteps: ["Finding was auto-triaged based on high agentic scanner confidence"],
+            fixPatch: null,
+          },
+          costUsd: 0,
+          attempts: 0,
+          index: triageCandidates.length + idx + 1,
+          total: triageCandidates.length + autoPassFindings.length,
+        }),
+      );
+    }
+
+    // If only auto-pass findings existed (no real candidates), finish triage now
+    if (triageCandidates.length === 0) {
+      await this.finishTriageAndRequestReport(state, runId);
+    }
   }
 
   private async handleTriageResult(event: TriageResultEvent): Promise<void> {
     const runId = event.meta.runId;
     const state = this.runs.get(runId);
     if (!state) {
+      return;
+    }
+
+    // Auto-passed findings: only push to verify candidates, skip counter manipulation
+    // to avoid corrupting inFlight/triaged and re-entrant dispatch.
+    if (state.autoPassedFingerprints.has(event.payload.finding.fingerprint)) {
+      if (shouldVerifyFinding(state, event.payload.finding, event.payload.result)) {
+        state.verifyCandidates.push({
+          finding: event.payload.finding,
+          triageResult: event.payload.result,
+        });
+      }
       return;
     }
 

@@ -306,6 +306,7 @@ export type AgentRuntimeConfigZ = z.infer<typeof AgentRuntimeConfigSchema>;
 export const KuzushiConfigSchema = z.object({
   model: z.string(),
   triageModel: z.string().optional(),
+  triageBatchModel: z.string().optional(),
   triageMaxTurns: z.number().nullable(),
   verify: z.boolean().optional(),
   verifyModel: z.string().optional(),
@@ -355,6 +356,7 @@ export const KuzushiConfigSchema = z.object({
   securityProfilesPath: z.string().optional(),
   prioritizeFindings: z.boolean().optional(),
   costBudgetUsd: z.number().optional(),
+  taskMaxTurns: z.number().optional(),
   enableDynamicTaskSelection: z.boolean().optional(),
   pocExecute: z.boolean().optional(),
   pocSandbox: PocSandboxSchema.optional(),
@@ -415,7 +417,10 @@ export const KuzushiConfigSchema = z.object({
     allow: z.array(z.string()).optional(),
     deny: z.array(z.string()).optional(),
   })).optional(),
+  modelFallbacks: z.record(z.string(), z.array(z.string())).optional(),
+  modelFallbackCooldownMs: z.number().optional(),
   incrementalCache: z.boolean().optional(),
+  skipTriageForHighConfidenceAgentic: z.boolean().optional(),
 });
 
 export type KuzushiConfigZ = z.infer<typeof KuzushiConfigSchema>;

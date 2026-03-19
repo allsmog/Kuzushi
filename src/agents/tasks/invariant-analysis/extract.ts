@@ -143,7 +143,7 @@ export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
         options: {
           cwd: context.repoRoot,
           model: cfg.extractionModel,
-          maxTurns: undefined,
+          maxTurns: context.config.taskMaxTurns ?? 15,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           outputFormat: {

@@ -59,7 +59,7 @@ export async function detectServiceBoundaries(
         options: {
           cwd: serviceRoot,
           model,
-          maxTurns: undefined,
+          maxTurns: 15,
           allowedTools: ["Read", "Glob", "Grep"],
           permissionMode: "dontAsk",
           canUseTool,

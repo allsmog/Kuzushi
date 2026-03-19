@@ -496,7 +496,7 @@ async function queryLabelBatch(
     options: {
       cwd: repoRoot,
       model,
-      maxTurns: undefined,
+      maxTurns: 15,
       allowedTools: ["Read", "Grep", "Glob"],
       permissionMode: "dontAsk",
       outputFormat: {

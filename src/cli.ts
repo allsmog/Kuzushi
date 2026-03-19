@@ -184,11 +184,10 @@ function resolveActivePiAiModels(
     }
   }
 
-  // Agentic analysis tasks: crypto-misuse, auth-access, race-condition
-  for (const taskId of ["crypto-misuse-detect", "auth-access-detect", "race-condition-detect"]) {
+  // Merged agentic detection tasks + race-condition
+  for (const taskId of ["secrets-crypto-detect", "code-config-detect", "race-condition-detect"]) {
     if (enabledTaskSet.has(taskId)) {
-      const cfgKey = taskId.replace("-detect", "");
-      const model = asModel(resolveScannerConfig(config, cfgKey)["model"]) ?? config.model;
+      const model = asModel(resolveScannerConfig(config, taskId)["model"]) ?? config.model;
       models.add(model);
     }
   }

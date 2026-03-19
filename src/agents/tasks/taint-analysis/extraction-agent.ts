@@ -132,7 +132,7 @@ export async function generateExtractionQuery(
         options: {
           cwd: repoRoot,
           model,
-          maxTurns: undefined,
+          maxTurns: 15,
           allowedTools: ["Read", "Glob", "Grep", "Bash", "Write"],
           permissionMode: "acceptEdits",
           canUseTool,
