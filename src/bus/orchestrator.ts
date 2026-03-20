@@ -3,6 +3,7 @@ import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { TaskContext as AgentTaskContext } from "../agents/types.js";
 import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
+import { SELECTABLE_TASK_IDS } from "../agents/tasks/task-selector.js";
 import type { Finding } from "../scanners/types.js";
 import { HardExclusionFilter } from "../scanners/fp-filter.js";
 import { rescoreFindings } from "../scanners/llm-rescore.js";
@@ -824,19 +825,36 @@ export class PipelineOrchestrator {
       && this.deps.taskRegistry.has("context-enricher");
     // When enabledTasks is empty, enable ALL registered tasks.
     // When set to ["*"], also enable all tasks (explicit opt-in to full suite).
-    // When explicitly set to specific task IDs, use only those tasks.
+    // When explicitly set to specific task IDs, use those as the base set.
+    // Note: when dynamic selection is active, task-selector may add tasks beyond the base set.
     const explicitTasks = state.config.enabledTasks ?? [];
     const allRegisteredTasks = this.deps.taskRegistry ? this.deps.taskRegistry.ids() : [];
     const useAllTasks = explicitTasks.length === 1 && explicitTasks[0] === "*";
+
+    const dynamicSelectionActive = state.config.enableDynamicTaskSelection === true
+      && this.deps.taskRegistry.has("task-selector");
+
+    let baseTaskIds: string[];
+    if (useAllTasks) {
+      // User said "run everything" — bypass dynamic selection filtering
+      baseTaskIds = allRegisteredTasks;
+    } else if (explicitTasks.length === 0) {
+      if (dynamicSelectionActive) {
+        // Exclude selectable tasks — task-selector will add the relevant ones
+        baseTaskIds = allRegisteredTasks.filter(id => !SELECTABLE_TASK_IDS.has(id));
+      } else {
+        baseTaskIds = allRegisteredTasks;
+      }
+    } else {
+      baseTaskIds = explicitTasks;
+    }
+
     const candidateIds = normalizeTaskIds([
       ...state.scanners,
       ...(enableContextExplicit ? ["context-gatherer"] : []),
       ...(enableContextEnrichment ? ["context-enricher"] : []),
-      ...(useAllTasks || explicitTasks.length === 0 ? allRegisteredTasks : explicitTasks),
-      // Auto-add task-selector when dynamic task selection is enabled
-      ...(state.config.enableDynamicTaskSelection && this.deps.taskRegistry.has("task-selector")
-        ? ["task-selector"]
-        : []),
+      ...baseTaskIds,
+      ...(dynamicSelectionActive ? ["task-selector"] : []),
     ]);
 
     // Auto-inject all transitive dependencies for enabled tasks
@@ -853,11 +871,17 @@ export class PipelineOrchestrator {
       );
       if (!othersDepend) {
         enabledTaskIds = enabledTaskIds.filter((id) => id !== "context-gatherer");
+      } else if (dynamicSelectionActive) {
+        console.error(
+          "[orchestrator] enableContextGathering: false ignored — task-selector requires context-gatherer",
+        );
       }
     }
 
     // Track already-completed tasks for dynamic re-resolution
     const completedTaskIds = new Set<string>();
+    const dynamicTasksProcessed = new Set<string>();
+    let taskSelectorFallbackApplied = false;
 
     let stages: string[][];
     try {
@@ -945,6 +969,7 @@ export class PipelineOrchestrator {
         const taskId = f.event.payload.taskId;
         const errMsg = f.event.payload.error;
         state.failedTasks.push(taskId);
+        completedTaskIds.add(taskId); // prevent re-scheduling in re-resolved stages
         console.error(`[orchestrator] Task "${taskId}" failed: ${errMsg}`);
         await this.bus.publish(
           createEvent("pipeline:error", runId, {
@@ -955,8 +980,9 @@ export class PipelineOrchestrator {
         );
       }
 
-      // Determine if this stage has any findings-producing tasks
-      const stageHasFindingsProducers = group.some((taskId) => {
+      // Determine if the actually-dispatched tasks include findings producers
+      // (exclude condition-skipped tasks — their absence is intentional)
+      const stageHasFindingsProducers = tasksToRun.some((taskId) => {
         const task = this.deps.taskRegistry!.get(taskId);
         return task.outputKind === "findings" || task.outputKind === "threat-model";
       });
@@ -1005,7 +1031,7 @@ export class PipelineOrchestrator {
       // Dynamic task selection: check if any completed task produced a TaskSelectionResult
       // (duck-type check: has recommendedTasks array). If so, merge and re-resolve.
       if (state.config.enableDynamicTaskSelection) {
-        const dynamicTasks = this.extractDynamicTasks(state, completedTaskIds);
+        const dynamicTasks = this.extractDynamicTasks(state, completedTaskIds, dynamicTasksProcessed);
         if (dynamicTasks.length > 0) {
           const newTaskIds = dynamicTasks.filter(
             (id) =>
@@ -1017,15 +1043,16 @@ export class PipelineOrchestrator {
             console.error(
               `[orchestrator] Dynamic task selection added: ${newTaskIds.join(", ")}`,
             );
-            enabledTaskIds = [
+            const candidateIds = [
               ...enabledTaskIds,
               ...collectTransitiveDeps(this.deps.taskRegistry, newTaskIds)
                 .filter((id) => !enabledTaskIds.includes(id)),
             ];
 
-            // Re-resolve remaining stages
+            // Re-resolve remaining stages — only commit enabledTaskIds on success
             try {
-              const fullStages = this.deps.taskRegistry.resolveOrder(enabledTaskIds);
+              const fullStages = this.deps.taskRegistry.resolveOrder(candidateIds);
+              enabledTaskIds = candidateIds;
               // Replace remaining stages — skip stages already completed
               const remaining = fullStages.filter((stage) =>
                 stage.some((id) => !completedTaskIds.has(id)),
@@ -1039,6 +1066,48 @@ export class PipelineOrchestrator {
                 `[orchestrator] Dynamic DAG re-resolution failed: ${toErrorMessage(error)}`,
               );
             }
+          }
+        }
+      }
+
+      // Fallback: after task-selector has settled (succeeded or failed), if no
+      // non-failed selectable tasks are enabled, re-add all selectable tasks so
+      // the pipeline doesn't produce zero detection results.
+      if (dynamicSelectionActive && !taskSelectorFallbackApplied) {
+        const selectorSettled = completedTaskIds.has("task-selector");
+        const hasSelectableTasks = enabledTaskIds.some(
+          id => SELECTABLE_TASK_IDS.has(id) && !state.failedTasks.includes(id),
+        );
+
+        if (selectorSettled && !hasSelectableTasks) {
+          const selectorFailed = state.failedTasks.includes("task-selector");
+          const reason = selectorFailed ? "failed" : "recommended no selectable tasks";
+          const fallbackIds = [...SELECTABLE_TASK_IDS].filter(
+            id => !enabledTaskIds.includes(id) && this.deps.taskRegistry!.has(id),
+          );
+          if (fallbackIds.length > 0) {
+            console.error(
+              `[orchestrator] task-selector ${reason} — falling back to all selectable tasks: ${fallbackIds.join(", ")}`,
+            );
+            const candidateIds = [
+              ...enabledTaskIds,
+              ...collectTransitiveDeps(this.deps.taskRegistry, fallbackIds)
+                .filter(id => !enabledTaskIds.includes(id)),
+            ];
+            try {
+              const fullStages = this.deps.taskRegistry.resolveOrder(candidateIds);
+              enabledTaskIds = candidateIds;
+              taskSelectorFallbackApplied = true;
+              const remaining = fullStages
+                .filter(stage => stage.some(id => !completedTaskIds.has(id)))
+                .map(stage => stage.filter(id => !completedTaskIds.has(id)));
+              stages = [...stages.slice(0, stageIndex + 1), ...remaining];
+            } catch (error) {
+              console.error(`[orchestrator] Fallback DAG re-resolution failed: ${toErrorMessage(error)}`);
+            }
+          } else {
+            // All selectable tasks already in enabledTaskIds (or none registered) — no retry needed
+            taskSelectorFallbackApplied = true;
           }
         }
       }
@@ -1094,20 +1163,27 @@ export class PipelineOrchestrator {
   private extractDynamicTasks(
     state: RunState,
     completedTaskIds: Set<string>,
+    processedTaskIds: Set<string>,
   ): string[] {
     const dynamicTasks: string[] = [];
     for (const taskId of completedTaskIds) {
+      if (processedTaskIds.has(taskId)) continue;
       const output = state.taskOutputs.get(taskId);
       if (
         isRecord(output)
         && Array.isArray(output["recommendedTasks"])
       ) {
+        processedTaskIds.add(taskId);
         const recommended = output["recommendedTasks"] as unknown[];
         for (const t of recommended) {
           if (typeof t === "string" && t.trim()) {
             dynamicTasks.push(t.trim());
           }
         }
+      } else {
+        // No output or wrong shape (e.g., failed task) — mark as processed
+        // to avoid re-scanning on every subsequent stage.
+        processedTaskIds.add(taskId);
       }
     }
     return normalizeTaskIds(dynamicTasks);

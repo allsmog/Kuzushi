@@ -68,16 +68,10 @@ const SELECTION_RULES: SelectionRule[] = [
     tasks: ["dangerous-api", "ssrf", "secrets", "template-injection", "supply-chain"],
     reason: "PHP: high risk for injection, SSRF, templating issues, and hardcoded secrets",
   },
-  {
-    condition: (ctx) => ctx.authPatterns.length > 0,
-    tasks: ["auth-access"],
-    reason: "Auth patterns detected — check for authentication and authorization issues",
-  },
-  {
-    condition: (ctx) => ctx.ormOrDb.length > 0,
-    tasks: ["dangerous-api"],
-    reason: "ORM/DB detected — check for dangerous database API usage",
-  },
+  // Note: auth-access and dangerous-api both resolve to code-config-detect,
+  // which is already in ALWAYS_RECOMMENDED via security-misconfig. Dedicated
+  // rules for auth patterns and ORM/DB are unnecessary until those capabilities
+  // map to distinct task IDs.
   {
     condition: (ctx) =>
       ctx.ormOrDb.some((item) => /mongo|mongoose|dynamo|cosmos/i.test(item)),
@@ -93,13 +87,32 @@ const SELECTION_RULES: SelectionRule[] = [
   },
   {
     condition: (ctx) => ctx.languages.length > 1,
-    tasks: ["threat-model-stride"],
-    reason: "Multi-language repo — STRIDE threat model for cross-boundary analysis",
+    tasks: ["threat-model"],
+    reason: "Multi-language repo — STRIDE + PASTA threat models for cross-boundary analysis",
   },
 ];
 
 /** Tasks always recommended regardless of context. */
 const ALWAYS_RECOMMENDED = ["secrets", "security-misconfig"];
+
+/**
+ * The set of resolved task IDs that task-selector manages.
+ * When dynamic task selection is active, these tasks are excluded from the
+ * initial candidate set — task-selector adds the relevant subset after it runs.
+ */
+export const SELECTABLE_TASK_IDS: ReadonlySet<string> = new Set([
+  "secrets-crypto-detect",
+  "code-config-detect",
+  "ssrf-detect",
+  "race-condition-detect",
+  "nosql-injection-detect",
+  "prototype-pollution-detect",
+  "template-injection-detect",
+  "graphql-security-detect",
+  "supply-chain-detect",
+  "threat-model-stride",
+  "threat-model-pasta",
+]);
 
 /**
  * Deterministic task selector — no LLM, pure rule-based mapping
@@ -108,10 +121,9 @@ const ALWAYS_RECOMMENDED = ["secrets", "security-misconfig"];
 function selectTasks(repoContext: RepoContext | undefined): TaskSelectionResult {
   const recommended = new Set<string>(ALWAYS_RECOMMENDED);
   const reasoning: Record<string, string> = {};
-  const skipped: Array<{ id: string; reason: string }> = [];
-  const recommendedTasks = normalizeTaskCapabilityIds([...recommended]);
 
   if (!repoContext) {
+    const recommendedTasks = normalizeTaskCapabilityIds([...recommended]);
     applyDefaultReasoning(recommendedTasks, reasoning);
     return {
       recommendedTasks,
@@ -152,24 +164,29 @@ function selectTasks(repoContext: RepoContext | undefined): TaskSelectionResult 
   }
 
   const normalizedRecommendedTasks = normalizeTaskCapabilityIds([...recommended]);
-  applyDefaultReasoning(normalizedRecommendedTasks, reasoning);
 
+  // Apply rule-specific reasoning first (first matching rule wins per task ID).
+  // Always-recommended tasks are skipped — they get their defaults below.
+  const alwaysRecommendedIds = new Set(normalizeTaskCapabilityIds([...ALWAYS_RECOMMENDED]));
   for (const rule of SELECTION_RULES) {
     const normalizedTasks = normalizeTaskCapabilityIds(rule.tasks);
     for (const taskId of normalizedTasks) {
-      if (normalizedRecommendedTasks.includes(taskId)) {
-        reasoning[taskId] = reasoning[taskId] === "Always recommended: secrets detection"
-          || reasoning[taskId] === "Always recommended: security misconfiguration checks"
-          ? reasoning[taskId]
-          : rule.reason;
+      if (
+        normalizedRecommendedTasks.includes(taskId)
+        && !alwaysRecommendedIds.has(taskId)
+        && !reasoning[taskId]
+      ) {
+        reasoning[taskId] = rule.reason;
       }
     }
   }
 
+  // Fill defaults for always-recommended tasks and any unmatched tasks
+  applyDefaultReasoning(normalizedRecommendedTasks, reasoning);
+
   return {
     recommendedTasks: normalizedRecommendedTasks,
     reasoning,
-    skippedTasks: skipped.length > 0 ? skipped : undefined,
   };
 }
 

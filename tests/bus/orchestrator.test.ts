@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TaskRegistry } from "../../src/agents/registry.js";
 import type { AgentTask } from "../../src/agents/types.js";
+import { SELECTABLE_TASK_IDS } from "../../src/agents/tasks/task-selector.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerOrchestrator } from "../../src/bus/orchestrator.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
@@ -13,6 +14,7 @@ import type {
   ReportRequestedEvent,
   ScanStartEvent,
   StageCompleteEvent,
+  TaskCompleteEvent,
   TaskStartEvent,
   TriageBatchQueuedEvent,
   TriageCompleteEvent,
@@ -2273,6 +2275,1217 @@ describe("PipelineOrchestrator", () => {
 
     const verificationStart = await verificationStartPromise;
     expect(verificationStart.payload.findingCount).toBe(3);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("dynamic selection excludes selectable tasks from initial candidate set", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
+      },
+    };
+    const selectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return {
+          recommendedTasks: ["secrets", "ssrf"],
+          reasoning: {},
+        };
+      },
+    };
+    // Register two selectable tasks — only the recommended ones should run
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-secrets", 80)];
+      },
+    };
+    const ssrfTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "ssrf-detect",
+      displayName: "SSRF",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-ssrf", 70)];
+      },
+    };
+    const protoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "prototype-pollution-detect",
+      displayName: "Prototype Pollution",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-proto", 60)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(selectorTask);
+    taskRegistry.register(secretsCryptoTask);
+    taskRegistry.register(ssrfTask);
+    taskRegistry.register(protoTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+          enabledTasks: [],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    // Only task-selector-recommended tasks should have run
+    expect(taskStarts).toContain("task-selector");
+    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("ssrf-detect");
+    // prototype-pollution-detect was NOT recommended, so it should NOT run
+    expect(taskStarts).not.toContain("prototype-pollution-detect");
+    // Findings should come from the two recommended tasks only
+    const fps = triageBatchQueued.payload.findings.map((f) => f.fingerprint);
+    expect(fps).toContain("fp-secrets");
+    expect(fps).toContain("fp-ssrf");
+    expect(fps).not.toContain("fp-proto");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("falls back to all selectable tasks when task-selector fails", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+      },
+    };
+    const failingSelectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        throw new Error("task-selector crash");
+      },
+    };
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-fallback-secrets", 80)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(failingSelectorTask);
+    taskRegistry.register(secretsCryptoTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+          enabledTasks: [],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    // Despite task-selector failing, the fallback should enable selectable tasks
+    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-fallback-secrets");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("preserves explicit enabledTasks when dynamic selection is active", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["TypeScript"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+      },
+    };
+    const selectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return {
+          recommendedTasks: ["ssrf"],
+          reasoning: {},
+        };
+      },
+    };
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-explicit-secrets", 80)];
+      },
+    };
+    const ssrfTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "ssrf-detect",
+      displayName: "SSRF",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-dynamic-ssrf", 70)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(selectorTask);
+    taskRegistry.register(secretsCryptoTask);
+    taskRegistry.register(ssrfTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    // User explicitly sets enabledTasks — dynamic selection adds to it, doesn't replace
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+          enabledTasks: ["secrets-crypto-detect"],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    // Explicit task should always run
+    expect(taskStarts).toContain("secrets-crypto-detect");
+    // task-selector should run even with explicit enabledTasks
+    expect(taskStarts).toContain("task-selector");
+    // Dynamic ssrf-detect added by task-selector
+    expect(taskStarts).toContain("ssrf-detect");
+    const fps = triageBatchQueued.payload.findings.map((f) => f.fingerprint);
+    expect(fps).toContain("fp-explicit-secrets");
+    expect(fps).toContain("fp-dynamic-ssrf");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("runs all tasks when enableDynamicTaskSelection is false (backward compat)", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+      },
+    };
+    const selectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return { recommendedTasks: ["secrets"], reasoning: {} };
+      },
+    };
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [];
+      },
+    };
+    const protoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "prototype-pollution-detect",
+      displayName: "Prototype Pollution",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-proto-compat", 60)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(selectorTask);
+    taskRegistry.register(secretsCryptoTask);
+    taskRegistry.register(protoTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    // Dynamic selection disabled — all tasks should run
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: false,
+          enabledTasks: [],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    // Both selectable tasks ran — no filtering when dynamic selection is disabled
+    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("prototype-pollution-detect");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-proto-compat");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("enabledTasks ['*'] with dynamic selection runs all tasks without filtering", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+      },
+    };
+    const selectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        // Should not matter — ["*"] bypasses dynamic filtering
+        return { recommendedTasks: ["secrets"], reasoning: {} };
+      },
+    };
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-star-secrets", 80)];
+      },
+    };
+    const protoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "prototype-pollution-detect",
+      displayName: "Prototype Pollution",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-star-proto", 60)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(selectorTask);
+    taskRegistry.register(secretsCryptoTask);
+    taskRegistry.register(protoTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+          enabledTasks: ["*"],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    // Both selectable tasks run — ["*"] means run everything, no filtering
+    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("prototype-pollution-detect");
+    const fps = triageBatchQueued.payload.findings.map((f) => f.fingerprint);
+    expect(fps).toContain("fp-star-secrets");
+    expect(fps).toContain("fp-star-proto");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("falls back to all selectable tasks when task-selector returns empty recommendations", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+      },
+    };
+    const emptySelectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return { recommendedTasks: [], reasoning: {} };
+      },
+    };
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-empty-fallback", 80)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(emptySelectorTask);
+    taskRegistry.register(secretsCryptoTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+          enabledTasks: [],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    // Despite empty recommendations, fallback should enable all selectable tasks
+    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-empty-fallback");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("threat-model-pasta transitive dep does not pull stride back in when neither is recommended", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+      },
+    };
+    const selectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        // Only recommend secrets — NOT stride or pasta
+        return { recommendedTasks: ["secrets"], reasoning: {} };
+      },
+    };
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-secrets-only", 80)];
+      },
+    };
+    const strideTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "threat-model-stride",
+      displayName: "STRIDE Threat Model",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-stride", 70)];
+      },
+    };
+    const pastaTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "threat-model-pasta",
+      displayName: "PASTA Threat Model",
+      outputKind: "findings",
+      dependsOn: ["threat-model-stride"],
+      async run() {
+        return [makeFinding("fp-pasta", 60)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(selectorTask);
+    taskRegistry.register(secretsCryptoTask);
+    taskRegistry.register(strideTask);
+    taskRegistry.register(pastaTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+          enabledTasks: [],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    // Neither stride nor pasta should run — both are selectable and neither was recommended
+    expect(taskStarts).not.toContain("threat-model-stride");
+    expect(taskStarts).not.toContain("threat-model-pasta");
+    // Only secrets should have produced findings
+    const fps = triageBatchQueued.payload.findings.map((f) => f.fingerprint);
+    expect(fps).toContain("fp-secrets-only");
+    expect(fps).not.toContain("fp-stride");
+    expect(fps).not.toContain("fp-pasta");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("does not re-schedule failed task-selector after fallback fires", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+      },
+    };
+    const failingSelectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        throw new Error("task-selector crash");
+      },
+    };
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-no-resched", 80)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(failingSelectorTask);
+    taskRegistry.register(secretsCryptoTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+          enabledTasks: [],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    await triageBatchQueuedPromise;
+
+    // task-selector should be started exactly once — not re-scheduled after failure
+    expect(taskStarts.filter((id) => id === "task-selector")).toHaveLength(1);
+    // Fallback should still fire and run selectable tasks
+    expect(taskStarts).toContain("secrets-crypto-detect");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("fallback fires when only recommended selectable task fails", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+      },
+    };
+    const selectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        // Recommend only the task that will fail
+        return { recommendedTasks: ["secrets"], reasoning: {} };
+      },
+    };
+    // Selectable task that will fail — use "custom" outputKind so the fatal
+    // "all findings producers failed" abort doesn't fire (we're testing the
+    // hasSelectableTasks fallback guard, not the fatal abort path).
+    const failingSecretsTask: AgentTask<ScanOpts, unknown> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        throw new Error("secrets-crypto crash");
+      },
+    };
+    // This selectable task should be added by fallback
+    const ssrfTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "ssrf-detect",
+      displayName: "SSRF",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-fallback-ssrf", 70)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(selectorTask);
+    taskRegistry.register(failingSecretsTask);
+    taskRegistry.register(ssrfTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+          enabledTasks: [],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    // secrets-crypto-detect failed, so fallback should add other selectable tasks
+    expect(taskStarts).toContain("ssrf-detect");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-fallback-ssrf");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("does not fatally abort when condition-skipped findings task is in a stage with a failing non-findings task", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["findings-task", "meta-task"],
+    };
+
+    const taskRegistry = new TaskRegistry();
+
+    const findingsTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "findings-task",
+      displayName: "Findings Task",
+      outputKind: "findings",
+      dependsOn: [],
+      condition: () => false, // intentionally skipped
+      async run() {
+        return [makeFinding("fp-should-not-run", 80)];
+      },
+    };
+
+    const metaTask: AgentTask<ScanOpts, unknown> = {
+      id: "meta-task",
+      displayName: "Meta Task",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        throw new Error("meta-task crash");
+      },
+    };
+
+    taskRegistry.register(findingsTask);
+    taskRegistry.register(metaTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    // Collect fatal errors
+    const fatalErrors: PipelineErrorEvent[] = [];
+    bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
+      if (event.meta.runId === runId && event.payload.fatal) {
+        fatalErrors.push(event);
+      }
+    });
+
+    const stageCompletePromise = bus.waitFor<StageCompleteEvent>(
+      "stage:complete",
+      (event) => event.meta.runId === runId,
+      1000,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: makeConfig(),
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    // Stage should complete — not fatally abort, because the findings task was
+    // intentionally skipped (condition=false), not a failed findings producer.
+    await stageCompletePromise;
+    expect(fatalErrors).toHaveLength(0);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("keeps context-gatherer when enableContextGathering is false and dynamic selection is active", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+      },
+    };
+    const selectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return { recommendedTasks: ["secrets"], reasoning: {} };
+      },
+    };
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-ctx-kept", 80)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(selectorTask);
+    taskRegistry.register(secretsCryptoTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    // enableContextGathering: false BUT enableDynamicTaskSelection: true —
+    // context-gatherer should be kept because task-selector depends on it
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableContextGathering: false,
+          enableDynamicTaskSelection: true,
+          enabledTasks: [],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    // Pipeline should complete — context-gatherer kept despite enableContextGathering: false
+    expect(taskStarts).toContain("context-gatherer");
+    expect(taskStarts).toContain("task-selector");
+    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-ctx-kept");
 
     await bus.close();
     db.close();
