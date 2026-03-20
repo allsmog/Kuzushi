@@ -21,6 +21,30 @@ const TASK_FILE_SPECS: Record<string, TaskFileSpec> = {
     patternDomains: ["eval-exec", "auth-session", "config-security"],
     pathFilter: (p) => /middleware|auth|guard|session|config|docker/i.test(p),
   },
+  "ssrf-detect": {
+    patternDomains: ["eval-exec"],
+    pathFilter: (p) => /fetch|http|request|client|api/i.test(p),
+  },
+  "race-condition-detect": {
+    pathFilter: (p) => /lock|mutex|semaphore|queue|transaction|atomic/i.test(p),
+  },
+  "nosql-injection-detect": {
+    pathFilter: (p) => /mongo|model|schema|query|repository/i.test(p),
+  },
+  "prototype-pollution-detect": {
+    pathFilter: (p) => /merge|extend|assign|deep|clone|util/i.test(p),
+    namePatterns: [/package\.json$/],
+  },
+  "template-injection-detect": {
+    pathFilter: (p) => /template|render|view|layout/i.test(p),
+  },
+  "graphql-security-detect": {
+    pathFilter: (p) => /graphql|schema|resolver|mutation|query/i.test(p),
+    namePatterns: [/\.graphql$/, /\.gql$/],
+  },
+  "supply-chain-detect": {
+    namePatterns: [/package\.json$/, /package-lock\.json$/, /go\.mod$/, /go\.sum$/, /requirements\.txt$/, /Cargo\.toml$/, /Cargo\.lock$/, /pom\.xml$/, /build\.gradle/],
+  },
 };
 
 export interface PreReadFile {

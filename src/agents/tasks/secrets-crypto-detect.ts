@@ -16,6 +16,7 @@ import { getProfilesForTask, formatProfilesForPrompt } from "../../security-prof
 import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
+import { filterCategories, type CategoryRelevance } from "./category-filter.js";
 
 const log = createLogger({ stage: "secrets-crypto-detect" });
 
@@ -74,7 +75,36 @@ function resolveConfig(ctx: TaskContext): SecretsCryptoConfig {
   return { model, maxFindings };
 }
 
+const SECRETS_CRYPTO_RELEVANCE: CategoryRelevance[] = [
+  // Part 1: Secrets Detection
+  { id: "api-key", always: true },
+  { id: "private-key", always: true },
+  { id: "password", always: true },
+  { id: "token", always: true },
+  { id: "connection-string", always: true },
+  { id: "webhook-url", always: true },
+  { id: "cloud-credential", always: true },
+  { id: "package-registry-token", always: true },
+  // Part 2: Crypto Misuse
+  { id: "hash-for-auth", always: true },
+  { id: "symmetric-cipher", always: true },
+  { id: "key-generation", always: true },
+  { id: "tls-config", always: true },
+  { id: "password-storage", always: true },
+  { id: "key-length", always: true },
+  { id: "ecb-mode", always: true },
+  { id: "insecure-prng", always: true },
+  { id: "timing-attack", always: true },
+  { id: "cert-validation", always: true },
+];
+
 function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+  // All secrets/crypto categories are language-agnostic (always included).
+  // Filter infrastructure wired for forward compatibility.
+  filterCategories(SECRETS_CRYPTO_RELEVANCE, repoContext, fileIndex);
+
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["secret-pattern", "crypto-import"]);
+
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -189,9 +219,9 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "Bad: TLS certificate verification disabled (`rejectUnauthorized: false`, `verify=False`,",
     "`InsecureSkipVerify: true`), custom trust stores that accept self-signed certs in production.",
     "",
-    formatFileTreeForPrompt(fileIndex),
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
     formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
-    formatPatternMatchesForPrompt(fileIndex, ["secret-pattern", "crypto-import"]),
+    patternMatchText,
     "## Instructions",
     ...(preRead && preRead.files.length > 0
       ? [
@@ -401,4 +431,5 @@ export const __secretsCryptoDetectInternals = {
   buildPrompt,
   normalizeFindings,
   computeFingerprint,
+  SECRETS_CRYPTO_RELEVANCE,
 };

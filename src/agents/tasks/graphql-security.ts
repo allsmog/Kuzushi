@@ -5,15 +5,17 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { RepoContext, ScanOpts } from "../../types.js";
+import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 
 const log = createLogger({ stage: "graphql-security" });
 
@@ -74,7 +76,9 @@ function resolveConfig(ctx: TaskContext): GraphqlSecurityConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec", "auth-session"]);
+
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -148,13 +152,26 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "- Missing dataloader or N+1 protection combined with batch access",
     "Only flag when batch/alias queries are possible AND no per-operation rate limiting exists.",
     "",
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    patternMatchText,
     "## Investigation methodology",
-    "1. Use Grep to find GraphQL server setup (ApolloServer, express-graphql, graphql-yoga,",
-    "   Mercurius, type-graphql, @nestjs/graphql).",
-    "2. Use Read to inspect server configuration for introspection settings and middleware.",
-    "3. Use Grep to find resolver definitions and check for auth context usage.",
-    "4. Use Grep to find depth-limit, query-complexity, or rate-limiting middleware.",
-    "5. Use Read to inspect schema definitions for self-referential types.",
+    ...(preRead && preRead.files.length > 0
+      ? [
+          "1. Start by analyzing the pre-loaded files above for GraphQL security issues.",
+          "2. Use Glob/Grep only for additional files not already provided.",
+          "3. Use Read to inspect additional GraphQL configuration and resolver files.",
+          "4. Check for depth-limit, query-complexity, or rate-limiting middleware.",
+          "5. Inspect schema definitions for self-referential types.",
+        ]
+      : [
+          "1. Use Grep to find GraphQL server setup (ApolloServer, express-graphql, graphql-yoga,",
+          "   Mercurius, type-graphql, @nestjs/graphql).",
+          "2. Use Read to inspect server configuration for introspection settings and middleware.",
+          "3. Use Grep to find resolver definitions and check for auth context usage.",
+          "4. Use Grep to find depth-limit, query-complexity, or rate-limiting middleware.",
+          "5. Use Read to inspect schema definitions for self-referential types.",
+        ]),
     `6. Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
     antiHallucinationModule({
@@ -242,11 +259,13 @@ export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
+    const preRead = await preReadFilesForTask("graphql-security-detect", fileIndex, context.repoRoot);
     const profiles = context.securityProfiles
       ? getProfilesForTask(context.securityProfiles, "graphql-security-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;

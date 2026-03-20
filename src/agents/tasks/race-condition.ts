@@ -5,15 +5,17 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { RepoContext, ScanOpts } from "../../types.js";
+import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 
 const log = createLogger({ stage: "race-condition" });
 
@@ -74,7 +76,9 @@ function resolveConfig(ctx: TaskContext): RaceConditionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
+
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -126,6 +130,18 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "- Temporary file creation in shared directories without exclusive flags",
     "- Symlink races: checking target then following link",
     "",
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    patternMatchText,
+    ...(preRead && preRead.files.length > 0
+      ? [
+          "## Investigation approach",
+          "1. Start by analyzing the pre-loaded files above for race condition vulnerabilities.",
+          "2. Use Glob/Grep only for additional files not already provided.",
+          "3. Use Read to inspect additional files with concurrent access patterns.",
+          "",
+        ]
+      : []),
     `Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
     antiHallucinationModule({
@@ -209,11 +225,13 @@ export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
+    const preRead = await preReadFilesForTask("race-condition-detect", fileIndex, context.repoRoot);
     const profiles = context.securityProfiles
       ? getProfilesForTask(context.securityProfiles, "race-condition-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;

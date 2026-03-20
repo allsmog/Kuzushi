@@ -1,7 +1,8 @@
 import path from "node:path";
 import { augurRoot as taintAnalysisRoot } from "@kuzushi/augur";
-import type { KuzushiConfig } from "../../../types.js";
+import type { KuzushiConfig, RepoContext } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
+import { normalizeLanguageName, WEB_FRAMEWORKS, SQL_DB_PATTERN } from "../category-filter.js";
 
 export type TaintAnalysisLanguage = "python" | "go" | "java" | "javascript" | "csharp";
 
@@ -193,6 +194,87 @@ export const TAINT_ANALYSIS_PASSES: TaintAnalysisPassDefinition[] = [
 export const TAINT_ANALYSIS_PASS_IDS: ReadonlySet<number> = new Set(
   TAINT_ANALYSIS_PASSES.map((p) => p.passId),
 );
+
+/* ------------------------------------------------------------------ */
+/*  Context-aware pass selection                                      */
+/* ------------------------------------------------------------------ */
+
+export interface PassRelevance {
+  passId: TaintAnalysisPassId;
+  always?: boolean;
+  languages?: string[];
+  requiresSqlDb?: boolean;
+  requiresWebFramework?: boolean;
+}
+
+export const PASS_RELEVANCE_MAP: PassRelevance[] = [
+  { passId: 1, always: true },
+  { passId: 2, always: true },
+  { passId: 3, requiresWebFramework: true },
+  { passId: 4, languages: ["JavaScript", "TypeScript", "Python", "Ruby", "PHP"] },
+  { passId: 5, requiresSqlDb: true },
+  { passId: 6, always: true },
+  { passId: 7, requiresWebFramework: true },
+  { passId: 8, languages: ["Java", "Kotlin", "Python", "PHP", "Ruby", "Go"] },
+  { passId: 9, requiresWebFramework: true },
+  { passId: 10, requiresWebFramework: true },
+  { passId: 11, always: true },
+  { passId: 12, languages: ["Java", "Kotlin", "Python", "PHP", "Ruby"] },
+  { passId: 13, languages: ["JavaScript", "TypeScript", "Python", "Ruby", "PHP", "Java", "Kotlin"] },
+  { passId: 14, languages: ["JavaScript", "TypeScript"] },
+  { passId: 15, languages: ["JavaScript", "TypeScript", "Ruby", "Python", "Java", "Kotlin"] },
+  { passId: 16, requiresWebFramework: true },
+  { passId: 17, languages: ["C", "C++", "Go", "Rust"] },
+  { passId: 18, languages: ["JavaScript", "TypeScript", "Python", "Ruby", "PHP", "Java"] },
+  { passId: 19, requiresSqlDb: true },
+];
+
+/**
+ * Select taint analysis passes based on repo context.
+ * When context is available, the agent chooses from all 19 passes.
+ * When no context, falls back to the provided fallback passes.
+ */
+export function resolveContextAwarePasses(
+  repoContext: RepoContext | undefined,
+  fallbackPasses: TaintAnalysisPassId[],
+): TaintAnalysisPassId[] {
+  if (!repoContext) return fallbackPasses;
+
+  const repoLangs = new Set(repoContext.languages.map(normalizeLanguageName));
+  const hasWebFramework = repoContext.frameworks.some(f =>
+    WEB_FRAMEWORKS.has(f.toLowerCase().trim()),
+  );
+  const hasSqlDb = repoContext.ormOrDb.some(db => SQL_DB_PATTERN.test(db));
+
+  const included: TaintAnalysisPassId[] = [];
+
+  for (const mapping of PASS_RELEVANCE_MAP) {
+    if (mapping.always) {
+      included.push(mapping.passId);
+      continue;
+    }
+
+    let match = false;
+
+    if (mapping.languages?.some(l => repoLangs.has(normalizeLanguageName(l)))) {
+      match = true;
+    }
+
+    if (!match && mapping.requiresWebFramework && hasWebFramework) {
+      match = true;
+    }
+
+    if (!match && mapping.requiresSqlDb && hasSqlDb) {
+      match = true;
+    }
+
+    if (match) {
+      included.push(mapping.passId);
+    }
+  }
+
+  return included.sort((a, b) => a - b);
+}
 
 const DEFAULT_TAINT_ANALYSIS_PATH = normalizeDefaultTaintAnalysisPath();
 

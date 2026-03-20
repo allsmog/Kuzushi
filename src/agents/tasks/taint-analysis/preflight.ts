@@ -32,12 +32,14 @@ import {
   mapFrameworkToReference,
   normalizeTaintAnalysisLanguage,
   resolveTaintAnalysisConfig,
+  resolveContextAwarePasses,
   type ExtractionDegradation,
   type ExtractionDegradationReason,
   type TaintAnalysisLanguage,
   type TaintAnalysisPreflightOutput,
   type TaintAnalysisTaskConfig,
 } from "./types.js";
+import { coerceRepoContext } from "../../../repo-context.js";
 import { buildTiPriorArtifacts } from "./ti-prior.js";
 
 interface ExtractionAgentContext {
@@ -281,11 +283,17 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
   id: "taint-analysis-preflight",
   displayName: "Taint Analysis Pre-flight",
   outputKind: "custom",
-  // Soft dependency: consume context-gatherer output when available, but do not require it.
-  // This keeps taint analysis usable even when context gathering is disabled.
-  dependsOn: [],
+  dependsOn: ["context-gatherer"],
   async run(_input, context): Promise<TaintAnalysisPreflightOutput> {
     const cfg = resolveTaintAnalysisConfig(context.config);
+    const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const originalPassCount = cfg.passes.length;
+    cfg.passes = resolveContextAwarePasses(repoContext, cfg.passes);
+    if (cfg.passes.length < originalPassCount) {
+      process.stderr.write(
+        `[taint-analysis-preflight] Context-aware pass filtering: ${originalPassCount} → ${cfg.passes.length} passes [${cfg.passes.join(", ")}]\n`,
+      );
+    }
     const taintAnalysisPath = toAbsolutePath(context.repoRoot, cfg.taintAnalysisPath);
     await validateTaintAnalysisPath(taintAnalysisPath);
 

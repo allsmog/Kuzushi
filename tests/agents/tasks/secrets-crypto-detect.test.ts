@@ -3,7 +3,7 @@ import { secretsCryptoDetectTask, __secretsCryptoDetectInternals } from "../../.
 import type { KuzushiConfig } from "../../../src/types.js";
 import type { TaskContext } from "../../../src/agents/types.js";
 
-const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint } = __secretsCryptoDetectInternals;
+const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint, SECRETS_CRYPTO_RELEVANCE } = __secretsCryptoDetectInternals;
 
 function makeContext(overrides: Record<string, unknown> = {}): TaskContext {
   return {
@@ -81,6 +81,32 @@ describe("buildPrompt", () => {
     const prompt = buildPrompt(undefined, 100);
     expect(prompt).toContain("test fixture");
     expect(prompt).toContain("placeholder");
+  });
+
+  it("includes all categories regardless of context (all always:true)", () => {
+    // Go repo context - secrets/crypto categories should not be filtered
+    const goPrompt = buildPrompt(
+      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      50,
+    );
+    expect(goPrompt).toContain("api-key");
+    expect(goPrompt).toContain("private-key");
+    expect(goPrompt).toContain("hash-for-auth");
+    expect(goPrompt).toContain("symmetric-cipher");
+    expect(goPrompt).toContain("timing-attack");
+    expect(goPrompt).toContain("cert-validation");
+  });
+});
+
+describe("SECRETS_CRYPTO_RELEVANCE", () => {
+  it("has all categories as always:true", () => {
+    for (const mapping of SECRETS_CRYPTO_RELEVANCE) {
+      expect(mapping.always).toBe(true);
+    }
+  });
+
+  it("covers all 18 categories", () => {
+    expect(SECRETS_CRYPTO_RELEVANCE).toHaveLength(18);
   });
 });
 

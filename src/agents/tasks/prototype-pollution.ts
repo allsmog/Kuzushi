@@ -5,15 +5,17 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { RepoContext, ScanOpts } from "../../types.js";
+import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 
 const log = createLogger({ stage: "prototype-pollution" });
 
@@ -74,7 +76,9 @@ function resolveConfig(ctx: TaskContext): PrototypePollutionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
+
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -128,10 +132,20 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "obj.__proto__ assignment, constructor.prototype modification, Object.create with user-supplied proto.",
     "Only flag when the prototype value or target is influenced by attacker-controlled data.",
     "",
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    patternMatchText,
     "## Investigation methodology",
-    "1. Use Grep to find merge/extend/deepmerge calls, dynamic property access patterns like obj[key],",
-    "   _.set, dot-prop, and __proto__/constructor references.",
-    "2. Use Read to inspect each candidate callsite and trace the input source.",
+    ...(preRead && preRead.files.length > 0
+      ? [
+          "1. Start by analyzing the pre-loaded files above for prototype pollution vulnerabilities.",
+          "2. Use Glob/Grep only for additional files not already provided.",
+        ]
+      : [
+          "1. Use Grep to find merge/extend/deepmerge calls, dynamic property access patterns like obj[key],",
+          "   _.set, dot-prop, and __proto__/constructor references.",
+          "2. Use Read to inspect each candidate callsite and trace the input source.",
+        ]),
     "3. Trace the input source: is the key or merged object attacker-controlled?",
     "4. Check for prototype pollution guards: hasOwnProperty checks, key filtering for __proto__/constructor,",
     "   Object.create(null) base objects, frozen prototypes.",
@@ -222,11 +236,13 @@ export const prototypePollutionTask: AgentTask<ScanOpts, Finding[]> = {
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
+    const preRead = await preReadFilesForTask("prototype-pollution-detect", fileIndex, context.repoRoot);
     const profiles = context.securityProfiles
       ? getProfilesForTask(context.securityProfiles, "prototype-pollution-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;

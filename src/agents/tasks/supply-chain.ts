@@ -5,15 +5,17 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { RepoContext, ScanOpts } from "../../types.js";
+import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 
 const log = createLogger({ stage: "supply-chain" });
 
@@ -74,7 +76,9 @@ function resolveConfig(ctx: TaskContext): SupplyChainConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, []);
+
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -138,12 +142,25 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "- Package names in dependencies that match common internal naming patterns",
     "  (e.g., company-utils, internal-*, private-*) without scope protection",
     "",
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    patternMatchText,
     "## Investigation methodology",
-    "1. Use Glob to find package.json, package-lock.json, yarn.lock, pnpm-lock.yaml, .npmrc, .yarnrc files.",
-    "2. Use Read to inspect package.json scripts sections for dangerous lifecycle hooks.",
-    "3. Use Read to check lockfile presence and integrity hash coverage.",
-    "4. Use Grep to search for internal package names in dependency lists.",
-    "5. Check CI configuration files for lockfile enforcement (--frozen-lockfile, --ci).",
+    ...(preRead && preRead.files.length > 0
+      ? [
+          "1. Start by analyzing the pre-loaded files above for supply chain risks.",
+          "2. Use Glob/Grep only for additional files not already provided.",
+          "3. Use Read to inspect additional package manifest and lockfiles.",
+          "4. Use Grep to search for internal package names in dependency lists.",
+          "5. Check CI configuration files for lockfile enforcement (--frozen-lockfile, --ci).",
+        ]
+      : [
+          "1. Use Glob to find package.json, package-lock.json, yarn.lock, pnpm-lock.yaml, .npmrc, .yarnrc files.",
+          "2. Use Read to inspect package.json scripts sections for dangerous lifecycle hooks.",
+          "3. Use Read to check lockfile presence and integrity hash coverage.",
+          "4. Use Grep to search for internal package names in dependency lists.",
+          "5. Check CI configuration files for lockfile enforcement (--frozen-lockfile, --ci).",
+        ]),
     `6. Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
     antiHallucinationModule({
@@ -231,11 +248,13 @@ export const supplyChainTask: AgentTask<ScanOpts, Finding[]> = {
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
+    const preRead = await preReadFilesForTask("supply-chain-detect", fileIndex, context.repoRoot);
     const profiles = context.securityProfiles
       ? getProfilesForTask(context.securityProfiles, "supply-chain-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;

@@ -5,15 +5,17 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { RepoContext, ScanOpts } from "../../types.js";
+import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 
 const log = createLogger({ stage: "template-injection" });
 
@@ -74,7 +76,9 @@ function resolveConfig(ctx: TaskContext): TemplateInjectionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
+
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -142,12 +146,23 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "- lookupProperty bypass via {{#with}} and custom helpers",
     "Only flag when user input controls the template source or helper definitions.",
     "",
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    patternMatchText,
     "## Investigation methodology",
-    "1. Use Grep to find template engine imports and rendering calls (render_template_string, Template,",
-    "   ejs.render, ejs.compile, pug.render, pug.compile, Handlebars.compile).",
-    "2. Use Read to inspect each candidate and trace the template string source.",
-    "3. Distinguish between safe patterns (static template files with context vars) and unsafe",
-    "   patterns (user input in template string).",
+    ...(preRead && preRead.files.length > 0
+      ? [
+          "1. Start by analyzing the pre-loaded files above for template injection vulnerabilities.",
+          "2. Use Glob/Grep only for additional files not already provided.",
+          "3. Use Read to inspect any additional candidate files.",
+        ]
+      : [
+          "1. Use Grep to find template engine imports and rendering calls (render_template_string, Template,",
+          "   ejs.render, ejs.compile, pug.render, pug.compile, Handlebars.compile).",
+          "2. Use Read to inspect each candidate and trace the template string source.",
+          "3. Distinguish between safe patterns (static template files with context vars) and unsafe",
+          "   patterns (user input in template string).",
+        ]),
     "4. Check for sandboxing (Jinja2 SandboxedEnvironment) or input validation.",
     "5. Only report findings where you can verify user input reaches the template compilation/rendering sink.",
     "",
@@ -236,11 +251,13 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
+    const preRead = await preReadFilesForTask("template-injection-detect", fileIndex, context.repoRoot);
     const profiles = context.securityProfiles
       ? getProfilesForTask(context.securityProfiles, "template-injection-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;

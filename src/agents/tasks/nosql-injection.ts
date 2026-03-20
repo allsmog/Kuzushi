@@ -5,15 +5,17 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { RepoContext, ScanOpts } from "../../types.js";
+import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 
 const log = createLogger({ stage: "nosql-injection" });
 
@@ -74,7 +76,9 @@ function resolveConfig(ctx: TaskContext): NosqlInjectionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
+
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -131,10 +135,21 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "An attacker can inject regex metacharacters for ReDoS or use .* patterns for data enumeration.",
     "Only flag when user input is passed to $regex without escaping regex special characters.",
     "",
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    patternMatchText,
     "## Investigation methodology",
-    "1. Use Grep to find MongoDB/Mongoose query calls (find, findOne, updateOne, aggregate, $where, $regex).",
-    "2. Use Read to trace data flow from user input (req.body, req.query, req.params) to query sinks.",
-    "3. Check for sanitization: express-mongo-sanitize, manual $ stripping, schema validation, DTO validation.",
+    ...(preRead && preRead.files.length > 0
+      ? [
+          "1. Start by analyzing the pre-loaded files above for NoSQL injection vulnerabilities.",
+          "2. Use Glob/Grep only for additional files not already provided.",
+          "3. Use Read to trace data flow from user input to query sinks.",
+        ]
+      : [
+          "1. Use Grep to find MongoDB/Mongoose query calls (find, findOne, updateOne, aggregate, $where, $regex).",
+          "2. Use Read to trace data flow from user input (req.body, req.query, req.params) to query sinks.",
+          "3. Check for sanitization: express-mongo-sanitize, manual $ stripping, schema validation, DTO validation.",
+        ]),
     "4. Check for regex escaping when user input reaches $regex operators.",
     "5. Only report findings where you can verify the injection vector AND the attacker-controlled input path.",
     "",
@@ -223,11 +238,13 @@ export const nosqlInjectionTask: AgentTask<ScanOpts, Finding[]> = {
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
+    const preRead = await preReadFilesForTask("nosql-injection-detect", fileIndex, context.repoRoot);
     const profiles = context.securityProfiles
       ? getProfilesForTask(context.securityProfiles, "nosql-injection-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;

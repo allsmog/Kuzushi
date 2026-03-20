@@ -3,7 +3,7 @@ import { codeConfigDetectTask, __codeConfigDetectInternals } from "../../../src/
 import type { KuzushiConfig } from "../../../src/types.js";
 import type { TaskContext } from "../../../src/agents/types.js";
 
-const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint } = __codeConfigDetectInternals;
+const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint, CODE_CONFIG_RELEVANCE } = __codeConfigDetectInternals;
 
 function makeContext(overrides: Record<string, unknown> = {}): TaskContext {
   return {
@@ -101,6 +101,125 @@ describe("buildPrompt", () => {
   it("includes anti-hallucination constraints", () => {
     const prompt = buildPrompt(undefined, 25);
     expect(prompt).toContain("Anti-hallucination constraints");
+  });
+
+  it("includes all categories when no context (safe fallback)", () => {
+    const prompt = buildPrompt(undefined, 50);
+    expect(prompt).toContain("prototype-pollution");
+    expect(prompt).toContain("nosql-injection");
+    expect(prompt).toContain("template-injection");
+    expect(prompt).toContain("ldap-injection");
+    expect(prompt).toContain("xml-injection");
+    expect(prompt).toContain("missing-role-check");
+    expect(prompt).toContain("jwt-claim-manipulation");
+    expect(prompt).toContain("session-fixation");
+    expect(prompt).toContain("container-misconfig");
+    expect(prompt).toContain("cicd-misconfig");
+    expect(prompt).not.toContain("Category scope");
+  });
+
+  it("excludes prototype-pollution for Go repos", () => {
+    const prompt = buildPrompt(
+      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      50,
+    );
+    expect(prompt).not.toContain("prototype-pollution");
+    expect(prompt).toContain("Category scope");
+  });
+
+  it("includes prototype-pollution for JS/TS repos", () => {
+    const prompt = buildPrompt(
+      { languages: ["TypeScript"], frameworks: ["Express"], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      50,
+    );
+    expect(prompt).toContain("prototype-pollution");
+  });
+
+  it("excludes auth-gated categories when no auth patterns", () => {
+    const prompt = buildPrompt(
+      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      50,
+    );
+    expect(prompt).not.toContain("jwt-claim-manipulation");
+    expect(prompt).not.toContain("session-fixation");
+    expect(prompt).not.toContain("missing-role-check");
+    expect(prompt).not.toContain("jwt-misconfiguration");
+    expect(prompt).not.toContain("session-storage");
+  });
+
+  it("includes auth-gated categories when auth patterns present", () => {
+    const prompt = buildPrompt(
+      { languages: ["Go"], frameworks: [], authPatterns: ["JWT"], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      50,
+    );
+    expect(prompt).toContain("jwt-claim-manipulation");
+    expect(prompt).toContain("session-fixation");
+    expect(prompt).toContain("missing-role-check");
+  });
+
+  it("includes container-misconfig when Dockerfile in file tree", () => {
+    const fileIndex = {
+      tree: [{ path: "Dockerfile" }, { path: "src/app.ts" }],
+      totalFiles: 2,
+      truncated: false,
+      patternMatches: {},
+    };
+    const prompt = buildPrompt(
+      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      50,
+      [],
+      fileIndex,
+    );
+    expect(prompt).toContain("container-misconfig");
+  });
+
+  it("excludes container-misconfig when no Docker files", () => {
+    const fileIndex = {
+      tree: [{ path: "src/app.ts" }, { path: "package.json" }],
+      totalFiles: 2,
+      truncated: false,
+      patternMatches: {},
+    };
+    const prompt = buildPrompt(
+      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      50,
+      [],
+      fileIndex,
+    );
+    expect(prompt).not.toContain("container-misconfig");
+  });
+
+  it("includes cicd-misconfig when GitHub Actions in file tree", () => {
+    const fileIndex = {
+      tree: [{ path: ".github/workflows/ci.yml" }, { path: "src/app.ts" }],
+      totalFiles: 2,
+      truncated: false,
+      patternMatches: {},
+    };
+    const prompt = buildPrompt(
+      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      50,
+      [],
+      fileIndex,
+    );
+    expect(prompt).toContain("cicd-misconfig");
+  });
+
+  it("includes nosql-injection when MongoDB in ormOrDb", () => {
+    const prompt = buildPrompt(
+      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: ["mongoose"], entryPoints: [] },
+      50,
+    );
+    expect(prompt).toContain("nosql-injection");
+  });
+
+  it("shows category scope header when filtering is active", () => {
+    const prompt = buildPrompt(
+      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      50,
+    );
+    expect(prompt).toContain("Category scope");
+    expect(prompt).toContain("pre-filtered");
   });
 });
 

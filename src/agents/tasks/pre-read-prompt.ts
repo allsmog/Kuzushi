@@ -3,8 +3,19 @@ import type { PreReadResult } from "./pre-read.js";
 
 const MAX_TREE_LINES = 200;
 
-export function formatFileTreeForPrompt(fileIndex: FileIndex | undefined): string {
+export function formatFileTreeForPrompt(
+  fileIndex: FileIndex | undefined,
+  hasPatternMatches?: boolean,
+): string {
   if (!fileIndex || fileIndex.tree.length === 0) return "";
+
+  if (hasPatternMatches) {
+    return [
+      `## Repository: ${fileIndex.totalFiles} source files${fileIndex.truncated ? " (truncated)" : ""}`,
+      "Use Glob if you need files beyond those listed in the pattern matches and pre-loaded files above.",
+      "",
+    ].join("\n");
+  }
 
   const entries = fileIndex.tree.slice(0, MAX_TREE_LINES);
   const lines = [

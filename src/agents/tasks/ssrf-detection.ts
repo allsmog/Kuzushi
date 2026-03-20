@@ -5,15 +5,17 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { RepoContext, ScanOpts } from "../../types.js";
+import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 
 const log = createLogger({ stage: "ssrf-detect" });
 
@@ -74,7 +76,9 @@ function resolveConfig(ctx: TaskContext): SsrfDetectionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = []): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
+
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -144,10 +148,21 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "- Encoded localhost: `http://0x7f000001`, `http://0177.0.0.1`, `http://0.0.0.0`",
     "- DNS rebinding: domain that resolves to internal IP after TTL expires",
     "",
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    patternMatchText,
     "## Instructions",
-    "1. Use Grep to find HTTP client usage (fetch, axios, http.get, urllib, requests, HttpClient)",
-    "2. Use Read to trace data flow from user input to HTTP request sink",
-    "3. Check for URL validation, allowlists, and redirect configuration",
+    ...(preRead && preRead.files.length > 0
+      ? [
+          "1. Start by analyzing the pre-loaded files above for SSRF vulnerabilities.",
+          "2. Use Glob/Grep only for additional files not already provided.",
+          "3. Use Read to trace data flow from user input to HTTP request sink.",
+        ]
+      : [
+          "1. Use Grep to find HTTP client usage (fetch, axios, http.get, urllib, requests, HttpClient)",
+          "2. Use Read to trace data flow from user input to HTTP request sink",
+          "3. Check for URL validation, allowlists, and redirect configuration",
+        ]),
     `4. Return at most ${maxFindings} findings, prioritized by severity.`,
     "",
     antiHallucinationModule({
@@ -231,11 +246,13 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
+    const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
+    const preRead = await preReadFilesForTask("ssrf-detect", fileIndex, context.repoRoot);
     const profiles = context.securityProfiles
       ? getProfilesForTask(context.securityProfiles, "ssrf-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
     const runtime = getAgentRuntime();
 
     let structuredOutput: unknown;
