@@ -154,16 +154,20 @@ function classifyDynamicResult(
   if (verdict === "PASS") return "confirmed";
   if (verdict === "TIMEOUT") return "interesting";
 
+  // Check stdout for explicit vulnerability signals regardless of verdict
   const output = stdout.toLowerCase();
   if (output.includes("vulnerable") || output.includes("exploited") || output.includes("injection successful")) {
     return "confirmed";
   }
+
+  // FAIL verdict = harness ran but did not demonstrate exploitation → rejected
+  if (verdict === "FAIL") return "rejected";
+
+  // ERROR verdict with partial signal
   if (output.includes("partial") || output.includes("interesting")) {
     return "interesting";
   }
-  if (exitCode === 0 && stdout.length > 0) {
-    return "interesting";
-  }
+
   return "rejected";
 }
 
@@ -247,7 +251,9 @@ async function runDynamicAnalysis(
     });
   }
 
+  let actualIterations = 0;
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+    actualIterations = iteration;
     // Budget check
     if (totalCostUsd >= budgetUsd) {
       process.stderr.write(
@@ -296,11 +302,9 @@ async function runDynamicAnalysis(
     }
 
     // Execute the harness
-    const coverageEnv: Record<string, string> = {};
-    if (coverageMode === "node-v8") {
-      coverageEnv["NODE_V8_COVERAGE"] = "/tmp/v8-coverage";
-    }
-
+    // NOTE: coverageEnv is not passed to executor.execute() in v1 — the executor
+    // interface does not support custom env vars yet. Coverage mode is tracked for
+    // future use and included in the refinement prompt for LLM guidance.
     const execution = await executor.execute(
       latestResult.scriptPath,
       latestResult.language,
@@ -360,7 +364,7 @@ async function runDynamicAnalysis(
     executionStderr,
     executionVerdict,
     executionDurationMs,
-    iterations: maxIterations,
+    iterations: actualIterations,
     costUsd: totalCostUsd,
     metadata: {},
   };

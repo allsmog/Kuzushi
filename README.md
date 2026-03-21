@@ -34,6 +34,9 @@ That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed
 - **AI-triages selected findings** — after dedupe/resume/max filters, agent investigates with repo tools, assigns tp/fp/needs_review with confidence and rationale
 - **Verifies exploitability** — optional post-triage phase constructs concrete proof-of-concept payloads for true positives (e.g., SQL injection strings, XSS vectors)
 - **Generates PoC harnesses** — optional post-verification phase produces runnable exploit scripts (TypeScript, Python, etc.) for verified-exploitable findings
+- **Dynamic analysis** — optional post-PoC phase executes harnesses locally to confirm or reject findings through actual exploitation, with coverage-guided iteration support (enable with `dynamicAnalysisEnabled`)
+- **Manual patch synthesis** — `kuzushi patch <repo> --fingerprint <fp>` synthesizes, applies, and validates security patches in disposable git worktrees without touching the live checkout
+- **Diff-aware taint analysis** — when `taintDiffBase` is set, taint analysis narrows to passes affected by changed files; supports `delta` mode (only findings intersecting the diff) and `baseline` mode (cached + rerun merge)
 - **Vendor-agnostic LLM runtime** — swap between Anthropic, OpenAI, Google, and 15+ other providers via the `pi-ai` backend with zero consumer-code changes
 - **Taint analysis integration** — multi-pass CodeQL-based source/sink labeling pipeline with LLM-assisted classification and deterministic library generation
 - **Structured evidence** — taintPath, proofState, and engineProvenance persist end-to-end from scan through store, resume, and all export formats (JSON, SARIF, Markdown, CSV, JSONL)
@@ -119,6 +122,30 @@ kuzushi <repo> --verify --poc-harness                          # generate exploi
 kuzushi <repo> --verify --poc-harness --poc-harness-model openai:gpt-4o-mini
 kuzushi <repo> --verify --poc-harness --poc-harness-max-turns 25
 kuzushi <repo> --verify --poc-harness --poc-harness-concurrency 2
+```
+
+### Dynamic Analysis
+
+```
+kuzushi <repo> --verify --poc-harness --dynamic-analysis       # execute harnesses to confirm/reject findings
+kuzushi <repo> --verify --dynamic-analysis --dynamic-max-candidates 10
+kuzushi <repo> --verify --dynamic-analysis --dynamic-min-score 8
+```
+
+### Patch Synthesis (manual)
+
+```
+kuzushi patch <repo> --fingerprint <fp>                        # synthesize and validate a patch
+kuzushi patch <repo> --fingerprint <fp> --build-cmd "npm run build"
+kuzushi patch <repo> --fingerprint <fp> --test-cmd "npm test" --max-iterations 5
+```
+
+### Diff-Aware Taint
+
+```
+kuzushi <repo> --taint-diff-base main                          # only taint-analyze files changed since main
+kuzushi <repo> --taint-diff-base main --taint-diff-mode delta  # emit only findings intersecting the diff
+kuzushi <repo> --taint-diff-base main --taint-diff-mode baseline  # merge cached + rerun for full baseline
 ```
 
 ### Output & Observability

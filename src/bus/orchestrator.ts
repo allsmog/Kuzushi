@@ -1899,6 +1899,7 @@ export class PipelineOrchestrator {
       "triage:agent-activity",
       "verification:agent-activity",
       "poc-harness:agent-activity",
+      "dynamic:agent-activity",
       "budget:check",
       "budget:warning",
       "llm:call-start",
@@ -3031,7 +3032,8 @@ export class PipelineOrchestrator {
     state.dynamicDispatching = true;
 
     try {
-      const concurrency = normalizeConcurrency(state.config.verifyConcurrency ?? 1);
+      // Dynamic analysis executes real harnesses — default to conservative concurrency of 1
+      const concurrency = normalizeConcurrency(1);
 
       while (
         state.dynamicInFlight < concurrency

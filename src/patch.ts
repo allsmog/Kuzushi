@@ -177,7 +177,7 @@ function buildPatchSynthesisPrompt(
   history: Array<{ attempt: number; diff: string; status: PatchStatus; output: string }>,
 ): string {
   const taintInfo = finding.taintPath
-    ? `Taint path:\n${finding.taintPath.map((step, i) => `  ${i + 1}. ${step.label ?? step.kind} at ${step.filePath}:${step.line}`).join("\n")}`
+    ? `Taint path:\n${finding.taintPath.map((step, i) => `  ${i + 1}. ${step.message ?? "step"} at ${step.filePath}:${step.line}`).join("\n")}`
     : "No taint path available.";
 
   const historyBlock =

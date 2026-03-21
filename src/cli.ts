@@ -1093,6 +1093,87 @@ taskCmd
     }
   });
 
+// ── patch ─────────────────────────────────────────────────────────────────
+
+program
+  .command("patch")
+  .description("Synthesize and validate a security patch for a specific finding")
+  .argument("<repo>", "Path to the repository")
+  .requiredOption("--fingerprint <fp>", "Finding fingerprint to patch")
+  .option("--build-cmd <cmd>", "Override build command for validation")
+  .option("--test-cmd <cmd>", "Override test command for validation")
+  .option("--max-iterations <n>", "Maximum patch synthesis iterations", parseInt, 3)
+  .option("--model <model>", "Model to use for patch synthesis")
+  .option("--max-turns <n>", "Max turns for patch synthesis agent", parseInt)
+  .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
+  .action(async (repoPath: string, opts: {
+    fingerprint: string;
+    buildCmd?: string;
+    testCmd?: string;
+    maxIterations: number;
+    model?: string;
+    maxTurns?: number;
+    db?: string;
+  }) => {
+    const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
+
+    // Load config with optional project-level overlay, then apply CLI overrides.
+    const config = loadConfig(repoRoot);
+    if (opts.model) config.model = opts.model;
+
+    const model = config.model;
+
+    // Set up DB.
+    const dbPath = opts.db ?? defaultDbPath(repoRoot);
+    const dbDir = path.dirname(dbPath);
+    if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
+
+    const db = initDb(dbPath);
+    try {
+      const { runPatchPipeline } = await import("./patch.js");
+      const result = await runPatchPipeline(db, {
+        fingerprint: opts.fingerprint,
+        repoRoot,
+        repoName,
+        model,
+        maxIterations: opts.maxIterations,
+        buildCommand: opts.buildCmd ?? null,
+        testCommand: opts.testCmd ?? null,
+        maxTurns: opts.maxTurns,
+      });
+
+      console.log("");
+      console.log(`Patch pipeline complete for finding: ${opts.fingerprint}`);
+      console.log(`  Status:     ${result.patchResult.status}`);
+      console.log(`  Iterations: ${result.patchResult.iterations}`);
+      console.log(`  Cost:       $${result.costUsd.toFixed(4)}`);
+      console.log(`  Run ID:     ${result.patchResult.patchRunId}`);
+
+      if (result.patchResult.status === "SOUND") {
+        console.log("");
+        console.log("Patch is SOUND. Diff:");
+        console.log("---");
+        console.log(result.patchResult.diff);
+        console.log("---");
+      } else {
+        console.log("");
+        console.log(`Patch did not reach SOUND status. Last status: ${result.patchResult.status}`);
+        if (result.patchResult.validatorLog) {
+          console.log("");
+          console.log("Validator log:");
+          console.log(result.patchResult.validatorLog);
+        }
+      }
+
+      process.exit(result.patchResult.status === "SOUND" ? 0 : 1);
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    } finally {
+      try { db.close(); } catch { /* best-effort */ }
+    }
+  });
+
 // ── list-tasks (shorthand) ────────────────────────────────────────────────
 
 program
