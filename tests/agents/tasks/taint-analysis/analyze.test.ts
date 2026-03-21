@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { __taintAnalysisRunInternals } from "../../../../src/agents/tasks/taint-analysis/analyze.js";
+import { __taintAnalysisRunInternals, taintAnalysisRunTask } from "../../../../src/agents/tasks/taint-analysis/analyze.js";
 import { profileById } from "../../../../src/agents/tasks/taint-analysis/codeql-compat.js";
 import type { TaintAnalysisLabelsDocument } from "../../../../src/agents/tasks/taint-analysis/types.js";
 import type { Finding } from "../../../../src/scanners/types.js";
@@ -727,6 +727,94 @@ describe("taint-analysis-run internals", () => {
       // pass 1 has summary, other passes should use regexpMatch impossible
       expect(libs.summaries).toContain("regexpMatch(\"a^\")");
       expect(libs.summaries).toContain("json_decode");
+    });
+
+    it("augmentFinding preserves structured taint paths and adds taint provenance", () => {
+      const finding: Finding = {
+        scanner: "codeql",
+        fingerprint: "fp-1",
+        ruleId: "codeql.py/path-problem",
+        filePath: "src/db.py",
+        startLine: 22,
+        severity: "ERROR",
+        message: "user input reaches SQL sink",
+        evidence: "Code flow: src/routes.py:5 -> src/db.py:22",
+        scannerConfidence: "HIGH",
+        subcategory: ["vuln"],
+        likelihood: "HIGH",
+        impact: "HIGH",
+        cwe: ["CWE-89"],
+        score: 10,
+        taintPath: [
+          { filePath: "src/routes.py", line: 5, message: "source" },
+          { filePath: "src/db.py", line: 22, message: "sink" },
+        ],
+        proofState: "symbolic_only",
+        engineProvenance: [{ kind: "codeql", detail: "CodeQL finding" }],
+      };
+
+      const augmented = __taintAnalysisRunInternals.augmentFinding(
+        finding,
+        {
+          passId: 5,
+          passKey: "sql_injection",
+          focus: "SQL Injection",
+          cwes: ["089"],
+        },
+        makeLabels(),
+      );
+
+      expect(augmented.taintPath).toEqual(finding.taintPath);
+      expect(augmented.proofState).toBe("symbolic_only");
+      expect(augmented.engineProvenance?.[0]).toEqual({
+        kind: "taint-analysis",
+        detail: "CodeQL-backed taint-analysis pass 5 (SQL Injection)",
+      });
+      expect(augmented.engineProvenance?.[1]).toEqual({
+        kind: "codeql",
+        detail: "CodeQL finding",
+      });
+      expect(augmented.ruleId).toContain("taint-analysis/pass5");
+      expect(augmented.cwe).toEqual(["CWE-89"]);
+    });
+
+    it("taint triage prompt renders the structured taint path", () => {
+      const finding: Finding = {
+        scanner: "taint-analysis-run",
+        fingerprint: "fp-taint",
+        ruleId: "taint-analysis/pass5/codeql.py/path-problem",
+        filePath: "src/db.py",
+        startLine: 22,
+        severity: "ERROR",
+        message: "SQL injection path",
+        evidence: "Code flow: src/routes.py:5 -> src/db.py:22",
+        scannerConfidence: "HIGH",
+        subcategory: ["vuln"],
+        likelihood: "HIGH",
+        impact: "HIGH",
+        cwe: ["CWE-89"],
+        score: 12,
+        taintPath: [
+          {
+            filePath: "src/routes.py",
+            line: 5,
+            message: "request parameter enters application",
+            snippet: "user_id = request.args['id']",
+          },
+          {
+            filePath: "src/db.py",
+            line: 22,
+            message: "tainted data reaches sink",
+            snippet: "cursor.execute(query)",
+          },
+        ],
+      };
+
+      const prompt = taintAnalysisRunTask.triageAgentConfig(finding, "repo").prompt;
+      expect(prompt).toContain("## Full Taint Flow Path");
+      expect(prompt).toContain("Step 1: src/routes.py:5 - request parameter enters application");
+      expect(prompt).toContain("Code: user_id = request.args['id']");
+      expect(prompt).toContain("For each taint-path step");
     });
   });
 });

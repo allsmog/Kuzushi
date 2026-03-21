@@ -198,6 +198,61 @@ function makeCrossProceduralWorkspace(): string {
   return dir;
 }
 
+function makeSemanticWorkspace(): string {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "kuzushi-semantic-test-"));
+  tempDirs.push(dir);
+  mkdirSync(path.join(dir, "src"), { recursive: true });
+
+  writeFileSync(
+    path.join(dir, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        target: "ES2020",
+        module: "ESNext",
+        moduleResolution: "Node",
+        strict: true,
+      },
+      include: ["src/**/*.ts"],
+    }, null, 2),
+    "utf8",
+  );
+
+  writeFileSync(
+    path.join(dir, "src", "dep.ts"),
+    [
+      "export function greet(name: string): string {",
+      "  return `hi ${name}`;",
+      "}",
+    ].join("\n"),
+    "utf8",
+  );
+
+  writeFileSync(
+    path.join(dir, "src", "main.ts"),
+    [
+      "import { greet } from './dep';",
+      "",
+      "const userId = 'guest';",
+      "const message = greet(userId);",
+      "const label = 'greet';",
+      "// greet in comment should not count as a reference",
+      "console.log(message, label);",
+    ].join("\n"),
+    "utf8",
+  );
+
+  writeFileSync(
+    path.join(dir, "src", "worker.py"),
+    [
+      "def greet(name):",
+      "    return f'hi {name}'",
+    ].join("\n"),
+    "utf8",
+  );
+
+  return dir;
+}
+
 describe("GetFunctionBody", () => {
   it("finds JS/TS function declarations", async () => {
     const cwd = makeCrossProceduralWorkspace();
@@ -569,5 +624,70 @@ describe("Cross-procedural tools - regression tests", () => {
       file_path: "empty.ts",
     }, dir);
     expect(callees).toContain("not found");
+  });
+});
+
+describe("Semantic navigation tools", () => {
+  it("GoToDefinition resolves cross-file TypeScript imports", async () => {
+    const cwd = makeSemanticWorkspace();
+    const output = await executeTool("GoToDefinition", {
+      file_path: "src/main.ts",
+      line: 4,
+      column: 18,
+    }, cwd);
+
+    expect(output).toContain("Symbol: greet");
+    expect(output).toContain("src/dep.ts:1:17:export function greet(name: string): string {");
+  });
+
+  it("FindReferences returns symbol references, not pure text matches", async () => {
+    const cwd = makeSemanticWorkspace();
+    const output = await executeTool("FindReferences", {
+      file_path: "src/main.ts",
+      line: 4,
+      column: 17,
+    }, cwd);
+
+    expect(output).toContain("src/main.ts:1:10:import { greet } from './dep';");
+    expect(output).toContain("src/main.ts:4:17:const message = greet(userId);");
+    expect(output).not.toContain("src/main.ts:5");
+    expect(output).not.toContain("src/main.ts:6");
+  }, 15_000);
+
+  it("TypeAtPosition returns the inferred type for a local variable", async () => {
+    const cwd = makeSemanticWorkspace();
+    const output = await executeTool("TypeAtPosition", {
+      file_path: "src/main.ts",
+      line: 4,
+      column: 7,
+    }, cwd);
+
+    expect(output).toContain("Symbol: message");
+    expect(output).toContain("Kind: const");
+    expect(output).toContain("Type:");
+    expect(output).toContain("string");
+    expect(output).toContain("Location: src/main.ts:4:7");
+  });
+
+  it("returns a stable message for unsupported file types", async () => {
+    const cwd = makeSemanticWorkspace();
+    const output = await executeTool("TypeAtPosition", {
+      file_path: "src/worker.py",
+      line: 1,
+      column: 5,
+    }, cwd);
+
+    expect(output).toContain("Semantic navigation is only supported for TypeScript/JavaScript files");
+    expect(output).toContain("src/worker.py");
+  });
+
+  it("rejects workspace escapes for semantic navigation tools", async () => {
+    const cwd = makeSemanticWorkspace();
+
+    await expect(executeTool("GoToDefinition", {
+      file_path: "../outside.ts",
+      line: 1,
+      column: 1,
+    }, cwd)).rejects.toThrow("Path escapes repository root");
   });
 });

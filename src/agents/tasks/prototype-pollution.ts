@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -16,6 +15,11 @@ import { getProfilesForTask, formatProfilesForPrompt } from "../../security-prof
 import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
+import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
+import { buildThreatModelLeadsSection } from "./threat-model-guidance.js";
+import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
+import { resolveTaskAllowedTools } from "./runtime-overrides.js";
+import type { ApplicationModel } from "../../types.js";
 
 const log = createLogger({ stage: "prototype-pollution" });
 
@@ -66,17 +70,12 @@ interface PrototypePollutionConfig {
 }
 
 function resolveConfig(ctx: TaskContext): PrototypePollutionConfig {
-  const raw = ctx.config.scannerConfig["prototype-pollution"];
-  const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
-    ? raw["model"].trim()
-    : ctx.config.model;
-  const maxFindings = (isRecord(raw) && typeof raw["maxFindings"] === "number" && raw["maxFindings"] >= 1)
-    ? Math.floor(raw["maxFindings"])
-    : 50;
+  const model = resolveTaskModel(ctx, "prototype-pollution");
+  const maxFindings = resolveTaskPositiveInt(ctx, "prototype-pollution", "maxFindings", 50);
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult, threatModelContext?: string, appModelContext?: string, scenarioContext?: string): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
 
   const contextLines = repoContext
@@ -113,6 +112,9 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...contextLines,
     ...frameworkGuidance,
     ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    ...(threatModelContext ? [threatModelContext, ""] : []),
+    ...(appModelContext ? [appModelContext, ""] : []),
+    ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
     "### merge-pollution (CWE-1321)",
@@ -231,7 +233,7 @@ export const prototypePollutionTask: AgentTask<ScanOpts, Finding[]> = {
   id: "prototype-pollution-detect",
   displayName: "Prototype Pollution Detector",
   outputKind: "findings",
-  dependsOn: ["context-gatherer"],
+  dependsOn: ["context-gatherer", "app-model-build", "threat-scenario-build"],
 
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
@@ -242,8 +244,18 @@ export const prototypePollutionTask: AgentTask<ScanOpts, Finding[]> = {
       ? getProfilesForTask(context.securityProfiles, "prototype-pollution-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
-    const runtime = getAgentRuntime();
+    const threatModelContext = buildThreatModelLeadsSection(
+      "prototype-pollution-detect",
+      context.upstreamOutputs.get("threat-model-stride"),
+      fileIndex,
+      preRead,
+    );
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
+    const appModelContext = buildApplicationModelSection("prototype-pollution-detect", applicationModel);
+    const scenarioContext = await buildThreatScenarioEvidenceSection("prototype-pollution-detect", context.repoRoot, applicationModel, scenarioOutput);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext);
+    const runtime = resolveTaskRuntime(context);
 
     let structuredOutput: unknown;
     let resultText = "";
@@ -259,7 +271,7 @@ export const prototypePollutionTask: AgentTask<ScanOpts, Finding[]> = {
           cwd: context.repoRoot,
           model,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
+          allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",

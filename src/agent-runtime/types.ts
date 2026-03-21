@@ -9,15 +9,23 @@ export type AgentToolDecision =
   | { behavior: "allow" }
   | { behavior: "deny"; message?: string };
 
+export interface AgentHistoryEntry {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface AgentQueryOptions {
   cwd: string;
   model: string;
   maxTurns?: number | null;
+  temperature?: number;
+  maxOutputTokens?: number;
   allowedTools?: string[];
   disallowedTools?: string[];
   permissionMode?: AgentPermissionMode;
   maxBudgetUsd?: number;
   abortController?: AbortController;
+  history?: AgentHistoryEntry[];
   outputFormat?: {
     type: "json_schema";
     schema: Record<string, unknown>;

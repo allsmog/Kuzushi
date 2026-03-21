@@ -162,6 +162,22 @@ function resolveActivePiAiModels(
     );
   }
 
+  if (config.enableClassifier === true) {
+    models.add(
+      config.classifierModel
+      ?? config.triageBatchModel
+      ?? config.contextEnrichmentModel
+      ?? config.model,
+    );
+  }
+
+  for (const model of config.ensembleModels ?? []) {
+    const trimmed = model.trim();
+    if (trimmed) {
+      models.add(trimmed);
+    }
+  }
+
   if (scannerSet.has("agentic")) {
     const model = asModel(resolveScannerConfig(config, "agentic")["model"]) ?? DEFAULT_AGENTIC_MODEL;
     models.add(model);
@@ -271,17 +287,25 @@ program
   .option("--severity <levels>", "Severity filter (comma-separated)")
   .option("--max <n>", "Max findings to triage", parseInt)
   .option("--model <model>", "Model to use for scanners")
+  .option("--ensemble-models <models>", "Run eligible agentic detection tasks across multiple models (comma-separated)")
   .option("--triage-model <model>", "Override model used by triage agent")
   .option("--triage-max-turns <n>", "Override triage agent max turn budget", parseInt)
+  .option("--enable-classifier", "Enable the cheap pre-triage classifier funnel", false)
+  .option("--classifier-model <model>", "Override model used by the pre-triage classifier")
+  .option("--classifier-threshold <n>", "Minimum classifier confidence required to keep a finding", parseFloat)
   .option("--verify", "Enable post-triage exploitability verification", false)
   .option("--verify-model <model>", "Override model used by verification agent")
   .option("--verify-max-turns <n>", "Override verification agent max turn budget", parseInt)
   .option("--verify-concurrency <n>", "Override verification concurrency", parseInt)
+  .option("--verify-refinement-max-iterations <n>", "Maximum verification refinement attempts", parseInt)
+  .option("--verify-reflection-interval <n>", "Inject verification reflection every N failed attempts", parseInt)
   .option("--verify-min-confidence <n>", "Minimum triage confidence required for verification", parseFloat)
   .option("--poc-harness", "Enable post-verification PoC harness generation", false)
   .option("--poc-harness-model <model>", "Override model used by PoC harness generator")
   .option("--poc-harness-max-turns <n>", "Override PoC harness agent max turn budget", parseInt)
   .option("--poc-harness-concurrency <n>", "Override PoC harness generation concurrency", parseInt)
+  .option("--poc-refinement-max-iterations <n>", "Maximum PoC refinement attempts when execution feedback is enabled", parseInt)
+  .option("--poc-reflection-interval <n>", "Inject PoC reflection every N failed attempts", parseInt)
   .option("--max-poc-harness-retries <n>", "Retries for PoC harness generation failures", parseInt)
   .option("--max-triage-retries <n>", "Retries for triage agent failures", parseInt)
   .option("--max-verify-retries <n>", "Retries for verification agent failures", parseInt)
@@ -309,17 +333,25 @@ program
     severity?: string;
     max?: number;
     model?: string;
+    ensembleModels?: string;
     triageModel?: string;
     triageMaxTurns?: number;
+    enableClassifier: boolean;
+    classifierModel?: string;
+    classifierThreshold?: number;
     verify: boolean;
     verifyModel?: string;
     verifyMaxTurns?: number;
     verifyConcurrency?: number;
+    verifyRefinementMaxIterations?: number;
+    verifyReflectionInterval?: number;
     verifyMinConfidence?: number;
     pocHarness: boolean;
     pocHarnessModel?: string;
     pocHarnessMaxTurns?: number;
     pocHarnessConcurrency?: number;
+    pocRefinementMaxIterations?: number;
+    pocReflectionInterval?: number;
     maxPocHarnessRetries?: number;
     maxTriageRetries?: number;
     maxVerifyRetries?: number;
@@ -349,11 +381,21 @@ program
     // Load config with optional project-level overlay, then apply CLI overrides.
     const config = loadConfig(repoRoot);
     if (opts.model) config.model = opts.model;
+    if (opts.ensembleModels) config.ensembleModels = parseScannersArg(opts.ensembleModels);
     if (opts.triageModel) config.triageModel = opts.triageModel;
+    if (opts.enableClassifier) config.enableClassifier = true;
+    if (opts.classifierModel) config.classifierModel = opts.classifierModel;
     if (opts.verify) config.verify = true;
     if (opts.verifyModel) config.verifyModel = opts.verifyModel;
     if (opts.pocHarness) config.pocHarness = true;
     if (opts.pocHarnessModel) config.pocHarnessModel = opts.pocHarnessModel;
+    if (opts.classifierThreshold !== undefined) {
+      if (!Number.isFinite(opts.classifierThreshold) || opts.classifierThreshold < 0 || opts.classifierThreshold > 1) {
+        console.error("Error: --classifier-threshold must be a number between 0 and 1.");
+        process.exit(1);
+      }
+      config.classifierThreshold = opts.classifierThreshold;
+    }
     if (opts.verifyMinConfidence !== undefined) {
       if (!Number.isFinite(opts.verifyMinConfidence) || opts.verifyMinConfidence < 0 || opts.verifyMinConfidence > 1) {
         console.error("Error: --verify-min-confidence must be a number between 0 and 1.");
@@ -434,6 +476,22 @@ program
       config.verifyConcurrency = Math.floor(opts.verifyConcurrency);
     }
 
+    if (opts.verifyRefinementMaxIterations !== undefined) {
+      if (!Number.isFinite(opts.verifyRefinementMaxIterations) || opts.verifyRefinementMaxIterations < 1) {
+        console.error("Error: --verify-refinement-max-iterations must be a positive integer.");
+        process.exit(1);
+      }
+      config.verifyRefinementMaxIterations = Math.floor(opts.verifyRefinementMaxIterations);
+    }
+
+    if (opts.verifyReflectionInterval !== undefined) {
+      if (!Number.isFinite(opts.verifyReflectionInterval) || opts.verifyReflectionInterval < 1) {
+        console.error("Error: --verify-reflection-interval must be a positive integer.");
+        process.exit(1);
+      }
+      config.verifyReflectionInterval = Math.floor(opts.verifyReflectionInterval);
+    }
+
     if (opts.pocHarnessMaxTurns !== undefined) {
       if (!Number.isFinite(opts.pocHarnessMaxTurns) || opts.pocHarnessMaxTurns < 1) {
         console.error("Error: --poc-harness-max-turns must be a positive integer.");
@@ -448,6 +506,22 @@ program
         process.exit(1);
       }
       config.pocHarnessConcurrency = Math.floor(opts.pocHarnessConcurrency);
+    }
+
+    if (opts.pocRefinementMaxIterations !== undefined) {
+      if (!Number.isFinite(opts.pocRefinementMaxIterations) || opts.pocRefinementMaxIterations < 1) {
+        console.error("Error: --poc-refinement-max-iterations must be a positive integer.");
+        process.exit(1);
+      }
+      config.pocRefinementMaxIterations = Math.floor(opts.pocRefinementMaxIterations);
+    }
+
+    if (opts.pocReflectionInterval !== undefined) {
+      if (!Number.isFinite(opts.pocReflectionInterval) || opts.pocReflectionInterval < 1) {
+        console.error("Error: --poc-reflection-interval must be a positive integer.");
+        process.exit(1);
+      }
+      config.pocReflectionInterval = Math.floor(opts.pocReflectionInterval);
     }
 
     if (config.pocHarness && config.verify !== true) {

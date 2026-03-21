@@ -28,6 +28,9 @@ import { supplyChainTask } from "./tasks/supply-chain.js";
 import { graphqlSecurityTask } from "./tasks/graphql-security.js";
 import { taskSelectorTask } from "./tasks/task-selector.js";
 import { reachabilityCheckTask } from "./tasks/reachability-check.js";
+import { callGraphAssistTask } from "./tasks/call-graph-assist.js";
+import { appModelBuildTask } from "./tasks/app-model-build.js";
+import { threatScenarioBuildTask } from "./tasks/threat-scenario-build.js";
 
 /** Create task registry populated with adapted scanner plugins. */
 export async function createDefaultTaskRegistry(
@@ -65,6 +68,10 @@ export async function createDefaultTaskRegistry(
   tasks.register(threatModelStrideTask);
   tasks.register(threatModelPastaTask);
 
+  // Upstream modeling tasks
+  tasks.register(appModelBuildTask);
+  tasks.register(threatScenarioBuildTask);
+
   // Additional agentic detection tasks
   tasks.register(ssrfDetectionTask);
   tasks.register(prototypePollutionTask);
@@ -75,6 +82,9 @@ export async function createDefaultTaskRegistry(
 
   // Reachability pre-filter
   tasks.register(reachabilityCheckTask);
+
+  // Call-graph evidence enrichment
+  tasks.register(callGraphAssistTask);
 
   // Dynamic task selection
   tasks.register(taskSelectorTask);

@@ -1,11 +1,15 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { globSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Type, type Tool } from "@mariozechner/pi-ai";
-import { toErrorMessage } from "../utils.js";
+import { isRecord, toErrorMessage } from "../utils.js";
 
 const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+const TSSERVER_PATH = require.resolve("typescript/lib/tsserver.js");
+
 const DEFAULT_BASH_TIMEOUT = 120_000;
 const MAX_BASH_TIMEOUT = 300_000;
 const BASH_MAX_BUFFER = 64 * 1024 * 1024;
@@ -13,6 +17,11 @@ const BASH_MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_READ_LIMIT = 200;
 const DEFAULT_GLOB_LIMIT = 200;
 const DEFAULT_GREP_LIMIT = 200;
+const DEFAULT_FIND_REFERENCES_LIMIT = 50;
+const MAX_FIND_REFERENCES_LIMIT = 200;
+const TSSERVER_TIMEOUT_MS = 10_000;
+const TSSERVER_HEADER_SEPARATOR = Buffer.from("\r\n\r\n", "utf8");
+const SUPPORTED_SEMANTIC_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"]);
 
 const ReadParameters = Type.Object(
   {
@@ -101,6 +110,31 @@ const GetCalleesParameters = Type.Object(
   { additionalProperties: true },
 );
 
+const SemanticPositionParameters = Type.Object(
+  {
+    file_path: Type.String({ description: "TypeScript/JavaScript file path" }),
+    line: Type.Integer({ minimum: 1, description: "1-based line number" }),
+    column: Type.Integer({ minimum: 1, description: "1-based column number" }),
+  },
+  { additionalProperties: true },
+);
+
+const FindReferencesParameters = Type.Object(
+  {
+    file_path: Type.String({ description: "TypeScript/JavaScript file path" }),
+    line: Type.Integer({ minimum: 1, description: "1-based line number" }),
+    column: Type.Integer({ minimum: 1, description: "1-based column number" }),
+    max_results: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: MAX_FIND_REFERENCES_LIMIT,
+        description: `Max results to return (default ${DEFAULT_FIND_REFERENCES_LIMIT})`,
+      }),
+    ),
+  },
+  { additionalProperties: true },
+);
+
 export const PI_AI_TOOL_DEFINITIONS: Tool[] = [
   {
     name: "Read",
@@ -142,6 +176,21 @@ export const PI_AI_TOOL_DEFINITIONS: Tool[] = [
     description: "Given a function, list all functions/methods it calls. Returns deduplicated list of callee names.",
     parameters: GetCalleesParameters,
   },
+  {
+    name: "GoToDefinition",
+    description: "Resolve the definition location for the symbol at a TypeScript/JavaScript position.",
+    parameters: SemanticPositionParameters,
+  },
+  {
+    name: "FindReferences",
+    description: "Find symbol references at a TypeScript/JavaScript position using semantic analysis.",
+    parameters: FindReferencesParameters,
+  },
+  {
+    name: "TypeAtPosition",
+    description: "Return the inferred or declared type for the symbol at a TypeScript/JavaScript position.",
+    parameters: SemanticPositionParameters,
+  },
 ];
 
 export async function executeTool(
@@ -179,6 +228,18 @@ export async function executeTool(
 
   if (name === "GetCallees") {
     return executeGetCallees(args, cwd);
+  }
+
+  if (name === "GoToDefinition") {
+    return executeGoToDefinition(args, cwd);
+  }
+
+  if (name === "FindReferences") {
+    return executeFindReferences(args, cwd);
+  }
+
+  if (name === "TypeAtPosition") {
+    return executeTypeAtPosition(args, cwd);
   }
 
   throw new Error(`Unsupported tool: ${name}`);
@@ -394,6 +455,362 @@ function executeWrite(args: Record<string, unknown>, cwd: string): string {
   writeFileSync(absolutePath, content, "utf-8");
 
   return `Wrote ${content.length} bytes to ${filePath}`;
+}
+
+interface TsServerLocation {
+  file: string;
+  start: { line: number; offset: number };
+  end: { line: number; offset: number };
+  lineText?: string;
+}
+
+interface TsServerReference extends TsServerLocation {
+  isWriteAccess?: boolean;
+}
+
+interface TsServerQuickInfoBody {
+  kind?: string;
+  kindModifiers?: string;
+  start?: { line: number; offset: number };
+  end?: { line: number; offset: number };
+  displayString?: string;
+  documentation?: string;
+}
+
+interface TsServerResponse {
+  type: "response";
+  command?: string;
+  request_seq?: number;
+  success: boolean;
+  message?: string;
+  body?: unknown;
+}
+
+class TsServerSession {
+  private readonly child;
+
+  private readonly pending = new Map<number, {
+    resolve: (response: TsServerResponse) => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }>();
+
+  private stdoutBuffer = Buffer.alloc(0);
+  private stderrText = "";
+  private nextSeq = 1;
+  private closed = false;
+
+  constructor(private readonly cwd: string) {
+    this.child = spawn(process.execPath, [TSSERVER_PATH], {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    this.child.stdout?.on("data", (chunk: Buffer) => {
+      this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk]);
+      this.processStdoutBuffer();
+    });
+
+    this.child.stderr?.on("data", (chunk: Buffer) => {
+      this.stderrText += chunk.toString("utf8");
+    });
+
+    this.child.on("error", (error) => {
+      this.rejectAll(new Error(`tsserver process error: ${toErrorMessage(error)}`));
+    });
+
+    this.child.on("exit", (code, signal) => {
+      if (this.pending.size === 0) {
+        this.closed = true;
+        return;
+      }
+
+      const reason = signal
+        ? `tsserver exited from signal ${signal}`
+        : `tsserver exited with code ${code ?? "unknown"}`;
+      const stderr = this.stderrText.trim();
+      this.rejectAll(new Error(stderr ? `${reason}: ${stderr}` : reason));
+      this.closed = true;
+    });
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+
+    this.closed = true;
+    this.child.kill();
+    await new Promise<void>((resolve) => {
+      this.child.once("exit", () => resolve());
+      setTimeout(resolve, 200);
+    });
+  }
+
+  async request<TBody = unknown>(
+    command: string,
+    args: Record<string, unknown>,
+  ): Promise<{ success: boolean; body?: TBody; message?: string }> {
+    if (this.closed) {
+      throw new Error("tsserver session is closed");
+    }
+
+    const seq = this.nextSeq++;
+    const payload = JSON.stringify({
+      seq,
+      type: "request",
+      command,
+      arguments: args,
+    });
+
+    const response = await new Promise<TsServerResponse>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(seq);
+        reject(new Error(`tsserver ${command} timed out after ${TSSERVER_TIMEOUT_MS}ms`));
+      }, TSSERVER_TIMEOUT_MS);
+
+      this.pending.set(seq, { resolve, reject, timeout });
+      if (!this.child.stdin) {
+        clearTimeout(timeout);
+        this.pending.delete(seq);
+        reject(new Error(`tsserver ${command} write failed: stdin unavailable`));
+        return;
+      }
+
+      this.child.stdin.write(`${payload}\n`, "utf8", (error) => {
+        if (!error) {
+          return;
+        }
+
+        const pending = this.pending.get(seq);
+        if (!pending) {
+          return;
+        }
+
+        clearTimeout(pending.timeout);
+        this.pending.delete(seq);
+        reject(new Error(`tsserver ${command} write failed: ${toErrorMessage(error)}`));
+      });
+    });
+
+    return {
+      success: response.success,
+      body: response.body as TBody | undefined,
+      message: response.message,
+    };
+  }
+
+  private processStdoutBuffer(): void {
+    while (true) {
+      const headerEnd = this.stdoutBuffer.indexOf(TSSERVER_HEADER_SEPARATOR);
+      if (headerEnd === -1) {
+        return;
+      }
+
+      const header = this.stdoutBuffer.subarray(0, headerEnd).toString("utf8");
+      const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
+      if (!lengthMatch) {
+        this.stdoutBuffer = this.stdoutBuffer.subarray(headerEnd + TSSERVER_HEADER_SEPARATOR.length);
+        continue;
+      }
+
+      const bodyStart = headerEnd + TSSERVER_HEADER_SEPARATOR.length;
+      const bodyLength = Number(lengthMatch[1]);
+      const frameLength = bodyStart + bodyLength;
+      if (this.stdoutBuffer.length < frameLength) {
+        return;
+      }
+
+      const bodyText = this.stdoutBuffer.subarray(bodyStart, frameLength).toString("utf8");
+      this.stdoutBuffer = this.stdoutBuffer.subarray(frameLength);
+
+      let message: unknown;
+      try {
+        message = JSON.parse(bodyText);
+      } catch {
+        continue;
+      }
+
+      if (!isTsServerResponse(message) || typeof message.request_seq !== "number") {
+        continue;
+      }
+
+      const pending = this.pending.get(message.request_seq);
+      if (!pending) {
+        continue;
+      }
+
+      clearTimeout(pending.timeout);
+      this.pending.delete(message.request_seq);
+      pending.resolve(message);
+    }
+  }
+
+  private rejectAll(error: Error): void {
+    for (const [seq, pending] of this.pending) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+      this.pending.delete(seq);
+    }
+  }
+}
+
+async function executeGoToDefinition(args: Record<string, unknown>, cwd: string): Promise<string> {
+  const position = resolveSemanticPosition(args, cwd, "GoToDefinition");
+  if (!isSupportedSemanticPath(position.absolutePath)) {
+    return formatSemanticFailure("GoToDefinition", position, undefined);
+  }
+  const session = new TsServerSession(cwd);
+
+  try {
+    const openResult = await session.request("open", { file: position.absolutePath });
+    if (!openResult.success) {
+      return formatSemanticFailure("GoToDefinition", position, openResult.message);
+    }
+
+    const [quickInfo, definition] = await Promise.all([
+      session.request<TsServerQuickInfoBody>("quickinfo", {
+        file: position.absolutePath,
+        line: position.line,
+        offset: position.column,
+      }),
+      session.request<{ definitions?: TsServerLocation[] }>("definitionAndBoundSpan", {
+        file: position.absolutePath,
+        line: position.line,
+        offset: position.column,
+      }),
+    ]);
+
+    if (!definition.success) {
+      return formatSemanticFailure("GoToDefinition", position, definition.message);
+    }
+
+    const definitions = Array.isArray(definition.body?.definitions)
+      ? definition.body.definitions
+      : [];
+    if (definitions.length === 0) {
+      return `No definition found at ${position.displayPath}:${position.line}:${position.column}.`;
+    }
+
+    const quickInfoBody = quickInfo.success ? quickInfo.body : undefined;
+    const header = formatSemanticHeader(position, quickInfoBody);
+    const lines = definitions.map((location) => formatTsServerLocation(cwd, location));
+    return [...header, ...lines].join("\n");
+  } finally {
+    await session.close();
+  }
+}
+
+async function executeFindReferences(args: Record<string, unknown>, cwd: string): Promise<string> {
+  const position = resolveSemanticPosition(args, cwd, "FindReferences");
+  if (!isSupportedSemanticPath(position.absolutePath)) {
+    return formatSemanticFailure("FindReferences", position, undefined);
+  }
+  const maxResults = Math.min(
+    toPositiveInt(args["max_results"] ?? args["maxResults"]) ?? DEFAULT_FIND_REFERENCES_LIMIT,
+    MAX_FIND_REFERENCES_LIMIT,
+  );
+  const session = new TsServerSession(cwd);
+
+  try {
+    const openResult = await session.request("open", { file: position.absolutePath });
+    if (!openResult.success) {
+      return formatSemanticFailure("FindReferences", position, openResult.message);
+    }
+
+    const [quickInfo, definition, references] = await Promise.all([
+      session.request<TsServerQuickInfoBody>("quickinfo", {
+        file: position.absolutePath,
+        line: position.line,
+        offset: position.column,
+      }),
+      session.request<{ definitions?: TsServerLocation[] }>("definitionAndBoundSpan", {
+        file: position.absolutePath,
+        line: position.line,
+        offset: position.column,
+      }),
+      session.request<{ refs?: TsServerReference[]; symbolName?: string }>("references", {
+        file: position.absolutePath,
+        line: position.line,
+        offset: position.column,
+      }),
+    ]);
+
+    if (!references.success) {
+      return formatSemanticFailure("FindReferences", position, references.message);
+    }
+
+    const definitions = Array.isArray(definition.body?.definitions)
+      ? definition.body.definitions
+      : [];
+    const refs = Array.isArray(references.body?.refs)
+      ? references.body.refs
+      : [];
+
+    const filtered = refs.filter((reference) =>
+      !definitions.some((definitionLocation) => isSameSemanticLocation(definitionLocation, reference)),
+    );
+
+    if (filtered.length === 0) {
+      const symbolName = references.body?.symbolName
+        ?? extractSymbolName(quickInfo.success ? quickInfo.body : undefined, position);
+      return `No references found for "${symbolName}" in ${position.displayPath}:${position.line}:${position.column}.`;
+    }
+
+    const lines = filtered
+      .slice(0, maxResults)
+      .map((reference) => formatTsServerLocation(cwd, reference));
+
+    if (filtered.length > maxResults) {
+      lines.push(`... (truncated to ${maxResults} references)`);
+    }
+
+    return lines.join("\n");
+  } finally {
+    await session.close();
+  }
+}
+
+async function executeTypeAtPosition(args: Record<string, unknown>, cwd: string): Promise<string> {
+  const position = resolveSemanticPosition(args, cwd, "TypeAtPosition");
+  if (!isSupportedSemanticPath(position.absolutePath)) {
+    return formatSemanticFailure("TypeAtPosition", position, undefined);
+  }
+  const session = new TsServerSession(cwd);
+
+  try {
+    const openResult = await session.request("open", { file: position.absolutePath });
+    if (!openResult.success) {
+      return formatSemanticFailure("TypeAtPosition", position, openResult.message);
+    }
+
+    const quickInfo = await session.request<TsServerQuickInfoBody>("quickinfo", {
+      file: position.absolutePath,
+      line: position.line,
+      offset: position.column,
+    });
+
+    if (!quickInfo.success) {
+      return formatSemanticFailure("TypeAtPosition", position, quickInfo.message);
+    }
+
+    if (!quickInfo.body) {
+      return `No symbol found at ${position.displayPath}:${position.line}:${position.column}.`;
+    }
+
+    const symbolName = extractSymbolName(quickInfo.body, position);
+    const kind = quickInfo.body.kind ?? "unknown";
+    const typeDisplay = normalizeTypeDisplay(quickInfo.body.displayString);
+
+    return [
+      `Symbol: ${symbolName}`,
+      `Kind: ${kind}`,
+      `Type: ${typeDisplay}`,
+      `Location: ${position.displayPath}:${position.line}:${position.column}`,
+    ].join("\n");
+  } finally {
+    await session.close();
+  }
 }
 
 const FUNCTION_DEF_CONTEXT_LINES = 50;
@@ -770,6 +1187,179 @@ function executeGetCallees(args: Record<string, unknown>, cwd: string): string {
 
   const sorted = [...callees].sort((a, b) => a.localeCompare(b));
   return sorted.join("\n");
+}
+
+function resolveSemanticPosition(
+  args: Record<string, unknown>,
+  cwd: string,
+  toolName: string,
+): {
+  absolutePath: string;
+  displayPath: string;
+  line: number;
+  column: number;
+} {
+  const filePath = getString(args, ["file_path", "filePath", "path"]);
+  if (!filePath) {
+    throw new Error(`${toolName} requires a file_path`);
+  }
+
+  const absolutePath = resolvePath(cwd, filePath);
+  const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
+  if (!fileStats || !fileStats.isFile()) {
+    throw new Error(`${toolName} file not found: ${filePath}`);
+  }
+
+  const line = toPositiveInt(args["line"]);
+  const column = toPositiveInt(args["column"]);
+  if (line == null || column == null) {
+    throw new Error(`${toolName} requires 1-based line and column`);
+  }
+
+  return {
+    absolutePath,
+    displayPath: normalizeForDisplay(path.relative(cwd, absolutePath)),
+    line,
+    column,
+  };
+}
+
+function formatSemanticFailure(
+  toolName: "GoToDefinition" | "FindReferences" | "TypeAtPosition",
+  position: { absolutePath: string; displayPath: string; line: number; column: number },
+  message: string | undefined,
+): string {
+  const extension = path.extname(position.absolutePath).toLowerCase();
+  if (!SUPPORTED_SEMANTIC_EXTENSIONS.has(extension)) {
+    return [
+      `Semantic navigation is only supported for TypeScript/JavaScript files (.ts, .tsx, .js, .jsx, .mts, .cts).`,
+      `File: ${position.displayPath}`,
+    ].join("\n");
+  }
+
+  const normalizedMessage = (message ?? "").trim();
+  if (!normalizedMessage) {
+    return `No symbol found at ${position.displayPath}:${position.line}:${position.column}.`;
+  }
+
+  if (/no project/i.test(normalizedMessage)) {
+    return `Semantic navigation could not resolve a TypeScript/JavaScript project for ${position.displayPath}.`;
+  }
+
+  if (/no content available|no references available|not found/i.test(normalizedMessage)) {
+    return `No symbol found at ${position.displayPath}:${position.line}:${position.column}.`;
+  }
+
+  return `${toolName} failed at ${position.displayPath}:${position.line}:${position.column}: ${normalizedMessage}`;
+}
+
+function formatSemanticHeader(
+  position: { absolutePath: string; displayPath: string; line: number; column: number },
+  quickInfo: TsServerQuickInfoBody | undefined,
+): string[] {
+  const symbolName = extractSymbolName(quickInfo, {
+    absolutePath: position.absolutePath,
+    displayPath: position.displayPath,
+    line: position.line,
+    column: position.column,
+  });
+  const kind = quickInfo?.kind ?? "unknown";
+  return [
+    `Symbol: ${symbolName}`,
+    `Kind: ${kind}`,
+  ];
+}
+
+function extractSymbolName(
+  quickInfo: TsServerQuickInfoBody | undefined,
+  position: { absolutePath?: string; displayPath: string; line: number; column: number },
+): string {
+  const textFromSpan = quickInfo?.start && quickInfo?.end && position.absolutePath
+    ? readSpanText(position.absolutePath, quickInfo.start, quickInfo.end)
+    : undefined;
+  if (textFromSpan) {
+    return textFromSpan;
+  }
+
+  const display = quickInfo?.displayString?.split("\n")[0]?.trim();
+  if (display) {
+    const strippedPrefix = display.replace(/^\([^)]*\)\s*/, "");
+    const match = strippedPrefix.match(/[A-Za-z_$][\w$]*/);
+    if (match) {
+      return match[0];
+    }
+  }
+
+  return `${position.displayPath}:${position.line}:${position.column}`;
+}
+
+function normalizeTypeDisplay(displayString: string | undefined): string {
+  const normalized = displayString?.split("\n").map((line) => line.trim()).filter(Boolean).join(" | ");
+  return normalized && normalized.length > 0 ? normalized : "unknown";
+}
+
+function formatTsServerLocation(cwd: string, location: TsServerLocation): string {
+  const displayPath = normalizeForDisplay(path.relative(cwd, location.file));
+  const snippet = normalizeLocationSnippet(location.file, location.start.line, location.lineText);
+  return `${displayPath}:${location.start.line}:${location.start.offset}:${snippet}`;
+}
+
+function normalizeLocationSnippet(
+  absolutePath: string,
+  lineNumber: number,
+  fallback: string | undefined,
+): string {
+  const rawLine = fallback ?? readLineSnippet(absolutePath, lineNumber);
+  return rawLine.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function readLineSnippet(absolutePath: string, lineNumber: number): string {
+  try {
+    const fileContent = readFileSync(absolutePath, "utf8");
+    const lines = fileContent.split(/\r?\n/);
+    return lines[lineNumber - 1] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function readSpanText(
+  absolutePath: string,
+  start: { line: number; offset: number },
+  end: { line: number; offset: number },
+): string | undefined {
+  try {
+    const fileContent = readFileSync(absolutePath, "utf8");
+    const lines = fileContent.split(/\r?\n/);
+    if (start.line !== end.line) {
+      return lines[start.line - 1]?.trim();
+    }
+    const line = lines[start.line - 1];
+    if (line == null) {
+      return undefined;
+    }
+    return line.slice(Math.max(0, start.offset - 1), Math.max(0, end.offset - 1)).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isSameSemanticLocation(left: TsServerLocation, right: TsServerLocation): boolean {
+  return path.normalize(left.file) === path.normalize(right.file)
+    && left.start.line === right.start.line
+    && left.start.offset === right.start.offset
+    && left.end.line === right.end.line
+    && left.end.offset === right.end.offset;
+}
+
+function isTsServerResponse(value: unknown): value is TsServerResponse {
+  return isRecord(value)
+    && value["type"] === "response"
+    && typeof value["success"] === "boolean";
+}
+
+function isSupportedSemanticPath(absolutePath: string): boolean {
+  return SUPPORTED_SEMANTIC_EXTENSIONS.has(path.extname(absolutePath).toLowerCase());
 }
 
 function resolvePath(cwd: string, targetPath: string): string {

@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { MessageBus } from "../bus/types.js";
 import type { Finding, TriageAgentConfig } from "../scanners/types.js";
 import type { KuzushiConfig, SecurityProfile } from "../types.js";
@@ -32,6 +33,10 @@ export interface TaskContext {
   };
   /** Optional database handle for regression detection and historical queries. */
   db?: Database.Database;
+  /** Optional per-execution model override used by internal orchestration features such as ensembles. */
+  modelOverride?: string;
+  /** Optional per-execution runtime override used by internal orchestration features such as ensembles. */
+  runtimeOverride?: AgentRuntime;
 }
 
 /**

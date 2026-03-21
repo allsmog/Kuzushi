@@ -71,6 +71,8 @@ export const DEFAULTS: KuzushiConfig = {
   enabledTasks: [
     "context-gatherer",
     "context-enricher",
+    "app-model-build",
+    "threat-scenario-build",
     "secrets-crypto-detect",
     "code-config-detect",
     "taint-analysis-preflight",
@@ -95,6 +97,29 @@ export const DEFAULTS: KuzushiConfig = {
   variantAnalysisMaxFindings: 10,
   contextEnrichmentModel: "anthropic:claude-haiku-4-5",
   enableContextEnrichment: true,
+  enableClassifier: false,
+  classifierModel: undefined,
+  classifierThreshold: 0.5,
+  ensembleModels: [],
+  taintDiffBase: undefined,
+  taintDiffMode: "delta",
+  taintGroundingEnabled: true,
+  astIndexEnabled: false,
+  callGraphAssistEnabled: false,
+  dynamicAnalysisEnabled: false,
+  coverageGuidedEnabled: false,
+  dynamicMaxIterations: 3,
+  dynamicMaxCandidates: 20,
+  dynamicMinScore: 7,
+  dynamicPerFindingBudgetUsd: 2,
+  patchingEnabled: false,
+  patchMaxIterations: 3,
+  patchBuildCommand: undefined,
+  patchTestCommand: undefined,
+  pocRefinementMaxIterations: 3,
+  pocReflectionInterval: 2,
+  verifyRefinementMaxIterations: 3,
+  verifyReflectionInterval: 2,
   confidenceCalibration: false,
   confidenceSignalWeights: undefined,
   trajectoryMemory: false,
@@ -676,6 +701,78 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "enableClassifier") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("enableClassifier must be true or false");
+    }
+    config.enableClassifier = parsed;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "classifierModel") {
+    config.classifierModel = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "classifierThreshold") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 1) {
+      throw new Error("classifierThreshold must be a number between 0 and 1");
+    }
+    config.classifierThreshold = n;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "ensembleModels") {
+    config.ensembleModels = coerceStringArray(raw);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "pocRefinementMaxIterations") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("pocRefinementMaxIterations must be a positive number");
+    }
+    config.pocRefinementMaxIterations = Math.floor(n);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "pocReflectionInterval") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("pocReflectionInterval must be a positive number");
+    }
+    config.pocReflectionInterval = Math.floor(n);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "verifyRefinementMaxIterations") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("verifyRefinementMaxIterations must be a positive number");
+    }
+    config.verifyRefinementMaxIterations = Math.floor(n);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "verifyReflectionInterval") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("verifyReflectionInterval must be a positive number");
+    }
+    config.verifyReflectionInterval = Math.floor(n);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   if (key === "triagePromptFile") {
     config.triagePromptFile = raw.trim() || undefined;
     saveUpdatedConfigLayer(config, repoRoot);
@@ -817,6 +914,32 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const confidenceSignalWeights = normalizeConfidenceSignalWeights(config.confidenceSignalWeights);
   const triageModel = normalizeOptionalString(config.triageModel);
   const triageBatchModel = normalizeOptionalString(config.triageBatchModel);
+  const enableClassifier = normalizeBoolean(
+    config.enableClassifier,
+    DEFAULTS.enableClassifier ?? false,
+  );
+  const classifierModel = normalizeOptionalString(config.classifierModel);
+  const classifierThreshold = normalizeUnitInterval(
+    config.classifierThreshold,
+    DEFAULTS.classifierThreshold ?? 0.5,
+  );
+  const ensembleModels = normalizeStringArray(config.ensembleModels);
+  const pocRefinementMaxIterations = normalizePositiveInt(
+    config.pocRefinementMaxIterations,
+    DEFAULTS.pocRefinementMaxIterations ?? 3,
+  );
+  const pocReflectionInterval = normalizePositiveInt(
+    config.pocReflectionInterval,
+    DEFAULTS.pocReflectionInterval ?? 2,
+  );
+  const verifyRefinementMaxIterations = normalizePositiveInt(
+    config.verifyRefinementMaxIterations,
+    DEFAULTS.verifyRefinementMaxIterations ?? 3,
+  );
+  const verifyReflectionInterval = normalizePositiveInt(
+    config.verifyReflectionInterval,
+    DEFAULTS.verifyReflectionInterval ?? 2,
+  );
   const enabledTasks = normalizeStringArray(config.enabledTasks);
   const externalTasks = normalizeStringArray(config.externalTasks);
   const enableExternalTasks = normalizeBoolean(config.enableExternalTasks, DEFAULTS.enableExternalTasks ?? false);
@@ -863,6 +986,14 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     confidenceSignalWeights,
     triageModel,
     triageBatchModel,
+    enableClassifier,
+    classifierModel,
+    classifierThreshold,
+    ensembleModels,
+    pocRefinementMaxIterations,
+    pocReflectionInterval,
+    verifyRefinementMaxIterations,
+    verifyReflectionInterval,
     enabledTasks,
     externalTasks,
     enableExternalTasks,
@@ -881,6 +1012,7 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
     scannerConfig: cloneScannerConfig(DEFAULTS.scannerConfig),
     enabledTasks: [...(DEFAULTS.enabledTasks ?? [])],
     externalTasks: [...(DEFAULTS.externalTasks ?? [])],
+    ensembleModels: [...(DEFAULTS.ensembleModels ?? [])],
     scanners: [...DEFAULTS.scanners],
     severity: [...DEFAULTS.severity],
     excludePatterns: [...DEFAULTS.excludePatterns],

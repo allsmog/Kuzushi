@@ -8,6 +8,15 @@ export type TaintAnalysisLanguage = "python" | "go" | "java" | "javascript" | "c
 
 export type TaintAnalysisPassId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
 
+export interface DiffScope {
+  base: string;
+  changedFiles: string[];
+  mode: "delta" | "baseline";
+  affectedPassIds: TaintAnalysisPassId[];
+  fellBackToFull: boolean;
+  fallbackReason?: string;
+}
+
 export interface TaintAnalysisPassDefinition {
   passId: TaintAnalysisPassId;
   passKey: string;
@@ -52,6 +61,9 @@ export interface TaintAnalysisTaskConfig {
   summarySupplementsDisabled?: boolean;
   extractionSupplementsDisabled?: boolean;
   renderingHintsDisabled?: boolean;
+  groundingEnabled?: boolean;
+  taintDiffBase?: string;
+  taintDiffMode?: "delta" | "baseline";
 }
 
 export interface TaintAnalysisCandidate {
@@ -144,6 +156,7 @@ export interface TaintAnalysisPreflightOutput {
     sinksRowCount: number;
   };
   extractionDegradation: ExtractionDegradation;
+  diffScope?: DiffScope;
 }
 
 export interface TaintAnalysisLabelOutput {
@@ -160,6 +173,7 @@ export interface TaintAnalysisLabelOutput {
   tiPriorJsonPath: string;
   tiPriorDegraded: boolean;
   extractionDegradation: ExtractionDegradation;
+  diffScope?: DiffScope;
   labelsPath: string;
   labels: TaintAnalysisLabelsDocument;
   taintModelPath: string;
@@ -315,6 +329,9 @@ export const DEFAULT_TAINT_ANALYSIS_TASK_CONFIG: TaintAnalysisTaskConfig = {
   summarySupplementsDisabled: false,
   extractionSupplementsDisabled: false,
   renderingHintsDisabled: false,
+  groundingEnabled: true,
+  taintDiffBase: undefined,
+  taintDiffMode: "delta",
 };
 
 function normalizeDefaultTaintAnalysisPath(): string {
@@ -419,6 +436,22 @@ export function resolveTaintAnalysisConfig(config: KuzushiConfig): TaintAnalysis
     renderingHintsDisabled: normalizeBoolean(
       merged["renderingHintsDisabled"],
       DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.renderingHintsDisabled ?? false,
+    ),
+    groundingEnabled: normalizeBoolean(
+      isRecord(raw) && raw["groundingEnabled"] !== undefined
+        ? raw["groundingEnabled"]
+        : config.taintGroundingEnabled,
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.groundingEnabled ?? true,
+    ),
+    taintDiffBase: normalizeOptionalString(
+      isRecord(raw) && raw["taintDiffBase"] !== undefined
+        ? raw["taintDiffBase"]
+        : config.taintDiffBase,
+    ),
+    taintDiffMode: normalizeDiffMode(
+      isRecord(raw) && raw["taintDiffMode"] !== undefined
+        ? raw["taintDiffMode"]
+        : config.taintDiffMode,
     ),
   };
 }
@@ -556,6 +589,14 @@ function normalizeTiFailurePolicy(value: unknown): "continue_without_ti" {
   }
   const trimmed = value.trim().toLowerCase();
   return trimmed === "continue_without_ti" ? "continue_without_ti" : "continue_without_ti";
+}
+
+function normalizeDiffMode(value: unknown): "delta" | "baseline" {
+  if (typeof value !== "string") {
+    return "delta";
+  }
+  const trimmed = value.trim().toLowerCase();
+  return trimmed === "baseline" ? "baseline" : "delta";
 }
 
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {

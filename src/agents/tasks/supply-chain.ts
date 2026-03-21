@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -16,6 +15,7 @@ import { getProfilesForTask, formatProfilesForPrompt } from "../../security-prof
 import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
+import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
 
 const log = createLogger({ stage: "supply-chain" });
 
@@ -66,13 +66,8 @@ interface SupplyChainConfig {
 }
 
 function resolveConfig(ctx: TaskContext): SupplyChainConfig {
-  const raw = ctx.config.scannerConfig["supply-chain"];
-  const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
-    ? raw["model"].trim()
-    : ctx.config.model;
-  const maxFindings = (isRecord(raw) && typeof raw["maxFindings"] === "number" && raw["maxFindings"] >= 1)
-    ? Math.floor(raw["maxFindings"])
-    : 50;
+  const model = resolveTaskModel(ctx, "supply-chain");
+  const maxFindings = resolveTaskPositiveInt(ctx, "supply-chain", "maxFindings", 50);
   return { model, maxFindings };
 }
 
@@ -255,7 +250,7 @@ export const supplyChainTask: AgentTask<ScanOpts, Finding[]> = {
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
     const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
-    const runtime = getAgentRuntime();
+    const runtime = resolveTaskRuntime(context);
 
     let structuredOutput: unknown;
     let resultText = "";
@@ -271,7 +266,7 @@ export const supplyChainTask: AgentTask<ScanOpts, Finding[]> = {
           cwd: context.repoRoot,
           model,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
+          allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",

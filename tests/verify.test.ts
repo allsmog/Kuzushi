@@ -51,9 +51,10 @@ function stream(messages: AgentMessage[]): AsyncIterable<AgentMessage> {
 function makeRuntime(
   messages: AgentMessage[],
   requests: AgentQueryRequest[],
+  id = "test-runtime",
 ): AgentRuntime {
   return {
-    id: "test-runtime",
+    id,
     query(request) {
       requests.push(request);
       return stream(messages);
@@ -132,6 +133,23 @@ describe("buildVerificationPrompt", () => {
 
     expect(prefix).toContain("Confidence Escalation Protocol");
     expect(prefix).toContain("Start at 0.1");
+  });
+
+  it("verificationSystemPromptPrefix appends extraPromptContext when provided", () => {
+    const extra = "## CWE-89 Knowledge\nSQL injection in parameterized queries requires unescaped interpolation.";
+    const prefix = verificationSystemPromptPrefix(undefined, undefined, extra);
+
+    expect(prefix).toContain(extra);
+    // Also still includes standard modules
+    expect(prefix).toContain("Proof Level Framework");
+  });
+
+  it("verificationSystemPromptPrefix omits extra block when extraPromptContext is undefined", () => {
+    const withExtra = verificationSystemPromptPrefix(undefined, undefined, "extra context");
+    const without = verificationSystemPromptPrefix(undefined, undefined, undefined);
+
+    expect(withExtra).toContain("extra context");
+    expect(without).not.toContain("extra context");
   });
 });
 
@@ -270,6 +288,91 @@ describe("verifyFindingWithAgent", () => {
     expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody"]);
     expect(requests[0]?.options?.outputFormat?.schema).toBe(VERIFICATION_RESULT_SCHEMA);
     expect(requests[0]?.options?.maxTurns).toBe(12);
+  });
+
+  it("uses semantic navigation tools when the runtime is pi-ai", async () => {
+    const requests: AgentQueryRequest[] = [];
+    const runtime = makeRuntime(
+      [{
+        type: "result",
+        subtype: "success",
+        result: "{}",
+        structuredOutput: {
+          fingerprint: "verify-fp",
+          exploitable: true,
+          poc_payload: "payload",
+          poc_description: "desc",
+          attack_vector: "network",
+          preconditions: [],
+          confidence: 0.9,
+        },
+      }],
+      requests,
+      "pi-ai",
+    );
+
+    await verifyFindingWithAgent(
+      makeFinding(),
+      makeTriageResult(),
+      "/tmp/repo",
+      "repo",
+      "claude-haiku-4-5-20251001",
+      12,
+      { runtime },
+    );
+
+    expect(requests[0]?.options?.allowedTools).toEqual([
+      "Read",
+      "Glob",
+      "Grep",
+      "GetCallers",
+      "GetCallees",
+      "GetFunctionBody",
+      "GoToDefinition",
+      "FindReferences",
+      "TypeAtPosition",
+    ]);
+  });
+
+  it("keeps the legacy tool bundle when the runtime is acp", async () => {
+    const requests: AgentQueryRequest[] = [];
+    const runtime = makeRuntime(
+      [{
+        type: "result",
+        subtype: "success",
+        result: "{}",
+        structuredOutput: {
+          fingerprint: "verify-fp",
+          exploitable: false,
+          poc_payload: null,
+          poc_description: "desc",
+          attack_vector: null,
+          preconditions: [],
+          confidence: 0.4,
+        },
+      }],
+      requests,
+      "acp",
+    );
+
+    await verifyFindingWithAgent(
+      makeFinding(),
+      makeTriageResult(),
+      "/tmp/repo",
+      "repo",
+      "claude-haiku-4-5-20251001",
+      12,
+      { runtime },
+    );
+
+    expect(requests[0]?.options?.allowedTools).toEqual([
+      "Read",
+      "Glob",
+      "Grep",
+      "GetCallers",
+      "GetCallees",
+      "GetFunctionBody",
+    ]);
   });
 
   it("throws VerificationExecutionError with cost on parse failure", async () => {

@@ -1,9 +1,19 @@
 import type { ScannerConfig, ScannerId } from "./scanners/types.js";
+import type { EngineProvenance, ProofState, TaintPathStep } from "./scanners/types.js";
 import type { QualityGateConfig } from "./quality-gate.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 
 // Re-export Zod schemas for consumers that need runtime validation.
 export {
+  TaintPathStepSchema,
+  EngineProvenanceSchema,
+  ProofStateSchema,
+  DynamicAnalysisStatusSchema,
+  DynamicCoverageModeSchema,
+  DynamicAnalysisRunSchema,
+  PatchStatusSchema,
+  PatchResultSchema,
+  FindingMetadataSchema,
   FindingSchema,
   TriageResultSchema,
   VerificationResultSchema,
@@ -11,6 +21,8 @@ export {
   PocHarnessResultSchema,
   RepoContextSchema,
   EnrichedRepoContextSchema,
+  ApplicationModelSchema,
+  ThreatScenarioSchema,
   ExploitChainSchema,
   PrecedentsSchema,
   SecurityProfileSchema,
@@ -153,6 +165,81 @@ export interface PocHarnessResult {
   pocExecStderr?: string;
   pocExecVerdict?: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
   pocExecDurationMs?: number;
+  iterations?: number;
+  refinementHistory?: Array<{
+    attempt: number;
+    error: string;
+    approach: string;
+  }>;
+}
+
+export type DynamicAnalysisStatus = "confirmed" | "interesting" | "rejected" | "error";
+
+export type DynamicCoverageMode = "none" | "node-v8" | "python-coverage";
+
+export interface DynamicAnalysisRun {
+  dynamicRunId: string;
+  pipelineRunId?: string;
+  fingerprint: string;
+  repo: string;
+  status: DynamicAnalysisStatus;
+  score: number;
+  proofValue: number;
+  language?: string;
+  harnessPath?: string | null;
+  harnessLanguage?: string | null;
+  seedInputs?: string[];
+  coverageMode?: DynamicCoverageMode;
+  coverageSummary?: string;
+  executionExitCode?: number | null;
+  executionStdout?: string;
+  executionStderr?: string;
+  executionVerdict?: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+  executionDurationMs?: number | null;
+  iterations: number;
+  costUsd?: number;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type PatchStatus =
+  | "APPLY_FAILED"
+  | "BUILD_FAILED"
+  | "STILL_VULNERABLE"
+  | "TESTS_FAILED"
+  | "SOUND"
+  | "UNKNOWN";
+
+export interface PatchResult {
+  patchRunId: string;
+  fingerprint: string;
+  repo: string;
+  diff: string | null;
+  status: PatchStatus;
+  iterations: number;
+  buildCommand?: string | null;
+  testCommand?: string | null;
+  worktreePath?: string | null;
+  costUsd?: number;
+  validatorLog?: string;
+  history: Array<{
+    attempt: number;
+    diff: string;
+    status: PatchStatus;
+    output: string;
+  }>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FindingMetadata {
+  latestDynamicRunId?: string;
+  dynamicRunIds?: string[];
+  latestPatchRunId?: string;
+  patchRunIds?: string[];
+  latestDynamicStatus?: DynamicAnalysisStatus;
+  notes?: string[];
 }
 
 /** Heuristic repository metadata used to enrich triage/verification prompts. */
@@ -175,6 +262,111 @@ export interface EnrichedRepoContext {
     dataClassifications: Array<{ dataType: string; sensitivity: "public" | "internal" | "confidential" | "restricted"; locations?: string[] }>;
     architecturalNotes: string[];
   };
+}
+
+export interface ModelEvidenceAnchor {
+  filePath: string;
+  startLine: number;
+  description: string;
+}
+
+export interface ApplicationRoute {
+  id: string;
+  method: string;
+  path: string;
+  filePath: string;
+  startLine: number;
+  framework?: string;
+  handlerSymbol?: string;
+  middleware: string[];
+  authMechanisms: string[];
+}
+
+export interface ApplicationOutboundClient {
+  id: string;
+  kind: string;
+  filePath: string;
+  startLine: number;
+  symbol?: string;
+  targetHint?: string;
+  protocol?: string;
+}
+
+export interface ApplicationDataStore {
+  id: string;
+  kind: string;
+  name: string;
+  filePath: string;
+  startLine: number;
+}
+
+export interface ApplicationBackgroundJob {
+  id: string;
+  name: string;
+  filePath: string;
+  startLine: number;
+  queue?: string;
+  handlerSymbol?: string;
+}
+
+export interface ApplicationServiceBoundary {
+  id: string;
+  name: string;
+  kind: "entrypoint" | "outbound" | "queue" | "datastore" | "trust-zone";
+  description: string;
+  evidenceAnchors: ModelEvidenceAnchor[];
+}
+
+export interface ApplicationModel {
+  version: string;
+  routes: ApplicationRoute[];
+  outboundClients: ApplicationOutboundClient[];
+  dataStores: ApplicationDataStore[];
+  backgroundJobs: ApplicationBackgroundJob[];
+  serviceBoundaries: ApplicationServiceBoundary[];
+  relevantFiles: string[];
+  notes: string[];
+}
+
+export type ThreatScenarioDetectorId =
+  | "code-config-detect"
+  | "dangerous-api-detect"
+  | "auth-access-detect"
+  | "security-misconfig-detect"
+  | "ssrf-detect"
+  | "nosql-injection-detect"
+  | "prototype-pollution-detect"
+  | "template-injection-detect"
+  | "graphql-security-detect"
+  | "race-condition-detect";
+
+export interface ThreatScenario {
+  id: string;
+  detectorId: ThreatScenarioDetectorId;
+  title: string;
+  rationale: string;
+  attackSurface: string;
+  expectedGuard?: string;
+  relatedFiles: string[];
+  relatedSymbols: string[];
+  sourceThreatIds: string[];
+  cwe: string[];
+  entryPoint?: {
+    kind: string;
+    filePath: string;
+    startLine: number;
+    method?: string;
+    path?: string;
+    handlerSymbol?: string;
+  };
+  sink?: {
+    kind: string;
+    filePath: string;
+    startLine: number;
+    symbol?: string;
+    detail?: string;
+  };
+  evidenceAnchors: ModelEvidenceAnchor[];
 }
 
 /** Parsed organization precedents for triage/verification prompt injection. */
@@ -318,8 +510,46 @@ export interface KuzushiConfig {
   enableContextEnrichment?: boolean;
   /** Optional override model for context enrichment. */
   contextEnrichmentModel?: string;
+  /** Enable the cheap pre-triage classifier stage. Default false. */
+  enableClassifier?: boolean;
+  /** Model for the cheap pre-triage classifier. Defaults to the cheapest configured model path. */
+  classifierModel?: string;
+  /** Minimum classifier confidence required to keep a finding. Default 0.5. */
+  classifierThreshold?: number;
+  /** Optional ensemble models for eligible agentic scan tasks. */
+  ensembleModels?: string[];
   /** Git ref for differential review (e.g. "main"). */
   diffBase?: string;
+  /** Optional Git ref for taint-analysis-specific differential slicing. */
+  taintDiffBase?: string;
+  /** Differential taint behavior when taintDiffBase is set. */
+  taintDiffMode?: "delta" | "baseline";
+  /** Enable deterministic grounding for taint supplements and rendering hints. Default true. */
+  taintGroundingEnabled?: boolean;
+  /** Enable the cheap structural index support layer. Default false. */
+  astIndexEnabled?: boolean;
+  /** Enable call-graph assist enrichment for high-value findings. Default false. */
+  callGraphAssistEnabled?: boolean;
+  /** Enable targeted dynamic analysis tasks. Default false. */
+  dynamicAnalysisEnabled?: boolean;
+  /** Enable coverage-guided refinement inside the dynamic lane. Default false. */
+  coverageGuidedEnabled?: boolean;
+  /** Max refinement iterations for dynamic analysis tasks. Default 3. */
+  dynamicMaxIterations?: number;
+  /** Max number of findings routed into the dynamic lane. Default 20. */
+  dynamicMaxCandidates?: number;
+  /** Minimum ranking score for dynamic analysis candidates. Default 7. */
+  dynamicMinScore?: number;
+  /** Per-finding dynamic analysis budget in USD. Default 2. */
+  dynamicPerFindingBudgetUsd?: number;
+  /** Enable patch synthesis and validation pipeline. Default false. */
+  patchingEnabled?: boolean;
+  /** Max patch synthesis iterations. Default 3. */
+  patchMaxIterations?: number;
+  /** Optional override build command for manual patch validation. */
+  patchBuildCommand?: string;
+  /** Optional override test command for manual patch validation. */
+  patchTestCommand?: string;
   /** Enable two-stage LLM re-scoring after hard FP filter. */
   llmRescoreEnabled?: boolean;
   /** Model for LLM re-scoring (defaults to haiku for cost efficiency). */
@@ -348,6 +578,14 @@ export interface KuzushiConfig {
   pocSandbox?: "docker" | "process";
   /** Timeout for PoC execution in milliseconds. Default 30000. */
   pocExecTimeoutMs?: number;
+  /** Max PoC refinement iterations when execution feedback is enabled. Default 3. */
+  pocRefinementMaxIterations?: number;
+  /** Inject PoC reflection guidance every N failed attempts. Default 2. */
+  pocReflectionInterval?: number;
+  /** Max verification refinement iterations when execution feedback is enabled. Default 3. */
+  verifyRefinementMaxIterations?: number;
+  /** Inject verification reflection guidance every N failed attempts. Default 2. */
+  verifyReflectionInterval?: number;
   /** Enable fine-grained per-step confidence calibration. Default false. */
   confidenceCalibration?: boolean;
   /** Per-signal weights for multi-signal composite confidence scoring. */
@@ -431,8 +669,16 @@ export interface FindingRow {
   pocHarnessSkipped?: number | null;
   pocHarnessSkipReason?: string | null;
   pocHarnessCostUsd?: number | null;
+  pocRunExitCode?: number | null;
+  pocRunStdout?: string | null;
+  pocRunStderr?: string | null;
+  pocRunVerdict?: "PASS" | "FAIL" | "ERROR" | "TIMEOUT" | null;
+  pocRunDurationMs?: number | null;
   compositeConfidence?: number | null;
   confidenceSignalsJson?: string | null;
+  taintPathJson?: string | null;
+  proofState?: ProofState | null;
+  engineProvenanceJson?: string | null;
   createdAt: string;
   updatedAt: string;
 }

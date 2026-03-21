@@ -10,7 +10,13 @@ import type {
 } from "../../src/bus/events.js";
 import type { KuzushiConfig, TriageResult, VerificationResult } from "../../src/types.js";
 
-const { verifyFindingWithAgentMock, VerificationExecutionErrorMock } = vi.hoisted(() => {
+const {
+  verifyFindingWithAgentMock,
+  generatePocHarnessMock,
+  createPocExecutorMock,
+  executorExecuteMock,
+  VerificationExecutionErrorMock,
+} = vi.hoisted(() => {
   class VerificationExecutionErrorMock extends Error {
     readonly costUsd: number;
 
@@ -23,6 +29,9 @@ const { verifyFindingWithAgentMock, VerificationExecutionErrorMock } = vi.hoiste
 
   return {
     verifyFindingWithAgentMock: vi.fn(),
+    generatePocHarnessMock: vi.fn(),
+    createPocExecutorMock: vi.fn(),
+    executorExecuteMock: vi.fn(),
     VerificationExecutionErrorMock,
   };
 });
@@ -30,6 +39,14 @@ const { verifyFindingWithAgentMock, VerificationExecutionErrorMock } = vi.hoiste
 vi.mock("../../src/verify.js", () => ({
   verifyFindingWithAgent: verifyFindingWithAgentMock,
   VerificationExecutionError: VerificationExecutionErrorMock,
+}));
+
+vi.mock("../../src/poc-harness.js", () => ({
+  generatePocHarness: generatePocHarnessMock,
+}));
+
+vi.mock("../../src/poc-executor/index.js", () => ({
+  createPocExecutor: createPocExecutorMock,
 }));
 
 function makeFinding(): Finding {
@@ -78,6 +95,7 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
     model: "anthropic:claude-sonnet-4-6",
     triageMaxTurns: 10,
     maxVerifyRetries: 0,
+    verifyRefinementMaxIterations: 1,
     retryBackoffMs: 0,
     retryBackoffMultiplier: 2,
     busBackend: "in-process",
@@ -94,6 +112,9 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
 
 afterEach(() => {
   verifyFindingWithAgentMock.mockReset();
+  generatePocHarnessMock.mockReset();
+  createPocExecutorMock.mockReset();
+  executorExecuteMock.mockReset();
 });
 
 describe("verification-worker", () => {
@@ -291,6 +312,105 @@ describe("verification-worker", () => {
     expect(resultEvent.payload.result.exploitable).toBe(true);
     expect(resultEvent.payload.attempts).toBe(2);
     expect(verifyFindingWithAgentMock).toHaveBeenCalledTimes(2);
+
+    await bus.close();
+  });
+
+  it("refines inconclusive verification with probe execution feedback", async () => {
+    const bus = new InProcessBus();
+    const config = makeConfig({
+      verifyRefinementMaxIterations: 3,
+      verifyReflectionInterval: 2,
+      pocHarnessMaxTurns: 9,
+    });
+
+    verifyFindingWithAgentMock
+      .mockResolvedValueOnce({
+        result: {
+          ...makeVerificationResult(),
+          confidence: 0.6,
+          proofVerdict: undefined,
+        },
+        costUsd: 0.01,
+      })
+      .mockResolvedValueOnce({
+        result: {
+          ...makeVerificationResult(),
+          confidence: 0.95,
+          proofVerdict: "exploited",
+        },
+        costUsd: 0.03,
+      });
+
+    generatePocHarnessMock.mockResolvedValue({
+      result: {
+        fingerprint: "fp-verify-1",
+        scriptPath: "/tmp/repo/.kuzushi/poc/probe.ts",
+        language: "typescript",
+        scriptContent: "console.log('FAIL');",
+        parsed: true,
+        parseError: null,
+        skipped: false,
+        skipReason: null,
+      },
+      costUsd: 0.02,
+    });
+
+    executorExecuteMock.mockResolvedValue({
+      exitCode: 1,
+      stdout: "FAIL",
+      stderr: "bad payload",
+      timedOut: false,
+      durationMs: 12,
+      verdict: "FAIL",
+    });
+    createPocExecutorMock.mockResolvedValue({
+      available: async () => true,
+      execute: executorExecuteMock,
+    });
+
+    registerVerificationWorker(bus, { config });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const resultPromise = bus.waitFor<VerificationResultEvent>(
+      "verification:result",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("verification:finding-queued", runId, {
+        context,
+        finding: makeFinding(),
+        triageResult: makeTriageResult(),
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    const resultEvent = await resultPromise;
+    expect(resultEvent.payload.result.proofVerdict).toBe("exploited");
+    expect(resultEvent.payload.costUsd).toBeCloseTo(0.06);
+    expect(verifyFindingWithAgentMock).toHaveBeenCalledTimes(2);
+    expect(generatePocHarnessMock).toHaveBeenCalledTimes(1);
+    expect(executorExecuteMock).toHaveBeenCalledTimes(1);
+    expect(verifyFindingWithAgentMock.mock.calls[1]?.[7]).toEqual(
+      expect.objectContaining({
+        history: expect.arrayContaining([
+          expect.objectContaining({ role: "assistant" }),
+          expect.objectContaining({
+            role: "user",
+            content: expect.stringContaining("Exit code: 1"),
+          }),
+        ]),
+      }),
+    );
 
     await bus.close();
   });

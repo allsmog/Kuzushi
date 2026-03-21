@@ -212,6 +212,101 @@ describe("selectFindings (CodeQL)", () => {
     expect(findings).toHaveLength(2);
   });
 
+  it("captures structured taint paths from SARIF code flows", () => {
+    const sarif: CodeQLSarifOutput = {
+      runs: [
+        {
+          tool: {
+            driver: {
+              rules: [
+                {
+                  id: "codeql.rule.flow",
+                  properties: {
+                    problem: { severity: "error" },
+                    precision: "high",
+                    tags: ["security", "external/cwe/cwe-89"],
+                  },
+                },
+              ],
+            },
+          },
+          results: [
+            {
+              ruleId: "codeql.rule.flow",
+              message: { text: "Flow reaches SQL sink" },
+              locations: [
+                {
+                  physicalLocation: {
+                    artifactLocation: { uri: "src/db.ts" },
+                    region: { startLine: 20 },
+                  },
+                },
+              ],
+              codeFlows: [
+                {
+                  threadFlows: [
+                    {
+                      locations: [
+                        {
+                          message: { text: "user input enters handler" },
+                          location: {
+                            physicalLocation: {
+                              artifactLocation: { uri: "src/routes.ts" },
+                              region: {
+                                startLine: 5,
+                                snippet: { text: "const id = req.query.id;" },
+                              },
+                            },
+                          },
+                        },
+                        {
+                          message: { text: "query string reaches db.query" },
+                          location: {
+                            physicalLocation: {
+                              artifactLocation: { uri: "src/db.ts" },
+                              region: {
+                                startLine: 20,
+                                snippet: { text: "db.query(sql, [id])" },
+                              },
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const [finding] = selectFindings(sarif, "repo", "HEAD");
+    expect(finding.taintPath).toEqual([
+      {
+        filePath: "src/routes.ts",
+        line: 5,
+        message: "user input enters handler",
+        snippet: "const id = req.query.id;",
+      },
+      {
+        filePath: "src/db.ts",
+        line: 20,
+        message: "query string reaches db.query",
+        snippet: "db.query(sql, [id])",
+      },
+    ]);
+    expect(finding.evidence).toContain("src/routes.ts:5");
+    expect(finding.proofState).toBe("symbolic_only");
+    expect(finding.engineProvenance).toEqual([
+      {
+        kind: "codeql",
+        detail: "CodeQL finding with structured code-flow path evidence",
+      },
+    ]);
+  });
+
   it("returns empty array for empty SARIF runs", () => {
     expect(selectFindings({ runs: [] }, "repo", "HEAD")).toEqual([]);
   });

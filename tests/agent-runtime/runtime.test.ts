@@ -6,6 +6,11 @@ import {
 } from "../../src/agent-runtime/index.js";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
+import {
+  DEFAULT_READ_ONLY_TOOLS,
+  resolveDefaultReadOnlyTools,
+  SEMANTIC_NAVIGATION_TOOLS,
+} from "../../src/agent-runtime/execution.js";
 
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
@@ -66,5 +71,21 @@ describe("agent runtime", () => {
 
     setAgentRuntime(custom);
     expect(getAgentRuntime().id).toBe("custom-test");
+  });
+
+  it("includes semantic navigation tools for pi-ai defaults", () => {
+    expect(resolveDefaultReadOnlyTools({ id: "pi-ai" } as AgentRuntime)).toEqual([
+      ...DEFAULT_READ_ONLY_TOOLS,
+      ...SEMANTIC_NAVIGATION_TOOLS,
+    ]);
+  });
+
+  it("keeps the legacy default bundle for acp and custom runtimes", () => {
+    expect(resolveDefaultReadOnlyTools({ id: "acp" } as AgentRuntime)).toEqual([
+      ...DEFAULT_READ_ONLY_TOOLS,
+    ]);
+    expect(resolveDefaultReadOnlyTools({ id: "custom-test" } as AgentRuntime)).toEqual([
+      ...DEFAULT_READ_ONLY_TOOLS,
+    ]);
   });
 });

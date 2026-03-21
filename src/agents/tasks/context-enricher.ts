@@ -4,6 +4,7 @@ import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { EnrichedRepoContext, RepoContext } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { resolveTaskAllowedTools } from "./runtime-overrides.js";
 
 const ENRICHED_CONTEXT_SCHEMA = {
   type: "object",
@@ -212,7 +213,7 @@ export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrich
           cwd: context.repoRoot,
           model,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
+          allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",

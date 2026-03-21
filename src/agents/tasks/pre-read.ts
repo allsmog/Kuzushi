@@ -5,7 +5,7 @@ import type { FileIndex } from "../../types.js";
 const MAX_PRE_READ_BYTES = 50_000;
 const MAX_FILES = 20;
 
-interface TaskFileSpec {
+export interface TaskFileSpec {
   namePatterns?: RegExp[];
   patternDomains?: string[];
   pathFilter?: (p: string) => boolean;
@@ -46,6 +46,10 @@ const TASK_FILE_SPECS: Record<string, TaskFileSpec> = {
     namePatterns: [/package\.json$/, /package-lock\.json$/, /go\.mod$/, /go\.sum$/, /requirements\.txt$/, /Cargo\.toml$/, /Cargo\.lock$/, /pom\.xml$/, /build\.gradle/],
   },
 };
+
+export function getTaskFileSpec(taskId: string): TaskFileSpec | undefined {
+  return TASK_FILE_SPECS[taskId];
+}
 
 export interface PreReadFile {
   path: string;

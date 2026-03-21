@@ -36,7 +36,7 @@ describe("ssrfDetectionTask", () => {
   it("has correct metadata", () => {
     expect(ssrfDetectionTask.id).toBe("ssrf-detect");
     expect(ssrfDetectionTask.outputKind).toBe("findings");
-    expect(ssrfDetectionTask.dependsOn).toEqual(["context-gatherer"]);
+    expect(ssrfDetectionTask.dependsOn).toEqual(["context-gatherer", "app-model-build", "threat-scenario-build"]);
   });
 });
 
@@ -90,6 +90,12 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("missing-allowlist");
     expect(prompt).toContain("redirect-following");
     expect(prompt).toContain("internal-service-url");
+  });
+
+  it("inserts threat-model guidance when provided", () => {
+    const prompt = buildPrompt(undefined, 50, [], undefined, undefined, "## Threat model leads from STRIDE\n- lead");
+    expect(prompt).toContain("## Threat model leads from STRIDE");
+    expect(prompt.indexOf("## Threat model leads from STRIDE")).toBeLessThan(prompt.indexOf("## Categories to check"));
   });
 });
 

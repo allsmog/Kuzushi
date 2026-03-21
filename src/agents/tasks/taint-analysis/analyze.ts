@@ -3,13 +3,15 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { formatTaintPathForPrompt } from "../../../findings/taint-path.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import { selectFindings, type CodeQLSarifOutput } from "../../../scanners/run-codeql.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import { DEFAULT_READ_ONLY_TOOLS, runStructuredAgentQuery } from "../../../agent-runtime/execution.js";
+import { resolveDefaultReadOnlyTools, runStructuredAgentQuery } from "../../../agent-runtime/execution.js";
 import type { AgentTask } from "../../types.js";
+import { groundCallableTargets, groundNamedHints } from "./grounding.js";
 import {
   candidateProfiles,
   formatProfileDiagnostics,
@@ -22,6 +24,7 @@ import {
   TAINT_ANALYSIS_PASSES,
   TAINT_ANALYSIS_PASS_IDS,
   resolveTaintAnalysisConfig,
+  type DiffScope,
   type ExtractionDegradation,
   type TaintAnalysisLabelOutput,
   type TaintAnalysisLabelsDocument,
@@ -157,7 +160,7 @@ For each supplement provide:
     cwd: repoRoot,
     model,
     maxTurns: 15,
-    allowedTools: [...DEFAULT_READ_ONLY_TOOLS],
+    allowedTools: resolveDefaultReadOnlyTools(),
     schema: SUMMARY_SUPPLEMENT_SCHEMA as Record<string, unknown>,
     strict: true,
     retryInvalidStructuredOutput: 2,
@@ -280,7 +283,7 @@ Return:
     cwd: repoRoot,
     model,
     maxTurns: 15,
-    allowedTools: [...DEFAULT_READ_ONLY_TOOLS],
+    allowedTools: resolveDefaultReadOnlyTools(),
     schema: RENDERING_HINTS_SCHEMA as Record<string, unknown>,
     strict: true,
     retryInvalidStructuredOutput: 2,
@@ -328,6 +331,9 @@ interface RawFindingRecord {
   evidence?: string | null;
   cwe: string[];
   passId?: number;
+  taintPath?: Finding["taintPath"];
+  proofState?: Finding["proofState"];
+  engineProvenance?: Finding["engineProvenance"];
 }
 
 /**
@@ -351,6 +357,22 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
     enforceLabelArtifactCompatibility(labels);
     const resultsDir = path.join(labelOutput.workspaceDir, "results");
     const compatRecordPath = path.join(labelOutput.workspaceDir, "exploration", "codeql_compat.json");
+
+    // --- Diff-aware pass narrowing ---
+    const diffScope = narrowDiffScope(labelOutput.diffScope, labels);
+    if (diffScope) {
+      process.stderr.write(
+        `[taint-analysis-run] Diff-aware mode=${diffScope.mode} affected_passes=[${diffScope.affectedPassIds.join(",")}] fell_back_to_full=${diffScope.fellBackToFull}\n`,
+      );
+      await writeFile(
+        path.join(resultsDir, "diff_scope_narrowed.json"),
+        JSON.stringify({
+          generatedAt: new Date().toISOString(),
+          ...diffScope,
+        }, null, 2),
+        "utf-8",
+      );
+    }
 
     const enabledPasses = TAINT_ANALYSIS_PASSES.filter((passDef) => labelOutput.passes.includes(passDef.passId));
     if (enabledPasses.length === 0) {
@@ -387,7 +409,20 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
           repoRoot: context.repoRoot,
           model: cfg.labelingModel,
         });
-        agenticSupplements = supplementResult.supplements;
+        const groundedSupplements = cfg.groundingEnabled
+          ? await groundCallableTargets(context.repoRoot, supplementResult.supplements)
+          : supplementResult.supplements.map((supplement) => ({
+            item: supplement,
+            grounding: {
+              status: "weak" as const,
+              reasons: ["grounding_disabled"],
+              matchCount: 0,
+              evidence: [],
+            },
+          }));
+        agenticSupplements = groundedSupplements
+          .filter((supplement) => supplement.grounding.status !== "invalid")
+          .map((supplement) => supplement.item);
         process.stderr.write(`[taint-analysis-run] Discovered ${agenticSupplements.length} summary supplement(s)\n`);
         await writeFile(
           path.join(resultsDir, "summary_supplements.json"),
@@ -397,6 +432,13 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
             framework: labelOutput.framework,
             costUsd: supplementResult.costUsd,
             supplements: agenticSupplements,
+            droppedSupplements: groundedSupplements
+              .filter((supplement) => supplement.grounding.status === "invalid")
+              .map((supplement) => supplement.item),
+            grounding: groundedSupplements.map((supplement) => ({
+              ...supplement.item,
+              grounding: supplement.grounding,
+            })),
           }, null, 2),
           "utf-8",
         );
@@ -424,9 +466,44 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
           model: cfg.labelingModel,
           labeledCallables,
         });
-        renderingHints = hintsResult.hints;
+        if (cfg.groundingEnabled) {
+          const [groundedVariadic, groundedSqlArg0, groundedStdlib] = await Promise.all([
+            groundNamedHints(context.repoRoot, [...hintsResult.hints.variadicFormatFuncs]),
+            groundNamedHints(context.repoRoot, [...hintsResult.hints.sqlQueryTextArg0Callables]),
+            groundNamedHints(context.repoRoot, [...hintsResult.hints.stdlibPackages]),
+          ]);
+          renderingHints = {
+            variadicFormatFuncs: new Set(
+              groundedVariadic
+                .filter((hint) => hint.grounding.status !== "invalid")
+                .map((hint) => hint.name),
+            ),
+            sqlQueryTextArg0Callables: new Set(
+              groundedSqlArg0
+                .filter((hint) => hint.grounding.status !== "invalid")
+                .map((hint) => hint.name),
+            ),
+            stdlibPackages: new Set(
+              groundedStdlib
+                .filter((hint) => hint.grounding.status !== "invalid")
+                .map((hint) => hint.name),
+            ),
+          };
+          await writeFile(
+            path.join(resultsDir, "rendering_hints_grounding.json"),
+            JSON.stringify({
+              generatedAt: new Date().toISOString(),
+              variadicFormatFuncs: groundedVariadic,
+              sqlQueryTextArg0Callables: groundedSqlArg0,
+              stdlibPackages: groundedStdlib,
+            }, null, 2),
+            "utf-8",
+          );
+        } else {
+          renderingHints = hintsResult.hints;
+        }
         process.stderr.write(
-          `[taint-analysis-run] Discovered rendering hints: variadicFmt=${hintsResult.hints.variadicFormatFuncs.size} sqlArg0=${hintsResult.hints.sqlQueryTextArg0Callables.size} stdlib=${hintsResult.hints.stdlibPackages.size}\n`,
+          `[taint-analysis-run] Discovered rendering hints: variadicFmt=${renderingHints.variadicFormatFuncs.size} sqlArg0=${renderingHints.sqlQueryTextArg0Callables.size} stdlib=${renderingHints.stdlibPackages.size}\n`,
         );
         await writeFile(
           path.join(resultsDir, "rendering_hints.json"),
@@ -435,9 +512,9 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
             language: labelOutput.language,
             framework: labelOutput.framework,
             costUsd: hintsResult.costUsd,
-            variadicFormatFuncs: [...hintsResult.hints.variadicFormatFuncs],
-            sqlQueryTextArg0Callables: [...hintsResult.hints.sqlQueryTextArg0Callables],
-            stdlibPackages: [...hintsResult.hints.stdlibPackages],
+            variadicFormatFuncs: [...renderingHints.variadicFormatFuncs],
+            sqlQueryTextArg0Callables: [...renderingHints.sqlQueryTextArg0Callables],
+            stdlibPackages: [...renderingHints.stdlibPackages],
           }, null, 2),
           "utf-8",
         );
@@ -508,8 +585,19 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
       "utf-8",
     );
 
+    let skippedByDiff = 0;
     for (let qi = 0; qi < passQueries.length; qi++) {
       const passQuery = passQueries[qi];
+
+      // Skip passes unaffected by the diff when narrowing is active
+      if (diffScope && !diffScope.fellBackToFull && !diffScope.affectedPassIds.includes(passQuery.passId)) {
+        process.stderr.write(
+          `[taint-analysis-run] Skipping query ${qi + 1}/${passQueries.length} (pass ${passQuery.passId}) — not affected by diff\n`,
+        );
+        skippedByDiff++;
+        continue;
+      }
+
       process.stderr.write(`[taint-analysis-run] Running query ${qi + 1}/${passQueries.length} (pass ${passQuery.passId})...\n`);
       await runCommand(
         labelOutput.codeqlBinary,
@@ -524,6 +612,9 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
         labelOutput.workspaceDir,
       );
       process.stderr.write(`[taint-analysis-run] Query ${qi + 1}/${passQueries.length} complete\n`);
+    }
+    if (skippedByDiff > 0) {
+      process.stderr.write(`[taint-analysis-run] Diff-aware analysis skipped ${skippedByDiff}/${passQueries.length} passes\n`);
     }
 
     // iris_report.md is a supplemental human-readable summary; SARIF-derived findings are the source of truth.
@@ -566,17 +657,44 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
       );
     }
 
-    const findings = await convertSarifToTaintAnalysisFindings(resultsDir, context.repoName, labels);
+    let findings = await convertSarifToTaintAnalysisFindings(resultsDir, context.repoName, labels);
+
+    // --- Diff-aware finding filtering ---
+    if (diffScope && !diffScope.fellBackToFull) {
+      const preFilterCount = findings.length;
+      if (diffScope.mode === "delta") {
+        // Delta mode: only emit findings whose filePath or any taintPath step
+        // intersects the set of changed files.
+        const changedSet = new Set(diffScope.changedFiles);
+        findings = findings.filter((f) => {
+          if (changedSet.has(f.filePath)) return true;
+          if (f.taintPath?.some((step) => changedSet.has(step.filePath))) return true;
+          return false;
+        });
+        process.stderr.write(
+          `[taint-analysis-run] Delta-mode filtering: ${preFilterCount} -> ${findings.length} findings (${preFilterCount - findings.length} outside diff)\n`,
+        );
+      } else {
+        // Baseline mode: ideally merge cached findings for unaffected passes.
+        // TODO: Wire getTaintFindingsByPasses() from store.ts when the store
+        // function lands.  For now, return full results with a diagnostic log.
+        process.stderr.write(
+          `[taint-analysis-run] Baseline mode: returning ${findings.length} findings (cache merge not yet wired)\n`,
+        );
+      }
+    }
+
     const capped = cfg.maxFindings ? findings.slice(0, cfg.maxFindings) : findings;
     process.stderr.write(`[taint-analysis-run] Complete: ${rawFindings.length} raw findings, ${capped.length} deduplicated findings\n`);
     return capped;
   },
   triageAgentConfig(finding, repoName): TriageAgentConfig {
+    const taintPathSection = formatTaintPathForPrompt(finding.taintPath);
     return {
       prompt: [
         "You are a taint-analysis-focused security triage agent.",
         "The finding came from a neurosymbolic pipeline: deterministic extraction + LLM API labeling + CodeQL taint analysis.",
-        "Use the evidence and code path to confirm exploitability rather than trusting the label blindly.",
+        "Use the evidence and full code path to confirm exploitability rather than trusting the label blindly.",
         "",
         "## Finding",
         `Repo: ${repoName}`,
@@ -592,11 +710,14 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
         `Evidence: ${finding.evidence || "none"}`,
         `Fingerprint: ${finding.fingerprint}`,
         "",
+        taintPathSection,
+        "",
         "## Investigation instructions",
         "1. Validate that source and sink semantics match the reported CWE pass.",
-        "2. Confirm attacker control, inter-procedural reachability, and realistic exploitability.",
-        "3. Check framework sanitization/validation guards and barriers along the path.",
-        "4. If uncertain, return needs_review with conservative confidence and concrete missing evidence.",
+        "2. For each taint-path step, check attacker control, inter-procedural reachability, and whether the hop is actually feasible.",
+        "3. Check framework sanitization, validation, policy checks, and branch conditions that may block the path.",
+        "4. If any hop is infeasible or sanitized, explain that explicitly and downgrade or reject the finding.",
+        "5. If uncertain, return needs_review with conservative confidence and concrete missing evidence.",
         "",
         "## Output requirements",
         "Return ONLY a JSON object with:",
@@ -1190,6 +1311,9 @@ async function collectRawFindings(
         evidence: finding.evidence,
         cwe: passDef ? passDef.cwes.map((cwe) => `CWE-${Number.parseInt(cwe, 10)}`) : finding.cwe,
         passId: passDef?.passId,
+        taintPath: finding.taintPath,
+        proofState: finding.proofState,
+        engineProvenance: finding.engineProvenance,
       });
     }
   }
@@ -1226,6 +1350,16 @@ function augmentFinding(
       ? `${finding.evidence} | ${passEvidence}`
       : passEvidence,
     cwe: passDef ? passDef.cwes.map((cwe) => `CWE-${Number.parseInt(cwe, 10)}`) : finding.cwe,
+    proofState: finding.proofState ?? "symbolic_only",
+    engineProvenance: [
+      {
+        kind: "taint-analysis",
+        detail: passDef
+          ? `CodeQL-backed taint-analysis pass ${passDef.passId} (${passDef.focus})`
+          : "CodeQL-backed taint-analysis finding",
+      },
+      ...(finding.engineProvenance ?? []),
+    ],
     score: scoreFindingMetadata({
       severity: finding.severity,
       likelihood: finding.likelihood,
@@ -1713,6 +1847,89 @@ function asLabelOutput(value: unknown): TaintAnalysisLabelOutput | null {
   return value as unknown as TaintAnalysisLabelOutput;
 }
 
+/**
+ * Taint-support artifact file patterns that, when changed, should force a
+ * full analysis run regardless of which passes the diff would otherwise
+ * narrow to.  This covers CodeQL libraries, query templates, and label
+ * definitions that affect all passes.
+ */
+const TAINT_SUPPORT_ARTIFACT_PATTERNS = [
+  "/iris/",
+  "/augur/",
+  ".qll",
+  ".ql.tmpl",
+  "labels.json",
+  "TAINT_MODEL.json",
+];
+
+/**
+ * After labels are available, narrow the preflight `DiffScope.affectedPassIds`
+ * by intersecting `changedFiles` with the file locations referenced in labeled
+ * source/sink/summary entries.  If any changed file touches taint support
+ * artifacts, fall back to full analysis.
+ *
+ * Returns `undefined` when no diff scope was produced (i.e. diff-aware mode
+ * is not active).
+ */
+function narrowDiffScope(
+  preflightScope: DiffScope | undefined,
+  labels: TaintAnalysisLabelsDocument,
+): DiffScope | undefined {
+  if (!preflightScope) return undefined;
+
+  // Already fell back — nothing to narrow
+  if (preflightScope.fellBackToFull) return preflightScope;
+
+  const changedSet = new Set(preflightScope.changedFiles);
+
+  // If changed files touch taint support artifacts, force full run
+  for (const changedFile of changedSet) {
+    if (TAINT_SUPPORT_ARTIFACT_PATTERNS.some((pat) => changedFile.includes(pat))) {
+      process.stderr.write(
+        `[taint-analysis-run] Changed file '${changedFile}' matches taint support artifact pattern; forcing full analysis\n`,
+      );
+      return {
+        ...preflightScope,
+        fellBackToFull: true,
+        fallbackReason: `taint_support_artifact_changed: ${changedFile}`,
+      };
+    }
+  }
+
+  // Intersect changed files with labeled source/sink/summary file locations
+  // to determine which passes are actually affected by the diff.
+  const affectedPassIds = new Set<TaintAnalysisPassId>();
+  for (const pass of labels.passes) {
+    for (const entry of pass.entries) {
+      if (entry.classification === "fp") continue;
+      if (entry.role === "none") continue;
+      if (changedSet.has(entry.location.file)) {
+        affectedPassIds.add(pass.pass_id);
+        break; // No need to check more entries for this pass
+      }
+    }
+  }
+
+  // If narrowing produces zero affected passes but there are changed files,
+  // keep the preflight scope as-is (conservative: all enabled passes).
+  if (affectedPassIds.size === 0) {
+    process.stderr.write(
+      `[taint-analysis-run] Diff narrowing found 0 affected passes from labels; keeping preflight scope (${preflightScope.affectedPassIds.length} passes)\n`,
+    );
+    return preflightScope;
+  }
+
+  const narrowed = [...affectedPassIds].sort((a, b) => a - b) as TaintAnalysisPassId[];
+  process.stderr.write(
+    `[taint-analysis-run] Diff narrowing: ${preflightScope.affectedPassIds.length} -> ${narrowed.length} affected passes [${narrowed.join(",")}]\n`,
+  );
+
+  return {
+    ...preflightScope,
+    affectedPassIds: narrowed,
+  };
+}
+
 export const __taintAnalysisRunInternals = {
   renderTaintAnalysisLibraries,
   renderTaintQuery,
@@ -1727,4 +1944,5 @@ export const __taintAnalysisRunInternals = {
   groupCallables,
   escapeQllString,
   defaultRenderingHints,
+  narrowDiffScope,
 };

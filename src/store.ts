@@ -1,7 +1,12 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import type {
+  DynamicAnalysisRun,
+  DynamicAnalysisStatus,
+  FindingMetadata,
   KuzushiConfig,
+  PatchResult,
+  PatchStatus,
   PocHarnessResult,
   ScanOpts,
   TriageResult,
@@ -10,9 +15,12 @@ import type {
 } from "./types.js";
 import type {
   CorroboratingSignal,
+  EngineProvenance,
   Finding,
+  ProofState,
   ScannerId,
   SuppressionReason,
+  TaintPathStep,
 } from "./scanners/types.js";
 import type { RunMetrics } from "./scoring/run-metrics.js";
 import { BATCH_TRIAGE_FALLBACK_RATIONALE } from "./triage.js";
@@ -24,6 +32,7 @@ export type PipelineRunStatus =
   | "triaging"
   | "verifying"
   | "poc-harnessing"
+  | "dynamic-analyzing"
   | "complete"
   | "error";
 
@@ -42,6 +51,50 @@ export interface PipelineRunRecord {
   metricsJson: string | null;
   assertionsJson: string | null;
   promptHash: string | null;
+}
+
+export interface StoredFindingRecord {
+  scanner: ScannerId;
+  fingerprint: string;
+  repo: string;
+  ref: string;
+  ruleId: string;
+  filePath: string;
+  startLine: number;
+  severity: string;
+  message: string;
+  verdict: Verdict;
+  confidence: number;
+  rationale: string;
+  verificationSteps: string[];
+  fixPatch: string | null;
+  triageDetails: Record<string, unknown> | null;
+  verifyExploitable: number | null;
+  verifyPocPayload: string | null;
+  verifyPocDescription: string | null;
+  verifyAttackVector: string | null;
+  verifyPreconditions: string[];
+  verifyConfidence: number | null;
+  verifyCostUsd: number | null;
+  pocHarnessPath: string | null;
+  pocHarnessLanguage: string | null;
+  pocHarnessParsed: number | null;
+  pocHarnessParseError: string | null;
+  pocHarnessSkipped: number | null;
+  pocHarnessSkipReason: string | null;
+  pocHarnessCostUsd: number | null;
+  pocRunExitCode: number | null;
+  pocRunStdout: string | null;
+  pocRunStderr: string | null;
+  pocRunVerdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT" | null;
+  pocRunDurationMs: number | null;
+  adjustedScore: number | null;
+  taintPath: TaintPathStep[] | undefined;
+  proofState: ProofState | undefined;
+  engineProvenance: EngineProvenance[] | undefined;
+  findingMetadata: FindingMetadata | undefined;
+  corroboratingSignals: CorroboratingSignal[];
+  suppressionReasons: SuppressionReason[];
 }
 
 /** Initialize the SQLite database with the findings schema. */
@@ -72,8 +125,9 @@ export function upsertFinding(
       fingerprint, scanner, repo, ref, rule_id, file_path, start_line,
       severity, message, adjusted_score, corroboration_json, suppression_json, verdict, confidence,
       rationale, verification_steps, fix_patch, triage_cost_usd, triage_details_json,
-      composite_confidence, confidence_signals_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      composite_confidence, confidence_signals_json, taint_path_json, proof_state, engine_provenance_json,
+      finding_metadata_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fingerprint) DO UPDATE SET
       scanner=excluded.scanner,
       repo=excluded.repo,
@@ -95,6 +149,10 @@ export function upsertFinding(
       triage_details_json=excluded.triage_details_json,
       composite_confidence=excluded.composite_confidence,
       confidence_signals_json=excluded.confidence_signals_json,
+      taint_path_json=excluded.taint_path_json,
+      proof_state=excluded.proof_state,
+      engine_provenance_json=excluded.engine_provenance_json,
+      finding_metadata_json=COALESCE(excluded.finding_metadata_json, findings.finding_metadata_json),
       updated_at=datetime('now')
   `);
 
@@ -128,6 +186,10 @@ export function upsertFinding(
     }),
     triage.compositeConfidence ?? null,
     null, // confidence_signals_json — populated by updateFindingCompositeConfidence if needed
+    finding.taintPath ? safeJsonStringify(finding.taintPath) : null,
+    finding.proofState ?? null,
+    finding.engineProvenance ? safeJsonStringify(finding.engineProvenance) : null,
+    null, // finding_metadata_json — populated by updateFindingMetadata; COALESCE preserves existing
   );
 }
 
@@ -491,36 +553,7 @@ export function getActionableFindings(
     includeFalsePositives?: boolean;
     fingerprints?: string[];
   } = {},
-): Array<{
-  scanner: ScannerId;
-  fingerprint: string;
-  ruleId: string;
-  filePath: string;
-  startLine: number;
-  severity: string;
-  message: string;
-  verdict: Verdict;
-  confidence: number;
-  rationale: string;
-  fixPatch: string | null;
-  verifyExploitable: number | null;
-  verifyPocPayload: string | null;
-  verifyPocDescription: string | null;
-  verifyAttackVector: string | null;
-  verifyPreconditions: string | null;
-  verifyConfidence: number | null;
-  verifyCostUsd: number | null;
-  pocHarnessPath: string | null;
-  pocHarnessLanguage: string | null;
-  pocHarnessParsed: number | null;
-  pocHarnessParseError: string | null;
-  pocHarnessSkipped: number | null;
-  pocHarnessSkipReason: string | null;
-  pocHarnessCostUsd: number | null;
-  adjustedScore: number | null;
-  corroboratingSignals: CorroboratingSignal[];
-  suppressionReasons: SuppressionReason[];
-}> {
+): StoredFindingRecord[] {
   const filters: string[] = [];
   const params: unknown[] = [];
   if (!options.includeFalsePositives) {
@@ -550,6 +583,10 @@ export function getActionableFindings(
     SELECT scanner, fingerprint, rule_id as ruleId, file_path as filePath, start_line as startLine,
            severity, message, verdict, confidence, rationale,
            adjusted_score as adjustedScore,
+           taint_path_json as taintPathJson,
+           proof_state as proofState,
+           engine_provenance_json as engineProvenanceJson,
+           finding_metadata_json as findingMetadataJson,
            corroboration_json as corroborationJson,
            suppression_json as suppressionJson,
            fix_patch as fixPatch,
@@ -566,7 +603,12 @@ export function getActionableFindings(
            poc_harness_parse_error as pocHarnessParseError,
            poc_harness_skipped as pocHarnessSkipped,
            poc_harness_skip_reason as pocHarnessSkipReason,
-           poc_harness_cost_usd as pocHarnessCostUsd
+           poc_harness_cost_usd as pocHarnessCostUsd,
+           poc_run_exit_code as pocRunExitCode,
+           poc_run_stdout as pocRunStdout,
+           poc_run_stderr as pocRunStderr,
+           poc_run_verdict as pocRunVerdict,
+           poc_run_duration_ms as pocRunDurationMs
     FROM findings ${where}
     ORDER BY
       CASE verdict WHEN 'tp' THEN 0 WHEN 'needs_review' THEN 1 ELSE 2 END,
@@ -585,6 +627,10 @@ export function getActionableFindings(
     confidence: number;
     rationale: string;
     adjustedScore: number | null;
+    taintPathJson: string | null;
+    proofState: string | null;
+    engineProvenanceJson: string | null;
+    findingMetadataJson: string | null;
     corroborationJson: string | null;
     suppressionJson: string | null;
     fixPatch: string | null;
@@ -602,6 +648,11 @@ export function getActionableFindings(
     pocHarnessSkipped: number | null;
     pocHarnessSkipReason: string | null;
     pocHarnessCostUsd: number | null;
+    pocRunExitCode: number | null;
+    pocRunStdout: string | null;
+    pocRunStderr: string | null;
+    pocRunVerdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT" | null;
+    pocRunDurationMs: number | null;
   }>;
 
   return rows.map((row) => ({
@@ -616,6 +667,10 @@ export function getActionableFindings(
     confidence: row.confidence,
     rationale: row.rationale,
     adjustedScore: row.adjustedScore,
+    taintPath: parseTaintPath(row.taintPathJson),
+    proofState: parseProofState(row.proofState),
+    engineProvenance: parseEngineProvenance(row.engineProvenanceJson),
+    findingMetadata: parseFindingMetadata(row.findingMetadataJson),
     corroboratingSignals: parseCorroboratingSignals(row.corroborationJson),
     suppressionReasons: parseSuppressionReasons(row.suppressionJson),
     fixPatch: row.fixPatch,
@@ -633,6 +688,11 @@ export function getActionableFindings(
     pocHarnessSkipped: row.pocHarnessSkipped,
     pocHarnessSkipReason: row.pocHarnessSkipReason,
     pocHarnessCostUsd: row.pocHarnessCostUsd,
+    pocRunExitCode: row.pocRunExitCode,
+    pocRunStdout: row.pocRunStdout,
+    pocRunStderr: row.pocRunStderr,
+    pocRunVerdict: row.pocRunVerdict,
+    pocRunDurationMs: row.pocRunDurationMs,
   }));
 }
 
@@ -718,6 +778,17 @@ export function getTriagedFindingsForRepo(
       triageDetails,
     };
   });
+}
+
+export function getStoredFinding(
+  db: Database.Database,
+  fingerprint: string,
+): StoredFindingRecord | undefined {
+  const rows = getActionableFindings(db, undefined, {
+    includeFalsePositives: true,
+    fingerprints: [fingerprint],
+  });
+  return rows[0];
 }
 
 /** Delete findings by fingerprint for a specific repo. Returns number of deleted rows. */
@@ -870,6 +941,129 @@ function parseCorroboratingSignals(raw: string | null): CorroboratingSignal[] {
   return signals;
 }
 
+function parseTaintPath(raw: string | null): TaintPathStep[] | undefined {
+  const parsed = safeJsonParse<unknown>(raw ?? "", null);
+  if (!Array.isArray(parsed)) {
+    return undefined;
+  }
+
+  const taintPath: TaintPathStep[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const filePath = asOptionalString(record["filePath"]);
+    const line = asFiniteNumber(record["line"]);
+    if (!filePath || line == null) {
+      continue;
+    }
+    taintPath.push({
+      filePath,
+      line,
+      message: asOptionalString(record["message"]) ?? undefined,
+      snippet: asOptionalString(record["snippet"]) ?? undefined,
+    });
+  }
+
+  return taintPath.length > 0 ? taintPath : undefined;
+}
+
+function parseProofState(raw: string | null): ProofState | undefined {
+  switch (raw) {
+    case "symbolic_only":
+    case "execution_attempted":
+    case "execution_confirmed":
+    case "execution_rejected":
+    case "inconclusive":
+      return raw;
+    default:
+      return undefined;
+  }
+}
+
+function parseEngineProvenance(raw: string | null): EngineProvenance[] | undefined {
+  const parsed = safeJsonParse<unknown>(raw ?? "", null);
+  if (!Array.isArray(parsed)) {
+    return undefined;
+  }
+
+  const engineProvenance: EngineProvenance[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const kind = asOptionalString(record["kind"]);
+    const detail = asOptionalString(record["detail"]);
+    if (!detail) {
+      continue;
+    }
+    if (kind === "semgrep" || kind === "codeql" || kind === "taint-analysis" || kind === "agentic" || kind === "dynamic") {
+      engineProvenance.push({ kind, detail });
+    }
+  }
+
+  return engineProvenance.length > 0 ? engineProvenance : undefined;
+}
+
+function parseFindingMetadata(raw: string | null): FindingMetadata | undefined {
+  const parsed = safeJsonParse<unknown>(raw ?? "", null);
+  if (!parsed || typeof parsed !== "object") {
+    return undefined;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const metadata: FindingMetadata = {};
+  const latestDynamicRunId = asOptionalString(record["latestDynamicRunId"]);
+  const latestPatchRunId = asOptionalString(record["latestPatchRunId"]);
+  const latestDynamicStatus = parseDynamicAnalysisStatus(asOptionalString(record["latestDynamicStatus"]) ?? null);
+  const dynamicRunIds = Array.isArray(record["dynamicRunIds"])
+    ? record["dynamicRunIds"].map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  const patchRunIds = Array.isArray(record["patchRunIds"])
+    ? record["patchRunIds"].map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  const notes = Array.isArray(record["notes"])
+    ? record["notes"].map((value) => String(value).trim()).filter(Boolean)
+    : [];
+
+  if (latestDynamicRunId) metadata.latestDynamicRunId = latestDynamicRunId;
+  if (dynamicRunIds.length > 0) metadata.dynamicRunIds = dynamicRunIds;
+  if (latestPatchRunId) metadata.latestPatchRunId = latestPatchRunId;
+  if (patchRunIds.length > 0) metadata.patchRunIds = patchRunIds;
+  if (latestDynamicStatus) metadata.latestDynamicStatus = latestDynamicStatus;
+  if (notes.length > 0) metadata.notes = notes;
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function parseDynamicAnalysisStatus(raw: string | null): DynamicAnalysisStatus | undefined {
+  switch (raw) {
+    case "confirmed":
+    case "interesting":
+    case "rejected":
+    case "error":
+      return raw;
+    default:
+      return undefined;
+  }
+}
+
+function parsePatchStatus(raw: string | null): PatchStatus | undefined {
+  switch (raw) {
+    case "APPLY_FAILED":
+    case "BUILD_FAILED":
+    case "STILL_VULNERABLE":
+    case "TESTS_FAILED":
+    case "SOUND":
+    case "UNKNOWN":
+      return raw;
+    default:
+      return undefined;
+  }
+}
+
 function parseSuppressionReasons(raw: string | null): SuppressionReason[] {
   const parsed = safeJsonParse<unknown>(raw ?? "", []);
   if (!Array.isArray(parsed)) {
@@ -1009,6 +1203,11 @@ export function updatePocHarnessResult(
       poc_harness_skipped = ?,
       poc_harness_skip_reason = ?,
       poc_harness_cost_usd = ?,
+      poc_run_exit_code = ?,
+      poc_run_stdout = ?,
+      poc_run_stderr = ?,
+      poc_run_verdict = ?,
+      poc_run_duration_ms = ?,
       updated_at = datetime('now')
     WHERE fingerprint = ?
   `).run(
@@ -1019,6 +1218,11 @@ export function updatePocHarnessResult(
     result.skipped ? 1 : 0,
     result.skipReason,
     result.costUsd ?? null,
+    result.pocExecExitCode ?? null,
+    result.pocExecStdout ?? null,
+    result.pocExecStderr ?? null,
+    result.pocExecVerdict ?? null,
+    result.pocExecDurationMs ?? null,
     fingerprint,
   );
 }
@@ -1040,6 +1244,29 @@ export function updatePocHarnessCost(
       updated_at = datetime('now')
     WHERE fingerprint = ?
   `).run(costUsd, fingerprint);
+}
+
+/** Update finding metadata (dynamic analysis, patch, notes). Merges with existing metadata. */
+export function updateFindingMetadata(
+  db: Database.Database,
+  fingerprint: string,
+  metadata: Partial<FindingMetadata>,
+): void {
+  const row = db.prepare(
+    "SELECT finding_metadata_json FROM findings WHERE fingerprint = ?",
+  ).get(fingerprint) as { finding_metadata_json?: string | null } | undefined;
+
+  const existing: FindingMetadata = row?.finding_metadata_json
+    ? (safeJsonParse(row.finding_metadata_json) as FindingMetadata) ?? {}
+    : {};
+
+  const merged: FindingMetadata = { ...existing, ...metadata };
+
+  db.prepare(`
+    UPDATE findings
+    SET finding_metadata_json = ?, updated_at = datetime('now')
+    WHERE fingerprint = ?
+  `).run(safeJsonStringify(merged), fingerprint);
 }
 
 /** Get latest resumable run for repo, if any. */
@@ -1064,7 +1291,7 @@ export function getLatestResumableRun(
       assertions_json as assertionsJson,
       prompt_hash as promptHash
     FROM pipeline_runs
-    WHERE repo = ? AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing')
+    WHERE repo = ? AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing', 'dynamic-analyzing')
     ORDER BY started_at DESC, rowid DESC
     LIMIT 1
   `).get(repo) as PipelineRunRecord | undefined;
@@ -1193,4 +1420,221 @@ export function getFixedFindingsForFiles(
     message: row.message,
     verdict: row.verdict,
   }));
+}
+
+// ─── Dynamic Analysis Runs ─────────────────────────────────────────────────
+
+type DynamicAnalysisRunRow = {
+  dynamic_run_id: string;
+  pipeline_run_id: string | null;
+  fingerprint: string;
+  repo: string;
+  status: string;
+  score: number;
+  proof_value: number;
+  language: string | null;
+  harness_path: string | null;
+  harness_language: string | null;
+  seed_inputs_json: string | null;
+  coverage_mode: string | null;
+  coverage_summary: string | null;
+  execution_exit_code: number | null;
+  execution_stdout: string | null;
+  execution_stderr: string | null;
+  execution_verdict: string | null;
+  execution_duration_ms: number | null;
+  iterations: number;
+  cost_usd: number | null;
+  metadata_json: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function rowToDynamicAnalysisRun(row: DynamicAnalysisRunRow): DynamicAnalysisRun {
+  return {
+    dynamicRunId: row.dynamic_run_id,
+    pipelineRunId: row.pipeline_run_id ?? undefined,
+    fingerprint: row.fingerprint,
+    repo: row.repo,
+    status: (parseDynamicAnalysisStatus(row.status) ?? "error") as DynamicAnalysisStatus,
+    score: row.score,
+    proofValue: row.proof_value,
+    language: row.language ?? undefined,
+    harnessPath: row.harness_path,
+    harnessLanguage: row.harness_language,
+    seedInputs: row.seed_inputs_json
+      ? (safeJsonParse<string[]>(row.seed_inputs_json, []) ?? [])
+      : undefined,
+    coverageMode: (row.coverage_mode as DynamicAnalysisRun["coverageMode"]) ?? undefined,
+    coverageSummary: row.coverage_summary ?? undefined,
+    executionExitCode: row.execution_exit_code,
+    executionStdout: row.execution_stdout ?? undefined,
+    executionStderr: row.execution_stderr ?? undefined,
+    executionVerdict: (row.execution_verdict as DynamicAnalysisRun["executionVerdict"]) ?? undefined,
+    executionDurationMs: row.execution_duration_ms,
+    iterations: row.iterations,
+    costUsd: row.cost_usd ?? undefined,
+    metadata: row.metadata_json
+      ? (safeJsonParse<Record<string, unknown>>(row.metadata_json, {}) ?? {})
+      : undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** Insert or replace a dynamic analysis run. */
+export function insertDynamicAnalysisRun(
+  db: Database.Database,
+  run: DynamicAnalysisRun,
+): void {
+  db.prepare(`
+    INSERT OR REPLACE INTO dynamic_analysis_runs (
+      dynamic_run_id, pipeline_run_id, fingerprint, repo, status,
+      score, proof_value, language, harness_path, harness_language,
+      seed_inputs_json, coverage_mode, coverage_summary,
+      execution_exit_code, execution_stdout, execution_stderr,
+      execution_verdict, execution_duration_ms, iterations,
+      cost_usd, metadata_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), datetime('now'))
+  `).run(
+    run.dynamicRunId,
+    run.pipelineRunId ?? null,
+    run.fingerprint,
+    run.repo,
+    run.status,
+    run.score,
+    run.proofValue,
+    run.language ?? null,
+    run.harnessPath ?? null,
+    run.harnessLanguage ?? null,
+    run.seedInputs ? safeJsonStringify(run.seedInputs) : null,
+    run.coverageMode ?? null,
+    run.coverageSummary ?? null,
+    run.executionExitCode ?? null,
+    run.executionStdout ?? null,
+    run.executionStderr ?? null,
+    run.executionVerdict ?? null,
+    run.executionDurationMs ?? null,
+    run.iterations,
+    run.costUsd ?? null,
+    run.metadata ? safeJsonStringify(run.metadata) : null,
+    run.createdAt ?? null,
+  );
+}
+
+/** Get a dynamic analysis run by its ID. */
+export function getDynamicAnalysisRun(
+  db: Database.Database,
+  dynamicRunId: string,
+): DynamicAnalysisRun | undefined {
+  const row = db.prepare(`
+    SELECT * FROM dynamic_analysis_runs WHERE dynamic_run_id = ?
+  `).get(dynamicRunId) as DynamicAnalysisRunRow | undefined;
+
+  return row ? rowToDynamicAnalysisRun(row) : undefined;
+}
+
+/** Get all dynamic analysis runs for a finding fingerprint, most recent first. */
+export function getDynamicRunsForFinding(
+  db: Database.Database,
+  fingerprint: string,
+): DynamicAnalysisRun[] {
+  const rows = db.prepare(`
+    SELECT * FROM dynamic_analysis_runs
+    WHERE fingerprint = ?
+    ORDER BY created_at DESC
+  `).all(fingerprint) as DynamicAnalysisRunRow[];
+
+  return rows.map(rowToDynamicAnalysisRun);
+}
+
+// ─── Patch Results ──────────────────────────────────────────────────────────
+
+type PatchResultRow = {
+  patch_run_id: string;
+  fingerprint: string;
+  repo: string;
+  diff: string | null;
+  status: string;
+  iterations: number;
+  build_command: string | null;
+  test_command: string | null;
+  worktree_path: string | null;
+  cost_usd: number | null;
+  validator_log: string | null;
+  history_json: string;
+  created_at: string;
+  updated_at: string;
+};
+
+function rowToPatchResult(row: PatchResultRow): PatchResult {
+  return {
+    patchRunId: row.patch_run_id,
+    fingerprint: row.fingerprint,
+    repo: row.repo,
+    diff: row.diff,
+    status: (parsePatchStatus(row.status) ?? "UNKNOWN") as PatchStatus,
+    iterations: row.iterations,
+    buildCommand: row.build_command,
+    testCommand: row.test_command,
+    worktreePath: row.worktree_path,
+    costUsd: row.cost_usd ?? undefined,
+    validatorLog: row.validator_log ?? undefined,
+    history: safeJsonParse<PatchResult["history"]>(row.history_json, []) ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** Insert a patch result record. */
+export function insertPatchResult(
+  db: Database.Database,
+  result: PatchResult,
+): void {
+  db.prepare(`
+    INSERT INTO patch_results (
+      patch_run_id, fingerprint, repo, diff, status,
+      iterations, build_command, test_command, worktree_path,
+      cost_usd, validator_log, history_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    result.patchRunId,
+    result.fingerprint,
+    result.repo,
+    result.diff,
+    result.status,
+    result.iterations,
+    result.buildCommand ?? null,
+    result.testCommand ?? null,
+    result.worktreePath ?? null,
+    result.costUsd ?? null,
+    result.validatorLog ?? null,
+    safeJsonStringify(result.history),
+  );
+}
+
+/** Get a single patch result by run ID. */
+export function getPatchResult(
+  db: Database.Database,
+  patchRunId: string,
+): PatchResult | undefined {
+  const row = db.prepare(`
+    SELECT * FROM patch_results WHERE patch_run_id = ?
+  `).get(patchRunId) as PatchResultRow | undefined;
+
+  return row ? rowToPatchResult(row) : undefined;
+}
+
+/** Get all patch results for a finding fingerprint, most recent first. */
+export function getPatchResultsForFinding(
+  db: Database.Database,
+  fingerprint: string,
+): PatchResult[] {
+  const rows = db.prepare(`
+    SELECT * FROM patch_results
+    WHERE fingerprint = ?
+    ORDER BY created_at DESC
+  `).all(fingerprint) as PatchResultRow[];
+
+  return rows.map(rowToPatchResult);
 }

@@ -7,7 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
-  DEFAULT_READ_ONLY_TOOLS,
+  resolveDefaultReadOnlyTools,
   runStructuredAgentQuery,
   type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
@@ -141,12 +141,12 @@ async function runSpecialist(
 
   try {
     const { structuredOutput, resultText, executionError, costUsd } =
-      await runStructuredAgentQuery({
+        await runStructuredAgentQuery({
         prompt,
         cwd: repoRoot,
         model,
         maxTurns,
-        allowedTools: Array.from<string>(DEFAULT_READ_ONLY_TOOLS),
+        allowedTools: resolveDefaultReadOnlyTools(runtimeOptions?.runtime),
         runtimeOptions,
         systemPromptPrefix: triageSystemPromptPrefix(
           repoContext,
@@ -373,7 +373,7 @@ export async function triageFindingMultiAgent(
       cwd: repoRoot,
       model: managerModel,
       maxTurns: managerMaxTurns,
-      allowedTools: Array.from<string>(DEFAULT_READ_ONLY_TOOLS),
+      allowedTools: resolveDefaultReadOnlyTools(runtimeOptions?.runtime),
       runtimeOptions,
       systemPromptPrefix: triageSystemPromptPrefix(
         repoContext,

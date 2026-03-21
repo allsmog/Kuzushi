@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
-  DEFAULT_READ_ONLY_TOOLS,
   extractJson,
+  resolveDefaultReadOnlyTools,
   resolveRepoContextAndRuntimeOptions,
   runStructuredAgentQuery,
   type AgentActivityCallback,
@@ -57,7 +57,6 @@ export const POC_HARNESS_RESULT_SCHEMA = {
   },
 } as const;
 
-export const DEFAULT_TOOLS: AllowedTriageTool[] = [...DEFAULT_READ_ONLY_TOOLS];
 export const DEFAULT_MAX_TURNS = 20;
 
 export interface PocHarnessRuntimeOptions extends AgentRuntimeOptions {}
@@ -65,6 +64,12 @@ export interface PocHarnessRuntimeOptions extends AgentRuntimeOptions {}
 export interface PocHarnessOutput {
   result: PocHarnessResult;
   costUsd: number;
+}
+
+export function resolveDefaultPocHarnessTools(
+  runtime: AgentRuntimeOptions["runtime"] | undefined,
+): AllowedTriageTool[] {
+  return normalizeAllowedTriageToolNames(resolveDefaultReadOnlyTools(runtime));
 }
 
 export class PocHarnessExecutionError extends Error {
@@ -104,7 +109,7 @@ export async function generatePocHarness(
     cwd: repoRoot,
     model,
     maxTurns: effectiveMaxTurns,
-    allowedTools: DEFAULT_TOOLS,
+    allowedTools: resolveDefaultPocHarnessTools(runtimeOptions.runtime),
     runtimeOptions,
     systemPromptPrefix: pocHarnessSystemPromptPrefix(repoContext),
     schema: POC_HARNESS_RESULT_SCHEMA,
@@ -407,4 +412,18 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   }
 
   return value;
+}
+
+function normalizeAllowedTriageToolNames(tools: readonly string[]): AllowedTriageTool[] {
+  return tools.filter((tool): tool is AllowedTriageTool =>
+    tool === "Read"
+      || tool === "Glob"
+      || tool === "Grep"
+      || tool === "GetCallers"
+      || tool === "GetCallees"
+      || tool === "GetFunctionBody"
+      || tool === "GoToDefinition"
+      || tool === "FindReferences"
+      || tool === "TypeAtPosition",
+  );
 }

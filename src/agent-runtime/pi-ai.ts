@@ -34,7 +34,19 @@ process.env.PI_CACHE_RETENTION ??= "long";
 installGlobalDispatcher();
 
 const DEFAULT_MAX_TURNS: number | undefined = undefined;
-const KNOWN_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "Bash", "Write", "GetCallers", "GetCallees", "GetFunctionBody"]);
+const KNOWN_TOOL_NAMES = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "Bash",
+  "Write",
+  "GetCallers",
+  "GetCallees",
+  "GetFunctionBody",
+  "GoToDefinition",
+  "FindReferences",
+  "TypeAtPosition",
+]);
 
 const TRANSIENT_RETRY_MAX = 3;
 const TRANSIENT_RETRY_BASE_MS = 5_000;
@@ -90,7 +102,7 @@ async function rateLimitedComplete(
   modelSpec: string,
   model: Parameters<typeof complete>[0],
   context: PiAiContext,
-  options: { signal?: AbortSignal },
+  options: { signal?: AbortSignal; temperature?: number; maxTokens?: number },
 ): Promise<PiAiAssistantMessage> {
   const registry = getRateLimitRegistry();
   // acquire() returns a safety-net release function, but we call
@@ -230,6 +242,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
       const context: PiAiContext = {
         systemPrompt: buildSystemPrompt(outputFormat?.schema, request.options.systemPromptPrefix),
         messages: [
+          ...mapHistoryToMessages(request.options.history),
           {
             role: "user",
             content: request.prompt,
@@ -285,7 +298,11 @@ export class PiAiAgentRuntime implements AgentRuntime {
           }
         }
         let assistant = await retryTransient(
-          () => rateLimitedComplete(modelSpec, model, context, { signal }),
+          () => rateLimitedComplete(modelSpec, model, context, {
+            signal,
+            temperature: request.options.temperature,
+            maxTokens: request.options.maxOutputTokens,
+          }),
           signal,
           TRANSIENT_RETRY_MAX,
           TRANSIENT_RETRY_BASE_MS,
@@ -342,7 +359,11 @@ export class PiAiAgentRuntime implements AgentRuntime {
               }
             });
             if (signal?.aborted) break;
-            assistant = await rateLimitedComplete(modelSpec, model, context, { signal });
+            assistant = await rateLimitedComplete(modelSpec, model, context, {
+              signal,
+              temperature: request.options.temperature,
+              maxTokens: request.options.maxOutputTokens,
+            });
             if (assistant.stopReason !== "error" || !assistant.errorMessage || !isTransientErrorMessage(assistant.errorMessage)) {
               retried = true;
               break;
@@ -793,7 +814,7 @@ function buildSystemPrompt(schema: Record<string, unknown> | undefined, prefix?:
 
   lines.push(
     "You are a code security agent operating on a local repository.",
-    "Use available tools (Read, Glob, Grep, Bash, Write, GetCallers, GetCallees, GetFunctionBody) when code inspection or file manipulation is required.",
+    "Use available tools (Read, Glob, Grep, Bash, Write, GetCallers, GetCallees, GetFunctionBody, GoToDefinition, FindReferences, TypeAtPosition) when code inspection or file manipulation is required.",
     "When you call tools, pass valid JSON arguments.",
   );
 
@@ -929,6 +950,20 @@ function normalizeRetryCount(value: number | undefined): number {
   }
 
   return Math.floor(value);
+}
+
+function mapHistoryToMessages(
+  history: AgentQueryRequest["options"]["history"],
+): PiAiContext["messages"] {
+  if (!Array.isArray(history) || history.length === 0) {
+    return [];
+  }
+
+  return history.map((entry) => ({
+    role: "user" as const,
+    content: `${entry.role === "assistant" ? "Assistant" : "User"}:\n${entry.content}`,
+    timestamp: Date.now(),
+  }));
 }
 
 async function canUseTool(

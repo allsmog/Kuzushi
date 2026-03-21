@@ -1,12 +1,14 @@
 import type { TaskRegistry } from "../../agents/registry.js";
-import type { TaskContext } from "../../agents/types.js";
+import type { AgentTask, TaskContext } from "../../agents/types.js";
+import { createAgentRuntimeInstance } from "../../agent-runtime/index.js";
 import type { KnowledgeRegistry } from "../../knowledge/types.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
-import type { ScannerConfig, ScannerId } from "../../scanners/types.js";
+import type { Finding, ScannerConfig, ScannerId } from "../../scanners/types.js";
+import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { KuzushiConfig } from "../../types.js";
 import { resolveScannerConfig } from "../../capabilities.js";
 import { loadSecurityProfiles } from "../../security-profiles.js";
-import { toErrorMessage } from "../../utils.js";
+import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import { executeAgentTask, executeScannerPlugin } from "../task-execution.js";
 import type { ScanStartEvent, TaskStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
@@ -18,6 +20,18 @@ export interface ScanWorkerDeps {
   config: KuzushiConfig;
   knowledgeRegistry?: KnowledgeRegistry;
 }
+
+const ENSEMBLE_ELIGIBLE_TASK_IDS = new Set([
+  "secrets-crypto-detect",
+  "code-config-detect",
+  "race-condition-detect",
+  "ssrf-detect",
+  "prototype-pollution-detect",
+  "nosql-injection-detect",
+  "template-injection-detect",
+  "supply-chain-detect",
+  "graphql-security-detect",
+]);
 
 /**
  * Scan worker: executes scanner plugins (legacy scan:start) and generic tasks (task:start).
@@ -105,7 +119,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
         knowledgeRegistry: deps.knowledgeRegistry,
       };
 
-      const executed = await executeAgentTask(task, input, taskContext, taskConfig);
+      const executed = await executeTaskWithOptionalEnsemble(task, input, taskContext, taskConfig, deps.config);
       const { output, emittedFindings, durationMs, costUsd } = executed;
 
       for (const finding of emittedFindings) {
@@ -222,4 +236,148 @@ async function runSingleScanner(
 
 function resolveTaskConfig(config: KuzushiConfig, taskId: string): ScannerConfig {
   return resolveScannerConfig(config, taskId);
+}
+
+async function executeTaskWithOptionalEnsemble(
+  task: AgentTask,
+  input: unknown,
+  taskContext: TaskContext,
+  taskConfig: ScannerConfig,
+  config: KuzushiConfig,
+) {
+  const ensembleModels = normalizeEnsembleModels(config.ensembleModels);
+  if (
+    ensembleModels.length <= 1
+    || task.outputKind !== "findings"
+    || !ENSEMBLE_ELIGIBLE_TASK_IDS.has(task.id)
+  ) {
+    return executeAgentTask(task, input, taskContext, taskConfig);
+  }
+
+  const startedAt = Date.now();
+  const laneResults = await Promise.all(
+    ensembleModels.map(async (model) => {
+      try {
+        const runtime = createAgentRuntimeInstance(config);
+        const result = await executeAgentTask(task, input, {
+          ...taskContext,
+          modelOverride: model,
+          runtimeOverride: runtime,
+        }, taskConfig);
+        return { kind: "success" as const, model, result };
+      } catch (error) {
+        return { kind: "error" as const, model, error };
+      }
+    }),
+  );
+
+  const successes = laneResults.filter((lane): lane is Extract<typeof laneResults[number], { kind: "success" }> => lane.kind === "success");
+  if (successes.length === 0) {
+    const firstError = laneResults.find((lane): lane is Extract<typeof laneResults[number], { kind: "error" }> => lane.kind === "error");
+    throw firstError?.error ?? new Error(`All ensemble runs failed for task "${task.id}"`);
+  }
+
+  const mergedFindings = mergeEnsembleFindings(
+    successes.flatMap((lane) => lane.result.emittedFindings.map((finding) => ({ finding, model: lane.model }))),
+  );
+  const costUsd = successes.reduce((sum, lane) => sum + normalizeCostUsd(lane.result.costUsd), 0);
+  const output = attachTaskOutputMeta(mergedFindings, { costUsd });
+
+  return {
+    output,
+    emittedFindings: mergedFindings,
+    durationMs: Date.now() - startedAt,
+    costUsd,
+  };
+}
+
+function normalizeEnsembleModels(value: KuzushiConfig["ensembleModels"]): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const unique = new Set<string>();
+  for (const model of value) {
+    if (typeof model !== "string") {
+      continue;
+    }
+    const trimmed = model.trim();
+    if (trimmed) {
+      unique.add(trimmed);
+    }
+  }
+  return [...unique];
+}
+
+function mergeEnsembleFindings(
+  findings: Array<{ finding: Finding; model: string }>,
+): Finding[] {
+  const groups = new Map<string, Array<{ finding: Finding; model: string }>>();
+  for (const entry of findings) {
+    const key = buildEnsembleKey(entry.finding);
+    const group = groups.get(key) ?? [];
+    group.push(entry);
+    groups.set(key, group);
+  }
+
+  const merged: Finding[] = [];
+  for (const group of groups.values()) {
+    const sorted = [...group].sort(
+      (left, right) => getFindingScore(right.finding) - getFindingScore(left.finding),
+    );
+    const primary = sorted[0].finding;
+    const corroboratingSignals = [
+      ...(primary.corroboratingSignals ?? []),
+      ...sorted.slice(1).map(({ finding, model }) => ({
+        scanner: `${finding.scanner}:${model}`,
+        fingerprint: finding.fingerprint,
+        ruleId: finding.ruleId,
+        filePath: finding.filePath,
+        startLine: finding.startLine,
+        cwe: [...finding.cwe],
+        score: finding.score,
+      })),
+    ];
+    const corroboratingModels = new Set(sorted.map(({ model }) => model));
+    const corroborationBoost = Math.min(15, Math.max(0, corroboratingModels.size - 1) * 5);
+    const adjustedScore = Math.min(100, getFindingScore(primary) + corroborationBoost);
+
+    merged.push({
+      ...primary,
+      adjustedScore,
+      scannerConfidence: boostScannerConfidence(primary.scannerConfidence, corroboratingModels.size),
+      corroboratingSignals: corroboratingSignals.length > 0 ? corroboratingSignals : primary.corroboratingSignals,
+    });
+  }
+
+  merged.sort((left, right) => getFindingScore(right) - getFindingScore(left));
+  return merged;
+}
+
+function buildEnsembleKey(finding: Finding): string {
+  const normalizedCwe = [...new Set(finding.cwe.map((entry) => entry.trim().toUpperCase()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right))
+    .join(",");
+  return [
+    finding.filePath.replace(/\\/g, "/").toLowerCase(),
+    Math.max(1, Math.floor(finding.startLine)),
+    normalizedCwe,
+  ].join("|");
+}
+
+function getFindingScore(finding: Finding): number {
+  return finding.adjustedScore ?? finding.score;
+}
+
+function boostScannerConfidence(
+  confidence: string,
+  corroboratingModels: number,
+): string {
+  if (corroboratingModels <= 1) {
+    return confidence;
+  }
+  if (confidence === "LOW") {
+    return "MEDIUM";
+  }
+  return "HIGH";
 }

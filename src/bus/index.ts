@@ -13,8 +13,11 @@ import { registerScanWorker } from "./workers/scan-worker.js";
 import { registerStoreWorker } from "./workers/store-worker.js";
 import { registerTriageWorker } from "./workers/triage-worker.js";
 import { registerPocHarnessWorker } from "./workers/poc-harness-worker.js";
+import { registerPocExecutorWorker } from "./workers/poc-executor-worker.js";
 import { registerVerificationWorker } from "./workers/verification-worker.js";
 import { registerTaintAnalysisRefinementWorker } from "./workers/taint-analysis-refinement-worker.js";
+import { registerDynamicAnalysisWorker } from "./workers/dynamic-analysis-worker.js";
+import { createPocExecutor } from "../poc-executor/index.js";
 
 export interface RegisterWorkersDeps {
   registry: ScannerRegistry;
@@ -24,7 +27,7 @@ export interface RegisterWorkersDeps {
 }
 
 /** Register orchestrator + all built-in workers on a bus instance. */
-export function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): void {
+export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): Promise<void> {
   const { taskRegistry } = deps;
   const knowledgeRegistry = createDefaultKnowledgeRegistry();
 
@@ -63,6 +66,18 @@ export function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): 
     });
   }
 
+  if (
+    deps.config.pocHarness
+    || deps.config.pocExecute === true
+    || (deps.config.verifyRefinementMaxIterations ?? 1) > 1
+  ) {
+    const executor = await createPocExecutor(
+      deps.config.pocSandbox ?? "docker",
+      deps.config.pocExecTimeoutMs,
+    );
+    registerPocExecutorWorker(bus, executor);
+  }
+
   registerStoreWorker(bus, {
     db: deps.db,
   });
@@ -77,6 +92,13 @@ export function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): 
     taskRegistry,
     config: deps.config,
   });
+
+  if (deps.config.dynamicAnalysisEnabled) {
+    registerDynamicAnalysisWorker(bus, {
+      config: deps.config,
+      db: deps.db,
+    });
+  }
 
   if (deps.config.auditLog) {
     registerAuditWorker(bus, {
@@ -108,3 +130,4 @@ export * from "./workers/audit-worker.js";
 export * from "./workers/report-worker.js";
 export * from "./workers/taint-analysis-artifact-worker.js";
 export * from "./workers/taint-analysis-refinement-worker.js";
+export * from "./workers/dynamic-analysis-worker.js";

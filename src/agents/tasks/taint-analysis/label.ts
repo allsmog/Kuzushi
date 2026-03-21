@@ -400,6 +400,7 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
       tiPriorJsonPath: preflight.tiPriorJsonPath,
       tiPriorDegraded: preflight.tiPriorDegraded,
       extractionDegradation: preflight.extractionDegradation,
+      diffScope: preflight.diffScope,
       labelsPath,
       labels,
       taintModelPath,

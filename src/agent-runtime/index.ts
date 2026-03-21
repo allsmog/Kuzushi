@@ -14,12 +14,16 @@ export function setAgentRuntime(runtime: AgentRuntime): void {
 }
 
 export function configureAgentRuntime(config: KuzushiConfig): AgentRuntime {
+  currentRuntime = createAgentRuntimeInstance(config);
+  return currentRuntime;
+}
+
+export function createAgentRuntimeInstance(config: KuzushiConfig): AgentRuntime {
   const backend = config.agentRuntimeBackend ?? "pi-ai";
   const runtimeConfig = config.agentRuntimeConfig;
 
   if (backend === "pi-ai") {
-    currentRuntime = new PiAiAgentRuntime(runtimeConfig);
-    return currentRuntime;
+    return new PiAiAgentRuntime(runtimeConfig);
   }
 
   if (backend === "acp") {
@@ -30,8 +34,7 @@ export function configureAgentRuntime(config: KuzushiConfig): AgentRuntime {
         + "Set it in config or pass --acp-adapter-command.",
       );
     }
-    currentRuntime = new AcpAgentRuntime(adapterCommand, runtimeConfig);
-    return currentRuntime;
+    return new AcpAgentRuntime(adapterCommand, runtimeConfig);
   }
 
   throw new Error(

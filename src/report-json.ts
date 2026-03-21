@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
 import type { ExploitChain } from "./types.js";
+import { summarizeTaintPath } from "./findings/taint-path.js";
 import { getActionableFindings } from "./store.js";
 
 interface JsonReportMeta {
@@ -85,6 +86,10 @@ export function writeJsonReport(
     confidence: f.confidence,
     rationale: f.rationale,
     fixPatch: f.fixPatch,
+    taintPath: f.taintPath,
+    taintPathSummary: summarizeTaintPath(f.taintPath),
+    proofState: f.proofState,
+    engineProvenance: f.engineProvenance,
     verifyExploitable: f.verifyExploitable,
     verifyPocPayload: f.verifyPocPayload,
     verifyPocDescription: f.verifyPocDescription,
@@ -99,6 +104,11 @@ export function writeJsonReport(
     pocHarnessSkipped: f.pocHarnessSkipped,
     pocHarnessSkipReason: f.pocHarnessSkipReason,
     pocHarnessCostUsd: f.pocHarnessCostUsd,
+    pocRunExitCode: f.pocRunExitCode,
+    pocRunStdout: f.pocRunStdout,
+    pocRunStderr: f.pocRunStderr,
+    pocRunVerdict: f.pocRunVerdict,
+    pocRunDurationMs: f.pocRunDurationMs,
   }));
 
   const data: JsonReportData = {

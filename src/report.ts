@@ -3,6 +3,7 @@ import path from "node:path";
 import type { ExploitChain, TriageResult, Verdict } from "./types.js";
 import type { ScannerId } from "./scanners/types.js";
 import type { QualityGateResult } from "./quality-gate.js";
+import { formatTaintPathForDisplay, summarizeTaintPath } from "./findings/taint-path.js";
 import type { RunMetrics } from "./scoring/run-metrics.js";
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
@@ -156,6 +157,9 @@ export function printSummary(
   if ((options.stats?.skippedByFpFilter ?? 0) > 0) {
     console.log(`  ${chalk.dim("Skipped (hard exclusions):")} ${options.stats?.skippedByFpFilter}`);
   }
+  if ((options.stats?.skippedByClassifier ?? 0) > 0) {
+    console.log(`  ${chalk.dim("Skipped (quick classifier):")} ${options.stats?.skippedByClassifier}`);
+  }
   if ((options.stats?.softSuppressedFindings ?? 0) > 0) {
     console.log(`  ${chalk.dim("Soft-suppressed findings:")} ${options.stats?.softSuppressedFindings}`);
   }
@@ -192,6 +196,24 @@ export function printSummary(
   if ((options.stats?.variantFindings ?? 0) > 0) {
     console.log("");
     console.log(`  ${chalk.cyan("Variant findings:")}  ${options.stats?.variantFindings}`);
+  }
+
+  const dynConfirmed = options.stats?.dynamicConfirmed ?? 0;
+  const dynInteresting = options.stats?.dynamicInteresting ?? 0;
+  const dynRejected = options.stats?.dynamicRejected ?? 0;
+  const dynErrors = options.stats?.dynamicErrors ?? 0;
+  if (dynConfirmed + dynInteresting + dynRejected + dynErrors > 0) {
+    console.log("");
+    console.log(chalk.bold("  Dynamic Analysis:"));
+    console.log(`    ${chalk.red.bold("Confirmed:")}   ${dynConfirmed}`);
+    console.log(`    ${chalk.yellow("Interesting:")} ${dynInteresting}`);
+    console.log(`    ${chalk.green("Rejected:")}    ${dynRejected}`);
+    if (dynErrors > 0) {
+      console.log(`    ${chalk.red("Errors:")}      ${dynErrors}`);
+    }
+    if (options.stats?.dynamicCostUsd) {
+      console.log(`    ${chalk.dim("Cost:")}        $${options.stats.dynamicCostUsd.toFixed(4)}`);
+    }
   }
 
   const chains = options.exploitChains;
@@ -243,6 +265,19 @@ export function printSummary(
       }
       if (f.verifyAttackVector) {
         console.log(`    ${chalk.cyan("Vector:")} ${f.verifyAttackVector}`);
+      }
+      if (f.proofState) {
+        console.log(`    ${chalk.magenta("Proof State:")} ${formatProofStateLabel(f.proofState)}`);
+      }
+      if (f.engineProvenance && f.engineProvenance.length > 0) {
+        console.log(`    ${chalk.dim("Engine Provenance:")} ${formatEngineProvenance(f.engineProvenance)}`);
+      }
+      const taintPathSummary = summarizeTaintPath(f.taintPath);
+      if (taintPathSummary) {
+        console.log(`    ${chalk.dim("Taint Path:")} ${taintPathSummary}`);
+        for (const line of formatTaintPathForDisplay(f.taintPath, 3)) {
+          console.log(`      ${chalk.dim(line)}`);
+        }
       }
       if (f.corroboratingSignals.length > 0) {
         const scanners = [...new Set(f.corroboratingSignals.map((signal) => signal.scanner))];
@@ -367,6 +402,15 @@ function printMetricsSummary(metrics: RunMetrics): void {
   if (metrics.exploitabilityRate != null) {
     console.log(`  ${chalk.dim("Exploitability rate:")} ${(metrics.exploitabilityRate * 100).toFixed(1)}%`);
   }
+  console.log(`  ${chalk.dim("Structured evidence:")} taint-path=${metrics.structuredEvidence.findingsWithTaintPath}`);
+  const proofEntries = Object.entries(metrics.structuredEvidence.proofStateCounts);
+  if (proofEntries.length > 0) {
+    console.log(`  ${chalk.dim("Proof states:")} ${proofEntries.map(([state, count]) => `${state}=${count}`).join(", ")}`);
+  }
+  const engineEntries = Object.entries(metrics.structuredEvidence.engineKindCounts);
+  if (engineEntries.length > 0) {
+    console.log(`  ${chalk.dim("Engine provenance:")} ${engineEntries.map(([kind, count]) => `${kind}=${count}`).join(", ")}`);
+  }
 
   // Duration breakdown
   console.log("");
@@ -378,6 +422,16 @@ function printMetricsSummary(metrics: RunMetrics): void {
 
   // Cost breakdown
   console.log(`  ${chalk.dim("Cost:")} triage=$${metrics.costBreakdown.triage.toFixed(4)} verify=$${metrics.costBreakdown.verify.toFixed(4)} poc=$${metrics.costBreakdown.pocHarness.toFixed(4)} variant=$${metrics.costBreakdown.variantAnalysis.toFixed(4)} total=$${metrics.costBreakdown.total.toFixed(4)}`);
+}
+
+function formatProofStateLabel(proofState: string): string {
+  return proofState.replace(/_/g, " ");
+}
+
+function formatEngineProvenance(
+  engineProvenance: Array<{ kind: string; detail: string }>,
+): string {
+  return engineProvenance.map((entry) => `${entry.kind}:${entry.detail}`).join(", ");
 }
 
 /** Print a short line when starting a scan. */

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -17,6 +16,7 @@ import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 import { filterCategories, type CategoryRelevance } from "./category-filter.js";
+import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
 
 const log = createLogger({ stage: "secrets-crypto-detect" });
 
@@ -65,13 +65,8 @@ interface SecretsCryptoConfig {
 }
 
 function resolveConfig(ctx: TaskContext): SecretsCryptoConfig {
-  const raw = ctx.config.scannerConfig["secrets-crypto-detect"];
-  const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
-    ? raw["model"].trim()
-    : ctx.config.model;
-  const maxFindings = (isRecord(raw) && typeof raw["maxFindings"] === "number" && raw["maxFindings"] >= 1)
-    ? Math.floor(raw["maxFindings"])
-    : 100;
+  const model = resolveTaskModel(ctx, "secrets-crypto-detect");
+  const maxFindings = resolveTaskPositiveInt(ctx, "secrets-crypto-detect", "maxFindings", 100);
   return { model, maxFindings };
 }
 
@@ -334,7 +329,7 @@ export const secretsCryptoDetectTask: AgentTask<ScanOpts, Finding[]> = {
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
     const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
-    const runtime = getAgentRuntime();
+    const runtime = resolveTaskRuntime(context);
 
     let structuredOutput: unknown;
     let resultText = "";
@@ -350,7 +345,7 @@ export const secretsCryptoDetectTask: AgentTask<ScanOpts, Finding[]> = {
           cwd: context.repoRoot,
           model,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
+          allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",

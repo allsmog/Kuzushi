@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import type Database from "better-sqlite3";
+import { summarizeTaintPath } from "./findings/taint-path.js";
 import { getActionableFindings } from "./store.js";
 
 /**
@@ -54,6 +55,10 @@ export function writeJsonlReport(
       confidence: f.confidence,
       rationale: f.rationale,
       fixPatch: f.fixPatch,
+      taintPath: f.taintPath,
+      taintPathSummary: summarizeTaintPath(f.taintPath),
+      proofState: f.proofState,
+      engineProvenance: f.engineProvenance,
       verifyExploitable: f.verifyExploitable,
       verifyPocPayload: f.verifyPocPayload,
       verifyPocDescription: f.verifyPocDescription,
@@ -68,6 +73,11 @@ export function writeJsonlReport(
       pocHarnessSkipped: f.pocHarnessSkipped,
       pocHarnessSkipReason: f.pocHarnessSkipReason,
       pocHarnessCostUsd: f.pocHarnessCostUsd,
+      pocRunExitCode: f.pocRunExitCode,
+      pocRunStdout: f.pocRunStdout,
+      pocRunStderr: f.pocRunStderr,
+      pocRunVerdict: f.pocRunVerdict,
+      pocRunDurationMs: f.pocRunDurationMs,
     }));
   }
 

@@ -68,6 +68,12 @@ function detectAndMarkLegacyDatabase(
   const trajectoriesTable = db.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'trajectories'",
   ).get() as { name: string } | undefined;
+  const dynamicAnalysisRunsTable = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'dynamic_analysis_runs'",
+  ).get() as { name: string } | undefined;
+  const patchResultsTable = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'patch_results'",
+  ).get() as { name: string } | undefined;
 
   const now = new Date().toISOString();
   const insertVersion = db.prepare(
@@ -149,6 +155,18 @@ function detectAndMarkLegacyDatabase(
   if (trajectoriesTable) {
     insertVersion.run(11, "add_trajectories_table", now);
     applied.add(11);
+  }
+
+  // Migration 016: structured finding evidence columns
+  if (findingsColumns.has("taint_path_json") && findingsColumns.has("proof_state") && findingsColumns.has("engine_provenance_json")) {
+    insertVersion.run(16, "add_structured_finding_evidence", now);
+    applied.add(16);
+  }
+
+  // Migration 017: dynamic + patch persistence
+  if (findingsColumns.has("finding_metadata_json") && dynamicAnalysisRunsTable && patchResultsTable) {
+    insertVersion.run(17, "add_dynamic_and_patch_persistence", now);
+    applied.add(17);
   }
 
   return applied;

@@ -61,6 +61,11 @@ describe("loadConfig", () => {
     expect(config.maxPocHarnessRetries).toBe(DEFAULTS.maxPocHarnessRetries);
     expect(config.retryBackoffMs).toBe(DEFAULTS.retryBackoffMs);
     expect(config.retryBackoffMultiplier).toBe(DEFAULTS.retryBackoffMultiplier);
+    expect(config.enableClassifier).toBe(DEFAULTS.enableClassifier);
+    expect(config.classifierThreshold).toBe(DEFAULTS.classifierThreshold);
+    expect(config.ensembleModels).toEqual(DEFAULTS.ensembleModels);
+    expect(config.pocRefinementMaxIterations).toBe(DEFAULTS.pocRefinementMaxIterations);
+    expect(config.verifyRefinementMaxIterations).toBe(DEFAULTS.verifyRefinementMaxIterations);
     expect(config.agentRuntimeConfig).toBe(DEFAULTS.agentRuntimeConfig);
     expect(config.scanners).toEqual(DEFAULTS.scanners);
   });
@@ -88,6 +93,14 @@ describe("loadConfig", () => {
       maxPocHarnessRetries: 6,
       retryBackoffMs: 2000,
       retryBackoffMultiplier: 3,
+      enableClassifier: true,
+      classifierModel: "anthropic:claude-haiku-4-5",
+      classifierThreshold: 0.65,
+      ensembleModels: ["anthropic:claude-haiku-4-5", "openai:gpt-4o"],
+      pocRefinementMaxIterations: 4,
+      pocReflectionInterval: 3,
+      verifyRefinementMaxIterations: 5,
+      verifyReflectionInterval: 4,
       agentRuntimeConfig: {
         apiKey: "sk-test",
         baseUrl: "https://api.example.com/",
@@ -116,6 +129,14 @@ describe("loadConfig", () => {
     expect(config.maxPocHarnessRetries).toBe(6);
     expect(config.retryBackoffMs).toBe(2000);
     expect(config.retryBackoffMultiplier).toBe(3);
+    expect(config.enableClassifier).toBe(true);
+    expect(config.classifierModel).toBe("anthropic:claude-haiku-4-5");
+    expect(config.classifierThreshold).toBe(0.65);
+    expect(config.ensembleModels).toEqual(["anthropic:claude-haiku-4-5", "openai:gpt-4o"]);
+    expect(config.pocRefinementMaxIterations).toBe(4);
+    expect(config.pocReflectionInterval).toBe(3);
+    expect(config.verifyRefinementMaxIterations).toBe(5);
+    expect(config.verifyReflectionInterval).toBe(4);
     expect(config.agentRuntimeConfig).toEqual({
       apiKey: "sk-test",
       baseUrl: "https://api.example.com/",
@@ -260,6 +281,26 @@ describe("setConfigValue", () => {
     expect(getConfigValue("maxPocHarnessRetries")).toBe(5);
     expect(getConfigValue("retryBackoffMs")).toBe(1200);
     expect(getConfigValue("retryBackoffMultiplier")).toBe(2.5);
+  });
+
+  it("sets classifier, ensemble, and refinement settings", () => {
+    setConfigValue("enableClassifier", "true");
+    setConfigValue("classifierModel", "anthropic:claude-haiku-4-5");
+    setConfigValue("classifierThreshold", "0.7");
+    setConfigValue("ensembleModels", "anthropic:claude-haiku-4-5,openai:gpt-4o");
+    setConfigValue("pocRefinementMaxIterations", "4");
+    setConfigValue("pocReflectionInterval", "3");
+    setConfigValue("verifyRefinementMaxIterations", "5");
+    setConfigValue("verifyReflectionInterval", "2");
+
+    expect(getConfigValue("enableClassifier")).toBe(true);
+    expect(getConfigValue("classifierModel")).toBe("anthropic:claude-haiku-4-5");
+    expect(getConfigValue("classifierThreshold")).toBe(0.7);
+    expect(getConfigValue("ensembleModels")).toEqual(["anthropic:claude-haiku-4-5", "openai:gpt-4o"]);
+    expect(getConfigValue("pocRefinementMaxIterations")).toBe(4);
+    expect(getConfigValue("pocReflectionInterval")).toBe(3);
+    expect(getConfigValue("verifyRefinementMaxIterations")).toBe(5);
+    expect(getConfigValue("verifyReflectionInterval")).toBe(2);
   });
 
   it("sets number values", () => {

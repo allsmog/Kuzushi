@@ -1,10 +1,12 @@
 import type { Finding } from "../scanners/types.js";
+import type { PipelineStats } from "../bus/events.js";
 
 export interface DurationBreakdown {
   scan: number;
   triage: number;
   verify?: number;
   pocHarness?: number;
+  dynamicAnalysis?: number;
   total: number;
 }
 
@@ -12,8 +14,15 @@ export interface CostBreakdown {
   triage: number;
   verify: number;
   pocHarness: number;
+  dynamicAnalysis: number;
   variantAnalysis: number;
   total: number;
+}
+
+export interface StructuredEvidenceMetrics {
+  findingsWithTaintPath: number;
+  proofStateCounts: Record<string, number>;
+  engineKindCounts: Record<string, number>;
 }
 
 export interface RunMetrics {
@@ -26,6 +35,19 @@ export interface RunMetrics {
   durationBreakdown: DurationBreakdown;
   costBreakdown: CostBreakdown;
   exploitabilityRate?: number;
+  structuredEvidence: StructuredEvidenceMetrics;
+  classifierDrops?: number;
+  corroboratedClusters?: number;
+  verificationOutcomes?: {
+    exploitable: number;
+    notExploitable: number;
+    errors: number;
+  };
+  pocOutcomes?: {
+    generated: number;
+    skipped: number;
+    errors: number;
+  };
   assertionSummary?: {
     totalAssertions: number;
     passedAssertions: number;
@@ -46,12 +68,15 @@ export interface StageTimestamps {
   verifyEnd?: string;
   pocStart?: string;
   pocEnd?: string;
+  dynamicStart?: string;
+  dynamicEnd?: string;
 }
 
 export interface StageCosts {
   triage: number;
   verify: number;
   pocHarness: number;
+  dynamicAnalysis: number;
   variantAnalysis: number;
 }
 
@@ -67,11 +92,15 @@ export function computeRunMetrics(
   findings: Finding[],
   timestamps: StageTimestamps,
   costs: StageCosts,
+  pipelineStats?: Partial<PipelineStats>,
 ): RunMetrics {
   // Verdict counts
   const verdictCounts: Record<string, number> = {};
   const severityCounts: Record<string, number> = {};
   const scannerYield: Record<string, number> = {};
+  const proofStateCounts: Record<string, number> = {};
+  const engineKindCounts: Record<string, number> = {};
+  let findingsWithTaintPath = 0;
   let totalConfidence = 0;
   let confidenceCount = 0;
 
@@ -99,6 +128,23 @@ export function computeRunMetrics(
       totalConfidence += confidence;
       confidenceCount += 1;
     }
+
+    if (Array.isArray(f.taintPath) && f.taintPath.length > 0) {
+      findingsWithTaintPath += 1;
+    }
+
+    if (typeof f.proofState === "string" && f.proofState.length > 0) {
+      proofStateCounts[f.proofState] = (proofStateCounts[f.proofState] ?? 0) + 1;
+    }
+
+    const engineKinds = new Set(
+      (f.engineProvenance ?? [])
+        .map((entry) => entry.kind)
+        .filter((kind) => typeof kind === "string" && kind.length > 0),
+    );
+    for (const kind of engineKinds) {
+      engineKindCounts[kind] = (engineKindCounts[kind] ?? 0) + 1;
+    }
   }
 
   const total = Object.values(verdictCounts).reduce((s, n) => s + n, 0);
@@ -113,6 +159,7 @@ export function computeRunMetrics(
   const triageDuration = msBetween(timestamps.triageStart, timestamps.triageEnd);
   const verifyDuration = msBetween(timestamps.verifyStart, timestamps.verifyEnd);
   const pocDuration = msBetween(timestamps.pocStart, timestamps.pocEnd);
+  const dynamicDuration = msBetween(timestamps.dynamicStart, timestamps.dynamicEnd);
   const totalDuration = msBetween(timestamps.pipelineStart, timestamps.pipelineEnd);
 
   const durationBreakdown: DurationBreakdown = {
@@ -126,13 +173,17 @@ export function computeRunMetrics(
   if (pocDuration > 0) {
     durationBreakdown.pocHarness = pocDuration;
   }
+  if (dynamicDuration > 0) {
+    durationBreakdown.dynamicAnalysis = dynamicDuration;
+  }
 
   // Cost breakdown
-  const costTotal = costs.triage + costs.verify + costs.pocHarness + costs.variantAnalysis;
+  const costTotal = costs.triage + costs.verify + costs.pocHarness + costs.dynamicAnalysis + costs.variantAnalysis;
   const costBreakdown: CostBreakdown = {
     triage: costs.triage,
     verify: costs.verify,
     pocHarness: costs.pocHarness,
+    dynamicAnalysis: costs.dynamicAnalysis,
     variantAnalysis: costs.variantAnalysis,
     total: costTotal,
   };
@@ -150,6 +201,39 @@ export function computeRunMetrics(
     exploitabilityRate = exploitable / verified;
   }
 
+  const structuredEvidence: StructuredEvidenceMetrics = {
+    findingsWithTaintPath,
+    proofStateCounts,
+    engineKindCounts,
+  };
+
+  // Pipeline stats propagation
+  const classifierDrops = pipelineStats?.skippedByClassifier;
+  const corroboratedClusters = pipelineStats?.corroboratedClusters;
+
+  const verifiedCount = pipelineStats?.verified ?? 0;
+  const verifyErrors = pipelineStats?.verifyErrors ?? 0;
+  let verificationOutcomes: RunMetrics["verificationOutcomes"];
+  if (verifiedCount > 0 || verifyErrors > 0) {
+    verificationOutcomes = {
+      exploitable: exploitable,
+      notExploitable: verifiedCount - exploitable,
+      errors: verifyErrors,
+    };
+  }
+
+  const pocGenerated = pipelineStats?.pocHarnessGenerated ?? 0;
+  const pocSkipped = pipelineStats?.pocHarnessSkipped ?? 0;
+  const pocErrors = pipelineStats?.pocHarnessErrors ?? 0;
+  let pocOutcomes: RunMetrics["pocOutcomes"];
+  if (pocGenerated > 0 || pocSkipped > 0 || pocErrors > 0) {
+    pocOutcomes = {
+      generated: pocGenerated,
+      skipped: pocSkipped,
+      errors: pocErrors,
+    };
+  }
+
   return {
     verdictCounts,
     severityCounts,
@@ -160,6 +244,11 @@ export function computeRunMetrics(
     durationBreakdown,
     costBreakdown,
     exploitabilityRate,
+    structuredEvidence,
+    classifierDrops,
+    corroboratedClusters,
+    verificationOutcomes,
+    pocOutcomes,
   };
 }
 
@@ -217,6 +306,18 @@ export function formatMetricsSummary(metrics: RunMetrics): string {
     lines.push("");
   }
 
+  lines.push("Structured Evidence:");
+  lines.push(`  Findings With Taint Path: ${metrics.structuredEvidence.findingsWithTaintPath}`);
+  const proofEntries = Object.entries(metrics.structuredEvidence.proofStateCounts);
+  if (proofEntries.length > 0) {
+    lines.push(`  Proof States: ${proofEntries.map(([state, count]) => `${state}=${count}`).join(", ")}`);
+  }
+  const engineEntries = Object.entries(metrics.structuredEvidence.engineKindCounts);
+  if (engineEntries.length > 0) {
+    lines.push(`  Engine Provenance: ${engineEntries.map(([kind, count]) => `${kind}=${count}`).join(", ")}`);
+  }
+  lines.push("");
+
   // Duration breakdown
   lines.push("Duration Breakdown:");
   lines.push(`  Scan:    ${formatDuration(metrics.durationBreakdown.scan)}`);
@@ -229,6 +330,25 @@ export function formatMetricsSummary(metrics: RunMetrics): string {
   }
   lines.push(`  Total:   ${formatDuration(metrics.durationBreakdown.total)}`);
   lines.push("");
+
+  // Pipeline quality
+  if (metrics.classifierDrops != null && metrics.classifierDrops > 0) {
+    lines.push(`Classifier Drops: ${metrics.classifierDrops}`);
+  }
+  if (metrics.corroboratedClusters != null && metrics.corroboratedClusters > 0) {
+    lines.push(`Corroborated Clusters: ${metrics.corroboratedClusters}`);
+  }
+  if (metrics.verificationOutcomes) {
+    const v = metrics.verificationOutcomes;
+    lines.push(`Verification: ${v.exploitable} exploitable, ${v.notExploitable} not exploitable, ${v.errors} errors`);
+  }
+  if (metrics.pocOutcomes) {
+    const p = metrics.pocOutcomes;
+    lines.push(`PoC Generation: ${p.generated} generated, ${p.skipped} skipped, ${p.errors} errors`);
+  }
+  if (metrics.classifierDrops || metrics.corroboratedClusters || metrics.verificationOutcomes || metrics.pocOutcomes) {
+    lines.push("");
+  }
 
   // Cost breakdown
   lines.push("Cost Breakdown:");

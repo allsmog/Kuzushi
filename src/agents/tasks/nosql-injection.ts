@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -16,6 +15,11 @@ import { getProfilesForTask, formatProfilesForPrompt } from "../../security-prof
 import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
+import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
+import { buildThreatModelLeadsSection } from "./threat-model-guidance.js";
+import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
+import { resolveTaskAllowedTools } from "./runtime-overrides.js";
+import type { ApplicationModel } from "../../types.js";
 
 const log = createLogger({ stage: "nosql-injection" });
 
@@ -66,17 +70,12 @@ interface NosqlInjectionConfig {
 }
 
 function resolveConfig(ctx: TaskContext): NosqlInjectionConfig {
-  const raw = ctx.config.scannerConfig["nosql-injection"];
-  const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
-    ? raw["model"].trim()
-    : ctx.config.model;
-  const maxFindings = (isRecord(raw) && typeof raw["maxFindings"] === "number" && raw["maxFindings"] >= 1)
-    ? Math.floor(raw["maxFindings"])
-    : 50;
+  const model = resolveTaskModel(ctx, "nosql-injection");
+  const maxFindings = resolveTaskPositiveInt(ctx, "nosql-injection", "maxFindings", 50);
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult, threatModelContext?: string, appModelContext?: string, scenarioContext?: string): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
 
   const contextLines = repoContext
@@ -113,6 +112,9 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...contextLines,
     ...frameworkGuidance,
     ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    ...(threatModelContext ? [threatModelContext, ""] : []),
+    ...(appModelContext ? [appModelContext, ""] : []),
+    ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
     "### query-operator-injection (CWE-943)",
@@ -233,7 +235,7 @@ export const nosqlInjectionTask: AgentTask<ScanOpts, Finding[]> = {
   id: "nosql-injection-detect",
   displayName: "NoSQL Injection Detector",
   outputKind: "findings",
-  dependsOn: ["context-gatherer"],
+  dependsOn: ["context-gatherer", "app-model-build", "threat-scenario-build"],
 
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
@@ -244,54 +246,57 @@ export const nosqlInjectionTask: AgentTask<ScanOpts, Finding[]> = {
       ? getProfilesForTask(context.securityProfiles, "nosql-injection-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
-    const runtime = getAgentRuntime();
-
-    let structuredOutput: unknown;
-    let resultText = "";
-    let costUsd = 0;
+    const threatModelContext = buildThreatModelLeadsSection(
+      "nosql-injection-detect",
+      context.upstreamOutputs.get("threat-model-stride"),
+      fileIndex,
+      preRead,
+    );
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
+    const appModelContext = buildApplicationModelSection("nosql-injection-detect", applicationModel);
+    const scenarioContext = await buildThreatScenarioEvidenceSection("nosql-injection-detect", context.repoRoot, applicationModel, scenarioOutput);
 
     const tag = "[nosql-injection]";
-    log.info(`Starting scan (model=${model})`);
+    const lensMaxTurns = Math.min(context.config.taskMaxTurns ?? 15, 8);
+    const perLensMax = Math.ceil(maxFindings / 2);
+    log.info(`Starting multi-lens scan (model=${model})`);
 
-    try {
-      for await (const message of runtime.query({
-        prompt,
-        options: {
-          cwd: context.repoRoot,
-          model,
-          maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
-          permissionMode: "dontAsk",
-          outputFormat: {
-            type: "json_schema",
-            schema: NOSQL_INJECTION_SCHEMA,
-            strict: true,
-            retryInvalidStructuredOutput: 2,
-          },
-        },
-      })) {
-        if (message.type !== "result") continue;
-        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-          costUsd = message.totalCostUsd;
-        }
-        if ("result" in message) {
-          resultText = message.result;
-          structuredOutput = message.structuredOutput;
-        }
+    const lensResults = await Promise.all([
+      runLens(
+        buildQueryBuilderLensPrompt(repoContext, perLensMax, profileLines, preRead, threatModelContext, appModelContext, scenarioContext),
+        context, model, lensMaxTurns, `${tag}/query-builder`,
+      ).catch((error) => {
+        log.error(`${tag}/query-builder lens error: ${toErrorMessage(error)}`);
+        return { output: { findings: [] }, costUsd: 0 };
+      }),
+      runLens(
+        buildRawOperatorLensPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
+        context, model, lensMaxTurns, `${tag}/raw-operator`,
+      ).catch((error) => {
+        log.error(`${tag}/raw-operator lens error: ${toErrorMessage(error)}`);
+        return { output: { findings: [] }, costUsd: 0 };
+      }),
+    ]);
+
+    let totalCostUsd = 0;
+    const allFindings: Finding[] = [];
+    for (const result of lensResults) {
+      totalCostUsd += result.costUsd;
+      allFindings.push(...normalizeFindings(result.output, context.repoRoot, context.repoName, perLensMax));
+    }
+
+    const deduped = new Map<string, Finding>();
+    for (const f of allFindings) {
+      const existing = deduped.get(f.fingerprint);
+      if (!existing || f.score > existing.score) {
+        deduped.set(f.fingerprint, f);
       }
-    } catch (error) {
-      throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
     return attachTaskOutputMeta(
-      normalizeFindings(
-        structuredOutput ?? parseJson(resultText, tag),
-        context.repoRoot,
-        context.repoName,
-        maxFindings,
-      ),
-      { costUsd },
+      [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings),
+      { costUsd: totalCostUsd },
     );
   },
 
@@ -320,6 +325,121 @@ function parseJson(text: string, tag: string): unknown {
   } catch (error) {
     throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
   }
+}
+
+interface LensResult {
+  output: unknown;
+  costUsd: number;
+}
+
+async function runLens(
+  prompt: string,
+  context: TaskContext,
+  model: string,
+  maxTurns: number,
+  tag: string,
+): Promise<LensResult> {
+  const runtime = resolveTaskRuntime(context);
+  let structuredOutput: unknown;
+  let resultText = "";
+  let costUsd = 0;
+
+  for await (const message of runtime.query({
+    prompt,
+    options: {
+      cwd: context.repoRoot,
+      model,
+      maxTurns,
+      allowedTools: resolveTaskAllowedTools(context),
+      permissionMode: "dontAsk",
+      outputFormat: {
+        type: "json_schema",
+        schema: NOSQL_INJECTION_SCHEMA,
+        strict: true,
+        retryInvalidStructuredOutput: 1,
+      },
+    },
+  })) {
+    if (message.type !== "result") continue;
+    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+      costUsd = message.totalCostUsd;
+    }
+    if ("result" in message) {
+      resultText = message.result;
+      structuredOutput = message.structuredOutput;
+    }
+  }
+
+  return { output: structuredOutput ?? parseJson(resultText, tag), costUsd };
+}
+
+function buildQueryBuilderLensPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[],
+  preRead: PreReadResult | undefined,
+  threatModelContext?: string,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
+  return [
+    "You are a NoSQL injection specialist. LENS: QUERY-BUILDER MISUSE.",
+    "Focus on ORM/ODM query builders (Mongoose, Prisma, TypeORM) where user input flows into",
+    "query filters without sanitization. Check pre-loaded files for find/findOne/updateOne/deleteMany calls.",
+    "",
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    ...(threatModelContext ? [threatModelContext, ""] : []),
+    ...(appModelContext ? [appModelContext, ""] : []),
+    ...(scenarioContext ? [scenarioContext, ""] : []),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    "",
+    "## Patterns to check",
+    "- Model.find(req.body) — direct user object as query filter",
+    "- collection.findOne({field: req.query.field}) — field injection via $ne/$gt",
+    "- Mongoose lean() queries bypassing middleware",
+    "",
+    `Return at most ${maxFindings} findings.`,
+    "",
+    antiHallucinationModule({ extra: ["Only report where user input reaches a query filter without sanitization."] }),
+    frameworkAwarenessModule(repoContext),
+  ].filter(Boolean).join("\n");
+}
+
+function buildRawOperatorLensPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[],
+  fileIndex: FileIndex | undefined,
+  preRead: PreReadResult | undefined,
+  threatModelContext?: string,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
+  return [
+    "You are a NoSQL injection specialist. LENS: RAW OPERATOR & $WHERE MISUSE.",
+    "Focus on raw MongoDB operators ($where, $regex, aggregate pipeline) with user-controlled input.",
+    "Trace cross-route input flows using Grep/Read.",
+    "",
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    ...(threatModelContext ? [threatModelContext, ""] : []),
+    ...(appModelContext ? [appModelContext, ""] : []),
+    ...(scenarioContext ? [scenarioContext, ""] : []),
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    patternMatchText,
+    "",
+    "## Patterns to check",
+    "- $where with user-controlled JavaScript strings",
+    "- $regex with unescaped user input (ReDoS / data extraction)",
+    "- aggregate pipeline stages with user-controlled operators",
+    "- Cross-route input flows: user input from one route used in another's query",
+    "",
+    `Return at most ${maxFindings} findings.`,
+    "",
+    antiHallucinationModule({ extra: ["Only report where raw operators receive user-controlled data."] }),
+    frameworkAwarenessModule(repoContext),
+  ].filter(Boolean).join("\n");
 }
 
 export const __nosqlInjectionInternals = {

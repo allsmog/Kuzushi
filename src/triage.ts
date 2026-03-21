@@ -1,6 +1,6 @@
 import {
-  DEFAULT_READ_ONLY_TOOLS,
   extractJson,
+  resolveDefaultReadOnlyTools,
   resolveRepoContextAndRuntimeOptions,
   runStructuredAgentQuery,
   type AgentActivity,
@@ -102,7 +102,6 @@ export const TRIAGE_RESULT_SCHEMA = {
   },
 } as const;
 
-export const DEFAULT_TOOLS: AllowedTriageTool[] = [...DEFAULT_READ_ONLY_TOOLS];
 export const BATCH_TRIAGE_TOOLS: AllowedTriageTool[] = ["Read", "Glob", "Grep"];
 export const DEFAULT_MAX_TURNS = 10;
 
@@ -125,6 +124,12 @@ export interface TriageOutput {
 export interface BatchTriageOutput {
   results: Map<string, TriageResult>;
   costUsd: number;
+}
+
+export function resolveDefaultTriageTools(
+  runtime: AgentRuntimeOptions["runtime"] | undefined,
+): AllowedTriageTool[] {
+  return normalizeAllowedTriageToolNames(resolveDefaultReadOnlyTools(runtime));
 }
 
 export const BATCH_TRIAGE_SCHEMA = {
@@ -192,7 +197,7 @@ export async function triageFindingWithAgent(
   const prompt = extraPromptContext
     ? agentConfig.prompt + "\n\n" + extraPromptContext
     : agentConfig.prompt;
-  const allowedTools = normalizeAllowedTools(agentConfig.allowedTools);
+  const allowedTools = normalizeAllowedTools(agentConfig.allowedTools, runtimeOptions.runtime);
   const effectiveMaxTurns = normalizeTurns(agentConfig.maxTurns ?? maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
@@ -473,18 +478,31 @@ function resolveAgentConfig(
   }
 }
 
-function normalizeAllowedTools(tools: AllowedTriageTool[] | undefined): AllowedTriageTool[] {
+function normalizeAllowedTools(
+  tools: AllowedTriageTool[] | undefined,
+  runtime: AgentRuntimeOptions["runtime"] | undefined,
+): AllowedTriageTool[] {
   if (!Array.isArray(tools) || tools.length === 0) {
-    return [...DEFAULT_TOOLS];
+    return resolveDefaultTriageTools(runtime);
   }
 
-  const normalized = tools
-    .filter((tool): tool is AllowedTriageTool => (
-      tool === "Read" || tool === "Glob" || tool === "Grep"
-      || tool === "GetCallers" || tool === "GetCallees" || tool === "GetFunctionBody"
-    ));
+  const normalized = normalizeAllowedTriageToolNames(tools);
 
-  return normalized.length > 0 ? normalized : [...DEFAULT_TOOLS];
+  return normalized.length > 0 ? normalized : resolveDefaultTriageTools(runtime);
+}
+
+function normalizeAllowedTriageToolNames(tools: readonly string[]): AllowedTriageTool[] {
+  return tools.filter((tool): tool is AllowedTriageTool => (
+    tool === "Read"
+    || tool === "Glob"
+    || tool === "Grep"
+    || tool === "GetCallers"
+    || tool === "GetCallees"
+    || tool === "GetFunctionBody"
+    || tool === "GoToDefinition"
+    || tool === "FindReferences"
+    || tool === "TypeAtPosition"
+  ));
 }
 
 function normalizeTurns(value: number | null | undefined): number | null {

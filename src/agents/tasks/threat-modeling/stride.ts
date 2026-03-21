@@ -9,6 +9,7 @@ import type { RepoContext, ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import { createLogger } from "../../../logger.js";
 import type { AgentTask, TaskContext } from "../../types.js";
+import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import {
   resolveThreatModelConfig,
   STRIDE_RESPONSE_SCHEMA,
@@ -320,7 +321,7 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
           cwd: context.repoRoot,
           model: cfg.strideModel,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
+          allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",

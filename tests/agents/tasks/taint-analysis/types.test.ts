@@ -42,6 +42,8 @@ describe("resolveTaintAnalysisConfig", () => {
     expect(resolved.refinementEnabled).toBe(true);
     expect(resolved.refinementIterations).toBe(2);
     expect(resolved.refinementDeltaOnly).toBe(true);
+    expect(resolved.groundingEnabled).toBe(true);
+    expect(resolved.taintDiffBase).toBeUndefined();
   });
 
   it("normalizes configured values and filters invalid pass ids", () => {
@@ -114,6 +116,16 @@ describe("resolveTaintAnalysisConfig", () => {
 
     const resolved = resolveTaintAnalysisConfig(config);
     expect(resolved.passes).toEqual([1, 13, 19]);
+  });
+
+  it("prefers top-level grounding and diff settings when task overrides are absent", () => {
+    const config = makeConfig();
+    config.taintGroundingEnabled = false;
+    config.taintDiffBase = "main";
+
+    const resolved = resolveTaintAnalysisConfig(config);
+    expect(resolved.groundingEnabled).toBe(false);
+    expect(resolved.taintDiffBase).toBe("main");
   });
 });
 

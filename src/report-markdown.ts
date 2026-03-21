@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
+import { formatTaintPathForDisplay, summarizeTaintPath } from "./findings/taint-path.js";
 import type { RunMetrics } from "./scoring/run-metrics.js";
 import {
   getActionableFindings,
@@ -96,11 +97,30 @@ export function generateMarkdownReport(
       lines.push(`- Scanner: \`${finding.scanner}\``);
       lines.push(`- Severity: \`${finding.severity}\``);
       lines.push(`- Confidence: ${(finding.confidence * 100).toFixed(0)}%`);
+      if (finding.proofState) {
+        lines.push(`- Proof state: \`${formatProofStateLabel(finding.proofState)}\``);
+      }
+      if (finding.engineProvenance && finding.engineProvenance.length > 0) {
+        lines.push(`- Engine provenance: ${formatEngineProvenance(finding.engineProvenance)}`);
+      }
+      if (finding.taintPath && finding.taintPath.length > 0) {
+        lines.push(`- Taint path summary: \`${summarizeTaintPath(finding.taintPath) ?? ""}\``);
+      }
       lines.push("");
       lines.push("Triage rationale:");
       lines.push("");
       lines.push(finding.rationale || "No rationale provided.");
       lines.push("");
+
+      const taintPathLines = formatTaintPathForDisplay(finding.taintPath);
+      if (taintPathLines.length > 0) {
+        lines.push("Structured taint path:");
+        lines.push("");
+        for (const line of taintPathLines) {
+          lines.push(`- ${line}`);
+        }
+        lines.push("");
+      }
 
       if (finding.verifyExploitable === 1) {
         lines.push("Verification result: **EXPLOITABLE**");
@@ -142,6 +162,12 @@ export function generateMarkdownReport(
         lines.push("PoC harness: **Not generated**");
       }
       lines.push("");
+
+      if (finding.pocRunVerdict) {
+        lines.push(`PoC execution: **${finding.pocRunVerdict}**${formatPocDuration(finding.pocRunDurationMs)}`);
+        lines.push("");
+      }
+
       if (finding.pocHarnessParsed === 0 && finding.pocHarnessParseError) {
         lines.push(`PoC harness parse check: **Failed** (${finding.pocHarnessParseError})`);
         lines.push("");
@@ -319,6 +345,15 @@ function appendMetricsSection(lines: string[], metrics: RunMetrics): void {
   if (metrics.exploitabilityRate != null) {
     lines.push(`- Exploitability Rate: ${(metrics.exploitabilityRate * 100).toFixed(1)}%`);
   }
+  lines.push(`- Findings With Taint Path: ${metrics.structuredEvidence.findingsWithTaintPath}`);
+  const proofEntries = Object.entries(metrics.structuredEvidence.proofStateCounts);
+  if (proofEntries.length > 0) {
+    lines.push(`- Proof States: ${proofEntries.map(([state, count]) => `${state}=${count}`).join(", ")}`);
+  }
+  const engineEntries = Object.entries(metrics.structuredEvidence.engineKindCounts);
+  if (engineEntries.length > 0) {
+    lines.push(`- Engine Provenance: ${engineEntries.map(([kind, count]) => `${kind}=${count}`).join(", ")}`);
+  }
   lines.push("");
 
   // Duration breakdown
@@ -348,4 +383,23 @@ function appendMetricsSection(lines: string[], metrics: RunMetrics): void {
   lines.push(`| Variant Analysis | $${metrics.costBreakdown.variantAnalysis.toFixed(4)} |`);
   lines.push(`| **Total** | **$${metrics.costBreakdown.total.toFixed(4)}** |`);
   lines.push("");
+}
+
+function formatProofStateLabel(proofState: string): string {
+  return proofState.replace(/_/g, " ");
+}
+
+function formatEngineProvenance(
+  engineProvenance: Array<{ kind: string; detail: string }>,
+): string {
+  return engineProvenance
+    .map((entry) => `\`${entry.kind}\` (${entry.detail})`)
+    .join(", ");
+}
+
+function formatPocDuration(durationMs: number | null | undefined): string {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs)) {
+    return "";
+  }
+  return ` (${formatDurationMs(durationMs)})`;
 }

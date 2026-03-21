@@ -3,6 +3,9 @@ import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { TaskContext as AgentTaskContext } from "../agents/types.js";
 import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
+import { quickClassifierTask } from "../agents/tasks/quick-classifier.js";
+import { reachabilityCheckTask } from "../agents/tasks/reachability-check.js";
+import { callGraphAssistTask } from "../agents/tasks/call-graph-assist.js";
 import { SELECTABLE_TASK_IDS } from "../agents/tasks/task-selector.js";
 import type { Finding } from "../scanners/types.js";
 import { HardExclusionFilter } from "../scanners/fp-filter.js";
@@ -36,9 +39,11 @@ import {
   updateRunStatus,
 } from "../store.js";
 import type {
+  DynamicAnalysisRun,
   EnrichedRepoContext,
   ExploitChain,
   KuzushiConfig,
+  PocHarnessResult,
   RepoContext,
   ScanOpts,
   TriageResult,
@@ -55,6 +60,8 @@ import { FindingSchema, formatZodErrors } from "../schemas.js";
 import { runVariantAnalysis } from "./workers/variant-analysis-worker.js";
 import type {
   BusHandlerErrorEvent,
+  DynamicAnalysisErrorEvent,
+  DynamicAnalysisResultEvent,
   PipelineStats,
   PipelineErrorEvent,
   PipelineStartEvent,
@@ -75,12 +82,22 @@ import type {
 } from "./events.js";
 import { createEvent } from "./helpers.js";
 import type { MessageBus } from "./types.js";
+import { executeAgentTask } from "./task-execution.js";
 import { PipelineHookChain } from "../hooks/chain.js";
 import type { HookContext } from "../hooks/types.js";
 import { loadHooksFromFile } from "../hooks/loader.js";
 
 /** Scanners whose findings come from static analysis tools, not LLM assessment. */
 const NON_LLM_SCANNERS = new Set(["semgrep", "codeql"]);
+const THREAT_AWARE_DETECTOR_TASK_IDS = new Set([
+  "code-config-detect",
+  "ssrf-detect",
+  "nosql-injection-detect",
+  "prototype-pollution-detect",
+  "template-injection-detect",
+  "graphql-security-detect",
+  "race-condition-detect",
+]);
 
 interface QueuedFinding {
   finding: Finding;
@@ -107,6 +124,20 @@ interface QueuedPocHarness extends PocHarnessCandidate {
   total: number;
 }
 
+interface DynamicAnalysisCandidate {
+  finding: Finding;
+  triageResult: TriageResult;
+  verificationResult?: VerificationResult;
+  pocHarnessResult?: PocHarnessResult;
+  score: number;
+  proofValue: number;
+}
+
+interface QueuedDynamicAnalysis extends DynamicAnalysisCandidate {
+  index: number;
+  total: number;
+}
+
 interface RunState {
   context: RunContext;
   checkpointRunId: string;
@@ -120,6 +151,7 @@ interface RunState {
   skippedAlreadyTriaged: number;
   skippedLowConfidence: number;
   skippedByFpFilter: number;
+  skippedByClassifier: number;
   triageQueue: QueuedFinding[];
   queueCursor: number;
   triageTotal: number;
@@ -186,6 +218,22 @@ interface RunState {
   verifyAttempts: Map<string, number>;
   /** Fingerprints of findings auto-passed by skipTriageForHighConfidenceAgentic. */
   autoPassedFingerprints: Set<string>;
+  // ── Dynamic analysis phase ──
+  dynamicAnalysisEnabled: boolean;
+  dynamicCandidates: DynamicAnalysisCandidate[];
+  dynamicQueue: QueuedDynamicAnalysis[];
+  dynamicCursor: number;
+  dynamicTotal: number;
+  dynamicInFlight: number;
+  dynamicConfirmed: number;
+  dynamicInteresting: number;
+  dynamicRejected: number;
+  dynamicErrors: number;
+  dynamicCostUsd: number;
+  dynamicDispatching: boolean;
+  dynamicStarted: boolean;
+  dynamicCompleted: boolean;
+  dynamicAttempts: Map<string, number>;
 }
 
 export interface OrchestratorDeps {
@@ -229,7 +277,7 @@ export class PipelineOrchestrator {
     for (const [runId, state] of this.runs) {
       // Wait for all in-flight queues to reach 0
       while (
-        (state.inFlight > 0 || state.verifyInFlight > 0 || state.pocHarnessInFlight > 0)
+        (state.inFlight > 0 || state.verifyInFlight > 0 || state.pocHarnessInFlight > 0 || state.dynamicInFlight > 0)
         && Date.now() < deadline
       ) {
         await new Promise((r) => setTimeout(r, 100));
@@ -306,6 +354,14 @@ export class PipelineOrchestrator {
       await this.handlePocHarnessError(event);
     });
 
+    this.bus.subscribe<DynamicAnalysisResultEvent>("dynamic:result", async (event) => {
+      await this.handleDynamicAnalysisResult(event);
+    });
+
+    this.bus.subscribe<DynamicAnalysisErrorEvent>("dynamic:error", async (event) => {
+      await this.handleDynamicAnalysisError(event);
+    });
+
     this.bus.subscribe<ReportCompleteEvent>("report:complete", async (event) => {
       await this.handleReportComplete(event);
     });
@@ -373,6 +429,7 @@ export class PipelineOrchestrator {
       skippedAlreadyTriaged: 0,
       skippedLowConfidence: 0,
       skippedByFpFilter: 0,
+      skippedByClassifier: 0,
       triageQueue: [],
       queueCursor: 0,
       triageTotal: 0,
@@ -433,6 +490,22 @@ export class PipelineOrchestrator {
       triageAttempts: new Map(),
       verifyAttempts: new Map(),
       autoPassedFingerprints: new Set(),
+      // ── Dynamic analysis phase ──
+      dynamicAnalysisEnabled: config.dynamicAnalysisEnabled === true,
+      dynamicCandidates: [],
+      dynamicQueue: [],
+      dynamicCursor: 0,
+      dynamicTotal: 0,
+      dynamicInFlight: 0,
+      dynamicConfirmed: 0,
+      dynamicInteresting: 0,
+      dynamicRejected: 0,
+      dynamicErrors: 0,
+      dynamicCostUsd: 0,
+      dynamicDispatching: false,
+      dynamicStarted: false,
+      dynamicCompleted: false,
+      dynamicAttempts: new Map(),
       stageTimestamps: {
         pipelineStart: event.meta.timestamp,
         pipelineEnd: "",
@@ -849,7 +922,7 @@ export class PipelineOrchestrator {
       baseTaskIds = explicitTasks;
     }
 
-    const candidateIds = normalizeTaskIds([
+    const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
       ...state.scanners,
       ...(enableContextExplicit ? ["context-gatherer"] : []),
       ...(enableContextEnrichment ? ["context-enricher"] : []),
@@ -885,7 +958,7 @@ export class PipelineOrchestrator {
 
     let stages: string[][];
     try {
-      stages = this.deps.taskRegistry.resolveOrder(enabledTaskIds);
+      stages = resolveOrderWithPolicyEdges(this.deps.taskRegistry, enabledTaskIds);
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -1043,15 +1116,15 @@ export class PipelineOrchestrator {
             console.error(
               `[orchestrator] Dynamic task selection added: ${newTaskIds.join(", ")}`,
             );
-            const candidateIds = [
+            const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
               ...enabledTaskIds,
               ...collectTransitiveDeps(this.deps.taskRegistry, newTaskIds)
                 .filter((id) => !enabledTaskIds.includes(id)),
-            ];
+            ]);
 
             // Re-resolve remaining stages — only commit enabledTaskIds on success
             try {
-              const fullStages = this.deps.taskRegistry.resolveOrder(candidateIds);
+              const fullStages = resolveOrderWithPolicyEdges(this.deps.taskRegistry, candidateIds);
               enabledTaskIds = candidateIds;
               // Replace remaining stages — skip stages already completed
               const remaining = fullStages.filter((stage) =>
@@ -1089,13 +1162,13 @@ export class PipelineOrchestrator {
             console.error(
               `[orchestrator] task-selector ${reason} — falling back to all selectable tasks: ${fallbackIds.join(", ")}`,
             );
-            const candidateIds = [
+            const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
               ...enabledTaskIds,
               ...collectTransitiveDeps(this.deps.taskRegistry, fallbackIds)
                 .filter(id => !enabledTaskIds.includes(id)),
-            ];
+            ]);
             try {
-              const fullStages = this.deps.taskRegistry.resolveOrder(candidateIds);
+              const fullStages = resolveOrderWithPolicyEdges(this.deps.taskRegistry, candidateIds);
               enabledTaskIds = candidateIds;
               taskSelectorFallbackApplied = true;
               const remaining = fullStages
@@ -1283,9 +1356,44 @@ export class PipelineOrchestrator {
 
     filteredFindings.sort((a, b) => getRankingScore(b) - getRankingScore(a));
 
-    // LLM rescore: bounded to top 2x maxFindings when capped.
+    state.skippedByClassifier = 0;
     state.skippedByLlmRescore = 0;
-    if (state.config.llmRescoreEnabled) {
+    if (state.config.enableClassifier === true) {
+      try {
+        const classifierContext: AgentTaskContext = {
+          runId,
+          repoRoot: state.context.scanPath ?? state.context.repoRoot,
+          scanPath: state.context.scanPath,
+          repoName: state.context.repoName,
+          config: state.config,
+          bus: this.bus,
+          upstreamOutputs: new Map(state.taskOutputs),
+        };
+        const executed = await executeAgentTask(
+          quickClassifierTask,
+          filteredFindings,
+          classifierContext,
+          {},
+        );
+        const classifiedFindings = coerceQuickClassifierFindings(executed.output);
+        state.skippedByClassifier = Math.max(0, filteredFindings.length - classifiedFindings.length);
+        filteredFindings = classifiedFindings;
+        const classifierCostUsd = normalizeCostUsd(executed.costUsd);
+        if (classifierCostUsd > 0) {
+          state.totalCostUsd += classifierCostUsd;
+          try {
+            updateRunCost(this.deps.db, state.checkpointRunId, classifierCostUsd);
+          } catch {
+            // Best-effort cost persistence for classifier calls.
+          }
+        }
+        if (state.skippedByClassifier > 0) {
+          console.error(`[quick-classifier] Excluded ${state.skippedByClassifier} findings`);
+        }
+      } catch (error) {
+        console.error(`[quick-classifier] Failed open: ${toErrorMessage(error)}`);
+      }
+    } else if (state.config.llmRescoreEnabled) {
       const rescoreWindow = selectFindingsForRescore(filteredFindings, state.scanOpts.maxFindings);
       const rescoredFingerprints = new Set(rescoreWindow.map((finding) => finding.fingerprint));
       const untouched = filteredFindings.filter(
@@ -1302,6 +1410,76 @@ export class PipelineOrchestrator {
       state.skippedByLlmRescore = applied.skippedByLlmRescore;
       if (state.skippedByLlmRescore > 0) {
         console.error(`[llm-rescore] Excluded ${state.skippedByLlmRescore} findings`);
+      }
+    }
+
+    // Reachability-assisted ranking: penalize unreachable findings before final sort
+    if (state.config.callGraphAssistEnabled === true && filteredFindings.length > 0) {
+      try {
+        const reachabilityContext: AgentTaskContext = {
+          runId,
+          repoRoot: state.context.scanPath ?? state.context.repoRoot,
+          scanPath: state.context.scanPath,
+          repoName: state.context.repoName,
+          config: state.config,
+          bus: this.bus,
+          upstreamOutputs: new Map(state.taskOutputs),
+        };
+        const executed = await executeAgentTask(
+          reachabilityCheckTask,
+          filteredFindings,
+          reachabilityContext,
+          {},
+        );
+        const enriched = executed.output;
+        if (Array.isArray(enriched) && enriched.length > 0) {
+          filteredFindings = enriched as Finding[];
+        }
+        const reachCostUsd = normalizeCostUsd(executed.costUsd);
+        if (reachCostUsd > 0) {
+          state.totalCostUsd += reachCostUsd;
+          try {
+            updateRunCost(this.deps.db, state.checkpointRunId, reachCostUsd);
+          } catch {
+            // Best-effort cost persistence.
+          }
+        }
+      } catch (error) {
+        console.error(`[reachability-check] Failed open: ${toErrorMessage(error)}`);
+      }
+
+      // Call-graph-assist: enrich high-score findings with call-chain evidence
+      try {
+        const cgContext: AgentTaskContext = {
+          runId,
+          repoRoot: state.context.scanPath ?? state.context.repoRoot,
+          scanPath: state.context.scanPath,
+          repoName: state.context.repoName,
+          config: state.config,
+          bus: this.bus,
+          upstreamOutputs: new Map(state.taskOutputs),
+        };
+        const cgExecuted = await executeAgentTask(
+          callGraphAssistTask,
+          filteredFindings,
+          cgContext,
+          {},
+        );
+        const cgEnriched = cgExecuted.output;
+        if (Array.isArray(cgEnriched) && cgEnriched.length > 0) {
+          filteredFindings = cgEnriched as Finding[];
+        }
+        const cgCostUsd = normalizeCostUsd(cgExecuted.costUsd);
+        if (cgCostUsd > 0) {
+          state.totalCostUsd += cgCostUsd;
+          try {
+            updateRunCost(this.deps.db, state.checkpointRunId, cgCostUsd);
+          } catch {
+            // Best-effort cost persistence.
+          }
+        }
+      } catch (error) {
+        console.error(`[call-graph-assist] Failed open: ${toErrorMessage(error)}`);
       }
     }
 
@@ -1581,7 +1759,7 @@ export class PipelineOrchestrator {
 
     // Compute final run metrics for the pipeline:complete event
     state.stageTimestamps.pipelineEnd = event.meta.timestamp;
-    const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
+    const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.dynamicCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
     const finalMetrics = computeRunMetrics(
       state.scanFindings,
       state.stageTimestamps,
@@ -1589,6 +1767,7 @@ export class PipelineOrchestrator {
         triage: Math.max(0, triageCost),
         verify: state.verifyCostUsd,
         pocHarness: state.pocHarnessCostUsd,
+        dynamicAnalysis: state.dynamicCostUsd,
         variantAnalysis: state.variantAnalysisCostUsd,
       },
     );
@@ -1607,6 +1786,7 @@ export class PipelineOrchestrator {
       skippedAlreadyTriaged: state.skippedAlreadyTriaged,
       skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
       skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
+      skippedByClassifier: state.skippedByClassifier > 0 ? state.skippedByClassifier : undefined,
       softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
       skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
       corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
@@ -2137,11 +2317,25 @@ export class PipelineOrchestrator {
     state.verificationCompleted = false;
 
     if (!state.resumingVerification) {
-      state.verifyTotal = state.verifyCandidates.length;
-      state.verifyQueue = state.verifyCandidates.map((item, idx) => ({
+      // Rank candidates: highest-score first, triage confidence as tiebreaker,
+      // presence of structured evidence (taintPath) as final tiebreaker.
+      const ranked = [...state.verifyCandidates].sort((a, b) => {
+        const scoreA = getRankingScore(a.finding);
+        const scoreB = getRankingScore(b.finding);
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        if (b.triageResult.confidence !== a.triageResult.confidence) {
+          return b.triageResult.confidence - a.triageResult.confidence;
+        }
+        const evidenceA = a.finding.taintPath?.length ? 1 : 0;
+        const evidenceB = b.finding.taintPath?.length ? 1 : 0;
+        return evidenceB - evidenceA;
+      });
+
+      state.verifyTotal = ranked.length;
+      state.verifyQueue = ranked.map((item, idx) => ({
         ...item,
         index: idx + 1,
-        total: state.verifyCandidates.length,
+        total: ranked.length,
       }));
       state.verifyCursor = 0;
     }
@@ -2273,7 +2467,9 @@ export class PipelineOrchestrator {
     state.verifyDispatching = true;
     try {
       const concurrency = normalizeConcurrency(state.config.verifyConcurrency ?? 1);
-      const batchSize = Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
+      const batchSize = state.config.verifyRefinementMaxIterations && state.config.verifyRefinementMaxIterations > 1
+        ? 1
+        : Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
 
       while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
         await this.emitBudgetCheck(state, runId);
@@ -2369,6 +2565,16 @@ export class PipelineOrchestrator {
     if (state.pocHarnessEnabled && state.pocHarnessCandidates.length > 0) {
       await this.startPocHarnessGeneration(state, runId);
       return;
+    }
+
+    // Gate: dynamic analysis when PoC harness is disabled
+    if (state.dynamicAnalysisEnabled && !this.isBudgetExceeded(state)) {
+      const candidates = this.selectDynamicAnalysisCandidates(state);
+      if (candidates.length > 0) {
+        state.dynamicCandidates = candidates;
+        await this.startDynamicAnalysis(state, runId);
+        return;
+      }
     }
 
     await this.runVariantAnalysisPhase(state, runId);
@@ -2584,6 +2790,16 @@ export class PipelineOrchestrator {
       }),
     );
 
+    // Gate: dynamic analysis after PoC harness
+    if (state.dynamicAnalysisEnabled && !this.isBudgetExceeded(state)) {
+      const candidates = this.selectDynamicAnalysisCandidates(state);
+      if (candidates.length > 0) {
+        state.dynamicCandidates = candidates;
+        await this.startDynamicAnalysis(state, runId);
+        return;
+      }
+    }
+
     await this.runVariantAnalysisPhase(state, runId);
 
     await this.bus.publish(
@@ -2643,6 +2859,270 @@ export class PipelineOrchestrator {
       }),
     );
   }
+
+  // ── Dynamic Analysis Phase ─────────────────────────────────────────────
+
+  private selectDynamicAnalysisCandidates(state: RunState): DynamicAnalysisCandidate[] {
+    const maxCandidates = state.config.dynamicMaxCandidates ?? 20;
+    const minScore = state.config.dynamicMinScore ?? 7;
+    const triageResults = getStoredTriageResults(this.deps.db, state.scanFindings.map((f) => f.fingerprint));
+    const verificationResults = getStoredVerificationResults(this.deps.db, state.scanFindings.map((f) => f.fingerprint));
+
+    const candidates: DynamicAnalysisCandidate[] = [];
+
+    for (const finding of state.scanFindings) {
+      const triageResult = triageResults.get(finding.fingerprint);
+      if (!triageResult || triageResult.verdict === "fp") continue;
+
+      const verificationResult = verificationResults.get(finding.fingerprint);
+
+      // Compute proof value based on evidence
+      let proofValue = 0;
+      if (finding.taintPath && finding.taintPath.length > 0) {
+        proofValue += finding.taintPath.length * 2;
+      }
+      if (finding.corroboratingSignals && finding.corroboratingSignals.length > 0) {
+        proofValue += finding.corroboratingSignals.length * 1.5;
+      }
+      if (verificationResult) {
+        proofValue += 3;
+      }
+
+      const score = finding.adjustedScore ?? finding.score;
+
+      // Priority 1: Inconclusive/low-confidence verified findings with taintPath
+      if (
+        verificationResult
+        && (!verificationResult.exploitable || (verificationResult.confidence ?? 0) < 0.6)
+        && finding.taintPath
+        && finding.taintPath.length > 0
+      ) {
+        candidates.push({ finding, triageResult, verificationResult, score, proofValue });
+        continue;
+      }
+
+      // Priority 2: Strong taint-analysis findings
+      if (
+        finding.scanner === "taint-analysis-run"
+        && score >= minScore
+        && finding.taintPath
+        && finding.taintPath.length > 0
+      ) {
+        candidates.push({ finding, triageResult, verificationResult, score, proofValue });
+        continue;
+      }
+
+      // Priority 3: Corroborated CodeQL or agentic findings
+      if (
+        (finding.scanner === "codeql" || finding.scanner === "agentic")
+        && finding.corroboratingSignals
+        && finding.corroboratingSignals.length >= 1
+      ) {
+        candidates.push({ finding, triageResult, verificationResult, score, proofValue });
+        continue;
+      }
+
+      // Priority 4: Semgrep only if corroborated or critical
+      if (
+        finding.scanner === "semgrep"
+        && (
+          (finding.corroboratingSignals && finding.corroboratingSignals.length >= 1)
+          || finding.severity === "ERROR"
+        )
+      ) {
+        candidates.push({ finding, triageResult, verificationResult, score, proofValue });
+        continue;
+      }
+    }
+
+    // Sort by (score + proofValue) descending, cap at maxCandidates
+    candidates.sort((a, b) => (b.score + b.proofValue) - (a.score + a.proofValue));
+    return candidates.slice(0, maxCandidates);
+  }
+
+  private async startDynamicAnalysis(state: RunState, runId: string): Promise<void> {
+    if (state.dynamicStarted || state.reportEmitted) {
+      return;
+    }
+
+    state.dynamicTotal = state.dynamicCandidates.length;
+    state.dynamicQueue = state.dynamicCandidates.map((item, idx) => ({
+      ...item,
+      index: idx + 1,
+      total: state.dynamicCandidates.length,
+    }));
+    state.dynamicCursor = 0;
+
+    try {
+      updateRunStatus(this.deps.db, state.checkpointRunId, "dynamic-analyzing");
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: toErrorMessage(error),
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    state.stageTimestamps.dynamicStart = new Date().toISOString();
+
+    await this.bus.publish(
+      createEvent("dynamic:start", runId, {
+        context: state.context,
+        findingCount: state.dynamicTotal,
+        model: state.config.pocHarnessModel ?? state.config.model,
+      }),
+    );
+
+    state.dynamicStarted = true;
+    await this.dispatchDynamicAnalysis(state, runId);
+  }
+
+  private async handleDynamicAnalysisResult(event: DynamicAnalysisResultEvent): Promise<void> {
+    const { runId } = event.meta;
+    const state = this.runs.get(runId);
+    if (!state) return;
+
+    state.dynamicInFlight -= 1;
+    const costUsd = normalizeCostUsd(event.payload.costUsd);
+    state.dynamicCostUsd += costUsd;
+    state.totalCostUsd += costUsd;
+    updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+
+    const status = event.payload.result.status;
+    if (status === "confirmed") state.dynamicConfirmed += 1;
+    else if (status === "interesting") state.dynamicInteresting += 1;
+    else if (status === "rejected") state.dynamicRejected += 1;
+
+    await this.publishDynamicAnalysisQueueDepth(state, runId);
+
+    if (this.isDynamicAnalysisDone(state)) {
+      await this.finishDynamicAnalysisAndContinue(state, runId);
+    } else {
+      await this.dispatchDynamicAnalysis(state, runId);
+    }
+  }
+
+  private async handleDynamicAnalysisError(event: DynamicAnalysisErrorEvent): Promise<void> {
+    const { runId } = event.meta;
+    const state = this.runs.get(runId);
+    if (!state) return;
+
+    state.dynamicInFlight -= 1;
+    state.dynamicErrors += 1;
+    const costUsd = normalizeCostUsd(event.payload.costUsd);
+    state.dynamicCostUsd += costUsd;
+    state.totalCostUsd += costUsd;
+    updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+
+    await this.publishDynamicAnalysisQueueDepth(state, runId);
+
+    if (this.isDynamicAnalysisDone(state)) {
+      await this.finishDynamicAnalysisAndContinue(state, runId);
+    } else {
+      await this.dispatchDynamicAnalysis(state, runId);
+    }
+  }
+
+  private async dispatchDynamicAnalysis(state: RunState, runId: string): Promise<void> {
+    if (state.dynamicDispatching || state.reportEmitted) return;
+    state.dynamicDispatching = true;
+
+    try {
+      const concurrency = normalizeConcurrency(state.config.verifyConcurrency ?? 1);
+
+      while (
+        state.dynamicInFlight < concurrency
+        && state.dynamicCursor < state.dynamicQueue.length
+      ) {
+        await this.emitBudgetCheck(state, runId);
+        if (this.isBudgetExceeded(state)) {
+          await this.emitBudgetExceeded(state, runId);
+          break;
+        }
+        const item = state.dynamicQueue[state.dynamicCursor];
+        state.dynamicCursor += 1;
+        state.dynamicInFlight += 1;
+
+        await this.bus.publish(
+          createEvent("dynamic:finding-queued", runId, {
+            context: state.context,
+            finding: item.finding,
+            triageResult: item.triageResult,
+            verificationResult: item.verificationResult,
+            pocHarnessResult: item.pocHarnessResult,
+            repoContext: state.repoContext,
+            index: item.index,
+            total: item.total,
+          }),
+        );
+      }
+
+      await this.publishDynamicAnalysisQueueDepth(state, runId);
+    } finally {
+      state.dynamicDispatching = false;
+    }
+  }
+
+  private isDynamicAnalysisDone(state: RunState): boolean {
+    const processed = state.dynamicConfirmed + state.dynamicInteresting + state.dynamicRejected + state.dynamicErrors;
+    return (
+      state.dynamicTotal > 0
+      && processed >= state.dynamicTotal
+      && state.dynamicInFlight === 0
+      && !state.reportEmitted
+    );
+  }
+
+  private async finishDynamicAnalysisAndContinue(state: RunState, runId: string): Promise<void> {
+    if (state.reportEmitted || state.dynamicCompleted) {
+      return;
+    }
+    state.dynamicCompleted = true;
+    state.stageTimestamps.dynamicEnd = new Date().toISOString();
+
+    await this.bus.publish(
+      createEvent("dynamic:complete", runId, {
+        context: state.context,
+        confirmed: state.dynamicConfirmed,
+        interesting: state.dynamicInteresting,
+        rejected: state.dynamicRejected,
+        errors: state.dynamicErrors,
+        totalCostUsd: state.dynamicCostUsd,
+      }),
+    );
+
+    await this.runVariantAnalysisPhase(state, runId);
+
+    await this.bus.publish(
+      createEvent("report:requested", runId, {
+        context: state.context,
+        stats: buildReportStats(state),
+        fingerprints: state.scanFindings.map((f) => f.fingerprint),
+        exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
+      }),
+    );
+
+    state.reportRequested = true;
+    state.reportEmitted = true;
+  }
+
+  private async publishDynamicAnalysisQueueDepth(state: RunState, runId: string): Promise<void> {
+    const queued = Math.max(0, state.dynamicQueue.length - state.dynamicCursor);
+    const processed = state.dynamicConfirmed + state.dynamicInteresting + state.dynamicRejected + state.dynamicErrors;
+
+    await this.bus.publish(
+      createEvent("dynamic:queue-depth", runId, {
+        context: state.context,
+        queued,
+        inFlight: state.dynamicInFlight,
+        processed,
+        total: state.dynamicTotal,
+      }),
+    );
+  }
 }
 
 export function registerOrchestrator(
@@ -2688,11 +3168,12 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
   state.stageTimestamps.pipelineEnd = completedAt;
 
   // Compute aggregate run metrics
-  const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
+  const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.dynamicCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
   const costs: StageCosts = {
     triage: Math.max(0, triageCost),
     verify: state.verifyCostUsd,
     pocHarness: state.pocHarnessCostUsd,
+    dynamicAnalysis: state.dynamicCostUsd,
     variantAnalysis: state.variantAnalysisCostUsd,
   };
 
@@ -2709,6 +3190,7 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     skippedAlreadyTriaged: state.skippedAlreadyTriaged,
     skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
     skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
+    skippedByClassifier: state.skippedByClassifier > 0 ? state.skippedByClassifier : undefined,
     softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
     skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
     corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
@@ -2722,6 +3204,11 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : undefined,
     pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
     pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
+    dynamicConfirmed: state.dynamicAnalysisEnabled ? state.dynamicConfirmed : undefined,
+    dynamicInteresting: state.dynamicAnalysisEnabled ? state.dynamicInteresting : undefined,
+    dynamicRejected: state.dynamicAnalysisEnabled ? state.dynamicRejected : undefined,
+    dynamicErrors: state.dynamicAnalysisEnabled ? state.dynamicErrors : undefined,
+    dynamicCostUsd: state.dynamicAnalysisEnabled ? state.dynamicCostUsd : undefined,
     variantFindings: state.variantFindings > 0 ? state.variantFindings : undefined,
     variantAnalysisCostUsd: state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
     chainCount: state.exploitChains.length > 0 ? state.exploitChains.length : undefined,
@@ -2912,6 +3399,13 @@ function coerceFindings(value: unknown): Finding[] {
   return findings;
 }
 
+function coerceQuickClassifierFindings(value: unknown): Finding[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+  return coerceFindings(value["findings"]);
+}
+
 function coerceFinding(item: Record<string, unknown>): Finding | null {
   const result = FindingSchema.safeParse(item);
   if (!result.success) {
@@ -3007,6 +3501,123 @@ function asVerdictArray(value: unknown): Verdict[] | null {
   return verdicts;
 }
 
+function injectThreatModelPolicyCandidates(
+  registry: TaskRegistry,
+  candidateIds: string[],
+): string[] {
+  const normalized = normalizeTaskIds(candidateIds);
+  if (
+    normalized.some((id) => THREAT_AWARE_DETECTOR_TASK_IDS.has(id))
+    && registry.has("threat-model-stride")
+  ) {
+    return normalizeTaskIds([...normalized, "threat-model-stride"]);
+  }
+
+  return normalized;
+}
+
+function resolveOrderWithPolicyEdges(
+  registry: TaskRegistry,
+  enabledIds: string[],
+): string[][] {
+  const enabled = dedupeTaskIds(normalizeTaskIds(enabledIds));
+  if (enabled.length === 0) {
+    return [];
+  }
+
+  for (const id of enabled) {
+    if (!registry.has(id)) {
+      throw new Error(`Unknown enabled task: ${id}`);
+    }
+  }
+
+  const enabledSet = new Set(enabled);
+  const priority = new Map<string, number>(enabled.map((id, idx) => [id, idx]));
+  const indegree = new Map<string, number>();
+  const edges = new Map<string, string[]>();
+  const policyDeps = buildThreatModelPolicyDeps(enabled);
+
+  for (const id of enabled) {
+    indegree.set(id, 0);
+    edges.set(id, []);
+  }
+
+  for (const id of enabled) {
+    const task = registry.get(id);
+    const dependencies = new Set(task.dependsOn);
+    for (const dep of policyDeps.get(id) ?? []) {
+      dependencies.add(dep);
+    }
+
+    for (const dep of dependencies) {
+      if (!registry.has(dep)) {
+        throw new Error(`Task "${id}" depends on unknown task "${dep}"`);
+      }
+      if (!enabledSet.has(dep)) {
+        throw new Error(`Task "${id}" depends on "${dep}" but it is not enabled`);
+      }
+
+      indegree.set(id, (indegree.get(id) ?? 0) + 1);
+      edges.get(dep)?.push(id);
+    }
+  }
+
+  const groups: string[][] = [];
+  const processed = new Set<string>();
+
+  while (processed.size < enabled.length) {
+    const group = enabled
+      .filter((id) => !processed.has(id) && (indegree.get(id) ?? 0) === 0)
+      .sort((a, b) => (priority.get(a) ?? 0) - (priority.get(b) ?? 0));
+
+    if (group.length === 0) {
+      const stuck = enabled.filter((id) => !processed.has(id));
+      throw new Error(`Task dependency cycle detected among: ${stuck.join(", ")}`);
+    }
+
+    groups.push(group);
+
+    for (const id of group) {
+      processed.add(id);
+      for (const dependent of edges.get(id) ?? []) {
+        indegree.set(dependent, (indegree.get(dependent) ?? 0) - 1);
+      }
+    }
+  }
+
+  return groups;
+}
+
+function buildThreatModelPolicyDeps(enabledIds: string[]): Map<string, Set<string>> {
+  const enabled = new Set(enabledIds);
+  const policyDeps = new Map<string, Set<string>>();
+  const enabledThreatAwareDetectors = enabledIds.filter((id) => THREAT_AWARE_DETECTOR_TASK_IDS.has(id));
+
+  if (enabled.has("threat-model-stride")) {
+    for (const detectorId of enabledThreatAwareDetectors) {
+      let deps = policyDeps.get(detectorId);
+      if (!deps) {
+        deps = new Set<string>();
+        policyDeps.set(detectorId, deps);
+      }
+      deps.add("threat-model-stride");
+    }
+  }
+
+  if (enabled.has("threat-model-pasta")) {
+    let pastaDeps = policyDeps.get("threat-model-pasta");
+    if (!pastaDeps) {
+      pastaDeps = new Set<string>();
+      policyDeps.set("threat-model-pasta", pastaDeps);
+    }
+    for (const detectorId of enabledThreatAwareDetectors) {
+      pastaDeps.add(detectorId);
+    }
+  }
+
+  return policyDeps;
+}
+
 function collectTransitiveDeps(registry: TaskRegistry, candidateIds: string[]): string[] {
   const all = new Set(candidateIds);
   const queue = [...candidateIds];
@@ -3023,4 +3634,17 @@ function collectTransitiveDeps(registry: TaskRegistry, candidateIds: string[]): 
   }
 
   return normalizeTaskIds([...all]);
+}
+
+function dedupeTaskIds(ids: string[]): string[] {
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    deduped.push(id);
+  }
+  return deduped;
 }

@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { ScanOpts } from "../types.js";
+import { formatTaintPathForPrompt } from "../findings/taint-path.js";
 import type { Finding, ScannerConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
 import { resolveCodeQLBinary } from "./resolve-codeql.js";
 import { ensureDatabase, runCodeQL, selectFindings, detectAllCodeQLLanguages } from "./run-codeql.js";
@@ -80,6 +81,7 @@ export class CodeQLPlugin implements ScannerPlugin {
   }
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
+    const taintPathSection = formatTaintPathForPrompt(finding.taintPath);
     return {
       prompt: [
         "You are a CodeQL-focused security triage agent.",
@@ -99,6 +101,8 @@ export class CodeQLPlugin implements ScannerPlugin {
         `Message: ${finding.message}`,
         `Evidence: ${finding.evidence || "none"}`,
         `Fingerprint: ${finding.fingerprint}`,
+        "",
+        taintPathSection,
         "",
         "## Investigation instructions",
         "1. Trace the full source-to-sink flow in code, including inter-procedural hops.",

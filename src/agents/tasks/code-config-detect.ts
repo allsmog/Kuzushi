@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -16,6 +15,7 @@ import { getProfilesForTask, formatProfilesForPrompt } from "../../security-prof
 import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
+import { buildThreatModelLeadsSection } from "./threat-model-guidance.js";
 import {
   filterCategories,
   filterBlocks,
@@ -23,6 +23,9 @@ import {
   type CategoryRelevance,
   type CategoryBlock,
 } from "./category-filter.js";
+import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
+import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
+import type { ToolPolicy } from "../../prompts/tool-policy.js";
 
 const log = createLogger({ stage: "code-config-detect" });
 
@@ -78,14 +81,21 @@ interface CodeConfigConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): CodeConfigConfig {
-  const raw = ctx.config.scannerConfig["code-config-detect"];
-  const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
-    ? raw["model"].trim()
-    : ctx.config.model;
-  const maxFindings = (isRecord(raw) && typeof raw["maxFindings"] === "number" && raw["maxFindings"] >= 1)
-    ? Math.floor(raw["maxFindings"])
-    : 50;
+type CodeConfigDetectorId =
+  | "dangerous-api-detect"
+  | "auth-access-detect"
+  | "security-misconfig-detect";
+
+const CODE_CONFIG_ANALYSIS_TOOL_POLICY: ToolPolicy = {
+  allow: ["group:readonly", "group:analysis"],
+};
+
+function resolveConfig(
+  ctx: TaskContext,
+  configKey = "code-config-detect",
+): CodeConfigConfig {
+  const model = resolveTaskModel(ctx, configKey, "code-config-detect");
+  const maxFindings = resolveTaskPositiveInt(ctx, configKey, "maxFindings", 50, "code-config-detect");
   return { model, maxFindings };
 }
 
@@ -309,7 +319,21 @@ const SECURITY_MISCONFIG_BLOCKS: CategoryBlock[] = [
   ] },
 ];
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[] = [],
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+  threatModelContext?: string,
+  applicationModelContext?: string,
+  scenarioContext?: string,
+  detectorScope: CodeConfigDetectorId[] = [
+    "dangerous-api-detect",
+    "auth-access-detect",
+    "security-misconfig-detect",
+  ],
+): string {
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -337,12 +361,15 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
 
   const included = filterCategories(CODE_CONFIG_RELEVANCE, repoContext, fileIndex);
   const isFiltered = repoContext != null && included.size < CODE_CONFIG_RELEVANCE.length;
+  const enableDangerousApi = detectorScope.includes("dangerous-api-detect");
+  const enableAuthAccess = detectorScope.includes("auth-access-detect");
+  const enableSecurityMisconfig = detectorScope.includes("security-misconfig-detect");
 
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec", "auth-session", "config-security"]);
 
-  const part1Lines = filterBlocks(DANGEROUS_API_BLOCKS, included);
-  const part2Lines = filterBlocks(AUTH_ACCESS_BLOCKS, included);
-  const part3Lines = filterBlocks(SECURITY_MISCONFIG_BLOCKS, included);
+  const part1Lines = enableDangerousApi ? filterBlocks(DANGEROUS_API_BLOCKS, included) : [];
+  const part2Lines = enableAuthAccess ? filterBlocks(AUTH_ACCESS_BLOCKS, included) : [];
+  const part3Lines = enableSecurityMisconfig ? filterBlocks(SECURITY_MISCONFIG_BLOCKS, included) : [];
 
   return [
     "You are a senior application security engineer with 10+ years of experience auditing production",
@@ -355,6 +382,9 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...contextLines,
     ...frameworkGuidance,
     ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    ...(threatModelContext ? [threatModelContext, ""] : []),
+    ...(applicationModelContext ? [applicationModelContext] : []),
+    ...(scenarioContext ? [scenarioContext] : []),
     ...(isFiltered ? CATEGORY_SCOPE_HEADER : []),
     ...(part1Lines.length > 0 ? [
       "# Part 1: Dangerous API Detection",
@@ -420,7 +450,13 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
   ].filter(Boolean).join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+  detectorScope?: Set<CodeConfigDetectorId>,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -428,6 +464,9 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     if (!isRecord(item)) continue;
     const f = item as unknown as CodeConfigFinding;
     if (!f.filePath?.trim()) continue;
+    if (detectorScope && !detectorScope.has((f.detectorId || "dangerous-api-detect") as CodeConfigDetectorId)) {
+      continue;
+    }
 
     let scanner: string;
     let rulePrefix: string;
@@ -527,8 +566,14 @@ export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
         ]
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
-    const runtime = getAgentRuntime();
+    const threatModelContext = buildThreatModelLeadsSection(
+      "code-config-detect",
+      context.upstreamOutputs.get("threat-model-stride"),
+      fileIndex,
+      preRead,
+    );
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead, threatModelContext);
+    const runtime = resolveTaskRuntime(context);
 
     let structuredOutput: unknown;
     let resultText = "";
@@ -544,7 +589,7 @@ export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
           cwd: context.repoRoot,
           model,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
+          allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",

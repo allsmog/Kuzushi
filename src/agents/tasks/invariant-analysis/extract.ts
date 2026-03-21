@@ -5,6 +5,7 @@ import type { ScanOpts, RepoContext } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
+import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import {
   resolveInvariantAnalysisConfig,
   INVARIANT_EXTRACT_SCHEMA,
@@ -144,7 +145,7 @@ export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
           cwd: context.repoRoot,
           model: cfg.extractionModel,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
+          allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",

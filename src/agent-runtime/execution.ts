@@ -1,4 +1,5 @@
 import type { MessageBus } from "../bus/types.js";
+import type { AgentHistoryEntry } from "./types.js";
 import type {
   LlmCallStartEvent,
   LlmCallCompleteEvent,
@@ -9,7 +10,30 @@ import { inflightCache } from "../cache.js";
 import { isRecord } from "../utils.js";
 import { getAgentRuntime, type AgentRuntime } from "./index.js";
 
-export const DEFAULT_READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody"] as const;
+export const DEFAULT_READ_ONLY_TOOLS = [
+  "Read",
+  "Glob",
+  "Grep",
+  "GetCallers",
+  "GetCallees",
+  "GetFunctionBody",
+] as const;
+
+export const SEMANTIC_NAVIGATION_TOOLS = [
+  "GoToDefinition",
+  "FindReferences",
+  "TypeAtPosition",
+] as const;
+
+export function resolveDefaultReadOnlyTools(
+  runtime: Pick<AgentRuntime, "id"> | undefined = getAgentRuntime(),
+): string[] {
+  if (runtime.id === "pi-ai") {
+    return [...DEFAULT_READ_ONLY_TOOLS, ...SEMANTIC_NAVIGATION_TOOLS];
+  }
+
+  return [...DEFAULT_READ_ONLY_TOOLS];
+}
 
 export interface AgentActivity {
   kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
@@ -27,6 +51,9 @@ export interface AgentRuntimeOptions {
   runtime?: AgentRuntime;
   abortController?: AbortController;
   maxBudgetUsd?: number;
+  temperature?: number;
+  maxOutputTokens?: number;
+  history?: AgentHistoryEntry[];
   activityCallback?: AgentActivityCallback;
   /** Optional message bus for emitting LLM observability events. */
   bus?: MessageBus;
@@ -139,10 +166,13 @@ async function executeStructuredAgentQuery(
         cwd: args.cwd,
         model: args.model,
         maxTurns: args.maxTurns,
+        temperature: args.runtimeOptions?.temperature,
+        maxOutputTokens: args.runtimeOptions?.maxOutputTokens,
         allowedTools: [...args.allowedTools],
         permissionMode: "dontAsk",
         maxBudgetUsd: args.runtimeOptions?.maxBudgetUsd,
         abortController: args.runtimeOptions?.abortController,
+        history: args.runtimeOptions?.history,
         systemPromptPrefix: args.systemPromptPrefix,
         outputFormat: {
           type: "json_schema",
@@ -305,6 +335,9 @@ function looksLikeRuntimeOptions<T extends AgentRuntimeOptions>(
     "runtime" in runtimeOptions
     || "abortController" in runtimeOptions
     || "maxBudgetUsd" in runtimeOptions
+    || "temperature" in runtimeOptions
+    || "maxOutputTokens" in runtimeOptions
+    || "history" in runtimeOptions
     || "activityCallback" in runtimeOptions
     || "bus" in runtimeOptions
     || "runId" in runtimeOptions

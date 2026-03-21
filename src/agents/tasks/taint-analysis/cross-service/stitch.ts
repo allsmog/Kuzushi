@@ -276,6 +276,45 @@ function normalizeFindingArray(value: unknown): Finding[] {
       impact: typeof finding["impact"] === "string" ? finding["impact"] : "MEDIUM",
       cwe: Array.isArray(finding["cwe"]) ? finding["cwe"].map((item) => String(item)) : [],
       score: Number.isFinite(Number(finding["score"])) ? Number(finding["score"]) : 0,
+      taintPath: Array.isArray(finding["taintPath"])
+        ? finding["taintPath"].flatMap((step) => {
+          if (!isRecord(step)) return [];
+          const pathFile = typeof step["filePath"] === "string" ? step["filePath"] : "";
+          const pathLine = Number(step["line"]);
+          if (!pathFile || !Number.isFinite(pathLine)) {
+            return [];
+          }
+          return [{
+            filePath: pathFile,
+            line: pathLine,
+            message: typeof step["message"] === "string" ? step["message"] : undefined,
+            snippet: typeof step["snippet"] === "string" ? step["snippet"] : undefined,
+          }];
+        })
+        : undefined,
+      proofState: (
+        finding["proofState"] === "symbolic_only"
+        || finding["proofState"] === "execution_attempted"
+        || finding["proofState"] === "execution_confirmed"
+        || finding["proofState"] === "execution_rejected"
+        || finding["proofState"] === "inconclusive"
+      )
+        ? finding["proofState"]
+        : undefined,
+      engineProvenance: Array.isArray(finding["engineProvenance"])
+        ? finding["engineProvenance"].flatMap((entry) => {
+          if (!isRecord(entry)) return [];
+          const kind = typeof entry["kind"] === "string" ? entry["kind"] : "";
+          const detail = typeof entry["detail"] === "string" ? entry["detail"] : "";
+          if (!detail) {
+            return [];
+          }
+          if (kind !== "semgrep" && kind !== "codeql" && kind !== "taint-analysis" && kind !== "agentic" && kind !== "dynamic") {
+            return [];
+          }
+          return [{ kind, detail }];
+        })
+        : undefined,
     }];
   });
 }

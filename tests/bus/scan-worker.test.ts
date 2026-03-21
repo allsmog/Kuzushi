@@ -378,4 +378,113 @@ describe("scan-worker", () => {
 
     await bus.close();
   });
+
+  it("fans out eligible agentic tasks across ensemble models and merges findings", async () => {
+    const bus = new InProcessBus();
+    const taskRegistry = new TaskRegistry();
+    const task: AgentTask = {
+      id: "ssrf-detect",
+      displayName: "SSRF Detector",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [];
+      },
+    };
+    task.run = async (_input, context) => {
+      if (context.modelOverride === "openai:gpt-4o") {
+        return [
+          {
+            ...makeFinding("ssrf-detect", "dup-openai"),
+            scanner: "ssrf-detect",
+            filePath: "src/http.ts",
+            startLine: 12,
+            cwe: ["CWE-918"],
+            score: 70,
+            scannerConfidence: "MEDIUM",
+          },
+          {
+            ...makeFinding("ssrf-detect", "unique-openai"),
+            scanner: "ssrf-detect",
+            filePath: "src/http.ts",
+            startLine: 20,
+            cwe: ["CWE-918"],
+            score: 55,
+            scannerConfidence: "LOW",
+          },
+        ];
+      }
+
+      return [
+        {
+          ...makeFinding("ssrf-detect", "dup-anthropic"),
+          scanner: "ssrf-detect",
+          filePath: "src/http.ts",
+          startLine: 12,
+          cwe: ["CWE-918"],
+          score: 60,
+          scannerConfidence: "HIGH",
+        },
+      ];
+    };
+    taskRegistry.register(task as AgentTask<any, any>);
+
+    registerScanWorker(bus, {
+      registry: { get: () => { throw new Error("unused"); } } as any,
+      taskRegistry,
+      config: {
+        ...makeConfig("sequential"),
+        ensembleModels: ["anthropic:claude-haiku-4-5", "openai:gpt-4o"],
+      },
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const completePromise = bus.waitFor<TaskCompleteEvent>(
+      "task:complete",
+      (event) => event.meta.runId === runId && event.payload.taskId === "ssrf-detect",
+    );
+
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "ssrf-detect",
+        outputKind: "findings",
+        input: {},
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    const complete = await completePromise;
+    const findings = complete.payload.output as Finding[];
+    expect(findings).toHaveLength(2);
+    expect(findings[0]).toEqual(
+      expect.objectContaining({
+        filePath: "src/http.ts",
+        startLine: 12,
+        adjustedScore: 75,
+        scannerConfidence: "HIGH",
+      }),
+    );
+    expect(findings[0]?.corroboratingSignals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ scanner: "ssrf-detect:anthropic:claude-haiku-4-5" }),
+      ]),
+    );
+    expect(findings[1]).toEqual(
+      expect.objectContaining({
+        filePath: "src/http.ts",
+        startLine: 20,
+      }),
+    );
+    expect(complete.payload.costUsd).toBe(0);
+
+    await bus.close();
+  });
 });

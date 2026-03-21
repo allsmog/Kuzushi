@@ -1,6 +1,6 @@
 import {
-  DEFAULT_READ_ONLY_TOOLS,
   extractJson,
+  resolveDefaultReadOnlyTools,
   resolveRepoContextAndRuntimeOptions,
   runStructuredAgentQuery,
   type AgentActivityCallback,
@@ -59,16 +59,23 @@ export const VERIFICATION_RESULT_SCHEMA = {
   },
 } as const;
 
-export const DEFAULT_TOOLS: AllowedTriageTool[] = [...DEFAULT_READ_ONLY_TOOLS];
 export const DEFAULT_MAX_TURNS = 15;
 
 export interface VerificationRuntimeOptions extends AgentRuntimeOptions {
   enrichedContext?: EnrichedRepoContext["enrichment"];
+  /** Extra prompt context injected by knowledge registry, precedents, etc. */
+  extraPromptContext?: string;
 }
 
 export interface VerificationOutput {
   result: VerificationResult;
   costUsd: number;
+}
+
+export function resolveDefaultVerificationTools(
+  runtime: AgentRuntimeOptions["runtime"] | undefined,
+): AllowedTriageTool[] {
+  return normalizeAllowedTriageToolNames(resolveDefaultReadOnlyTools(runtime));
 }
 
 export class VerificationExecutionError extends Error {
@@ -84,6 +91,7 @@ export class VerificationExecutionError extends Error {
 export function verificationSystemPromptPrefix(
   repoContext?: RepoContext,
   enrichedContext?: EnrichedRepoContext["enrichment"],
+  extraPromptContext?: string,
 ): string {
   const repoSection = formatRepoContext(repoContext);
   const enrichedSection = formatEnrichedRepoContext(enrichedContext);
@@ -93,12 +101,15 @@ export function verificationSystemPromptPrefix(
   const enrichedBlock = enrichedSection.length > 0
     ? "## Enriched Repository Context\n" + enrichedSection.join("\n") + "\n\n"
     : "";
+  const extraBlock = extraPromptContext
+    ? "\n\n" + extraPromptContext
+    : "";
   return repoBlock + enrichedBlock + composePromptModules(
     frameworkAwarenessModule(repoContext),
     proofLevelModule(),
     bypassExhaustionModule(),
     confidenceEscalationModule("verification"),
-  );
+  ) + extraBlock;
 }
 
 export async function verifyFindingWithAgent(
@@ -124,9 +135,9 @@ export async function verifyFindingWithAgent(
     cwd: repoRoot,
     model,
     maxTurns: effectiveMaxTurns,
-    allowedTools: DEFAULT_TOOLS,
+    allowedTools: resolveDefaultVerificationTools(runtimeOptions.runtime),
     runtimeOptions,
-    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
+    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext),
     schema: VERIFICATION_RESULT_SCHEMA,
   });
 
@@ -378,9 +389,9 @@ async function verifySingleBatch(
     cwd: repoRoot,
     model,
     maxTurns: effectiveMaxTurns,
-    allowedTools: DEFAULT_TOOLS,
+    allowedTools: resolveDefaultVerificationTools(runtimeOptions.runtime),
     runtimeOptions,
-    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
+    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext),
     schema: BATCH_VERIFICATION_SCHEMA,
     strict: true,
     retryInvalidStructuredOutput: 2,
@@ -481,4 +492,18 @@ function parseBatchVerificationOutput(
   }
 
   return results;
+}
+
+function normalizeAllowedTriageToolNames(tools: readonly string[]): AllowedTriageTool[] {
+  return tools.filter((tool): tool is AllowedTriageTool => (
+    tool === "Read"
+    || tool === "Glob"
+    || tool === "Grep"
+    || tool === "GetCallers"
+    || tool === "GetCallees"
+    || tool === "GetFunctionBody"
+    || tool === "GoToDefinition"
+    || tool === "FindReferences"
+    || tool === "TypeAtPosition"
+  ));
 }

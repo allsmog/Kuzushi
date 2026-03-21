@@ -7,7 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { isRecord, toErrorMessage } from "../utils.js";
 import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
-import type { Finding } from "./types.js";
+import type { Finding, TaintPathStep } from "./types.js";
 
 /**
  * In-process lock map to prevent concurrent `ensureDatabase` calls from racing
@@ -76,6 +76,9 @@ interface CodeQLSarifResult {
       };
       region?: {
         startLine?: number;
+        snippet?: {
+          text?: string;
+        };
       };
     };
   }>;
@@ -103,6 +106,9 @@ interface CodeQLSarifThreadFlowLocation {
       };
       region?: {
         startLine?: number;
+        snippet?: {
+          text?: string;
+        };
       };
     };
   };
@@ -313,7 +319,8 @@ export function selectFindings(
       if (!filePath) {
         continue;
       }
-      const evidence = extractCodeFlowEvidence(result);
+      const taintPath = extractCodeFlowPath(result);
+      const evidence = renderCodeFlowEvidence(taintPath);
 
       const message = (
         asOptionalString(result.message?.text)
@@ -359,6 +366,14 @@ export function selectFindings(
         impact,
         cwe,
         score,
+        taintPath,
+        proofState: "symbolic_only",
+        engineProvenance: [{
+          kind: "codeql",
+          detail: taintPath && taintPath.length > 0
+            ? "CodeQL finding with structured code-flow path evidence"
+            : "CodeQL finding",
+        }],
       };
 
       const existing = deduped.get(fingerprint);
@@ -622,8 +637,8 @@ function extractLocation(result: CodeQLSarifResult): { filePath: string; startLi
   return { filePath: "", startLine: 1 };
 }
 
-function extractCodeFlowEvidence(result: CodeQLSarifResult): string | null {
-  const segments: string[] = [];
+function extractCodeFlowPath(result: CodeQLSarifResult): TaintPathStep[] | undefined {
+  const steps: TaintPathStep[] = [];
 
   for (const codeFlow of result.codeFlows ?? []) {
     for (const threadFlow of codeFlow.threadFlows ?? []) {
@@ -634,23 +649,53 @@ function extractCodeFlowEvidence(result: CodeQLSarifResult): string | null {
         }
 
         const filePath = normalizeArtifactUri(uri);
-        const startLine = asPositiveInt(location.location?.physicalLocation?.region?.startLine) ?? 1;
+        const line = asPositiveInt(location.location?.physicalLocation?.region?.startLine) ?? 1;
         const message = asOptionalString(location.location?.message?.text)
-          ?? asOptionalString(location.message?.text);
-        const segment = message
-          ? `${filePath}:${startLine} (${message})`
-          : `${filePath}:${startLine}`;
+          ?? asOptionalString(location.message?.text)
+          ?? undefined;
+        const snippet = asOptionalString(location.location?.physicalLocation?.region?.snippet?.text)
+          ?? undefined;
 
-        segments.push(segment);
-        if (segments.length >= 16) {
-          return `Code flow: ${segments.join(" -> ")}`;
+        const previous = steps[steps.length - 1];
+        if (
+          previous
+          && previous.filePath === filePath
+          && previous.line === line
+          && previous.message === message
+          && previous.snippet === snippet
+        ) {
+          continue;
         }
+
+        steps.push({
+          filePath,
+          line,
+          message,
+          snippet,
+        });
       }
     }
   }
 
-  if (segments.length === 0) {
+  return steps.length > 0 ? steps : undefined;
+}
+
+function renderCodeFlowEvidence(path: TaintPathStep[] | undefined): string | null {
+  if (!path || path.length === 0) {
     return null;
+  }
+
+  const segments: string[] = [];
+  for (const step of path.slice(0, 16)) {
+    segments.push(
+      step.message
+        ? `${step.filePath}:${step.line} (${step.message})`
+        : `${step.filePath}:${step.line}`,
+    );
+  }
+
+  if (path.length > 16) {
+    segments.push(`... ${path.length - 16} more step(s)`);
   }
 
   return `Code flow: ${segments.join(" -> ")}`;

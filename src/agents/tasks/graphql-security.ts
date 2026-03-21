@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -16,6 +15,11 @@ import { getProfilesForTask, formatProfilesForPrompt } from "../../security-prof
 import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
+import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
+import { buildThreatModelLeadsSection } from "./threat-model-guidance.js";
+import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
+import { resolveTaskAllowedTools } from "./runtime-overrides.js";
+import type { ApplicationModel } from "../../types.js";
 
 const log = createLogger({ stage: "graphql-security" });
 
@@ -66,17 +70,12 @@ interface GraphqlSecurityConfig {
 }
 
 function resolveConfig(ctx: TaskContext): GraphqlSecurityConfig {
-  const raw = ctx.config.scannerConfig["graphql-security"];
-  const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
-    ? raw["model"].trim()
-    : ctx.config.model;
-  const maxFindings = (isRecord(raw) && typeof raw["maxFindings"] === "number" && raw["maxFindings"] >= 1)
-    ? Math.floor(raw["maxFindings"])
-    : 50;
+  const model = resolveTaskModel(ctx, "graphql-security");
+  const maxFindings = resolveTaskPositiveInt(ctx, "graphql-security", "maxFindings", 50);
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult, threatModelContext?: string, appModelContext?: string, scenarioContext?: string): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec", "auth-session"]);
 
   const contextLines = repoContext
@@ -113,6 +112,9 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...contextLines,
     ...frameworkGuidance,
     ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    ...(threatModelContext ? [threatModelContext, ""] : []),
+    ...(appModelContext ? [appModelContext, ""] : []),
+    ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
     "### introspection-enabled (CWE-200)",
@@ -254,7 +256,7 @@ export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
   id: "graphql-security-detect",
   displayName: "GraphQL Security Detector",
   outputKind: "findings",
-  dependsOn: ["context-gatherer"],
+  dependsOn: ["context-gatherer", "app-model-build", "threat-scenario-build"],
 
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
@@ -265,8 +267,18 @@ export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
       ? getProfilesForTask(context.securityProfiles, "graphql-security-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
-    const runtime = getAgentRuntime();
+    const threatModelContext = buildThreatModelLeadsSection(
+      "graphql-security-detect",
+      context.upstreamOutputs.get("threat-model-stride"),
+      fileIndex,
+      preRead,
+    );
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
+    const appModelContext = buildApplicationModelSection("graphql-security-detect", applicationModel);
+    const scenarioContext = await buildThreatScenarioEvidenceSection("graphql-security-detect", context.repoRoot, applicationModel, scenarioOutput);
+    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext);
+    const runtime = resolveTaskRuntime(context);
 
     let structuredOutput: unknown;
     let resultText = "";
@@ -282,7 +294,7 @@ export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
           cwd: context.repoRoot,
           model,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
+          allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
             type: "json_schema",

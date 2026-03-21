@@ -2,10 +2,13 @@ import type { AgentTask, TaskContext } from "../agents/types.js";
 import { isHandoff } from "../agents/handoff.js";
 import type {
   CorroboratingSignal,
+  EngineProvenance,
   ScannerConfig,
   ScannerPlugin,
   Finding,
+  ProofState,
   SuppressionReason,
+  TaintPathStep,
 } from "../scanners/types.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd } from "../utils.js";
@@ -137,6 +140,9 @@ function asFinding(item: Record<string, unknown>): Finding | null {
     cwe: asStringArray(item["cwe"]),
     score: asNumber(item["score"]) || 0,
     adjustedScore: asOptionalNumber(item["adjustedScore"]),
+    taintPath: asTaintPath(item["taintPath"]),
+    proofState: asProofState(item["proofState"]),
+    engineProvenance: asEngineProvenance(item["engineProvenance"]),
     corroboratingSignals: asCorroboratingSignals(item["corroboratingSignals"]),
     suppressionReasons: asSuppressionReasons(item["suppressionReasons"]),
   };
@@ -228,4 +234,69 @@ function asSuppressionReasons(value: unknown): SuppressionReason[] | undefined {
   }
 
   return reasons.length > 0 ? reasons : undefined;
+}
+
+function asTaintPath(value: unknown): TaintPathStep[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const steps: TaintPathStep[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const filePath = asString(item["filePath"]);
+    const line = asNumber(item["line"]);
+    if (!filePath || !Number.isFinite(line)) {
+      continue;
+    }
+    steps.push({
+      filePath,
+      line,
+      message: asOptionalStringFromRecord(item["message"]),
+      snippet: asOptionalStringFromRecord(item["snippet"]),
+    });
+  }
+
+  return steps.length > 0 ? steps : undefined;
+}
+
+function asProofState(value: unknown): ProofState | undefined {
+  const raw = asString(value);
+  switch (raw) {
+    case "symbolic_only":
+    case "execution_attempted":
+    case "execution_confirmed":
+    case "execution_rejected":
+    case "inconclusive":
+      return raw;
+    default:
+      return undefined;
+  }
+}
+
+function asEngineProvenance(value: unknown): EngineProvenance[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const entries: EngineProvenance[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const detail = asString(item["detail"]);
+    const kind = asString(item["kind"]);
+    if (!detail) {
+      continue;
+    }
+    if (kind !== "semgrep" && kind !== "codeql" && kind !== "taint-analysis" && kind !== "agentic" && kind !== "dynamic") {
+      continue;
+    }
+    entries.push({ kind, detail });
+  }
+
+  return entries.length > 0 ? entries : undefined;
+}
+
+function asOptionalStringFromRecord(value: unknown): string | undefined {
+  const text = asString(value);
+  return text || undefined;
 }

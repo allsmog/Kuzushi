@@ -15,6 +15,7 @@ import {
   getTriagedFingerprints,
   getVerdictCounts,
   getActionableFindings,
+  updateFindingMetadata,
   updatePocHarnessResult,
   updateRunCost,
   updateRunContext,
@@ -639,6 +640,49 @@ describe("large fingerprint sets (SQLite bind limit)", () => {
 
     const deleted = deleteFindingsByFingerprints(db, "repo", fingerprints);
     expect(deleted).toBe(1100);
+    db.close();
+  });
+});
+
+describe("updateFindingMetadata", () => {
+  it("writes metadata and round-trips through getActionableFindings", () => {
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("fp-meta"), makeResult("fp-meta", "tp"), "repo", "HEAD");
+
+    updateFindingMetadata(db, "fp-meta", {
+      latestDynamicRunId: "dyn-001",
+      dynamicRunIds: ["dyn-001"],
+      notes: ["initial dynamic run"],
+    });
+
+    const findings = getActionableFindings(db, "repo", { includeFalsePositives: true });
+    const match = findings.find(f => f.fingerprint === "fp-meta");
+    expect(match).toBeDefined();
+    expect(match!.findingMetadata).toBeDefined();
+    expect(match!.findingMetadata!.latestDynamicRunId).toBe("dyn-001");
+    expect(match!.findingMetadata!.dynamicRunIds).toEqual(["dyn-001"]);
+    expect(match!.findingMetadata!.notes).toEqual(["initial dynamic run"]);
+    db.close();
+  });
+
+  it("merges with existing metadata", () => {
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("fp-merge"), makeResult("fp-merge", "tp"), "repo", "HEAD");
+
+    updateFindingMetadata(db, "fp-merge", {
+      latestDynamicRunId: "dyn-001",
+      dynamicRunIds: ["dyn-001"],
+    });
+
+    updateFindingMetadata(db, "fp-merge", {
+      latestPatchRunId: "patch-001",
+      patchRunIds: ["patch-001"],
+    });
+
+    const findings = getActionableFindings(db, "repo", { includeFalsePositives: true });
+    const match = findings.find(f => f.fingerprint === "fp-merge");
+    expect(match!.findingMetadata!.latestDynamicRunId).toBe("dyn-001");
+    expect(match!.findingMetadata!.latestPatchRunId).toBe("patch-001");
     db.close();
   });
 });

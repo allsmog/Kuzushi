@@ -62,6 +62,10 @@ export class AcpAgentRuntime implements AgentRuntime {
     const startedAtMs = Date.now();
     const signal = request.options.abortController?.signal;
     let totalCostUsd = 0;
+    const promptWithHistory = formatPromptWithHistory(
+      request.options.history,
+      request.prompt,
+    );
 
     try {
       await this.ensureProcess();
@@ -100,10 +104,12 @@ export class AcpAgentRuntime implements AgentRuntime {
         let response: JsonRpcResponse;
         try {
           response = await this.sendWithRetry("prompt", {
-            prompt: request.prompt,
+            prompt: promptWithHistory,
             model: request.options.model,
             systemPrompt: request.options.systemPromptPrefix ?? "",
             maxTurns: 1,
+            temperature: request.options.temperature,
+            maxTokens: request.options.maxOutputTokens,
             allowedTools: request.options.allowedTools ?? [],
             outputFormat: request.options.outputFormat,
           }, signal);
@@ -338,4 +344,25 @@ export class AcpAgentRuntime implements AgentRuntime {
     this.process = null;
     this.pendingRequests.clear();
   }
+}
+
+function formatPromptWithHistory(
+  history: AgentQueryRequest["options"]["history"],
+  prompt: string,
+): string {
+  if (!Array.isArray(history) || history.length === 0) {
+    return prompt;
+  }
+
+  const transcript = history
+    .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}:\n${entry.content}`)
+    .join("\n\n");
+
+  return [
+    "Prior conversation context:",
+    transcript,
+    "",
+    "Current request:",
+    prompt,
+  ].join("\n");
 }

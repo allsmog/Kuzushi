@@ -8,7 +8,8 @@ import { resolveCodeQLBinary } from "../../../scanners/resolve-codeql.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import { DEFAULT_READ_ONLY_TOOLS, runStructuredAgentQuery } from "../../../agent-runtime/execution.js";
+import { resolveDefaultReadOnlyTools, runStructuredAgentQuery } from "../../../agent-runtime/execution.js";
+import { createSimpleTextIndexProvider } from "../../../analysis-support/index.js";
 import type { AgentTask } from "../../types.js";
 import {
   generateExtractionQuery,
@@ -33,14 +34,17 @@ import {
   normalizeTaintAnalysisLanguage,
   resolveTaintAnalysisConfig,
   resolveContextAwarePasses,
+  type DiffScope,
   type ExtractionDegradation,
   type ExtractionDegradationReason,
   type TaintAnalysisLanguage,
+  type TaintAnalysisPassId,
   type TaintAnalysisPreflightOutput,
   type TaintAnalysisTaskConfig,
 } from "./types.js";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { buildTiPriorArtifacts } from "./ti-prior.js";
+import { groundCallableTargets } from "./grounding.js";
 
 interface ExtractionAgentContext {
   referenceFiles: string[];
@@ -214,7 +218,7 @@ For each candidate provide:
     cwd: repoRoot,
     model,
     maxTurns: 15,
-    allowedTools: [...DEFAULT_READ_ONLY_TOOLS],
+    allowedTools: resolveDefaultReadOnlyTools(),
     schema: EXTRACTION_SUPPLEMENT_SCHEMA as Record<string, unknown>,
     strict: true,
     retryInvalidStructuredOutput: 2,
@@ -382,6 +386,26 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
     );
 
     const explorationDir = path.join(workspaceDir, "exploration");
+    let diffScope: DiffScope | undefined;
+    if (cfg.taintDiffBase) {
+      diffScope = await buildDiffScope(
+        context.repoRoot,
+        cfg.taintDiffBase,
+        cfg.taintDiffMode ?? "delta",
+        cfg.passes,
+      );
+      await writeFile(
+        path.join(explorationDir, "diff_scope.json"),
+        JSON.stringify({
+          generatedAt: new Date().toISOString(),
+          ...diffScope,
+        }, null, 2),
+        "utf-8",
+      );
+      process.stderr.write(
+        `[taint-analysis-preflight] Diff-aware scope: base=${diffScope.base} mode=${diffScope.mode} changed_files=${diffScope.changedFiles.length} fell_back_to_full=${diffScope.fellBackToFull}${diffScope.fallbackReason ? ` reason=${diffScope.fallbackReason}` : ""}\n`,
+      );
+    }
     const tiPriorMarkdownPath = path.join(explorationDir, "TI_PRIOR.md");
     const tiPriorJsonPath = path.join(explorationDir, "ti_prior.json");
     const selectedPasses = TAINT_ANALYSIS_PASSES.filter((pass) => cfg.passes.includes(pass.passId));
@@ -505,7 +529,21 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
           sinksRowCount: sinksDecodedRows,
         });
         extractionCostUsd += supplementResult.costUsd;
-        const csvRows = supplementCandidatesToCsvRows(supplementResult.candidates);
+        const groundedCandidates = cfg.groundingEnabled
+          ? await groundCallableTargets(context.repoRoot, supplementResult.candidates)
+          : supplementResult.candidates.map((candidate) => ({
+            item: candidate,
+            grounding: {
+              status: "weak" as const,
+              reasons: ["grounding_disabled"],
+              matchCount: 0,
+              evidence: [],
+            },
+          }));
+        const acceptedCandidates = groundedCandidates
+          .filter((candidate) => candidate.grounding.status !== "invalid")
+          .map((candidate) => candidate.item);
+        const csvRows = supplementCandidatesToCsvRows(acceptedCandidates);
         agenticSupplementSources = csvRows.sourceRows.length;
         agenticSupplementSinks = csvRows.sinkRows.length;
 
@@ -516,7 +554,14 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
             language,
             framework,
             costUsd: supplementResult.costUsd,
-            candidates: supplementResult.candidates,
+            candidates: acceptedCandidates,
+            droppedCandidates: groundedCandidates
+              .filter((candidate) => candidate.grounding.status === "invalid")
+              .map((candidate) => candidate.item),
+            grounding: groundedCandidates.map((candidate) => ({
+              ...candidate.item,
+              grounding: candidate.grounding,
+            })),
           }, null, 2),
           "utf-8",
         );
@@ -625,9 +670,59 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
         sinksRowCount,
       },
       extractionDegradation,
+      diffScope,
     }, { costUsd: extractionCostUsd });
   },
 };
+
+async function buildDiffScope(
+  repoRoot: string,
+  taintDiffBase: string,
+  mode: "delta" | "baseline",
+  enabledPasses: TaintAnalysisPassId[],
+): Promise<DiffScope> {
+  try {
+    const index = await createSimpleTextIndexProvider(repoRoot);
+    const diffSlice = await index.getDiffSlice(taintDiffBase);
+
+    if (diffSlice.changedFiles.length === 0) {
+      process.stderr.write(
+        `[taint-analysis-preflight] Diff slice returned 0 changed files; falling back to full analysis\n`,
+      );
+      return {
+        base: diffSlice.base,
+        changedFiles: [],
+        mode,
+        affectedPassIds: [...enabledPasses],
+        fellBackToFull: true,
+        fallbackReason: "no_changed_files",
+      };
+    }
+
+    // At preflight time, labels are not yet available so we conservatively
+    // assume all enabled passes may be affected by the diff.  The analyze
+    // task narrows this set once label data is available.
+    return {
+      base: diffSlice.base,
+      changedFiles: diffSlice.changedFiles,
+      mode,
+      affectedPassIds: [...enabledPasses],
+      fellBackToFull: false,
+    };
+  } catch (error) {
+    process.stderr.write(
+      `[taint-analysis-preflight] getDiffSlice failed: ${toErrorMessage(error)}; falling back to full analysis\n`,
+    );
+    return {
+      base: taintDiffBase,
+      changedFiles: [],
+      mode,
+      affectedPassIds: [...enabledPasses],
+      fellBackToFull: true,
+      fallbackReason: `getDiffSlice_error: ${toErrorMessage(error)}`,
+    };
+  }
+}
 
 function withResources(args: string[], cfg: TaintAnalysisTaskConfig): string[] {
   const out = [...args];

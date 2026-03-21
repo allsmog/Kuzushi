@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -16,6 +15,11 @@ import { getProfilesForTask, formatProfilesForPrompt } from "../../security-prof
 import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
+import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
+import { buildThreatModelLeadsSection } from "./threat-model-guidance.js";
+import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
+import { resolveTaskAllowedTools } from "./runtime-overrides.js";
+import type { ApplicationModel } from "../../types.js";
 
 const log = createLogger({ stage: "ssrf-detect" });
 
@@ -66,17 +70,12 @@ interface SsrfDetectionConfig {
 }
 
 function resolveConfig(ctx: TaskContext): SsrfDetectionConfig {
-  const raw = ctx.config.scannerConfig["ssrf-detect"];
-  const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
-    ? raw["model"].trim()
-    : ctx.config.model;
-  const maxFindings = (isRecord(raw) && typeof raw["maxFindings"] === "number" && raw["maxFindings"] >= 1)
-    ? Math.floor(raw["maxFindings"])
-    : 50;
+  const model = resolveTaskModel(ctx, "ssrf-detect");
+  const maxFindings = resolveTaskPositiveInt(ctx, "ssrf-detect", "maxFindings", 50);
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult, threatModelContext?: string, appModelContext?: string, scenarioContext?: string): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
 
   const contextLines = repoContext
@@ -98,6 +97,9 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "",
     ...contextLines,
     ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    ...(threatModelContext ? [threatModelContext, ""] : []),
+    ...(appModelContext ? [appModelContext, ""] : []),
+    ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to check",
     "",
     "### url-from-user-input (CWE-918)",
@@ -241,7 +243,7 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
   id: "ssrf-detect",
   displayName: "SSRF Detector",
   outputKind: "findings",
-  dependsOn: ["context-gatherer"],
+  dependsOn: ["context-gatherer", "app-model-build", "threat-scenario-build"],
 
   async run(_input, context): Promise<Finding[]> {
     const { model, maxFindings } = resolveConfig(context);
@@ -252,54 +254,70 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
       ? getProfilesForTask(context.securityProfiles, "ssrf-detect")
       : [];
     const profileLines = formatProfilesForPrompt(profiles);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead);
-    const runtime = getAgentRuntime();
-
-    let structuredOutput: unknown;
-    let resultText = "";
-    let costUsd = 0;
+    const threatModelContext = buildThreatModelLeadsSection(
+      "ssrf-detect",
+      context.upstreamOutputs.get("threat-model-stride"),
+      fileIndex,
+      preRead,
+    );
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
+    const appModelContext = buildApplicationModelSection("ssrf-detect", applicationModel);
+    const scenarioContext = await buildThreatScenarioEvidenceSection("ssrf-detect", context.repoRoot, applicationModel, scenarioOutput);
 
     const tag = "[ssrf-detect]";
-    log.info(`Starting scan (model=${model})`);
+    const lensMaxTurns = Math.min(context.config.taskMaxTurns ?? 15, 8);
+    const perLensMax = Math.ceil(maxFindings / 2);
+    log.info(`Starting multi-lens scan (model=${model})`);
 
-    try {
-      for await (const message of runtime.query({
-        prompt,
-        options: {
-          cwd: context.repoRoot,
-          model,
-          maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: ["Read", "Glob", "Grep"],
-          permissionMode: "dontAsk",
-          outputFormat: {
-            type: "json_schema",
-            schema: SSRF_DETECTION_SCHEMA,
-            strict: true,
-            retryInvalidStructuredOutput: 2,
-          },
-        },
-      })) {
-        if (message.type !== "result") continue;
-        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-          costUsd = message.totalCostUsd;
-        }
-        if ("result" in message) {
-          resultText = message.result;
-          structuredOutput = message.structuredOutput;
-        }
+    // Run lenses in parallel: local sink review + cross-function dataflow
+    const lensPromises: Array<Promise<LensResult>> = [
+      runLens(
+        buildLocalSinkPrompt(repoContext, perLensMax, profileLines, preRead, threatModelContext, appModelContext, scenarioContext),
+        context,
+        model,
+        lensMaxTurns,
+        `${tag}/local-sink`,
+      ).catch((error) => {
+        log.error(`${tag}/local-sink lens error: ${toErrorMessage(error)}`);
+        return { output: { findings: [] }, costUsd: 0 };
+      }),
+      runLens(
+        buildCrossFunctionPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
+        context,
+        model,
+        lensMaxTurns,
+        `${tag}/cross-function`,
+      ).catch((error) => {
+        log.error(`${tag}/cross-function lens error: ${toErrorMessage(error)}`);
+        return { output: { findings: [] }, costUsd: 0 };
+      }),
+    ];
+
+    const lensResults = await Promise.all(lensPromises);
+    let totalCostUsd = 0;
+
+    // Merge all lens outputs through existing dedup
+    const allFindings: Finding[] = [];
+    for (const result of lensResults) {
+      totalCostUsd += result.costUsd;
+      allFindings.push(...normalizeFindings(result.output, context.repoRoot, context.repoName, perLensMax));
+    }
+
+    // Final dedup across lenses by fingerprint, keeping highest score
+    const deduped = new Map<string, Finding>();
+    for (const f of allFindings) {
+      const existing = deduped.get(f.fingerprint);
+      if (!existing || f.score > existing.score) {
+        deduped.set(f.fingerprint, f);
       }
-    } catch (error) {
-      throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
     return attachTaskOutputMeta(
-      normalizeFindings(
-        structuredOutput ?? parseJson(resultText, tag),
-        context.repoRoot,
-        context.repoName,
-        maxFindings,
-      ),
-      { costUsd },
+      [...deduped.values()]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxFindings),
+      { costUsd: totalCostUsd },
     );
   },
 
@@ -331,9 +349,135 @@ function parseJson(text: string, tag: string): unknown {
   }
 }
 
+interface LensResult {
+  output: unknown;
+  costUsd: number;
+}
+
+async function runLens(
+  prompt: string,
+  context: TaskContext,
+  model: string,
+  maxTurns: number,
+  tag: string,
+): Promise<LensResult> {
+  const runtime = resolveTaskRuntime(context);
+  let structuredOutput: unknown;
+  let resultText = "";
+  let costUsd = 0;
+
+  for await (const message of runtime.query({
+    prompt,
+    options: {
+      cwd: context.repoRoot,
+      model,
+      maxTurns,
+      allowedTools: resolveTaskAllowedTools(context),
+      permissionMode: "dontAsk",
+      outputFormat: {
+        type: "json_schema",
+        schema: SSRF_DETECTION_SCHEMA,
+        strict: true,
+        retryInvalidStructuredOutput: 1,
+      },
+    },
+  })) {
+    if (message.type !== "result") continue;
+    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+      costUsd = message.totalCostUsd;
+    }
+    if ("result" in message) {
+      resultText = message.result;
+      structuredOutput = message.structuredOutput;
+    }
+  }
+
+  return { output: structuredOutput ?? parseJson(resultText, tag), costUsd };
+}
+
+function buildLocalSinkPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[],
+  preRead: PreReadResult | undefined,
+  threatModelContext?: string,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
+  return [
+    "You are an SSRF specialist. LENS: LOCAL SINK REVIEW.",
+    "Focus ONLY on HTTP client calls visible in the pre-loaded files. Do NOT use Glob/Grep.",
+    "Check each call for user-controlled URL parameters, missing allowlists, and redirect following.",
+    "",
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    ...(threatModelContext ? [threatModelContext, ""] : []),
+    ...(appModelContext ? [appModelContext, ""] : []),
+    ...(scenarioContext ? [scenarioContext, ""] : []),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    "",
+    "## Sink functions to check",
+    "fetch, axios, http.get, urllib, HttpClient, requests.get, http.request, got, undici, superagent",
+    "",
+    `Return at most ${maxFindings} findings.`,
+    "",
+    antiHallucinationModule({
+      extra: [
+        "Only report SSRF where user input reaches an HTTP request sink in the provided files.",
+        "Do NOT report internal-only HTTP calls with hardcoded URLs.",
+      ],
+    }),
+    frameworkAwarenessModule(repoContext),
+  ].filter(Boolean).join("\n");
+}
+
+function buildCrossFunctionPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[],
+  fileIndex: FileIndex | undefined,
+  preRead: PreReadResult | undefined,
+  threatModelContext?: string,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
+  return [
+    "You are an SSRF specialist. LENS: CROSS-FUNCTION DATAFLOW.",
+    "Trace user input across function boundaries to HTTP request sinks.",
+    "Focus on multi-hop data flows: request handler → utility → HTTP client.",
+    "Use Grep to find HTTP client usage, then Read to trace cross-function data flow.",
+    "",
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    ...(threatModelContext ? [threatModelContext, ""] : []),
+    ...(appModelContext ? [appModelContext, ""] : []),
+    ...(scenarioContext ? [scenarioContext, ""] : []),
+    formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
+    formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
+    patternMatchText,
+    "",
+    "## Cross-function patterns to check",
+    "- Request handler extracts URL/host → passes to utility → utility calls HTTP client",
+    "- URL constructed from multiple user inputs across helpers",
+    "- Redirect target resolution spanning middleware and route handlers",
+    "",
+    `Return at most ${maxFindings} findings.`,
+    "",
+    antiHallucinationModule({
+      extra: [
+        "Only report SSRF where you can verify user input crosses at least one function boundary to reach an HTTP sink.",
+        "Do NOT report single-file, obvious cases — focus on non-trivial data flows.",
+      ],
+    }),
+    frameworkAwarenessModule(repoContext),
+  ].filter(Boolean).join("\n");
+}
+
 export const __ssrfDetectionInternals = {
   resolveConfig,
   buildPrompt,
+  buildLocalSinkPrompt,
+  buildCrossFunctionPrompt,
   normalizeFindings,
   computeFingerprint,
+  runLens,
 };

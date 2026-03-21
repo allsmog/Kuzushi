@@ -1,6 +1,7 @@
 import type { Finding, ScannerId } from "../scanners/types.js";
 import type { TaskOutputKind } from "../agents/types.js";
 import type {
+  DynamicAnalysisRun,
   EnrichedRepoContext,
   ExploitChain,
   KuzushiConfig,
@@ -30,6 +31,7 @@ export interface PipelineStats {
   skippedAlreadyTriaged: number;
   skippedLowConfidence?: number;
   skippedByFpFilter?: number;
+  skippedByClassifier?: number;
   softSuppressedFindings?: number;
   skippedByLlmRescore?: number;
   corroboratedClusters?: number;
@@ -47,6 +49,11 @@ export interface PipelineStats {
   variantAnalysisCostUsd?: number;
   chainCount?: number;
   chainAnalysisCostUsd?: number;
+  dynamicConfirmed?: number;
+  dynamicInteresting?: number;
+  dynamicRejected?: number;
+  dynamicErrors?: number;
+  dynamicCostUsd?: number;
   budgetExceeded?: boolean;
   failedTasks?: string[];
   deadLetterCount?: number;
@@ -493,6 +500,95 @@ export type PocHarnessQueueDepthEvent = EventEnvelope<
   }
 >;
 
+// ─── Dynamic Analysis Events ────────────────────────────────────────────────
+
+export type DynamicAnalysisStartEvent = EventEnvelope<
+  "dynamic:start",
+  {
+    context: RunContext;
+    findingCount: number;
+    model: string;
+  }
+>;
+
+export type DynamicAnalysisFindingQueuedEvent = EventEnvelope<
+  "dynamic:finding-queued",
+  {
+    context: RunContext;
+    finding: Finding;
+    triageResult: TriageResult;
+    verificationResult?: VerificationResult;
+    pocHarnessResult?: PocHarnessResult;
+    repoContext?: unknown;
+    index: number;
+    total: number;
+  }
+>;
+
+export type DynamicAnalysisResultEvent = EventEnvelope<
+  "dynamic:result",
+  {
+    context: RunContext;
+    finding: Finding;
+    result: DynamicAnalysisRun;
+    costUsd?: number;
+    attempts?: number;
+    index: number;
+    total: number;
+  }
+>;
+
+export type DynamicAnalysisErrorEvent = EventEnvelope<
+  "dynamic:error",
+  {
+    context: RunContext;
+    finding: Finding;
+    error: string;
+    costUsd?: number;
+    attempts?: number;
+    index: number;
+    total: number;
+  }
+>;
+
+export type DynamicAnalysisAgentActivityEvent = EventEnvelope<
+  "dynamic:agent-activity",
+  {
+    context: RunContext;
+    fingerprint: string;
+    kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
+    toolName?: string;
+    toolInput?: Record<string, unknown>;
+    summary?: string;
+    elapsedSeconds?: number;
+    index: number;
+    total: number;
+  }
+>;
+
+export type DynamicAnalysisCompleteEvent = EventEnvelope<
+  "dynamic:complete",
+  {
+    context: RunContext;
+    confirmed: number;
+    interesting: number;
+    rejected: number;
+    errors: number;
+    totalCostUsd?: number;
+  }
+>;
+
+export type DynamicAnalysisQueueDepthEvent = EventEnvelope<
+  "dynamic:queue-depth",
+  {
+    context: RunContext;
+    queued: number;
+    inFlight: number;
+    processed: number;
+    total: number;
+  }
+>;
+
 export type StoreUpsertedEvent = EventEnvelope<
   "store:upserted",
   {
@@ -774,6 +870,13 @@ export type KuzushiEvent =
   | PocHarnessAgentActivityEvent
   | PocHarnessCompleteEvent
   | PocHarnessQueueDepthEvent
+  | DynamicAnalysisStartEvent
+  | DynamicAnalysisFindingQueuedEvent
+  | DynamicAnalysisResultEvent
+  | DynamicAnalysisErrorEvent
+  | DynamicAnalysisAgentActivityEvent
+  | DynamicAnalysisCompleteEvent
+  | DynamicAnalysisQueueDepthEvent
   | StoreUpsertedEvent
   | TaintAnalysisRefinementStartEvent
   | TaintAnalysisRefinementResultEvent

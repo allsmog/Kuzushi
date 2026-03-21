@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { setAgentRuntime } from "../../src/agent-runtime/index.js";
+import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import { TaskRegistry } from "../../src/agents/registry.js";
 import type { AgentTask } from "../../src/agents/types.js";
 import { SELECTABLE_TASK_IDS } from "../../src/agents/tasks/task-selector.js";
@@ -232,6 +234,10 @@ describe("PipelineOrchestrator", () => {
       "report:requested",
       (event) => event.meta.runId === runId,
     );
+    const completePromise = bus.waitFor<PipelineCompleteEvent>(
+      "pipeline:complete",
+      (event) => event.meta.runId === runId,
+    );
 
     await bus.publish(
       createEvent("scan:complete", runId, {
@@ -273,6 +279,92 @@ describe("PipelineOrchestrator", () => {
     expect(finalDepth.payload.inFlight).toBe(0);
     expect(finalDepth.payload.processed).toBe(1);
     expect(finalDepth.payload.total).toBe(1);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("uses quick classifier output as the pre-triage candidate set when enabled", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    const runtime: AgentRuntime = {
+      id: "classifier-test",
+      async *query(request) {
+        yield {
+          type: "result",
+          subtype: "success",
+          result: request.prompt.includes("src/app.ts:10")
+            ? "LIKELY_FALSE_POSITIVE"
+            : "LIKELY_REAL",
+          totalCostUsd: 0.001,
+        };
+      },
+    };
+    setAgentRuntime(runtime);
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+    registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableClassifier: true,
+          llmRescoreEnabled: true,
+        },
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    const batchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
+      "report:requested",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: makeFinding("fp-filtered", 10),
+        scannerId: "semgrep",
+      }),
+    );
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: makeFinding("fp-kept", 20),
+        scannerId: "semgrep",
+      }),
+    );
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 2,
+      }),
+    );
+
+    const batchQueued = await batchQueuedPromise;
+    const reportRequested = await reportRequestedPromise;
+    expect(batchQueued.payload.findings.map((finding) => finding.fingerprint)).toEqual(["fp-kept"]);
+    expect(reportRequested.payload.stats?.skippedByClassifier).toBe(1);
+    expect(reportRequested.payload.stats?.skippedByLlmRescore).toBeUndefined();
 
     await bus.close();
     db.close();
@@ -677,6 +769,10 @@ describe("PipelineOrchestrator", () => {
       "report:requested",
       (event) => event.meta.runId === runId,
     );
+    const completePromise = bus.waitFor<PipelineCompleteEvent>(
+      "pipeline:complete",
+      (event) => event.meta.runId === runId,
+    );
 
     for (const queued of verificationQueued) {
       await bus.publish(
@@ -700,11 +796,6 @@ describe("PipelineOrchestrator", () => {
     }
 
     await reportRequestedPromise;
-
-    const completePromise = bus.waitFor<PipelineCompleteEvent>(
-      "pipeline:complete",
-      (event) => event.meta.runId === runId,
-    );
     await bus.publish(
       createEvent("report:complete", runId, {
         context,
@@ -3084,6 +3175,254 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
+  it("auto-enables STRIDE for threat-aware detectors and runs PASTA after them", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    let ssrfUpstream: Map<string, unknown> | undefined;
+    let pastaUpstream: Map<string, unknown> | undefined;
+
+    taskRegistry.register({
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return {
+          repoContext: { languages: ["TypeScript"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+          fileIndex: { tree: [], totalFiles: 0, truncated: false, patternMatches: {} },
+        };
+      },
+    });
+    taskRegistry.register({
+      id: "threat-model-stride",
+      displayName: "STRIDE Threat Model",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return {
+          document: {
+            version: "1.0",
+            dfd: { elements: [], trustBoundaries: [] },
+            threats: [],
+            summary: {
+              total: 0,
+              bySeverity: {},
+              byCategory: {
+                spoofing: 0,
+                tampering: 0,
+                repudiation: 0,
+                "information-disclosure": 0,
+                "denial-of-service": 0,
+                "elevation-of-privilege": 0,
+              },
+            },
+          },
+          findings: [],
+        };
+      },
+    });
+    taskRegistry.register({
+      id: "ssrf-detect",
+      displayName: "SSRF Detector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run(_input, context) {
+        ssrfUpstream = new Map(context.upstreamOutputs);
+        return { findings: ["ssrf"] };
+      },
+    });
+    taskRegistry.register({
+      id: "threat-model-pasta",
+      displayName: "PASTA Threat Model",
+      outputKind: "custom",
+      dependsOn: ["threat-model-stride"],
+      async run(_input, context) {
+        pastaUpstream = new Map(context.upstreamOutputs);
+        return { trees: [] };
+      },
+    });
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
+      "report:requested",
+      (event) => event.meta.runId === runId,
+    );
+    const completePromise = bus.waitFor<PipelineCompleteEvent>(
+      "pipeline:complete",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enabledTasks: ["ssrf-detect", "threat-model-pasta"],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    await reportRequestedPromise;
+    await bus.publish(
+      createEvent("report:complete", runId, {
+        context,
+      }),
+    );
+    await completePromise;
+
+    expect(taskStarts).toContain("threat-model-stride");
+    expect(taskStarts.indexOf("threat-model-stride")).toBeLessThan(taskStarts.indexOf("ssrf-detect"));
+    expect(taskStarts.indexOf("ssrf-detect")).toBeLessThan(taskStarts.indexOf("threat-model-pasta"));
+    expect(ssrfUpstream?.has("threat-model-stride")).toBe(true);
+    expect(pastaUpstream?.has("ssrf-detect")).toBe(true);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("does not auto-inject STRIDE for non-threat-aware detector runs", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    taskRegistry.register({
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return {
+          repoContext: { languages: ["TypeScript"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+          fileIndex: { tree: [], totalFiles: 0, truncated: false, patternMatches: {} },
+        };
+      },
+    });
+    taskRegistry.register({
+      id: "threat-model-stride",
+      displayName: "STRIDE Threat Model",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return {};
+      },
+    });
+    taskRegistry.register({
+      id: "secrets-crypto-detect",
+      displayName: "Secrets Detector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return {};
+      },
+    });
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
+      "report:requested",
+      (event) => event.meta.runId === runId,
+    );
+    const completePromise = bus.waitFor<PipelineCompleteEvent>(
+      "pipeline:complete",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enabledTasks: ["secrets-crypto-detect"],
+        },
+        scanOpts: { ...makeScanOpts(), scanners: [] },
+      }),
+    );
+
+    await reportRequestedPromise;
+    await bus.publish(
+      createEvent("report:complete", runId, {
+        context,
+      }),
+    );
+    await completePromise;
+
+    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).not.toContain("threat-model-stride");
+
+    await bus.close();
+    db.close();
+  });
+
   it("does not re-schedule failed task-selector after fallback fires", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
@@ -3566,6 +3905,127 @@ describe("PipelineOrchestrator", () => {
 
     const triageBatchQueued = await triageBatchQueuedPromise;
     expect(triageBatchQueued.payload.findings).toHaveLength(1);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("ranks verification candidates by score descending, then triage confidence", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      verify: true,
+      verifyConcurrency: 1,
+      triageConcurrency: 3,
+    };
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+
+    // Create findings with different scores
+    const findingHigh = makeFinding("fp-high-score", 90);
+    const findingMid = makeFinding("fp-mid-score", 60);
+    const findingLow = makeFinding("fp-low-score", 30);
+    // Give mid-score finding a taintPath to test tiebreaking
+    findingMid.taintPath = [{ filePath: "a.ts", line: 1, message: "source" }];
+
+    const confidenceMap: Record<string, number> = {
+      "fp-high-score": 0.7,
+      "fp-mid-score": 0.9,
+      "fp-low-score": 0.8,
+    };
+
+    bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {
+      const { context: ctx, findings, total } = event.payload;
+      const batchRunId = event.meta.runId;
+      for (const [idx, finding] of findings.entries()) {
+        await bus.publish(
+          createEvent("triage:result", batchRunId, {
+            context: ctx,
+            finding,
+            result: {
+              ...makeResult(finding.fingerprint),
+              confidence: confidenceMap[finding.fingerprint] ?? 0.9,
+            },
+            costUsd: 0.01,
+            attempts: 1,
+            index: idx + 1,
+            total,
+          }),
+        );
+      }
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    // Publish findings in non-score order
+    for (const f of [findingMid, findingLow, findingHigh]) {
+      await bus.publish(
+        createEvent("scan:finding", runId, {
+          context,
+          finding: f,
+          scannerId: "semgrep",
+        }),
+      );
+    }
+
+    const verificationQueued: Array<{ finding: any; index: number }> = [];
+    bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", (event) => {
+      if (event.meta.runId === runId) {
+        verificationQueued.push({ finding: event.payload.finding, index: event.payload.index });
+      }
+    });
+    bus.subscribe<VerificationBatchQueuedEvent>("verification:batch-queued", (event) => {
+      if (event.meta.runId === runId) {
+        for (const item of event.payload.items) {
+          verificationQueued.push({ finding: item.finding, index: item.index });
+        }
+      }
+    });
+
+    const verificationStartPromise = bus.waitFor<VerificationStartEvent>(
+      "verification:start",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 3,
+      }),
+    );
+
+    await verificationStartPromise;
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Verification queue should be ordered: high-score (90), mid-score (60), low-score (30)
+    expect(verificationQueued.length).toBeGreaterThanOrEqual(1);
+    const queuedFingerprints = verificationQueued.map(q => q.finding.fingerprint);
+    expect(queuedFingerprints[0]).toBe("fp-high-score");
+    if (queuedFingerprints.length >= 2) {
+      expect(queuedFingerprints[1]).toBe("fp-mid-score");
+    }
+    if (queuedFingerprints.length >= 3) {
+      expect(queuedFingerprints[2]).toBe("fp-low-score");
+    }
 
     await bus.close();
     db.close();

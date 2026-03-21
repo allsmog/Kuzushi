@@ -10,7 +10,12 @@ import type {
 } from "../../src/bus/events.js";
 import type { KuzushiConfig, PocHarnessResult, TriageResult, VerificationResult } from "../../src/types.js";
 
-const { generatePocHarnessMock, PocHarnessExecutionErrorMock } = vi.hoisted(() => {
+const {
+  generatePocHarnessMock,
+  createPocExecutorMock,
+  executorExecuteMock,
+  PocHarnessExecutionErrorMock,
+} = vi.hoisted(() => {
   class PocHarnessExecutionErrorMock extends Error {
     readonly costUsd: number;
 
@@ -23,6 +28,8 @@ const { generatePocHarnessMock, PocHarnessExecutionErrorMock } = vi.hoisted(() =
 
   return {
     generatePocHarnessMock: vi.fn(),
+    createPocExecutorMock: vi.fn(),
+    executorExecuteMock: vi.fn(),
     PocHarnessExecutionErrorMock,
   };
 });
@@ -30,6 +37,10 @@ const { generatePocHarnessMock, PocHarnessExecutionErrorMock } = vi.hoisted(() =
 vi.mock("../../src/poc-harness.js", () => ({
   generatePocHarness: generatePocHarnessMock,
   PocHarnessExecutionError: PocHarnessExecutionErrorMock,
+}));
+
+vi.mock("../../src/poc-executor/index.js", () => ({
+  createPocExecutor: createPocExecutorMock,
 }));
 
 function makeFinding(): Finding {
@@ -107,6 +118,8 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
 
 afterEach(() => {
   generatePocHarnessMock.mockReset();
+  createPocExecutorMock.mockReset();
+  executorExecuteMock.mockReset();
 });
 
 describe("poc-harness-worker", () => {
@@ -357,6 +370,106 @@ describe("poc-harness-worker", () => {
     const resultEvent = await resultPromise;
     expect(resultEvent.payload.attempts).toBe(2);
     expect(generatePocHarnessMock).toHaveBeenCalledTimes(2);
+
+    await bus.close();
+  });
+
+  it("refines failed PoC executions with execution feedback", async () => {
+    const bus = new InProcessBus();
+    const config = makeConfig({
+      pocExecute: true,
+      pocRefinementMaxIterations: 3,
+      pocReflectionInterval: 2,
+    });
+
+    generatePocHarnessMock
+      .mockResolvedValueOnce({
+        result: {
+          ...makePocHarnessResult(),
+          scriptContent: "console.log('FAIL')",
+        },
+        costUsd: 0.01,
+      })
+      .mockResolvedValueOnce({
+        result: {
+          ...makePocHarnessResult(),
+          scriptContent: "console.log('PASS')",
+        },
+        costUsd: 0.02,
+      });
+
+    executorExecuteMock
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: "FAIL",
+        stderr: "bad import",
+        timedOut: false,
+        durationMs: 11,
+        verdict: "FAIL",
+      })
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: "PASS",
+        stderr: "",
+        timedOut: false,
+        durationMs: 7,
+        verdict: "PASS",
+      });
+
+    createPocExecutorMock.mockResolvedValue({
+      available: async () => true,
+      execute: executorExecuteMock,
+    });
+
+    registerPocHarnessWorker(bus, { config });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const resultPromise = bus.waitFor<PocHarnessResultEvent>(
+      "poc-harness:result",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("poc-harness:finding-queued", runId, {
+        context,
+        finding: makeFinding(),
+        triageResult: makeTriageResult(),
+        verificationResult: makeVerificationResult(),
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    const event = await resultPromise;
+    expect(event.payload.result.iterations).toBe(2);
+    expect(event.payload.result.refinementHistory).toEqual([
+      expect.objectContaining({
+        attempt: 1,
+        error: expect.stringContaining("verdict=FAIL"),
+      }),
+    ]);
+    expect(event.payload.result.pocExecVerdict).toBe("PASS");
+    expect(event.payload.costUsd).toBeCloseTo(0.03);
+    expect(generatePocHarnessMock).toHaveBeenCalledTimes(2);
+    expect(executorExecuteMock).toHaveBeenCalledTimes(2);
+    expect(generatePocHarnessMock.mock.calls[1]?.[8]).toEqual(
+      expect.objectContaining({
+        history: expect.arrayContaining([
+          expect.objectContaining({ role: "assistant" }),
+          expect.objectContaining({
+            role: "user",
+            content: expect.stringContaining("Exit code: 1"),
+          }),
+        ]),
+      }),
+    );
 
     await bus.close();
   });

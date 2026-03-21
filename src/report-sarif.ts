@@ -88,6 +88,8 @@ export function generateSarifReport(
         confidence: finding.confidence,
         rationale: finding.rationale,
         adjustedScore: finding.adjustedScore ?? undefined,
+        proofState: finding.proofState ?? undefined,
+        engineProvenance: finding.engineProvenance?.length ? finding.engineProvenance : undefined,
         corroboratingSignalCount: finding.corroboratingSignals.length || undefined,
         corroboratingSignals: finding.corroboratingSignals.length > 0
           ? finding.corroboratingSignals
@@ -97,8 +99,27 @@ export function generateSarifReport(
           : undefined,
         exploitable: toExploitableFlag(finding.verifyExploitable),
         pocPayload: finding.verifyPocPayload ?? undefined,
+        pocRunVerdict: finding.pocRunVerdict ?? undefined,
+        pocRunDurationMs: finding.pocRunDurationMs ?? undefined,
       },
     };
+
+    if (finding.taintPath && finding.taintPath.length > 0) {
+      result["codeFlows"] = [
+        {
+          threadFlows: [
+            {
+              locations: finding.taintPath.map((step, index) => ({
+                location: buildSarifLocation(step.filePath, step.line),
+                message: {
+                  text: step.message || `taint step ${index + 1}`,
+                },
+              })),
+            },
+          ],
+        },
+      ];
+    }
 
     if (finding.fixPatch) {
       result["fixes"] = [

@@ -1,6 +1,6 @@
 import {
   runStructuredAgentQuery,
-  DEFAULT_READ_ONLY_TOOLS,
+  resolveDefaultReadOnlyTools,
 } from "../../agent-runtime/execution.js";
 import type { Finding } from "../../scanners/types.js";
 import type { TriageResult } from "../../types.js";
@@ -221,8 +221,8 @@ export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
           cwd: context.repoRoot,
           model,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: [...DEFAULT_READ_ONLY_TOOLS],
-          runtimeOptions: {},
+          allowedTools: resolveDefaultReadOnlyTools(context.runtimeOverride),
+          runtimeOptions: context.runtimeOverride ? { runtime: context.runtimeOverride } : {},
           schema: CHAIN_ANALYSIS_SCHEMA,
         });
 

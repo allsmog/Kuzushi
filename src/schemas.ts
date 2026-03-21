@@ -45,10 +45,48 @@ export const DataSensitivitySchema = z.enum([
 ]);
 
 export const ExploitChainSeveritySchema = z.enum(["CRITICAL", "HIGH", "MEDIUM"]);
+export const ProofStateSchema = z.enum([
+  "symbolic_only",
+  "execution_attempted",
+  "execution_confirmed",
+  "execution_rejected",
+  "inconclusive",
+]);
+export const DynamicAnalysisStatusSchema = z.enum([
+  "confirmed",
+  "interesting",
+  "rejected",
+  "error",
+]);
+export const DynamicCoverageModeSchema = z.enum([
+  "none",
+  "node-v8",
+  "python-coverage",
+]);
+export const PatchStatusSchema = z.enum([
+  "APPLY_FAILED",
+  "BUILD_FAILED",
+  "STILL_VULNERABLE",
+  "TESTS_FAILED",
+  "SOUND",
+  "UNKNOWN",
+]);
 
 // ---------------------------------------------------------------------------
 // Finding (scanner output)
 // ---------------------------------------------------------------------------
+
+export const TaintPathStepSchema = z.object({
+  filePath: z.string(),
+  line: z.number(),
+  message: z.string().optional(),
+  snippet: z.string().optional(),
+});
+
+export const EngineProvenanceSchema = z.object({
+  kind: z.enum(["semgrep", "codeql", "taint-analysis", "agentic", "dynamic"]),
+  detail: z.string(),
+});
 
 export const FindingSchema = z.object({
   scanner: z.string(),
@@ -66,6 +104,9 @@ export const FindingSchema = z.object({
   cwe: z.array(z.string()),
   score: z.number(),
   adjustedScore: z.number().optional(),
+  taintPath: z.array(TaintPathStepSchema).optional(),
+  proofState: ProofStateSchema.optional(),
+  engineProvenance: z.array(EngineProvenanceSchema).optional(),
   corroboratingSignals: z.array(
     z.object({
       scanner: z.string(),
@@ -173,9 +214,78 @@ export const PocHarnessResultSchema = z.object({
   pocExecStderr: z.string().optional(),
   pocExecVerdict: PocExecVerdictSchema.optional(),
   pocExecDurationMs: z.number().optional(),
+  iterations: z.number().optional(),
+  refinementHistory: z.array(z.object({
+    attempt: z.number(),
+    error: z.string(),
+    approach: z.string(),
+  })).optional(),
 });
 
 export type PocHarnessResultZ = z.infer<typeof PocHarnessResultSchema>;
+
+export const DynamicAnalysisRunSchema = z.object({
+  dynamicRunId: z.string(),
+  pipelineRunId: z.string().optional(),
+  fingerprint: z.string(),
+  repo: z.string(),
+  status: DynamicAnalysisStatusSchema,
+  score: z.number(),
+  proofValue: z.number(),
+  language: z.string().optional(),
+  harnessPath: z.string().nullable().optional(),
+  harnessLanguage: z.string().nullable().optional(),
+  seedInputs: z.array(z.string()).optional(),
+  coverageMode: DynamicCoverageModeSchema.optional(),
+  coverageSummary: z.string().optional(),
+  executionExitCode: z.number().nullable().optional(),
+  executionStdout: z.string().optional(),
+  executionStderr: z.string().optional(),
+  executionVerdict: PocExecVerdictSchema.optional(),
+  executionDurationMs: z.number().nullable().optional(),
+  iterations: z.number(),
+  costUsd: z.number().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export type DynamicAnalysisRunZ = z.infer<typeof DynamicAnalysisRunSchema>;
+
+export const PatchResultSchema = z.object({
+  patchRunId: z.string(),
+  fingerprint: z.string(),
+  repo: z.string(),
+  diff: z.string().nullable(),
+  status: PatchStatusSchema,
+  iterations: z.number(),
+  buildCommand: z.string().nullable().optional(),
+  testCommand: z.string().nullable().optional(),
+  worktreePath: z.string().nullable().optional(),
+  costUsd: z.number().optional(),
+  validatorLog: z.string().optional(),
+  history: z.array(z.object({
+    attempt: z.number(),
+    diff: z.string(),
+    status: PatchStatusSchema,
+    output: z.string(),
+  })),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export type PatchResultZ = z.infer<typeof PatchResultSchema>;
+
+export const FindingMetadataSchema = z.object({
+  latestDynamicRunId: z.string().optional(),
+  dynamicRunIds: z.array(z.string()).optional(),
+  latestPatchRunId: z.string().optional(),
+  patchRunIds: z.array(z.string()).optional(),
+  latestDynamicStatus: DynamicAnalysisStatusSchema.optional(),
+  notes: z.array(z.string()).optional(),
+});
+
+export type FindingMetadataZ = z.infer<typeof FindingMetadataSchema>;
 
 // ---------------------------------------------------------------------------
 // Repo context types
@@ -230,6 +340,113 @@ export const EnrichedRepoContextSchema = z.object({
 });
 
 export type EnrichedRepoContextZ = z.infer<typeof EnrichedRepoContextSchema>;
+
+export const ModelEvidenceAnchorSchema = z.object({
+  filePath: z.string(),
+  startLine: z.number(),
+  description: z.string(),
+});
+
+export const ApplicationRouteSchema = z.object({
+  id: z.string(),
+  method: z.string(),
+  path: z.string(),
+  filePath: z.string(),
+  startLine: z.number(),
+  framework: z.string().optional(),
+  handlerSymbol: z.string().optional(),
+  middleware: z.array(z.string()),
+  authMechanisms: z.array(z.string()),
+});
+
+export const ApplicationOutboundClientSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  filePath: z.string(),
+  startLine: z.number(),
+  symbol: z.string().optional(),
+  targetHint: z.string().optional(),
+  protocol: z.string().optional(),
+});
+
+export const ApplicationDataStoreSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  name: z.string(),
+  filePath: z.string(),
+  startLine: z.number(),
+});
+
+export const ApplicationBackgroundJobSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  filePath: z.string(),
+  startLine: z.number(),
+  queue: z.string().optional(),
+  handlerSymbol: z.string().optional(),
+});
+
+export const ApplicationServiceBoundarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(["entrypoint", "outbound", "queue", "datastore", "trust-zone"]),
+  description: z.string(),
+  evidenceAnchors: z.array(ModelEvidenceAnchorSchema),
+});
+
+export const ApplicationModelSchema = z.object({
+  version: z.string(),
+  routes: z.array(ApplicationRouteSchema),
+  outboundClients: z.array(ApplicationOutboundClientSchema),
+  dataStores: z.array(ApplicationDataStoreSchema),
+  backgroundJobs: z.array(ApplicationBackgroundJobSchema),
+  serviceBoundaries: z.array(ApplicationServiceBoundarySchema),
+  relevantFiles: z.array(z.string()),
+  notes: z.array(z.string()),
+});
+
+export const ThreatScenarioSchema = z.object({
+  id: z.string(),
+  detectorId: z.enum([
+    "code-config-detect",
+    "dangerous-api-detect",
+    "auth-access-detect",
+    "security-misconfig-detect",
+    "ssrf-detect",
+    "nosql-injection-detect",
+    "prototype-pollution-detect",
+    "template-injection-detect",
+    "graphql-security-detect",
+    "race-condition-detect",
+  ]),
+  title: z.string(),
+  rationale: z.string(),
+  attackSurface: z.string(),
+  expectedGuard: z.string().optional(),
+  relatedFiles: z.array(z.string()),
+  relatedSymbols: z.array(z.string()),
+  sourceThreatIds: z.array(z.string()),
+  cwe: z.array(z.string()),
+  entryPoint: z.object({
+    kind: z.string(),
+    filePath: z.string(),
+    startLine: z.number(),
+    method: z.string().optional(),
+    path: z.string().optional(),
+    handlerSymbol: z.string().optional(),
+  }).optional(),
+  sink: z.object({
+    kind: z.string(),
+    filePath: z.string(),
+    startLine: z.number(),
+    symbol: z.string().optional(),
+    detail: z.string().optional(),
+  }).optional(),
+  evidenceAnchors: z.array(ModelEvidenceAnchorSchema),
+});
+
+export type ApplicationModelZ = z.infer<typeof ApplicationModelSchema>;
+export type ThreatScenarioZ = z.infer<typeof ThreatScenarioSchema>;
 
 // ---------------------------------------------------------------------------
 // Precedents & security profiles
@@ -346,7 +563,26 @@ export const KuzushiConfigSchema = z.object({
   variantAnalysisMaxFindings: z.number().optional(),
   enableContextEnrichment: z.boolean().optional(),
   contextEnrichmentModel: z.string().optional(),
+  enableClassifier: z.boolean().optional(),
+  classifierModel: z.string().optional(),
+  classifierThreshold: z.number().optional(),
+  ensembleModels: z.array(z.string()).optional(),
   diffBase: z.string().optional(),
+  taintDiffBase: z.string().optional(),
+  taintDiffMode: z.enum(["delta", "baseline"]).optional(),
+  taintGroundingEnabled: z.boolean().optional(),
+  astIndexEnabled: z.boolean().optional(),
+  callGraphAssistEnabled: z.boolean().optional(),
+  dynamicAnalysisEnabled: z.boolean().optional(),
+  coverageGuidedEnabled: z.boolean().optional(),
+  dynamicMaxIterations: z.number().optional(),
+  dynamicMaxCandidates: z.number().optional(),
+  dynamicMinScore: z.number().optional(),
+  dynamicPerFindingBudgetUsd: z.number().optional(),
+  patchingEnabled: z.boolean().optional(),
+  patchMaxIterations: z.number().optional(),
+  patchBuildCommand: z.string().optional(),
+  patchTestCommand: z.string().optional(),
   llmRescoreEnabled: z.boolean().optional(),
   llmRescoreModel: z.string().optional(),
   llmRescoreThreshold: z.number().optional(),
@@ -361,6 +597,10 @@ export const KuzushiConfigSchema = z.object({
   pocExecute: z.boolean().optional(),
   pocSandbox: PocSandboxSchema.optional(),
   pocExecTimeoutMs: z.number().optional(),
+  pocRefinementMaxIterations: z.number().optional(),
+  pocReflectionInterval: z.number().optional(),
+  verifyRefinementMaxIterations: z.number().optional(),
+  verifyReflectionInterval: z.number().optional(),
   confidenceCalibration: z.boolean().optional(),
   confidenceSignalWeights: z.object({
     scanner: z.number().optional(),
@@ -459,8 +699,17 @@ export const FindingRowSchema = z.object({
   pocHarnessSkipped: z.number().nullable().optional(),
   pocHarnessSkipReason: z.string().nullable().optional(),
   pocHarnessCostUsd: z.number().nullable().optional(),
+  pocRunExitCode: z.number().nullable().optional(),
+  pocRunStdout: z.string().nullable().optional(),
+  pocRunStderr: z.string().nullable().optional(),
+  pocRunVerdict: PocExecVerdictSchema.nullable().optional(),
+  pocRunDurationMs: z.number().nullable().optional(),
   compositeConfidence: z.number().nullable().optional(),
   confidenceSignalsJson: z.string().nullable().optional(),
+  taintPathJson: z.string().nullable().optional(),
+  proofState: ProofStateSchema.nullable().optional(),
+  engineProvenanceJson: z.string().nullable().optional(),
+  findingMetadataJson: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

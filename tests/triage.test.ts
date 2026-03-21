@@ -54,7 +54,7 @@ function missingRegistry() {
   };
 }
 
-function makeMockRuntime(messages: AgentMessage[]): AgentRuntime {
+function makeMockRuntime(messages: AgentMessage[], id = "mock-runtime"): AgentRuntime {
   const queryFn = vi.fn().mockImplementation(function* () {
     for (const message of messages) {
       yield message;
@@ -62,7 +62,7 @@ function makeMockRuntime(messages: AgentMessage[]): AgentRuntime {
   });
 
   return {
-    id: "mock-runtime",
+    id,
     query: queryFn,
   };
 }
@@ -309,6 +309,50 @@ describe("triageFindingWithAgent", () => {
     expect(output.result.confidence).toBe(0.95);
     expect(output.costUsd).toBe(0);
     expect(runtime.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses semantic navigation tools for pi-ai runtime defaults", async () => {
+    const runtime = makeMockRuntime([
+      {
+        type: "result",
+        subtype: "success",
+        result: "{}",
+        structuredOutput: {
+          fingerprint: "test-fp",
+          verdict: "fp",
+          confidence: 0.95,
+          rationale: "hardcoded input",
+          verification_steps: ["check source"],
+          fix_patch: null,
+        },
+      },
+    ], "pi-ai");
+
+    await triageFindingWithAgent(
+      registryWithConfig({ prompt: "custom triage" }) as any,
+      makeFinding(),
+      "/tmp/repo",
+      "repo",
+      "anthropic:claude-sonnet-4-6",
+      12,
+      { runtime },
+    );
+
+    expect(runtime.query).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        allowedTools: [
+          "Read",
+          "Glob",
+          "Grep",
+          "GetCallers",
+          "GetCallees",
+          "GetFunctionBody",
+          "GoToDefinition",
+          "FindReferences",
+          "TypeAtPosition",
+        ],
+      }),
+    }));
   });
 
   it("falls back to result text parsing when structured_output is missing", async () => {

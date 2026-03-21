@@ -27,13 +27,44 @@ export interface ToolPolicyLayer {
 /** Predefined tool groups for convenience. */
 export const TOOL_GROUPS: Record<string, string[]> = {
   "group:readonly": ["Read", "Glob", "Grep"],
-  "group:analysis": ["GetCallers", "GetCallees", "GetFunctionBody"],
+  "group:analysis": [
+    "GetCallers",
+    "GetCallees",
+    "GetFunctionBody",
+    "GoToDefinition",
+    "FindReferences",
+    "TypeAtPosition",
+  ],
   "group:readwrite": ["Read", "Glob", "Grep", "Write"],
-  "group:all": ["Read", "Glob", "Grep", "Bash", "Write", "GetCallers", "GetCallees", "GetFunctionBody"],
+  "group:all": [
+    "Read",
+    "Glob",
+    "Grep",
+    "Bash",
+    "Write",
+    "GetCallers",
+    "GetCallees",
+    "GetFunctionBody",
+    "GoToDefinition",
+    "FindReferences",
+    "TypeAtPosition",
+  ],
 };
 
 /** All known tool names in the system. */
-export const ALL_TOOLS = ["Read", "Glob", "Grep", "Bash", "Write", "GetCallers", "GetCallees", "GetFunctionBody"];
+export const ALL_TOOLS = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Bash",
+  "Write",
+  "GetCallers",
+  "GetCallees",
+  "GetFunctionBody",
+  "GoToDefinition",
+  "FindReferences",
+  "TypeAtPosition",
+];
 
 /**
  * Expand tool group references in a list of tool names.

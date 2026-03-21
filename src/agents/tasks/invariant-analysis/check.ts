@@ -8,6 +8,7 @@ import type { ScanOpts } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
+import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import {
   resolveInvariantAnalysisConfig,
   INVARIANT_CHECK_SCHEMA,
@@ -194,7 +195,7 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
             cwd: context.repoRoot,
             model: cfg.checkModel,
             maxTurns,
-            allowedTools: ["Read", "Glob", "Grep"],
+            allowedTools: resolveTaskAllowedTools(context),
             permissionMode: "dontAsk",
             outputFormat: {
               type: "json_schema",

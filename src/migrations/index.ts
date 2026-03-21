@@ -16,6 +16,8 @@ import { migration012 } from "./012_add_finding_provenance_columns.js";
 import { migration013 } from "./013_add_composite_confidence_columns.js";
 import { migration014 } from "./014_add_metrics_column.js";
 import { migration015 } from "./015_add_assertion_tracking.js";
+import { migration016 } from "./016_add_structured_finding_evidence.js";
+import { migration017 } from "./017_add_dynamic_and_patch_persistence.js";
 import type { Migration } from "./types.js";
 
 /** All registered migrations in version order. */
@@ -35,4 +37,6 @@ export const allMigrations: Migration[] = [
   migration013,
   migration014,
   migration015,
+  migration016,
+  migration017,
 ];

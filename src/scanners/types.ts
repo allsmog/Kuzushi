@@ -20,6 +20,25 @@ export interface SuppressionReason {
   scorePenalty?: number;
 }
 
+export interface TaintPathStep {
+  filePath: string;
+  line: number;
+  message?: string;
+  snippet?: string;
+}
+
+export type ProofState =
+  | "symbolic_only"
+  | "execution_attempted"
+  | "execution_confirmed"
+  | "execution_rejected"
+  | "inconclusive";
+
+export interface EngineProvenance {
+  kind: "semgrep" | "codeql" | "taint-analysis" | "agentic" | "dynamic";
+  detail: string;
+}
+
 // Single finding type shared by all scanners.
 export interface Finding {
   scanner: ScannerId;
@@ -38,11 +57,23 @@ export interface Finding {
   cwe: string[];
   score: number;
   adjustedScore?: number;
+  taintPath?: TaintPathStep[];
+  proofState?: ProofState;
+  engineProvenance?: EngineProvenance[];
   corroboratingSignals?: CorroboratingSignal[];
   suppressionReasons?: SuppressionReason[];
 }
 
-export type AllowedTriageTool = "Read" | "Glob" | "Grep" | "GetCallers" | "GetCallees" | "GetFunctionBody";
+export type AllowedTriageTool =
+  | "Read"
+  | "Glob"
+  | "Grep"
+  | "GetCallers"
+  | "GetCallees"
+  | "GetFunctionBody"
+  | "GoToDefinition"
+  | "FindReferences"
+  | "TypeAtPosition";
 
 export interface TriageAgentConfig {
   /** Prompt for the Agent SDK query(). Finding metadata + investigation instructions. */
