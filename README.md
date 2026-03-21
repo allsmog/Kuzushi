@@ -36,7 +36,13 @@ That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed
 - **Generates PoC harnesses** — optional post-verification phase produces runnable exploit scripts (TypeScript, Python, etc.) for verified-exploitable findings
 - **Vendor-agnostic LLM runtime** — swap between Anthropic, OpenAI, Google, and 15+ other providers via the `pi-ai` backend with zero consumer-code changes
 - **Taint analysis integration** — multi-pass CodeQL-based source/sink labeling pipeline with LLM-assisted classification and deterministic library generation
+- **Structured evidence** — taintPath, proofState, and engineProvenance persist end-to-end from scan through store, resume, and all export formats (JSON, SARIF, Markdown, CSV, JSONL)
+- **Multi-lens detection** — SSRF, NoSQL injection, and template injection tasks run parallel focused lenses (local sink + cross-function dataflow) and merge through dedup for broader coverage
+- **Reachability-assisted ranking** — optional post-scan reachability check penalizes unreachable code before triage (enable with `callGraphAssistEnabled`)
+- **Call-graph-assist** — enriches high-score findings with call-chain evidence from code intelligence without additional LLM calls
+- **Pre-verification ranking** — verification candidates sorted by score, triage confidence, and evidence quality so highest-value findings verify first
 - **Tracks cost** — per-finding triage, verification, and PoC harness costs are persisted and displayed in the summary
+- **Extended metrics** — classifier drops, corroborated clusters, verification outcomes, and PoC generation outcomes flow from pipeline stats to reports
 - **Event-driven pipeline** — pluggable message bus interface (in-process backend implemented; Redis/Google Pub/Sub/NATS adapters are scaffolded)
 - **DAG-based task orchestration** — tasks declare dependencies, run in parallel groups, pass outputs downstream
 - **Extensible agent framework** — `AgentTask` interface for adding new analysis types (threat modeling, binary analysis, etc.)
