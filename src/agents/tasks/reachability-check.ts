@@ -1,8 +1,8 @@
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import type { Finding } from "../../scanners/types.js";
 import { toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import { resolveTaskModel, resolveTaskRuntime } from "./runtime-overrides.js";
 
 const log = createLogger({ stage: "reachability-check" });
 
@@ -109,7 +109,7 @@ export const reachabilityCheckTask: AgentTask<Finding[], Finding[]> = {
       return input ?? [];
     }
 
-    const model = context.config.model;
+    const model = resolveTaskModel(context, "reachability-check");
     const maxPerBatch = 20;
     const allResults = new Map<string, ReachabilityResult>();
 
@@ -117,7 +117,7 @@ export const reachabilityCheckTask: AgentTask<Finding[], Finding[]> = {
     for (let i = 0; i < input.length; i += maxPerBatch) {
       const batch = input.slice(i, i + maxPerBatch);
       const prompt = buildPrompt(batch);
-      const runtime = getAgentRuntime();
+      const runtime = resolveTaskRuntime(context);
 
       try {
         let structuredOutput: unknown;

@@ -380,9 +380,14 @@ async function runLens(
     if ("result" in message) {
       resultText = message.result;
       structuredOutput = message.structuredOutput;
+    } else if ("errors" in message) {
+      throw new Error(`${tag} runtime error: ${(message as { errors: string[] }).errors?.join("; ") ?? "unknown"}`);
     }
   }
 
+  if (structuredOutput === undefined && resultText === "") {
+    throw new Error(`${tag} runtime returned no output`);
+  }
   return { output: structuredOutput ?? parseJson(resultText, tag), costUsd };
 }
 
