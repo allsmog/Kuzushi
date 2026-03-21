@@ -580,7 +580,7 @@ export function getActionableFindings(
   const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
 
   const query = `
-    SELECT scanner, fingerprint, rule_id as ruleId, file_path as filePath, start_line as startLine,
+    SELECT scanner, fingerprint, repo, ref, rule_id as ruleId, file_path as filePath, start_line as startLine,
            severity, message, verdict, confidence, rationale,
            adjusted_score as adjustedScore,
            taint_path_json as taintPathJson,
@@ -658,6 +658,8 @@ export function getActionableFindings(
   return rows.map((row) => ({
     scanner: row.scanner,
     fingerprint: row.fingerprint,
+    repo: row.repo,
+    ref: row.ref,
     ruleId: row.ruleId,
     filePath: row.filePath,
     startLine: row.startLine,
@@ -678,7 +680,7 @@ export function getActionableFindings(
     verifyPocPayload: row.verifyPocPayload,
     verifyPocDescription: row.verifyPocDescription,
     verifyAttackVector: row.verifyAttackVector,
-    verifyPreconditions: row.verifyPreconditions,
+    verifyPreconditions: parsePreconditions(row.verifyPreconditions),
     verifyConfidence: row.verifyConfidence,
     verifyCostUsd: row.verifyCostUsd,
     pocHarnessPath: row.pocHarnessPath,
@@ -995,16 +997,20 @@ function parseEngineProvenance(raw: string | null): EngineProvenance[] | undefin
     }
     const record = item as Record<string, unknown>;
     const kind = asOptionalString(record["kind"]);
-    const detail = asOptionalString(record["detail"]);
-    if (!detail) {
-      continue;
-    }
+    const detail = asOptionalString(record["detail"]) ?? "";
     if (kind === "semgrep" || kind === "codeql" || kind === "taint-analysis" || kind === "agentic" || kind === "dynamic") {
       engineProvenance.push({ kind, detail });
     }
   }
 
   return engineProvenance.length > 0 ? engineProvenance : undefined;
+}
+
+function parsePreconditions(raw: string | null): string[] {
+  if (!raw) return [];
+  const parsed = safeJsonParse<unknown>(raw, null);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((s) => String(s)).filter(Boolean);
 }
 
 function parseFindingMetadata(raw: string | null): FindingMetadata | undefined {
@@ -1260,7 +1266,19 @@ export function updateFindingMetadata(
     ? (safeJsonParse(row.finding_metadata_json) as FindingMetadata) ?? {}
     : {};
 
-  const merged: FindingMetadata = { ...existing, ...metadata };
+  const merged: FindingMetadata = {
+    ...existing,
+    ...metadata,
+    // Accumulate array fields instead of replacing
+    dynamicRunIds: [...new Set([...(existing.dynamicRunIds ?? []), ...(metadata.dynamicRunIds ?? [])])],
+    patchRunIds: [...new Set([...(existing.patchRunIds ?? []), ...(metadata.patchRunIds ?? [])])],
+    notes: [...(existing.notes ?? []), ...(metadata.notes ?? [])],
+  };
+
+  // Remove empty arrays to keep the JSON clean
+  if (merged.dynamicRunIds?.length === 0) delete merged.dynamicRunIds;
+  if (merged.patchRunIds?.length === 0) delete merged.patchRunIds;
+  if (merged.notes?.length === 0) delete merged.notes;
 
   db.prepare(`
     UPDATE findings

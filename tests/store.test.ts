@@ -672,17 +672,23 @@ describe("updateFindingMetadata", () => {
     updateFindingMetadata(db, "fp-merge", {
       latestDynamicRunId: "dyn-001",
       dynamicRunIds: ["dyn-001"],
+      notes: ["first note"],
     });
 
     updateFindingMetadata(db, "fp-merge", {
       latestPatchRunId: "patch-001",
       patchRunIds: ["patch-001"],
+      dynamicRunIds: ["dyn-002"],
+      notes: ["second note"],
     });
 
     const findings = getActionableFindings(db, "repo", { includeFalsePositives: true });
     const match = findings.find(f => f.fingerprint === "fp-merge");
     expect(match!.findingMetadata!.latestDynamicRunId).toBe("dyn-001");
     expect(match!.findingMetadata!.latestPatchRunId).toBe("patch-001");
+    // Arrays should accumulate, not replace
+    expect(match!.findingMetadata!.dynamicRunIds).toEqual(["dyn-001", "dyn-002"]);
+    expect(match!.findingMetadata!.patchRunIds).toEqual(["patch-001"]);
     db.close();
   });
 });
