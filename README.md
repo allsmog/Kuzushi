@@ -35,6 +35,7 @@ That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed
 - **Verifies exploitability** — optional post-triage phase constructs concrete proof-of-concept payloads for true positives (e.g., SQL injection strings, XSS vectors)
 - **Generates PoC harnesses** — optional post-verification phase produces runnable exploit scripts (TypeScript, Python, etc.) for verified-exploitable findings
 - **Dynamic analysis** — optional post-PoC phase executes harnesses locally to confirm or reject findings through actual exploitation, with coverage-guided iteration support (enable with `dynamicAnalysisEnabled`)
+- **Crypto behavioral testing** — optional phase generates and executes behavioral test harnesses (timing, ECB mode, weak hash, weak PRNG, key length, edge-case) for crypto misuse findings in a Docker sandbox, producing `vulnerable`/`secure`/`inconclusive` verdicts (enable with `cryptoBehavioralTestEnabled`)
 - **Manual patch synthesis** — `kuzushi patch <repo> --fingerprint <fp>` synthesizes, applies, and validates security patches in disposable git worktrees without touching the live checkout
 - **Diff-aware taint analysis** — when `taintDiffBase` is set, taint analysis narrows to passes affected by changed files; supports `delta` mode (only findings intersecting the diff) and `baseline` mode (cached + rerun merge)
 - **Vendor-agnostic LLM runtime** — swap between Anthropic, OpenAI, Google, and 15+ other providers via the `pi-ai` backend with zero consumer-code changes
@@ -146,6 +147,14 @@ kuzushi patch <repo> --fingerprint <fp> --build-cmd "npm run build"
 kuzushi patch <repo> --fingerprint <fp> --test-cmd "npm test" --max-iterations 5
 ```
 
+### Crypto Behavioral Testing
+
+```
+kuzushi <repo> --crypto-behavioral-test                        # generate & run behavioral tests for crypto misuse findings
+```
+
+When enabled, Kuzushi generates executable test harnesses (TypeScript, Python) for cryptographic misuse findings detected by the `secrets-crypto-detect` task. Harnesses are executed in a Docker sandbox and produce verdicts: `vulnerable`, `secure`, `inconclusive`, or `error`. Supports 6 test types: timing side-channels, ECB mode detection, weak hashes, weak PRNGs, insufficient key lengths, and edge-case behavior.
+
 ### Diff-Aware Taint
 
 ```
@@ -224,7 +233,7 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `busBackend` | `"in-process"` | Message bus transport (`in-process`) |
 | `triageConcurrency` | `5` | Parallel LLM triage calls |
 | `scanMode` | `"concurrent"` | Scanner execution mode (`sequential` or `concurrent`) |
-| `enabledTasks` | `["context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect", ...]` | Agent tasks to enable beyond scanners |
+| `enabledTasks` | `["context-gatherer", "context-enricher", "app-model-build", "threat-scenario-build", "secrets-crypto-detect", "crypto-behavioral-test", "code-config-detect", ...]` | Agent tasks to enable beyond scanners |
 | `agentRuntimeBackend` | `"pi-ai"` | Agent runtime backend (`pi-ai`, future: `acp`) |
 | `verify` | `false` | Enable proof-of-exploitability verification |
 | `verifyModel` | _(uses `triageModel` or `model`)_ | Override model for verification agent |
@@ -236,6 +245,10 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `pocHarnessModel` | _(uses `triageModel` or `model`)_ | Override model for PoC harness agent |
 | `pocHarnessMaxTurns` | `20` | Max turns for PoC harness agent |
 | `pocHarnessConcurrency` | `2` | Parallel PoC harness generation calls |
+| `cryptoBehavioralTestEnabled` | `false` | Enable crypto behavioral testing for crypto misuse findings |
+| `cryptoBehavioralMaxFindings` | `10` | Max findings to generate behavioral tests for per run |
+| `cryptoBehavioralTimeoutMs` | `120000` | Execution timeout per harness in ms |
+| `cryptoBehavioralPerFindingBudgetUsd` | `1` | Cost budget per finding for harness generation |
 | `enableContextGathering` | `true` | Run repo context analysis before triage |
 | `auditLog` | `false` | Write agent activity to JSONL audit files |
 | `reportOutput` | _(unset)_ | Write markdown report output to this path |
@@ -259,7 +272,8 @@ Example:
   "verify": true,
   "verifyMinConfidence": 0.7,
   "auditLog": true,
-  "enabledTasks": ["context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect"],
+  "cryptoBehavioralTestEnabled": false,
+  "enabledTasks": ["context-gatherer", "context-enricher", "app-model-build", "threat-scenario-build", "secrets-crypto-detect", "crypto-behavioral-test", "code-config-detect"],
   "scannerConfig": {
     "codeql": { "dbPath": "./codeql-db", "suite": "javascript-security-extended" },
     "semgrep": { "binary": "opengrep", "configFlag": "auto" },
@@ -468,6 +482,10 @@ pnpm test:e2e                         # deterministic smoke scan against fixture
 pnpm test:coverage                    # tests + coverage (70% threshold)
 pnpm build                            # compile to dist/
 pnpm verify:pack                      # verify published tarball contents
+pnpm benchmark                        # run benchmark suite against govwa dataset
+pnpm benchmark:freeze                 # freeze current benchmark results as baseline
+pnpm benchmark:diff                   # diff current results against frozen baseline
+pnpm benchmark:regression             # CI regression check against baseline
 ```
 
 Tests are organized by subsystem: `tests/bus/` for orchestrator, workers, and event bus tests, `tests/agents/` for DAG, task registry, and context-gatherer tests, and `tests/` for scanners, triage, verification, store, config, retry, and report.
