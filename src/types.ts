@@ -5,6 +5,8 @@ import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js"
 
 // Re-export Zod schemas for consumers that need runtime validation.
 export {
+  CryptoBehavioralVerdictSchema,
+  CryptoBehavioralRunSchema,
   TaintPathStepSchema,
   EngineProvenanceSchema,
   ProofStateSchema,
@@ -37,8 +39,10 @@ export {
   formatValidationErrorMessage,
 } from "./schemas.js";
 
+export type { CryptoBehavioralRun } from "./crypto-behavioral/types.js";
+
 /** Pluggable message bus backend. */
-export type BusBackend = "in-process" | "redis" | "google-pubsub" | "nats";
+export type BusBackend = "in-process";
 
 /** Scanner execution mode. */
 export type ScanMode = "sequential" | "concurrent";
@@ -532,6 +536,14 @@ export interface KuzushiConfig {
   callGraphAssistEnabled?: boolean;
   /** Enable targeted dynamic analysis tasks. Default false. */
   dynamicAnalysisEnabled?: boolean;
+  /** Enable crypto behavioral runtime confirmation after secrets-crypto detection. Default false. */
+  cryptoBehavioralTestEnabled?: boolean;
+  /** Timeout for crypto behavioral harness execution in milliseconds. Default 120000. */
+  cryptoBehavioralTimeoutMs?: number;
+  /** Max number of crypto findings routed into the crypto behavioral task. Default 10. */
+  cryptoBehavioralMaxFindings?: number;
+  /** Max LLM spend allowed per crypto behavioral finding before stopping later findings. Default 1. */
+  cryptoBehavioralPerFindingBudgetUsd?: number;
   /** Enable coverage-guided refinement inside the dynamic lane. Default false. */
   coverageGuidedEnabled?: boolean;
   /** Max refinement iterations for dynamic analysis tasks. Default 3. */

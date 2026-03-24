@@ -1,3 +1,4 @@
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { Finding } from "../../scanners/types.js";
 import type { KuzushiConfig, RepoContext, TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
@@ -9,6 +10,7 @@ import type { RunContext, TriageCompleteEvent, VariantAnalysisCompleteEvent } fr
 export interface VariantAnalysisWorkerDeps {
   bus: MessageBus;
   config: KuzushiConfig;
+  runtime: AgentRuntime;
 }
 
 /**
@@ -42,6 +44,7 @@ export async function runVariantAnalysis(
   confirmedTPs: Array<{ finding: Finding; triageResult: TriageResult }>,
   context: RunContext,
   config: KuzushiConfig,
+  runtime: AgentRuntime,
 ): Promise<{ findings: Finding[]; costUsd: number }> {
   const model = config.variantAnalysisModel || config.model;
   const maxFindingsPerVariant = config.variantAnalysisMaxFindings ?? 10;
@@ -78,6 +81,7 @@ export async function runVariantAnalysis(
             context.repoName,
             model,
             maxFindingsPerVariant,
+            runtime,
           );
           allFindings.push(...result.findings);
           totalCost += result.costUsd;
@@ -96,6 +100,7 @@ export async function runVariantAnalysis(
                 context.repoName,
                 model,
                 maxFindingsPerVariant,
+                runtime,
               );
               allFindings.push(...result.findings);
               totalCost += result.costUsd;
@@ -115,6 +120,7 @@ export async function runVariantAnalysis(
           context.repoName,
           model,
           maxFindingsPerVariant,
+          runtime,
         );
         allFindings.push(...result.findings);
         totalCost += result.costUsd;

@@ -12,10 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
+      - run: python -m pip install --upgrade pip semgrep
+      - run: pnpm check:types
       - run: pnpm test
+      - run: pnpm test:coverage
+      - run: pnpm build
+      - run: pnpm verify:pack
+      - run: pnpm test:e2e

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getAgentRuntime } from "../../../../agent-runtime/index.js";
+import type { AgentRuntime } from "../../../../agent-runtime/types.js";
 import type {
   AgentResultErrorMessage,
   AgentResultSuccessMessage,
@@ -23,6 +23,7 @@ interface BoundaryAgentOptions {
   repoRoot: string;
   model: string;
   confidenceThreshold: number;
+  runtime: AgentRuntime;
 }
 
 interface BoundaryAgentRawResponse {
@@ -37,11 +38,10 @@ interface BoundaryAgentRawResponse {
 export async function detectServiceBoundaries(
   options: BoundaryAgentOptions,
 ): Promise<BoundaryManifest> {
-  const { service, repoRoot, model, confidenceThreshold } = options;
+  const { service, repoRoot, model, confidenceThreshold, runtime } = options;
   const serviceRoot = path.resolve(repoRoot, service.rootPath);
   const canUseTool = createBoundaryToolGuard(serviceRoot);
   const prompt = buildBoundaryPrompt(service);
-  const runtime = getAgentRuntime();
 
   let resultText = "";
   let structuredOutput: unknown;

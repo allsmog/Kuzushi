@@ -1,5 +1,4 @@
 import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { ALL_TOOLS, buildPolicyLayers, resolveToolPolicy, type ToolPolicy } from "../../prompts/tool-policy.js";
 import { isRecord } from "../../utils.js";
@@ -44,7 +43,7 @@ export function resolveTaskAllowedTools(
 }
 
 export function resolveTaskRuntime(context: TaskContext): AgentRuntime {
-  return context.runtimeOverride ?? getAgentRuntime();
+  return context.runtime;
 }
 
 function resolveTaskStringConfig(

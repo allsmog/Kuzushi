@@ -46,7 +46,7 @@ That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed
 - **Pre-verification ranking** — verification candidates sorted by score, triage confidence, and evidence quality so highest-value findings verify first
 - **Tracks cost** — per-finding triage, verification, and PoC harness costs are persisted and displayed in the summary
 - **Extended metrics** — classifier drops, corroborated clusters, verification outcomes, and PoC generation outcomes flow from pipeline stats to reports
-- **Event-driven pipeline** — pluggable message bus interface (in-process backend implemented; Redis/Google Pub/Sub/NATS adapters are scaffolded)
+- **Event-driven pipeline** — pluggable message bus interface with the in-process backend supported in the stable surface today
 - **DAG-based task orchestration** — tasks declare dependencies, run in parallel groups, pass outputs downstream
 - **Extensible agent framework** — `AgentTask` interface for adding new analysis types (threat modeling, binary analysis, etc.)
 - **Persists results** in SQLite — resume interrupted scans, skip already-triaged findings
@@ -71,7 +71,13 @@ Under the hood, Kuzushi uses an event-driven architecture with a DAG-based task 
 7. **PoC harness generation** (optional) — verified-exploitable findings are sent to a harness generator that produces runnable exploit scripts with syntax validation.
 8. **Report** — final results are persisted, rendered to terminal, and optionally exported as markdown, SARIF, JSON, CSV, or JSONL.
 
-All communication happens through a transport-agnostic `MessageBus` interface. The default in-process bus works out of the box; distributed adapters (Redis, Google Pub/Sub, NATS) are planned and scaffolded behind the same interface.
+All communication happens through a transport-agnostic `MessageBus` interface. The default in-process bus works out of the box, and it is the only supported transport in the stable build today.
+
+## Package Surface
+
+Kuzushi is published as a CLI-first package. The supported npm surface is the executable plus the root package export; internal modules under `dist/*` and `src/*` are not a stable API contract and may change between releases.
+
+Release builds are expected to come from a clean compile into `dist/`. `pnpm build` now cleans `dist/` first, `prepack` rebuilds automatically, and `pnpm verify:pack` runs `npm pack --dry-run` so stale artifacts do not get published.
 
 ## Commands
 
@@ -157,6 +163,7 @@ kuzushi <repo> --json results.json    # export JSON report
 kuzushi <repo> --csv results.csv      # export CSV report
 kuzushi <repo> --jsonl results.jsonl  # export JSONL report
 kuzushi <repo> --audit-log            # write agent activity to .kuzushi/runs/{runId}/
+kuzushi <repo> --verbose              # show debug-level runtime diagnostics
 kuzushi <repo> --no-context           # disable repo context gathering
 ```
 
@@ -193,6 +200,7 @@ kuzushi config set severity ERROR,WARNING,INFO
 kuzushi config set verify true
 kuzushi config set verifyMinConfidence 0.7
 kuzushi config set auditLog true
+kuzushi config validate --repo .      # validate the effective config for this repo
 kuzushi config unset model            # reset to default
 kuzushi config path                   # print config file location
 ```
@@ -213,7 +221,7 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `severity` | `["ERROR","WARNING"]` | Semgrep severity filter |
 | `excludePatterns` | `["test","tests","node_modules",...]` | Directories/globs to skip |
 | `scannerConfig` | `{ semgrep: {...}, agentic: {...}, codeql: {...} }` | Per-scanner config blocks keyed by scanner id |
-| `busBackend` | `"in-process"` | Message bus transport (`in-process`, future: `redis`, `google-pubsub`, `nats`) |
+| `busBackend` | `"in-process"` | Message bus transport (`in-process`) |
 | `triageConcurrency` | `5` | Parallel LLM triage calls |
 | `scanMode` | `"concurrent"` | Scanner execution mode (`sequential` or `concurrent`) |
 | `enabledTasks` | `["context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect", ...]` | Agent tasks to enable beyond scanners |
@@ -438,7 +446,7 @@ Use this to debug verdicts, review agent reasoning, or build compliance records.
 
 Kuzushi is built on three core abstractions:
 
-**Message Bus** — A transport-agnostic `MessageBus` interface (`publish`, `subscribe`, `waitFor`) that decouples pipeline stages. The default in-process implementation uses an `EventEmitter`; the interface supports swapping in Redis, Google Pub/Sub, or NATS for distributed setups.
+**Message Bus** — A transport-agnostic `MessageBus` interface (`publish`, `subscribe`, `waitFor`) that decouples pipeline stages. The stable build supports the in-process `EventEmitter` transport today.
 
 **AgentTask + DAG** — Every unit of work (context gatherer, scanner, future threat modeler, etc.) implements the `AgentTask` interface: an `id`, `dependsOn` list, `outputKind`, and a `run()` method. The `TaskRegistry` resolves enabled tasks into a DAG, groups them into parallel stages, detects cycles, and hands execution to the `PipelineOrchestrator`. Upstream task outputs are forwarded to dependents automatically.
 
@@ -453,10 +461,13 @@ See [AGENTS.md](AGENTS.md) for the full developer guide on adding new agent task
 ```
 pnpm install                          # install deps
 pnpm dev -- /path/to/repo             # run in dev mode
+pnpm check:types                      # typecheck app + benchmark tooling
 pnpm typecheck                        # type check
 pnpm test                             # run tests
+pnpm test:e2e                         # deterministic smoke scan against fixture app
 pnpm test:coverage                    # tests + coverage (70% threshold)
 pnpm build                            # compile to dist/
+pnpm verify:pack                      # verify published tarball contents
 ```
 
 Tests are organized by subsystem: `tests/bus/` for orchestrator, workers, and event bus tests, `tests/agents/` for DAG, task registry, and context-gatherer tests, and `tests/` for scanners, triage, verification, store, config, retry, and report.

@@ -1,5 +1,6 @@
 import type { AgentHistoryEntry } from "../../agent-runtime/types.js";
 import type { AgentActivity } from "../../agent-runtime/execution.js";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { generatePocHarness } from "../../poc-harness.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
 import { verifyFindingWithAgent, verifyFindingsBatch, VerificationExecutionError } from "../../verify.js";
@@ -25,6 +26,7 @@ import {
 
 export interface VerificationWorkerDeps {
   config: KuzushiConfig;
+  runtime: AgentRuntime;
   /** Optional knowledge registry for domain-specific verification prompt enrichment. */
   knowledgeRegistry?: KnowledgeRegistry;
   /** Optional database handle for composite confidence features. */
@@ -78,6 +80,7 @@ export function registerVerificationWorker(
 
       const { result, costUsd } = await verifyWithRefinement(
         deps.config,
+        deps.runtime,
         bus,
         runId,
         context,
@@ -151,7 +154,10 @@ export function registerVerificationWorker(
             context.repoName,
             deps.config.verifyModel ?? deps.config.triageModel ?? deps.config.model,
             coerceRepoContext(repoContext),
-            { enrichedContext: coerceContextEnrichment(enrichedContext) },
+            {
+              runtime: deps.runtime,
+              enrichedContext: coerceContextEnrichment(enrichedContext),
+            },
             deps.config.verifyBatchSize ?? 5,
             deps.config.verifyMaxTurns,
             resolvedTemplates.verify,
@@ -209,6 +215,7 @@ export function registerVerificationWorker(
 
 async function verifyWithRefinement(
   config: KuzushiConfig,
+  runtime: AgentRuntime,
   bus: MessageBus,
   runId: string,
   context: VerificationFindingQueuedEvent["payload"]["context"],
@@ -271,6 +278,7 @@ async function verifyWithRefinement(
           config.verifyMaxTurns,
           repoContextValue,
           {
+            runtime,
             enrichedContext: enrichedContextValue,
             history: verificationHistory,
             activityCallback,
@@ -305,6 +313,7 @@ async function verifyWithRefinement(
         config.pocHarnessMaxTurns ?? config.verifyMaxTurns,
         repoContextValue,
         {
+          runtime,
           history: probeHistory,
         },
       ),

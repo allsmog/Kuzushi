@@ -19,6 +19,7 @@ export interface TaskContext {
   scanPath?: string;
   repoName: string;
   config: KuzushiConfig;
+  runtime: AgentRuntime;
   bus: MessageBus;
   /** Outputs from completed dependency tasks, keyed by task ID. */
   upstreamOutputs: Map<string, unknown>;
@@ -35,8 +36,6 @@ export interface TaskContext {
   db?: Database.Database;
   /** Optional per-execution model override used by internal orchestration features such as ensembles. */
   modelOverride?: string;
-  /** Optional per-execution runtime override used by internal orchestration features such as ensembles. */
-  runtimeOverride?: AgentRuntime;
 }
 
 /**

@@ -145,7 +145,7 @@ export function generateMarkdownReport(
         lines.push("");
       }
 
-      const preconditions = parsePreconditions(finding.verifyPreconditions);
+      const preconditions = finding.verifyPreconditions;
       if (preconditions.length > 0) {
         lines.push("Preconditions:");
         for (const item of preconditions) {

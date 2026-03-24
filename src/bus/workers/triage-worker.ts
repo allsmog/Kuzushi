@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -45,6 +46,7 @@ export interface TriageWorkerDeps {
   registry: ScannerRegistry;
   taskRegistry?: TaskRegistry;
   config: KuzushiConfig;
+  runtime: AgentRuntime;
   /** Optional database handle for trajectory memory and calibration features. */
   db?: Database.Database;
   /** Optional knowledge registry for domain-specific triage prompt enrichment. */
@@ -244,6 +246,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               deps.config.triageSpecialistMaxTurns ?? null,
               coercedRepoContext,
               {
+                runtime: deps.runtime,
                 activityCallback,
                 enrichedContext: coercedEnrichedContext,
               },
@@ -259,6 +262,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               deps.config.triageMaxTurns,
               coercedRepoContext,
               {
+                runtime: deps.runtime,
                 activityCallback,
                 enrichedContext: coercedEnrichedContext,
               },
@@ -417,6 +421,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
         deps.config.triageBatchModel ?? deps.config.triageModel ?? deps.config.model,
         coerceRepoContext(repoContext),
         {
+          runtime: deps.runtime,
           enrichedContext: coerceContextEnrichment(enrichedContext),
           activityCallback: async (activity) => {
             await bus.publish(

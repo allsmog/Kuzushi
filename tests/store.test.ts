@@ -15,6 +15,8 @@ import {
   getTriagedFingerprints,
   getVerdictCounts,
   getActionableFindings,
+  getLatestCompletedRunFindings,
+  updateFindingProofState,
   updateFindingMetadata,
   updatePocHarnessResult,
   updateRunCost,
@@ -608,6 +610,74 @@ describe("pipeline_runs", () => {
     expect(run?.contextJson).toContain("\"base\"");
     expect(run?.contextJson).toContain("\"enrichment\"");
     expect(run?.contextJson).toContain("Jobs handle uploaded files.");
+    db.close();
+  });
+
+  it("loads latest completed run findings as full Finding records", () => {
+    const db = initDb(dbPath);
+    const runId = "run-complete-findings";
+    const findings = [makeFinding("fp-cache-a"), makeFinding("fp-cache-b")];
+
+    createRun(db, runId, "repo-abs", makeConfig(), makeScanOpts());
+    updateRunFindings(db, runId, findings);
+    updateRunStatus(db, runId, "complete");
+
+    const restored = getLatestCompletedRunFindings(db, "repo-abs");
+    expect(restored).toHaveLength(2);
+    expect(restored.map((finding) => finding.fingerprint)).toEqual(["fp-cache-a", "fp-cache-b"]);
+    expect(restored[0]?.scannerConfidence).toBe("HIGH");
+    db.close();
+  });
+
+  it("prefers the run that completed last when loading cached findings", () => {
+    const db = initDb(dbPath);
+
+    createRun(db, "run-started-first", "repo-abs", makeConfig(), makeScanOpts());
+    updateRunFindings(db, "run-started-first", [makeFinding("fp-completed-last")]);
+    db.prepare("UPDATE pipeline_runs SET started_at = ? WHERE run_id = ?")
+      .run("2026-01-01T00:00:00.000Z", "run-started-first");
+    updateRunStatus(db, "run-started-first", "complete", {
+      completedAt: "2026-01-01T00:20:00.000Z",
+    });
+
+    createRun(db, "run-started-last", "repo-abs", makeConfig(), makeScanOpts());
+    updateRunFindings(db, "run-started-last", [makeFinding("fp-completed-earlier")]);
+    db.prepare("UPDATE pipeline_runs SET started_at = ? WHERE run_id = ?")
+      .run("2026-01-01T00:10:00.000Z", "run-started-last");
+    updateRunStatus(db, "run-started-last", "complete", {
+      completedAt: "2026-01-01T00:15:00.000Z",
+    });
+
+    const restored = getLatestCompletedRunFindings(db, "repo-abs");
+    expect(restored.map((finding) => finding.fingerprint)).toEqual(["fp-completed-last"]);
+    db.close();
+  });
+});
+
+describe("updateFindingProofState", () => {
+  it("keeps the strongest proof state seen so far", () => {
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("fp-proof"), makeResult("fp-proof", "tp"), "repo", "HEAD");
+
+    updateFindingProofState(db, "fp-proof", "execution_attempted");
+    updateFindingProofState(db, "fp-proof", "execution_confirmed");
+    updateFindingProofState(db, "fp-proof", "execution_rejected");
+
+    const finding = getActionableFindings(db, "repo")[0];
+    expect(finding?.proofState).toBe("execution_confirmed");
+    db.close();
+  });
+
+  it("allows stronger evidence to replace weaker states", () => {
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("fp-proof-upgrade"), makeResult("fp-proof-upgrade", "tp"), "repo", "HEAD");
+
+    updateFindingProofState(db, "fp-proof-upgrade", "inconclusive");
+    updateFindingProofState(db, "fp-proof-upgrade", "execution_attempted");
+    updateFindingProofState(db, "fp-proof-upgrade", "execution_rejected");
+
+    const finding = getActionableFindings(db, "repo")[0];
+    expect(finding?.proofState).toBe("execution_rejected");
     db.close();
   });
 });

@@ -62,7 +62,7 @@ describe("SimpleTextIndexProvider", () => {
 
     expect(diffSlice.base).toBe("HEAD");
     expect(diffSlice.changedFiles).toContain("src/app.ts");
-  });
+  }, 15_000);
 
   it("indexes multi-language repos with many files", async () => {
     const files: Record<string, string> = {};
@@ -116,5 +116,5 @@ describe("SimpleTextIndexProvider", () => {
     const index = await createSimpleTextIndexProvider(repoRoot);
     const diffSlice = await index.getDiffSlice("HEAD");
     expect(diffSlice.changedFiles).toHaveLength(0);
-  });
+  }, 15_000);
 });

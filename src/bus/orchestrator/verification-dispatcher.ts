@@ -6,9 +6,10 @@
  */
 
 import { normalizeCostUsd } from "../../utils.js";
+import { updateRunCost } from "../../store.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import type { RunState, OrchestratorDeps, PocHarnessCandidate } from "./types.js";
+import type { RunState, OrchestratorDeps } from "./types.js";
 import type { VerificationResultEvent, VerificationErrorEvent } from "../events.js";
 
 export function handleVerificationResultState(
@@ -31,7 +32,6 @@ export function handleVerificationResultState(
   }
 
   try {
-    const { updateRunCost } = require("../../store.js");
     updateRunCost(deps.db, state.checkpointRunId, costUsd);
   } catch {
     // Cost persistence is best-effort.
@@ -49,8 +49,23 @@ export function handleVerificationErrorState(
   state.totalCostUsd += costUsd;
   state.verifyCostUsd += costUsd;
 
+  const fp = event.payload.finding.fingerprint;
+  const maxRetries = state.config.maxVerifyRetries ?? 2;
+  const priorAttempts = state.verifyAttempts.get(fp) ?? 0;
+  const totalAttempts = Math.max(priorAttempts, event.payload.attempts ?? 1);
+  state.verifyAttempts.set(fp, totalAttempts);
+
+  if (totalAttempts < maxRetries) {
+    state.verifyErrors -= 1;
+    state.verifyQueue.push({
+      finding: event.payload.finding,
+      triageResult: event.payload.triageResult,
+      index: event.payload.index ?? 0,
+      total: event.payload.total ?? state.verifyTotal,
+    });
+  }
+
   try {
-    const { updateRunCost } = require("../../store.js");
     updateRunCost(deps.db, state.checkpointRunId, costUsd);
   } catch {
     // Cost persistence is best-effort.
@@ -81,7 +96,9 @@ export async function dispatchVerification(
   state.verifyDispatching = true;
   try {
     const concurrency = normalizeConcurrency(state.config.verifyConcurrency ?? 1);
-    const batchSize = Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
+    const batchSize = state.config.verifyRefinementMaxIterations && state.config.verifyRefinementMaxIterations > 1
+      ? 1
+      : Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
 
     while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
       await emitBudgetCheck(state, runId);

@@ -89,7 +89,7 @@ export const callGraphAssistTask: AgentTask<Finding[], Finding[]> = {
  */
 function extractFunctionName(finding: Finding): string | undefined {
   // Use sinkFunction if available (set by SSRF, NoSQL, etc.)
-  const sink = (finding as Record<string, unknown>).sinkFunction;
+  const sink = (finding as unknown as Record<string, unknown>)["sinkFunction"];
   if (typeof sink === "string" && sink.length > 0) {
     return sink;
   }

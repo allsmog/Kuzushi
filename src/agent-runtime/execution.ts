@@ -8,7 +8,7 @@ import type {
 import type { RepoContext } from "../types.js";
 import { inflightCache } from "../cache.js";
 import { isRecord } from "../utils.js";
-import { getAgentRuntime, type AgentRuntime } from "./index.js";
+import type { AgentRuntime } from "./types.js";
 
 export const DEFAULT_READ_ONLY_TOOLS = [
   "Read",
@@ -26,9 +26,9 @@ export const SEMANTIC_NAVIGATION_TOOLS = [
 ] as const;
 
 export function resolveDefaultReadOnlyTools(
-  runtime: Pick<AgentRuntime, "id"> | undefined = getAgentRuntime(),
+  runtime?: Pick<AgentRuntime, "id">,
 ): string[] {
-  if (runtime.id === "pi-ai") {
+  if (runtime?.id === "pi-ai") {
     return [...DEFAULT_READ_ONLY_TOOLS, ...SEMANTIC_NAVIGATION_TOOLS];
   }
 
@@ -129,7 +129,12 @@ export async function runStructuredAgentQuery(
 async function executeStructuredAgentQuery(
   args: StructuredAgentQueryArgs,
 ): Promise<AgentQueryExecutionResult> {
-  const runtime = args.runtimeOptions?.runtime ?? getAgentRuntime();
+  const runtime = args.runtimeOptions?.runtime;
+  if (!runtime) {
+    throw new Error(
+      "Agent runtime is required. Pass runtimeOptions.runtime explicitly when executing agent queries.",
+    );
+  }
   const bus = args.runtimeOptions?.bus;
   const runId = args.runtimeOptions?.runId ?? "";
   let resultText = "";

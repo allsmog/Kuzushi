@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
@@ -305,7 +304,7 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
     const cfg = resolveThreatModelConfig(context.config);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const prompt = buildStridePrompt(repoContext, cfg.maxElements, cfg.maxThreats);
-    const runtime = getAgentRuntime();
+    const runtime = context.runtime;
 
     let structuredOutput: unknown;
     let resultText = "";

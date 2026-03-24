@@ -110,6 +110,7 @@ export const reachabilityCheckTask: AgentTask<Finding[], Finding[]> = {
     }
 
     const model = resolveTaskModel(context, "reachability-check");
+    const workingRoot = context.scanPath ?? context.repoRoot;
     const maxPerBatch = 20;
     const allResults = new Map<string, ReachabilityResult>();
 
@@ -124,7 +125,7 @@ export const reachabilityCheckTask: AgentTask<Finding[], Finding[]> = {
         for await (const message of runtime.query({
           prompt,
           options: {
-            cwd: context.repoRoot,
+            cwd: workingRoot,
             model,
             maxTurns: context.config.taskMaxTurns ?? 15,
             allowedTools: ["Read", "Glob", "Grep", "GetCallers"],

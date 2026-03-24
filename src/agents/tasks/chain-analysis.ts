@@ -221,8 +221,8 @@ export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
           cwd: context.repoRoot,
           model,
           maxTurns: context.config.taskMaxTurns ?? 15,
-          allowedTools: resolveDefaultReadOnlyTools(context.runtimeOverride),
-          runtimeOptions: context.runtimeOverride ? { runtime: context.runtimeOverride } : {},
+          allowedTools: resolveDefaultReadOnlyTools(context.runtime),
+          runtimeOptions: { runtime: context.runtime },
           schema: CHAIN_ANALYSIS_SCHEMA,
         });
 

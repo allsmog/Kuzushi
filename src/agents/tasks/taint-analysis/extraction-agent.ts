@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getAgentRuntime } from "../../../agent-runtime/index.js";
+import { getLogger } from "../../../logger.js";
 import type {
+  AgentRuntime,
   AgentResultErrorMessage,
   AgentResultSuccessMessage,
   AgentToolDecision,
@@ -15,6 +16,7 @@ const SOURCE_BODY_PLACEHOLDERS = ["{{SOURCE_HANDLER_PREDICATE}}"];
 const SINK_BODY_PLACEHOLDERS = ["{{SINK_CALL_PREDICATE}}"];
 const CACHE_PREFIX = "// cache:";
 const QUERY_FENCE_REGEX = /```([a-zA-Z0-9_-]+)?[ \t]*\n([\s\S]*?)```/g;
+const log = getLogger("taint-analysis-extraction-agent");
 
 export interface ExtractionAgentOptions {
   language: TaintAnalysisLanguage;
@@ -30,6 +32,7 @@ export interface ExtractionAgentOptions {
   codeqlApiProfileId: string;
   dataFlowImport: string;
   taintTrackingImport: string;
+  runtime: AgentRuntime;
   disableCacheRead?: boolean;
 }
 
@@ -70,6 +73,7 @@ export async function generateExtractionQuery(
     codeqlApiProfileId,
     dataFlowImport,
     taintTrackingImport,
+    runtime,
     disableCacheRead = false,
   } = options;
 
@@ -114,7 +118,6 @@ export async function generateExtractionQuery(
     });
 
   // --- Call LLM (with retry for transient API errors) ---
-  const runtime = getAgentRuntime();
   const MAX_RETRIES = 2;
   let resultText: string | null = null;
   let costUsd = 0;
@@ -124,8 +127,15 @@ export async function generateExtractionQuery(
     let lastErrorSubtype: string | null = null;
 
     try {
-      process.stderr.write(
-        `[taint-analysis-extraction-agent] Starting LLM call for ${language}/${kind} with model ${model}${attempt > 0 ? ` (retry ${attempt}/${MAX_RETRIES})` : ""}\n`,
+      log.info(
+        {
+          language,
+          kind,
+          model,
+          attempt,
+          maxRetries: MAX_RETRIES,
+        },
+        `Starting LLM call for ${language}/${kind}${attempt > 0 ? ` (retry ${attempt}/${MAX_RETRIES})` : ""}`,
       );
       for await (const message of runtime.query({
         prompt: systemPrompt,
@@ -146,12 +156,16 @@ export async function generateExtractionQuery(
         } else if (message.type === "result") {
           lastErrorSubtype = message.subtype;
           const errMsg = (message as AgentResultErrorMessage).errors.join("; ") || message.subtype;
-          process.stderr.write(`[taint-analysis-extraction-agent] Non-success result for ${language}/${kind}: ${message.subtype} — ${errMsg}\n`);
+          log.warn(
+            { language, kind, subtype: message.subtype, error: errMsg },
+            `Non-success result for ${language}/${kind}`,
+          );
         }
       }
     } catch (error) {
-      process.stderr.write(
-        `[taint-analysis-extraction-agent] LLM call failed for ${language}/${kind}: ${toErrorMessage(error)}\n`,
+      log.warn(
+        { language, kind, error: toErrorMessage(error) },
+        `LLM call failed for ${language}/${kind}`,
       );
       if (attempt < MAX_RETRIES) {
         continue;
@@ -172,18 +186,21 @@ export async function generateExtractionQuery(
       break;
     }
 
-    process.stderr.write(`[taint-analysis-extraction-agent] Transient error for ${language}/${kind}, retrying...\n`);
+    log.info({ language, kind, attempt }, `Transient error for ${language}/${kind}, retrying`);
   }
 
   if (!resultText) {
-    process.stderr.write(`[taint-analysis-extraction-agent] No result text from LLM for ${language}/${kind}\n`);
+    log.warn({ language, kind }, `No result text from LLM for ${language}/${kind}`);
     return {
       query: null,
       costUsd,
     };
   }
 
-  process.stderr.write(`[taint-analysis-extraction-agent] Got result text for ${language}/${kind} (${resultText.length} chars)\n`);
+  log.info(
+    { language, kind, resultLength: resultText.length },
+    `Got result text for ${language}/${kind}`,
+  );
 
   // --- Extract query from result ---
   let queryText = extractQueryFromResult(resultText);

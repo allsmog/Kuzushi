@@ -286,16 +286,6 @@ export function printSummary(
       if (f.suppressionReasons.length > 0) {
         console.log(`    ${chalk.dim("Suppression notes:")} ${f.suppressionReasons.map((reason) => reason.id).join(", ")}`);
       }
-      const proofLevel = (f as Record<string, unknown>)["verifyProofLevel"];
-      const proofVerdict = (f as Record<string, unknown>)["verifyProofVerdict"];
-      if (typeof proofLevel === "number" && proofLevel >= 1 && proofLevel <= 4) {
-        const levelLabels = ["", "Theoretical", "Partial Bypass", "Full Bypass", "Account Takeover"];
-        console.log(`    ${chalk.magenta("Proof Level:")} ${proofLevel} (${levelLabels[proofLevel]})`);
-      }
-      if (typeof proofVerdict === "string" && proofVerdict) {
-        const verdictColor = proofVerdict === "exploited" ? chalk.red : chalk.yellow;
-        console.log(`    ${verdictColor("Proof Verdict:")} ${proofVerdict.replace(/_/g, " ")}`);
-      }
       if (f.pocHarnessPath) {
         console.log(`    ${chalk.blue("PoC Harness:")} ${f.pocHarnessPath}`);
       } else if (f.pocHarnessSkipped === 1) {
@@ -304,8 +294,8 @@ export function printSummary(
       if (f.pocHarnessParsed === 0 && f.pocHarnessParseError) {
         console.log(`    ${chalk.red("PoC Parse Error:")} ${f.pocHarnessParseError}`);
       }
-      const pocRunVerdict = (f as Record<string, unknown>)["pocRunVerdict"];
-      const pocRunDurationMs = (f as Record<string, unknown>)["pocRunDurationMs"];
+      const pocRunVerdict = f.pocRunVerdict;
+      const pocRunDurationMs = f.pocRunDurationMs;
       if (typeof pocRunVerdict === "string" && pocRunVerdict) {
         const verdictColor = pocRunVerdict === "PASS" ? chalk.green.bold
           : pocRunVerdict === "FAIL" ? chalk.red.bold

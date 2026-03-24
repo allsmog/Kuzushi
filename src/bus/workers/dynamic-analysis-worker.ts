@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import crypto from "node:crypto";
 import type { AgentHistoryEntry } from "../../agent-runtime/types.js";
 import type { AgentActivity } from "../../agent-runtime/execution.js";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { generatePocHarness, PocHarnessExecutionError } from "../../poc-harness.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
 import { withRetry } from "../../retry.js";
@@ -20,6 +21,7 @@ import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import {
   insertDynamicAnalysisRun,
   updateFindingMetadata,
+  updateFindingProofState,
 } from "../../store.js";
 import type { DynamicAnalysisFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
@@ -27,6 +29,7 @@ import type { MessageBus } from "../types.js";
 
 export interface DynamicAnalysisWorkerDeps {
   config: KuzushiConfig;
+  runtime: AgentRuntime;
   db: Database.Database;
 }
 
@@ -55,6 +58,7 @@ export function registerDynamicAnalysisWorker(
     try {
       const result = await runDynamicAnalysis(
         deps.config,
+        deps.runtime,
         deps.db,
         bus,
         runId,
@@ -173,6 +177,7 @@ function classifyDynamicResult(
 
 async function runDynamicAnalysis(
   config: KuzushiConfig,
+  runtime: AgentRuntime,
   db: Database.Database,
   bus: MessageBus,
   runId: string,
@@ -283,6 +288,7 @@ async function runDynamicAnalysis(
           config.pocHarnessMaxTurns,
           coerceRepoContext(repoContext),
           {
+            runtime,
             history,
             activityCallback,
           },
@@ -378,6 +384,14 @@ async function runDynamicAnalysis(
     latestDynamicStatus: latestStatus,
     dynamicRunIds: [dynamicRunId],
   });
+
+  if (latestStatus === "confirmed") {
+    updateFindingProofState(db, finding.fingerprint, "execution_confirmed");
+  } else if (latestStatus === "rejected") {
+    updateFindingProofState(db, finding.fingerprint, "execution_rejected");
+  } else {
+    updateFindingProofState(db, finding.fingerprint, "execution_attempted");
+  }
 
   return run;
 }

@@ -1,4 +1,3 @@
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { EnrichedRepoContext, RepoContext } from "../../types.js";
@@ -197,7 +196,7 @@ export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrich
     const { model } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const prompt = buildPrompt(repoContext);
-    const runtime = getAgentRuntime();
+    const runtime = context.runtime;
 
     let structuredOutput: unknown;
     let resultText = "";

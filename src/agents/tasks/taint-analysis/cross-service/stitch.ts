@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { getAgentRuntime } from "../../../../agent-runtime/index.js";
-import type { AgentResultErrorMessage, AgentResultSuccessMessage } from "../../../../agent-runtime/types.js";
+import type { AgentRuntime, AgentResultErrorMessage, AgentResultSuccessMessage } from "../../../../agent-runtime/types.js";
 import { scoreFindingMetadata } from "../../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../../scanners/types.js";
 import { attachTaskOutputMeta, getTaskOutputMeta, type TaskOutputMeta } from "../../../../task-output-meta.js";
@@ -59,6 +58,7 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
         heuristicEdges,
         crossCfg.stitchModel,
         context.repoRoot,
+        context.runtime,
       );
       validationCostUsd = normalizeCostUsd(getTaskOutputMeta(validatedEdges)?.costUsd);
     } catch (error) {
@@ -484,9 +484,9 @@ async function validateAndEnrichWithLlm(
   heuristicEdges: StitchedEdge[],
   model: string,
   repoRoot: string,
+  runtime: AgentRuntime,
 ): Promise<StitchedEdge[]> {
   const prompt = buildStitchPrompt(boundaries, heuristicEdges);
-  const runtime = getAgentRuntime();
 
   let structuredOutput: unknown;
   let resultText = "";

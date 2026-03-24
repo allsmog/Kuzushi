@@ -23,6 +23,10 @@ const {
   projectConfigPath,
   DEFAULTS,
 } = await import("../src/config.js");
+const {
+  hasConfigValidationErrors,
+  validateKuzushiConfig,
+} = await import("../src/config/validation.js");
 
 beforeEach(() => {
   mkdirSync(TMP_CONFIG_DIR, { recursive: true });
@@ -68,6 +72,17 @@ describe("loadConfig", () => {
     expect(config.verifyRefinementMaxIterations).toBe(DEFAULTS.verifyRefinementMaxIterations);
     expect(config.agentRuntimeConfig).toBe(DEFAULTS.agentRuntimeConfig);
     expect(config.scanners).toEqual(DEFAULTS.scanners);
+  });
+
+  it("injects crypto-behavioral-test into explicit enabledTasks when the feature is enabled", () => {
+    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
+      enabledTasks: ["custom-task"],
+      cryptoBehavioralTestEnabled: true,
+    }));
+
+    const config = loadConfig();
+    expect(config.cryptoBehavioralTestEnabled).toBe(true);
+    expect(config.enabledTasks).toEqual(["custom-task", "crypto-behavioral-test"]);
   });
 
   it("merges global config over defaults", () => {
@@ -587,6 +602,87 @@ describe("unsetConfigValue", () => {
 
   it("throws on unknown key", () => {
     expect(() => unsetConfigValue("bogus")).toThrow("Unknown config key");
+  });
+});
+
+describe("validateKuzushiConfig", () => {
+  it("accepts the default configuration", () => {
+    const issues = validateKuzushiConfig(DEFAULTS);
+    expect(issues).toEqual([]);
+    expect(hasConfigValidationErrors(issues)).toBe(false);
+  });
+
+  it("rejects unsupported bus backends", () => {
+    const issues = validateKuzushiConfig({
+      ...DEFAULTS,
+      busBackend: "redis" as typeof DEFAULTS.busBackend,
+    });
+
+    expect(issues).toEqual([
+      expect.objectContaining({
+        severity: "error",
+        path: "busBackend",
+      }),
+    ]);
+    expect(hasConfigValidationErrors(issues)).toBe(true);
+  });
+
+  it("requires an ACP adapter command when ACP is enabled", () => {
+    const issues = validateKuzushiConfig({
+      ...DEFAULTS,
+      agentRuntimeBackend: "acp",
+      acpAdapterCommand: "   ",
+    });
+
+    expect(issues).toEqual([
+      expect.objectContaining({
+        severity: "error",
+        path: "acpAdapterCommand",
+      }),
+    ]);
+  });
+
+  it("flags verification-dependent features when verify is disabled", () => {
+    const issues = validateKuzushiConfig({
+      ...DEFAULTS,
+      verify: false,
+      pocHarness: true,
+      dynamicAnalysisEnabled: true,
+      qualityGates: {
+        failOnExploitable: true,
+      },
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        severity: "error",
+        path: "pocHarness",
+      }),
+      expect.objectContaining({
+        severity: "error",
+        path: "dynamicAnalysisEnabled",
+      }),
+      expect.objectContaining({
+        severity: "warning",
+        path: "qualityGates.failOnExploitable",
+      }),
+    ]));
+  });
+
+  it("warns when external tasks are configured but disabled", () => {
+    const issues = validateKuzushiConfig({
+      ...DEFAULTS,
+      enableExternalTasks: false,
+      externalTasks: ["/tmp/ext-task"],
+    });
+
+    expect(issues).toEqual([
+      expect.objectContaining({
+        severity: "warning",
+        path: "externalTasks",
+      }),
+    ]);
+    expect(hasConfigValidationErrors(issues)).toBe(false);
   });
 });
 

@@ -1,7 +1,8 @@
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { AgentTask, TaskContext } from "../../agents/types.js";
-import { createAgentRuntimeInstance } from "../../agent-runtime/index.js";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { KnowledgeRegistry } from "../../knowledge/types.js";
+import type Database from "better-sqlite3";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, ScannerConfig, ScannerId } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
@@ -18,7 +19,9 @@ export interface ScanWorkerDeps {
   registry: ScannerRegistry;
   taskRegistry?: TaskRegistry;
   config: KuzushiConfig;
+  runtime: AgentRuntime;
   knowledgeRegistry?: KnowledgeRegistry;
+  db?: Database.Database;
 }
 
 const ENSEMBLE_ELIGIBLE_TASK_IDS = new Set([
@@ -109,14 +112,16 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
 
       const taskContext: TaskContext = {
         runId,
-        repoRoot: context.scanPath ?? context.repoRoot,
+        repoRoot: context.repoRoot,
         scanPath: context.scanPath,
         repoName: context.repoName,
         config: deps.config,
+        runtime: deps.runtime,
         bus,
         upstreamOutputs,
         securityProfiles,
         knowledgeRegistry: deps.knowledgeRegistry,
+        db: deps.db,
       };
 
       const executed = await executeTaskWithOptionalEnsemble(task, input, taskContext, taskConfig, deps.config);
@@ -190,6 +195,7 @@ async function runSingleScanner(
     context.scanPath ?? context.repoRoot,
     scanOpts,
     pluginConfig,
+    deps.runtime,
   );
 
   for (const finding of findings) {
@@ -258,11 +264,9 @@ async function executeTaskWithOptionalEnsemble(
   const laneResults = await Promise.all(
     ensembleModels.map(async (model) => {
       try {
-        const runtime = createAgentRuntimeInstance(config);
         const result = await executeAgentTask(task, input, {
           ...taskContext,
           modelOverride: model,
-          runtimeOverride: runtime,
         }, taskConfig);
         return { kind: "success" as const, model, result };
       } catch (error) {

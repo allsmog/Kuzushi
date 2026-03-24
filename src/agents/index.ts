@@ -13,6 +13,7 @@ import { taintAnalysisPreflightTask } from "./tasks/taint-analysis/preflight.js"
 import { contextGathererTask } from "./tasks/context-gatherer.js";
 import { contextEnricherTask } from "./tasks/context-enricher.js";
 import { secretsCryptoDetectTask } from "./tasks/secrets-crypto-detect.js";
+import { cryptoBehavioralTestTask } from "./tasks/crypto-behavioral-test.js";
 import { codeConfigDetectTask } from "./tasks/code-config-detect.js";
 import { raceConditionTask } from "./tasks/race-condition.js";
 import { diffReviewTask } from "./tasks/diff-review.js";
@@ -51,6 +52,7 @@ export async function createDefaultTaskRegistry(
 
   // Merged agentic detection tasks
   tasks.register(secretsCryptoDetectTask);
+  tasks.register(cryptoBehavioralTestTask);
   tasks.register(codeConfigDetectTask);
 
   // Agentic analysis tasks

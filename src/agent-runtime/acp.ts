@@ -16,11 +16,13 @@ import type {
   AgentRuntime,
 } from "./types.js";
 import type { AgentRuntimeConfig } from "../types.js";
+import { getLogger } from "../logger.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const TRANSIENT_RETRY_MAX = 3;
 const TRANSIENT_RETRY_BASE_MS = 5_000;
+const log = getLogger("acp");
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -302,7 +304,7 @@ export class AcpAgentRuntime implements AgentRuntime {
 
         const classified = classifyError(error);
         const delay = calculateBackoff(attempt, TRANSIENT_RETRY_BASE_MS, classified);
-        console.error(
+        log.warn(
           `[acp] ${classified.category} error (attempt ${attempt + 1}/${TRANSIENT_RETRY_MAX + 1}), retrying in ${delay / 1000}s`,
         );
 

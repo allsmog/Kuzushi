@@ -24,11 +24,14 @@ import { TRIAGE_TEMPLATE } from "./prompts/templates/triage.js";
 import { BATCH_TRIAGE_TEMPLATE } from "./prompts/templates/triage.js";
 import { buildTriageContext, buildBatchTriageContext } from "./prompts/context.js";
 import type { EnrichedRepoContext, RepoContext, TriageResult, Verdict } from "./types.js";
+import { getLogger } from "./logger.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 import { RawTriageOutputSchema, RawBatchTriageOutputSchema, formatZodErrors } from "./schemas.js";
 
 export type { AgentActivity, AgentActivityCallback } from "./agent-runtime/execution.js";
 export { extractJson } from "./agent-runtime/execution.js";
+
+const log = getLogger("triage");
 
 export const TRIAGE_RESULT_SCHEMA = {
   type: "object",
@@ -342,7 +345,7 @@ function parseBatchTriageOutput(
         items = (raw as Record<string, unknown>)["results"] as unknown[];
       }
       const errors = formatZodErrors(batchValidation.error.issues);
-      console.warn(
+      log.warn(
         `[triage] Batch triage output has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
       );
     }
@@ -415,7 +418,7 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
     const validation = RawTriageOutputSchema.safeParse(raw);
     if (!validation.success) {
       const errors = formatZodErrors(validation.error.issues);
-      console.warn(
+      log.warn(
         `[triage] LLM output for ${fingerprint} has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
       );
     }
@@ -531,7 +534,7 @@ export function parseTriageResponse(
     const validation = RawTriageOutputSchema.safeParse(parsed);
     if (!validation.success) {
       const errors = formatZodErrors(validation.error.issues);
-      console.warn(
+      log.warn(
         `[triage] LLM text output for ${fingerprint} has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
       );
     }

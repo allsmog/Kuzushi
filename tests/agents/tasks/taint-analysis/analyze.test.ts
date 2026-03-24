@@ -816,5 +816,88 @@ describe("taint-analysis-run internals", () => {
       expect(prompt).toContain("Code: user_id = request.args['id']");
       expect(prompt).toContain("For each taint-path step");
     });
+
+    it("merges cached unaffected baseline findings with rerun affected passes", () => {
+      const cached: Finding[] = [
+        {
+          scanner: "taint-analysis-run",
+          fingerprint: "cached-pass1",
+          ruleId: "taint-analysis/pass1/test.rule",
+          filePath: "src/a.ts",
+          startLine: 10,
+          severity: "ERROR",
+          message: "cached pass 1",
+          scannerConfidence: "HIGH",
+          subcategory: ["vuln"],
+          likelihood: "HIGH",
+          impact: "HIGH",
+          cwe: ["CWE-22"],
+          score: 80,
+        },
+        {
+          scanner: "taint-analysis-run",
+          fingerprint: "cached-pass2-old",
+          ruleId: "taint-analysis/pass2/test.rule",
+          filePath: "src/b.ts",
+          startLine: 20,
+          severity: "ERROR",
+          message: "cached pass 2 old",
+          scannerConfidence: "HIGH",
+          subcategory: ["vuln"],
+          likelihood: "HIGH",
+          impact: "HIGH",
+          cwe: ["CWE-78"],
+          score: 82,
+        },
+      ];
+
+      const rerun: Finding[] = [
+        {
+          scanner: "taint-analysis-run",
+          fingerprint: "cached-pass2-old",
+          ruleId: "taint-analysis/pass2/test.rule",
+          filePath: "src/b.ts",
+          startLine: 21,
+          severity: "ERROR",
+          message: "rerun pass 2 replacement",
+          scannerConfidence: "HIGH",
+          subcategory: ["vuln"],
+          likelihood: "HIGH",
+          impact: "HIGH",
+          cwe: ["CWE-78"],
+          score: 90,
+        },
+        {
+          scanner: "taint-analysis-run",
+          fingerprint: "rerun-pass2-new",
+          ruleId: "taint-analysis/pass2/test.rule2",
+          filePath: "src/c.ts",
+          startLine: 30,
+          severity: "ERROR",
+          message: "rerun pass 2 new",
+          scannerConfidence: "HIGH",
+          subcategory: ["vuln"],
+          likelihood: "HIGH",
+          impact: "HIGH",
+          cwe: ["CWE-78"],
+          score: 91,
+        },
+      ];
+
+      const merged = __taintAnalysisRunInternals.mergeBaselineTaintFindings(cached, rerun, [2]);
+      expect(merged.map((finding) => finding.fingerprint)).toEqual([
+        "cached-pass1",
+        "cached-pass2-old",
+        "rerun-pass2-new",
+      ]);
+      expect(merged.find((finding) => finding.fingerprint === "cached-pass2-old")?.startLine).toBe(21);
+    });
+
+    it("keys baseline cache lookups on repo root even when scanPath is set", () => {
+      expect(__taintAnalysisRunInternals.resolveBaselineCacheRepoRoot({
+        repoRoot: "/tmp/repo",
+        scanPath: "/tmp/repo/subdir",
+      })).toBe("/tmp/repo");
+    });
   });
 });

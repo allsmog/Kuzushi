@@ -1,8 +1,9 @@
 import type { TriageAssertionConfig } from "../types.js";
+import { getLogger } from "../logger.js";
 
 export type { TriageAssertionConfig };
 
-const tag = "[triage-assertions]";
+const log = getLogger("triage-assertions");
 
 export interface AssertionResult {
   name: string;
@@ -444,7 +445,10 @@ export function runTriageAssertions(
   }
 
   const passed = results.filter(r => r.passed).length;
-  console.error(`${tag} Triage assertions completed: ${passed}/${results.length} passed`);
+  log.info(
+    { passed, total: results.length },
+    "Triage assertions completed",
+  );
 
   return results;
 }

@@ -1,11 +1,9 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import type {
-  DynamicAnalysisRun,
   DynamicAnalysisStatus,
   FindingMetadata,
   KuzushiConfig,
-  PatchResult,
   PatchStatus,
   PocHarnessResult,
   ScanOpts,
@@ -23,6 +21,7 @@ import type {
   TaintPathStep,
 } from "./scanners/types.js";
 import type { RunMetrics } from "./scoring/run-metrics.js";
+import { FindingSchema } from "./schemas.js";
 import { BATCH_TRIAGE_FALLBACK_RATIONALE } from "./triage.js";
 import { runMigrations, allMigrations } from "./migrations/index.js";
 import { safeJsonStringify, safeJsonParse } from "./utils/safe-json.js";
@@ -96,6 +95,14 @@ export interface StoredFindingRecord {
   corroboratingSignals: CorroboratingSignal[];
   suppressionReasons: SuppressionReason[];
 }
+
+const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
+  symbolic_only: 0,
+  inconclusive: 1,
+  execution_attempted: 2,
+  execution_rejected: 3,
+  execution_confirmed: 4,
+};
 
 /** Initialize the SQLite database with the findings schema. */
 export function initDb(dbPath: string): Database.Database {
@@ -582,6 +589,8 @@ export function getActionableFindings(
   const query = `
     SELECT scanner, fingerprint, repo, ref, rule_id as ruleId, file_path as filePath, start_line as startLine,
            severity, message, verdict, confidence, rationale,
+           verification_steps as verificationSteps,
+           triage_details_json as triageDetailsJson,
            adjusted_score as adjustedScore,
            taint_path_json as taintPathJson,
            proof_state as proofState,
@@ -618,6 +627,8 @@ export function getActionableFindings(
   const rows = db.prepare(query).all(...params) as Array<{
     scanner: ScannerId;
     fingerprint: string;
+    repo: string;
+    ref: string;
     ruleId: string;
     filePath: string;
     startLine: number;
@@ -626,6 +637,8 @@ export function getActionableFindings(
     verdict: Verdict;
     confidence: number;
     rationale: string;
+    verificationSteps: string;
+    triageDetailsJson: string | null;
     adjustedScore: number | null;
     taintPathJson: string | null;
     proofState: string | null;
@@ -668,6 +681,8 @@ export function getActionableFindings(
     verdict: row.verdict,
     confidence: row.confidence,
     rationale: row.rationale,
+    verificationSteps: parseVerificationSteps(row.verificationSteps),
+    triageDetails: parseTriageDetailsRecord(row.triageDetailsJson),
     adjustedScore: row.adjustedScore,
     taintPath: parseTaintPath(row.taintPathJson),
     proofState: parseProofState(row.proofState),
@@ -971,6 +986,25 @@ function parseTaintPath(raw: string | null): TaintPathStep[] | undefined {
   return taintPath.length > 0 ? taintPath : undefined;
 }
 
+function parseVerificationSteps(raw: string | null): string[] {
+  const parsed = safeJsonParse<unknown>(raw ?? "", []);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed
+    .map((value) => String(value).trim())
+    .filter(Boolean);
+}
+
+function parseTriageDetailsRecord(raw: string | null): Record<string, unknown> | null {
+  const parsed = safeJsonParse<unknown>(raw ?? "", null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
 function parseProofState(raw: string | null): ProofState | undefined {
   switch (raw) {
     case "symbolic_only":
@@ -1252,6 +1286,31 @@ export function updatePocHarnessCost(
   `).run(costUsd, fingerprint);
 }
 
+/** Persist proof-state updates from verification or dynamic execution. */
+export function updateFindingProofState(
+  db: Database.Database,
+  fingerprint: string,
+  proofState: ProofState,
+): void {
+  const row = db.prepare(`
+    SELECT proof_state as proofState
+    FROM findings
+    WHERE fingerprint = ?
+    LIMIT 1
+  `).get(fingerprint) as { proofState: string | null } | undefined;
+
+  const current = parseProofState(row?.proofState ?? null);
+  if (current && PROOF_STATE_PRECEDENCE[proofState] <= PROOF_STATE_PRECEDENCE[current]) {
+    return;
+  }
+
+  db.prepare(`
+    UPDATE findings
+    SET proof_state = ?, updated_at = datetime('now')
+    WHERE fingerprint = ?
+  `).run(proofState, fingerprint);
+}
+
 /** Update finding metadata (dynamic analysis, patch, notes). Merges with existing metadata. */
 export function updateFindingMetadata(
   db: Database.Database,
@@ -1344,6 +1403,40 @@ export function getRun(
   `).get(runId) as PipelineRunRecord | undefined;
 
   return row;
+}
+
+/** Load the latest completed pipeline run's serialized findings for a repo path. */
+export function getLatestCompletedRunFindings(
+  db: Database.Database,
+  repo: string,
+): Finding[] {
+  const row = db.prepare(`
+    SELECT findings_json as findingsJson
+    FROM pipeline_runs
+    WHERE repo = ? AND status = 'complete' AND findings_json IS NOT NULL
+    ORDER BY COALESCE(completed_at, started_at) DESC, started_at DESC, rowid DESC
+    LIMIT 1
+  `).get(repo) as { findingsJson?: string | null } | undefined;
+
+  if (!row?.findingsJson) {
+    return [];
+  }
+
+  const parsed = safeJsonParse<unknown>(row.findingsJson, []);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  const findings: Finding[] = [];
+  for (const item of parsed) {
+    const validated = FindingSchema.safeParse(item);
+    if (!validated.success) {
+      continue;
+    }
+    findings.push(validated.data);
+  }
+
+  return findings;
 }
 
 /** Save assertion results for a finding in a specific run. */
@@ -1440,219 +1533,6 @@ export function getFixedFindingsForFiles(
   }));
 }
 
-// ─── Dynamic Analysis Runs ─────────────────────────────────────────────────
-
-type DynamicAnalysisRunRow = {
-  dynamic_run_id: string;
-  pipeline_run_id: string | null;
-  fingerprint: string;
-  repo: string;
-  status: string;
-  score: number;
-  proof_value: number;
-  language: string | null;
-  harness_path: string | null;
-  harness_language: string | null;
-  seed_inputs_json: string | null;
-  coverage_mode: string | null;
-  coverage_summary: string | null;
-  execution_exit_code: number | null;
-  execution_stdout: string | null;
-  execution_stderr: string | null;
-  execution_verdict: string | null;
-  execution_duration_ms: number | null;
-  iterations: number;
-  cost_usd: number | null;
-  metadata_json: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-function rowToDynamicAnalysisRun(row: DynamicAnalysisRunRow): DynamicAnalysisRun {
-  return {
-    dynamicRunId: row.dynamic_run_id,
-    pipelineRunId: row.pipeline_run_id ?? undefined,
-    fingerprint: row.fingerprint,
-    repo: row.repo,
-    status: (parseDynamicAnalysisStatus(row.status) ?? "error") as DynamicAnalysisStatus,
-    score: row.score,
-    proofValue: row.proof_value,
-    language: row.language ?? undefined,
-    harnessPath: row.harness_path,
-    harnessLanguage: row.harness_language,
-    seedInputs: row.seed_inputs_json
-      ? (safeJsonParse<string[]>(row.seed_inputs_json, []) ?? [])
-      : undefined,
-    coverageMode: (row.coverage_mode as DynamicAnalysisRun["coverageMode"]) ?? undefined,
-    coverageSummary: row.coverage_summary ?? undefined,
-    executionExitCode: row.execution_exit_code,
-    executionStdout: row.execution_stdout ?? undefined,
-    executionStderr: row.execution_stderr ?? undefined,
-    executionVerdict: (row.execution_verdict as DynamicAnalysisRun["executionVerdict"]) ?? undefined,
-    executionDurationMs: row.execution_duration_ms,
-    iterations: row.iterations,
-    costUsd: row.cost_usd ?? undefined,
-    metadata: row.metadata_json
-      ? (safeJsonParse<Record<string, unknown>>(row.metadata_json, {}) ?? {})
-      : undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-/** Insert or replace a dynamic analysis run. */
-export function insertDynamicAnalysisRun(
-  db: Database.Database,
-  run: DynamicAnalysisRun,
-): void {
-  db.prepare(`
-    INSERT OR REPLACE INTO dynamic_analysis_runs (
-      dynamic_run_id, pipeline_run_id, fingerprint, repo, status,
-      score, proof_value, language, harness_path, harness_language,
-      seed_inputs_json, coverage_mode, coverage_summary,
-      execution_exit_code, execution_stdout, execution_stderr,
-      execution_verdict, execution_duration_ms, iterations,
-      cost_usd, metadata_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), datetime('now'))
-  `).run(
-    run.dynamicRunId,
-    run.pipelineRunId ?? null,
-    run.fingerprint,
-    run.repo,
-    run.status,
-    run.score,
-    run.proofValue,
-    run.language ?? null,
-    run.harnessPath ?? null,
-    run.harnessLanguage ?? null,
-    run.seedInputs ? safeJsonStringify(run.seedInputs) : null,
-    run.coverageMode ?? null,
-    run.coverageSummary ?? null,
-    run.executionExitCode ?? null,
-    run.executionStdout ?? null,
-    run.executionStderr ?? null,
-    run.executionVerdict ?? null,
-    run.executionDurationMs ?? null,
-    run.iterations,
-    run.costUsd ?? null,
-    run.metadata ? safeJsonStringify(run.metadata) : null,
-    run.createdAt ?? null,
-  );
-}
-
-/** Get a dynamic analysis run by its ID. */
-export function getDynamicAnalysisRun(
-  db: Database.Database,
-  dynamicRunId: string,
-): DynamicAnalysisRun | undefined {
-  const row = db.prepare(`
-    SELECT * FROM dynamic_analysis_runs WHERE dynamic_run_id = ?
-  `).get(dynamicRunId) as DynamicAnalysisRunRow | undefined;
-
-  return row ? rowToDynamicAnalysisRun(row) : undefined;
-}
-
-/** Get all dynamic analysis runs for a finding fingerprint, most recent first. */
-export function getDynamicRunsForFinding(
-  db: Database.Database,
-  fingerprint: string,
-): DynamicAnalysisRun[] {
-  const rows = db.prepare(`
-    SELECT * FROM dynamic_analysis_runs
-    WHERE fingerprint = ?
-    ORDER BY created_at DESC
-  `).all(fingerprint) as DynamicAnalysisRunRow[];
-
-  return rows.map(rowToDynamicAnalysisRun);
-}
-
-// ─── Patch Results ──────────────────────────────────────────────────────────
-
-type PatchResultRow = {
-  patch_run_id: string;
-  fingerprint: string;
-  repo: string;
-  diff: string | null;
-  status: string;
-  iterations: number;
-  build_command: string | null;
-  test_command: string | null;
-  worktree_path: string | null;
-  cost_usd: number | null;
-  validator_log: string | null;
-  history_json: string;
-  created_at: string;
-  updated_at: string;
-};
-
-function rowToPatchResult(row: PatchResultRow): PatchResult {
-  return {
-    patchRunId: row.patch_run_id,
-    fingerprint: row.fingerprint,
-    repo: row.repo,
-    diff: row.diff,
-    status: (parsePatchStatus(row.status) ?? "UNKNOWN") as PatchStatus,
-    iterations: row.iterations,
-    buildCommand: row.build_command,
-    testCommand: row.test_command,
-    worktreePath: row.worktree_path,
-    costUsd: row.cost_usd ?? undefined,
-    validatorLog: row.validator_log ?? undefined,
-    history: safeJsonParse<PatchResult["history"]>(row.history_json, []) ?? [],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-/** Insert a patch result record. */
-export function insertPatchResult(
-  db: Database.Database,
-  result: PatchResult,
-): void {
-  db.prepare(`
-    INSERT INTO patch_results (
-      patch_run_id, fingerprint, repo, diff, status,
-      iterations, build_command, test_command, worktree_path,
-      cost_usd, validator_log, history_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    result.patchRunId,
-    result.fingerprint,
-    result.repo,
-    result.diff,
-    result.status,
-    result.iterations,
-    result.buildCommand ?? null,
-    result.testCommand ?? null,
-    result.worktreePath ?? null,
-    result.costUsd ?? null,
-    result.validatorLog ?? null,
-    safeJsonStringify(result.history),
-  );
-}
-
-/** Get a single patch result by run ID. */
-export function getPatchResult(
-  db: Database.Database,
-  patchRunId: string,
-): PatchResult | undefined {
-  const row = db.prepare(`
-    SELECT * FROM patch_results WHERE patch_run_id = ?
-  `).get(patchRunId) as PatchResultRow | undefined;
-
-  return row ? rowToPatchResult(row) : undefined;
-}
-
-/** Get all patch results for a finding fingerprint, most recent first. */
-export function getPatchResultsForFinding(
-  db: Database.Database,
-  fingerprint: string,
-): PatchResult[] {
-  const rows = db.prepare(`
-    SELECT * FROM patch_results
-    WHERE fingerprint = ?
-    ORDER BY created_at DESC
-  `).all(fingerprint) as PatchResultRow[];
-
-  return rows.map(rowToPatchResult);
-}
+export * from "./store/dynamic-analysis.js";
+export * from "./store/crypto-behavioral.js";
+export * from "./store/patch-results.js";

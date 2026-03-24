@@ -1,165 +1,37 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, realpathSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 import type { QualityGateConfig } from "./quality-gate.js";
 import type { ScannerConfig } from "./scanners/types.js";
 import { isRecord } from "./utils.js";
-import { augurRoot as taintAnalysisRoot } from "@kuzushi/augur";
 import { normalizeScannerConfigAliases } from "./capabilities.js";
+import { getLogger } from "./logger.js";
 import { KuzushiConfigSchema } from "./schemas.js";
 import {
   detectConfigFormat,
   parseConfigFile,
   serializeConfig,
-  discoverConfigFile,
   resolveFileReferences,
   type ConfigFormat,
 } from "./config-io.js";
-
-const CONFIG_DIR = path.join(os.homedir(), ".kuzushi");
-const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
-const PROJECT_CONFIG_DIR = ".kuzushi";
-const CONFIG_BASENAME = "config";
-const BUS_BACKENDS = new Set<string>([
-  "in-process",
-  "redis",
-  "google-pubsub",
-  "nats",
-]);
-const AGENT_RUNTIME_BACKENDS = new Set<string>([
-  "pi-ai",
-  "acp",
-]);
-const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() || taintAnalysisRoot;
+import {
+  DEFAULTS,
+  BUS_BACKENDS,
+  AGENT_RUNTIME_BACKENDS,
+} from "./config/defaults.js";
+import {
+  CONFIG_DIR,
+  CONFIG_PATH,
+  configPath,
+  projectConfigPath,
+  isPathWithinAllowedRoots,
+} from "./config/paths.js";
 type ConfigLayer = Record<string, unknown>;
 type WritableConfigLayer = Partial<KuzushiConfig> & ConfigLayer;
+const log = getLogger("config");
 
-/** Hard defaults — the bottom of the precedence stack. */
-export const DEFAULTS: KuzushiConfig = {
-  model: "anthropic:claude-sonnet-4-6",
-  triageBatchModel: "anthropic:claude-haiku-4-5",
-  triageMaxTurns: null,
-  verify: false,
-  verifyMaxTurns: undefined,
-  verifyConcurrency: 3,
-  verifyBatchSize: 5,
-  verifyVerdicts: ["tp"],
-  verifyMinConfidence: 0,
-  pocHarness: false,
-  pocHarnessMaxTurns: undefined,
-  pocHarnessConcurrency: 2,
-  enableContextGathering: true,
-  auditLog: false,
-  reportOutput: undefined,
-  sarifOutput: undefined,
-  jsonOutput: undefined,
-  csvOutput: undefined,
-  jsonlOutput: undefined,
-  maxTriageRetries: 2,
-  maxVerifyRetries: 2,
-  maxPocHarnessRetries: 2,
-  retryBackoffMs: 5000,
-  retryBackoffMultiplier: 2,
-  busBackend: "in-process",
-  triageBatchSize: 40,
-  triageConcurrency: 5,
-  scanMode: "concurrent",
-  agentRuntimeBackend: "pi-ai",
-  agentRuntimeConfig: undefined,
-  enabledTasks: [
-    "context-gatherer",
-    "context-enricher",
-    "app-model-build",
-    "threat-scenario-build",
-    "secrets-crypto-detect",
-    "code-config-detect",
-    "taint-analysis-preflight",
-    "taint-analysis-label",
-    "taint-analysis-run",
-  ],
-  scanners: ["semgrep"],
-  severity: ["ERROR", "WARNING"],
-  excludePatterns: [
-    "test", "tests", "spec", "vendor",
-    "node_modules", "__tests__", "*.min.js", "*.min.css",
-  ],
-  llmRescoreEnabled: true,
-  fpFilterEnabled: true,
-  fpFilterCustomExclusions: [],
-  taskMaxTurns: 10,
-  enableDynamicTaskSelection: false,
-  pocExecute: false,
-  pocSandbox: "docker",
-  pocExecTimeoutMs: 30_000,
-  variantAnalysis: false,
-  variantAnalysisMaxFindings: 10,
-  contextEnrichmentModel: "anthropic:claude-haiku-4-5",
-  enableContextEnrichment: true,
-  enableClassifier: false,
-  classifierModel: undefined,
-  classifierThreshold: 0.5,
-  ensembleModels: [],
-  taintDiffBase: undefined,
-  taintDiffMode: "delta",
-  taintGroundingEnabled: true,
-  astIndexEnabled: false,
-  callGraphAssistEnabled: false,
-  dynamicAnalysisEnabled: false,
-  coverageGuidedEnabled: false,
-  dynamicMaxIterations: 3,
-  dynamicMaxCandidates: 20,
-  dynamicMinScore: 7,
-  dynamicPerFindingBudgetUsd: 2,
-  patchingEnabled: false,
-  patchMaxIterations: 3,
-  patchBuildCommand: undefined,
-  patchTestCommand: undefined,
-  pocRefinementMaxIterations: 3,
-  pocReflectionInterval: 2,
-  verifyRefinementMaxIterations: 3,
-  verifyReflectionInterval: 2,
-  confidenceCalibration: false,
-  confidenceSignalWeights: undefined,
-  trajectoryMemory: false,
-  trajectoryMaxExemplars: 2,
-  triageStrategy: "single",
-  triageSpecialistMaxTurns: null,
-  prioritizeFindings: true,
-  externalTasks: [],
-  enableExternalTasks: false,
-  diffBase: undefined,
-  skipTriageForHighConfidenceAgentic: true,
-  scannerConfig: {
-    semgrep: { configFlag: ["auto", "p/security-audit", "p/owasp-top-ten", "p/cwe-top-25"] },
-    agentic: { model: "anthropic:claude-sonnet-4-6", maxFindings: 20 },
-    codeql: {},
-    "secrets-crypto-detect": { model: "anthropic:claude-haiku-4-5" },
-    "code-config-detect": { model: "anthropic:claude-haiku-4-5", maxFindings: 50 },
-    "taint-analysis": {
-      taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
-      dbPath: undefined,
-      passes: [1, 2, 3, 4, 5],
-      extractionModel: "anthropic:claude-haiku-4-5",
-      labelingBatchSize: 20,
-      labelingConfidenceThreshold: 0.55,
-      workspaceDir: "./iris",
-      codeqlBinary: undefined,
-      python3Binary: "python3",
-      threads: undefined,
-      ram: undefined,
-      maxFindings: undefined,
-      tiMode: "live-required",
-      tiFailurePolicy: "continue_without_ti",
-      tiTimeoutMs: 15_000,
-      refinementEnabled: false,
-      refinementIterations: 1,
-      refinementDeltaOnly: true,
-      refinementModel: undefined,
-    },
-  },
-};
+export { DEFAULTS, configPath, projectConfigPath };
 
 /** Derived from KuzushiConfigSchema so that adding a new config key to the
  *  interface automatically makes it valid here — no manual list to maintain. */
@@ -785,6 +657,46 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "cryptoBehavioralTestEnabled") {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error("cryptoBehavioralTestEnabled must be true or false");
+    }
+    config.cryptoBehavioralTestEnabled = parsed;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "cryptoBehavioralTimeoutMs") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("cryptoBehavioralTimeoutMs must be a positive number");
+    }
+    config.cryptoBehavioralTimeoutMs = Math.floor(n);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "cryptoBehavioralMaxFindings") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error("cryptoBehavioralMaxFindings must be a positive number");
+    }
+    config.cryptoBehavioralMaxFindings = Math.floor(n);
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "cryptoBehavioralPerFindingBudgetUsd") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error("cryptoBehavioralPerFindingBudgetUsd must be a positive number");
+    }
+    config.cryptoBehavioralPerFindingBudgetUsd = n;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   if (key === "qualityGates") {
     const parsed = parseFlexibleValue(raw);
     if (!isRecord(parsed)) {
@@ -816,26 +728,6 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
 
   delete config[key];
   saveUpdatedConfigLayer(config, repoRoot);
-}
-
-/** Return global config file path.
- *  Auto-discovers config.json, config.yaml, or config.yml (in that order).
- *  Falls back to config.json if none exists yet. */
-export function configPath(): string {
-  const discovered = discoverConfigFile(CONFIG_DIR, CONFIG_BASENAME);
-  if (discovered) return discovered.path;
-  return CONFIG_PATH;
-}
-
-/** Return project config file path.
- *  Auto-discovers config.json, config.yaml, or config.yml (in that order).
- *  Falls back to config.json if none exists yet. */
-export function projectConfigPath(repoRoot: string): string {
-  const dir = path.join(repoRoot, PROJECT_CONFIG_DIR);
-  const discovered = discoverConfigFile(dir, CONFIG_BASENAME);
-  if (discovered) return discovered.path;
-  // Default to JSON when creating a new project config
-  return path.join(dir, `${CONFIG_BASENAME}.json`);
 }
 
 function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
@@ -941,6 +833,26 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     DEFAULTS.verifyReflectionInterval ?? 2,
   );
   const enabledTasks = normalizeStringArray(config.enabledTasks);
+  const cryptoBehavioralTestEnabled = normalizeBoolean(
+    config.cryptoBehavioralTestEnabled,
+    DEFAULTS.cryptoBehavioralTestEnabled ?? false,
+  );
+  const cryptoBehavioralTimeoutMs = normalizePositiveInt(
+    config.cryptoBehavioralTimeoutMs,
+    DEFAULTS.cryptoBehavioralTimeoutMs ?? 120_000,
+  );
+  const cryptoBehavioralMaxFindings = normalizePositiveInt(
+    config.cryptoBehavioralMaxFindings,
+    DEFAULTS.cryptoBehavioralMaxFindings ?? 10,
+  );
+  const cryptoBehavioralPerFindingBudgetUsd = normalizePositiveNumber(
+    config.cryptoBehavioralPerFindingBudgetUsd,
+    DEFAULTS.cryptoBehavioralPerFindingBudgetUsd ?? 1,
+  );
+  const normalizedEnabledTasks = dedupeStringsPreserveOrder([
+    ...enabledTasks,
+    ...(cryptoBehavioralTestEnabled ? ["crypto-behavioral-test"] : []),
+  ]);
   const externalTasks = normalizeStringArray(config.externalTasks);
   const enableExternalTasks = normalizeBoolean(config.enableExternalTasks, DEFAULTS.enableExternalTasks ?? false);
   const taskMaxTurns = config.taskMaxTurns == null
@@ -994,7 +906,11 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     pocReflectionInterval,
     verifyRefinementMaxIterations,
     verifyReflectionInterval,
-    enabledTasks,
+    enabledTasks: normalizedEnabledTasks,
+    cryptoBehavioralTestEnabled,
+    cryptoBehavioralTimeoutMs,
+    cryptoBehavioralMaxFindings,
+    cryptoBehavioralPerFindingBudgetUsd,
     externalTasks,
     enableExternalTasks,
     taskMaxTurns,
@@ -1146,7 +1062,7 @@ function readConfigFile(configFilePath: string): WritableConfigLayer {
 
     // Guard: circular reference detection
     if (configLoadStack.has(resolvedPath)) {
-      console.warn(`Warning: circular config reference detected for ${resolvedPath}, skipping`);
+      log.warn(`Circular config reference detected for ${resolvedPath}, skipping`);
       return {};
     }
 
@@ -1154,14 +1070,14 @@ function readConfigFile(configFilePath: string): WritableConfigLayer {
     try {
       const stats = statSync(resolvedPath);
       if (stats.size > MAX_CONFIG_FILE_BYTES) {
-        console.warn(`Warning: config file ${resolvedPath} exceeds 1MB limit, skipping`);
+        log.warn(`Config file ${resolvedPath} exceeds 1MB limit, skipping`);
         return {};
       }
       // Guard: symlink check — resolve and verify target is in expected location
       if (stats.isSymbolicLink?.()) {
         const realPath = realpathSync(resolvedPath);
         if (!isPathWithinAllowedRoots(realPath)) {
-          console.warn(`Warning: config symlink ${resolvedPath} points outside allowed directories, skipping`);
+          log.warn(`Config symlink ${resolvedPath} points outside allowed directories, skipping`);
           return {};
         }
       }
@@ -1184,20 +1100,9 @@ function readConfigFile(configFilePath: string): WritableConfigLayer {
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
-    console.warn(`Warning: config file ${configFilePath} is corrupt and will be ignored: ${err}`);
+    log.warn(`Config file ${configFilePath} is corrupt and will be ignored: ${err}`);
     return {};
   }
-}
-
-/** Check if a path is within ~/.kuzushi/ or current working directory. */
-function isPathWithinAllowedRoots(filePath: string): boolean {
-  const resolved = path.resolve(filePath);
-  const homeConfig = path.resolve(CONFIG_DIR);
-  const cwd = path.resolve(".");
-  return resolved.startsWith(homeConfig + path.sep)
-    || resolved === homeConfig
-    || resolved.startsWith(cwd + path.sep)
-    || resolved === cwd;
 }
 
 function sanitizeConfigLayer(value: unknown): unknown {
@@ -1301,6 +1206,20 @@ function coerceVerdictArray(raw: string): Verdict[] {
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((v) => String(v).trim()).filter(Boolean);
+}
+
+function dedupeStringsPreserveOrder(values: Iterable<string>): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = raw.trim();
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
 }
 
 function normalizeVerdictArray(value: unknown): Verdict[] {

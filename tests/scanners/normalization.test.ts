@@ -84,4 +84,24 @@ describe("normalization pipeline", () => {
     expect(applied.skippedByLlmRescore).toBe(2);
     expect(capped.map((finding) => finding.fingerprint)).toEqual(["fp-1", "fp-4"]);
   });
+
+  it("prefers stronger structured evidence for identical fingerprints at equal score", () => {
+    const original = makeFinding({
+      fingerprint: "fp-1",
+      score: 70,
+    });
+    const enriched = makeFinding({
+      fingerprint: "fp-1",
+      score: 70,
+      proofState: "execution_confirmed",
+      engineProvenance: [{ kind: "dynamic", detail: "crypto-behavioral/timing verdict=vulnerable" }],
+    });
+
+    const clustered = clusterFindings([original, enriched]);
+    expect(clustered.findings).toHaveLength(1);
+    expect(clustered.findings[0].proofState).toBe("execution_confirmed");
+    expect(clustered.findings[0].engineProvenance).toEqual([
+      { kind: "dynamic", detail: "crypto-behavioral/timing verdict=vulnerable" },
+    ]);
+  });
 });

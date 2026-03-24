@@ -12,6 +12,7 @@
 import type { AgentTask, TaskContext, TaskOutputKind } from "../types.js";
 import type { KuzushiConfig } from "../../types.js";
 import { createInterface } from "node:readline";
+import { getLogger } from "../../logger.js";
 
 export interface ApprovalGateInput {
   description?: string;
@@ -25,6 +26,7 @@ export interface ApprovalOutput {
 
 /** Default timeout for approval (5 minutes). */
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+const log = getLogger("approval-gate");
 
 /**
  * Create an approval gate task with the given configuration.
@@ -81,7 +83,10 @@ export function createApprovalGate(
 
       // If stdin is not a TTY, auto-approve or auto-deny based on config
       if (!process.stdin.isTTY) {
-        console.error(`[approval-gate] Non-interactive mode: ${defaultOnTimeout ? "auto-approved" : "auto-denied"}`);
+        log.warn(
+          { defaultOnTimeout },
+          `Non-interactive mode: ${defaultOnTimeout ? "auto-approved" : "auto-denied"}`,
+        );
         return {
           approved: defaultOnTimeout,
           method: "auto",

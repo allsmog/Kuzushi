@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import { attachTaskOutputMeta } from "../task-output-meta.js";
 import type { ScanOpts } from "../types.js";
 import type { Finding, ScannerConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
@@ -24,9 +25,14 @@ export class AgenticPlugin implements ScannerPlugin {
     this.passes = config["passes"] === 2 ? 2 : 1;
   }
 
-  async scan(repoRoot: string, opts: ScanOpts, _config: ScannerConfig): Promise<Finding[]> {
+  async scan(
+    repoRoot: string,
+    opts: ScanOpts,
+    _config: ScannerConfig,
+    runtime?: AgentRuntime,
+  ): Promise<Finding[]> {
     const repoName = path.basename(repoRoot);
-    const output = await runAgentic(repoRoot, opts, this.model, this.maxFindings);
+    const output = await runAgentic(repoRoot, opts, this.model, this.maxFindings, { runtime });
     let findings = selectAgenticFindings(output, repoRoot, repoName, "HEAD");
     let totalCost = output.costUsd ?? 0;
 
@@ -41,6 +47,7 @@ export class AgenticPlugin implements ScannerPlugin {
         } as ScanOpts,
         this.model,
         this.maxFindings,
+        { runtime },
       );
       const reviewFindings = selectAgenticFindings(reviewOutput, repoRoot, repoName, "HEAD");
       totalCost += reviewOutput.costUsd ?? 0;

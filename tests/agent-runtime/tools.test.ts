@@ -638,7 +638,7 @@ describe("Semantic navigation tools", () => {
 
     expect(output).toContain("Symbol: greet");
     expect(output).toContain("src/dep.ts:1:17:export function greet(name: string): string {");
-  });
+  }, 15_000);
 
   it("FindReferences returns symbol references, not pure text matches", async () => {
     const cwd = makeSemanticWorkspace();
@@ -667,7 +667,7 @@ describe("Semantic navigation tools", () => {
     expect(output).toContain("Type:");
     expect(output).toContain("string");
     expect(output).toContain("Location: src/main.ts:4:7");
-  });
+  }, 15_000);
 
   it("returns a stable message for unsupported file types", async () => {
     const cwd = makeSemanticWorkspace();

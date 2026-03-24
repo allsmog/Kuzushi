@@ -1,4 +1,5 @@
 import type { ScanOpts } from "../types.js";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 
 export type ScannerId = string;
 export type ScannerConfig = Record<string, unknown>;
@@ -87,7 +88,7 @@ export interface TriageAgentConfig {
 export interface ScannerPlugin {
   readonly id: ScannerId;
   readonly displayName: string;
-  scan(repoRoot: string, opts: ScanOpts, config: ScannerConfig): Promise<Finding[]>;
+  scan(repoRoot: string, opts: ScanOpts, config: ScannerConfig, runtime?: AgentRuntime): Promise<Finding[]>;
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig;
   init?(config: ScannerConfig): Promise<void>;
 }

@@ -172,6 +172,7 @@ async function analyzeService(
       repoRoot: context.repoRoot,
       model: boundaryModel,
       confidenceThreshold: boundaryThreshold,
+      runtime: context.runtime,
     });
     totalCostUsd += normalizeCostUsd(getTaskOutputMeta(boundary)?.costUsd);
   } catch (error) {
@@ -262,6 +263,7 @@ async function runTaintAnalysisForService(
     scanPath: serviceRoot,
     repoName: service.id,
     config: serviceConfig,
+    runtime: parentContext.runtime,
     bus: parentContext.bus,
     upstreamOutputs: new Map(),
   };

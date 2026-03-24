@@ -3,11 +3,14 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import type { AgentRuntime } from "../../../agent-runtime/types.js";
+import { getLogger } from "../../../logger.js";
 import { formatTaintPathForPrompt } from "../../../findings/taint-path.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import { selectFindings, type CodeQLSarifOutput } from "../../../scanners/run-codeql.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import type { ScanOpts } from "../../../types.js";
+import { getLatestCompletedRunFindings } from "../../../store.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import { resolveDefaultReadOnlyTools, runStructuredAgentQuery } from "../../../agent-runtime/execution.js";
 import type { AgentTask } from "../../types.js";
@@ -21,10 +24,9 @@ import {
   type CodeqlProfile,
 } from "./codeql-compat.js";
 import {
-  TAINT_ANALYSIS_PASSES,
   TAINT_ANALYSIS_PASS_IDS,
+  TAINT_ANALYSIS_PASSES,
   resolveTaintAnalysisConfig,
-  type DiffScope,
   type ExtractionDegradation,
   type TaintAnalysisLabelOutput,
   type TaintAnalysisLabelsDocument,
@@ -34,8 +36,14 @@ import {
   type TaintAnalysisPassId,
   type TaintAnalysisPreflightOutput,
 } from "./types.js";
+import {
+  extractPassId,
+  mergeBaselineTaintFindings,
+  narrowDiffScope,
+} from "./diff-scope.js";
 
 const execFileAsync = promisify(execFile);
+const log = getLogger("taint-analysis-run");
 const EXPECTED_LABEL_CHECKPOINT_VERSION = 2;
 const EXPECTED_LABEL_PARSER_VERSION = 2;
 const LABEL_CHECKPOINT_VERSION_NOTE_PREFIX = "internal.label_checkpoint_version=";
@@ -71,12 +79,13 @@ interface DiscoverSummarySupplementsArgs {
   extractionDegradation: ExtractionDegradation;
   repoRoot: string;
   model: string;
+  runtime: AgentRuntime;
 }
 
 async function discoverSummarySupplements(
   args: DiscoverSummarySupplementsArgs,
 ): Promise<{ supplements: CallableInfo[]; costUsd: number }> {
-  const { labels, language, framework, extractionDegradation, repoRoot, model } = args;
+  const { labels, language, framework, extractionDegradation, repoRoot, model, runtime } = args;
 
   const labelSummaryLines: string[] = [];
   for (const pass of labels.passes) {
@@ -160,7 +169,8 @@ For each supplement provide:
     cwd: repoRoot,
     model,
     maxTurns: 15,
-    allowedTools: resolveDefaultReadOnlyTools(),
+    allowedTools: resolveDefaultReadOnlyTools(runtime),
+    runtimeOptions: { runtime },
     schema: SUMMARY_SUPPLEMENT_SCHEMA as Record<string, unknown>,
     strict: true,
     retryInvalidStructuredOutput: 2,
@@ -243,13 +253,14 @@ interface DiscoverRenderingHintsArgs {
   framework: string | null;
   repoRoot: string;
   model: string;
+  runtime: AgentRuntime;
   labeledCallables: string[];
 }
 
 async function discoverRenderingHints(
   args: DiscoverRenderingHintsArgs,
 ): Promise<{ hints: RenderingHints; costUsd: number }> {
-  const { language, framework, repoRoot, model, labeledCallables } = args;
+  const { language, framework, repoRoot, model, runtime, labeledCallables } = args;
 
   const callableContext = labeledCallables.length > 0
     ? `\n\nLabeled callables in the codebase (for context):\n${labeledCallables.slice(0, 50).map((c) => `  - ${c}`).join("\n")}${labeledCallables.length > 50 ? `\n  ... and ${labeledCallables.length - 50} more` : ""}`
@@ -283,7 +294,8 @@ Return:
     cwd: repoRoot,
     model,
     maxTurns: 15,
-    allowedTools: resolveDefaultReadOnlyTools(),
+    allowedTools: resolveDefaultReadOnlyTools(runtime),
+    runtimeOptions: { runtime },
     schema: RENDERING_HINTS_SCHEMA as Record<string, unknown>,
     strict: true,
     retryInvalidStructuredOutput: 2,
@@ -359,7 +371,37 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
     const compatRecordPath = path.join(labelOutput.workspaceDir, "exploration", "codeql_compat.json");
 
     // --- Diff-aware pass narrowing ---
-    const diffScope = narrowDiffScope(labelOutput.diffScope, labels);
+    let diffScope = narrowDiffScope(labelOutput.diffScope, labels);
+    let cachedBaselineFindings: Finding[] = [];
+    if (diffScope?.mode === "baseline" && !diffScope.fellBackToFull) {
+      if (!context.db) {
+        diffScope = {
+          ...diffScope,
+          fellBackToFull: true,
+          fallbackReason: "baseline_cache_unavailable",
+        };
+        process.stderr.write(
+          "[taint-analysis-run] Baseline mode requested but no findings database is attached to task context; falling back to full analysis\n",
+        );
+      } else {
+        cachedBaselineFindings = getLatestCompletedRunFindings(
+          context.db,
+          resolveBaselineCacheRepoRoot(context),
+        )
+          .filter((finding) => finding.scanner === "taint-analysis-run");
+        if (cachedBaselineFindings.length === 0) {
+          diffScope = {
+            ...diffScope,
+            fellBackToFull: true,
+            fallbackReason: "baseline_cache_missing",
+          };
+          process.stderr.write(
+            "[taint-analysis-run] Baseline mode requested but no completed taint baseline was found; falling back to full analysis\n",
+          );
+        }
+      }
+    }
+
     if (diffScope) {
       process.stderr.write(
         `[taint-analysis-run] Diff-aware mode=${diffScope.mode} affected_passes=[${diffScope.affectedPassIds.join(",")}] fell_back_to_full=${diffScope.fellBackToFull}\n`,
@@ -408,6 +450,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
           extractionDegradation: labelOutput.extractionDegradation,
           repoRoot: context.repoRoot,
           model: cfg.labelingModel,
+          runtime: context.runtime,
         });
         const groundedSupplements = cfg.groundingEnabled
           ? await groundCallableTargets(context.repoRoot, supplementResult.supplements)
@@ -464,6 +507,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
           framework: labelOutput.framework,
           repoRoot: context.repoRoot,
           model: cfg.labelingModel,
+          runtime: context.runtime,
           labeledCallables,
         });
         if (cfg.groundingEnabled) {
@@ -675,11 +719,13 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
           `[taint-analysis-run] Delta-mode filtering: ${preFilterCount} -> ${findings.length} findings (${preFilterCount - findings.length} outside diff)\n`,
         );
       } else {
-        // Baseline mode: ideally merge cached findings for unaffected passes.
-        // TODO: Wire getTaintFindingsByPasses() from store.ts when the store
-        // function lands.  For now, return full results with a diagnostic log.
+        findings = mergeBaselineTaintFindings(
+          cachedBaselineFindings,
+          findings,
+          diffScope.affectedPassIds,
+        );
         process.stderr.write(
-          `[taint-analysis-run] Baseline mode: returning ${findings.length} findings (cache merge not yet wired)\n`,
+          `[taint-analysis-run] Baseline mode: merged cached unaffected findings with ${diffScope.affectedPassIds.length} rerun pass(es), returning ${findings.length} findings\n`,
         );
       }
     }
@@ -995,8 +1041,14 @@ function groupCallables(labels: TaintAnalysisLabelsDocument, role: TaintAnalysis
     }
 
     if (skippedSynthetic > 0) {
-      process.stderr.write(
-        `[taint-analysis-run] pass ${pass.pass_id} (${passDef.focus}): skipped ${skippedSynthetic} synthetic ${role} callable entr${skippedSynthetic === 1 ? "y" : "ies"}\n`,
+      log.info(
+        {
+          passId: pass.pass_id,
+          focus: passDef.focus,
+          skippedSynthetic,
+          role,
+        },
+        `pass ${pass.pass_id} (${passDef.focus}): skipped ${skippedSynthetic} synthetic ${role} callable entr${skippedSynthetic === 1 ? "y" : "ies"}`,
       );
     }
 
@@ -1847,87 +1899,8 @@ function asLabelOutput(value: unknown): TaintAnalysisLabelOutput | null {
   return value as unknown as TaintAnalysisLabelOutput;
 }
 
-/**
- * Taint-support artifact file patterns that, when changed, should force a
- * full analysis run regardless of which passes the diff would otherwise
- * narrow to.  This covers CodeQL libraries, query templates, and label
- * definitions that affect all passes.
- */
-const TAINT_SUPPORT_ARTIFACT_PATTERNS = [
-  "/iris/",
-  "/augur/",
-  ".qll",
-  ".ql.tmpl",
-  "labels.json",
-  "TAINT_MODEL.json",
-];
-
-/**
- * After labels are available, narrow the preflight `DiffScope.affectedPassIds`
- * by intersecting `changedFiles` with the file locations referenced in labeled
- * source/sink/summary entries.  If any changed file touches taint support
- * artifacts, fall back to full analysis.
- *
- * Returns `undefined` when no diff scope was produced (i.e. diff-aware mode
- * is not active).
- */
-function narrowDiffScope(
-  preflightScope: DiffScope | undefined,
-  labels: TaintAnalysisLabelsDocument,
-): DiffScope | undefined {
-  if (!preflightScope) return undefined;
-
-  // Already fell back — nothing to narrow
-  if (preflightScope.fellBackToFull) return preflightScope;
-
-  const changedSet = new Set(preflightScope.changedFiles);
-
-  // If changed files touch taint support artifacts, force full run
-  for (const changedFile of changedSet) {
-    if (TAINT_SUPPORT_ARTIFACT_PATTERNS.some((pat) => changedFile.includes(pat))) {
-      process.stderr.write(
-        `[taint-analysis-run] Changed file '${changedFile}' matches taint support artifact pattern; forcing full analysis\n`,
-      );
-      return {
-        ...preflightScope,
-        fellBackToFull: true,
-        fallbackReason: `taint_support_artifact_changed: ${changedFile}`,
-      };
-    }
-  }
-
-  // Intersect changed files with labeled source/sink/summary file locations
-  // to determine which passes are actually affected by the diff.
-  const affectedPassIds = new Set<TaintAnalysisPassId>();
-  for (const pass of labels.passes) {
-    for (const entry of pass.entries) {
-      if (entry.classification === "fp") continue;
-      if (entry.role === "none") continue;
-      if (changedSet.has(entry.location.file)) {
-        affectedPassIds.add(pass.pass_id);
-        break; // No need to check more entries for this pass
-      }
-    }
-  }
-
-  // If narrowing produces zero affected passes but there are changed files,
-  // keep the preflight scope as-is (conservative: all enabled passes).
-  if (affectedPassIds.size === 0) {
-    process.stderr.write(
-      `[taint-analysis-run] Diff narrowing found 0 affected passes from labels; keeping preflight scope (${preflightScope.affectedPassIds.length} passes)\n`,
-    );
-    return preflightScope;
-  }
-
-  const narrowed = [...affectedPassIds].sort((a, b) => a - b) as TaintAnalysisPassId[];
-  process.stderr.write(
-    `[taint-analysis-run] Diff narrowing: ${preflightScope.affectedPassIds.length} -> ${narrowed.length} affected passes [${narrowed.join(",")}]\n`,
-  );
-
-  return {
-    ...preflightScope,
-    affectedPassIds: narrowed,
-  };
+function resolveBaselineCacheRepoRoot(context: { repoRoot: string; scanPath?: string }): string {
+  return context.repoRoot;
 }
 
 export const __taintAnalysisRunInternals = {
@@ -1945,4 +1918,7 @@ export const __taintAnalysisRunInternals = {
   escapeQllString,
   defaultRenderingHints,
   narrowDiffScope,
+  resolveBaselineCacheRepoRoot,
+  mergeBaselineTaintFindings,
+  extractPassId,
 };

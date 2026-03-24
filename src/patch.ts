@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, copyFileSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
+import type { AgentRuntime } from "./agent-runtime/types.js";
 import {
   resolveDefaultReadOnlyTools,
   runStructuredAgentQuery,
@@ -33,6 +34,7 @@ export interface PatchSynthesisOptions {
   repoRoot: string;
   repoName: string;
   model: string;
+  runtime: AgentRuntime;
   maxIterations: number;
   buildCommand: string | null;
   testCommand: string | null;
@@ -235,12 +237,13 @@ async function synthesizePatch(
   repoRoot: string,
   repoName: string,
   model: string,
+  runtime: AgentRuntime,
   history: Array<{ attempt: number; diff: string; status: PatchStatus; output: string }>,
   maxTurns?: number,
 ): Promise<{ diff: string; explanation: string; costUsd: number }> {
   const prompt = buildPatchSynthesisPrompt(finding, repoName, history);
 
-  const allowedTools = resolveDefaultReadOnlyTools();
+  const allowedTools = resolveDefaultReadOnlyTools(runtime);
 
   const { resultText, structuredOutput, executionError, costUsd } =
     await runStructuredAgentQuery({
@@ -249,6 +252,7 @@ async function synthesizePatch(
       model,
       maxTurns: maxTurns ?? 15,
       allowedTools,
+      runtimeOptions: { runtime },
       systemPromptPrefix:
         "You are a security patch generator. Read the vulnerable code, then produce a minimal unified diff that fixes the vulnerability.",
       schema: PATCH_SYNTHESIS_SCHEMA,
@@ -475,6 +479,7 @@ export async function runPatchPipeline(
         options.repoRoot,
         options.repoName,
         options.model,
+        options.runtime,
         history,
         options.maxTurns,
       );

@@ -22,6 +22,7 @@ import type {
 import type { AgentRuntimeConfig } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { getRateLimitRegistry } from "../scheduler/index.js";
+import { getLogger } from "../logger.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
@@ -65,6 +66,7 @@ const TRANSIENT_API_TOKENS = [
   "temporarily unavailable",
   "Service Temporarily Unavailable",
 ];
+const log = getLogger("pi-ai");
 
 /** Exported for testing. */
 export function isTransientError(error: unknown): boolean {
@@ -159,7 +161,7 @@ async function retryTransient<T>(
       // Rate-limit errors get longer backoff.
       const factor = wrapped.category === "rate_limit" ? 3 : 1;
       const delay = backoffMs * factor * 2 ** attempt;
-      console.error(
+      log.warn(
         `[pi-ai] ${wrapped.name} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay / 1000}s: ${wrapped.message}`,
       );
 
@@ -323,7 +325,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
             const isRateLimit = /\b429\b|rate.?limit/i.test(assistant.errorMessage ?? "");
             const rateFactor = isRateLimit ? 3 : 1;
             const delay = TRANSIENT_RETRY_BASE_MS * rateFactor * 2 ** softRetry;
-            console.error(
+            log.warn(
               `[pi-ai] Transient soft error (attempt ${softRetry + 1}/${TRANSIENT_RETRY_MAX}), retrying in ${delay / 1000}s: ${assistant.errorMessage}`,
             );
 

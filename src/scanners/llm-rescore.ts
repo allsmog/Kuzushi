@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import { runStructuredAgentQuery } from "../agent-runtime/execution.js";
 import type { Finding } from "./types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
@@ -16,6 +17,7 @@ export interface RescoreOptions {
   threshold?: number;
   concurrency?: number;
   repoRoot: string;
+  runtime: AgentRuntime;
 }
 
 const RESCORE_SCHEMA = {
@@ -73,7 +75,14 @@ export async function rescoreFindings(
 
   for (const finding of findings) {
     const fileContent = fileContents.get(finding.filePath) ?? "[no content]";
-    pending.push(() => rescoreSingleFinding(finding, fileContent, model, options.repoRoot, threshold));
+    pending.push(() => rescoreSingleFinding(
+      finding,
+      fileContent,
+      model,
+      options.repoRoot,
+      threshold,
+      options.runtime,
+    ));
   }
 
   // Execute with concurrency limit
@@ -100,6 +109,7 @@ async function rescoreSingleFinding(
   model: string,
   repoRoot: string,
   threshold: number,
+  runtime: AgentRuntime,
 ): Promise<LlmRescoreResult> {
   // Extract relevant lines around the finding (±20 lines)
   const lines = fileContent.split("\n");
@@ -138,7 +148,7 @@ async function rescoreSingleFinding(
       model,
       maxTurns: 1,
       allowedTools: [],
-      runtimeOptions: {},
+      runtimeOptions: { runtime },
       schema: RESCORE_SCHEMA,
     });
 

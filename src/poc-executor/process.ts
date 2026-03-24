@@ -1,8 +1,10 @@
 import { execFile as execFileCb } from "node:child_process";
 import path from "node:path";
 import type { PocExecutionResult, PocExecutor } from "./types.js";
+import { getLogger } from "../logger.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const log = getLogger("poc-executor");
 
 function resolveCommand(language: string): { bin: string; args: string[] } {
   const lower = language.toLowerCase();
@@ -24,9 +26,8 @@ export class ProcessPocExecutor implements PocExecutor {
 
   constructor(timeoutMs: number = DEFAULT_TIMEOUT_MS) {
     this.timeoutMs = timeoutMs;
-    console.error(
-      "[poc-executor] WARNING: Using process executor without container isolation. " +
-      "Install Docker for sandboxed execution.",
+    log.warn(
+      "Using process executor without container isolation. Install Docker for sandboxed execution.",
     );
   }
 

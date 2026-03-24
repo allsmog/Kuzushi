@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime, type AgentRuntime } from "../agent-runtime/index.js";
+import type { AgentRuntime } from "../agent-runtime/types.js";
+import { getLogger } from "../logger.js";
 import type { ScanOpts } from "../types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
 import type { Finding } from "./types.js";
 import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
+
+const log = getLogger("agentic-scan");
 
 const SEVERITY_LEVELS = new Set(["ERROR", "WARNING", "INFO"]);
 const CONFIDENCE_LEVELS = new Set(["HIGH", "MEDIUM", "LOW"]);
@@ -81,14 +84,17 @@ export async function runAgentic(
 ): Promise<AgenticOutput> {
   const requestedMax = Math.max(1, opts.maxFindings ?? defaultMaxFindings);
   const prompt = buildPrompt(opts, requestedMax);
-  const runtime = runtimeOptions.runtime ?? getAgentRuntime();
+  const runtime = runtimeOptions.runtime;
+  if (!runtime) {
+    throw new Error("Agentic scanner requires an explicit runtime.");
+  }
   let resultText = "";
   let structuredOutput: unknown = undefined;
   let executionError: string | null = null;
   let costUsd = 0;
 
   const tag = "[agentic]";
-  console.error(`${tag} Starting scan (model=${model}, cwd=${repoRoot})`);
+  log.info(`${tag} Starting scan (model=${model}, cwd=${repoRoot})`);
 
   for await (const message of runtime.query({
     prompt,
@@ -109,12 +115,12 @@ export async function runAgentic(
     },
   })) {
     if (message.type === "tool-progress") {
-      console.error(`${tag} [${Math.round(message.elapsedSeconds)}s] Tool: ${message.toolName}`);
+      log.debug(`${tag} [${Math.round(message.elapsedSeconds)}s] Tool: ${message.toolName}`);
       continue;
     }
 
     if (message.type === "tool-summary") {
-      console.error(`${tag} ${message.summary}`);
+      log.debug(`${tag} ${message.summary}`);
       continue;
     }
 
@@ -123,13 +129,13 @@ export async function runAgentic(
         .filter((b: Record<string, unknown>) => b["type"] === "tool_use")
         .map((b: Record<string, unknown>) => b["name"]);
       if (toolUses.length > 0) {
-        console.error(`${tag} Using tools: ${toolUses.join(", ")}`);
+        log.debug(`${tag} Using tools: ${toolUses.join(", ")}`);
       } else {
         const textBlocks = message.content
           .filter((b: Record<string, unknown>) => b["type"] === "text")
           .map((b: Record<string, unknown>) => String(b["text"] ?? "").slice(0, 120));
         if (textBlocks.length > 0) {
-          console.error(`${tag} ${textBlocks[0]}${textBlocks[0].length >= 120 ? "..." : ""}`);
+          log.debug(`${tag} ${textBlocks[0]}${textBlocks[0].length >= 120 ? "..." : ""}`);
         }
       }
       continue;
@@ -143,7 +149,7 @@ export async function runAgentic(
       resultText = message.result;
       structuredOutput = message.structuredOutput;
       const durationSec = message.durationMs ? (message.durationMs / 1000).toFixed(1) : "?";
-      console.error(`${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`);
+      log.info(`${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`);
       break;
     }
 

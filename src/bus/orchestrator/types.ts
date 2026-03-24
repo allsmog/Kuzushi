@@ -1,18 +1,14 @@
-/**
- * Shared types for orchestrator sub-modules.
- *
- * These types are extracted from the main orchestrator to allow
- * the dispatcher modules to reference them without circular dependencies.
- */
-
 import type Database from "better-sqlite3";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { Finding } from "../../scanners/types.js";
 import type { ScannerRegistry } from "../../scanners/registry.js";
 import type {
+  DynamicAnalysisRun,
   EnrichedRepoContext,
   ExploitChain,
   KuzushiConfig,
+  PocHarnessResult,
   RepoContext,
   ScanOpts,
   TriageResult,
@@ -49,6 +45,20 @@ export interface QueuedPocHarness extends PocHarnessCandidate {
   total: number;
 }
 
+export interface DynamicAnalysisCandidate {
+  finding: Finding;
+  triageResult: TriageResult;
+  verificationResult?: VerificationResult;
+  pocHarnessResult?: PocHarnessResult;
+  score: number;
+  proofValue: number;
+}
+
+export interface QueuedDynamicAnalysis extends DynamicAnalysisCandidate {
+  index: number;
+  total: number;
+}
+
 export interface RunState {
   context: RunContext;
   checkpointRunId: string;
@@ -62,6 +72,7 @@ export interface RunState {
   skippedAlreadyTriaged: number;
   skippedLowConfidence: number;
   skippedByFpFilter: number;
+  skippedByClassifier: number;
   triageQueue: QueuedFinding[];
   queueCursor: number;
   triageTotal: number;
@@ -122,10 +133,29 @@ export interface RunState {
   stageTimestamps: StageTimestamps;
   hookChain?: PipelineHookChain;
   deadLetterFindings: Array<{ fingerprint: string; error: string; attempts: number; lastAttempt: string }>;
+  triageAttempts: Map<string, number>;
+  verifyAttempts: Map<string, number>;
+  autoPassedFingerprints: Set<string>;
+  dynamicAnalysisEnabled: boolean;
+  dynamicCandidates: DynamicAnalysisCandidate[];
+  dynamicQueue: QueuedDynamicAnalysis[];
+  dynamicCursor: number;
+  dynamicTotal: number;
+  dynamicInFlight: number;
+  dynamicConfirmed: number;
+  dynamicInteresting: number;
+  dynamicRejected: number;
+  dynamicErrors: number;
+  dynamicCostUsd: number;
+  dynamicDispatching: boolean;
+  dynamicStarted: boolean;
+  dynamicCompleted: boolean;
+  dynamicAttempts: Map<string, number>;
 }
 
 export interface OrchestratorDeps {
   registry: ScannerRegistry;
   taskRegistry?: TaskRegistry;
   db: Database.Database;
+  runtime: AgentRuntime;
 }

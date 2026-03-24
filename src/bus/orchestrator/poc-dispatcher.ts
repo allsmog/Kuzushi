@@ -3,6 +3,7 @@
  */
 
 import { normalizeCostUsd } from "../../utils.js";
+import { updateRunCost } from "../../store.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
 import type { PocHarnessResultEvent, PocHarnessErrorEvent } from "../events.js";
@@ -24,7 +25,6 @@ export function handlePocHarnessResultState(
   state.pocHarnessCostUsd += costUsd;
 
   try {
-    const { updateRunCost } = require("../../store.js");
     updateRunCost(deps.db, state.checkpointRunId, costUsd);
   } catch {
     // Cost persistence is best-effort.
@@ -43,7 +43,6 @@ export function handlePocHarnessErrorState(
   state.pocHarnessCostUsd += costUsd;
 
   try {
-    const { updateRunCost } = require("../../store.js");
     updateRunCost(deps.db, state.checkpointRunId, costUsd);
   } catch {
     // Cost persistence is best-effort.

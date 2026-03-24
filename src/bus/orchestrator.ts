@@ -57,6 +57,7 @@ import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { safeJsonParse } from "../utils/safe-json.js";
 import { FindingSchema, formatZodErrors } from "../schemas.js";
+import { getLogger } from "../logger.js";
 import { runVariantAnalysis } from "./workers/variant-analysis-worker.js";
 import type {
   BusHandlerErrorEvent,
@@ -86,161 +87,44 @@ import { executeAgentTask } from "./task-execution.js";
 import { PipelineHookChain } from "../hooks/chain.js";
 import type { HookContext } from "../hooks/types.js";
 import { loadHooksFromFile } from "../hooks/loader.js";
+import {
+  collectTransitiveDeps,
+  injectThreatModelPolicyCandidates,
+  resolveOrderWithPolicyEdges,
+} from "./orchestrator/task-policy.js";
+import {
+  dispatchPocHarness as dispatchPocHarnessQueue,
+  handlePocHarnessErrorState,
+  handlePocHarnessResultState,
+  isPocHarnessDone as isPocHarnessQueueDone,
+  publishPocQueueDepth,
+} from "./orchestrator/poc-dispatcher.js";
+import {
+  dispatchTriage as dispatchTriageQueue,
+  handleTriageError as handleTriageErrorState,
+  handleTriageResult as handleTriageResultState,
+  isTriageDone as isTriageQueueDone,
+  publishTriageQueueDepth,
+} from "./orchestrator/triage-dispatcher.js";
+import {
+  dispatchVerification as dispatchVerificationQueue,
+  handleVerificationErrorState,
+  handleVerificationResultState,
+  isVerificationDone as isVerificationQueueDone,
+  publishVerifyQueueDepth,
+} from "./orchestrator/verification-dispatcher.js";
+import type {
+  DynamicAnalysisCandidate,
+  OrchestratorDeps,
+  PocHarnessCandidate,
+  QueuedDynamicAnalysis,
+  RunState,
+  VerificationCandidate,
+} from "./orchestrator/types.js";
 
 /** Scanners whose findings come from static analysis tools, not LLM assessment. */
 const NON_LLM_SCANNERS = new Set(["semgrep", "codeql"]);
-const THREAT_AWARE_DETECTOR_TASK_IDS = new Set([
-  "code-config-detect",
-  "ssrf-detect",
-  "nosql-injection-detect",
-  "prototype-pollution-detect",
-  "template-injection-detect",
-  "graphql-security-detect",
-  "race-condition-detect",
-]);
-
-interface QueuedFinding {
-  finding: Finding;
-  index: number;
-  total: number;
-}
-
-interface VerificationCandidate {
-  finding: Finding;
-  triageResult: TriageResult;
-}
-
-interface QueuedVerification extends VerificationCandidate {
-  index: number;
-  total: number;
-}
-
-interface PocHarnessCandidate extends VerificationCandidate {
-  verificationResult: VerificationResult;
-}
-
-interface QueuedPocHarness extends PocHarnessCandidate {
-  index: number;
-  total: number;
-}
-
-interface DynamicAnalysisCandidate {
-  finding: Finding;
-  triageResult: TriageResult;
-  verificationResult?: VerificationResult;
-  pocHarnessResult?: PocHarnessResult;
-  score: number;
-  proofValue: number;
-}
-
-interface QueuedDynamicAnalysis extends DynamicAnalysisCandidate {
-  index: number;
-  total: number;
-}
-
-interface RunState {
-  context: RunContext;
-  checkpointRunId: string;
-  resuming: boolean;
-  config: KuzushiConfig;
-  scanOpts: ScanOpts;
-  scanners: string[];
-  startedAt: string;
-  scanFindings: Finding[];
-  totalFindings: number;
-  skippedAlreadyTriaged: number;
-  skippedLowConfidence: number;
-  skippedByFpFilter: number;
-  skippedByClassifier: number;
-  triageQueue: QueuedFinding[];
-  queueCursor: number;
-  triageTotal: number;
-  inFlight: number;
-  triaged: number;
-  triageErrors: number;
-  totalCostUsd: number;
-  verifyEnabled: boolean;
-  verifyVerdicts: Set<Verdict>;
-  verifyCandidates: VerificationCandidate[];
-  verifyQueue: QueuedVerification[];
-  verifyCursor: number;
-  verifyTotal: number;
-  verifyInFlight: number;
-  verified: number;
-  verifyErrors: number;
-  verifyCostUsd: number;
-  verifyDispatching: boolean;
-  verificationStarted: boolean;
-  verificationCompleted: boolean;
-  resumingVerification: boolean;
-  pocHarnessEnabled: boolean;
-  pocHarnessCandidates: PocHarnessCandidate[];
-  pocHarnessQueue: QueuedPocHarness[];
-  pocHarnessCursor: number;
-  pocHarnessTotal: number;
-  pocHarnessInFlight: number;
-  pocHarnessGenerated: number;
-  pocHarnessSkipped: number;
-  pocHarnessErrors: number;
-  pocHarnessCostUsd: number;
-  pocHarnessDispatching: boolean;
-  pocHarnessStarted: boolean;
-  reportRequested: boolean;
-  reportEmitted: boolean;
-  refinementEnabled: boolean;
-  refinementDeltaOnly: boolean;
-  refinementIterations: number;
-  refinementIteration: number;
-  refinementInFlight: boolean;
-  dispatching: boolean;
-  collectScanFindingEvents: boolean;
-  repoContext?: RepoContext;
-  enrichedRepoContext?: EnrichedRepoContext["enrichment"];
-  precedents?: Precedents;
-  taskOutputs: Map<string, unknown>;
-  failedTasks: string[];
-  skippedByLlmRescore: number;
-  softSuppressedFindings: number;
-  corroboratedClusters: number;
-  variantAnalysisCompleted: boolean;
-  variantFindings: number;
-  variantAnalysisCostUsd: number;
-  exploitChains: ExploitChain[];
-  chainAnalysisCostUsd: number;
-  budgetExceeded: boolean;
-  budgetWarningEmitted: boolean;
-  stageTimestamps: StageTimestamps;
-  hookChain?: PipelineHookChain;
-  deadLetterFindings: Array<{ fingerprint: string; error: string; attempts: number; lastAttempt: string }>;
-  /** Per-finding attempt counts for retry tracking (fingerprint → total attempts). */
-  triageAttempts: Map<string, number>;
-  /** Per-finding verification attempt counts (fingerprint → total attempts). */
-  verifyAttempts: Map<string, number>;
-  /** Fingerprints of findings auto-passed by skipTriageForHighConfidenceAgentic. */
-  autoPassedFingerprints: Set<string>;
-  // ── Dynamic analysis phase ──
-  dynamicAnalysisEnabled: boolean;
-  dynamicCandidates: DynamicAnalysisCandidate[];
-  dynamicQueue: QueuedDynamicAnalysis[];
-  dynamicCursor: number;
-  dynamicTotal: number;
-  dynamicInFlight: number;
-  dynamicConfirmed: number;
-  dynamicInteresting: number;
-  dynamicRejected: number;
-  dynamicErrors: number;
-  dynamicCostUsd: number;
-  dynamicDispatching: boolean;
-  dynamicStarted: boolean;
-  dynamicCompleted: boolean;
-  dynamicAttempts: Map<string, number>;
-}
-
-export interface OrchestratorDeps {
-  registry: ScannerRegistry;
-  taskRegistry?: TaskRegistry;
-  db: Database.Database;
-}
+const log = getLogger("orchestrator");
 
 type TaskOutcome =
   | { kind: "complete"; event: TaskCompleteEvent }
@@ -527,7 +411,7 @@ export class PipelineOrchestrator {
           config.hooks.files.map((file) => loadHooksFromFile(file, context.repoRoot)),
         );
         state.hookChain = new PipelineHookChain(hookObjects);
-        console.error(`[orchestrator] Loaded ${hookObjects.length} pipeline hook file(s)`);
+        log.info(`Loaded ${hookObjects.length} pipeline hook file(s)`);
       } catch (error) {
         await this.bus.publish(
           createEvent("pipeline:error", runId, {
@@ -561,7 +445,7 @@ export class PipelineOrchestrator {
       try {
         await state.hookChain.beforeScan(this.buildHookContext(state));
       } catch (error) {
-        console.error(`[hooks] beforeScan hook error: ${toErrorMessage(error)}`);
+        log.warn(`[hooks] beforeScan hook error: ${toErrorMessage(error)}`);
       }
     }
 
@@ -945,7 +829,7 @@ export class PipelineOrchestrator {
       if (!othersDepend) {
         enabledTaskIds = enabledTaskIds.filter((id) => id !== "context-gatherer");
       } else if (dynamicSelectionActive) {
-        console.error(
+        log.info(
           "[orchestrator] enableContextGathering: false ignored — task-selector requires context-gatherer",
         );
       }
@@ -975,7 +859,7 @@ export class PipelineOrchestrator {
       try {
         await state.hookChain.beforeScan(this.buildHookContext(state));
       } catch (error) {
-        console.error(`[hooks] beforeScan hook error: ${toErrorMessage(error)}`);
+        log.warn(`[hooks] beforeScan hook error: ${toErrorMessage(error)}`);
       }
     }
 
@@ -996,7 +880,7 @@ export class PipelineOrchestrator {
 
       // Emit skip events for conditionally skipped tasks
       for (const taskId of tasksToSkip) {
-        console.error(`[orchestrator] Task "${taskId}" skipped: condition returned false`);
+        log.info(`Task "${taskId}" skipped: condition returned false`);
         await this.bus.publish(
           createEvent("task:skipped", runId, {
             context: state.context,
@@ -1043,7 +927,7 @@ export class PipelineOrchestrator {
         const errMsg = f.event.payload.error;
         state.failedTasks.push(taskId);
         completedTaskIds.add(taskId); // prevent re-scheduling in re-resolved stages
-        console.error(`[orchestrator] Task "${taskId}" failed: ${errMsg}`);
+        log.warn(`Task "${taskId}" failed: ${errMsg}`);
         await this.bus.publish(
           createEvent("pipeline:error", runId, {
             context: state.context,
@@ -1073,7 +957,7 @@ export class PipelineOrchestrator {
           return;
         }
         // Non-findings stage fully failed — continue with empty upstream outputs
-        console.error(`[orchestrator] Stage ${stageIndex} (non-findings) fully failed, continuing`);
+        log.warn(`Stage ${stageIndex} (non-findings) fully failed, continuing`);
       }
 
       for (const outcome of successes) {
@@ -1113,9 +997,7 @@ export class PipelineOrchestrator {
           );
 
           if (newTaskIds.length > 0) {
-            console.error(
-              `[orchestrator] Dynamic task selection added: ${newTaskIds.join(", ")}`,
-            );
+            log.info(`Dynamic task selection added: ${newTaskIds.join(", ")}`);
             const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
               ...enabledTaskIds,
               ...collectTransitiveDeps(this.deps.taskRegistry, newTaskIds)
@@ -1135,9 +1017,7 @@ export class PipelineOrchestrator {
                 ...remaining,
               ];
             } catch (error) {
-              console.error(
-                `[orchestrator] Dynamic DAG re-resolution failed: ${toErrorMessage(error)}`,
-              );
+              log.warn(`Dynamic DAG re-resolution failed: ${toErrorMessage(error)}`);
             }
           }
         }
@@ -1159,9 +1039,7 @@ export class PipelineOrchestrator {
             id => !enabledTaskIds.includes(id) && this.deps.taskRegistry!.has(id),
           );
           if (fallbackIds.length > 0) {
-            console.error(
-              `[orchestrator] task-selector ${reason} — falling back to all selectable tasks: ${fallbackIds.join(", ")}`,
-            );
+            log.warn(`task-selector ${reason} — falling back to all selectable tasks: ${fallbackIds.join(", ")}`);
             const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
               ...enabledTaskIds,
               ...collectTransitiveDeps(this.deps.taskRegistry, fallbackIds)
@@ -1176,7 +1054,7 @@ export class PipelineOrchestrator {
                 .map(stage => stage.filter(id => !completedTaskIds.has(id)));
               stages = [...stages.slice(0, stageIndex + 1), ...remaining];
             } catch (error) {
-              console.error(`[orchestrator] Fallback DAG re-resolution failed: ${toErrorMessage(error)}`);
+              log.warn(`Fallback DAG re-resolution failed: ${toErrorMessage(error)}`);
             }
           } else {
             // All selectable tasks already in enabledTaskIds (or none registered) — no retry needed
@@ -1350,7 +1228,7 @@ export class PipelineOrchestrator {
       state.skippedByFpFilter = filterResult.hardExcluded.length;
       state.softSuppressedFindings = filterResult.softSuppressed.length;
       if (filterResult.hardExcluded.length > 0) {
-        console.error(`[fp-filter] Excluded ${filterResult.hardExcluded.length} findings`);
+        log.info(`[fp-filter] Excluded ${filterResult.hardExcluded.length} findings`);
       }
     }
 
@@ -1362,10 +1240,11 @@ export class PipelineOrchestrator {
       try {
         const classifierContext: AgentTaskContext = {
           runId,
-          repoRoot: state.context.scanPath ?? state.context.repoRoot,
+          repoRoot: state.context.repoRoot,
           scanPath: state.context.scanPath,
           repoName: state.context.repoName,
           config: state.config,
+          runtime: this.deps.runtime,
           bus: this.bus,
           upstreamOutputs: new Map(state.taskOutputs),
         };
@@ -1388,10 +1267,10 @@ export class PipelineOrchestrator {
           }
         }
         if (state.skippedByClassifier > 0) {
-          console.error(`[quick-classifier] Excluded ${state.skippedByClassifier} findings`);
+          log.info(`[quick-classifier] Excluded ${state.skippedByClassifier} findings`);
         }
       } catch (error) {
-        console.error(`[quick-classifier] Failed open: ${toErrorMessage(error)}`);
+        log.warn(`[quick-classifier] Failed open: ${toErrorMessage(error)}`);
       }
     } else if (state.config.llmRescoreEnabled) {
       const rescoreWindow = selectFindingsForRescore(filteredFindings, state.scanOpts.maxFindings);
@@ -1403,13 +1282,14 @@ export class PipelineOrchestrator {
         model: state.config.llmRescoreModel,
         threshold: state.config.llmRescoreThreshold,
         repoRoot: state.context.repoRoot,
+        runtime: this.deps.runtime,
       });
       const applied = applyRescoreResults(rescoreWindow, rescoreResults);
       filteredFindings = [...applied.findings, ...untouched]
         .sort((a, b) => getRankingScore(b) - getRankingScore(a));
       state.skippedByLlmRescore = applied.skippedByLlmRescore;
       if (state.skippedByLlmRescore > 0) {
-        console.error(`[llm-rescore] Excluded ${state.skippedByLlmRescore} findings`);
+        log.info(`[llm-rescore] Excluded ${state.skippedByLlmRescore} findings`);
       }
     }
 
@@ -1418,10 +1298,11 @@ export class PipelineOrchestrator {
       try {
         const reachabilityContext: AgentTaskContext = {
           runId,
-          repoRoot: state.context.scanPath ?? state.context.repoRoot,
+          repoRoot: state.context.repoRoot,
           scanPath: state.context.scanPath,
           repoName: state.context.repoName,
           config: state.config,
+          runtime: this.deps.runtime,
           bus: this.bus,
           upstreamOutputs: new Map(state.taskOutputs),
         };
@@ -1445,17 +1326,18 @@ export class PipelineOrchestrator {
           }
         }
       } catch (error) {
-        console.error(`[reachability-check] Failed open: ${toErrorMessage(error)}`);
+        log.warn(`[reachability-check] Failed open: ${toErrorMessage(error)}`);
       }
 
       // Call-graph-assist: enrich high-score findings with call-chain evidence
       try {
         const cgContext: AgentTaskContext = {
           runId,
-          repoRoot: state.context.scanPath ?? state.context.repoRoot,
+          repoRoot: state.context.repoRoot,
           scanPath: state.context.scanPath,
           repoName: state.context.repoName,
           config: state.config,
+          runtime: this.deps.runtime,
           bus: this.bus,
           upstreamOutputs: new Map(state.taskOutputs),
         };
@@ -1479,7 +1361,7 @@ export class PipelineOrchestrator {
           }
         }
       } catch (error) {
-        console.error(`[call-graph-assist] Failed open: ${toErrorMessage(error)}`);
+        log.warn(`[call-graph-assist] Failed open: ${toErrorMessage(error)}`);
       }
     }
 
@@ -1497,7 +1379,7 @@ export class PipelineOrchestrator {
           filteredFindings,
         );
       } catch (error) {
-        console.error(`[hooks] afterScan hook error: ${toErrorMessage(error)}`);
+        log.warn(`[hooks] afterScan hook error: ${toErrorMessage(error)}`);
       }
     }
 
@@ -1640,23 +1522,15 @@ export class PipelineOrchestrator {
       return;
     }
 
-    state.inFlight = Math.max(0, state.inFlight - 1);
-    state.triaged += 1;
-    const costUsd = normalizeCostUsd(event.payload.costUsd);
-    state.totalCostUsd += costUsd;
-
-    if (shouldVerifyFinding(state, event.payload.finding, event.payload.result)) {
-      state.verifyCandidates.push({
-        finding: event.payload.finding,
-        triageResult: event.payload.result,
-      });
-    }
-
-    try {
-      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
-    } catch {
-      // Cost persistence is best-effort and should not fail the run.
-    }
+    handleTriageResultState(
+      state,
+      runId,
+      event.payload.finding,
+      event.payload.result,
+      event.payload.costUsd,
+      shouldVerifyFinding,
+      this.deps,
+    );
 
     await this.publishQueueDepth(state, runId);
 
@@ -1675,40 +1549,16 @@ export class PipelineOrchestrator {
       return;
     }
 
-    state.inFlight = Math.max(0, state.inFlight - 1);
-    state.triageErrors += 1;
-    const costUsd = normalizeCostUsd(event.payload.costUsd);
-    state.totalCostUsd += costUsd;
-
-    const fp = event.payload.finding.fingerprint;
-    const maxRetries = state.config.maxTriageRetries ?? 2;
-    const priorAttempts = state.triageAttempts.get(fp) ?? 0;
-    const totalAttempts = Math.max(priorAttempts, event.payload.attempts ?? 1);
-    state.triageAttempts.set(fp, totalAttempts);
-
-    if (totalAttempts >= maxRetries) {
-      // Exhausted all retries — dead-letter the finding.
-      state.deadLetterFindings.push({
-        fingerprint: fp,
-        error: event.payload.error,
-        attempts: totalAttempts,
-        lastAttempt: new Date().toISOString(),
-      });
-    } else {
-      // Re-enqueue for individual retry via dispatchTriage.
-      state.triageErrors -= 1; // undo error count — this is a retry, not a terminal failure
-      state.triageQueue.push({
-        finding: event.payload.finding,
-        index: event.payload.index ?? 0,
-        total: event.payload.total ?? state.triageTotal,
-      });
-    }
-
-    try {
-      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
-    } catch {
-      // Cost persistence is best-effort and should not fail the run.
-    }
+    handleTriageErrorState(
+      state,
+      event.payload.error,
+      event.payload.finding,
+      event.payload.costUsd,
+      event.payload.attempts,
+      event.payload.index,
+      event.payload.total,
+      this.deps,
+    );
 
     await this.publishQueueDepth(state, runId);
 
@@ -1821,7 +1671,7 @@ export class PipelineOrchestrator {
           stats: pipelineStats as unknown as Record<string, unknown>,
         });
       } catch (error) {
-        console.error(`[hooks] afterAll hook error: ${toErrorMessage(error)}`);
+        log.warn(`[hooks] afterAll hook error: ${toErrorMessage(error)}`);
       }
     }
 
@@ -1921,41 +1771,15 @@ export class PipelineOrchestrator {
   }
 
   private async dispatchTriage(state: RunState, runId: string): Promise<void> {
-    if (state.dispatching) {
-      return;
-    }
-
-    state.dispatching = true;
-    try {
-      const concurrency = normalizeConcurrency(state.config.triageConcurrency);
-
-      while (state.inFlight < concurrency && state.queueCursor < state.triageQueue.length) {
-        await this.emitBudgetCheck(state, runId);
-        if (this.isBudgetExceeded(state)) {
-          await this.emitBudgetExceeded(state, runId);
-          break;
-        }
-        const item = state.triageQueue[state.queueCursor];
-        state.queueCursor += 1;
-        state.inFlight += 1;
-
-        await this.bus.publish(
-          createEvent("triage:finding-queued", runId, {
-            context: state.context,
-            finding: item.finding,
-            repoContext: state.repoContext,
-            enrichedContext: state.enrichedRepoContext,
-            precedents: state.precedents,
-            index: item.index,
-            total: item.total,
-          }),
-        );
-      }
-
-      await this.publishQueueDepth(state, runId);
-    } finally {
-      state.dispatching = false;
-    }
+    await dispatchTriageQueue(
+      state,
+      runId,
+      this.bus,
+      this.isBudgetExceeded.bind(this),
+      this.emitBudgetCheck.bind(this),
+      this.emitBudgetExceeded.bind(this),
+      this.publishQueueDepth.bind(this),
+    );
   }
 
   private async dispatchTriageBatch(
@@ -1981,19 +1805,13 @@ export class PipelineOrchestrator {
   }
 
   private isTriageDone(state: RunState): boolean {
-    const processed = state.triaged + state.triageErrors;
-    return (
-      state.triageTotal > 0
-      && processed >= state.triageTotal
-      && state.inFlight === 0
-      && !state.reportRequested
-    );
+    return isTriageQueueDone(state);
   }
 
   private async finishTriageAndRequestReport(state: RunState, runId: string): Promise<void> {
     if (state.reportRequested || state.refinementInFlight) {
-      console.error(
-        `[orchestrator] finishTriageAndRequestReport skipped: reportRequested=${state.reportRequested}, refinementInFlight=${state.refinementInFlight}`,
+      log.info(
+        `finishTriageAndRequestReport skipped: reportRequested=${state.reportRequested}, refinementInFlight=${state.refinementInFlight}`,
       );
       return;
     }
@@ -2019,7 +1837,7 @@ export class PipelineOrchestrator {
 
   private async requestPostTriageFlow(state: RunState, runId: string): Promise<void> {
     if (state.reportRequested) {
-      console.error("[orchestrator] requestPostTriageFlow skipped: reportRequested=true");
+      log.info("requestPostTriageFlow skipped: reportRequested=true");
       return;
     }
 
@@ -2045,6 +1863,7 @@ export class PipelineOrchestrator {
             repoRoot: state.context.repoRoot,
             repoName: state.context.repoName,
             config: state.config,
+            runtime: this.deps.runtime,
             bus: this.bus,
             upstreamOutputs: state.taskOutputs,
           };
@@ -2060,7 +1879,7 @@ export class PipelineOrchestrator {
             updateRunCost(this.deps.db, state.checkpointRunId, chainMeta.costUsd);
           }
         } catch (error) {
-          console.error(`[orchestrator] Chain analysis error: ${toErrorMessage(error)}`);
+          log.warn(`Chain analysis error: ${toErrorMessage(error)}`);
         }
         await this.bus.publish(
           createEvent("chain-analysis:complete", runId, {
@@ -2075,14 +1894,12 @@ export class PipelineOrchestrator {
     state.reportRequested = true;
 
     if (state.verifyEnabled) {
-      console.error(
-        `[orchestrator] verification enabled — ${state.verifyCandidates.length} candidates, starting verification`,
-      );
+      log.info(`verification enabled — ${state.verifyCandidates.length} candidates, starting verification`);
       await this.startVerification(state, runId);
       return;
     }
 
-    console.error("[orchestrator] verification disabled — requesting report directly");
+    log.info("verification disabled — requesting report directly");
 
     await this.bus.publish(
       createEvent("report:requested", runId, {
@@ -2164,14 +1981,14 @@ export class PipelineOrchestrator {
       const result = await runVariantAnalysis(confirmedTPs, state.context, {
         ...state.config,
         variantAnalysisMaxFindings: Math.min(state.config.variantAnalysisMaxFindings ?? 5, 5),
-      });
+      }, this.deps.runtime);
       const normalizedVariants = await this.normalizeFindingsForVariantAnalysis(state, result.findings);
       state.variantFindings = normalizedVariants.length;
       state.variantAnalysisCostUsd = result.costUsd;
       state.totalCostUsd += result.costUsd;
       updateRunCost(this.deps.db, state.checkpointRunId, result.costUsd);
     } catch (error) {
-      console.error(`[orchestrator] Variant analysis error: ${toErrorMessage(error)}`);
+      log.warn(`Variant analysis error: ${toErrorMessage(error)}`);
     }
 
     await this.bus.publish(
@@ -2210,6 +2027,7 @@ export class PipelineOrchestrator {
         model: state.config.llmRescoreModel,
         threshold: state.config.llmRescoreThreshold,
         repoRoot: state.context.repoRoot,
+        runtime: this.deps.runtime,
       });
       normalized = [...applyRescoreResults(rescoreWindow, rescoreResults).findings, ...untouched]
         .sort((a, b) => getRankingScore(b) - getRankingScore(a));
@@ -2261,7 +2079,7 @@ export class PipelineOrchestrator {
     if (state.budgetExceeded) return;
     state.budgetExceeded = true;
     const budget = state.config.costBudgetUsd!;
-    console.error(`[orchestrator] Budget exceeded: $${state.totalCostUsd.toFixed(4)} >= $${budget.toFixed(4)}`);
+    log.warn(`Budget exceeded: $${state.totalCostUsd.toFixed(4)} >= $${budget.toFixed(4)}`);
     await this.bus.publish(
       createEvent("budget:exceeded", runId, {
         context: state.context,
@@ -2309,8 +2127,8 @@ export class PipelineOrchestrator {
 
   private async startVerification(state: RunState, runId: string): Promise<void> {
     if (state.verificationStarted || state.reportEmitted) {
-      console.error(
-        `[orchestrator] startVerification skipped: verificationStarted=${state.verificationStarted}, reportEmitted=${state.reportEmitted}`,
+      log.info(
+        `startVerification skipped: verificationStarted=${state.verificationStarted}, reportEmitted=${state.reportEmitted}`,
       );
       return;
     }
@@ -2384,25 +2202,7 @@ export class PipelineOrchestrator {
       return;
     }
 
-    state.verifyInFlight = Math.max(0, state.verifyInFlight - 1);
-    state.verified += 1;
-    const costUsd = normalizeCostUsd(event.payload.costUsd);
-    state.totalCostUsd += costUsd;
-    state.verifyCostUsd += costUsd;
-
-    if (event.payload.result.exploitable) {
-      state.pocHarnessCandidates.push({
-        finding: event.payload.finding,
-        triageResult: event.payload.triageResult,
-        verificationResult: event.payload.result,
-      });
-    }
-
-    try {
-      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
-    } catch {
-      // Cost persistence is best-effort and should not fail the run.
-    }
+    handleVerificationResultState(state, event, this.deps);
 
     await this.publishVerificationQueueDepth(state, runId);
 
@@ -2421,34 +2221,7 @@ export class PipelineOrchestrator {
       return;
     }
 
-    state.verifyInFlight = Math.max(0, state.verifyInFlight - 1);
-    state.verifyErrors += 1;
-    const costUsd = normalizeCostUsd(event.payload.costUsd);
-    state.totalCostUsd += costUsd;
-    state.verifyCostUsd += costUsd;
-
-    const fp = event.payload.finding.fingerprint;
-    const maxRetries = state.config.maxVerifyRetries ?? 2;
-    const priorAttempts = state.verifyAttempts.get(fp) ?? 0;
-    const totalAttempts = Math.max(priorAttempts, event.payload.attempts ?? 1);
-    state.verifyAttempts.set(fp, totalAttempts);
-
-    if (totalAttempts < maxRetries) {
-      // Re-enqueue for individual retry via dispatchVerification.
-      state.verifyErrors -= 1; // undo error count — this is a retry, not terminal
-      state.verifyQueue.push({
-        finding: event.payload.finding,
-        triageResult: event.payload.triageResult,
-        index: event.payload.index ?? 0,
-        total: event.payload.total ?? state.verifyTotal,
-      });
-    }
-
-    try {
-      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
-    } catch {
-      // Cost persistence is best-effort and should not fail the run.
-    }
+    handleVerificationErrorState(state, event, this.deps);
 
     await this.publishVerificationQueueDepth(state, runId);
 
@@ -2461,90 +2234,19 @@ export class PipelineOrchestrator {
   }
 
   private async dispatchVerification(state: RunState, runId: string): Promise<void> {
-    if (state.verifyDispatching) {
-      return;
-    }
-
-    state.verifyDispatching = true;
-    try {
-      const concurrency = normalizeConcurrency(state.config.verifyConcurrency ?? 1);
-      const batchSize = state.config.verifyRefinementMaxIterations && state.config.verifyRefinementMaxIterations > 1
-        ? 1
-        : Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
-
-      while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
-        await this.emitBudgetCheck(state, runId);
-        if (this.isBudgetExceeded(state)) {
-          await this.emitBudgetExceeded(state, runId);
-          break;
-        }
-
-        // Collect a batch of items
-        const batchItems: Array<{
-          finding: typeof state.verifyQueue[0]["finding"];
-          triageResult: typeof state.verifyQueue[0]["triageResult"];
-          index: number;
-          total: number;
-        }> = [];
-        while (
-          batchItems.length < batchSize
-          && state.verifyCursor < state.verifyQueue.length
-        ) {
-          const item = state.verifyQueue[state.verifyCursor];
-          state.verifyCursor += 1;
-          batchItems.push({
-            finding: item.finding,
-            triageResult: item.triageResult,
-            index: item.index,
-            total: item.total,
-          });
-        }
-
-        if (batchItems.length === 0) break;
-
-        state.verifyInFlight += batchItems.length;
-
-        if (batchItems.length === 1) {
-          // Single-item dispatch for efficiency
-          const item = batchItems[0];
-          await this.bus.publish(
-            createEvent("verification:finding-queued", runId, {
-              context: state.context,
-              finding: item.finding,
-              triageResult: item.triageResult,
-              repoContext: state.repoContext,
-              enrichedContext: state.enrichedRepoContext,
-              precedents: state.precedents,
-              index: item.index,
-              total: item.total,
-            }),
-          );
-        } else {
-          await this.bus.publish(
-            createEvent("verification:batch-queued", runId, {
-              context: state.context,
-              items: batchItems,
-              repoContext: state.repoContext,
-              enrichedContext: state.enrichedRepoContext,
-            }),
-          );
-        }
-      }
-
-      await this.publishVerificationQueueDepth(state, runId);
-    } finally {
-      state.verifyDispatching = false;
-    }
+    await dispatchVerificationQueue(
+      state,
+      runId,
+      this.bus,
+      this.isBudgetExceeded.bind(this),
+      this.emitBudgetCheck.bind(this),
+      this.emitBudgetExceeded.bind(this),
+      this.publishVerificationQueueDepth.bind(this),
+    );
   }
 
   private isVerificationDone(state: RunState): boolean {
-    const processed = state.verified + state.verifyErrors;
-    return (
-      state.verifyTotal > 0
-      && processed >= state.verifyTotal
-      && state.verifyInFlight === 0
-      && !state.reportEmitted
-    );
+    return isVerificationQueueDone(state);
   }
 
   private async finishVerificationAndRequestReport(state: RunState, runId: string): Promise<void> {
@@ -2650,21 +2352,7 @@ export class PipelineOrchestrator {
       return;
     }
 
-    state.pocHarnessInFlight = Math.max(0, state.pocHarnessInFlight - 1);
-    if (event.payload.result.skipped) {
-      state.pocHarnessSkipped += 1;
-    } else {
-      state.pocHarnessGenerated += 1;
-    }
-    const costUsd = normalizeCostUsd(event.payload.costUsd);
-    state.totalCostUsd += costUsd;
-    state.pocHarnessCostUsd += costUsd;
-
-    try {
-      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
-    } catch {
-      // Cost persistence is best-effort and should not fail the run.
-    }
+    handlePocHarnessResultState(state, event, this.deps);
 
     // Queue PoC execution if enabled and harness was successfully generated
     if (
@@ -2701,17 +2389,7 @@ export class PipelineOrchestrator {
       return;
     }
 
-    state.pocHarnessInFlight = Math.max(0, state.pocHarnessInFlight - 1);
-    state.pocHarnessErrors += 1;
-    const costUsd = normalizeCostUsd(event.payload.costUsd);
-    state.totalCostUsd += costUsd;
-    state.pocHarnessCostUsd += costUsd;
-
-    try {
-      updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
-    } catch {
-      // Cost persistence is best-effort and should not fail the run.
-    }
+    handlePocHarnessErrorState(state, event, this.deps);
 
     await this.publishPocHarnessQueueDepth(state, runId);
 
@@ -2724,54 +2402,19 @@ export class PipelineOrchestrator {
   }
 
   private async dispatchPocHarness(state: RunState, runId: string): Promise<void> {
-    if (state.pocHarnessDispatching) {
-      return;
-    }
-
-    state.pocHarnessDispatching = true;
-    try {
-      const concurrency = normalizeConcurrency(state.config.pocHarnessConcurrency ?? 1);
-
-      while (
-        state.pocHarnessInFlight < concurrency
-        && state.pocHarnessCursor < state.pocHarnessQueue.length
-      ) {
-        await this.emitBudgetCheck(state, runId);
-        if (this.isBudgetExceeded(state)) {
-          await this.emitBudgetExceeded(state, runId);
-          break;
-        }
-        const item = state.pocHarnessQueue[state.pocHarnessCursor];
-        state.pocHarnessCursor += 1;
-        state.pocHarnessInFlight += 1;
-
-        await this.bus.publish(
-          createEvent("poc-harness:finding-queued", runId, {
-            context: state.context,
-            finding: item.finding,
-            triageResult: item.triageResult,
-            verificationResult: item.verificationResult,
-            repoContext: state.repoContext,
-            index: item.index,
-            total: item.total,
-          }),
-        );
-      }
-
-      await this.publishPocHarnessQueueDepth(state, runId);
-    } finally {
-      state.pocHarnessDispatching = false;
-    }
+    await dispatchPocHarnessQueue(
+      state,
+      runId,
+      this.bus,
+      this.isBudgetExceeded.bind(this),
+      this.emitBudgetCheck.bind(this),
+      this.emitBudgetExceeded.bind(this),
+      this.publishPocHarnessQueueDepth.bind(this),
+    );
   }
 
   private isPocHarnessDone(state: RunState): boolean {
-    const processed = state.pocHarnessGenerated + state.pocHarnessSkipped + state.pocHarnessErrors;
-    return (
-      state.pocHarnessTotal > 0
-      && processed >= state.pocHarnessTotal
-      && state.pocHarnessInFlight === 0
-      && !state.reportEmitted
-    );
+    return isPocHarnessQueueDone(state);
   }
 
   private async finishPocHarnessAndRequestReport(state: RunState, runId: string): Promise<void> {
@@ -2817,48 +2460,15 @@ export class PipelineOrchestrator {
   }
 
   private async publishQueueDepth(state: RunState, runId: string): Promise<void> {
-    const queued = Math.max(0, state.triageQueue.length - state.queueCursor);
-    const processed = state.triaged + state.triageErrors;
-
-    await this.bus.publish(
-      createEvent("triage:queue-depth", runId, {
-        context: state.context,
-        queued,
-        inFlight: state.inFlight,
-        processed,
-        total: state.triageTotal,
-      }),
-    );
+    await publishTriageQueueDepth(state, runId, this.bus);
   }
 
   private async publishVerificationQueueDepth(state: RunState, runId: string): Promise<void> {
-    const queued = Math.max(0, state.verifyQueue.length - state.verifyCursor);
-    const processed = state.verified + state.verifyErrors;
-
-    await this.bus.publish(
-      createEvent("verification:queue-depth", runId, {
-        context: state.context,
-        queued,
-        inFlight: state.verifyInFlight,
-        processed,
-        total: state.verifyTotal,
-      }),
-    );
+    await publishVerifyQueueDepth(state, runId, this.bus);
   }
 
   private async publishPocHarnessQueueDepth(state: RunState, runId: string): Promise<void> {
-    const queued = Math.max(0, state.pocHarnessQueue.length - state.pocHarnessCursor);
-    const processed = state.pocHarnessGenerated + state.pocHarnessSkipped + state.pocHarnessErrors;
-
-    await this.bus.publish(
-      createEvent("poc-harness:queue-depth", runId, {
-        context: state.context,
-        queued,
-        inFlight: state.pocHarnessInFlight,
-        processed,
-        total: state.pocHarnessTotal,
-      }),
-    );
+    await publishPocQueueDepth(state, runId, this.bus);
   }
 
   // ── Dynamic Analysis Phase ─────────────────────────────────────────────
@@ -3413,8 +3023,8 @@ function coerceFinding(item: Record<string, unknown>): Finding | null {
   if (!result.success) {
     const errors = formatZodErrors(result.error.issues);
     const fingerprint = typeof item["fingerprint"] === "string" ? item["fingerprint"] : "<unknown>";
-    console.warn(
-      `[orchestrator] Skipping malformed finding (${fingerprint}): ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+    log.warn(
+      `Skipping malformed finding (${fingerprint}): ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
     );
     return null;
   }
@@ -3501,152 +3111,4 @@ function asVerdictArray(value: unknown): Verdict[] | null {
   }
 
   return verdicts;
-}
-
-function injectThreatModelPolicyCandidates(
-  registry: TaskRegistry,
-  candidateIds: string[],
-): string[] {
-  const normalized = normalizeTaskIds(candidateIds);
-  if (
-    normalized.some((id) => THREAT_AWARE_DETECTOR_TASK_IDS.has(id))
-    && registry.has("threat-model-stride")
-  ) {
-    return normalizeTaskIds([...normalized, "threat-model-stride"]);
-  }
-
-  return normalized;
-}
-
-function resolveOrderWithPolicyEdges(
-  registry: TaskRegistry,
-  enabledIds: string[],
-): string[][] {
-  const enabled = dedupeTaskIds(normalizeTaskIds(enabledIds));
-  if (enabled.length === 0) {
-    return [];
-  }
-
-  for (const id of enabled) {
-    if (!registry.has(id)) {
-      throw new Error(`Unknown enabled task: ${id}`);
-    }
-  }
-
-  const enabledSet = new Set(enabled);
-  const priority = new Map<string, number>(enabled.map((id, idx) => [id, idx]));
-  const indegree = new Map<string, number>();
-  const edges = new Map<string, string[]>();
-  const policyDeps = buildThreatModelPolicyDeps(enabled);
-
-  for (const id of enabled) {
-    indegree.set(id, 0);
-    edges.set(id, []);
-  }
-
-  for (const id of enabled) {
-    const task = registry.get(id);
-    const dependencies = new Set(task.dependsOn);
-    for (const dep of policyDeps.get(id) ?? []) {
-      dependencies.add(dep);
-    }
-
-    for (const dep of dependencies) {
-      if (!registry.has(dep)) {
-        throw new Error(`Task "${id}" depends on unknown task "${dep}"`);
-      }
-      if (!enabledSet.has(dep)) {
-        throw new Error(`Task "${id}" depends on "${dep}" but it is not enabled`);
-      }
-
-      indegree.set(id, (indegree.get(id) ?? 0) + 1);
-      edges.get(dep)?.push(id);
-    }
-  }
-
-  const groups: string[][] = [];
-  const processed = new Set<string>();
-
-  while (processed.size < enabled.length) {
-    const group = enabled
-      .filter((id) => !processed.has(id) && (indegree.get(id) ?? 0) === 0)
-      .sort((a, b) => (priority.get(a) ?? 0) - (priority.get(b) ?? 0));
-
-    if (group.length === 0) {
-      const stuck = enabled.filter((id) => !processed.has(id));
-      throw new Error(`Task dependency cycle detected among: ${stuck.join(", ")}`);
-    }
-
-    groups.push(group);
-
-    for (const id of group) {
-      processed.add(id);
-      for (const dependent of edges.get(id) ?? []) {
-        indegree.set(dependent, (indegree.get(dependent) ?? 0) - 1);
-      }
-    }
-  }
-
-  return groups;
-}
-
-function buildThreatModelPolicyDeps(enabledIds: string[]): Map<string, Set<string>> {
-  const enabled = new Set(enabledIds);
-  const policyDeps = new Map<string, Set<string>>();
-  const enabledThreatAwareDetectors = enabledIds.filter((id) => THREAT_AWARE_DETECTOR_TASK_IDS.has(id));
-
-  if (enabled.has("threat-model-stride")) {
-    for (const detectorId of enabledThreatAwareDetectors) {
-      let deps = policyDeps.get(detectorId);
-      if (!deps) {
-        deps = new Set<string>();
-        policyDeps.set(detectorId, deps);
-      }
-      deps.add("threat-model-stride");
-    }
-  }
-
-  if (enabled.has("threat-model-pasta")) {
-    let pastaDeps = policyDeps.get("threat-model-pasta");
-    if (!pastaDeps) {
-      pastaDeps = new Set<string>();
-      policyDeps.set("threat-model-pasta", pastaDeps);
-    }
-    for (const detectorId of enabledThreatAwareDetectors) {
-      pastaDeps.add(detectorId);
-    }
-  }
-
-  return policyDeps;
-}
-
-function collectTransitiveDeps(registry: TaskRegistry, candidateIds: string[]): string[] {
-  const all = new Set(candidateIds);
-  const queue = [...candidateIds];
-
-  while (queue.length > 0) {
-    const id = queue.pop()!;
-    if (!registry.has(id)) continue;
-    for (const dep of registry.get(id).dependsOn) {
-      if (!all.has(dep) && registry.has(dep)) {
-        all.add(dep);
-        queue.push(dep);
-      }
-    }
-  }
-
-  return normalizeTaskIds([...all]);
-}
-
-function dedupeTaskIds(ids: string[]): string[] {
-  const deduped: string[] = [];
-  const seen = new Set<string>();
-  for (const id of ids) {
-    if (!id || seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    deduped.push(id);
-  }
-  return deduped;
 }

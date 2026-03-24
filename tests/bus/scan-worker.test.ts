@@ -238,6 +238,62 @@ describe("scan-worker", () => {
     await bus.close();
   });
 
+  it("passes repoRoot and scanPath separately to agent tasks", async () => {
+    const bus = new InProcessBus();
+    const taskRegistry = new TaskRegistry();
+    const task: AgentTask<unknown, { repoRoot: string; scanPath?: string }> = {
+      id: "context-check",
+      displayName: "Context Check",
+      outputKind: "custom",
+      dependsOn: [],
+      async run(_input, context) {
+        return {
+          repoRoot: context.repoRoot,
+          scanPath: context.scanPath,
+        };
+      },
+    };
+    taskRegistry.register(task);
+
+    registerScanWorker(bus, {
+      registry: { get: () => new FakePlugin("unused", "Unused", []) } as any,
+      config: makeConfig("sequential"),
+      taskRegistry,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      scanPath: "/tmp/repo/subdir",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const completePromise = bus.waitFor<TaskCompleteEvent>(
+      "task:complete",
+      (event) => event.meta.runId === runId && event.payload.taskId === "context-check",
+    );
+
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "context-check",
+        outputKind: "custom",
+        input: {},
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    const complete = await completePromise;
+    expect(complete.payload.output).toEqual({
+      repoRoot: "/tmp/repo",
+      scanPath: "/tmp/repo/subdir",
+    });
+
+    await bus.close();
+  });
+
   it("emits task:error when taskId is not in registry", async () => {
     const bus = new InProcessBus();
     const registry = new TaskRegistry();

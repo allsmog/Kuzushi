@@ -1,5 +1,6 @@
 import type { AgentHistoryEntry } from "../../agent-runtime/types.js";
 import type { AgentActivity } from "../../agent-runtime/execution.js";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { generatePocHarness, PocHarnessExecutionError } from "../../poc-harness.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
 import { withRetry } from "../../retry.js";
@@ -13,6 +14,7 @@ import type { MessageBus } from "../types.js";
 
 export interface PocHarnessWorkerDeps {
   config: KuzushiConfig;
+  runtime: AgentRuntime;
 }
 
 /**
@@ -30,6 +32,7 @@ export function registerPocHarnessWorker(
     try {
       const { result, costUsd } = await generateHarnessWithRefinement(
         deps.config,
+        deps.runtime,
         bus,
         runId,
         context,
@@ -79,6 +82,7 @@ export function registerPocHarnessWorker(
 
 async function generateHarnessWithRefinement(
   config: KuzushiConfig,
+  runtime: AgentRuntime,
   bus: MessageBus,
   runId: string,
   context: PocHarnessFindingQueuedEvent["payload"]["context"],
@@ -140,6 +144,7 @@ async function generateHarnessWithRefinement(
           config.pocHarnessMaxTurns,
           coerceRepoContext(repoContext),
           {
+            runtime,
             history,
             activityCallback,
           },

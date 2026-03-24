@@ -66,9 +66,9 @@ describe("quick-classifier task", () => {
         repoRoot: "/tmp/repo",
         repoName: "repo",
         config: makeConfig({ classifierModel: "anthropic:claude-haiku-4-5" }),
+        runtime,
         bus: new InProcessBus(),
         upstreamOutputs: new Map(),
-        runtimeOverride: runtime,
       },
     );
 
@@ -100,9 +100,9 @@ describe("quick-classifier task", () => {
         repoRoot: "/tmp/repo",
         repoName: "repo",
         config: makeConfig(),
+        runtime,
         bus: new InProcessBus(),
         upstreamOutputs: new Map(),
-        runtimeOverride: runtime,
       },
     );
 

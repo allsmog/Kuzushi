@@ -3,19 +3,8 @@ import { PiAiAgentRuntime } from "./pi-ai.js";
 import { AcpAgentRuntime } from "./acp.js";
 import type { AgentRuntime } from "./types.js";
 
-let currentRuntime: AgentRuntime = new PiAiAgentRuntime();
-
-export function getAgentRuntime(): AgentRuntime {
-  return currentRuntime;
-}
-
-export function setAgentRuntime(runtime: AgentRuntime): void {
-  currentRuntime = runtime;
-}
-
 export function configureAgentRuntime(config: KuzushiConfig): AgentRuntime {
-  currentRuntime = createAgentRuntimeInstance(config);
-  return currentRuntime;
+  return createAgentRuntimeInstance(config);
 }
 
 export function createAgentRuntimeInstance(config: KuzushiConfig): AgentRuntime {

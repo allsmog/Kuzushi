@@ -1,0 +1,54 @@
+name: Benchmark Regression
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * *"
+
+jobs:
+  benchmark-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: python -m pip install --upgrade pip semgrep
+      - run: bash benchmarks/govwa/setup.sh
+      - name: Write benchmark scan config
+        run: |
+          mkdir -p benchmarks/govwa/repo/.kuzushi
+          cat > benchmarks/govwa/repo/.kuzushi/config.json <<JSON
+          {
+            "model": "anthropic:claude-sonnet-4-6",
+            "agentRuntimeBackend": "acp",
+            "acpAdapterCommand": "node ${GITHUB_WORKSPACE}/tests/fixtures/fake-acp-adapter.mjs",
+            "scanners": ["semgrep"],
+            "enabledTasks": ["context-gatherer"],
+            "verify": false,
+            "triageConcurrency": 1,
+            "triageBatchSize": 1,
+            "scanMode": "sequential",
+            "auditLog": false,
+            "enableContextGathering": false,
+            "enableContextEnrichment": false,
+            "llmRescoreEnabled": false,
+            "fpFilterEnabled": false
+          }
+          JSON
+      - run: pnpm benchmark --run --dataset benchmarks/govwa --output benchmarks/govwa/results/metrics-ci.json
+      - run: pnpm benchmark:regression --results benchmarks/govwa/results/metrics-ci.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-regression-artifacts
+          path: |
+            benchmarks/govwa/results
+            benchmarks/baseline.json

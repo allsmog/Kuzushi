@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import type { AgentRuntime } from "../../../agent-runtime/types.js";
 import { withRetry } from "../../../retry.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
@@ -228,7 +227,7 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
       : await loadReferenceContent(preflight.referenceFiles);
     const runtime = noSourcesExtracted
       ? null
-      : getAgentRuntime();
+      : context.runtime;
 
     const labelsByPass = new Map<number, TaintAnalysisPassEntry[]>();
     let totalCostUsd = 0;

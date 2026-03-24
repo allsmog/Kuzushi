@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { setAgentRuntime } from "../../src/agent-runtime/index.js";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import { TaskRegistry } from "../../src/agents/registry.js";
 import type { AgentTask } from "../../src/agents/types.js";
@@ -305,9 +304,7 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    setAgentRuntime(runtime);
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerOrchestrator(bus, { registry: registry as any, db, runtime });
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
 
     const runId = generateRunId();

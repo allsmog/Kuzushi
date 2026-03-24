@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   extractJson,
@@ -287,6 +288,11 @@ export function validateScriptSyntax(
       args: ["-n", scriptPath],
       applies: extension === ".sh" || normalizedLanguage === "shell" || normalizedLanguage === "bash",
     },
+    {
+      cmd: "go",
+      args: ["build", "-o", os.devNull, scriptPath],
+      applies: extension === ".go" || normalizedLanguage === "go",
+    },
   ];
 
   const validator = validators.find((candidate) => candidate.applies);
@@ -371,10 +377,13 @@ function firstCwe(cwes: string[]): string {
   return "cwe";
 }
 
-function resolveScriptExtension(language: string | null): string {
+export function resolveScriptExtension(language: string | null): string {
   const normalized = normalizeLanguage(language);
   if (normalized === "python" || normalized === "py") {
     return "py";
+  }
+  if (normalized === "go") {
+    return "go";
   }
   if (normalized === "javascript" || normalized === "node" || normalized === "js") {
     return "mjs";

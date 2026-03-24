@@ -12,15 +12,28 @@
     "url": "https://github.com/allsmog/Kuzushi/issues"
   },
   "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "kuzushi": "./dist/cli.js"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "build": "tsc",
+    "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "pnpm clean:dist && tsc",
+    "prepack": "pnpm build",
+    "check:types": "pnpm typecheck && pnpm typecheck:benchmarks",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "bash tests/e2e/run-smoke.sh",
     "test:coverage": "vitest run --coverage",
+    "verify:pack": "npm pack --dry-run",
     "benchmark": "tsx benchmarks/harness.ts",
     "benchmark:freeze": "tsx benchmarks/freeze-baseline.ts",
     "benchmark:diff": "tsx benchmarks/sarif-diff.ts",

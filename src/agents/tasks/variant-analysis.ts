@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
@@ -187,9 +187,9 @@ export async function analyzeVariants(
   repoName: string,
   model: string,
   maxFindings: number,
+  runtime: AgentRuntime,
 ): Promise<VariantAnalysisOutput> {
   const prompt = buildPrompt(finding, triageResult);
-  const runtime = getAgentRuntime();
 
   let structuredOutput: unknown;
   let resultText = "";
@@ -334,9 +334,9 @@ export async function analyzeVariantsBatch(
   repoName: string,
   model: string,
   maxFindingsPerVariant: number,
+  runtime: AgentRuntime,
 ): Promise<VariantAnalysisOutput> {
   const prompt = buildBatchPrompt(items);
-  const runtime = getAgentRuntime();
 
   let structuredOutput: unknown;
   let resultText = "";

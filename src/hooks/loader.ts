@@ -2,6 +2,9 @@ import type { PipelineHooks } from "./types.js";
 import * as path from "node:path";
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { getLogger } from "../logger.js";
+
+const log = getLogger("hooks");
 
 /**
  * Load pipeline hooks from an external JS/TS file.
@@ -19,7 +22,7 @@ export async function loadHooksFromFile(filePath: string, repoRoot: string): Pro
   const mod = await import(url);
   const hooks = mod.default ?? mod;
   validateHooks(hooks, filePath);
-  console.error(`[hooks] Loaded pipeline hooks from ${filePath}`);
+  log.info(`Loaded pipeline hooks from ${filePath}`);
   return hooks;
 }
 
@@ -31,7 +34,7 @@ function validateHooks(hooks: unknown, source: string): asserts hooks is Pipelin
   const validKeys = new Set(["beforeScan", "afterScan", "beforeTriage", "afterTriage", "afterAll"]);
   for (const key of Object.keys(hooks)) {
     if (!validKeys.has(key)) {
-      console.error(`[hooks] Unknown hook key "${key}" in ${source} ignored`);
+      log.warn(`Unknown hook key "${key}" in ${source} ignored`);
     }
     if (validKeys.has(key) && typeof (hooks as Record<string, unknown>)[key] !== "function") {
       throw new Error(`Hook "${key}" in ${source} must be a function`);

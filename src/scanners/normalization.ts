@@ -1,6 +1,14 @@
 import type { CorroboratingSignal, Finding } from "./types.js";
 import type { LlmRescoreResult } from "./llm-rescore.js";
 
+const PROOF_STATE_PRECEDENCE: Record<NonNullable<Finding["proofState"]>, number> = {
+  symbolic_only: 0,
+  inconclusive: 1,
+  execution_attempted: 2,
+  execution_rejected: 3,
+  execution_confirmed: 4,
+};
+
 const RULE_STOP_WORDS = new Set([
   "codeql",
   "semgrep",
@@ -40,7 +48,7 @@ export function clusterFindings(findings: Finding[]): ClusteredFindingResult {
   const byFingerprint = new Map<string, Finding>();
   for (const finding of findings) {
     const existing = byFingerprint.get(finding.fingerprint);
-    if (!existing || getRankingScore(finding) > getRankingScore(existing)) {
+    if (!existing || shouldReplaceFingerprintEntry(existing, finding)) {
       byFingerprint.set(finding.fingerprint, finding);
     }
   }
@@ -141,6 +149,37 @@ function mergeCorroboration(primary: Finding, corroborating: Finding[]): Corrobo
   }
 
   return result;
+}
+
+function shouldReplaceFingerprintEntry(existing: Finding, candidate: Finding): boolean {
+  const existingScore = getRankingScore(existing);
+  const candidateScore = getRankingScore(candidate);
+  if (candidateScore > existingScore) {
+    return true;
+  }
+  if (candidateScore < existingScore) {
+    return false;
+  }
+
+  const existingProof = existing.proofState ? PROOF_STATE_PRECEDENCE[existing.proofState] : -1;
+  const candidateProof = candidate.proofState ? PROOF_STATE_PRECEDENCE[candidate.proofState] : -1;
+  if (candidateProof > existingProof) {
+    return true;
+  }
+  if (candidateProof < existingProof) {
+    return false;
+  }
+
+  const existingProvenanceCount = existing.engineProvenance?.length ?? 0;
+  const candidateProvenanceCount = candidate.engineProvenance?.length ?? 0;
+  if (candidateProvenanceCount > existingProvenanceCount) {
+    return true;
+  }
+  if (candidateProvenanceCount < existingProvenanceCount) {
+    return false;
+  }
+
+  return false;
 }
 
 /**

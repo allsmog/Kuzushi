@@ -8,9 +8,10 @@
 import type { Finding } from "../../scanners/types.js";
 import type { TriageResult } from "../../types.js";
 import { normalizeCostUsd } from "../../utils.js";
+import { updateRunCost } from "../../store.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import type { RunState, OrchestratorDeps, VerificationCandidate } from "./types.js";
+import type { RunState, OrchestratorDeps } from "./types.js";
 
 export function handleTriageResult(
   state: RunState,
@@ -31,7 +32,6 @@ export function handleTriageResult(
   }
 
   try {
-    const { updateRunCost } = require("../../store.js");
     updateRunCost(deps.db, state.checkpointRunId, cost);
   } catch {
     // Cost persistence is best-effort.
@@ -44,6 +44,8 @@ export function handleTriageError(
   finding: Finding,
   costUsd: number | undefined,
   attempts: number | undefined,
+  index: number | undefined,
+  total: number | undefined,
   deps: OrchestratorDeps,
 ): void {
   state.inFlight = Math.max(0, state.inFlight - 1);
@@ -51,19 +53,29 @@ export function handleTriageError(
   const cost = normalizeCostUsd(costUsd);
   state.totalCostUsd += cost;
 
-  // Track dead-letter findings (those that exhausted all retries)
+  const fp = finding.fingerprint;
   const maxRetries = state.config.maxTriageRetries ?? 2;
-  if (attempts !== undefined && attempts >= maxRetries) {
+  const priorAttempts = state.triageAttempts.get(fp) ?? 0;
+  const totalAttempts = Math.max(priorAttempts, attempts ?? 1);
+  state.triageAttempts.set(fp, totalAttempts);
+
+  if (totalAttempts >= maxRetries) {
     state.deadLetterFindings.push({
-      fingerprint: finding.fingerprint,
+      fingerprint: fp,
       error,
-      attempts,
+      attempts: totalAttempts,
       lastAttempt: new Date().toISOString(),
+    });
+  } else {
+    state.triageErrors -= 1;
+    state.triageQueue.push({
+      finding,
+      index: index ?? 0,
+      total: total ?? state.triageTotal,
     });
   }
 
   try {
-    const { updateRunCost } = require("../../store.js");
     updateRunCost(deps.db, state.checkpointRunId, cost);
   } catch {
     // Cost persistence is best-effort.

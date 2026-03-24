@@ -1,10 +1,13 @@
 import { DockerPocExecutor } from "./docker.js";
 import { ProcessPocExecutor } from "./process.js";
 import type { PocExecutor, PocSandboxBackend } from "./types.js";
+import { getLogger } from "../logger.js";
 
 export type { PocExecutionResult, PocExecutor, PocSandboxBackend } from "./types.js";
 export { DockerPocExecutor } from "./docker.js";
 export { ProcessPocExecutor } from "./process.js";
+
+const log = getLogger("poc-executor");
 
 /**
  * Create a PoC executor with Docker-preferred fallback to process.
@@ -24,8 +27,6 @@ export async function createPocExecutor(
     return docker;
   }
 
-  console.error(
-    "[poc-executor] Docker not available, falling back to process executor",
-  );
+  log.warn("Docker not available, falling back to process executor");
   return new ProcessPocExecutor(timeoutMs);
 }

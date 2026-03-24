@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import type { Finding } from "../../src/scanners/types.js";
 
 // Mock the agent runtime execution
@@ -20,6 +21,7 @@ import { rescoreFindings, type LlmRescoreResult } from "../../src/scanners/llm-r
 import { runStructuredAgentQuery } from "../../src/agent-runtime/execution.js";
 
 const mockRunQuery = vi.mocked(runStructuredAgentQuery);
+const runtime = { id: "test-runtime", query: vi.fn() } as unknown as AgentRuntime;
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -47,7 +49,7 @@ describe("rescoreFindings", () => {
   });
 
   it("returns empty array for no findings", async () => {
-    const results = await rescoreFindings([], { repoRoot: "/repo" });
+    const results = await rescoreFindings([], { repoRoot: "/repo", runtime });
     expect(results).toEqual([]);
   });
 
@@ -63,6 +65,7 @@ describe("rescoreFindings", () => {
     const results = await rescoreFindings(findings, {
       repoRoot: "/repo",
       threshold: 4,
+      runtime,
     });
 
     expect(results).toHaveLength(1);
@@ -82,6 +85,7 @@ describe("rescoreFindings", () => {
     const results = await rescoreFindings(findings, {
       repoRoot: "/repo",
       threshold: 4,
+      runtime,
     });
 
     expect(results).toHaveLength(1);
@@ -101,6 +105,7 @@ describe("rescoreFindings", () => {
     const results = await rescoreFindings(findings, {
       repoRoot: "/repo",
       threshold: 4,
+      runtime,
     });
 
     expect(results).toHaveLength(1);
@@ -127,6 +132,7 @@ describe("rescoreFindings", () => {
     const results = await rescoreFindings(findings, {
       repoRoot: "/repo",
       threshold: 4,
+      runtime,
     });
 
     expect(results).toHaveLength(2);

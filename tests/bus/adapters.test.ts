@@ -25,10 +25,10 @@ describe("createBus", () => {
     expect(bus).toBeTruthy();
   });
 
-  it("throws for unsupported redis adapter placeholder", () => {
+  it("rejects unsupported distributed backends before runtime dispatch", () => {
     const config = baseConfig();
-    config.busBackend = "redis";
-    expect(() => createBus(config)).toThrow("busBackend=redis is not available");
+    config.busBackend = "redis" as KuzushiConfig["busBackend"];
+    expect(() => createBus(config)).toThrow("Unknown bus backend");
   });
 
   it("throws for unknown backend typo", () => {

@@ -3,8 +3,10 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import type { AgentRuntime } from "../../../agent-runtime/types.js";
 import { ensureDatabase, withCodeQLDatabase } from "../../../scanners/run-codeql.js";
 import { resolveCodeQLBinary } from "../../../scanners/resolve-codeql.js";
+import { getLogger } from "../../../logger.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
@@ -50,6 +52,7 @@ interface ExtractionAgentContext {
   referenceFiles: string[];
   taintAnalysisPath: string;
   model: string;
+  runtime: AgentRuntime;
   repoRoot: string;
   workspaceDir: string;
   codeqlBinary: string;
@@ -77,6 +80,7 @@ const WORKSPACE_SUBDIRS = [
   "results",
   "report",
 ];
+const log = getLogger("taint-analysis-preflight");
 
 interface FrameworkCandidate {
   id: string;
@@ -163,6 +167,7 @@ interface DiscoverExtractionSupplementsArgs {
   framework: string | null;
   repoRoot: string;
   model: string;
+  runtime: AgentRuntime;
   sourcesRowCount: number;
   sinksRowCount: number;
 }
@@ -170,7 +175,7 @@ interface DiscoverExtractionSupplementsArgs {
 async function discoverExtractionSupplements(
   args: DiscoverExtractionSupplementsArgs,
 ): Promise<{ candidates: ExtractionSupplementCandidate[]; costUsd: number }> {
-  const { language, framework, repoRoot, model, sourcesRowCount, sinksRowCount } = args;
+  const { language, framework, repoRoot, model, runtime, sourcesRowCount, sinksRowCount } = args;
 
   const coverageNote = (sourcesRowCount < 5 || sinksRowCount < 5)
     ? `\n\nNOTE: The main extraction found very few results (${sourcesRowCount} sources, ${sinksRowCount} sinks). ` +
@@ -218,7 +223,8 @@ For each candidate provide:
     cwd: repoRoot,
     model,
     maxTurns: 15,
-    allowedTools: resolveDefaultReadOnlyTools(),
+    allowedTools: resolveDefaultReadOnlyTools(runtime),
+    runtimeOptions: { runtime },
     schema: EXTRACTION_SUPPLEMENT_SCHEMA as Record<string, unknown>,
     strict: true,
     retryInvalidStructuredOutput: 2,
@@ -427,6 +433,7 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       referenceFiles,
       taintAnalysisPath,
       model: extractionModel,
+      runtime: context.runtime,
       repoRoot: context.repoRoot,
       workspaceDir,
       codeqlBinary,
@@ -525,6 +532,7 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
           framework,
           repoRoot: context.repoRoot,
           model: extractionModel,
+          runtime: context.runtime,
           sourcesRowCount: sourcesDecodedRows,
           sinksRowCount: sinksDecodedRows,
         });
@@ -1086,7 +1094,7 @@ async function renderExtractionTemplateWithDiagnostic(
   if (templateHadBodyPlaceholders) {
     if (agentCtx) {
       try {
-        process.stderr.write(`[taint-analysis-preflight] Running extraction agent for ${language}/${kind}...\n`);
+        log.info({ language, kind }, `Running extraction agent for ${language}/${kind}`);
         diagnostic.initialAttempt.attempted = true;
         const generated = await generateExtractionQuery({
           language,
@@ -1097,7 +1105,10 @@ async function renderExtractionTemplateWithDiagnostic(
         costUsd += generated.costUsd;
         if (generated.query) {
           diagnostic.initialAttempt.generatedQuery = true;
-          process.stderr.write(`[taint-analysis-preflight] Extraction agent succeeded for ${language}/${kind} (${generated.query.length} chars)\n`);
+          log.info(
+            { language, kind, queryLength: generated.query.length },
+            `Extraction agent succeeded for ${language}/${kind}`,
+          );
           const compileResult = await tryCompileQuery(generated.query, agentCtx);
           diagnostic.initialAttempt.compileOk = compileResult.ok;
           diagnostic.initialAttempt.compileErrorExcerpt = compileResult.errorExcerpt ?? null;
@@ -1109,8 +1120,9 @@ async function renderExtractionTemplateWithDiagnostic(
               costUsd,
             };
           }
-          process.stderr.write(
-            `[taint-analysis-preflight] Generated query failed compile check for ${language}/${kind}; retrying without cache\n`,
+          log.warn(
+            { language, kind },
+            `Generated query failed compile check for ${language}/${kind}; retrying without cache`,
           );
           diagnostic.fallbackReason = "initial_compile_failed";
           diagnostic.fallbackDetail = compileResult.errorExcerpt ?? null;
@@ -1119,8 +1131,9 @@ async function renderExtractionTemplateWithDiagnostic(
           diagnostic.initialAttempt.generatedQuery = false;
           diagnostic.initialAttempt.compileOk = null;
           diagnostic.fallbackReason = "agent_returned_no_query";
-          process.stderr.write(
-            `[taint-analysis-preflight] Extraction agent returned no query for ${language}/${kind}; retrying without cache\n`,
+          log.warn(
+            { language, kind },
+            `Extraction agent returned no query for ${language}/${kind}; retrying without cache`,
           );
         }
 
@@ -1135,8 +1148,9 @@ async function renderExtractionTemplateWithDiagnostic(
         costUsd += regenerated.costUsd;
         if (regenerated.query) {
           diagnostic.retryAttempt.generatedQuery = true;
-          process.stderr.write(
-            `[taint-analysis-preflight] Extraction agent retry succeeded for ${language}/${kind} (${regenerated.query.length} chars)\n`,
+          log.info(
+            { language, kind, queryLength: regenerated.query.length },
+            `Extraction agent retry succeeded for ${language}/${kind}`,
           );
           const compileResult = await tryCompileQuery(regenerated.query, agentCtx);
           diagnostic.retryAttempt.compileOk = compileResult.ok;
@@ -1152,8 +1166,9 @@ async function renderExtractionTemplateWithDiagnostic(
               costUsd,
             };
           }
-          process.stderr.write(
-            `[taint-analysis-preflight] Retry query failed compile check for ${language}/${kind}, using fallback\n`,
+          log.warn(
+            { language, kind },
+            `Retry query failed compile check for ${language}/${kind}, using fallback`,
           );
           diagnostic.fallbackReason = "retry_compile_failed";
           diagnostic.fallbackDetail = compileResult.errorExcerpt ?? null;
@@ -1161,8 +1176,9 @@ async function renderExtractionTemplateWithDiagnostic(
           diagnostic.retryAttempt.generatedQuery = false;
           diagnostic.retryAttempt.compileOk = null;
           diagnostic.fallbackReason = "retry_returned_no_query";
-          process.stderr.write(
-            `[taint-analysis-preflight] Extraction agent retry returned no query for ${language}/${kind}, using fallback\n`,
+          log.warn(
+            { language, kind },
+            `Extraction agent retry returned no query for ${language}/${kind}, using fallback`,
           );
         }
         await clearExtractionCache(agentCtx.workspaceDir, language, kind);
@@ -1506,8 +1522,9 @@ export function resolveWorkspaceDir(repoRoot: string, workspaceDir: string): str
   }
 
   const fallbackWorkspace = toAbsolutePath(absoluteRepoRoot, DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.workspaceDir);
-  process.stderr.write(
-    `[taint-analysis-preflight] Ignoring workspaceDir outside repo root: ${workspaceDir}; using ${fallbackWorkspace}\n`,
+  log.warn(
+    { workspaceDir, fallbackWorkspace },
+    "Ignoring workspaceDir outside repo root; using fallback workspace",
   );
   return fallbackWorkspace;
 }

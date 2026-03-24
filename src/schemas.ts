@@ -13,12 +13,7 @@ import { z } from "zod";
 
 export const VerdictSchema = z.enum(["tp", "fp", "needs_review"]);
 
-export const BusBackendSchema = z.enum([
-  "in-process",
-  "redis",
-  "google-pubsub",
-  "nats",
-]);
+export const BusBackendSchema = z.enum(["in-process"]);
 
 export const ScanModeSchema = z.enum(["sequential", "concurrent"]);
 
@@ -251,6 +246,53 @@ export const DynamicAnalysisRunSchema = z.object({
 });
 
 export type DynamicAnalysisRunZ = z.infer<typeof DynamicAnalysisRunSchema>;
+
+export const CryptoBehavioralVerdictSchema = z.enum([
+  "vulnerable",
+  "secure",
+  "inconclusive",
+  "error",
+]);
+
+export const CryptoBehavioralTestTypeSchema = z.enum([
+  "timing",
+  "ecb-mode",
+  "weak-hash",
+  "weak-prng",
+  "key-length",
+  "edge-case",
+]);
+
+export const CryptoBehavioralRunSchema = z.object({
+  runId: z.string(),
+  pipelineRunId: z.string().optional(),
+  fingerprint: z.string(),
+  repo: z.string(),
+  testType: CryptoBehavioralTestTypeSchema,
+  verdict: CryptoBehavioralVerdictSchema,
+  harnessPath: z.string().nullable().optional(),
+  harnessLanguage: z.string().nullable().optional(),
+  executionExitCode: z.number().nullable().optional(),
+  executionVerdict: PocExecVerdictSchema.optional(),
+  executionStdout: z.string().optional(),
+  executionStderr: z.string().optional(),
+  executionDurationMs: z.number().nullable().optional(),
+  tStatistic: z.number().nullable().optional(),
+  pValue: z.number().nullable().optional(),
+  meanANs: z.number().nullable().optional(),
+  meanBNs: z.number().nullable().optional(),
+  timingIterations: z.number().nullable().optional(),
+  observedBehavior: z.string().optional(),
+  expectedBehavior: z.string().optional(),
+  algorithmConfirmed: z.string().optional(),
+  keyLengthBits: z.number().nullable().optional(),
+  costUsd: z.number().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export type CryptoBehavioralRunZ = z.infer<typeof CryptoBehavioralRunSchema>;
 
 export const PatchResultSchema = z.object({
   patchRunId: z.string(),
@@ -574,6 +616,10 @@ export const KuzushiConfigSchema = z.object({
   astIndexEnabled: z.boolean().optional(),
   callGraphAssistEnabled: z.boolean().optional(),
   dynamicAnalysisEnabled: z.boolean().optional(),
+  cryptoBehavioralTestEnabled: z.boolean().optional(),
+  cryptoBehavioralTimeoutMs: z.number().optional(),
+  cryptoBehavioralMaxFindings: z.number().optional(),
+  cryptoBehavioralPerFindingBudgetUsd: z.number().optional(),
   coverageGuidedEnabled: z.boolean().optional(),
   dynamicMaxIterations: z.number().optional(),
   dynamicMaxCandidates: z.number().optional(),

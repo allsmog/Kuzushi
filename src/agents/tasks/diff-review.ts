@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
-import { getAgentRuntime } from "../../agent-runtime/index.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -319,7 +318,7 @@ async function detectRegressions(
   model: string,
 ): Promise<Finding[]> {
   const prompt = buildRegressionPrompt(diff, previousFindings);
-  const runtime = getAgentRuntime();
+  const runtime = context.runtime;
 
   let structuredOutput: unknown;
   let resultText = "";
@@ -424,7 +423,7 @@ export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
     log.info(`${changedFiles.length} changed files, starting review (model=${model})`);
 
     const prompt = buildPrompt(repoContext, changedFiles, diff, diffBase, maxFindings, profileLines);
-    const runtime = getAgentRuntime();
+    const runtime = context.runtime;
 
     let structuredOutput: unknown;
     let resultText = "";

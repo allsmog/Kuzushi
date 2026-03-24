@@ -81,6 +81,7 @@ async function classifyFinding(
   model: string,
 ): Promise<{ decision: QuickClassifierDecision; costUsd: number }> {
   const prompt = buildPrompt(finding);
+  const workingRoot = context.scanPath ?? context.repoRoot;
   let resultText = "";
   let costUsd = 0;
 
@@ -88,7 +89,7 @@ async function classifyFinding(
     for await (const message of runtime.query({
       prompt,
       options: {
-        cwd: context.repoRoot,
+        cwd: workingRoot,
         model,
         maxTurns: 1,
         temperature: 0,

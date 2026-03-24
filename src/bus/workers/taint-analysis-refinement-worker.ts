@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { TaskContext } from "../../agents/types.js";
 import { taintAnalysisRunTask } from "../../agents/tasks/taint-analysis/analyze.js";
@@ -28,6 +29,7 @@ export interface TaintAnalysisRefinementWorkerDeps {
   registry: ScannerRegistry;
   taskRegistry?: TaskRegistry;
   config: KuzushiConfig;
+  runtime: AgentRuntime;
 }
 
 interface RefinementSignals {
@@ -125,10 +127,11 @@ export function registerTaintAnalysisRefinementWorker(
 
       const taskContext: TaskContext = {
         runId: event.meta.runId,
-        repoRoot: context.scanPath ?? context.repoRoot,
+        repoRoot: context.repoRoot,
         scanPath: context.scanPath,
         repoName: context.repoName,
         config: deps.config,
+        runtime: deps.runtime,
         bus,
         upstreamOutputs: new Map([["taint-analysis-label", refinedLabelOutput]]),
       };
@@ -306,6 +309,7 @@ async function triageDeltaFindings(args: {
       args.context.repoName,
       args.deps.config.triageModel ?? args.deps.config.model,
       args.repoContext,
+      { runtime: args.deps.runtime },
     );
 
     let triaged = 0;

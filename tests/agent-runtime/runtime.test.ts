@@ -1,9 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  configureAgentRuntime,
-  getAgentRuntime,
-  setAgentRuntime,
-} from "../../src/agent-runtime/index.js";
+import { describe, expect, it } from "vitest";
+import { configureAgentRuntime } from "../../src/agent-runtime/index.js";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 import {
@@ -29,18 +25,11 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
 }
 
 describe("agent runtime", () => {
-  afterEach(() => {
-    configureAgentRuntime(makeConfig({
-      agentRuntimeBackend: "pi-ai",
-    }));
-  });
-
   it("configures pi-ai backend (default)", () => {
     const runtime = configureAgentRuntime(makeConfig({
       agentRuntimeBackend: "pi-ai",
     }));
     expect(runtime.id).toBe("pi-ai");
-    expect(getAgentRuntime().id).toBe("pi-ai");
   });
 
   it("throws for acp backend when adapter command is missing", () => {
@@ -57,20 +46,17 @@ describe("agent runtime", () => {
     expect(runtime.id).toBe("acp");
   });
 
-  it("allows tests/extensions to inject a custom runtime", () => {
-    const custom: AgentRuntime = {
-      id: "custom-test",
-      async *query() {
-        yield {
-          type: "result",
-          subtype: "success",
-          result: "{\"ok\":true}",
-        };
-      },
-    };
+  it("creates independent runtime instances without global mutation", () => {
+    const first = configureAgentRuntime(makeConfig({
+      agentRuntimeBackend: "pi-ai",
+    }));
+    const second = configureAgentRuntime(makeConfig({
+      agentRuntimeBackend: "pi-ai",
+    }));
 
-    setAgentRuntime(custom);
-    expect(getAgentRuntime().id).toBe("custom-test");
+    expect(first.id).toBe("pi-ai");
+    expect(second.id).toBe("pi-ai");
+    expect(first).not.toBe(second);
   });
 
   it("includes semantic navigation tools for pi-ai defaults", () => {

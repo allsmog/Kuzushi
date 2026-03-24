@@ -1,4 +1,3 @@
-import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts, RepoContext } from "../../../types.js";
@@ -129,7 +128,7 @@ export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
     const cfg = resolveInvariantAnalysisConfig(context.config);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const prompt = buildExtractionPrompt(repoContext, cfg.securityOnly, cfg.maxInvariants);
-    const runtime = getAgentRuntime();
+    const runtime = context.runtime;
 
     let structuredOutput: unknown;
     let resultText = "";

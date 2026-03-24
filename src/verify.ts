@@ -23,12 +23,15 @@ import {
   frameworkAwarenessModule,
   proofLevelModule,
 } from "./prompts/modules.js";
+import { getLogger } from "./logger.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 import { RawVerificationOutputSchema, RawBatchVerificationOutputSchema, formatZodErrors } from "./schemas.js";
 import { renderTemplate } from "./prompts/template.js";
 import { VERIFY_UNIFIED_TEMPLATE } from "./prompts/templates/verify.js";
 import { BATCH_VERIFY_TEMPLATE } from "./prompts/templates/verify.js";
 import { buildVerifyContext, buildBatchVerifyContext } from "./prompts/context.js";
+
+const log = getLogger("verify");
 
 export const VERIFICATION_RESULT_SCHEMA = {
   type: "object",
@@ -179,7 +182,7 @@ export function parseVerificationOutput(raw: unknown, fingerprint: string): Veri
     const validation = RawVerificationOutputSchema.safeParse(raw);
     if (!validation.success) {
       const errors = formatZodErrors(validation.error.issues);
-      console.warn(
+      log.warn(
         `[verify] LLM output for ${fingerprint} has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
       );
     }
@@ -214,7 +217,7 @@ function parseVerificationResponse(text: string, fingerprint: string): Verificat
     const validation = RawVerificationOutputSchema.safeParse(parsed);
     if (!validation.success) {
       const errors = formatZodErrors(validation.error.issues);
-      console.warn(
+      log.warn(
         `[verify] LLM text output for ${fingerprint} has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
       );
     }
@@ -434,7 +437,7 @@ function parseBatchVerificationOutput(
         rawItems = (raw as Record<string, unknown>)["results"] as unknown[];
       }
       const errors = formatZodErrors(batchValidation.error.issues);
-      console.warn(
+      log.warn(
         `[verify] Batch verification output has schema issues: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
       );
     }

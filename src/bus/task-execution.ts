@@ -1,5 +1,6 @@
 import type { AgentTask, TaskContext } from "../agents/types.js";
 import { isHandoff } from "../agents/handoff.js";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import type {
   CorroboratingSignal,
   EngineProvenance,
@@ -53,6 +54,7 @@ export async function executeScannerPlugin(
   repoRoot: string,
   input: Parameters<ScannerPlugin["scan"]>[1],
   config: ScannerConfig,
+  runtime: AgentRuntime,
 ): Promise<ExecutedScannerResult> {
   const startedAt = Date.now();
 
@@ -60,7 +62,7 @@ export async function executeScannerPlugin(
     await plugin.init(config);
   }
 
-  const findings = await plugin.scan(repoRoot, input, config);
+  const findings = await plugin.scan(repoRoot, input, config, runtime);
 
   return {
     findings,

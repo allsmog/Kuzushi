@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
@@ -170,7 +169,7 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
       return [];
     }
 
-    const runtime = getAgentRuntime();
+    const runtime = context.runtime;
     const tag = "[invariant-check]";
     const batches = chunkArray(invariantsToCheck, cfg.checkBatchSize);
 

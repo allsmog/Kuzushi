@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import { createDefaultKnowledgeRegistry } from "../knowledge/index.js";
 import type { ScannerRegistry } from "../scanners/registry.js";
@@ -24,6 +25,7 @@ export interface RegisterWorkersDeps {
   taskRegistry: TaskRegistry;
   db: Database.Database;
   config: KuzushiConfig;
+  runtime: AgentRuntime;
 }
 
 /** Register orchestrator + all built-in workers on a bus instance. */
@@ -36,19 +38,23 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
     registry: deps.registry,
     taskRegistry,
     db: deps.db,
+    runtime: deps.runtime,
   });
 
   registerScanWorker(bus, {
     registry: deps.registry,
     taskRegistry,
     config: deps.config,
+    runtime: deps.runtime,
     knowledgeRegistry,
+    db: deps.db,
   });
 
   registerTriageWorker(bus, {
     registry: deps.registry,
     taskRegistry,
     config: deps.config,
+    runtime: deps.runtime,
     db: deps.db,
     knowledgeRegistry,
     getRunHooks: (runId) => orchestrator.getRunHooks(runId),
@@ -56,6 +62,7 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
 
   registerVerificationWorker(bus, {
     config: deps.config,
+    runtime: deps.runtime,
     knowledgeRegistry,
     db: deps.db,
   });
@@ -63,6 +70,7 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
   if (deps.config.pocHarness) {
     registerPocHarnessWorker(bus, {
       config: deps.config,
+      runtime: deps.runtime,
     });
   }
 
@@ -91,11 +99,13 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
     registry: deps.registry,
     taskRegistry,
     config: deps.config,
+    runtime: deps.runtime,
   });
 
   if (deps.config.dynamicAnalysisEnabled) {
     registerDynamicAnalysisWorker(bus, {
       config: deps.config,
+      runtime: deps.runtime,
       db: deps.db,
     });
   }
@@ -118,9 +128,6 @@ export * from "./events.js";
 export * from "./helpers.js";
 export * from "./orchestrator.js";
 export * from "./adapters/in-process.js";
-export * from "./adapters/redis.js";
-export * from "./adapters/google-pubsub.js";
-export * from "./adapters/nats.js";
 export * from "./workers/scan-worker.js";
 export * from "./workers/triage-worker.js";
 export * from "./workers/verification-worker.js";

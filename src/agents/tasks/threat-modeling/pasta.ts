@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { getAgentRuntime } from "../../../agent-runtime/index.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
@@ -306,7 +305,7 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
     }
 
     const prompt = buildPastaPrompt(strideThreats, upstreamFindings, cfg.maxTrees);
-    const runtime = getAgentRuntime();
+    const runtime = context.runtime;
 
     let structuredOutput: unknown;
     let resultText = "";

@@ -3,61 +3,25 @@
 import { Command } from "commander";
 import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { cleanup as cleanupHttpAgents } from "./http-agent.js";
 import { registerShutdownHook, initiateShutdown } from "./lifecycle.js";
 import { loadConfig, getConfigValue, setConfigValue, unsetConfigValue, configPath } from "./config.js";
 import {
-  createRun,
+  formatConfigValidationIssue,
+  validateKuzushiConfig,
+} from "./config/validation.js";
+import {
   defaultDbPath,
-  getLatestResumableRun,
   getRun,
   initDb,
 } from "./store.js";
 import { createDefaultRegistry } from "./scanners/index.js";
 import { createDefaultTaskRegistry } from "./agents/index.js";
 import { configureAgentRuntime } from "./agent-runtime/index.js";
-import { configureRateLimitRegistry } from "./scheduler/index.js";
-import { parsePiAiModelSpec } from "./agent-runtime/model-spec.js";
-import {
-  createBus,
-  registerAllWorkers,
-  createEvent,
-  generateRunId,
-  type PipelineCompleteEvent,
-  type PipelineErrorEvent,
-} from "./bus/index.js";
-import type { KuzushiConfig, ScanOpts } from "./types.js";
-import { printQualityGateResult } from "./report.js";
-import { inflightCache } from "./cache.js";
-import {
-  expandScannerSelections,
-  resolveScannerConfig,
-  TAINT_ANALYSIS_TASK_IDS,
-  TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS,
-} from "./capabilities.js";
-
-const DEFAULT_AGENTIC_MODEL = "anthropic:claude-sonnet-4-6";
-
-function resolveRepo(repoPath: string): { root: string; name: string } {
-  const absPath = path.resolve(repoPath);
-  try {
-    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      cwd: absPath,
-      encoding: "utf-8",
-    }).trim();
-    return { root, name: path.basename(root) };
-  } catch {
-    return { root: absPath, name: path.basename(absPath) };
-  }
-}
-
-function parseScannersArg(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+import { setGlobalLogLevel } from "./logger.js";
+import { wrapCliAction, CliUsageError } from "./cli/errors.js";
+import { runScanCommand } from "./cli/commands/scan.js";
+import { resolveRepo } from "./cli/shared.js";
 
 function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
   let storesApiKey = key === "agentRuntimeConfig.apiKey";
@@ -81,201 +45,19 @@ function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
   );
 }
 
-function maybeWarnPiAiApiKeyForModel(
-  model: string | undefined,
-  options: { anthropicApiKey?: string } = {},
-): void {
-  if (!model) {
-    return;
-  }
-
-  let provider: string;
-  try {
-    provider = parsePiAiModelSpec(model).provider;
-  } catch {
-    return;
-  }
-
-  const envVars = requiredEnvVarsForProvider(provider);
-  if (envVars.length === 0) {
-    return;
-  }
-
-  const hasAny = envVars.some((name) => Boolean(process.env[name]))
-    || (provider === "anthropic" && Boolean(options.anthropicApiKey));
-  if (hasAny) {
-    return;
-  }
-
-  console.warn(
-    `Warning: model "${model}" uses provider "${provider}", `
-    + `but none of [${envVars.join(", ")}] are set.`,
-  );
-}
-
-function warnPiAiBackendApiKeys(
-  models: string[],
-  options: { anthropicApiKey?: string } = {},
-): void {
-  for (const model of models) {
-    maybeWarnPiAiApiKeyForModel(model, options);
-  }
-}
-
-function requiredEnvVarsForProvider(provider: string): string[] {
-  if (provider === "anthropic") {
-    return ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"];
-  }
-
-  if (provider === "openai") {
-    return ["OPENAI_API_KEY"];
-  }
-
-  if (provider === "google") {
-    return ["GEMINI_API_KEY", "GOOGLE_API_KEY"];
-  }
-
-  return [];
-}
-
-function resolveActivePiAiModels(
-  config: KuzushiConfig,
-  selectedScanners: string[],
-  enabledTaskIds: string[],
-): string[] {
-  const models = new Set<string>();
-  const scannerSet = new Set(selectedScanners);
-  const enabledTaskSet = new Set(enabledTaskIds);
-
-  const triageModel = config.triageModel ?? config.model;
-  models.add(triageModel);
-
-  if (config.verify === true) {
-    models.add(config.verifyModel ?? triageModel);
-  }
-
-  if (config.pocHarness === true) {
-    models.add(
-      config.pocHarnessModel
-      ?? config.verifyModel
-      ?? triageModel,
-    );
-  }
-
-  if (config.enableClassifier === true) {
-    models.add(
-      config.classifierModel
-      ?? config.triageBatchModel
-      ?? config.contextEnrichmentModel
-      ?? config.model,
-    );
-  }
-
-  for (const model of config.ensembleModels ?? []) {
-    const trimmed = model.trim();
-    if (trimmed) {
-      models.add(trimmed);
-    }
-  }
-
-  if (scannerSet.has("agentic")) {
-    const model = asModel(resolveScannerConfig(config, "agentic")["model"]) ?? DEFAULT_AGENTIC_MODEL;
-    models.add(model);
-  }
-
-  const usesTaintAnalysis = TAINT_ANALYSIS_TASK_IDS.some((id) => enabledTaskSet.has(id));
-  const usesCrossService = TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS.some((id) => enabledTaskSet.has(id));
-  if (usesTaintAnalysis || usesCrossService) {
-    const taCfg = config.scannerConfig["taint-analysis"];
-    const labelingModel = asModel(taCfg?.["labelingModel"]) ?? config.model;
-    const extractionModel = asModel(taCfg?.["extractionModel"]) ?? labelingModel;
-    models.add(labelingModel);
-    models.add(extractionModel);
-
-    if (usesCrossService) {
-      const boundaryModel = asModel(taCfg?.["crossServiceBoundaryModel"]) ?? labelingModel;
-      const stitchModel = asModel(taCfg?.["crossServiceStitchModel"]) ?? labelingModel;
-      models.add(boundaryModel);
-      models.add(stitchModel);
-    }
-  }
-
-  // Merged agentic detection tasks + race-condition
-  for (const taskId of ["secrets-crypto-detect", "code-config-detect", "race-condition-detect"]) {
-    if (enabledTaskSet.has(taskId)) {
-      const model = asModel(resolveScannerConfig(config, taskId)["model"]) ?? config.model;
-      models.add(model);
-    }
-  }
-
-  // Invariant analysis tasks
-  if (enabledTaskSet.has("invariant-extract") || enabledTaskSet.has("invariant-check")) {
-      const iaCfg = resolveScannerConfig(config, "invariant-analysis");
-      models.add(asModel(iaCfg?.["extractionModel"]) ?? config.model);
-      models.add(asModel(iaCfg?.["checkModel"]) ?? config.model);
-    }
-
-  // Threat modeling tasks
-  if (enabledTaskSet.has("threat-model-stride") || enabledTaskSet.has("threat-model-pasta")) {
-      const tmCfg = resolveScannerConfig(config, "threat-model");
-      models.add(asModel(tmCfg?.["strideModel"]) ?? config.model);
-      models.add(asModel(tmCfg?.["pastaModel"]) ?? config.model);
-    }
-
-  return [...models];
-}
-
-function validatePiAiProviderCredentials(
-  models: string[],
-  options: { anthropicApiKey?: string } = {},
-): Array<{ provider: string; envVars: string[]; models: string[] }> {
-  const missingByProvider = new Map<string, { envVars: string[]; models: Set<string> }>();
-
-  for (const model of models) {
-    let provider: string;
-    try {
-      provider = parsePiAiModelSpec(model).provider;
-    } catch {
-      continue;
-    }
-
-    const envVars = requiredEnvVarsForProvider(provider);
-    if (envVars.length === 0) {
-      continue;
-    }
-
-    const hasAny = envVars.some((name) => Boolean(process.env[name]))
-      || (provider === "anthropic" && Boolean(options.anthropicApiKey));
-    if (hasAny) {
-      continue;
-    }
-
-    const entry = missingByProvider.get(provider) ?? { envVars, models: new Set<string>() };
-    entry.models.add(model);
-    missingByProvider.set(provider, entry);
-  }
-
-  return [...missingByProvider.entries()].map(([provider, entry]) => ({
-    provider,
-    envVars: entry.envVars,
-    models: [...entry.models],
-  }));
-}
-
-function asModel(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
 const program = new Command();
 
 program
   .name("kuzushi")
   .description("Kuzushi — Agentic SAST orchestration")
+  .option("--verbose", "Show debug-level diagnostics", false)
   .version("0.1.0");
+
+program.hook("preAction", (_thisCommand, actionCommand) => {
+  if (actionCommand.optsWithGlobals().verbose) {
+    setGlobalLogLevel("debug");
+  }
+});
 
 // ── scan (default command) ────────────────────────────────────────────────
 
@@ -300,6 +82,7 @@ program
   .option("--verify-refinement-max-iterations <n>", "Maximum verification refinement attempts", parseInt)
   .option("--verify-reflection-interval <n>", "Inject verification reflection every N failed attempts", parseInt)
   .option("--verify-min-confidence <n>", "Minimum triage confidence required for verification", parseFloat)
+  .option("--crypto-behavioral-test", "Enable crypto behavioral runtime confirmation", false)
   .option("--poc-harness", "Enable post-verification PoC harness generation", false)
   .option("--poc-harness-model <model>", "Override model used by PoC harness generator")
   .option("--poc-harness-max-turns <n>", "Override PoC harness agent max turn budget", parseInt)
@@ -328,463 +111,7 @@ program
   .option("--no-cache", "Disable inflight request deduplication and LLM result caching")
   .option("--resume [runId]", "Resume a previous run (optionally by run id)")
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
-  .action(async (repoPath: string, opts: {
-    scanners?: string;
-    severity?: string;
-    max?: number;
-    model?: string;
-    ensembleModels?: string;
-    triageModel?: string;
-    triageMaxTurns?: number;
-    enableClassifier: boolean;
-    classifierModel?: string;
-    classifierThreshold?: number;
-    verify: boolean;
-    verifyModel?: string;
-    verifyMaxTurns?: number;
-    verifyConcurrency?: number;
-    verifyRefinementMaxIterations?: number;
-    verifyReflectionInterval?: number;
-    verifyMinConfidence?: number;
-    pocHarness: boolean;
-    pocHarnessModel?: string;
-    pocHarnessMaxTurns?: number;
-    pocHarnessConcurrency?: number;
-    pocRefinementMaxIterations?: number;
-    pocReflectionInterval?: number;
-    maxPocHarnessRetries?: number;
-    maxTriageRetries?: number;
-    maxVerifyRetries?: number;
-    retryBackoffMs?: number;
-    context: boolean;
-    auditLog: boolean;
-    output?: string;
-    sarif?: string;
-    json?: string;
-    csv?: string;
-    jsonl?: string;
-    agentRuntime?: string;
-    apiKey?: string;
-    baseUrl?: string;
-    enableExternalTasks: boolean;
-    enabledTasks?: string;
-    qualityGate: boolean;
-    failOnTp: boolean;
-    fresh: boolean;
-    cache: boolean;
-    resume?: string | boolean;
-    db?: string;
-  }) => {
-    const scanPath = path.resolve(repoPath);
-    const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
-
-    // Load config with optional project-level overlay, then apply CLI overrides.
-    const config = loadConfig(repoRoot);
-    if (opts.model) config.model = opts.model;
-    if (opts.ensembleModels) config.ensembleModels = parseScannersArg(opts.ensembleModels);
-    if (opts.triageModel) config.triageModel = opts.triageModel;
-    if (opts.enableClassifier) config.enableClassifier = true;
-    if (opts.classifierModel) config.classifierModel = opts.classifierModel;
-    if (opts.verify) config.verify = true;
-    if (opts.verifyModel) config.verifyModel = opts.verifyModel;
-    if (opts.pocHarness) config.pocHarness = true;
-    if (opts.pocHarnessModel) config.pocHarnessModel = opts.pocHarnessModel;
-    if (opts.classifierThreshold !== undefined) {
-      if (!Number.isFinite(opts.classifierThreshold) || opts.classifierThreshold < 0 || opts.classifierThreshold > 1) {
-        console.error("Error: --classifier-threshold must be a number between 0 and 1.");
-        process.exit(1);
-      }
-      config.classifierThreshold = opts.classifierThreshold;
-    }
-    if (opts.verifyMinConfidence !== undefined) {
-      if (!Number.isFinite(opts.verifyMinConfidence) || opts.verifyMinConfidence < 0 || opts.verifyMinConfidence > 1) {
-        console.error("Error: --verify-min-confidence must be a number between 0 and 1.");
-        process.exit(1);
-      }
-      config.verifyMinConfidence = opts.verifyMinConfidence;
-    }
-    if (opts.context === false) config.enableContextGathering = false;
-    if (opts.auditLog) config.auditLog = true;
-    if (opts.output) config.reportOutput = path.resolve(opts.output);
-    if (opts.sarif) config.sarifOutput = path.resolve(opts.sarif);
-    if (opts.json) config.jsonOutput = path.resolve(opts.json);
-    if (opts.csv) config.csvOutput = path.resolve(opts.csv);
-    if (opts.jsonl) config.jsonlOutput = path.resolve(opts.jsonl);
-    if (opts.agentRuntime) {
-      config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
-    }
-    if (opts.apiKey || opts.baseUrl) {
-      const runtimeConfig = {
-        ...(config.agentRuntimeConfig ?? {}),
-      };
-
-      if (opts.apiKey) {
-        const apiKey = opts.apiKey.trim();
-        runtimeConfig.apiKey = apiKey || undefined;
-      }
-
-      if (opts.baseUrl) {
-        const baseUrl = opts.baseUrl.trim();
-        runtimeConfig.baseUrl = baseUrl || undefined;
-      }
-
-      config.agentRuntimeConfig = runtimeConfig;
-    }
-    if (opts.enableExternalTasks) config.enableExternalTasks = true;
-    if (opts.enabledTasks) {
-      config.enabledTasks = [
-        ...(config.enabledTasks ?? []),
-        ...parseScannersArg(opts.enabledTasks),
-      ];
-    }
-
-    // Quality gate CLI overrides
-    if (opts.qualityGate) {
-      config.qualityGates = {
-        failOnHighSeverityTP: true,
-        failOnExploitable: true,
-        ...(config.qualityGates ?? {}),
-      };
-    }
-    if (opts.failOnTp) {
-      config.qualityGates = {
-        ...(config.qualityGates ?? {}),
-        failOnHighSeverityTP: true,
-      };
-    }
-    if (opts.triageMaxTurns !== undefined) {
-      if (!Number.isFinite(opts.triageMaxTurns) || opts.triageMaxTurns < 1) {
-        console.error("Error: --triage-max-turns must be a positive integer.");
-        process.exit(1);
-      }
-      config.triageMaxTurns = Math.floor(opts.triageMaxTurns);
-    }
-
-    if (opts.verifyMaxTurns !== undefined) {
-      if (!Number.isFinite(opts.verifyMaxTurns) || opts.verifyMaxTurns < 1) {
-        console.error("Error: --verify-max-turns must be a positive integer.");
-        process.exit(1);
-      }
-      config.verifyMaxTurns = Math.floor(opts.verifyMaxTurns);
-    }
-
-    if (opts.verifyConcurrency !== undefined) {
-      if (!Number.isFinite(opts.verifyConcurrency) || opts.verifyConcurrency < 1) {
-        console.error("Error: --verify-concurrency must be a positive integer.");
-        process.exit(1);
-      }
-      config.verifyConcurrency = Math.floor(opts.verifyConcurrency);
-    }
-
-    if (opts.verifyRefinementMaxIterations !== undefined) {
-      if (!Number.isFinite(opts.verifyRefinementMaxIterations) || opts.verifyRefinementMaxIterations < 1) {
-        console.error("Error: --verify-refinement-max-iterations must be a positive integer.");
-        process.exit(1);
-      }
-      config.verifyRefinementMaxIterations = Math.floor(opts.verifyRefinementMaxIterations);
-    }
-
-    if (opts.verifyReflectionInterval !== undefined) {
-      if (!Number.isFinite(opts.verifyReflectionInterval) || opts.verifyReflectionInterval < 1) {
-        console.error("Error: --verify-reflection-interval must be a positive integer.");
-        process.exit(1);
-      }
-      config.verifyReflectionInterval = Math.floor(opts.verifyReflectionInterval);
-    }
-
-    if (opts.pocHarnessMaxTurns !== undefined) {
-      if (!Number.isFinite(opts.pocHarnessMaxTurns) || opts.pocHarnessMaxTurns < 1) {
-        console.error("Error: --poc-harness-max-turns must be a positive integer.");
-        process.exit(1);
-      }
-      config.pocHarnessMaxTurns = Math.floor(opts.pocHarnessMaxTurns);
-    }
-
-    if (opts.pocHarnessConcurrency !== undefined) {
-      if (!Number.isFinite(opts.pocHarnessConcurrency) || opts.pocHarnessConcurrency < 1) {
-        console.error("Error: --poc-harness-concurrency must be a positive integer.");
-        process.exit(1);
-      }
-      config.pocHarnessConcurrency = Math.floor(opts.pocHarnessConcurrency);
-    }
-
-    if (opts.pocRefinementMaxIterations !== undefined) {
-      if (!Number.isFinite(opts.pocRefinementMaxIterations) || opts.pocRefinementMaxIterations < 1) {
-        console.error("Error: --poc-refinement-max-iterations must be a positive integer.");
-        process.exit(1);
-      }
-      config.pocRefinementMaxIterations = Math.floor(opts.pocRefinementMaxIterations);
-    }
-
-    if (opts.pocReflectionInterval !== undefined) {
-      if (!Number.isFinite(opts.pocReflectionInterval) || opts.pocReflectionInterval < 1) {
-        console.error("Error: --poc-reflection-interval must be a positive integer.");
-        process.exit(1);
-      }
-      config.pocReflectionInterval = Math.floor(opts.pocReflectionInterval);
-    }
-
-    if (config.pocHarness && config.verify !== true) {
-      console.error("Error: --poc-harness requires --verify.");
-      process.exit(1);
-    }
-
-    if (opts.maxTriageRetries !== undefined) {
-      if (!Number.isFinite(opts.maxTriageRetries) || opts.maxTriageRetries < 0) {
-        console.error("Error: --max-triage-retries must be a non-negative integer.");
-        process.exit(1);
-      }
-      config.maxTriageRetries = Math.floor(opts.maxTriageRetries);
-    }
-
-    if (opts.maxVerifyRetries !== undefined) {
-      if (!Number.isFinite(opts.maxVerifyRetries) || opts.maxVerifyRetries < 0) {
-        console.error("Error: --max-verify-retries must be a non-negative integer.");
-        process.exit(1);
-      }
-      config.maxVerifyRetries = Math.floor(opts.maxVerifyRetries);
-    }
-
-    if (opts.maxPocHarnessRetries !== undefined) {
-      if (!Number.isFinite(opts.maxPocHarnessRetries) || opts.maxPocHarnessRetries < 0) {
-        console.error("Error: --max-poc-harness-retries must be a non-negative integer.");
-        process.exit(1);
-      }
-      config.maxPocHarnessRetries = Math.floor(opts.maxPocHarnessRetries);
-    }
-
-    if (opts.retryBackoffMs !== undefined) {
-      if (!Number.isFinite(opts.retryBackoffMs) || opts.retryBackoffMs < 0) {
-        console.error("Error: --retry-backoff-ms must be a non-negative integer.");
-        process.exit(1);
-      }
-      config.retryBackoffMs = Math.floor(opts.retryBackoffMs);
-    }
-
-    const severity = opts.severity
-      ? opts.severity.split(",").map((s) => s.trim().toUpperCase())
-      : config.severity;
-
-    let scannersOverride = opts.scanners
-      ? parseScannersArg(opts.scanners)
-      : undefined;
-
-    // Auto-expand scanner aliases that map to AgentTask DAGs.
-    // This must run on the effective scanner list whether from CLI or config file.
-    const effectiveScanners = scannersOverride ?? [...config.scanners];
-    const { pluginScanners, enabledTasks: aliasExpandedTasks } = expandScannerSelections(effectiveScanners, config);
-    if (aliasExpandedTasks.length > 0) {
-      config.enabledTasks = [...(config.enabledTasks ?? []), ...aliasExpandedTasks];
-    }
-    if (scannersOverride) {
-      scannersOverride = pluginScanners;
-    } else {
-      config.scanners = pluginScanners;
-    }
-
-    const scanOpts: ScanOpts = {
-      severity,
-      maxFindings: opts.max,
-      excludePatterns: config.excludePatterns,
-      scanners: scannersOverride,
-      fresh: opts.fresh,
-    };
-
-    const registry = createDefaultRegistry();
-    try {
-      scanOpts.scanners = registry.resolveEnabled(scanOpts, config);
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
-    }
-
-    const runtimeBackend = config.agentRuntimeBackend ?? "pi-ai";
-    if (runtimeBackend === "pi-ai") {
-      const activeModels = resolveActivePiAiModels(
-        config,
-        scanOpts.scanners ?? [],
-        config.enabledTasks ?? [],
-      );
-
-      const missingCredentials = validatePiAiProviderCredentials(
-        activeModels,
-        {
-          anthropicApiKey: config.agentRuntimeConfig?.apiKey,
-        },
-      );
-
-      if (missingCredentials.length > 0) {
-        console.error("Error: missing API credentials for selected model provider(s):");
-        for (const entry of missingCredentials) {
-          console.error(
-            `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] `
-            + `(used by: ${entry.models.join(", ")})`,
-          );
-        }
-        if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
-          console.error(
-            "Tip: for Anthropic models, you can also set agentRuntimeConfig.apiKey "
-            + "or pass --api-key for this run.",
-          );
-        }
-        process.exit(1);
-      }
-
-      warnPiAiBackendApiKeys(activeModels, {
-        anthropicApiKey: config.agentRuntimeConfig?.apiKey,
-      });
-    }
-
-    try {
-      configureAgentRuntime(config);
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
-    }
-
-    // Configure rate limit registry with triage concurrency as the initial seed.
-    configureRateLimitRegistry(config.triageConcurrency);
-
-    // Disable LLM result cache when --fresh or --no-cache is passed.
-    if (opts.fresh || opts.cache === false) {
-      inflightCache.enabled = false;
-      inflightCache.invalidate();
-    }
-
-    // Set up DB.
-    const dbPath = opts.db ?? defaultDbPath(repoRoot);
-    const dbDir = path.dirname(dbPath);
-    if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
-
-    const repoId = path.resolve(repoRoot);
-
-    const db = initDb(dbPath);
-    let bus: ReturnType<typeof createBus> | undefined;
-    try {
-      bus = createBus(config);
-      const taskRegistry = await createDefaultTaskRegistry(registry, config, repoRoot);
-      await registerAllWorkers(bus, { registry, taskRegistry, db, config });
-    } catch (err) {
-      db.close();
-      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
-    }
-
-    // Register shutdown hooks for bus draining and DB close.
-    registerShutdownHook("bus-drain", async () => {
-      if (bus) {
-        try { await bus.close(); } catch { /* best-effort */ }
-      }
-    }, 1);
-    registerShutdownHook("db-close", async () => {
-      try { db.close(); } catch { /* best-effort */ }
-    }, 2);
-
-    let resumeRunId: string | undefined;
-    if (opts.resume !== undefined) {
-      if (opts.resume === true) {
-        const latest = getLatestResumableRun(db, repoId) ?? getLatestResumableRun(db, repoName);
-        if (!latest) {
-          console.error(`Error: no resumable runs found for repo "${repoId}".`);
-          process.exit(1);
-        }
-        resumeRunId = latest.runId;
-      } else if (typeof opts.resume === "string" && opts.resume.trim().length > 0) {
-        resumeRunId = opts.resume.trim();
-      }
-
-      if (!resumeRunId) {
-        console.error("Error: --resume received an invalid run id.");
-        process.exit(1);
-      }
-
-      const run = getRun(db, resumeRunId);
-      if (!run) {
-        console.error(`Error: run "${resumeRunId}" was not found.`);
-        process.exit(1);
-      }
-
-      if (run.repo !== repoId && run.repo !== repoName) {
-        console.error(
-          `Error: run "${resumeRunId}" belongs to repo "${run.repo}", not "${repoId}".`,
-        );
-        process.exit(1);
-      }
-
-      if (run.status === "complete") {
-        console.error(`Error: run "${resumeRunId}" is already complete and cannot be resumed.`);
-        process.exit(1);
-      }
-    }
-
-    const runId = resumeRunId ?? generateRunId();
-    if (!resumeRunId) {
-      createRun(db, runId, repoId, config, scanOpts);
-    }
-
-    const context = {
-      runId,
-      repoRoot,
-      scanPath,
-      repoName,
-      dbPath,
-    };
-
-    const pipelineComplete = bus!
-      .waitFor<PipelineCompleteEvent>(
-        "pipeline:complete",
-        (event) => event.meta.runId === runId,
-      )
-      .then((event) => ({ kind: "complete" as const, event }));
-
-    const pipelineError = bus!
-      .waitFor<PipelineErrorEvent>(
-        "pipeline:error",
-        (event) => event.meta.runId === runId && event.payload.fatal,
-      )
-      .then((event) => ({ kind: "error" as const, event }));
-
-    try {
-      await bus!.publish(
-        createEvent("pipeline:start", runId, {
-          context,
-          config,
-          scanOpts,
-          resumeRunId,
-        }),
-      );
-
-      const outcome = await Promise.race([pipelineComplete, pipelineError]);
-      if (outcome.kind === "error") {
-        const { error: errMsg, errorCategory } = outcome.event.payload;
-        console.error(`Error: ${errMsg}`);
-        if (errorCategory === "auth") {
-          console.error("Hint: Check your API key or credentials.");
-        } else if (errorCategory === "rate_limit") {
-          console.error("Hint: Reduce concurrency or wait before retrying.");
-        } else if (errorCategory === "budget") {
-          console.error("Hint: Increase your cost budget or use a cheaper model.");
-        }
-        process.exitCode = 1;
-      } else if (outcome.kind === "complete") {
-        const { stats } = outcome.event.payload;
-        if (stats.qualityGateResult) {
-          printQualityGateResult(stats.qualityGateResult);
-        }
-        if (stats.deadLetterCount && stats.deadLetterCount > 0) {
-          console.error(
-            `\n${stats.deadLetterCount} finding(s) failed all triage retries. Run \`kuzushi explain <fingerprint>\` for details.`,
-          );
-        }
-      }
-    } finally {
-      try {
-        await bus!.close();
-      } finally {
-        db.close();
-      }
-    }
-  });
+  .action(wrapCliAction(runScanCommand));
 
 // ── compare-runs ──────────────────────────────────────────────────────────
 
@@ -802,7 +129,7 @@ program
   .command("compare-runs <id1> <id2>")
   .description("Compare metrics and assertions between two pipeline runs")
   .option("-r, --repo <path>", "Repository path", ".")
-  .action(async (id1: string, id2: string, options: { repo: string }) => {
+  .action(wrapCliAction(async (id1: string, id2: string, options: { repo: string }) => {
     const { root } = resolveRepo(options.repo);
     const dbPath = defaultDbPath(root);
     const db = initDb(dbPath);
@@ -810,8 +137,7 @@ program
       const run1 = getRun(db, id1);
       const run2 = getRun(db, id2);
       if (!run1 || !run2) {
-        console.error(`Run not found: ${!run1 ? id1 : id2}`);
-        process.exit(1);
+        throw new CliUsageError(`Run not found: ${!run1 ? id1 : id2}`);
       }
       // Parse metrics
       const metrics1 = run1.metricsJson ? JSON.parse(run1.metricsJson) : null;
@@ -866,7 +192,7 @@ program
     } finally {
       db.close();
     }
-  });
+  }));
 
 // ── config get/set/unset ──────────────────────────────────────────────────
 
@@ -878,7 +204,7 @@ configCmd
   .command("get")
   .description("Get a config value")
   .argument("[key]", "Config key (omit to show all)")
-  .action((key?: string) => {
+  .action(wrapCliAction((key?: string) => {
     if (!key) {
       const config = loadConfig();
       console.log(JSON.stringify(config, null, 2));
@@ -886,41 +212,30 @@ configCmd
     }
     const value = getConfigValue(key);
     if (value === undefined) {
-      console.error(`Unknown config key: ${key}`);
-      process.exit(1);
+      throw new CliUsageError(`Unknown config key: ${key}`);
     }
     console.log(typeof value === "string" ? value : JSON.stringify(value));
-  });
+  }));
 
 configCmd
   .command("set")
   .description("Set a config value")
   .argument("<key>", "Config key")
   .argument("<value>", "Value to set")
-  .action((key: string, value: string) => {
-    try {
-      setConfigValue(key, value);
-      console.log(`${key} = ${JSON.stringify(getConfigValue(key))}`);
-      maybeWarnPlaintextApiKeyStorage(key, value);
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
-    }
-  });
+  .action(wrapCliAction((key: string, value: string) => {
+    setConfigValue(key, value);
+    console.log(`${key} = ${JSON.stringify(getConfigValue(key))}`);
+    maybeWarnPlaintextApiKeyStorage(key, value);
+  }));
 
 configCmd
   .command("unset")
   .description("Reset a config key to its default")
   .argument("<key>", "Config key")
-  .action((key: string) => {
-    try {
-      unsetConfigValue(key);
-      console.log(`${key} reset to default: ${JSON.stringify(getConfigValue(key))}`);
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
-    }
-  });
+  .action(wrapCliAction((key: string) => {
+    unsetConfigValue(key);
+    console.log(`${key} reset to default: ${JSON.stringify(getConfigValue(key))}`);
+  }));
 
 configCmd
   .command("path")
@@ -928,6 +243,36 @@ configCmd
   .action(() => {
     console.log(configPath());
   });
+
+configCmd
+  .command("validate")
+  .description("Validate the effective Kuzushi configuration")
+  .option("-r, --repo <path>", "Repository path for project-level config overlay", ".")
+  .action(wrapCliAction((opts: { repo: string }) => {
+    const { root } = resolveRepo(opts.repo);
+    const config = loadConfig(root);
+    const issues = validateKuzushiConfig(config);
+    const warnings = issues.filter((issue) => issue.severity === "warning");
+    const errors = issues.filter((issue) => issue.severity === "error");
+
+    if (warnings.length === 0 && errors.length === 0) {
+      console.log(`Configuration is valid for ${root}`);
+      return;
+    }
+
+    if (warnings.length > 0) {
+      console.log("Warnings:");
+      for (const issue of warnings) {
+        console.log(`  - ${formatConfigValidationIssue(issue)}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new CliUsageError("Errors:", {
+        details: errors.map((issue) => `  - ${formatConfigValidationIssue(issue)}`),
+      });
+    }
+  }));
 
 // ── task list/info/validate ────────────────────────────────────────────────
 
@@ -991,15 +336,14 @@ taskCmd
   .description("Show detailed information about a task")
   .argument("<id>", "Task ID")
   .option("-r, --repo <path>", "Repository path", ".")
-  .action(async (id: string, opts: { repo: string }) => {
+  .action(wrapCliAction(async (id: string, opts: { repo: string }) => {
     const { root } = resolveRepo(opts.repo);
     const config = loadConfig(root);
     const registry = createDefaultRegistry();
     const taskRegistry = await createDefaultTaskRegistry(registry, config, root);
 
     if (!taskRegistry.has(id)) {
-      console.error(`Task "${id}" not found.`);
-      process.exit(1);
+      throw new CliUsageError(`Task "${id}" not found.`);
     }
 
     const task = taskRegistry.get(id);
@@ -1037,13 +381,13 @@ taskCmd
         }
       }
     }
-  });
+  }));
 
 taskCmd
   .command("validate")
   .description("Validate an external task file and its manifest")
   .argument("<path>", "Path to task file")
-  .action(async (filePath: string) => {
+  .action(wrapCliAction(async (filePath: string) => {
     const { parseTaskSpecifier, loadExternalTask } = await import("./agents/task-loader.js");
     const { loadManifestForTaskFile, checkRequirements } = await import("./agents/task-manifest.js");
 
@@ -1053,11 +397,9 @@ taskCmd
     const manifestResult = loadManifestForTaskFile(absPath);
     if (manifestResult) {
       if (!manifestResult.valid) {
-        console.error("Manifest validation failed:");
-        for (const err of manifestResult.errors ?? []) {
-          console.error(`  - ${err}`);
-        }
-        process.exit(1);
+        throw new CliUsageError("Manifest validation failed:", {
+          details: (manifestResult.errors ?? []).map((err) => `  - ${err}`),
+        });
       }
       console.log(`Manifest: valid (${manifestResult.manifest!.id} v${manifestResult.manifest!.version})`);
 
@@ -1088,10 +430,9 @@ taskCmd
       await loadExternalTask(spec, path.dirname(absPath));
       console.log("Task module: valid");
     } catch (err) {
-      console.error(`Task module validation failed: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
+      throw new CliUsageError(`Task module validation failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  });
+  }));
 
 // ── patch ─────────────────────────────────────────────────────────────────
 
@@ -1106,7 +447,7 @@ program
   .option("--model <model>", "Model to use for patch synthesis")
   .option("--max-turns <n>", "Max turns for patch synthesis agent", parseInt)
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
-  .action(async (repoPath: string, opts: {
+  .action(wrapCliAction(async (repoPath: string, opts: {
     fingerprint: string;
     buildCmd?: string;
     testCmd?: string;
@@ -1130,12 +471,14 @@ program
 
     const db = initDb(dbPath);
     try {
+      const runtime = configureAgentRuntime(config);
       const { runPatchPipeline } = await import("./patch.js");
       const result = await runPatchPipeline(db, {
         fingerprint: opts.fingerprint,
         repoRoot,
         repoName,
         model,
+        runtime,
         maxIterations: opts.maxIterations,
         buildCommand: opts.buildCmd ?? null,
         testCommand: opts.testCmd ?? null,
@@ -1166,13 +509,10 @@ program
       }
 
       process.exit(result.patchResult.status === "SOUND" ? 0 : 1);
-    } catch (err) {
-      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
     } finally {
       try { db.close(); } catch { /* best-effort */ }
     }
-  });
+  }));
 
 // ── list-tasks (shorthand) ────────────────────────────────────────────────
 
