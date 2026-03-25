@@ -1,86 +1,150 @@
 <img src="kuzushi.png" alt="Kuzushi" width="200" />
 
-# Kuzushi — Agentic SAST Orchestrator
+# Kuzushi — AI Security Scanner That Only Shows You Real Vulnerabilities
 
 [![CI](https://github.com/allsmog/Kuzushi/actions/workflows/ci.yml/badge.svg)](https://github.com/allsmog/Kuzushi/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/kuzushi)](https://www.npmjs.com/package/kuzushi)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Agentic SAST orchestrator. Runs security analysis tasks — scanners, AI triage, exploit verification, and more — as a dependency graph on an event-driven pipeline, then tells you what's actually dangerous.
+SAST tools cry wolf. Semgrep finds 500 issues in your codebase. 480 of them are false positives. You spend hours triaging a wall of noise and still miss the real vulnerability on line 247.
+
+Kuzushi runs the same scanners, then sends an AI agent to investigate each finding — reading the actual code, tracing data flow, checking for sanitization. It tells you which findings are real, which are noise, and optionally proves exploitability by constructing a working PoC.
+
+```sh
+npx kuzushi /path/to/your/repo
+```
+
+No install. No config files. Just point it at a repo.
+
+<!-- TODO: Add terminal recording / asciinema GIF here -->
 
 ## Quick Start
 
-Prereqs: Node 22+, an API key for at least one supported LLM provider.
+Prereqs: Node 22+, an API key for at least one LLM provider.
 
-**With Anthropic (default):**
+```sh
+# With Anthropic (default)
+export ANTHROPIC_API_KEY=sk-ant-...
+npx kuzushi /path/to/your/repo
 
-1. Get an API key at https://console.anthropic.com/
-2. Set it: `export ANTHROPIC_API_KEY=sk-ant-...`
-3. Scan: `npx kuzushi /path/to/your/repo`
+# With OpenAI
+export OPENAI_API_KEY=sk-...
+npx kuzushi /path/to/repo --model openai:gpt-4o
 
-**With OpenAI, Google, or other providers:**
+# With Google, Groq, Mistral, or 15+ other providers
+npx kuzushi /path/to/repo --model google:gemini-2.0-flash
+```
 
-1. Set the provider key: `export OPENAI_API_KEY=sk-...` (or `GEMINI_API_KEY`, etc.)
-2. Scan: `npx kuzushi /path/to/repo --model openai:gpt-4o`
+Kuzushi auto-downloads Opengrep if you don't have a scanner installed. Zero dependencies to manage.
 
-That's it. Kuzushi auto-downloads Opengrep if you don't have a scanner installed. To add CodeQL, see [CodeQL Setup](#codeql-setup).
+## The Problem
 
-## What It Does
+**SAST scanners alone** have high recall but terrible precision — they flag everything that *could* be a vulnerability, drowning you in false positives. Teams burn hours triaging, develop alert fatigue, and eventually stop looking.
 
-- **Runs Opengrep/Semgrep** with severity-ranked rule matching
-- **Runs configurable scanners** (`semgrep`, `agentic`, `codeql`) in one orchestration flow
-- **Gathers repo context** — auto-detects language, frameworks, auth patterns, ORMs, and sanitization libraries to enrich AI analysis
-- **Scores and deduplicates** findings by severity, likelihood, impact, and subcategory — cross-scanner normalization merges equivalent findings from different scanners at the same location
-- **AI-triages selected findings** — after dedupe/resume/max filters, agent investigates with repo tools, assigns tp/fp/needs_review with confidence and rationale
-- **Verifies exploitability** — optional post-triage phase constructs concrete proof-of-concept payloads for true positives (e.g., SQL injection strings, XSS vectors)
-- **Generates PoC harnesses** — optional post-verification phase produces runnable exploit scripts (TypeScript, Python, etc.) for verified-exploitable findings
-- **Dynamic analysis** — optional post-PoC phase executes harnesses locally to confirm or reject findings through actual exploitation, with coverage-guided iteration support (enable with `dynamicAnalysisEnabled`)
-- **Crypto behavioral testing** — optional phase generates and executes behavioral test harnesses (timing, ECB mode, weak hash, weak PRNG, key length, edge-case) for crypto misuse findings in a Docker sandbox, producing `vulnerable`/`secure`/`inconclusive` verdicts (enable with `cryptoBehavioralTestEnabled`)
-- **Manual patch synthesis** — `kuzushi patch <repo> --fingerprint <fp>` synthesizes, applies, and validates security patches in disposable git worktrees without touching the live checkout
-- **Diff-aware taint analysis** — when `taintDiffBase` is set, taint analysis narrows to passes affected by changed files; supports `delta` mode (only findings intersecting the diff) and `baseline` mode (cached + rerun merge)
-- **Vendor-agnostic LLM runtime** — swap between Anthropic, OpenAI, Google, and 15+ other providers via the `pi-ai` backend with zero consumer-code changes
-- **Taint analysis integration** — multi-pass CodeQL-based source/sink labeling pipeline with LLM-assisted classification and deterministic library generation
-- **Structured evidence** — taintPath, proofState, and engineProvenance persist end-to-end from scan through store, resume, and all export formats (JSON, SARIF, Markdown, CSV, JSONL)
-- **Multi-lens detection** — SSRF, NoSQL injection, and template injection tasks run parallel focused lenses (local sink + cross-function dataflow) and merge through dedup for broader coverage
-- **Reachability-assisted ranking** — optional post-scan reachability check penalizes unreachable code before triage (enable with `callGraphAssistEnabled`)
-- **Call-graph-assist** — enriches high-score findings with call-chain evidence from code intelligence without additional LLM calls
-- **Pre-verification ranking** — verification candidates sorted by score, triage confidence, and evidence quality so highest-value findings verify first
-- **Tracks cost** — per-finding triage, verification, and PoC harness costs are persisted and displayed in the summary
-- **Extended metrics** — classifier drops, corroborated clusters, verification outcomes, and PoC generation outcomes flow from pipeline stats to reports
-- **Event-driven pipeline** — pluggable message bus interface with the in-process backend supported in the stable surface today
-- **DAG-based task orchestration** — tasks declare dependencies, run in parallel groups, pass outputs downstream
-- **Extensible agent framework** — `AgentTask` interface for adding new analysis types (threat modeling, binary analysis, etc.)
-- **Persists results** in SQLite — resume interrupted scans, skip already-triaged findings
-- **Resumable runs** — checkpoint pipeline state to SQLite; `--resume` picks up where a crashed or interrupted scan left off
-- **Retry with backoff** — transient agent failures are retried automatically with exponential backoff
-- **Audit logging** — optional JSONL audit trail of every agent decision for debugging and accountability
-- **Multiple export formats** — markdown, SARIF v2.1.0, JSON, CSV, and JSONL reports for CI pipelines and team review
-- **Prints a styled report** showing only what matters: true positives, needs-review items, and verified exploits with PoC payloads
+**LLMs alone** can reason about code but hallucinate when scanning from scratch — 95%+ false positive rate when you ask "find vulnerabilities in this repo."
+
+**Kuzushi combines both.** SAST signal narrows the search space. AI reasoning eliminates false positives. The result: near-human researcher agreement rates on vulnerability classification.
+
+## What You Get
+
+For each finding, Kuzushi produces:
+
+- **Verdict** — `true_positive`, `false_positive`, or `needs_review`
+- **Confidence** — 0.0 to 1.0
+- **Rationale** — why the agent reached that verdict, referencing specific code lines
+- **Verification steps** — 2-6 actionable steps a human reviewer can follow
+- **Fix suggestion** — suggested patch when applicable
+- **PoC exploit** (with `--verify`) — a concrete proof-of-concept payload proving the vulnerability is exploitable
+- **Cost** — per-finding triage and verification cost in USD
+
+The terminal report shows true positives first, then needs-review items. False positives are counted but hidden. You only see what matters.
 
 ## How It Works
 
-Semgrep/Opengrep catches syntactic patterns but can't verify data flow or intent. LLMs can reason about code but hallucinate when scanning from scratch (95%+ false positive rate). Kuzushi combines both: SAST signal narrows the search space, LLM reasoning eliminates false positives. This hybrid approach matches human researcher agreement rates.
+```
+  ┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────┐
+  │   Scanners   │────▶│  AI Triage   │────▶│ Verification │────▶│  Report  │
+  │ Semgrep      │     │ Investigate  │     │ Construct    │     │ TP only  │
+  │ CodeQL       │     │ each finding │     │ PoC exploits │     │ + export │
+  │ Agentic      │     │ with context │     │ (optional)   │     │          │
+  └─────────────┘     └──────────────┘     └──────────────┘     └──────────┘
+```
 
-Under the hood, Kuzushi uses an event-driven architecture with a DAG-based task orchestrator:
+1. **Context gathering** — auto-detects your tech stack, frameworks, auth patterns, ORMs, and sanitization libraries
+2. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently
+3. **Deduplication** — fingerprints and merges equivalent findings across scanners
+4. **AI triage** — an agent investigates each finding with full repo context, reads the code, traces data flow, and classifies it
+5. **Verification** (optional) — constructs concrete PoC exploit payloads for true positives
+6. **PoC harness generation** (optional) — produces runnable exploit scripts
+7. **Dynamic analysis** (optional) — executes harnesses to confirm exploitability
+8. **Report** — terminal display + export to SARIF, Markdown, JSON, CSV, or JSONL
 
-1. **Context gathering** (optional, enabled by default) — the context-gatherer task analyzes the repo structure (package.json, go.mod, etc.) to identify the tech stack, frameworks, and security-relevant libraries.
-2. **Pipeline starts** — the orchestrator resolves enabled tasks into a dependency graph and groups them into parallel stages.
-3. **Scanners run** — scanner tasks (Semgrep, CodeQL, Agentic, etc.) execute concurrently within their stage, emitting findings as typed events on the message bus.
-4. **Results gate downstream tasks** — the orchestrator waits for each stage to complete before starting dependent stages. Upstream outputs are forwarded to dependent tasks via `TaskContext`.
-5. **Triage stage** — findings are deduplicated (fingerprint + cross-scanner location/CWE/rule normalization), ranked, and sent to an LLM for semantic verification with configurable concurrency. The repo context from step 1 enriches every triage prompt.
-6. **Verification stage** (optional) — triaged findings that pass verification gates (`verifyVerdicts`, scanner-level `scannerConfig.<id>.verify`, and `verifyMinConfidence`) are sent to a verification agent that attempts to construct concrete PoC exploit payloads.
-7. **PoC harness generation** (optional) — verified-exploitable findings are sent to a harness generator that produces runnable exploit scripts with syntax validation.
-8. **Report** — final results are persisted, rendered to terminal, and optionally exported as markdown, SARIF, JSON, CSV, or JSONL.
+## CI Integration
 
-All communication happens through a transport-agnostic `MessageBus` interface. The default in-process bus works out of the box, and it is the only supported transport in the stable build today.
+### GitHub Actions
 
-## Package Surface
+```yaml
+name: Security Scan
+on: [push, pull_request]
+jobs:
+  kuzushi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx kuzushi . --sarif results.sarif --quality-gate --fail-on-tp
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+```
 
-Kuzushi is published as a CLI-first package. The supported npm surface is the executable plus the root package export; internal modules under `dist/*` and `src/*` are not a stable API contract and may change between releases.
+### Quality Gates
 
-Release builds are expected to come from a clean compile into `dist/`. `pnpm build` now cleans `dist/` first, `prepack` rebuilds automatically, and `pnpm verify:pack` runs `npm pack --dry-run` so stale artifacts do not get published.
+```sh
+kuzushi <repo> --quality-gate         # fail CI on threshold violations
+kuzushi <repo> --fail-on-tp           # fail if any high/critical TP is found
+kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
+```
 
-## Commands
+## Key Features
+
+**Vendor-agnostic LLM runtime** — works with Anthropic, OpenAI, Google, Groq, Mistral, and 15+ other providers. Swap models at runtime with `--model provider:modelId`. Use cheaper models for triage, premium models for verification.
+
+**Exploit verification** — goes beyond classification. Constructs concrete PoC payloads (SQL injection strings, XSS vectors, etc.) that prove a finding is exploitable, not just theoretically possible.
+
+**Crypto behavioral testing** — generates and executes behavioral test harnesses in a Docker sandbox for crypto misuse findings. Detects timing side-channels, ECB mode, weak hashes, weak PRNGs, and more.
+
+**Diff-aware taint analysis** — narrows analysis to files changed since a base branch. Run `--taint-diff-base main` in CI to only analyze what's new in the PR.
+
+**Resumable runs** — checkpoints pipeline state to SQLite. Interrupted scan? `--resume` picks up exactly where it left off.
+
+**Patch synthesis** — `kuzushi patch <repo> --fingerprint <fp>` generates and validates security patches in disposable git worktrees without touching your working copy.
+
+**Audit logging** — optional JSONL audit trail of every agent decision for debugging, accountability, and compliance records.
+
+## Scanner Plugins
+
+| Scanner | Description | Auto-download |
+|---------|-------------|---------------|
+| `semgrep` (default) | Traditional SAST via Opengrep/Semgrep | Yes |
+| `codeql` | Semantic dataflow/taint analysis via GitHub CodeQL CLI | No (opt-in) |
+| `agentic` | AI-driven scanner — LLM with read-only repo tools | N/A |
+| `taint-analysis` | Multi-pass CodeQL source/sink labeling with LLM-assisted classification | No (opt-in) |
+
+```sh
+kuzushi <repo> --scanners semgrep,codeql    # run multiple scanners
+kuzushi <repo> --scanners agentic           # AI-only scan
+```
+
+---
+
+<details>
+<summary><strong>All Commands</strong></summary>
 
 ### Scan (default)
 
@@ -100,17 +164,6 @@ kuzushi <repo> --db ./my.sqlite3      # custom database path
 kuzushi <repo> --resume               # resume the most recent interrupted run
 kuzushi <repo> --resume <run-id>      # resume a specific run by ID
 ```
-
-### Vendor-Agnostic Runtime
-
-```
-kuzushi <repo> --model openai:gpt-4o
-kuzushi <repo> --model google:gemini-2.0-flash
-kuzushi <repo> --model anthropic:claude-sonnet-4-6
-kuzushi config set model openai:gpt-4o
-```
-
-Model strings use `provider:modelId` format. The default `pi-ai` backend implements its own agentic tool-calling loop with local Read/Glob/Grep tools, structured output enforcement, budget tracking, and abort support. All consumer code (triage, verify, PoC harness, scanners) works unchanged — the `AgentRuntime` abstraction handles it.
 
 ### Verification
 
@@ -139,7 +192,7 @@ kuzushi <repo> --verify --dynamic-analysis --dynamic-max-candidates 10
 kuzushi <repo> --verify --dynamic-analysis --dynamic-min-score 8
 ```
 
-### Patch Synthesis (manual)
+### Patch Synthesis
 
 ```
 kuzushi patch <repo> --fingerprint <fp>                        # synthesize and validate a patch
@@ -152,8 +205,6 @@ kuzushi patch <repo> --fingerprint <fp> --test-cmd "npm test" --max-iterations 5
 ```
 kuzushi <repo> --crypto-behavioral-test                        # generate & run behavioral tests for crypto misuse findings
 ```
-
-When enabled, Kuzushi generates executable test harnesses (TypeScript, Python) for cryptographic misuse findings detected by the `secrets-crypto-detect` task. Harnesses are executed in a Docker sandbox and produce verdicts: `vulnerable`, `secure`, `inconclusive`, or `error`. Supports 6 test types: timing side-channels, ECB mode detection, weak hashes, weak PRNGs, insufficient key lengths, and edge-case behavior.
 
 ### Diff-Aware Taint
 
@@ -174,14 +225,6 @@ kuzushi <repo> --jsonl results.jsonl  # export JSONL report
 kuzushi <repo> --audit-log            # write agent activity to .kuzushi/runs/{runId}/
 kuzushi <repo> --verbose              # show debug-level runtime diagnostics
 kuzushi <repo> --no-context           # disable repo context gathering
-```
-
-### CI / Quality Gates
-
-```
-kuzushi <repo> --quality-gate         # fail CI on threshold violations
-kuzushi <repo> --fail-on-tp           # fail if any high/critical TP is found
-kuzushi <repo> --enabled-tasks taint-analysis-preflight,taint-analysis-label,taint-analysis-run  # enable specific tasks
 ```
 
 ### Retry
@@ -218,7 +261,10 @@ Global config lives at `~/.kuzushi/config.json`. Optional project overrides can 
 
 Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config files. Prefer `--api-key` for one-off runs or `ANTHROPIC_API_KEY` from your shell/secret manager.
 
-## Configuration
+</details>
+
+<details>
+<summary><strong>Configuration Reference</strong></summary>
 
 | Key | Default | Description |
 | --- | --- | --- |
@@ -262,7 +308,7 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `retryBackoffMs` | `5000` | Initial retry backoff delay in ms |
 | `retryBackoffMultiplier` | `2` | Exponential backoff multiplier |
 
-Example:
+Example config:
 
 ```json
 {
@@ -290,25 +336,10 @@ Example:
 | `OPENAI_API_KEY` | When using `openai:*` models | OpenAI API key for pi-ai backend |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | When using `google:*` models | Google API key for pi-ai backend |
 
-## Scanner Plugins
+</details>
 
-- `semgrep`: traditional SAST via Opengrep/Semgrep binary
-- `codeql`: semantic dataflow/taint analysis via GitHub CodeQL CLI (SARIF output)
-- `agentic`: AI-driven agentic scanner — LLM with read-only repo tools via any supported runtime
-- `taint-analysis`: multi-pass CodeQL source/sink labeling pipeline — runs preflight (database creation, candidate extraction), LLM-assisted labeling, and deterministic library/query generation + analysis
-
-## Semgrep Resolution
-
-For the `semgrep` plugin, Kuzushi finds a scanner binary in this order:
-
-1. `opengrep` on your PATH
-2. `semgrep` on your PATH
-3. Previously downloaded binary at `~/.kuzushi/bin/opengrep`
-4. Auto-downloads Opengrep from GitHub releases (~40 MB, cached for future runs)
-
-No pip, no brew, no manual install needed.
-
-## CodeQL Setup
+<details>
+<summary><strong>CodeQL Setup</strong></summary>
 
 The `codeql` scanner requires the [CodeQL CLI](https://github.com/github/codeql-cli-binaries/releases) to be installed separately. Unlike Semgrep, it is **not auto-downloaded** (the CLI is ~500 MB and requires accepting GitHub's license).
 
@@ -342,25 +373,10 @@ CodeQL builds a database from your source code before running queries. You can s
 kuzushi config set scannerConfig.codeql.dbPath ./codeql-db
 ```
 
-## Pi-AI Runtime
+</details>
 
-The `pi-ai` backend uses `@mariozechner/pi-ai` to provide vendor-agnostic LLM access. It supports 15+ providers (Anthropic, OpenAI, Google, Groq, Mistral, etc.) through a single interface.
-
-Kuzushi implements an internal agentic loop on top of pi-ai:
-
-1. **Tool-calling loop** — call model, parse tool calls, execute tools, feed results back, repeat until stop or max turns
-2. **Local tool implementations** — Read (file reader with line numbers), Glob (Node 22+ `globSync`), Grep (regex search across files)
-3. **Structured output** — system prompt injection + post-hoc JSON extraction from fenced code blocks or raw text
-4. **Safety controls** — max turns, budget enforcement, abort signal, permission gating via `canUseTool`
-
-```sh
-# Use with any supported provider:
-OPENAI_API_KEY=... kuzushi <repo> --model openai:gpt-4o
-GEMINI_API_KEY=... kuzushi <repo> --model google:gemini-2.0-flash
-ANTHROPIC_API_KEY=... kuzushi <repo> --model anthropic:claude-sonnet-4-6
-```
-
-## Taint Analysis Setup
+<details>
+<summary><strong>Taint Analysis Setup</strong></summary>
 
 The `taint-analysis` scanner is a multi-pass CodeQL-based pipeline that uses LLM-assisted classification to label sources, sinks, sanitizers, and summaries. It requires:
 
@@ -403,60 +419,31 @@ Relevant `scannerConfig["taint-analysis"]` options:
 - `refinementDeltaOnly`: triage only changed findings after refinement (default `true`)
 - `refinementModel`: optional model override for refinement stage wiring
 
-## Output
+</details>
 
-Results are stored in SQLite at `<repo>/.kuzushi/findings.sqlite3`. Each finding includes:
+<details>
+<summary><strong>Pi-AI Runtime</strong></summary>
 
-- **verdict**: `tp` (true positive), `fp` (false positive), or `needs_review`
-- **confidence**: 0.0-1.0
-- **rationale**: why the LLM reached that verdict, referencing specific code
-- **verification_steps**: 2-6 steps a human reviewer can follow
-- **fix_patch**: suggested fix (when applicable)
-- **exploitability** (with `--verify`): whether a concrete exploit was constructed, PoC payload, attack vector, and preconditions
-- **cost**: per-finding triage and verification cost in USD
+The `pi-ai` backend uses `@mariozechner/pi-ai` to provide vendor-agnostic LLM access. It supports 15+ providers (Anthropic, OpenAI, Google, Groq, Mistral, etc.) through a single interface.
 
-The terminal report shows true positives first, then needs-review items. False positives are counted but hidden. Verified exploitable findings are highlighted with their PoC payloads.
+Kuzushi implements an internal agentic loop on top of pi-ai:
 
-Export options: `--output report.md` (markdown), `--sarif results.sarif` (SARIF v2.1.0), `--json results.json`, `--csv results.csv`, `--jsonl results.jsonl`.
+1. **Tool-calling loop** — call model, parse tool calls, execute tools, feed results back, repeat until stop or max turns
+2. **Local tool implementations** — Read (file reader with line numbers), Glob (Node 22+ `globSync`), Grep (regex search across files)
+3. **Structured output** — system prompt injection + post-hoc JSON extraction from fenced code blocks or raw text
+4. **Safety controls** — max turns, budget enforcement, abort signal, permission gating via `canUseTool`
 
-## SARIF / GitHub Code Scanning
-
-Kuzushi can emit SARIF v2.1.0 directly. GitHub Code Scanning ingests SARIF and creates inline annotations.
-
-```
-kuzushi <repo> --sarif results.sarif
-
-gh api \
-  -X POST \
-  repos/OWNER/REPO/code-scanning/sarifs \
-  -f commit_sha="$(git rev-parse HEAD)" \
-  -f ref="refs/heads/$(git rev-parse --abbrev-ref HEAD)" \
-  -f sarif="$(gzip -c results.sarif | base64 | tr -d '\n')"
+```sh
+# Use with any supported provider:
+OPENAI_API_KEY=... kuzushi <repo> --model openai:gpt-4o
+GEMINI_API_KEY=... kuzushi <repo> --model google:gemini-2.0-flash
+ANTHROPIC_API_KEY=... kuzushi <repo> --model anthropic:claude-sonnet-4-6
 ```
 
-## Resume Support
+</details>
 
-Kuzushi fingerprints every finding (content-based SHA-256 that survives line shifts). Re-running a scan skips already-triaged findings automatically. Use `--fresh` to start over.
-
-For interrupted runs, use `--resume` to pick up where the pipeline left off. Kuzushi checkpoints pipeline state (scan findings, triage progress, verification progress) to SQLite. On resume, completed phases are skipped and only remaining work is executed.
-
-```
-kuzushi <repo> --resume               # resume most recent interrupted run
-kuzushi <repo> --resume abc-123       # resume a specific run by ID
-```
-
-## Audit Logging
-
-With `--audit-log`, Kuzushi writes a structured audit trail to `.kuzushi/runs/{runId}/`:
-
-- `triage.jsonl` — every tool call, reasoning step, and verdict from triage agents
-- `verify.jsonl` — same for verification agents
-- `run.json` — run config and scan options
-- `stats.json` — final pipeline statistics
-
-Use this to debug verdicts, review agent reasoning, or build compliance records.
-
-## Architecture
+<details>
+<summary><strong>Architecture</strong></summary>
 
 Kuzushi is built on three core abstractions:
 
@@ -469,6 +456,26 @@ Kuzushi is built on three core abstractions:
 Existing `ScannerPlugin` implementations (Semgrep, Agentic) are adapted into `AgentTask` via `adaptScannerPlugin()`, so the scanner plugin API remains stable.
 
 See [AGENTS.md](AGENTS.md) for the full developer guide on adding new agent tasks.
+
+### Package Surface
+
+Kuzushi is published as a CLI-first package. The supported npm surface is the executable plus the root package export; internal modules under `dist/*` and `src/*` are not a stable API contract and may change between releases.
+
+Release builds are expected to come from a clean compile into `dist/`. `pnpm build` now cleans `dist/` first, `prepack` rebuilds automatically, and `pnpm verify:pack` runs `npm pack --dry-run` so stale artifacts do not get published.
+
+</details>
+
+## Output
+
+Results are stored in SQLite at `<repo>/.kuzushi/findings.sqlite3`. Export to any format:
+
+```sh
+kuzushi <repo> --output report.md     # Markdown
+kuzushi <repo> --sarif results.sarif  # SARIF v2.1.0 (GitHub Code Scanning compatible)
+kuzushi <repo> --json results.json    # JSON
+kuzushi <repo> --csv results.csv      # CSV
+kuzushi <repo> --jsonl results.jsonl  # JSONL
+```
 
 ## Development
 
@@ -487,8 +494,6 @@ pnpm benchmark:freeze                 # freeze current benchmark results as base
 pnpm benchmark:diff                   # diff current results against frozen baseline
 pnpm benchmark:regression             # CI regression check against baseline
 ```
-
-Tests are organized by subsystem: `tests/bus/` for orchestrator, workers, and event bus tests, `tests/agents/` for DAG, task registry, and context-gatherer tests, and `tests/` for scanners, triage, verification, store, config, retry, and report.
 
 ## Troubleshooting
 
