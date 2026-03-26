@@ -1843,6 +1843,9 @@ export class PipelineOrchestrator {
 
     state.stageTimestamps.triageEnd = new Date().toISOString();
 
+    // Memory: release triage queue — items have been processed and results are in the DB.
+    state.triageQueue = [];
+
     await this.bus.publish(
       createEvent("triage:complete", runId, {
         context: state.context,
@@ -2281,6 +2284,10 @@ export class PipelineOrchestrator {
     state.verificationCompleted = true;
     state.stageTimestamps.verifyEnd = new Date().toISOString();
 
+    // Memory: release verification queue — results are persisted in the DB.
+    state.verifyQueue = [];
+    state.verifyCandidates = [];
+
     await this.bus.publish(
       createEvent("verification:complete", runId, {
         context: state.context,
@@ -2331,6 +2338,8 @@ export class PipelineOrchestrator {
       index: idx + 1,
       total: state.pocHarnessCandidates.length,
     }));
+    // Memory: candidates have been copied into the queue, release the source array.
+    state.pocHarnessCandidates = [];
     state.pocHarnessCursor = 0;
 
     try {
@@ -2587,6 +2596,8 @@ export class PipelineOrchestrator {
       index: idx + 1,
       total: state.dynamicCandidates.length,
     }));
+    // Memory: candidates have been copied into the queue, release the source array.
+    state.dynamicCandidates = [];
     state.dynamicCursor = 0;
 
     try {
