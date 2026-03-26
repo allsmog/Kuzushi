@@ -291,6 +291,12 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
+  if (key === "htmlOutput") {
+    config.htmlOutput = raw.trim() || undefined;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
   if (key === "maxTriageRetries") {
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) {
@@ -780,6 +786,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const jsonOutput = normalizeOptionalString(config.jsonOutput);
   const csvOutput = normalizeOptionalString(config.csvOutput);
   const jsonlOutput = normalizeOptionalString(config.jsonlOutput);
+  const htmlOutput = normalizeOptionalString(config.htmlOutput);
   const maxTriageRetries = normalizeNonNegativeInt(
     config.maxTriageRetries,
     DEFAULTS.maxTriageRetries ?? 2,
@@ -883,6 +890,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     jsonOutput,
     csvOutput,
     jsonlOutput,
+    htmlOutput,
     maxTriageRetries,
     maxVerifyRetries,
     maxPocHarnessRetries,

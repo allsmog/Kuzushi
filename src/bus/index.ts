@@ -18,7 +18,9 @@ import { registerPocExecutorWorker } from "./workers/poc-executor-worker.js";
 import { registerVerificationWorker } from "./workers/verification-worker.js";
 import { registerTaintAnalysisRefinementWorker } from "./workers/taint-analysis-refinement-worker.js";
 import { registerDynamicAnalysisWorker } from "./workers/dynamic-analysis-worker.js";
+import { registerProgressWorker } from "./workers/progress-worker.js";
 import { createPocExecutor } from "../poc-executor/index.js";
+import { getGlobalLogLevel } from "../logger.js";
 
 export interface RegisterWorkersDeps {
   registry: ScannerRegistry;
@@ -116,9 +118,15 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
     });
   }
 
+  // Register progress worker before report worker so it can signal suppression
+  const progressResult = registerProgressWorker(bus, {
+    verbose: getGlobalLogLevel() === "debug",
+  });
+
   registerReportWorker(bus, {
     db: deps.db,
     config: deps.config,
+    suppressInlineProgress: progressResult.isActive,
   });
 }
 
@@ -138,3 +146,4 @@ export * from "./workers/report-worker.js";
 export * from "./workers/taint-analysis-artifact-worker.js";
 export * from "./workers/taint-analysis-refinement-worker.js";
 export * from "./workers/dynamic-analysis-worker.js";
+export * from "./workers/progress-worker.js";

@@ -100,6 +100,7 @@ program
   .option("--json <path>", "Write JSON report to this path")
   .option("--csv <path>", "Write CSV report to this path")
   .option("--jsonl <path>", "Write JSONL report to this path")
+  .option("--html <path>", "Write interactive HTML report to this path")
   .option("--agent-runtime <backend>", "Agent runtime backend (pi-ai|acp)")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
@@ -107,10 +108,41 @@ program
   .option("--enable-external-tasks", "Enable loading of external tasks from config", false)
   .option("--quality-gate", "Enable quality gates (fail CI on threshold violations)", false)
   .option("--fail-on-tp", "Shorthand: fail if any high/critical severity true positive is found", false)
+  .option("--dry-run", "Run scanners but skip AI triage. Shows finding count and cost estimate at zero LLM cost.", false)
   .option("--fresh", "Clear prior results before scanning", false)
   .option("--no-cache", "Disable inflight request deduplication and LLM result caching")
   .option("--resume [runId]", "Resume a previous run (optionally by run id)")
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
+  .option("--no-interactive", "Disable post-scan interactive REPL")
+  .addHelpText("after", `
+Option Groups:
+
+  Basic Options:
+    --scanners, --severity, --max, --model, --dry-run, --fresh, --resume, --db
+
+  Output Options:
+    --output, --sarif, --json, --csv, --jsonl, --html, --audit-log
+
+  Triage (Advanced):
+    --triage-model, --triage-max-turns, --max-triage-retries,
+    --enable-classifier, --classifier-model, --classifier-threshold
+
+  Verification (Advanced):
+    --verify, --verify-model, --verify-max-turns, --verify-concurrency,
+    --verify-min-confidence, --verify-refinement-max-iterations,
+    --verify-reflection-interval, --max-verify-retries
+
+  PoC / Dynamic (Advanced):
+    --poc-harness, --poc-harness-model, --poc-harness-max-turns,
+    --poc-harness-concurrency, --poc-refinement-max-iterations,
+    --poc-reflection-interval, --max-poc-harness-retries,
+    --crypto-behavioral-test
+
+  Pipeline / Runtime:
+    --agent-runtime, --api-key, --base-url, --ensemble-models,
+    --enabled-tasks, --enable-external-tasks, --quality-gate,
+    --fail-on-tp, --no-context, --no-cache, --retry-backoff-ms
+`)
   .action(wrapCliAction(runScanCommand));
 
 // ── compare-runs ──────────────────────────────────────────────────────────
@@ -527,6 +559,22 @@ program
       ["list", ...(opts.filter ? ["--filter", opts.filter] : []), "-r", opts.repo],
       { from: "user" },
     );
+  });
+
+// ── explain ──────────────────────────────────────────────────────────────────
+
+import { registerExplainCommand } from "./cli/commands/explain.js";
+registerExplainCommand(program);
+
+// ── init ─────────────────────────────────────────────────────────────────────
+
+program
+  .command("init")
+  .description("Set up Kuzushi for a project with guided configuration")
+  .argument("[repo]", "Path to the repository", ".")
+  .action(async (repo: string) => {
+    const { runInit } = await import("./cli/commands/init.js");
+    await runInit(repo);
   });
 
 // Graceful shutdown via lifecycle coordinator.

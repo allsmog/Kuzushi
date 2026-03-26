@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
+  printPreTriageEstimate,
   printResumeInfo,
   printScanStart,
   printSummary,
@@ -12,6 +13,7 @@ import { generateSarifReport } from "../../report-sarif.js";
 import { writeJsonReport } from "../../report-json.js";
 import { writeCsvReport } from "../../report-csv.js";
 import { writeJsonlReport } from "../../report-jsonl.js";
+import { generateHtmlReport } from "../../report-html.js";
 import type { KuzushiConfig } from "../../types.js";
 import type {
   PipelineStartEvent,
@@ -45,6 +47,8 @@ interface RunReportState {
 export interface ReportWorkerDeps {
   db: Database.Database;
   config: KuzushiConfig;
+  /** When true, suppress inline triage/verification/poc progress lines (progress worker handles them). */
+  suppressInlineProgress?: boolean;
 }
 
 /**
@@ -52,6 +56,7 @@ export interface ReportWorkerDeps {
  */
 export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): void {
   const runState = new Map<string, RunReportState>();
+  const suppress = deps.suppressInlineProgress === true;
 
   bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
@@ -79,26 +84,33 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   bus.subscribe<ScanCompleteEvent>("scan:complete", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     state.totalFindings = event.payload.totalFindings;
-    maybePrintStartBanner(state, event.payload.context.repoName);
+    if (!suppress) {
+      maybePrintStartBanner(state, event.payload.context.repoName);
+    }
   });
 
   bus.subscribe<TriageStartEvent>("triage:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     state.selectedForTriage = event.payload.findingCount;
 
-    maybePrintStartBanner(state, event.payload.context.repoName);
+    if (!suppress) {
+      maybePrintStartBanner(state, event.payload.context.repoName);
+    }
 
-    if (event.payload.findingCount > 0) {
+    if (!suppress && event.payload.findingCount > 0) {
+      printPreTriageEstimate(event.payload.findingCount);
       console.log(`  Triaging ${event.payload.findingCount} findings via ${event.payload.model}...\n`);
     }
   });
 
   bus.subscribe<TriageResultEvent>("triage:result", (event) => {
+    if (suppress) return;
     const { result, index, total, attempts } = event.payload;
     printTriageProgress(result, index, total, attempts);
   });
 
   bus.subscribe<TriageErrorEvent>("triage:error", (event) => {
+    if (suppress) return;
     const { finding, error, index, total, attempts } = event.payload;
     const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
     console.log(`  [${index}/${total}] TRIAGE ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`);
@@ -106,12 +118,14 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   });
 
   bus.subscribe<VerificationStartEvent>("verification:start", (event) => {
+    if (suppress) return;
     if (event.payload.findingCount > 0) {
       console.log(`  Verifying ${event.payload.findingCount} findings via ${event.payload.model}...\n`);
     }
   });
 
   bus.subscribe<VerificationResultEvent>("verification:result", (event) => {
+    if (suppress) return;
     const { result, index, total, attempts } = event.payload;
     const status = result.exploitable ? "EXPLOITABLE" : "not exploitable";
     const cost = result.verifyCostUsd && result.verifyCostUsd > 0
@@ -122,6 +136,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   });
 
   bus.subscribe<VerificationErrorEvent>("verification:error", (event) => {
+    if (suppress) return;
     const { finding, error, index, total, attempts } = event.payload;
     const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
     console.log(`  [${index}/${total}] VERIFY ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`);
@@ -129,12 +144,14 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   });
 
   bus.subscribe<PocHarnessStartEvent>("poc-harness:start", (event) => {
+    if (suppress) return;
     if (event.payload.findingCount > 0) {
       console.log(`  Generating ${event.payload.findingCount} PoC harnesses via ${event.payload.model}...\n`);
     }
   });
 
   bus.subscribe<PocHarnessResultEvent>("poc-harness:result", (event) => {
+    if (suppress) return;
     const { result, index, total, attempts } = event.payload;
     const status = result.skipped ? "SKIPPED" : "GENERATED";
     const parsed = result.skipped ? "" : (result.parsed ? " parsed" : " parse-error");
@@ -148,6 +165,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   });
 
   bus.subscribe<PocHarnessErrorEvent>("poc-harness:error", (event) => {
+    if (suppress) return;
     const { finding, error, index, total, attempts } = event.payload;
     const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
     console.log(`  [${index}/${total}] POC ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`);
@@ -155,6 +173,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   });
 
   bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", (event) => {
+    if (suppress) return;
     const prefix = `  [${event.payload.index}/${event.payload.total}]`;
 
     if (event.payload.kind === "tool-start") {
@@ -172,17 +191,18 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
 
     if (event.payload.kind === "tool-complete") {
       if (event.payload.summary) {
-        console.log(`${prefix} ✓ ${truncate(event.payload.summary, 140)}`);
+        console.log(`${prefix} \u2713 ${truncate(event.payload.summary, 140)}`);
       }
       return;
     }
 
     if (event.payload.summary) {
-      console.log(`${prefix} · ${truncate(event.payload.summary, 120)}`);
+      console.log(`${prefix} \u00b7 ${truncate(event.payload.summary, 120)}`);
     }
   });
 
   bus.subscribe<VerificationAgentActivityEvent>("verification:agent-activity", (event) => {
+    if (suppress) return;
     const prefix = `  [${event.payload.index}/${event.payload.total}]`;
 
     if (event.payload.kind === "tool-start") {
@@ -200,17 +220,18 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
 
     if (event.payload.kind === "tool-complete") {
       if (event.payload.summary) {
-        console.log(`${prefix} ✓ ${truncate(event.payload.summary, 140)}`);
+        console.log(`${prefix} \u2713 ${truncate(event.payload.summary, 140)}`);
       }
       return;
     }
 
     if (event.payload.summary) {
-      console.log(`${prefix} · ${truncate(event.payload.summary, 120)}`);
+      console.log(`${prefix} \u00b7 ${truncate(event.payload.summary, 120)}`);
     }
   });
 
   bus.subscribe<PocHarnessAgentActivityEvent>("poc-harness:agent-activity", (event) => {
+    if (suppress) return;
     const prefix = `  [${event.payload.index}/${event.payload.total}]`;
 
     if (event.payload.kind === "tool-start") {
@@ -228,13 +249,13 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
 
     if (event.payload.kind === "tool-complete") {
       if (event.payload.summary) {
-        console.log(`${prefix} ✓ ${truncate(event.payload.summary, 140)}`);
+        console.log(`${prefix} \u2713 ${truncate(event.payload.summary, 140)}`);
       }
       return;
     }
 
     if (event.payload.summary) {
-      console.log(`${prefix} · ${truncate(event.payload.summary, 120)}`);
+      console.log(`${prefix} \u00b7 ${truncate(event.payload.summary, 120)}`);
     }
   });
 
@@ -332,6 +353,20 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
         event.payload.fingerprints,
       );
       console.log(`  JSONL report written to ${deps.config.jsonlOutput}`);
+    }
+
+    if (deps.config.htmlOutput) {
+      const outputDir = path.dirname(deps.config.htmlOutput);
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+      const htmlContent = generateHtmlReport(
+        deps.db,
+        event.payload.context.repoName,
+        { fingerprints: event.payload.fingerprints },
+      );
+      writeFileSync(deps.config.htmlOutput, htmlContent, "utf-8");
+      console.log(`  HTML report written to ${deps.config.htmlOutput}`);
     }
 
     await bus.publish(

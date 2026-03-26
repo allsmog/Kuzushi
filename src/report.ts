@@ -253,7 +253,8 @@ export function printSummary(
           ? chalk.bgGreen.black(" NOT EXPLOITABLE ")
           : "";
 
-      console.log(`  ${verdict} ${conf}  ${severity} ${scanner}${verificationBadge ? ` ${verificationBadge}` : ""}`);
+      const consensusBadge = formatConsensusBadge(f.triageDetails);
+      console.log(`  ${verdict} ${conf}  ${severity} ${scanner}${verificationBadge ? ` ${verificationBadge}` : ""}${consensusBadge ? ` ${consensusBadge}` : ""}`);
       console.log(`    ${location}`);
       console.log(`    ${chalk.dim(f.ruleId)}`);
       console.log(`    ${f.rationale.slice(0, 120)}${f.rationale.length > 120 ? "..." : ""}`);
@@ -424,6 +425,61 @@ function formatEngineProvenance(
   return engineProvenance.map((entry) => `${entry.kind}:${entry.detail}`).join(", ");
 }
 
+/**
+ * Format a consensus badge from triage details containing consensus_votes.
+ * Returns a string like "3/3 models: TP" or "2/3 models: TP", or empty string
+ * if consensus data is not available.
+ */
+function formatConsensusBadge(triageDetails: Record<string, unknown> | null): string {
+  if (!triageDetails) {
+    return "";
+  }
+
+  const votes = triageDetails["consensus_votes"] ?? triageDetails["consensusVotes"];
+  if (!Array.isArray(votes) || votes.length === 0) {
+    return "";
+  }
+
+  // Count votes by verdict
+  const verdictCounts = new Map<string, number>();
+  for (const vote of votes) {
+    if (vote && typeof vote === "object" && typeof vote.verdict === "string") {
+      const v = vote.verdict.toUpperCase();
+      verdictCounts.set(v, (verdictCounts.get(v) ?? 0) + 1);
+    }
+  }
+
+  // Find the majority verdict
+  let majorityVerdict = "";
+  let majorityCount = 0;
+  for (const [verdict, count] of verdictCounts) {
+    if (count > majorityCount) {
+      majorityCount = count;
+      majorityVerdict = verdict;
+    }
+  }
+
+  if (!majorityVerdict) {
+    return "";
+  }
+
+  const total = votes.length;
+  const label = `${majorityCount}/${total} models: ${majorityVerdict}`;
+  const isUnanimous = majorityCount === total;
+
+  if (majorityVerdict === "TP") {
+    return isUnanimous
+      ? chalk.bgRed.white.bold(` ${label} `)
+      : chalk.red(label);
+  }
+  if (majorityVerdict === "FP") {
+    return isUnanimous
+      ? chalk.bgGreen.black(` ${label} `)
+      : chalk.green(label);
+  }
+  return chalk.yellow(label);
+}
+
 /** Print a short line when starting a scan. */
 export function printScanStart(
   repoName: string,
@@ -436,6 +492,35 @@ export function printScanStart(
   console.log(`  Scanners: ${scanners.join(", ")}`);
   console.log(`  ${total} findings, ${findingCount} selected for AI triage`);
   console.log("");
+}
+
+/** Approximate per-finding triage cost in USD. */
+const ESTIMATED_PER_FINDING_TRIAGE_COST_USD = 0.002;
+
+/** Print a pre-triage cost estimate before triage begins. */
+export function printPreTriageEstimate(findingCount: number): void {
+  if (findingCount <= 0) return;
+  const estimatedCost = findingCount * ESTIMATED_PER_FINDING_TRIAGE_COST_USD;
+  console.log(
+    `  ${chalk.dim("Estimated triage cost:")} ~$${estimatedCost.toFixed(2)} for ${findingCount} findings`,
+  );
+  console.log("");
+}
+
+/** Print a dry-run summary after scanning completes, then stop. */
+export function printDryRunSummary(findingCount: number): void {
+  const estimatedCost = findingCount * ESTIMATED_PER_FINDING_TRIAGE_COST_USD;
+  console.log("");
+  console.log(chalk.bold("─".repeat(60)));
+  console.log(chalk.bold("  Dry Run Summary"));
+  console.log(chalk.bold("─".repeat(60)));
+  console.log("");
+  console.log(`  Found ${chalk.bold(String(findingCount))} findings.`);
+  console.log(`  Estimated triage cost: ${chalk.cyan(`~$${estimatedCost.toFixed(2)}`)}`);
+  console.log("");
+  console.log(chalk.dim("  Skipping triage (dry-run mode)."));
+  console.log(chalk.dim("  Findings have been saved to the database for later review."));
+  console.log(chalk.bold("─".repeat(60)));
 }
 
 /** Print when resuming with skipped findings. */

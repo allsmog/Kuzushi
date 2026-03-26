@@ -166,6 +166,11 @@ export const TriageResultSchema = z.object({
   triageCostUsd: z.number().optional(),
   calibratedConfidence: z.number().optional(),
   evidenceChain: z.array(EvidenceStepSchema).optional(),
+  consensusVotes: z.array(z.object({
+    model: z.string(),
+    verdict: z.string(),
+    confidence: z.number(),
+  })).optional(),
 });
 
 export type TriageResultZ = z.infer<typeof TriageResultSchema>;
@@ -609,6 +614,8 @@ export const KuzushiConfigSchema = z.object({
   classifierModel: z.string().optional(),
   classifierThreshold: z.number().optional(),
   ensembleModels: z.array(z.string()).optional(),
+  multiStrategyEnabled: z.boolean().optional(),
+  ensembleTriageEnabled: z.boolean().optional(),
   diffBase: z.string().optional(),
   taintDiffBase: z.string().optional(),
   taintDiffMode: z.enum(["delta", "baseline"]).optional(),
@@ -684,6 +691,7 @@ export const KuzushiConfigSchema = z.object({
   jsonOutput: z.string().optional(),
   csvOutput: z.string().optional(),
   jsonlOutput: z.string().optional(),
+  htmlOutput: z.string().optional(),
   externalTasks: z.array(z.string()).optional(),
   enableExternalTasks: z.boolean().optional(),
   hooks: z.object({
@@ -707,6 +715,7 @@ export const KuzushiConfigSchema = z.object({
   modelFallbackCooldownMs: z.number().optional(),
   incrementalCache: z.boolean().optional(),
   skipTriageForHighConfidenceAgentic: z.boolean().optional(),
+  verifyExecuteEnabled: z.boolean().optional(),
 });
 
 export type KuzushiConfigZ = z.infer<typeof KuzushiConfigSchema>;

@@ -190,6 +190,7 @@ export function upsertFinding(
       recommended_fix: triage.recommendedFix ?? null,
       rule_refinement_hint: triage.ruleRefinementHint ?? null,
       triage_schema_version: triage.triageSchemaVersion ?? null,
+      consensus_votes: triage.consensusVotes ?? null,
     }),
     triage.compositeConfidence ?? null,
     null, // confidence_signals_json — populated by updateFindingCompositeConfidence if needed

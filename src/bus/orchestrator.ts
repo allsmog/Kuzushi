@@ -1451,6 +1451,31 @@ export class PipelineOrchestrator {
     state.refinementIteration = 0;
     state.refinementInFlight = false;
 
+    // Dry-run mode: skip triage and all downstream phases, emit report immediately.
+    if (state.scanOpts.dryRun) {
+      const { printDryRunSummary } = await import("../report.js");
+      printDryRunSummary(filteredFindings.length);
+      const completedAt = new Date().toISOString();
+      updateRunStatus(this.deps.db, state.checkpointRunId, "complete");
+      await this.bus.publish(
+        createEvent("pipeline:complete", runId, {
+          context: state.context,
+          stats: {
+            scanners: [...state.scanners],
+            totalFindings: state.totalFindings,
+            queuedForTriage: 0,
+            skippedAlreadyTriaged: state.skippedAlreadyTriaged,
+            triaged: 0,
+            triageErrors: 0,
+            startedAt: state.startedAt,
+            completedAt,
+          },
+        }),
+      );
+      this.runs.delete(runId);
+      return;
+    }
+
     state.stageTimestamps.triageStart = new Date().toISOString();
 
     await this.bus.publish(

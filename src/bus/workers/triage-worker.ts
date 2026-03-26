@@ -6,8 +6,9 @@ import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
-import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, BATCH_TRIAGE_FALLBACK_RATIONALE } from "../../triage.js";
-import type { KuzushiConfig } from "../../types.js";
+import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, BATCH_TRIAGE_FALLBACK_RATIONALE, parseVerdict } from "../../triage.js";
+import type { TriageOutput, TriageRuntimeOptions, TriageConfigProvider } from "../../triage.js";
+import type { KuzushiConfig, Verdict, RepoContext } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
 import { runTriageAssertions, computeTriageQualityScore } from "../../scoring/triage-assertions.js";
@@ -67,6 +68,8 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
   const useMultiAgent = deps.config.triageStrategy === "multi-agent";
   const useTrajectoryMemory = deps.config.trajectoryMemory === true && deps.db != null;
   const useCalibration = deps.config.confidenceCalibration === true && deps.db != null;
+  const ensembleTriageModels = normalizeEnsembleTriageModels(deps.config);
+  const useEnsembleTriage = ensembleTriageModels.length > 1;
 
   // Cache per-run prompt fragments: these are pure functions of (repoContext, enrichedContext)
   // which are fixed for the entire run. Caching maximizes Anthropic API prompt cache hits.
@@ -269,6 +272,27 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               extraPromptContext,
               resolvedTemplates.triage,
               cachedSystemPromptPrefix,
+            );
+          }
+
+          // Ensemble triage: run additional models in parallel and merge via majority vote
+          if (useEnsembleTriage && !useMultiAgent) {
+            triageOutput = await runEnsembleTriage(
+              triageConfigProvider,
+              finding,
+              context.scanPath ?? context.repoRoot,
+              context.repoName,
+              ensembleTriageModels,
+              deps.config.triageMaxTurns,
+              coercedRepoContext,
+              {
+                runtime: deps.runtime,
+                enrichedContext: coercedEnrichedContext,
+              },
+              extraPromptContext,
+              resolvedTemplates.triage,
+              cachedSystemPromptPrefix,
+              triageOutput,
             );
           }
 
@@ -541,6 +565,151 @@ function createTriageConfigProvider(
         triageAgentConfig: (finding: Finding, repoName: string) => triageAgentConfig(finding, repoName),
       };
     },
+  };
+}
+
+/**
+ * Determine ensemble models for triage. Returns an empty array if ensemble
+ * triage is disabled, or the list of unique model identifiers when enabled.
+ */
+function normalizeEnsembleTriageModels(config: KuzushiConfig): string[] {
+  if (config.ensembleTriageEnabled !== true) {
+    return [];
+  }
+
+  const models = config.ensembleModels;
+  if (!Array.isArray(models)) {
+    return [];
+  }
+
+  const unique = new Set<string>();
+  for (const model of models) {
+    if (typeof model !== "string") {
+      continue;
+    }
+    const trimmed = model.trim();
+    if (trimmed) {
+      unique.add(trimmed);
+    }
+  }
+
+  // Need at least 2 models for meaningful ensemble
+  const result = [...unique];
+  return result.length >= 2 ? result : [];
+}
+
+/**
+ * Run ensemble triage: call triage with each ensemble model in parallel,
+ * then aggregate results via majority voting.
+ *
+ * The primary model's result (passed in as `primaryOutput`) is always included.
+ * Additional models are called in parallel.
+ */
+async function runEnsembleTriage(
+  triageConfigProvider: TriageConfigProvider,
+  finding: Finding,
+  repoRoot: string,
+  repoName: string,
+  ensembleModels: string[],
+  maxTurns: number | null,
+  repoContext: RepoContext | undefined,
+  runtimeOptions: TriageRuntimeOptions,
+  extraPromptContext: string | undefined,
+  triageTemplate: string | undefined,
+  systemPromptPrefix: string | undefined,
+  primaryOutput: TriageOutput,
+): Promise<TriageOutput> {
+  // The primary model already ran — determine which model was used
+  const primaryModel = ensembleModels[0] ?? "primary";
+  const additionalModels = ensembleModels.slice(1);
+
+  // Run remaining models in parallel
+  const additionalResults = await Promise.all(
+    additionalModels.map(async (model) => {
+      try {
+        const result = await triageFindingWithAgent(
+          triageConfigProvider,
+          finding,
+          repoRoot,
+          repoName,
+          model,
+          maxTurns,
+          repoContext,
+          runtimeOptions,
+          extraPromptContext,
+          triageTemplate,
+          systemPromptPrefix,
+        );
+        return { kind: "success" as const, model, result };
+      } catch {
+        return { kind: "error" as const, model };
+      }
+    }),
+  );
+
+  // Collect all votes: primary + successful additional results
+  const votes: Array<{ model: string; verdict: Verdict; confidence: number; output: TriageOutput }> = [
+    { model: primaryModel, verdict: primaryOutput.result.verdict, confidence: primaryOutput.result.confidence, output: primaryOutput },
+  ];
+  let totalAdditionalCost = 0;
+
+  for (const lane of additionalResults) {
+    if (lane.kind === "success") {
+      votes.push({
+        model: lane.model,
+        verdict: lane.result.result.verdict,
+        confidence: lane.result.result.confidence,
+        output: lane.result,
+      });
+      totalAdditionalCost += normalizeCostUsd(lane.result.costUsd);
+    }
+  }
+
+  // If only the primary succeeded, return it as-is (no ensemble benefit)
+  if (votes.length <= 1) {
+    return primaryOutput;
+  }
+
+  // Majority vote on verdict
+  const verdictCounts = new Map<Verdict, number>();
+  for (const vote of votes) {
+    verdictCounts.set(vote.verdict, (verdictCounts.get(vote.verdict) ?? 0) + 1);
+  }
+
+  let winningVerdict: Verdict = primaryOutput.result.verdict;
+  let maxCount = 0;
+  for (const [verdict, count] of verdictCounts) {
+    if (count > maxCount) {
+      maxCount = count;
+      winningVerdict = verdict;
+    }
+  }
+
+  // Average confidence across all votes
+  const avgConfidence = votes.reduce((sum, v) => sum + v.confidence, 0) / votes.length;
+
+  // Build consensus votes array
+  const consensusVotes = votes.map((v) => ({
+    model: v.model,
+    verdict: v.verdict,
+    confidence: v.confidence,
+  }));
+
+  // Use the highest-confidence result matching the winning verdict as the base
+  const bestMatch = votes
+    .filter((v) => v.verdict === winningVerdict)
+    .sort((a, b) => b.confidence - a.confidence)[0];
+
+  const baseOutput = bestMatch?.output ?? primaryOutput;
+
+  return {
+    result: {
+      ...baseOutput.result,
+      verdict: winningVerdict,
+      confidence: Math.round(avgConfidence * 1000) / 1000,
+      consensusVotes,
+    },
+    costUsd: primaryOutput.costUsd + totalAdditionalCost,
   };
 }
 

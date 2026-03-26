@@ -39,6 +39,7 @@ export interface ScanCommandOptions {
   json?: string;
   csv?: string;
   jsonl?: string;
+  html?: string;
   agentRuntime?: string;
   apiKey?: string;
   baseUrl?: string;
@@ -47,9 +48,11 @@ export interface ScanCommandOptions {
   qualityGate: boolean;
   failOnTp: boolean;
   fresh: boolean;
+  dryRun: boolean;
   cache: boolean;
   resume?: string | boolean;
   db?: string;
+  interactive: boolean;
 }
 
 export function applyScanCommandConfigOverrides(
@@ -79,6 +82,7 @@ export function applyScanCommandConfigOverrides(
   if (opts.json) config.jsonOutput = path.resolve(opts.json);
   if (opts.csv) config.csvOutput = path.resolve(opts.csv);
   if (opts.jsonl) config.jsonlOutput = path.resolve(opts.jsonl);
+  if (opts.html) config.htmlOutput = path.resolve(opts.html);
   if (opts.agentRuntime) {
     config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
   }

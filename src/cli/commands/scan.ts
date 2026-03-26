@@ -10,6 +10,7 @@ import {
 import {
   createRun,
   defaultDbPath,
+  getActionableFindings,
   getLatestResumableRun,
   getRun,
   initDb,
@@ -39,6 +40,7 @@ import {
 } from "../scan-config.js";
 import { warnPiAiBackendApiKeys, resolveActivePiAiModels, validatePiAiProviderCredentials } from "../pi-ai.js";
 import { isShutdownCapableRuntime, resolveRepo } from "../shared.js";
+import { startInteractiveRepl } from "../interactive.js";
 
 export async function runScanCommand(repoPath: string, opts: ScanCommandOptions): Promise<void> {
   const scanPath = path.resolve(repoPath);
@@ -67,6 +69,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     excludePatterns: config.excludePatterns,
     scanners: scannersOverride,
     fresh: opts.fresh,
+    dryRun: opts.dryRun,
   };
 
   const registry = createDefaultRegistry();
@@ -202,6 +205,18 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
         console.error(
           `\n${stats.deadLetterCount} finding(s) failed all triage retries. Run \`kuzushi explain <fingerprint>\` for details.`,
         );
+      }
+
+      // Start interactive REPL if running in a TTY with actionable findings
+      if (
+        opts.interactive !== false &&
+        process.stdin.isTTY &&
+        process.stdout.isTTY
+      ) {
+        const actionable = getActionableFindings(db, repoId);
+        if (actionable.length > 0) {
+          await startInteractiveRepl(db, repoId);
+        }
       }
     }
   } finally {

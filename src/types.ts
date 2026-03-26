@@ -93,6 +93,8 @@ export interface ScanOpts {
   excludePatterns: string[];
   scanners?: ScannerId[];
   fresh: boolean;
+  /** Run scanners but skip AI triage. Shows finding count and cost estimate. */
+  dryRun?: boolean;
   /** Git ref to diff against for differential review (e.g. "main", "HEAD~5"). */
   diffBase?: string;
   /** Injected summary of first-pass findings for agentic two-pass review mode. */
@@ -130,6 +132,8 @@ export interface TriageResult {
   compositeConfidence?: number;
   /** Per-step evidence chain for fine-grained confidence calibration. */
   evidenceChain?: EvidenceStep[];
+  /** Per-model consensus votes from ensemble triage. */
+  consensusVotes?: Array<{ model: string; verdict: string; confidence: number }>;
 }
 
 /** Proof-level verdict for verification. */
@@ -468,6 +472,8 @@ export interface KuzushiConfig {
   csvOutput?: string;
   /** Optional JSONL report output path. */
   jsonlOutput?: string;
+  /** Optional HTML report output path. */
+  htmlOutput?: string;
   /** Retry count for triage worker transient failures. */
   maxTriageRetries?: number;
   /** Retry count for verification worker transient failures. */
@@ -522,6 +528,10 @@ export interface KuzushiConfig {
   classifierThreshold?: number;
   /** Optional ensemble models for eligible agentic scan tasks. */
   ensembleModels?: string[];
+  /** Enable multi-strategy analysis for vulnerability detection tasks. Default false. */
+  multiStrategyEnabled?: boolean;
+  /** Enable multi-model ensemble triage with majority voting. Default false. */
+  ensembleTriageEnabled?: boolean;
   /** Git ref for differential review (e.g. "main"). */
   diffBase?: string;
   /** Optional Git ref for taint-analysis-specific differential slicing. */
@@ -648,6 +658,8 @@ export interface KuzushiConfig {
   incrementalCache?: boolean;
   /** Skip triage for high-confidence agentic findings (score >= 7, confidence HIGH). Default false. */
   skipTriageForHighConfidenceAgentic?: boolean;
+  /** Enable execution-based verification via iterative harness loop. Default false. */
+  verifyExecuteEnabled?: boolean;
 }
 
 /** A persisted finding row from SQLite. */

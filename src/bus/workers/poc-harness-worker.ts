@@ -11,6 +11,7 @@ import { toErrorMessage } from "../../utils.js";
 import type { PocHarnessFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
+import { iterativeExecutionLoop } from "./iterative-loop.js";
 
 export interface PocHarnessWorkerDeps {
   config: KuzushiConfig;
@@ -80,6 +81,21 @@ export function registerPocHarnessWorker(
   });
 }
 
+/** Intermediate wrapper that holds the PocHarnessResult plus execution metadata. */
+interface HarnessIterationResult {
+  pocResult: PocHarnessResult;
+  /** When true, the result is final and should not be refined further. */
+  earlyExit: boolean;
+  /** Execution metadata populated when the executor ran. */
+  execution?: {
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+    verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+    durationMs: number;
+  };
+}
+
 async function generateHarnessWithRefinement(
   config: KuzushiConfig,
   runtime: AgentRuntime,
@@ -122,116 +138,166 @@ async function generateHarnessWithRefinement(
     );
   };
 
-  const history: AgentHistoryEntry[] = [];
-  const refinementHistory: NonNullable<PocHarnessResult["refinementHistory"]> = [];
   const executor = config.pocExecute === true
     ? await createPocExecutor(config.pocSandbox ?? "docker", config.pocExecTimeoutMs)
     : undefined;
-  let totalCostUsd = 0;
-  let latestResult: PocHarnessResult | undefined;
 
-  for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
-    const generated = await withRetry(
-      async () => {
-        onAttempt();
-        return generatePocHarness(
-          finding,
-          triageResult,
-          verificationResult,
-          repoRoot,
-          context.repoName,
-          model,
-          config.pocHarnessMaxTurns,
-          coerceRepoContext(repoContext),
-          {
-            runtime,
-            history,
-            activityCallback,
-          },
-        );
-      },
-      retryOptions,
-    );
+  // Track previous iteration result for assistant summary injection.
+  let previousPocResult: PocHarnessResult | undefined;
 
-    totalCostUsd += normalizeCostUsd(generated.costUsd);
-    latestResult = {
-      ...generated.result,
-      iterations: iteration,
-      refinementHistory: [...refinementHistory],
-    };
+  // PoC-specific refinement tracking.
+  const pocRefinementHistory: NonNullable<PocHarnessResult["refinementHistory"]> = [];
 
-    if (latestResult.skipped || !executor) {
-      latestResult.costUsd = totalCostUsd;
-      return { result: latestResult, costUsd: totalCostUsd };
-    }
+  const loopResult = await iterativeExecutionLoop<HarnessIterationResult>({
+    maxIterations,
+    reflectionInterval,
 
-    if (!latestResult.scriptPath || !latestResult.language || latestResult.parsed === false) {
-      const error = latestResult.parseError ?? "Generated PoC harness was not runnable.";
-      refinementHistory.push({
-        attempt: iteration,
-        error,
-        approach: describeHarnessApproach(latestResult),
+    generate: async (history: AgentHistoryEntry[], _iteration: number) => {
+      // On subsequent iterations, inject the assistant summary of the previous
+      // attempt before the failure prompt that the loop already appended.
+      // The original code pushed: assistant_summary, then failure_prompt.
+      // The loop appends the failure prompt as the last entry. We insert the
+      // assistant summary just before it to maintain the same conversation flow.
+      if (previousPocResult && history.length > 0) {
+        const assistantEntry: AgentHistoryEntry = {
+          role: "assistant",
+          content: summarizeHarnessAttempt(previousPocResult),
+        };
+        // Find where the loop's appended user entries start (from the tail).
+        let insertIdx = history.length;
+        for (let i = history.length - 1; i >= 0; i--) {
+          if (history[i].role === "user") {
+            insertIdx = i;
+          } else {
+            break;
+          }
+        }
+        history.splice(insertIdx, 0, assistantEntry);
+      }
+
+      const generated = await withRetry(
+        async () => {
+          onAttempt();
+          return generatePocHarness(
+            finding,
+            triageResult,
+            verificationResult,
+            repoRoot,
+            context.repoName,
+            model,
+            config.pocHarnessMaxTurns,
+            coerceRepoContext(repoContext),
+            {
+              runtime,
+              history,
+              activityCallback,
+            },
+          );
+        },
+        retryOptions,
+      );
+
+      const pocResult: PocHarnessResult = {
+        ...generated.result,
+      };
+
+      previousPocResult = pocResult;
+
+      // Determine whether this result should skip execution entirely.
+      const earlyExit = pocResult.skipped || !executor;
+
+      return {
+        result: { pocResult, earlyExit },
+        costUsd: normalizeCostUsd(generated.costUsd),
+        history: [...history],
+      };
+    },
+
+    execute: async (iterResult: HarnessIterationResult) => {
+      // Early exit: skipped result or no executor configured.
+      if (iterResult.earlyExit) {
+        return { success: true, output: "", durationMs: 0 };
+      }
+
+      const pocResult = iterResult.pocResult;
+
+      // Parse/syntax validation failure — treat as execution failure without running executor.
+      if (!pocResult.scriptPath || !pocResult.language || pocResult.parsed === false) {
+        const error = pocResult.parseError ?? "Generated PoC harness was not runnable.";
+        return { success: false, output: error, durationMs: 0 };
+      }
+
+      // Run the actual executor.
+      const execution = await executor!.execute(
+        pocResult.scriptPath,
+        pocResult.language,
+        context.repoRoot,
+      );
+
+      // Stash execution metadata on the iteration result so the caller can read it.
+      iterResult.execution = {
+        exitCode: execution.exitCode,
+        stdout: execution.stdout,
+        stderr: execution.stderr,
+        verdict: execution.verdict,
+        durationMs: execution.durationMs,
+      };
+
+      if (execution.verdict === "PASS") {
+        return { success: true, output: "", durationMs: execution.durationMs };
+      }
+
+      const errorDescription = describeExecutionFailure(
+        execution.exitCode,
+        execution.stdout,
+        execution.stderr,
+        execution.verdict,
+      );
+      return { success: false, output: errorDescription, durationMs: execution.durationMs };
+    },
+
+    buildFailurePrompt: (iterResult: HarnessIterationResult, executionOutput: string, _iteration: number) => {
+      const pocResult = iterResult.pocResult;
+
+      // Record in PoC-specific refinement history.
+      pocRefinementHistory.push({
+        attempt: pocRefinementHistory.length + 1,
+        error: executionOutput,
+        approach: describeHarnessApproach(pocResult),
       });
 
-      if (iteration >= maxIterations) {
-        latestResult.refinementHistory = [...refinementHistory];
-        latestResult.costUsd = totalCostUsd;
-        return { result: latestResult, costUsd: totalCostUsd };
-      }
+      // Determine if this was a parse failure (no execution) or an execution failure.
+      const execution = iterResult.execution;
+      return buildPocFailurePrompt(
+        execution
+          ? { exitCode: execution.exitCode, stdout: execution.stdout, stderr: execution.stderr, verdict: execution.verdict }
+          : undefined,
+        executionOutput,
+      );
+    },
 
-      history.push({ role: "assistant", content: summarizeHarnessAttempt(latestResult) });
-      history.push({ role: "user", content: buildPocFailurePrompt(undefined, error) });
-      if (iteration % reflectionInterval === 0) {
-        history.push({ role: "user", content: buildReflectionPrompt(iteration) });
-      }
-      continue;
-    }
+    buildReflectionPrompt: (_failureCount: number, totalIterations: number) => {
+      return buildReflectionPrompt(totalIterations);
+    },
+  });
 
-    const execution = await executor.execute(
-      latestResult.scriptPath,
-      latestResult.language,
-      context.repoRoot,
-    );
+  // Build the final PocHarnessResult from the loop output.
+  const finalIterResult = loopResult.result;
+  const finalPocResult = finalIterResult.pocResult;
+  finalPocResult.iterations = loopResult.iterations;
+  finalPocResult.refinementHistory = [...pocRefinementHistory];
+  finalPocResult.costUsd = loopResult.totalCostUsd;
 
-    latestResult.pocExecExitCode = execution.exitCode;
-    latestResult.pocExecStdout = execution.stdout;
-    latestResult.pocExecStderr = execution.stderr;
-    latestResult.pocExecVerdict = execution.verdict;
-    latestResult.pocExecDurationMs = execution.durationMs;
-    latestResult.refinementHistory = [...refinementHistory];
-
-    if (execution.verdict === "PASS") {
-      latestResult.costUsd = totalCostUsd;
-      return { result: latestResult, costUsd: totalCostUsd };
-    }
-
-    const error = describeExecutionFailure(execution.exitCode, execution.stdout, execution.stderr, execution.verdict);
-    refinementHistory.push({
-      attempt: iteration,
-      error,
-      approach: describeHarnessApproach(latestResult),
-    });
-
-    if (iteration >= maxIterations) {
-      latestResult.refinementHistory = [...refinementHistory];
-      latestResult.costUsd = totalCostUsd;
-      return { result: latestResult, costUsd: totalCostUsd };
-    }
-
-    history.push({ role: "assistant", content: summarizeHarnessAttempt(latestResult) });
-    history.push({ role: "user", content: buildPocFailurePrompt(execution, error) });
-    if (iteration % reflectionInterval === 0) {
-      history.push({ role: "user", content: buildReflectionPrompt(iteration) });
-    }
+  // Populate execution metadata on the final result if the executor ran.
+  if (finalIterResult.execution) {
+    finalPocResult.pocExecExitCode = finalIterResult.execution.exitCode;
+    finalPocResult.pocExecStdout = finalIterResult.execution.stdout;
+    finalPocResult.pocExecStderr = finalIterResult.execution.stderr;
+    finalPocResult.pocExecVerdict = finalIterResult.execution.verdict;
+    finalPocResult.pocExecDurationMs = finalIterResult.execution.durationMs;
   }
 
-  if (!latestResult) {
-    throw new PocHarnessExecutionError("poc harness generation did not produce a result", totalCostUsd);
-  }
-
-  latestResult.costUsd = totalCostUsd;
-  latestResult.refinementHistory = [...refinementHistory];
-  return { result: latestResult, costUsd: totalCostUsd };
+  return { result: finalPocResult, costUsd: loopResult.totalCostUsd };
 }
 
 function summarizeHarnessAttempt(result: PocHarnessResult): string {
