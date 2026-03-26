@@ -15,6 +15,7 @@ import type {
   VerificationResult,
   Verdict,
 } from "../../types.js";
+import type { GeneratedRule } from "../../strategies/types.js";
 import type { StageTimestamps } from "../../scoring/run-metrics.js";
 import type { PipelineHookChain } from "../../hooks/chain.js";
 import type { Precedents } from "../../precedents.js";
@@ -163,6 +164,7 @@ export interface RunState {
   patchErrors: number;
   patchDispatching: boolean;
   patchStarted: boolean;
+  generatedRules: GeneratedRule[];
 }
 
 export interface OrchestratorDeps {

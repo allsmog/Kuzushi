@@ -71,16 +71,18 @@ The terminal report shows true positives first, then needs-review items. False p
 ```
 
 1. **Context gathering** — auto-detects your tech stack, frameworks, auth patterns, ORMs, and sanitization libraries
-2. **Code graph** (optional) — builds a persistent entry-point-to-sink graph via static analysis + LLM gap-filling
-3. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently; multi-strategy mode runs 2-4 analytical approaches per vuln class
-4. **Deduplication** — fingerprints and merges equivalent findings across scanners
-5. **Incremental skip** — findings already triaged in previous runs are skipped automatically
-6. **AI triage** — an agent investigates each finding with full repo context, code graph paths, reads the code, traces data flow, and classifies it
-7. **Verification** (optional) — constructs concrete PoC exploit payloads for true positives
-8. **PoC harness generation** (optional) — produces runnable exploit scripts
-9. **Dynamic analysis** (optional) — executes harnesses to confirm exploitability
-10. **Auto-patch** (optional) — generates, validates, and re-verifies patches in disposable git worktrees
-11. **Report** — terminal display + export to SARIF, Markdown, JSON, CSV, or JSONL; optional SSE live streaming
+2. **Code graph** — builds a persistent entry-point-to-sink graph via static analysis + LLM gap-filling for reachability-aware triage
+3. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently; 13 specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto); multi-strategy mode runs 2-4 analytical approaches per vuln class
+4. **Classifier funnel** — cheap single-token pre-filter removes ~80% of noise before expensive triage
+5. **Deduplication** — fingerprints and merges equivalent findings across scanners
+6. **Incremental skip** — findings already triaged in previous runs are skipped automatically
+7. **AI triage** — an agent investigates each finding with pre-loaded source context, code graph paths, evidence chains, and CWE-specific knowledge modules; batch-dropped findings auto-escalate to individual triage
+8. **Variant analysis** — confirmed TPs trigger automatic search for similar patterns across the codebase
+9. **Verification** (optional) — constructs concrete PoC exploit payloads for true positives
+10. **PoC harness generation** (optional) — produces runnable exploit scripts with iterative execution feedback
+11. **Dynamic analysis** (optional) — executes harnesses in Docker sandbox to confirm exploitability
+12. **Auto-patch** (optional) — generates, validates, and re-verifies patches in disposable git worktrees
+13. **Report** — terminal display + export to SARIF, Markdown, JSON, CSV, or JSONL; optional SSE live streaming
 
 ## CI Integration
 
@@ -128,9 +130,17 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 
 **Patch synthesis** — `kuzushi patch <repo> --fingerprint <fp>` generates and validates security patches in disposable git worktrees without touching your working copy.
 
+**13 specialized detectors** — dedicated detection tasks for command injection, XXE, insecure deserialization, SSRF, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL security, secrets/crypto, code config, and crypto behavioral testing. Each has vulnerability-class-specific prompts, anti-hallucination constraints, and multi-lens analysis.
+
+**Classifier funnel** — single-token LLM pre-filter using a cheap model removes ~80% of false positives before expensive triage, cutting per-scan cost dramatically.
+
+**Source pre-read** — triage agents receive the flagged source file pre-loaded (50 lines surrounding the finding), eliminating cold-start tool calls and improving reasoning accuracy.
+
 **LLM code graph** — builds a persistent code graph tracing entry points through middleware, controllers, services, and data-access layers. Static skeleton from import analysis + LLM-assisted gap-filling for dynamic dispatch, DI, and callback patterns. Feeds graph context into triage for better reasoning.
 
-**Multi-strategy analysis** — runs 2-4 different analytical approaches per vulnerability class (syntactic pattern matching, dataflow tracing, first-principles reasoning, execution-based proof) and merges results with confidence boosting when strategies agree.
+**Multi-strategy analysis** — runs 2-4 different analytical approaches per vulnerability class (syntactic pattern matching, dataflow tracing, first-principles reasoning, execution-based proof) and merges results with confidence boosting when strategies agree. Auto-generates reusable Semgrep rules from confirmed multi-strategy findings.
+
+**13 CWE knowledge modules** — domain-specific knowledge for SQL injection, XSS, SSRF, command injection, path traversal, auth bypass, deserialization, race conditions, crypto, XXE, file upload, IDOR, and NoSQL injection — including dangerous patterns, safe patterns, bypass techniques, and fix examples.
 
 **Incremental scanning** — skips re-triage for unchanged findings across runs. Tracks the last scanned commit, computes file diffs, and expands the rescan scope with dependency-aware invalidation via the import graph.
 
@@ -343,7 +353,7 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `cryptoBehavioralMaxFindings` | `10` | Max findings to generate behavioral tests for per run |
 | `cryptoBehavioralTimeoutMs` | `120000` | Execution timeout per harness in ms |
 | `cryptoBehavioralPerFindingBudgetUsd` | `1` | Cost budget per finding for harness generation |
-| `codeGraphEnabled` | `false` | Enable LLM-powered code graph construction and enrichment |
+| `codeGraphEnabled` | `true` | Enable LLM-powered code graph construction and enrichment |
 | `multiStrategyMode` | `"off"` | Multi-strategy analysis mode (`off`, `adaptive`, `full`) |
 | `multiStrategyBudgetUsd` | `2.0` | Per-finding budget across all strategies (USD) |
 | `autoPatchEnabled` | `false` | Enable automatic patch generation in pipeline |

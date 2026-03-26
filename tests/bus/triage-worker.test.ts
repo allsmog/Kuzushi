@@ -18,6 +18,7 @@ vi.mock("../../src/triage.js", () => ({
   triageFindingWithAgent: triageFindingWithAgentMock,
   triageSystemPromptPrefix: () => "mocked-system-prompt-prefix",
   triageFindingsBatch: vi.fn(),
+  preReadForTriage: async () => "",
   BATCH_TRIAGE_FALLBACK_RATIONALE: "Finding was not included in batch triage agent response.",
 }));
 

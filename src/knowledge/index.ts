@@ -8,6 +8,10 @@ import { pathTraversalModule } from "./modules/path-traversal.js";
 import { authBypassModule } from "./modules/auth-bypass.js";
 import { deserializationModule } from "./modules/deserialization.js";
 import { raceConditionModule } from "./modules/race-condition.js";
+import { xxeModule } from "./modules/xxe.js";
+import { fileUploadModule } from "./modules/file-upload.js";
+import { idorModule } from "./modules/idor.js";
+import { nosqlInjectionModule } from "./modules/nosql-injection.js";
 
 export type { KnowledgeModule, KnowledgeQuery, KnowledgeRegistry } from "./types.js";
 export { InMemoryKnowledgeRegistry } from "./registry.js";
@@ -27,6 +31,10 @@ export function createDefaultKnowledgeRegistry(): InMemoryKnowledgeRegistry {
   registry.register(authBypassModule);
   registry.register(deserializationModule);
   registry.register(raceConditionModule);
+  registry.register(xxeModule);
+  registry.register(fileUploadModule);
+  registry.register(idorModule);
+  registry.register(nosqlInjectionModule);
 
   return registry;
 }

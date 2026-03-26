@@ -343,7 +343,10 @@ export type ThreatScenarioDetectorId =
   | "prototype-pollution-detect"
   | "template-injection-detect"
   | "graphql-security-detect"
-  | "race-condition-detect";
+  | "race-condition-detect"
+  | "command-injection-detect"
+  | "xxe-detect"
+  | "deserialization-detect";
 
 export interface ThreatScenario {
   id: string;

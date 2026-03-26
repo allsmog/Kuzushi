@@ -9,6 +9,7 @@ const log = createLogger({ stage: "strategy-dataflow" });
 
 const SUPPORTED_CWES = new Set([
   "CWE-89", "CWE-79", "CWE-918", "CWE-78", "CWE-94", "CWE-22", "CWE-502",
+  "CWE-943", "CWE-1336",
 ]);
 
 const DATAFLOW_SCHEMA = {

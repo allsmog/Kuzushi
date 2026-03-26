@@ -6,7 +6,7 @@ import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
-import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, BATCH_TRIAGE_FALLBACK_RATIONALE } from "../../triage.js";
+import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, BATCH_TRIAGE_FALLBACK_RATIONALE, preReadForTriage } from "../../triage.js";
 import type { KuzushiConfig } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
@@ -72,7 +72,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
   // which are fixed for the entire run. Caching maximizes Anthropic API prompt cache hits.
   let cachedSystemPromptPrefix: string | undefined;
   let cachedSystemPromptKey: string | undefined;
-  const cachedEvidenceChain = useCalibration ? evidenceChainModule() : undefined;
+  const cachedEvidenceChain = evidenceChainModule();
 
   bus.subscribe<TriageFindingQueuedEvent>("triage:finding-queued", async (event) => {
     const { context, repoContext, enrichedContext, index, total } = event.payload;
@@ -122,6 +122,15 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           // Build extra prompt context from enabled features
           const extraSections: string[] = [];
 
+          // Pre-read: load the flagged source file so the LLM has immediate context
+          const preRead = await preReadForTriage(
+            finding,
+            event.payload.context.scanPath ?? event.payload.context.repoRoot,
+          );
+          if (preRead) {
+            extraSections.push(preRead);
+          }
+
           // Trajectory memory: retrieve exemplars and format for injection
           if (useTrajectoryMemory && deps.db) {
             const maxExemplars = deps.config.trajectoryMaxExemplars ?? 2;
@@ -137,8 +146,8 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             }
           }
 
-          // Confidence calibration: inject evidence chain instructions (cached)
-          if (useCalibration && cachedEvidenceChain) {
+          // Evidence chain: always inject structured per-step reasoning instructions
+          if (cachedEvidenceChain) {
             extraSections.push(cachedEvidenceChain);
           }
 
@@ -465,15 +474,15 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             }),
           );
         } else {
+          // Escalate batch-dropped findings to individual triage instead of
+          // accepting needs_review — individual triage has pre-read context
+          // and can spend more turns investigating.
           await bus.publish(
-            createEvent("triage:error", runId, {
+            createEvent("triage:finding-queued", runId, {
               context,
               finding,
-              error: isFallback
-                ? "Finding omitted from batch triage response"
-                : "Finding missing from batch triage response",
-              costUsd: perFindingCost,
-              attempts: 1,
+              repoContext,
+              enrichedContext,
               index: idx + 1,
               total,
             }),

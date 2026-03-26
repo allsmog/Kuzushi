@@ -11,6 +11,9 @@ const log = createLogger({ stage: "strategy-reasoning" });
 const SUPPORTED_CWES = new Set([
   "CWE-89", "CWE-79", "CWE-918", "CWE-78", "CWE-94", "CWE-22", "CWE-502",
   "CWE-862", "CWE-863", "CWE-95",
+  "CWE-943", "CWE-1336", "CWE-1321", "CWE-362", "CWE-367",
+  "CWE-798", "CWE-327", "CWE-326", "CWE-829", "CWE-200", "CWE-400",
+  "CWE-611", "CWE-776",
 ]);
 
 const REASONING_SCHEMA = {

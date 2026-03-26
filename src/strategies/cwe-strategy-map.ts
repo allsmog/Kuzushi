@@ -82,6 +82,70 @@ export const CWE_STRATEGY_PROFILES: CweStrategyProfile[] = [
       { strategyId: "reasoning-path-traversal", priority: 3, earlyExitThreshold: 0.0 },
     ],
   },
+  {
+    cweIds: ["CWE-943"],
+    vulnClass: "nosql-injection",
+    strategies: [
+      { strategyId: "syntactic-nosql-injection", priority: 1, earlyExitThreshold: 0.95 },
+      { strategyId: "dataflow-nosql-injection", priority: 2, earlyExitThreshold: 0.90 },
+      { strategyId: "reasoning-nosql-injection", priority: 3, earlyExitThreshold: 0.0 },
+    ],
+  },
+  {
+    cweIds: ["CWE-1336", "CWE-94"],
+    vulnClass: "template-injection",
+    strategies: [
+      { strategyId: "syntactic-template-injection", priority: 1, earlyExitThreshold: 0.95 },
+      { strategyId: "dataflow-template-injection", priority: 2, earlyExitThreshold: 0.90 },
+      { strategyId: "reasoning-template-injection", priority: 3, earlyExitThreshold: 0.0 },
+    ],
+  },
+  {
+    cweIds: ["CWE-1321"],
+    vulnClass: "prototype-pollution",
+    strategies: [
+      { strategyId: "syntactic-prototype-pollution", priority: 1, earlyExitThreshold: 0.95 },
+      { strategyId: "reasoning-prototype-pollution", priority: 2, earlyExitThreshold: 0.0 },
+    ],
+  },
+  {
+    cweIds: ["CWE-362", "CWE-367"],
+    vulnClass: "race-condition",
+    strategies: [
+      { strategyId: "reasoning-race-condition", priority: 1, earlyExitThreshold: 0.0 },
+    ],
+  },
+  {
+    cweIds: ["CWE-798", "CWE-327", "CWE-326"],
+    vulnClass: "secrets-crypto",
+    strategies: [
+      { strategyId: "syntactic-secrets-crypto", priority: 1, earlyExitThreshold: 0.90 },
+      { strategyId: "reasoning-secrets-crypto", priority: 2, earlyExitThreshold: 0.0 },
+    ],
+  },
+  {
+    cweIds: ["CWE-829"],
+    vulnClass: "supply-chain",
+    strategies: [
+      { strategyId: "syntactic-supply-chain", priority: 1, earlyExitThreshold: 0.90 },
+      { strategyId: "reasoning-supply-chain", priority: 2, earlyExitThreshold: 0.0 },
+    ],
+  },
+  {
+    cweIds: ["CWE-200", "CWE-400"],
+    vulnClass: "graphql-security",
+    strategies: [
+      { strategyId: "reasoning-graphql-security", priority: 1, earlyExitThreshold: 0.0 },
+    ],
+  },
+  {
+    cweIds: ["CWE-611", "CWE-776"],
+    vulnClass: "xxe",
+    strategies: [
+      { strategyId: "syntactic-xxe", priority: 1, earlyExitThreshold: 0.95 },
+      { strategyId: "reasoning-xxe", priority: 2, earlyExitThreshold: 0.0 },
+    ],
+  },
 ];
 
 /** Find the strategy profile for a given set of CWE IDs. */

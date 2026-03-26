@@ -49,8 +49,8 @@ describe("quick-classifier task", () => {
           type: "result",
           subtype: "success",
           result: request.prompt.includes("false.rule")
-            ? "LIKELY_FALSE_POSITIVE"
-            : "LIKELY_REAL",
+            ? "FALSE"
+            : "REAL",
           totalCostUsd: 0.001,
         };
       },

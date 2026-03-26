@@ -20,8 +20,8 @@ export interface QuickClassifierOutput {
 }
 
 const QUICK_CLASSIFIER_PROMPT_PREFIX = [
-  "Given this potential vulnerability finding, classify it as LIKELY_REAL or LIKELY_FALSE_POSITIVE.",
-  "Respond with exactly one word.",
+  "Given this potential vulnerability finding, classify it as REAL or FALSE.",
+  "Respond with exactly one word: REAL or FALSE.",
 ].join("\n");
 
 export const quickClassifierTask: AgentTask<Finding[], QuickClassifierOutput> = {
@@ -93,7 +93,7 @@ async function classifyFinding(
         model,
         maxTurns: 1,
         temperature: 0,
-        maxOutputTokens: 1,
+        maxOutputTokens: 3,
         allowedTools: [],
         permissionMode: "dontAsk",
       },
@@ -174,11 +174,11 @@ function normalizeThreshold(value: unknown): number {
 
 function normalizeClassifierLabel(raw: string): QuickClassifierLabel | undefined {
   const normalized = raw.trim().toUpperCase();
-  if (normalized === "LIKELY_REAL") {
-    return normalized;
+  if (normalized === "REAL" || normalized === "LIKELY_REAL") {
+    return "LIKELY_REAL";
   }
-  if (normalized === "LIKELY_FALSE_POSITIVE") {
-    return normalized;
+  if (normalized === "FALSE" || normalized === "LIKELY_FALSE_POSITIVE") {
+    return "LIKELY_FALSE_POSITIVE";
   }
   return undefined;
 }

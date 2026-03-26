@@ -4,6 +4,10 @@ import type { KuzushiConfig } from "../types.js";
 import { adaptScannerPlugin } from "./scanner-adapter.js";
 import { TaskRegistry } from "./registry.js";
 import { loadAllExternalTasksWithManifest } from "./task-loader.js";
+import { withMultiStrategy } from "../strategies/multi-strategy-task.js";
+import { createPopulatedRegistry } from "../strategies/init.js";
+import { getProfileForTask } from "../strategies/task-profile-map.js";
+import type { AgentTask } from "./types.js";
 import { taintAnalysisRunTask } from "./tasks/taint-analysis/analyze.js";
 import { taintAnalysisCrossAnalyzeTask } from "./tasks/taint-analysis/cross-service/analyze.js";
 import { taintAnalysisDiscoverTask } from "./tasks/taint-analysis/cross-service/discover.js";
@@ -34,6 +38,9 @@ import { codeGraphBuildTask } from "./tasks/code-graph/build.js";
 import { codeGraphEnrichTask } from "./tasks/code-graph/enrich.js";
 import { appModelBuildTask } from "./tasks/app-model-build.js";
 import { threatScenarioBuildTask } from "./tasks/threat-scenario-build.js";
+import { commandInjectionTask } from "./tasks/command-injection.js";
+import { xxeDetectionTask } from "./tasks/xxe-detection.js";
+import { deserializationDetectionTask } from "./tasks/deserialization-detection.js";
 
 /** Create task registry populated with adapted scanner plugins. */
 export async function createDefaultTaskRegistry(
@@ -44,6 +51,14 @@ export async function createDefaultTaskRegistry(
   const tasks = new TaskRegistry();
   const registry = scannerRegistry ?? createDefaultRegistry();
 
+  // Multi-strategy registry — wraps eligible detection tasks with parallel strategy analysis.
+  // When multiStrategyMode === "off" (default), the wrapper is a no-op.
+  const strategyRegistry = createPopulatedRegistry();
+  const wrapTask = <TI, TO>(task: AgentTask<TI, TO>): AgentTask<TI, TO> => {
+    const profile = getProfileForTask(task.id);
+    return profile ? withMultiStrategy(task, profile, () => strategyRegistry) : task;
+  };
+
   tasks.register(contextGathererTask);
   tasks.register(taintAnalysisPreflightTask);
   tasks.register(taintAnalysisLabelTask);
@@ -52,13 +67,13 @@ export async function createDefaultTaskRegistry(
   tasks.register(taintAnalysisCrossAnalyzeTask);
   tasks.register(taintAnalysisStitchTask);
 
-  // Merged agentic detection tasks
-  tasks.register(secretsCryptoDetectTask);
+  // Merged agentic detection tasks — wrapped with multi-strategy
+  tasks.register(wrapTask(secretsCryptoDetectTask));
   tasks.register(cryptoBehavioralTestTask);
   tasks.register(codeConfigDetectTask);
 
-  // Agentic analysis tasks
-  tasks.register(raceConditionTask);
+  // Agentic analysis tasks — wrapped with multi-strategy
+  tasks.register(wrapTask(raceConditionTask));
   tasks.register(diffReviewTask);
 
   // LLM context enrichment
@@ -76,13 +91,16 @@ export async function createDefaultTaskRegistry(
   tasks.register(appModelBuildTask);
   tasks.register(threatScenarioBuildTask);
 
-  // Additional agentic detection tasks
-  tasks.register(ssrfDetectionTask);
-  tasks.register(prototypePollutionTask);
-  tasks.register(nosqlInjectionTask);
-  tasks.register(templateInjectionTask);
-  tasks.register(supplyChainTask);
-  tasks.register(graphqlSecurityTask);
+  // Additional agentic detection tasks — wrapped with multi-strategy
+  tasks.register(wrapTask(ssrfDetectionTask));
+  tasks.register(wrapTask(prototypePollutionTask));
+  tasks.register(wrapTask(nosqlInjectionTask));
+  tasks.register(wrapTask(templateInjectionTask));
+  tasks.register(wrapTask(supplyChainTask));
+  tasks.register(wrapTask(graphqlSecurityTask));
+  tasks.register(wrapTask(commandInjectionTask));
+  tasks.register(wrapTask(xxeDetectionTask));
+  tasks.register(wrapTask(deserializationDetectionTask));
 
   // Reachability pre-filter
   tasks.register(reachabilityCheckTask);

@@ -124,6 +124,13 @@ import type {
 
 /** Scanners whose findings come from static analysis tools, not LLM assessment. */
 const NON_LLM_SCANNERS = new Set(["semgrep", "codeql"]);
+
+/** Check if a finding has evidence from multi-strategy analysis. */
+function hasMultiStrategyEvidence(finding: Finding): boolean {
+  return (finding.engineProvenance ?? []).some(
+    (e) => typeof e.detail === "string" && e.detail.startsWith("strategy:"),
+  );
+}
 const log = getLogger("orchestrator");
 
 type TaskOutcome =
@@ -402,6 +409,7 @@ export class PipelineOrchestrator {
       patchErrors: 0,
       patchDispatching: false,
       patchStarted: false,
+      generatedRules: [],
       stageTimestamps: {
         pipelineStart: event.meta.timestamp,
         pipelineEnd: "",
@@ -1550,6 +1558,17 @@ export class PipelineOrchestrator {
       this.deps,
     );
 
+    // Auto-rule generation: fire-and-forget for TP findings with strategy evidence
+    if (
+      state.config.multiStrategyAutoRuleGeneration
+      && event.payload.result.verdict !== "fp"
+      && hasMultiStrategyEvidence(event.payload.finding)
+    ) {
+      this.generateAutoRule(state, runId, event.payload.finding).catch((err) => {
+        log.warn(`Auto-rule generation failed: ${toErrorMessage(err)}`);
+      });
+    }
+
     await this.publishQueueDepth(state, runId);
 
     if (this.isTriageDone(state)) {
@@ -1834,6 +1853,34 @@ export class PipelineOrchestrator {
 
   private isTriageDone(state: RunState): boolean {
     return isTriageQueueDone(state);
+  }
+
+  private async generateAutoRule(state: RunState, runId: string, finding: Finding): Promise<void> {
+    const { generateRule } = await import("../strategies/auto-rule.js");
+    const evidence = (finding.engineProvenance ?? [])
+      .filter((e) => typeof e.detail === "string" && e.detail.startsWith("strategy:"))
+      .map((e) => ({ kind: "reasoning-chain" as const, description: e.detail }));
+    const rule = await generateRule(finding, evidence, {
+      runId,
+      repoRoot: state.context.repoRoot,
+      repoName: state.context.repoName,
+      config: state.config,
+      runtime: this.deps.runtime,
+      bus: this.bus,
+      upstreamOutputs: state.taskOutputs,
+    });
+    if (rule) {
+      state.generatedRules.push(rule);
+      await this.bus.publish(createEvent("auto-rule:generated", runId, {
+        context: state.context,
+        rule,
+        sourceFinding: {
+          fingerprint: finding.fingerprint,
+          filePath: finding.filePath,
+          startLine: finding.startLine,
+        },
+      }));
+    }
   }
 
   private async finishTriageAndRequestReport(state: RunState, runId: string): Promise<void> {

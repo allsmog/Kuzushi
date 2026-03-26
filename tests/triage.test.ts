@@ -694,7 +694,7 @@ describe("triageFindingsBatch", () => {
   });
 
   it("uses DEFAULT_BATCH_SIZE when no maxBatchSize provided", () => {
-    expect(DEFAULT_BATCH_SIZE).toBe(15);
+    expect(DEFAULT_BATCH_SIZE).toBe(5);
   });
 
   it("fills missing findings with needs_review fallback", async () => {

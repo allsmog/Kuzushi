@@ -16,6 +16,7 @@ import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
 import type { EventEnvelope } from "./types.js";
 import type { ErrorCategory } from "../errors.js";
+import type { GeneratedRule } from "../strategies/types.js";
 
 export interface RunContext {
   runId: string;
@@ -929,6 +930,15 @@ export type PatchVerifyErrorEvent = EventEnvelope<
   }
 >;
 
+export type AutoRuleGeneratedEvent = EventEnvelope<
+  "auto-rule:generated",
+  {
+    context: RunContext;
+    rule: GeneratedRule;
+    sourceFinding: { fingerprint: string; filePath: string; startLine: number };
+  }
+>;
+
 export type KuzushiEvent =
   | PipelineStartEvent
   | PipelineCompleteEvent
@@ -1007,4 +1017,5 @@ export type KuzushiEvent =
   | PatchVerifyRequestedEvent
   | PatchVerifyStartEvent
   | PatchVerifyCompleteEvent
-  | PatchVerifyErrorEvent;
+  | PatchVerifyErrorEvent
+  | AutoRuleGeneratedEvent;

@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   extractJson,
   resolveDefaultReadOnlyTools,
@@ -235,7 +237,7 @@ export async function triageFindingWithAgent(
 
 export const BATCH_TRIAGE_FALLBACK_RATIONALE = "Finding was not included in batch triage agent response.";
 
-export const DEFAULT_BATCH_SIZE = 15;
+export const DEFAULT_BATCH_SIZE = 5;
 
 export async function triageFindingsBatch(
   findings: Finding[],
@@ -648,4 +650,55 @@ function parsePathAssessment(value: unknown): TriageResult["source"] | undefined
     isFalsePositive,
     evidence,
   };
+}
+
+const PRE_READ_BYTE_CAP = 20_000;
+
+/**
+ * Pre-read the flagged source file for a finding, returning a formatted
+ * markdown snippet centered on the finding's start line.
+ * Returns empty string on any failure — triage must never fail due to pre-read.
+ */
+export async function preReadForTriage(
+  finding: Finding,
+  repoRoot: string,
+  surroundingLines = 50,
+): Promise<string> {
+  try {
+    const filePath = path.resolve(repoRoot, finding.filePath);
+    const raw = await readFile(filePath, "utf-8");
+    if (raw.length > PRE_READ_BYTE_CAP * 2) {
+      // For very large files, only use a window
+    }
+    const lines = raw.split("\n");
+    const start = Math.max(0, finding.startLine - 1 - surroundingLines);
+    const end = Math.min(lines.length, finding.startLine + surroundingLines);
+    const snippet = lines.slice(start, end).join("\n");
+
+    if (snippet.length === 0 || snippet.length > PRE_READ_BYTE_CAP) {
+      return snippet.length > PRE_READ_BYTE_CAP
+        ? formatPreReadSnippet(finding, start + 1, end, snippet.slice(0, PRE_READ_BYTE_CAP))
+        : "";
+    }
+
+    return formatPreReadSnippet(finding, start + 1, end, snippet);
+  } catch {
+    return "";
+  }
+}
+
+function formatPreReadSnippet(
+  finding: Finding,
+  startLine: number,
+  endLine: number,
+  snippet: string,
+): string {
+  return [
+    "## Pre-loaded source context",
+    `File: ${finding.filePath} (lines ${startLine}-${endLine}, finding at line ${finding.startLine})`,
+    "```",
+    snippet,
+    "```",
+    "",
+  ].join("\n");
 }
