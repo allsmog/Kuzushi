@@ -151,6 +151,18 @@ export interface RunState {
   dynamicStarted: boolean;
   dynamicCompleted: boolean;
   dynamicAttempts: Map<string, number>;
+  autoPatchEnabled: boolean;
+  patchCandidates: Set<string>;
+  patchQueue: string[];
+  patchCursor: number;
+  patchInFlight: number;
+  patchCompleted: number;
+  patchVerified: number;
+  patchFailed: number;
+  patchCostUsd: number;
+  patchErrors: number;
+  patchDispatching: boolean;
+  patchStarted: boolean;
 }
 
 export interface OrchestratorDeps {

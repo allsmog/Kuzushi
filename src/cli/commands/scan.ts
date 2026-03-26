@@ -150,6 +150,19 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     }
   }, 3);
 
+  // Start streaming server if enabled
+  let streamingCleanup: (() => Promise<void>) | undefined;
+  if (config.streamingEnabled) {
+    const { startStreamingServer } = await import("../../streaming.js");
+    const streaming = startStreamingServer(bus, config.streamingPort ?? 0);
+    streamingCleanup = streaming.close;
+    registerShutdownHook("streaming-server", async () => {
+      if (streamingCleanup) {
+        try { await streamingCleanup(); } catch { /* best-effort */ }
+      }
+    }, 0);
+  }
+
   const resumeRunId = resolveResumeRunId(db, repoId, repoName, opts.resume);
   const runId = resumeRunId ?? generateRunId();
 

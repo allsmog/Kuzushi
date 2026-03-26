@@ -5,6 +5,7 @@ import type {
   EnrichedRepoContext,
   ExploitChain,
   KuzushiConfig,
+  PatchStatus,
   PocHarnessResult,
   ScanOpts,
   TriageResult,
@@ -54,6 +55,14 @@ export interface PipelineStats {
   dynamicRejected?: number;
   dynamicErrors?: number;
   dynamicCostUsd?: number;
+  incrementalCachedFiles?: number;
+  incrementalRescannedFiles?: number;
+  incrementalDepExpandedFiles?: number;
+  patchGenerated?: number;
+  patchVerified?: number;
+  patchFailed?: number;
+  patchCostUsd?: number;
+  patchErrors?: number;
   budgetExceeded?: boolean;
   failedTasks?: string[];
   deadLetterCount?: number;
@@ -831,6 +840,95 @@ export type TaskApprovalRequestedEvent = EventEnvelope<
   }
 >;
 
+// ── Patch synthesis events ────────────────────────────────────────────────
+
+export type PatchRequestedEvent = EventEnvelope<
+  "patch:requested",
+  {
+    context: RunContext;
+    fingerprint: string;
+    trigger: "verify" | "poc" | "triage";
+  }
+>;
+
+export type PatchStartEvent = EventEnvelope<
+  "patch:start",
+  {
+    context: RunContext;
+    fingerprint: string;
+  }
+>;
+
+export type PatchCompleteEvent = EventEnvelope<
+  "patch:complete",
+  {
+    context: RunContext;
+    fingerprint: string;
+    status: PatchStatus;
+    worktreePath: string | null;
+    costUsd: number;
+    iterations: number;
+  }
+>;
+
+export type PatchErrorEvent = EventEnvelope<
+  "patch:error",
+  {
+    context: RunContext;
+    fingerprint: string;
+    error: string;
+    attempt: number;
+  }
+>;
+
+export type PatchQueueDepthEvent = EventEnvelope<
+  "patch:queue-depth",
+  {
+    context: RunContext;
+    depth: number;
+  }
+>;
+
+// ── Patch re-verification events ─────────────────────────────────────────
+
+export type PatchVerifyRequestedEvent = EventEnvelope<
+  "patch-verify:requested",
+  {
+    context: RunContext;
+    fingerprint: string;
+    worktreePath: string;
+    depth: "scanner" | "triage" | "full";
+  }
+>;
+
+export type PatchVerifyStartEvent = EventEnvelope<
+  "patch-verify:start",
+  {
+    context: RunContext;
+    fingerprint: string;
+  }
+>;
+
+export type PatchVerifyCompleteEvent = EventEnvelope<
+  "patch-verify:complete",
+  {
+    context: RunContext;
+    fingerprint: string;
+    verified: boolean;
+    depth: "scanner" | "triage" | "full";
+    details: string;
+  }
+>;
+
+export type PatchVerifyErrorEvent = EventEnvelope<
+  "patch-verify:error",
+  {
+    context: RunContext;
+    fingerprint: string;
+    error: string;
+  }
+>;
+
 export type KuzushiEvent =
   | PipelineStartEvent
   | PipelineCompleteEvent
@@ -900,4 +998,13 @@ export type KuzushiEvent =
   | ReportRequestedEvent
   | ReportCompleteEvent
   | PromptReportEvent
-  | TaskApprovalRequestedEvent;
+  | TaskApprovalRequestedEvent
+  | PatchRequestedEvent
+  | PatchStartEvent
+  | PatchCompleteEvent
+  | PatchErrorEvent
+  | PatchQueueDepthEvent
+  | PatchVerifyRequestedEvent
+  | PatchVerifyStartEvent
+  | PatchVerifyCompleteEvent
+  | PatchVerifyErrorEvent;

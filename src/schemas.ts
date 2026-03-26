@@ -64,6 +64,7 @@ export const PatchStatusSchema = z.enum([
   "STILL_VULNERABLE",
   "TESTS_FAILED",
   "SOUND",
+  "VERIFIED",
   "UNKNOWN",
 ]);
 
@@ -629,6 +630,10 @@ export const KuzushiConfigSchema = z.object({
   patchMaxIterations: z.number().optional(),
   patchBuildCommand: z.string().optional(),
   patchTestCommand: z.string().optional(),
+  autoPatchEnabled: z.boolean().optional(),
+  autoPatchAfter: z.enum(["verify", "poc", "triage"]).optional(),
+  patchVerifyDepth: z.enum(["scanner", "triage", "full"]).optional(),
+  patchConcurrency: z.number().int().positive().optional(),
   llmRescoreEnabled: z.boolean().optional(),
   llmRescoreModel: z.string().optional(),
   llmRescoreThreshold: z.number().optional(),
@@ -705,7 +710,11 @@ export const KuzushiConfigSchema = z.object({
   })).optional(),
   modelFallbacks: z.record(z.string(), z.array(z.string())).optional(),
   modelFallbackCooldownMs: z.number().optional(),
+  streamingEnabled: z.boolean().optional(),
+  streamingPort: z.number().int().nonnegative().optional(),
   incrementalCache: z.boolean().optional(),
+  incrementalDepTracking: z.boolean().optional(),
+  incrementalCacheTtlDays: z.number().int().positive().optional(),
   skipTriageForHighConfidenceAgentic: z.boolean().optional(),
 });
 

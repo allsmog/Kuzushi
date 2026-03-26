@@ -390,6 +390,18 @@ export class PipelineOrchestrator {
       dynamicStarted: false,
       dynamicCompleted: false,
       dynamicAttempts: new Map(),
+      autoPatchEnabled: config.autoPatchEnabled === true,
+      patchCandidates: new Set(),
+      patchQueue: [],
+      patchCursor: 0,
+      patchInFlight: 0,
+      patchCompleted: 0,
+      patchVerified: 0,
+      patchFailed: 0,
+      patchCostUsd: 0,
+      patchErrors: 0,
+      patchDispatching: false,
+      patchStarted: false,
       stageTimestamps: {
         pipelineStart: event.meta.timestamp,
         pipelineEnd: "",
@@ -425,6 +437,12 @@ export class PipelineOrchestrator {
     }
 
     this.runs.set(runId, state);
+
+    // Set up patch dispatching if auto-patch is enabled
+    if (state.autoPatchEnabled) {
+      const { setupPatchDispatching } = await import("./orchestrator/patch-dispatcher.js");
+      setupPatchDispatching(this.bus, state, this.deps.db);
+    }
 
     if (resumeRunId) {
       await this.resumeFromCheckpoint(state, runId, resumeRunId);
@@ -1672,6 +1690,16 @@ export class PipelineOrchestrator {
         });
       } catch (error) {
         log.warn(`[hooks] afterAll hook error: ${toErrorMessage(error)}`);
+      }
+    }
+
+    // Store HEAD ref for incremental scanning on next run
+    if (state.config.incrementalCache !== false) {
+      try {
+        const { storeHeadRef } = await import("../incremental.js");
+        storeHeadRef(this.deps.db, runId, state.context.repoRoot);
+      } catch {
+        /* best-effort */
       }
     }
 

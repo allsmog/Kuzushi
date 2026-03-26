@@ -62,22 +62,25 @@ The terminal report shows true positives first, then needs-review items. False p
 ## How It Works
 
 ```
-  ┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────┐
-  │   Scanners   │────▶│  AI Triage   │────▶│ Verification │────▶│  Report  │
-  │ Semgrep      │     │ Investigate  │     │ Construct    │     │ TP only  │
-  │ CodeQL       │     │ each finding │     │ PoC exploits │     │ + export │
-  │ Agentic      │     │ with context │     │ (optional)   │     │          │
-  └─────────────┘     └──────────────┘     └──────────────┘     └──────────┘
+  ┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌─────────┐     ┌──────────┐
+  │   Scanners   │────▶│  AI Triage   │────▶│ Verification │────▶│  Patch  │────▶│  Report  │
+  │ Semgrep      │     │ Investigate  │     │ Construct    │     │ Generate │     │ TP only  │
+  │ CodeQL       │     │ each finding │     │ PoC exploits │     │ & verify │     │ + export │
+  │ Agentic      │     │ with context │     │ (optional)   │     │ (opt-in) │     │ + stream │
+  └─────────────┘     └──────────────┘     └──────────────┘     └─────────┘     └──────────┘
 ```
 
 1. **Context gathering** — auto-detects your tech stack, frameworks, auth patterns, ORMs, and sanitization libraries
-2. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently
-3. **Deduplication** — fingerprints and merges equivalent findings across scanners
-4. **AI triage** — an agent investigates each finding with full repo context, reads the code, traces data flow, and classifies it
-5. **Verification** (optional) — constructs concrete PoC exploit payloads for true positives
-6. **PoC harness generation** (optional) — produces runnable exploit scripts
-7. **Dynamic analysis** (optional) — executes harnesses to confirm exploitability
-8. **Report** — terminal display + export to SARIF, Markdown, JSON, CSV, or JSONL
+2. **Code graph** (optional) — builds a persistent entry-point-to-sink graph via static analysis + LLM gap-filling
+3. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently; multi-strategy mode runs 2-4 analytical approaches per vuln class
+4. **Deduplication** — fingerprints and merges equivalent findings across scanners
+5. **Incremental skip** — findings already triaged in previous runs are skipped automatically
+6. **AI triage** — an agent investigates each finding with full repo context, code graph paths, reads the code, traces data flow, and classifies it
+7. **Verification** (optional) — constructs concrete PoC exploit payloads for true positives
+8. **PoC harness generation** (optional) — produces runnable exploit scripts
+9. **Dynamic analysis** (optional) — executes harnesses to confirm exploitability
+10. **Auto-patch** (optional) — generates, validates, and re-verifies patches in disposable git worktrees
+11. **Report** — terminal display + export to SARIF, Markdown, JSON, CSV, or JSONL; optional SSE live streaming
 
 ## CI Integration
 
@@ -124,6 +127,16 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 **Resumable runs** — checkpoints pipeline state to SQLite. Interrupted scan? `--resume` picks up exactly where it left off.
 
 **Patch synthesis** — `kuzushi patch <repo> --fingerprint <fp>` generates and validates security patches in disposable git worktrees without touching your working copy.
+
+**LLM code graph** — builds a persistent code graph tracing entry points through middleware, controllers, services, and data-access layers. Static skeleton from import analysis + LLM-assisted gap-filling for dynamic dispatch, DI, and callback patterns. Feeds graph context into triage for better reasoning.
+
+**Multi-strategy analysis** — runs 2-4 different analytical approaches per vulnerability class (syntactic pattern matching, dataflow tracing, first-principles reasoning, execution-based proof) and merges results with confidence boosting when strategies agree.
+
+**Incremental scanning** — skips re-triage for unchanged findings across runs. Tracks the last scanned commit, computes file diffs, and expands the rescan scope with dependency-aware invalidation via the import graph.
+
+**Auto-patch with closed-loop verification** — after confirming a vulnerability, automatically generates a patch in a disposable git worktree, validates it (apply, build, test), then re-runs the scanner on the patched code to confirm the vulnerability is gone.
+
+**Live streaming** — SSE server streams pipeline events in real-time (`--stream`). Connect with `curl`, `EventSource`, or any SSE client to watch findings appear as they're triaged.
 
 **Audit logging** — optional JSONL audit trail of every agent decision for debugging, accountability, and compliance records.
 
@@ -198,6 +211,41 @@ kuzushi <repo> --verify --dynamic-analysis --dynamic-min-score 8
 kuzushi patch <repo> --fingerprint <fp>                        # synthesize and validate a patch
 kuzushi patch <repo> --fingerprint <fp> --build-cmd "npm run build"
 kuzushi patch <repo> --fingerprint <fp> --test-cmd "npm test" --max-iterations 5
+```
+
+### Code Graph
+
+```
+kuzushi <repo> --code-graph                       # enable LLM-powered code graph (entry-point-to-sink tracing)
+```
+
+### Multi-Strategy Analysis
+
+```
+kuzushi <repo> --multi-strategy                   # adaptive mode: run cheapest strategy first, exit early if confident
+kuzushi <repo> --multi-strategy-full              # run all strategies in parallel for maximum coverage
+kuzushi <repo> --multi-strategy-budget 3.0        # per-finding budget across all strategies (USD)
+kuzushi <repo> --multi-strategy-auto-rules        # generate Semgrep rules from confirmed multi-strategy findings
+```
+
+### Auto-Patch (Closed-Loop)
+
+```
+kuzushi <repo> --verify --auto-patch                                # patch exploitable findings, re-verify
+kuzushi <repo> --verify --auto-patch --auto-patch-after triage      # patch any TP (broadest trigger)
+kuzushi <repo> --verify --auto-patch --auto-patch-after poc         # patch only after PoC proves it
+kuzushi <repo> --auto-patch --patch-verify-depth triage             # re-run scanner + triage on patched code
+kuzushi <repo> --auto-patch --patch-verify-depth full               # full pipeline re-verify (most thorough)
+kuzushi <repo> --auto-patch --patch-concurrency 3                   # parallel patch synthesis tasks
+```
+
+### Streaming
+
+```
+kuzushi <repo> --stream                           # start SSE server on auto-assigned port
+kuzushi <repo> --stream --stream-port 3001        # start SSE server on specific port
+# Then in another terminal:
+curl -N http://localhost:3001/events              # watch live pipeline events
 ```
 
 ### Crypto Behavioral Testing
@@ -295,6 +343,17 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `cryptoBehavioralMaxFindings` | `10` | Max findings to generate behavioral tests for per run |
 | `cryptoBehavioralTimeoutMs` | `120000` | Execution timeout per harness in ms |
 | `cryptoBehavioralPerFindingBudgetUsd` | `1` | Cost budget per finding for harness generation |
+| `codeGraphEnabled` | `false` | Enable LLM-powered code graph construction and enrichment |
+| `multiStrategyMode` | `"off"` | Multi-strategy analysis mode (`off`, `adaptive`, `full`) |
+| `multiStrategyBudgetUsd` | `2.0` | Per-finding budget across all strategies (USD) |
+| `autoPatchEnabled` | `false` | Enable automatic patch generation in pipeline |
+| `autoPatchAfter` | `"verify"` | Trigger threshold for auto-patch (`verify`, `poc`, `triage`) |
+| `patchVerifyDepth` | `"scanner"` | Re-verification depth after patching (`scanner`, `triage`, `full`) |
+| `patchConcurrency` | `2` | Max concurrent patch synthesis tasks |
+| `incrementalCache` | `true` | Enable incremental scanning (skip unchanged findings across runs) |
+| `incrementalDepTracking` | `true` | Include importers of changed files in rescan scope |
+| `streamingEnabled` | `false` | Enable SSE streaming server for live pipeline events |
+| `streamingPort` | `0` (auto) | Port for the SSE streaming server |
 | `enableContextGathering` | `true` | Run repo context analysis before triage |
 | `auditLog` | `false` | Write agent activity to JSONL audit files |
 | `reportOutput` | _(unset)_ | Write markdown report output to this path |
@@ -451,7 +510,11 @@ Kuzushi is built on three core abstractions:
 
 **AgentTask + DAG** — Every unit of work (context gatherer, scanner, future threat modeler, etc.) implements the `AgentTask` interface: an `id`, `dependsOn` list, `outputKind`, and a `run()` method. The `TaskRegistry` resolves enabled tasks into a DAG, groups them into parallel stages, detects cycles, and hands execution to the `PipelineOrchestrator`. Upstream task outputs are forwarded to dependents automatically.
 
-**Pipeline Phases** — After the DAG completes, the orchestrator drives three sequential phases: triage (classify findings), verification (construct PoC exploits), and report (display results). Each phase has its own concurrency control, cost tracking, and checkpoint support.
+**Pipeline Phases** — After the DAG completes, the orchestrator drives sequential phases: triage (classify findings), verification (construct PoC exploits), patch synthesis (auto-generate and re-verify fixes), and report (display results + optional SSE streaming). Each phase has its own concurrency control, cost tracking, and checkpoint support.
+
+**Strategy Framework** — The multi-strategy system wraps detection tasks with multiple analytical approaches (syntactic, dataflow, reasoning, execution) that run in parallel or adaptively, merging results with corroboration-based confidence boosting.
+
+**Code Graph** — A persistent SQLite-backed graph of code paths from entry points to sinks, built from static import analysis and LLM-assisted tracing. Injected into triage prompts for deeper reasoning about reachability and sanitization.
 
 Existing `ScannerPlugin` implementations (Semgrep, Agentic) are adapted into `AgentTask` via `adaptScannerPlugin()`, so the scanner plugin API remains stable.
 

@@ -88,6 +88,17 @@ function rowToPatchResult(row: PatchResultRow): PatchResult {
   };
 }
 
+export function updatePatchResultStatus(
+  db: Database.Database,
+  patchRunId: string,
+  status: PatchStatus,
+): void {
+  db.prepare(`
+    UPDATE patch_results SET status = ?, updated_at = datetime('now')
+    WHERE patch_run_id = ?
+  `).run(status, patchRunId);
+}
+
 function parsePatchStatus(raw: string | null): PatchStatus | undefined {
   switch (raw) {
     case "APPLY_FAILED":
@@ -95,6 +106,7 @@ function parsePatchStatus(raw: string | null): PatchStatus | undefined {
     case "STILL_VULNERABLE":
     case "TESTS_FAILED":
     case "SOUND":
+    case "VERIFIED":
     case "UNKNOWN":
       return raw;
     default:

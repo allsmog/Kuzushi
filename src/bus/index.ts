@@ -18,6 +18,8 @@ import { registerPocExecutorWorker } from "./workers/poc-executor-worker.js";
 import { registerVerificationWorker } from "./workers/verification-worker.js";
 import { registerTaintAnalysisRefinementWorker } from "./workers/taint-analysis-refinement-worker.js";
 import { registerDynamicAnalysisWorker } from "./workers/dynamic-analysis-worker.js";
+import { registerPatchWorker } from "./workers/patch-worker.js";
+import { registerPatchVerifyWorker } from "./workers/patch-verify-worker.js";
 import { createPocExecutor } from "../poc-executor/index.js";
 
 export interface RegisterWorkersDeps {
@@ -108,6 +110,11 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
       runtime: deps.runtime,
       db: deps.db,
     });
+  }
+
+  if (deps.config.autoPatchEnabled) {
+    registerPatchWorker({ bus, db: deps.db, runtime: deps.runtime, config: deps.config });
+    registerPatchVerifyWorker({ bus, db: deps.db, config: deps.config, registry: deps.registry });
   }
 
   if (deps.config.auditLog) {

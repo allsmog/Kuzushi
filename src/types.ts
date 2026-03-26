@@ -213,6 +213,7 @@ export type PatchStatus =
   | "STILL_VULNERABLE"
   | "TESTS_FAILED"
   | "SOUND"
+  | "VERIFIED"
   | "UNKNOWN";
 
 export interface PatchResult {
@@ -534,6 +535,20 @@ export interface KuzushiConfig {
   astIndexEnabled?: boolean;
   /** Enable call-graph assist enrichment for high-value findings. Default false. */
   callGraphAssistEnabled?: boolean;
+  /** Enable LLM-powered code graph construction and enrichment. Default false. */
+  codeGraphEnabled?: boolean;
+  /** Multi-strategy analysis mode. Default "off". */
+  multiStrategyMode?: "off" | "adaptive" | "full";
+  /** Budget per finding across all strategies in USD. Default 2.0. */
+  multiStrategyBudgetUsd?: number;
+  /** Budget per individual strategy in USD. Default 0.50. */
+  multiStrategyPerStrategyBudgetUsd?: number;
+  /** Per-strategy timeout in milliseconds. Default 60000. */
+  multiStrategyTimeoutMs?: number;
+  /** Enable auto-rule generation from confirmed multi-strategy findings. Default false. */
+  multiStrategyAutoRuleGeneration?: boolean;
+  /** Rescan codebase with generated rules for variant detection. Default false. */
+  multiStrategyRescanWithRules?: boolean;
   /** Enable targeted dynamic analysis tasks. Default false. */
   dynamicAnalysisEnabled?: boolean;
   /** Enable crypto behavioral runtime confirmation after secrets-crypto detection. Default false. */
@@ -562,6 +577,14 @@ export interface KuzushiConfig {
   patchBuildCommand?: string;
   /** Optional override test command for manual patch validation. */
   patchTestCommand?: string;
+  /** Enable automatic patch generation in pipeline. Default false. */
+  autoPatchEnabled?: boolean;
+  /** Trigger threshold for auto-patch: patch after verify, poc, or triage. Default "verify". */
+  autoPatchAfter?: "verify" | "poc" | "triage";
+  /** Depth of re-verification after patching. Default "scanner". */
+  patchVerifyDepth?: "scanner" | "triage" | "full";
+  /** Max concurrent patch synthesis tasks. Default 2. */
+  patchConcurrency?: number;
   /** Enable two-stage LLM re-scoring after hard FP filter. */
   llmRescoreEnabled?: boolean;
   /** Model for LLM re-scoring (defaults to haiku for cost efficiency). */
@@ -644,8 +667,16 @@ export interface KuzushiConfig {
   modelFallbacks?: Record<string, string[]>;
   /** Cooldown duration (ms) before retrying a failed model. Default 60000. */
   modelFallbackCooldownMs?: number;
-  /** Enable incremental scanner result caching across runs. Default false. */
+  /** Enable incremental scanner result caching across runs. Default true. */
   incrementalCache?: boolean;
+  /** Include importers of changed files in incremental rescan scope. Default true. */
+  incrementalDepTracking?: boolean;
+  /** Days before scanner cache entries expire. Default 30. */
+  incrementalCacheTtlDays?: number;
+  /** Enable SSE streaming server for live pipeline events. Default false. */
+  streamingEnabled?: boolean;
+  /** Port for the SSE streaming server. Default 0 (auto-assign). */
+  streamingPort?: number;
   /** Skip triage for high-confidence agentic findings (score >= 7, confidence HIGH). Default false. */
   skipTriageForHighConfidenceAgentic?: boolean;
 }

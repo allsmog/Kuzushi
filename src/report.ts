@@ -216,6 +216,34 @@ export function printSummary(
     }
   }
 
+  const cachedFiles = options.stats?.incrementalCachedFiles ?? 0;
+  const rescannedFiles = options.stats?.incrementalRescannedFiles ?? 0;
+  const depExpanded = options.stats?.incrementalDepExpandedFiles ?? 0;
+  if (cachedFiles > 0 || rescannedFiles > 0) {
+    console.log("");
+    console.log(`  ${chalk.dim("Incremental:")}     ${chalk.green(`${cachedFiles} cached`)}, ${rescannedFiles} rescanned${depExpanded > 0 ? `, ${depExpanded} dependency-expanded` : ""}`);
+  }
+
+  const patchGenerated = options.stats?.patchGenerated ?? 0;
+  const patchVerified = options.stats?.patchVerified ?? 0;
+  const patchFailed = options.stats?.patchFailed ?? 0;
+  const patchErrors = options.stats?.patchErrors ?? 0;
+  if (patchGenerated + patchVerified + patchFailed + patchErrors > 0) {
+    console.log("");
+    console.log(chalk.bold("  Patch Synthesis:"));
+    console.log(`    ${chalk.cyan("Generated:")}  ${patchGenerated}`);
+    console.log(`    ${chalk.green("Verified:")}   ${patchVerified} (finding eliminated after patch)`);
+    if (patchFailed > 0) {
+      console.log(`    ${chalk.red("Failed:")}     ${patchFailed}`);
+    }
+    if (patchErrors > 0) {
+      console.log(`    ${chalk.red("Errors:")}     ${patchErrors}`);
+    }
+    if (options.stats?.patchCostUsd) {
+      console.log(`    ${chalk.dim("Cost:")}       $${options.stats.patchCostUsd.toFixed(4)}`);
+    }
+  }
+
   const chains = options.exploitChains;
   if (chains && chains.length > 0) {
     console.log("");

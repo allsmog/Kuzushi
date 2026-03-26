@@ -19,6 +19,9 @@ import { migration015 } from "./015_add_assertion_tracking.js";
 import { migration016 } from "./016_add_structured_finding_evidence.js";
 import { migration017 } from "./017_add_dynamic_and_patch_persistence.js";
 import { migration018 } from "./018_add_crypto_behavioral_runs.js";
+import { migration019 } from "./019_add_code_graph_tables.js";
+import { migration020 } from "./020_add_verified_patch_status.js";
+import { migration021 } from "./021_add_incremental_scanning_support.js";
 import type { Migration } from "./types.js";
 
 /** All registered migrations in version order. */
@@ -41,4 +44,7 @@ export const allMigrations: Migration[] = [
   migration016,
   migration017,
   migration018,
+  migration019,
+  migration020,
+  migration021,
 ];

@@ -30,6 +30,8 @@ import { graphqlSecurityTask } from "./tasks/graphql-security.js";
 import { taskSelectorTask } from "./tasks/task-selector.js";
 import { reachabilityCheckTask } from "./tasks/reachability-check.js";
 import { callGraphAssistTask } from "./tasks/call-graph-assist.js";
+import { codeGraphBuildTask } from "./tasks/code-graph/build.js";
+import { codeGraphEnrichTask } from "./tasks/code-graph/enrich.js";
 import { appModelBuildTask } from "./tasks/app-model-build.js";
 import { threatScenarioBuildTask } from "./tasks/threat-scenario-build.js";
 
@@ -87,6 +89,10 @@ export async function createDefaultTaskRegistry(
 
   // Call-graph evidence enrichment
   tasks.register(callGraphAssistTask);
+
+  // LLM-powered code graph
+  tasks.register(codeGraphBuildTask);
+  tasks.register(codeGraphEnrichTask);
 
   // Dynamic task selection
   tasks.register(taskSelectorTask);

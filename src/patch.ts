@@ -39,6 +39,8 @@ export interface PatchSynthesisOptions {
   buildCommand: string | null;
   testCommand: string | null;
   maxTurns?: number;
+  /** When true, keep the worktree alive after synthesis for re-verification. Default false. */
+  skipCleanup?: boolean;
 }
 
 export interface PatchPipelineResult {
@@ -98,7 +100,7 @@ function validatePatchEligibility(
 /**
  * Create a disposable git worktree for safe patch application.
  */
-function createDisposableWorktree(repoRoot: string): {
+export function createDisposableWorktree(repoRoot: string): {
   worktreePath: string;
   cleanup: () => Promise<void>;
 } {
@@ -522,8 +524,12 @@ export async function runPatchPipeline(
       finalDiff = synthesis.diff;
     }
   } finally {
-    await cleanup();
+    if (!options.skipCleanup || finalStatus !== "SOUND") {
+      await cleanup();
+    }
   }
+
+  const keepWorktree = options.skipCleanup === true && finalStatus === "SOUND";
 
   const patchResult: PatchResult = {
     patchRunId,
@@ -534,7 +540,7 @@ export async function runPatchPipeline(
     iterations: history.length,
     buildCommand: buildCmd,
     testCommand: testCmd,
-    worktreePath: null, // cleaned up
+    worktreePath: keepWorktree ? worktreePath : null,
     costUsd: normalizeCostUsd(totalCostUsd),
     validatorLog: history.map((h) => `[Attempt ${h.attempt}] ${h.status}: ${h.output}`).join("\n\n"),
     history,

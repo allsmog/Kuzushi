@@ -22,6 +22,17 @@ export interface ScanCommandOptions {
   verifyReflectionInterval?: number;
   verifyMinConfidence?: number;
   cryptoBehavioralTest: boolean;
+  codeGraph: boolean;
+  multiStrategy: boolean;
+  multiStrategyFull: boolean;
+  multiStrategyBudget?: number;
+  multiStrategyAutoRules: boolean;
+  stream: boolean;
+  streamPort?: number;
+  autoPatch: boolean;
+  autoPatchAfter?: string;
+  patchVerifyDepth?: string;
+  patchConcurrency?: number;
   pocHarness: boolean;
   pocHarnessModel?: string;
   pocHarnessMaxTurns?: number;
@@ -70,6 +81,24 @@ export function applyScanCommandConfigOverrides(
       "crypto-behavioral-test",
     ]);
   }
+  if (opts.codeGraph) {
+    config.codeGraphEnabled = true;
+    config.enabledTasks = dedupeStrings([
+      ...(config.enabledTasks ?? []),
+      "code-graph-build",
+      "code-graph-enrich",
+    ]);
+  }
+  if (opts.multiStrategy) config.multiStrategyMode = "adaptive";
+  if (opts.multiStrategyFull) config.multiStrategyMode = "full";
+  if (opts.multiStrategyBudget != null) config.multiStrategyBudgetUsd = opts.multiStrategyBudget;
+  if (opts.multiStrategyAutoRules) config.multiStrategyAutoRuleGeneration = true;
+  if (opts.stream) config.streamingEnabled = true;
+  if (opts.streamPort != null) config.streamingPort = opts.streamPort;
+  if (opts.autoPatch) config.autoPatchEnabled = true;
+  if (opts.autoPatchAfter) config.autoPatchAfter = opts.autoPatchAfter as typeof config.autoPatchAfter;
+  if (opts.patchVerifyDepth) config.patchVerifyDepth = opts.patchVerifyDepth as typeof config.patchVerifyDepth;
+  if (opts.patchConcurrency != null) config.patchConcurrency = opts.patchConcurrency;
   if (opts.pocHarness) config.pocHarness = true;
   if (opts.pocHarnessModel) config.pocHarnessModel = opts.pocHarnessModel;
   if (opts.context === false) config.enableContextGathering = false;
