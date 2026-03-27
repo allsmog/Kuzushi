@@ -9,9 +9,13 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { resolve, join, basename } from "node:path";
+import { resolve, join, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import chalk from "chalk";
 import type {
   GroundTruthDataset,

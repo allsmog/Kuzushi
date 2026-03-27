@@ -70,6 +70,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
 
   // Cache per-run prompt fragments: these are pure functions of (repoContext, enrichedContext)
   // which are fixed for the entire run. Caching maximizes Anthropic API prompt cache hits.
+  const escalatedFingerprints = new Set<string>();
   let cachedSystemPromptPrefix: string | undefined;
   let cachedSystemPromptKey: string | undefined;
   const cachedEvidenceChain = evidenceChainModule();
@@ -115,7 +116,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
     }
 
     try {
-      const { result, costUsd } = await withRetry(
+      let { result, costUsd } = await withRetry(
         async () => {
           attempts += 1;
 
@@ -341,6 +342,42 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
         },
       );
       result.triageCostUsd = costUsd;
+
+      // Auto-escalate: high-severity needs_review with low confidence → multi-agent triage
+      if (
+        !useMultiAgent
+        && result.verdict === "needs_review"
+        && result.confidence < 0.4
+        && finding.severity === "ERROR"
+        && !escalatedFingerprints.has(finding.fingerprint)
+      ) {
+        escalatedFingerprints.add(finding.fingerprint);
+        try {
+          const coercedRepoContext = coerceRepoContext(repoContext);
+          const coercedEnrichedContext = coerceContextEnrichment(enrichedContext);
+          const escalatedOutput = await triageFindingMultiAgent(
+            triageConfigProvider,
+            finding,
+            context.scanPath ?? context.repoRoot,
+            context.repoName,
+            deps.config.triageModel ?? deps.config.model,
+            deps.config.triageSpecialistModel ?? deps.config.triageModel ?? deps.config.model,
+            deps.config.triageMaxTurns,
+            deps.config.triageSpecialistMaxTurns ?? null,
+            coercedRepoContext,
+            {
+              runtime: deps.runtime,
+              enrichedContext: coercedEnrichedContext,
+            },
+          );
+          result = escalatedOutput.result;
+          result.triageCostUsd = (result.triageCostUsd ?? 0) + escalatedOutput.costUsd;
+          costUsd += escalatedOutput.costUsd;
+          console.error(`[triage] Auto-escalated ${finding.fingerprint} to multi-agent (was needs_review @ ${result.confidence})`);
+        } catch (error) {
+          console.error(`[triage] Multi-agent escalation failed for ${finding.fingerprint}: ${toErrorMessage(error)}`);
+        }
+      }
 
       // Invoke afterTriage hook — allows hooks to override verdict/confidence
       const afterRunHooks = deps.getRunHooks?.(runId);
