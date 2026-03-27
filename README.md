@@ -317,6 +317,8 @@ kuzushi config path                   # print config file location
 
 Global config lives at `~/.kuzushi/config.json`. Optional project overrides can live at `<repo>/.kuzushi/config.json`. CLI flags override config values.
 
+**Repo-local config sandboxing:** By default, project-level config files (`<repo>/.kuzushi/config.json`) are sandboxed — keys that could execute code or reach external systems (e.g., `acpAdapterCommand`, `hooks`, `externalTasks`, `pocExecute`, scanner binary paths) are silently stripped. This prevents a cloned repo from altering your runtime behavior. Pass `--trust-repo-config` to opt in to the full project config when you trust the repository.
+
 Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config files. Prefer `--api-key` for one-off runs or `ANTHROPIC_API_KEY` from your shell/secret manager.
 
 </details>

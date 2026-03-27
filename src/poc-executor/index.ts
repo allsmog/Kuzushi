@@ -10,8 +10,8 @@ export { ProcessPocExecutor } from "./process.js";
 const log = getLogger("poc-executor");
 
 /**
- * Create a PoC executor with Docker-preferred fallback to process.
- * If backend is "docker", tries Docker first, falls back to process.
+ * Create a PoC executor for the requested backend.
+ * If backend is "docker", Docker must be available.
  * If backend is "process", uses process directly.
  */
 export async function createPocExecutor(
@@ -27,6 +27,8 @@ export async function createPocExecutor(
     return docker;
   }
 
-  log.warn("Docker not available, falling back to process executor");
-  return new ProcessPocExecutor(timeoutMs);
+  log.warn("Docker sandbox requested but Docker is unavailable");
+  throw new Error(
+    "Docker sandbox requested but Docker is unavailable. Install Docker or set pocSandbox=process explicitly.",
+  );
 }

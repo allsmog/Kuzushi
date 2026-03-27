@@ -144,6 +144,108 @@ describe("report-worker", () => {
     db.close();
   });
 
+  it("does not label max-capped findings as already triaged", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      triageMaxTurns: 10,
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 1,
+      scanMode: "sequential",
+      scanners: ["semgrep"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      scannerConfig: { semgrep: {} },
+    };
+
+    registerReportWorker(bus, { db, config });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(createEvent("scan:start", runId, {
+      context,
+      scanners: ["semgrep"],
+      scanOpts: {
+        severity: ["ERROR"],
+        excludePatterns: [],
+        fresh: false,
+      },
+    }));
+    await bus.publish(createEvent("scan:complete", runId, { context, totalFindings: 5 }));
+    await bus.publish(createEvent("triage:start", runId, {
+      context,
+      findingCount: 1,
+      model: "anthropic:claude-sonnet-4-6",
+      skippedAlreadyTriaged: 0,
+    }));
+
+    const output = vi.mocked(console.log).mock.calls.flat().join("\n");
+    expect(output).not.toContain("already-triaged");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("prints resume info only for actually skipped triaged findings", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      triageMaxTurns: 10,
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 1,
+      scanMode: "sequential",
+      scanners: ["semgrep"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      scannerConfig: { semgrep: {} },
+    };
+
+    registerReportWorker(bus, { db, config });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(createEvent("scan:start", runId, {
+      context,
+      scanners: ["semgrep"],
+      scanOpts: {
+        severity: ["ERROR"],
+        excludePatterns: [],
+        fresh: false,
+      },
+    }));
+    await bus.publish(createEvent("scan:complete", runId, { context, totalFindings: 3 }));
+    await bus.publish(createEvent("triage:start", runId, {
+      context,
+      findingCount: 1,
+      model: "anthropic:claude-sonnet-4-6",
+      skippedAlreadyTriaged: 2,
+    }));
+
+    const output = vi.mocked(console.log).mock.calls.flat().join("\n");
+    expect(output).toContain("Skipping 2 already-triaged findings, 1 remaining");
+
+    await bus.close();
+    db.close();
+  });
+
   it("prints skipped poc harness results without parse-error suffix", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");

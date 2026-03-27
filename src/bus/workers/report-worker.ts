@@ -39,6 +39,7 @@ interface RunReportState {
   scanners?: string[];
   totalFindings?: number;
   selectedForTriage?: number;
+  skippedAlreadyTriaged?: number;
   startPrinted: boolean;
 }
 
@@ -85,6 +86,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   bus.subscribe<TriageStartEvent>("triage:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     state.selectedForTriage = event.payload.findingCount;
+    state.skippedAlreadyTriaged = event.payload.skippedAlreadyTriaged;
 
     maybePrintStartBanner(state, event.payload.context.repoName);
 
@@ -369,8 +371,8 @@ function maybePrintStartBanner(state: RunReportState, repoName: string): void {
 
   printScanStart(repoName, state.selectedForTriage, state.totalFindings, state.scanners);
 
-  if (state.selectedForTriage < state.totalFindings) {
-    printResumeInfo(state.totalFindings - state.selectedForTriage, state.selectedForTriage);
+  if ((state.skippedAlreadyTriaged ?? 0) > 0) {
+    printResumeInfo(state.skippedAlreadyTriaged ?? 0, state.selectedForTriage);
   }
 
   state.startPrinted = true;

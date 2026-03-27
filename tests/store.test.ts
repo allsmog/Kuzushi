@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import {
   createRun,
   deleteFindingsByFingerprints,
+  deleteFindingsForRepo,
   getPocHarnessCounts,
   getLatestResumableRun,
   getRun,
@@ -341,6 +342,22 @@ describe("deleteFindingsByFingerprints", () => {
     expect(repoAFingerprints.has("keep")).toBe(true);
     expect(repoAFingerprints.has("drop")).toBe(false);
     expect(repoAFingerprints.has("other-repo")).toBe(true);
+    db.close();
+  });
+});
+
+describe("deleteFindingsForRepo", () => {
+  it("removes all findings for the target repo only", () => {
+    const db = initDb(dbPath);
+    upsertFinding(db, makeFinding("repo-a-1"), makeResult("repo-a-1", "tp"), "repo-a", "HEAD");
+    upsertFinding(db, makeFinding("repo-a-2"), makeResult("repo-a-2", "tp"), "repo-a", "HEAD");
+    upsertFinding(db, makeFinding("repo-b-1"), makeResult("repo-b-1", "tp"), "repo-b", "HEAD");
+
+    const deleted = deleteFindingsForRepo(db, "repo-a");
+    expect(deleted).toBe(2);
+
+    const remaining = getActionableFindings(db, undefined, { includeFalsePositives: true });
+    expect(remaining.map((finding) => finding.fingerprint)).toEqual(["repo-b-1"]);
     db.close();
   });
 });

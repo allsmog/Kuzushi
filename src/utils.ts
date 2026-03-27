@@ -1,6 +1,14 @@
+import path from "node:path";
+
 /** True when value is a non-null, non-array object record. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** True when candidate resolves inside root (or exactly equals it). */
+export function isPathWithinRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 /** Normalize unknown errors into a readable message string. */

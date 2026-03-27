@@ -239,7 +239,7 @@ describe("generatePocHarness", () => {
       "FindReferences",
       "TypeAtPosition",
     ]);
-  });
+  }, 15_000);
 
   it("keeps the legacy tool bundle when the runtime is acp", async () => {
     const requests: AgentQueryRequest[] = [];

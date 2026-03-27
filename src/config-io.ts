@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { isPathWithinRoot } from "./utils.js";
 
 export type ConfigFormat = "json" | "yaml";
 
@@ -57,7 +58,7 @@ export function resolveFileReferences(
     const refPath = value.slice(7); // remove "file://"
     const resolved = path.resolve(baseDir, refPath);
     // Security: prevent path traversal outside baseDir
-    if (!resolved.startsWith(path.resolve(baseDir))) {
+    if (!isPathWithinRoot(baseDir, resolved)) {
       throw new Error(
         `Config file reference escapes base directory: ${refPath}`,
       );

@@ -249,9 +249,9 @@ run_kuzushi() {
     # validator requires OPENAI_API_KEY to be set for openai: model specs.
     export OPENAI_API_KEY="${OPENAI_API_KEY:-ollama}"
     if [[ -n "$timeout_cmd" ]]; then
-      $timeout_cmd pnpm dev scan "$@" 2>&1
+      $timeout_cmd pnpm dev scan --trust-repo-config "$@" 2>&1
     else
-      pnpm dev scan "$@" 2>&1
+      pnpm dev scan --trust-repo-config "$@" 2>&1
     fi
   ) || exit_code=$?
 

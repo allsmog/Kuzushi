@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
@@ -25,8 +25,8 @@ import {
   CONFIG_PATH,
   configPath,
   projectConfigPath,
-  isPathWithinAllowedRoots,
 } from "./config/paths.js";
+import { isPathWithinRoot } from "./utils.js";
 type ConfigLayer = Record<string, unknown>;
 type WritableConfigLayer = Partial<KuzushiConfig> & ConfigLayer;
 const log = getLogger("config");
@@ -39,10 +39,58 @@ const VALID_TOP_LEVEL_KEYS = new Set<string>(
   Object.keys(KuzushiConfigSchema.shape),
 );
 
+const UNSAFE_PROJECT_CONFIG_KEYS = new Set<string>([
+  "agentRuntimeBackend",
+  "agentRuntimeConfig",
+  "acpAdapterCommand",
+  "verify",
+  "pocHarness",
+  "pocExecute",
+  "pocSandbox",
+  "dynamicAnalysisEnabled",
+  "patchingEnabled",
+  "patchBuildCommand",
+  "patchTestCommand",
+  "autoPatchEnabled",
+  "reportOutput",
+  "sarifOutput",
+  "jsonOutput",
+  "csvOutput",
+  "jsonlOutput",
+  "streamingEnabled",
+  "streamingPort",
+  "externalTasks",
+  "enableExternalTasks",
+  "hooks",
+  "enableExternalHooks",
+  "precedentsPath",
+  "securityProfilesPath",
+  "triagePromptFile",
+  "verifyPromptFile",
+  "bootstrapFiles",
+  "toolPolicies",
+]);
+
+const UNSAFE_PROJECT_SCANNER_CONFIG_KEYS = new Set<string>([
+  "binary",
+  "codeqlBinary",
+  "python3Binary",
+  "dbPath",
+  "taintAnalysisPath",
+  "workspaceDir",
+]);
+
+export interface LoadConfigOptions {
+  trustProjectConfig?: boolean;
+}
+
 /** Load config from ~/.kuzushi/config.json + optional <repo>/.kuzushi/config.json. */
-export function loadConfig(repoRoot?: string): KuzushiConfig {
+export function loadConfig(repoRoot?: string, options?: LoadConfigOptions): KuzushiConfig {
   const { globalRaw, projectRaw } = loadConfigLayers(repoRoot);
-  return mergeConfigLayers(globalRaw, projectRaw);
+  const effectiveProjectRaw = repoRoot
+    ? sanitizeProjectConfigLayer(projectRaw, repoRoot, options)
+    : projectRaw;
+  return mergeConfigLayers(globalRaw, effectiveProjectRaw);
 }
 
 /** Save config. If repoRoot is provided, writes project config. */
@@ -1023,15 +1071,15 @@ function loadConfigLayers(repoRoot?: string): {
   projectRaw: WritableConfigLayer;
 } {
   return {
-    globalRaw: readConfigFile(configPath()),
-    projectRaw: repoRoot ? readConfigFile(projectConfigPath(repoRoot)) : {},
+    globalRaw: readConfigFile(configPath(), [CONFIG_DIR]),
+    projectRaw: repoRoot ? readConfigFile(projectConfigPath(repoRoot), [repoRoot]) : {},
   };
 }
 
 function loadWritableConfigLayer(repoRoot?: string): WritableConfigLayer {
   return repoRoot
-    ? readConfigFile(projectConfigPath(repoRoot))
-    : readConfigFile(configPath());
+    ? readConfigFile(projectConfigPath(repoRoot), [repoRoot])
+    : readConfigFile(configPath(), [CONFIG_DIR]);
 }
 
 function saveUpdatedConfigLayer(config: WritableConfigLayer, repoRoot?: string): void {
@@ -1046,7 +1094,7 @@ function validateConfigLayer(layer: WritableConfigLayer, repoRoot?: string): voi
     return;
   }
 
-  const globalRaw = readConfigFile(configPath());
+  const globalRaw = readConfigFile(configPath(), [CONFIG_DIR]);
   mergeConfigLayers(globalRaw, layer);
 }
 
@@ -1056,7 +1104,7 @@ const MAX_CONFIG_FILE_BYTES = 1_024 * 1_024;
 /** Track config files being loaded to detect circular includes. */
 const configLoadStack = new Set<string>();
 
-function readConfigFile(configFilePath: string): WritableConfigLayer {
+function readConfigFile(configFilePath: string, allowedRoots: string[] = []): WritableConfigLayer {
   try {
     const resolvedPath = path.resolve(configFilePath);
 
@@ -1068,18 +1116,21 @@ function readConfigFile(configFilePath: string): WritableConfigLayer {
 
     // Guard: file size cap
     try {
-      const stats = statSync(resolvedPath);
-      if (stats.size > MAX_CONFIG_FILE_BYTES) {
-        log.warn(`Config file ${resolvedPath} exceeds 1MB limit, skipping`);
-        return {};
-      }
-      // Guard: symlink check — resolve and verify target is in expected location
-      if (stats.isSymbolicLink?.()) {
+      const stats = lstatSync(resolvedPath);
+      if (stats.isSymbolicLink()) {
         const realPath = realpathSync(resolvedPath);
-        if (!isPathWithinAllowedRoots(realPath)) {
+        if (allowedRoots.length > 0 && !allowedRoots.some((root) => isPathWithinRoot(root, realPath))) {
           log.warn(`Config symlink ${resolvedPath} points outside allowed directories, skipping`);
           return {};
         }
+        const targetStats = lstatSync(realPath);
+        if (targetStats.size > MAX_CONFIG_FILE_BYTES) {
+          log.warn(`Config file ${realPath} exceeds 1MB limit, skipping`);
+          return {};
+        }
+      } else if (stats.size > MAX_CONFIG_FILE_BYTES) {
+        log.warn(`Config file ${resolvedPath} exceeds 1MB limit, skipping`);
+        return {};
       }
     } catch (statErr) {
       if ((statErr as NodeJS.ErrnoException).code === "ENOENT") return {};
@@ -1103,6 +1154,68 @@ function readConfigFile(configFilePath: string): WritableConfigLayer {
     log.warn(`Config file ${configFilePath} is corrupt and will be ignored: ${err}`);
     return {};
   }
+}
+
+function sanitizeProjectConfigLayer(
+  layer: WritableConfigLayer,
+  repoRoot: string,
+  options?: LoadConfigOptions,
+): WritableConfigLayer {
+  if (options?.trustProjectConfig === true) {
+    return layer;
+  }
+
+  const stripped: string[] = [];
+  const sanitized = stripUnsafeProjectConfigValue(cloneLayerValue(layer), [], stripped);
+  if (stripped.length > 0) {
+    log.warn(
+      `Ignoring unsafe repo-local config keys from ${projectConfigPath(repoRoot)}: ${stripped.join(", ")}. `
+      + "Pass --trust-repo-config to opt in.",
+    );
+  }
+
+  return isRecord(sanitized) ? sanitized as WritableConfigLayer : {};
+}
+
+function stripUnsafeProjectConfigValue(
+  value: unknown,
+  pathParts: string[],
+  stripped: string[],
+): unknown {
+  if (pathParts.length > 0 && shouldStripProjectConfigPath(pathParts)) {
+    stripped.push(pathParts.join("."));
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => stripUnsafeProjectConfigValue(entry, pathParts, stripped))
+      .filter((entry) => entry !== undefined);
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const cleaned = stripUnsafeProjectConfigValue(entry, [...pathParts, key], stripped);
+    if (cleaned !== undefined) {
+      sanitized[key] = cleaned;
+    }
+  }
+
+  return sanitized;
+}
+
+function shouldStripProjectConfigPath(pathParts: string[]): boolean {
+  if (pathParts.length === 1 && UNSAFE_PROJECT_CONFIG_KEYS.has(pathParts[0])) {
+    return true;
+  }
+
+  return pathParts[0] === "scannerConfig"
+    && pathParts.length >= 3
+    && UNSAFE_PROJECT_SCANNER_CONFIG_KEYS.has(pathParts[pathParts.length - 1]);
 }
 
 function sanitizeConfigLayer(value: unknown): unknown {

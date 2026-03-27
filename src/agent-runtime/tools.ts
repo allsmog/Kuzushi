@@ -19,7 +19,9 @@ const DEFAULT_GLOB_LIMIT = 200;
 const DEFAULT_GREP_LIMIT = 200;
 const DEFAULT_FIND_REFERENCES_LIMIT = 50;
 const MAX_FIND_REFERENCES_LIMIT = 200;
-const TSSERVER_TIMEOUT_MS = 10_000;
+const TSSERVER_OPEN_TIMEOUT_MS = 30_000;
+const TSSERVER_REQUEST_TIMEOUT_MS = 15_000;
+const TSSERVER_MAX_RETRIES = 1;
 const TSSERVER_HEADER_SEPARATOR = Buffer.from("\r\n\r\n", "utf8");
 const SUPPORTED_SEMANTIC_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"]);
 
@@ -564,10 +566,11 @@ class TsServerSession {
     });
 
     const response = await new Promise<TsServerResponse>((resolve, reject) => {
+      const timeoutMs = getTsServerTimeoutMs(command);
       const timeout = setTimeout(() => {
         this.pending.delete(seq);
-        reject(new Error(`tsserver ${command} timed out after ${TSSERVER_TIMEOUT_MS}ms`));
-      }, TSSERVER_TIMEOUT_MS);
+        reject(new Error(`tsserver ${command} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
 
       this.pending.set(seq, { resolve, reject, timeout });
       if (!this.child.stdin) {
@@ -655,14 +658,43 @@ class TsServerSession {
   }
 }
 
+function getTsServerTimeoutMs(command: string): number {
+  return command === "open" ? TSSERVER_OPEN_TIMEOUT_MS : TSSERVER_REQUEST_TIMEOUT_MS;
+}
+
+function isTsServerTimeoutError(error: unknown): boolean {
+  return error instanceof Error && /^tsserver .* timed out after \d+ms$/.test(error.message);
+}
+
+async function withTsServerSession<T>(
+  cwd: string,
+  action: (session: TsServerSession) => Promise<T>,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= TSSERVER_MAX_RETRIES; attempt += 1) {
+    const session = new TsServerSession(cwd);
+    try {
+      return await action(session);
+    } catch (error) {
+      lastError = error;
+      if (!isTsServerTimeoutError(error) || attempt >= TSSERVER_MAX_RETRIES) {
+        throw error;
+      }
+    } finally {
+      await session.close();
+    }
+  }
+
+  throw lastError;
+}
+
 async function executeGoToDefinition(args: Record<string, unknown>, cwd: string): Promise<string> {
   const position = resolveSemanticPosition(args, cwd, "GoToDefinition");
   if (!isSupportedSemanticPath(position.absolutePath)) {
     return formatSemanticFailure("GoToDefinition", position, undefined);
   }
-  const session = new TsServerSession(cwd);
-
-  try {
+  return withTsServerSession(cwd, async (session) => {
     const openResult = await session.request("open", { file: position.absolutePath });
     if (!openResult.success) {
       return formatSemanticFailure("GoToDefinition", position, openResult.message);
@@ -696,9 +728,7 @@ async function executeGoToDefinition(args: Record<string, unknown>, cwd: string)
     const header = formatSemanticHeader(position, quickInfoBody);
     const lines = definitions.map((location) => formatTsServerLocation(cwd, location));
     return [...header, ...lines].join("\n");
-  } finally {
-    await session.close();
-  }
+  });
 }
 
 async function executeFindReferences(args: Record<string, unknown>, cwd: string): Promise<string> {
@@ -710,9 +740,7 @@ async function executeFindReferences(args: Record<string, unknown>, cwd: string)
     toPositiveInt(args["max_results"] ?? args["maxResults"]) ?? DEFAULT_FIND_REFERENCES_LIMIT,
     MAX_FIND_REFERENCES_LIMIT,
   );
-  const session = new TsServerSession(cwd);
-
-  try {
+  return withTsServerSession(cwd, async (session) => {
     const openResult = await session.request("open", { file: position.absolutePath });
     if (!openResult.success) {
       return formatSemanticFailure("FindReferences", position, openResult.message);
@@ -766,9 +794,7 @@ async function executeFindReferences(args: Record<string, unknown>, cwd: string)
     }
 
     return lines.join("\n");
-  } finally {
-    await session.close();
-  }
+  });
 }
 
 async function executeTypeAtPosition(args: Record<string, unknown>, cwd: string): Promise<string> {
@@ -776,9 +802,7 @@ async function executeTypeAtPosition(args: Record<string, unknown>, cwd: string)
   if (!isSupportedSemanticPath(position.absolutePath)) {
     return formatSemanticFailure("TypeAtPosition", position, undefined);
   }
-  const session = new TsServerSession(cwd);
-
-  try {
+  return withTsServerSession(cwd, async (session) => {
     const openResult = await session.request("open", { file: position.absolutePath });
     if (!openResult.success) {
       return formatSemanticFailure("TypeAtPosition", position, openResult.message);
@@ -808,9 +832,7 @@ async function executeTypeAtPosition(args: Record<string, unknown>, cwd: string)
       `Type: ${typeDisplay}`,
       `Location: ${position.displayPath}:${position.line}:${position.column}`,
     ].join("\n");
-  } finally {
-    await session.close();
-  }
+  });
 }
 
 const FUNCTION_DEF_CONTEXT_LINES = 50;

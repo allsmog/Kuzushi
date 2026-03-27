@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "./agent-runtime/types.js";
+import { DockerPocExecutor } from "./poc-executor/docker.js";
 import {
   resolveDefaultReadOnlyTools,
   runStructuredAgentQuery,
@@ -61,6 +62,14 @@ const PATCH_SYNTHESIS_SCHEMA = {
 } as const;
 
 const EXEC_TIMEOUT_MS = 60_000;
+const PATCH_VALIDATE_MEMORY = "1g";
+const PATCH_VALIDATE_CPUS = "2";
+
+interface PatchValidationPlan {
+  build: string | null;
+  test: string | null;
+  dockerImage: string | null;
+}
 
 /**
  * Validate that the finding is eligible for patch synthesis.
@@ -146,30 +155,27 @@ export function createDisposableWorktree(repoRoot: string): {
 /**
  * Detect build and test commands from common project manifest files.
  */
-function detectBuildAndTestCommands(repoRoot: string): {
-  build: string | null;
-  test: string | null;
-} {
+function detectBuildAndTestCommands(repoRoot: string): PatchValidationPlan {
   if (existsSync(path.join(repoRoot, "package.json"))) {
-    return { build: "npm run build", test: "npm test" };
+    return { build: "npm run build", test: "npm test", dockerImage: "node:22-slim" };
   }
   if (existsSync(path.join(repoRoot, "Makefile"))) {
-    return { build: "make", test: "make test" };
+    return { build: "make", test: "make test", dockerImage: "buildpack-deps:bookworm" };
   }
   if (existsSync(path.join(repoRoot, "Cargo.toml"))) {
-    return { build: "cargo build", test: "cargo test" };
+    return { build: "cargo build", test: "cargo test", dockerImage: "rust:1.85-slim" };
   }
   if (
     existsSync(path.join(repoRoot, "setup.py")) ||
     existsSync(path.join(repoRoot, "pyproject.toml"))
   ) {
-    return { build: null, test: "python -m pytest" };
+    return { build: null, test: "python -m pytest", dockerImage: "python:3.12-slim" };
   }
   if (existsSync(path.join(repoRoot, "go.mod"))) {
-    return { build: "go build ./...", test: "go test ./..." };
+    return { build: "go build ./...", test: "go test ./...", dockerImage: "golang:1.22-alpine" };
   }
 
-  return { build: null, test: null };
+  return { build: null, test: null, dockerImage: null };
 }
 
 /**
@@ -314,21 +320,22 @@ function parsePatchOutput(raw: unknown): { diff: string; explanation: string } {
 }
 
 /**
- * Validate a patch through sequential checks: apply, build, PoC re-run, tests.
+ * Validate a patch through sequential checks: apply, sandboxed build, sandboxed
+ * PoC re-run, sandboxed tests.
  *
  * Uses `execSync` with `input` for `git apply` operations that require piping
  * diff content through stdin. All other subprocess calls use `execFileSync` to
- * avoid shell injection. Build and test commands use `execSync` because they are
- * auto-detected from known manifests or explicitly provided by the operator via
- * CLI flags — they are not user-controlled untrusted input.
+ * avoid shell injection. Build and test commands run inside Docker to avoid
+ * executing repository code directly on the host.
  */
-function validatePatch(
+async function validatePatch(
   worktreePath: string,
   diff: string,
   buildCmd: string | null,
   testCmd: string | null,
   pocArtifactPath: string | null,
-): { status: PatchStatus; output: string } {
+  dockerImage: string | null,
+): Promise<{ status: PatchStatus; output: string }> {
   const logs: string[] = [];
 
   // Step 1: Check if the diff can be applied (requires stdin piping via execSync)
@@ -361,25 +368,31 @@ function validatePatch(
     return { status: "APPLY_FAILED", output: logs.join("\n") };
   }
 
-  // Step 3: Run build command if present
-  // Build commands come from detectBuildAndTestCommands() (hardcoded safe strings)
-  // or from operator-supplied --build-cmd CLI flag (trusted operator input).
-  if (buildCmd) {
+  const requiresSandbox = buildCmd != null || testCmd != null || (pocArtifactPath != null && existsSync(pocArtifactPath));
+  const pocExecutor = new DockerPocExecutor(EXEC_TIMEOUT_MS);
+  if (requiresSandbox && !(await pocExecutor.available())) {
+    logs.push("sandbox: UNAVAILABLE — Docker is required for patch validation");
+    return { status: "UNKNOWN", output: logs.join("\n") };
+  }
+
+  if ((buildCmd || testCmd) && !dockerImage) {
+    logs.push("sandbox: UNSUPPORTED — no sandbox image is available for build/test validation");
+    return { status: "UNKNOWN", output: logs.join("\n") };
+  }
+
+  // Step 3: Run build command if present in Docker.
+  if (buildCmd && dockerImage) {
     try {
-      execSync(buildCmd, {
-        cwd: worktreePath,
-        stdio: "pipe",
-        timeout: EXEC_TIMEOUT_MS,
-      });
+      runCommandInDocker(worktreePath, dockerImage, buildCmd);
       logs.push(`build (${buildCmd}): OK`);
     } catch (error) {
-      const msg = toErrorMessage(error);
+      const msg = extractCommandError(error);
       logs.push(`build (${buildCmd}): FAILED — ${msg}`);
       return { status: "BUILD_FAILED", output: logs.join("\n") };
     }
   }
 
-  // Step 4: If PoC artifact exists, copy and execute it in worktree
+  // Step 4: If PoC artifact exists, copy and execute it in Docker.
   if (pocArtifactPath && existsSync(pocArtifactPath)) {
     try {
       const pocFileName = path.basename(pocArtifactPath);
@@ -388,55 +401,40 @@ function validatePatch(
       copyFileSync(pocArtifactPath, pocDest);
 
       const ext = path.extname(pocFileName).toLowerCase();
-      let runProgram: string;
-      let runArgs: string[];
+      let language: string;
       if (ext === ".py") {
-        runProgram = "python3";
-        runArgs = [pocDest];
+        language = "python";
       } else if (ext === ".sh") {
-        runProgram = "sh";
-        runArgs = [pocDest];
+        language = "shell";
       } else if (ext === ".ts") {
-        runProgram = "npx";
-        runArgs = ["tsx", pocDest];
+        logs.push("PoC re-run: UNSUPPORTED — TypeScript harnesses are not sandbox-runnable without transpilation");
+        return { status: "UNKNOWN", output: logs.join("\n") };
       } else {
-        // .mjs, .js, .cjs, or fallback
-        runProgram = "node";
-        runArgs = [pocDest];
+        language = "javascript";
       }
 
-      const pocResult = execFileSync(runProgram, runArgs, {
-        cwd: worktreePath,
-        stdio: "pipe",
-        timeout: EXEC_TIMEOUT_MS,
-      });
-      const pocOutput = pocResult.toString("utf-8");
+      const pocResult = await pocExecutor.execute(pocDest, language, worktreePath);
+      const pocOutput = [pocResult.stdout, pocResult.stderr].filter(Boolean).join("\n");
 
       // If the PoC script still passes (exits 0), the vulnerability is not fixed
-      if (pocOutput.includes("PASS")) {
+      if (pocResult.verdict === "PASS" || pocOutput.includes("PASS")) {
         logs.push("PoC re-run: STILL VULNERABLE (PoC still passes)");
         return { status: "STILL_VULNERABLE", output: logs.join("\n") };
       }
       logs.push("PoC re-run: vulnerability appears fixed (PoC did not pass)");
-    } catch {
-      // PoC exiting non-zero or failing means the vulnerability is likely fixed
-      logs.push("PoC re-run: vulnerability appears fixed (PoC exited non-zero)");
+    } catch (error) {
+      logs.push(`PoC re-run: FAILED — ${extractCommandError(error)}`);
+      return { status: "UNKNOWN", output: logs.join("\n") };
     }
   }
 
-  // Step 5: Run test command
-  // Test commands come from detectBuildAndTestCommands() (hardcoded safe strings)
-  // or from operator-supplied --test-cmd CLI flag (trusted operator input).
-  if (testCmd) {
+  // Step 5: Run test command in Docker.
+  if (testCmd && dockerImage) {
     try {
-      execSync(testCmd, {
-        cwd: worktreePath,
-        stdio: "pipe",
-        timeout: EXEC_TIMEOUT_MS,
-      });
+      runCommandInDocker(worktreePath, dockerImage, testCmd);
       logs.push(`tests (${testCmd}): OK`);
     } catch (error) {
-      const msg = toErrorMessage(error);
+      const msg = extractCommandError(error);
       logs.push(`tests (${testCmd}): FAILED — ${msg}`);
       return { status: "TESTS_FAILED", output: logs.join("\n") };
     }
@@ -444,6 +442,43 @@ function validatePatch(
 
   logs.push("All validations passed.");
   return { status: "SOUND", output: logs.join("\n") };
+}
+
+function runCommandInDocker(
+  worktreePath: string,
+  image: string,
+  command: string,
+): string {
+  return execFileSync("docker", [
+    "run",
+    "--rm",
+    "--network=none",
+    `--memory=${PATCH_VALIDATE_MEMORY}`,
+    `--cpus=${PATCH_VALIDATE_CPUS}`,
+    "--read-only",
+    "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+    "-e", "HOME=/tmp",
+    "-v", `${worktreePath}:/repo:rw`,
+    "-w", "/repo",
+    image,
+    "sh",
+    "-lc",
+    command,
+  ], {
+    stdio: "pipe",
+    timeout: EXEC_TIMEOUT_MS,
+    encoding: "utf-8",
+  });
+}
+
+function extractCommandError(error: unknown): string {
+  const err = error as Error & { stdout?: string | Buffer; stderr?: string | Buffer };
+  const stdout = typeof err.stdout === "string" ? err.stdout : err.stdout?.toString("utf-8");
+  const stderr = typeof err.stderr === "string" ? err.stderr : err.stderr?.toString("utf-8");
+  return [stderr, stdout, toErrorMessage(error)]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join("\n");
 }
 
 /* ── Main pipeline ─────────────────────────────────────────────────────── */
@@ -488,12 +523,13 @@ export async function runPatchPipeline(
       totalCostUsd += synthesis.costUsd;
 
       // Validate the patch
-      const validation = validatePatch(
+      const validation = await validatePatch(
         worktreePath,
         synthesis.diff,
         buildCmd,
         testCmd,
         finding.pocHarnessPath,
+        detected.dockerImage,
       );
 
       history.push({

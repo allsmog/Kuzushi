@@ -1484,6 +1484,7 @@ export class PipelineOrchestrator {
         context: state.context,
         findingCount: triageCandidates.length,
         model: state.config.triageModel ?? state.config.model,
+        skippedAlreadyTriaged: state.skippedAlreadyTriaged,
       }),
     );
 
@@ -1646,18 +1647,7 @@ export class PipelineOrchestrator {
 
     // Compute final run metrics for the pipeline:complete event
     state.stageTimestamps.pipelineEnd = event.meta.timestamp;
-    const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.dynamicCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
-    const finalMetrics = computeRunMetrics(
-      state.scanFindings,
-      state.stageTimestamps,
-      {
-        triage: Math.max(0, triageCost),
-        verify: state.verifyCostUsd,
-        pocHarness: state.pocHarnessCostUsd,
-        dynamicAnalysis: state.dynamicCostUsd,
-        variantAnalysis: state.variantAnalysisCostUsd,
-      },
-    );
+    const finalMetrics = buildRunMetrics(this.deps.db, state);
 
     // Persist metrics to database
     try {
@@ -1979,7 +1969,7 @@ export class PipelineOrchestrator {
     await this.bus.publish(
       createEvent("report:requested", runId, {
         context: state.context,
-        stats: buildReportStats(state),
+        stats: buildReportStats(this.deps.db, state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
       }),
@@ -2360,7 +2350,7 @@ export class PipelineOrchestrator {
     await this.bus.publish(
       createEvent("report:requested", runId, {
         context: state.context,
-        stats: buildReportStats(state),
+        stats: buildReportStats(this.deps.db, state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
       }),
@@ -2524,7 +2514,7 @@ export class PipelineOrchestrator {
     await this.bus.publish(
       createEvent("report:requested", runId, {
         context: state.context,
-        stats: buildReportStats(state),
+        stats: buildReportStats(this.deps.db, state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
       }),
@@ -2786,7 +2776,7 @@ export class PipelineOrchestrator {
     await this.bus.publish(
       createEvent("report:requested", runId, {
         context: state.context,
-        stats: buildReportStats(state),
+        stats: buildReportStats(this.deps.db, state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
       }),
@@ -2819,7 +2809,10 @@ export function registerOrchestrator(
   return new PipelineOrchestrator(bus, deps);
 }
 
-function buildReportStats(state: RunState): Partial<PipelineStats> {
+function buildReportStats(
+  db: Database.Database,
+  state: RunState,
+): Partial<PipelineStats> {
   let extractionDegradation: PipelineStats["extractionDegradation"];
   let tiPriorDegraded: boolean | undefined;
   const preflightOutput = state.taskOutputs.get("taint-analysis-preflight");
@@ -2854,21 +2847,7 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
   const completedAt = new Date().toISOString();
   state.stageTimestamps.pipelineEnd = completedAt;
 
-  // Compute aggregate run metrics
-  const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.dynamicCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
-  const costs: StageCosts = {
-    triage: Math.max(0, triageCost),
-    verify: state.verifyCostUsd,
-    pocHarness: state.pocHarnessCostUsd,
-    dynamicAnalysis: state.dynamicCostUsd,
-    variantAnalysis: state.variantAnalysisCostUsd,
-  };
-
-  const runMetrics = computeRunMetrics(
-    state.scanFindings,
-    state.stageTimestamps,
-    costs,
-  );
+  const runMetrics = buildRunMetrics(db, state);
 
   return {
     scanners: [...state.scanners],
@@ -2909,6 +2888,45 @@ function buildReportStats(state: RunState): Partial<PipelineStats> {
     startedAt: state.startedAt,
     completedAt,
   };
+}
+
+function buildRunMetrics(
+  db: Database.Database,
+  state: RunState,
+) {
+  const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.dynamicCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
+  const costs: StageCosts = {
+    triage: Math.max(0, triageCost),
+    verify: state.verifyCostUsd,
+    pocHarness: state.pocHarnessCostUsd,
+    dynamicAnalysis: state.dynamicCostUsd,
+    variantAnalysis: state.variantAnalysisCostUsd,
+  };
+
+  let findings: Finding[] = state.scanFindings;
+  try {
+    findings = getActionableFindings(db, state.context.repoName, {
+      includeFalsePositives: true,
+      fingerprints: state.scanFindings.map((finding) => finding.fingerprint),
+    }) as unknown as Finding[];
+  } catch (error) {
+    log.warn(`Falling back to in-memory findings for run metrics: ${toErrorMessage(error)}`);
+  }
+
+  return computeRunMetrics(
+    findings,
+    state.stageTimestamps,
+    costs,
+    {
+      skippedByClassifier: state.skippedByClassifier,
+      corroboratedClusters: state.corroboratedClusters,
+      verified: state.verifyEnabled ? state.verified : 0,
+      verifyErrors: state.verifyEnabled ? state.verifyErrors : 0,
+      pocHarnessGenerated: state.pocHarnessEnabled ? state.pocHarnessGenerated : 0,
+      pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : 0,
+      pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : 0,
+    },
+  );
 }
 
 function resolveTaintAnalysisConfig(config: KuzushiConfig): Record<string, unknown> {

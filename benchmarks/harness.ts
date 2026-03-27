@@ -120,7 +120,7 @@ function runKuzushiScan(repoDir: string, sarifOutputPath: string, configOverride
     }
   }
 
-  console.log(chalk.blue(`Running: npx tsx ${cmdArgs.join(" ")}`));
+  console.log(chalk.blue(`Running: npx tsx ${redactCommandArgs(cmdArgs).join(" ")}`));
   const start = performance.now();
 
   execFileSync("npx", ["tsx", ...cmdArgs], {
@@ -130,6 +130,16 @@ function runKuzushiScan(repoDir: string, sarifOutputPath: string, configOverride
   });
 
   return { durationMs: performance.now() - start };
+}
+
+function redactCommandArgs(args: string[]): string[] {
+  const redacted = [...args];
+  for (let i = 0; i < redacted.length; i += 1) {
+    if (redacted[i] === "--api-key" && i + 1 < redacted.length) {
+      redacted[i + 1] = "<redacted>";
+    }
+  }
+  return redacted;
 }
 
 // ── Finding matching ──

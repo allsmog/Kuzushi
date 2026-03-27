@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { getLogger } from "../logger.js";
+import { isPathWithinRoot } from "../utils.js";
 
 const log = getLogger("hooks");
 
@@ -13,6 +14,9 @@ const log = getLogger("hooks");
  */
 export async function loadHooksFromFile(filePath: string, repoRoot: string): Promise<PipelineHooks> {
   const resolved = path.resolve(repoRoot, filePath);
+  if (!isPathWithinRoot(repoRoot, resolved)) {
+    throw new Error(`Hooks file path escapes repo root: ${filePath}`);
+  }
 
   if (!existsSync(resolved)) {
     throw new Error(`Hooks file not found: ${resolved}`);

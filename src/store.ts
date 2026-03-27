@@ -832,6 +832,14 @@ export function deleteFindingsByFingerprints(
   return totalChanges;
 }
 
+/** Delete all findings for a repo. Returns number of deleted rows. */
+export function deleteFindingsForRepo(
+  db: Database.Database,
+  repo: string,
+): number {
+  return db.prepare("DELETE FROM findings WHERE repo = ?").run(repo).changes;
+}
+
 /** Create a new persisted pipeline run checkpoint. */
 export function createRun(
   db: Database.Database,

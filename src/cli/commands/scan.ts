@@ -9,6 +9,7 @@ import {
 } from "../../config/validation.js";
 import {
   createRun,
+  deleteFindingsForRepo,
   defaultDbPath,
   getLatestResumableRun,
   getRun,
@@ -44,7 +45,10 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   const scanPath = path.resolve(repoPath);
   const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
 
-  const config = applyScanCommandConfigOverrides(loadConfig(repoRoot), opts);
+  const config = applyScanCommandConfigOverrides(
+    loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true }),
+    opts,
+  );
   reportConfigValidationIssues(validateKuzushiConfig(config));
 
   const severity = resolveScanSeverity(config, opts);
@@ -126,6 +130,15 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   const repoId = path.resolve(repoRoot);
   const db = initDb(dbPath);
   let bus: ReturnType<typeof createBus> | undefined;
+
+  if (opts.fresh) {
+    try {
+      deleteFindingsForRepo(db, repoName);
+    } catch (error) {
+      db.close();
+      throw new CliCommandError(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   try {
     bus = createBus(config);

@@ -644,7 +644,7 @@ describe("triageFindingsBatch", () => {
     for (const f of findings) {
       expect(output.results.get(f.fingerprint)?.verdict).toBe("tp");
     }
-  });
+  }, 15_000);
 
   it("chunks large batches into multiple LLM calls", async () => {
     const batchSize = 5;

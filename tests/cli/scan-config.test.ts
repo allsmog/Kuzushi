@@ -78,6 +78,26 @@ describe("applyScanCommandConfigOverrides", () => {
     expect(config.enabledTasks).toContain("crypto-behavioral-test");
   });
 
+  it("applies dynamic analysis and taint-diff overrides", () => {
+    const config = structuredClone(DEFAULTS);
+
+    applyScanCommandConfigOverrides(config, makeOptions({
+      verify: true,
+      dynamicAnalysis: true,
+      dynamicMaxCandidates: 10,
+      dynamicMinScore: 8,
+      taintDiffBase: "main",
+      taintDiffMode: "baseline",
+    }));
+
+    expect(config.verify).toBe(true);
+    expect(config.dynamicAnalysisEnabled).toBe(true);
+    expect(config.dynamicMaxCandidates).toBe(10);
+    expect(config.dynamicMinScore).toBe(8);
+    expect(config.taintDiffBase).toBe("main");
+    expect(config.taintDiffMode).toBe("baseline");
+  });
+
   it("rejects invalid unit interval values", () => {
     const config = structuredClone(DEFAULTS);
 
@@ -92,5 +112,13 @@ describe("applyScanCommandConfigOverrides", () => {
     expect(() => applyScanCommandConfigOverrides(config, makeOptions({
       pocHarness: true,
     }))).toThrowError(new CliUsageError("--poc-harness requires --verify."));
+  });
+
+  it("rejects invalid taint diff modes", () => {
+    const config = structuredClone(DEFAULTS);
+
+    expect(() => applyScanCommandConfigOverrides(config, makeOptions({
+      taintDiffMode: "bogus",
+    }))).toThrowError(new CliUsageError("--taint-diff-mode must be one of: delta, baseline."));
   });
 });

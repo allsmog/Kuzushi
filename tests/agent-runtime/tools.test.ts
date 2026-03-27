@@ -638,7 +638,7 @@ describe("Semantic navigation tools", () => {
 
     expect(output).toContain("Symbol: greet");
     expect(output).toContain("src/dep.ts:1:17:export function greet(name: string): string {");
-  }, 15_000);
+  }, 70_000);
 
   it("FindReferences returns symbol references, not pure text matches", async () => {
     const cwd = makeSemanticWorkspace();
@@ -652,7 +652,7 @@ describe("Semantic navigation tools", () => {
     expect(output).toContain("src/main.ts:4:17:const message = greet(userId);");
     expect(output).not.toContain("src/main.ts:5");
     expect(output).not.toContain("src/main.ts:6");
-  }, 15_000);
+  }, 70_000);
 
   it("TypeAtPosition returns the inferred type for a local variable", async () => {
     const cwd = makeSemanticWorkspace();
@@ -667,7 +667,7 @@ describe("Semantic navigation tools", () => {
     expect(output).toContain("Type:");
     expect(output).toContain("string");
     expect(output).toContain("Location: src/main.ts:4:7");
-  }, 15_000);
+  }, 70_000);
 
   it("returns a stable message for unsupported file types", async () => {
     const cwd = makeSemanticWorkspace();

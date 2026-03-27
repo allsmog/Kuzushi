@@ -83,11 +83,16 @@ program
   .option("--verify-reflection-interval <n>", "Inject verification reflection every N failed attempts", parseInt)
   .option("--verify-min-confidence <n>", "Minimum triage confidence required for verification", parseFloat)
   .option("--crypto-behavioral-test", "Enable crypto behavioral runtime confirmation", false)
+  .option("--dynamic-analysis", "Enable dynamic analysis using generated PoC harnesses", false)
+  .option("--dynamic-max-candidates <n>", "Override maximum number of dynamic analysis candidates", parseInt)
+  .option("--dynamic-min-score <n>", "Minimum score for dynamic analysis candidates", parseInt)
   .option("--code-graph", "Enable LLM-powered code graph construction and enrichment", false)
   .option("--multi-strategy", "Enable multi-strategy analysis (adaptive mode)", false)
   .option("--multi-strategy-full", "Enable multi-strategy analysis (all strategies in parallel)", false)
   .option("--multi-strategy-budget <n>", "Budget per finding across all strategies in USD", parseFloat)
   .option("--multi-strategy-auto-rules", "Generate rules from confirmed multi-strategy findings", false)
+  .option("--taint-diff-base <ref>", "Only taint-analyze files changed since the provided git ref")
+  .option("--taint-diff-mode <mode>", "Diff-aware taint mode: delta|baseline")
   .option("--stream", "Enable SSE streaming server for live pipeline events", false)
   .option("--stream-port <n>", "Port for SSE streaming server (0 = auto)", parseInt)
   .option("--auto-patch", "Enable automatic patch generation in pipeline", false)
@@ -116,6 +121,7 @@ program
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
   .option("--enabled-tasks <ids>", "Additional AgentTask IDs to enable (comma-separated)")
   .option("--enable-external-tasks", "Enable loading of external tasks from config", false)
+  .option("--trust-repo-config", "Trust unsafe repo-local config keys such as ACP adapters, hooks, and external tasks", false)
   .option("--quality-gate", "Enable quality gates (fail CI on threshold violations)", false)
   .option("--fail-on-tp", "Shorthand: fail if any high/critical severity true positive is found", false)
   .option("--fresh", "Clear prior results before scanning", false)
@@ -259,9 +265,10 @@ configCmd
   .command("validate")
   .description("Validate the effective Kuzushi configuration")
   .option("-r, --repo <path>", "Repository path for project-level config overlay", ".")
-  .action(wrapCliAction((opts: { repo: string }) => {
+  .option("--trust-repo-config", "Trust unsafe repo-local config keys during validation", false)
+  .action(wrapCliAction((opts: { repo: string; trustRepoConfig?: boolean }) => {
     const { root } = resolveRepo(opts.repo);
-    const config = loadConfig(root);
+    const config = loadConfig(root, { trustProjectConfig: opts.trustRepoConfig === true });
     const issues = validateKuzushiConfig(config);
     const warnings = issues.filter((issue) => issue.severity === "warning");
     const errors = issues.filter((issue) => issue.severity === "error");
@@ -296,9 +303,10 @@ taskCmd
   .description("List all registered tasks with their metadata")
   .option("-r, --repo <path>", "Repository path", ".")
   .option("--filter <outputKind>", "Filter by output kind (findings|threat-model|verdict|report|custom)")
-  .action(async (opts: { repo: string; filter?: string }) => {
+  .option("--trust-repo-config", "Trust unsafe repo-local config keys while loading tasks", false)
+  .action(async (opts: { repo: string; filter?: string; trustRepoConfig?: boolean }) => {
     const { root } = resolveRepo(opts.repo);
-    const config = loadConfig(root);
+    const config = loadConfig(root, { trustProjectConfig: opts.trustRepoConfig === true });
     const registry = createDefaultRegistry();
     const taskRegistry = await createDefaultTaskRegistry(registry, config, root);
 
@@ -347,9 +355,10 @@ taskCmd
   .description("Show detailed information about a task")
   .argument("<id>", "Task ID")
   .option("-r, --repo <path>", "Repository path", ".")
-  .action(wrapCliAction(async (id: string, opts: { repo: string }) => {
+  .option("--trust-repo-config", "Trust unsafe repo-local config keys while loading tasks", false)
+  .action(wrapCliAction(async (id: string, opts: { repo: string; trustRepoConfig?: boolean }) => {
     const { root } = resolveRepo(opts.repo);
-    const config = loadConfig(root);
+    const config = loadConfig(root, { trustProjectConfig: opts.trustRepoConfig === true });
     const registry = createDefaultRegistry();
     const taskRegistry = await createDefaultTaskRegistry(registry, config, root);
 
@@ -458,6 +467,7 @@ program
   .option("--model <model>", "Model to use for patch synthesis")
   .option("--max-turns <n>", "Max turns for patch synthesis agent", parseInt)
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
+  .option("--trust-repo-config", "Trust unsafe repo-local config keys such as ACP adapters", false)
   .action(wrapCliAction(async (repoPath: string, opts: {
     fingerprint: string;
     buildCmd?: string;
@@ -466,11 +476,12 @@ program
     model?: string;
     maxTurns?: number;
     db?: string;
+    trustRepoConfig?: boolean;
   }) => {
     const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
 
     // Load config with optional project-level overlay, then apply CLI overrides.
-    const config = loadConfig(repoRoot);
+    const config = loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true });
     if (opts.model) config.model = opts.model;
 
     const model = config.model;
@@ -535,7 +546,7 @@ program
   .action(async (opts: { repo: string; filter?: string }) => {
     // Delegate to the task list command
     await taskCmd.commands.find((c) => c.name() === "list")!.parseAsync(
-      ["list", ...(opts.filter ? ["--filter", opts.filter] : []), "-r", opts.repo],
+      [...(opts.filter ? ["--filter", opts.filter] : []), "-r", opts.repo],
       { from: "user" },
     );
   });

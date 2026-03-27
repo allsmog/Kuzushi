@@ -43,8 +43,8 @@ cat > "${TEST_APP_DIR}/.kuzushi/config.json" <<JSON
 }
 JSON
 
-pnpm dev config validate --repo "${TEST_APP_DIR}" >"${TEST_LOG_DIR}/config-validate.log" 2>&1
-pnpm dev scan "${TEST_APP_DIR}" --fresh --max 3 --sarif "${SARIF_PATH}" >"${TEST_LOG_DIR}/scan.log" 2>&1
+pnpm dev config validate --repo "${TEST_APP_DIR}" --trust-repo-config >"${TEST_LOG_DIR}/config-validate.log" 2>&1
+pnpm dev scan "${TEST_APP_DIR}" --trust-repo-config --fresh --max 3 --sarif "${SARIF_PATH}" >"${TEST_LOG_DIR}/scan.log" 2>&1
 
 if [[ ! -f "${SARIF_PATH}" ]]; then
   echo "expected SARIF output at ${SARIF_PATH}" >&2

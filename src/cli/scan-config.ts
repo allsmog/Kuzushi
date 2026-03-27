@@ -22,11 +22,16 @@ export interface ScanCommandOptions {
   verifyReflectionInterval?: number;
   verifyMinConfidence?: number;
   cryptoBehavioralTest: boolean;
+  dynamicAnalysis?: boolean;
+  dynamicMaxCandidates?: number;
+  dynamicMinScore?: number;
   codeGraph: boolean;
   multiStrategy: boolean;
   multiStrategyFull: boolean;
   multiStrategyBudget?: number;
   multiStrategyAutoRules: boolean;
+  taintDiffBase?: string;
+  taintDiffMode?: string;
   stream: boolean;
   streamPort?: number;
   autoPatch: boolean;
@@ -54,6 +59,7 @@ export interface ScanCommandOptions {
   apiKey?: string;
   baseUrl?: string;
   enableExternalTasks: boolean;
+  trustRepoConfig?: boolean;
   enabledTasks?: string;
   qualityGate: boolean;
   failOnTp: boolean;
@@ -80,6 +86,15 @@ export function applyScanCommandConfigOverrides(
       ...(config.enabledTasks ?? []),
       "crypto-behavioral-test",
     ]);
+  }
+  if (opts.dynamicAnalysis) config.dynamicAnalysisEnabled = true;
+  if (opts.taintDiffBase) config.taintDiffBase = opts.taintDiffBase.trim() || undefined;
+  if (opts.taintDiffMode) {
+    config.taintDiffMode = coerceStringEnum(
+      opts.taintDiffMode,
+      ["delta", "baseline"],
+      "--taint-diff-mode",
+    ) as typeof config.taintDiffMode;
   }
   if (opts.codeGraph) {
     config.codeGraphEnabled = true;
@@ -158,6 +173,8 @@ export function applyScanCommandConfigOverrides(
   applyOptionalPositiveInteger(config, "triageMaxTurns", opts.triageMaxTurns, "--triage-max-turns");
   applyOptionalPositiveInteger(config, "verifyMaxTurns", opts.verifyMaxTurns, "--verify-max-turns");
   applyOptionalPositiveInteger(config, "verifyConcurrency", opts.verifyConcurrency, "--verify-concurrency");
+  applyOptionalPositiveInteger(config, "dynamicMaxCandidates", opts.dynamicMaxCandidates, "--dynamic-max-candidates");
+  applyOptionalPositiveInteger(config, "dynamicMinScore", opts.dynamicMinScore, "--dynamic-min-score");
   applyOptionalPositiveInteger(
     config,
     "verifyRefinementMaxIterations",
@@ -257,6 +274,18 @@ function coercePositiveInteger(value: number, flagName: string): number {
     throw new CliUsageError(`${flagName} must be a positive integer.`);
   }
   return Math.floor(value);
+}
+
+function coerceStringEnum(
+  value: string,
+  allowed: string[],
+  flagName: string,
+): string {
+  const normalized = value.trim().toLowerCase();
+  if (!allowed.includes(normalized)) {
+    throw new CliUsageError(`${flagName} must be one of: ${allowed.join(", ")}.`);
+  }
+  return normalized;
 }
 
 function coerceNonNegativeInteger(value: number, flagName: string): number {

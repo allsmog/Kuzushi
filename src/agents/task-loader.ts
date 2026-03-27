@@ -3,6 +3,7 @@ import { loadManifestForTaskFile, checkRequirements, fingerprintTaskCode, type T
 import * as path from "node:path";
 import { lstatSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { isPathWithinRoot } from "../utils.js";
 
 export interface TaskSpecifier {
   type: "file" | "package";
@@ -46,7 +47,7 @@ export async function loadExternalTask(
     const resolved = path.resolve(repoRoot, spec.path);
 
     // Security: reject path traversal outside repo root
-    if (!resolved.startsWith(path.resolve(repoRoot) + path.sep) && resolved !== path.resolve(repoRoot)) {
+    if (!isPathWithinRoot(repoRoot, resolved)) {
       throw new Error(
         `External task path "${spec.path}" resolves outside repo root. Path traversal is not allowed.`,
       );
@@ -57,7 +58,7 @@ export async function loadExternalTask(
       const stats = lstatSync(resolved);
       if (stats.isSymbolicLink()) {
         const realPath = realpathSync(resolved);
-        if (!realPath.startsWith(path.resolve(repoRoot) + path.sep)) {
+        if (!isPathWithinRoot(repoRoot, realPath)) {
           throw new Error(
             `External task "${spec.path}" is a symlink pointing outside repo root. This is not allowed.`,
           );

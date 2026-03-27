@@ -30,6 +30,12 @@ export interface RegisterWorkersDeps {
   runtime: AgentRuntime;
 }
 
+export function shouldRegisterPocExecutorWorker(config: KuzushiConfig): boolean {
+  return config.pocHarness === true
+    || config.pocExecute === true
+    || (config.verify === true && (config.verifyRefinementMaxIterations ?? 1) > 1);
+}
+
 /** Register orchestrator + all built-in workers on a bus instance. */
 export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): Promise<void> {
   const { taskRegistry } = deps;
@@ -76,11 +82,7 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
     });
   }
 
-  if (
-    deps.config.pocHarness
-    || deps.config.pocExecute === true
-    || (deps.config.verifyRefinementMaxIterations ?? 1) > 1
-  ) {
+  if (shouldRegisterPocExecutorWorker(deps.config)) {
     const executor = await createPocExecutor(
       deps.config.pocSandbox ?? "docker",
       deps.config.pocExecTimeoutMs,

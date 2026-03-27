@@ -217,6 +217,7 @@ export type TriageStartEvent = EventEnvelope<
     context: RunContext;
     findingCount: number;
     model: string;
+    skippedAlreadyTriaged?: number;
   }
 >;
 
