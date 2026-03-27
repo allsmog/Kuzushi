@@ -12,7 +12,7 @@ export const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.t
 
 export const DEFAULTS: KuzushiConfig = {
   model: "anthropic:claude-sonnet-4-6",
-  triageBatchModel: "anthropic:claude-haiku-4-5",
+  triageBatchModel: undefined,
   triageMaxTurns: null,
   verify: false,
   verifyMaxTurns: undefined,
@@ -69,7 +69,7 @@ export const DEFAULTS: KuzushiConfig = {
   pocExecTimeoutMs: 30_000,
   variantAnalysis: true,
   variantAnalysisMaxFindings: 10,
-  contextEnrichmentModel: "anthropic:claude-haiku-4-5",
+  contextEnrichmentModel: undefined,
   enableContextEnrichment: true,
   enableClassifier: true,
   classifierModel: undefined,
@@ -127,14 +127,13 @@ export const DEFAULTS: KuzushiConfig = {
   skipTriageForHighConfidenceAgentic: true,
   scannerConfig: {
     semgrep: { configFlag: ["auto", "p/security-audit", "p/owasp-top-ten", "p/cwe-top-25"] },
-    agentic: { model: "anthropic:claude-sonnet-4-6", maxFindings: 20 },
+    agentic: { maxFindings: 20 },
     codeql: {},
-    "secrets-crypto-detect": { model: "anthropic:claude-haiku-4-5" },
+    "secrets-crypto-detect": {},
     "crypto-behavioral-test": {
-      model: "anthropic:claude-haiku-4-5",
       timingIterations: 10_000,
     },
-    "code-config-detect": { model: "anthropic:claude-haiku-4-5", maxFindings: 50 },
+    "code-config-detect": { maxFindings: 50 },
     "code-graph": {
       maxEntryPoints: 50,
       maxHopsPerTrace: 15,
@@ -147,7 +146,7 @@ export const DEFAULTS: KuzushiConfig = {
       taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
       dbPath: undefined,
       passes: [1, 2, 3, 4, 5],
-      extractionModel: "anthropic:claude-haiku-4-5",
+      extractionModel: undefined,
       labelingBatchSize: 20,
       labelingConfidenceThreshold: 0.55,
       workspaceDir: "./iris",
