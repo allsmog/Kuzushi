@@ -105,6 +105,15 @@ function runKuzushiScan(repoDir: string, sarifOutputPath: string, configOverride
       if (overrides["severity"]) {
         cmdArgs.push("--severity", String(overrides["severity"]));
       }
+      if (overrides["baseUrl"]) {
+        cmdArgs.push("--base-url", String(overrides["baseUrl"]));
+      }
+      if (overrides["max"]) {
+        cmdArgs.push("--max", String(overrides["max"]));
+      }
+      if (overrides["apiKey"]) {
+        cmdArgs.push("--api-key", String(overrides["apiKey"]));
+      }
     } catch {
       console.error(chalk.red("Invalid --config JSON"));
       process.exit(1);
