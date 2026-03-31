@@ -210,7 +210,7 @@ export const xxeDetectionTask: AgentTask<ScanOpts, Finding[]> = {
       options: {
         cwd: context.repoRoot,
         model,
-        maxTurns: Math.min(context.config.taskMaxTurns ?? 15, 10),
+
         allowedTools: resolveTaskAllowedTools(context),
         permissionMode: "dontAsk",
         outputFormat: {

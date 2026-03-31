@@ -3,9 +3,12 @@ import {
   resolveDefaultReadOnlyTools,
   resolveRepoContextAndRuntimeOptions,
   runStructuredAgentQuery,
+  runStructuredSessionQuery,
   type AgentActivityCallback,
   type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
+import type { AgentSession } from "./agent-runtime/types.js";
+import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
 import type { AllowedTriageTool, Finding } from "./scanners/types.js";
 import type {
   EnrichedRepoContext,
@@ -68,6 +71,8 @@ export interface VerificationRuntimeOptions extends AgentRuntimeOptions {
   enrichedContext?: EnrichedRepoContext["enrichment"];
   /** Extra prompt context injected by knowledge registry, precedents, etc. */
   extraPromptContext?: string;
+  /** Enable Write/Bash/Edit tools for runtime instrumentation (runs in worktree sandbox). */
+  enableInstrumentation?: boolean;
 }
 
 export interface VerificationOutput {
@@ -77,8 +82,13 @@ export interface VerificationOutput {
 
 export function resolveDefaultVerificationTools(
   runtime: AgentRuntimeOptions["runtime"] | undefined,
+  enableInstrumentation = false,
 ): AllowedTriageTool[] {
-  return normalizeAllowedTriageToolNames(resolveDefaultReadOnlyTools(runtime));
+  const tools = normalizeAllowedTriageToolNames(resolveDefaultReadOnlyTools(runtime));
+  if (enableInstrumentation) {
+    tools.push("Write" as AllowedTriageTool, "Bash" as AllowedTriageTool, "Edit" as AllowedTriageTool);
+  }
+  return tools;
 }
 
 export class VerificationExecutionError extends Error {
@@ -95,6 +105,7 @@ export function verificationSystemPromptPrefix(
   repoContext?: RepoContext,
   enrichedContext?: EnrichedRepoContext["enrichment"],
   extraPromptContext?: string,
+  enableInstrumentation?: boolean,
 ): string {
   const repoSection = formatRepoContext(repoContext);
   const enrichedSection = formatEnrichedRepoContext(enrichedContext);
@@ -107,7 +118,18 @@ export function verificationSystemPromptPrefix(
   const extraBlock = extraPromptContext
     ? "\n\n" + extraPromptContext
     : "";
-  return repoBlock + enrichedBlock + composePromptModules(
+  const instrumentationBlock = enableInstrumentation
+    ? "\n\n## Runtime Instrumentation\n"
+      + "You have Write, Edit, and Bash tools available for runtime instrumentation.\n"
+      + "When exploitability is unclear from static analysis alone:\n"
+      + "1. Insert trace/debug statements (print, log, assert) at key points in the code path\n"
+      + "2. Use Bash to run tests, compile, or execute the modified code\n"
+      + "3. Read the output to observe actual data flow and behavior\n"
+      + "4. Iterate: refine instrumentation based on what you observe\n"
+      + "5. Determine exploitability from runtime evidence, not just code review\n"
+      + "All changes are in a disposable sandbox — do not worry about breaking things.\n"
+    : "";
+  return repoBlock + enrichedBlock + instrumentationBlock + composePromptModules(
     frameworkAwarenessModule(repoContext),
     proofLevelModule(),
     bypassExhaustionModule(),
@@ -121,7 +143,6 @@ export async function verifyFindingWithAgent(
   repoRoot: string,
   repoName: string,
   model: string,
-  maxTurns: number | undefined,
   repoContextOrRuntimeOptions?: RepoContext | VerificationRuntimeOptions,
   maybeRuntimeOptions: VerificationRuntimeOptions = {},
   /** Optional custom verify template override (loaded from config). */
@@ -132,15 +153,13 @@ export async function verifyFindingWithAgent(
     maybeRuntimeOptions,
   );
   const prompt = buildVerificationPrompt(finding, triageResult, repoName, verifyTemplate);
-  const effectiveMaxTurns = normalizeTurns(maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
     cwd: repoRoot,
     model,
-    maxTurns: effectiveMaxTurns,
-    allowedTools: resolveDefaultVerificationTools(runtimeOptions.runtime),
+    allowedTools: resolveDefaultVerificationTools(runtimeOptions.runtime, runtimeOptions.enableInstrumentation),
     runtimeOptions,
-    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext),
+    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext, runtimeOptions.enableInstrumentation),
     schema: VERIFICATION_RESULT_SCHEMA,
   });
 
@@ -239,15 +258,6 @@ function parseVerificationResponse(text: string, fingerprint: string): Verificat
   }
 }
 
-function normalizeTurns(value: number | undefined): number | undefined {
-  if (value == null) return undefined;
-  if (!Number.isFinite(value) || value < 1) {
-    return DEFAULT_MAX_TURNS;
-  }
-
-  return Math.floor(value);
-}
-
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item).trim()).filter(Boolean);
@@ -337,7 +347,6 @@ export async function verifyFindingsBatch(
   repoContext?: RepoContext,
   runtimeOptions: VerificationRuntimeOptions = {},
   maxBatchSize: number = DEFAULT_VERIFY_BATCH_SIZE,
-  maxTurns: number | undefined = undefined,
   verifyTemplate?: string,
 ): Promise<BatchVerificationOutput> {
   if (items.length === 0) {
@@ -347,32 +356,118 @@ export async function verifyFindingsBatch(
   const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
 
   if (items.length <= effectiveBatchSize) {
-    return verifySingleBatch(items, repoRoot, repoName, model, repoContext, runtimeOptions, maxTurns, verifyTemplate);
+    return verifySingleBatch(items, repoRoot, repoName, model, repoContext, runtimeOptions, verifyTemplate);
   }
 
   const allResults = new Map<string, VerificationResult>();
   let totalCost = 0;
 
-  for (let i = 0; i < items.length; i += effectiveBatchSize) {
-    const chunk = items.slice(i, i + effectiveBatchSize);
-    const { results, costUsd } = await verifySingleBatch(
-      chunk,
-      repoRoot,
-      repoName,
-      model,
-      repoContext,
-      runtimeOptions,
-      maxTurns,
-      verifyTemplate,
-    );
+  // Try to create a reusable session for subprocess reuse across batches
+  const runtime = runtimeOptions.runtime;
+  const session = runtime?.createSession?.({
+    cwd: repoRoot,
+    model,
+    allowedTools: [...resolveDefaultVerificationTools(runtime, runtimeOptions.enableInstrumentation)],
+    permissionMode: "dontAsk",
+    outputFormat: {
+      type: "json_schema",
+      schema: BATCH_VERIFICATION_SCHEMA,
+      strict: true,
+    },
+    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext, runtimeOptions.enableInstrumentation),
+  });
 
-    for (const [fp, result] of results) {
-      allResults.set(fp, result);
+  const runId = session ? crypto.randomUUID() : "";
+
+  try {
+    let batchIdx = 0;
+    for (let i = 0; i < items.length; i += effectiveBatchSize) {
+      const chunk = items.slice(i, i + effectiveBatchSize);
+
+      const { results, costUsd } = session
+        ? await verifySingleBatchSession(
+            chunk,
+            repoRoot,
+            repoName,
+            session,
+            runId,
+            batchIdx,
+            verifyTemplate,
+          )
+        : await verifySingleBatch(
+            chunk,
+            repoRoot,
+            repoName,
+            model,
+            repoContext,
+            runtimeOptions,
+            verifyTemplate,
+          );
+
+      for (const [fp, result] of results) {
+        allResults.set(fp, result);
+      }
+      totalCost += costUsd;
+      batchIdx++;
     }
-    totalCost += costUsd;
+  } finally {
+    await session?.close();
+    if (runId) cleanupBatchFiles(repoRoot, runId);
   }
 
   return { results: allResults, costUsd: totalCost };
+}
+
+async function verifySingleBatchSession(
+  items: Array<{ finding: Finding; triageResult: TriageResult }>,
+  repoRoot: string,
+  repoName: string,
+  session: AgentSession,
+  runId: string,
+  batchIdx: number,
+  _verifyTemplate?: string,
+): Promise<BatchVerificationOutput> {
+  const batchData = {
+    repoName,
+    findingCount: items.length,
+    items: items.map(({ finding, triageResult }) => ({
+      finding: {
+        fingerprint: finding.fingerprint,
+        scanner: finding.scanner,
+        ruleId: finding.ruleId,
+        filePath: finding.filePath,
+        startLine: finding.startLine,
+        severity: finding.severity,
+        scannerConfidence: finding.scannerConfidence,
+        likelihood: finding.likelihood,
+        impact: finding.impact,
+        cwe: finding.cwe,
+        message: finding.message,
+        evidence: finding.evidence || null,
+      },
+      triage: {
+        verdict: triageResult.verdict,
+        confidence: triageResult.confidence,
+        rationale: triageResult.rationale,
+        verificationSteps: triageResult.verificationSteps,
+      },
+    })),
+  };
+
+  const filePath = writeBatchFile(repoRoot, runId, "verify", batchIdx, batchData);
+  const prompt = `Read ${filePath} and verify each finding. For each, determine exploitability, craft a PoC payload if possible, identify attack vector, preconditions, and confidence.`;
+
+  const { resultText, structuredOutput, executionError, costUsd } = await runStructuredSessionQuery(
+    session,
+    prompt,
+  );
+
+  if (executionError) {
+    throw new VerificationExecutionError(`batch verification agent failed: ${executionError}`, costUsd);
+  }
+
+  const results = parseBatchVerificationOutput(structuredOutput ?? resultText, items);
+  return { results, costUsd };
 }
 
 async function verifySingleBatch(
@@ -382,19 +477,16 @@ async function verifySingleBatch(
   model: string,
   repoContext: RepoContext | undefined,
   runtimeOptions: VerificationRuntimeOptions,
-  maxTurns: number | undefined,
   verifyTemplate?: string,
 ): Promise<BatchVerificationOutput> {
   const prompt = buildBatchVerificationPrompt(items, repoName, verifyTemplate);
-  const effectiveMaxTurns = normalizeTurns(maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
     cwd: repoRoot,
     model,
-    maxTurns: effectiveMaxTurns,
-    allowedTools: resolveDefaultVerificationTools(runtimeOptions.runtime),
+    allowedTools: resolveDefaultVerificationTools(runtimeOptions.runtime, runtimeOptions.enableInstrumentation),
     runtimeOptions,
-    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext),
+    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext, runtimeOptions.enableInstrumentation),
     schema: BATCH_VERIFICATION_SCHEMA,
     strict: true,
     retryInvalidStructuredOutput: 2,

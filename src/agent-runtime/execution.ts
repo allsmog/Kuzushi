@@ -8,7 +8,7 @@ import type {
 import type { RepoContext } from "../types.js";
 import { inflightCache } from "../cache.js";
 import { isRecord } from "../utils.js";
-import type { AgentRuntime } from "./types.js";
+import type { AgentRuntime, AgentSession } from "./types.js";
 
 export const DEFAULT_READ_ONLY_TOOLS = [
   "Read",
@@ -26,13 +26,9 @@ export const SEMANTIC_NAVIGATION_TOOLS = [
 ] as const;
 
 export function resolveDefaultReadOnlyTools(
-  runtime?: Pick<AgentRuntime, "id">,
+  _runtime?: Pick<AgentRuntime, "id">,
 ): string[] {
-  if (runtime?.id === "pi-ai") {
-    return [...DEFAULT_READ_ONLY_TOOLS, ...SEMANTIC_NAVIGATION_TOOLS];
-  }
-
-  return [...DEFAULT_READ_ONLY_TOOLS];
+  return [...DEFAULT_READ_ONLY_TOOLS, ...SEMANTIC_NAVIGATION_TOOLS];
 }
 
 export interface AgentActivity {
@@ -72,7 +68,6 @@ export interface StructuredAgentQueryArgs {
   prompt: string;
   cwd: string;
   model: string;
-  maxTurns?: number | null;
   allowedTools: string[];
   runtimeOptions?: AgentRuntimeOptions;
   systemPromptPrefix?: string;
@@ -100,12 +95,11 @@ export function extractJson(text: string): string {
 export async function runStructuredAgentQuery(
   args: StructuredAgentQueryArgs,
 ): Promise<AgentQueryExecutionResult> {
-  // Include schema, allowedTools, and maxTurns in the cache key to prevent
+  // Include schema and allowedTools in the cache key to prevent
   // different-shaped queries with identical prompts from colliding.
   const extraKeyParts = [
     JSON.stringify(args.schema ?? ""),
     JSON.stringify(args.allowedTools ?? []),
-    String(args.maxTurns ?? ""),
   ].join("\x00");
   const cacheKey = inflightCache.generateKey(
     args.model,
@@ -170,7 +164,6 @@ async function executeStructuredAgentQuery(
       options: {
         cwd: args.cwd,
         model: args.model,
-        maxTurns: args.maxTurns,
         temperature: args.runtimeOptions?.temperature,
         maxOutputTokens: args.runtimeOptions?.maxOutputTokens,
         allowedTools: [...args.allowedTools],
@@ -310,6 +303,40 @@ async function executeStructuredAgentQuery(
   }
 
   return result;
+}
+
+/**
+ * Execute a structured query within an existing session (single subprocess).
+ * Unlike `runStructuredAgentQuery()`, this does NOT spawn a new subprocess —
+ * it sends the prompt as a turn on an already-running session.
+ */
+export async function runStructuredSessionQuery(
+  session: AgentSession,
+  prompt: string,
+): Promise<AgentQueryExecutionResult> {
+  let resultText = "";
+  let structuredOutput: unknown = undefined;
+  let executionError: string | null = null;
+  let costUsd = 0;
+
+  for await (const message of session.query(prompt)) {
+    if (message.type !== "result") continue;
+
+    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+      costUsd = message.totalCostUsd;
+    }
+
+    if ("result" in message) {
+      resultText = message.result;
+      structuredOutput = message.structuredOutput;
+    } else {
+      executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "")
+        || message.subtype
+        || "unknown error";
+    }
+  }
+
+  return { resultText, structuredOutput, executionError, costUsd };
 }
 
 export function resolveRepoContextAndRuntimeOptions<T extends AgentRuntimeOptions>(

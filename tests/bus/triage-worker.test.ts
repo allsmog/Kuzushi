@@ -43,7 +43,6 @@ function makeFinding(scanner = "semgrep"): Finding {
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 10,
     maxTriageRetries: 0,
     retryBackoffMs: 0,
     retryBackoffMultiplier: 2,
@@ -123,7 +122,6 @@ describe("triage-worker", () => {
       "/tmp/repo",
       "repo",
       "anthropic:claude-sonnet-4-6",
-      10,
       undefined,
       expect.objectContaining({
         activityCallback: expect.any(Function),
@@ -139,7 +137,7 @@ describe("triage-worker", () => {
   it("publishes triage:error when triage fails", async () => {
     const bus = new InProcessBus();
     const registry = {};
-    const config = makeConfig({ triageModel: "claude-opus-4-20250514", triageMaxTurns: 15 });
+    const config = makeConfig();
 
     triageFindingWithAgentMock.mockRejectedValue(new Error("agent failed"));
 
@@ -182,8 +180,7 @@ describe("triage-worker", () => {
       finding,
       "/tmp/repo",
       "repo",
-      "claude-opus-4-20250514",
-      15,
+      "anthropic:claude-sonnet-4-6",
       undefined,
       expect.objectContaining({
         activityCallback: expect.any(Function),
@@ -313,7 +310,7 @@ describe("triage-worker", () => {
     const config = makeConfig();
 
     triageFindingWithAgentMock.mockImplementation(async (...args: any[]) => {
-      const runtimeOptions = args[7];
+      const runtimeOptions = args[6];
       await runtimeOptions?.activityCallback?.({
         kind: "tool-start",
         toolName: "Read",

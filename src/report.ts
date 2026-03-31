@@ -157,9 +157,6 @@ export function printSummary(
   if ((options.stats?.skippedByFpFilter ?? 0) > 0) {
     console.log(`  ${chalk.dim("Skipped (hard exclusions):")} ${options.stats?.skippedByFpFilter}`);
   }
-  if ((options.stats?.skippedByClassifier ?? 0) > 0) {
-    console.log(`  ${chalk.dim("Skipped (quick classifier):")} ${options.stats?.skippedByClassifier}`);
-  }
   if ((options.stats?.softSuppressedFindings ?? 0) > 0) {
     console.log(`  ${chalk.dim("Soft-suppressed findings:")} ${options.stats?.softSuppressedFindings}`);
   }

@@ -33,7 +33,6 @@ export interface PipelineStats {
   skippedAlreadyTriaged: number;
   skippedLowConfidence?: number;
   skippedByFpFilter?: number;
-  skippedByClassifier?: number;
   softSuppressedFindings?: number;
   skippedByLlmRescore?: number;
   corroboratedClusters?: number;

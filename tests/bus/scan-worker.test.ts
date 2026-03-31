@@ -64,7 +64,6 @@ function makeFinding(scanner: string, fp: string): Finding {
 function makeConfig(scanMode: KuzushiConfig["scanMode"]): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 10,
     busBackend: "in-process",
     triageBatchSize: 15,
     triageConcurrency: 1,

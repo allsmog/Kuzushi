@@ -8,6 +8,9 @@ const THREAT_AWARE_DETECTOR_TASK_IDS = new Set([
   "template-injection-detect",
   "graphql-security-detect",
   "race-condition-detect",
+  "command-injection-detect",
+  "xxe-detect",
+  "deserialization-detect",
 ]);
 
 export function injectThreatModelPolicyCandidates(

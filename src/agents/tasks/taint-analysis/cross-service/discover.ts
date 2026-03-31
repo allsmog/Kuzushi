@@ -113,6 +113,10 @@ export const taintAnalysisDiscoverTask: AgentTask<ScanOpts, CrossServiceDiscover
   displayName: "Cross-Service Discovery",
   outputKind: "custom",
   dependsOn: [],
+  condition: (_upstreamOutputs, config) => {
+    const cfg = resolveTaintAnalysisConfig(config);
+    return resolveCrossServiceConfig(cfg).enabled;
+  },
   async run(_input, context): Promise<CrossServiceDiscoverOutput> {
     const cfg = resolveTaintAnalysisConfig(context.config);
     const crossCfg = resolveCrossServiceConfig(cfg);

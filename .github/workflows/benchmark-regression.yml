@@ -22,14 +22,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: python -m pip install --upgrade pip semgrep
       - run: bash benchmarks/govwa/setup.sh
+      - name: Start mock Anthropic API server
+        run: |
+          node tests/fixtures/fake-anthropic-server.mjs > /tmp/mock-url.txt &
+          echo "MOCK_PID=$!" >> "$GITHUB_ENV"
+          sleep 1
+          echo "MOCK_BASE_URL=$(cat /tmp/mock-url.txt)" >> "$GITHUB_ENV"
       - name: Write benchmark scan config
         run: |
           mkdir -p benchmarks/govwa/repo/.kuzushi
           cat > benchmarks/govwa/repo/.kuzushi/config.json <<JSON
           {
             "model": "anthropic:claude-sonnet-4-6",
-            "agentRuntimeBackend": "acp",
-            "acpAdapterCommand": "node ${GITHUB_WORKSPACE}/tests/fixtures/fake-acp-adapter.mjs",
+            "agentRuntimeConfig": { "baseUrl": "${MOCK_BASE_URL}", "apiKey": "fake-key" },
             "scanners": ["semgrep"],
             "enabledTasks": ["context-gatherer"],
             "verify": false,

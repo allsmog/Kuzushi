@@ -119,15 +119,7 @@ export function defaultDbPath(repoRoot: string): string {
   return path.join(repoRoot, ".kuzushi", "findings.sqlite3");
 }
 
-/** Upsert a triage result into the database. */
-export function upsertFinding(
-  db: Database.Database,
-  finding: Finding,
-  triage: TriageResult,
-  repo: string,
-  ref: string,
-): void {
-  const stmt = db.prepare(`
+const UPSERT_FINDING_SQL = `
     INSERT INTO findings (
       fingerprint, scanner, repo, ref, rule_id, file_path, start_line,
       severity, message, adjusted_score, corroboration_json, suppression_json, verdict, confidence,
@@ -161,9 +153,15 @@ export function upsertFinding(
       engine_provenance_json=excluded.engine_provenance_json,
       finding_metadata_json=COALESCE(excluded.finding_metadata_json, findings.finding_metadata_json),
       updated_at=datetime('now')
-  `);
+  `;
 
-  stmt.run(
+function upsertFindingParams(
+  finding: Finding,
+  triage: TriageResult,
+  repo: string,
+  ref: string,
+): unknown[] {
+  return [
     triage.fingerprint,
     finding.scanner,
     repo,
@@ -197,7 +195,65 @@ export function upsertFinding(
     finding.proofState ?? null,
     finding.engineProvenance ? safeJsonStringify(finding.engineProvenance) : null,
     null, // finding_metadata_json — populated by updateFindingMetadata; COALESCE preserves existing
-  );
+  ];
+}
+
+/** Upsert a triage result into the database. */
+export function upsertFinding(
+  db: Database.Database,
+  finding: Finding,
+  triage: TriageResult,
+  repo: string,
+  ref: string,
+): void {
+  const stmt = db.prepare(UPSERT_FINDING_SQL);
+  stmt.run(...upsertFindingParams(finding, triage, repo, ref));
+}
+
+/** Default flush threshold for {@link FindingUpsertQueue}. */
+const DEFAULT_FLUSH_THRESHOLD = 50;
+
+/**
+ * Batched upsert queue — collects individual upsert calls and flushes them
+ * inside a single SQLite transaction when the threshold is reached or on
+ * explicit {@link flush}.  Drop-in replacement for per-event `upsertFinding()`
+ * calls in the store worker.
+ */
+export class FindingUpsertQueue {
+  private pending: Array<{ finding: Finding; triage: TriageResult; repo: string; ref: string }> = [];
+  private readonly flushThreshold: number;
+  private readonly db: Database.Database;
+
+  constructor(db: Database.Database, flushThreshold = DEFAULT_FLUSH_THRESHOLD) {
+    this.db = db;
+    this.flushThreshold = flushThreshold;
+  }
+
+  /** Enqueue a single upsert. Auto-flushes when the threshold is reached. */
+  enqueue(finding: Finding, triage: TriageResult, repo: string, ref: string): void {
+    this.pending.push({ finding, triage, repo, ref });
+    if (this.pending.length >= this.flushThreshold) {
+      this.flush();
+    }
+  }
+
+  /** Flush all pending upserts in a single transaction. */
+  flush(): void {
+    if (this.pending.length === 0) return;
+    const batch = this.pending.splice(0);
+    const stmt = this.db.prepare(UPSERT_FINDING_SQL);
+    const runAll = this.db.transaction(() => {
+      for (const item of batch) {
+        stmt.run(...upsertFindingParams(item.finding, item.triage, item.repo, item.ref));
+      }
+    });
+    runAll();
+  }
+
+  /** Number of pending (unflushed) upserts. */
+  get size(): number {
+    return this.pending.length;
+  }
 }
 
 /** Get set of already-triaged fingerprints from the database.

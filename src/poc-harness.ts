@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,9 +8,12 @@ import {
   resolveDefaultReadOnlyTools,
   resolveRepoContextAndRuntimeOptions,
   runStructuredAgentQuery,
+  runStructuredSessionQuery,
   type AgentActivityCallback,
   type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
+import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
+import type { AgentSession } from "./agent-runtime/types.js";
 import type { AllowedTriageTool, Finding } from "./scanners/types.js";
 import type {
   PocHarnessResult,
@@ -90,7 +94,6 @@ export async function generatePocHarness(
   repoRoot: string,
   repoName: string,
   model: string,
-  maxTurns: number | undefined,
   repoContextOrRuntimeOptions?: RepoContext | PocHarnessRuntimeOptions,
   maybeRuntimeOptions: PocHarnessRuntimeOptions = {},
 ): Promise<PocHarnessOutput> {
@@ -98,23 +101,92 @@ export async function generatePocHarness(
     repoContextOrRuntimeOptions,
     maybeRuntimeOptions,
   );
+
   const prompt = buildPocHarnessPrompt(
     finding,
     triageResult,
     verificationResult,
     repoName,
   );
-  const effectiveMaxTurns = normalizeTurns(maxTurns);
-  const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
-    prompt,
-    cwd: repoRoot,
-    model,
-    maxTurns: effectiveMaxTurns,
-    allowedTools: resolveDefaultPocHarnessTools(runtimeOptions.runtime),
-    runtimeOptions,
-    systemPromptPrefix: pocHarnessSystemPromptPrefix(repoContext),
-    schema: POC_HARNESS_RESULT_SCHEMA,
-  });
+
+  // ── Session-based path: reuse subprocess if runtime supports sessions ──
+  const runtime = runtimeOptions.runtime;
+  const canUseSession = runtime?.createSession != null;
+
+  let resultText: string;
+  let structuredOutput: unknown;
+  let executionError: string | null;
+  let costUsd: number;
+
+  if (canUseSession) {
+    const runId = randomUUID();
+    const session = runtime.createSession!({
+      cwd: repoRoot,
+      model,
+      allowedTools: resolveDefaultPocHarnessTools(runtime),
+      permissionMode: "dontAsk",
+      systemPromptPrefix: pocHarnessSystemPromptPrefix(repoContext),
+      outputFormat: {
+        type: "json_schema",
+        schema: POC_HARNESS_RESULT_SCHEMA,
+      },
+    });
+
+    try {
+      const batchFile = writeBatchFile(repoRoot, runId, "poc-harness", 0, {
+        fingerprint: finding.fingerprint,
+        finding: {
+          scanner: finding.scanner,
+          ruleId: finding.ruleId,
+          filePath: finding.filePath,
+          startLine: finding.startLine,
+          severity: finding.severity,
+          cwe: finding.cwe,
+          message: finding.message,
+        },
+        triage: {
+          verdict: triageResult.verdict,
+          confidence: triageResult.confidence,
+          rationale: triageResult.rationale,
+        },
+        verification: {
+          exploitable: verificationResult.exploitable,
+          pocPayload: verificationResult.pocPayload,
+          attackVector: verificationResult.attackVector,
+        },
+      });
+
+      const sessionPrompt = [
+        prompt,
+        "",
+        `Finding context has been written to ${batchFile} — use Read to load it if needed.`,
+      ].join("\n");
+
+      const sessionResult = await runStructuredSessionQuery(session, sessionPrompt);
+      resultText = sessionResult.resultText;
+      structuredOutput = sessionResult.structuredOutput;
+      executionError = sessionResult.executionError;
+      costUsd = sessionResult.costUsd;
+    } finally {
+      await session.close();
+      cleanupBatchFiles(repoRoot, runId);
+    }
+  } else {
+    // ── Fallback: original subprocess-per-call path ──
+    const queryResult = await runStructuredAgentQuery({
+      prompt,
+      cwd: repoRoot,
+      model,
+      allowedTools: resolveDefaultPocHarnessTools(runtimeOptions.runtime),
+      runtimeOptions,
+      systemPromptPrefix: pocHarnessSystemPromptPrefix(repoContext),
+      schema: POC_HARNESS_RESULT_SCHEMA,
+    });
+    resultText = queryResult.resultText;
+    structuredOutput = queryResult.structuredOutput;
+    executionError = queryResult.executionError;
+    costUsd = queryResult.costUsd;
+  }
 
   if (executionError) {
     throw new PocHarnessExecutionError(`poc harness agent failed: ${executionError}`, costUsd);
@@ -349,15 +421,6 @@ function parsePocHarnessResponse(text: string, fingerprint: string): PocHarnessR
   } catch (error) {
     throw new Error(`Invalid PoC harness JSON response: ${toErrorMessage(error)}`);
   }
-}
-
-function normalizeTurns(value: number | undefined): number | undefined {
-  if (value == null) return undefined;
-  if (!Number.isFinite(value) || value < 1) {
-    return DEFAULT_MAX_TURNS;
-  }
-
-  return Math.floor(value);
 }
 
 function buildHarnessFileName(fingerprint: string, cwes: string[], extension: string): string {

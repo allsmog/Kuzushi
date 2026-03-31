@@ -141,7 +141,6 @@ async function generateHarnessWithRefinement(
           repoRoot,
           context.repoName,
           model,
-          config.pocHarnessMaxTurns,
           coerceRepoContext(repoContext),
           {
             runtime,

@@ -9,8 +9,11 @@ import { randomUUID } from "node:crypto";
 import {
   resolveDefaultReadOnlyTools,
   runStructuredAgentQuery,
+  runStructuredSessionQuery,
   type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
+import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
+import type { AgentSession } from "./agent-runtime/types.js";
 import type { Finding, AllowedTriageTool } from "./scanners/types.js";
 import type { RepoContext, TriageResult } from "./types.js";
 import {
@@ -125,6 +128,75 @@ function formatFindingContext(finding: Finding): string {
 }
 
 /**
+ * Run a single specialist agent via session (subprocess reuse) and return its report.
+ */
+async function runSpecialistViaSession(
+  session: AgentSession,
+  role: SpecialistRole,
+  finding: Finding,
+  repoRoot: string,
+  repoName: string,
+  runId: string,
+  batchIdx: number,
+): Promise<SpecialistReport> {
+  const batchFile = writeBatchFile(repoRoot, runId, `specialist-${role}`, batchIdx, {
+    role,
+    finding: {
+      ruleId: finding.ruleId,
+      filePath: finding.filePath,
+      startLine: finding.startLine,
+      severity: finding.severity,
+      cwe: finding.cwe,
+      message: finding.message,
+      evidence: finding.evidence,
+    },
+  });
+
+  const prompt = [
+    SPECIALIST_PROMPTS[role](finding, repoName),
+    "",
+    `Finding context has been written to ${batchFile} — use Read to load it if needed.`,
+  ].join("\n");
+
+  try {
+    const { structuredOutput, resultText, executionError, costUsd } =
+      await runStructuredSessionQuery(session, prompt);
+
+    if (executionError) {
+      return {
+        role,
+        findings: "",
+        isFalsePositive: false,
+        evidence: `Specialist error: ${executionError}`,
+        confidence: 0,
+        costUsd,
+        error: executionError,
+      };
+    }
+
+    const output = (structuredOutput ?? resultText) as Record<string, unknown>;
+    return {
+      role,
+      findings: String(output?.["findings"] ?? ""),
+      isFalsePositive: output?.["is_false_positive"] === true,
+      evidence: String(output?.["evidence"] ?? ""),
+      confidence: clampConfidence(output?.["confidence"]),
+      costUsd,
+    };
+  } catch (error) {
+    return {
+      role,
+      findings: "",
+      isFalsePositive: false,
+      evidence: `Specialist exception: ${toErrorMessage(error)}`,
+      confidence: 0,
+      costUsd: 0,
+      error: toErrorMessage(error),
+    };
+  }
+}
+
+/**
  * Run a single specialist agent and return its report.
  */
 async function runSpecialist(
@@ -133,7 +205,6 @@ async function runSpecialist(
   repoRoot: string,
   repoName: string,
   model: string,
-  maxTurns: number | null,
   repoContext?: RepoContext,
   runtimeOptions?: AgentRuntimeOptions,
 ): Promise<SpecialistReport> {
@@ -145,7 +216,6 @@ async function runSpecialist(
         prompt,
         cwd: repoRoot,
         model,
-        maxTurns,
         allowedTools: resolveDefaultReadOnlyTools(runtimeOptions?.runtime),
         runtimeOptions,
         systemPromptPrefix: triageSystemPromptPrefix(
@@ -290,6 +360,11 @@ function clampConfidence(value: unknown): number {
 /**
  * Multi-agent triage: dispatches specialists in parallel, then synthesizes
  * via a manager agent. Falls back to single-agent triage if all specialists fail.
+ *
+ * When `createSession` is available on the runtime, creates 5 long-lived sessions
+ * (4 specialist + 1 manager) instead of spawning 5 subprocesses per finding.
+ * Each specialist session handles ALL findings for that role sequentially, and
+ * the manager session synthesizes results after specialists complete.
  */
 export async function triageFindingMultiAgent(
   registry: TriageConfigProvider,
@@ -298,19 +373,139 @@ export async function triageFindingMultiAgent(
   repoName: string,
   managerModel: string,
   specialistModel: string,
-  managerMaxTurns: number | null,
-  specialistMaxTurns: number | null,
   repoContext?: RepoContext,
   runtimeOptions?: TriageRuntimeOptions,
   extraPromptContext?: string,
   specialistAccuracies?: Map<string, number>,
 ): Promise<TriageOutput> {
+  const runtime = runtimeOptions?.runtime;
+  const canUseSession = runtime?.createSession != null;
+
   const roles: SpecialistRole[] = [
     "source-tracer",
     "sink-analyzer",
     "sanitization-checker",
     "config-reviewer",
   ];
+
+  // ── Session-based path: reuse subprocesses across findings ──
+  if (canUseSession) {
+    const runId = randomUUID();
+    const systemPrefix = triageSystemPromptPrefix(
+      repoContext,
+      runtimeOptions?.enrichedContext,
+    );
+
+    // Create one session per specialist role (4 total)
+    const specialistSessions = new Map<SpecialistRole, AgentSession>();
+    for (const role of roles) {
+      specialistSessions.set(
+        role,
+        runtime.createSession!({
+          cwd: repoRoot,
+          model: specialistModel,
+          allowedTools: resolveDefaultReadOnlyTools(runtime),
+          permissionMode: "dontAsk",
+          systemPromptPrefix: systemPrefix,
+          outputFormat: {
+            type: "json_schema",
+            schema: SPECIALIST_SCHEMA,
+          },
+        }),
+      );
+    }
+
+    try {
+      // Run all 4 specialist sessions in parallel, each handling this finding
+      const specialistResults = await Promise.allSettled(
+        roles.map((role) =>
+          runSpecialistViaSession(
+            specialistSessions.get(role)!,
+            role,
+            finding,
+            repoRoot,
+            repoName,
+            runId,
+            0,
+          ),
+        ),
+      );
+
+      const reports: SpecialistReport[] = specialistResults.map((result, idx) => {
+        if (result.status === "fulfilled") return result.value;
+        return {
+          role: roles[idx],
+          findings: "",
+          isFalsePositive: false,
+          evidence: `Specialist crashed: ${toErrorMessage(result.reason)}`,
+          confidence: 0,
+          costUsd: 0,
+          error: toErrorMessage(result.reason),
+        };
+      });
+
+      const specialistCost = reports.reduce((sum, r) => sum + r.costUsd, 0);
+      const successfulReports = reports.filter((r) => !r.error);
+
+      // If all specialists failed, fall back to single-agent triage
+      if (successfulReports.length === 0) {
+        const fallback = await triageFindingWithAgent(
+          registry, finding, repoRoot, repoName, managerModel, repoContext, runtimeOptions ?? {},
+        );
+        return { result: fallback.result, costUsd: specialistCost + fallback.costUsd };
+      }
+
+      // Create manager session and synthesize
+      const managerSession = runtime.createSession!({
+        cwd: repoRoot,
+        model: managerModel,
+        allowedTools: resolveDefaultReadOnlyTools(runtime),
+        permissionMode: "dontAsk",
+        systemPromptPrefix: systemPrefix,
+        outputFormat: {
+          type: "json_schema",
+          schema: TRIAGE_RESULT_SCHEMA,
+        },
+      });
+
+      try {
+        const managerPrompt = buildManagerPrompt(finding, repoName, reports, extraPromptContext, specialistAccuracies);
+        const { structuredOutput, resultText, executionError, costUsd: managerCost } =
+          await runStructuredSessionQuery(managerSession, managerPrompt);
+
+        const totalCost = specialistCost + managerCost;
+
+        if (executionError) {
+          throw new TriageExecutionError(
+            `multi-agent manager failed: ${executionError}`,
+            totalCost,
+          );
+        }
+
+        let result: TriageResult;
+        try {
+          result = parseAgentOutput(structuredOutput ?? resultText, finding.fingerprint);
+        } catch (error) {
+          throw new TriageExecutionError(
+            `multi-agent manager output parse failed: ${toErrorMessage(error)}`,
+            totalCost,
+          );
+        }
+
+        return { result, costUsd: totalCost };
+      } finally {
+        await managerSession.close();
+      }
+    } finally {
+      // Close all specialist sessions
+      await Promise.allSettled(
+        [...specialistSessions.values()].map((s) => s.close()),
+      );
+      cleanupBatchFiles(repoRoot, runId);
+    }
+  }
+
+  // ── Fallback: original subprocess-per-call path ──
 
   // Run all specialists in parallel
   const specialistResults = await Promise.allSettled(
@@ -321,7 +516,6 @@ export async function triageFindingMultiAgent(
         repoRoot,
         repoName,
         specialistModel,
-        specialistMaxTurns,
         repoContext,
         runtimeOptions,
       ),
@@ -354,7 +548,6 @@ export async function triageFindingMultiAgent(
       repoRoot,
       repoName,
       managerModel,
-      managerMaxTurns,
       repoContext,
       runtimeOptions ?? {},
     );
@@ -372,7 +565,6 @@ export async function triageFindingMultiAgent(
       prompt: managerPrompt,
       cwd: repoRoot,
       model: managerModel,
-      maxTurns: managerMaxTurns,
       allowedTools: resolveDefaultReadOnlyTools(runtimeOptions?.runtime),
       runtimeOptions,
       systemPromptPrefix: triageSystemPromptPrefix(

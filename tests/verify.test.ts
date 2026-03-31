@@ -278,16 +278,15 @@ describe("verifyFindingWithAgent", () => {
       "/tmp/repo",
       "repo",
       "claude-haiku-4-5-20251001",
-      12,
       { runtime },
     );
 
     expect(output.result.exploitable).toBe(true);
     expect(output.costUsd).toBe(0.0142);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody"]);
+    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody", "GoToDefinition", "FindReferences", "TypeAtPosition"]);
     expect(requests[0]?.options?.outputFormat?.schema).toBe(VERIFICATION_RESULT_SCHEMA);
-    expect(requests[0]?.options?.maxTurns).toBe(12);
+
   });
 
   it("uses semantic navigation tools when the runtime is pi-ai", async () => {
@@ -317,7 +316,6 @@ describe("verifyFindingWithAgent", () => {
       "/tmp/repo",
       "repo",
       "claude-haiku-4-5-20251001",
-      12,
       { runtime },
     );
 
@@ -331,47 +329,6 @@ describe("verifyFindingWithAgent", () => {
       "GoToDefinition",
       "FindReferences",
       "TypeAtPosition",
-    ]);
-  });
-
-  it("keeps the legacy tool bundle when the runtime is acp", async () => {
-    const requests: AgentQueryRequest[] = [];
-    const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          fingerprint: "verify-fp",
-          exploitable: false,
-          poc_payload: null,
-          poc_description: "desc",
-          attack_vector: null,
-          preconditions: [],
-          confidence: 0.4,
-        },
-      }],
-      requests,
-      "acp",
-    );
-
-    await verifyFindingWithAgent(
-      makeFinding(),
-      makeTriageResult(),
-      "/tmp/repo",
-      "repo",
-      "claude-haiku-4-5-20251001",
-      12,
-      { runtime },
-    );
-
-    expect(requests[0]?.options?.allowedTools).toEqual([
-      "Read",
-      "Glob",
-      "Grep",
-      "GetCallers",
-      "GetCallees",
-      "GetFunctionBody",
     ]);
   });
 
@@ -394,7 +351,6 @@ describe("verifyFindingWithAgent", () => {
         "/tmp/repo",
         "repo",
         "claude-haiku-4-5-20251001",
-        12,
         { runtime },
       );
       expect.unreachable("Expected verification to throw");

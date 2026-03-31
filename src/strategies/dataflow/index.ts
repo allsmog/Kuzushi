@@ -71,7 +71,6 @@ export function createDataflowStrategy(strategyId: string, cweIds: string[]): An
           options: {
             cwd,
             model,
-            maxTurns: 8,
             allowedTools: ["Read", "Glob", "Grep", "GetCallers", "GetCallees"],
             permissionMode: "dontAsk",
             outputFormat: {

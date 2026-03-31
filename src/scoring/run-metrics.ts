@@ -36,7 +36,6 @@ export interface RunMetrics {
   costBreakdown: CostBreakdown;
   exploitabilityRate?: number;
   structuredEvidence: StructuredEvidenceMetrics;
-  classifierDrops?: number;
   corroboratedClusters?: number;
   verificationOutcomes?: {
     exploitable: number;
@@ -208,7 +207,6 @@ export function computeRunMetrics(
   };
 
   // Pipeline stats propagation
-  const classifierDrops = pipelineStats?.skippedByClassifier;
   const corroboratedClusters = pipelineStats?.corroboratedClusters;
 
   const verifiedCount = pipelineStats?.verified ?? 0;
@@ -245,7 +243,6 @@ export function computeRunMetrics(
     costBreakdown,
     exploitabilityRate,
     structuredEvidence,
-    classifierDrops,
     corroboratedClusters,
     verificationOutcomes,
     pocOutcomes,
@@ -332,9 +329,6 @@ export function formatMetricsSummary(metrics: RunMetrics): string {
   lines.push("");
 
   // Pipeline quality
-  if (metrics.classifierDrops != null && metrics.classifierDrops > 0) {
-    lines.push(`Classifier Drops: ${metrics.classifierDrops}`);
-  }
   if (metrics.corroboratedClusters != null && metrics.corroboratedClusters > 0) {
     lines.push(`Corroborated Clusters: ${metrics.corroboratedClusters}`);
   }
@@ -346,7 +340,7 @@ export function formatMetricsSummary(metrics: RunMetrics): string {
     const p = metrics.pocOutcomes;
     lines.push(`PoC Generation: ${p.generated} generated, ${p.skipped} skipped, ${p.errors} errors`);
   }
-  if (metrics.classifierDrops || metrics.corroboratedClusters || metrics.verificationOutcomes || metrics.pocOutcomes) {
+  if (metrics.corroboratedClusters || metrics.verificationOutcomes || metrics.pocOutcomes) {
     lines.push("");
   }
 

@@ -1,5 +1,16 @@
 #!/usr/bin/env node
 
+// Suppress EPIPE errors from child process stdio pipes (e.g. Claude SDK subprocesses).
+// These occur when a subprocess exits and the parent writes to a closed pipe.
+process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED") {
+    // Non-fatal — the subprocess already exited, the task will be reported as failed.
+    return;
+  }
+  console.error(err);
+  process.exitCode = 1;
+});
+
 import { Command } from "commander";
 import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
@@ -65,19 +76,16 @@ program
   .command("scan", { isDefault: true })
   .description("Scan a repository with configured scanners and triage findings with an agent")
   .argument("<repo>", "Path to the repository to scan")
+  .option("--preset <name>", "Scan preset: fast, standard, deep")
   .option("--scanners <names>", "Scanners to run (comma-separated scanner ids)")
   .option("--severity <levels>", "Severity filter (comma-separated)")
   .option("--max <n>", "Max findings to triage", parseInt)
   .option("--model <model>", "Model to use for scanners")
   .option("--ensemble-models <models>", "Run eligible agentic detection tasks across multiple models (comma-separated)")
   .option("--triage-model <model>", "Override model used by triage agent")
-  .option("--triage-max-turns <n>", "Override triage agent max turn budget", parseInt)
-  .option("--enable-classifier", "Enable the cheap pre-triage classifier funnel", false)
-  .option("--classifier-model <model>", "Override model used by the pre-triage classifier")
-  .option("--classifier-threshold <n>", "Minimum classifier confidence required to keep a finding", parseFloat)
+
   .option("--verify", "Enable post-triage exploitability verification", false)
   .option("--verify-model <model>", "Override model used by verification agent")
-  .option("--verify-max-turns <n>", "Override verification agent max turn budget", parseInt)
   .option("--verify-concurrency <n>", "Override verification concurrency", parseInt)
   .option("--verify-refinement-max-iterations <n>", "Maximum verification refinement attempts", parseInt)
   .option("--verify-reflection-interval <n>", "Inject verification reflection every N failed attempts", parseInt)
@@ -95,13 +103,14 @@ program
   .option("--taint-diff-mode <mode>", "Diff-aware taint mode: delta|baseline")
   .option("--stream", "Enable SSE streaming server for live pipeline events", false)
   .option("--stream-port <n>", "Port for SSE streaming server (0 = auto)", parseInt)
+  .option("--github-pr", "Create GitHub fix PRs from verified patches", false)
+  .option("--github-comment", "Post findings summary as PR comment", false)
   .option("--auto-patch", "Enable automatic patch generation in pipeline", false)
   .option("--auto-patch-after <trigger>", "Trigger threshold: verify|poc|triage")
   .option("--patch-verify-depth <depth>", "Re-verification depth: scanner|triage|full")
   .option("--patch-concurrency <n>", "Max concurrent patch synthesis tasks", parseInt)
   .option("--poc-harness", "Enable post-verification PoC harness generation", false)
   .option("--poc-harness-model <model>", "Override model used by PoC harness generator")
-  .option("--poc-harness-max-turns <n>", "Override PoC harness agent max turn budget", parseInt)
   .option("--poc-harness-concurrency <n>", "Override PoC harness generation concurrency", parseInt)
   .option("--poc-refinement-max-iterations <n>", "Maximum PoC refinement attempts when execution feedback is enabled", parseInt)
   .option("--poc-reflection-interval <n>", "Inject PoC reflection every N failed attempts", parseInt)
@@ -116,12 +125,12 @@ program
   .option("--json <path>", "Write JSON report to this path")
   .option("--csv <path>", "Write CSV report to this path")
   .option("--jsonl <path>", "Write JSONL report to this path")
-  .option("--agent-runtime <backend>", "Agent runtime backend (pi-ai|acp)")
+  .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
   .option("--enabled-tasks <ids>", "Additional AgentTask IDs to enable (comma-separated)")
   .option("--enable-external-tasks", "Enable loading of external tasks from config", false)
-  .option("--trust-repo-config", "Trust unsafe repo-local config keys such as ACP adapters, hooks, and external tasks", false)
+  .option("--trust-repo-config", "Trust unsafe repo-local config keys such as hooks and external tasks", false)
   .option("--quality-gate", "Enable quality gates (fail CI on threshold violations)", false)
   .option("--fail-on-tp", "Shorthand: fail if any high/critical severity true positive is found", false)
   .option("--fresh", "Clear prior results before scanning", false)
@@ -465,16 +474,14 @@ program
   .option("--test-cmd <cmd>", "Override test command for validation")
   .option("--max-iterations <n>", "Maximum patch synthesis iterations", parseInt, 3)
   .option("--model <model>", "Model to use for patch synthesis")
-  .option("--max-turns <n>", "Max turns for patch synthesis agent", parseInt)
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
-  .option("--trust-repo-config", "Trust unsafe repo-local config keys such as ACP adapters", false)
+  .option("--trust-repo-config", "Trust unsafe repo-local config keys", false)
   .action(wrapCliAction(async (repoPath: string, opts: {
     fingerprint: string;
     buildCmd?: string;
     testCmd?: string;
     maxIterations: number;
     model?: string;
-    maxTurns?: number;
     db?: string;
     trustRepoConfig?: boolean;
   }) => {
@@ -504,7 +511,7 @@ program
         maxIterations: opts.maxIterations,
         buildCommand: opts.buildCmd ?? null,
         testCommand: opts.testCmd ?? null,
-        maxTurns: opts.maxTurns,
+
       });
 
       console.log("");

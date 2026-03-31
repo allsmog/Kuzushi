@@ -40,7 +40,6 @@ export function registerPatchWorker(deps: PatchWorkerDeps): void {
         maxIterations: config.patchMaxIterations ?? 3,
         buildCommand: config.patchBuildCommand ?? null,
         testCommand: config.patchTestCommand ?? null,
-        maxTurns: config.taskMaxTurns ?? 15,
         skipCleanup: true,
       });
 

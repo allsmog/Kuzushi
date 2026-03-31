@@ -48,7 +48,7 @@ export type BusBackend = "in-process";
 export type ScanMode = "sequential" | "concurrent";
 
 /** Runtime provider for agent execution. */
-export type AgentRuntimeBackend = "pi-ai" | "acp";
+export type AgentRuntimeBackend = "claude" | "pi-ai";
 
 /** Configuration for agent runtime authentication and endpoint selection. */
 export interface AgentRuntimeConfig {
@@ -434,8 +434,6 @@ export interface KuzushiConfig {
   triageModel?: string;
   /** Optional override model for batch triage (classification). Defaults to Haiku. */
   triageBatchModel?: string;
-  /** Max turns for triage agents. null = unlimited. */
-  triageMaxTurns: number | null;
   /** Enable post-triage exploitability verification phase. */
   verify?: boolean;
   /** Optional override model for verification agents. */
@@ -518,12 +516,6 @@ export interface KuzushiConfig {
   enableContextEnrichment?: boolean;
   /** Optional override model for context enrichment. */
   contextEnrichmentModel?: string;
-  /** Enable the cheap pre-triage classifier stage. Default false. */
-  enableClassifier?: boolean;
-  /** Model for the cheap pre-triage classifier. Defaults to the cheapest configured model path. */
-  classifierModel?: string;
-  /** Minimum classifier confidence required to keep a finding. Default 0.5. */
-  classifierThreshold?: number;
   /** Optional ensemble models for eligible agentic scan tasks. */
   ensembleModels?: string[];
   /** Git ref for differential review (e.g. "main"). */
@@ -606,8 +598,6 @@ export interface KuzushiConfig {
   prioritizeFindings?: boolean;
   /** Maximum cost budget in USD. Pipeline stops early when exceeded. */
   costBudgetUsd?: number;
-  /** Max turns for agentic task executions in the DAG. Default 15. */
-  taskMaxTurns?: number;
   /** Enable dynamic task selection based on repo context. Default false. */
   enableDynamicTaskSelection?: boolean;
   /** Enable PoC harness execution after generation. Default false. */
@@ -654,10 +644,6 @@ export interface KuzushiConfig {
   triagePromptFile?: string;
   /** Path to custom verify prompt template file. */
   verifyPromptFile?: string;
-  /** Command to spawn the ACP adapter process. */
-  acpAdapterCommand?: string;
-  /** Enable multi-turn session persistence for ACP. */
-  acpSessionPersist?: boolean;
   /** Bootstrap files injected into system prompts. */
   bootstrapFiles?: {
     files?: string[];

@@ -28,6 +28,10 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
   displayName: "Cross-Service Stitch",
   outputKind: "findings",
   dependsOn: ["taint-analysis-cross-analyze"],
+  condition: (_upstreamOutputs, config) => {
+    const cfg = resolveTaintAnalysisConfig(config);
+    return resolveCrossServiceConfig(cfg).enabled;
+  },
   async run(_input, context): Promise<Finding[]> {
     const cfg = resolveTaintAnalysisConfig(context.config);
     const crossCfg = resolveCrossServiceConfig(cfg);
@@ -498,7 +502,6 @@ async function validateAndEnrichWithLlm(
     options: {
       cwd: repoRoot,
       model,
-      maxTurns: 15,
       allowedTools: [],
       permissionMode: "dontAsk",
       outputFormat: {

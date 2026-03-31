@@ -64,7 +64,7 @@ export const DEFAULT_INVARIANT_ANALYSIS_CONFIG: InvariantAnalysisConfig = {
   maxInvariants: 200,
   securityOnly: true,
   confidenceThreshold: 0.4,
-  checkBatchSize: 15,
+  checkBatchSize: 50,
 };
 
 export function resolveInvariantAnalysisConfig(config: KuzushiConfig): InvariantAnalysisConfig {

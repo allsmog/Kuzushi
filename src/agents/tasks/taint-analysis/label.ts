@@ -3,6 +3,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { AgentRuntime } from "../../../agent-runtime/types.js";
+import { runStructuredSessionQuery } from "../../../agent-runtime/execution.js";
+import { writeBatchFile, cleanupBatchFiles } from "../../../agent-runtime/batch-files.js";
 import { withRetry } from "../../../retry.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
@@ -117,6 +119,30 @@ interface TaintModelDocument {
   cwes: TaintModelCwe[];
 }
 
+/**
+ * Lightweight schema for bulk sink triage — just id + relevant boolean.
+ * Used in Phase 1 to cheaply pre-filter sinks before detailed labeling.
+ */
+const TRIAGE_RESPONSE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["entries"],
+  properties: {
+    entries: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "relevant"],
+        properties: {
+          id: { type: "string" },
+          relevant: { type: "boolean" },
+        },
+      },
+    },
+  },
+} as const;
+
 const LABEL_RESPONSE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -210,8 +236,15 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
     emitExtractionQualityDiagnostics(extractionCounts);
     assertExtractionQualityThresholds(extractionCounts, preflight.workspaceDir);
     const candidateFingerprint = computeCandidatesFingerprint(allCandidates);
-    // Enrich candidates with code snippets from source files
-    await enrichCandidateSnippets(allCandidates, context.repoRoot);
+
+    // ── Signature dedup: label unique signatures, propagate to instances ──
+    const { representatives, signatureMap } = deduplicateBySig(allCandidates);
+    process.stderr.write(
+      `[taint-analysis-label] Dedup: ${allCandidates.length} instances -> ${representatives.length} unique signatures (${((1 - representatives.length / allCandidates.length) * 100).toFixed(0)}% reduction)\n`,
+    );
+
+    // Enrich only representative candidates with code snippets
+    await enrichCandidateSnippets(representatives, context.repoRoot);
     process.stderr.write(`[taint-analysis-label] Loaded ${allCandidates.length} candidates (${preflight.extraction.sourcesRowCount} sources, ${preflight.extraction.sinksRowCount} sinks)\n`);
     const sourceStatus = resolveSourceAvailability(preflight, allCandidates);
     const noSourcesExtracted = sourceStatus.noSourcesExtracted;
@@ -244,6 +277,24 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
         );
       }
     } else {
+      // ── Optimization: label sources once, share across all passes ──
+      // Use deduplicated representatives for labeling, propagate to all instances later
+      const sourceCandidates = representatives.filter((c) => c.candidateKind === "source_candidate");
+      const sinkCandidates = representatives.filter((c) => c.candidateKind === "sink_candidate");
+
+      process.stderr.write(`[taint-analysis-label] Split (deduped): ${sourceCandidates.length} sources, ${sinkCandidates.length} sinks\n`);
+
+      const sourceLabels = await labelSourcesOnce(
+        runtime!,
+        sourceCandidates,
+        references,
+        cfg,
+        context.repoRoot,
+        preflight.language,
+        preflight.framework,
+      );
+      totalCostUsd += sourceLabels.costUsd;
+
       for (const passId of preflight.passes) {
         const passDef = TAINT_ANALYSIS_PASSES.find((pass) => pass.passId === passId);
         if (!passDef || !runtime) {
@@ -282,12 +333,33 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
         }
 
         process.stderr.write(`[taint-analysis-label] Pass ${passId} (${passDef.focus}): checkpoint miss (${cached.reason})\n`);
-        process.stderr.write(`[taint-analysis-label] Labeling pass ${passId} (${passDef.focus})...\n`);
+
+        // ── Optimization: two-phase sink triage ──
+        // Phase 1: cheap bulk pre-filter — which sinks are plausibly relevant to this CWE?
+        const { relevantIds: relevantSinkIds, costUsd: triageCostUsd } = await triageSinkRelevance(
+          runtime,
+          sinkCandidates,
+          passDef,
+          context.repoRoot,
+          cfg.labelingModel,
+        );
+        totalCostUsd += triageCostUsd;
+
+        // Filter sinks to only those that survived triage (fallback: all sinks if triage returned nothing)
+        const filteredSinks = relevantSinkIds.size > 0
+          ? sinkCandidates.filter((c) => relevantSinkIds.has(c.id))
+          : sinkCandidates;
+
+        // Combine pre-labeled sources with filtered sinks for detailed labeling
+        const passCandidates = [...sourceCandidates, ...filteredSinks];
+        process.stderr.write(`[taint-analysis-label] Labeling pass ${passId} (${passDef.focus}): ${passCandidates.length} candidates (${sourceCandidates.length} sources + ${filteredSinks.length} sinks)...\n`);
+
+        // Phase 2: detailed labeling on filtered candidates
         try {
           const passEntries = await labelPass(
             runtime,
             passDef,
-            allCandidates,
+            passCandidates,
             references,
             tiPrior,
             {
@@ -299,9 +371,30 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
             preflight.framework,
           );
 
-          labelsByPass.set(passId, passEntries.entries);
+          // Store only deduped representative entries — no expansion back to 51K instances.
+          // Downstream groupCallables() already deduplicates, so it works unchanged.
+          const dedupedEntries: TaintAnalysisPassEntry[] = [];
+          const passEntryById = new Map(passEntries.entries.map((e) => [e.id, e]));
+
+          // Add labeled sinks from this pass
+          for (const rep of filteredSinks) {
+            const entry = passEntryById.get(rep.id);
+            if (entry) dedupedEntries.push(entry);
+          }
+          // Add source labels (from source-once labeling or this pass)
+          for (const rep of sourceCandidates) {
+            const entry = passEntryById.get(rep.id);
+            if (entry) {
+              dedupedEntries.push(entry);
+            } else {
+              const srcLabel = sourceLabels.entries.get(rep.id);
+              dedupedEntries.push(normalizePassEntry(rep, srcLabel));
+            }
+          }
+
+          labelsByPass.set(passId, dedupedEntries);
           totalCostUsd += passEntries.costUsd;
-          process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${passEntries.entries.length} entries labeled\n`);
+          process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${dedupedEntries.length} entries (deduped)\n`);
 
           await writePassCheckpointV2(
             checkpointPath,
@@ -425,38 +518,111 @@ async function labelPass(
   let totalCostUsd = 0;
   process.stderr.write(`[taint-analysis-label]   ${batches.length} batch(es) of up to ${cfg.labelingBatchSize} candidates\n`);
 
-  for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
-    const batch = batches[batchIdx];
-    process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: querying LLM with ${batch.length} candidates...\n`);
-    const prompt = buildLabelPrompt(passDef, batch, references, tiPrior, language, framework, false);
-    const initial = await withRetry(
-      () => queryLabelBatch(runtime, prompt, repoRoot, cfg.labelingModel),
-      { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
-    );
-    totalCostUsd += initial.costUsd;
+  // Session path: reuse a single subprocess for all batches in this pass
+  const session = runtime.createSession?.({
+    cwd: repoRoot,
+    model: cfg.labelingModel,
+    allowedTools: ["Read", "Grep", "Glob"],
+    permissionMode: "dontAsk",
+    outputFormat: {
+      type: "json_schema",
+      schema: LABEL_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
+      strict: true,
+      retryInvalidStructuredOutput: 2,
+    },
+    systemPromptPrefix: buildLabelSystemPrompt(passDef, references, tiPrior, language, framework),
+  });
 
-    process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: LLM returned ${initial.response.entries.length} entries\n`);
-    for (const entry of initial.response.entries) {
-      byCandidateId.set(entry.id, entry);
-    }
+  const runId = session ? crypto.randomUUID() : "";
 
-    const lowConfidenceIds = initial.response.entries
-      .filter((entry) => entry.confidence < cfg.labelingConfidenceThreshold)
-      .map((entry) => entry.id);
+  try {
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx];
+      process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: querying LLM with ${batch.length} candidates...\n`);
 
-    if (lowConfidenceIds.length > 0) {
-      process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: retrying ${lowConfidenceIds.length} low-confidence entries...\n`);
-      const lowConfidenceCandidates = batch.filter((candidate) => lowConfidenceIds.includes(candidate.id));
-      const retryPrompt = buildLabelPrompt(passDef, lowConfidenceCandidates, references, tiPrior, language, framework, true);
-      const retry = await withRetry(
-        () => queryLabelBatch(runtime, retryPrompt, repoRoot, cfg.labelingModel),
-        { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
-      );
-      totalCostUsd += retry.costUsd;
-      for (const entry of retry.response.entries) {
+      let initial: { response: LabelResponse; costUsd: number };
+
+      if (session) {
+        const candidatePayload = batch.map((c) => ({
+          id: c.id,
+          candidate_kind: c.candidateKind,
+          callable: c.callable,
+          flow_kind: c.flowKind,
+          arg_index: c.argIndex,
+          receiver_hint: c.receiverHint ?? null,
+          module_hint: c.moduleHint ?? null,
+          location: { file: c.locationFile, line: c.locationLine },
+          snippet: c.snippet ?? "",
+        }));
+        const batchFile = writeBatchFile(repoRoot, runId, `label-pass${passDef.passId}`, batchIdx, candidatePayload);
+        const turnPrompt = `Read ${batchFile} and classify each candidate. Return JSON with your assessment.`;
+        const result = await withRetry(
+          () => runStructuredSessionQuery(session, turnPrompt),
+          { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
+        );
+        const parsed = parseLabelResponse(result.structuredOutput ?? result.resultText);
+        initial = { response: parsed, costUsd: result.costUsd };
+      } else {
+        // Fallback: spawn a new subprocess per batch (pi-ai runtime)
+        const prompt = buildLabelPrompt(passDef, batch, references, tiPrior, language, framework, false);
+        initial = await withRetry(
+          () => queryLabelBatch(runtime, prompt, repoRoot, cfg.labelingModel),
+          { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
+        );
+      }
+      totalCostUsd += initial.costUsd;
+
+      process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: LLM returned ${initial.response.entries.length} entries\n`);
+      for (const entry of initial.response.entries) {
         byCandidateId.set(entry.id, entry);
       }
+
+      const lowConfidenceIds = initial.response.entries
+        .filter((entry) => entry.confidence < cfg.labelingConfidenceThreshold)
+        .map((entry) => entry.id);
+
+      if (lowConfidenceIds.length > 0) {
+        process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: retrying ${lowConfidenceIds.length} low-confidence entries...\n`);
+        const lowConfidenceCandidates = batch.filter((candidate) => lowConfidenceIds.includes(candidate.id));
+
+        let retry: { response: LabelResponse; costUsd: number };
+
+        if (session) {
+          const retryPayload = lowConfidenceCandidates.map((c) => ({
+            id: c.id,
+            candidate_kind: c.candidateKind,
+            callable: c.callable,
+            flow_kind: c.flowKind,
+            arg_index: c.argIndex,
+            receiver_hint: c.receiverHint ?? null,
+            module_hint: c.moduleHint ?? null,
+            location: { file: c.locationFile, line: c.locationLine },
+            snippet: c.snippet ?? "",
+          }));
+          const retryFile = writeBatchFile(repoRoot, runId, `label-pass${passDef.passId}-retry`, batchIdx, retryPayload);
+          const retryTurnPrompt = `This is a retry pass for low-confidence items. Re-evaluate carefully with stricter confidence calibration. Read ${retryFile} and classify each candidate. Return JSON with your assessment.`;
+          const result = await withRetry(
+            () => runStructuredSessionQuery(session, retryTurnPrompt),
+            { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
+          );
+          const parsed = parseLabelResponse(result.structuredOutput ?? result.resultText);
+          retry = { response: parsed, costUsd: result.costUsd };
+        } else {
+          const retryPrompt = buildLabelPrompt(passDef, lowConfidenceCandidates, references, tiPrior, language, framework, true);
+          retry = await withRetry(
+            () => queryLabelBatch(runtime, retryPrompt, repoRoot, cfg.labelingModel),
+            { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
+          );
+        }
+        totalCostUsd += retry.costUsd;
+        for (const entry of retry.response.entries) {
+          byCandidateId.set(entry.id, entry);
+        }
+      }
     }
+  } finally {
+    await session?.close();
+    if (runId) cleanupBatchFiles(repoRoot, runId);
   }
 
   const entries = candidates.map((candidate) => {
@@ -479,6 +645,286 @@ async function labelPass(
   };
 }
 
+/**
+ * Label all source candidates once in a CWE-agnostic pass.
+ * Sources (HTTP params, env vars, file reads) are universal — they don't
+ * change by CWE class, so we label them once and reuse across all passes.
+ */
+async function labelSourcesOnce(
+  runtime: AgentRuntime,
+  sourceCandidates: TaintAnalysisCandidate[],
+  references: string,
+  cfg: ReturnType<typeof resolveTaintAnalysisConfig>,
+  repoRoot: string,
+  language: TaintAnalysisPreflightOutput["language"],
+  framework: string | null,
+): Promise<{ entries: Map<string, LabelResponseEntry>; costUsd: number }> {
+  const byCandidateId = new Map<string, LabelResponseEntry>();
+  if (sourceCandidates.length === 0) {
+    return { entries: byCandidateId, costUsd: 0 };
+  }
+
+  const batches = chunk(sourceCandidates, cfg.labelingBatchSize);
+  let totalCostUsd = 0;
+
+  process.stderr.write(`[taint-analysis-label] Labeling ${sourceCandidates.length} sources once (${batches.length} batch(es))...\n`);
+
+  const sourceSystemPrompt = [
+    "You are a taint analysis source labeling agent.",
+    "Return JSON only. Do not include markdown or narrative text.",
+    "Classify each candidate as a data source (user-controlled input), sanitizer, or none.",
+    "This is CWE-agnostic — focus on whether data is user-controllable, not on specific vulnerability types.",
+    "",
+    "Output JSON schema:",
+    JSON.stringify(LABEL_RESPONSE_SCHEMA),
+    "",
+    "Labeling rubric:",
+    "- role: source|sanitizer|none",
+    "- classification: tp|fp|candidate|unknown",
+    "- confidence: number in [0,1]",
+    "",
+    `Known sanitizer functions for ${language}:`,
+    JSON.stringify(FRAMEWORK_SANITIZER_CATALOG[language as TaintAnalysisLanguage] ?? [], null, 2),
+    "",
+    `Language: ${language}${framework ? `, Framework: ${framework}` : ""}`,
+    "",
+    "References (trimmed):",
+    references,
+  ].join("\n");
+
+  // Session path: reuse a single subprocess for all source batches
+  const session = runtime.createSession?.({
+    cwd: repoRoot,
+    model: cfg.labelingModel,
+    allowedTools: ["Read", "Grep", "Glob"],
+    permissionMode: "dontAsk",
+    outputFormat: {
+      type: "json_schema",
+      schema: LABEL_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
+      strict: true,
+      retryInvalidStructuredOutput: 2,
+    },
+    systemPromptPrefix: sourceSystemPrompt,
+  });
+
+  const runId = session ? crypto.randomUUID() : "";
+
+  try {
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx];
+      const candidatePayload = batch.map((c) => ({
+        id: c.id,
+        candidate_kind: c.candidateKind,
+        callable: c.callable,
+        flow_kind: c.flowKind,
+        arg_index: c.argIndex,
+        receiver_hint: c.receiverHint ?? null,
+        module_hint: c.moduleHint ?? null,
+        location: { file: c.locationFile, line: c.locationLine },
+        snippet: c.snippet ?? "",
+      }));
+
+      let result: { response: LabelResponse; costUsd: number };
+
+      if (session) {
+        const batchFile = writeBatchFile(repoRoot, runId, "label-sources", batchIdx, candidatePayload);
+        const turnPrompt = `Read ${batchFile} and classify each candidate. Return JSON with your assessment.`;
+        const sessionResult = await withRetry(
+          () => runStructuredSessionQuery(session, turnPrompt),
+          { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
+        );
+        const parsed = parseLabelResponse(sessionResult.structuredOutput ?? sessionResult.resultText);
+        result = { response: parsed, costUsd: sessionResult.costUsd };
+      } else {
+        // Fallback: spawn a new subprocess per batch (pi-ai runtime)
+        const prompt = [
+          sourceSystemPrompt,
+          "",
+          "Candidates:",
+          JSON.stringify(candidatePayload, null, 2),
+        ].join("\n");
+        result = await withRetry(
+          () => queryLabelBatch(runtime, prompt, repoRoot, cfg.labelingModel),
+          { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
+        );
+      }
+      totalCostUsd += result.costUsd;
+
+      for (const entry of result.response.entries) {
+        byCandidateId.set(entry.id, entry);
+      }
+
+      if ((batchIdx + 1) % 50 === 0 || batchIdx === batches.length - 1) {
+        process.stderr.write(`[taint-analysis-label]   Source labeling: ${batchIdx + 1}/${batches.length} batches done\n`);
+      }
+    }
+  } finally {
+    await session?.close();
+    if (runId) cleanupBatchFiles(repoRoot, runId);
+  }
+
+  process.stderr.write(`[taint-analysis-label] Source labeling complete: ${byCandidateId.size} entries\n`);
+  return { entries: byCandidateId, costUsd: totalCostUsd };
+}
+
+const TRIAGE_BATCH_SIZE = 300;
+
+/**
+ * Cheap bulk pre-filter: send sink callables (minimal context) to LLM and
+ * ask which are plausibly relevant to a given CWE class. Returns the set
+ * of candidate IDs that survived triage.
+ *
+ * Language-agnostic — the LLM determines relevance based on callable names
+ * and CWE semantics, not regex patterns.
+ */
+async function triageSinkRelevance(
+  runtime: AgentRuntime,
+  sinkCandidates: TaintAnalysisCandidate[],
+  passDef: TaintAnalysisPassDefinition,
+  repoRoot: string,
+  model: string,
+): Promise<{ relevantIds: Set<string>; costUsd: number }> {
+  const relevantIds = new Set<string>();
+  if (sinkCandidates.length === 0) {
+    return { relevantIds, costUsd: 0 };
+  }
+
+  const batches = chunk(sinkCandidates, TRIAGE_BATCH_SIZE);
+  let totalCostUsd = 0;
+
+  process.stderr.write(`[taint-analysis-label]   Sink triage for ${passDef.focus}: ${sinkCandidates.length} sinks in ${batches.length} batch(es)...\n`);
+
+  const systemPrompt = [
+    `You are a taint analysis triage agent. For CWE ${passDef.cwes.join("/")} (${passDef.focus}):`,
+    "Mark each callable as relevant (true) or skip (false).",
+    "A callable is relevant ONLY if it could plausibly be a security-sensitive sink for this CWE class.",
+    "Be inclusive — when in doubt, mark as relevant. The goal is to filter out obvious non-sinks (logging, formatting, type conversion, string building).",
+    "",
+    "Return JSON only:",
+    JSON.stringify(TRIAGE_RESPONSE_SCHEMA),
+  ].join("\n");
+
+  // Session path: reuse a single subprocess for all batches
+  const session = runtime.createSession?.({
+    cwd: repoRoot,
+    model,
+    allowedTools: ["Read"],
+    permissionMode: "dontAsk",
+    outputFormat: {
+      type: "json_schema",
+      schema: TRIAGE_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
+      strict: true,
+      retryInvalidStructuredOutput: 1,
+    },
+    systemPromptPrefix: systemPrompt,
+  });
+
+  const runId = session ? crypto.randomUUID() : "";
+
+  try {
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx];
+      // Compact payload — only callable name and module, no snippets or file paths
+      const compactPayload = batch.map((c) => ({
+        id: c.id,
+        callable: c.callable,
+        module_hint: c.moduleHint ?? null,
+        receiver_hint: c.receiverHint ?? null,
+      }));
+
+      let rawResult: unknown;
+      let rawText = "";
+      let costUsd = 0;
+
+      if (session) {
+        // Write batch data to a file the subprocess can read
+        const batchFile = writeBatchFile(repoRoot, runId, "triage-sink", batchIdx, compactPayload);
+        const turnPrompt = `Read ${batchFile} and classify each candidate. Return JSON with your assessment.`;
+
+        const result = await runStructuredSessionQuery(session, turnPrompt);
+        costUsd = result.costUsd;
+        rawText = result.resultText;
+        rawResult = result.structuredOutput;
+      } else {
+        // Fallback: spawn a new subprocess per batch (pi-ai runtime)
+        const prompt = [
+          systemPrompt,
+          "",
+          "Candidates:",
+          JSON.stringify(compactPayload, null, 2),
+        ].join("\n");
+
+        for await (const message of runtime.query({
+          prompt,
+          options: {
+            cwd: repoRoot,
+            model,
+            allowedTools: [],
+            permissionMode: "dontAsk",
+            outputFormat: {
+              type: "json_schema",
+              schema: TRIAGE_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
+              strict: true,
+              retryInvalidStructuredOutput: 1,
+            },
+          },
+        })) {
+          if (message.type !== "result") continue;
+          if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+            costUsd = message.totalCostUsd;
+          }
+          if ("result" in message) {
+            rawText = message.result;
+            rawResult = message.structuredOutput;
+          }
+        }
+      }
+
+      totalCostUsd += costUsd;
+
+      // Parse triage response
+      const parsed = parseTriageResponse(rawResult ?? rawText);
+      for (const entry of parsed.entries) {
+        if (entry.relevant) {
+          relevantIds.add(entry.id);
+        }
+      }
+
+      if ((batchIdx + 1) % 20 === 0 || batchIdx === batches.length - 1) {
+        process.stderr.write(`[taint-analysis-label]   Sink triage: ${batchIdx + 1}/${batches.length} batches, ${relevantIds.size} relevant so far\n`);
+      }
+    }
+  } finally {
+    await session?.close();
+    if (runId) cleanupBatchFiles(repoRoot, runId);
+  }
+
+  process.stderr.write(`[taint-analysis-label]   Sink triage complete: ${relevantIds.size}/${sinkCandidates.length} sinks relevant to ${passDef.focus}\n`);
+  return { relevantIds, costUsd: totalCostUsd };
+}
+
+function parseTriageResponse(value: unknown): { entries: Array<{ id: string; relevant: boolean }> } {
+  if (isRecord(value) && Array.isArray(value["entries"])) {
+    return {
+      entries: value["entries"]
+        .filter((e): e is Record<string, unknown> => isRecord(e) && typeof e["id"] === "string")
+        .map((e) => ({ id: String(e["id"]), relevant: e["relevant"] === true })),
+    };
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(extractJson(value));
+      return parseTriageResponse(parsed);
+    } catch {
+      // If triage parsing fails, mark all as relevant (safe fallback)
+      return { entries: [] };
+    }
+  }
+
+  return { entries: [] };
+}
+
 async function queryLabelBatch(
   runtime: AgentRuntime,
   prompt: string,
@@ -496,7 +942,6 @@ async function queryLabelBatch(
     options: {
       cwd: repoRoot,
       model,
-      maxTurns: 15,
       allowedTools: ["Read", "Grep", "Glob"],
       permissionMode: "dontAsk",
       outputFormat: {
@@ -755,6 +1200,60 @@ async function enrichCandidateSnippets(
       `[taint-analysis-label] Snippet enrichment: added code context to ${enrichedCount} candidates\n`,
     );
   }
+}
+
+/**
+ * Extract the static system prompt portion of the label prompt.
+ * Used as `systemPromptPrefix` when creating a session so the
+ * per-batch turn only needs to reference the batch file path.
+ */
+function buildLabelSystemPrompt(
+  passDef: TaintAnalysisPassDefinition,
+  references: string,
+  tiPrior: TiPriorDocument | null,
+  language: string,
+  framework: string | null,
+): string {
+  const passTiPrior = selectTiPriorForPass(passDef, tiPrior);
+
+  return [
+    "You are a taint analysis labeling agent for one CWE-focused pass.",
+    "Return JSON only. Do not include markdown or narrative text.",
+    "Classify each candidate conservatively and include concise rationale.",
+    "",
+    "Output JSON schema:",
+    JSON.stringify(LABEL_RESPONSE_SCHEMA),
+    "",
+    "Labeling rubric:",
+    "- role: source|sink|sanitizer|summary|none",
+    "- classification: tp|fp|candidate|unknown",
+    "- confidence: number in [0,1]",
+    "",
+    "Sink classification constraints (hard rules):",
+    "- A sink MUST be a function that performs a security-sensitive action: executing commands, querying databases, making network requests, writing to filesystems, evaluating code, rendering templates, constructing LDAP filters, or setting HTTP headers/redirects.",
+    "- String formatting functions (Sprintf, Errorf, String.format, etc.) are NOT sinks - they produce strings but do not execute, query, or transmit anything.",
+    "- Logging functions (log.Printf, logger.info, console.log, etc.) are NOT injection sinks for command/SQL/SSRF/LDAP injection passes.",
+    "- If a candidate is a formatting or logging function, classify it as role=none, classification=fp.",
+    "",
+    `Known sanitizer functions for ${language} (classify as role=sanitizer when encountered):`,
+    JSON.stringify(FRAMEWORK_SANITIZER_CATALOG[language as TaintAnalysisLanguage] ?? [], null, 2),
+    "",
+    "Threat-intelligence prior (use as weighting guidance, not as proof):",
+    JSON.stringify(passTiPrior, null, 2),
+    "",
+    "Pass context:",
+    JSON.stringify({
+      pass_id: passDef.passId,
+      pass_key: passDef.passKey,
+      focus: passDef.focus,
+      cwes: passDef.cwes,
+      language,
+      framework,
+    }, null, 2),
+    "",
+    "References (trimmed):",
+    references,
+  ].join("\n");
 }
 
 function buildLabelPrompt(
@@ -1834,6 +2333,46 @@ function clamp(value: number): number {
   }
 
   return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Build a signature key from candidate properties that identify equivalent
+ * callables. All instances sharing the same key will receive the same label.
+ *
+ * Keyed by (candidateKind, callable) only — the callable name determines
+ * whether something is a source/sink/sanitizer regardless of which module
+ * or receiver it appears in. This aggressive dedup reduces 51K instances
+ * to ~120 unique callables.
+ */
+function candidateSignatureKey(c: TaintAnalysisCandidate): string {
+  return `${c.candidateKind}\0${c.callable}`;
+}
+
+/**
+ * Group candidates by signature and pick one representative per group.
+ * Returns the representative list (for labeling) and a map from signature
+ * key -> representative candidate ID (for propagation).
+ */
+function deduplicateBySig(candidates: TaintAnalysisCandidate[]): {
+  representatives: TaintAnalysisCandidate[];
+  signatureMap: Map<string, string>;
+} {
+  const seen = new Map<string, TaintAnalysisCandidate>();
+  const signatureMap = new Map<string, string>();
+
+  for (const candidate of candidates) {
+    const key = candidateSignatureKey(candidate);
+    if (!seen.has(key)) {
+      seen.set(key, candidate);
+    }
+    // Map every instance's signature to its representative's ID
+    signatureMap.set(key, seen.get(key)!.id);
+  }
+
+  return {
+    representatives: [...seen.values()],
+    signatureMap,
+  };
 }
 
 function chunk<T>(values: T[], size: number): T[][] {

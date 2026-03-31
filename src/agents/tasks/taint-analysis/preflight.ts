@@ -222,7 +222,6 @@ For each candidate provide:
     prompt,
     cwd: repoRoot,
     model,
-    maxTurns: 15,
     allowedTools: resolveDefaultReadOnlyTools(runtime),
     runtimeOptions: { runtime },
     schema: EXTRACTION_SUPPLEMENT_SCHEMA as Record<string, unknown>,

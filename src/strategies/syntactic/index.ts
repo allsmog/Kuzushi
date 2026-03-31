@@ -124,7 +124,6 @@ export function createSyntacticStrategy(strategyId: string, cweIds: string[]): A
             options: {
               cwd,
               model: "anthropic:claude-haiku-4-5",
-              maxTurns: 2,
               allowedTools: ["Grep", "Glob"],
               permissionMode: "dontAsk",
             },

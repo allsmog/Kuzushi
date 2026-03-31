@@ -34,7 +34,6 @@ function makePatchState(): Pick<RunState,
     budgetExceeded: false,
     config: {
       model: "test",
-      triageMaxTurns: null,
       busBackend: "in-process",
       triageBatchSize: 10,
       triageConcurrency: 5,

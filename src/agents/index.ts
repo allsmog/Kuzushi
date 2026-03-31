@@ -31,6 +31,7 @@ import { nosqlInjectionTask } from "./tasks/nosql-injection.js";
 import { templateInjectionTask } from "./tasks/template-injection.js";
 import { supplyChainTask } from "./tasks/supply-chain.js";
 import { graphqlSecurityTask } from "./tasks/graphql-security.js";
+import { authLogicDetectTask } from "./tasks/auth-logic-detect.js";
 import { taskSelectorTask } from "./tasks/task-selector.js";
 import { reachabilityCheckTask } from "./tasks/reachability-check.js";
 import { callGraphAssistTask } from "./tasks/call-graph-assist.js";
@@ -101,6 +102,9 @@ export async function createDefaultTaskRegistry(
   tasks.register(wrapTask(commandInjectionTask));
   tasks.register(wrapTask(xxeDetectionTask));
   tasks.register(wrapTask(deserializationDetectionTask));
+
+  // Authorization logic detection
+  tasks.register(authLogicDetectTask);
 
   // Reachability pre-filter
   tasks.register(reachabilityCheckTask);

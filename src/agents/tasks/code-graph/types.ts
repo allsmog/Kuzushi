@@ -106,8 +106,6 @@ export interface CodeGraphConfig {
   maxEntryPoints?: number;
   /** Max depth per LLM trace. Default 15. */
   maxHopsPerTrace?: number;
-  /** LLM turn budget per trace. Default 10. */
-  maxTurnsPerTrace?: number;
   /** Prefer tracing entry points near scan findings. Default true. */
   prioritizeNearFindings?: boolean;
   /** Persist graph to SQLite. Default true. */

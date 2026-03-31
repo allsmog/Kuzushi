@@ -85,15 +85,6 @@ export function resolveActivePiAiModels(
     );
   }
 
-  if (config.enableClassifier === true) {
-    models.add(
-      config.classifierModel
-      ?? config.triageBatchModel
-      ?? config.contextEnrichmentModel
-      ?? config.model,
-    );
-  }
-
   for (const model of config.ensembleModels ?? []) {
     const trimmed = model.trim();
     if (trimmed) {

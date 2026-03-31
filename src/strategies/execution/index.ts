@@ -72,7 +72,6 @@ export function createExecutionStrategy(strategyId: string, cweIds: string[]): A
           options: {
             cwd,
             model,
-            maxTurns: 8,
             allowedTools: ["Read", "Glob", "Grep"],
             permissionMode: "dontAsk",
             outputFormat: {

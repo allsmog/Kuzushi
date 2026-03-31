@@ -83,7 +83,6 @@ export function createReasoningStrategy(strategyId: string, cweIds: string[]): A
           options: {
             cwd,
             model,
-            maxTurns: 10,
             allowedTools: ["Read", "Glob", "Grep"],
             permissionMode: "dontAsk",
             outputFormat: {

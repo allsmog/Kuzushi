@@ -8,7 +8,6 @@ import type { KuzushiConfig } from "../../../../src/types.js";
 function makeConfig(): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 10,
     busBackend: "in-process",
     triageBatchSize: 15,
     triageConcurrency: 1,
@@ -26,7 +25,7 @@ describe("DEFAULT_INVARIANT_ANALYSIS_CONFIG", () => {
     expect(DEFAULT_INVARIANT_ANALYSIS_CONFIG.maxInvariants).toBe(200);
     expect(DEFAULT_INVARIANT_ANALYSIS_CONFIG.securityOnly).toBe(true);
     expect(DEFAULT_INVARIANT_ANALYSIS_CONFIG.confidenceThreshold).toBe(0.4);
-    expect(DEFAULT_INVARIANT_ANALYSIS_CONFIG.checkBatchSize).toBe(15);
+    expect(DEFAULT_INVARIANT_ANALYSIS_CONFIG.checkBatchSize).toBe(50);
   });
 });
 
@@ -38,7 +37,7 @@ describe("resolveInvariantAnalysisConfig", () => {
     expect(resolved.maxInvariants).toBe(200);
     expect(resolved.securityOnly).toBe(true);
     expect(resolved.confidenceThreshold).toBe(0.4);
-    expect(resolved.checkBatchSize).toBe(15);
+    expect(resolved.checkBatchSize).toBe(50);
   });
 
   it("reads overrides from scannerConfig", () => {

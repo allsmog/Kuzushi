@@ -159,7 +159,6 @@ export function registerVerificationWorker(
               enrichedContext: coerceContextEnrichment(enrichedContext),
             },
             deps.config.verifyBatchSize ?? 5,
-            deps.config.verifyMaxTurns,
             resolvedTemplates.verify,
           ),
         {
@@ -275,7 +274,6 @@ async function verifyWithRefinement(
           repoRoot,
           context.repoName,
           verifyModel,
-          config.verifyMaxTurns,
           repoContextValue,
           {
             runtime,
@@ -283,6 +281,7 @@ async function verifyWithRefinement(
             history: verificationHistory,
             activityCallback,
             extraPromptContext,
+            enableInstrumentation: maxIterations > 1,
           },
           verifyTemplate,
         );
@@ -310,7 +309,6 @@ async function verifyWithRefinement(
         repoRoot,
         context.repoName,
         pocModel,
-        config.pocHarnessMaxTurns ?? config.verifyMaxTurns,
         repoContextValue,
         {
           runtime,

@@ -258,21 +258,21 @@ export const nosqlInjectionTask: AgentTask<ScanOpts, Finding[]> = {
     const scenarioContext = await buildThreatScenarioEvidenceSection("nosql-injection-detect", context.repoRoot, applicationModel, scenarioOutput);
 
     const tag = "[nosql-injection]";
-    const lensMaxTurns = Math.min(context.config.taskMaxTurns ?? 15, 8);
+
     const perLensMax = Math.ceil(maxFindings / 2);
     log.info(`Starting multi-lens scan (model=${model})`);
 
     const lensResults = await Promise.all([
       runLens(
         buildQueryBuilderLensPrompt(repoContext, perLensMax, profileLines, preRead, threatModelContext, appModelContext, scenarioContext),
-        context, model, lensMaxTurns, `${tag}/query-builder`,
+        context, model, `${tag}/query-builder`,
       ).catch((error) => {
         log.error(`${tag}/query-builder lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
       }),
       runLens(
         buildRawOperatorLensPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
-        context, model, lensMaxTurns, `${tag}/raw-operator`,
+        context, model, `${tag}/raw-operator`,
       ).catch((error) => {
         log.error(`${tag}/raw-operator lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
@@ -336,7 +336,6 @@ async function runLens(
   prompt: string,
   context: TaskContext,
   model: string,
-  maxTurns: number,
   tag: string,
 ): Promise<LensResult> {
   const runtime = resolveTaskRuntime(context);
@@ -349,7 +348,6 @@ async function runLens(
     options: {
       cwd: context.repoRoot,
       model,
-      maxTurns,
       allowedTools: resolveTaskAllowedTools(context),
       permissionMode: "dontAsk",
       outputFormat: {

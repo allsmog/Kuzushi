@@ -20,11 +20,10 @@ describe("createPocExecutor", () => {
     expect(executor).toBeInstanceOf(DockerPocExecutor);
   });
 
-  it("throws when Docker is requested but unavailable", async () => {
+  it("falls back to process executor when Docker is unavailable", async () => {
     vi.spyOn(DockerPocExecutor.prototype, "available").mockResolvedValue(false);
 
-    await expect(createPocExecutor("docker")).rejects.toThrow(
-      "Docker sandbox requested but Docker is unavailable",
-    );
+    const executor = await createPocExecutor("docker");
+    expect(executor).toBeInstanceOf(ProcessPocExecutor);
   });
 });

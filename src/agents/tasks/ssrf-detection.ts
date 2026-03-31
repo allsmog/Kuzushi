@@ -266,7 +266,7 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
     const scenarioContext = await buildThreatScenarioEvidenceSection("ssrf-detect", context.repoRoot, applicationModel, scenarioOutput);
 
     const tag = "[ssrf-detect]";
-    const lensMaxTurns = Math.min(context.config.taskMaxTurns ?? 15, 8);
+
     const perLensMax = Math.ceil(maxFindings / 2);
     log.info(`Starting multi-lens scan (model=${model})`);
 
@@ -276,7 +276,6 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
         buildLocalSinkPrompt(repoContext, perLensMax, profileLines, preRead, threatModelContext, appModelContext, scenarioContext),
         context,
         model,
-        lensMaxTurns,
         `${tag}/local-sink`,
       ).catch((error) => {
         log.error(`${tag}/local-sink lens error: ${toErrorMessage(error)}`);
@@ -286,7 +285,6 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
         buildCrossFunctionPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
         context,
         model,
-        lensMaxTurns,
         `${tag}/cross-function`,
       ).catch((error) => {
         log.error(`${tag}/cross-function lens error: ${toErrorMessage(error)}`);
@@ -358,7 +356,6 @@ async function runLens(
   prompt: string,
   context: TaskContext,
   model: string,
-  maxTurns: number,
   tag: string,
 ): Promise<LensResult> {
   const runtime = resolveTaskRuntime(context);
@@ -371,7 +368,6 @@ async function runLens(
     options: {
       cwd: context.repoRoot,
       model,
-      maxTurns,
       allowedTools: resolveTaskAllowedTools(context),
       permissionMode: "dontAsk",
       outputFormat: {

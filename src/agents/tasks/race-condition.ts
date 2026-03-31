@@ -250,7 +250,7 @@ export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
         options: {
           cwd: context.repoRoot,
           model,
-          maxTurns: context.config.taskMaxTurns ?? 15,
+
           allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {

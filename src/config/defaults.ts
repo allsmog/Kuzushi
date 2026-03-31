@@ -4,8 +4,8 @@ import type { KuzushiConfig } from "../types.js";
 export const BUS_BACKENDS = new Set<string>(["in-process"]);
 
 export const AGENT_RUNTIME_BACKENDS = new Set<string>([
+  "claude",
   "pi-ai",
-  "acp",
 ]);
 
 export const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() || taintAnalysisRoot;
@@ -13,7 +13,6 @@ export const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.t
 export const DEFAULTS: KuzushiConfig = {
   model: "anthropic:claude-sonnet-4-6",
   triageBatchModel: undefined,
-  triageMaxTurns: null,
   verify: false,
   verifyMaxTurns: undefined,
   verifyConcurrency: 3,
@@ -39,20 +38,9 @@ export const DEFAULTS: KuzushiConfig = {
   triageBatchSize: 5,
   triageConcurrency: 5,
   scanMode: "concurrent",
-  agentRuntimeBackend: "pi-ai",
+  agentRuntimeBackend: "claude",
   agentRuntimeConfig: undefined,
-  enabledTasks: [
-    "context-gatherer",
-    "context-enricher",
-    "app-model-build",
-    "threat-scenario-build",
-    "secrets-crypto-detect",
-    "crypto-behavioral-test",
-    "code-config-detect",
-    "taint-analysis-preflight",
-    "taint-analysis-label",
-    "taint-analysis-run",
-  ],
+  enabledTasks: [],
   scanners: ["semgrep"],
   severity: ["ERROR", "WARNING"],
   excludePatterns: [
@@ -62,7 +50,6 @@ export const DEFAULTS: KuzushiConfig = {
   llmRescoreEnabled: true,
   fpFilterEnabled: true,
   fpFilterCustomExclusions: [],
-  taskMaxTurns: 10,
   enableDynamicTaskSelection: true,
   pocExecute: false,
   pocSandbox: "docker",
@@ -71,9 +58,6 @@ export const DEFAULTS: KuzushiConfig = {
   variantAnalysisMaxFindings: 10,
   contextEnrichmentModel: undefined,
   enableContextEnrichment: true,
-  enableClassifier: true,
-  classifierModel: undefined,
-  classifierThreshold: 0.5,
   ensembleModels: [],
   taintDiffBase: undefined,
   taintDiffMode: "delta",
@@ -137,7 +121,6 @@ export const DEFAULTS: KuzushiConfig = {
     "code-graph": {
       maxEntryPoints: 50,
       maxHopsPerTrace: 15,
-      maxTurnsPerTrace: 10,
       prioritizeNearFindings: true,
       persistGraph: true,
       warmStart: true,
@@ -145,7 +128,7 @@ export const DEFAULTS: KuzushiConfig = {
     "taint-analysis": {
       taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
       dbPath: undefined,
-      passes: [1, 2, 3, 4, 5],
+      passes: [1, 2, 3],
       extractionModel: undefined,
       labelingBatchSize: 20,
       labelingConfidenceThreshold: 0.55,

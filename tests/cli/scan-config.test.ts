@@ -6,7 +6,6 @@ import { applyScanCommandConfigOverrides, type ScanCommandOptions } from "../../
 
 function makeOptions(overrides: Partial<ScanCommandOptions> = {}): ScanCommandOptions {
   return {
-    enableClassifier: false,
     verify: false,
     cryptoBehavioralTest: false,
     pocHarness: false,
@@ -26,7 +25,6 @@ describe("applyScanCommandConfigOverrides", () => {
     const config = structuredClone(DEFAULTS);
 
     applyScanCommandConfigOverrides(config, makeOptions({
-      triageMaxTurns: 12,
       verify: true,
       verifyMaxTurns: 9,
       verifyConcurrency: 4,
@@ -36,7 +34,6 @@ describe("applyScanCommandConfigOverrides", () => {
     }));
 
     expect(config.verify).toBe(true);
-    expect(config.triageMaxTurns).toBe(12);
     expect(config.verifyMaxTurns).toBe(9);
     expect(config.verifyConcurrency).toBe(4);
     expect(config.verifyMinConfidence).toBe(0.7);
@@ -102,8 +99,8 @@ describe("applyScanCommandConfigOverrides", () => {
     const config = structuredClone(DEFAULTS);
 
     expect(() => applyScanCommandConfigOverrides(config, makeOptions({
-      classifierThreshold: 1.5,
-    }))).toThrowError(new CliUsageError("--classifier-threshold must be a number between 0 and 1."));
+      verifyMinConfidence: 1.5,
+    }))).toThrowError(new CliUsageError("--verify-min-confidence must be a number between 0 and 1."));
   });
 
   it("rejects poc harness without verification", () => {

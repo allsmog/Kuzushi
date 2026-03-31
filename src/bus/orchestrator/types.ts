@@ -73,7 +73,6 @@ export interface RunState {
   skippedAlreadyTriaged: number;
   skippedLowConfidence: number;
   skippedByFpFilter: number;
-  skippedByClassifier: number;
   triageQueue: QueuedFinding[];
   queueCursor: number;
   triageTotal: number;

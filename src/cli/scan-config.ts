@@ -1,19 +1,18 @@
 import path from "node:path";
 import type { KuzushiConfig } from "../types.js";
+import { isValidPreset, SCAN_PRESETS } from "../config/presets.js";
 import { CliUsageError } from "./errors.js";
 import { parseCommaSeparatedList } from "./shared.js";
 
 export interface ScanCommandOptions {
+  preset?: string;
   scanners?: string;
   severity?: string;
   max?: number;
   model?: string;
   ensembleModels?: string;
   triageModel?: string;
-  triageMaxTurns?: number;
-  enableClassifier: boolean;
-  classifierModel?: string;
-  classifierThreshold?: number;
+
   verify: boolean;
   verifyModel?: string;
   verifyMaxTurns?: number;
@@ -34,6 +33,8 @@ export interface ScanCommandOptions {
   taintDiffMode?: string;
   stream: boolean;
   streamPort?: number;
+  githubPr: boolean;
+  githubComment: boolean;
   autoPatch: boolean;
   autoPatchAfter?: string;
   patchVerifyDepth?: string;
@@ -73,11 +74,17 @@ export function applyScanCommandConfigOverrides(
   config: KuzushiConfig,
   opts: ScanCommandOptions,
 ): KuzushiConfig {
+  // Apply preset before any other overrides so CLI flags take precedence.
+  if (opts.preset) {
+    if (!isValidPreset(opts.preset)) {
+      throw new CliUsageError(`Unknown preset "${opts.preset}". Valid presets: fast, standard, deep`);
+    }
+    Object.assign(config, SCAN_PRESETS[opts.preset]);
+  }
+
   if (opts.model) config.model = opts.model;
   if (opts.ensembleModels) config.ensembleModels = parseCommaSeparatedList(opts.ensembleModels);
   if (opts.triageModel) config.triageModel = opts.triageModel;
-  if (opts.enableClassifier) config.enableClassifier = true;
-  if (opts.classifierModel) config.classifierModel = opts.classifierModel;
   if (opts.verify) config.verify = true;
   if (opts.verifyModel) config.verifyModel = opts.verifyModel;
   if (opts.cryptoBehavioralTest) {
@@ -110,6 +117,8 @@ export function applyScanCommandConfigOverrides(
   if (opts.multiStrategyAutoRules) config.multiStrategyAutoRuleGeneration = true;
   if (opts.stream) config.streamingEnabled = true;
   if (opts.streamPort != null) config.streamingPort = opts.streamPort;
+  if (opts.githubPr) (config as Record<string, unknown>)["githubPr"] = true;
+  if (opts.githubComment) (config as Record<string, unknown>)["githubComment"] = true;
   if (opts.autoPatch) config.autoPatchEnabled = true;
   if (opts.autoPatchAfter) config.autoPatchAfter = opts.autoPatchAfter as typeof config.autoPatchAfter;
   if (opts.patchVerifyDepth) config.patchVerifyDepth = opts.patchVerifyDepth as typeof config.patchVerifyDepth;
@@ -168,9 +177,8 @@ export function applyScanCommandConfigOverrides(
     };
   }
 
-  applyOptionalUnitInterval(config, "classifierThreshold", opts.classifierThreshold, "--classifier-threshold");
   applyOptionalUnitInterval(config, "verifyMinConfidence", opts.verifyMinConfidence, "--verify-min-confidence");
-  applyOptionalPositiveInteger(config, "triageMaxTurns", opts.triageMaxTurns, "--triage-max-turns");
+
   applyOptionalPositiveInteger(config, "verifyMaxTurns", opts.verifyMaxTurns, "--verify-max-turns");
   applyOptionalPositiveInteger(config, "verifyConcurrency", opts.verifyConcurrency, "--verify-concurrency");
   applyOptionalPositiveInteger(config, "dynamicMaxCandidates", opts.dynamicMaxCandidates, "--dynamic-max-candidates");

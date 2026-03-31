@@ -1,0 +1,581 @@
+import {
+  query as claudeQuery,
+  type Options as ClaudeOptions,
+  type SDKMessage,
+  type SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
+import type { AgentRuntimeConfig } from "../types.js";
+import type { MessageBus } from "../bus/types.js";
+import type {
+  LlmCallStartEvent,
+  LlmCallCompleteEvent,
+  LlmCallErrorEvent,
+} from "../bus/events.js";
+import { normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { getLogger } from "../logger.js";
+import type {
+  AgentMessage,
+  AgentQueryOptions,
+  AgentQueryRequest,
+  AgentRuntime,
+  AgentSession,
+} from "./types.js";
+
+const log = getLogger("claude-runtime");
+
+// Prevent EPIPE from crashing the process when Claude SDK subprocesses die.
+// Multiple concurrent query() calls each spawn a Claude Code subprocess;
+// if one exits early the parent may write to a closed pipe.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED") return;
+    throw err;
+  });
+}
+
+/**
+ * Agent runtime backed by the Claude Agent SDK (@anthropic-ai/claude-agent-sdk).
+ *
+ * Benefits over pi-ai:
+ * - Uses Claude Code's native tool implementations (Read, Grep, Glob, Bash, etc.)
+ * - Prompt caching via Claude's API
+ * - .claude configuration support
+ * - Session persistence and resume
+ */
+// Semaphore to limit concurrent Claude Code subprocess spawns.
+// Each query() spawns a subprocess; too many concurrent processes causes
+// rapid "process exited with code 1" failures.
+const MAX_CONCURRENT_QUERIES = 5;
+let activeQueries = 0;
+const waitQueue: Array<() => void> = [];
+
+async function acquireSlot(): Promise<void> {
+  if (activeQueries < MAX_CONCURRENT_QUERIES) {
+    activeQueries++;
+    return;
+  }
+  await new Promise<void>((resolve) => waitQueue.push(resolve));
+  activeQueries++;
+}
+
+function releaseSlot(): void {
+  activeQueries--;
+  const next = waitQueue.shift();
+  if (next) next();
+}
+
+export class ClaudeAgentRuntime implements AgentRuntime {
+  readonly id = "claude";
+  private readonly config: AgentRuntimeConfig | undefined;
+  bus: MessageBus | null = null;
+  runId: string | null = null;
+
+  constructor(config?: AgentRuntimeConfig) {
+    this.config = config;
+  }
+
+  createSession(baseOptions: AgentQueryOptions): AgentSession {
+    return new ClaudeSession(baseOptions, this.config, this.bus, this.runId);
+  }
+
+  async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    await acquireSlot();
+    const startedAtMs = Date.now();
+    let totalCostUsd = 0;
+    let numTurns = 0;
+
+    const options: ClaudeOptions = {
+      cwd: request.options.cwd,
+      permissionMode: mapPermissionMode(request.options.permissionMode),
+      allowDangerouslySkipPermissions: true,
+      persistSession: false,
+    };
+
+    // Model
+    if (request.options.model) {
+      // Strip provider prefix (e.g. "anthropic:claude-sonnet-4-6" -> "claude-sonnet-4-6")
+      const model = request.options.model.includes(":")
+        ? request.options.model.split(":").slice(1).join(":")
+        : request.options.model;
+      options.model = model;
+    }
+
+    // Tools — use `tools` to restrict available tools (not just auto-approve).
+    // With bypassPermissions, `allowedTools` only auto-approves but doesn't
+    // restrict availability. `tools` actually removes tools from the model's context.
+    if (request.options.allowedTools) {
+      options.tools = request.options.allowedTools;
+    }
+    if (request.options.disallowedTools) {
+      options.disallowedTools = request.options.disallowedTools;
+    }
+
+    // Structured output — enforce JSON schema and add system prompt reinforcement.
+    // The Claude SDK subprocess doesn't always enforce structured output when tools
+    // are also active, so we add explicit instructions to the system prompt.
+    if (request.options.outputFormat) {
+      options.outputFormat = {
+        type: "json_schema",
+        schema: request.options.outputFormat.schema,
+      };
+      // Reinforce JSON-only output in the system prompt to prevent prose responses
+      const jsonEnforcement = [
+        "CRITICAL: You MUST return your final response as a valid JSON object matching the provided schema.",
+        "Do NOT wrap the JSON in markdown code fences. Do NOT include any text before or after the JSON.",
+        "After using tools to investigate, respond with ONLY the JSON result.",
+      ].join(" ");
+      const existingPrefix = request.options.systemPromptPrefix ?? "";
+      request = {
+        ...request,
+        options: {
+          ...request.options,
+          systemPromptPrefix: existingPrefix
+            ? `${jsonEnforcement}\n\n${existingPrefix}`
+            : jsonEnforcement,
+        },
+      };
+    }
+
+    // Budget
+    if (request.options.maxBudgetUsd) {
+      options.maxBudgetUsd = request.options.maxBudgetUsd;
+    }
+
+    // System prompt — use Claude Code's default with appended instructions
+    if (request.options.systemPromptPrefix) {
+      options.systemPrompt = {
+        type: "preset",
+        preset: "claude_code",
+        append: request.options.systemPromptPrefix,
+      };
+    }
+
+    // API key / base URL from config — always pass env so subprocess
+    // inherits credentials even when agentRuntimeConfig is not set.
+    const env: Record<string, string | undefined> = { ...process.env };
+    if (this.config?.apiKey) {
+      env.ANTHROPIC_API_KEY = this.config.apiKey;
+    }
+    if (this.config?.baseUrl) {
+      env.ANTHROPIC_BASE_URL = this.config.baseUrl;
+    }
+    // Claude Code refuses to launch inside another Claude Code session.
+    // Strip the nesting detection variable so subprocesses can run.
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_SESSION_ID;
+    options.env = env;
+
+    // Abort controller
+    if (request.options.abortController) {
+      options.abortController = request.options.abortController;
+    }
+
+    // Thinking — disable for structured output tasks (cheaper, faster)
+    if (request.options.outputFormat) {
+      options.thinking = { type: "disabled" };
+    }
+
+    // Emit llm:call-start
+    const turnRunId = this.runId ?? "";
+    if (this.bus) {
+      try {
+        await this.bus.publish<LlmCallStartEvent>({
+          type: "llm:call-start",
+          meta: {
+            id: crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+            runId: turnRunId,
+          },
+          payload: {
+            model: request.options.model,
+            promptLength: request.prompt.length,
+            runId: turnRunId,
+          },
+        });
+      } catch {
+        // Non-fatal
+      }
+    }
+
+    try {
+      const queryResult = claudeQuery({
+        prompt: request.prompt,
+        options,
+      });
+
+      for await (const message of queryResult) {
+        const mapped = mapMessage(message);
+        if (!mapped) continue;
+
+        if (mapped.type === "result") {
+          // Extract cost and metadata from SDK result
+          const sdkMsg = message as Record<string, unknown>;
+          totalCostUsd = normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined);
+          numTurns = (sdkMsg["num_turns"] as number) ?? 0;
+
+          const durationMs = Date.now() - startedAtMs;
+
+          if (mapped.subtype === "success") {
+            yield {
+              type: "result",
+              subtype: "success",
+              result: mapped.result,
+              structuredOutput: (sdkMsg as Record<string, unknown>)["structured_output"],
+              durationMs,
+              numTurns,
+              totalCostUsd,
+            };
+          } else {
+            yield {
+              type: "result",
+              subtype: mapped.subtype,
+              errors: mapped.errors,
+              durationMs,
+              numTurns,
+              totalCostUsd,
+            };
+          }
+        } else {
+          yield mapped;
+        }
+      }
+
+      // Emit llm:call-complete
+      if (this.bus) {
+        try {
+          await this.bus.publish<LlmCallCompleteEvent>({
+            type: "llm:call-complete",
+            meta: {
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              runId: turnRunId,
+            },
+            payload: {
+              model: request.options.model,
+              durationMs: Date.now() - startedAtMs,
+              tokensUsed: 0,
+              costUsd: totalCostUsd,
+              runId: turnRunId,
+            },
+          });
+        } catch {
+          // Non-fatal
+        }
+      }
+    } catch (error) {
+      const durationMs = Date.now() - startedAtMs;
+      log.error(`Claude SDK query failed (${durationMs}ms): ${toErrorMessage(error)}`);
+
+      // Emit llm:call-error
+      if (this.bus) {
+        try {
+          await this.bus.publish<LlmCallErrorEvent>({
+            type: "llm:call-error",
+            meta: {
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              runId: turnRunId,
+            },
+            payload: {
+              model: request.options.model,
+              error: toErrorMessage(error),
+              retryable: false,
+              runId: turnRunId,
+            },
+          });
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      yield {
+        type: "result",
+        subtype: "error_runtime",
+        errors: [toErrorMessage(error)],
+        durationMs,
+        numTurns,
+        totalCostUsd,
+      };
+    } finally {
+      releaseSlot();
+    }
+  }
+}
+
+/**
+ * Async queue that implements AsyncIterable — used to feed SDKUserMessages
+ * into a single `claudeQuery()` call. Push messages with `enqueue()`, end
+ * with `done()`. The SDK subprocess stays alive as long as the iterable
+ * hasn't completed.
+ */
+class MessageQueue implements AsyncIterable<SDKUserMessage>, AsyncIterator<SDKUserMessage> {
+  private queue: SDKUserMessage[] = [];
+  private resolve: ((result: IteratorResult<SDKUserMessage>) => void) | null = null;
+  private isDone = false;
+
+  enqueue(msg: SDKUserMessage): void {
+    if (this.resolve) {
+      const r = this.resolve;
+      this.resolve = null;
+      r({ done: false, value: msg });
+    } else {
+      this.queue.push(msg);
+    }
+  }
+
+  done(): void {
+    this.isDone = true;
+    if (this.resolve) {
+      const r = this.resolve;
+      this.resolve = null;
+      r({ done: true, value: undefined });
+    }
+  }
+
+  next(): Promise<IteratorResult<SDKUserMessage>> {
+    if (this.queue.length > 0) {
+      return Promise.resolve({ done: false, value: this.queue.shift()! });
+    }
+    if (this.isDone) {
+      return Promise.resolve({ done: true, value: undefined });
+    }
+    return new Promise((resolve) => { this.resolve = resolve; });
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> { return this; }
+}
+
+/**
+ * A session backed by a single Claude Code subprocess. Uses the SDK's
+ * `query({ prompt: AsyncIterable<SDKUserMessage> })` to keep one process
+ * alive across multiple turns. Each `query()` call pushes a user message
+ * and yields response messages until a `result` arrives.
+ */
+class ClaudeSession implements AgentSession {
+  private readonly messageQueue = new MessageQueue();
+  private queryIterator: AsyncIterator<SDKMessage> | null = null;
+  private closed = false;
+  private slotAcquired = false;
+
+  constructor(
+    private readonly baseOptions: AgentQueryOptions,
+    private readonly config: AgentRuntimeConfig | undefined,
+    private readonly bus: MessageBus | null,
+    private readonly runId: string | null,
+  ) {}
+
+  private ensureStarted(): void {
+    if (this.queryIterator) return;
+
+    const options: ClaudeOptions = {
+      cwd: this.baseOptions.cwd,
+      permissionMode: mapPermissionMode(this.baseOptions.permissionMode),
+      allowDangerouslySkipPermissions: true,
+      persistSession: false,
+    };
+
+    if (this.baseOptions.model) {
+      const model = this.baseOptions.model.includes(":")
+        ? this.baseOptions.model.split(":").slice(1).join(":")
+        : this.baseOptions.model;
+      options.model = model;
+    }
+
+    if (this.baseOptions.allowedTools) {
+      options.allowedTools = this.baseOptions.allowedTools;
+    }
+    if (this.baseOptions.disallowedTools) {
+      options.disallowedTools = this.baseOptions.disallowedTools;
+    }
+
+    if (this.baseOptions.outputFormat) {
+      options.outputFormat = {
+        type: "json_schema",
+        schema: this.baseOptions.outputFormat.schema,
+      };
+    }
+
+    if (this.baseOptions.maxBudgetUsd) {
+      options.maxBudgetUsd = this.baseOptions.maxBudgetUsd;
+    }
+
+    if (this.baseOptions.systemPromptPrefix) {
+      options.systemPrompt = {
+        type: "preset",
+        preset: "claude_code",
+        append: this.baseOptions.systemPromptPrefix,
+      };
+    }
+
+    if (this.baseOptions.outputFormat) {
+      options.thinking = { type: "disabled" };
+    }
+
+    const env: Record<string, string | undefined> = { ...process.env };
+    if (this.config?.apiKey) env.ANTHROPIC_API_KEY = this.config.apiKey;
+    if (this.config?.baseUrl) env.ANTHROPIC_BASE_URL = this.config.baseUrl;
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_SESSION_ID;
+    options.env = env;
+
+    if (this.baseOptions.abortController) {
+      options.abortController = this.baseOptions.abortController;
+    }
+
+    // Pass the async message queue as prompt — SDK keeps one subprocess alive
+    const queryResult = claudeQuery({
+      prompt: this.messageQueue,
+      options,
+    });
+
+    this.queryIterator = queryResult[Symbol.asyncIterator]();
+  }
+
+  async *query(prompt: string): AsyncIterable<AgentMessage> {
+    if (this.closed) throw new Error("Session is closed");
+
+    // Acquire semaphore on first query only
+    if (!this.slotAcquired) {
+      await acquireSlot();
+      this.slotAcquired = true;
+    }
+
+    this.ensureStarted();
+
+    // Push user message into the queue
+    const userMessage: SDKUserMessage = {
+      type: "user",
+      session_id: "",
+      message: { role: "user", content: [{ type: "text", text: prompt }] },
+      parent_tool_use_id: null,
+    };
+    this.messageQueue.enqueue(userMessage);
+
+    // Read messages from the subprocess until we get a result for this turn
+    const iter = this.queryIterator!;
+    while (true) {
+      const { value, done } = await iter.next();
+      if (done) return;
+
+      const mapped = mapMessage(value);
+      if (!mapped) continue;
+
+      if (mapped.type === "result") {
+        const sdkMsg = value as Record<string, unknown>;
+        const totalCostUsd = normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined);
+        const numTurns = (sdkMsg["num_turns"] as number) ?? 0;
+
+        if (mapped.subtype === "success") {
+          yield {
+            type: "result",
+            subtype: "success",
+            result: mapped.result,
+            structuredOutput: sdkMsg["structured_output"],
+            numTurns,
+            totalCostUsd,
+          };
+        } else {
+          yield {
+            type: "result",
+            subtype: mapped.subtype,
+            errors: mapped.errors,
+            numTurns,
+            totalCostUsd,
+          };
+        }
+        return; // Turn complete — caller can call query() again for next turn
+      }
+
+      yield mapped;
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    this.messageQueue.done();
+    if (this.slotAcquired) {
+      releaseSlot();
+    }
+  }
+}
+
+function mapPermissionMode(
+  mode: string | undefined,
+): "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" {
+  switch (mode) {
+    case "default":
+    case "acceptEdits":
+    case "plan":
+      return mode;
+    case "bypassPermissions":
+    case "dontAsk":
+      // For non-interactive automated use, "dontAsk" in Kuzushi maps to
+      // "bypassPermissions" in the Claude SDK. The SDK's "dontAsk" denies
+      // anything not pre-approved, which breaks automated tool execution.
+      return "bypassPermissions";
+    default:
+      return "bypassPermissions";
+  }
+}
+
+function mapMessage(msg: SDKMessage): AgentMessage | null {
+  const type = (msg as Record<string, unknown>)["type"] as string;
+
+  switch (type) {
+    case "result": {
+      const sdkMsg = msg as Record<string, unknown>;
+      const subtype = sdkMsg["subtype"] as string;
+      if (subtype === "success") {
+        return {
+          type: "result",
+          subtype: "success",
+          result: (sdkMsg["result"] as string) ?? "",
+          structuredOutput: sdkMsg["structured_output"],
+          totalCostUsd: normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined),
+        };
+      }
+      return {
+        type: "result",
+        subtype: subtype ?? "error_runtime",
+        errors: Array.isArray(sdkMsg["errors"])
+          ? (sdkMsg["errors"] as string[])
+          : [String(sdkMsg["errors"] ?? "Unknown error")],
+        totalCostUsd: normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined),
+      };
+    }
+
+    case "assistant": {
+      const sdkMsg = msg as Record<string, unknown>;
+      return {
+        type: "assistant",
+        content: Array.isArray(sdkMsg["content"]) ? sdkMsg["content"] : [],
+      };
+    }
+
+    case "tool_use_progress": {
+      const sdkMsg = msg as Record<string, unknown>;
+      return {
+        type: "tool-progress",
+        toolUseId: String(sdkMsg["tool_use_id"] ?? ""),
+        toolName: String(sdkMsg["tool_name"] ?? ""),
+        elapsedSeconds: (sdkMsg["elapsed_seconds"] as number) ?? 0,
+      };
+    }
+
+    case "tool_use_summary": {
+      const sdkMsg = msg as Record<string, unknown>;
+      return {
+        type: "tool-summary",
+        summary: String(sdkMsg["summary"] ?? ""),
+        precedingToolUseIds: Array.isArray(sdkMsg["preceding_tool_use_ids"])
+          ? sdkMsg["preceding_tool_use_ids"] as string[]
+          : [],
+      };
+    }
+
+    default:
+      // Skip system messages, auth status, stream events, etc.
+      return null;
+  }
+}

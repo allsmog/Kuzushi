@@ -80,34 +80,31 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     throw new CliUsageError(error instanceof Error ? error.message : String(error));
   }
 
-  const runtimeBackend = config.agentRuntimeBackend ?? "pi-ai";
-  if (runtimeBackend === "pi-ai") {
-    const activeModels = resolveActivePiAiModels(
-      config,
-      scanOpts.scanners ?? [],
-      config.enabledTasks ?? [],
+  const activeModels = resolveActivePiAiModels(
+    config,
+    scanOpts.scanners ?? [],
+    config.enabledTasks ?? [],
+  );
+
+  const missingCredentials = validatePiAiProviderCredentials(activeModels, {
+    anthropicApiKey: config.agentRuntimeConfig?.apiKey,
+  });
+
+  if (missingCredentials.length > 0) {
+    const details = missingCredentials.map(
+      (entry) => `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] (used by: ${entry.models.join(", ")})`,
     );
-
-    const missingCredentials = validatePiAiProviderCredentials(activeModels, {
-      anthropicApiKey: config.agentRuntimeConfig?.apiKey,
-    });
-
-    if (missingCredentials.length > 0) {
-      const details = missingCredentials.map(
-        (entry) => `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] (used by: ${entry.models.join(", ")})`,
+    if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
+      details.push(
+        "Tip: for Anthropic models, you can also set agentRuntimeConfig.apiKey or pass --api-key for this run.",
       );
-      if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
-        details.push(
-          "Tip: for Anthropic models, you can also set agentRuntimeConfig.apiKey or pass --api-key for this run.",
-        );
-      }
-      throw new CliConfigError("missing API credentials for selected model provider(s):", { details });
     }
-
-    warnPiAiBackendApiKeys(activeModels, {
-      anthropicApiKey: config.agentRuntimeConfig?.apiKey,
-    });
+    throw new CliConfigError("missing API credentials for selected model provider(s):", { details });
   }
+
+  warnPiAiBackendApiKeys(activeModels, {
+    anthropicApiKey: config.agentRuntimeConfig?.apiKey,
+  });
 
   let runtime;
   try {
@@ -204,6 +201,22 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
       (event) => event.meta.runId === runId && event.payload.fatal,
     )
     .then((event) => ({ kind: "error" as const, event }));
+
+  // Print scan plan summary
+  {
+    const tasks = config.enabledTasks ?? [];
+    const taskSummary = tasks.length === 0
+      ? "none (scanners only)"
+      : tasks.length === 1 && tasks[0] === "*"
+        ? "all"
+        : `${tasks.length} (${tasks.slice(0, 3).join(", ")}${tasks.length > 3 ? ", ..." : ""})`;
+    const scanners = config.scanners?.join(", ") ?? "semgrep";
+    const dynamic = config.enableDynamicTaskSelection ? "on" : "off";
+    console.error(`\nScan plan:`);
+    console.error(`  Scanners:  ${scanners}`);
+    console.error(`  Tasks:     ${taskSummary}`);
+    console.error(`  Dynamic:   ${dynamic}\n`);
+  }
 
   try {
     await bus.publish(

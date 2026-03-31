@@ -71,7 +71,6 @@ export interface AgenticRuntimeOptions {
   runtime?: AgentRuntime;
   abortController?: AbortController;
   maxBudgetUsd?: number;
-  maxTurns?: number;
 }
 
 /** Run the agentic scanner and return structured findings. */
@@ -103,7 +102,6 @@ export async function runAgentic(
       model,
       allowedTools: ["Read", "Glob", "Grep"],
       permissionMode: "dontAsk",
-      maxTurns: runtimeOptions.maxTurns ?? undefined,
       maxBudgetUsd: runtimeOptions.maxBudgetUsd,
       abortController: runtimeOptions.abortController,
       outputFormat: {

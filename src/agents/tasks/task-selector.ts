@@ -40,33 +40,35 @@ const SELECTION_RULES: SelectionRule[] = [
       "prototype-pollution",
       "template-injection",
       "supply-chain",
+      "command-injection",
+      "deserialization",
     ],
     reason: "JS/TS ecosystem: prioritize dangerous APIs, SSRF, prototype pollution, templating, and package supply-chain risk",
   },
   {
     languages: ["Go", "golang"],
-    tasks: ["race-condition", "crypto-misuse", "supply-chain"],
-    reason: "Go: goroutine races, crypto misuse, and dependency risk are common review targets",
+    tasks: ["race-condition", "crypto-misuse", "supply-chain", "command-injection", "deserialization"],
+    reason: "Go: goroutine races, crypto misuse, dependency risk, and command/deserialization checks",
   },
   {
     languages: ["Python"],
-    tasks: ["dangerous-api", "secrets", "security-misconfig", "template-injection", "supply-chain"],
-    reason: "Python: check for dangerous APIs, secrets, misconfiguration, templating risk, and dependency exposure",
+    tasks: ["dangerous-api", "secrets", "security-misconfig", "template-injection", "supply-chain", "command-injection", "deserialization", "xxe"],
+    reason: "Python: check for dangerous APIs, secrets, misconfiguration, templating, command injection, deserialization, and XXE risk",
   },
   {
     languages: ["Java", "Kotlin"],
-    tasks: ["dangerous-api", "crypto-misuse", "secrets", "supply-chain"],
-    reason: "JVM: check for dangerous APIs, crypto misuse, secrets, and dependency exposure",
+    tasks: ["dangerous-api", "crypto-misuse", "secrets", "supply-chain", "command-injection", "deserialization", "xxe"],
+    reason: "JVM: check for dangerous APIs, crypto misuse, secrets, command injection, deserialization, and XXE",
   },
   {
     languages: ["Ruby"],
-    tasks: ["dangerous-api", "secrets", "security-misconfig", "template-injection", "supply-chain"],
-    reason: "Ruby: check for dangerous APIs, secrets, misconfiguration, ERB-like templating issues, and gem risk",
+    tasks: ["dangerous-api", "secrets", "security-misconfig", "template-injection", "supply-chain", "command-injection", "deserialization", "xxe"],
+    reason: "Ruby: check for dangerous APIs, secrets, misconfiguration, templating, command injection, deserialization, and XXE",
   },
   {
     languages: ["PHP"],
-    tasks: ["dangerous-api", "ssrf", "secrets", "template-injection", "supply-chain"],
-    reason: "PHP: high risk for injection, SSRF, templating issues, and hardcoded secrets",
+    tasks: ["dangerous-api", "ssrf", "secrets", "template-injection", "supply-chain", "command-injection", "deserialization", "xxe"],
+    reason: "PHP: high risk for injection, SSRF, templating, command injection, deserialization, and XXE",
   },
   // Note: auth-access and dangerous-api both resolve to code-config-detect,
   // which is already in ALWAYS_RECOMMENDED via security-misconfig. Dedicated
@@ -90,6 +92,13 @@ const SELECTION_RULES: SelectionRule[] = [
     tasks: ["threat-model"],
     reason: "Multi-language repo — STRIDE + PASTA threat models for cross-boundary analysis",
   },
+  {
+    condition: (ctx) =>
+      ctx.frameworks.some((f) => /express|fastapi|django|flask|spring|gin|echo|nest|next|rails|laravel/i.test(f))
+      || ctx.authPatterns.length > 0,
+    tasks: ["auth-logic"],
+    reason: "Web framework or auth patterns detected — probe authorization logic for privilege escalation",
+  },
 ];
 
 /** Tasks always recommended regardless of context. */
@@ -110,6 +119,10 @@ export const SELECTABLE_TASK_IDS: ReadonlySet<string> = new Set([
   "template-injection-detect",
   "graphql-security-detect",
   "supply-chain-detect",
+  "command-injection-detect",
+  "xxe-detect",
+  "deserialization-detect",
+  "auth-logic-detect",
   "threat-model-stride",
   "threat-model-pasta",
 ]);

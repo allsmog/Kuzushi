@@ -71,7 +71,6 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
     const graphConfig = (context.config.scannerConfig["code-graph"] ?? {}) as Record<string, unknown>;
     const rawMaxEntryPoints = typeof graphConfig["maxEntryPoints"] === "number" ? graphConfig["maxEntryPoints"] : null;
     const maxEntryPoints = rawMaxEntryPoints != null ? rawMaxEntryPoints : DEFAULT_MAX_ENTRY_POINTS;
-    const maxTurnsPerTrace = resolveTaskPositiveInt(context, "code-graph", "maxTurnsPerTrace", DEFAULT_MAX_TURNS_PER_TRACE);
     const model = resolveTaskModel(context, "code-graph");
     const warmStart = (graphConfig as Record<string, unknown>)["warmStart"] !== false;
 
@@ -215,7 +214,6 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
           options: {
             cwd: workingRoot,
             model,
-            maxTurns: maxTurnsPerTrace,
             allowedTools: ["Read", "Glob", "Grep", "GetCallers", "GetCallees"],
             permissionMode: "dontAsk",
             outputFormat: {

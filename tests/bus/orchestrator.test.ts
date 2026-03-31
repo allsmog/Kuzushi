@@ -43,7 +43,6 @@ import type { KuzushiConfig, ScanOpts, TriageResult } from "../../src/types.js";
 function makeConfig(): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 10,
     busBackend: "in-process",
     triageBatchSize: 15,
     triageConcurrency: 1,
@@ -278,90 +277,6 @@ describe("PipelineOrchestrator", () => {
     expect(finalDepth.payload.inFlight).toBe(0);
     expect(finalDepth.payload.processed).toBe(1);
     expect(finalDepth.payload.total).toBe(1);
-
-    await bus.close();
-    db.close();
-  });
-
-  it("uses quick classifier output as the pre-triage candidate set when enabled", async () => {
-    const bus = new InProcessBus();
-    const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    const runtime: AgentRuntime = {
-      id: "classifier-test",
-      async *query(request) {
-        yield {
-          type: "result",
-          subtype: "success",
-          result: request.prompt.includes("src/app.ts:10")
-            ? "LIKELY_FALSE_POSITIVE"
-            : "LIKELY_REAL",
-          totalCostUsd: 0.001,
-        };
-      },
-    };
-    registerOrchestrator(bus, { registry: registry as any, db, runtime });
-    registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
-
-    const runId = generateRunId();
-    const context = {
-      runId,
-      repoRoot: "/tmp/repo",
-      repoName: "repo",
-      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
-    };
-
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config: {
-          ...makeConfig(),
-          enableClassifier: true,
-          llmRescoreEnabled: true,
-        },
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    const batchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
-      "triage:batch-queued",
-      (event) => event.meta.runId === runId,
-    );
-    const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
-      "report:requested",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-filtered", 10),
-        scannerId: "semgrep",
-      }),
-    );
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-kept", 20),
-        scannerId: "semgrep",
-      }),
-    );
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 2,
-      }),
-    );
-
-    const batchQueued = await batchQueuedPromise;
-    const reportRequested = await reportRequestedPromise;
-    expect(batchQueued.payload.findings.map((finding) => finding.fingerprint)).toEqual(["fp-kept"]);
-    expect(reportRequested.payload.stats?.skippedByClassifier).toBe(1);
-    expect(reportRequested.payload.stats?.skippedByLlmRescore).toBeUndefined();
 
     await bus.close();
     db.close();

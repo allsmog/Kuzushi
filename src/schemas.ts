@@ -17,7 +17,7 @@ export const BusBackendSchema = z.enum(["in-process"]);
 
 export const ScanModeSchema = z.enum(["sequential", "concurrent"]);
 
-export const AgentRuntimeBackendSchema = z.enum(["pi-ai", "acp"]);
+export const AgentRuntimeBackendSchema = z.enum(["pi-ai"]);
 
 export const ProofVerdictSchema = z.enum([
   "exploited",
@@ -567,7 +567,6 @@ export const KuzushiConfigSchema = z.object({
   model: z.string(),
   triageModel: z.string().optional(),
   triageBatchModel: z.string().optional(),
-  triageMaxTurns: z.number().nullable(),
   verify: z.boolean().optional(),
   verifyModel: z.string().optional(),
   verifyMaxTurns: z.number().optional(),
@@ -606,9 +605,6 @@ export const KuzushiConfigSchema = z.object({
   variantAnalysisMaxFindings: z.number().optional(),
   enableContextEnrichment: z.boolean().optional(),
   contextEnrichmentModel: z.string().optional(),
-  enableClassifier: z.boolean().optional(),
-  classifierModel: z.string().optional(),
-  classifierThreshold: z.number().optional(),
   ensembleModels: z.array(z.string()).optional(),
   diffBase: z.string().optional(),
   taintDiffBase: z.string().optional(),
@@ -643,7 +639,6 @@ export const KuzushiConfigSchema = z.object({
   securityProfilesPath: z.string().optional(),
   prioritizeFindings: z.boolean().optional(),
   costBudgetUsd: z.number().optional(),
-  taskMaxTurns: z.number().optional(),
   enableDynamicTaskSelection: z.boolean().optional(),
   pocExecute: z.boolean().optional(),
   pocSandbox: PocSandboxSchema.optional(),
@@ -697,8 +692,6 @@ export const KuzushiConfigSchema = z.object({
   enableExternalHooks: z.boolean().optional(),
   triagePromptFile: z.string().optional(),
   verifyPromptFile: z.string().optional(),
-  acpAdapterCommand: z.string().optional(),
-  acpSessionPersist: z.boolean().optional(),
   bootstrapFiles: z.object({
     files: z.array(z.string()).optional(),
     maxCharsPerFile: z.number().optional(),

@@ -285,7 +285,6 @@ async function runDynamicAnalysis(
           repoRoot,
           context.repoName,
           model,
-          config.pocHarnessMaxTurns,
           coerceRepoContext(repoContext),
           {
             runtime,

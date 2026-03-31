@@ -32,7 +32,6 @@ import {
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 10,
     busBackend: "in-process",
     triageBatchSize: 10,
     triageConcurrency: 1,

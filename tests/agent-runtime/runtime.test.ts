@@ -11,7 +11,6 @@ import {
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 10,
     busBackend: "in-process",
     triageBatchSize: 15,
     triageConcurrency: 1,
@@ -30,20 +29,6 @@ describe("agent runtime", () => {
       agentRuntimeBackend: "pi-ai",
     }));
     expect(runtime.id).toBe("pi-ai");
-  });
-
-  it("throws for acp backend when adapter command is missing", () => {
-    expect(() => configureAgentRuntime(makeConfig({
-      agentRuntimeBackend: "acp",
-    }))).toThrow("agentRuntimeBackend=acp requires acpAdapterCommand");
-  });
-
-  it("configures acp backend with adapter command", () => {
-    const runtime = configureAgentRuntime(makeConfig({
-      agentRuntimeBackend: "acp",
-      acpAdapterCommand: "echo test",
-    }));
-    expect(runtime.id).toBe("acp");
   });
 
   it("creates independent runtime instances without global mutation", () => {
@@ -66,12 +51,10 @@ describe("agent runtime", () => {
     ]);
   });
 
-  it("keeps the legacy default bundle for acp and custom runtimes", () => {
-    expect(resolveDefaultReadOnlyTools({ id: "acp" } as AgentRuntime)).toEqual([
-      ...DEFAULT_READ_ONLY_TOOLS,
-    ]);
+  it("always includes semantic navigation tools", () => {
     expect(resolveDefaultReadOnlyTools({ id: "custom-test" } as AgentRuntime)).toEqual([
       ...DEFAULT_READ_ONLY_TOOLS,
+      ...SEMANTIC_NAVIGATION_TOOLS,
     ]);
   });
 });

@@ -60,12 +60,7 @@ export const cryptoBehavioralTestTask: AgentTask<unknown, Finding[]> = {
     const timeoutMs = context.config.cryptoBehavioralTimeoutMs ?? 120_000;
     const budgetUsd = context.config.cryptoBehavioralPerFindingBudgetUsd ?? 1;
     const model = resolveTaskModel(context, "crypto-behavioral-test");
-    const maxTurns = resolveTaskPositiveInt(
-      context,
-      "crypto-behavioral-test",
-      "maxTurns",
-      context.config.taskMaxTurns ?? 10,
-    );
+
     const timingIterations = resolveTaskPositiveInt(
       context,
       "crypto-behavioral-test",
@@ -100,7 +95,6 @@ export const cryptoBehavioralTestTask: AgentTask<unknown, Finding[]> = {
           context.scanPath ?? context.repoRoot,
           context.repoName,
           model,
-          maxTurns,
           {
             runtime: context.runtime,
             bus: context.bus,

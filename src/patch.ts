@@ -3,12 +3,14 @@ import { existsSync, mkdirSync, copyFileSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
-import type { AgentRuntime } from "./agent-runtime/types.js";
+import type { AgentRuntime, AgentSession } from "./agent-runtime/types.js";
 import { DockerPocExecutor } from "./poc-executor/docker.js";
 import {
   resolveDefaultReadOnlyTools,
   runStructuredAgentQuery,
+  runStructuredSessionQuery,
 } from "./agent-runtime/execution.js";
+import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
 import {
   getStoredFinding,
   insertPatchResult,
@@ -39,7 +41,6 @@ export interface PatchSynthesisOptions {
   maxIterations: number;
   buildCommand: string | null;
   testCommand: string | null;
-  maxTurns?: number;
   /** When true, keep the worktree alive after synthesis for re-verification. Default false. */
   skipCleanup?: boolean;
 }
@@ -247,7 +248,6 @@ async function synthesizePatch(
   model: string,
   runtime: AgentRuntime,
   history: Array<{ attempt: number; diff: string; status: PatchStatus; output: string }>,
-  maxTurns?: number,
 ): Promise<{ diff: string; explanation: string; costUsd: number }> {
   const prompt = buildPatchSynthesisPrompt(finding, repoName, history);
 
@@ -258,13 +258,74 @@ async function synthesizePatch(
       prompt,
       cwd: repoRoot,
       model,
-      maxTurns: maxTurns ?? 15,
       allowedTools,
       runtimeOptions: { runtime },
       systemPromptPrefix:
         "You are a security patch generator. Read the vulnerable code, then produce a minimal unified diff that fixes the vulnerability.",
       schema: PATCH_SYNTHESIS_SCHEMA,
     });
+
+  if (executionError) {
+    throw new PatchExecutionError(
+      `Patch synthesis agent failed: ${executionError}`,
+      costUsd,
+    );
+  }
+
+  let parsed: { diff: string; explanation: string };
+  try {
+    parsed = parsePatchOutput(structuredOutput ?? resultText);
+  } catch (error) {
+    throw new PatchExecutionError(
+      `Patch synthesis output parse failed: ${toErrorMessage(error)}`,
+      costUsd,
+    );
+  }
+
+  return {
+    diff: parsed.diff,
+    explanation: parsed.explanation,
+    costUsd,
+  };
+}
+
+/**
+ * Synthesize a patch diff via an existing session (subprocess reuse).
+ * Writes iteration context to a batch file so the session can read it.
+ */
+async function synthesizePatchViaSession(
+  session: AgentSession,
+  finding: StoredFindingRecord,
+  repoRoot: string,
+  repoName: string,
+  runId: string,
+  iteration: number,
+  history: Array<{ attempt: number; diff: string; status: PatchStatus; output: string }>,
+): Promise<{ diff: string; explanation: string; costUsd: number }> {
+  const batchFile = writeBatchFile(repoRoot, runId, "patch-synthesis", iteration, {
+    fingerprint: finding.fingerprint,
+    filePath: finding.filePath,
+    startLine: finding.startLine,
+    ruleId: finding.ruleId,
+    severity: finding.severity,
+    message: finding.message,
+    iteration,
+    history: history.map((h) => ({
+      attempt: h.attempt,
+      status: h.status,
+      output: h.output,
+      diffLength: h.diff.length,
+    })),
+  });
+
+  const prompt = [
+    buildPatchSynthesisPrompt(finding, repoName, history),
+    "",
+    `Iteration context has been written to ${batchFile} — use Read to load it if needed.`,
+  ].join("\n");
+
+  const { resultText, structuredOutput, executionError, costUsd } =
+    await runStructuredSessionQuery(session, prompt);
 
   if (executionError) {
     throw new PatchExecutionError(
@@ -508,18 +569,50 @@ export async function runPatchPipeline(
   let finalDiff: string | null = null;
   let totalCostUsd = 0;
 
+  const canUseSession = options.runtime.createSession != null;
+
+  // Create a session for the iteration loop if supported — one session
+  // handles all iterations for this finding, avoiding up to 10 subprocess
+  // spawns.
+  let session: AgentSession | null = null;
+  const sessionRunId = crypto.randomUUID();
+
   try {
+    if (canUseSession) {
+      session = options.runtime.createSession!({
+        cwd: options.repoRoot,
+        model: options.model,
+        allowedTools: resolveDefaultReadOnlyTools(options.runtime),
+        permissionMode: "dontAsk",
+        systemPromptPrefix:
+          "You are a security patch generator. Read the vulnerable code, then produce a minimal unified diff that fixes the vulnerability.",
+        outputFormat: {
+          type: "json_schema",
+          schema: PATCH_SYNTHESIS_SCHEMA,
+        },
+      });
+    }
+
     for (let iteration = 1; iteration <= options.maxIterations; iteration++) {
-      // Synthesize a patch
-      const synthesis = await synthesizePatch(
-        finding,
-        options.repoRoot,
-        options.repoName,
-        options.model,
-        options.runtime,
-        history,
-        options.maxTurns,
-      );
+      // Synthesize a patch — use session if available, otherwise spawn subprocess
+      const synthesis = session
+        ? await synthesizePatchViaSession(
+            session,
+            finding,
+            options.repoRoot,
+            options.repoName,
+            sessionRunId,
+            iteration,
+            history,
+          )
+        : await synthesizePatch(
+            finding,
+            options.repoRoot,
+            options.repoName,
+            options.model,
+            options.runtime,
+            history,
+          );
       totalCostUsd += synthesis.costUsd;
 
       // Validate the patch
@@ -560,6 +653,12 @@ export async function runPatchPipeline(
       finalDiff = synthesis.diff;
     }
   } finally {
+    // Close session if we created one
+    if (session) {
+      await session.close();
+      cleanupBatchFiles(options.repoRoot, sessionRunId);
+    }
+
     if (!options.skipCleanup || finalStatus !== "SOUND") {
       await cleanup();
     }

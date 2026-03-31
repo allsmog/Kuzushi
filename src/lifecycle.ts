@@ -1,7 +1,7 @@
 /**
  * Graceful shutdown coordinator.
  *
- * Provides a hook-based shutdown sequence inspired by acpx's 3-phase pattern:
+ * Provides a hook-based shutdown sequence with priority ordering:
  * register named hooks with priority, then drain them in order with a timeout.
  */
 

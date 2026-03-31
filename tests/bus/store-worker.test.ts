@@ -41,7 +41,7 @@ describe("store-worker", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    registerStoreWorker(bus, { db });
+    const store = registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -69,6 +69,9 @@ describe("store-worker", () => {
 
     const event = await upserted;
     expect(event.payload.verdict).toBe("tp");
+
+    // Flush the batched upsert queue before reading back from the DB.
+    store.flush();
 
     const counts = getVerdictCounts(db, "repo");
     expect(counts.tp).toBe(1);

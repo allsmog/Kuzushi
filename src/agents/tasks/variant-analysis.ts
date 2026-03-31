@@ -1,6 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import type { AgentRuntime } from "../../agent-runtime/types.js";
+import type { AgentRuntime, AgentSession } from "../../agent-runtime/types.js";
+import { runStructuredSessionQuery } from "../../agent-runtime/execution.js";
+import { writeBatchFile, cleanupBatchFiles } from "../../agent-runtime/batch-files.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
@@ -179,6 +181,8 @@ function normalizeFilePath(repoRoot: string, filePath: string): string {
 
 /**
  * Run variant analysis for a single confirmed TP finding.
+ * When `createSession` is available on the runtime, uses a session to avoid
+ * spawning a new subprocess.
  */
 export async function analyzeVariants(
   finding: Finding,
@@ -198,34 +202,91 @@ export async function analyzeVariants(
   const tag = "[variant-analysis]";
   log.info(`Searching for variants of ${finding.ruleId} in ${finding.filePath}:${finding.startLine}`);
 
-  try {
-    for await (const message of runtime.query({
-      prompt,
-      options: {
-        cwd: repoRoot,
-        model,
-        maxTurns: 15,
-        allowedTools: ["Read", "Glob", "Grep"],
-        permissionMode: "dontAsk",
-        outputFormat: {
-          type: "json_schema",
-          schema: VARIANT_SCHEMA,
-          strict: true,
-          retryInvalidStructuredOutput: 2,
-        },
+  const canUseSession = runtime.createSession != null;
+
+  if (canUseSession) {
+    // ── Session-based path ──
+    const runId = randomUUID();
+    const session = runtime.createSession!({
+      cwd: repoRoot,
+      model,
+      allowedTools: ["Read", "Glob", "Grep"],
+      permissionMode: "dontAsk",
+      outputFormat: {
+        type: "json_schema",
+        schema: VARIANT_SCHEMA,
+        strict: true,
+        retryInvalidStructuredOutput: 2,
       },
-    })) {
-      if (message.type !== "result") continue;
-      if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-        costUsd = message.totalCostUsd;
+    });
+
+    try {
+      const batchFile = writeBatchFile(repoRoot, runId, "variant-analysis", 0, {
+        finding: {
+          scanner: finding.scanner,
+          ruleId: finding.ruleId,
+          filePath: finding.filePath,
+          startLine: finding.startLine,
+          severity: finding.severity,
+          cwe: finding.cwe,
+          message: finding.message,
+          evidence: finding.evidence,
+        },
+        triage: {
+          verdict: triageResult.verdict,
+          rationale: triageResult.rationale,
+        },
+      });
+
+      const sessionPrompt = [
+        prompt,
+        "",
+        `Finding context has been written to ${batchFile} — use Read to load it if needed.`,
+      ].join("\n");
+
+      const sessionResult = await runStructuredSessionQuery(session, sessionPrompt);
+      resultText = sessionResult.resultText;
+      structuredOutput = sessionResult.structuredOutput;
+      costUsd = sessionResult.costUsd;
+
+      if (sessionResult.executionError) {
+        throw new Error(`${tag} Agent error: ${sessionResult.executionError}`);
       }
-      if ("result" in message) {
-        resultText = message.result;
-        structuredOutput = message.structuredOutput;
-      }
+    } finally {
+      await session.close();
+      cleanupBatchFiles(repoRoot, runId);
     }
-  } catch (error) {
-    throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
+  } else {
+    // ── Fallback: original subprocess-per-call path ──
+    try {
+      for await (const message of runtime.query({
+        prompt,
+        options: {
+          cwd: repoRoot,
+          model,
+
+          allowedTools: ["Read", "Glob", "Grep"],
+          permissionMode: "dontAsk",
+          outputFormat: {
+            type: "json_schema",
+            schema: VARIANT_SCHEMA,
+            strict: true,
+            retryInvalidStructuredOutput: 2,
+          },
+        },
+      })) {
+        if (message.type !== "result") continue;
+        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
+        if ("result" in message) {
+          resultText = message.result;
+          structuredOutput = message.structuredOutput;
+        }
+      }
+    } catch (error) {
+      throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
+    }
   }
 
   const findings = normalizeVariants(
@@ -327,6 +388,8 @@ function buildBatchPrompt(
 
 /**
  * Run variant analysis for multiple confirmed TP findings in a single LLM call.
+ * When `createSession` is available on the runtime, uses a session to avoid
+ * spawning a new subprocess.
  */
 export async function analyzeVariantsBatch(
   items: Array<{ finding: Finding; triageResult: TriageResult }>,
@@ -345,34 +408,90 @@ export async function analyzeVariantsBatch(
   const tag = "[variant-analysis-batch]";
   log.info(`Batch analyzing ${items.length} findings for variants`);
 
-  try {
-    for await (const message of runtime.query({
-      prompt,
-      options: {
-        cwd: repoRoot,
-        model,
-        maxTurns: 15,
-        allowedTools: ["Read", "Glob", "Grep"],
-        permissionMode: "dontAsk",
-        outputFormat: {
-          type: "json_schema",
-          schema: BATCH_VARIANT_SCHEMA,
-          strict: true,
-          retryInvalidStructuredOutput: 2,
-        },
+  const canUseSession = runtime.createSession != null;
+
+  if (canUseSession) {
+    // ── Session-based path ──
+    const runId = randomUUID();
+    const session = runtime.createSession!({
+      cwd: repoRoot,
+      model,
+      allowedTools: ["Read", "Glob", "Grep"],
+      permissionMode: "dontAsk",
+      outputFormat: {
+        type: "json_schema",
+        schema: BATCH_VARIANT_SCHEMA,
+        strict: true,
+        retryInvalidStructuredOutput: 2,
       },
-    })) {
-      if (message.type !== "result") continue;
-      if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-        costUsd = message.totalCostUsd;
+    });
+
+    try {
+      const batchFile = writeBatchFile(repoRoot, runId, "variant-batch", 0, {
+        findings: items.map((item) => ({
+          fingerprint: item.finding.fingerprint,
+          scanner: item.finding.scanner,
+          ruleId: item.finding.ruleId,
+          filePath: item.finding.filePath,
+          startLine: item.finding.startLine,
+          severity: item.finding.severity,
+          cwe: item.finding.cwe,
+          message: item.finding.message,
+          evidence: item.finding.evidence,
+          triageVerdict: item.triageResult.verdict,
+          triageRationale: item.triageResult.rationale,
+        })),
+      });
+
+      const sessionPrompt = [
+        prompt,
+        "",
+        `Batch context has been written to ${batchFile} — use Read to load it if needed.`,
+      ].join("\n");
+
+      const sessionResult = await runStructuredSessionQuery(session, sessionPrompt);
+      resultText = sessionResult.resultText;
+      structuredOutput = sessionResult.structuredOutput;
+      costUsd = sessionResult.costUsd;
+
+      if (sessionResult.executionError) {
+        throw new Error(`${tag} Agent error: ${sessionResult.executionError}`);
       }
-      if ("result" in message) {
-        resultText = message.result;
-        structuredOutput = message.structuredOutput;
-      }
+    } finally {
+      await session.close();
+      cleanupBatchFiles(repoRoot, runId);
     }
-  } catch (error) {
-    throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
+  } else {
+    // ── Fallback: original subprocess-per-call path ──
+    try {
+      for await (const message of runtime.query({
+        prompt,
+        options: {
+          cwd: repoRoot,
+          model,
+
+          allowedTools: ["Read", "Glob", "Grep"],
+          permissionMode: "dontAsk",
+          outputFormat: {
+            type: "json_schema",
+            schema: BATCH_VARIANT_SCHEMA,
+            strict: true,
+            retryInvalidStructuredOutput: 2,
+          },
+        },
+      })) {
+        if (message.type !== "result") continue;
+        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+          costUsd = message.totalCostUsd;
+        }
+        if ("result" in message) {
+          resultText = message.result;
+          structuredOutput = message.structuredOutput;
+        }
+      }
+    } catch (error) {
+      throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
+    }
   }
 
   const parsed = structuredOutput ?? parseJson(resultText, tag);

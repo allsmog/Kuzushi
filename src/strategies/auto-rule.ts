@@ -73,7 +73,6 @@ export async function generateRule(
       options: {
         cwd,
         model,
-        maxTurns: 5,
         allowedTools: ["Read", "Grep"],
         permissionMode: "dontAsk",
         outputFormat: {

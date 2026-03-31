@@ -20,6 +20,7 @@ import { registerTaintAnalysisRefinementWorker } from "./workers/taint-analysis-
 import { registerDynamicAnalysisWorker } from "./workers/dynamic-analysis-worker.js";
 import { registerPatchWorker } from "./workers/patch-worker.js";
 import { registerPatchVerifyWorker } from "./workers/patch-verify-worker.js";
+import { registerGitHubWorker } from "./workers/github-worker.js";
 import { createPocExecutor } from "../poc-executor/index.js";
 
 export interface RegisterWorkersDeps {
@@ -118,6 +119,9 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
     registerPatchWorker({ bus, db: deps.db, runtime: deps.runtime, config: deps.config });
     registerPatchVerifyWorker({ bus, db: deps.db, config: deps.config, registry: deps.registry });
   }
+
+  // GitHub integration (fix PRs + findings comments)
+  registerGitHubWorker(bus, { config: deps.config });
 
   if (deps.config.auditLog) {
     registerAuditWorker(bus, {

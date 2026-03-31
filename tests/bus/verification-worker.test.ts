@@ -93,7 +93,6 @@ function makeVerificationResult(): VerificationResult {
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 10,
     maxVerifyRetries: 0,
     verifyRefinementMaxIterations: 1,
     retryBackoffMs: 0,
@@ -167,7 +166,6 @@ describe("verification-worker", () => {
       "/tmp/repo",
       "repo",
       "claude-haiku-4-5-20251001",
-      17,
       undefined,
       expect.objectContaining({
         activityCallback: expect.any(Function),
@@ -223,7 +221,7 @@ describe("verification-worker", () => {
     const config = makeConfig();
 
     verifyFindingWithAgentMock.mockImplementation(async (...args: any[]) => {
-      const runtimeOptions = args[7];
+      const runtimeOptions = args[6];
       await runtimeOptions?.activityCallback?.({
         kind: "tool-start",
         toolName: "Read",
@@ -400,7 +398,7 @@ describe("verification-worker", () => {
     expect(verifyFindingWithAgentMock).toHaveBeenCalledTimes(2);
     expect(generatePocHarnessMock).toHaveBeenCalledTimes(1);
     expect(executorExecuteMock).toHaveBeenCalledTimes(1);
-    expect(verifyFindingWithAgentMock.mock.calls[1]?.[7]).toEqual(
+    expect(verifyFindingWithAgentMock.mock.calls[1]?.[6]).toEqual(
       expect.objectContaining({
         history: expect.arrayContaining([
           expect.objectContaining({ role: "assistant" }),

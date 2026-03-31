@@ -6,7 +6,7 @@ import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
-import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, BATCH_TRIAGE_FALLBACK_RATIONALE, preReadForTriage } from "../../triage.js";
+import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, BATCH_TRIAGE_FALLBACK_RATIONALE, preReadForTriage, type FileContentCache } from "../../triage.js";
 import type { KuzushiConfig } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
@@ -73,7 +73,11 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
   const escalatedFingerprints = new Set<string>();
   let cachedSystemPromptPrefix: string | undefined;
   let cachedSystemPromptKey: string | undefined;
-  const cachedEvidenceChain = evidenceChainModule();
+  const cachedEvidenceChain = deps.config.confidenceCalibration ? evidenceChainModule() : "";
+
+  // Per-run file content cache: avoids re-reading the same source file for
+  // co-located findings during preReadForTriage.
+  const fileContentCache: FileContentCache = new Map();
 
   bus.subscribe<TriageFindingQueuedEvent>("triage:finding-queued", async (event) => {
     const { context, repoContext, enrichedContext, index, total } = event.payload;
@@ -127,6 +131,8 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           const preRead = await preReadForTriage(
             finding,
             event.payload.context.scanPath ?? event.payload.context.repoRoot,
+            50,
+            fileContentCache,
           );
           if (preRead) {
             extraSections.push(preRead);
@@ -252,8 +258,6 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               context.repoName,
               deps.config.triageModel ?? deps.config.model,
               deps.config.triageSpecialistModel ?? deps.config.triageModel ?? deps.config.model,
-              deps.config.triageMaxTurns,
-              deps.config.triageSpecialistMaxTurns ?? null,
               coercedRepoContext,
               {
                 runtime: deps.runtime,
@@ -269,7 +273,6 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               context.scanPath ?? context.repoRoot,
               context.repoName,
               deps.config.triageModel ?? deps.config.model,
-              deps.config.triageMaxTurns,
               coercedRepoContext,
               {
                 runtime: deps.runtime,
@@ -362,8 +365,6 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             context.repoName,
             deps.config.triageModel ?? deps.config.model,
             deps.config.triageSpecialistModel ?? deps.config.triageModel ?? deps.config.model,
-            deps.config.triageMaxTurns,
-            deps.config.triageSpecialistMaxTurns ?? null,
             coercedRepoContext,
             {
               runtime: deps.runtime,
@@ -486,7 +487,6 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           },
         },
         deps.config.triageBatchSize,
-        deps.config.triageMaxTurns,
         resolvedTemplates.triage,
       );
 

@@ -211,7 +211,7 @@ export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrich
         options: {
           cwd: context.repoRoot,
           model,
-          maxTurns: context.config.taskMaxTurns ?? 15,
+
           allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {

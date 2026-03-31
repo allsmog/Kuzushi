@@ -96,7 +96,6 @@ function makeRequest(
     options: {
       cwd,
       model: "openai:gpt-4o",
-      maxTurns: 3,
       ...overrides,
     },
   };
@@ -219,26 +218,6 @@ describe("PiAiAgentRuntime", () => {
 
     const secondContext = completeMock.mock.calls[1]?.[1];
     expect(secondContext.messages.some((message: { role: string }) => message.role === "toolResult")).toBe(true);
-  });
-
-  it("returns max-turns error when tool loop does not converge", async () => {
-    const cwd = makeTempDir();
-    completeMock.mockResolvedValue(makeAssistantMessage(
-      [{
-        type: "toolCall",
-        id: "tool-read-1",
-        name: "Read",
-        arguments: { path: "target.ts" },
-      }],
-      { stopReason: "toolUse" },
-    ));
-
-    const runtime = new PiAiAgentRuntime();
-    const messages = await collectMessages(runtime, makeRequest(cwd, { maxTurns: 1 }));
-    expect(messages[messages.length - 1]).toMatchObject({
-      type: "result",
-      subtype: "error_max_turns",
-    });
   });
 
   it("treats allowedTools=[] as explicit no-tools mode", async () => {

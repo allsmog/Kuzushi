@@ -106,6 +106,20 @@ function resolveConfig(ctx: TaskContext): DiffReviewConfig {
 }
 
 function getDiffContent(repoRoot: string, diffBase: string): { changedFiles: string[]; diff: string } {
+  // Verify the diff base ref exists before attempting the diff.
+  // This avoids noisy errors when scanning monorepo subdirectories that
+  // don't have the expected branch (e.g. "main") in scope.
+  try {
+    execFileSync("git", ["rev-parse", "--verify", diffBase], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      timeout: 5_000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch {
+    throw new Error(`Diff base ref "${diffBase}" not found in ${repoRoot} — skipping diff review`);
+  }
+
   try {
     const diffRef = `${diffBase}...HEAD`;
     const filesRaw = execFileSync("git", ["diff", "--name-only", diffRef], {
@@ -328,7 +342,7 @@ async function detectRegressions(
     options: {
       cwd: context.repoRoot,
       model,
-      maxTurns: context.config.taskMaxTurns ?? 15,
+
       allowedTools: resolveTaskAllowedTools(context),
       permissionMode: "dontAsk",
       outputFormat: {
@@ -435,7 +449,7 @@ export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
         options: {
           cwd: context.repoRoot,
           model,
-          maxTurns: context.config.taskMaxTurns ?? 15,
+    
           allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {

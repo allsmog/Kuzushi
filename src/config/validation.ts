@@ -21,15 +21,6 @@ export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIs
     });
   }
 
-  if (config.agentRuntimeBackend === "acp" && !config.acpAdapterCommand?.trim()) {
-    issues.push({
-      severity: "error",
-      path: "acpAdapterCommand",
-      message: "agentRuntimeBackend=acp requires acpAdapterCommand to be set.",
-      hint: "Configure a local ACP adapter command or switch agentRuntimeBackend back to \"pi-ai\".",
-    });
-  }
-
   if (config.pocHarness === true && config.verify !== true) {
     issues.push({
       severity: "error",

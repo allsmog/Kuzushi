@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import {
+  FindingUpsertQueue,
   saveAssertionResults,
   updatePocHarnessCost,
   updatePocHarnessResult,
@@ -11,6 +12,7 @@ import type {
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
   TriageAssertionsEvent,
+  TriageCompleteEvent,
   TriageResultEvent,
   VerificationErrorEvent,
   VerificationResultEvent,
@@ -30,18 +32,26 @@ export interface StoreWorkerDeps {
   config?: KuzushiConfig;
 }
 
+export interface StoreWorkerHandle {
+  /** Flush any pending batched upserts to the database. */
+  flush(): void;
+}
+
 /**
  * Store worker: persists triage results into SQLite.
+ * Triage upserts are batched (flushed every 50 findings or at phase boundaries)
+ * to reduce per-finding transaction overhead.
  */
-export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): void {
+export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): StoreWorkerHandle {
+  const upsertQueue = new FindingUpsertQueue(deps.db);
+
   bus.subscribe<TriageResultEvent>("triage:result", async (event) => {
     const { context, finding, result, costUsd } = event.payload;
     if (result.triageCostUsd === undefined && typeof costUsd === "number") {
       result.triageCostUsd = costUsd;
     }
 
-    upsertFinding(
-      deps.db,
+    upsertQueue.enqueue(
       finding,
       result,
       context.repoName,
@@ -57,6 +67,11 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): voi
     );
   });
 
+  // Flush all pending upserts before the verification phase begins.
+  bus.subscribe<TriageCompleteEvent>("triage:complete", () => {
+    upsertQueue.flush();
+  });
+
   bus.subscribe<TriageAssertionsEvent>("triage:assertions", (event) => {
     const { fingerprint, assertions } = event.payload;
     const runId = event.meta.runId;
@@ -70,6 +85,8 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): voi
       result.verifyCostUsd = costUsd;
     }
 
+    // Ensure the triage row is flushed before the UPDATE.
+    upsertQueue.flush();
     updateVerificationResult(deps.db, finding.fingerprint, result);
 
     // Update trajectory correctness for trajectory memory
@@ -113,6 +130,8 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): voi
       return;
     }
 
+    // Flush any pending batched upserts so the row exists before the UPDATE.
+    upsertQueue.flush();
     // Ensure the row exists even if persistence ordering is delayed.
     upsertFinding(
       deps.db,
@@ -130,6 +149,8 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): voi
       result.costUsd = costUsd;
     }
 
+    // Ensure the triage row is flushed before the UPDATE.
+    upsertQueue.flush();
     updatePocHarnessResult(deps.db, finding.fingerprint, result);
 
     await bus.publish(
@@ -147,6 +168,8 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): voi
       return;
     }
 
+    // Flush any pending batched upserts so the row exists before the UPDATE.
+    upsertQueue.flush();
     // Ensure the row exists even if persistence ordering is delayed.
     upsertFinding(
       deps.db,
@@ -157,4 +180,6 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): voi
     );
     updatePocHarnessCost(deps.db, finding.fingerprint, costUsd);
   });
+
+  return { flush: () => upsertQueue.flush() };
 }

@@ -185,7 +185,6 @@ describe("generatePocHarness", () => {
       repoRoot,
       "repo",
       "claude-haiku-4-5-20251001",
-      22,
       { runtime },
     );
 
@@ -193,9 +192,9 @@ describe("generatePocHarness", () => {
     expect(output.result.scriptPath).toBeNull();
     expect(output.costUsd).toBe(0.0112);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody"]);
+    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody", "GoToDefinition", "FindReferences", "TypeAtPosition"]);
     expect(requests[0]?.options?.outputFormat?.schema).toBe(POC_HARNESS_RESULT_SCHEMA);
-    expect(requests[0]?.options?.maxTurns).toBe(22);
+
   });
 
   it("uses semantic navigation tools when the runtime is pi-ai", async () => {
@@ -224,7 +223,6 @@ describe("generatePocHarness", () => {
       makeTempRepo(),
       "repo",
       "claude-haiku-4-5-20251001",
-      12,
       { runtime },
     );
 
@@ -240,46 +238,6 @@ describe("generatePocHarness", () => {
       "TypeAtPosition",
     ]);
   }, 15_000);
-
-  it("keeps the legacy tool bundle when the runtime is acp", async () => {
-    const requests: AgentQueryRequest[] = [];
-    const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          fingerprint: "poc-fp-1",
-          script_content: null,
-          language: "typescript",
-          skipped: true,
-          skip_reason: "skip",
-        },
-      }],
-      requests,
-      "acp",
-    );
-
-    await generatePocHarness(
-      makeFinding(),
-      makeTriageResult(),
-      makeVerificationResult(),
-      makeTempRepo(),
-      "repo",
-      "claude-haiku-4-5-20251001",
-      12,
-      { runtime },
-    );
-
-    expect(requests[0]?.options?.allowedTools).toEqual([
-      "Read",
-      "Glob",
-      "Grep",
-      "GetCallers",
-      "GetCallees",
-      "GetFunctionBody",
-    ]);
-  });
 
   it("writes generated scripts and validates syntax", async () => {
     const requests: AgentQueryRequest[] = [];
@@ -308,7 +266,6 @@ describe("generatePocHarness", () => {
       repoRoot,
       "repo",
       "claude-haiku-4-5-20251001",
-      12,
       { runtime },
     );
 
@@ -342,7 +299,6 @@ describe("generatePocHarness", () => {
         repoRoot,
         "repo",
         "claude-haiku-4-5-20251001",
-        12,
         { runtime },
       );
       expect.unreachable("Expected poc harness generation to throw");
@@ -374,7 +330,6 @@ describe("generatePocHarness", () => {
       repoRoot,
       "repo",
       "claude-haiku-4-5-20251001",
-      12,
       { runtime },
     )).rejects.toMatchObject({
       name: "PocHarnessExecutionError",
@@ -408,7 +363,6 @@ describe("generatePocHarness", () => {
       repoRoot,
       "repo",
       "claude-haiku-4-5-20251001",
-      22,
       { runtime },
     );
 

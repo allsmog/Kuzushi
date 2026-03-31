@@ -80,7 +80,7 @@ describe("selectTasks", () => {
     const ctx = makeContext({ languages: ["Go"] });
     const result = selectTasks(ctx);
     expect(result.reasoning["race-condition-detect"]).toBe(
-      "Go: goroutine races, crypto misuse, and dependency risk are common review targets",
+      "Go: goroutine races, crypto misuse, dependency risk, and command/deserialization checks",
     );
     // secrets-crypto-detect is always-recommended — reasoning should be the default
     expect(result.reasoning["secrets-crypto-detect"]).toBe(

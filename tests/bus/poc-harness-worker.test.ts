@@ -100,7 +100,6 @@ function makePocHarnessResult(): PocHarnessResult {
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 10,
     maxVerifyRetries: 0,
     retryBackoffMs: 0,
     retryBackoffMultiplier: 2,
@@ -175,7 +174,6 @@ describe("poc-harness-worker", () => {
       "/tmp/repo",
       "repo",
       "claude-haiku-4-5-20251001",
-      17,
       undefined,
       expect.objectContaining({
         activityCallback: expect.any(Function),
@@ -231,7 +229,7 @@ describe("poc-harness-worker", () => {
     const config = makeConfig();
 
     generatePocHarnessMock.mockImplementation(async (...args: any[]) => {
-      const runtimeOptions = args[8];
+      const runtimeOptions = args[7];
       await runtimeOptions?.activityCallback?.({
         kind: "tool-start",
         toolName: "Read",
@@ -459,7 +457,7 @@ describe("poc-harness-worker", () => {
     expect(event.payload.costUsd).toBeCloseTo(0.03);
     expect(generatePocHarnessMock).toHaveBeenCalledTimes(2);
     expect(executorExecuteMock).toHaveBeenCalledTimes(2);
-    expect(generatePocHarnessMock.mock.calls[1]?.[8]).toEqual(
+    expect(generatePocHarnessMock.mock.calls[1]?.[7]).toEqual(
       expect.objectContaining({
         history: expect.arrayContaining([
           expect.objectContaining({ role: "assistant" }),

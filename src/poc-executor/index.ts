@@ -27,8 +27,6 @@ export async function createPocExecutor(
     return docker;
   }
 
-  log.warn("Docker sandbox requested but Docker is unavailable");
-  throw new Error(
-    "Docker sandbox requested but Docker is unavailable. Install Docker or set pocSandbox=process explicitly.",
-  );
+  log.warn("Docker sandbox requested but Docker is unavailable — falling back to process sandbox");
+  return new ProcessPocExecutor(timeoutMs);
 }

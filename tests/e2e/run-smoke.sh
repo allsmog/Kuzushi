@@ -8,9 +8,14 @@ TEST_APP_DIR="${TEST_APP_DIR:-/tmp/kuzushi-smoke-app}"
 TEST_LOG_DIR="${TEST_LOG_DIR:-/tmp/kuzushi-smoke-logs}"
 SARIF_PATH="${TEST_LOG_DIR}/results.sarif"
 DB_PATH="${TEST_APP_DIR}/.kuzushi/findings.sqlite3"
-FAKE_ADAPTER_PATH="${REPO_DIR}/tests/fixtures/fake-acp-adapter.mjs"
+FAKE_SERVER_SCRIPT="${REPO_DIR}/tests/fixtures/fake-anthropic-server.mjs"
 
 mkdir -p "${TEST_LOG_DIR}"
+
+# Start mock Anthropic API server and capture its base URL.
+MOCK_BASE_URL=$(node "${FAKE_SERVER_SCRIPT}" &)
+MOCK_PID=$!
+trap 'kill $MOCK_PID 2>/dev/null || true' EXIT
 
 if ! command -v semgrep >/dev/null 2>&1; then
   echo "semgrep is required for smoke e2e" >&2
@@ -27,8 +32,7 @@ bash "${SCRIPT_DIR}/setup-test-app.sh" "${TEST_APP_DIR}" >"${TEST_LOG_DIR}/setup
 cat > "${TEST_APP_DIR}/.kuzushi/config.json" <<JSON
 {
   "model": "anthropic:claude-sonnet-4-6",
-  "agentRuntimeBackend": "acp",
-  "acpAdapterCommand": "node ${FAKE_ADAPTER_PATH}",
+  "agentRuntimeConfig": { "baseUrl": "${MOCK_BASE_URL}", "apiKey": "fake-key" },
   "scanners": ["semgrep"],
   "enabledTasks": ["context-gatherer"],
   "verify": false,

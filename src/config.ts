@@ -42,7 +42,6 @@ const VALID_TOP_LEVEL_KEYS = new Set<string>(
 const UNSAFE_PROJECT_CONFIG_KEYS = new Set<string>([
   "agentRuntimeBackend",
   "agentRuntimeConfig",
-  "acpAdapterCommand",
   "verify",
   "pocHarness",
   "pocExecute",
@@ -195,20 +194,6 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("triageConcurrency must be a positive number");
     }
     config.triageConcurrency = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "triageMaxTurns") {
-    if (raw === "null" || raw === "unlimited" || raw === "0") {
-      config.triageMaxTurns = null;
-    } else {
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n < 1) {
-        throw new Error("triageMaxTurns must be a positive number, 0, or 'unlimited'");
-      }
-      config.triageMaxTurns = Math.floor(n);
-    }
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
@@ -601,48 +586,12 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
-  if (key === "taskMaxTurns") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("taskMaxTurns must be a positive number");
-    }
-    config.taskMaxTurns = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
   if (key === "skipTriageForHighConfidenceAgentic") {
     const parsed = parseFlexibleValue(raw);
     if (typeof parsed !== "boolean") {
       throw new Error("skipTriageForHighConfidenceAgentic must be true or false");
     }
     config.skipTriageForHighConfidenceAgentic = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "enableClassifier") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("enableClassifier must be true or false");
-    }
-    config.enableClassifier = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "classifierModel") {
-    config.classifierModel = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "classifierThreshold") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0 || n > 1) {
-      throw new Error("classifierThreshold must be a number between 0 and 1");
-    }
-    config.classifierThreshold = n;
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
@@ -785,9 +734,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const busBackend = normalizeBusBackend(config.busBackend);
   const triageBatchSize = normalizePositiveInt(config.triageBatchSize, DEFAULTS.triageBatchSize);
   const triageConcurrency = normalizePositiveInt(config.triageConcurrency, DEFAULTS.triageConcurrency);
-  const triageMaxTurns = config.triageMaxTurns == null
-    ? null
-    : normalizePositiveInt(config.triageMaxTurns, DEFAULTS.triageMaxTurns ?? 10);
+
   const verify = normalizeBoolean(config.verify, DEFAULTS.verify ?? false);
   const verifyModel = normalizeOptionalString(config.verifyModel);
   const verifyMaxTurns = config.verifyMaxTurns == null
@@ -854,15 +801,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const confidenceSignalWeights = normalizeConfidenceSignalWeights(config.confidenceSignalWeights);
   const triageModel = normalizeOptionalString(config.triageModel);
   const triageBatchModel = normalizeOptionalString(config.triageBatchModel);
-  const enableClassifier = normalizeBoolean(
-    config.enableClassifier,
-    DEFAULTS.enableClassifier ?? false,
-  );
-  const classifierModel = normalizeOptionalString(config.classifierModel);
-  const classifierThreshold = normalizeUnitInterval(
-    config.classifierThreshold,
-    DEFAULTS.classifierThreshold ?? 0.5,
-  );
   const ensembleModels = normalizeStringArray(config.ensembleModels);
   const pocRefinementMaxIterations = normalizePositiveInt(
     config.pocRefinementMaxIterations,
@@ -903,9 +841,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   ]);
   const externalTasks = normalizeStringArray(config.externalTasks);
   const enableExternalTasks = normalizeBoolean(config.enableExternalTasks, DEFAULTS.enableExternalTasks ?? false);
-  const taskMaxTurns = config.taskMaxTurns == null
-    ? DEFAULTS.taskMaxTurns
-    : normalizePositiveInt(config.taskMaxTurns, DEFAULTS.taskMaxTurns ?? 15);
+
   const skipTriageForHighConfidenceAgentic = normalizeBoolean(
     config.skipTriageForHighConfidenceAgentic,
     DEFAULTS.skipTriageForHighConfidenceAgentic ?? false,
@@ -939,16 +875,12 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     busBackend,
     triageBatchSize,
     triageConcurrency,
-    triageMaxTurns,
     scanMode,
     agentRuntimeBackend,
     agentRuntimeConfig,
     confidenceSignalWeights,
     triageModel,
     triageBatchModel,
-    enableClassifier,
-    classifierModel,
-    classifierThreshold,
     ensembleModels,
     pocRefinementMaxIterations,
     pocReflectionInterval,
@@ -961,7 +893,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     cryptoBehavioralPerFindingBudgetUsd,
     externalTasks,
     enableExternalTasks,
-    taskMaxTurns,
     skipTriageForHighConfidenceAgentic,
     scanners: scanners.length > 0 ? scanners : [...DEFAULTS.scanners],
     severity: severity.length > 0 ? severity : [...DEFAULTS.severity],

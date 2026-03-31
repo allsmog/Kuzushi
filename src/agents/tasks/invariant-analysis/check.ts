@@ -181,8 +181,6 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
       const prompt = buildCheckPrompt(batch);
-      const maxTurns = context.config.taskMaxTurns ?? 15;
-
       let structuredOutput: unknown;
       let resultText = "";
       let batchCostUsd = 0;
@@ -193,7 +191,6 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
           options: {
             cwd: context.repoRoot,
             model: cfg.checkModel,
-            maxTurns,
             allowedTools: resolveTaskAllowedTools(context),
             permissionMode: "dontAsk",
             outputFormat: {

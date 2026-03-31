@@ -301,7 +301,6 @@ describe("triageFindingWithAgent", () => {
       "/tmp/repo",
       "repo",
       "anthropic:claude-sonnet-4-6",
-      12,
       { runtime },
     );
 
@@ -334,7 +333,6 @@ describe("triageFindingWithAgent", () => {
       "/tmp/repo",
       "repo",
       "anthropic:claude-sonnet-4-6",
-      12,
       { runtime },
     );
 
@@ -379,7 +377,6 @@ describe("triageFindingWithAgent", () => {
       "/tmp/repo",
       "repo",
       "anthropic:claude-sonnet-4-6",
-      7,
       { runtime },
     );
 
@@ -411,7 +408,6 @@ describe("triageFindingWithAgent", () => {
       "/tmp/repo",
       "repo",
       "anthropic:claude-sonnet-4-6",
-      9,
       { runtime },
     );
 
@@ -442,7 +438,6 @@ describe("triageFindingWithAgent", () => {
       "/tmp/repo",
       "repo",
       "anthropic:claude-sonnet-4-6",
-      9,
       { runtime },
     );
 
@@ -469,7 +464,6 @@ describe("triageFindingWithAgent", () => {
         "/tmp/repo",
         "repo",
         "anthropic:claude-sonnet-4-6",
-        9,
         { runtime },
       ),
     ).rejects.toThrow("triage agent failed");
@@ -494,7 +488,6 @@ describe("triageFindingWithAgent", () => {
         "/tmp/repo",
         "repo",
         "anthropic:claude-sonnet-4-6",
-        9,
         { runtime },
       );
       expect.unreachable("Expected triage run to throw");
@@ -523,7 +516,6 @@ describe("triageFindingWithAgent", () => {
         "/tmp/repo",
         "repo",
         "anthropic:claude-sonnet-4-6",
-        9,
         { runtime },
       );
       expect.unreachable("Expected triage run to throw");
@@ -578,7 +570,6 @@ describe("triageFindingWithAgent", () => {
       "/tmp/repo",
       "repo",
       "anthropic:claude-sonnet-4-6",
-      10,
       {
         runtime,
         activityCallback: (activity) => {

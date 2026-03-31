@@ -19,7 +19,6 @@ function makeContext(overrides: Record<string, unknown> = {}): TaskContext {
 function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 7,
     busBackend: "in-process",
     triageBatchSize: 40,
     triageConcurrency: 1,

@@ -271,21 +271,21 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
     const scenarioContext = await buildThreatScenarioEvidenceSection("template-injection-detect", context.repoRoot, applicationModel, scenarioOutput);
 
     const tag = "[template-injection]";
-    const lensMaxTurns = Math.min(context.config.taskMaxTurns ?? 15, 8);
+
     const perLensMax = Math.ceil(maxFindings / 2);
     log.info(`Starting multi-lens scan (model=${model})`);
 
     const lensResults = await Promise.all([
       runLens(
         buildTemplateConstructionLensPrompt(repoContext, perLensMax, profileLines, preRead, threatModelContext, appModelContext, scenarioContext),
-        context, model, lensMaxTurns, `${tag}/construction`,
+        context, model, `${tag}/construction`,
       ).catch((error) => {
         log.error(`${tag}/construction lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
       }),
       runLens(
         buildRendererConfigLensPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
-        context, model, lensMaxTurns, `${tag}/renderer-config`,
+        context, model, `${tag}/renderer-config`,
       ).catch((error) => {
         log.error(`${tag}/renderer-config lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
@@ -349,7 +349,6 @@ async function runLens(
   prompt: string,
   context: TaskContext,
   model: string,
-  maxTurns: number,
   tag: string,
 ): Promise<LensResult> {
   const runtime = resolveTaskRuntime(context);
@@ -362,7 +361,6 @@ async function runLens(
     options: {
       cwd: context.repoRoot,
       model,
-      maxTurns,
       allowedTools: resolveTaskAllowedTools(context),
       permissionMode: "dontAsk",
       outputFormat: {

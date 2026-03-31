@@ -317,7 +317,7 @@ kuzushi config path                   # print config file location
 
 Global config lives at `~/.kuzushi/config.json`. Optional project overrides can live at `<repo>/.kuzushi/config.json`. CLI flags override config values.
 
-**Repo-local config sandboxing:** By default, project-level config files (`<repo>/.kuzushi/config.json`) are sandboxed — keys that could execute code or reach external systems (e.g., `acpAdapterCommand`, `hooks`, `externalTasks`, `pocExecute`, scanner binary paths) are silently stripped. This prevents a cloned repo from altering your runtime behavior. Pass `--trust-repo-config` to opt in to the full project config when you trust the repository.
+**Repo-local config sandboxing:** By default, project-level config files (`<repo>/.kuzushi/config.json`) are sandboxed — keys that could execute code or reach external systems (e.g., `hooks`, `externalTasks`, `pocExecute`, scanner binary paths) are silently stripped. This prevents a cloned repo from altering your runtime behavior. Pass `--trust-repo-config` to opt in to the full project config when you trust the repository.
 
 Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config files. Prefer `--api-key` for one-off runs or `ANTHROPIC_API_KEY` from your shell/secret manager.
 
@@ -340,7 +340,7 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `triageConcurrency` | `5` | Parallel LLM triage calls |
 | `scanMode` | `"concurrent"` | Scanner execution mode (`sequential` or `concurrent`) |
 | `enabledTasks` | `["context-gatherer", "context-enricher", "app-model-build", "threat-scenario-build", "secrets-crypto-detect", "crypto-behavioral-test", "code-config-detect", ...]` | Agent tasks to enable beyond scanners |
-| `agentRuntimeBackend` | `"pi-ai"` | Agent runtime backend (`pi-ai`, future: `acp`) |
+| `agentRuntimeBackend` | `"claude"` | Agent runtime backend (`claude` or `pi-ai`) |
 | `verify` | `false` | Enable proof-of-exploitability verification |
 | `verifyModel` | _(uses `triageModel` or `model`)_ | Override model for verification agent |
 | `verifyMaxTurns` | `15` | Max turns for verification agent |
@@ -493,9 +493,13 @@ Relevant `scannerConfig["taint-analysis"]` options:
 </details>
 
 <details>
-<summary><strong>Pi-AI Runtime</strong></summary>
+<summary><strong>Agent Runtime Backends</strong></summary>
 
-The `pi-ai` backend uses `@mariozechner/pi-ai` to provide vendor-agnostic LLM access. It supports 15+ providers (Anthropic, OpenAI, Google, Groq, Mistral, etc.) through a single interface.
+Kuzushi supports two agent runtime backends:
+
+**Claude (default)** — Uses `@anthropic-ai/claude-agent-sdk` to spawn Claude Code subprocesses with built-in tool implementations (Read, Glob, Grep, Bash, etc.). Supports session reuse: batch operations keep a single subprocess alive across multiple turns via the SDK's streaming input API, reducing subprocess spawns by ~99%. Requires `ANTHROPIC_API_KEY`.
+
+**Pi-AI** — Uses `@mariozechner/pi-ai` to provide vendor-agnostic LLM access. It supports 15+ providers (Anthropic, OpenAI, Google, Groq, Mistral, etc.) through a single interface. All LLM calls run in-process (no subprocesses).
 
 Kuzushi implements an internal agentic loop on top of pi-ai:
 
@@ -527,6 +531,8 @@ Kuzushi is built on three core abstractions:
 **Strategy Framework** — The multi-strategy system wraps detection tasks with multiple analytical approaches (syntactic, dataflow, reasoning, execution) that run in parallel or adaptively, merging results with corroboration-based confidence boosting.
 
 **Code Graph** — A persistent SQLite-backed graph of code paths from entry points to sinks, built from static import analysis and LLM-assisted tracing. Injected into triage prompts for deeper reasoning about reachability and sanitization.
+
+**Session Reuse** — The Claude runtime uses the Agent SDK's `AsyncIterable<SDKUserMessage>` prompt to keep a single subprocess alive across multiple turns. Batch operations (taint labeling, triage, verification, rescoring, PoC generation, patch synthesis) write per-batch data to `.kuzushi/batches/` files and send the subprocess a prompt to `Read` each file. This reduces worst-case subprocess spawns from ~3,100 to ~24 per pipeline run. Runtimes without `createSession` support (pi-ai) fall back to one subprocess per call automatically.
 
 Existing `ScannerPlugin` implementations (Semgrep, Agentic) are adapted into `AgentTask` via `adaptScannerPlugin()`, so the scanner plugin API remains stable.
 

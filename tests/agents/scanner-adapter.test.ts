@@ -46,7 +46,6 @@ class FakeScannerPlugin implements ScannerPlugin {
 function makeConfig(): KuzushiConfig {
   return {
     model: "anthropic:claude-sonnet-4-6",
-    triageMaxTurns: 10,
     busBackend: "in-process",
     triageBatchSize: 15,
     triageConcurrency: 1,

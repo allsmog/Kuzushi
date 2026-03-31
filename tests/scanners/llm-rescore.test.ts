@@ -54,14 +54,15 @@ describe("rescoreFindings", () => {
   });
 
   it("keeps findings scoring at or above threshold", async () => {
+    const fp = "fp-1";
     mockRunQuery.mockResolvedValue({
       resultText: "",
-      structuredOutput: { score: 7, reason: "Likely true positive" },
+      structuredOutput: { scores: [{ fingerprint: fp, score: 7, reason: "Likely true positive" }] },
       executionError: null,
       costUsd: 0.001,
     });
 
-    const findings = [makeFinding({ fingerprint: "fp-1" })];
+    const findings = [makeFinding({ fingerprint: fp })];
     const results = await rescoreFindings(findings, {
       repoRoot: "/repo",
       threshold: 4,
@@ -74,14 +75,15 @@ describe("rescoreFindings", () => {
   });
 
   it("excludes findings scoring below threshold", async () => {
+    const fp = "fp-1";
     mockRunQuery.mockResolvedValue({
       resultText: "",
-      structuredOutput: { score: 2, reason: "Clearly a false positive" },
+      structuredOutput: { scores: [{ fingerprint: fp, score: 2, reason: "Clearly a false positive" }] },
       executionError: null,
       costUsd: 0.001,
     });
 
-    const findings = [makeFinding({ fingerprint: "fp-1" })];
+    const findings = [makeFinding({ fingerprint: fp })];
     const results = await rescoreFindings(findings, {
       repoRoot: "/repo",
       threshold: 4,
@@ -112,16 +114,17 @@ describe("rescoreFindings", () => {
     expect(results[0].keep).toBe(true);
   });
 
-  it("processes multiple findings", async () => {
-    let callCount = 0;
-    mockRunQuery.mockImplementation(async () => {
-      callCount++;
-      return {
-        resultText: "",
-        structuredOutput: { score: callCount <= 1 ? 8 : 2, reason: "test" },
-        executionError: null,
-        costUsd: 0.001,
-      };
+  it("processes multiple findings in one batch call", async () => {
+    mockRunQuery.mockResolvedValue({
+      resultText: "",
+      structuredOutput: {
+        scores: [
+          { fingerprint: "fp-keep", score: 8, reason: "real vuln" },
+          { fingerprint: "fp-drop", score: 2, reason: "false positive" },
+        ],
+      },
+      executionError: null,
+      costUsd: 0.001,
     });
 
     const findings = [
@@ -138,6 +141,11 @@ describe("rescoreFindings", () => {
     expect(results).toHaveLength(2);
     const kept = results.filter((r) => r.keep);
     const dropped = results.filter((r) => !r.keep);
-    expect(kept.length + dropped.length).toBe(2);
+    expect(kept).toHaveLength(1);
+    expect(dropped).toHaveLength(1);
+    expect(kept[0].fingerprint).toBe("fp-keep");
+    expect(dropped[0].fingerprint).toBe("fp-drop");
+    // Should be a single batch call, not one per finding
+    expect(mockRunQuery).toHaveBeenCalledTimes(1);
   });
 });

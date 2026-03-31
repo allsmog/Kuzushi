@@ -320,7 +320,8 @@ export const threatModelPastaTask: AgentTask<ScanOpts, { document: AttackSimulat
         options: {
           cwd: context.repoRoot,
           model: cfg.pastaModel,
-          maxTurns: context.config.taskMaxTurns ?? 15,
+
+          maxOutputTokens: 16384,
           allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {

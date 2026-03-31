@@ -22,8 +22,9 @@
   - Orchestrator: `src/bus/orchestrator.ts` (DAG-aware stage execution)
   - Workers: `src/bus/workers/`
 - Agent runtime abstraction: `src/agent-runtime/`
-  - Contract: `src/agent-runtime/types.ts` (`AgentRuntime`, normalized messages/options)
-  - Claude adapter: `src/agent-runtime/claude.ts`
+  - Contract: `src/agent-runtime/types.ts` (`AgentRuntime`, `AgentSession`, normalized messages/options)
+  - Claude adapter: `src/agent-runtime/claude.ts` (`ClaudeSession` for subprocess reuse)
+  - Batch file I/O: `src/agent-runtime/batch-files.ts` (`.kuzushi/batches/` read/write/cleanup)
   - Runtime selector: `src/agent-runtime/index.ts`
 - Triage: `src/triage.ts` (agentic triage via `AgentRuntime`, not SDK-bound).
 - Store: `src/store.ts` (SQLite persistence via `better-sqlite3`).
@@ -73,7 +74,7 @@
 - Layered precedence: defaults -> `~/.kuzushi/config.json` -> `<repo>/.kuzushi/config.json` -> CLI flags.
 - Key fields:
   - `model`, `triageModel`, `triageMaxTurns`
-  - `agentRuntimeBackend` (`claude-sdk` today; `acp` reserved)
+  - `agentRuntimeBackend` (`pi-ai`)
   - `scanners`, optional `enabledTasks`
   - `severity`, `excludePatterns`, `scannerConfig`
   - `busBackend`, `triageConcurrency`, `scanMode`

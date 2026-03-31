@@ -81,8 +81,6 @@ export interface TriageAgentConfig {
   prompt: string;
   /** Override default tools. Defaults to ["Read", "Glob", "Grep"]. */
   allowedTools?: AllowedTriageTool[];
-  /** Override default max turns. Defaults to config.triageMaxTurns. */
-  maxTurns?: number;
 }
 
 export interface ScannerPlugin {

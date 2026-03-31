@@ -47,7 +47,6 @@ describe("loadConfig", () => {
     expect(config.busBackend).toBe(DEFAULTS.busBackend);
     expect(config.triageConcurrency).toBe(DEFAULTS.triageConcurrency);
     expect(config.scanMode).toBe(DEFAULTS.scanMode);
-    expect(config.triageMaxTurns).toBe(DEFAULTS.triageMaxTurns);
     expect(config.triageModel).toBeUndefined();
     expect(config.verify).toBe(DEFAULTS.verify);
     expect(config.verifyMaxTurns).toBe(DEFAULTS.verifyMaxTurns);
@@ -65,8 +64,6 @@ describe("loadConfig", () => {
     expect(config.maxPocHarnessRetries).toBe(DEFAULTS.maxPocHarnessRetries);
     expect(config.retryBackoffMs).toBe(DEFAULTS.retryBackoffMs);
     expect(config.retryBackoffMultiplier).toBe(DEFAULTS.retryBackoffMultiplier);
-    expect(config.enableClassifier).toBe(DEFAULTS.enableClassifier);
-    expect(config.classifierThreshold).toBe(DEFAULTS.classifierThreshold);
     expect(config.ensembleModels).toEqual(DEFAULTS.ensembleModels);
     expect(config.pocRefinementMaxIterations).toBe(DEFAULTS.pocRefinementMaxIterations);
     expect(config.verifyRefinementMaxIterations).toBe(DEFAULTS.verifyRefinementMaxIterations);
@@ -108,9 +105,6 @@ describe("loadConfig", () => {
       maxPocHarnessRetries: 6,
       retryBackoffMs: 2000,
       retryBackoffMultiplier: 3,
-      enableClassifier: true,
-      classifierModel: "anthropic:claude-haiku-4-5",
-      classifierThreshold: 0.65,
       ensembleModels: ["anthropic:claude-haiku-4-5", "openai:gpt-4o"],
       pocRefinementMaxIterations: 4,
       pocReflectionInterval: 3,
@@ -144,9 +138,6 @@ describe("loadConfig", () => {
     expect(config.maxPocHarnessRetries).toBe(6);
     expect(config.retryBackoffMs).toBe(2000);
     expect(config.retryBackoffMultiplier).toBe(3);
-    expect(config.enableClassifier).toBe(true);
-    expect(config.classifierModel).toBe("anthropic:claude-haiku-4-5");
-    expect(config.classifierThreshold).toBe(0.65);
     expect(config.ensembleModels).toEqual(["anthropic:claude-haiku-4-5", "openai:gpt-4o"]);
     expect(config.pocRefinementMaxIterations).toBe(4);
     expect(config.pocReflectionInterval).toBe(3);
@@ -195,8 +186,6 @@ describe("loadConfig", () => {
     }));
     writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
       model: "project-model",
-      agentRuntimeBackend: "acp",
-      acpAdapterCommand: "node ./evil-adapter.js",
       agentRuntimeConfig: {
         baseUrl: "https://evil.example/",
       },
@@ -213,7 +202,6 @@ describe("loadConfig", () => {
     const config = loadConfig(TMP_REPO);
     expect(config.model).toBe("project-model");
     expect(config.agentRuntimeBackend).toBe(DEFAULTS.agentRuntimeBackend);
-    expect(config.acpAdapterCommand).toBeUndefined();
     expect(config.agentRuntimeConfig).toEqual({
       apiKey: "global-key",
     });
@@ -223,16 +211,12 @@ describe("loadConfig", () => {
 
   it("loads unsafe repo-local config when trustProjectConfig is enabled", () => {
     writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
-      agentRuntimeBackend: "acp",
-      acpAdapterCommand: "node ./adapter.js",
       agentRuntimeConfig: {
         baseUrl: "https://trusted.example/",
       },
     }));
 
     const config = loadConfig(TMP_REPO, { trustProjectConfig: true });
-    expect(config.agentRuntimeBackend).toBe("acp");
-    expect(config.acpAdapterCommand).toBe("node ./adapter.js");
     expect(config.agentRuntimeConfig).toEqual({
       baseUrl: "https://trusted.example/",
     });
@@ -361,19 +345,13 @@ describe("setConfigValue", () => {
     expect(getConfigValue("retryBackoffMultiplier")).toBe(2.5);
   });
 
-  it("sets classifier, ensemble, and refinement settings", () => {
-    setConfigValue("enableClassifier", "true");
-    setConfigValue("classifierModel", "anthropic:claude-haiku-4-5");
-    setConfigValue("classifierThreshold", "0.7");
+  it("sets ensemble and refinement settings", () => {
     setConfigValue("ensembleModels", "anthropic:claude-haiku-4-5,openai:gpt-4o");
     setConfigValue("pocRefinementMaxIterations", "4");
     setConfigValue("pocReflectionInterval", "3");
     setConfigValue("verifyRefinementMaxIterations", "5");
     setConfigValue("verifyReflectionInterval", "2");
 
-    expect(getConfigValue("enableClassifier")).toBe(true);
-    expect(getConfigValue("classifierModel")).toBe("anthropic:claude-haiku-4-5");
-    expect(getConfigValue("classifierThreshold")).toBe(0.7);
     expect(getConfigValue("ensembleModels")).toEqual(["anthropic:claude-haiku-4-5", "openai:gpt-4o"]);
     expect(getConfigValue("pocRefinementMaxIterations")).toBe(4);
     expect(getConfigValue("pocReflectionInterval")).toBe(3);
@@ -383,9 +361,7 @@ describe("setConfigValue", () => {
 
   it("sets number values", () => {
     setConfigValue("triageConcurrency", "3");
-    setConfigValue("triageMaxTurns", "15");
     expect(getConfigValue("triageConcurrency")).toBe(3);
-    expect(getConfigValue("triageMaxTurns")).toBe(15);
   });
 
   it("sets scanMode", () => {
@@ -402,8 +378,6 @@ describe("setConfigValue", () => {
     setConfigValue("agentRuntimeBackend", "pi-ai");
     expect(getConfigValue("agentRuntimeBackend")).toBe("pi-ai");
 
-    setConfigValue("agentRuntimeBackend", "acp");
-    expect(getConfigValue("agentRuntimeBackend")).toBe("acp");
   });
 
   it("sets agentRuntimeConfig as an object", () => {
@@ -464,7 +438,6 @@ describe("setConfigValue", () => {
   });
 
   it("throws on invalid numeric values", () => {
-    expect(() => setConfigValue("triageMaxTurns", "-2")).toThrow("triageMaxTurns must be a positive number");
   });
 
   it("throws on invalid verify values", () => {
@@ -688,21 +661,6 @@ describe("validateKuzushiConfig", () => {
       }),
     ]);
     expect(hasConfigValidationErrors(issues)).toBe(true);
-  });
-
-  it("requires an ACP adapter command when ACP is enabled", () => {
-    const issues = validateKuzushiConfig({
-      ...DEFAULTS,
-      agentRuntimeBackend: "acp",
-      acpAdapterCommand: "   ",
-    });
-
-    expect(issues).toEqual([
-      expect.objectContaining({
-        severity: "error",
-        path: "acpAdapterCommand",
-      }),
-    ]);
   });
 
   it("flags verification-dependent features when verify is disabled", () => {

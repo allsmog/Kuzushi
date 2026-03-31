@@ -58,7 +58,6 @@ export async function generateCryptoBehavioralHarness(
   repoRoot: string,
   _repoName: string,
   model: string,
-  maxTurns: number | undefined,
   options: GenerateCryptoBehavioralHarnessOptions = {},
 ): Promise<CryptoBehavioralHarnessOutput> {
   const prompt = buildPromptForTestType(testType, finding, repoRoot, {
@@ -70,7 +69,6 @@ export async function generateCryptoBehavioralHarness(
     prompt,
     cwd: repoRoot,
     model,
-    maxTurns,
     allowedTools: resolveDefaultPocHarnessTools(options.runtime),
     runtimeOptions: options,
     systemPromptPrefix: buildCryptoBehavioralSystemPrompt(options.repoContext),

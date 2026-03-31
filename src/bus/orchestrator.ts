@@ -3,7 +3,6 @@ import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { TaskContext as AgentTaskContext } from "../agents/types.js";
 import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
-import { quickClassifierTask } from "../agents/tasks/quick-classifier.js";
 import { reachabilityCheckTask } from "../agents/tasks/reachability-check.js";
 import { callGraphAssistTask } from "../agents/tasks/call-graph-assist.js";
 import { SELECTABLE_TASK_IDS } from "../agents/tasks/task-selector.js";
@@ -280,6 +279,13 @@ export class PipelineOrchestrator {
       } catch {
         // Best-effort status persistence for fatal run failures.
       }
+      // Clean up batch files on fatal error
+      if (state) {
+        try {
+          const { cleanupBatchFiles } = await import("../agent-runtime/batch-files.js");
+          cleanupBatchFiles(state.context.repoRoot, event.meta.runId);
+        } catch { /* best-effort */ }
+      }
       this.runs.delete(event.meta.runId);
     });
   }
@@ -320,7 +326,6 @@ export class PipelineOrchestrator {
       skippedAlreadyTriaged: 0,
       skippedLowConfidence: 0,
       skippedByFpFilter: 0,
-      skippedByClassifier: 0,
       triageQueue: [],
       queueCursor: 0,
       triageTotal: 0,
@@ -863,6 +868,7 @@ export class PipelineOrchestrator {
 
     // Track already-completed tasks for dynamic re-resolution
     const completedTaskIds = new Set<string>();
+    const taskRetryCount = new Map<string, number>();
     const dynamicTasksProcessed = new Set<string>();
     let taskSelectorFallbackApplied = false;
 
@@ -948,7 +954,45 @@ export class PipelineOrchestrator {
       const successes = resolved.filter((o) => o.kind === "complete");
       const failures = resolved.filter((o) => o.kind === "error");
 
-      for (const f of failures) {
+      // Retry failed tasks up to 5 times before giving up
+      const MAX_TASK_RETRIES = 5;
+      let retryableFailures = failures;
+      for (let retryAttempt = 1; retryAttempt <= MAX_TASK_RETRIES && retryableFailures.length > 0; retryAttempt++) {
+        const retryIds = retryableFailures
+          .map((f) => f.event.payload.taskId)
+          .filter((id) => id !== "task-selector" && (taskRetryCount.get(id) ?? 0) < MAX_TASK_RETRIES);
+        if (retryIds.length === 0) break;
+
+        log.info(`Retry attempt ${retryAttempt}/${MAX_TASK_RETRIES} for ${retryIds.length} task(s): ${retryIds.join(", ")}`);
+        for (const id of retryIds) taskRetryCount.set(id, (taskRetryCount.get(id) ?? 0) + 1);
+
+        const retryOutcomes = retryIds.map((taskId) => this.waitForTaskOutcome(runId, taskId));
+        for (const taskId of retryIds) {
+          const task = this.deps.taskRegistry!.get(taskId);
+          await this.bus.publish(
+            createEvent("task:start", runId, {
+              context: state.context,
+              taskId,
+              outputKind: task.outputKind,
+              input: state.scanOpts,
+              upstreamOutputs: new Map(state.taskOutputs),
+            }),
+          );
+        }
+
+        const retryResolved = await allSettledCollect(retryOutcomes);
+        const retrySuccesses = retryResolved.filter((o) => o.kind === "complete");
+        const retryFinalFailures = retryResolved.filter((o) => o.kind === "error");
+
+        for (const s of retrySuccesses) {
+          successes.push(s);
+          log.info(`Task "${s.event.payload.taskId}" succeeded on retry attempt ${retryAttempt}`);
+        }
+
+        retryableFailures = retryFinalFailures;
+      }
+
+      for (const f of retryableFailures) {
         const taskId = f.event.payload.taskId;
         const errMsg = f.event.payload.error;
         state.failedTasks.push(taskId);
@@ -970,13 +1014,13 @@ export class PipelineOrchestrator {
         return task.outputKind === "findings" || task.outputKind === "threat-model";
       });
 
-      if (successes.length === 0 && failures.length > 0) {
+      if (successes.length === 0 && retryableFailures.length > 0) {
         if (stageHasFindingsProducers) {
-          // All findings producers failed — fatal, nothing to triage
+          // All findings producers failed (including retries) — fatal, nothing to triage
           await this.bus.publish(
             createEvent("pipeline:error", runId, {
               context: state.context,
-              error: `All tasks in stage ${stageIndex} failed: ${failures.map((f) => f.event.payload.taskId).join(", ")}`,
+              error: `All tasks in stage ${stageIndex} failed: ${retryableFailures.map((f) => f.event.payload.taskId).join(", ")}`,
               fatal: true,
             }),
           );
@@ -1260,45 +1304,8 @@ export class PipelineOrchestrator {
 
     filteredFindings.sort((a, b) => getRankingScore(b) - getRankingScore(a));
 
-    state.skippedByClassifier = 0;
     state.skippedByLlmRescore = 0;
-    if (state.config.enableClassifier === true) {
-      try {
-        const classifierContext: AgentTaskContext = {
-          runId,
-          repoRoot: state.context.repoRoot,
-          scanPath: state.context.scanPath,
-          repoName: state.context.repoName,
-          config: state.config,
-          runtime: this.deps.runtime,
-          bus: this.bus,
-          upstreamOutputs: new Map(state.taskOutputs),
-        };
-        const executed = await executeAgentTask(
-          quickClassifierTask,
-          filteredFindings,
-          classifierContext,
-          {},
-        );
-        const classifiedFindings = coerceQuickClassifierFindings(executed.output);
-        state.skippedByClassifier = Math.max(0, filteredFindings.length - classifiedFindings.length);
-        filteredFindings = classifiedFindings;
-        const classifierCostUsd = normalizeCostUsd(executed.costUsd);
-        if (classifierCostUsd > 0) {
-          state.totalCostUsd += classifierCostUsd;
-          try {
-            updateRunCost(this.deps.db, state.checkpointRunId, classifierCostUsd);
-          } catch {
-            // Best-effort cost persistence for classifier calls.
-          }
-        }
-        if (state.skippedByClassifier > 0) {
-          log.info(`[quick-classifier] Excluded ${state.skippedByClassifier} findings`);
-        }
-      } catch (error) {
-        log.warn(`[quick-classifier] Failed open: ${toErrorMessage(error)}`);
-      }
-    } else if (state.config.llmRescoreEnabled) {
+    if (state.config.llmRescoreEnabled) {
       const rescoreWindow = selectFindingsForRescore(filteredFindings, state.scanOpts.maxFindings);
       const rescoredFingerprints = new Set(rescoreWindow.map((finding) => finding.fingerprint));
       const untouched = filteredFindings.filter(
@@ -1663,7 +1670,6 @@ export class PipelineOrchestrator {
       skippedAlreadyTriaged: state.skippedAlreadyTriaged,
       skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
       skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
-      skippedByClassifier: state.skippedByClassifier > 0 ? state.skippedByClassifier : undefined,
       softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
       skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
       corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
@@ -1710,6 +1716,14 @@ export class PipelineOrchestrator {
       } catch {
         /* best-effort */
       }
+    }
+
+    // Clean up batch files created by session-based queries
+    try {
+      const { cleanupBatchFiles } = await import("../agent-runtime/batch-files.js");
+      cleanupBatchFiles(state.context.repoRoot, runId);
+    } catch {
+      /* best-effort */
     }
 
     await this.bus.publish(
@@ -2856,7 +2870,6 @@ function buildReportStats(
     skippedAlreadyTriaged: state.skippedAlreadyTriaged,
     skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
     skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
-    skippedByClassifier: state.skippedByClassifier > 0 ? state.skippedByClassifier : undefined,
     softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
     skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
     corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
@@ -2918,7 +2931,6 @@ function buildRunMetrics(
     state.stageTimestamps,
     costs,
     {
-      skippedByClassifier: state.skippedByClassifier,
       corroboratedClusters: state.corroboratedClusters,
       verified: state.verifyEnabled ? state.verified : 0,
       verifyErrors: state.verifyEnabled ? state.verifyErrors : 0,
@@ -3102,13 +3114,6 @@ function coerceFindings(value: unknown): Finding[] {
   }
 
   return findings;
-}
-
-function coerceQuickClassifierFindings(value: unknown): Finding[] {
-  if (!isRecord(value)) {
-    return [];
-  }
-  return coerceFindings(value["findings"]);
 }
 
 function coerceFinding(item: Record<string, unknown>): Finding | null {

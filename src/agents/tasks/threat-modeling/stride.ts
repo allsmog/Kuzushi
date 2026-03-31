@@ -319,7 +319,8 @@ export const threatModelStrideTask: AgentTask<ScanOpts, { document: ThreatModelD
         options: {
           cwd: context.repoRoot,
           model: cfg.strideModel,
-          maxTurns: context.config.taskMaxTurns ?? 15,
+
+          maxOutputTokens: 16384,
           allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {

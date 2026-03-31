@@ -17,7 +17,6 @@ export interface AgentHistoryEntry {
 export interface AgentQueryOptions {
   cwd: string;
   model: string;
-  maxTurns?: number | null;
   temperature?: number;
   maxOutputTokens?: number;
   allowedTools?: string[];
@@ -101,7 +100,16 @@ export type AgentMessage =
   | AgentToolSummaryMessage
   | AgentUnknownMessage;
 
+export interface AgentSession {
+  /** Send a prompt and stream back results within the same subprocess. */
+  query(prompt: string): AsyncIterable<AgentMessage>;
+  /** Close the subprocess. */
+  close(): Promise<void>;
+}
+
 export interface AgentRuntime {
   readonly id: string;
   query(request: AgentQueryRequest): AsyncIterable<AgentMessage>;
+  /** Create a reusable session backed by a single subprocess. */
+  createSession?(baseOptions: AgentQueryOptions): AgentSession;
 }

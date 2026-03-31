@@ -5,10 +5,13 @@ import {
   resolveDefaultReadOnlyTools,
   resolveRepoContextAndRuntimeOptions,
   runStructuredAgentQuery,
+  runStructuredSessionQuery,
   type AgentActivity,
   type AgentActivityCallback,
   type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
+import type { AgentSession } from "./agent-runtime/types.js";
+import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
 import type {
   AllowedTriageTool,
   Finding,
@@ -35,7 +38,8 @@ export { extractJson } from "./agent-runtime/execution.js";
 
 const log = getLogger("triage");
 
-export const TRIAGE_RESULT_SCHEMA = {
+/** Lite triage schema — core fields only, used by default. */
+export const TRIAGE_RESULT_SCHEMA_LITE = {
   type: "object",
   additionalProperties: false,
   required: ["fingerprint", "verdict", "confidence", "rationale", "verification_steps"],
@@ -46,6 +50,16 @@ export const TRIAGE_RESULT_SCHEMA = {
     rationale: { type: "string" },
     verification_steps: { type: "array", items: { type: "string" }, minItems: 1 },
     fix_patch: { type: ["string", "null"] },
+  },
+} as const;
+
+/** Full triage schema — includes evidence chain, source/sink analysis, etc. */
+export const TRIAGE_RESULT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["fingerprint", "verdict", "confidence", "rationale", "verification_steps"],
+  properties: {
+    ...TRIAGE_RESULT_SCHEMA_LITE.properties,
     source: {
       type: "object",
       additionalProperties: false,
@@ -144,7 +158,7 @@ export const BATCH_TRIAGE_SCHEMA = {
   properties: {
     results: {
       type: "array",
-      items: TRIAGE_RESULT_SCHEMA,
+      items: TRIAGE_RESULT_SCHEMA_LITE,
     },
   },
 } as const;
@@ -184,7 +198,6 @@ export async function triageFindingWithAgent(
   repoRoot: string,
   repoName: string,
   model: string,
-  maxTurns: number | null,
   repoContextOrRuntimeOptions?: RepoContext | TriageRuntimeOptions,
   maybeRuntimeOptions: TriageRuntimeOptions = {},
   /** Optional extra context appended to the triage prompt (trajectories, evidence chain instructions). */
@@ -203,16 +216,14 @@ export async function triageFindingWithAgent(
     ? agentConfig.prompt + "\n\n" + extraPromptContext
     : agentConfig.prompt;
   const allowedTools = normalizeAllowedTools(agentConfig.allowedTools, runtimeOptions.runtime);
-  const effectiveMaxTurns = normalizeTurns(agentConfig.maxTurns ?? maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
     cwd: repoRoot,
     model,
-    maxTurns: effectiveMaxTurns,
     allowedTools,
     runtimeOptions,
     systemPromptPrefix: precomputedSystemPromptPrefix ?? triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
-    schema: TRIAGE_RESULT_SCHEMA,
+    schema: TRIAGE_RESULT_SCHEMA_LITE,
   });
 
   if (executionError) {
@@ -247,7 +258,6 @@ export async function triageFindingsBatch(
   repoContext?: RepoContext,
   runtimeOptions: TriageRuntimeOptions = {},
   maxBatchSize: number = DEFAULT_BATCH_SIZE,
-  maxTurns: number | null = null,
   batchTemplate?: string,
 ): Promise<BatchTriageOutput> {
   if (findings.length === 0) {
@@ -257,32 +267,114 @@ export async function triageFindingsBatch(
   const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
 
   if (findings.length <= effectiveBatchSize) {
-    return triageSingleBatch(findings, repoRoot, repoName, model, repoContext, runtimeOptions, maxTurns, batchTemplate);
+    return triageSingleBatch(findings, repoRoot, repoName, model, repoContext, runtimeOptions, batchTemplate);
   }
 
   const allResults = new Map<string, TriageResult>();
   let totalCost = 0;
 
-  for (let i = 0; i < findings.length; i += effectiveBatchSize) {
-    const chunk = findings.slice(i, i + effectiveBatchSize);
-    const { results, costUsd } = await triageSingleBatch(
-      chunk,
-      repoRoot,
-      repoName,
-      model,
-      repoContext,
-      runtimeOptions,
-      maxTurns,
-      batchTemplate,
-    );
+  // Try to create a reusable session for subprocess reuse across batches
+  const runtime = runtimeOptions.runtime;
+  const session = runtime?.createSession?.({
+    cwd: repoRoot,
+    model,
+    allowedTools: [...BATCH_TRIAGE_TOOLS],
+    permissionMode: "dontAsk",
+    outputFormat: {
+      type: "json_schema",
+      schema: BATCH_TRIAGE_SCHEMA,
+      strict: true,
+    },
+    systemPromptPrefix: triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
+  });
 
-    for (const [fp, result] of results) {
-      allResults.set(fp, result);
+  const runId = session ? crypto.randomUUID() : "";
+
+  try {
+    let batchIdx = 0;
+    for (let i = 0; i < findings.length; i += effectiveBatchSize) {
+      const chunk = findings.slice(i, i + effectiveBatchSize);
+
+      const { results, costUsd } = session
+        ? await triageSingleBatchSession(
+            chunk,
+            repoRoot,
+            repoName,
+            findings,
+            session,
+            runId,
+            batchIdx,
+            batchTemplate,
+          )
+        : await triageSingleBatch(
+            chunk,
+            repoRoot,
+            repoName,
+            model,
+            repoContext,
+            runtimeOptions,
+            batchTemplate,
+          );
+
+      for (const [fp, result] of results) {
+        allResults.set(fp, result);
+      }
+      totalCost += costUsd;
+      batchIdx++;
     }
-    totalCost += costUsd;
+  } finally {
+    await session?.close();
+    if (runId) cleanupBatchFiles(repoRoot, runId);
   }
 
   return { results: allResults, costUsd: totalCost };
+}
+
+async function triageSingleBatchSession(
+  chunk: Finding[],
+  repoRoot: string,
+  repoName: string,
+  _allFindings: Finding[],
+  session: AgentSession,
+  runId: string,
+  batchIdx: number,
+  batchTemplate?: string,
+): Promise<BatchTriageOutput> {
+  const batchData = {
+    repoName,
+    findingCount: chunk.length,
+    findings: chunk.map((f) => ({
+      fingerprint: f.fingerprint,
+      scanner: f.scanner,
+      ruleId: f.ruleId,
+      filePath: f.filePath,
+      startLine: f.startLine,
+      severity: f.severity,
+      scannerConfidence: f.scannerConfidence,
+      likelihood: f.likelihood,
+      impact: f.impact,
+      cwe: f.cwe,
+      message: f.message,
+      evidence: f.evidence || null,
+    })),
+  };
+
+  const filePath = writeBatchFile(repoRoot, runId, "triage", batchIdx, batchData);
+  const prompt = batchTemplate
+    ? `Read ${filePath} and triage each finding using the provided template context.`
+    : `Read ${filePath} and triage each finding. For each, determine verdict (tp/fp/needs_review), confidence (0-1), rationale, and verification_steps.`;
+
+  const { resultText, structuredOutput, executionError, costUsd } = await runStructuredSessionQuery(
+    session,
+    prompt,
+  );
+
+  if (executionError) {
+    throw new TriageExecutionError(`batch triage agent failed: ${executionError}`, costUsd);
+  }
+
+  const results = parseBatchTriageOutput(structuredOutput ?? resultText, chunk);
+  return { results, costUsd };
 }
 
 async function triageSingleBatch(
@@ -292,16 +384,13 @@ async function triageSingleBatch(
   model: string,
   repoContext: RepoContext | undefined,
   runtimeOptions: TriageRuntimeOptions,
-  maxTurns: number | null = null,
   batchTemplate?: string,
 ): Promise<BatchTriageOutput> {
   const prompt = buildBatchTriagePrompt(findings, repoName, batchTemplate);
-  const effectiveMaxTurns = normalizeTurns(maxTurns);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
     cwd: repoRoot,
     model,
-    maxTurns: effectiveMaxTurns,
     allowedTools: BATCH_TRIAGE_TOOLS,
     runtimeOptions,
     systemPromptPrefix: triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
@@ -510,12 +599,6 @@ function normalizeAllowedTriageToolNames(tools: readonly string[]): AllowedTriag
   ));
 }
 
-function normalizeTurns(value: number | null | undefined): number | null {
-  if (value == null) return null;
-  if (!Number.isFinite(value) || value < 1) return null;
-  return Math.floor(value);
-}
-
 /** Parse a verdict string, defaulting to needs_review for unknown values. */
 export function parseVerdict(v: string): Verdict {
   const normalized = v.trim().toLowerCase();
@@ -655,18 +738,37 @@ function parsePathAssessment(value: unknown): TriageResult["source"] | undefined
 const PRE_READ_BYTE_CAP = 20_000;
 
 /**
+ * Per-run file content cache — avoids re-reading the same source file for
+ * co-located findings.  Keyed by absolute path; values are raw file contents.
+ */
+export type FileContentCache = Map<string, string>;
+
+/**
  * Pre-read the flagged source file for a finding, returning a formatted
  * markdown snippet centered on the finding's start line.
  * Returns empty string on any failure — triage must never fail due to pre-read.
+ *
+ * When a {@link FileContentCache} is provided, file contents are read from the
+ * cache on subsequent calls for the same path, eliminating redundant disk I/O
+ * for findings in the same file.
  */
 export async function preReadForTriage(
   finding: Finding,
   repoRoot: string,
   surroundingLines = 50,
+  fileCache?: FileContentCache,
 ): Promise<string> {
   try {
     const filePath = path.resolve(repoRoot, finding.filePath);
-    const raw = await readFile(filePath, "utf-8");
+
+    let raw: string;
+    if (fileCache?.has(filePath)) {
+      raw = fileCache.get(filePath)!;
+    } else {
+      raw = await readFile(filePath, "utf-8");
+      fileCache?.set(filePath, raw);
+    }
+
     if (raw.length > PRE_READ_BYTE_CAP * 2) {
       // For very large files, only use a window
     }

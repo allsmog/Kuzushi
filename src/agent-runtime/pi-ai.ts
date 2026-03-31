@@ -34,7 +34,6 @@ process.env.PI_CACHE_RETENTION ??= "long";
 // pi-ai (and transitively by the Anthropic SDK) reuse a shared connection pool.
 installGlobalDispatcher();
 
-const DEFAULT_MAX_TURNS: number | undefined = undefined;
 const KNOWN_TOOL_NAMES = new Set([
   "Read",
   "Glob",
@@ -222,7 +221,6 @@ export class PiAiAgentRuntime implements AgentRuntime {
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
     const restoreRuntimeEnv = applyRuntimeEnvOverrides(this.runtimeConfig);
     const startedAtMs = Date.now();
-    const maxTurns = normalizeMaxTurns(request.options.maxTurns);
     const signal = request.options.abortController?.signal;
     const maxBudgetUsd = normalizeBudget(request.options.maxBudgetUsd);
     const outputFormat = request.options.outputFormat;
@@ -256,7 +254,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
 
       const toolsByName = new Map(enabledTools.map((tool) => [tool.name, tool]));
 
-      for (let turn = 1; maxTurns == null || turn <= maxTurns; turn++) {
+      for (let turn = 1; ; turn++) {
         if (signal?.aborted) {
           yield errorResult(
             "error_aborted",
@@ -539,17 +537,6 @@ export class PiAiAgentRuntime implements AgentRuntime {
           return;
         }
 
-        if (maxTurns != null && turn >= maxTurns) {
-          yield errorResult(
-            "error_max_turns",
-            `pi-ai agent exceeded max turns (${maxTurns}) before producing a final response`,
-            startedAtMs,
-            turn,
-            totalCostUsd,
-          );
-          return;
-        }
-
         for (const toolCall of toolCalls) {
           const toolUseId = toolCall.id || `${toolCall.name}_${Date.now()}_${++generatedToolCallCounter}`;
           const startedToolMs = Date.now();
@@ -678,13 +665,6 @@ export class PiAiAgentRuntime implements AgentRuntime {
         }
       }
 
-      yield errorResult(
-        "error_max_turns",
-        `pi-ai agent exceeded max turns (${maxTurns ?? "unlimited"})`,
-        startedAtMs,
-        maxTurns ?? 0,
-        totalCostUsd,
-      );
     } catch (error) {
       const aborted = signal?.aborted === true;
       const wrapped = error instanceof KuzushiError ? error : wrapError(error);
@@ -769,7 +749,7 @@ function resolveModel(modelSpec: string, baseUrlOverride?: string) {
     input: ["text"] as ("text" | "image")[],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 32768,
-    maxTokens: 8192,
+    maxTokens: 16384,
   };
 }
 
@@ -927,16 +907,6 @@ function extractCostUsd(message: PiAiAssistantMessage): number {
   return normalizeCostUsd(message.usage?.cost?.total);
 }
 
-function normalizeMaxTurns(value: number | null | undefined): number | undefined {
-  if (value == null) {
-    return undefined;
-  }
-  if (!Number.isFinite(value) || value < 1) {
-    return DEFAULT_MAX_TURNS;
-  }
-
-  return Math.floor(value);
-}
 
 function normalizeBudget(value: number | undefined): number | undefined {
   if (!Number.isFinite(value) || value == null || value < 0) {
