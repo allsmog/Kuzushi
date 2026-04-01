@@ -192,9 +192,10 @@ describe("parseVerificationOutput", () => {
     expect(parsed.confidence).toBe(1);
   });
 
-  it("throws a clear error for malformed JSON", () => {
-    expect(() => parseVerificationOutput("not-json", "fallback-fp"))
-      .toThrow("Invalid verification JSON response");
+  it("returns conservative result for malformed JSON instead of throwing", () => {
+    const result = parseVerificationOutput("not-json", "fallback-fp");
+    expect(result.fingerprint).toBe("fallback-fp");
+    expect(result.exploitable).toBe(false);
   });
 
   it("parses proof_level and proof_verdict from output", () => {
@@ -344,20 +345,16 @@ describe("verifyFindingWithAgent", () => {
       requests,
     );
 
-    try {
-      await verifyFindingWithAgent(
-        makeFinding(),
-        makeTriageResult(),
-        "/tmp/repo",
-        "repo",
-        "claude-haiku-4-5-20251001",
-        { runtime },
-      );
-      expect.unreachable("Expected verification to throw");
-    } catch (error) {
-      expect(error).toBeInstanceOf(VerificationExecutionError);
-      expect((error as VerificationExecutionError).costUsd).toBe(0.009);
-      expect((error as Error).message).toContain("verification output parse failed");
-    }
+    const result = await verifyFindingWithAgent(
+      makeFinding(),
+      makeTriageResult(),
+      "/tmp/repo",
+      "repo",
+      "claude-haiku-4-5-20251001",
+      { runtime },
+    );
+    // Malformed JSON now returns a conservative result instead of throwing
+    expect(result.result.exploitable).toBe(false);
+    expect(result.costUsd).toBe(0.009);
   });
 });

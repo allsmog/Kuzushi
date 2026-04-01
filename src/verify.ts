@@ -254,7 +254,23 @@ function parseVerificationResponse(text: string, fingerprint: string): Verificat
       bypassAttempts: parseOptionalStringArray(parsed.bypass_attempts),
     };
   } catch (error) {
-    throw new Error(`Invalid verification JSON response: ${toErrorMessage(error)}`);
+    // Graceful degradation: when the agent returns prose instead of JSON
+    // (common after multi-turn tool use), return a conservative inconclusive
+    // result. The verification refinement loop will retry with this failure
+    // in history, prompting the agent to return proper JSON next time.
+    log.warn(`[verify] Could not parse verification response for ${fingerprint}: ${toErrorMessage(error)}`);
+    return {
+      fingerprint,
+      exploitable: false,
+      pocPayload: null,
+      pocDescription: text.slice(0, 500),
+      attackVector: null,
+      preconditions: [],
+      confidence: 0,
+      proofLevel: 1,
+      proofVerdict: undefined,
+      bypassAttempts: [],
+    };
   }
 }
 

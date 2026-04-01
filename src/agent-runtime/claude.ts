@@ -97,6 +97,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
     let model = baseOptions.model ?? "claude-sonnet-4-6";
     if (model.includes(":")) model = model.split(":").slice(1).join(":");
+    const isHaiku = model.includes("haiku");
 
     const batchRequests = requests.map((req) => {
       const systemBlocks: Anthropic.TextBlockParam[] = [];
@@ -105,8 +106,20 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         systemBlocks.push({
           type: "text" as const,
           text: sysPrompt,
-          cache_control: { type: "ephemeral" as const },
+          cache_control: { type: "ephemeral" as const, ttl: "1h" as const },
         });
+      }
+
+      // Build output_config — effort errors on Haiku, so skip it
+      const outputConfig: Record<string, unknown> = {};
+      if (baseOptions.outputFormat) {
+        outputConfig.format = {
+          type: "json_schema" as const,
+          schema: baseOptions.outputFormat.schema,
+        };
+      }
+      if (baseOptions.effort && !isHaiku) {
+        outputConfig.effort = baseOptions.effort;
       }
 
       const params: Anthropic.MessageCreateParamsNonStreaming = {
@@ -116,18 +129,8 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         system: systemBlocks.length > 0 ? systemBlocks : undefined,
         messages: [{ role: "user" as const, content: req.prompt }],
         stream: false,
-        ...(baseOptions.outputFormat ? {
-          output_config: {
-            format: {
-              type: "json_schema" as const,
-              schema: baseOptions.outputFormat.schema,
-            },
-            ...(baseOptions.effort ? { effort: baseOptions.effort } : {}),
-          },
-        } : baseOptions.effort ? {
-          output_config: { effort: baseOptions.effort },
-        } : {}),
-        ...(baseOptions.thinkingDisabled || baseOptions.effort === "low"
+        ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
+        ...(baseOptions.thinkingDisabled || (baseOptions.effort === "low" && !isHaiku)
           ? { thinking: { type: "disabled" as const } }
           : {}),
       };
@@ -159,6 +162,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     const results = new Map<string, AgentQueryExecutionResult>();
     const decoder = await client.messages.batches.results(batch.id);
 
+    // Model-aware pricing at batch rate (50% of standard)
+    const inputRate = (isHaiku ? 1 : model.includes("opus") ? 5 : 3) * 0.5;
+    const outputRate = (isHaiku ? 5 : model.includes("opus") ? 25 : 15) * 0.5;
+
     for await (const item of decoder) {
       if (item.result.type === "succeeded") {
         const msg = item.result.message;
@@ -166,9 +173,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
           (b): b is Anthropic.TextBlock => b.type === "text",
         );
         const usage = msg.usage;
-        const inputCost = (usage.input_tokens / 1_000_000) * 1.5; // Batch = 50% of standard
-        const outputCost = (usage.output_tokens / 1_000_000) * 7.5;
-        const cacheSavings = ((usage as unknown as Record<string, unknown>)["cache_read_input_tokens"] as number ?? 0) / 1_000_000 * 1.35;
+        const inputCost = (usage.input_tokens / 1_000_000) * inputRate;
+        const outputCost = (usage.output_tokens / 1_000_000) * outputRate;
+        const cacheReadTokens = (usage as unknown as Record<string, unknown>)["cache_read_input_tokens"] as number ?? 0;
+        const cacheSavings = (cacheReadTokens / 1_000_000) * (inputRate * 0.9);
 
         results.set(item.custom_id, {
           resultText: textBlock?.text ?? "",
@@ -195,7 +203,13 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   /**
    * Direct Anthropic API call for tool-less queries. Skips the Claude Code
    * subprocess entirely — no spawn overhead, no tool initialization.
-   * Uses prompt caching via cache_control for the system prompt.
+   *
+   * Best practices applied:
+   * - Streaming with finalMessage() for large outputs (avoids HTTP timeouts)
+   * - cache_control with 1h TTL for system prompt reuse across pipeline
+   * - Typed error handling (RateLimitError, APIError)
+   * - Effort not set on Haiku (would error)
+   * - Right-sized max_tokens based on output needs
    */
   private async *queryDirect(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
     const startedAtMs = Date.now();
@@ -204,18 +218,19 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     // Strip provider prefix
     let model = request.options.model ?? "claude-sonnet-4-6";
     if (model.includes(":")) model = model.split(":").slice(1).join(":");
+    const isHaiku = model.includes("haiku");
 
     const apiKey = this.config?.apiKey ?? process.env["ANTHROPIC_API_KEY"];
     const baseURL = this.config?.baseUrl;
     const client = new Anthropic({ apiKey, baseURL });
 
-    // Build system prompt with cache_control for reuse across calls
+    // Build system prompt with 1h cache TTL for pipeline-duration reuse
     const systemBlocks: Anthropic.TextBlockParam[] = [];
     if (request.options.systemPromptPrefix) {
       systemBlocks.push({
         type: "text",
         text: request.options.systemPromptPrefix,
-        cache_control: { type: "ephemeral" },
+        cache_control: { type: "ephemeral", ttl: "1h" },
       });
     }
 
@@ -231,6 +246,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     }
 
     try {
+      // Build output_config — effort errors on Haiku, so skip it
       const outputConfig: Record<string, unknown> = {};
       if (request.options.outputFormat) {
         outputConfig.format = {
@@ -238,26 +254,36 @@ export class ClaudeAgentRuntime implements AgentRuntime {
           schema: request.options.outputFormat.schema,
         };
       }
-      if (request.options.effort) {
+      if (request.options.effort && !isHaiku) {
         outputConfig.effort = request.options.effort;
       }
 
-      const response = await client.messages.create({
+      // Right-size max_tokens: classification tasks need minimal output
+      const maxTokens = request.options.maxOutputTokens ?? 16000;
+
+      // Use streaming + finalMessage() to avoid HTTP timeouts on large outputs
+      const stream = client.messages.stream({
         model,
-        max_tokens: request.options.maxOutputTokens ?? 16000,
+        max_tokens: maxTokens,
         temperature: request.options.temperature,
         system: systemBlocks.length > 0 ? systemBlocks : undefined,
         messages: [{ role: "user", content: request.prompt }],
         ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
-        ...(request.options.thinkingDisabled ? { thinking: { type: "disabled" as const } } : {}),
+        ...(request.options.thinkingDisabled || (request.options.effort === "low" && !isHaiku)
+          ? { thinking: { type: "disabled" as const } }
+          : {}),
       });
 
+      const response = await stream.finalMessage();
       const durationMs = Date.now() - startedAtMs;
 
-      // Extract cost from usage
-      const inputCost = (response.usage.input_tokens / 1_000_000) * 3; // Sonnet default
-      const outputCost = (response.usage.output_tokens / 1_000_000) * 15;
-      const cacheSavings = ((response.usage as unknown as Record<string, unknown>)["cache_read_input_tokens"] as number ?? 0) / 1_000_000 * 2.7; // 90% savings
+      // Extract cost from usage (model-aware pricing)
+      const inputRate = isHaiku ? 1 : model.includes("opus") ? 5 : 3;
+      const outputRate = isHaiku ? 5 : model.includes("opus") ? 25 : 15;
+      const inputCost = (response.usage.input_tokens / 1_000_000) * inputRate;
+      const outputCost = (response.usage.output_tokens / 1_000_000) * outputRate;
+      const cacheReadTokens = (response.usage as unknown as Record<string, unknown>)["cache_read_input_tokens"] as number ?? 0;
+      const cacheSavings = (cacheReadTokens / 1_000_000) * (inputRate * 0.9); // 90% savings on cached tokens
       const totalCostUsd = normalizeCostUsd(inputCost + outputCost - cacheSavings);
 
       // Extract text result
@@ -286,14 +312,17 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       };
     } catch (error) {
       const durationMs = Date.now() - startedAtMs;
-      log.error(`Direct API query failed (${durationMs}ms): ${toErrorMessage(error)}`);
+      const retryable = error instanceof Anthropic.RateLimitError
+        || error instanceof Anthropic.InternalServerError;
+
+      log.error(`Direct API query failed (${durationMs}ms, retryable=${retryable}): ${toErrorMessage(error)}`);
 
       if (this.bus) {
         try {
           await this.bus.publish<LlmCallErrorEvent>({
             type: "llm:call-error",
             meta: { id: crypto.randomUUID(), timestamp: new Date().toISOString(), runId: turnRunId },
-            payload: { model, error: toErrorMessage(error), retryable: false, runId: turnRunId },
+            payload: { model, error: toErrorMessage(error), retryable, runId: turnRunId },
           });
         } catch { /* non-fatal */ }
       }
