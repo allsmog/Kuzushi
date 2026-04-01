@@ -115,9 +115,20 @@ export interface AgentSession {
   close(): Promise<void>;
 }
 
+export interface AgentBatchRequest {
+  id: string;
+  prompt: string;
+  systemPrompt?: string;
+}
+
 export interface AgentRuntime {
   readonly id: string;
   query(request: AgentQueryRequest): AsyncIterable<AgentMessage>;
   /** Create a reusable session backed by a single subprocess. */
   createSession?(baseOptions: AgentQueryOptions): AgentSession;
+  /** Submit multiple prompts as a batch for async processing at 50% cost. */
+  queryBatch?(
+    requests: AgentBatchRequest[],
+    baseOptions: AgentQueryOptions,
+  ): Promise<Map<string, { resultText: string; structuredOutput: unknown; executionError: string | null; costUsd: number }>>;
 }

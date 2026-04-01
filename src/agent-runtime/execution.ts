@@ -8,7 +8,7 @@ import type {
 import type { RepoContext } from "../types.js";
 import { inflightCache } from "../cache.js";
 import { isRecord } from "../utils.js";
-import type { AgentEffort, AgentRuntime, AgentSession } from "./types.js";
+import type { AgentBatchRequest, AgentEffort, AgentRuntime, AgentSession } from "./types.js";
 
 export const DEFAULT_READ_ONLY_TOOLS = [
   "Read",
@@ -343,6 +343,59 @@ export async function runStructuredSessionQuery(
   }
 
   return { resultText, structuredOutput, executionError, costUsd };
+}
+
+/**
+ * Submit multiple tool-less prompts as a batch for 50% cost reduction.
+ * Falls back to sequential `runStructuredAgentQuery()` if the runtime
+ * doesn't support batch processing.
+ */
+export async function runStructuredBatchQuery(
+  requests: Array<{ id: string; prompt: string; systemPrompt?: string }>,
+  args: {
+    cwd: string;
+    model: string;
+    schema: Record<string, unknown>;
+    runtimeOptions?: AgentRuntimeOptions;
+    effort?: AgentEffort;
+    thinkingDisabled?: boolean;
+  },
+): Promise<Map<string, AgentQueryExecutionResult>> {
+  const runtime = args.runtimeOptions?.runtime;
+  if (!runtime) {
+    throw new Error("Agent runtime is required for batch queries.");
+  }
+
+  // Use batch API if available
+  if (runtime.queryBatch) {
+    return runtime.queryBatch(
+      requests.map((r) => ({ id: r.id, prompt: r.prompt, systemPrompt: r.systemPrompt })),
+      {
+        cwd: args.cwd,
+        model: args.model,
+        outputFormat: { type: "json_schema", schema: args.schema },
+        effort: args.effort,
+        thinkingDisabled: args.thinkingDisabled,
+        permissionMode: "dontAsk",
+      },
+    );
+  }
+
+  // Fallback: run sequentially
+  const results = new Map<string, AgentQueryExecutionResult>();
+  for (const req of requests) {
+    const result = await runStructuredAgentQuery({
+      prompt: req.prompt,
+      cwd: args.cwd,
+      model: args.model,
+      allowedTools: [],
+      runtimeOptions: args.runtimeOptions,
+      systemPromptPrefix: req.systemPrompt,
+      schema: args.schema,
+    });
+    results.set(req.id, result);
+  }
+  return results;
 }
 
 export function resolveRepoContextAndRuntimeOptions<T extends AgentRuntimeOptions>(

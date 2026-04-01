@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { AgentRuntime, AgentSession } from "../agent-runtime/types.js";
-import { runStructuredAgentQuery, runStructuredSessionQuery } from "../agent-runtime/execution.js";
+import { runStructuredAgentQuery, runStructuredSessionQuery, runStructuredBatchQuery } from "../agent-runtime/execution.js";
 import { writeBatchFile, cleanupBatchFiles } from "../agent-runtime/batch-files.js";
 import type { Finding } from "./types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
@@ -81,9 +81,104 @@ export async function rescoreFindings(
   }
 
   const allResults: LlmRescoreResult[] = [];
-
-  // Try to create a reusable session for subprocess reuse across batches
   const runtime = options.runtime;
+
+  // ── Priority 1: Batch API path (50% cost reduction) ──
+  if (runtime.queryBatch) {
+    process.stderr.write(`[llm-rescore] Using Batch API for ${batches.length} batch(es) (50% cost reduction)\n`);
+
+    // Collect all batch prompts upfront
+    const batchRequests: Array<{ id: string; prompt: string; systemPrompt?: string }> = [];
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx];
+      const findingEntries = batch.map((finding) => {
+        const fileContent = fileContents.get(finding.filePath) ?? "[no content]";
+        const lines = fileContent.split("\n");
+        const startLine = Math.max(0, finding.startLine - 11);
+        const endLine = Math.min(lines.length, finding.startLine + 10);
+        const relevantContent = lines.slice(startLine, endLine).join("\n");
+
+        return [
+          `### Finding: ${finding.fingerprint}`,
+          `Rule: ${finding.ruleId}`,
+          `File: ${finding.filePath}:${finding.startLine}`,
+          `Severity: ${finding.severity}`,
+          `CWE: ${finding.cwe.join(", ") || "none"}`,
+          `Message: ${finding.message}`,
+          `Evidence: ${finding.evidence || "none"}`,
+          "```",
+          relevantContent,
+          "```",
+        ].join("\n");
+      });
+
+      batchRequests.push({
+        id: `rescore-batch${batchIdx}`,
+        prompt: [
+          `Return a JSON array with one entry per finding, using the fingerprint to identify each.`,
+          "",
+          ...findingEntries,
+        ].join("\n"),
+        systemPrompt: RESCORE_SYSTEM_PROMPT,
+      });
+    }
+
+    const resultsMap = await runStructuredBatchQuery(batchRequests, {
+      cwd: options.repoRoot,
+      model,
+      schema: BATCH_RESCORE_SCHEMA as unknown as Record<string, unknown>,
+      runtimeOptions: { runtime },
+      thinkingDisabled: true,
+    });
+
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx];
+      const reqId = `rescore-batch${batchIdx}`;
+      const result = resultsMap.get(reqId);
+
+      if (!result || result.executionError || !isRecord(result.structuredOutput)) {
+        // On error, keep all findings (don't filter)
+        allResults.push(...batch.map((f) => ({
+          fingerprint: f.fingerprint,
+          score: threshold,
+          reason: result?.executionError ?? "Failed to parse batch rescore output",
+          keep: true,
+        })));
+        continue;
+      }
+
+      const scores = Array.isArray(result.structuredOutput["scores"]) ? result.structuredOutput["scores"] : [];
+      const scoreMap = new Map<string, { score: number; reason: string }>();
+      for (const entry of scores) {
+        if (isRecord(entry) && typeof entry["fingerprint"] === "string") {
+          scoreMap.set(entry["fingerprint"] as string, {
+            score: typeof entry["score"] === "number"
+              ? Math.max(1, Math.min(10, Math.floor(entry["score"] as number)))
+              : threshold,
+            reason: typeof entry["reason"] === "string" ? entry["reason"] as string : "",
+          });
+        }
+      }
+
+      allResults.push(...batch.map((f) => {
+        const entry = scoreMap.get(f.fingerprint);
+        const score = entry?.score ?? threshold;
+        return {
+          fingerprint: f.fingerprint,
+          score,
+          reason: entry?.reason ?? "No rescore result returned",
+          keep: score >= threshold,
+        };
+      }));
+
+      process.stderr.write(`[llm-rescore] Batch ${batchIdx + 1}/${batches.length}: rescored ${batch.length} findings\n`);
+    }
+
+    return allResults;
+  }
+
+  // ── Priority 2: Session path — reuse a single subprocess across batches ──
+  // ── Priority 3: One-shot query fallback ──
   const session = runtime.createSession?.({
     cwd: options.repoRoot,
     model,

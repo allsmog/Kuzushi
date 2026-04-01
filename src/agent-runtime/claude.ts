@@ -15,12 +15,14 @@ import type {
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { getLogger } from "../logger.js";
 import type {
+  AgentBatchRequest,
   AgentMessage,
   AgentQueryOptions,
   AgentQueryRequest,
   AgentRuntime,
   AgentSession,
 } from "./types.js";
+import type { AgentQueryExecutionResult } from "./execution.js";
 
 const log = getLogger("claude-runtime");
 
@@ -77,6 +79,117 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
   createSession(baseOptions: AgentQueryOptions): AgentSession {
     return new ClaudeSession(baseOptions, this.config, this.bus, this.runId);
+  }
+
+  /**
+   * Submit multiple tool-less prompts as a single Anthropic Batch API call.
+   * 50% cost reduction, async processing. Polls until completion.
+   */
+  async queryBatch(
+    requests: AgentBatchRequest[],
+    baseOptions: AgentQueryOptions,
+  ): Promise<Map<string, AgentQueryExecutionResult>> {
+    if (requests.length === 0) return new Map();
+
+    const apiKey = this.config?.apiKey ?? process.env["ANTHROPIC_API_KEY"];
+    const baseURL = this.config?.baseUrl;
+    const client = new Anthropic({ apiKey, baseURL });
+
+    let model = baseOptions.model ?? "claude-sonnet-4-6";
+    if (model.includes(":")) model = model.split(":").slice(1).join(":");
+
+    const batchRequests = requests.map((req) => {
+      const systemBlocks: Anthropic.TextBlockParam[] = [];
+      const sysPrompt = req.systemPrompt ?? baseOptions.systemPromptPrefix;
+      if (sysPrompt) {
+        systemBlocks.push({
+          type: "text" as const,
+          text: sysPrompt,
+          cache_control: { type: "ephemeral" as const },
+        });
+      }
+
+      const params: Anthropic.MessageCreateParamsNonStreaming = {
+        model,
+        max_tokens: baseOptions.maxOutputTokens ?? 16000,
+        temperature: baseOptions.temperature,
+        system: systemBlocks.length > 0 ? systemBlocks : undefined,
+        messages: [{ role: "user" as const, content: req.prompt }],
+        stream: false,
+        ...(baseOptions.outputFormat ? {
+          output_config: {
+            format: {
+              type: "json_schema" as const,
+              schema: baseOptions.outputFormat.schema,
+            },
+            ...(baseOptions.effort ? { effort: baseOptions.effort } : {}),
+          },
+        } : baseOptions.effort ? {
+          output_config: { effort: baseOptions.effort },
+        } : {}),
+        ...(baseOptions.thinkingDisabled || baseOptions.effort === "low"
+          ? { thinking: { type: "disabled" as const } }
+          : {}),
+      };
+
+      return { custom_id: req.id, params };
+    });
+
+    log.info(`Submitting batch of ${batchRequests.length} requests`);
+    let batch = await client.messages.batches.create({ requests: batchRequests });
+    log.info(`Batch ${batch.id} submitted, polling for completion`);
+
+    const startMs = Date.now();
+    const POLL_INTERVAL_MS = 2_000;
+    const MAX_POLL_MS = 600_000; // 10 minutes
+
+    while (batch.processing_status !== "ended") {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      batch = await client.messages.batches.retrieve(batch.id);
+      if (Date.now() - startMs > MAX_POLL_MS) {
+        await client.messages.batches.cancel(batch.id);
+        throw new Error(`Batch ${batch.id} timed out after ${MAX_POLL_MS}ms`);
+      }
+    }
+
+    const durationMs = Date.now() - startMs;
+    log.info(`Batch ${batch.id} completed in ${durationMs}ms — succeeded: ${batch.request_counts.succeeded}, errored: ${batch.request_counts.errored}`);
+
+    // Stream results
+    const results = new Map<string, AgentQueryExecutionResult>();
+    const decoder = await client.messages.batches.results(batch.id);
+
+    for await (const item of decoder) {
+      if (item.result.type === "succeeded") {
+        const msg = item.result.message;
+        const textBlock = msg.content.find(
+          (b): b is Anthropic.TextBlock => b.type === "text",
+        );
+        const usage = msg.usage;
+        const inputCost = (usage.input_tokens / 1_000_000) * 1.5; // Batch = 50% of standard
+        const outputCost = (usage.output_tokens / 1_000_000) * 7.5;
+        const cacheSavings = ((usage as unknown as Record<string, unknown>)["cache_read_input_tokens"] as number ?? 0) / 1_000_000 * 1.35;
+
+        results.set(item.custom_id, {
+          resultText: textBlock?.text ?? "",
+          structuredOutput: (msg as unknown as Record<string, unknown>)["parsed_output"] ?? undefined,
+          executionError: null,
+          costUsd: normalizeCostUsd(inputCost + outputCost - cacheSavings),
+        });
+      } else {
+        const errorMsg = item.result.type === "errored"
+          ? JSON.stringify(item.result.error)
+          : item.result.type;
+        results.set(item.custom_id, {
+          resultText: "",
+          structuredOutput: undefined,
+          executionError: errorMsg,
+          costUsd: 0,
+        });
+      }
+    }
+
+    return results;
   }
 
   /**

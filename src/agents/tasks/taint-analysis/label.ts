@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { AgentRuntime } from "../../../agent-runtime/types.js";
-import { runStructuredSessionQuery } from "../../../agent-runtime/execution.js";
+import { runStructuredSessionQuery, runStructuredBatchQuery } from "../../../agent-runtime/execution.js";
 import { writeBatchFile, cleanupBatchFiles } from "../../../agent-runtime/batch-files.js";
 import { withRetry } from "../../../retry.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
@@ -804,7 +804,59 @@ async function triageSinkRelevance(
     JSON.stringify(TRIAGE_RESPONSE_SCHEMA),
   ].join("\n");
 
-  // Session path: reuse a single subprocess for all batches
+  // ── Priority 1: Batch API path (50% cost reduction) ──
+  if (runtime.queryBatch) {
+    process.stderr.write(`[taint-analysis-label]   Using Batch API for sink triage (50% cost reduction)\n`);
+
+    // Collect all batch prompts upfront
+    const batchRequests: Array<{ id: string; prompt: string; systemPrompt?: string }> = [];
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx];
+      const compactPayload = batch.map((c) => ({
+        id: c.id,
+        callable: c.callable,
+        module_hint: c.moduleHint ?? null,
+        receiver_hint: c.receiverHint ?? null,
+      }));
+
+      batchRequests.push({
+        id: `triage-pass${passDef.passId}-batch${batchIdx}`,
+        prompt: [
+          "Candidates:",
+          JSON.stringify(compactPayload, null, 2),
+        ].join("\n"),
+        systemPrompt,
+      });
+    }
+
+    const resultsMap = await runStructuredBatchQuery(batchRequests, {
+      cwd: repoRoot,
+      model,
+      schema: TRIAGE_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
+      runtimeOptions: { runtime },
+      thinkingDisabled: true,
+    });
+
+    for (const [reqId, result] of resultsMap) {
+      totalCostUsd += result.costUsd;
+      const parsed = parseTriageResponse(result.structuredOutput ?? result.resultText);
+      for (const entry of parsed.entries) {
+        if (entry.relevant) {
+          relevantIds.add(entry.id);
+        }
+      }
+      // Log progress for large batch sets
+      const batchIdx = parseInt(reqId.split("batch")[1], 10);
+      if ((batchIdx + 1) % 20 === 0 || batchIdx === batches.length - 1) {
+        process.stderr.write(`[taint-analysis-label]   Sink triage: ${batchIdx + 1}/${batches.length} batches processed, ${relevantIds.size} relevant so far\n`);
+      }
+    }
+
+    process.stderr.write(`[taint-analysis-label]   Sink triage complete: ${relevantIds.size}/${sinkCandidates.length} sinks relevant to ${passDef.focus}\n`);
+    return { relevantIds, costUsd: totalCostUsd };
+  }
+
+  // ── Priority 2: Session path — reuse a single subprocess for all batches ──
   const session = runtime.createSession?.({
     cwd: repoRoot,
     model,
@@ -846,7 +898,7 @@ async function triageSinkRelevance(
         rawText = result.resultText;
         rawResult = result.structuredOutput;
       } else {
-        // Fallback: spawn a new subprocess per batch (pi-ai runtime)
+        // Priority 3: Fallback — spawn a new subprocess per batch (pi-ai runtime)
         const prompt = [
           systemPrompt,
           "",
