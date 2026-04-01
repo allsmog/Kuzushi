@@ -73,6 +73,13 @@ export function handleVerificationErrorState(
 }
 
 export function isVerificationDone(state: RunState): boolean {
+  // During pipelined verification (before startVerification sets verificationStarted),
+  // verifyTotal grows incrementally as triage results arrive. Don't consider
+  // verification "done" until startVerification has finalized the total.
+  if (!state.verificationStarted) {
+    return false;
+  }
+
   const processed = state.verified + state.verifyErrors;
   return (
     state.verifyTotal > 0

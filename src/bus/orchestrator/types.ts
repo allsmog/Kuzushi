@@ -91,6 +91,7 @@ export interface RunState {
   verifyErrors: number;
   verifyCostUsd: number;
   verifyDispatching: boolean;
+  verifyDispatchedFingerprints: Set<string>;
   verificationStarted: boolean;
   verificationCompleted: boolean;
   resumingVerification: boolean;

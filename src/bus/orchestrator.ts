@@ -344,6 +344,7 @@ export class PipelineOrchestrator {
       verifyErrors: 0,
       verifyCostUsd: 0,
       verifyDispatching: false,
+      verifyDispatchedFingerprints: new Set(),
       verificationStarted: false,
       verificationCompleted: false,
       resumingVerification: false,
@@ -673,6 +674,7 @@ export class PipelineOrchestrator {
     state.verified = 0;
     state.verifyErrors = 0;
     state.verifyCostUsd = 0;
+    state.verifyDispatchedFingerprints = new Set();
     state.verificationCompleted = false;
     state.resumingVerification = true;
     state.pocHarnessCandidates = [];
@@ -1461,6 +1463,7 @@ export class PipelineOrchestrator {
     state.verifyCostUsd = 0;
     state.skippedLowConfidence = 0;
     state.verifyDispatching = false;
+    state.verifyDispatchedFingerprints = new Set();
     state.verificationStarted = false;
     state.verificationCompleted = false;
     state.resumingVerification = false;
@@ -1552,6 +1555,8 @@ export class PipelineOrchestrator {
           finding: event.payload.finding,
           triageResult: event.payload.result,
         });
+        // Pipeline: immediately queue for verification while triage continues
+        await this.pipelineVerifyCandidate(state, runId, event.payload.finding, event.payload.result);
       }
       return;
     }
@@ -1565,6 +1570,16 @@ export class PipelineOrchestrator {
       shouldVerifyFinding,
       this.deps,
     );
+
+    // Pipeline: if the finding was added to verifyCandidates by handleTriageResultState,
+    // immediately queue it for verification while triage continues.
+    if (
+      state.verifyCandidates.length > 0
+      && state.verifyCandidates[state.verifyCandidates.length - 1].finding.fingerprint
+        === event.payload.finding.fingerprint
+    ) {
+      await this.pipelineVerifyCandidate(state, runId, event.payload.finding, event.payload.result);
+    }
 
     // Auto-rule generation: fire-and-forget for TP findings with strategy evidence
     if (
@@ -2204,6 +2219,51 @@ export class PipelineOrchestrator {
     );
   }
 
+  /**
+   * Pipeline a single verification candidate while triage is still in progress.
+   * Adds the finding to the verify queue and dispatches immediately, respecting
+   * concurrency limits. Tracks dispatched fingerprints to avoid double-dispatch
+   * when startVerification runs after triage completes.
+   */
+  private async pipelineVerifyCandidate(
+    state: RunState,
+    runId: string,
+    finding: Finding,
+    triageResult: TriageResult,
+  ): Promise<void> {
+    // Guard: only pipeline when verification is enabled and not yet formally started
+    // (startVerification handles dispatch after triage completes)
+    if (!state.verifyEnabled || state.verificationStarted || state.reportEmitted) {
+      return;
+    }
+
+    const fp = finding.fingerprint;
+    if (state.verifyDispatchedFingerprints.has(fp)) {
+      return;
+    }
+
+    state.verifyDispatchedFingerprints.add(fp);
+    state.verifyTotal += 1;
+    state.verifyQueue.push({
+      finding,
+      triageResult,
+      index: state.verifyTotal,
+      total: state.verifyTotal, // Will be updated by startVerification for final count
+    });
+
+    // Set the DB status to "verifying" on the first pipelined candidate
+    if (state.verifyTotal === 1) {
+      state.stageTimestamps.verifyStart = new Date().toISOString();
+      try {
+        updateRunStatus(this.deps.db, state.checkpointRunId, "verifying");
+      } catch {
+        // Status persistence is best-effort.
+      }
+    }
+
+    await this.dispatchVerification(state, runId);
+  }
+
   private async startVerification(state: RunState, runId: string): Promise<void> {
     if (state.verificationStarted || state.reportEmitted) {
       log.info(
@@ -2215,9 +2275,14 @@ export class PipelineOrchestrator {
     state.verificationCompleted = false;
 
     if (!state.resumingVerification) {
-      // Rank candidates: highest-score first, triage confidence as tiebreaker,
+      // Filter out candidates already pipelined during triage
+      const remaining = state.verifyCandidates.filter(
+        (c) => !state.verifyDispatchedFingerprints.has(c.finding.fingerprint),
+      );
+
+      // Rank remaining candidates: highest-score first, triage confidence as tiebreaker,
       // presence of structured evidence (taintPath) as final tiebreaker.
-      const ranked = [...state.verifyCandidates].sort((a, b) => {
+      const ranked = remaining.sort((a, b) => {
         const scoreA = getRankingScore(a.finding);
         const scoreB = getRankingScore(b.finding);
         if (scoreB !== scoreA) return scoreB - scoreA;
@@ -2229,13 +2294,18 @@ export class PipelineOrchestrator {
         return evidenceB - evidenceA;
       });
 
-      state.verifyTotal = ranked.length;
-      state.verifyQueue = ranked.map((item, idx) => ({
-        ...item,
-        index: idx + 1,
-        total: ranked.length,
-      }));
-      state.verifyCursor = 0;
+      // Append newly ranked candidates to the existing queue (pipelined items are already there)
+      const pipelinedCount = state.verifyDispatchedFingerprints.size;
+      const finalTotal = pipelinedCount + ranked.length;
+      for (const [idx, item] of ranked.entries()) {
+        state.verifyQueue.push({
+          ...item,
+          index: pipelinedCount + idx + 1,
+          total: finalTotal,
+        });
+      }
+      state.verifyTotal = finalTotal;
+      // Don't reset verifyCursor — pipelined dispatch already advanced it
     }
 
     if (!state.resumingVerification) {
@@ -2253,7 +2323,9 @@ export class PipelineOrchestrator {
       }
     }
 
-    state.stageTimestamps.verifyStart = new Date().toISOString();
+    if (!state.stageTimestamps.verifyStart) {
+      state.stageTimestamps.verifyStart = new Date().toISOString();
+    }
 
     await this.bus.publish(
       createEvent("verification:start", runId, {
@@ -2267,6 +2339,13 @@ export class PipelineOrchestrator {
     await this.publishVerificationQueueDepth(state, runId);
 
     if (state.verifyTotal === 0) {
+      await this.finishVerificationAndRequestReport(state, runId);
+      return;
+    }
+
+    // Pipelined verifications may have already completed before startVerification ran.
+    // Now that verificationStarted is true, check if we're already done.
+    if (this.isVerificationDone(state)) {
       await this.finishVerificationAndRequestReport(state, runId);
       return;
     }
