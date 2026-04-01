@@ -100,14 +100,20 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     if (model.includes(":")) model = model.split(":").slice(1).join(":");
     const isHaiku = model.includes("haiku");
 
+    // Minimum cacheable tokens by model (below this, cache_control silently wastes the write premium)
+    const minCacheTokens = isHaiku || model.includes("opus") ? 4096 : 2048;
+
     const batchRequests = requests.map((req) => {
       const systemBlocks: Anthropic.TextBlockParam[] = [];
       const sysPrompt = req.systemPrompt ?? baseOptions.systemPromptPrefix;
       if (sysPrompt) {
+        const estimatedTokens = Math.ceil(sysPrompt.length / 4);
         systemBlocks.push({
           type: "text" as const,
           text: sysPrompt,
-          cache_control: { type: "ephemeral" as const, ttl: "1h" as const },
+          ...(estimatedTokens >= minCacheTokens
+            ? { cache_control: { type: "ephemeral" as const, ttl: "1h" as const } }
+            : {}),
         });
       }
 
@@ -222,13 +228,18 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     if (model.includes(":")) model = model.split(":").slice(1).join(":");
     const isHaiku = model.includes("haiku");
 
-    // Build system prompt with 1h cache TTL for pipeline-duration reuse
+    // Only apply cache_control when system prompt meets minimum token threshold.
+    // Below the minimum, caching silently fails and we waste the 1.25x write premium.
+    const minCacheTokens = isHaiku || model.includes("opus") ? 4096 : 2048;
     const systemBlocks: Anthropic.TextBlockParam[] = [];
     if (request.options.systemPromptPrefix) {
+      const estimatedTokens = Math.ceil(request.options.systemPromptPrefix.length / 4);
       systemBlocks.push({
         type: "text",
         text: request.options.systemPromptPrefix,
-        cache_control: { type: "ephemeral", ttl: "1h" },
+        ...(estimatedTokens >= minCacheTokens
+          ? { cache_control: { type: "ephemeral", ttl: "1h" } }
+          : {}),
       });
     }
 
@@ -259,6 +270,11 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       // Right-size max_tokens: classification tasks need minimal output
       const maxTokens = request.options.maxOutputTokens ?? 16000;
 
+      // Thinking: disable for classification, use adaptive+omitted for analysis
+      // display: "omitted" skips streaming thinking tokens (faster time-to-first-text)
+      const shouldDisableThinking = request.options.thinkingDisabled
+        || (request.options.effort === "low" && !isHaiku);
+
       // Use streaming + finalMessage() to avoid HTTP timeouts on large outputs
       const stream = this.client.messages.stream({
         model,
@@ -268,9 +284,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         system: systemBlocks.length > 0 ? systemBlocks : undefined,
         messages: [{ role: "user", content: request.prompt }],
         ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
-        ...(request.options.thinkingDisabled || (request.options.effort === "low" && !isHaiku)
-          ? { thinking: { type: "disabled" as const } }
-          : {}),
+        thinking: shouldDisableThinking
+          ? { type: "disabled" as const }
+          : { type: "adaptive" as const, display: "omitted" },
       });
 
       const response = await stream.finalMessage();
