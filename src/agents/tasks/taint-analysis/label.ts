@@ -464,10 +464,10 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
     }
 
     const labelsPath = path.join(preflight.workspaceDir, "labels", "labels.json");
-    await writeFile(labelsPath, JSON.stringify(labels, null, 2), "utf-8");
+    await writeFile(labelsPath, JSON.stringify(labels), "utf-8");
     const taintModel = buildTaintModelDocument(labels, tiPrior);
     const taintModelPath = path.join(preflight.workspaceDir, "labels", "TAINT_MODEL.json");
-    await writeFile(taintModelPath, JSON.stringify(taintModel, null, 2), "utf-8");
+    await writeFile(taintModelPath, JSON.stringify(taintModel), "utf-8");
     process.stderr.write(`[taint-analysis-label] Labels and taint model written\n`);
 
     const { labelCounts, reviewSummary } = summarizeLabels(labels, cfg.labelingConfidenceThreshold);
@@ -1637,7 +1637,7 @@ async function writePassCheckpointV2(
     generatedAt: new Date().toISOString(),
     entries,
   };
-  await writeFile(checkpointPath, JSON.stringify(payload, null, 2), "utf-8");
+  await writeFile(checkpointPath, JSON.stringify(payload), "utf-8");
 }
 
 function canonicalizeCandidateForFingerprint(candidate: TaintAnalysisCandidate): string {

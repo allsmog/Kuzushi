@@ -256,7 +256,7 @@ function applyDeterministicPatch(
   signalsByPass: Map<number, RefinementSignals>,
   confidenceCap: number,
 ): TaintAnalysisLabelsDocument {
-  const cloned = JSON.parse(JSON.stringify(labels)) as TaintAnalysisLabelsDocument;
+  const cloned = structuredClone(labels);
   for (const pass of cloned.passes) {
     const signal = signalsByPass.get(pass.pass_id);
     if (!signal) {

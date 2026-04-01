@@ -128,6 +128,8 @@ export const contextGathererTask: AgentTask<ScanOpts, ContextGathererOutput> = {
   },
 };
 
+const GREP_CONCURRENCY = 16;
+
 async function grepSecurityPatterns(
   repoRoot: string,
   files: WalkEntry[],
@@ -138,48 +140,58 @@ async function grepSecurityPatterns(
     result[domain] = [];
   }
 
-  for (const file of files) {
-    const absPath = path.join(repoRoot, file.relPath);
+  // Process files with bounded concurrency instead of sequentially
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < files.length) {
+      const idx = cursor++;
+      const file = files[idx];
+      const absPath = path.join(repoRoot, file.relPath);
 
-    let fileSize: number;
-    try {
-      const s = await stat(absPath);
-      fileSize = s.size;
-    } catch {
-      continue;
-    }
-    if (fileSize > MAX_GREP_FILE_SIZE) continue;
+      let fileSize: number;
+      try {
+        const s = await stat(absPath);
+        fileSize = s.size;
+      } catch {
+        continue;
+      }
+      if (fileSize > MAX_GREP_FILE_SIZE) continue;
 
-    let content: string;
-    try {
-      content = await readFile(absPath, "utf-8");
-    } catch {
-      continue;
-    }
+      let content: string;
+      try {
+        content = await readFile(absPath, "utf-8");
+      } catch {
+        continue;
+      }
 
-    const lines = content.split("\n");
+      const lines = content.split("\n");
 
-    for (const [domain, spec] of Object.entries(SECURITY_GREP_PATTERNS)) {
-      if (result[domain].length >= MAX_MATCHES_PER_DOMAIN) continue;
-      if (spec.fileFilter && !spec.fileFilter(file.relPath)) continue;
+      for (const [domain, spec] of Object.entries(SECURITY_GREP_PATTERNS)) {
+        if (result[domain].length >= MAX_MATCHES_PER_DOMAIN) continue;
+        if (spec.fileFilter && !spec.fileFilter(file.relPath)) continue;
 
-      for (let i = 0; i < lines.length; i++) {
-        if (result[domain].length >= MAX_MATCHES_PER_DOMAIN) break;
-        const line = lines[i];
-        for (const pattern of spec.patterns) {
-          if (pattern.test(line)) {
-            result[domain].push({
-              pattern: pattern.source,
-              filePath: file.relPath,
-              lineNumber: i + 1,
-              lineContent: line.slice(0, 200),
-            });
-            break; // one match per line per domain
+        for (let i = 0; i < lines.length; i++) {
+          if (result[domain].length >= MAX_MATCHES_PER_DOMAIN) break;
+          const line = lines[i];
+          for (const pattern of spec.patterns) {
+            if (pattern.test(line)) {
+              result[domain].push({
+                pattern: pattern.source,
+                filePath: file.relPath,
+                lineNumber: i + 1,
+                lineContent: line.slice(0, 200),
+              });
+              break; // one match per line per domain
+            }
           }
         }
       }
     }
-  }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(GREP_CONCURRENCY, files.length) }, () => worker()),
+  );
 
   return result;
 }
