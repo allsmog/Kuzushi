@@ -650,6 +650,7 @@ class ClaudeSession implements AgentSession {
   private queryIterator: AsyncIterator<SDKMessage> | null = null;
   private closed = false;
   private slotAcquired = false;
+  private queryInFlight = false; // Mutex: prevent concurrent query() calls
 
   constructor(
     private readonly baseOptions: AgentQueryOptions,
@@ -675,8 +676,10 @@ class ClaudeSession implements AgentSession {
       options.model = model;
     }
 
+    // Use `tools` to restrict available tools (not just auto-approve).
+    // Consistent with the query() method which also uses `tools`.
     if (this.baseOptions.allowedTools) {
-      options.allowedTools = this.baseOptions.allowedTools;
+      options.tools = this.baseOptions.allowedTools;
     }
     if (this.baseOptions.disallowedTools) {
       options.disallowedTools = this.baseOptions.disallowedTools;
@@ -741,60 +744,91 @@ class ClaudeSession implements AgentSession {
 
   async *query(prompt: string): AsyncIterable<AgentMessage> {
     if (this.closed) throw new Error("Session is closed");
+    if (this.queryInFlight) throw new Error("Session query already in flight — concurrent access is not supported");
 
-    // Acquire semaphore on first query only
-    if (!this.slotAcquired) {
-      await acquireSlot();
-      this.slotAcquired = true;
-    }
-
-    this.ensureStarted();
-
-    // Push user message into the queue
-    const userMessage: SDKUserMessage = {
-      type: "user",
-      session_id: "",
-      message: { role: "user", content: [{ type: "text", text: prompt }] },
-      parent_tool_use_id: null,
-    };
-    this.messageQueue.enqueue(userMessage);
-
-    // Read messages from the subprocess until we get a result for this turn
-    const iter = this.queryIterator!;
-    while (true) {
-      const { value, done } = await iter.next();
-      if (done) return;
-
-      const mapped = mapMessage(value);
-      if (!mapped) continue;
-
-      if (mapped.type === "result") {
-        const sdkMsg = value as Record<string, unknown>;
-        const totalCostUsd = normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined);
-        const numTurns = (sdkMsg["num_turns"] as number) ?? 0;
-
-        if (mapped.subtype === "success") {
-          yield {
-            type: "result",
-            subtype: "success",
-            result: mapped.result,
-            structuredOutput: sdkMsg["structured_output"],
-            numTurns,
-            totalCostUsd,
-          };
-        } else {
-          yield {
-            type: "result",
-            subtype: mapped.subtype,
-            errors: mapped.errors,
-            numTurns,
-            totalCostUsd,
-          };
-        }
-        return; // Turn complete — caller can call query() again for next turn
+    this.queryInFlight = true;
+    try {
+      // Acquire semaphore on first query only
+      if (!this.slotAcquired) {
+        await acquireSlot();
+        this.slotAcquired = true;
       }
 
-      yield mapped;
+      this.ensureStarted();
+
+      // Push user message into the queue
+      const userMessage: SDKUserMessage = {
+        type: "user",
+        session_id: "",
+        message: { role: "user", content: [{ type: "text", text: prompt }] },
+        parent_tool_use_id: null,
+      };
+      this.messageQueue.enqueue(userMessage);
+
+      // Read messages from the subprocess until we get a result for this turn
+      const iter = this.queryIterator!;
+      while (true) {
+        let value: SDKMessage;
+        let done: boolean | undefined;
+        try {
+          const next = await iter.next();
+          value = next.value;
+          done = next.done;
+        } catch (error) {
+          // Subprocess crashed — yield error and bail
+          yield {
+            type: "result",
+            subtype: "error_runtime",
+            errors: [`Session subprocess crashed: ${toErrorMessage(error)}`],
+            totalCostUsd: 0,
+          };
+          return;
+        }
+
+        if (done) {
+          // Subprocess exited unexpectedly — yield error
+          yield {
+            type: "result",
+            subtype: "error_runtime",
+            errors: ["Session subprocess exited unexpectedly"],
+            totalCostUsd: 0,
+          };
+          return;
+        }
+
+        const mapped = mapMessage(value);
+        if (!mapped) continue;
+
+        if (mapped.type === "result") {
+          const sdkMsg = value as Record<string, unknown>;
+          const totalCostUsd = normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined);
+          const numTurns = (sdkMsg["num_turns"] as number) ?? 0;
+
+          if (mapped.subtype === "success") {
+            yield {
+              type: "result",
+              subtype: "success",
+              result: mapped.result,
+              structuredOutput: sdkMsg["structured_output"],
+              numTurns,
+              totalCostUsd,
+            };
+          } else {
+            yield {
+              type: "result",
+              subtype: mapped.subtype,
+              errors: mapped.errors,
+              numTurns,
+              totalCostUsd,
+            };
+          }
+          return; // Turn complete — caller can call query() again for next turn
+        }
+
+        yield mapped;
+      }
+    } finally {
+      this.queryInFlight = false;
     }
   }
 

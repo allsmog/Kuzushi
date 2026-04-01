@@ -1,6 +1,11 @@
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
+/** Sanitize a path component to prevent traversal (strip slashes, .., etc.) */
+function sanitizeComponent(value: string): string {
+  return path.basename(value.replace(/[/\\]/g, "_"));
+}
+
 /**
  * Write batch data to `.kuzushi/batches/<runId>/<taskId>-<batchIdx>.json`.
  * Returns the absolute path to the written file so the subprocess can `Read` it.
@@ -12,9 +17,11 @@ export function writeBatchFile(
   batchIdx: number,
   data: unknown,
 ): string {
-  const dir = path.join(repoRoot, ".kuzushi", "batches", runId);
+  const safeRunId = sanitizeComponent(runId);
+  const safeTaskId = sanitizeComponent(taskId);
+  const dir = path.join(repoRoot, ".kuzushi", "batches", safeRunId);
   mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `${taskId}-${String(batchIdx).padStart(4, "0")}.json`);
+  const filePath = path.join(dir, `${safeTaskId}-${String(batchIdx).padStart(4, "0")}.json`);
   writeFileSync(filePath, JSON.stringify(data, null, 2));
   return filePath;
 }
@@ -23,6 +30,7 @@ export function writeBatchFile(
  * Remove all batch files for a given run.
  */
 export function cleanupBatchFiles(repoRoot: string, runId: string): void {
-  const dir = path.join(repoRoot, ".kuzushi", "batches", runId);
+  const safeRunId = sanitizeComponent(runId);
+  const dir = path.join(repoRoot, ".kuzushi", "batches", safeRunId);
   rmSync(dir, { recursive: true, force: true });
 }
