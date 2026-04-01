@@ -296,7 +296,7 @@ export const DEFAULT_TAINT_ANALYSIS_TASK_CONFIG: TaintAnalysisTaskConfig = {
   taintAnalysisPath: DEFAULT_TAINT_ANALYSIS_PATH,
   dbPath: undefined,
   passes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-  labelingModel: "anthropic:claude-sonnet-4-6",
+  labelingModel: "anthropic:claude-haiku-4-5",
   extractionModel: undefined,
   labelingBatchSize: 20,
   labelingConfidenceThreshold: 0.55,

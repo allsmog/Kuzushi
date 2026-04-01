@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import {
   query as claudeQuery,
   type Options as ClaudeOptions,
@@ -78,7 +79,125 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     return new ClaudeSession(baseOptions, this.config, this.bus, this.runId);
   }
 
+  /**
+   * Direct Anthropic API call for tool-less queries. Skips the Claude Code
+   * subprocess entirely — no spawn overhead, no tool initialization.
+   * Uses prompt caching via cache_control for the system prompt.
+   */
+  private async *queryDirect(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    const startedAtMs = Date.now();
+    const turnRunId = this.runId ?? "";
+
+    // Strip provider prefix
+    let model = request.options.model ?? "claude-sonnet-4-6";
+    if (model.includes(":")) model = model.split(":").slice(1).join(":");
+
+    const apiKey = this.config?.apiKey ?? process.env["ANTHROPIC_API_KEY"];
+    const baseURL = this.config?.baseUrl;
+    const client = new Anthropic({ apiKey, baseURL });
+
+    // Build system prompt with cache_control for reuse across calls
+    const systemBlocks: Anthropic.TextBlockParam[] = [];
+    if (request.options.systemPromptPrefix) {
+      systemBlocks.push({
+        type: "text",
+        text: request.options.systemPromptPrefix,
+        cache_control: { type: "ephemeral" },
+      });
+    }
+
+    // Emit llm:call-start
+    if (this.bus) {
+      try {
+        await this.bus.publish<LlmCallStartEvent>({
+          type: "llm:call-start",
+          meta: { id: crypto.randomUUID(), timestamp: new Date().toISOString(), runId: turnRunId },
+          payload: { model, promptLength: request.prompt.length, runId: turnRunId },
+        });
+      } catch { /* non-fatal */ }
+    }
+
+    try {
+      const response = await client.messages.create({
+        model,
+        max_tokens: request.options.maxOutputTokens ?? 16000,
+        temperature: request.options.temperature,
+        system: systemBlocks.length > 0 ? systemBlocks : undefined,
+        messages: [{ role: "user", content: request.prompt }],
+        ...(request.options.outputFormat ? {
+          output_config: {
+            format: {
+              type: "json_schema" as const,
+              schema: request.options.outputFormat.schema,
+            },
+          },
+        } : {}),
+      });
+
+      const durationMs = Date.now() - startedAtMs;
+
+      // Extract cost from usage
+      const inputCost = (response.usage.input_tokens / 1_000_000) * 3; // Sonnet default
+      const outputCost = (response.usage.output_tokens / 1_000_000) * 15;
+      const cacheSavings = ((response.usage as unknown as Record<string, unknown>)["cache_read_input_tokens"] as number ?? 0) / 1_000_000 * 2.7; // 90% savings
+      const totalCostUsd = normalizeCostUsd(inputCost + outputCost - cacheSavings);
+
+      // Extract text result
+      const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
+      const resultText = textBlock?.text ?? "";
+
+      // Emit llm:call-complete
+      if (this.bus) {
+        try {
+          await this.bus.publish<LlmCallCompleteEvent>({
+            type: "llm:call-complete",
+            meta: { id: crypto.randomUUID(), timestamp: new Date().toISOString(), runId: turnRunId },
+            payload: { model, durationMs, tokensUsed: response.usage.input_tokens + response.usage.output_tokens, costUsd: totalCostUsd, runId: turnRunId },
+          });
+        } catch { /* non-fatal */ }
+      }
+
+      yield {
+        type: "result",
+        subtype: "success",
+        result: resultText,
+        structuredOutput: (response as unknown as Record<string, unknown>)["parsed_output"] ?? undefined,
+        durationMs,
+        numTurns: 1,
+        totalCostUsd,
+      };
+    } catch (error) {
+      const durationMs = Date.now() - startedAtMs;
+      log.error(`Direct API query failed (${durationMs}ms): ${toErrorMessage(error)}`);
+
+      if (this.bus) {
+        try {
+          await this.bus.publish<LlmCallErrorEvent>({
+            type: "llm:call-error",
+            meta: { id: crypto.randomUUID(), timestamp: new Date().toISOString(), runId: turnRunId },
+            payload: { model, error: toErrorMessage(error), retryable: false, runId: turnRunId },
+          });
+        } catch { /* non-fatal */ }
+      }
+
+      yield {
+        type: "result",
+        subtype: "error_runtime",
+        errors: [toErrorMessage(error)],
+        durationMs,
+        numTurns: 0,
+        totalCostUsd: 0,
+      };
+    }
+  }
+
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    // Fast path: tool-less calls go directly to Anthropic API — no subprocess
+    if (!request.options.allowedTools?.length && !request.options.disallowedTools?.length) {
+      yield* this.queryDirect(request);
+      return;
+    }
+
     await acquireSlot();
     const startedAtMs = Date.now();
     let totalCostUsd = 0;

@@ -12,7 +12,7 @@ export const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.t
 
 export const DEFAULTS: KuzushiConfig = {
   model: "anthropic:claude-sonnet-4-6",
-  triageBatchModel: undefined,
+  triageBatchModel: "anthropic:claude-haiku-4-5",
   verify: false,
   verifyMaxTurns: undefined,
   verifyConcurrency: 3,

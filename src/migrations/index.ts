@@ -22,6 +22,7 @@ import { migration018 } from "./018_add_crypto_behavioral_runs.js";
 import { migration019 } from "./019_add_code_graph_tables.js";
 import { migration020 } from "./020_add_verified_patch_status.js";
 import { migration021 } from "./021_add_incremental_scanning_support.js";
+import { migration022 } from "./022_add_verdict_index.js";
 import type { Migration } from "./types.js";
 
 /** All registered migrations in version order. */
@@ -47,4 +48,5 @@ export const allMigrations: Migration[] = [
   migration019,
   migration020,
   migration021,
+  migration022,
 ];
