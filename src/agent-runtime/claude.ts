@@ -70,11 +70,16 @@ function releaseSlot(): void {
 export class ClaudeAgentRuntime implements AgentRuntime {
   readonly id = "claude";
   private readonly config: AgentRuntimeConfig | undefined;
+  private readonly client: Anthropic;
   bus: MessageBus | null = null;
   runId: string | null = null;
 
   constructor(config?: AgentRuntimeConfig) {
     this.config = config;
+    this.client = new Anthropic({
+      apiKey: config?.apiKey,
+      baseURL: config?.baseUrl,
+    });
   }
 
   createSession(baseOptions: AgentQueryOptions): AgentSession {
@@ -90,10 +95,6 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     baseOptions: AgentQueryOptions,
   ): Promise<Map<string, AgentQueryExecutionResult>> {
     if (requests.length === 0) return new Map();
-
-    const apiKey = this.config?.apiKey ?? process.env["ANTHROPIC_API_KEY"];
-    const baseURL = this.config?.baseUrl;
-    const client = new Anthropic({ apiKey, baseURL });
 
     let model = baseOptions.model ?? "claude-sonnet-4-6";
     if (model.includes(":")) model = model.split(":").slice(1).join(":");
@@ -125,10 +126,11 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       const params: Anthropic.MessageCreateParamsNonStreaming = {
         model,
         max_tokens: baseOptions.maxOutputTokens ?? 16000,
-        temperature: baseOptions.temperature,
+        temperature: baseOptions.temperature ?? 0,
         system: systemBlocks.length > 0 ? systemBlocks : undefined,
         messages: [{ role: "user" as const, content: req.prompt }],
         stream: false,
+        service_tier: "standard_only",
         ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
         ...(baseOptions.thinkingDisabled || (baseOptions.effort === "low" && !isHaiku)
           ? { thinking: { type: "disabled" as const } }
@@ -139,7 +141,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     });
 
     log.info(`Submitting batch of ${batchRequests.length} requests`);
-    let batch = await client.messages.batches.create({ requests: batchRequests });
+    let batch = await this.client.messages.batches.create({ requests: batchRequests });
     log.info(`Batch ${batch.id} submitted, polling for completion`);
 
     const startMs = Date.now();
@@ -148,9 +150,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
     while (batch.processing_status !== "ended") {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-      batch = await client.messages.batches.retrieve(batch.id);
+      batch = await this.client.messages.batches.retrieve(batch.id);
       if (Date.now() - startMs > MAX_POLL_MS) {
-        await client.messages.batches.cancel(batch.id);
+        await this.client.messages.batches.cancel(batch.id);
         throw new Error(`Batch ${batch.id} timed out after ${MAX_POLL_MS}ms`);
       }
     }
@@ -160,7 +162,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
     // Stream results
     const results = new Map<string, AgentQueryExecutionResult>();
-    const decoder = await client.messages.batches.results(batch.id);
+    const decoder = await this.client.messages.batches.results(batch.id);
 
     // Model-aware pricing at batch rate (50% of standard)
     const inputRate = (isHaiku ? 1 : model.includes("opus") ? 5 : 3) * 0.5;
@@ -220,10 +222,6 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     if (model.includes(":")) model = model.split(":").slice(1).join(":");
     const isHaiku = model.includes("haiku");
 
-    const apiKey = this.config?.apiKey ?? process.env["ANTHROPIC_API_KEY"];
-    const baseURL = this.config?.baseUrl;
-    const client = new Anthropic({ apiKey, baseURL });
-
     // Build system prompt with 1h cache TTL for pipeline-duration reuse
     const systemBlocks: Anthropic.TextBlockParam[] = [];
     if (request.options.systemPromptPrefix) {
@@ -262,10 +260,11 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       const maxTokens = request.options.maxOutputTokens ?? 16000;
 
       // Use streaming + finalMessage() to avoid HTTP timeouts on large outputs
-      const stream = client.messages.stream({
+      const stream = this.client.messages.stream({
         model,
         max_tokens: maxTokens,
-        temperature: request.options.temperature,
+        temperature: request.options.temperature ?? 0,
+        metadata: { user_id: turnRunId || "kuzushi" },
         system: systemBlocks.length > 0 ? systemBlocks : undefined,
         messages: [{ role: "user", content: request.prompt }],
         ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
@@ -276,6 +275,23 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
       const response = await stream.finalMessage();
       const durationMs = Date.now() - startedAtMs;
+
+      // Check stop_reason for truncation or refusal
+      if (response.stop_reason === "refusal") {
+        log.warn(`Model refused request (${model}, ${durationMs}ms)`);
+        yield {
+          type: "result",
+          subtype: "error_runtime",
+          errors: ["Model refused the request for safety reasons"],
+          durationMs,
+          numTurns: 0,
+          totalCostUsd: 0,
+        };
+        return;
+      }
+      if (response.stop_reason === "max_tokens") {
+        log.warn(`Response truncated at ${maxTokens} max_tokens (${model}, ${durationMs}ms)`);
+      }
 
       // Extract cost from usage (model-aware pricing)
       const inputRate = isHaiku ? 1 : model.includes("opus") ? 5 : 3;
@@ -376,29 +392,12 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       options.disallowedTools = request.options.disallowedTools;
     }
 
-    // Structured output — enforce JSON schema and add system prompt reinforcement.
-    // The Claude SDK subprocess doesn't always enforce structured output when tools
-    // are also active, so we add explicit instructions to the system prompt.
+    // Structured output — pass schema to SDK which handles enforcement natively.
+    // No system prompt injection needed — the SDK enforces the schema directly.
     if (request.options.outputFormat) {
       options.outputFormat = {
         type: "json_schema",
         schema: request.options.outputFormat.schema,
-      };
-      // Reinforce JSON-only output in the system prompt to prevent prose responses
-      const jsonEnforcement = [
-        "CRITICAL: You MUST return your final response as a valid JSON object matching the provided schema.",
-        "Do NOT wrap the JSON in markdown code fences. Do NOT include any text before or after the JSON.",
-        "After using tools to investigate, respond with ONLY the JSON result.",
-      ].join(" ");
-      const existingPrefix = request.options.systemPromptPrefix ?? "";
-      request = {
-        ...request,
-        options: {
-          ...request.options,
-          systemPromptPrefix: existingPrefix
-            ? `${jsonEnforcement}\n\n${existingPrefix}`
-            : jsonEnforcement,
-        },
       };
     }
 
