@@ -8,7 +8,7 @@ import type {
 import type { RepoContext } from "../types.js";
 import { inflightCache } from "../cache.js";
 import { isRecord } from "../utils.js";
-import type { AgentRuntime, AgentSession } from "./types.js";
+import type { AgentEffort, AgentRuntime, AgentSession } from "./types.js";
 
 export const DEFAULT_READ_ONLY_TOOLS = [
   "Read",
@@ -55,6 +55,10 @@ export interface AgentRuntimeOptions {
   bus?: MessageBus;
   /** Optional run ID for correlating observability events. */
   runId?: string;
+  /** Controls thinking depth: low = fast/cheap, high = deep reasoning. */
+  effort?: AgentEffort;
+  /** Disable extended thinking entirely. */
+  thinkingDisabled?: boolean;
 }
 
 export interface AgentQueryExecutionResult {
@@ -172,6 +176,8 @@ async function executeStructuredAgentQuery(
         abortController: args.runtimeOptions?.abortController,
         history: args.runtimeOptions?.history,
         systemPromptPrefix: args.systemPromptPrefix,
+        effort: args.runtimeOptions?.effort,
+        thinkingDisabled: args.runtimeOptions?.thinkingDisabled,
         outputFormat: {
           type: "json_schema",
           schema: args.schema,

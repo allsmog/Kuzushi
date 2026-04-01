@@ -14,6 +14,8 @@ export interface AgentHistoryEntry {
   content: string;
 }
 
+export type AgentEffort = "low" | "medium" | "high";
+
 export interface AgentQueryOptions {
   cwd: string;
   model: string;
@@ -33,6 +35,12 @@ export interface AgentQueryOptions {
   };
   /** Static content prepended to the system prompt. Cached by Anthropic's prompt caching. */
   systemPromptPrefix?: string;
+  /** Controls thinking depth. low = fast/cheap, high = deep reasoning. */
+  effort?: AgentEffort;
+  /** Disable extended thinking entirely (overrides effort). */
+  thinkingDisabled?: boolean;
+  /** Fallback model if primary fails or is unavailable. */
+  fallbackModel?: string;
   canUseTool?: (
     toolName: string,
     input: Record<string, unknown>,

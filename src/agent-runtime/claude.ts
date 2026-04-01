@@ -118,20 +118,25 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     }
 
     try {
+      const outputConfig: Record<string, unknown> = {};
+      if (request.options.outputFormat) {
+        outputConfig.format = {
+          type: "json_schema" as const,
+          schema: request.options.outputFormat.schema,
+        };
+      }
+      if (request.options.effort) {
+        outputConfig.effort = request.options.effort;
+      }
+
       const response = await client.messages.create({
         model,
         max_tokens: request.options.maxOutputTokens ?? 16000,
         temperature: request.options.temperature,
         system: systemBlocks.length > 0 ? systemBlocks : undefined,
         messages: [{ role: "user", content: request.prompt }],
-        ...(request.options.outputFormat ? {
-          output_config: {
-            format: {
-              type: "json_schema" as const,
-              schema: request.options.outputFormat.schema,
-            },
-          },
-        } : {}),
+        ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
+        ...(request.options.thinkingDisabled ? { thinking: { type: "disabled" as const } } : {}),
       });
 
       const durationMs = Date.now() - startedAtMs;
@@ -289,8 +294,21 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       options.abortController = request.options.abortController;
     }
 
-    // Thinking — disable for structured output tasks (cheaper, faster)
-    if (request.options.outputFormat) {
+    // Fallback model
+    if (request.options.fallbackModel) {
+      const fallback = request.options.fallbackModel.includes(":")
+        ? request.options.fallbackModel.split(":").slice(1).join(":")
+        : request.options.fallbackModel;
+      options.fallbackModel = fallback;
+    }
+
+    // Effort level
+    if (request.options.effort) {
+      options.effort = request.options.effort;
+    }
+
+    // Thinking — disable only when explicitly requested or for low-effort classification
+    if (request.options.thinkingDisabled || request.options.effort === "low") {
       options.thinking = { type: "disabled" };
     }
 
@@ -526,7 +544,21 @@ class ClaudeSession implements AgentSession {
       };
     }
 
-    if (this.baseOptions.outputFormat) {
+    // Fallback model
+    if (this.baseOptions.fallbackModel) {
+      const fallback = this.baseOptions.fallbackModel.includes(":")
+        ? this.baseOptions.fallbackModel.split(":").slice(1).join(":")
+        : this.baseOptions.fallbackModel;
+      options.fallbackModel = fallback;
+    }
+
+    // Effort level
+    if (this.baseOptions.effort) {
+      options.effort = this.baseOptions.effort;
+    }
+
+    // Thinking — disable only when explicitly requested or for low-effort classification
+    if (this.baseOptions.thinkingDisabled || this.baseOptions.effort === "low") {
       options.thinking = { type: "disabled" };
     }
 
