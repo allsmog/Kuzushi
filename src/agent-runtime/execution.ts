@@ -1,5 +1,5 @@
 import type { MessageBus } from "../bus/types.js";
-import type { AgentHistoryEntry } from "./types.js";
+import type { AgentHistoryEntry, AgentSession } from "./types.js";
 import type {
   LlmCallStartEvent,
   LlmCallCompleteEvent,
@@ -7,7 +7,10 @@ import type {
 } from "../bus/events.js";
 import type { RepoContext } from "../types.js";
 import { inflightCache } from "../cache.js";
-import { isRecord } from "../utils.js";
+import { isRecord, toErrorMessage } from "../utils.js";
+import { getLogger } from "../logger.js";
+
+const log = getLogger("batch-fallback");
 import type { AgentBatchRequest, AgentEffort, AgentRuntime, AgentSession } from "./types.js";
 
 export const DEFAULT_READ_ONLY_TOOLS = [
@@ -59,6 +62,8 @@ export interface AgentRuntimeOptions {
   effort?: AgentEffort;
   /** Disable extended thinking entirely. */
   thinkingDisabled?: boolean;
+  /** Reuse an existing session instead of spawning a new subprocess per call. */
+  session?: AgentSession;
 }
 
 export interface AgentQueryExecutionResult {
@@ -163,29 +168,35 @@ async function executeStructuredAgentQuery(
   }
 
   try {
-    for await (const message of runtime.query({
-      prompt: args.prompt,
-      options: {
-        cwd: args.cwd,
-        model: args.model,
-        temperature: args.runtimeOptions?.temperature,
-        maxOutputTokens: args.runtimeOptions?.maxOutputTokens,
-        allowedTools: [...args.allowedTools],
-        permissionMode: "dontAsk",
-        maxBudgetUsd: args.runtimeOptions?.maxBudgetUsd,
-        abortController: args.runtimeOptions?.abortController,
-        history: args.runtimeOptions?.history,
-        systemPromptPrefix: args.systemPromptPrefix,
-        effort: args.runtimeOptions?.effort,
-        thinkingDisabled: args.runtimeOptions?.thinkingDisabled,
-        outputFormat: {
-          type: "json_schema",
-          schema: args.schema,
-          strict: args.strict,
-          retryInvalidStructuredOutput: args.retryInvalidStructuredOutput,
-        },
-      },
-    })) {
+    // Use existing session if available (avoids spawning a new subprocess)
+    const session = args.runtimeOptions?.session;
+    const messageStream = session
+      ? session.query(args.prompt)
+      : runtime.query({
+          prompt: args.prompt,
+          options: {
+            cwd: args.cwd,
+            model: args.model,
+            temperature: args.runtimeOptions?.temperature,
+            maxOutputTokens: args.runtimeOptions?.maxOutputTokens,
+            allowedTools: [...args.allowedTools],
+            permissionMode: "dontAsk",
+            maxBudgetUsd: args.runtimeOptions?.maxBudgetUsd,
+            abortController: args.runtimeOptions?.abortController,
+            history: args.runtimeOptions?.history,
+            systemPromptPrefix: args.systemPromptPrefix,
+            effort: args.runtimeOptions?.effort,
+            thinkingDisabled: args.runtimeOptions?.thinkingDisabled,
+            outputFormat: {
+              type: "json_schema",
+              schema: args.schema,
+              strict: args.strict,
+              retryInvalidStructuredOutput: args.retryInvalidStructuredOutput,
+            },
+          },
+        });
+
+    for await (const message of messageStream) {
       if (message.type === "assistant") {
         await emitAssistantActivity(message.content, args.runtimeOptions?.activityCallback);
         continue;
@@ -366,22 +377,29 @@ export async function runStructuredBatchQuery(
     throw new Error("Agent runtime is required for batch queries.");
   }
 
-  // Use batch API if available
+  // Use batch API if available, fall back to sequential on endpoint errors (e.g. proxy 404)
   if (runtime.queryBatch) {
-    return runtime.queryBatch(
-      requests.map((r) => ({ id: r.id, prompt: r.prompt, systemPrompt: r.systemPrompt })),
-      {
-        cwd: args.cwd,
-        model: args.model,
-        outputFormat: { type: "json_schema", schema: args.schema },
-        effort: args.effort,
-        thinkingDisabled: args.thinkingDisabled,
-        permissionMode: "dontAsk",
-      },
-    );
+    try {
+      return await runtime.queryBatch(
+        requests.map((r) => ({ id: r.id, prompt: r.prompt, systemPrompt: r.systemPrompt })),
+        {
+          cwd: args.cwd,
+          model: args.model,
+          outputFormat: { type: "json_schema", schema: args.schema },
+          effort: args.effort,
+          thinkingDisabled: args.thinkingDisabled,
+          permissionMode: "dontAsk",
+        },
+      );
+    } catch (err) {
+      log.warn(`Batch API failed, falling back to sequential: ${toErrorMessage(err)}`);
+    }
   }
 
-  // Fallback: run sequentially
+  // Fallback: run sequentially.
+  // Do NOT carry over temperature=0 from batch settings — the Batch API
+  // handles temperature internally, but sequential queries with thinking
+  // enabled require temperature=1 (or omitted to use the default).
   const results = new Map<string, AgentQueryExecutionResult>();
   for (const req of requests) {
     const result = await runStructuredAgentQuery({
@@ -389,7 +407,10 @@ export async function runStructuredBatchQuery(
       cwd: args.cwd,
       model: args.model,
       allowedTools: [],
-      runtimeOptions: args.runtimeOptions,
+      runtimeOptions: {
+        ...args.runtimeOptions,
+        temperature: undefined,
+      },
       systemPromptPrefix: req.systemPrompt,
       schema: args.schema,
     });

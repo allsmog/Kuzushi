@@ -3,7 +3,7 @@ import type { AgentActivity } from "../../agent-runtime/execution.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { generatePocHarness } from "../../poc-harness.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
-import { verifyFindingWithAgent, verifyFindingsBatch, VerificationExecutionError } from "../../verify.js";
+import { verifyFindingWithAgent, verifyFindingsBatch, VerificationExecutionError, resolveDefaultVerificationTools, verificationSystemPromptPrefix, VERIFICATION_RESULT_SCHEMA } from "../../verify.js";
 import { withRetry } from "../../retry.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
 import type { KuzushiConfig, VerificationResult } from "../../types.js";
@@ -259,11 +259,29 @@ async function verifyWithRefinement(
   const repoContextValue = coerceRepoContext(repoContext);
   const enrichedContextValue = coerceContextEnrichment(enrichedContext);
   const executor = maxIterations > 1
-    ? await createPocExecutor(config.pocSandbox ?? "docker", config.pocExecTimeoutMs)
+    ? await createPocExecutor(config.pocSandbox ?? "process", config.pocExecTimeoutMs)
     : undefined;
+
+  // Create a session to reuse one subprocess across all refinement iterations
+  const session = maxIterations > 1 && runtime?.createSession
+    ? runtime.createSession({
+        cwd: repoRoot,
+        model: verifyModel,
+        allowedTools: resolveDefaultVerificationTools(runtime, true),
+        permissionMode: "dontAsk",
+        outputFormat: {
+          type: "json_schema",
+          schema: VERIFICATION_RESULT_SCHEMA as unknown as Record<string, unknown>,
+          strict: true,
+        },
+        systemPromptPrefix: verificationSystemPromptPrefix(repoContextValue, enrichedContextValue, extraPromptContext, true),
+      })
+    : undefined;
+
   let totalCostUsd = 0;
   let latestResult: VerificationResult | undefined;
 
+  try {
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
     const verified = await withRetry(
       async () => {
@@ -277,6 +295,7 @@ async function verifyWithRefinement(
           repoContextValue,
           {
             runtime,
+            session,
             enrichedContext: enrichedContextValue,
             history: verificationHistory,
             activityCallback,
@@ -352,6 +371,9 @@ async function verifyWithRefinement(
   }
 
   return { result: latestResult, costUsd: totalCostUsd };
+  } finally {
+    await session?.close();
+  }
 }
 
 async function buildVerificationFeedback(

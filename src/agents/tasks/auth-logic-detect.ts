@@ -4,6 +4,7 @@ import type { Finding } from "../../scanners/types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask, TaskContext } from "../types.js";
 import { resolveTaskRuntime, resolveTaskModel } from "./runtime-overrides.js";
+import { resolveThreatModelOutput } from "./threat-model-guidance.js";
 import { getLogger } from "../../logger.js";
 import { createHash } from "node:crypto";
 
@@ -53,7 +54,7 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
   id: "auth-logic-detect",
   displayName: "Authorization Logic Detector",
   outputKind: "findings",
-  dependsOn: ["context-gatherer", "app-model-build", "threat-model-stride"],
+  dependsOn: ["context-gatherer", "app-model-build"],
 
   async run(_input, context): Promise<Finding[]> {
     const model = resolveTaskModel(context);
@@ -61,7 +62,7 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
 
     // Gather upstream data
     const appModel = context.upstreamOutputs.get("app-model-build");
-    const strideOutput = context.upstreamOutputs.get("threat-model-stride");
+    const strideOutput = resolveThreatModelOutput(context.upstreamOutputs);
 
     if (!appModel && !strideOutput) {
       log.info("No app model or STRIDE output available — skipping auth logic detection");

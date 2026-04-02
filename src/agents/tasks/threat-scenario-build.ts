@@ -1,4 +1,5 @@
 import type { ThreatModelDocument } from "./threat-modeling/types.js";
+import { resolveThreatModelOutput } from "./threat-model-guidance.js";
 import { isRecord } from "../../utils.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type {
@@ -78,11 +79,11 @@ export const threatScenarioBuildTask: AgentTask<unknown, ThreatScenarioBuildOutp
   id: "threat-scenario-build",
   displayName: "Threat Scenario Builder",
   outputKind: "custom",
-  dependsOn: ["app-model-build", "threat-model-stride"],
+  dependsOn: ["app-model-build"],
 
   async run(_input, context): Promise<ThreatScenarioBuildOutput> {
     const appModel = asApplicationModel(context.upstreamOutputs.get("app-model-build"));
-    const strideOutput = asStrideDocument(context.upstreamOutputs.get("threat-model-stride"));
+    const strideOutput = asStrideDocument(resolveThreatModelOutput(context.upstreamOutputs));
     if (!appModel || !strideOutput) {
       return attachTaskOutputMeta({ scenarios: [] }, { costUsd: 0 });
     }

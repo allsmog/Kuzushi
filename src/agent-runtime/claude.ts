@@ -52,17 +52,31 @@ const MAX_CONCURRENT_QUERIES = 5;
 let activeQueries = 0;
 const waitQueue: Array<() => void> = [];
 
+const SLOT_TIMEOUT_MS = 600_000; // 10 minutes max wait for a slot
+
 async function acquireSlot(): Promise<void> {
   if (activeQueries < MAX_CONCURRENT_QUERIES) {
     activeQueries++;
     return;
   }
-  await new Promise<void>((resolve) => waitQueue.push(resolve));
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      // Remove from queue and force-acquire — a subprocess likely died without releasing
+      const idx = waitQueue.indexOf(resolve);
+      if (idx >= 0) waitQueue.splice(idx, 1);
+      log.warn("Semaphore slot timeout — force-acquiring (likely leaked slot from dead subprocess)");
+      resolve();
+    }, SLOT_TIMEOUT_MS);
+    waitQueue.push(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
   activeQueries++;
 }
 
 function releaseSlot(): void {
-  activeQueries--;
+  activeQueries = Math.max(0, activeQueries - 1);
   const next = waitQueue.shift();
   if (next) next();
 }
@@ -446,6 +460,11 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     delete env.CLAUDE_CODE_SESSION_ID;
     options.env = env;
 
+    // Plugins — load Claude Code plugins in the subprocess
+    if (request.options.plugins && request.options.plugins.length > 0) {
+      options.plugins = request.options.plugins;
+    }
+
     // Abort controller
     if (request.options.abortController) {
       options.abortController = request.options.abortController;
@@ -731,6 +750,11 @@ class ClaudeSession implements AgentSession {
 
     if (this.baseOptions.abortController) {
       options.abortController = this.baseOptions.abortController;
+    }
+
+    // Plugins — load Claude Code plugins in the subprocess
+    if (this.baseOptions.plugins && this.baseOptions.plugins.length > 0) {
+      options.plugins = this.baseOptions.plugins;
     }
 
     // Pass the async message queue as prompt — SDK keeps one subprocess alive

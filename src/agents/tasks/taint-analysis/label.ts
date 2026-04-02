@@ -834,7 +834,6 @@ async function triageSinkRelevance(
       model,
       schema: TRIAGE_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
       runtimeOptions: { runtime },
-      thinkingDisabled: true,
     });
 
     for (const [reqId, result] of resultsMap) {

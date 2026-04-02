@@ -86,20 +86,25 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     config.enabledTasks ?? [],
   );
 
-  const missingCredentials = validatePiAiProviderCredentials(activeModels, {
-    anthropicApiKey: config.agentRuntimeConfig?.apiKey,
-  });
+  // Skip credential check for Claude Agent SDK runtime — it handles auth
+  // internally via OAuth (the subprocess resolves credentials from ~/.claude/).
+  const isClaudeRuntime = (config.agentRuntimeBackend ?? "claude") === "claude";
+  if (!isClaudeRuntime) {
+    const missingCredentials = validatePiAiProviderCredentials(activeModels, {
+      anthropicApiKey: config.agentRuntimeConfig?.apiKey,
+    });
 
-  if (missingCredentials.length > 0) {
-    const details = missingCredentials.map(
-      (entry) => `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] (used by: ${entry.models.join(", ")})`,
-    );
-    if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
-      details.push(
-        "Tip: for Anthropic models, you can also set agentRuntimeConfig.apiKey or pass --api-key for this run.",
+    if (missingCredentials.length > 0) {
+      const details = missingCredentials.map(
+        (entry) => `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] (used by: ${entry.models.join(", ")})`,
       );
+      if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
+        details.push(
+          "Tip: for Anthropic models, you can also set agentRuntimeConfig.apiKey or pass --api-key for this run.",
+        );
+      }
+      throw new CliConfigError("missing API credentials for selected model provider(s):", { details });
     }
-    throw new CliConfigError("missing API credentials for selected model provider(s):", { details });
   }
 
   warnPiAiBackendApiKeys(activeModels, {

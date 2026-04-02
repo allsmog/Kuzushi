@@ -45,6 +45,11 @@ const TASK_FILE_SPECS: Record<string, TaskFileSpec> = {
   "supply-chain-detect": {
     namePatterns: [/package\.json$/, /package-lock\.json$/, /go\.mod$/, /go\.sum$/, /requirements\.txt$/, /Cargo\.toml$/, /Cargo\.lock$/, /pom\.xml$/, /build\.gradle/],
   },
+  "sharp-edges-detect": {
+    namePatterns: [/config\./, /\.env/, /default/, /options\./],
+    patternDomains: ["config-security", "crypto-import"],
+    pathFilter: (p) => /config|option|setting|default|init|setup|crypto|auth|session/i.test(p),
+  },
 };
 
 export function getTaskFileSpec(taskId: string): TaskFileSpec | undefined {

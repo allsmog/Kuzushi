@@ -2962,7 +2962,7 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
-  it("threat-model-pasta transitive dep does not pull stride back in when neither is recommended", async () => {
+  it("threat-model-randori does not run when not recommended by task-selector", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
@@ -2999,30 +2999,20 @@ describe("PipelineOrchestrator", () => {
         return [makeFinding("fp-secrets-only", 80)];
       },
     };
-    const strideTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "threat-model-stride",
-      displayName: "STRIDE Threat Model",
+    const randoriTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "threat-model-randori",
+      displayName: "Randori PASTA Threat Model",
       outputKind: "findings",
       dependsOn: ["context-gatherer"],
       async run() {
-        return [makeFinding("fp-stride", 70)];
-      },
-    };
-    const pastaTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "threat-model-pasta",
-      displayName: "PASTA Threat Model",
-      outputKind: "findings",
-      dependsOn: ["threat-model-stride"],
-      async run() {
-        return [makeFinding("fp-pasta", 60)];
+        return [makeFinding("fp-randori", 70)];
       },
     };
 
     taskRegistry.register(contextTask);
     taskRegistry.register(selectorTask);
     taskRegistry.register(secretsCryptoTask);
-    taskRegistry.register(strideTask);
-    taskRegistry.register(pastaTask);
+    taskRegistry.register(randoriTask);
 
     registerScanWorker(bus, {
       registry: {
@@ -3074,20 +3064,18 @@ describe("PipelineOrchestrator", () => {
 
     const triageBatchQueued = await triageBatchQueuedPromise;
 
-    // Neither stride nor pasta should run — both are selectable and neither was recommended
-    expect(taskStarts).not.toContain("threat-model-stride");
-    expect(taskStarts).not.toContain("threat-model-pasta");
+    // Randori should not run — it is selectable and was not recommended
+    expect(taskStarts).not.toContain("threat-model-randori");
     // Only secrets should have produced findings
     const fps = triageBatchQueued.payload.findings.map((f) => f.fingerprint);
     expect(fps).toContain("fp-secrets-only");
-    expect(fps).not.toContain("fp-stride");
-    expect(fps).not.toContain("fp-pasta");
+    expect(fps).not.toContain("fp-randori");
 
     await bus.close();
     db.close();
   });
 
-  it("auto-enables STRIDE for threat-aware detectors and runs PASTA after them", async () => {
+  it("auto-enables Randori threat model for threat-aware detectors", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
@@ -3097,7 +3085,6 @@ describe("PipelineOrchestrator", () => {
 
     const taskRegistry = new TaskRegistry();
     let ssrfUpstream: Map<string, unknown> | undefined;
-    let pastaUpstream: Map<string, unknown> | undefined;
 
     taskRegistry.register({
       id: "context-gatherer",
@@ -3112,8 +3099,8 @@ describe("PipelineOrchestrator", () => {
       },
     });
     taskRegistry.register({
-      id: "threat-model-stride",
-      displayName: "STRIDE Threat Model",
+      id: "threat-model-randori",
+      displayName: "Randori PASTA Threat Model",
       outputKind: "custom",
       dependsOn: ["context-gatherer"],
       async run() {
@@ -3149,16 +3136,6 @@ describe("PipelineOrchestrator", () => {
         return { findings: ["ssrf"] };
       },
     });
-    taskRegistry.register({
-      id: "threat-model-pasta",
-      displayName: "PASTA Threat Model",
-      outputKind: "custom",
-      dependsOn: ["threat-model-stride"],
-      async run(_input, context) {
-        pastaUpstream = new Map(context.upstreamOutputs);
-        return { trees: [] };
-      },
-    });
 
     registerScanWorker(bus, {
       registry: {
@@ -3205,7 +3182,7 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          enabledTasks: ["ssrf-detect", "threat-model-pasta"],
+          enabledTasks: ["ssrf-detect"],
         },
         scanOpts: { ...makeScanOpts(), scanners: [] },
       }),
@@ -3219,17 +3196,15 @@ describe("PipelineOrchestrator", () => {
     );
     await completePromise;
 
-    expect(taskStarts).toContain("threat-model-stride");
-    expect(taskStarts.indexOf("threat-model-stride")).toBeLessThan(taskStarts.indexOf("ssrf-detect"));
-    expect(taskStarts.indexOf("ssrf-detect")).toBeLessThan(taskStarts.indexOf("threat-model-pasta"));
-    expect(ssrfUpstream?.has("threat-model-stride")).toBe(true);
-    expect(pastaUpstream?.has("ssrf-detect")).toBe(true);
+    expect(taskStarts).toContain("threat-model-randori");
+    expect(taskStarts.indexOf("threat-model-randori")).toBeLessThan(taskStarts.indexOf("ssrf-detect"));
+    expect(ssrfUpstream?.has("threat-model-randori")).toBe(true);
 
     await bus.close();
     db.close();
   });
 
-  it("does not auto-inject STRIDE for non-threat-aware detector runs", async () => {
+  it("does not auto-inject Randori for non-threat-aware detector runs", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
@@ -3251,17 +3226,18 @@ describe("PipelineOrchestrator", () => {
       },
     });
     taskRegistry.register({
-      id: "threat-model-stride",
-      displayName: "STRIDE Threat Model",
+      id: "threat-model-randori",
+      displayName: "Randori PASTA Threat Model",
       outputKind: "custom",
       dependsOn: ["context-gatherer"],
       async run() {
         return {};
       },
     });
+    // Use diff-review as a non-threat-aware task (not in THREAT_AWARE_DETECTOR_TASK_IDS)
     taskRegistry.register({
-      id: "secrets-crypto-detect",
-      displayName: "Secrets Detector",
+      id: "diff-review",
+      displayName: "Diff Review",
       outputKind: "custom",
       dependsOn: ["context-gatherer"],
       async run() {
@@ -3314,7 +3290,7 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          enabledTasks: ["secrets-crypto-detect"],
+          enabledTasks: ["diff-review"],
         },
         scanOpts: { ...makeScanOpts(), scanners: [] },
       }),
@@ -3328,8 +3304,8 @@ describe("PipelineOrchestrator", () => {
     );
     await completePromise;
 
-    expect(taskStarts).toContain("secrets-crypto-detect");
-    expect(taskStarts).not.toContain("threat-model-stride");
+    expect(taskStarts).toContain("diff-review");
+    expect(taskStarts).not.toContain("threat-model-randori");
 
     await bus.close();
     db.close();

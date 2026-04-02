@@ -110,6 +110,11 @@ export async function dispatchVerification(
     while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
       await emitBudgetCheck(state, runId);
       if (isBudgetExceeded(state)) {
+        // Reduce verifyTotal to match what was actually dispatched so
+        // isVerificationDone() can become true and the pipeline completes.
+        const skipped = state.verifyQueue.length - state.verifyCursor;
+        state.verifyTotal = Math.max(0, state.verifyTotal - skipped);
+        state.verifyCursor = state.verifyQueue.length;
         await emitBudgetExceeded(state, runId);
         break;
       }

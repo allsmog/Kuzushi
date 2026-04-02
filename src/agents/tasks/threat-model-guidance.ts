@@ -3,15 +3,6 @@ import { isRecord } from "../../utils.js";
 import { getTaskFileSpec, type PreReadResult } from "./pre-read.js";
 import type { ThreatModelDocument, StrideThreat } from "./threat-modeling/types.js";
 
-export type ThreatAwareDetectorTaskId =
-  | "code-config-detect"
-  | "ssrf-detect"
-  | "nosql-injection-detect"
-  | "prototype-pollution-detect"
-  | "template-injection-detect"
-  | "graphql-security-detect"
-  | "race-condition-detect";
-
 interface ThreatScore {
   threat: StrideThreat;
   score: number;
@@ -23,7 +14,7 @@ interface DetectorThreatMetadata {
   keywords: string[];
 }
 
-const DETECTOR_THREAT_METADATA: Record<ThreatAwareDetectorTaskId, DetectorThreatMetadata> = {
+const DETECTOR_THREAT_METADATA: Record<string, DetectorThreatMetadata> = {
   "code-config-detect": {
     cwes: new Set(),
     keywords: [],
@@ -52,7 +43,38 @@ const DETECTOR_THREAT_METADATA: Record<ThreatAwareDetectorTaskId, DetectorThreat
     cwes: new Set(["362"]),
     keywords: ["race", "concurrent", "lock", "toctou"],
   },
+  "command-injection-detect": {
+    cwes: new Set(["78", "77"]),
+    keywords: ["command", "exec", "spawn", "shell", "subprocess", "system"],
+  },
+  "xxe-detect": {
+    cwes: new Set(["611"]),
+    keywords: ["xml", "parser", "external entity", "dtd", "xxe"],
+  },
+  "deserialization-detect": {
+    cwes: new Set(["502"]),
+    keywords: ["deserialize", "unserialize", "marshal"],
+  },
+  "secrets-crypto-detect": {
+    cwes: new Set(["798", "321", "327"]),
+    keywords: ["secret", "key", "password", "credential", "crypto", "hardcoded"],
+  },
+  "supply-chain-detect": {
+    cwes: new Set(["1357"]),
+    keywords: ["dependency", "package", "supply chain", "typosquat", "lockfile"],
+  },
+  "auth-logic-detect": {
+    cwes: new Set(["287", "863"]),
+    keywords: ["auth", "authorization", "rbac", "permission", "role", "access control"],
+  },
+  "sharp-edges-detect": {
+    cwes: new Set(["327", "1188", "676", "16", "755", "697"]),
+    keywords: ["config", "default", "algorithm", "parameter", "silent failure", "string comparison", "api design"],
+  },
 };
+
+/** Default metadata for tasks not in the explicit map — uses generic scoring. */
+const FALLBACK_METADATA: DetectorThreatMetadata = { cwes: new Set(), keywords: [] };
 
 const GENERIC_THREAT_STOP_WORDS = new Set([
   "with",
@@ -84,8 +106,15 @@ const GENERIC_THREAT_STOP_WORDS = new Set([
   "parameters",
 ]);
 
+/**
+ * Resolve the threat model output from upstream.
+ */
+export function resolveThreatModelOutput(upstreamOutputs: Map<string, unknown>): unknown {
+  return upstreamOutputs.get("threat-model-randori");
+}
+
 export function buildThreatModelLeadsSection(
-  taskId: ThreatAwareDetectorTaskId,
+  taskId: string,
   strideOutput: unknown,
   fileIndex: FileIndex | undefined,
   preRead: PreReadResult | undefined,
@@ -131,12 +160,12 @@ export function buildThreatModelLeadsSection(
 }
 
 function scoreThreatForTask(
-  taskId: ThreatAwareDetectorTaskId,
+  taskId: string,
   threat: StrideThreat,
   shortlist: Set<string>,
   shortlistCorpus: string,
 ): ThreatScore {
-  const metadata = DETECTOR_THREAT_METADATA[taskId];
+  const metadata = DETECTOR_THREAT_METADATA[taskId] ?? FALLBACK_METADATA;
   const reasons: string[] = [];
   let score = 0;
 
@@ -168,7 +197,7 @@ function scoreThreatForTask(
 }
 
 function matchesThreatKeywords(
-  taskId: ThreatAwareDetectorTaskId,
+  taskId: string,
   metadata: DetectorThreatMetadata,
   threat: StrideThreat,
   shortlistCorpus: string,
@@ -196,7 +225,7 @@ function formatThreatEvidence(threat: StrideThreat): string {
 }
 
 function collectShortlistPaths(
-  taskId: ThreatAwareDetectorTaskId,
+  taskId: string,
   fileIndex: FileIndex | undefined,
   preRead: PreReadResult | undefined,
 ): Set<string> {
@@ -236,7 +265,7 @@ function collectShortlistPaths(
 }
 
 function buildShortlistCorpus(
-  taskId: ThreatAwareDetectorTaskId,
+  taskId: string,
   fileIndex: FileIndex | undefined,
   preRead: PreReadResult | undefined,
   shortlist: Set<string>,

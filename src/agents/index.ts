@@ -8,12 +8,6 @@ import { withMultiStrategy } from "../strategies/multi-strategy-task.js";
 import { createPopulatedRegistry } from "../strategies/init.js";
 import { getProfileForTask } from "../strategies/task-profile-map.js";
 import type { AgentTask } from "./types.js";
-import { taintAnalysisRunTask } from "./tasks/taint-analysis/analyze.js";
-import { taintAnalysisCrossAnalyzeTask } from "./tasks/taint-analysis/cross-service/analyze.js";
-import { taintAnalysisDiscoverTask } from "./tasks/taint-analysis/cross-service/discover.js";
-import { taintAnalysisStitchTask } from "./tasks/taint-analysis/cross-service/stitch.js";
-import { taintAnalysisLabelTask } from "./tasks/taint-analysis/label.js";
-import { taintAnalysisPreflightTask } from "./tasks/taint-analysis/preflight.js";
 import { contextGathererTask } from "./tasks/context-gatherer.js";
 import { contextEnricherTask } from "./tasks/context-enricher.js";
 import { secretsCryptoDetectTask } from "./tasks/secrets-crypto-detect.js";
@@ -23,8 +17,7 @@ import { raceConditionTask } from "./tasks/race-condition.js";
 import { diffReviewTask } from "./tasks/diff-review.js";
 import { invariantExtractTask } from "./tasks/invariant-analysis/extract.js";
 import { invariantCheckTask } from "./tasks/invariant-analysis/check.js";
-import { threatModelStrideTask } from "./tasks/threat-modeling/stride.js";
-import { threatModelPastaTask } from "./tasks/threat-modeling/pasta.js";
+import { threatModelRandoriTask } from "./tasks/threat-modeling/randori.js";
 import { ssrfDetectionTask } from "./tasks/ssrf-detection.js";
 import { prototypePollutionTask } from "./tasks/prototype-pollution.js";
 import { nosqlInjectionTask } from "./tasks/nosql-injection.js";
@@ -42,6 +35,11 @@ import { threatScenarioBuildTask } from "./tasks/threat-scenario-build.js";
 import { commandInjectionTask } from "./tasks/command-injection.js";
 import { xxeDetectionTask } from "./tasks/xxe-detection.js";
 import { deserializationDetectionTask } from "./tasks/deserialization-detection.js";
+import { threatHuntTask } from "./tasks/threat-hunt.js";
+import { sharpEdgesDetectTask } from "./tasks/sharp-edges-detect.js";
+import { tobAuditTask } from "./tasks/tob-audit/tob-audit.js";
+import { taintCweSelectTask } from "./tasks/taint-iris/cwe-select.js";
+import { taintIrisTask } from "./tasks/taint-iris/iris.js";
 
 /** Create task registry populated with adapted scanner plugins. */
 export async function createDefaultTaskRegistry(
@@ -61,12 +59,6 @@ export async function createDefaultTaskRegistry(
   };
 
   tasks.register(contextGathererTask);
-  tasks.register(taintAnalysisPreflightTask);
-  tasks.register(taintAnalysisLabelTask);
-  tasks.register(taintAnalysisRunTask);
-  tasks.register(taintAnalysisDiscoverTask);
-  tasks.register(taintAnalysisCrossAnalyzeTask);
-  tasks.register(taintAnalysisStitchTask);
 
   // Merged agentic detection tasks — wrapped with multi-strategy
   tasks.register(wrapTask(secretsCryptoDetectTask));
@@ -84,9 +76,8 @@ export async function createDefaultTaskRegistry(
   tasks.register(invariantExtractTask);
   tasks.register(invariantCheckTask);
 
-  // Threat modeling tasks
-  tasks.register(threatModelStrideTask);
-  tasks.register(threatModelPastaTask);
+  // Threat modeling (Randori PASTA plugin)
+  tasks.register(threatModelRandoriTask);
 
   // Upstream modeling tasks
   tasks.register(appModelBuildTask);
@@ -103,8 +94,21 @@ export async function createDefaultTaskRegistry(
   tasks.register(wrapTask(xxeDetectionTask));
   tasks.register(wrapTask(deserializationDetectionTask));
 
+  // Threat-driven hunt (Carlini-style, one agent per DFD threat actor)
+  tasks.register(wrapTask(threatHuntTask));
+
+  // Sharp-edges detection (Trail of Bits, three adversarial personas)
+  tasks.register(wrapTask(sharpEdgesDetectTask));
+
+  // Trail of Bits audit (loads ToB security skills plugin)
+  tasks.register(wrapTask(tobAuditTask));
+
   // Authorization logic detection
   tasks.register(authLogicDetectTask);
+
+  // IRIS-style taint analysis (LLM-driven CodeQL)
+  tasks.register(taintCweSelectTask);
+  tasks.register(taintIrisTask);
 
   // Reachability pre-filter
   tasks.register(reachabilityCheckTask);

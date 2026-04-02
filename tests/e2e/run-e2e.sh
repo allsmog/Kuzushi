@@ -556,7 +556,7 @@ test_g() {
     --fresh \
     --audit-log \
     --max 3 \
-    --enabled-tasks taint-analysis-preflight,taint-analysis-label,taint-analysis-run \
+    --enabled-tasks taint-cwe-select,taint-iris \
     2>&1 | tee "$TEST_LOG_DIR/test-g.log" || exit_code=$?
 
   # Verify the model fix regardless of exit code: extraction agent should use the configured model.
@@ -639,7 +639,7 @@ test_h() {
     --fresh \
     --audit-log \
     --max 3 \
-    --enabled-tasks taint-analysis-discover,taint-analysis-cross-analyze,taint-analysis-stitch \
+    --enabled-tasks taint-cwe-select,taint-iris \
     2>&1 | tee "$TEST_LOG_DIR/test-h.log" || exit_code=$?
 
   if [[ $exit_code -ne 0 ]]; then
@@ -660,7 +660,7 @@ test_h() {
   fi
   pass "Cross-service taint pipeline completed"
 
-  if grep -q "taint-analysis-discover\|Cross-Service" "$TEST_LOG_DIR/test-h.log" 2>/dev/null; then
+  if grep -q "taint-cwe-select\|taint-iris" "$TEST_LOG_DIR/test-h.log" 2>/dev/null; then
     pass "Cross-service discovery task appeared in pipeline"
   else
     if [[ "$has_codeql" == "true" ]]; then
@@ -757,7 +757,7 @@ test_k() {
     --fresh \
     --audit-log \
     --max 2 \
-    --enabled-tasks invariant-extract,invariant-check,threat-model-stride,threat-model-pasta \
+    --enabled-tasks invariant-extract,invariant-check,threat-model-randori \
     2>&1 | tee "$TEST_LOG_DIR/test-k.log" || exit_code=$?
 
   if [[ $exit_code -ne 0 ]]; then

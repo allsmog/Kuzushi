@@ -17,3 +17,4 @@ coverage/
 benchmarks/*/repo/
 benchmarks/*/results/
 benchmarks/*-results.json
+iris.pdf

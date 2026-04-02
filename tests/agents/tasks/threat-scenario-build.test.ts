@@ -93,7 +93,6 @@ describe("threat-scenario-build task", () => {
     expect(threatScenarioBuildTask.id).toBe("threat-scenario-build");
     expect(threatScenarioBuildTask.outputKind).toBe("custom");
     expect(threatScenarioBuildTask.dependsOn).toContain("app-model-build");
-    expect(threatScenarioBuildTask.dependsOn).toContain("threat-model-stride");
   });
 
   it("maps STRIDE SSRF threat to ssrf-detect scenario", () => {

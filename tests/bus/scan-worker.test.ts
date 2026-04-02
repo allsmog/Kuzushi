@@ -285,8 +285,10 @@ describe("scan-worker", () => {
     );
 
     const complete = await completePromise;
+    // repoRoot is overridden to scanPath when scanPath is set,
+    // so agent tasks operate on the scan subdirectory by default.
     expect(complete.payload.output).toEqual({
-      repoRoot: "/tmp/repo",
+      repoRoot: "/tmp/repo/subdir",
       scanPath: "/tmp/repo/subdir",
     });
 

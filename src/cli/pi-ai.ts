@@ -132,10 +132,9 @@ export function resolveActivePiAiModels(
     models.add(asModel(iaCfg?.["checkModel"]) ?? config.model);
   }
 
-  if (enabledTaskSet.has("threat-model-stride") || enabledTaskSet.has("threat-model-pasta")) {
+  if (enabledTaskSet.has("threat-model-randori")) {
     const tmCfg = resolveScannerConfig(config, "threat-model");
-    models.add(asModel(tmCfg?.["strideModel"]) ?? config.model);
-    models.add(asModel(tmCfg?.["pastaModel"]) ?? config.model);
+    models.add(asModel(tmCfg?.["model"] ?? tmCfg?.["strideModel"]) ?? config.model);
   }
 
   return [...models];

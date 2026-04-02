@@ -20,10 +20,13 @@ No install. No config files. Just point it at a repo.
 
 ## Quick Start
 
-Prereqs: Node 22+, an API key for at least one LLM provider.
+Prereqs: Node 22+, and either an API key or Claude Code OAuth login.
 
 ```sh
-# With Anthropic (default)
+# With Claude Code OAuth (no API key needed — uses your Claude login)
+npx kuzushi /path/to/your/repo
+
+# With Anthropic API key
 export ANTHROPIC_API_KEY=sk-ant-...
 npx kuzushi /path/to/your/repo
 
@@ -72,7 +75,9 @@ The terminal report shows true positives first, then needs-review items. False p
 
 1. **Context gathering** — auto-detects your tech stack, frameworks, auth patterns, ORMs, and sanitization libraries
 2. **Code graph** — builds a persistent entry-point-to-sink graph via static analysis + LLM gap-filling for reachability-aware triage
-3. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently; 13 specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto); multi-strategy mode runs 2-4 analytical approaches per vuln class
+3. **Threat modeling** — Randori PASTA plugin (shipped as `@kuzushi/randori-plugin`) performs 4-stage threat analysis: business objectives, technical scope, DFD decomposition, and STRIDE threat scenarios with ATT&CK/CAPEC/OWASP mapping and 5-factor probabilistic scoring. All threat leads are injected into every detector's prompts.
+4. **Threat-informed hunting** — spawns one adversarial Claude agent per DFD external entity (users, services, attackers) to CTF-style hunt for vulnerabilities from each actor's perspective
+5. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently; 13+ specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto, auth logic, sharp edges); multi-strategy mode runs 2-4 analytical approaches per vuln class
 4. **Classifier funnel** — cheap single-token pre-filter removes ~80% of noise before expensive triage
 5. **Deduplication** — fingerprints and merges equivalent findings across scanners
 6. **Incremental skip** — findings already triaged in previous runs are skipped automatically
@@ -124,13 +129,21 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 
 **Crypto behavioral testing** — generates and executes behavioral test harnesses in a Docker sandbox for crypto misuse findings. Detects timing side-channels, ECB mode, weak hashes, weak PRNGs, and more.
 
+**IRIS-style taint analysis** — LLM-driven CodeQL taint analysis inspired by the IRIS paper (ICLR 2025). An LLM selects relevant CWE classes for the project, writes CodeQL extraction queries dynamically (language-agnostic, framework-agnostic), labels candidates, generates TaintTracking configurations, and iteratively refines queries when compilation fails. No templates, no hardcoded framework detection.
+
+**Randori PASTA threat modeling** — ships `@kuzushi/randori-plugin` as a dependency. Runs 4-stage PASTA analysis (objectives, scope, DFD decomposition, STRIDE threats) via Claude Code plugin. Threat leads are injected into all detector prompts for threat-informed scanning. ATT&CK, CAPEC, and OWASP mapping included.
+
+**Threat-informed hunting** — spawns adversarial Claude agents for each DFD external entity identified by the threat model. Each agent explores the codebase as that actor (end user, admin, external service, LLM agent) looking for exploitable paths. Findings are deduplicated and fed into triage/verification.
+
+**Auto rule generation** — verified exploitable findings automatically generate custom Semgrep rules. Rules are persisted to `.kuzushi/custom-rules/` and auto-loaded on subsequent scans, creating a feedback loop where the scanner gets smarter over time. Rules are validated against the original finding and removed if they don't match.
+
 **Diff-aware taint analysis** — narrows analysis to files changed since a base branch. Run `--taint-diff-base main` in CI to only analyze what's new in the PR.
 
 **Resumable runs** — checkpoints pipeline state to SQLite. Interrupted scan? `--resume` picks up exactly where it left off.
 
 **Patch synthesis** — `kuzushi patch <repo> --fingerprint <fp>` generates and validates security patches in disposable git worktrees without touching your working copy.
 
-**13 specialized detectors** — dedicated detection tasks for command injection, XXE, insecure deserialization, SSRF, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL security, secrets/crypto, code config, and crypto behavioral testing. Each has vulnerability-class-specific prompts, anti-hallucination constraints, and multi-lens analysis.
+**15+ specialized detectors** — dedicated detection tasks for command injection, XXE, insecure deserialization, SSRF, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL security, secrets/crypto, code config, auth logic, sharp edges, and crypto behavioral testing. Each has vulnerability-class-specific prompts, anti-hallucination constraints, and multi-lens analysis. All detectors receive threat model leads for threat-informed scanning.
 
 **Classifier funnel** — single-token LLM pre-filter using a cheap model removes ~80% of false positives before expensive triage, cutting per-scan cost dramatically.
 
@@ -157,7 +170,7 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 | `semgrep` (default) | Traditional SAST via Opengrep/Semgrep | Yes |
 | `codeql` | Semantic dataflow/taint analysis via GitHub CodeQL CLI | No (opt-in) |
 | `agentic` | AI-driven scanner — LLM with read-only repo tools | N/A |
-| `taint-analysis` | Multi-pass CodeQL source/sink labeling with LLM-assisted classification | No (opt-in) |
+| `taint-analysis` | IRIS-style LLM-driven CodeQL taint analysis — dynamic CWE selection, LLM-generated queries, iterative refinement | No (opt-in) |
 
 ```sh
 kuzushi <repo> --scanners semgrep,codeql    # run multiple scanners

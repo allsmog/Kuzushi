@@ -16,7 +16,7 @@ import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
-import { buildThreatModelLeadsSection } from "./threat-model-guidance.js";
+import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
 import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
 import { resolveTaskAllowedTools } from "./runtime-overrides.js";
 import type { ApplicationModel } from "../../types.js";
@@ -246,7 +246,7 @@ export const prototypePollutionTask: AgentTask<ScanOpts, Finding[]> = {
     const profileLines = formatProfilesForPrompt(profiles);
     const threatModelContext = buildThreatModelLeadsSection(
       "prototype-pollution-detect",
-      context.upstreamOutputs.get("threat-model-stride"),
+      resolveThreatModelOutput(context.upstreamOutputs),
       fileIndex,
       preRead,
     );

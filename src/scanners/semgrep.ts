@@ -3,6 +3,7 @@ import type { ScanOpts } from "../types.js";
 import type { Finding, ScannerConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
 import { resolveSemgrepBinary } from "./resolve-semgrep.js";
 import { runSemgrep, selectFindings } from "./run-semgrep.js";
+import { loadCustomRulesDir } from "../strategies/rule-persistence.js";
 
 export class SemgrepPlugin implements ScannerPlugin {
   readonly id = "semgrep";
@@ -32,7 +33,18 @@ export class SemgrepPlugin implements ScannerPlugin {
 
   async scan(repoRoot: string, opts: ScanOpts, _config: ScannerConfig): Promise<Finding[]> {
     const repoName = path.basename(repoRoot);
-    const output = await runSemgrep(repoRoot, opts, this.scannerBin, this.configFlag);
+
+    // Auto-load custom rules generated from previous verified findings
+    const customDir = loadCustomRulesDir(repoRoot);
+    let configs: string | string[];
+    if (customDir) {
+      const base = Array.isArray(this.configFlag) ? this.configFlag : [this.configFlag];
+      configs = [...base, customDir];
+    } else {
+      configs = this.configFlag;
+    }
+
+    const output = await runSemgrep(repoRoot, opts, this.scannerBin, configs);
     // Do not apply maxFindings here — the registry's dedupeFindings applies
     // the single final cap across all scanners to avoid double-capping.
     return selectFindings(output, repoName, "HEAD");

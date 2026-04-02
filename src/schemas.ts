@@ -603,6 +603,7 @@ export const KuzushiConfigSchema = z.object({
   variantAnalysis: z.boolean().optional(),
   variantAnalysisModel: z.string().optional(),
   variantAnalysisMaxFindings: z.number().optional(),
+  variantRuleSweepEnabled: z.boolean().optional(),
   enableContextEnrichment: z.boolean().optional(),
   contextEnrichmentModel: z.string().optional(),
   ensembleModels: z.array(z.string()).optional(),

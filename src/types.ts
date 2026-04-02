@@ -346,7 +346,8 @@ export type ThreatScenarioDetectorId =
   | "race-condition-detect"
   | "command-injection-detect"
   | "xxe-detect"
-  | "deserialization-detect";
+  | "deserialization-detect"
+  | "sharp-edges-detect";
 
 export interface ThreatScenario {
   id: string;
@@ -512,6 +513,8 @@ export interface KuzushiConfig {
   variantAnalysisModel?: string;
   /** Max variant findings per confirmed TP. */
   variantAnalysisMaxFindings?: number;
+  /** Enable post-verification sweep of codebase with generated custom rules. */
+  variantRuleSweepEnabled?: boolean;
   /** Enable LLM context enrichment task. */
   enableContextEnrichment?: boolean;
   /** Optional override model for context enrichment. */
@@ -544,6 +547,8 @@ export interface KuzushiConfig {
   multiStrategyAutoRuleGeneration?: boolean;
   /** Rescan codebase with generated rules for variant detection. Default false. */
   multiStrategyRescanWithRules?: boolean;
+  /** Generate Semgrep rules from verified exploitable findings and persist to .kuzushi/custom-rules/. Default false. */
+  autoRuleGeneration?: boolean;
   /** Enable targeted dynamic analysis tasks. Default false. */
   dynamicAnalysisEnabled?: boolean;
   /** Enable crypto behavioral runtime confirmation after secrets-crypto detection. Default false. */

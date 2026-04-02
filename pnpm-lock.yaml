@@ -17,12 +17,18 @@ importers:
       '@kuzushi/augur':
         specifier: ^0.1.0
         version: 0.1.0
+      '@kuzushi/randori-plugin':
+        specifier: github:allsmog/randori-plugin
+        version: https://codeload.github.com/allsmog/randori-plugin/tar.gz/e977f2d6ebe2142a5c325f822f9cc9ccb67e84c0
+      '@kuzushi/tob-skills':
+        specifier: github:allsmog/tob-security-skills
+        version: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2
       '@mariozechner/pi-ai':
         specifier: ^0.57.1
         version: 0.57.1(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
       better-sqlite3:
-        specifier: ^11.8.1
-        version: 11.10.0
+        specifier: ^12.8.0
+        version: 12.8.0
       chalk:
         specifier: ^5.4.1
         version: 5.6.2
@@ -546,6 +552,14 @@ packages:
   '@kuzushi/augur@0.1.0':
     resolution: {integrity: sha512-YFLJ3N9J5nFzWMEIDFyqE7M/an/fzYyswRJvY5HTPQPXSLl+6OLad+RJvEOwpWgK8Z9up9teUSwsTdL8b8rZcQ==}
 
+  '@kuzushi/randori-plugin@https://codeload.github.com/allsmog/randori-plugin/tar.gz/e977f2d6ebe2142a5c325f822f9cc9ccb67e84c0':
+    resolution: {tarball: https://codeload.github.com/allsmog/randori-plugin/tar.gz/e977f2d6ebe2142a5c325f822f9cc9ccb67e84c0}
+    version: 1.0.0
+
+  '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2':
+    resolution: {tarball: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2}
+    version: 1.0.0
+
   '@mariozechner/pi-ai@0.57.1':
     resolution: {integrity: sha512-Bd/J4a3YpdzJVyHLih0vDSdB0QPL4ti0XsAwtHOK/8eVhB0fHM1CpcgIrcBFJ23TMcKXMi0qamz18ERfp8tmgg==}
     engines: {node: '>=20.0.0'}
@@ -1047,8 +1061,9 @@ packages:
     resolution: {integrity: sha512-VoMINM2rqJwJgfdHq6RiUudKt2BV+FY5ZFezP/ypmwayk68+NzzAQy4XXLlqsGD4MCzq3DrmNFD/uUmBJuGoXw==}
     engines: {node: '>=10.0.0'}
 
-  better-sqlite3@11.10.0:
-    resolution: {integrity: sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ==}
+  better-sqlite3@12.8.0:
+    resolution: {integrity: sha512-RxD2Vd96sQDjQr20kdP+F+dK/1OUNiVOl200vKBZY8u0vTwysfolF6Hq+3ZK2+h8My9YvZhHsF+RSGZW2VYrPQ==}
+    engines: {node: 20.x || 22.x || 23.x || 24.x || 25.x}
 
   bignumber.js@9.3.1:
     resolution: {integrity: sha512-Ko0uX15oIUS7wJ3Rb30Fs6SkVbLmPBAKdlm7q9+ak9bbIeFf0MwuBsQV6z7+X768/cHsfg+WlysDWJcmthjsjQ==}
@@ -2684,6 +2699,10 @@ snapshots:
 
   '@kuzushi/augur@0.1.0': {}
 
+  '@kuzushi/randori-plugin@https://codeload.github.com/allsmog/randori-plugin/tar.gz/e977f2d6ebe2142a5c325f822f9cc9ccb67e84c0': {}
+
+  '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2': {}
+
   '@mariozechner/pi-ai@0.57.1(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)':
     dependencies:
       '@anthropic-ai/sdk': 0.73.0(zod@4.3.6)
@@ -3274,7 +3293,7 @@ snapshots:
 
   basic-ftp@5.2.0: {}
 
-  better-sqlite3@11.10.0:
+  better-sqlite3@12.8.0:
     dependencies:
       bindings: 1.5.0
       prebuild-install: 7.1.3

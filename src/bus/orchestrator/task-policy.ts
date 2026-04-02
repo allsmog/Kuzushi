@@ -11,7 +11,13 @@ const THREAT_AWARE_DETECTOR_TASK_IDS = new Set([
   "command-injection-detect",
   "xxe-detect",
   "deserialization-detect",
+  "secrets-crypto-detect",
+  "supply-chain-detect",
+  "auth-logic-detect",
+  "threat-scenario-build",
 ]);
+
+const THREAT_MODEL_TASK_ID = "threat-model-randori";
 
 export function injectThreatModelPolicyCandidates(
   registry: TaskRegistry,
@@ -20,9 +26,9 @@ export function injectThreatModelPolicyCandidates(
   const normalized = normalizeTaskIds(candidateIds);
   if (
     normalized.some((id) => THREAT_AWARE_DETECTOR_TASK_IDS.has(id))
-    && registry.has("threat-model-stride")
+    && registry.has(THREAT_MODEL_TASK_ID)
   ) {
-    return normalizeTaskIds([...normalized, "threat-model-stride"]);
+    return normalizeTaskIds([...normalized, THREAT_MODEL_TASK_ID]);
   }
 
   return normalized;
@@ -124,28 +130,18 @@ export function collectTransitiveDeps(registry: TaskRegistry, candidateIds: stri
 function buildThreatModelPolicyDeps(enabledIds: string[]): Map<string, Set<string>> {
   const enabled = new Set(enabledIds);
   const policyDeps = new Map<string, Set<string>>();
-  const enabledThreatAwareDetectors = enabledIds.filter((id) => THREAT_AWARE_DETECTOR_TASK_IDS.has(id));
 
-  if (enabled.has("threat-model-stride")) {
-    for (const detectorId of enabledThreatAwareDetectors) {
-      let deps = policyDeps.get(detectorId);
-      if (!deps) {
-        deps = new Set<string>();
-        policyDeps.set(detectorId, deps);
-      }
-      deps.add("threat-model-stride");
-    }
-  }
+  if (!enabled.has(THREAT_MODEL_TASK_ID)) return policyDeps;
 
-  if (enabled.has("threat-model-pasta")) {
-    let pastaDeps = policyDeps.get("threat-model-pasta");
-    if (!pastaDeps) {
-      pastaDeps = new Set<string>();
-      policyDeps.set("threat-model-pasta", pastaDeps);
+  // All threat-aware detectors must wait for the threat model
+  for (const detectorId of enabledIds) {
+    if (!THREAT_AWARE_DETECTOR_TASK_IDS.has(detectorId)) continue;
+    let deps = policyDeps.get(detectorId);
+    if (!deps) {
+      deps = new Set<string>();
+      policyDeps.set(detectorId, deps);
     }
-    for (const detectorId of enabledThreatAwareDetectors) {
-      pastaDeps.add(detectorId);
-    }
+    deps.add(THREAT_MODEL_TASK_ID);
   }
 
   return policyDeps;

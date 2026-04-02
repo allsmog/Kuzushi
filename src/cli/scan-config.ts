@@ -29,6 +29,7 @@ export interface ScanCommandOptions {
   multiStrategyFull: boolean;
   multiStrategyBudget?: number;
   multiStrategyAutoRules: boolean;
+  autoRuleGen: boolean;
   taintDiffBase?: string;
   taintDiffMode?: string;
   stream: boolean;
@@ -115,6 +116,7 @@ export function applyScanCommandConfigOverrides(
   if (opts.multiStrategyFull) config.multiStrategyMode = "full";
   if (opts.multiStrategyBudget != null) config.multiStrategyBudgetUsd = opts.multiStrategyBudget;
   if (opts.multiStrategyAutoRules) config.multiStrategyAutoRuleGeneration = true;
+  if (opts.autoRuleGen) config.autoRuleGeneration = true;
   if (opts.stream) config.streamingEnabled = true;
   if (opts.streamPort != null) config.streamingPort = opts.streamPort;
   if (opts.githubPr) (config as Record<string, unknown>)["githubPr"] = true;

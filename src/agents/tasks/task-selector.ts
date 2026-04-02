@@ -89,20 +89,26 @@ const SELECTION_RULES: SelectionRule[] = [
   },
   {
     condition: (ctx) => ctx.languages.length > 1,
-    tasks: ["threat-model"],
-    reason: "Multi-language repo — STRIDE + PASTA threat models for cross-boundary analysis",
+    tasks: ["threat-model", "threat-hunt"],
+    reason: "Multi-language repo — STRIDE + PASTA threat models and threat-actor-driven hunting",
   },
   {
     condition: (ctx) =>
       ctx.frameworks.some((f) => /express|fastapi|django|flask|spring|gin|echo|nest|next|rails|laravel/i.test(f))
       || ctx.authPatterns.length > 0,
-    tasks: ["auth-logic"],
-    reason: "Web framework or auth patterns detected — probe authorization logic for privilege escalation",
+    tasks: ["auth-logic", "threat-hunt"],
+    reason: "Web framework or auth patterns detected — probe authorization logic and run threat-actor-driven hunting",
+  },
+  {
+    condition: (ctx) =>
+      ctx.frameworks.length > 0 || ctx.authPatterns.length > 0,
+    tasks: ["sharp-edges"],
+    reason: "Framework or auth patterns detected — probe for API design footguns and dangerous defaults",
   },
 ];
 
 /** Tasks always recommended regardless of context. */
-const ALWAYS_RECOMMENDED = ["secrets", "security-misconfig"];
+const ALWAYS_RECOMMENDED = ["secrets", "security-misconfig", "sharp-edges", "threat-model", "threat-hunt", "taint-analysis"];
 
 /**
  * The set of resolved task IDs that task-selector manages.
@@ -123,8 +129,11 @@ export const SELECTABLE_TASK_IDS: ReadonlySet<string> = new Set([
   "xxe-detect",
   "deserialization-detect",
   "auth-logic-detect",
-  "threat-model-stride",
-  "threat-model-pasta",
+  "threat-model-randori",
+  "threat-hunt",
+  "sharp-edges-detect",
+  "taint-cwe-select",
+  "taint-iris",
 ]);
 
 /**

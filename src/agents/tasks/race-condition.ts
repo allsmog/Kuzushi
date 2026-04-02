@@ -16,7 +16,7 @@ import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
-import { buildThreatModelLeadsSection } from "./threat-model-guidance.js";
+import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
 
 const log = createLogger({ stage: "race-condition" });
 
@@ -230,7 +230,7 @@ export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
     const profileLines = formatProfilesForPrompt(profiles);
     const threatModelContext = buildThreatModelLeadsSection(
       "race-condition-detect",
-      context.upstreamOutputs.get("threat-model-stride"),
+      resolveThreatModelOutput(context.upstreamOutputs),
       fileIndex,
       preRead,
     );

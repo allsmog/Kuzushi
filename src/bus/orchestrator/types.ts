@@ -165,6 +165,10 @@ export interface RunState {
   patchDispatching: boolean;
   patchStarted: boolean;
   generatedRules: GeneratedRule[];
+  /** Tracks fingerprints already queued for rule generation to prevent duplicates. */
+  generatingRuleFingerprints?: Set<string>;
+  ruleSweepCompleted: boolean;
+  ruleSweepFindings: number;
 }
 
 export interface OrchestratorDeps {

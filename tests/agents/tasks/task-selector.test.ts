@@ -69,11 +69,11 @@ describe("selectTasks", () => {
     expect(result.recommendedTasks).toContain("graphql-security-detect");
   });
 
-  it("recommends both threat-model-stride and threat-model-pasta for multi-language repos", () => {
+  it("recommends threat-model-randori and threat-hunt for multi-language repos", () => {
     const ctx = makeContext({ languages: ["TypeScript", "Python"] });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("threat-model-stride");
-    expect(result.recommendedTasks).toContain("threat-model-pasta");
+    expect(result.recommendedTasks).toContain("threat-model-randori");
+    expect(result.recommendedTasks).toContain("threat-hunt");
   });
 
   it("provides reasoning for each recommended task", () => {
@@ -157,8 +157,12 @@ describe("SELECTABLE_TASK_IDS", () => {
     }
   });
 
-  it("contains threat-model-pasta", () => {
-    expect(SELECTABLE_TASK_IDS.has("threat-model-pasta")).toBe(true);
+  it("contains threat-model-randori", () => {
+    expect(SELECTABLE_TASK_IDS.has("threat-model-randori")).toBe(true);
+  });
+
+  it("contains threat-hunt", () => {
+    expect(SELECTABLE_TASK_IDS.has("threat-hunt")).toBe(true);
   });
 
   it("does not contain diff-review", () => {

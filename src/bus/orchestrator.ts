@@ -416,6 +416,8 @@ export class PipelineOrchestrator {
       patchDispatching: false,
       patchStarted: false,
       generatedRules: [],
+      ruleSweepCompleted: false,
+      ruleSweepFindings: 0,
       stageTimestamps: {
         pipelineStart: event.meta.timestamp,
         pipelineEnd: "",
@@ -1586,7 +1588,10 @@ export class PipelineOrchestrator {
       state.config.multiStrategyAutoRuleGeneration
       && event.payload.result.verdict !== "fp"
       && hasMultiStrategyEvidence(event.payload.finding)
+      && !state.generatingRuleFingerprints?.has(event.payload.finding.fingerprint)
     ) {
+      if (!state.generatingRuleFingerprints) state.generatingRuleFingerprints = new Set();
+      state.generatingRuleFingerprints.add(event.payload.finding.fingerprint);
       this.generateAutoRule(state, runId, event.payload.finding).catch((err) => {
         log.warn(`Auto-rule generation failed: ${toErrorMessage(err)}`);
       });
@@ -1875,11 +1880,12 @@ export class PipelineOrchestrator {
   }
 
   private async generateAutoRule(state: RunState, runId: string, finding: Finding): Promise<void> {
-    const { generateRule } = await import("../strategies/auto-rule.js");
+    const { generateRule, validateRule } = await import("../strategies/auto-rule.js");
+    const { persistRule, removeRule } = await import("../strategies/rule-persistence.js");
     const evidence = (finding.engineProvenance ?? [])
       .filter((e) => typeof e.detail === "string" && e.detail.startsWith("strategy:"))
       .map((e) => ({ kind: "reasoning-chain" as const, description: e.detail }));
-    const rule = await generateRule(finding, evidence, {
+    const rule = await generateRule(finding, evidence.length > 0 ? evidence : undefined, {
       runId,
       repoRoot: state.context.repoRoot,
       repoName: state.context.repoName,
@@ -1888,7 +1894,31 @@ export class PipelineOrchestrator {
       bus: this.bus,
       upstreamOutputs: state.taskOutputs,
     });
-    if (rule) {
+    if (!rule) return;
+
+    // Persist to disk for use in subsequent scans
+    const filePath = persistRule(state.context.repoRoot, rule);
+
+    // Validate the rule catches the original finding; remove if it doesn't
+    let ruleValid = true;
+    if (filePath) {
+      try {
+        ruleValid = await validateRule(
+          filePath,
+          finding.filePath,
+          finding.startLine,
+          state.context.repoRoot,
+        );
+        if (!ruleValid) {
+          log.warn(`Generated rule failed validation — removing: ${filePath}`);
+          removeRule(filePath);
+        }
+      } catch (err) {
+        log.warn(`Rule validation error: ${toErrorMessage(err)}`);
+      }
+    }
+
+    if (ruleValid) {
       state.generatedRules.push(rule);
       await this.bus.publish(createEvent("auto-rule:generated", runId, {
         context: state.context,
@@ -1899,6 +1929,43 @@ export class PipelineOrchestrator {
           startLine: finding.startLine,
         },
       }));
+
+      // Generalize the rule for broader sweep when variant rule sweep is enabled
+      if (state.config.variantRuleSweepEnabled) {
+        try {
+          const { generateGeneralizedRule } = await import("../strategies/auto-rule.js");
+          const taskContext = {
+            runId,
+            repoRoot: state.context.repoRoot,
+            repoName: state.context.repoName,
+            config: state.config,
+            runtime: this.deps.runtime,
+            bus: this.bus,
+            upstreamOutputs: state.taskOutputs,
+          };
+          const generalized = await generateGeneralizedRule(rule, finding, taskContext);
+          if (generalized) {
+            // Use distinct vulnClass to avoid filename collision with the original rule
+            const genWithSuffix = { ...generalized, vulnClass: `${generalized.vulnClass}-generalized` };
+            const genPath = persistRule(state.context.repoRoot, genWithSuffix);
+            if (genPath) {
+              const genValid = await validateRule(
+                genPath,
+                finding.filePath,
+                finding.startLine,
+                state.context.repoRoot,
+              );
+              if (!genValid) {
+                removeRule(genPath);
+              } else {
+                state.generatedRules.push(generalized);
+              }
+            }
+          }
+        } catch (err) {
+          log.warn(`Generalized rule generation error: ${toErrorMessage(err)}`);
+        }
+      }
     }
   }
 
@@ -1937,6 +2004,7 @@ export class PipelineOrchestrator {
 
     if (!state.verifyEnabled) {
       await this.runVariantAnalysisPhase(state, runId);
+      await this.runRuleSweepPhase(state, runId);
     }
 
     // Chain analysis phase
@@ -2092,6 +2160,101 @@ export class PipelineOrchestrator {
         costUsd: state.variantAnalysisCostUsd,
       }),
     );
+  }
+
+  /**
+   * Rule sweep phase: re-scan the codebase with custom rules generated during
+   * this pipeline run. Only runs when variantRuleSweepEnabled is true and rules
+   * were actually generated.
+   */
+  private async runRuleSweepPhase(state: RunState, runId: string): Promise<void> {
+    if (!state.config.variantRuleSweepEnabled || state.ruleSweepCompleted) {
+      return;
+    }
+    state.ruleSweepCompleted = true;
+
+    if (state.generatedRules.length === 0) {
+      return;
+    }
+
+    const { loadCustomRulesDir } = await import("../strategies/rule-persistence.js");
+    const customDir = loadCustomRulesDir(state.context.repoRoot);
+    if (!customDir) {
+      return;
+    }
+
+    log.info(`[rule-sweep] Scanning with ${state.generatedRules.length} custom rules from ${customDir}`);
+
+    try {
+      const { runSemgrep } = await import("../scanners/run-semgrep.js");
+      const { selectFindings } = await import("../scanners/normalize-findings.js");
+
+      const sweepOutput = await runSemgrep(
+        state.context.repoRoot,
+        {
+          excludePatterns: state.config.excludePatterns ?? [],
+          severity: state.config.severity ?? ["ERROR", "WARNING"],
+        },
+        "semgrep",
+        customDir,
+      );
+
+      // Convert Semgrep results through the standard finding normalization pipeline
+      const sweepFindings = selectFindings(
+        { findings: sweepOutput.results.map((r) => ({
+          ruleId: r.check_id,
+          filePath: r.path,
+          startLine: r.start.line,
+          severity: r.extra?.severity ?? "WARNING",
+          message: r.extra?.message ?? "Custom rule match",
+          confidence: r.extra?.metadata?.confidence ?? "MEDIUM",
+          subcategory: r.extra?.metadata?.subcategory ?? ["vuln"],
+          likelihood: r.extra?.metadata?.likelihood ?? "MEDIUM",
+          impact: r.extra?.metadata?.impact ?? "MEDIUM",
+          cwe: r.extra?.metadata?.cwe ?? [],
+        })), costUsd: 0 },
+        state.context.repoRoot,
+        state.context.repoName,
+        "HEAD",
+        "rule-sweep",
+        state.config.variantAnalysisMaxFindings ?? 10,
+      );
+
+      // Filter out findings already in the scan — check both fingerprint and
+      // location (filePath:startLine) since different scanners use incompatible
+      // fingerprint schemes and a sweep finding at the same location as an
+      // existing finding is a duplicate.
+      const existingFps = new Set(state.scanFindings.map((f) => f.fingerprint));
+      const existingLocations = new Set(state.scanFindings.map((f) => `${f.filePath}:${f.startLine}`));
+      const newFindings = sweepFindings.filter(
+        (f) => !existingFps.has(f.fingerprint) && !existingLocations.has(`${f.filePath}:${f.startLine}`),
+      );
+
+      if (newFindings.length > 0) {
+        state.ruleSweepFindings = newFindings.length;
+        state.scanFindings.push(...newFindings);
+        log.info(`[rule-sweep] Found ${newFindings.length} new findings from custom rules`);
+
+        // Persist sweep findings to DB so they appear in reports and survive resume.
+        // Tagged with needs_review verdict since they haven't been triaged.
+        if (this.deps.db) {
+          const { upsertFinding } = await import("../store.js");
+          for (const f of newFindings) {
+            upsertFinding(this.deps.db, f, {
+              fingerprint: f.fingerprint,
+              verdict: "needs_review" as const,
+              confidence: 0.5,
+              rationale: "Discovered by rule sweep — pending triage",
+              verificationSteps: [],
+              fixPatch: null,
+              triageCostUsd: 0,
+            }, state.context.repoName, "HEAD");
+          }
+        }
+      }
+    } catch (error) {
+      log.warn(`[rule-sweep] Error: ${toErrorMessage(error)}`);
+    }
   }
 
   private async normalizeFindingsForVariantAnalysis(
@@ -2362,6 +2525,22 @@ export class PipelineOrchestrator {
 
     handleVerificationResultState(state, event, this.deps);
 
+    // Auto-rule generation: fire-and-forget for verified exploitable findings
+    const ruleGenConfidence = event.payload.result.compositeConfidence ?? event.payload.result.confidence;
+    if (
+      state.config.autoRuleGeneration
+      && event.payload.result.exploitable
+      && typeof ruleGenConfidence === "number"
+      && ruleGenConfidence >= 0.7
+      && !state.generatingRuleFingerprints?.has(event.payload.finding.fingerprint)
+    ) {
+      if (!state.generatingRuleFingerprints) state.generatingRuleFingerprints = new Set();
+      state.generatingRuleFingerprints.add(event.payload.finding.fingerprint);
+      this.generateAutoRule(state, runId, event.payload.finding).catch((err) => {
+        log.warn(`Post-verification rule generation failed: ${toErrorMessage(err)}`);
+      });
+    }
+
     await this.publishVerificationQueueDepth(state, runId);
 
     if (this.isVerificationDone(state)) {
@@ -2439,6 +2618,7 @@ export class PipelineOrchestrator {
     }
 
     await this.runVariantAnalysisPhase(state, runId);
+    await this.runRuleSweepPhase(state, runId);
 
     await this.bus.publish(
       createEvent("report:requested", runId, {
@@ -2603,6 +2783,7 @@ export class PipelineOrchestrator {
     }
 
     await this.runVariantAnalysisPhase(state, runId);
+    await this.runRuleSweepPhase(state, runId);
 
     await this.bus.publish(
       createEvent("report:requested", runId, {
@@ -2672,7 +2853,7 @@ export class PipelineOrchestrator {
 
       // Priority 2: Strong taint-analysis findings
       if (
-        finding.scanner === "taint-analysis-run"
+        (finding.scanner === "taint-iris" || finding.scanner === "taint-analysis-run")
         && score >= minScore
         && finding.taintPath
         && finding.taintPath.length > 0
@@ -2865,6 +3046,7 @@ export class PipelineOrchestrator {
     );
 
     await this.runVariantAnalysisPhase(state, runId);
+    await this.runRuleSweepPhase(state, runId);
 
     await this.bus.publish(
       createEvent("report:requested", runId, {
@@ -2969,6 +3151,7 @@ function buildReportStats(
     dynamicCostUsd: state.dynamicAnalysisEnabled ? state.dynamicCostUsd : undefined,
     variantFindings: state.variantFindings > 0 ? state.variantFindings : undefined,
     variantAnalysisCostUsd: state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
+    ruleSweepFindings: state.ruleSweepFindings > 0 ? state.ruleSweepFindings : undefined,
     chainCount: state.exploitChains.length > 0 ? state.exploitChains.length : undefined,
     chainAnalysisCostUsd: state.chainAnalysisCostUsd > 0 ? state.chainAnalysisCostUsd : undefined,
     budgetExceeded: state.budgetExceeded || undefined,

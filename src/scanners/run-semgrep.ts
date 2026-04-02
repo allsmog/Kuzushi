@@ -85,7 +85,7 @@ export async function runSemgrep(
     args.push("--exclude", pattern);
   }
 
-  args.push(".");
+  args.push(repoRoot);
 
   return new Promise((resolve, reject) => {
     const proc = spawn(scannerBin, args, {

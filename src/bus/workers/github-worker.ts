@@ -129,12 +129,12 @@ interface GitHubIntegrationConfig {
 }
 
 function resolveGitHubConfig(config: KuzushiConfig): GitHubIntegrationConfig {
-  const raw = (config as Record<string, unknown>)["github"];
+  const raw = (config as unknown as Record<string, unknown>)["github"];
   if (!raw || typeof raw !== "object") {
     return {
-      enabled: Boolean((config as Record<string, unknown>)["githubPr"] || (config as Record<string, unknown>)["githubComment"]),
-      createFixPrs: Boolean((config as Record<string, unknown>)["githubPr"]),
-      postFindingsComment: Boolean((config as Record<string, unknown>)["githubComment"]),
+      enabled: Boolean((config as unknown as Record<string, unknown>)["githubPr"] || (config as unknown as Record<string, unknown>)["githubComment"]),
+      createFixPrs: Boolean((config as unknown as Record<string, unknown>)["githubPr"]),
+      postFindingsComment: Boolean((config as unknown as Record<string, unknown>)["githubComment"]),
     };
   }
 

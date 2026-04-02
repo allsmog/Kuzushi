@@ -202,9 +202,8 @@ cat > "$TARGET_DIR/.kuzushi/config.json" << 'CONFIG'
       "labelingModel": "openai:qwen3:8b",
       "extractionModel": "openai:qwen3:8b"
     },
-    "threat-modeling": {
-      "strideModel": "openai:qwen3:8b",
-      "pastaModel": "openai:qwen3:8b"
+    "threat-model": {
+      "model": "openai:qwen3:8b"
     },
     "invariant-analysis": {
       "extractionModel": "openai:qwen3:8b",

@@ -41,6 +41,8 @@ export interface AgentQueryOptions {
   thinkingDisabled?: boolean;
   /** Fallback model if primary fails or is unavailable. */
   fallbackModel?: string;
+  /** Claude Code plugins to load in the subprocess. */
+  plugins?: Array<{ type: "local"; path: string }>;
   canUseTool?: (
     toolName: string,
     input: Record<string, unknown>,

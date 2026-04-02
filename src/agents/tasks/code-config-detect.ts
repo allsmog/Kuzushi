@@ -15,7 +15,7 @@ import { getProfilesForTask, formatProfilesForPrompt } from "../../security-prof
 import type { AgentTask, TaskContext } from "../types.js";
 import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { buildThreatModelLeadsSection } from "./threat-model-guidance.js";
+import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
 import {
   filterCategories,
   filterBlocks,
@@ -568,7 +568,7 @@ export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
     const profileLines = formatProfilesForPrompt(profiles);
     const threatModelContext = buildThreatModelLeadsSection(
       "code-config-detect",
-      context.upstreamOutputs.get("threat-model-stride"),
+      resolveThreatModelOutput(context.upstreamOutputs),
       fileIndex,
       preRead,
     );

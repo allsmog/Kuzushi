@@ -3,16 +3,12 @@ import type { KuzushiConfig } from "./types.js";
 import { isRecord } from "./utils.js";
 
 export const TAINT_ANALYSIS_TASK_IDS = [
-  "taint-analysis-preflight",
-  "taint-analysis-label",
-  "taint-analysis-run",
+  "taint-cwe-select",
+  "taint-iris",
 ] as const;
 
-export const TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS = [
-  "taint-analysis-discover",
-  "taint-analysis-cross-analyze",
-  "taint-analysis-stitch",
-] as const;
+/** @deprecated Old cross-service taint tasks replaced by taint-iris. */
+export const TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS = [] as const;
 
 export interface CapabilityDefinition {
   publicId: string;
@@ -31,7 +27,7 @@ const CAPABILITIES: CapabilityDefinition[] = [
     publicId: "taint-analysis",
     configKey: "taint-analysis",
     taskIds: TAINT_ANALYSIS_TASK_IDS,
-    aliases: TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS,
+    aliases: ["taint-cwe-select", "taint-iris"],
     scannerSelectable: true,
   },
   {
@@ -162,8 +158,27 @@ const CAPABILITIES: CapabilityDefinition[] = [
   {
     publicId: "threat-model",
     configKey: "threat-model",
-    taskIds: ["threat-model-stride", "threat-model-pasta"],
-    aliases: ["threat-model-stride", "threat-model-pasta"],
+    taskIds: ["threat-model-randori"],
+    aliases: ["threat-model-randori"],
+    scannerSelectable: true,
+  },
+  {
+    publicId: "threat-hunt",
+    configKey: "threat-hunt",
+    taskIds: ["threat-hunt"],
+    scannerSelectable: true,
+  },
+  {
+    publicId: "tob-audit",
+    configKey: "tob-audit",
+    taskIds: ["tob-audit"],
+    scannerSelectable: true,
+  },
+  {
+    publicId: "sharp-edges",
+    configKey: "sharp-edges-detect",
+    taskIds: ["sharp-edges-detect"],
+    aliases: ["sharp-edges-detect"],
     scannerSelectable: true,
   },
   {
@@ -245,7 +260,7 @@ export function resolveRunnableIds(id: string): string[] {
     return [normalized];
   }
 
-  if (capability.publicId === "taint-analysis" && normalized.startsWith("taint-analysis-")) {
+  if (capability.publicId === "taint-analysis" && normalized.startsWith("taint-")) {
     return [normalized];
   }
 

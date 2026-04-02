@@ -128,7 +128,6 @@ export async function rescoreFindings(
       model,
       schema: BATCH_RESCORE_SCHEMA as unknown as Record<string, unknown>,
       runtimeOptions: { runtime },
-      thinkingDisabled: true,
     });
 
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {

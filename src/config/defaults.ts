@@ -52,10 +52,11 @@ export const DEFAULTS: KuzushiConfig = {
   fpFilterCustomExclusions: [],
   enableDynamicTaskSelection: true,
   pocExecute: false,
-  pocSandbox: "docker",
+  pocSandbox: "process",
   pocExecTimeoutMs: 30_000,
   variantAnalysis: true,
   variantAnalysisMaxFindings: 10,
+  variantRuleSweepEnabled: true,
   contextEnrichmentModel: undefined,
   enableContextEnrichment: true,
   ensembleModels: [],
@@ -71,6 +72,7 @@ export const DEFAULTS: KuzushiConfig = {
   multiStrategyTimeoutMs: 60_000,
   multiStrategyAutoRuleGeneration: false,
   multiStrategyRescanWithRules: false,
+  autoRuleGeneration: true,
   dynamicAnalysisEnabled: false,
   cryptoBehavioralTestEnabled: false,
   cryptoBehavioralTimeoutMs: 120_000,
@@ -117,6 +119,7 @@ export const DEFAULTS: KuzushiConfig = {
     "crypto-behavioral-test": {
       timingIterations: 10_000,
     },
+    "threat-hunt": { runsPerActor: 2 },
     "code-config-detect": { maxFindings: 50 },
     "code-graph": {
       maxEntryPoints: 50,
