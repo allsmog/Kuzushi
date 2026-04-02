@@ -134,6 +134,7 @@ export const SELECTABLE_TASK_IDS: ReadonlySet<string> = new Set([
   "sharp-edges-detect",
   "taint-cwe-select",
   "taint-iris",
+  "taint-analysis",
 ]);
 
 /**

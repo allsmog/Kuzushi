@@ -132,6 +132,9 @@ function hasMultiStrategyEvidence(finding: Finding): boolean {
 }
 const log = getLogger("orchestrator");
 
+/** CWE classes that are auth/logic bugs — not pattern-matchable by Semgrep. Skip rule gen. */
+const SKIP_RULE_GEN_CWES = new Set(["285", "862", "863", "639", "284", "269", "915"]);
+
 type TaskOutcome =
   | { kind: "complete"; event: TaskCompleteEvent }
   | { kind: "error"; event: TaskErrorEvent };
@@ -1251,8 +1254,12 @@ export class PipelineOrchestrator {
     state.stageTimestamps.scanEnd = event.meta.timestamp;
 
     const clustered = clusterFindings(state.scanFindings);
-    state.scanFindings = clustered.findings;
-    state.totalFindings = clustered.findings.length;
+
+    // Location-based dedup: merge findings at the same file:line into one,
+    // keeping the highest-scored and attaching others as corroborating signals.
+    // Prevents 11x triage/verification for the same code location.
+    state.scanFindings = deduplicateByLocation(clustered.findings);
+    state.totalFindings = state.scanFindings.length;
     state.corroboratedClusters = clustered.corroboratedClusters;
 
     try {
@@ -2525,13 +2532,17 @@ export class PipelineOrchestrator {
 
     handleVerificationResultState(state, event, this.deps);
 
-    // Auto-rule generation: fire-and-forget for verified exploitable findings
+    // Auto-rule generation: fire-and-forget for verified exploitable findings.
+    // Skip auth/logic CWEs that can't be pattern-matched by Semgrep.
     const ruleGenConfidence = event.payload.result.compositeConfidence ?? event.payload.result.confidence;
+    const findingCwes = event.payload.finding.cwe ?? [];
+    const isAuthLogicCwe = findingCwes.some((c) => SKIP_RULE_GEN_CWES.has(c.replace(/^CWE-/, "")));
     if (
       state.config.autoRuleGeneration
       && event.payload.result.exploitable
       && typeof ruleGenConfidence === "number"
       && ruleGenConfidence >= 0.7
+      && !isAuthLogicCwe
       && !state.generatingRuleFingerprints?.has(event.payload.finding.fingerprint)
     ) {
       if (!state.generatingRuleFingerprints) state.generatingRuleFingerprints = new Set();
@@ -3075,6 +3086,56 @@ export class PipelineOrchestrator {
       }),
     );
   }
+}
+
+/**
+ * Merge findings at the same file:line into one entry, keeping the highest-scored
+ * and attaching others as corroborating signals. Prevents N-way triage/verification
+ * for findings from different scanners at the same code location.
+ */
+function deduplicateByLocation(findings: Finding[]): Finding[] {
+  const byLocation = new Map<string, Finding[]>();
+  for (const f of findings) {
+    const key = `${f.filePath}:${f.startLine}`;
+    const group = byLocation.get(key);
+    if (group) {
+      group.push(f);
+    } else {
+      byLocation.set(key, [f]);
+    }
+  }
+
+  const deduped: Finding[] = [];
+  for (const group of byLocation.values()) {
+    if (group.length === 1) {
+      deduped.push(group[0]);
+      continue;
+    }
+    // Sort by score descending — keep highest as primary
+    group.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    const primary = group[0];
+    const others = group.slice(1);
+
+    // Attach others as corroborating signals
+    const existing = primary.corroboratingSignals ?? [];
+    const newSignals = others.map((f) => ({
+      scanner: f.scanner,
+      fingerprint: f.fingerprint,
+      ruleId: f.ruleId,
+      filePath: f.filePath,
+      startLine: f.startLine,
+      cwe: f.cwe,
+      score: f.score ?? 0,
+    }));
+    primary.corroboratingSignals = [...existing, ...newSignals];
+    deduped.push(primary);
+  }
+
+  if (deduped.length < findings.length) {
+    log.info(`[location-dedup] Merged ${findings.length} findings into ${deduped.length} (${findings.length - deduped.length} duplicates absorbed as corroborating signals)`);
+  }
+
+  return deduped;
 }
 
 export function registerOrchestrator(

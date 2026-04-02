@@ -24,7 +24,7 @@ describe("DEFAULT_THREAT_MODEL_CONFIG", () => {
   it("has expected defaults", () => {
     expect(DEFAULT_THREAT_MODEL_CONFIG.maxElements).toBe(50);
     expect(DEFAULT_THREAT_MODEL_CONFIG.maxThreats).toBe(100);
-    expect(DEFAULT_THREAT_MODEL_CONFIG.emitFindings).toBe(true);
+    expect(DEFAULT_THREAT_MODEL_CONFIG.emitFindings).toBe(false);
     expect(DEFAULT_THREAT_MODEL_CONFIG.findingThreshold).toBe("high");
     expect(DEFAULT_THREAT_MODEL_CONFIG.randoriStages).toEqual(["s1", "s2", "s3", "s4"]);
   });
@@ -36,7 +36,7 @@ describe("resolveThreatModelConfig", () => {
     expect(resolved.model).toBe("anthropic:claude-sonnet-4-6");
     expect(resolved.maxElements).toBe(50);
     expect(resolved.maxThreats).toBe(100);
-    expect(resolved.emitFindings).toBe(true);
+    expect(resolved.emitFindings).toBe(false);
   });
 
   it("reads overrides from scannerConfig", () => {
