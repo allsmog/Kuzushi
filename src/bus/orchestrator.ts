@@ -1435,8 +1435,18 @@ export class PipelineOrchestrator {
     );
     let triageCandidates = capFindingsForTriage(pendingFindings, state.scanOpts.maxFindings);
 
-    // PR 5: Auto-pass high-confidence agentic findings when enabled
+    // Auto-pass threat-model findings — they're already validated by the threat model.
+    // Include in report but skip triage/verification to save budget.
     const autoPassFindings: Finding[] = [];
+    triageCandidates = triageCandidates.filter((finding) => {
+      if (finding.scanner === "threat-model-randori") {
+        autoPassFindings.push(finding);
+        return false;
+      }
+      return true;
+    });
+
+    // PR 5: Auto-pass high-confidence agentic findings when enabled
     if (state.config.skipTriageForHighConfidenceAgentic) {
       triageCandidates = triageCandidates.filter((finding) => {
         if (

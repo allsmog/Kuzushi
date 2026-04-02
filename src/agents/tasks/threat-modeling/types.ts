@@ -87,7 +87,7 @@ export const DEFAULT_THREAT_MODEL_CONFIG: ThreatModelConfig = {
   model: "anthropic:claude-sonnet-4-6",
   maxElements: 50,
   maxThreats: 100,
-  emitFindings: false,
+  emitFindings: true,
   findingThreshold: "high",
   randoriStages: ["s1", "s2", "s3", "s4"],
 };
