@@ -110,6 +110,12 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   ): Promise<Map<string, AgentQueryExecutionResult>> {
     if (requests.length === 0) return new Map();
 
+    // Batch API requires an API key — OAuth mode can't use the direct SDK client.
+    // Throw so callers fall back to sequential subprocess queries.
+    if (!this.config?.apiKey) {
+      throw new Error("Batch API requires an API key — not available in OAuth mode");
+    }
+
     let model = baseOptions.model ?? "claude-sonnet-4-6";
     if (model.includes(":")) model = model.split(":").slice(1).join(":");
     const isHaiku = model.includes("haiku");
@@ -385,8 +391,13 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   }
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
-    // Fast path: tool-less calls go directly to Anthropic API — no subprocess
-    if (!request.options.allowedTools?.length && !request.options.disallowedTools?.length) {
+    // Fast path: tool-less calls go directly to Anthropic API — no subprocess.
+    // Only when an API key is available — OAuth mode must use subprocess path.
+    if (
+      !request.options.allowedTools?.length
+      && !request.options.disallowedTools?.length
+      && this.config?.apiKey
+    ) {
       yield* this.queryDirect(request);
       return;
     }
