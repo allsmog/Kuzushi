@@ -260,7 +260,9 @@ export function resolveRunnableIds(id: string): string[] {
     return [normalized];
   }
 
-  if (capability.publicId === "taint-analysis" && normalized.startsWith("taint-")) {
+  // Pass through concrete taint task IDs (e.g. "taint-cwe-select", "taint-iris")
+  // but expand the capability alias "taint-analysis" to its task IDs
+  if (capability.publicId === "taint-analysis" && normalized !== "taint-analysis" && normalized.startsWith("taint-")) {
     return [normalized];
   }
 

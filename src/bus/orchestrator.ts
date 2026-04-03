@@ -2372,10 +2372,15 @@ export class PipelineOrchestrator {
     if (state.refinementIteration >= state.refinementIterations) {
       return false;
     }
-    if (!state.taskOutputs.has("taint-analysis-label")) {
+    // Support both old pipeline (taint-analysis-label/run) and new IRIS pipeline (taint-cwe-select/iris)
+    const hasLabelContext = state.taskOutputs.has("taint-analysis-label")
+      || state.taskOutputs.has("taint-cwe-select");
+    if (!hasLabelContext) {
       return false;
     }
-    return state.scanFindings.some((finding) => finding.scanner === "taint-analysis-run");
+    return state.scanFindings.some(
+      (finding) => finding.scanner === "taint-analysis-run" || finding.scanner === "taint-iris",
+    );
   }
 
   private async startTaintAnalysisRefinement(state: RunState, runId: string): Promise<void> {
@@ -2394,7 +2399,7 @@ export class PipelineOrchestrator {
         iteration: nextIteration,
         totalIterations: state.refinementIterations,
         findings: [...state.scanFindings],
-        labelOutput: state.taskOutputs.get("taint-analysis-label"),
+        labelOutput: state.taskOutputs.get("taint-analysis-label") ?? state.taskOutputs.get("taint-cwe-select"),
         repoContext: state.repoContext,
         refinementDeltaOnly: state.refinementDeltaOnly,
       }),
