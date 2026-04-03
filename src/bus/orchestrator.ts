@@ -22,7 +22,7 @@ import {
   type StageTimestamps,
   type StageCosts,
 } from "../scoring/run-metrics.js";
-import { resolveCapabilityConfigKey } from "../capabilities.js";
+import { resolveCapabilityConfigKey, normalizeTaskCapabilityIds } from "../capabilities.js";
 import {
   getActionableFindings,
   getPocHarnessedFingerprints,
@@ -1067,7 +1067,9 @@ export class PipelineOrchestrator {
       if (state.config.enableDynamicTaskSelection) {
         const dynamicTasks = this.extractDynamicTasks(state, completedTaskIds, dynamicTasksProcessed);
         if (dynamicTasks.length > 0) {
-          const newTaskIds = dynamicTasks.filter(
+          // Resolve capability IDs (e.g. "taint-analysis") to task IDs (e.g. "taint-cwe-select", "taint-iris")
+          const resolved = normalizeTaskCapabilityIds(dynamicTasks);
+          const newTaskIds = resolved.filter(
             (id) =>
               !enabledTaskIds.includes(id)
               && this.deps.taskRegistry!.has(id),
