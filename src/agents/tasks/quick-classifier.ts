@@ -93,7 +93,7 @@ async function classifyFinding(
         model,
         maxTurns: 1,
         temperature: 0,
-        maxOutputTokens: 1,
+        maxOutputTokens: 16,
         allowedTools: [],
         permissionMode: "dontAsk",
       },

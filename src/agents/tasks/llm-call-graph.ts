@@ -147,7 +147,7 @@ export const llmCallGraphTask: AgentTask<Finding[], LlmCallGraphOutput> = {
             severity: taintedPath.severity === "high" ? "ERROR" : "WARNING",
             message: taintedPath.description,
             evidence: `Entry point: ${entry.method} ${entry.path}\nSink: ${taintedPath.sinkType}\nCall chain: ${taintedPath.steps.map((s) => s.function).join(" -> ")}`,
-            scannerConfidence: "high",
+            scannerConfidence: "HIGH",
             subcategory: [taintedPath.sinkType],
             likelihood: taintedPath.severity === "high" ? "high" : "medium",
             impact: taintedPath.severity === "high" ? "high" : "medium",

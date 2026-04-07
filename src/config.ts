@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
@@ -1076,7 +1076,7 @@ function readConfigFile(configFilePath: string): WritableConfigLayer {
 
     // Guard: file size cap
     try {
-      const stats = statSync(resolvedPath);
+      const stats = lstatSync(resolvedPath);
       if (stats.size > MAX_CONFIG_FILE_BYTES) {
         log.warn(`Config file ${resolvedPath} exceeds 1MB limit, skipping`);
         return {};

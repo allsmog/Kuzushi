@@ -31,6 +31,7 @@ import { taskSelectorTask } from "./tasks/task-selector.js";
 import { reachabilityCheckTask } from "./tasks/reachability-check.js";
 import { callGraphAssistTask } from "./tasks/call-graph-assist.js";
 import { llmCallGraphTask } from "./tasks/llm-call-graph.js";
+import { quickClassifierTask } from "./tasks/quick-classifier.js";
 import { appModelBuildTask } from "./tasks/app-model-build.js";
 import { threatScenarioBuildTask } from "./tasks/threat-scenario-build.js";
 
@@ -91,6 +92,9 @@ export async function createDefaultTaskRegistry(
 
   // LLM-driven call graph discovery
   tasks.register(llmCallGraphTask);
+
+  // Quick classifier (pre-triage filter)
+  tasks.register(quickClassifierTask);
 
   // Dynamic task selection
   tasks.register(taskSelectorTask);
