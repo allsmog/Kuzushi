@@ -163,6 +163,20 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 
 **Audit logging** — optional JSONL audit trail of every agent decision for debugging, accountability, and compliance records.
 
+## Scan Presets
+
+Presets configure the pipeline for different cost/depth tradeoffs. CLI flags override preset values.
+
+```sh
+kuzushi <repo> --preset fast        # scanners only, no context/enrichment/variant analysis
+kuzushi <repo> --preset standard    # scanners + IRIS taint + secrets/crypto detection
+kuzushi <repo> --preset deep        # standard + exploit verification
+kuzushi <repo> --preset reference   # verification + PoC generation + threat-informed hunting
+                                    # with a frontier model for adversarial CTF-style exploration
+```
+
+The `reference` preset uses a cost-smart model tiering strategy: a standard model handles bulk scanning and triage, while a frontier model is used surgically for the threat-hunt stage only — where stronger adversarial reasoning has the highest ROI for zero-day discovery. Per-task model overrides keep costs controlled.
+
 ## Scanner Plugins
 
 | Scanner | Description | Auto-download |

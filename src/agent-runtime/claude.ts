@@ -121,7 +121,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     const isHaiku = model.includes("haiku");
 
     // Minimum cacheable tokens by model (below this, cache_control silently wastes the write premium)
-    const minCacheTokens = isHaiku || model.includes("opus") ? 4096 : 2048;
+    const minCacheTokens = isHaiku || model.includes("opus") || model.includes("orchid") ? 4096 : 2048;
 
     const batchRequests = requests.map((req) => {
       const systemBlocks: Anthropic.TextBlockParam[] = [];
@@ -191,8 +191,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     const decoder = await this.client.messages.batches.results(batch.id);
 
     // Model-aware pricing at batch rate (50% of standard)
-    const inputRate = (isHaiku ? 1 : model.includes("opus") ? 5 : 3) * 0.5;
-    const outputRate = (isHaiku ? 5 : model.includes("opus") ? 25 : 15) * 0.5;
+    const isOrchid = model.includes("orchid");
+    const isOpus = model.includes("opus");
+    const inputRate = (isHaiku ? 1 : isOrchid ? 25 : isOpus ? 5 : 3) * 0.5;
+    const outputRate = (isHaiku ? 5 : isOrchid ? 125 : isOpus ? 25 : 15) * 0.5;
 
     for await (const item of decoder) {
       if (item.result.type === "succeeded") {
@@ -250,7 +252,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
     // Only apply cache_control when system prompt meets minimum token threshold.
     // Below the minimum, caching silently fails and we waste the 1.25x write premium.
-    const minCacheTokens = isHaiku || model.includes("opus") ? 4096 : 2048;
+    const minCacheTokens = isHaiku || model.includes("opus") || model.includes("orchid") ? 4096 : 2048;
     const systemBlocks: Anthropic.TextBlockParam[] = [];
     if (request.options.systemPromptPrefix) {
       const estimatedTokens = Math.ceil(request.options.systemPromptPrefix.length / 4);
@@ -330,8 +332,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       }
 
       // Extract cost from usage (model-aware pricing)
-      const inputRate = isHaiku ? 1 : model.includes("opus") ? 5 : 3;
-      const outputRate = isHaiku ? 5 : model.includes("opus") ? 25 : 15;
+      const isOrchid = model.includes("orchid");
+      const isOpus = model.includes("opus");
+      const inputRate = isHaiku ? 1 : isOrchid ? 25 : isOpus ? 5 : 3;
+      const outputRate = isHaiku ? 5 : isOrchid ? 125 : isOpus ? 25 : 15;
       const inputCost = (response.usage.input_tokens / 1_000_000) * inputRate;
       const outputCost = (response.usage.output_tokens / 1_000_000) * outputRate;
       const cacheReadTokens = (response.usage as unknown as Record<string, unknown>)["cache_read_input_tokens"] as number ?? 0;
