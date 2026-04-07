@@ -365,7 +365,7 @@ describe("getVerdictCounts", () => {
   it("returns zero counts for empty db", () => {
     const db = initDb(dbPath);
     const counts = getVerdictCounts(db);
-    expect(counts).toEqual({ tp: 0, fp: 0, needs_review: 0 });
+    expect(counts).toEqual({ tp: 0, fp: 0, needs_review: 0, by_design: 0 });
     db.close();
   });
 
@@ -376,7 +376,7 @@ describe("getVerdictCounts", () => {
     upsertFinding(db, makeFinding("c"), makeResult("c", "tp"), "repo", "HEAD");
     upsertFinding(db, makeFinding("d"), makeResult("d", "needs_review"), "repo", "HEAD");
     const counts = getVerdictCounts(db);
-    expect(counts).toEqual({ tp: 1, fp: 2, needs_review: 1 });
+    expect(counts).toEqual({ tp: 1, fp: 2, needs_review: 1, by_design: 0 });
     db.close();
   });
 
@@ -385,7 +385,7 @@ describe("getVerdictCounts", () => {
     upsertFinding(db, makeFinding("a"), makeResult("a", "tp"), "repo-a", "HEAD");
     upsertFinding(db, makeFinding("b"), makeResult("b", "fp"), "repo-b", "HEAD");
     const counts = getVerdictCounts(db, "repo-a");
-    expect(counts).toEqual({ tp: 1, fp: 0, needs_review: 0 });
+    expect(counts).toEqual({ tp: 1, fp: 0, needs_review: 0, by_design: 0 });
     db.close();
   });
 });
