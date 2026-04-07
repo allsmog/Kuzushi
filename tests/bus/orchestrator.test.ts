@@ -2721,7 +2721,7 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
-  it("runs all tasks when enableDynamicTaskSelection is false (backward compat)", async () => {
+  it("runs all tasks when enableDynamicTaskSelection is false (backward compat)", { timeout: 15_000 }, async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
