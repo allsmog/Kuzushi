@@ -8,7 +8,7 @@ import type { ApplicationModel, ApplicationRoute, ScanOpts } from "../../../type
 import { toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
 import { resolveTaskModel, resolveTaskRuntime, resolveTaskPositiveInt } from "../runtime-overrides.js";
-import { buildTracePrompt, TRACE_OUTPUT_SCHEMA } from "./prompts.js";
+import { buildTracePrompt, buildDiscoveryPrompt, TRACE_OUTPUT_SCHEMA } from "./prompts.js";
 import {
   makeNodeId,
   makeEdgeId,
@@ -194,25 +194,123 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
 
     // ── Phase B: LLM gap-filling ────────────────────────────────────────
 
-    if (entryRoutes.length === 0) {
-      log.info("No entry points found, skipping LLM tracing");
-      const output: CodeGraphOutput = {
-        nodes: allNodes, edges: allEdges, paths: allPaths,
-        stats: {
-          totalNodes: allNodes.length, totalEdges: allEdges.length, totalPaths: 0,
-          staticNodes: staticNodeCount, llmInferredNodes: 0,
-          entryPoints: 0, tracedEntryPoints: 0, costUsd: 0,
-        },
-      };
-      return attachTaskOutputMeta(output, { costUsd: 0 });
-    }
-
     const routesToTrace = entryRoutes.slice(0, maxEntryPoints);
     const frameworks = repoContext?.frameworks ?? [];
-
-    log.info(`Phase B: Tracing ${routesToTrace.length}/${entryRoutes.length} entry points via LLM`);
+    const discoveryMode = entryRoutes.length === 0;
 
     const runtime = resolveTaskRuntime(context);
+
+    // Discovery mode: no pre-identified entry points — let the LLM find them
+    if (discoveryMode) {
+      log.info("Phase B: Discovery mode — LLM will identify entry points and trace paths");
+
+      // Collect project file paths (excluding external deps) for the LLM
+      const projectFiles = new Set<string>();
+      for (const edge of importGraph) {
+        if (!edge.fromFilePath.includes("node_modules") && !edge.fromFilePath.startsWith("github.com/")) {
+          projectFiles.add(edge.fromFilePath);
+        }
+        if (!edge.toPath.includes("node_modules") && !edge.toPath.startsWith("github.com/")) {
+          projectFiles.add(edge.toPath);
+        }
+      }
+
+      // Build threat model summary if available
+      const threatModelRaw = context.upstreamOutputs.get("threat-model-randori");
+      let threatModelSummary: string | undefined;
+      if (threatModelRaw && typeof threatModelRaw === "object") {
+        try {
+          const tmDoc = threatModelRaw as Record<string, unknown>;
+          const threats = Array.isArray(tmDoc["threats"]) ? tmDoc["threats"] : [];
+          const topThreats = threats.slice(0, 5).map((t: unknown) => {
+            const tr = t as Record<string, unknown>;
+            return `- ${String(tr["title"] ?? "")} [${String(tr["category"] ?? "")}]`;
+          }).filter(Boolean);
+          if (topThreats.length > 0) {
+            threatModelSummary = `Top threats identified:\n${topThreats.join("\n")}`;
+          }
+        } catch { /* non-fatal */ }
+      }
+
+      const discoveryPrompt = buildDiscoveryPrompt({
+        fileList: [...projectFiles].sort(),
+        frameworks,
+        languages: repoContext?.languages ?? [],
+        threatModelSummary,
+        repoContextSummary: repoContext
+          ? `Entry points: ${repoContext.entryPoints.join(", ") || "none detected"}\nFrameworks: ${repoContext.frameworks.join(", ") || "none"}\nDB/ORM: ${repoContext.ormOrDb.join(", ") || "none"}`
+          : undefined,
+      });
+
+      try {
+        let structuredOutput: unknown;
+        let costUsd = 0;
+
+        for await (const message of runtime.query({
+          prompt: discoveryPrompt,
+          options: {
+            cwd: workingRoot,
+            model,
+            allowedTools: ["Read", "Glob", "Grep", "GetCallers", "GetCallees"],
+            permissionMode: "dontAsk",
+            outputFormat: {
+              type: "json_schema",
+              schema: TRACE_OUTPUT_SCHEMA,
+              strict: true,
+              retryInvalidStructuredOutput: 1,
+            },
+          },
+        })) {
+          if (message.type === "result" && "result" in message) {
+            structuredOutput = message.structuredOutput;
+            costUsd = (message as unknown as Record<string, unknown>).totalCostUsd as number ?? 0;
+          }
+        }
+
+        totalCostUsd += costUsd;
+
+        const hops = parseTraceHops(structuredOutput);
+        if (hops.length > 0) {
+          let prevNodeId: string | null = null;
+
+          for (const hop of hops) {
+            const nodeId = makeNodeId(repo, hop.filePath, hop.startLine, hop.symbol);
+            const node: CodeGraphNode = {
+              nodeId, filePath: hop.filePath, startLine: hop.startLine,
+              symbol: hop.symbol, nodeKind: hop.nodeKind,
+              framework: frameworks[0] ?? null,
+              metadata: hop.dataLabel ? { dataLabel: hop.dataLabel } : {},
+              confidence: hop.confidence, source: "llm",
+            };
+            allNodes.push(node);
+            llmNodeCount++;
+
+            if (prevNodeId) {
+              const edgeId = makeEdgeId(prevNodeId, nodeId, hop.edgeKind);
+              const edge: CodeGraphEdge = {
+                edgeId, fromNodeId: prevNodeId, toNodeId: nodeId,
+                edgeKind: hop.edgeKind, dataLabel: hop.dataLabel ?? null,
+                ordinal: null, confidence: hop.confidence, source: "llm",
+              };
+              allEdges.push(edge);
+              if (db) upsertGraphEdge(db, repo, runId, edge);
+            }
+
+            if (db) upsertGraphNode(db, repo, runId, node);
+            prevNodeId = nodeId;
+          }
+
+          tracedEntryPoints++;
+        }
+
+        log.info(`Discovery mode complete: ${hops.length} hops traced, $${costUsd.toFixed(4)}`);
+      } catch (error) {
+        log.warn(`Discovery mode failed: ${toErrorMessage(error)}`);
+      }
+    } else {
+      // Standard mode: trace pre-identified entry points
+      log.info(`Phase B: Tracing ${routesToTrace.length}/${entryRoutes.length} entry points via LLM`);
+    }
 
     for (const route of routesToTrace) {
       const prompt = buildTracePrompt({
@@ -535,28 +633,62 @@ async function detectFallbackEntryRoutes(
     }
   }
 
+  const results: ApplicationRoute[] = [];
+
   for (const filePath of candidateFiles) {
     const content = await safeReadRepoFile(repoRoot, filePath);
     if (!content) {
       continue;
     }
-    const lineNumber = content.split(/\r?\n/u).findIndex((line) => /^\s*func\s+main\s*\(/.test(line));
-    if (lineNumber >= 0) {
-      return [{
-        id: `CLI|cli://main|${filePath}|${lineNumber + 1}`,
+    const lines = content.split(/\r?\n/u);
+
+    // func main()
+    const mainLine = lines.findIndex((line) => /^\s*func\s+main\s*\(/.test(line));
+    if (mainLine >= 0) {
+      results.push({
+        id: `CLI|cli://main|${filePath}|${mainLine + 1}`,
         method: "CLI",
         path: "cli://main",
         filePath,
-        startLine: lineNumber + 1,
+        startLine: mainLine + 1,
         framework: "CLI",
         handlerSymbol: "main",
         middleware: [],
         authMechanisms: [],
-      }];
+      });
+    }
+
+    // net.Listen*, grpc.NewServer, http.ListenAndServe*
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/\bnet\.Listen(?:TCP|UDP|Unix)?\s*\(/.test(line)) {
+        results.push({
+          id: `TCP|tcp://listener|${filePath}|${i + 1}`,
+          method: "TCP", path: "tcp://listener", filePath,
+          startLine: i + 1, framework: "Go net",
+          handlerSymbol: undefined, middleware: [], authMechanisms: [],
+        });
+      }
+      if (/\bgrpc\.NewServer\s*\(/.test(line)) {
+        results.push({
+          id: `GRPC|grpc://server|${filePath}|${i + 1}`,
+          method: "GRPC", path: "grpc://server", filePath,
+          startLine: i + 1, framework: "gRPC",
+          handlerSymbol: undefined, middleware: [], authMechanisms: [],
+        });
+      }
+      if (/\bhttp\.ListenAndServe\s*\(/.test(line)) {
+        results.push({
+          id: `HTTP|http://server|${filePath}|${i + 1}`,
+          method: "HTTP", path: "http://server", filePath,
+          startLine: i + 1, framework: "net/http",
+          handlerSymbol: undefined, middleware: [], authMechanisms: [],
+        });
+      }
     }
   }
 
-  return [];
+  return results;
 }
 
 async function safeReadRepoFile(repoRoot: string, filePath: string): Promise<string | null> {
