@@ -157,10 +157,10 @@ describe("code-graph-build task", () => {
 
     const output = await codeGraphBuildTask.run({} as any, makeContext(tempDir, runtime));
 
-    expect(runtime.query).toHaveBeenCalledTimes(1);
-    expect(output.stats.entryPoints).toBe(1);
-    expect(output.stats.tracedEntryPoints).toBe(1);
-    expect(output.paths).toHaveLength(1);
+    expect(runtime.query).toHaveBeenCalledTimes(2);
+    expect(output.stats.entryPoints).toBe(2);
+    expect(output.stats.tracedEntryPoints).toBe(2);
+    expect(output.paths).toHaveLength(2);
     expect(output.nodes).toEqual(expect.arrayContaining([
       expect.objectContaining({
         filePath: "main.go",
