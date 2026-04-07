@@ -57,7 +57,7 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
   dependsOn: ["context-gatherer", "app-model-build"],
 
   async run(_input, context): Promise<Finding[]> {
-    const model = resolveTaskModel(context);
+    const model = resolveTaskModel(context, "auth-logic-detect");
     const runtime = resolveTaskRuntime(context);
 
     // Gather upstream data
@@ -121,6 +121,8 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
             impact: "HIGH",
             cwe: cweList,
             score: normalizeSeverity(f["severity"]) === "ERROR" ? 85 : 65,
+            proofState: "symbolic_only",
+            engineProvenance: [{ kind: "agentic", detail: "LLM-driven auth-logic-detect analysis" }],
           };
         });
 

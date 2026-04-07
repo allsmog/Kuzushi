@@ -1565,6 +1565,19 @@ export function updateRunAssertions(
 }
 
 /**
+ * Mark pipeline runs stuck in non-terminal states as "aborted".
+ * Cleans up orphaned runs from killed processes or crashes.
+ */
+export function markStaleRunsAborted(db: Database.Database, repo: string): number {
+  const result = db.prepare(`
+    UPDATE pipeline_runs
+    SET status = 'aborted', completed_at = datetime('now'), updated_at = datetime('now')
+    WHERE repo = ? AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing', 'dynamic-analyzing')
+  `).run(repo);
+  return result.changes;
+}
+
+/**
  * Get previously-triaged TP findings in the specified files.
  * Used by regression detection to check if a diff re-introduces a fixed vulnerability.
  */

@@ -204,6 +204,8 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
         subcategory: ["vuln"],
         cwe: cweList,
       }),
+      proofState: "symbolic_only",
+      engineProvenance: [{ kind: "agentic", detail: "LLM-driven prototype-pollution-detect analysis" }],
     };
 
     const existing = deduped.get(fingerprint);

@@ -253,6 +253,8 @@ function normalizeFindings(
         impact: f.severity === "ERROR" ? "HIGH" : f.severity === "INFO" ? "LOW" : "MEDIUM",
         subcategory: ["vuln"],
       }),
+      proofState: "symbolic_only",
+      engineProvenance: [{ kind: "agentic", detail: "LLM-driven diff security review" }],
     };
 
     const existing = deduped.get(fingerprint);
@@ -397,6 +399,8 @@ async function detectRegressions(
         impact: "HIGH",
         subcategory: ["vuln", "regression"],
       }),
+      proofState: "symbolic_only",
+      engineProvenance: [{ kind: "agentic", detail: "LLM-driven diff security review" }],
     });
   }
 

@@ -1,50 +1,171 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { registerShutdownHook } from "../../lifecycle.js";
+import { createDefaultTaskRegistry } from "../../agents/index.js";
+import { configureAgentRuntime } from "../../agent-runtime/index.js";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
+import {
+  createBus,
+  createEvent,
+  generateRunId,
+  registerAllWorkers,
+  type PipelineCompleteEvent,
+  type PipelineErrorEvent,
+  type PipelineStats,
+} from "../../bus/index.js";
+import { inflightCache } from "../../cache.js";
+import { expandScannerSelections } from "../../capabilities.js";
 import { loadConfig } from "../../config.js";
 import {
   formatConfigValidationIssue,
   hasConfigValidationErrors,
   validateKuzushiConfig,
 } from "../../config/validation.js";
+import { registerShutdownHook } from "../../lifecycle.js";
+import { createDefaultRegistry } from "../../scanners/index.js";
+import { configureRateLimitRegistry } from "../../scheduler/index.js";
 import {
   createRun,
-  deleteFindingsForRepo,
   defaultDbPath,
+  deleteFindingsForRepo,
   getLatestResumableRun,
   getRun,
   initDb,
+  markStaleRunsAborted,
 } from "../../store.js";
-import { createDefaultRegistry } from "../../scanners/index.js";
-import { createDefaultTaskRegistry } from "../../agents/index.js";
-import { configureAgentRuntime } from "../../agent-runtime/index.js";
-import { configureRateLimitRegistry } from "../../scheduler/index.js";
-import {
-  createBus,
-  registerAllWorkers,
-  createEvent,
-  generateRunId,
-  type PipelineCompleteEvent,
-  type PipelineErrorEvent,
-} from "../../bus/index.js";
-import type { ScanOpts } from "../../types.js";
+import { looksLikeMonorepo } from "../../discovery/module-discovery.js";
+import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import { printQualityGateResult } from "../../report.js";
-import { inflightCache } from "../../cache.js";
-import { expandScannerSelections } from "../../capabilities.js";
 import { CliCommandError, CliConfigError, CliUsageError } from "../errors.js";
+import { warnPiAiBackendApiKeys, resolveActivePiAiModels, validatePiAiProviderCredentials } from "../pi-ai.js";
 import {
   applyScanCommandConfigOverrides,
   resolveScanSeverity,
   resolveScannerOverride,
   type ScanCommandOptions,
 } from "../scan-config.js";
-import { warnPiAiBackendApiKeys, resolveActivePiAiModels, validatePiAiProviderCredentials } from "../pi-ai.js";
 import { isShutdownCapableRuntime, resolveRepo } from "../shared.js";
+
+export interface PreparedScanExecution {
+  config: KuzushiConfig;
+  scanOpts: ScanOpts;
+}
+
+export interface PipelineParams {
+  repoRoot: string;
+  scanPath: string;
+  repoName: string;
+  config: KuzushiConfig;
+  scanOpts: ScanOpts;
+  opts: ScanCommandOptions;
+  dbPath?: string;
+  runRepoId?: string;
+  reportMode?: "full" | "suppress";
+  runtime?: AgentRuntime;
+  manageCache?: boolean;
+}
+
+export interface PipelineResult {
+  runId: string;
+  status: "complete" | "error";
+  stats?: PipelineStats;
+}
+
+export type MonorepoExecutionReason =
+  | "manual-modules"
+  | "list-modules"
+  | "cli-opt-out"
+  | "config-modules"
+  | "config-monorepo"
+  | "auto-detected"
+  | "single-root";
+
+export interface MonorepoExecutionDecision {
+  useMonorepo: boolean;
+  reason: MonorepoExecutionReason;
+}
 
 export async function runScanCommand(repoPath: string, opts: ScanCommandOptions): Promise<void> {
   const scanPath = path.resolve(repoPath);
   const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
+  const modeConfig = applyScanCommandConfigOverrides(
+    loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true }),
+    opts,
+  );
+  const monorepoDecision = await resolveMonorepoExecution({
+    repoRoot,
+    scanPath,
+    config: modeConfig,
+    opts,
+  });
 
+  if (monorepoDecision.useMonorepo) {
+    const { runMonorepoScan } = await import("./monorepo-scan.js");
+    await runMonorepoScan(repoPath, opts);
+    return;
+  }
+
+  if (opts.moduleFilter) {
+    throw new CliUsageError("--module-filter can only be used when module discovery or manual modules are active.");
+  }
+
+  const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
+
+  await runPipeline({
+    repoRoot,
+    scanPath,
+    repoName,
+    config,
+    scanOpts,
+    opts,
+  });
+}
+
+export async function resolveMonorepoExecution(params: {
+  repoRoot: string;
+  scanPath: string;
+  config: KuzushiConfig;
+  opts: Pick<ScanCommandOptions, "listModules" | "moduleDiscovery" | "modules">;
+}): Promise<MonorepoExecutionDecision> {
+  const { repoRoot, scanPath, config, opts } = params;
+
+  if (opts.modules) {
+    return { useMonorepo: true, reason: "manual-modules" };
+  }
+
+  if (opts.listModules) {
+    return { useMonorepo: true, reason: "list-modules" };
+  }
+
+  if (opts.moduleDiscovery === false) {
+    return { useMonorepo: false, reason: "cli-opt-out" };
+  }
+
+  const targetIsRepoRoot = path.resolve(scanPath) === path.resolve(repoRoot);
+  if ((config.monorepo?.modules?.length ?? 0) > 0) {
+    return {
+      useMonorepo: targetIsRepoRoot,
+      reason: targetIsRepoRoot ? "config-modules" : "single-root",
+    };
+  }
+
+  if (config.monorepo?.mode === "off") {
+    return { useMonorepo: false, reason: "single-root" };
+  }
+
+  if (!targetIsRepoRoot) {
+    return { useMonorepo: false, reason: "single-root" };
+  }
+
+  if (config.monorepo) {
+    return { useMonorepo: true, reason: "config-monorepo" };
+  }
+
+  return await looksLikeMonorepo(scanPath)
+    ? { useMonorepo: true, reason: "auto-detected" }
+    : { useMonorepo: false, reason: "single-root" };
+}
+
+export function prepareScanExecution(repoRoot: string, opts: ScanCommandOptions): PreparedScanExecution {
   const config = applyScanCommandConfigOverrides(
     loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true }),
     opts,
@@ -80,14 +201,16 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     throw new CliUsageError(error instanceof Error ? error.message : String(error));
   }
 
+  return { config, scanOpts };
+}
+
+export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts): AgentRuntime {
   const activeModels = resolveActivePiAiModels(
     config,
     scanOpts.scanners ?? [],
     config.enabledTasks ?? [],
   );
 
-  // Skip credential check for Claude Agent SDK runtime — it handles auth
-  // internally via OAuth (the subprocess resolves credentials from ~/.claude/).
   const isClaudeRuntime = (config.agentRuntimeBackend ?? "claude") === "claude";
   if (!isClaudeRuntime) {
     const missingCredentials = validatePiAiProviderCredentials(activeModels, {
@@ -111,25 +234,48 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     anthropicApiKey: config.agentRuntimeConfig?.apiKey,
   });
 
-  let runtime;
+  configureRateLimitRegistry(config.triageConcurrency);
+
   try {
-    runtime = configureAgentRuntime(config);
+    return configureAgentRuntime(config);
   } catch (error) {
     throw new CliConfigError(error instanceof Error ? error.message : String(error));
   }
+}
 
-  configureRateLimitRegistry(config.triageConcurrency);
-
+export function applyPipelineCacheOptions(opts: Pick<ScanCommandOptions, "fresh" | "cache">): void {
   if (opts.fresh || opts.cache === false) {
     inflightCache.enabled = false;
     inflightCache.invalidate();
   }
+}
 
-  const dbPath = opts.db ?? defaultDbPath(repoRoot);
+export async function runPipeline(params: PipelineParams): Promise<PipelineResult> {
+  const {
+    repoRoot,
+    scanPath,
+    repoName,
+    config,
+    scanOpts,
+    opts,
+    runtime: runtimeOverride,
+  } = params;
+  const reportMode = params.reportMode ?? "full";
+  const manageCache = params.manageCache ?? true;
+
+  if (manageCache) {
+    applyPipelineCacheOptions(opts);
+  }
+
+  const runtime = runtimeOverride ?? createPipelineRuntime(config, scanOpts);
+  const ownsRuntime = runtimeOverride == null;
+  const dbPath = params.dbPath ?? defaultDbPath(repoRoot);
   const dbDir = path.dirname(dbPath);
-  if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
+  if (!existsSync(dbDir)) {
+    mkdirSync(dbDir, { recursive: true });
+  }
 
-  const repoId = path.resolve(repoRoot);
+  const runRepoId = params.runRepoId ?? path.resolve(repoRoot);
   const db = initDb(dbPath);
   let bus: ReturnType<typeof createBus> | undefined;
 
@@ -143,11 +289,15 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   }
 
   try {
+    const registry = createDefaultRegistry();
     bus = createBus(config);
     const taskRegistry = await createDefaultTaskRegistry(registry, config, repoRoot);
     await registerAllWorkers(bus, { registry, taskRegistry, db, config, runtime });
   } catch (error) {
     db.close();
+    if (ownsRuntime && isShutdownCapableRuntime(runtime)) {
+      try { await runtime.shutdown(); } catch { /* best-effort */ }
+    }
     throw new CliCommandError(error instanceof Error ? error.message : String(error));
   }
 
@@ -159,15 +309,16 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   registerShutdownHook("db-close", async () => {
     try { db.close(); } catch { /* best-effort */ }
   }, 2);
-  registerShutdownHook("agent-runtime-shutdown", async () => {
-    if (isShutdownCapableRuntime(runtime)) {
-      try { await runtime.shutdown(); } catch { /* best-effort */ }
-    }
-  }, 3);
+  if (ownsRuntime) {
+    registerShutdownHook("agent-runtime-shutdown", async () => {
+      if (isShutdownCapableRuntime(runtime)) {
+        try { await runtime.shutdown(); } catch { /* best-effort */ }
+      }
+    }, 3);
+  }
 
-  // Start streaming server if enabled
   let streamingCleanup: (() => Promise<void>) | undefined;
-  if (config.streamingEnabled) {
+  if (reportMode === "full" && config.streamingEnabled) {
     const { startStreamingServer } = await import("../../streaming.js");
     const streaming = startStreamingServer(bus, config.streamingPort ?? 0);
     streamingCleanup = streaming.close;
@@ -178,11 +329,12 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     }, 0);
   }
 
-  const resumeRunId = resolveResumeRunId(db, repoId, repoName, opts.resume);
+  const resumeRunId = resolveResumeRunId(db, runRepoId, repoName, opts.resume);
   const runId = resumeRunId ?? generateRunId();
 
   if (!resumeRunId) {
-    createRun(db, runId, repoId, config, scanOpts);
+    markStaleRunsAborted(db, runRepoId);
+    createRun(db, runId, runRepoId, config, scanOpts);
   }
 
   const context = {
@@ -191,6 +343,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     scanPath,
     repoName,
     dbPath,
+    reportMode,
   };
 
   const pipelineComplete = bus
@@ -207,20 +360,8 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     )
     .then((event) => ({ kind: "error" as const, event }));
 
-  // Print scan plan summary
-  {
-    const tasks = config.enabledTasks ?? [];
-    const taskSummary = tasks.length === 0
-      ? "none (scanners only)"
-      : tasks.length === 1 && tasks[0] === "*"
-        ? "all"
-        : `${tasks.length} (${tasks.slice(0, 3).join(", ")}${tasks.length > 3 ? ", ..." : ""})`;
-    const scanners = config.scanners?.join(", ") ?? "semgrep";
-    const dynamic = config.enableDynamicTaskSelection ? "on" : "off";
-    console.error(`\nScan plan:`);
-    console.error(`  Scanners:  ${scanners}`);
-    console.error(`  Tasks:     ${taskSummary}`);
-    console.error(`  Dynamic:   ${dynamic}\n`);
+  if (reportMode === "full") {
+    printScanPlan(config);
   }
 
   try {
@@ -237,7 +378,13 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     if (outcome.kind === "error") {
       printPipelineError(outcome.event.payload.error, outcome.event.payload.errorCategory);
       process.exitCode = 1;
-    } else {
+      return {
+        runId,
+        status: "error",
+      };
+    }
+
+    if (reportMode === "full") {
       const { stats } = outcome.event.payload;
       if (stats.qualityGateResult) {
         printQualityGateResult(stats.qualityGateResult);
@@ -248,19 +395,46 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
         );
       }
     }
+
+    return {
+      runId,
+      status: "complete",
+      stats: outcome.event.payload.stats,
+    };
   } finally {
     try {
       await bus.close();
     } finally {
       try {
-        if (isShutdownCapableRuntime(runtime)) {
-          await runtime.shutdown();
+        if (streamingCleanup) {
+          await streamingCleanup();
         }
       } finally {
-        db.close();
+        try {
+          if (ownsRuntime && isShutdownCapableRuntime(runtime)) {
+            await runtime.shutdown();
+          }
+        } finally {
+          db.close();
+        }
       }
     }
   }
+}
+
+function printScanPlan(config: KuzushiConfig): void {
+  const tasks = config.enabledTasks ?? [];
+  const taskSummary = tasks.length === 0
+    ? "none (scanners only)"
+    : tasks.length === 1 && tasks[0] === "*"
+      ? "all"
+      : `${tasks.length} (${tasks.slice(0, 3).join(", ")}${tasks.length > 3 ? ", ..." : ""})`;
+  const scanners = config.scanners?.join(", ") ?? "semgrep";
+  const dynamic = config.enableDynamicTaskSelection ? "on" : "off";
+  console.error("\nScan plan:");
+  console.error(`  Scanners:  ${scanners}`);
+  console.error(`  Tasks:     ${taskSummary}`);
+  console.error(`  Dynamic:   ${dynamic}\n`);
 }
 
 function resolveResumeRunId(
