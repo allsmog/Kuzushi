@@ -119,4 +119,50 @@ describe("applyScanCommandConfigOverrides", () => {
       taintDiffMode: "bogus",
     }))).toThrowError(new CliUsageError("--taint-diff-mode must be one of: delta, baseline."));
   });
+
+  it("applies reference preset with deep-merged scannerConfig", () => {
+    const config = structuredClone(DEFAULTS);
+    const originalSemgrep = { ...config.scannerConfig.semgrep };
+
+    applyScanCommandConfigOverrides(config, makeOptions({ preset: "reference" }));
+
+    // Threat-hunt gets Orchid model from the preset
+    expect(config.scannerConfig["threat-hunt"].model).toBe("anthropic:claude-orchid-preview");
+    expect(config.scannerConfig["threat-hunt"].runsPerActor).toBe(3);
+
+    // Other scanner configs survive the deep-merge (not wiped out)
+    expect(config.scannerConfig.semgrep).toEqual(originalSemgrep);
+    expect(config.scannerConfig["taint-analysis"]).toBeDefined();
+    expect(config.scannerConfig["taint-analysis"].passes).toEqual([1, 2, 3]);
+
+    // Top-level preset fields are applied
+    expect(config.verify).toBe(true);
+    expect(config.pocHarness).toBe(true);
+    // Scanners are NOT overridden — user's configured scanners are preserved
+    expect(config.scanners).toEqual(DEFAULTS.scanners);
+  });
+
+  it("reference preset does not override global model or scanners", () => {
+    const config = structuredClone(DEFAULTS);
+
+    applyScanCommandConfigOverrides(config, makeOptions({
+      preset: "reference",
+      model: "anthropic:claude-opus-4-6",
+    }));
+
+    // CLI --model sets the global model; preset doesn't fight it
+    expect(config.model).toBe("anthropic:claude-opus-4-6");
+    // Scanners stay at user defaults
+    expect(config.scanners).toEqual(DEFAULTS.scanners);
+    // Threat-hunt gets Orchid from scannerConfig deep-merge
+    expect(config.scannerConfig["threat-hunt"].model).toBe("anthropic:claude-orchid-preview");
+  });
+
+  it("rejects unknown preset names", () => {
+    const config = structuredClone(DEFAULTS);
+
+    expect(() => applyScanCommandConfigOverrides(config, makeOptions({
+      preset: "bogus",
+    }))).toThrowError(CliUsageError);
+  });
 });

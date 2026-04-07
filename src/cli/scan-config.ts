@@ -82,9 +82,20 @@ export function applyScanCommandConfigOverrides(
   // Apply preset before any other overrides so CLI flags take precedence.
   if (opts.preset) {
     if (!isValidPreset(opts.preset)) {
-      throw new CliUsageError(`Unknown preset "${opts.preset}". Valid presets: fast, standard, deep`);
+      throw new CliUsageError(`Unknown preset "${opts.preset}". Valid presets: fast, standard, deep, reference`);
     }
-    Object.assign(config, SCAN_PRESETS[opts.preset]);
+    const preset = SCAN_PRESETS[opts.preset];
+    // Deep-merge scannerConfig so presets can override individual scanner
+    // settings without wiping out defaults for other scanners.
+    if (preset.scannerConfig) {
+      for (const [key, val] of Object.entries(preset.scannerConfig)) {
+        config.scannerConfig[key] = { ...config.scannerConfig[key], ...val };
+      }
+      const { scannerConfig: _, ...rest } = preset;
+      Object.assign(config, rest);
+    } else {
+      Object.assign(config, preset);
+    }
   }
 
   if (opts.model) config.model = opts.model;
