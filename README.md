@@ -52,7 +52,7 @@ Kuzushi auto-downloads Opengrep if you don't have a scanner installed. Zero depe
 
 For each finding, Kuzushi produces:
 
-- **Verdict** — `true_positive`, `false_positive`, or `needs_review`
+- **Verdict** — `true_positive`, `false_positive`, `by_design`, or `needs_review`
 - **Confidence** — 0.0 to 1.0
 - **Rationale** — why the agent reached that verdict, referencing specific code lines
 - **Verification steps** — 2-6 actionable steps a human reviewer can follow
@@ -60,7 +60,7 @@ For each finding, Kuzushi produces:
 - **PoC exploit** (with `--verify`) — a concrete proof-of-concept payload proving the vulnerability is exploitable
 - **Cost** — per-finding triage and verification cost in USD
 
-The terminal report shows true positives first, then needs-review items. False positives are counted but hidden. You only see what matters.
+The terminal report shows true positives first, then needs-review items. False positives and by-design findings are counted but deprioritized. You only see what matters.
 
 ## How It Works
 
@@ -74,14 +74,14 @@ The terminal report shows true positives first, then needs-review items. False p
 ```
 
 1. **Context gathering** — auto-detects your tech stack, frameworks, auth patterns, ORMs, and sanitization libraries
-2. **Code graph** — builds a persistent entry-point-to-sink graph via static analysis + LLM gap-filling for reachability-aware triage
+2. **Code graph** — builds a persistent entry-point-to-sink graph via static analysis + LLM discovery mode. For HTTP services, traces pre-identified routes. For CLI tools, daemons, and non-HTTP projects, the LLM identifies entry points itself (main functions, socket listeners, gRPC servers, CLI handlers) and traces security-relevant call/data-flow paths
 3. **Threat modeling** — Randori PASTA plugin (shipped as `@kuzushi/randori-plugin`) performs 4-stage threat analysis: business objectives, technical scope, DFD decomposition, and STRIDE threat scenarios with ATT&CK/CAPEC/OWASP mapping and 5-factor probabilistic scoring. All threat leads are injected into every detector's prompts.
 4. **Threat-informed hunting** — spawns one adversarial Claude agent per DFD external entity (users, services, attackers) to CTF-style hunt for vulnerabilities from each actor's perspective
 5. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently; 13+ specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto, auth logic, sharp edges); multi-strategy mode runs 2-4 analytical approaches per vuln class
 4. **Classifier funnel** — cheap single-token pre-filter removes ~80% of noise before expensive triage
 5. **Deduplication** — fingerprints and merges equivalent findings across scanners
 6. **Incremental skip** — findings already triaged in previous runs are skipped automatically
-7. **AI triage** — an agent investigates each finding with pre-loaded source context, code graph paths, evidence chains, and CWE-specific knowledge modules; batch-dropped findings auto-escalate to individual triage
+7. **AI triage** — an agent investigates each finding with pre-loaded source context, code graph paths, evidence chains, threat model context, and CWE-specific knowledge modules. Threat model output from Randori PASTA is injected into triage prompts so the agent can distinguish design choices (`by_design`) from real vulnerabilities (`tp`). Batch-dropped findings auto-escalate to individual triage
 8. **Variant analysis** — confirmed TPs trigger automatic search for similar patterns across the codebase
 9. **Verification** (optional) — constructs concrete PoC exploit payloads for true positives
 10. **PoC harness generation** (optional) — produces runnable exploit scripts with iterative execution feedback
@@ -129,7 +129,7 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 
 **Crypto behavioral testing** — generates and executes behavioral test harnesses in a Docker sandbox for crypto misuse findings. Detects timing side-channels, ECB mode, weak hashes, weak PRNGs, and more.
 
-**IRIS-style taint analysis** — LLM-driven CodeQL taint analysis inspired by the IRIS paper (ICLR 2025). An LLM selects relevant CWE classes for the project, writes CodeQL extraction queries dynamically (language-agnostic, framework-agnostic), labels candidates, generates TaintTracking configurations, and iteratively refines queries when compilation fails. No templates, no hardcoded framework detection.
+**IRIS-style taint analysis** — LLM-driven CodeQL taint analysis inspired by the IRIS paper (ICLR 2025). An LLM selects relevant CWE classes for the project, writes CodeQL extraction queries dynamically (language-agnostic, framework-agnostic), labels candidates, generates TaintTracking configurations, and iteratively refines queries when compilation fails. Structured taint paths (source-to-sink step data) are persisted to the findings DB for downstream verification and reporting. No templates, no hardcoded framework detection.
 
 **Randori PASTA threat modeling** — ships `@kuzushi/randori-plugin` as a dependency. Runs 4-stage PASTA analysis (objectives, scope, DFD decomposition, STRIDE threats) via Claude Code plugin. Threat leads are injected into all detector prompts for threat-informed scanning. ATT&CK, CAPEC, and OWASP mapping included.
 
@@ -149,7 +149,7 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 
 **Source pre-read** — triage agents receive the flagged source file pre-loaded (50 lines surrounding the finding), eliminating cold-start tool calls and improving reasoning accuracy.
 
-**LLM code graph** — builds a persistent code graph tracing entry points through middleware, controllers, services, and data-access layers. Static skeleton from import analysis + LLM-assisted gap-filling for dynamic dispatch, DI, and callback patterns. Feeds graph context into triage for better reasoning.
+**LLM code graph** — builds a persistent code graph tracing entry points through middleware, controllers, services, and data-access layers. Static skeleton from import analysis + LLM-assisted gap-filling for dynamic dispatch, DI, and callback patterns. Discovery mode: when no HTTP routes are detected, the LLM identifies entry points itself (main functions, socket listeners, gRPC servers, CLI handlers) and traces security-relevant paths with threat model context. Feeds graph context into triage for better reasoning.
 
 **Multi-strategy analysis** — runs 2-4 different analytical approaches per vulnerability class (syntactic pattern matching, dataflow tracing, first-principles reasoning, execution-based proof) and merges results with confidence boosting when strategies agree. Auto-generates reusable Semgrep rules from confirmed multi-strategy findings.
 
