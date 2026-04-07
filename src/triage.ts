@@ -509,6 +509,8 @@ function parseBatchTriageOutput(
       recommendedFix: asOptionalString((item as Record<string, unknown>)["recommended_fix"]),
       ruleRefinementHint: asOptionalString((item as Record<string, unknown>)["rule_refinement_hint"]),
       triageSchemaVersion: asOptionalString((item as Record<string, unknown>)["triage_schema_version"]),
+      evidenceTrail: parseEvidenceTrail((item as Record<string, unknown>)["evidence_trail"]),
+      evidenceChain: parseEvidenceChain((item as Record<string, unknown>)["evidence_chain"]),
     });
   }
 

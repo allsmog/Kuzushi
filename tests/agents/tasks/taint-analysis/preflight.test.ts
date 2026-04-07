@@ -26,7 +26,7 @@ describe("taint-analysis-preflight internals", () => {
     mkdirSync(repoRoot, { recursive: true });
 
     const workspace = __taintAnalysisPreflightInternals.resolveWorkspaceDir(repoRoot, "../outside-iris");
-    expect(workspace).toBe(path.resolve(repoRoot, "./iris"));
+    expect(workspace).toBe(path.resolve(repoRoot, ".kuzushi/iris"));
   });
 
   it("uses extractionModel when configured", () => {
@@ -141,7 +141,7 @@ describe("taint-analysis-preflight internals", () => {
     writeFileSync(templatePath, "{{SOURCE_HANDLER_PREDICATE}}", "utf-8");
 
     const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
-    expect(rendered).toContain("@id taint-analysis/extraction/fallback-source");
+    expect(rendered).toBeNull();
   });
 
   it("falls back without agentCtx even when body placeholders present", async () => {
@@ -154,14 +154,13 @@ describe("taint-analysis-preflight internals", () => {
       "select {{SOURCE_SELECT}}",
     ].join("\n"), "utf-8");
 
-    // No agentCtx → should use deterministic fallback
+    // No agentCtx → extraction should be unavailable
     const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(
       templatePath,
       "go",
       "source",
     );
-    expect(rendered).toContain("@id taint-analysis/extraction/fallback-source");
-    expect(rendered).toContain("where 1 = 0");
+    expect(rendered).toBeNull();
   });
 
   it("records fallback diagnostics when body placeholders have no agent context", async () => {
@@ -179,8 +178,9 @@ describe("taint-analysis-preflight internals", () => {
       "go",
       "source",
     );
-    expect(rendered.query).toContain("@id taint-analysis/extraction/fallback-source");
-    expect(rendered.diagnostic.fallbackUsed).toBe(true);
+    expect(rendered.query).toBeNull();
+    expect(rendered.diagnostic.selectedQuerySource).toBe("unavailable");
+    expect(rendered.diagnostic.fallbackUsed).toBe(false);
     expect(rendered.diagnostic.fallbackReason).toBe("body_placeholders_without_agent_ctx");
     expect(rendered.diagnostic.retryAttempt.attempted).toBe(false);
   });
@@ -195,7 +195,7 @@ describe("taint-analysis-preflight internals", () => {
       "select n",
     ].join("\n"), "utf-8");
 
-    // Agent will fail (no runtime configured) but should fall back gracefully
+    // Agent will fail (no runtime configured) and extraction should be unavailable
     const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(
       templatePath,
       "go",
@@ -214,9 +214,7 @@ describe("taint-analysis-preflight internals", () => {
       },
     );
 
-    // Should fall back to deterministic fallback
-    expect(rendered).toContain("@id taint-analysis/extraction/fallback-source");
-    expect(rendered).toContain("where 1 = 0");
+    expect(rendered).toBeNull();
   });
 
   it("writes manifest model fields aligned with effective extraction model", async () => {
@@ -286,7 +284,7 @@ describe("taint-analysis-preflight internals", () => {
 
     function makeDiagnostic(overrides: Partial<{
       kind: "source" | "sink";
-      fallbackUsed: boolean;
+      selectedQuerySource: "deterministic-template" | "agent-initial" | "agent-retry" | "unavailable";
       fallbackReason: string | null;
     }> = {}) {
       return {
@@ -295,8 +293,8 @@ describe("taint-analysis-preflight internals", () => {
         templatePath: "/tmp/t.tmpl",
         templateExists: true,
         templateHadBodyPlaceholders: true,
-        selectedQuerySource: "agent-initial" as const,
-        fallbackUsed: overrides.fallbackUsed ?? false,
+        selectedQuerySource: overrides.selectedQuerySource ?? "agent-initial",
+        fallbackUsed: false,
         fallbackReason: overrides.fallbackReason ?? null,
         fallbackDetail: null,
         initialAttempt: { attempted: true, generatedQuery: true, compileOk: true, compileErrorExcerpt: null },
@@ -316,18 +314,18 @@ describe("taint-analysis-preflight internals", () => {
 
     it("returns degraded when fallback used for sources", () => {
       const result = computeExtractionDegradation(
-        [makeDiagnostic({ kind: "source", fallbackUsed: true }), makeDiagnostic({ kind: "sink" })],
+        [makeDiagnostic({ kind: "source", selectedQuerySource: "unavailable" }), makeDiagnostic({ kind: "sink" })],
         5,
         10,
       );
       expect(result.status).toBe("degraded");
-      expect(result.reasons).toContain("sources_used_fallback_template");
+      expect(result.reasons).toContain("sources_extraction_unavailable");
     });
 
     it("returns degraded when agent returned no query", () => {
       const result = computeExtractionDegradation(
         [
-          makeDiagnostic({ kind: "source", fallbackUsed: true, fallbackReason: "agent_returned_no_query" }),
+          makeDiagnostic({ kind: "source", selectedQuerySource: "unavailable", fallbackReason: "agent_returned_no_query" }),
           makeDiagnostic({ kind: "sink" }),
         ],
         5,
@@ -335,7 +333,7 @@ describe("taint-analysis-preflight internals", () => {
       );
       expect(result.status).toBe("degraded");
       expect(result.reasons).toContain("sources_agent_returned_no_query");
-      expect(result.reasons).toContain("sources_used_fallback_template");
+      expect(result.reasons).toContain("sources_extraction_unavailable");
     });
 
     it("returns failed when both sources and sinks are zero", () => {
@@ -352,14 +350,14 @@ describe("taint-analysis-preflight internals", () => {
     it("returns degraded for mixed scenario (one fallback + one zero)", () => {
       const result = computeExtractionDegradation(
         [
-          makeDiagnostic({ kind: "source", fallbackUsed: true }),
+          makeDiagnostic({ kind: "source", selectedQuerySource: "unavailable" }),
           makeDiagnostic({ kind: "sink" }),
         ],
         0,
         10,
       );
       expect(result.status).toBe("degraded");
-      expect(result.reasons).toContain("sources_used_fallback_template");
+      expect(result.reasons).toContain("sources_extraction_unavailable");
       expect(result.reasons).toContain("zero_usable_sources");
       expect(result.reasons).not.toContain("zero_usable_sinks");
     });
@@ -381,8 +379,8 @@ describe("taint-analysis-preflight internals", () => {
           templatePath: "/tmp/sources.tmpl",
           templateExists: true,
           templateHadBodyPlaceholders: true,
-          selectedQuerySource: "fallback",
-          fallbackUsed: true,
+          selectedQuerySource: "unavailable",
+          fallbackUsed: false,
           fallbackReason: "retry_compile_failed",
           fallbackDetail: "ERROR: unresolved variable node",
           initialAttempt: {

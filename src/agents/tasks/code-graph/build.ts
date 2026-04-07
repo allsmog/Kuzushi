@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { getCodeIntelligenceProvider } from "../../../analysis-support/index.js";
 import { createLogger } from "../../../logger.js";
 import { coerceRepoContext, coerceContextEnrichment } from "../../../repo-context.js";
@@ -30,6 +32,8 @@ const log = createLogger({ stage: "code-graph-build" });
 
 const DEFAULT_MAX_ENTRY_POINTS = 50;
 const DEFAULT_MAX_TURNS_PER_TRACE = 10;
+const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "ALL", "HTTP"]);
+const EVENT_ENTRY_METHODS = new Set(["GRPC", "TCP", "UDP", "UNIX"]);
 
 interface TraceHop {
   filePath: string;
@@ -39,6 +43,11 @@ interface TraceHop {
   edgeKind: CodeGraphEdgeKind;
   dataLabel?: string;
   confidence: number;
+}
+
+interface StaticNodeDescriptor {
+  nodeKind: CodeGraphNodeKind;
+  framework: string | null;
 }
 
 function coerceApplicationModel(raw: unknown): ApplicationModel | null {
@@ -88,18 +97,29 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
 
     const intelligence = await getCodeIntelligenceProvider(workingRoot);
     const importGraph = await intelligence.getImportGraph();
+    const appModelRoutes: ApplicationRoute[] = appModel?.routes ?? [];
+    const entryRoutes = appModelRoutes.length > 0
+      ? appModelRoutes
+      : await detectFallbackEntryRoutes(workingRoot, repoContext, importGraph);
+    const staticNodeDescriptors = await buildStaticNodeDescriptors(workingRoot, importGraph, entryRoutes);
+
+    if (appModelRoutes.length === 0 && entryRoutes.length > 0) {
+      log.info(`No application routes found; using ${entryRoutes.length} synthetic fallback entry point(s)`);
+    }
 
     // Create nodes from import graph edges (deduplicate by nodeId)
     const seenNodeIds = new Set<string>();
     for (const edge of importGraph) {
       const fromId = makeNodeId(repo, edge.fromFilePath, 1, null);
       const toId = makeNodeId(repo, edge.toPath, 1, null);
+      const fromDescriptor = staticNodeDescriptors.get(edge.fromFilePath) ?? { nodeKind: "unknown", framework: null };
+      const toDescriptor = staticNodeDescriptors.get(edge.toPath) ?? { nodeKind: "unknown", framework: null };
 
       if (!seenNodeIds.has(fromId)) {
         seenNodeIds.add(fromId);
         allNodes.push({
           nodeId: fromId, filePath: edge.fromFilePath, startLine: 1, symbol: null,
-          nodeKind: "unknown", framework: null, metadata: {}, confidence: 1.0, source: "static",
+          nodeKind: fromDescriptor.nodeKind, framework: fromDescriptor.framework, metadata: {}, confidence: 1.0, source: "static",
         });
         staticNodeCount++;
       }
@@ -107,7 +127,7 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
         seenNodeIds.add(toId);
         allNodes.push({
           nodeId: toId, filePath: edge.toPath, startLine: 1, symbol: null,
-          nodeKind: "unknown", framework: null, metadata: {}, confidence: 1.0, source: "static",
+          nodeKind: toDescriptor.nodeKind, framework: toDescriptor.framework, metadata: {}, confidence: 1.0, source: "static",
         });
         staticNodeCount++;
       }
@@ -120,12 +140,12 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
     }
 
     // Create entry point nodes from ApplicationModel routes
-    const entryRoutes: ApplicationRoute[] = appModel?.routes ?? [];
     for (const route of entryRoutes) {
       const nodeId = makeNodeId(repo, route.filePath, route.startLine, route.handlerSymbol ?? null);
+      const nodeKind = inferRouteNodeKind(route);
       const entryNode: CodeGraphNode = {
         nodeId, filePath: route.filePath, startLine: route.startLine,
-        symbol: route.handlerSymbol ?? null, nodeKind: "entry-http",
+        symbol: route.handlerSymbol ?? null, nodeKind,
         framework: route.framework ?? repoContext?.frameworks[0] ?? null,
         metadata: { method: route.method, path: route.path, middleware: route.middleware },
         confidence: 1.0, source: "static",
@@ -342,3 +362,213 @@ function parseTraceHops(raw: unknown): TraceHop[] {
   }
   return hops;
 }
+
+function inferRouteNodeKind(route: ApplicationRoute): CodeGraphNodeKind {
+  const method = route.method.toUpperCase();
+  const routePath = route.path.toLowerCase();
+
+  if (HTTP_METHODS.has(method) || routePath.startsWith("/") || routePath.startsWith("http://") || routePath.startsWith("https://")) {
+    return "entry-http";
+  }
+  if (method === "CLI" || routePath.startsWith("cli://")) {
+    return "entry-cli";
+  }
+  if (method === "INIT" || routePath.startsWith("go://init")) {
+    return "entry-background";
+  }
+  if (EVENT_ENTRY_METHODS.has(method) || routePath.startsWith("grpc://") || routePath.startsWith("tcp://")) {
+    return "entry-event";
+  }
+  if (method === "CRON") {
+    return "entry-cron";
+  }
+
+  return "unknown";
+}
+
+async function buildStaticNodeDescriptors(
+  repoRoot: string,
+  importGraph: Array<{ fromFilePath: string; toPath: string }>,
+  entryRoutes: ApplicationRoute[],
+): Promise<Map<string, StaticNodeDescriptor>> {
+  const filePaths = new Set<string>();
+  for (const edge of importGraph) {
+    filePaths.add(edge.fromFilePath);
+    filePaths.add(edge.toPath);
+  }
+
+  const entryRoutesByFile = new Map<string, ApplicationRoute[]>();
+  for (const route of entryRoutes) {
+    const existing = entryRoutesByFile.get(route.filePath) ?? [];
+    existing.push(route);
+    entryRoutesByFile.set(route.filePath, existing);
+  }
+
+  const descriptors = await Promise.all(
+    [...filePaths].map(async (filePath) => {
+      const content = await safeReadRepoFile(repoRoot, filePath);
+      return [filePath, classifyStaticNodeFromContent(content, entryRoutesByFile.get(filePath) ?? [])] as const;
+    }),
+  );
+
+  return new Map(descriptors);
+}
+
+function classifyStaticNodeFromContent(
+  content: string | null,
+  entryRoutes: ApplicationRoute[],
+): StaticNodeDescriptor {
+  if (entryRoutes.length > 0) {
+    const preferredRoute = [...entryRoutes].sort((left, right) => (
+      rankNodeKind(inferRouteNodeKind(left)) - rankNodeKind(inferRouteNodeKind(right))
+    ))[0];
+
+    return {
+      nodeKind: inferRouteNodeKind(preferredRoute),
+      framework: preferredRoute.framework ?? inferStaticFramework(content),
+    };
+  }
+
+  if (!content) {
+    return { nodeKind: "unknown", framework: null };
+  }
+
+  if (/func(?:\s+\([^)]*\))?\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*http\.ResponseWriter[^)]*\*?http\.Request/m.test(content)) {
+    return { nodeKind: "entry-http", framework: "net/http" };
+  }
+  if (/^\s*func\s+main\s*\(/m.test(content)
+    || /\bflag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)\s*\(/.test(content)
+    || /\bcobra\.Command\b/.test(content)
+    || /\b[A-Za-z_][A-Za-z0-9_]*\.(?:Execute|ExecuteContext)\s*\(/.test(content)
+    || /\bkong\.Parse\s*\(/.test(content)) {
+    return { nodeKind: "entry-cli", framework: "CLI" };
+  }
+  if (/^\s*func\s+init\s*\(/m.test(content)) {
+    return { nodeKind: "entry-background", framework: "Go" };
+  }
+  if (/\b(?:grpc\.NewServer|net\.Listen(?:TCP|UDP|Unix)?)\s*\(/.test(content)) {
+    return {
+      nodeKind: "entry-event",
+      framework: /\bgrpc\.NewServer\s*\(/.test(content) ? "gRPC" : "Go net",
+    };
+  }
+  if (/\b(?:gin\.HandlerFunc|r\.Use\s*\(|e\.Use\s*\(|router\.Use\s*\()/i.test(content)) {
+    return { nodeKind: "middleware", framework: inferStaticFramework(content) };
+  }
+  if (/\b(?:db\.Query|db\.Exec|tx\.Query|tx\.Exec|gorm\.DB)\b/.test(content)) {
+    return { nodeKind: "data-access", framework: inferStaticFramework(content) };
+  }
+  if (/\b(?:exec\.Command|os\.Exit|net\.Dial|grpc\.Dial|sql\.(?:Query|Exec))\b/.test(content)) {
+    return { nodeKind: "external-call", framework: inferStaticFramework(content) };
+  }
+
+  return {
+    nodeKind: "unknown",
+    framework: inferStaticFramework(content),
+  };
+}
+
+function inferStaticFramework(content: string | null): string | null {
+  if (!content) {
+    return null;
+  }
+  if (/\bgrpc\.NewServer\s*\(/.test(content)) {
+    return "gRPC";
+  }
+  if (/\bgin\./.test(content)) {
+    return "Gin";
+  }
+  if (/\becho\./i.test(content)) {
+    return "Echo";
+  }
+  if (/\bhttp\.(?:HandleFunc|ListenAndServe)|http\.ResponseWriter|http\.Request\b/.test(content)) {
+    return "net/http";
+  }
+  if (/\b(?:flag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)|cobra\.Command|kong\.Parse)\b/.test(content)) {
+    return "CLI";
+  }
+  return null;
+}
+
+function rankNodeKind(nodeKind: CodeGraphNodeKind): number {
+  switch (nodeKind) {
+    case "entry-http":
+      return 0;
+    case "entry-cli":
+      return 1;
+    case "entry-event":
+      return 2;
+    case "entry-cron":
+      return 3;
+    case "entry-background":
+      return 4;
+    case "middleware":
+      return 5;
+    case "data-access":
+      return 6;
+    case "external-call":
+      return 7;
+    default:
+      return 8;
+  }
+}
+
+async function detectFallbackEntryRoutes(
+  repoRoot: string,
+  repoContext: ReturnType<typeof coerceRepoContext>,
+  importGraph: Array<{ fromFilePath: string; toPath: string }>,
+): Promise<ApplicationRoute[]> {
+  const candidateFiles = new Set<string>();
+
+  for (const entryPoint of repoContext?.entryPoints ?? []) {
+    if (!entryPoint.includes("*")) {
+      candidateFiles.add(entryPoint);
+    }
+  }
+
+  for (const edge of importGraph) {
+    if (edge.fromFilePath.endsWith(".go")) {
+      candidateFiles.add(edge.fromFilePath);
+    }
+    if (edge.toPath.endsWith(".go")) {
+      candidateFiles.add(edge.toPath);
+    }
+  }
+
+  for (const filePath of candidateFiles) {
+    const content = await safeReadRepoFile(repoRoot, filePath);
+    if (!content) {
+      continue;
+    }
+    const lineNumber = content.split(/\r?\n/u).findIndex((line) => /^\s*func\s+main\s*\(/.test(line));
+    if (lineNumber >= 0) {
+      return [{
+        id: `CLI|cli://main|${filePath}|${lineNumber + 1}`,
+        method: "CLI",
+        path: "cli://main",
+        filePath,
+        startLine: lineNumber + 1,
+        framework: "CLI",
+        handlerSymbol: "main",
+        middleware: [],
+        authMechanisms: [],
+      }];
+    }
+  }
+
+  return [];
+}
+
+async function safeReadRepoFile(repoRoot: string, filePath: string): Promise<string | null> {
+  try {
+    return await readFile(path.join(repoRoot, filePath), "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+export const __codeGraphBuildInternals = {
+  inferRouteNodeKind,
+  classifyStaticNodeFromContent,
+  detectFallbackEntryRoutes,
+};

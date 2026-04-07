@@ -35,9 +35,23 @@ function makeEvent(type: string, payload: Record<string, unknown>) {
   };
 }
 
-function fetchSSE(port: number): Promise<string[]> {
+function fetchSSE(port: number, minEvents: number = 1, timeoutMs: number = 500): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const events: string[] = [];
+    let settled = false;
+    let resolveTimer: NodeJS.Timeout | null = null;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (resolveTimer) {
+        clearTimeout(resolveTimer);
+      }
+      req.destroy();
+      resolve(events);
+    };
+
     const req = http.get(`http://localhost:${port}/events`, (res) => {
       res.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
@@ -45,14 +59,18 @@ function fetchSSE(port: number): Promise<string[]> {
         for (const line of lines) {
           events.push(line.replace("data: ", ""));
         }
+
+        if (events.length >= minEvents && resolveTimer == null) {
+          resolveTimer = setTimeout(finish, 50);
+        }
       });
     });
-    req.on("error", reject);
-    // Collect for 500ms then resolve
-    setTimeout(() => {
-      req.destroy();
-      resolve(events);
-    }, 500);
+    req.on("error", (error) => {
+      if (!settled) {
+        reject(error);
+      }
+    });
+    setTimeout(finish, timeoutMs);
   });
 }
 
@@ -98,10 +116,10 @@ describe("Streaming Server", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     // Start SSE listener
-    const eventsPromise = fetchSSE(streaming.port);
+    const eventsPromise = fetchSSE(streaming.port, 2, 3_000);
 
     // Wait for connection to establish
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
 
     // Emit a triage result event
     await bus.publish(makeEvent("triage:result", {

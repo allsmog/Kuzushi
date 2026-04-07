@@ -80,8 +80,8 @@ export interface TaintAnalysisCandidate {
 }
 
 export type ExtractionDegradationReason =
-  | "sources_used_fallback_template"
-  | "sinks_used_fallback_template"
+  | "sources_extraction_unavailable"
+  | "sinks_extraction_unavailable"
   | "sources_agent_returned_no_query"
   | "sinks_agent_returned_no_query"
   | "zero_usable_sources"
@@ -300,7 +300,7 @@ export const DEFAULT_TAINT_ANALYSIS_TASK_CONFIG: TaintAnalysisTaskConfig = {
   extractionModel: undefined,
   labelingBatchSize: 20,
   labelingConfidenceThreshold: 0.55,
-  workspaceDir: "./iris",
+  workspaceDir: ".kuzushi/iris",
   codeqlBinary: undefined,
   python3Binary: "python3",
   threads: undefined,

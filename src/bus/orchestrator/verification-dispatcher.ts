@@ -11,6 +11,7 @@ import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
 import type { RunState, OrchestratorDeps } from "./types.js";
 import type { VerificationResultEvent, VerificationErrorEvent } from "../events.js";
+import { buildThreatModelSummary } from "./triage-dispatcher.js";
 
 export function handleVerificationResultState(
   state: RunState,
@@ -150,6 +151,7 @@ export async function dispatchVerification(
             repoContext: state.repoContext,
             enrichedContext: state.enrichedRepoContext,
             precedents: state.precedents,
+            threatModelSummary: buildThreatModelSummary(state.taskOutputs),
             index: item.index,
             total: item.total,
           }),

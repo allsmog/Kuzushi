@@ -30,6 +30,19 @@ interface CandidateFile {
   content: string;
 }
 
+interface GoFunctionContext {
+  name: string;
+  startLine: number;
+}
+
+interface SyntheticEntryRoute {
+  method: string;
+  path: string;
+  startLine: number;
+  framework?: string;
+  handlerSymbol?: string;
+}
+
 export const appModelBuildTask: AgentTask<ScanOpts, ApplicationModel> = {
   id: "app-model-build",
   displayName: "Application Model Builder",
@@ -144,42 +157,71 @@ function collectRoutes(
   for (const file of files) {
     const lines = file.content.split(/\r?\n/u);
     const controllerBasePath = extractControllerBasePath(file.content);
+    let currentGoFunction: GoFunctionContext | undefined;
 
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index] ?? "";
+      const goFunction = extractGoFunctionContext(line, index + 1);
+      if (goFunction) {
+        currentGoFunction = goFunction;
+      }
       const match = line.match(/\b(?:app|router)\.(get|post|put|patch|delete|all)\(\s*["'`]([^"'`]+)["'`]/i)
         ?? line.match(/@(Get|Post|Put|Patch|Delete)\(\s*["'`]?(.*?)["'`]?\s*\)/)
         ?? line.match(/@(app|router)\.(get|post|put|patch|delete)\(\s*["'`]([^"'`]+)["'`]/i)
         ?? line.match(/\b\w+\.(GET|POST|PUT|PATCH|DELETE)\(\s*"([^"]+)"/)
         ?? line.match(/export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/);
-      if (!match) {
+      if (match) {
+        const method = String(match[1] ?? "GET").toUpperCase();
+        const rawPath = match[2] && method !== "GET" && method !== "POST" && method !== "PUT" && method !== "PATCH" && method !== "DELETE"
+          ? String(match[3] ?? "/")
+          : String(match[2] ?? routePathFromFilePath(file.filePath));
+        const routePath = normalizeRoutePath(controllerBasePath, rawPath || routePathFromFilePath(file.filePath));
+        const handlerSymbol = extractHandlerSymbol(line)
+          ?? routeHandlerFromExport(lines, index)
+          ?? currentGoFunction?.name
+          ?? path.basename(file.filePath);
+        const middleware = extractMiddlewareHints(file.content, line, enrichment);
+        const authMechanisms = extractAuthMechanisms(file.content, middleware, repoContext);
+        const framework = detectRouteFramework(file.filePath, file.content);
+        const id = [method, routePath, file.filePath, String(index + 1)].join("|");
+        if (seen.has(id)) {
+          continue;
+        }
+        seen.add(id);
+        routes.push({
+          id,
+          method,
+          path: routePath,
+          filePath: file.filePath,
+          startLine: index + 1,
+          framework,
+          handlerSymbol,
+          middleware,
+          authMechanisms,
+        });
         continue;
       }
 
-      const method = String(match[1] ?? "GET").toUpperCase();
-      const rawPath = match[2] && method !== "GET" && method !== "POST" && method !== "PUT" && method !== "PATCH" && method !== "DELETE"
-        ? String(match[3] ?? "/")
-        : String(match[2] ?? routePathFromFilePath(file.filePath));
-      const routePath = normalizeRoutePath(controllerBasePath, rawPath || routePathFromFilePath(file.filePath));
-      const handlerSymbol = extractHandlerSymbol(line) ?? routeHandlerFromExport(lines, index) ?? path.basename(file.filePath);
-      const middleware = extractMiddlewareHints(file.content, line, enrichment);
-      const authMechanisms = extractAuthMechanisms(file.content, middleware, repoContext);
-      const framework = detectRouteFramework(file.filePath, file.content);
-      const id = [method, routePath, file.filePath, String(index + 1)].join("|");
+      const synthetic = detectSyntheticEntryRoute(line, index + 1, currentGoFunction);
+      if (!synthetic) {
+        continue;
+      }
+
+      const id = [synthetic.method, synthetic.path, file.filePath, String(synthetic.startLine)].join("|");
       if (seen.has(id)) {
         continue;
       }
       seen.add(id);
       routes.push({
         id,
-        method,
-        path: routePath,
+        method: synthetic.method,
+        path: synthetic.path,
         filePath: file.filePath,
-        startLine: index + 1,
-        framework,
-        handlerSymbol,
-        middleware,
-        authMechanisms,
+        startLine: synthetic.startLine,
+        framework: synthetic.framework ?? detectRouteFramework(file.filePath, file.content),
+        handlerSymbol: synthetic.handlerSymbol ?? currentGoFunction?.name ?? path.basename(file.filePath),
+        middleware: [],
+        authMechanisms: extractAuthMechanisms(file.content, [], repoContext),
       });
     }
   }
@@ -393,10 +435,96 @@ function routeHandlerFromExport(lines: string[], index: number): string | undefi
   return undefined;
 }
 
+function extractGoFunctionContext(line: string, startLine: number): GoFunctionContext | undefined {
+  const match = line.match(/^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+  if (!match?.[1]) {
+    return undefined;
+  }
+  return {
+    name: match[1],
+    startLine,
+  };
+}
+
 function extractHandlerSymbol(line: string): string | undefined {
   return line.match(/,\s*([A-Za-z0-9_$.]+)\s*\)?\s*$/)?.[1]
     ?? line.match(/function\s+([A-Za-z0-9_]+)/)?.[1]
     ?? undefined;
+}
+
+function detectSyntheticEntryRoute(
+  line: string,
+  lineNumber: number,
+  currentGoFunction: GoFunctionContext | undefined,
+): SyntheticEntryRoute | undefined {
+  if (/^\s*func\s+main\s*\(/.test(line)) {
+    return {
+      method: "CLI",
+      path: "cli://main",
+      startLine: lineNumber,
+      framework: "CLI",
+      handlerSymbol: "main",
+    };
+  }
+
+  if (/^\s*func\s+init\s*\(/.test(line)) {
+    return {
+      method: "INIT",
+      path: "go://init",
+      startLine: lineNumber,
+      framework: "Go",
+      handlerSymbol: "init",
+    };
+  }
+
+  if (/\bgrpc\.NewServer\s*\(/.test(line)) {
+    return {
+      method: "GRPC",
+      path: `grpc://${currentGoFunction?.name ?? "server"}`,
+      startLine: lineNumber,
+      framework: "gRPC",
+      handlerSymbol: currentGoFunction?.name,
+    };
+  }
+
+  if (/\bnet\.Listen(?:TCP|UDP|Unix)?\s*\(/.test(line)) {
+    const quoted = extractQuotedStrings(line);
+    const protocol = quoted[0] ?? "tcp";
+    const address = quoted[1] ?? currentGoFunction?.name ?? "listen";
+    return {
+      method: protocol.toUpperCase(),
+      path: `${protocol}://${address}`,
+      startLine: lineNumber,
+      framework: "Go net",
+      handlerSymbol: currentGoFunction?.name,
+    };
+  }
+
+  if (/\bhttp\.ListenAndServe(?:TLS)?\s*\(/.test(line)) {
+    const [address] = extractQuotedStrings(line);
+    return {
+      method: "HTTP",
+      path: `http://${address ?? currentGoFunction?.name ?? "listen"}`,
+      startLine: lineNumber,
+      framework: "net/http",
+      handlerSymbol: currentGoFunction?.name,
+    };
+  }
+
+  if (/\bflag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)\s*\(/.test(line)
+    || /\bcobra\.Command\b/.test(line)
+    || /\b(?:cli\.App|kong\.Parse)\s*\(/.test(line)
+    || /\b[A-Za-z_][A-Za-z0-9_]*\.(?:Execute|ExecuteContext)\s*\(/.test(line)) {
+    return {
+      method: "CLI",
+      path: `cli://${currentGoFunction?.name ?? "flags"}`,
+      startLine: currentGoFunction?.startLine ?? lineNumber,
+      framework: "CLI",
+      handlerSymbol: currentGoFunction?.name ?? "flags",
+    };
+  }
+
+  return undefined;
 }
 
 function extractMiddlewareHints(
@@ -448,6 +576,16 @@ function detectRouteFramework(filePath: string, content: string): string | undef
   if (/@app\.(get|post|put|patch|delete)|APIRouter/i.test(content)) {
     return "FastAPI";
   }
+  if (/\bgrpc\.NewServer\s*\(/.test(content)) {
+    return "gRPC";
+  }
+  if (/\b(?:flag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)|cobra\.Command|cli\.App|kong\.Parse)\b/.test(content)
+    || /\b[A-Za-z_][A-Za-z0-9_]*\.(?:Execute|ExecuteContext)\s*\(/.test(content)) {
+    return "CLI";
+  }
+  if (/\b(?:http\.ListenAndServe|http\.HandleFunc|http\.ResponseWriter|http\.Request)\b/.test(content)) {
+    return "net/http";
+  }
   if (/\b\w+\.(GET|POST|PUT|PATCH|DELETE)\(/.test(content)) {
     return "Gin/Echo";
   }
@@ -460,6 +598,10 @@ function extractInvocationSymbol(line: string): string | undefined {
 
 function extractQuotedString(line: string): string | undefined {
   return line.match(/["'`]([^"'`]+)["'`]/)?.[1];
+}
+
+function extractQuotedStrings(line: string): string[] {
+  return [...line.matchAll(/["'`]([^"'`]+)["'`]/g)].map((match) => match[1]).filter(Boolean);
 }
 
 function detectProtocolHint(line: string): string | undefined {
@@ -507,3 +649,10 @@ function dedupeById<T extends { id: string }>(items: T[]): T[] {
   }
   return [...deduped.values()];
 }
+
+export const __appModelBuildInternals = {
+  collectRoutes,
+  detectRouteFramework,
+  detectSyntheticEntryRoute,
+  extractGoFunctionContext,
+};

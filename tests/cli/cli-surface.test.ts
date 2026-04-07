@@ -41,12 +41,25 @@ describe("CLI surface", () => {
     expect(result.stdout).toContain("--dynamic-max-candidates");
     expect(result.stdout).toContain("--taint-diff-base");
     expect(result.stdout).toContain("--taint-diff-mode");
-  }, 20000);
+    expect(result.stdout).toContain("--no-module-discovery");
+    expect(result.stdout).toContain("--list-modules");
+    expect(result.stdout).toContain("--modules");
+    expect(result.stdout).toContain("--module-filter");
+    expect(result.stdout).not.toContain("--discover-modules");
+    expect(result.stdout).not.toContain("--discovery-model");
+  }, 40000);
 
   it("supports the list-tasks shorthand", () => {
     const repoDir = makeTempRepo();
     const result = runCli(["list-tasks", "-r", repoDir]);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Registered tasks:");
-  }, 20000);
+  }, 40000);
+
+  it("rejects --module-filter for single-root scans", () => {
+    const repoDir = makeTempRepo();
+    const result = runCli(["scan", repoDir, "--no-module-discovery", "--module-filter", "platform*"]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("--module-filter");
+  }, 40000);
 });

@@ -34,20 +34,20 @@ const IMPACT_TO_SEVERITY: Record<string, string> = {
   low: "INFO",
 };
 
-function buildRandoriPrompt(stages: string[]): string {
+function buildRandoriPrompt(stages: string[], maxThreats: number, maxElements: number, outputDir: string): string {
   const stageList = stages.join(", ");
   return [
     "You are running a PASTA threat model analysis on the current repository.",
     "",
     `Run stages: ${stageList}`,
     "",
-    "For each stage, write the output JSON to the randori-output/ directory:",
+    `For each stage, write the output JSON to the ${outputDir}/ directory:`,
     "- Stage S1: Write pasta-s1.json (business objectives and security requirements)",
     "- Stage S2: Write pasta-s2.json (technical scope — components, actors, data flows)",
     "- Stage S3: Write pasta-s3.json (DFD, trust boundaries, entry points) and dfd.mmd",
     "- Stage S4: Write pasta-s4.json (STRIDE threat scenarios with evidence anchors)",
     "",
-    "Also write randori-output/randori-state.json tracking which stages completed.",
+    `Also write ${outputDir}/randori-state.json tracking which stages completed.`,
     "",
     "CRITICAL requirements for S4 threat scenarios:",
     "- Every threat MUST have evidence_anchors with file_path, start_line, description",
@@ -55,6 +55,8 @@ function buildRandoriPrompt(stages: string[]): string {
     "- Include probability (0-1) and impact (critical/high/medium/low)",
     "- Map to MITRE ATT&CK technique IDs where applicable",
     "- Include OWASP category mapping (e.g., A01, A03)",
+    `- Identify up to ${maxThreats} distinct threat scenarios across all STRIDE categories`,
+    `- Include up to ${maxElements} DFD elements in the technical scope`,
     "",
     "Explore the codebase thoroughly using Glob, Grep, and Read before writing threats.",
     "Ground every threat in actual code evidence, not theoretical concerns.",
@@ -73,9 +75,12 @@ export const threatModelRandoriTask: AgentTask<ScanOpts, { document: ThreatModel
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const tag = "[threat-model-randori]";
 
+    // Write artifacts directly into .kuzushi/runs/<runId>/randori-output/
+    const artifactDir = path.join(".kuzushi", "runs", context.runId, "randori-output");
+
     log.info(`Starting Randori PASTA analysis (stages=${cfg.randoriStages.join(",")}, model=${cfg.model})`);
 
-    const prompt = buildRandoriPrompt(cfg.randoriStages);
+    const prompt = buildRandoriPrompt(cfg.randoriStages, cfg.maxThreats, cfg.maxElements, artifactDir);
     let costUsd = 0;
 
     try {
@@ -99,7 +104,7 @@ export const threatModelRandoriTask: AgentTask<ScanOpts, { document: ThreatModel
     }
 
     // Read artifacts written by the plugin
-    const artifacts = readRandoriArtifacts(context.repoRoot);
+    const artifacts = readRandoriArtifacts(context.repoRoot, artifactDir);
     const merged = mergeRandoriStageOutputs(artifacts);
 
     if (!merged) {
@@ -128,17 +133,28 @@ export const threatModelRandoriTask: AgentTask<ScanOpts, { document: ThreatModel
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
+    const strideMatch = finding.ruleId.match(/^threat-model\/([^/]+)/);
+    const strideCategory = strideMatch?.[1] ?? "unknown";
+
     return {
       prompt: [
-        `You are triaging a Randori PASTA threat model finding in "${repoName}".`,
+        `You are triaging a PASTA threat model finding in "${repoName}".`,
         "",
+        `STRIDE Category: ${strideCategory}`,
         `Rule: ${finding.ruleId}`,
         `File: ${finding.filePath}:${finding.startLine}`,
+        `Severity: ${finding.severity}`,
         `Message: ${finding.message}`,
-        finding.evidence ? `Evidence: ${finding.evidence}` : "",
+        finding.evidence ? `\nEvidence:\n${finding.evidence}` : "",
         "",
-        "This finding was identified through PASTA threat analysis with STRIDE classification.",
-        "Verify the threat is realistic given the actual system architecture and existing mitigations.",
+        "This finding was identified through PASTA (Process for Attack Simulation and Threat Analysis).",
+        "The threat model analyzed the application's data flow diagram, trust boundaries, and attack surface.",
+        "",
+        "Your task:",
+        "1. Read the flagged code and surrounding context to verify the threat is real",
+        "2. Check if existing mitigations (input validation, auth checks, TLS) address this threat",
+        "3. For offensive/pentest tools: distinguish between DESIGN CHOICES (by_design) and actual bugs",
+        "4. Provide a concrete attack scenario if the threat is valid",
       ].filter(Boolean).join("\n"),
     };
   },

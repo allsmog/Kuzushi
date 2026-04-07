@@ -11,7 +11,6 @@ const THREAT_AWARE_DETECTOR_TASK_IDS = new Set([
   "command-injection-detect",
   "xxe-detect",
   "deserialization-detect",
-  "secrets-crypto-detect",
   "supply-chain-detect",
   "auth-logic-detect",
   "threat-scenario-build",

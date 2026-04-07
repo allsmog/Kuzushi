@@ -124,6 +124,14 @@ import type {
 /** Scanners whose findings come from static analysis tools, not LLM assessment. */
 const NON_LLM_SCANNERS = new Set(["semgrep", "codeql"]);
 
+function isHighConfidenceAgenticFinding(finding: Finding): boolean {
+  return (
+    !NON_LLM_SCANNERS.has(finding.scanner)
+    && finding.scannerConfidence === "HIGH"
+    && finding.score >= 8
+  );
+}
+
 /** Check if a finding has evidence from multi-strategy analysis. */
 function hasMultiStrategyEvidence(finding: Finding): boolean {
   return (finding.engineProvenance ?? []).some(
@@ -389,7 +397,6 @@ export class PipelineOrchestrator {
       deadLetterFindings: [],
       triageAttempts: new Map(),
       verifyAttempts: new Map(),
-      autoPassedFingerprints: new Set(),
       // ── Dynamic analysis phase ──
       dynamicAnalysisEnabled: config.dynamicAnalysisEnabled === true,
       dynamicCandidates: [],
@@ -1437,34 +1444,14 @@ export class PipelineOrchestrator {
     );
     let triageCandidates = capFindingsForTriage(pendingFindings, state.scanOpts.maxFindings);
 
-    // Auto-pass threat-model findings — they're already validated by the threat model.
-    // Include in report but skip triage/verification to save budget.
-    const autoPassFindings: Finding[] = [];
-    triageCandidates = triageCandidates.filter((finding) => {
-      if (finding.scanner === "threat-model-randori") {
-        autoPassFindings.push(finding);
-        return false;
-      }
-      return true;
-    });
-
-    // PR 5: Auto-pass high-confidence agentic findings when enabled
     if (state.config.skipTriageForHighConfidenceAgentic) {
-      triageCandidates = triageCandidates.filter((finding) => {
-        if (
-          !NON_LLM_SCANNERS.has(finding.scanner)
-          && finding.scannerConfidence === "HIGH"
-          && finding.score >= 8
-        ) {
-          autoPassFindings.push(finding);
-          return false;
-        }
-        return true;
-      });
+      log.warn(
+        "skipTriageForHighConfidenceAgentic no longer skips triage; prioritizing matching findings instead.",
+      );
+      const prioritized = triageCandidates.filter(isHighConfidenceAgenticFinding);
+      const remaining = triageCandidates.filter((finding) => !isHighConfidenceAgenticFinding(finding));
+      triageCandidates = [...prioritized, ...remaining];
     }
-
-    // Track auto-passed fingerprints so handleTriageResult can skip counter manipulation
-    state.autoPassedFingerprints = new Set(autoPassFindings.map((f) => f.fingerprint));
 
     state.skippedAlreadyTriaged = filteredFindings.length - pendingFindings.length;
     state.triageTotal = triageCandidates.length;
@@ -1521,64 +1508,18 @@ export class PipelineOrchestrator {
 
     await this.publishQueueDepth(state, runId);
 
-    if (triageCandidates.length === 0 && autoPassFindings.length === 0) {
+    if (triageCandidates.length === 0) {
       await this.finishTriageAndRequestReport(state, runId);
       return;
     }
 
-    // Dispatch real triage FIRST — before emitting auto-pass events
-    if (triageCandidates.length > 0) {
-      await this.dispatchTriageBatch(state, runId, triageCandidates);
-    }
-
-    // Emit synthetic triage results for auto-passed findings AFTER dispatch.
-    // handleTriageResult detects these via autoPassedFingerprints and skips
-    // counter manipulation (inFlight/triaged), only pushing to verifyCandidates.
-    for (const [idx, finding] of autoPassFindings.entries()) {
-      await this.bus.publish(
-        createEvent("triage:result", runId, {
-          context: state.context,
-          finding,
-          result: {
-            fingerprint: finding.fingerprint,
-            verdict: "tp" as const,
-            confidence: 0.9,
-            rationale: "Auto-passed: high-confidence LLM-generated finding (skipTriageForHighConfidenceAgentic)",
-            verificationSteps: ["Finding was auto-triaged based on high agentic scanner confidence"],
-            fixPatch: null,
-          },
-          costUsd: 0,
-          attempts: 0,
-          index: triageCandidates.length + idx + 1,
-          total: triageCandidates.length + autoPassFindings.length,
-        }),
-      );
-    }
-
-    // If only auto-pass findings existed (no real candidates), finish triage now
-    if (triageCandidates.length === 0) {
-      await this.finishTriageAndRequestReport(state, runId);
-    }
+    await this.dispatchTriageBatch(state, runId, triageCandidates);
   }
 
   private async handleTriageResult(event: TriageResultEvent): Promise<void> {
     const runId = event.meta.runId;
     const state = this.runs.get(runId);
     if (!state) {
-      return;
-    }
-
-    // Auto-passed findings: only push to verify candidates, skip counter manipulation
-    // to avoid corrupting inFlight/triaged and re-entrant dispatch.
-    if (state.autoPassedFingerprints.has(event.payload.finding.fingerprint)) {
-      if (shouldVerifyFinding(state, event.payload.finding, event.payload.result)) {
-        state.verifyCandidates.push({
-          finding: event.payload.finding,
-          triageResult: event.payload.result,
-        });
-        // Pipeline: immediately queue for verification while triage continues
-        await this.pipelineVerifyCandidate(state, runId, event.payload.finding, event.payload.result);
-      }
       return;
     }
 
@@ -2088,6 +2029,7 @@ export class PipelineOrchestrator {
         stats: buildReportStats(this.deps.db, state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
+        reportMode: state.context.reportMode,
       }),
     );
 
@@ -2213,6 +2155,7 @@ export class PipelineOrchestrator {
         {
           excludePatterns: state.config.excludePatterns ?? [],
           severity: state.config.severity ?? ["ERROR", "WARNING"],
+          fresh: false,
         },
         "semgrep",
         customDir,
@@ -2231,6 +2174,7 @@ export class PipelineOrchestrator {
           likelihood: r.extra?.metadata?.likelihood ?? "MEDIUM",
           impact: r.extra?.metadata?.impact ?? "MEDIUM",
           cwe: r.extra?.metadata?.cwe ?? [],
+          evidence: r.extra?.lines ?? "",
         })), costUsd: 0 },
         state.context.repoRoot,
         state.context.repoName,
@@ -2654,6 +2598,7 @@ export class PipelineOrchestrator {
         stats: buildReportStats(this.deps.db, state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
+        reportMode: state.context.reportMode,
       }),
     );
 
@@ -2819,6 +2764,7 @@ export class PipelineOrchestrator {
         stats: buildReportStats(this.deps.db, state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
+        reportMode: state.context.reportMode,
       }),
     );
 
@@ -3082,6 +3028,7 @@ export class PipelineOrchestrator {
         stats: buildReportStats(this.deps.db, state),
         fingerprints: state.scanFindings.map((f) => f.fingerprint),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
+        reportMode: state.context.reportMode,
       }),
     );
 
@@ -3109,11 +3056,20 @@ export class PipelineOrchestrator {
  * Merge findings at the same file:line into one entry, keeping the highest-scored
  * and attaching others as corroborating signals. Prevents N-way triage/verification
  * for findings from different scanners at the same code location.
+ *
+ * Threat-model findings (scanner starts with "threat-model-") use a scanner-scoped
+ * key so they survive alongside detector findings at the same location. This
+ * preserves the STRIDE/PASTA context that would otherwise be lost as a bare
+ * corroborating signal.
  */
 function deduplicateByLocation(findings: Finding[]): Finding[] {
   const byLocation = new Map<string, Finding[]>();
   for (const f of findings) {
-    const key = `${f.filePath}:${f.startLine}`;
+    // Threat-model findings get a scanner-scoped key so they don't merge
+    // with detector findings at the same location.
+    const key = isThreatModelScanner(f.scanner)
+      ? `tm:${f.scanner}:${f.filePath}:${f.startLine}`
+      : `${f.filePath}:${f.startLine}`;
     const group = byLocation.get(key);
     if (group) {
       group.push(f);
@@ -3148,11 +3104,57 @@ function deduplicateByLocation(findings: Finding[]): Finding[] {
     deduped.push(primary);
   }
 
+  // Cross-reference: attach bidirectional corroborating signals between
+  // threat-model findings and detector findings at the same file:line.
+  const detectorByLoc = new Map<string, Finding>();
+  const threatModelByLoc = new Map<string, Finding[]>();
+  for (const f of deduped) {
+    const loc = `${f.filePath}:${f.startLine}`;
+    if (isThreatModelScanner(f.scanner)) {
+      const group = threatModelByLoc.get(loc) ?? [];
+      group.push(f);
+      threatModelByLoc.set(loc, group);
+    } else {
+      detectorByLoc.set(loc, f);
+    }
+  }
+  for (const [loc, tmFindings] of threatModelByLoc) {
+    const detector = detectorByLoc.get(loc);
+    if (!detector) continue;
+    const detectorSignal = {
+      scanner: detector.scanner,
+      fingerprint: detector.fingerprint,
+      ruleId: detector.ruleId,
+      filePath: detector.filePath,
+      startLine: detector.startLine,
+      cwe: detector.cwe,
+      score: detector.score ?? 0,
+    };
+    for (const tm of tmFindings) {
+      // Attach detector as corroborating signal on threat-model finding
+      tm.corroboratingSignals = [...(tm.corroboratingSignals ?? []), detectorSignal];
+      // Attach threat-model as corroborating signal on detector finding
+      detector.corroboratingSignals = [...(detector.corroboratingSignals ?? []), {
+        scanner: tm.scanner,
+        fingerprint: tm.fingerprint,
+        ruleId: tm.ruleId,
+        filePath: tm.filePath,
+        startLine: tm.startLine,
+        cwe: tm.cwe,
+        score: tm.score ?? 0,
+      }];
+    }
+  }
+
   if (deduped.length < findings.length) {
     log.info(`[location-dedup] Merged ${findings.length} findings into ${deduped.length} (${findings.length - deduped.length} duplicates absorbed as corroborating signals)`);
   }
 
   return deduped;
+}
+
+function isThreatModelScanner(scanner: string): boolean {
+  return scanner.startsWith("threat-model-");
 }
 
 export function registerOrchestrator(

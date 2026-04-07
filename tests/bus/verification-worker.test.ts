@@ -12,6 +12,7 @@ import type { KuzushiConfig, TriageResult, VerificationResult } from "../../src/
 
 const {
   verifyFindingWithAgentMock,
+  verifyFindingsBatchMock,
   generatePocHarnessMock,
   createPocExecutorMock,
   executorExecuteMock,
@@ -33,11 +34,13 @@ const {
     createPocExecutorMock: vi.fn(),
     executorExecuteMock: vi.fn(),
     VerificationExecutionErrorMock,
+    verifyFindingsBatchMock: vi.fn(),
   };
 });
 
 vi.mock("../../src/verify.js", () => ({
   verifyFindingWithAgent: verifyFindingWithAgentMock,
+  verifyFindingsBatch: verifyFindingsBatchMock,
   VerificationExecutionError: VerificationExecutionErrorMock,
 }));
 
@@ -111,6 +114,7 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
 
 afterEach(() => {
   verifyFindingWithAgentMock.mockReset();
+  verifyFindingsBatchMock.mockReset();
   generatePocHarnessMock.mockReset();
   createPocExecutorMock.mockReset();
   executorExecuteMock.mockReset();
@@ -409,6 +413,68 @@ describe("verification-worker", () => {
         ]),
       }),
     );
+
+    await bus.close();
+  });
+
+  it("requeues batch-missing findings for individual verification instead of synthesizing not-exploitable", async () => {
+    const bus = new InProcessBus();
+    const config = makeConfig();
+
+    verifyFindingsBatchMock.mockResolvedValue({
+      results: new Map([
+        ["fp-verify-1", makeVerificationResult()],
+      ]),
+      costUsd: 0.02,
+      missingFingerprints: ["fp-verify-2"],
+      incomplete: true,
+      recoveredByRetry: [],
+    });
+    verifyFindingWithAgentMock.mockResolvedValue({
+      result: {
+        ...makeVerificationResult(),
+        fingerprint: "fp-verify-2",
+      },
+      costUsd: 0.01,
+    });
+
+    registerVerificationWorker(bus, { config });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const retriedResultPromise = bus.waitFor<VerificationResultEvent>(
+      "verification:result",
+      (event) => event.meta.runId === runId && event.payload.finding.fingerprint === "fp-verify-2",
+    );
+
+    await bus.publish(
+      createEvent("verification:batch-queued", runId, {
+        context,
+        items: [
+          { finding: makeFinding(), triageResult: makeTriageResult(), index: 1, total: 2 },
+          {
+            finding: { ...makeFinding(), fingerprint: "fp-verify-2" },
+            triageResult: { ...makeTriageResult(), fingerprint: "fp-verify-2" },
+            index: 2,
+            total: 2,
+          },
+        ],
+        index: 1,
+        total: 2,
+      } as any),
+    );
+
+    const retriedResult = await retriedResultPromise;
+    expect(retriedResult.payload.finding.fingerprint).toBe("fp-verify-2");
+    expect(retriedResult.payload.result.exploitable).toBe(true);
+    expect(verifyFindingsBatchMock).toHaveBeenCalledTimes(1);
+    expect(verifyFindingWithAgentMock).toHaveBeenCalledTimes(1);
 
     await bus.close();
   });

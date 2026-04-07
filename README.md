@@ -579,7 +579,7 @@ pnpm dev -- /path/to/repo             # run in dev mode
 pnpm check:types                      # typecheck app + benchmark tooling
 pnpm typecheck                        # type check
 pnpm test                             # run tests
-pnpm test:e2e                         # deterministic smoke scan against fixture app
+pnpm test:e2e                         # deterministic mock-backed smoke scan against fixture app
 pnpm test:coverage                    # tests + coverage (70% threshold)
 pnpm build                            # compile to dist/
 pnpm verify:pack                      # verify published tarball contents
@@ -588,6 +588,8 @@ pnpm benchmark:freeze                 # freeze current benchmark results as base
 pnpm benchmark:diff                   # diff current results against frozen baseline
 pnpm benchmark:regression             # CI regression check against baseline
 ```
+
+`pnpm test:e2e` and the benchmark regression workflow use `tests/fixtures/mock-anthropic-server.mjs` for deterministic mock-backed coverage. They are useful smoke/regression checks, but they are not real LLM integration tests.
 
 ## Troubleshooting
 

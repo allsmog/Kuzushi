@@ -88,7 +88,7 @@ export const DEFAULT_THREAT_MODEL_CONFIG: ThreatModelConfig = {
   maxElements: 50,
   maxThreats: 100,
   emitFindings: true,
-  findingThreshold: "high",
+  findingThreshold: "medium",
   randoriStages: ["s1", "s2", "s3", "s4"],
 };
 

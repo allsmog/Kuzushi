@@ -243,97 +243,100 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
   bus.subscribe<ReportRequestedEvent>("report:requested", async (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     maybePrintStartBanner(state, event.payload.context.repoName);
+    const reportMode = event.payload.reportMode ?? event.payload.context.reportMode ?? "full";
 
-    if (state.totalFindings === 0) {
-      console.log("  No findings from scanner. Code looks clean.");
-    } else if ((state.selectedForTriage ?? 0) === 0) {
-      console.log("  All findings already triaged. Nothing to do.");
-    }
-
-    printSummary(deps.db, event.payload.context.repoName, {
-      stats: event.payload.stats,
-      runId: event.meta.runId,
-      repoRoot: event.payload.context.repoRoot,
-      auditLog: deps.config.auditLog === true,
-      fingerprints: event.payload.fingerprints,
-      exploitChains: event.payload.exploitChains,
-    });
-
-    if (deps.config.reportOutput) {
-      const outputDir = path.dirname(deps.config.reportOutput);
-      if (!existsSync(outputDir)) {
-        mkdirSync(outputDir, { recursive: true });
+    if (reportMode === "full") {
+      if (state.totalFindings === 0) {
+        console.log("  No findings from scanner. Code looks clean.");
+      } else if ((state.selectedForTriage ?? 0) === 0) {
+        console.log("  All findings already triaged. Nothing to do.");
       }
-      const markdown = generateMarkdownReport(
-        deps.db,
-        event.payload.context.repoName,
-        event.payload.stats ?? {},
-        event.meta.runId,
-        event.payload.fingerprints,
-      );
-      writeFileSync(deps.config.reportOutput, markdown, "utf-8");
-      console.log(`  Report written to ${deps.config.reportOutput}`);
-    }
 
-    if (deps.config.sarifOutput) {
-      const outputDir = path.dirname(deps.config.sarifOutput);
-      if (!existsSync(outputDir)) {
-        mkdirSync(outputDir, { recursive: true });
-      }
-      const sarif = generateSarifReport(
-        deps.db,
-        event.payload.context.repoName,
-        event.payload.stats ?? {},
-        event.meta.runId,
-        event.payload.fingerprints,
-      );
-      writeFileSync(deps.config.sarifOutput, sarif, "utf-8");
-      console.log(`  SARIF report written to ${deps.config.sarifOutput}`);
-    }
+      printSummary(deps.db, event.payload.context.repoName, {
+        stats: event.payload.stats,
+        runId: event.meta.runId,
+        repoRoot: event.payload.context.repoRoot,
+        auditLog: deps.config.auditLog === true,
+        fingerprints: event.payload.fingerprints,
+        exploitChains: event.payload.exploitChains,
+      });
 
-    if (deps.config.jsonOutput) {
-      const outputDir = path.dirname(deps.config.jsonOutput);
-      if (!existsSync(outputDir)) {
-        mkdirSync(outputDir, { recursive: true });
+      if (deps.config.reportOutput) {
+        const outputDir = path.dirname(deps.config.reportOutput);
+        if (!existsSync(outputDir)) {
+          mkdirSync(outputDir, { recursive: true });
+        }
+        const markdown = generateMarkdownReport(
+          deps.db,
+          event.payload.context.repoName,
+          event.payload.stats ?? {},
+          event.meta.runId,
+          event.payload.fingerprints,
+        );
+        writeFileSync(deps.config.reportOutput, markdown, "utf-8");
+        console.log(`  Report written to ${deps.config.reportOutput}`);
       }
-      writeJsonReport(
-        deps.config.jsonOutput,
-        deps.db,
-        event.payload.context.repoName,
-        event.payload.stats ?? {},
-        event.payload.exploitChains ?? [],
-        deps.config.scanMode,
-        event.payload.fingerprints,
-      );
-      console.log(`  JSON report written to ${deps.config.jsonOutput}`);
-    }
 
-    if (deps.config.csvOutput) {
-      const outputDir = path.dirname(deps.config.csvOutput);
-      if (!existsSync(outputDir)) {
-        mkdirSync(outputDir, { recursive: true });
+      if (deps.config.sarifOutput) {
+        const outputDir = path.dirname(deps.config.sarifOutput);
+        if (!existsSync(outputDir)) {
+          mkdirSync(outputDir, { recursive: true });
+        }
+        const sarif = generateSarifReport(
+          deps.db,
+          event.payload.context.repoName,
+          event.payload.stats ?? {},
+          event.meta.runId,
+          event.payload.fingerprints,
+        );
+        writeFileSync(deps.config.sarifOutput, sarif, "utf-8");
+        console.log(`  SARIF report written to ${deps.config.sarifOutput}`);
       }
-      writeCsvReport(
-        deps.config.csvOutput,
-        deps.db,
-        event.payload.context.repoName,
-        event.payload.fingerprints,
-      );
-      console.log(`  CSV report written to ${deps.config.csvOutput}`);
-    }
 
-    if (deps.config.jsonlOutput) {
-      const outputDir = path.dirname(deps.config.jsonlOutput);
-      if (!existsSync(outputDir)) {
-        mkdirSync(outputDir, { recursive: true });
+      if (deps.config.jsonOutput) {
+        const outputDir = path.dirname(deps.config.jsonOutput);
+        if (!existsSync(outputDir)) {
+          mkdirSync(outputDir, { recursive: true });
+        }
+        writeJsonReport(
+          deps.config.jsonOutput,
+          deps.db,
+          event.payload.context.repoName,
+          event.payload.stats ?? {},
+          event.payload.exploitChains ?? [],
+          deps.config.scanMode,
+          event.payload.fingerprints,
+        );
+        console.log(`  JSON report written to ${deps.config.jsonOutput}`);
       }
-      writeJsonlReport(
-        deps.config.jsonlOutput,
-        deps.db,
-        event.payload.context.repoName,
-        event.payload.fingerprints,
-      );
-      console.log(`  JSONL report written to ${deps.config.jsonlOutput}`);
+
+      if (deps.config.csvOutput) {
+        const outputDir = path.dirname(deps.config.csvOutput);
+        if (!existsSync(outputDir)) {
+          mkdirSync(outputDir, { recursive: true });
+        }
+        writeCsvReport(
+          deps.config.csvOutput,
+          deps.db,
+          event.payload.context.repoName,
+          event.payload.fingerprints,
+        );
+        console.log(`  CSV report written to ${deps.config.csvOutput}`);
+      }
+
+      if (deps.config.jsonlOutput) {
+        const outputDir = path.dirname(deps.config.jsonlOutput);
+        if (!existsSync(outputDir)) {
+          mkdirSync(outputDir, { recursive: true });
+        }
+        writeJsonlReport(
+          deps.config.jsonlOutput,
+          deps.db,
+          event.payload.context.repoName,
+          event.payload.fingerprints,
+        );
+        console.log(`  JSONL report written to ${deps.config.jsonlOutput}`);
+      }
     }
 
     await bus.publish(

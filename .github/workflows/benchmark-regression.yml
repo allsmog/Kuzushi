@@ -24,7 +24,8 @@ jobs:
       - run: bash benchmarks/govwa/setup.sh
       - name: Start mock Anthropic API server
         run: |
-          node tests/fixtures/fake-anthropic-server.mjs > /tmp/mock-url.txt &
+          echo "Benchmark regression uses a deterministic mock Anthropic server; this is not a real LLM integration test."
+          node tests/fixtures/mock-anthropic-server.mjs > /tmp/mock-url.txt &
           echo "MOCK_PID=$!" >> "$GITHUB_ENV"
           sleep 1
           echo "MOCK_BASE_URL=$(cat /tmp/mock-url.txt)" >> "$GITHUB_ENV"
@@ -49,6 +50,13 @@ jobs:
           }
           JSON
       - run: pnpm benchmark --run --dataset benchmarks/govwa --output benchmarks/govwa/results/metrics-ci.json
+      - name: Write benchmark mock-mode note
+        run: |
+          mkdir -p benchmarks/govwa/results
+          cat > benchmarks/govwa/results/mock-mode.txt <<'EOF'
+          Deterministic benchmark run using tests/fixtures/mock-anthropic-server.mjs.
+          Metrics reflect mock-backed fixture coverage, not a real LLM integration test.
+          EOF
       - run: pnpm benchmark:regression --results benchmarks/govwa/results/metrics-ci.json
       - uses: actions/upload-artifact@v4
         if: always()

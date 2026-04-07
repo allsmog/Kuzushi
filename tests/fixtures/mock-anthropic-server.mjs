@@ -1,5 +1,5 @@
 /**
- * Lightweight mock Anthropic Messages API server for smoke / benchmark tests.
+ * Deterministic mock Anthropic Messages API server for smoke / benchmark tests.
  *
  * Starts an HTTP server that responds to POST /v1/messages with a canned
  * assistant response.  The triage pipeline only needs a plausible JSON reply
@@ -7,10 +7,10 @@
  * "needs_review" triage verdict so findings pass through without real LLM calls.
  *
  * Usage:
- *   node tests/fixtures/fake-anthropic-server.mjs
+ *   node tests/fixtures/mock-anthropic-server.mjs
  *
  * The server prints the base URL to stdout on startup so callers can capture it:
- *   BASE_URL=$(node tests/fixtures/fake-anthropic-server.mjs &)
+ *   BASE_URL=$(node tests/fixtures/mock-anthropic-server.mjs &)
  */
 
 import { createServer } from "node:http";

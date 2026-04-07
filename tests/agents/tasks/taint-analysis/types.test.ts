@@ -30,7 +30,7 @@ describe("resolveTaintAnalysisConfig", () => {
     expect(resolved.passes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     expect(resolved.labelingBatchSize).toBe(20);
     expect(resolved.labelingConfidenceThreshold).toBe(0.55);
-    expect(resolved.workspaceDir).toBe("iris");
+    expect(resolved.workspaceDir).toBe(".kuzushi/iris");
     expect(resolved.python3Binary).toBe("python3");
     expect(resolved.codeqlApiProfile).toBe("auto");
     expect(resolved.codeqlProbeTimeoutMs).toBe(20_000);

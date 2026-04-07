@@ -340,6 +340,7 @@ export type VerificationFindingQueuedEvent = EventEnvelope<
     repoContext?: unknown;
     enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
+    threatModelSummary?: string;
     index: number;
     total: number;
   }

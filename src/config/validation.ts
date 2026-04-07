@@ -1,4 +1,5 @@
 import type { KuzushiConfig } from "../types.js";
+import path from "node:path";
 
 export type ConfigValidationSeverity = "error" | "warning";
 
@@ -54,6 +55,32 @@ export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIs
       path: "qualityGates.failOnExploitable",
       message: "failOnExploitable is enabled while verification is disabled, so exploitable findings will never be confirmed.",
       hint: "Enable verify=true if you want failOnExploitable to have effect.",
+    });
+  }
+
+  if (config.monorepo?.maxModules != null && (!Number.isFinite(config.monorepo.maxModules) || config.monorepo.maxModules < 1)) {
+    issues.push({
+      severity: "error",
+      path: "monorepo.maxModules",
+      message: "monorepo.maxModules must be a positive number.",
+    });
+  }
+
+  for (const [index, module] of (config.monorepo?.modules ?? []).entries()) {
+    if (path.isAbsolute(module.path) || module.path.startsWith("..")) {
+      issues.push({
+        severity: "error",
+        path: `monorepo.modules[${index}].path`,
+        message: "module paths must be relative to the monorepo root and stay within it.",
+      });
+    }
+  }
+
+  if (config.monorepo?.mode != null && config.monorepo.mode !== "auto" && config.monorepo.mode !== "off") {
+    issues.push({
+      severity: "error",
+      path: "monorepo.mode",
+      message: "monorepo.mode must be either \"auto\" or \"off\".",
     });
   }
 

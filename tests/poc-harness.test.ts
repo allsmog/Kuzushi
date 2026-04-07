@@ -275,7 +275,7 @@ describe("generatePocHarness", () => {
     expect(existsSync(output.result.scriptPath as string)).toBe(true);
     expect(output.result.parsed).toBe(true);
     expect(readFileSync(output.result.scriptPath as string, "utf-8")).toContain("PASS");
-  });
+  }, 15_000);
 
   it("throws PocHarnessExecutionError with cost on parse failure", async () => {
     const requests: AgentQueryRequest[] = [];

@@ -110,7 +110,8 @@ export const DEFAULTS: KuzushiConfig = {
   incrementalCache: true,
   incrementalDepTracking: true,
   incrementalCacheTtlDays: 30,
-  skipTriageForHighConfidenceAgentic: true,
+  skipTriageForHighConfidenceAgentic: false,
+  monorepo: undefined,
   scannerConfig: {
     semgrep: { configFlag: ["auto", "p/security-audit", "p/owasp-top-ten", "p/cwe-top-25"] },
     agentic: { maxFindings: 20 },

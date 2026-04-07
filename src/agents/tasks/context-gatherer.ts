@@ -1,23 +1,12 @@
-import { readdir, readFile, stat } from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ScanOpts, RepoContext, FileIndex, SecurityPatternMatch } from "../../types.js";
+import { DEFAULT_IGNORED_DIRS, walkRepo as walkRepoEntries } from "../../repo-walk.js";
 import { isRecord } from "../../utils.js";
 import type { AgentTask } from "../types.js";
 
 const MAX_WALK_DEPTH = 5;
 const MAX_WALK_ENTRIES = 4000;
-const IGNORED_DIRS = new Set([
-  ".git",
-  ".kuzushi",
-  "node_modules",
-  "dist",
-  "coverage",
-  "vendor",
-  "target",
-  "build",
-  ".next",
-]);
 
 const MAX_FILE_INDEX_ENTRIES = 500;
 
@@ -409,50 +398,21 @@ async function walkRepo(repoRoot: string): Promise<PathSignals> {
   const files: WalkEntry[] = [];
   const fileSet = new Set<string>();
   const dirs = new Set<string>();
-  const stack: Array<{ relDir: string; depth: number }> = [{ relDir: "", depth: 0 }];
-  let visited = 0;
+  const entries = await walkRepoEntries(repoRoot, {
+    maxDepth: MAX_WALK_DEPTH,
+    maxEntries: MAX_WALK_ENTRIES,
+    ignoredDirs: DEFAULT_IGNORED_DIRS,
+  });
 
-  while (stack.length > 0 && visited < MAX_WALK_ENTRIES) {
-    const next = stack.pop();
-    if (!next) {
-      break;
-    }
-
-    const absDir = path.join(repoRoot, next.relDir);
-    let entries: Dirent[];
-    try {
-      entries = await readdir(absDir, { withFileTypes: true });
-    } catch {
+  for (const entry of entries) {
+    const relPath = normalizeRelPath(entry.relPath);
+    if (entry.kind === "dir") {
+      dirs.add(relPath);
       continue;
     }
 
-    for (const entry of entries) {
-      if (visited >= MAX_WALK_ENTRIES) {
-        break;
-      }
-
-      const relPath = normalizeRelPath(path.join(next.relDir, entry.name));
-      visited += 1;
-
-      if (entry.isDirectory()) {
-        dirs.add(relPath);
-
-        if (next.depth >= MAX_WALK_DEPTH || IGNORED_DIRS.has(entry.name)) {
-          continue;
-        }
-
-        stack.push({
-          relDir: relPath,
-          depth: next.depth + 1,
-        });
-        continue;
-      }
-
-      if (entry.isFile()) {
-        files.push({ relPath });
-        fileSet.add(relPath);
-      }
-    }
+    files.push({ relPath });
+    fileSet.add(relPath);
   }
 
   return { files, fileSet, dirs };
