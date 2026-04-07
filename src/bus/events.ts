@@ -24,6 +24,7 @@ export interface RunContext {
   scanPath?: string;
   repoName: string;
   dbPath: string;
+  reportMode?: "full" | "suppress";
 }
 
 export interface PipelineStats {
@@ -48,6 +49,7 @@ export interface PipelineStats {
   pocHarnessCostUsd?: number;
   variantFindings?: number;
   variantAnalysisCostUsd?: number;
+  ruleSweepFindings?: number;
   chainCount?: number;
   chainAnalysisCostUsd?: number;
   dynamicConfirmed?: number;
@@ -228,6 +230,7 @@ export type TriageFindingQueuedEvent = EventEnvelope<
     repoContext?: unknown;
     enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
+    threatModelSummary?: string;
     index: number;
     total: number;
   }
@@ -241,6 +244,7 @@ export type TriageBatchQueuedEvent = EventEnvelope<
     repoContext?: unknown;
     enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
+    threatModelSummary?: string;
     total: number;
   }
 >;
@@ -810,6 +814,7 @@ export type ReportRequestedEvent = EventEnvelope<
     stats?: Partial<PipelineStats>;
     fingerprints?: string[];
     exploitChains?: ExploitChain[];
+    reportMode?: "full" | "suppress";
   }
 >;
 

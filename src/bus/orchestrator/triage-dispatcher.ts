@@ -7,11 +7,75 @@
 
 import type { Finding } from "../../scanners/types.js";
 import type { TriageResult } from "../../types.js";
-import { normalizeCostUsd } from "../../utils.js";
+import { isRecord, normalizeCostUsd } from "../../utils.js";
 import { updateRunCost } from "../../store.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
 import type { RunState, OrchestratorDeps } from "./types.js";
+
+/**
+ * Extract a concise threat model summary from upstream task outputs
+ * to provide application-context for triage decisions.
+ */
+export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): string | undefined {
+  const raw = taskOutputs.get("threat-model-randori");
+  if (!isRecord(raw)) return undefined;
+
+  const parts: string[] = [];
+
+  // Extract DFD external entities (these describe what the app IS)
+  const dfd = isRecord(raw["dfd"]) ? raw["dfd"] : undefined;
+  if (dfd) {
+    const elements = Array.isArray(dfd["elements"]) ? dfd["elements"] : [];
+    const externalEntities = elements
+      .filter((e: unknown) => isRecord(e) && e["type"] === "external-entity")
+      .map((e: unknown) => isRecord(e) ? String(e["name"] ?? "") : "")
+      .filter(Boolean);
+    if (externalEntities.length > 0) {
+      parts.push(`External actors: ${externalEntities.join(", ")}`);
+    }
+
+    const trustBoundaries = Array.isArray(dfd["trustBoundaries"]) ? dfd["trustBoundaries"] : [];
+    const boundaryNames = trustBoundaries
+      .map((b: unknown) => isRecord(b) ? String(b["name"] ?? "") : "")
+      .filter(Boolean);
+    if (boundaryNames.length > 0) {
+      parts.push(`Trust boundaries: ${boundaryNames.join(", ")}`);
+    }
+  }
+
+  // Extract threat summary to understand app purpose
+  const summary = isRecord(raw["summary"]) ? raw["summary"] : undefined;
+  if (summary) {
+    const total = Number(summary["total"] ?? 0);
+    const byCategory = isRecord(summary["byCategory"]) ? summary["byCategory"] : {};
+    const cats = Object.entries(byCategory)
+      .filter(([, v]) => Number(v) > 0)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ");
+    if (cats) parts.push(`Threat profile: ${total} threats (${cats})`);
+  }
+
+  // Extract top threats for context
+  const threats = Array.isArray(raw["threats"]) ? raw["threats"] : [];
+  const topThreats = threats.slice(0, 5).map((t: unknown) => {
+    if (!isRecord(t)) return "";
+    return `- ${String(t["title"] ?? "")} [${String(t["category"] ?? "")}]`;
+  }).filter(Boolean);
+  if (topThreats.length > 0) {
+    parts.push(`Top threats:\n${topThreats.join("\n")}`);
+  }
+
+  // Detect offensive/pentest tool patterns from threat actors and descriptions
+  const allText = JSON.stringify(raw).toLowerCase();
+  const offensivePatterns = ["pentest", "offensive", "red team", "tunneling", "pivoting", "c2", "implant", "exploitation framework", "attack tool"];
+  const isOffensiveTool = offensivePatterns.some((p) => allText.includes(p));
+  if (isOffensiveTool) {
+    parts.push("Application type: OFFENSIVE SECURITY / PENTEST TOOL — findings about missing authentication, encryption, or access control may be BY DESIGN for this tool's intended use case. Focus on bugs that harm the tool's OPERATOR (crashes, data races, credential leaks) rather than design choices about target interaction.");
+  }
+
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
 
 export function handleTriageResult(
   state: RunState,
@@ -124,6 +188,7 @@ export async function dispatchTriage(
           repoContext: state.repoContext,
           enrichedContext: state.enrichedRepoContext,
           precedents: state.precedents,
+          threatModelSummary: buildThreatModelSummary(state.taskOutputs),
           index: item.index,
           total: item.total,
         }),

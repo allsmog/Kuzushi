@@ -66,7 +66,7 @@ export function writeJsonReport(
     fingerprints,
   });
 
-  const byVerdict: Record<string, number> = { tp: 0, fp: 0, needs_review: 0 };
+  const byVerdict: Record<string, number> = { tp: 0, fp: 0, needs_review: 0, by_design: 0 };
   const bySeverity: Record<string, number> = {};
 
   for (const f of allFindings) {

@@ -6,7 +6,7 @@ import type { ScannerRegistry } from "../../scanners/registry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
-import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, BATCH_TRIAGE_FALLBACK_RATIONALE, preReadForTriage, type FileContentCache } from "../../triage.js";
+import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, preReadForTriage, type FileContentCache } from "../../triage.js";
 import type { KuzushiConfig } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
@@ -178,6 +178,19 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               extraSections.push(
                 bypassLines.join("\n") +
                 "\n\nBefore concluding FP, verify that these bypass techniques don't apply.",
+              );
+            }
+          }
+
+          // 1C-pre: Threat model context — inject application-level context for verdict decisions
+          {
+            const tmSummary = event.payload.threatModelSummary;
+            if (typeof tmSummary === "string" && tmSummary.length > 0) {
+              extraSections.push(
+                "## Application Threat Model Context\n"
+                + "The following context was derived from automated threat modeling of this application.\n"
+                + "Use it to distinguish between DESIGN CHOICES (by_design) and actual VULNERABILITIES (tp).\n\n"
+                + tmSummary,
               );
             }
           }
@@ -461,7 +474,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
     const runId = event.meta.runId;
 
     try {
-      const { results, costUsd } = await triageFindingsBatch(
+      const { results, costUsd, missingFingerprints } = await triageFindingsBatch(
         findings,
         context.scanPath ?? context.repoRoot,
         context.repoName,
@@ -491,13 +504,12 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
       );
 
       const perFindingCost = findings.length > 0 ? costUsd / findings.length : 0;
+      const missingFingerprintSet = new Set(missingFingerprints);
 
       for (const [idx, finding] of findings.entries()) {
         const result = results.get(finding.fingerprint);
-        const isFallback = result?.confidence === 0
-          && result?.rationale === BATCH_TRIAGE_FALLBACK_RATIONALE;
 
-        if (result && !isFallback) {
+        if (result && !missingFingerprintSet.has(finding.fingerprint)) {
           result.triageCostUsd = perFindingCost;
           await bus.publish(
             createEvent("triage:result", runId, {
@@ -511,9 +523,9 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             }),
           );
         } else {
-          // Escalate batch-dropped findings to individual triage instead of
-          // accepting needs_review — individual triage has pre-read context
-          // and can spend more turns investigating.
+          // Escalate batch-incomplete findings to individual triage instead of
+          // accepting a synthesized result — individual triage has pre-read
+          // context and can spend more turns investigating.
           await bus.publish(
             createEvent("triage:finding-queued", runId, {
               context,

@@ -43,6 +43,8 @@ function colorVerdict(verdict: Verdict): string {
       return chalk.green("false positive");
     case "needs_review":
       return chalk.yellow("needs review");
+    case "by_design":
+      return chalk.blue("BY DESIGN");
   }
 }
 
@@ -84,7 +86,7 @@ export function printSummary(
   const fp = options.fingerprints;
   const allFindings = getActionableFindings(db, repo, { includeFalsePositives: true, fingerprints: fp });
 
-  const counts: Record<Verdict, number> = { tp: 0, fp: 0, needs_review: 0 };
+  const counts: Record<Verdict, number> = { tp: 0, fp: 0, needs_review: 0, by_design: 0 };
   for (const f of allFindings) {
     counts[f.verdict]++;
   }

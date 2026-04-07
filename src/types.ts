@@ -2,6 +2,7 @@ import type { ScannerConfig, ScannerId } from "./scanners/types.js";
 import type { EngineProvenance, ProofState, TaintPathStep } from "./scanners/types.js";
 import type { QualityGateConfig } from "./quality-gate.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
+import type { DiscoveredModule } from "./discovery/types.js";
 
 // Re-export Zod schemas for consumers that need runtime validation.
 export {
@@ -78,7 +79,7 @@ export interface TriageAssertionConfig {
 }
 
 /** Verdict assigned by AI triage. */
-export type Verdict = "tp" | "fp" | "needs_review";
+export type Verdict = "tp" | "fp" | "needs_review" | "by_design";
 
 export interface TriagePathAssessment {
   why: string;
@@ -110,6 +111,12 @@ export interface EvidenceStep {
 /** Result of AI triage for a single finding. */
 export interface TriageResult {
   fingerprint: string;
+  /** Human-readable title for the finding (5-12 words). */
+  title?: string;
+  /** Alice-and-Bob style attack narrative describing who, what, and impact. */
+  attackNarrative?: string;
+  /** Assessed security severity: critical, high, medium, or low. */
+  displaySeverity?: "critical" | "high" | "medium" | "low";
   verdict: Verdict;
   confidence: number;
   rationale: string;
@@ -673,6 +680,19 @@ export interface KuzushiConfig {
   streamingPort?: number;
   /** Skip triage for high-confidence agentic findings (score >= 7, confidence HIGH). Default false. */
   skipTriageForHighConfidenceAgentic?: boolean;
+  /** Monorepo module discovery and manual module overrides. */
+  monorepo?: {
+    /** Monorepo handling mode. "off" disables auto-discovery for this project. */
+    mode?: "auto" | "off";
+    /** Manual module list. When set, skips LLM discovery. */
+    modules?: DiscoveredModule[];
+    /** Module names to exclude from discovery or scanning. */
+    excludeModules?: string[];
+    /** Override model used for module discovery. */
+    discoveryModel?: string;
+    /** Max number of modules emitted by discovery. Default 30. */
+    maxModules?: number;
+  };
 }
 
 /** A persisted finding row from SQLite. */

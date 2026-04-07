@@ -22,7 +22,7 @@ export function generateMarkdownReport(
 ): string {
   const allFindings = getActionableFindings(db, repo, { includeFalsePositives: true, fingerprints });
 
-  const verdictCounts = { tp: 0, fp: 0, needs_review: 0 };
+  const verdictCounts = { tp: 0, fp: 0, needs_review: 0, by_design: 0 };
   let exploitable = 0;
   let notExploitable = 0;
   let pocGenerated = 0;
@@ -30,6 +30,7 @@ export function generateMarkdownReport(
   for (const f of allFindings) {
     if (f.verdict === "tp") verdictCounts.tp++;
     else if (f.verdict === "fp") verdictCounts.fp++;
+    else if (f.verdict === "by_design") verdictCounts.by_design++;
     else verdictCounts.needs_review++;
     if (f.verifyExploitable === 1) exploitable++;
     else if (f.verifyExploitable === 0) notExploitable++;

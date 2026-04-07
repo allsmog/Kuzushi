@@ -181,6 +181,9 @@ function upsertFindingParams(
     triage.fixPatch,
     triage.triageCostUsd ?? null,
     safeJsonStringify({
+      title: triage.title ?? null,
+      attack_narrative: triage.attackNarrative ?? null,
+      display_severity: triage.displaySeverity ?? null,
       source: triage.source ?? null,
       sink: triage.sink ?? null,
       is_vulnerable: triage.isVulnerable ?? null,
@@ -480,7 +483,7 @@ export function getVerdictCounts(
   db: Database.Database,
   repo?: string,
 ): Record<Verdict, number> {
-  const counts: Record<Verdict, number> = { tp: 0, fp: 0, needs_review: 0 };
+  const counts: Record<Verdict, number> = { tp: 0, fp: 0, needs_review: 0, by_design: 0 };
 
   const query = repo
     ? "SELECT verdict, COUNT(*) as count FROM findings WHERE repo = ? GROUP BY verdict"
