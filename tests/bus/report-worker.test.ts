@@ -3,6 +3,9 @@ import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerReportWorker } from "../../src/bus/workers/report-worker.js";
 import { initDb } from "../../src/store.js";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { Finding } from "../../src/scanners/types.js";
 import type { KuzushiConfig, TriageResult } from "../../src/types.js";
 import type { ReportCompleteEvent } from "../../src/bus/events.js";
@@ -42,6 +45,14 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  while (tempDirs.length > 0) {
+    rmSync(tempDirs.pop()!, { recursive: true, force: true });
+  }
 });
 
 describe("report-worker", () => {
@@ -188,6 +199,62 @@ describe("report-worker", () => {
 
     const output = vi.mocked(console.log).mock.calls.flat().join("\n");
     expect(output).not.toContain("already-triaged");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("suppresses final report output for child module runs", async () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "kuzushi-report-"));
+    tempDirs.push(tempDir);
+    const reportPath = path.join(tempDir, "report.md");
+
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 1,
+      scanMode: "sequential",
+      scanners: ["semgrep"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      reportOutput: reportPath,
+      scannerConfig: { semgrep: {} },
+    };
+
+    registerReportWorker(bus, { db, config });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/monorepo",
+      scanPath: "/tmp/monorepo/services/auth",
+      repoName: "monorepo/auth",
+      dbPath: "/tmp/monorepo/.kuzushi/findings.sqlite3",
+      reportMode: "suppress" as const,
+    };
+
+    const reportCompletePromise = bus.waitFor<ReportCompleteEvent>(
+      "report:complete",
+      (event) => event.meta.runId === runId,
+    );
+
+    vi.mocked(console.log).mockClear();
+
+    await bus.publish(
+      createEvent("report:requested", runId, {
+        context,
+        reportMode: "suppress",
+      }),
+    );
+
+    await reportCompletePromise;
+
+    expect(existsSync(reportPath)).toBe(false);
+    expect(console.log).not.toHaveBeenCalled();
 
     await bus.close();
     db.close();

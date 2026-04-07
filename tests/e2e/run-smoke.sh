@@ -8,12 +8,18 @@ TEST_APP_DIR="${TEST_APP_DIR:-/tmp/kuzushi-smoke-app}"
 TEST_LOG_DIR="${TEST_LOG_DIR:-/tmp/kuzushi-smoke-logs}"
 SARIF_PATH="${TEST_LOG_DIR}/results.sarif"
 DB_PATH="${TEST_APP_DIR}/.kuzushi/findings.sqlite3"
-FAKE_SERVER_SCRIPT="${REPO_DIR}/tests/fixtures/fake-anthropic-server.mjs"
+MOCK_SERVER_SCRIPT="${REPO_DIR}/tests/fixtures/mock-anthropic-server.mjs"
+MOCK_MODE_NOTE="${TEST_LOG_DIR}/mock-mode.txt"
 
 mkdir -p "${TEST_LOG_DIR}"
+cat > "${MOCK_MODE_NOTE}" <<'EOF'
+Deterministic smoke run using tests/fixtures/mock-anthropic-server.mjs.
+This is mock-backed fixture coverage, not a real LLM integration test.
+EOF
 
 # Start mock Anthropic API server and capture its base URL.
-MOCK_BASE_URL=$(node "${FAKE_SERVER_SCRIPT}" &)
+echo "Running deterministic mock-backed smoke scan; no real LLM calls will be made." >&2
+MOCK_BASE_URL=$(node "${MOCK_SERVER_SCRIPT}" &)
 MOCK_PID=$!
 trap 'kill $MOCK_PID 2>/dev/null || true' EXIT
 

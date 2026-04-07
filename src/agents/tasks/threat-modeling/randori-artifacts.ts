@@ -12,8 +12,8 @@ export interface RandoriArtifacts {
   s4Threats: Record<string, unknown> | null;
 }
 
-export function readRandoriArtifacts(repoRoot: string): RandoriArtifacts {
-  const outputDir = path.join(repoRoot, "randori-output");
+export function readRandoriArtifacts(repoRoot: string, relativeOutputDir?: string): RandoriArtifacts {
+  const outputDir = path.join(repoRoot, relativeOutputDir ?? "randori-output");
   return {
     state: readJson(path.join(outputDir, "randori-state.json")),
     s2Scope: readJson(path.join(outputDir, "pasta-s2.json")),
@@ -152,3 +152,4 @@ function readJson(filePath: string): Record<string, unknown> | null {
     return null;
   }
 }
+

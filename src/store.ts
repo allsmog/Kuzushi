@@ -181,6 +181,9 @@ function upsertFindingParams(
     triage.fixPatch,
     triage.triageCostUsd ?? null,
     safeJsonStringify({
+      title: triage.title ?? null,
+      attack_narrative: triage.attackNarrative ?? null,
+      display_severity: triage.displaySeverity ?? null,
       source: triage.source ?? null,
       sink: triage.sink ?? null,
       is_vulnerable: triage.isVulnerable ?? null,
@@ -480,7 +483,7 @@ export function getVerdictCounts(
   db: Database.Database,
   repo?: string,
 ): Record<Verdict, number> {
-  const counts: Record<Verdict, number> = { tp: 0, fp: 0, needs_review: 0 };
+  const counts: Record<Verdict, number> = { tp: 0, fp: 0, needs_review: 0, by_design: 0 };
 
   const query = repo
     ? "SELECT verdict, COUNT(*) as count FROM findings WHERE repo = ? GROUP BY verdict"
@@ -1559,6 +1562,19 @@ export function updateRunAssertions(
   db.prepare(`
     UPDATE pipeline_runs SET assertions_json = ?, updated_at = datetime('now') WHERE run_id = ?
   `).run(assertionsJson, runId);
+}
+
+/**
+ * Mark pipeline runs stuck in non-terminal states as "aborted".
+ * Cleans up orphaned runs from killed processes or crashes.
+ */
+export function markStaleRunsAborted(db: Database.Database, repo: string): number {
+  const result = db.prepare(`
+    UPDATE pipeline_runs
+    SET status = 'aborted', completed_at = datetime('now'), updated_at = datetime('now')
+    WHERE repo = ? AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing', 'dynamic-analyzing')
+  `).run(repo);
+  return result.changes;
 }
 
 /**

@@ -1,8 +1,10 @@
 import type Database from "better-sqlite3";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { getTriagedFindingsForRepo } from "../../store.js";
-import type { PipelineStartEvent, ReportRequestedEvent } from "../events.js";
+import { isRecord } from "../../utils.js";
+import { safeJsonStringify } from "../../utils/safe-json.js";
+import type { PipelineStartEvent, ReportRequestedEvent, TaskCompleteEvent } from "../events.js";
 import type { MessageBus } from "../types.js";
 
 export interface TaintAnalysisArtifactWorkerDeps {
@@ -28,6 +30,28 @@ export function registerTaintAnalysisArtifactWorker(
     });
   });
 
+  // Persist ThreatModelDocument when threat-model-randori completes
+  bus.subscribe<TaskCompleteEvent>("task:complete", (event) => {
+    if (event.payload.taskId !== "threat-model-randori") return;
+    const state = runs.get(event.meta.runId);
+    if (!state) return;
+    const output = event.payload.output;
+    if (!isRecord(output) || !isRecord(output["document"])) return;
+    try {
+      const runDir = path.join(state.repoRoot, ".kuzushi", "runs", event.meta.runId);
+      if (!existsSync(runDir)) {
+        mkdirSync(runDir, { recursive: true });
+      }
+      writeFileSync(
+        path.join(runDir, "threat-model.json"),
+        safeJsonStringify(output["document"], 2),
+        "utf-8",
+      );
+    } catch (error) {
+      console.error(`[taint-analysis-artifact-worker] Failed to write threat-model.json: ${error}`);
+    }
+  });
+
   bus.subscribe<ReportRequestedEvent>("report:requested", (event) => {
     try {
       const state = runs.get(event.meta.runId);
@@ -38,23 +62,37 @@ export function registerTaintAnalysisArtifactWorker(
       }
 
       const rows = getTriagedFindingsForRepo(deps.db, event.payload.context.repoName);
-      const findings = rows.map((row) => ({
-        id: row.fingerprint,
-        scanner: row.scanner,
-        rule_id: row.ruleId,
-        location: {
-          file: row.filePath,
-          line: row.startLine,
-        },
-        severity: row.severity,
-        message: row.message,
-        verdict: row.verdict,
-        confidence: row.confidence,
-        rationale: row.rationale,
-        verification_steps: row.verificationSteps,
-        fix_patch: row.fixPatch,
-        ...(row.triageDetails ?? {}),
-      }));
+      const findings = rows.map((row) => {
+        const details = (row.triageDetails ?? {}) as Record<string, unknown>;
+        return {
+          id: row.fingerprint,
+          scanner: row.scanner,
+          rule_id: row.ruleId,
+          location: {
+            file: row.filePath,
+            line: row.startLine,
+          },
+          severity: row.severity,
+          message: row.message,
+          title: details.title ?? null,
+          attack_narrative: details.attack_narrative ?? null,
+          verdict: row.verdict,
+          confidence: row.confidence,
+          rationale: row.rationale,
+          verification_steps: row.verificationSteps,
+          fix_patch: row.fixPatch,
+          ...details,
+        };
+      });
+
+      // Include the threat model document if available
+      let threatModel: unknown = null;
+      const tmPath = path.join(runDir, "threat-model.json");
+      if (existsSync(tmPath)) {
+        try {
+          threatModel = JSON.parse(readFileSync(tmPath, "utf-8"));
+        } catch { /* best-effort */ }
+      }
 
       writeFileSync(
         path.join(runDir, "findings.triaged.json"),
@@ -64,6 +102,7 @@ export function registerTaintAnalysisArtifactWorker(
           runId: event.meta.runId,
           repo: event.payload.context.repoName,
           findings,
+          ...(threatModel ? { threatModel } : {}),
         }, null, 2),
         "utf-8",
       );

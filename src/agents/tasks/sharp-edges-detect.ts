@@ -410,6 +410,8 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
         subcategory: ["vuln"],
         cwe: [cwe],
       }),
+      proofState: "symbolic_only",
+      engineProvenance: [{ kind: "agentic", detail: "LLM-driven sharp-edges-detect analysis" }],
     };
 
     const existing = deduped.get(fingerprint);

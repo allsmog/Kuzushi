@@ -180,6 +180,8 @@ export function selectFindings(
       impact: meta.impact ?? "LOW",
       cwe: meta.cwe ?? [],
       score,
+      proofState: "symbolic_only",
+      engineProvenance: [{ kind: "semgrep", detail: "Semgrep static analysis rule match" }],
     };
   });
 }

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  BATCH_TRIAGE_FALLBACK_RATIONALE,
   buildDefaultTriageAgentConfig,
   DEFAULT_BATCH_SIZE,
   extractJson,
@@ -688,7 +687,7 @@ describe("triageFindingsBatch", () => {
     expect(DEFAULT_BATCH_SIZE).toBe(5);
   });
 
-  it("fills missing findings with needs_review fallback", async () => {
+  it("reports missing findings without synthesizing fallback results", async () => {
     const findings = Array.from({ length: 3 }, (_, i) => makeFindingWithFp(`fp-${i}`));
     // Runtime only returns result for fp-0, missing fp-1 and fp-2
     const queryFn = vi.fn().mockImplementation(function* () {
@@ -714,12 +713,57 @@ describe("triageFindingsBatch", () => {
     const runtime: AgentRuntime = { id: "mock-partial", query: queryFn };
 
     const output = await triageFindingsBatch(findings, "/tmp", "repo", "model", undefined, { runtime });
-    expect(output.results.size).toBe(3);
+    expect(output.results.size).toBe(1);
     expect(output.results.get("fp-0")?.verdict).toBe("tp");
-    expect(output.results.get("fp-1")?.verdict).toBe("needs_review");
-    expect(output.results.get("fp-1")?.confidence).toBe(0);
-    expect(output.results.get("fp-1")?.rationale).toBe(BATCH_TRIAGE_FALLBACK_RATIONALE);
-    expect(output.results.get("fp-2")?.verdict).toBe("needs_review");
-    expect(output.results.get("fp-2")?.rationale).toBe(BATCH_TRIAGE_FALLBACK_RATIONALE);
+    expect(output.results.has("fp-1")).toBe(false);
+    expect(output.results.has("fp-2")).toBe(false);
+    expect(output.incomplete).toBe(true);
+    expect(output.missingFingerprints).toEqual(["fp-1", "fp-2"]);
+    expect(output.recoveredByRetry).toEqual([]);
+  });
+
+  it("parses evidence trail and chain from batch structured output", async () => {
+    const finding = makeFindingWithFp("fp-evidence");
+    const queryFn = vi.fn().mockImplementation(function* () {
+      yield {
+        type: "result",
+        subtype: "success",
+        result: "{}",
+        structuredOutput: {
+          results: [{
+            fingerprint: finding.fingerprint,
+            verdict: "tp",
+            confidence: 0.9,
+            rationale: "confirmed",
+            verification_steps: ["trace control flow"],
+            fix_patch: null,
+            evidence_trail: [
+              { level: "0.4", evidence: "Reached listener bootstrap" },
+            ],
+            evidence_chain: [
+              {
+                step_type: "source-reachability",
+                description: "Synthetic entry-cli reaches sink candidate",
+                confidence: 0.9,
+                evidence: "call graph path",
+              },
+            ],
+          }],
+        },
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0.01,
+      };
+    });
+    const runtime: AgentRuntime = { id: "mock-batch-evidence", query: queryFn };
+
+    const output = await triageFindingsBatch([finding], "/tmp", "repo", "model", undefined, { runtime });
+    const result = output.results.get(finding.fingerprint);
+
+    expect(result?.evidenceTrail).toEqual([
+      { level: "0.4", evidence: "Reached listener bootstrap" },
+    ]);
+    expect(result?.evidenceChain?.[0]?.stepType).toBe("source-reachability");
+    expect(result?.evidenceChain?.[0]?.description).toContain("entry-cli");
   });
 });

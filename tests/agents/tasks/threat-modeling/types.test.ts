@@ -25,7 +25,7 @@ describe("DEFAULT_THREAT_MODEL_CONFIG", () => {
     expect(DEFAULT_THREAT_MODEL_CONFIG.maxElements).toBe(50);
     expect(DEFAULT_THREAT_MODEL_CONFIG.maxThreats).toBe(100);
     expect(DEFAULT_THREAT_MODEL_CONFIG.emitFindings).toBe(true);
-    expect(DEFAULT_THREAT_MODEL_CONFIG.findingThreshold).toBe("high");
+    expect(DEFAULT_THREAT_MODEL_CONFIG.findingThreshold).toBe("medium");
     expect(DEFAULT_THREAT_MODEL_CONFIG.randoriStages).toEqual(["s1", "s2", "s3", "s4"]);
   });
 });

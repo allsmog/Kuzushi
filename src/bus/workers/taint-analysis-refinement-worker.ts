@@ -303,7 +303,7 @@ async function triageDeltaFindings(args: {
   }
 
   try {
-    const { results, costUsd } = await triageFindingsBatch(
+    const { results, costUsd, missingFingerprints } = await triageFindingsBatch(
       args.deltaFindings,
       args.context.scanPath ?? args.context.repoRoot,
       args.context.repoName,
@@ -314,9 +314,10 @@ async function triageDeltaFindings(args: {
 
     let triaged = 0;
     let errors = 0;
+    const unresolvedFingerprints = new Set(missingFingerprints);
     for (const finding of args.deltaFindings) {
       const result = results.get(finding.fingerprint);
-      if (!result) {
+      if (!result || unresolvedFingerprints.has(finding.fingerprint)) {
         errors += 1;
         continue;
       }
@@ -325,29 +326,20 @@ async function triageDeltaFindings(args: {
       triaged += 1;
     }
 
+    if (errors > 0) {
+      const unresolved = args.deltaFindings
+        .map((finding) => finding.fingerprint)
+        .filter((fingerprint) => !results.has(fingerprint) || unresolvedFingerprints.has(fingerprint));
+      throw new Error(`Refinement delta triage incomplete; unresolved findings: ${unresolved.join(", ")}`);
+    }
+
     return {
       triaged,
       errors,
       costUsd: normalizeCostUsd(costUsd),
     };
   } catch {
-    for (const finding of args.deltaFindings) {
-      const fallback: TriageResult = {
-        fingerprint: finding.fingerprint,
-        verdict: "needs_review",
-        confidence: 0,
-        rationale: "Refinement delta triage failed; queued as needs_review.",
-        verificationSteps: [],
-        fixPatch: null,
-      };
-      upsertFinding(args.deps.db, finding, fallback, args.context.repoName, "HEAD");
-    }
-
-    return {
-      triaged: 0,
-      errors: args.deltaFindings.length,
-      costUsd: 0,
-    };
+    throw new Error("Refinement delta triage failed; findings left unresolved.");
   }
 }
 

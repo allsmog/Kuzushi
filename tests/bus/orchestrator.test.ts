@@ -361,6 +361,88 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
+  it("queues high-confidence agentic findings for normal triage instead of auto-classifying them", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      skipTriageForHighConfidenceAgentic: true,
+    };
+
+    const registry = {
+      resolveEnabled: () => ["semgrep", "agentic"],
+    };
+
+    registerOrchestrator(bus, { registry: registry as any, db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const triageStartPromise = bus.waitFor<TriageStartEvent>(
+      "triage:start",
+      (event) => event.meta.runId === runId,
+    );
+    const batchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: {
+          ...makeFinding("fp-semgrep", 50),
+          scanner: "semgrep",
+        },
+        scannerId: "semgrep",
+      }),
+    );
+    await bus.publish(
+      createEvent("scan:finding", runId, {
+        context,
+        finding: {
+          ...makeFinding("fp-agentic", 80),
+          scanner: "agentic",
+          ruleId: "agentic.sql-injection",
+          scannerConfidence: "HIGH",
+        },
+        scannerId: "agentic",
+      }),
+    );
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 2,
+      }),
+    );
+
+    const triageStart = await triageStartPromise;
+    const batchQueued = await batchQueuedPromise;
+
+    expect(triageStart.payload.findingCount).toBe(2);
+    expect(batchQueued.payload.findings.map((finding) => finding.fingerprint)).toEqual([
+      "fp-agentic",
+      "fp-semgrep",
+    ]);
+
+    await bus.close();
+    db.close();
+  });
+
   it("accumulates triage costs into triage:complete and pipeline stats", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");

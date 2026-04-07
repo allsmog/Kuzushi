@@ -254,23 +254,7 @@ function parseVerificationResponse(text: string, fingerprint: string): Verificat
       bypassAttempts: parseOptionalStringArray(parsed.bypass_attempts),
     };
   } catch (error) {
-    // Graceful degradation: when the agent returns prose instead of JSON
-    // (common after multi-turn tool use), return a conservative inconclusive
-    // result. The verification refinement loop will retry with this failure
-    // in history, prompting the agent to return proper JSON next time.
-    log.warn(`[verify] Could not parse verification response for ${fingerprint}: ${toErrorMessage(error)}`);
-    return {
-      fingerprint,
-      exploitable: false,
-      pocPayload: null,
-      pocDescription: text.slice(0, 500),
-      attackVector: null,
-      preconditions: [],
-      confidence: 0,
-      proofLevel: 1,
-      proofVerdict: undefined,
-      bypassAttempts: [],
-    };
+    throw new Error(`Invalid verification JSON response: ${toErrorMessage(error)}`);
   }
 }
 
@@ -353,6 +337,9 @@ export const BATCH_VERIFICATION_FALLBACK_DESCRIPTION = "Finding was not included
 export interface BatchVerificationOutput {
   results: Map<string, VerificationResult>;
   costUsd: number;
+  missingFingerprints: string[];
+  incomplete: boolean;
+  recoveredByRetry: string[];
 }
 
 export async function verifyFindingsBatch(
@@ -366,7 +353,13 @@ export async function verifyFindingsBatch(
   verifyTemplate?: string,
 ): Promise<BatchVerificationOutput> {
   if (items.length === 0) {
-    return { results: new Map(), costUsd: 0 };
+    return {
+      results: new Map(),
+      costUsd: 0,
+      missingFingerprints: [],
+      incomplete: false,
+      recoveredByRetry: [],
+    };
   }
 
   const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
@@ -377,6 +370,7 @@ export async function verifyFindingsBatch(
 
   const allResults = new Map<string, VerificationResult>();
   let totalCost = 0;
+  const missingFingerprints = new Set<string>();
 
   // Try to create a reusable session for subprocess reuse across batches
   const runtime = runtimeOptions.runtime;
@@ -400,7 +394,7 @@ export async function verifyFindingsBatch(
     for (let i = 0; i < items.length; i += effectiveBatchSize) {
       const chunk = items.slice(i, i + effectiveBatchSize);
 
-      const { results, costUsd } = session
+      const chunkResult = session
         ? await verifySingleBatchSession(
             chunk,
             repoRoot,
@@ -420,8 +414,12 @@ export async function verifyFindingsBatch(
             verifyTemplate,
           );
 
+      const { results, costUsd } = chunkResult;
       for (const [fp, result] of results) {
         allResults.set(fp, result);
+      }
+      for (const fingerprint of chunkResult.missingFingerprints) {
+        missingFingerprints.add(fingerprint);
       }
       totalCost += costUsd;
       batchIdx++;
@@ -431,7 +429,13 @@ export async function verifyFindingsBatch(
     if (runId) cleanupBatchFiles(repoRoot, runId);
   }
 
-  return { results: allResults, costUsd: totalCost };
+  return {
+    results: allResults,
+    costUsd: totalCost,
+    missingFingerprints: [...missingFingerprints],
+    incomplete: missingFingerprints.size > 0,
+    recoveredByRetry: [],
+  };
 }
 
 async function verifySingleBatchSession(
@@ -482,8 +486,12 @@ async function verifySingleBatchSession(
     throw new VerificationExecutionError(`batch verification agent failed: ${executionError}`, costUsd);
   }
 
-  const results = parseBatchVerificationOutput(structuredOutput ?? resultText, items);
-  return { results, costUsd };
+  const parsed = parseBatchVerificationOutput(structuredOutput ?? resultText, items);
+  return {
+    ...parsed,
+    costUsd,
+    recoveredByRetry: [],
+  };
 }
 
 async function verifySingleBatch(
@@ -512,8 +520,12 @@ async function verifySingleBatch(
     throw new VerificationExecutionError(`batch verification agent failed: ${executionError}`, costUsd);
   }
 
-  const results = parseBatchVerificationOutput(structuredOutput ?? resultText, items);
-  return { results, costUsd };
+  const parsed = parseBatchVerificationOutput(structuredOutput ?? resultText, items);
+  return {
+    ...parsed,
+    costUsd,
+    recoveredByRetry: [],
+  };
 }
 
 function buildBatchVerificationPrompt(
@@ -528,7 +540,7 @@ function buildBatchVerificationPrompt(
 function parseBatchVerificationOutput(
   raw: unknown,
   items: Array<{ finding: Finding; triageResult: TriageResult }>,
-): Map<string, VerificationResult> {
+): Omit<BatchVerificationOutput, "costUsd" | "recoveredByRetry"> {
   const results = new Map<string, VerificationResult>();
   const fingerprintSet = new Set(items.map((item) => item.finding.fingerprint));
 
@@ -561,7 +573,7 @@ function parseBatchVerificationOutput(
         rawItems = parsed;
       }
     } catch {
-      // Fall through — missing findings will get fallback below
+      // Fall through — missing findings will be reported via missingFingerprints.
     }
   }
 
@@ -584,25 +596,15 @@ function parseBatchVerificationOutput(
     });
   }
 
-  // Fill in any missing findings with not-exploitable fallback
-  for (const item of items) {
-    if (!results.has(item.finding.fingerprint)) {
-      results.set(item.finding.fingerprint, {
-        fingerprint: item.finding.fingerprint,
-        exploitable: false,
-        pocPayload: null,
-        pocDescription: BATCH_VERIFICATION_FALLBACK_DESCRIPTION,
-        attackVector: null,
-        preconditions: [],
-        confidence: 0,
-        proofLevel: undefined,
-        proofVerdict: undefined,
-        bypassAttempts: undefined,
-      });
-    }
-  }
+  const missingFingerprints = items
+    .map((item) => item.finding.fingerprint)
+    .filter((fingerprint) => !results.has(fingerprint));
 
-  return results;
+  return {
+    results,
+    missingFingerprints,
+    incomplete: missingFingerprints.length > 0,
+  };
 }
 
 function normalizeAllowedTriageToolNames(tools: readonly string[]): AllowedTriageTool[] {

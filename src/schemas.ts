@@ -11,7 +11,7 @@ import { z } from "zod";
 // Shared enums / literals
 // ---------------------------------------------------------------------------
 
-export const VerdictSchema = z.enum(["tp", "fp", "needs_review"]);
+export const VerdictSchema = z.enum(["tp", "fp", "needs_review", "by_design"]);
 
 export const BusBackendSchema = z.enum(["in-process"]);
 
@@ -559,6 +559,26 @@ export const AgentRuntimeConfigSchema = z.object({
 
 export type AgentRuntimeConfigZ = z.infer<typeof AgentRuntimeConfigSchema>;
 
+export const DiscoveredModuleSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  description: z.string(),
+  language: z.string(),
+  buildSystem: z.string().optional(),
+  isParent: z.boolean().optional(),
+  parentModule: z.string().optional(),
+});
+
+export const MonorepoConfigSchema = z.object({
+  mode: z.enum(["auto", "off"]).optional(),
+  modules: z.array(DiscoveredModuleSchema).optional(),
+  excludeModules: z.array(z.string()).optional(),
+  discoveryModel: z.string().optional(),
+  maxModules: z.number().optional(),
+});
+
+export type MonorepoConfigZ = z.infer<typeof MonorepoConfigSchema>;
+
 // ---------------------------------------------------------------------------
 // KuzushiConfig — the full configuration object
 // ---------------------------------------------------------------------------
@@ -710,6 +730,7 @@ export const KuzushiConfigSchema = z.object({
   incrementalDepTracking: z.boolean().optional(),
   incrementalCacheTtlDays: z.number().int().positive().optional(),
   skipTriageForHighConfidenceAgentic: z.boolean().optional(),
+  monorepo: MonorepoConfigSchema.optional(),
 });
 
 export type KuzushiConfigZ = z.infer<typeof KuzushiConfigSchema>;
@@ -776,6 +797,9 @@ export type FindingRowZ = z.infer<typeof FindingRowSchema>;
  */
 export const RawTriageOutputSchema = z.object({
   fingerprint: z.string(),
+  title: z.string().optional(),
+  attack_narrative: z.string().nullable().optional(),
+  display_severity: z.enum(["critical", "high", "medium", "low"]).optional(),
   verdict: VerdictSchema,
   confidence: z.number(),
   rationale: z.string(),

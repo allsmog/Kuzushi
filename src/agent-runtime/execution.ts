@@ -11,7 +11,7 @@ import { isRecord, toErrorMessage } from "../utils.js";
 import { getLogger } from "../logger.js";
 
 const log = getLogger("batch-fallback");
-import type { AgentBatchRequest, AgentEffort, AgentRuntime, AgentSession } from "./types.js";
+import type { AgentBatchRequest, AgentEffort, AgentRuntime } from "./types.js";
 
 export const DEFAULT_READ_ONLY_TOOLS = [
   "Read",

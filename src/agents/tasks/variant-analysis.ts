@@ -149,6 +149,8 @@ function normalizeVariants(
         impact: v.severity === "ERROR" ? "HIGH" : v.severity === "INFO" ? "LOW" : "MEDIUM",
         subcategory: ["vuln"],
       }),
+      proofState: "symbolic_only",
+      engineProvenance: [{ kind: "agentic", detail: "LLM-driven variant-analysis analysis" }],
     };
 
     const existing = deduped.get(fingerprint);

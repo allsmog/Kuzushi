@@ -539,7 +539,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
           const durationMs = Date.now() - startedAtMs;
 
-          if (mapped.subtype === "success") {
+          if (mapped.subtype === "success" && "result" in mapped) {
             yield {
               type: "result",
               subtype: "success",
@@ -549,7 +549,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
               numTurns,
               totalCostUsd,
             };
-          } else {
+          } else if ("errors" in mapped) {
             yield {
               type: "result",
               subtype: mapped.subtype,
@@ -839,7 +839,7 @@ class ClaudeSession implements AgentSession {
           const totalCostUsd = normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined);
           const numTurns = (sdkMsg["num_turns"] as number) ?? 0;
 
-          if (mapped.subtype === "success") {
+          if (mapped.subtype === "success" && "result" in mapped) {
             yield {
               type: "result",
               subtype: "success",
@@ -848,7 +848,7 @@ class ClaudeSession implements AgentSession {
               numTurns,
               totalCostUsd,
             };
-          } else {
+          } else if ("errors" in mapped) {
             yield {
               type: "result",
               subtype: mapped.subtype,

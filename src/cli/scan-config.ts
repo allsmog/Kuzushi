@@ -65,10 +65,14 @@ export interface ScanCommandOptions {
   enabledTasks?: string;
   qualityGate: boolean;
   failOnTp: boolean;
+  moduleDiscovery: boolean;
   fresh: boolean;
   cache: boolean;
   resume?: string | boolean;
   db?: string;
+  listModules?: boolean;
+  modules?: string;
+  moduleFilter?: string;
 }
 
 export function applyScanCommandConfigOverrides(
@@ -119,8 +123,8 @@ export function applyScanCommandConfigOverrides(
   if (opts.autoRuleGen) config.autoRuleGeneration = true;
   if (opts.stream) config.streamingEnabled = true;
   if (opts.streamPort != null) config.streamingPort = opts.streamPort;
-  if (opts.githubPr) (config as Record<string, unknown>)["githubPr"] = true;
-  if (opts.githubComment) (config as Record<string, unknown>)["githubComment"] = true;
+  if (opts.githubPr) ((config as unknown) as Record<string, unknown>)["githubPr"] = true;
+  if (opts.githubComment) ((config as unknown) as Record<string, unknown>)["githubComment"] = true;
   if (opts.autoPatch) config.autoPatchEnabled = true;
   if (opts.autoPatchAfter) config.autoPatchAfter = opts.autoPatchAfter as typeof config.autoPatchAfter;
   if (opts.patchVerifyDepth) config.patchVerifyDepth = opts.patchVerifyDepth as typeof config.patchVerifyDepth;

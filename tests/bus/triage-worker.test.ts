@@ -10,14 +10,15 @@ import type {
 } from "../../src/bus/events.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
-const { triageFindingWithAgentMock } = vi.hoisted(() => ({
+const { triageFindingWithAgentMock, triageFindingsBatchMock } = vi.hoisted(() => ({
   triageFindingWithAgentMock: vi.fn(),
+  triageFindingsBatchMock: vi.fn(),
 }));
 
 vi.mock("../../src/triage.js", () => ({
   triageFindingWithAgent: triageFindingWithAgentMock,
   triageSystemPromptPrefix: () => "mocked-system-prompt-prefix",
-  triageFindingsBatch: vi.fn(),
+  triageFindingsBatch: triageFindingsBatchMock,
   preReadForTriage: async () => "",
   BATCH_TRIAGE_FALLBACK_RATIONALE: "Finding was not included in batch triage agent response.",
 }));
@@ -60,6 +61,7 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
 
 afterEach(() => {
   triageFindingWithAgentMock.mockReset();
+  triageFindingsBatchMock.mockReset();
 });
 
 describe("triage-worker", () => {
@@ -418,6 +420,75 @@ describe("triage-worker", () => {
     expect(resultEvent.payload.result.verdict).toBe("tp");
     expect(resultEvent.payload.attempts).toBe(2);
     expect(triageFindingWithAgentMock).toHaveBeenCalledTimes(2);
+
+    await bus.close();
+  });
+
+  it("requeues batch-missing findings for individual triage instead of accepting a fallback result", async () => {
+    const bus = new InProcessBus();
+    const registry = {};
+    const config = makeConfig();
+
+    triageFindingsBatchMock.mockResolvedValue({
+      results: new Map([
+        ["fp-1", {
+          fingerprint: "fp-1",
+          verdict: "tp",
+          confidence: 0.9,
+          rationale: "batch result",
+          verificationSteps: ["check"],
+          fixPatch: null,
+        }],
+      ]),
+      costUsd: 0.01,
+      missingFingerprints: ["fp-2"],
+      incomplete: true,
+      recoveredByRetry: [],
+    });
+    triageFindingWithAgentMock.mockResolvedValue({
+      result: {
+        fingerprint: "fp-2",
+        verdict: "fp",
+        confidence: 0.7,
+        rationale: "retried individually",
+        verificationSteps: ["inspect"],
+        fixPatch: null,
+      },
+      costUsd: 0.005,
+    });
+
+    registerTriageWorker(bus, {
+      registry: registry as any,
+      config,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const retriedResultPromise = bus.waitFor<TriageResultEvent>(
+      "triage:result",
+      (event) => event.meta.runId === runId && event.payload.finding.fingerprint === "fp-2",
+    );
+
+    await bus.publish(
+      createEvent("triage:batch-queued", runId, {
+        context,
+        findings: [makeFinding(), { ...makeFinding(), fingerprint: "fp-2" }],
+        index: 1,
+        total: 2,
+      } as any),
+    );
+
+    const retriedResult = await retriedResultPromise;
+    expect(retriedResult.payload.finding.fingerprint).toBe("fp-2");
+    expect(retriedResult.payload.result.rationale).toBe("retried individually");
+    expect(triageFindingsBatchMock).toHaveBeenCalledTimes(1);
+    expect(triageFindingWithAgentMock).toHaveBeenCalledTimes(1);
 
     await bus.close();
   });

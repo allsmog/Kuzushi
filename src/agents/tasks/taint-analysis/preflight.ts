@@ -101,7 +101,7 @@ interface ExtractionQueryDiagnostic {
   templatePath: string;
   templateExists: boolean;
   templateHadBodyPlaceholders: boolean;
-  selectedQuerySource: "deterministic-template" | "agent-initial" | "agent-retry" | "fallback";
+  selectedQuerySource: "deterministic-template" | "agent-initial" | "agent-retry" | "unavailable";
   fallbackUsed: boolean;
   fallbackReason: string | null;
   fallbackDetail: string | null;
@@ -124,7 +124,7 @@ interface ExtractionDiagnosticsDocument {
 }
 
 interface RenderExtractionTemplateResult {
-  query: string;
+  query: string | null;
   diagnostic: ExtractionQueryDiagnostic;
   costUsd: number;
 }
@@ -455,14 +455,67 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       agentCtx,
     );
     let extractionCostUsd = sourcesQueryResult.costUsd + sinksQueryResult.costUsd;
-
-    await writeFile(sourcesQueryPath, sourcesQueryResult.query, "utf-8");
-    await writeFile(sinksQueryPath, sinksQueryResult.query, "utf-8");
-
     const sourcesBqrsPath = path.join(extractionDir, "sources.bqrs");
     const sinksBqrsPath = path.join(extractionDir, "sinks.bqrs");
     const sourcesCsvPath = path.join(extractionDir, "sources.csv");
     const sinksCsvPath = path.join(extractionDir, "sinks.csv");
+
+    if (!sourcesQueryResult.query || !sinksQueryResult.query) {
+      const extractionDegradation = computeExtractionDegradation(
+        [sourcesQueryResult.diagnostic, sinksQueryResult.diagnostic],
+        0,
+        0,
+        language,
+        framework,
+      );
+
+      await writeExtractionDiagnostics(
+        path.join(explorationDir, "extraction_diagnostics.json"),
+        language,
+        {
+          sources: 0,
+          sinks: 0,
+          sourcesDecodedRows: 0,
+          sinksDecodedRows: 0,
+          agenticSupplementSources: 0,
+          agenticSupplementSinks: 0,
+        },
+        [sourcesQueryResult.diagnostic, sinksQueryResult.diagnostic],
+      );
+
+      process.stderr.write(
+        `[taint-analysis-preflight] Extraction unavailable; taint analysis will stop before labeling (${extractionDegradation.reasons.join(", ") || "unknown_reason"}).\n`,
+      );
+
+      return attachTaskOutputMeta({
+        taintAnalysisPath,
+        workspaceDir,
+        dbPath,
+        codeqlBinary,
+        codeqlVersion,
+        codeqlApiProfileId,
+        language,
+        framework,
+        referenceFiles,
+        passes: cfg.passes,
+        tiPriorMarkdownPath,
+        tiPriorJsonPath,
+        tiPriorDegraded: tiPriorArtifacts.document.degraded,
+        extraction: {
+          sourcesQueryPath,
+          sinksQueryPath,
+          sourcesCsvPath,
+          sinksCsvPath,
+          sourcesRowCount: 0,
+          sinksRowCount: 0,
+        },
+        extractionDegradation,
+        diffScope,
+      }, { costUsd: extractionCostUsd });
+    }
+
+    await writeFile(sourcesQueryPath, sourcesQueryResult.query, "utf-8");
+    await writeFile(sinksQueryPath, sinksQueryResult.query, "utf-8");
 
     process.stderr.write(`[taint-analysis-preflight] Running CodeQL query: sources.ql...\n`);
     await runCodeql(
@@ -870,8 +923,8 @@ function computeExtractionDegradation(
   const reasons: ExtractionDegradationReason[] = [];
 
   for (const diag of diagnostics) {
-    if (diag.fallbackUsed) {
-      reasons.push(diag.kind === "source" ? "sources_used_fallback_template" : "sinks_used_fallback_template");
+    if (diag.selectedQuerySource === "unavailable") {
+      reasons.push(diag.kind === "source" ? "sources_extraction_unavailable" : "sinks_extraction_unavailable");
     }
     if (
       diag.fallbackReason?.includes("agent_returned_no_query")
@@ -1047,7 +1100,7 @@ async function renderExtractionTemplate(
   language: TaintAnalysisLanguage,
   kind: "source" | "sink",
   agentCtx?: ExtractionAgentContext,
-): Promise<string> {
+): Promise<string | null> {
   const result = await renderExtractionTemplateWithDiagnostic(
     templatePath,
     language,
@@ -1076,7 +1129,7 @@ async function renderExtractionTemplateWithDiagnostic(
     templatePath,
     templateExists,
     templateHadBodyPlaceholders,
-    selectedQuerySource: "fallback",
+    selectedQuerySource: "unavailable",
     fallbackUsed: false,
     fallbackReason: null,
     fallbackDetail: null,
@@ -1085,7 +1138,7 @@ async function renderExtractionTemplateWithDiagnostic(
   };
 
   if (!template) {
-    return withFallback(diagnostic, language, kind, "missing_template", null, costUsd);
+    return withoutGeneratedQuery(diagnostic, "missing_template", null, costUsd);
   }
 
   // Kind-specific gate: only templates with unresolved body placeholders need
@@ -1167,7 +1220,7 @@ async function renderExtractionTemplateWithDiagnostic(
           }
           log.warn(
             { language, kind },
-            `Retry query failed compile check for ${language}/${kind}, using fallback`,
+            `Retry query failed compile check for ${language}/${kind}; extraction unavailable`,
           );
           diagnostic.fallbackReason = "retry_compile_failed";
           diagnostic.fallbackDetail = compileResult.errorExcerpt ?? null;
@@ -1177,7 +1230,7 @@ async function renderExtractionTemplateWithDiagnostic(
           diagnostic.fallbackReason = "retry_returned_no_query";
           log.warn(
             { language, kind },
-            `Extraction agent retry returned no query for ${language}/${kind}, using fallback`,
+            `Extraction agent retry returned no query for ${language}/${kind}; extraction unavailable`,
           );
         }
         await clearExtractionCache(agentCtx.workspaceDir, language, kind);
@@ -1185,16 +1238,14 @@ async function renderExtractionTemplateWithDiagnostic(
         diagnostic.fallbackReason = "agent_exception";
         diagnostic.fallbackDetail = toErrorMessage(error);
         process.stderr.write(
-          `[taint-analysis-preflight] Agent extraction failed for ${language}/${kind}, using fallback: ${toErrorMessage(error)}\n`,
+          `[taint-analysis-preflight] Agent extraction failed for ${language}/${kind}; extraction unavailable: ${toErrorMessage(error)}\n`,
         );
       }
     } else {
       diagnostic.fallbackReason = "body_placeholders_without_agent_ctx";
     }
-    return withFallback(
+    return withoutGeneratedQuery(
       diagnostic,
-      language,
-      kind,
       diagnostic.fallbackReason ?? "agent_path_exhausted",
       diagnostic.fallbackDetail,
       costUsd,
@@ -1217,7 +1268,7 @@ async function renderExtractionTemplateWithDiagnostic(
     .replaceAll("{{SELECT_LINE}}", "1");
 
   if (rendered.includes("{{")) {
-    return withFallback(diagnostic, language, kind, "unresolved_placeholders_after_render", null, costUsd);
+    return withoutGeneratedQuery(diagnostic, "unresolved_placeholders_after_render", null, costUsd);
   }
 
   diagnostic.selectedQuerySource = "deterministic-template";
@@ -1238,20 +1289,18 @@ function createEmptyCompileAttempt(): ExtractionCompileAttempt {
   };
 }
 
-function withFallback(
+function withoutGeneratedQuery(
   diagnostic: ExtractionQueryDiagnostic,
-  language: TaintAnalysisLanguage,
-  kind: "source" | "sink",
   reason: string,
   detail: string | null = null,
   costUsd = 0,
 ): RenderExtractionTemplateResult {
-  diagnostic.selectedQuerySource = "fallback";
-  diagnostic.fallbackUsed = true;
+  diagnostic.selectedQuerySource = "unavailable";
+  diagnostic.fallbackUsed = false;
   diagnostic.fallbackReason = reason;
   diagnostic.fallbackDetail = detail;
   return {
-    query: fallbackExtractionQuery(language, kind),
+    query: null,
     diagnostic,
     costUsd,
   };
@@ -1268,34 +1317,6 @@ async function clearExtractionCache(
   } catch {
     // Best-effort cache cleanup.
   }
-}
-
-function fallbackExtractionQuery(language: TaintAnalysisLanguage, kind: "source" | "sink"): string {
-  const candidateKind = kind === "source" ? "source_candidate" : "sink_candidate";
-  return [
-    "/**",
-    ` * @name Taint Analysis ${capitalize(kind)} candidate extraction`,
-    " * @description Deterministic fallback extraction query generated by Kuzushi.",
-    " * @kind problem",
-    ` * @id taint-analysis/extraction/fallback-${kind}`,
-    " * @problem.severity recommendation",
-    " */",
-    "",
-    `import ${language}`,
-    "",
-    "from DataFlow::Node marker",
-    "where 1 = 0",
-    "select",
-    "  marker,",
-    `  \"${candidateKind}\",`,
-    "  \"unknown\",",
-    "  \"flow_kind=unknown\",",
-    "  \"receiver=\",",
-    "  \"module=\",",
-    "  \"arg_index=-1\",",
-    "  1",
-    "",
-  ].join("\n");
 }
 
 async function tryCompileQuery(

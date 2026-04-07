@@ -214,6 +214,8 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
         subcategory: ["vuln"],
         cwe: ["CWE-918"],
       }),
+      proofState: "symbolic_only",
+      engineProvenance: [{ kind: "agentic", detail: "LLM-driven ssrf-detect analysis" }],
     };
 
     const existing = deduped.get(fingerprint);

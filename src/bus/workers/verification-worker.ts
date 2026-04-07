@@ -74,6 +74,19 @@ export function registerVerificationWorker(
         }
       }
 
+      // Threat model context — inject PASTA application-level context
+      {
+        const tmSummary = event.payload.threatModelSummary;
+        if (typeof tmSummary === "string" && tmSummary.length > 0) {
+          extraSections.push(
+            "## Application Threat Model Context\n"
+            + "The following context was derived from automated threat modeling of this application.\n"
+            + "Use it to understand the application's architecture and attack surface.\n\n"
+            + tmSummary,
+          );
+        }
+      }
+
       const extraPromptContext = extraSections.length > 0
         ? extraSections.join("\n\n")
         : undefined;
@@ -146,7 +159,7 @@ export function registerVerificationWorker(
     }));
 
     try {
-      const { results, costUsd } = await withRetry(
+      const { results, costUsd, missingFingerprints } = await withRetry(
         () =>
           verifyFindingsBatch(
             batchItems,
@@ -169,10 +182,11 @@ export function registerVerificationWorker(
       );
 
       const perFindingCost = items.length > 0 ? costUsd / items.length : 0;
+      const missingFingerprintSet = new Set(missingFingerprints);
 
       for (const item of items) {
         const result = results.get(item.finding.fingerprint);
-        if (result) {
+        if (result && !missingFingerprintSet.has(item.finding.fingerprint)) {
           result.verifyCostUsd = perFindingCost;
           await bus.publish(
             createEvent("verification:result", runId, {
@@ -186,7 +200,20 @@ export function registerVerificationWorker(
               total: item.total,
             }),
           );
+          continue;
         }
+
+        await bus.publish(
+          createEvent("verification:finding-queued", runId, {
+            context,
+            finding: item.finding,
+            triageResult: item.triageResult,
+            repoContext,
+            enrichedContext,
+            index: item.index,
+            total: item.total,
+          }),
+        );
       }
     } catch (error) {
       const costUsd = error instanceof VerificationExecutionError ? error.costUsd : undefined;

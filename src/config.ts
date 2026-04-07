@@ -841,6 +841,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   ]);
   const externalTasks = normalizeStringArray(config.externalTasks);
   const enableExternalTasks = normalizeBoolean(config.enableExternalTasks, DEFAULTS.enableExternalTasks ?? false);
+  const monorepo = normalizeMonorepoConfig(config.monorepo);
 
   const skipTriageForHighConfidenceAgentic = normalizeBoolean(
     config.skipTriageForHighConfidenceAgentic,
@@ -893,6 +894,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     cryptoBehavioralPerFindingBudgetUsd,
     externalTasks,
     enableExternalTasks,
+    monorepo,
     skipTriageForHighConfidenceAgentic,
     scanners: scanners.length > 0 ? scanners : [...DEFAULTS.scanners],
     severity: severity.length > 0 ? severity : [...DEFAULTS.severity],
@@ -987,6 +989,23 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
           ...(merged.qualityGates ?? {}),
           ...cloneLayerValue(value),
         });
+        continue;
+      }
+
+      if (key === "monorepo") {
+        if (value == null) {
+          merged.monorepo = undefined;
+          continue;
+        }
+
+        if (!isRecord(value)) {
+          continue;
+        }
+
+        merged.monorepo = {
+          ...(merged.monorepo ?? {}),
+          ...cloneLayerValue(value),
+        };
         continue;
       }
 
@@ -1359,6 +1378,57 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function normalizeMonorepoConfig(value: unknown): KuzushiConfig["monorepo"] {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const rawMode = normalizeOptionalString(value["mode"])?.toLowerCase();
+  const mode = rawMode === "auto" || rawMode === "off" ? rawMode : undefined;
+
+  const modules = Array.isArray(value["modules"])
+    ? value["modules"]
+      .filter((entry): entry is Record<string, unknown> => isRecord(entry))
+      .map((entry) => {
+        const name = normalizeOptionalString(entry["name"]);
+        const modulePath = normalizeOptionalString(entry["path"]);
+        if (!name || !modulePath) {
+          return null;
+        }
+
+        return {
+          name,
+          path: modulePath,
+          description: normalizeOptionalString(entry["description"]) ?? "",
+          language: normalizeOptionalString(entry["language"]) ?? "unknown",
+          buildSystem: normalizeOptionalString(entry["buildSystem"]),
+          isParent: typeof entry["isParent"] === "boolean" ? entry["isParent"] : undefined,
+          parentModule: normalizeOptionalString(entry["parentModule"]),
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    : undefined;
+
+  const excludeModules = normalizeStringArray(value["excludeModules"]);
+  const discoveryModel = normalizeOptionalString(value["discoveryModel"]);
+  const rawMaxModules = Number(value["maxModules"]);
+  const maxModules = Number.isFinite(rawMaxModules) && rawMaxModules > 0
+    ? Math.floor(rawMaxModules)
+    : undefined;
+
+  if (!mode && !modules && excludeModules.length === 0 && !discoveryModel && maxModules == null) {
+    return undefined;
+  }
+
+  return {
+    mode,
+    modules,
+    excludeModules: excludeModules.length > 0 ? excludeModules : undefined,
+    discoveryModel,
+    maxModules,
+  };
 }
 
 const VALID_SIGNAL_WEIGHT_KEYS = new Set<string>(["scanner", "triage", "verification", "history", "context"]);

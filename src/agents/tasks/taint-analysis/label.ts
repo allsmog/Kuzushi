@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { AgentRuntime } from "../../../agent-runtime/types.js";
-import { runStructuredSessionQuery, runStructuredBatchQuery } from "../../../agent-runtime/execution.js";
+import { runStructuredAgentQuery, runStructuredSessionQuery, runStructuredBatchQuery } from "../../../agent-runtime/execution.js";
 import { writeBatchFile, cleanupBatchFiles } from "../../../agent-runtime/batch-files.js";
 import { withRetry } from "../../../retry.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
@@ -225,6 +225,11 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
     if (!preflight) {
       throw new Error("taint-analysis-label requires upstream output from taint-analysis-preflight");
     }
+    if (preflight.extractionDegradation.status === "failed") {
+      throw new Error(
+        `taint-analysis-label requires successful extraction; preflight failed with: ${preflight.extractionDegradation.reasons.join(", ") || "unknown_reason"}`,
+      );
+    }
 
     process.stderr.write(`[taint-analysis-label] Starting labeling task...\n`);
     const allCandidates = await loadCandidates(
@@ -345,72 +350,64 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
         );
         totalCostUsd += triageCostUsd;
 
-        // Filter sinks to only those that survived triage (fallback: all sinks if triage returned nothing)
-        const filteredSinks = relevantSinkIds.size > 0
-          ? sinkCandidates.filter((c) => relevantSinkIds.has(c.id))
-          : sinkCandidates;
+        const filteredSinks = sinkCandidates.filter((c) => relevantSinkIds.has(c.id));
 
         // Combine pre-labeled sources with filtered sinks for detailed labeling
         const passCandidates = [...sourceCandidates, ...filteredSinks];
         process.stderr.write(`[taint-analysis-label] Labeling pass ${passId} (${passDef.focus}): ${passCandidates.length} candidates (${sourceCandidates.length} sources + ${filteredSinks.length} sinks)...\n`);
 
-        // Phase 2: detailed labeling on filtered candidates
-        try {
-          const passEntries = await labelPass(
-            runtime,
-            passDef,
-            passCandidates,
-            references,
-            tiPrior,
-            {
-              ...cfg,
-              workspaceDir: preflight.workspaceDir,
-            },
-            context.repoRoot,
-            preflight.language,
-            preflight.framework,
-          );
+        const passEntries = await labelPass(
+          runtime,
+          passDef,
+          passCandidates,
+          references,
+          tiPrior,
+          {
+            ...cfg,
+            workspaceDir: preflight.workspaceDir,
+          },
+          context.repoRoot,
+          preflight.language,
+          preflight.framework,
+        );
 
-          // Store only deduped representative entries — no expansion back to 51K instances.
-          // Downstream groupCallables() already deduplicates, so it works unchanged.
-          const dedupedEntries: TaintAnalysisPassEntry[] = [];
-          const passEntryById = new Map(passEntries.entries.map((e) => [e.id, e]));
+        // Store only deduped representative entries — no expansion back to 51K instances.
+        // Downstream groupCallables() already deduplicates, so it works unchanged.
+        const dedupedEntries: TaintAnalysisPassEntry[] = [];
+        const passEntryById = new Map(passEntries.entries.map((e) => [e.id, e]));
 
-          // Add labeled sinks from this pass
-          for (const rep of filteredSinks) {
-            const entry = passEntryById.get(rep.id);
-            if (entry) dedupedEntries.push(entry);
+        // Add labeled sinks from this pass
+        for (const rep of filteredSinks) {
+          const entry = passEntryById.get(rep.id);
+          if (entry) {
+            dedupedEntries.push(entry);
           }
-          // Add source labels (from source-once labeling or this pass)
-          for (const rep of sourceCandidates) {
-            const entry = passEntryById.get(rep.id);
-            if (entry) {
-              dedupedEntries.push(entry);
-            } else {
-              const srcLabel = sourceLabels.entries.get(rep.id);
-              dedupedEntries.push(normalizePassEntry(rep, srcLabel));
-            }
-          }
-
-          labelsByPass.set(passId, dedupedEntries);
-          totalCostUsd += passEntries.costUsd;
-          process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${dedupedEntries.length} entries (deduped)\n`);
-
-          await writePassCheckpointV2(
-            checkpointPath,
-            passId,
-            preflight.language,
-            candidateFingerprint,
-            passEntries.entries,
-          );
-        } catch (passError) {
-          // A single pass failure (e.g. malformed JSON from the LLM) should not kill
-          // all previously completed passes. Log the error and continue with empty
-          // entries for this pass — the run stage will simply skip it.
-          const msg = passError instanceof Error ? passError.message : String(passError);
-          process.stderr.write(`[taint-analysis-label] Pass ${passId} (${passDef.focus}) failed (non-fatal): ${msg}\n`);
-          labelsByPass.set(passId, []);
         }
+        // Add source labels (from source-once labeling or this pass)
+        for (const rep of sourceCandidates) {
+          const passEntry = passEntryById.get(rep.id);
+          if (passEntry) {
+            dedupedEntries.push(passEntry);
+            continue;
+          }
+          const sourceEntry = sourceLabels.entries.get(rep.id);
+          if (!sourceEntry) {
+            throw new Error(`Pass ${passId} missing source label for candidate ${rep.id}`);
+          }
+          dedupedEntries.push(normalizePassEntry(rep, sourceEntry));
+        }
+
+        labelsByPass.set(passId, dedupedEntries);
+        totalCostUsd += passEntries.costUsd;
+        process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${dedupedEntries.length} entries (deduped)\n`);
+
+        await writePassCheckpointV2(
+          checkpointPath,
+          passId,
+          preflight.language,
+          candidateFingerprint,
+          passEntries.entries,
+        );
       }
     }
 
@@ -580,15 +577,21 @@ async function labelPass(
       const lowConfidenceIds = initial.response.entries
         .filter((entry) => entry.confidence < cfg.labelingConfidenceThreshold)
         .map((entry) => entry.id);
+      const missingIds = batch
+        .map((candidate) => candidate.id)
+        .filter((candidateId) => !byCandidateId.has(candidateId));
+      const retryCandidateIds = new Set([...lowConfidenceIds, ...missingIds]);
 
-      if (lowConfidenceIds.length > 0) {
-        process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: retrying ${lowConfidenceIds.length} low-confidence entries...\n`);
-        const lowConfidenceCandidates = batch.filter((candidate) => lowConfidenceIds.includes(candidate.id));
+      if (retryCandidateIds.size > 0) {
+        process.stderr.write(
+          `[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: retrying ${retryCandidateIds.size} incomplete/low-confidence entries...\n`,
+        );
+        const retryCandidates = batch.filter((candidate) => retryCandidateIds.has(candidate.id));
 
         let retry: { response: LabelResponse; costUsd: number };
 
         if (session) {
-          const retryPayload = lowConfidenceCandidates.map((c) => ({
+          const retryPayload = retryCandidates.map((c) => ({
             id: c.id,
             candidate_kind: c.candidateKind,
             callable: c.callable,
@@ -608,7 +611,7 @@ async function labelPass(
           const parsed = parseLabelResponse(result.structuredOutput ?? result.resultText);
           retry = { response: parsed, costUsd: result.costUsd };
         } else {
-          const retryPrompt = buildLabelPrompt(passDef, lowConfidenceCandidates, references, tiPrior, language, framework, true);
+          const retryPrompt = buildLabelPrompt(passDef, retryCandidates, references, tiPrior, language, framework, true);
           retry = await withRetry(
             () => queryLabelBatch(runtime, retryPrompt, repoRoot, cfg.labelingModel),
             { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
@@ -619,6 +622,15 @@ async function labelPass(
           byCandidateId.set(entry.id, entry);
         }
       }
+
+      const unresolvedIds = batch
+        .map((candidate) => candidate.id)
+        .filter((candidateId) => !byCandidateId.has(candidateId));
+      if (unresolvedIds.length > 0) {
+        throw new Error(
+          `Taint analysis labeling omitted candidates for pass ${passDef.passId}: ${unresolvedIds.join(", ")}`,
+        );
+      }
     }
   } finally {
     await session?.close();
@@ -627,6 +639,9 @@ async function labelPass(
 
   const entries = candidates.map((candidate) => {
     const entry = byCandidateId.get(candidate.id);
+    if (!entry) {
+      throw new Error(`Taint analysis labeling missing entry for candidate ${candidate.id}`);
+    }
     return normalizePassEntry(candidate, entry);
   });
 
@@ -754,6 +769,74 @@ async function labelSourcesOnce(
         byCandidateId.set(entry.id, entry);
       }
 
+      const missingIds = batch
+        .map((candidate) => candidate.id)
+        .filter((candidateId) => !byCandidateId.has(candidateId));
+      if (missingIds.length > 0) {
+        const retryCandidates = batch.filter((candidate) => missingIds.includes(candidate.id));
+        process.stderr.write(
+          `[taint-analysis-label]   Source labeling: retrying ${retryCandidates.length} omitted candidates...\n`,
+        );
+
+        let retryResult: { response: LabelResponse; costUsd: number };
+
+        if (session) {
+          const retryPayload = retryCandidates.map((c) => ({
+            id: c.id,
+            candidate_kind: c.candidateKind,
+            callable: c.callable,
+            flow_kind: c.flowKind,
+            arg_index: c.argIndex,
+            receiver_hint: c.receiverHint ?? null,
+            module_hint: c.moduleHint ?? null,
+            location: { file: c.locationFile, line: c.locationLine },
+            snippet: c.snippet ?? "",
+          }));
+          const retryFile = writeBatchFile(repoRoot, runId, "label-sources-retry", batchIdx, retryPayload);
+          const retryTurnPrompt = `Retry only the omitted candidates. Read ${retryFile} and classify each candidate. Return JSON with your assessment.`;
+          const sessionResult = await withRetry(
+            () => runStructuredSessionQuery(session, retryTurnPrompt),
+            { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
+          );
+          const parsed = parseLabelResponse(sessionResult.structuredOutput ?? sessionResult.resultText);
+          retryResult = { response: parsed, costUsd: sessionResult.costUsd };
+        } else {
+          const retryPrompt = [
+            sourceSystemPrompt,
+            "",
+            "Candidates:",
+            JSON.stringify(retryCandidates.map((c) => ({
+              id: c.id,
+              candidate_kind: c.candidateKind,
+              callable: c.callable,
+              flow_kind: c.flowKind,
+              arg_index: c.argIndex,
+              receiver_hint: c.receiverHint ?? null,
+              module_hint: c.moduleHint ?? null,
+              location: { file: c.locationFile, line: c.locationLine },
+              snippet: c.snippet ?? "",
+            })), null, 2),
+          ].join("\n");
+          retryResult = await withRetry(
+            () => queryLabelBatch(runtime, retryPrompt, repoRoot, cfg.labelingModel),
+            { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
+          );
+        }
+        totalCostUsd += retryResult.costUsd;
+        for (const entry of retryResult.response.entries) {
+          byCandidateId.set(entry.id, entry);
+        }
+      }
+
+      const unresolvedIds = batch
+        .map((candidate) => candidate.id)
+        .filter((candidateId) => !byCandidateId.has(candidateId));
+      if (unresolvedIds.length > 0) {
+        throw new Error(
+          `Source labeling omitted candidates: ${unresolvedIds.join(", ")}`,
+        );
+      }
+
       if ((batchIdx + 1) % 50 === 0 || batchIdx === batches.length - 1) {
         process.stderr.write(`[taint-analysis-label]   Source labeling: ${batchIdx + 1}/${batches.length} batches done\n`);
       }
@@ -838,14 +921,62 @@ async function triageSinkRelevance(
 
     for (const [reqId, result] of resultsMap) {
       totalCostUsd += result.costUsd;
-      const parsed = parseTriageResponse(result.structuredOutput ?? result.resultText);
+      const batchIdx = parseInt(reqId.split("batch")[1], 10);
+      const batch = batches[batchIdx] ?? [];
+      const compactPayload = batch.map((c) => ({
+        id: c.id,
+        callable: c.callable,
+        module_hint: c.moduleHint ?? null,
+        receiver_hint: c.receiverHint ?? null,
+      }));
+      let parsed = parseTriageResponse(
+        result.structuredOutput ?? result.resultText,
+        compactPayload.map((entry) => entry.id),
+      );
+      if (parsed.missingIds.length > 0) {
+        const retryPayload = compactPayload.filter((entry) => parsed.missingIds.includes(entry.id));
+        process.stderr.write(
+          `[taint-analysis-label]   Sink triage batch ${batchIdx + 1}/${batches.length}: retrying ${retryPayload.length} omitted candidates...\n`,
+        );
+        const retryPrompt = [
+          "Candidates:",
+          JSON.stringify(retryPayload, null, 2),
+        ].join("\n");
+        const retryResult = await runStructuredAgentQuery({
+          prompt: retryPrompt,
+          cwd: repoRoot,
+          model,
+          allowedTools: [],
+          runtimeOptions: { runtime },
+          systemPromptPrefix: systemPrompt,
+          schema: TRIAGE_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
+          strict: true,
+          retryInvalidStructuredOutput: 1,
+        });
+        totalCostUsd += retryResult.costUsd;
+        if (retryResult.executionError) {
+          throw new Error(`Sink triage retry failed: ${retryResult.executionError}`);
+        }
+        parsed = mergeTriageResponses(
+          parsed,
+          parseTriageResponse(
+            retryResult.structuredOutput ?? retryResult.resultText,
+            retryPayload.map((entry) => entry.id),
+          ),
+          compactPayload.map((entry) => entry.id),
+        );
+      }
+      if (parsed.missingIds.length > 0) {
+        throw new Error(
+          `Sink triage omitted candidates for pass ${passDef.passId}: ${parsed.missingIds.join(", ")}`,
+        );
+      }
       for (const entry of parsed.entries) {
         if (entry.relevant) {
           relevantIds.add(entry.id);
         }
       }
       // Log progress for large batch sets
-      const batchIdx = parseInt(reqId.split("batch")[1], 10);
       if ((batchIdx + 1) % 20 === 0 || batchIdx === batches.length - 1) {
         process.stderr.write(`[taint-analysis-label]   Sink triage: ${batchIdx + 1}/${batches.length} batches processed, ${relevantIds.size} relevant so far\n`);
       }
@@ -933,8 +1064,68 @@ async function triageSinkRelevance(
 
       totalCostUsd += costUsd;
 
-      // Parse triage response
-      const parsed = parseTriageResponse(rawResult ?? rawText);
+      const parsedInitial = parseTriageResponse(
+        rawResult ?? rawText,
+        compactPayload.map((entry) => entry.id),
+      );
+      let parsed = parsedInitial;
+      if (parsed.missingIds.length > 0) {
+        const retryPayload = compactPayload.filter((entry) => parsed.missingIds.includes(entry.id));
+        process.stderr.write(
+          `[taint-analysis-label]   Sink triage batch ${batchIdx + 1}/${batches.length}: retrying ${retryPayload.length} omitted candidates...\n`,
+        );
+
+        if (session) {
+          const retryFile = writeBatchFile(repoRoot, runId, "triage-sink-retry", batchIdx, retryPayload);
+          const retryTurnPrompt = `Retry only the omitted candidates. Read ${retryFile} and classify each candidate. Return JSON with your assessment.`;
+          const retryResult = await runStructuredSessionQuery(session, retryTurnPrompt);
+          totalCostUsd += retryResult.costUsd;
+          parsed = mergeTriageResponses(
+            parsed,
+            parseTriageResponse(
+              retryResult.structuredOutput ?? retryResult.resultText,
+              retryPayload.map((entry) => entry.id),
+            ),
+            compactPayload.map((entry) => entry.id),
+          );
+        } else {
+          const retryPrompt = [
+            systemPrompt,
+            "",
+            "Candidates:",
+            JSON.stringify(retryPayload, null, 2),
+          ].join("\n");
+
+          const retryResult = await runStructuredAgentQuery({
+            prompt: retryPrompt,
+            cwd: repoRoot,
+            model,
+            allowedTools: [],
+            runtimeOptions: { runtime },
+            schema: TRIAGE_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
+            strict: true,
+            retryInvalidStructuredOutput: 1,
+          });
+          totalCostUsd += retryResult.costUsd;
+          if (retryResult.executionError) {
+            throw new Error(`Sink triage retry failed: ${retryResult.executionError}`);
+          }
+          parsed = mergeTriageResponses(
+            parsed,
+            parseTriageResponse(
+              retryResult.structuredOutput ?? retryResult.resultText,
+              retryPayload.map((entry) => entry.id),
+            ),
+            compactPayload.map((entry) => entry.id),
+          );
+        }
+      }
+
+      if (parsed.missingIds.length > 0) {
+        throw new Error(
+          `Sink triage omitted candidates for pass ${passDef.passId}: ${parsed.missingIds.join(", ")}`,
+        );
+      }
       for (const entry of parsed.entries) {
         if (entry.relevant) {
           relevantIds.add(entry.id);
@@ -954,26 +1145,60 @@ async function triageSinkRelevance(
   return { relevantIds, costUsd: totalCostUsd };
 }
 
-function parseTriageResponse(value: unknown): { entries: Array<{ id: string; relevant: boolean }> } {
+function parseTriageResponse(
+  value: unknown,
+  expectedIds: string[],
+): { entries: Array<{ id: string; relevant: boolean }>; missingIds: string[] } {
+  const expected = new Set(expectedIds);
+  const seen = new Set<string>();
+
   if (isRecord(value) && Array.isArray(value["entries"])) {
+    const entries = value["entries"]
+      .filter((e): e is Record<string, unknown> => isRecord(e) && typeof e["id"] === "string")
+      .map((e) => ({ id: String(e["id"]), relevant: e["relevant"] === true }))
+      .filter((entry) => expected.has(entry.id))
+      .filter((entry) => {
+        if (seen.has(entry.id)) {
+          return false;
+        }
+        seen.add(entry.id);
+        return true;
+      });
     return {
-      entries: value["entries"]
-        .filter((e): e is Record<string, unknown> => isRecord(e) && typeof e["id"] === "string")
-        .map((e) => ({ id: String(e["id"]), relevant: e["relevant"] === true })),
+      entries,
+      missingIds: expectedIds.filter((id) => !seen.has(id)),
     };
   }
 
   if (typeof value === "string") {
     try {
       const parsed = JSON.parse(extractJson(value));
-      return parseTriageResponse(parsed);
+      return parseTriageResponse(parsed, expectedIds);
     } catch {
-      // If triage parsing fails, mark all as relevant (safe fallback)
-      return { entries: [] };
+      return { entries: [], missingIds: [...expectedIds] };
     }
   }
 
-  return { entries: [] };
+  return { entries: [], missingIds: [...expectedIds] };
+}
+
+function mergeTriageResponses(
+  initial: { entries: Array<{ id: string; relevant: boolean }>; missingIds: string[] },
+  retry: { entries: Array<{ id: string; relevant: boolean }>; missingIds: string[] },
+  expectedIds: string[],
+): { entries: Array<{ id: string; relevant: boolean }>; missingIds: string[] } {
+  const merged = new Map<string, boolean>();
+  for (const entry of initial.entries) {
+    merged.set(entry.id, entry.relevant);
+  }
+  for (const entry of retry.entries) {
+    merged.set(entry.id, entry.relevant);
+  }
+
+  return {
+    entries: [...merged.entries()].map(([id, relevant]) => ({ id, relevant })),
+    missingIds: expectedIds.filter((id) => !merged.has(id)),
+  };
 }
 
 async function queryLabelBatch(
@@ -1085,12 +1310,12 @@ function normalizeLabelResponseEntry(value: unknown): LabelResponseEntry | null 
   };
 }
 
-function normalizePassEntry(candidate: TaintAnalysisCandidate, entry: LabelResponseEntry | undefined): TaintAnalysisPassEntry {
+function normalizePassEntry(candidate: TaintAnalysisCandidate, entry: LabelResponseEntry): TaintAnalysisPassEntry {
   return {
     id: candidate.id,
-    role: entry?.role ?? (candidate.candidateKind === "sink_candidate" ? "sink" : "source"),
-    classification: entry?.classification ?? "candidate",
-    confidence: entry?.confidence ?? 0.5,
+    role: entry.role,
+    classification: entry.classification,
+    confidence: entry.confidence,
     signature: {
       package: null,
       module: candidate.moduleHint ?? null,
@@ -1103,8 +1328,8 @@ function normalizePassEntry(candidate: TaintAnalysisCandidate, entry: LabelRespo
       file: candidate.locationFile,
       line: candidate.locationLine,
     },
-    rationale: entry?.rationale ?? "Generated fallback label from extraction metadata.",
-    evidence: entry?.evidence,
+    rationale: entry.rationale,
+    evidence: entry.evidence,
   };
 }
 

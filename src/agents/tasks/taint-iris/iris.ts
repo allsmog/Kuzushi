@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
-import type { Finding } from "../../../scanners/types.js";
+import type { Finding, TaintPathStep } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
@@ -45,6 +45,20 @@ const IRIS_FINDING_SCHEMA = {
           startLine: { type: "integer" },
           message: { type: "string" },
           sourceSinkTrace: { type: "string" },
+          taintPath: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["filePath", "line"],
+              properties: {
+                filePath: { type: "string" },
+                line: { type: "integer" },
+                message: { type: "string" },
+                snippet: { type: "string" },
+              },
+            },
+          },
           confidence: { type: "string", enum: ["high", "medium", "low"] },
           exploitPreconditions: { type: "string" },
         },
@@ -140,7 +154,8 @@ function buildIrisPrompt(
     "",
     "## Output",
     "After analyzing ALL CWE classes, return your findings as structured JSON.",
-    "Each finding needs: title, CWE, severity, file path, line number, description, and source→sink trace.",
+    "Each finding needs: title, CWE, severity, file path, line number, description, source→sink trace,",
+    "and a structured taintPath array with each step's filePath, line, message (role like 'source', 'step', 'sink'), and code snippet.",
   ].join("\n");
 }
 
@@ -232,6 +247,21 @@ function parseFindings(raw: unknown, repoRoot: string, repoName: string): Findin
 
     if (!title || !filePath || !message) continue;
 
+    const rawPath = Array.isArray(item["taintPath"]) ? item["taintPath"] : [];
+    const taintPath: TaintPathStep[] = [];
+    for (const step of rawPath) {
+      if (!isRecord(step)) continue;
+      const fp = str(step["filePath"]);
+      const ln = Math.max(1, Math.floor(Number(step["line"]) || 1));
+      if (!fp) continue;
+      taintPath.push({
+        filePath: normalizePath(repoRoot, fp),
+        line: ln,
+        message: str(step["message"]) || undefined,
+        snippet: str(step["snippet"]) || undefined,
+      });
+    }
+
     const severity = mapSeverity(str(item["severity"]));
     const fingerprint = createHash("sha256")
       .update([repoName, "taint-iris", cwe, filePath, String(startLine), title].join("|"))
@@ -257,6 +287,9 @@ function parseFindings(raw: unknown, repoRoot: string, repoName: string): Findin
         impact: severity === "ERROR" ? "HIGH" : "MEDIUM",
         subcategory: ["vuln"],
       }),
+      taintPath: taintPath.length > 0 ? taintPath : undefined,
+      proofState: "symbolic_only",
+      engineProvenance: [{ kind: "taint-analysis", detail: "IRIS CodeQL-backed taint analysis" }],
     });
   }
 

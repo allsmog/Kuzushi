@@ -45,6 +45,9 @@ export const TRIAGE_RESULT_SCHEMA_LITE = {
   required: ["fingerprint", "verdict", "confidence", "rationale", "verification_steps"],
   properties: {
     fingerprint: { type: "string" },
+    title: { type: "string", description: "A concise, human-readable title for this finding (5-12 words). Should describe the vulnerability, not the rule. Example: 'SQL Injection in BSim Database Name Parameter'" },
+    attack_narrative: { type: ["string", "null"], description: "A 2-3 sentence Alice-and-Bob style attack scenario. Use concrete actor names (e.g. 'An attacker on the local network', 'A malicious analyst with repository access'). Describe: who the attacker is, what they do, and what they gain. Example: 'Alice, a network attacker, connects to the TraceRMI port while Bob is debugging. She injects false register values, causing Bob to conclude the binary is benign when it is actually malicious.'" },
+    display_severity: { type: "string", enum: ["critical", "high", "medium", "low"], description: "The assessed security severity. critical = remote code execution, auth bypass, data destruction. high = injection, privilege escalation, sensitive data exposure. medium = information disclosure, weak crypto, missing validation. low = informational, best-practice deviation." },
     verdict: { type: "string", enum: ["tp", "fp", "needs_review"] },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     rationale: { type: "string" },
@@ -143,6 +146,9 @@ export interface TriageOutput {
 export interface BatchTriageOutput {
   results: Map<string, TriageResult>;
   costUsd: number;
+  missingFingerprints: string[];
+  incomplete: boolean;
+  recoveredByRetry: string[];
 }
 
 export function resolveDefaultTriageTools(
@@ -261,7 +267,13 @@ export async function triageFindingsBatch(
   batchTemplate?: string,
 ): Promise<BatchTriageOutput> {
   if (findings.length === 0) {
-    return { results: new Map(), costUsd: 0 };
+    return {
+      results: new Map(),
+      costUsd: 0,
+      missingFingerprints: [],
+      incomplete: false,
+      recoveredByRetry: [],
+    };
   }
 
   const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
@@ -272,6 +284,7 @@ export async function triageFindingsBatch(
 
   const allResults = new Map<string, TriageResult>();
   let totalCost = 0;
+  const missingFingerprints = new Set<string>();
 
   // Try to create a reusable session for subprocess reuse across batches
   const runtime = runtimeOptions.runtime;
@@ -295,7 +308,7 @@ export async function triageFindingsBatch(
     for (let i = 0; i < findings.length; i += effectiveBatchSize) {
       const chunk = findings.slice(i, i + effectiveBatchSize);
 
-      const { results, costUsd } = session
+      const chunkResult = session
         ? await triageSingleBatchSession(
             chunk,
             repoRoot,
@@ -316,8 +329,12 @@ export async function triageFindingsBatch(
             batchTemplate,
           );
 
+      const { results, costUsd } = chunkResult;
       for (const [fp, result] of results) {
         allResults.set(fp, result);
+      }
+      for (const fingerprint of chunkResult.missingFingerprints) {
+        missingFingerprints.add(fingerprint);
       }
       totalCost += costUsd;
       batchIdx++;
@@ -327,7 +344,13 @@ export async function triageFindingsBatch(
     if (runId) cleanupBatchFiles(repoRoot, runId);
   }
 
-  return { results: allResults, costUsd: totalCost };
+  return {
+    results: allResults,
+    costUsd: totalCost,
+    missingFingerprints: [...missingFingerprints],
+    incomplete: missingFingerprints.size > 0,
+    recoveredByRetry: [],
+  };
 }
 
 async function triageSingleBatchSession(
@@ -373,8 +396,12 @@ async function triageSingleBatchSession(
     throw new TriageExecutionError(`batch triage agent failed: ${executionError}`, costUsd);
   }
 
-  const results = parseBatchTriageOutput(structuredOutput ?? resultText, chunk);
-  return { results, costUsd };
+  const parsed = parseBatchTriageOutput(structuredOutput ?? resultText, chunk);
+  return {
+    ...parsed,
+    costUsd,
+    recoveredByRetry: [],
+  };
 }
 
 async function triageSingleBatch(
@@ -403,8 +430,12 @@ async function triageSingleBatch(
     throw new TriageExecutionError(`batch triage agent failed: ${executionError}`, costUsd);
   }
 
-  const results = parseBatchTriageOutput(structuredOutput ?? resultText, findings);
-  return { results, costUsd };
+  const parsed = parseBatchTriageOutput(structuredOutput ?? resultText, findings);
+  return {
+    ...parsed,
+    costUsd,
+    recoveredByRetry: [],
+  };
 }
 
 function buildBatchTriagePrompt(
@@ -419,7 +450,7 @@ function buildBatchTriagePrompt(
 function parseBatchTriageOutput(
   raw: unknown,
   findings: Finding[],
-): Map<string, TriageResult> {
+): Omit<BatchTriageOutput, "costUsd" | "recoveredByRetry"> {
   const results = new Map<string, TriageResult>();
   const fingerprintSet = new Set(findings.map((f) => f.fingerprint));
 
@@ -452,7 +483,7 @@ function parseBatchTriageOutput(
         items = parsed;
       }
     } catch {
-      // Fall through — missing findings will get needs_review below
+      // Fall through — missing findings will be reported via missingFingerprints.
     }
   }
 
@@ -463,6 +494,9 @@ function parseBatchTriageOutput(
 
     results.set(fp, {
       fingerprint: fp,
+      title: asOptionalString((item as Record<string, unknown>)["title"]),
+      attackNarrative: asOptionalString((item as Record<string, unknown>)["attack_narrative"]),
+      displaySeverity: asOptionalString((item as Record<string, unknown>)["display_severity"]) as TriageResult["displaySeverity"],
       verdict: parseVerdict(asString((item as Record<string, unknown>)["verdict"], "needs_review")),
       confidence: clampConfidence((item as Record<string, unknown>)["confidence"]),
       rationale: asString((item as Record<string, unknown>)["rationale"], ""),
@@ -475,31 +509,20 @@ function parseBatchTriageOutput(
       recommendedFix: asOptionalString((item as Record<string, unknown>)["recommended_fix"]),
       ruleRefinementHint: asOptionalString((item as Record<string, unknown>)["rule_refinement_hint"]),
       triageSchemaVersion: asOptionalString((item as Record<string, unknown>)["triage_schema_version"]),
+      evidenceTrail: parseEvidenceTrail((item as Record<string, unknown>)["evidence_trail"]),
+      evidenceChain: parseEvidenceChain((item as Record<string, unknown>)["evidence_chain"]),
     });
   }
 
-  // Fill in any missing findings with needs_review
-  for (const finding of findings) {
-    if (!results.has(finding.fingerprint)) {
-      results.set(finding.fingerprint, {
-        fingerprint: finding.fingerprint,
-        verdict: "needs_review",
-        confidence: 0,
-        rationale: BATCH_TRIAGE_FALLBACK_RATIONALE,
-        verificationSteps: [],
-        fixPatch: null,
-        source: undefined,
-        sink: undefined,
-        isVulnerable: undefined,
-        exploitScenario: undefined,
-        recommendedFix: undefined,
-        ruleRefinementHint: undefined,
-        triageSchemaVersion: undefined,
-      });
-    }
-  }
+  const missingFingerprints = findings
+    .map((finding) => finding.fingerprint)
+    .filter((fingerprint) => !results.has(fingerprint));
 
-  return results;
+  return {
+    results,
+    missingFingerprints,
+    incomplete: missingFingerprints.length > 0,
+  };
 }
 
 export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResult {
@@ -516,6 +539,9 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
 
     return {
       fingerprint: asString(raw["fingerprint"], fingerprint),
+      title: asOptionalString(raw["title"]),
+      attackNarrative: asOptionalString(raw["attack_narrative"]),
+      displaySeverity: asOptionalString(raw["display_severity"]) as TriageResult["displaySeverity"],
       verdict: parseVerdict(asString(raw["verdict"], "needs_review")),
       confidence: clampConfidence(raw["confidence"]),
       rationale: asString(raw["rationale"], ""),
@@ -602,7 +628,7 @@ function normalizeAllowedTriageToolNames(tools: readonly string[]): AllowedTriag
 /** Parse a verdict string, defaulting to needs_review for unknown values. */
 export function parseVerdict(v: string): Verdict {
   const normalized = v.trim().toLowerCase();
-  if (normalized === "tp" || normalized === "fp" || normalized === "needs_review") return normalized;
+  if (normalized === "tp" || normalized === "fp" || normalized === "needs_review" || normalized === "by_design") return normalized;
   return "needs_review";
 }
 
@@ -626,6 +652,9 @@ export function parseTriageResponse(
 
     return {
       fingerprint: asString(parsed.fingerprint, fingerprint),
+      title: asOptionalString(parsed.title),
+      attackNarrative: asOptionalString(parsed.attack_narrative),
+      displaySeverity: asOptionalString(parsed.display_severity) as TriageResult["displaySeverity"],
       verdict: parseVerdict(asString(parsed.verdict, "needs_review")),
       confidence: clampConfidence(parsed.confidence),
       rationale: asString(parsed.rationale, ""),

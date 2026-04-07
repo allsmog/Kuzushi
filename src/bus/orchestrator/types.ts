@@ -136,7 +136,6 @@ export interface RunState {
   deadLetterFindings: Array<{ fingerprint: string; error: string; attempts: number; lastAttempt: string }>;
   triageAttempts: Map<string, number>;
   verifyAttempts: Map<string, number>;
-  autoPassedFingerprints: Set<string>;
   dynamicAnalysisEnabled: boolean;
   dynamicCandidates: DynamicAnalysisCandidate[];
   dynamicQueue: QueuedDynamicAnalysis[];

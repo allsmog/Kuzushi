@@ -45,12 +45,16 @@ Fingerprint: {{ finding.fingerprint }}
 5. Use GetCallers to find who calls the vulnerable function and trace attacker-controlled input.
 6. Use GetCallees to understand what downstream functions the vulnerable code invokes.
 7. Use GetFunctionBody to inspect specific sanitizers, validators, or middleware functions.
-8. Decide tp/fp/needs_review using the confidence escalation protocol below.
+8. Decide tp/fp/by_design/needs_review using the confidence escalation protocol below.
 
 ## Output requirements
 Return ONLY a JSON object with:
-fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null),
-evidence_trail(optional array of {level: string, evidence: string})`;
+fingerprint, verdict(tp|fp|by_design|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null),
+evidence_trail(optional array of {level: string, evidence: string})
+
+Use verdict "by_design" when the code pattern is technically accurate but is an intentional architectural decision
+for the application's purpose (e.g., missing authentication in a pentest tool, permissive TLS in a debugging proxy).
+Reserve "tp" for actual bugs and vulnerabilities that harm the application's users or operators.`;
 
 /**
  * Batch triage prompt template — header section (per-finding sections
@@ -99,11 +103,11 @@ export const BATCH_TRIAGE_FOOTER_TEMPLATE = `## Investigation instructions
 2. Trace dataflow from source to sink across call boundaries.
 3. Use Grep/Glob to locate sanitization, validation, and guards.
 4. Validate reachability and realistic attacker control.
-5. Decide tp/fp/needs_review per finding using the confidence escalation protocol below.
+5. Decide tp/fp/by_design/needs_review per finding using the confidence escalation protocol below.
 
 ## Output requirements
 Return ONLY a JSON object with a "results" array. Each element MUST have:
-fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)
+fingerprint, verdict(tp|fp|by_design|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)
 
 You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;
 
@@ -142,10 +146,10 @@ Fingerprint: {{ finding.fingerprint }}
 2. Trace dataflow from source to sink across call boundaries.
 3. Use Grep/Glob to locate sanitization, validation, and guards.
 4. Validate reachability and realistic attacker control.
-5. Decide tp/fp/needs_review per finding using the confidence escalation protocol below.
+5. Decide tp/fp/by_design/needs_review per finding using the confidence escalation protocol below.
 
 ## Output requirements
 Return ONLY a JSON object with a "results" array. Each element MUST have:
-fingerprint, verdict(tp|fp|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)
+fingerprint, verdict(tp|fp|by_design|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)
 
 You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;

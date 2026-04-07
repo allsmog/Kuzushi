@@ -8,6 +8,7 @@ import {
   VERIFICATION_RESULT_SCHEMA,
   VerificationExecutionError,
   verificationSystemPromptPrefix,
+  verifyFindingsBatch,
   verifyFindingWithAgent,
 } from "../src/verify.js";
 
@@ -192,10 +193,9 @@ describe("parseVerificationOutput", () => {
     expect(parsed.confidence).toBe(1);
   });
 
-  it("returns conservative result for malformed JSON instead of throwing", () => {
-    const result = parseVerificationOutput("not-json", "fallback-fp");
-    expect(result.fingerprint).toBe("fallback-fp");
-    expect(result.exploitable).toBe(false);
+  it("throws for malformed JSON instead of synthesizing a conservative result", () => {
+    expect(() => parseVerificationOutput("not-json", "fallback-fp"))
+      .toThrow("Invalid verification JSON response");
   });
 
   it("parses proof_level and proof_verdict from output", () => {
@@ -345,16 +345,70 @@ describe("verifyFindingWithAgent", () => {
       requests,
     );
 
-    const result = await verifyFindingWithAgent(
-      makeFinding(),
-      makeTriageResult(),
+    await expect(
+      verifyFindingWithAgent(
+        makeFinding(),
+        makeTriageResult(),
+        "/tmp/repo",
+        "repo",
+        "claude-haiku-4-5-20251001",
+        { runtime },
+      ),
+    ).rejects.toMatchObject({
+      name: "VerificationExecutionError",
+      message: expect.stringContaining("verification output parse failed"),
+      costUsd: 0.009,
+    });
+  });
+});
+
+describe("verifyFindingsBatch", () => {
+  it("reports missing findings without synthesizing not-exploitable results", async () => {
+    const requests: AgentQueryRequest[] = [];
+    const runtime = makeRuntime(
+      [{
+        type: "result",
+        subtype: "success",
+        result: "{}",
+        structuredOutput: {
+          results: [{
+            fingerprint: "verify-fp",
+            exploitable: true,
+            poc_payload: "payload",
+            poc_description: "desc",
+            attack_vector: "query",
+            preconditions: [],
+            confidence: 0.9,
+          }],
+        },
+        durationMs: 100,
+        numTurns: 1,
+        totalCostUsd: 0.02,
+      }],
+      requests,
+      "mock-batch-runtime",
+    );
+
+    const output = await verifyFindingsBatch(
+      [
+        { finding: makeFinding(), triageResult: makeTriageResult() },
+        {
+          finding: { ...makeFinding(), fingerprint: "verify-fp-2" },
+          triageResult: { ...makeTriageResult(), fingerprint: "verify-fp-2" },
+        },
+      ],
       "/tmp/repo",
       "repo",
-      "claude-haiku-4-5-20251001",
+      "model",
+      undefined,
       { runtime },
     );
-    // Malformed JSON now returns a conservative result instead of throwing
-    expect(result.result.exploitable).toBe(false);
-    expect(result.costUsd).toBe(0.009);
+
+    expect(output.results.size).toBe(1);
+    expect(output.results.get("verify-fp")?.exploitable).toBe(true);
+    expect(output.results.has("verify-fp-2")).toBe(false);
+    expect(output.incomplete).toBe(true);
+    expect(output.missingFingerprints).toEqual(["verify-fp-2"]);
+    expect(output.recoveredByRetry).toEqual([]);
   });
 });
