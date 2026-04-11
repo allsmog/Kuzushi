@@ -60,8 +60,16 @@ describe("resolveConfig", () => {
 });
 
 describe("buildPrompt", () => {
-  it("includes all three detection sections", () => {
+  it("includes dangerous-api and misconfig detection sections by default", () => {
     const prompt = buildPrompt(undefined, 50);
+    expect(prompt).toContain("Part 1: Dangerous API Detection");
+    expect(prompt).not.toContain("Part 2: Auth/Access Control Detection");
+    expect(prompt).toContain("Part 3: Security Misconfiguration Detection");
+  });
+
+  it("includes all three detection sections when auth-access-detect is in scope", () => {
+    const prompt = buildPrompt(undefined, 50, [], undefined, undefined, undefined, undefined, undefined,
+      ["dangerous-api-detect", "auth-access-detect", "security-misconfig-detect"]);
     expect(prompt).toContain("Part 1: Dangerous API Detection");
     expect(prompt).toContain("Part 2: Auth/Access Control Detection");
     expect(prompt).toContain("Part 3: Security Misconfiguration Detection");
@@ -72,13 +80,6 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("unsafe-deserialization");
     expect(prompt).toContain("unsafe-subprocess");
     expect(prompt).toContain("unsafe-file-ops");
-  });
-
-  it("includes auth categories", () => {
-    const prompt = buildPrompt(undefined, 50);
-    expect(prompt).toContain("unprotected-endpoint");
-    expect(prompt).toContain("missing-role-check");
-    expect(prompt).toContain("idor");
   });
 
   it("includes misconfig categories", () => {
@@ -102,18 +103,19 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("Anti-hallucination constraints");
   });
 
-  it("includes all categories when no context (safe fallback)", () => {
+  it("includes all non-auth categories when no context (safe fallback)", () => {
     const prompt = buildPrompt(undefined, 50);
     expect(prompt).toContain("prototype-pollution");
     expect(prompt).toContain("nosql-injection");
     expect(prompt).toContain("template-injection");
     expect(prompt).toContain("ldap-injection");
     expect(prompt).toContain("xml-injection");
-    expect(prompt).toContain("missing-role-check");
-    expect(prompt).toContain("jwt-claim-manipulation");
-    expect(prompt).toContain("session-fixation");
     expect(prompt).toContain("container-misconfig");
     expect(prompt).toContain("cicd-misconfig");
+    // auth categories excluded from default scope
+    expect(prompt).not.toContain("missing-role-check");
+    expect(prompt).not.toContain("jwt-claim-manipulation");
+    expect(prompt).not.toContain("session-fixation");
     expect(prompt).not.toContain("Category scope");
   });
 
@@ -146,10 +148,12 @@ describe("buildPrompt", () => {
     expect(prompt).not.toContain("session-storage");
   });
 
-  it("includes auth-gated categories when auth patterns present", () => {
+  it("includes auth-gated categories when auth-access-detect is explicitly in scope", () => {
     const prompt = buildPrompt(
       { languages: ["Go"], frameworks: [], authPatterns: ["JWT"], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
       50,
+      [], undefined, undefined, undefined, undefined, undefined,
+      ["dangerous-api-detect", "auth-access-detect", "security-misconfig-detect"],
     );
     expect(prompt).toContain("jwt-claim-manipulation");
     expect(prompt).toContain("session-fixation");

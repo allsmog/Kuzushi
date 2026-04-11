@@ -194,6 +194,7 @@ export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrich
 
   async run(_input, context): Promise<EnrichedRepoContext["enrichment"]> {
     const { model } = resolveConfig(context);
+    const workRoot = context.workRoot ?? context.repoRoot;
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const prompt = buildPrompt(repoContext);
     const runtime = context.runtime;
@@ -209,7 +210,7 @@ export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrich
       for await (const message of runtime.query({
         prompt,
         options: {
-          cwd: context.repoRoot,
+          cwd: workRoot,
           model,
 
           allowedTools: resolveTaskAllowedTools(context),

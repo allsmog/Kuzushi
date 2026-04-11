@@ -120,15 +120,16 @@ export const taintAnalysisDiscoverTask: AgentTask<ScanOpts, CrossServiceDiscover
   async run(_input, context): Promise<CrossServiceDiscoverOutput> {
     const cfg = resolveTaintAnalysisConfig(context.config);
     const crossCfg = resolveCrossServiceConfig(cfg);
+    const projectRoot = context.projectRoot ?? context.repoRoot;
 
     // Check for manifest override
-    const manifestPath = path.join(context.repoRoot, ".kuzushi", "services.json");
+    const manifestPath = path.join(projectRoot, ".kuzushi", "services.json");
     if (existsSync(manifestPath)) {
       const manifest = await loadManifest(manifestPath);
       const services = manifest.services
         .slice(0, crossCfg.maxServices)
         .map((entry) => manifestEntryToDescriptor(entry))
-        .filter((svc) => isWithinRepoRoot(context.repoRoot, svc.rootPath));
+        .filter((svc) => isWithinRepoRoot(projectRoot, svc.rootPath));
       return {
         services,
         usedManifest: true,
@@ -139,7 +140,7 @@ export const taintAnalysisDiscoverTask: AgentTask<ScanOpts, CrossServiceDiscover
     // Auto-detect services
     const detectedPaths: string[] = [];
     const services = await autoDetectServices(
-      context.repoRoot,
+      projectRoot,
       crossCfg.maxServices,
       detectedPaths,
     );

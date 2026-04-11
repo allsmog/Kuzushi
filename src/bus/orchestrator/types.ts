@@ -73,6 +73,12 @@ export interface RunState {
   skippedAlreadyTriaged: number;
   skippedLowConfidence: number;
   skippedByFpFilter: number;
+  skippedByScoreFilter: number;
+  verifyGateAutoAccepted: number;
+  verifyGateSkipped: number;
+  verifyGateCostUsd: number;
+  /** Sink patterns verified as exploitable — key: `CWE:sinkFunction`, value: first fingerprint. */
+  verifiedPatterns: Map<string, string>;
   triageQueue: QueuedFinding[];
   queueCursor: number;
   triageTotal: number;

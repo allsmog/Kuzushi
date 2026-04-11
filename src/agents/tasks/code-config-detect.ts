@@ -330,7 +330,6 @@ function buildPrompt(
   scenarioContext?: string,
   detectorScope: CodeConfigDetectorId[] = [
     "dangerous-api-detect",
-    "auth-access-detect",
     "security-misconfig-detect",
   ],
 ): string {

@@ -75,16 +75,17 @@ export const contextGathererTask: AgentTask<ScanOpts, ContextGathererOutput> = {
   outputKind: "custom",
   dependsOn: [],
   async run(_input, context): Promise<ContextGathererOutput> {
+    const workRoot = context.workRoot ?? context.repoRoot;
     const aggregate = createMutableRepoContext();
 
     await Promise.all([
-      gatherFromPackageJson(context.repoRoot, aggregate),
-      gatherFromGoMod(context.repoRoot, aggregate),
-      gatherFromPython(context.repoRoot, aggregate),
-      gatherFromCargoToml(context.repoRoot, aggregate),
+      gatherFromPackageJson(workRoot, aggregate),
+      gatherFromGoMod(workRoot, aggregate),
+      gatherFromPython(workRoot, aggregate),
+      gatherFromCargoToml(workRoot, aggregate),
     ]);
 
-    const pathSignals = await walkRepo(context.repoRoot);
+    const pathSignals = await walkRepo(workRoot);
     gatherFromPathSignals(pathSignals, aggregate);
 
     const sourceFiles = pathSignals.files
@@ -94,7 +95,7 @@ export const contextGathererTask: AgentTask<ScanOpts, ContextGathererOutput> = {
       .slice(0, MAX_FILE_INDEX_ENTRIES)
       .map(f => ({ path: f.relPath }));
 
-    const patternMatches = await grepSecurityPatterns(context.repoRoot, sourceFiles);
+    const patternMatches = await grepSecurityPatterns(workRoot, sourceFiles);
 
     const repoContext: RepoContext = {
       languages: sortValues(aggregate.languages),

@@ -16,8 +16,9 @@ export const VerdictSchema = z.enum(["tp", "fp", "needs_review", "by_design"]);
 export const BusBackendSchema = z.enum(["in-process"]);
 
 export const ScanModeSchema = z.enum(["sequential", "concurrent"]);
+export const TaskModeSchema = z.enum(["compat", "explicit", "scanners-only"]);
 
-export const AgentRuntimeBackendSchema = z.enum(["pi-ai"]);
+export const AgentRuntimeBackendSchema = z.enum(["claude", "pi-ai"]);
 
 export const ProofVerdictSchema = z.enum([
   "exploited",
@@ -156,6 +157,7 @@ export const TriageResultSchema = z.object({
   fixPatch: z.string().nullable(),
   source: TriagePathAssessmentSchema.optional(),
   sink: TriagePathAssessmentSchema.optional(),
+  sinkFunction: z.string().nullable().optional(),
   isVulnerable: z.boolean().optional(),
   exploitScenario: z.string().optional(),
   recommendedFix: z.string().optional(),
@@ -611,6 +613,7 @@ export const KuzushiConfigSchema = z.object({
   triageBatchSize: z.number(),
   triageConcurrency: z.number(),
   scanMode: ScanModeSchema,
+  taskMode: TaskModeSchema.optional(),
   agentRuntimeBackend: AgentRuntimeBackendSchema.optional(),
   agentRuntimeConfig: AgentRuntimeConfigSchema.optional(),
   enabledTasks: z.array(z.string()).optional(),
@@ -660,6 +663,8 @@ export const KuzushiConfigSchema = z.object({
   securityProfilesPath: z.string().optional(),
   prioritizeFindings: z.boolean().optional(),
   costBudgetUsd: z.number().optional(),
+  triageMaxFindings: z.number().int().positive().optional(),
+  triageMinScore: z.number().min(0).max(100).optional(),
   enableDynamicTaskSelection: z.boolean().optional(),
   pocExecute: z.boolean().optional(),
   pocSandbox: PocSandboxSchema.optional(),

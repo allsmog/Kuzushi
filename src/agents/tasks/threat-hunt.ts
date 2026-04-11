@@ -22,7 +22,7 @@ import { createLogger } from "../../logger.js";
 import type { AgentTask, TaskContext } from "../types.js";
 import { resolveTaskModel, resolveTaskRuntime, resolveTaskAllowedTools, resolveTaskPositiveInt } from "./runtime-overrides.js";
 import { resolveThreatModelOutput } from "./threat-model-guidance.js";
-import type { DfdElement, ThreatModelDocument } from "./threat-modeling/types.js";
+import type { DfdElement, StrideThreat, ThreatModelDocument } from "./threat-modeling/types.js";
 import { isRecord } from "../../utils.js";
 
 const log = createLogger({ stage: "threat-hunt" });
@@ -33,30 +33,92 @@ interface ThreatHuntConfig {
   maxActors: number;
   runsPerActor: number;
   maxConcurrentHunts: number;
+  maxTurnsPerHunt: number;
+}
+
+interface ActorWithThreats {
+  actor: DfdElement;
+  threats: StrideThreat[];
 }
 
 function resolveConfig(ctx: TaskContext): ThreatHuntConfig {
   const model = resolveTaskModel(ctx, "threat-hunt");
   const maxFindings = resolveTaskPositiveInt(ctx, "threat-hunt", "maxFindings", 50);
-  const maxActors = resolveTaskPositiveInt(ctx, "threat-hunt", "maxActors", 10);
+  const maxActors = resolveTaskPositiveInt(ctx, "threat-hunt", "maxActors", 5);
   const runsPerActor = Math.min(resolveTaskPositiveInt(ctx, "threat-hunt", "runsPerActor", 1), 5);
-  const maxConcurrentHunts = resolveTaskPositiveInt(ctx, "threat-hunt", "maxConcurrentHunts", 5);
-  return { model, maxFindings, maxActors, runsPerActor, maxConcurrentHunts };
+  const maxConcurrentHunts = resolveTaskPositiveInt(ctx, "threat-hunt", "maxConcurrentHunts", 3);
+  const maxTurnsPerHunt = resolveTaskPositiveInt(ctx, "threat-hunt", "maxTurnsPerHunt", 30);
+  return { model, maxFindings, maxActors, runsPerActor, maxConcurrentHunts, maxTurnsPerHunt };
 }
 
-function extractActors(upstreamOutputs: Map<string, unknown>): DfdElement[] {
+/**
+ * Extract external-entity actors from the randori threat model output,
+ * paired with their HIGH/CRITICAL threats. Actors with no high-severity
+ * threats are excluded — their hunt would be speculative.
+ * Actors are sorted by threat severity (most critical first).
+ */
+function extractActorsWithThreats(upstreamOutputs: Map<string, unknown>): {
+  prioritized: ActorWithThreats[];
+  allActors: DfdElement[];
+} {
   const raw = resolveThreatModelOutput(upstreamOutputs);
-  if (!isRecord(raw) || !isRecord(raw["document"])) return [];
+  if (!isRecord(raw) || !isRecord(raw["document"])) return { prioritized: [], allActors: [] };
   const doc = raw["document"] as unknown as ThreatModelDocument;
-  if (!doc.dfd?.elements || !Array.isArray(doc.dfd.elements)) return [];
-  return doc.dfd.elements.filter((el) => el.type === "external-entity");
+  if (!doc.dfd?.elements || !Array.isArray(doc.dfd.elements)) return { prioritized: [], allActors: [] };
+
+  const allActors = doc.dfd.elements.filter((el) => el.type === "external-entity");
+  const threats: StrideThreat[] = Array.isArray(doc.threats) ? doc.threats : [];
+
+  // Group HIGH/CRITICAL threats by elementId
+  const highThreats = new Map<string, StrideThreat[]>();
+  for (const threat of threats) {
+    if (threat.impact !== "critical" && threat.impact !== "high") continue;
+    const bucket = highThreats.get(threat.elementId) ?? [];
+    bucket.push(threat);
+    highThreats.set(threat.elementId, bucket);
+  }
+
+  const prioritized = allActors
+    .filter((el) => (highThreats.get(el.id)?.length ?? 0) > 0)
+    .map((el) => ({ actor: el, threats: highThreats.get(el.id)! }))
+    .sort((a, b) => {
+      const critA = a.threats.filter((t) => t.impact === "critical").length;
+      const critB = b.threats.filter((t) => t.impact === "critical").length;
+      if (critB !== critA) return critB - critA;
+      return b.threats.length - a.threats.length;
+    });
+
+  return { prioritized, allActors };
 }
 
-function buildPrompt(actor: DfdElement): string {
+function buildPrompt(actor: DfdElement, threats: StrideThreat[]): string {
+  const threatLines: string[] = [];
+  if (threats.length > 0) {
+    threatLines.push(
+      "",
+      "The threat model identified these specific threats from your attack surface:",
+    );
+    for (const [i, t] of threats.entries()) {
+      threatLines.push(`${i + 1}. [${t.impact.toUpperCase()}/${t.category}] ${t.title}`);
+      threatLines.push(`   Attack vector: ${t.attackVector}`);
+      const files = t.affectedFiles.slice(0, 2).map((f) => `${f.filePath}:${f.startLine}`).join(", ");
+      if (files) threatLines.push(`   Affected code: ${files}`);
+      const anchors = (t.evidenceAnchors ?? []).slice(0, 2)
+        .map((a) => `${a.filePath}:${a.startLine} — ${a.description}`).join("; ");
+      if (anchors) threatLines.push(`   Evidence: ${anchors}`);
+    }
+    threatLines.push(
+      "",
+      "Your mission: find additional evidence for these threats, discover new attack vectors in the same surface, or identify variants the threat model missed.",
+      "Do NOT re-confirm what is already documented above — find something new or deeper.",
+    );
+  }
+
   return [
     `You are competing in a CTF. You are simulating: ${actor.name}`,
     `Description: ${actor.description}`,
     `Trust zone: ${actor.trustZone}`,
+    ...threatLines,
     "",
     "Find exploitable security vulnerabilities in this codebase from this actor's perspective.",
     "Explore the codebase using the tools available to you.",
@@ -66,12 +128,23 @@ function buildPrompt(actor: DfdElement): string {
   ].join("\n");
 }
 
+function buildScopedPrompt(actor: DfdElement, threats: StrideThreat[], scanScope: string): string {
+  const base = buildPrompt(actor, threats);
+  return [
+    `IMPORTANT: Only examine files under ${scanScope}. Do not read, grep, or navigate outside this directory.`,
+    "",
+    base,
+  ].join("\n");
+}
+
 async function runActorHunt(
   actor: DfdElement,
+  threats: StrideThreat[],
   context: TaskContext,
   config: ThreatHuntConfig,
 ): Promise<FindingOutput> {
-  const prompt = buildPrompt(actor);
+  const scanScope = context.scanPath ?? context.repoRoot;
+  const prompt = buildScopedPrompt(actor, threats, scanScope);
   const runtime = resolveTaskRuntime(context);
   const tag = `[threat-hunt/${actor.name}]`;
 
@@ -126,28 +199,42 @@ async function runActorHunt(
   return { findings: parsed.findings, costUsd };
 }
 
+/**
+ * Extract external-entity actors from the upstream threat model output.
+ * Simple wrapper over extractActorsWithThreats that returns only the actor list
+ * (allActors, not just those with high-severity threats).
+ */
+function extractActors(upstreamOutputs: Map<string, unknown>): DfdElement[] {
+  return extractActorsWithThreats(upstreamOutputs).allActors;
+}
+
 async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
   const config = resolveConfig(context);
-  const actors = extractActors(context.upstreamOutputs);
+  const { prioritized, allActors } = extractActorsWithThreats(context.upstreamOutputs);
 
-  if (actors.length === 0) {
+  if (allActors.length === 0) {
     log.info("[threat-hunt] No external entities in threat model DFD — skipping");
     return attachTaskOutputMeta([], { costUsd: 0 });
   }
 
-  const capped = actors.slice(0, config.maxActors);
+  // Prefer actors with HIGH/CRITICAL threats; fall back to all actors if none qualify.
+  const actorsToHunt: ActorWithThreats[] = prioritized.length > 0
+    ? prioritized
+    : allActors.map((a) => ({ actor: a, threats: [] }));
+
+  const capped = actorsToHunt.slice(0, config.maxActors);
   const totalRuns = capped.length * config.runsPerActor;
   log.info(
-    `[threat-hunt] Spawning ${totalRuns} hunts (${capped.length} actors x ${config.runsPerActor} runs, from ${actors.length} external entities)`,
+    `[threat-hunt] Spawning ${totalRuns} hunts (${capped.length} actors x ${config.runsPerActor} runs, from ${allActors.length} external entities)`,
   );
 
   // Build all hunt tasks, then execute with bounded concurrency to avoid
   // saturating API rate limits or exhausting OS resources.
   const huntTasks: Array<() => Promise<FindingOutput>> = [];
-  for (const actor of capped) {
+  for (const { actor, threats } of capped) {
     for (let i = 0; i < config.runsPerActor; i++) {
       huntTasks.push(() =>
-        runActorHunt(actor, context, config).catch((err) => {
+        runActorHunt(actor, threats, context, config).catch((err) => {
           log.error(`[threat-hunt/${actor.name}] Error: ${toErrorMessage(err)}`);
           return { findings: [], costUsd: 0 } as FindingOutput;
         }),

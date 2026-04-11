@@ -59,12 +59,15 @@ async function acquireSlot(): Promise<void> {
     activeQueries++;
     return;
   }
+  let forcedAcquire = false;
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
-      // Remove from queue and force-acquire — a subprocess likely died without releasing
+      // Remove from queue and force-acquire — a subprocess likely died without releasing.
+      // Don't increment activeQueries; the orphaned slot already holds that count.
       const idx = waitQueue.indexOf(resolve);
       if (idx >= 0) waitQueue.splice(idx, 1);
       log.warn("Semaphore slot timeout — force-acquiring (likely leaked slot from dead subprocess)");
+      forcedAcquire = true;
       resolve();
     }, SLOT_TIMEOUT_MS);
     waitQueue.push(() => {
@@ -72,7 +75,9 @@ async function acquireSlot(): Promise<void> {
       resolve();
     });
   });
-  activeQueries++;
+  if (!forcedAcquire) {
+    activeQueries++;
+  }
 }
 
 function releaseSlot(): void {
@@ -158,7 +163,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         stream: false,
         service_tier: "standard_only",
         ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
-        ...(baseOptions.thinkingDisabled || (baseOptions.effort === "low" && !isHaiku)
+        ...(baseOptions.thinkingDisabled || isHaiku || baseOptions.effort === "low"
           ? { thinking: { type: "disabled" as const } }
           : {}),
       };
@@ -295,7 +300,8 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       // Thinking: disable for classification, use adaptive+omitted for analysis
       // display: "omitted" skips streaming thinking tokens (faster time-to-first-text)
       const shouldDisableThinking = request.options.thinkingDisabled
-        || (request.options.effort === "low" && !isHaiku);
+        || isHaiku
+        || request.options.effort === "low";
 
       // Use streaming + finalMessage() to avoid HTTP timeouts on large outputs
       const stream = this.client.messages.stream({
@@ -473,6 +479,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     // Strip the nesting detection variable so subprocesses can run.
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_SESSION_ID;
+    // Raise the default 32K output token cap so large structured outputs
+    // (e.g., PASTA threat models) don't get truncated mid-response.
+    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "100000";
     options.env = env;
 
     // Plugins — load Claude Code plugins in the subprocess
@@ -761,6 +770,7 @@ class ClaudeSession implements AgentSession {
     if (this.config?.baseUrl) env.ANTHROPIC_BASE_URL = this.config.baseUrl;
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_SESSION_ID;
+    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "100000";
     options.env = env;
 
     if (this.baseOptions.abortController) {
@@ -814,7 +824,8 @@ class ClaudeSession implements AgentSession {
           value = next.value;
           done = next.done;
         } catch (error) {
-          // Subprocess crashed — yield error and bail
+          // Subprocess crashed — self-close to release the semaphore slot, then yield error.
+          await this.close();
           yield {
             type: "result",
             subtype: "error_runtime",
@@ -825,7 +836,8 @@ class ClaudeSession implements AgentSession {
         }
 
         if (done) {
-          // Subprocess exited unexpectedly — yield error
+          // Subprocess exited unexpectedly — self-close to release the semaphore slot.
+          await this.close();
           yield {
             type: "result",
             subtype: "error_runtime",

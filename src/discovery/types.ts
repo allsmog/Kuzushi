@@ -1,3 +1,5 @@
+export type ModulePriority = "critical" | "high" | "medium" | "low";
+
 export interface DiscoveredModule {
   name: string;
   path: string;
@@ -6,6 +8,8 @@ export interface DiscoveredModule {
   buildSystem?: string;
   isParent?: boolean;
   parentModule?: string;
+  priority?: ModulePriority;
+  securitySignals?: string[];
 }
 
 export interface DiscoveryResult {

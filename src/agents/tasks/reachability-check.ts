@@ -110,7 +110,7 @@ export const reachabilityCheckTask: AgentTask<Finding[], Finding[]> = {
     }
 
     const model = resolveTaskModel(context, "reachability-check");
-    const workingRoot = context.scanPath ?? context.repoRoot;
+    const workingRoot = context.workRoot ?? context.scanPath ?? context.repoRoot;
     const maxPerBatch = 20;
     const allResults = new Map<string, ReachabilityResult>();
 

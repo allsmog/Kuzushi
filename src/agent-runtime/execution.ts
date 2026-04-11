@@ -410,6 +410,8 @@ export async function runStructuredBatchQuery(
       runtimeOptions: {
         ...args.runtimeOptions,
         temperature: undefined,
+        effort: args.effort,
+        thinkingDisabled: args.thinkingDisabled,
       },
       systemPromptPrefix: req.systemPrompt,
       schema: args.schema,

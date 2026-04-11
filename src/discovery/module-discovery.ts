@@ -45,7 +45,7 @@ const PASS1_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["name", "path", "description", "language", "needsClustering"],
+        required: ["name", "path", "description", "language", "needsClustering", "priority"],
         properties: {
           name: { type: "string" },
           path: { type: "string" },
@@ -53,6 +53,8 @@ const PASS1_SCHEMA = {
           language: { type: "string" },
           buildSystem: { type: "string" },
           needsClustering: { type: "boolean" },
+          priority: { type: "string", enum: ["critical", "high", "medium", "low"] },
+          securitySignals: { type: "array", items: { type: "string" } },
         },
       },
     },
@@ -92,7 +94,7 @@ interface HeuristicModuleSnapshot {
   topLevelDirs: Array<{
     name: string;
     subdirCount: number;
-    buildFiles: string[];
+    rootFiles: string[];
     docSnippets: Array<{ path: string; snippet: string }>;
   }>;
   workspaceHints: string[];
@@ -144,6 +146,8 @@ export async function discoverModules(
     language: module.language,
     buildSystem: module.buildSystem,
     isParent: module.needsClustering ? true : undefined,
+    priority: module.priority,
+    securitySignals: module.securitySignals,
   }));
   let costUsd = pass1.costUsd;
   const reasoningParts = [pass1Result.reasoning];
@@ -344,6 +348,15 @@ function normalizePass1Module(raw: unknown, monorepoRoot: string): ModuleDiscove
     return null;
   }
 
+  const rawPriority = asString(record.priority);
+  const priority = (rawPriority === "critical" || rawPriority === "high" || rawPriority === "medium" || rawPriority === "low")
+    ? rawPriority
+    : undefined;
+
+  const securitySignals = Array.isArray(record.securitySignals)
+    ? record.securitySignals.filter((s): s is string => typeof s === "string").slice(0, 5)
+    : undefined;
+
   return {
     name,
     path: modulePath,
@@ -351,6 +364,8 @@ function normalizePass1Module(raw: unknown, monorepoRoot: string): ModuleDiscove
     language: asString(record.language) ?? "unknown",
     buildSystem: asString(record.buildSystem) ?? undefined,
     needsClustering: record.needsClustering === true,
+    priority,
+    securitySignals: securitySignals?.length ? securitySignals : undefined,
   };
 }
 
@@ -474,7 +489,7 @@ async function collectTopLevelDirs(monorepoRoot: string): Promise<HeuristicModul
     }
 
     const absolutePath = path.join(monorepoRoot, entry.name);
-    const buildFiles = await detectBuildFiles(absolutePath);
+    const rootFiles = await listRootFiles(absolutePath);
     const docSnippets = await Promise.all(
       README_FILES.map(async (fileName) => {
         const snippet = await readSnippet(path.join(absolutePath, fileName));
@@ -485,7 +500,7 @@ async function collectTopLevelDirs(monorepoRoot: string): Promise<HeuristicModul
     results.push({
       name: entry.name,
       subdirCount: await countImmediateSubdirs(absolutePath),
-      buildFiles,
+      rootFiles,
       docSnippets: docSnippets.filter((value): value is NonNullable<typeof value> => value !== null),
     });
   }
@@ -612,6 +627,13 @@ function buildPass1Prompt(
     `Return at most ${maxModules} top-level modules.`,
     `Set needsClustering=true for modules that are broad enough to merit deeper sub-clustering. This includes modules with many services at ANY depth (not just immediate children) — for example a product with 10 top-level dirs where one of them contains 100+ service directories nested 2-3 levels deep. If the tree sample shows a large fan-out of services anywhere under a module, mark it for clustering.`,
     "",
+    "For each module, assign a security priority:",
+    "  critical — auth, crypto, secrets/key management, payment, code execution, privilege escalation surface",
+    "  high     — DB access, user input processing, webhooks, external API calls, file I/O, session management",
+    "  medium   — internal services, background jobs, config management, logging",
+    "  low      — UI-only components, docs, test infra, CLI tooling, build scripts, dev tooling",
+    "Also list 1-3 concise securitySignals that explain the priority (e.g. \"handles OAuth tokens\", \"executes user-supplied code\").",
+    "",
     `Monorepo root: ${monorepoRoot}`,
     "",
     "## Workspace hints",
@@ -623,7 +645,7 @@ function buildPass1Prompt(
     "## Top-level directories",
     ...snapshot.topLevelDirs.flatMap((dir) => {
       const lines = [
-        `- ${dir.name}: immediateSubdirs=${dir.subdirCount}; buildFiles=${dir.buildFiles.join(", ") || "none"}`,
+        `- ${dir.name}: immediateSubdirs=${dir.subdirCount}; rootFiles=${dir.rootFiles.join(", ") || "none"}`,
       ];
       for (const doc of dir.docSnippets) {
         lines.push(`  ${doc.path}: ${doc.snippet}`);
@@ -722,15 +744,23 @@ function formatTreeLines(
   maxLines: number,
 ): string[] {
   return entries
-    .filter((entry) => entry.kind === "dir" || isSignalFile(entry.relPath))
+    .filter((entry) => entry.kind === "dir" || entry.depth <= 2)
     .slice(0, maxLines)
     .map((entry) => `${"  ".repeat(Math.max(0, entry.depth - 1))}- ${entry.relPath}${entry.kind === "dir" ? "/" : ""}`);
 }
 
-function isSignalFile(relPath: string): boolean {
-  const baseName = path.basename(relPath);
-  return README_FILES.includes(baseName as typeof README_FILES[number])
-    || BUILD_FILES.includes(baseName as typeof BUILD_FILES[number]);
+async function listRootFiles(rootPath: string, max = 12): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(rootPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((e) => e.isFile() && !e.name.startsWith("."))
+    .map((e) => e.name)
+    .sort()
+    .slice(0, max);
 }
 
 async function countImmediateSubdirs(rootPath: string): Promise<number> {

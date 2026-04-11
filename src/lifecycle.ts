@@ -24,8 +24,15 @@ export function registerShutdownHook(
   name: string,
   fn: () => Promise<void>,
   priority: number,
-): void {
-  hooks.push({ name, fn, priority });
+): () => void {
+  const hook = { name, fn, priority };
+  hooks.push(hook);
+  return () => {
+    const index = hooks.indexOf(hook);
+    if (index >= 0) {
+      hooks.splice(index, 1);
+    }
+  };
 }
 
 /** Check if the process is currently shutting down. */
@@ -78,4 +85,9 @@ export async function initiateShutdown(code: number): Promise<never> {
 export function clearShutdownHooks(): void {
   hooks.length = 0;
   shuttingDown = false;
+}
+
+/** Number of currently registered shutdown hooks. Useful for diagnostics and tests. */
+export function getShutdownHookCount(): number {
+  return hooks.length;
 }

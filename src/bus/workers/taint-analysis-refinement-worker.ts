@@ -127,7 +127,9 @@ export function registerTaintAnalysisRefinementWorker(
 
       const taskContext: TaskContext = {
         runId: event.meta.runId,
-        repoRoot: context.repoRoot,
+        projectRoot: context.repoRoot,
+        workRoot: context.scanPath ?? context.repoRoot,
+        repoRoot: context.scanPath ?? context.repoRoot,
         scanPath: context.scanPath,
         repoName: context.repoName,
         config: deps.config,

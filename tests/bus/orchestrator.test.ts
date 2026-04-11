@@ -7,6 +7,7 @@ import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerOrchestrator } from "../../src/bus/orchestrator.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
+import { getScanPlanSummary } from "../../src/cli/commands/scan.js";
 import type {
   PipelineCompleteEvent,
   PipelineErrorEvent,
@@ -2721,7 +2722,224 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
-  it("runs all tasks when enableDynamicTaskSelection is false (backward compat)", { timeout: 15_000 }, async () => {
+  it("runs only explicit enabled tasks when taskMode is explicit", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const scannerTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding("fp-semgrep-explicit", 90)];
+      },
+    };
+    const secretsTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding("fp-explicit-secrets-only", 80)];
+      },
+    };
+    const protoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "prototype-pollution-detect",
+      displayName: "Prototype Pollution",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding("fp-explicit-proto", 60)];
+      },
+    };
+
+    taskRegistry.register(scannerTask);
+    taskRegistry.register(secretsTask);
+    taskRegistry.register(protoTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+    const config = {
+      ...makeConfig(),
+      taskMode: "explicit" as const,
+      enableDynamicTaskSelection: false,
+      enabledTasks: ["secrets-crypto-detect"],
+    };
+    const scanOpts = { ...makeScanOpts(), scanners: ["semgrep"] };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts,
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+    const scanPlan = getScanPlanSummary(config, scanOpts, taskRegistry);
+    const nonScannerTaskStarts = taskStarts.filter((id) => id !== "semgrep");
+
+    expect(taskStarts).toContain("semgrep");
+    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).not.toContain("prototype-pollution-detect");
+    expect(scanPlan.taskMode).toBe("explicit");
+    expect(scanPlan.resolvedTaskIds).toEqual(nonScannerTaskStarts);
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint).sort()).toEqual([
+      "fp-explicit-secrets-only",
+      "fp-semgrep-explicit",
+    ]);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("runs only scanner tasks when taskMode is scanners-only", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => ["semgrep"],
+    };
+
+    const taskRegistry = new TaskRegistry();
+    const scannerTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding("fp-scanners-only", 95)];
+      },
+    };
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return {};
+      },
+    };
+    const detectorTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-should-not-run", 80)];
+      },
+    };
+
+    taskRegistry.register(scannerTask);
+    taskRegistry.register(contextTask);
+    taskRegistry.register(detectorTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+    const config = {
+      ...makeConfig(),
+      taskMode: "scanners-only" as const,
+      enableDynamicTaskSelection: true,
+      enabledTasks: ["secrets-crypto-detect"],
+    };
+    const scanOpts = { ...makeScanOpts(), scanners: ["semgrep"] };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts,
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+    const scanPlan = getScanPlanSummary(config, scanOpts, taskRegistry);
+    const nonScannerTaskStarts = taskStarts.filter((id) => id !== "semgrep");
+
+    expect(taskStarts).toEqual(["semgrep"]);
+    expect(scanPlan.taskMode).toBe("scanners-only");
+    expect(scanPlan.resolvedTaskIds).toEqual(nonScannerTaskStarts);
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toEqual([
+      "fp-scanners-only",
+    ]);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("runs all tasks when taskMode is compat and dynamic selection is disabled", { timeout: 15_000 }, async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
@@ -2814,6 +3032,7 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
+          taskMode: "compat",
           enableDynamicTaskSelection: false,
           enabledTasks: [],
         },
@@ -2826,6 +3045,15 @@ describe("PipelineOrchestrator", () => {
     // Both selectable tasks ran — no filtering when dynamic selection is disabled
     expect(taskStarts).toContain("secrets-crypto-detect");
     expect(taskStarts).toContain("prototype-pollution-detect");
+    const scanPlan = getScanPlanSummary({
+      ...makeConfig(),
+      taskMode: "compat",
+      enableDynamicTaskSelection: false,
+      enabledTasks: [],
+    }, { ...makeScanOpts(), scanners: [] }, taskRegistry);
+    expect([...scanPlan.resolvedTaskIds].sort()).toEqual(
+      [...taskStarts].sort(),
+    );
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-proto-compat");
 
     await bus.close();

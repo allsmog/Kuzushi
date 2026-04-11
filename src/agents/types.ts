@@ -15,6 +15,14 @@ export type PromptMode = "full" | "minimal" | "none";
 /** Shared context provided to every task execution. */
 export interface TaskContext {
   runId: string;
+  /** Actual repository root for the pipeline run. */
+  projectRoot?: string;
+  /** Effective scan scope for the current task, usually scanPath ?? projectRoot. */
+  workRoot?: string;
+  /**
+   * @deprecated Backward-compatible alias for workRoot.
+   * Prefer projectRoot for repo-wide state and workRoot for scan-scoped work.
+   */
   repoRoot: string;
   scanPath?: string;
   repoName: string;

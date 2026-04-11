@@ -48,6 +48,9 @@ export type BusBackend = "in-process";
 /** Scanner execution mode. */
 export type ScanMode = "sequential" | "concurrent";
 
+/** Agent task selection mode. */
+export type TaskMode = "compat" | "explicit" | "scanners-only";
+
 /** Runtime provider for agent execution. */
 export type AgentRuntimeBackend = "claude" | "pi-ai";
 
@@ -124,6 +127,8 @@ export interface TriageResult {
   fixPatch: string | null;
   source?: TriagePathAssessment;
   sink?: TriagePathAssessment;
+  /** The dangerous function/API that data flows into (e.g. 'eval', 'popen', 'SafeExecWithTimeout'). */
+  sinkFunction?: string | null;
   isVulnerable?: boolean;
   exploitScenario?: string;
   recommendedFix?: string;
@@ -456,6 +461,10 @@ export interface KuzushiConfig {
   verifyVerdicts?: Verdict[];
   /** Minimum triage confidence required before entering verification. */
   verifyMinConfidence?: number;
+  /** Enable LLM-based verification gate (cheap Haiku call to decide verify/auto-accept/skip). */
+  verifyGateEnabled?: boolean;
+  /** Override model for the verification gate LLM call. */
+  verifyGateModel?: string;
   /** Enable post-verification PoC harness generation phase. */
   pocHarness?: boolean;
   /** Optional override model for PoC harness generation agents. */
@@ -500,7 +509,9 @@ export interface KuzushiConfig {
   agentRuntimeBackend?: AgentRuntimeBackend;
   /** Optional runtime-level credentials and endpoint overrides. */
   agentRuntimeConfig?: AgentRuntimeConfig;
-  /** Optional list of additional AgentTask IDs to enable in DAG execution. */
+  /** Agent task selection policy. compat preserves legacy defaults; explicit honors enabledTasks; scanners-only skips non-scanner tasks. */
+  taskMode?: TaskMode;
+  /** Optional list of AgentTask IDs to enable when taskMode is explicit, or to override compat defaults. */
   enabledTasks?: string[];
   /** Enabled scanner IDs, in execution order. */
   scanners: ScannerId[];
@@ -610,6 +621,10 @@ export interface KuzushiConfig {
   prioritizeFindings?: boolean;
   /** Maximum cost budget in USD. Pipeline stops early when exceeded. */
   costBudgetUsd?: number;
+  /** Maximum findings to enter LLM triage. Top-scored findings are prioritized. Default 50. */
+  triageMaxFindings?: number;
+  /** Minimum score (0-100) a finding must have to enter the triage queue. Findings below this threshold are dropped before any LLM call. Default: 0 (disabled). */
+  triageMinScore?: number;
   /** Enable dynamic task selection based on repo context. Default false. */
   enableDynamicTaskSelection?: boolean;
   /** Enable PoC harness execution after generation. Default false. */
@@ -692,6 +707,14 @@ export interface KuzushiConfig {
     discoveryModel?: string;
     /** Max number of modules emitted by discovery. Default 30. */
     maxModules?: number;
+    /** Total budget for the entire monorepo scan. Falls back to costBudgetUsd. */
+    budgetUsd?: number;
+    /** Reserve percentage of budget for cross-module analysis. Default 0.10. */
+    crossModuleReserve?: number;
+    /** Enable cross-module data flow tracing. Default true. */
+    crossModuleTracing?: boolean;
+    /** Enable architectural threat model. Default true. */
+    architecturalThreatModel?: boolean;
   };
 }
 

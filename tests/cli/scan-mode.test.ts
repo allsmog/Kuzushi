@@ -3,7 +3,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULTS } from "../../src/config.js";
-import { resolveMonorepoExecution } from "../../src/cli/commands/scan.js";
+import { prepareScanExecution, resolveMonorepoExecution } from "../../src/cli/commands/scan.js";
+import type { ScanCommandOptions } from "../../src/cli/scan-config.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
 const tempDirs: string[] = [];
@@ -17,6 +18,23 @@ function makeTempRoot(): string {
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
     ...structuredClone(DEFAULTS),
+    ...overrides,
+  };
+}
+
+function makeOptions(overrides: Partial<ScanCommandOptions> = {}): ScanCommandOptions {
+  return {
+    verify: false,
+    cryptoBehavioralTest: false,
+    pocHarness: false,
+    context: true,
+    moduleDiscovery: true,
+    auditLog: false,
+    enableExternalTasks: false,
+    qualityGate: false,
+    failOnTp: false,
+    fresh: false,
+    cache: true,
     ...overrides,
   };
 }
@@ -144,5 +162,19 @@ describe("resolveMonorepoExecution", () => {
       useMonorepo: true,
       reason: "list-modules",
     });
+  });
+
+  it("promotes scanners-only mode when CLI scanner selections expand to AgentTasks", () => {
+    const root = makeTempRoot();
+    writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "repo" }), "utf-8");
+
+    const { config, scanOpts } = prepareScanExecution(root, makeOptions({
+      preset: "fast",
+      scanners: "secrets",
+    }));
+
+    expect(config.taskMode).toBe("explicit");
+    expect(config.enabledTasks).toContain("secrets-crypto-detect");
+    expect(scanOpts.scanners).toEqual([]);
   });
 });

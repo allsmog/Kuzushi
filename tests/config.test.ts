@@ -69,6 +69,7 @@ describe("loadConfig", () => {
     expect(config.verifyRefinementMaxIterations).toBe(DEFAULTS.verifyRefinementMaxIterations);
     expect(config.agentRuntimeConfig).toBe(DEFAULTS.agentRuntimeConfig);
     expect(config.scanners).toEqual(DEFAULTS.scanners);
+    expect(config.taskMode).toBe(DEFAULTS.taskMode);
   });
 
   it("injects crypto-behavioral-test into explicit enabledTasks when the feature is enabled", () => {
@@ -321,6 +322,11 @@ describe("setConfigValue", () => {
     expect(getConfigValue("pocHarnessConcurrency")).toBe(2);
   });
 
+  it("normalizes percentage-style verifyMinConfidence", () => {
+    setConfigValue("verifyMinConfidence", "90");
+    expect(getConfigValue("verifyMinConfidence")).toBe(0.9);
+  });
+
   it("sets confidence gate, context, audit, and retry settings", () => {
     setConfigValue("verifyMinConfidence", "0.6");
     setConfigValue("enableContextGathering", "false");
@@ -447,8 +453,8 @@ describe("setConfigValue", () => {
     expect(() => setConfigValue("verifyVerdicts", "foo")).toThrow(
       "verifyVerdicts must contain only: tp, fp, needs_review",
     );
-    expect(() => setConfigValue("verifyMinConfidence", "1.4")).toThrow(
-      "verifyMinConfidence must be a number between 0 and 1",
+    expect(() => setConfigValue("verifyMinConfidence", "101")).toThrow(
+      "verifyMinConfidence must be a number between 0 and 1 (or 0-100 as a percentage)",
     );
     expect(() => setConfigValue("pocHarness", "maybe")).toThrow(
       "pocHarness must be true or false",

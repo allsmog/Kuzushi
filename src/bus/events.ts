@@ -34,6 +34,7 @@ export interface PipelineStats {
   skippedAlreadyTriaged: number;
   skippedLowConfidence?: number;
   skippedByFpFilter?: number;
+  skippedByScoreFilter?: number;
   softSuppressedFindings?: number;
   skippedByLlmRescore?: number;
   corroboratedClusters?: number;
@@ -43,6 +44,9 @@ export interface PipelineStats {
   verified?: number;
   verifyErrors?: number;
   verifyCostUsd?: number;
+  verifyGateAutoAccepted?: number;
+  verifyGateSkipped?: number;
+  verifyGateCostUsd?: number;
   pocHarnessGenerated?: number;
   pocHarnessSkipped?: number;
   pocHarnessErrors?: number;
@@ -84,6 +88,7 @@ export type PipelineStartEvent = EventEnvelope<
     config: KuzushiConfig;
     scanOpts: ScanOpts;
     resumeRunId?: string;
+    monorepoContext?: import("../monorepo/types.js").MonorepoSharedContext;
   }
 >;
 

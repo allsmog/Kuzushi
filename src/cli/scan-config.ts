@@ -20,6 +20,8 @@ export interface ScanCommandOptions {
   verifyRefinementMaxIterations?: number;
   verifyReflectionInterval?: number;
   verifyMinConfidence?: number;
+  verifyGate?: boolean;
+  verifyGateModel?: string;
   cryptoBehavioralTest: boolean;
   dynamicAnalysis?: boolean;
   dynamicMaxCandidates?: number;
@@ -73,6 +75,9 @@ export interface ScanCommandOptions {
   listModules?: boolean;
   modules?: string;
   moduleFilter?: string;
+  modulePriority?: string;
+  maxModules?: number;
+  dryRun?: boolean;
 }
 
 export function applyScanCommandConfigOverrides(
@@ -82,7 +87,7 @@ export function applyScanCommandConfigOverrides(
   // Apply preset before any other overrides so CLI flags take precedence.
   if (opts.preset) {
     if (!isValidPreset(opts.preset)) {
-      throw new CliUsageError(`Unknown preset "${opts.preset}". Valid presets: fast, standard, deep, reference`);
+      throw new CliUsageError(`Unknown preset "${opts.preset}". Valid presets: safe, fast, standard, deep, reference`);
     }
     const preset = SCAN_PRESETS[opts.preset];
     // Deep-merge scannerConfig so presets can override individual scanner
@@ -109,6 +114,7 @@ export function applyScanCommandConfigOverrides(
       ...(config.enabledTasks ?? []),
       "crypto-behavioral-test",
     ]);
+    promoteTaskModeForExplicitTasks(config);
   }
   if (opts.dynamicAnalysis) config.dynamicAnalysisEnabled = true;
   if (opts.taintDiffBase) config.taintDiffBase = opts.taintDiffBase.trim() || undefined;
@@ -126,6 +132,7 @@ export function applyScanCommandConfigOverrides(
       "code-graph-build",
       "code-graph-enrich",
     ]);
+    promoteTaskModeForExplicitTasks(config);
   }
   if (opts.multiStrategy) config.multiStrategyMode = "adaptive";
   if (opts.multiStrategyFull) config.multiStrategyMode = "full";
@@ -177,6 +184,7 @@ export function applyScanCommandConfigOverrides(
       ...(config.enabledTasks ?? []),
       ...parseCommaSeparatedList(opts.enabledTasks),
     ]);
+    promoteTaskModeForExplicitTasks(config);
   }
 
   if (opts.qualityGate) {
@@ -195,6 +203,9 @@ export function applyScanCommandConfigOverrides(
   }
 
   applyOptionalUnitInterval(config, "verifyMinConfidence", opts.verifyMinConfidence, "--verify-min-confidence");
+
+  if (opts.verifyGate === false) config.verifyGateEnabled = false;
+  if (opts.verifyGateModel) config.verifyGateModel = opts.verifyGateModel;
 
   applyOptionalPositiveInteger(config, "verifyMaxTurns", opts.verifyMaxTurns, "--verify-max-turns");
   applyOptionalPositiveInteger(config, "verifyConcurrency", opts.verifyConcurrency, "--verify-concurrency");
@@ -256,6 +267,12 @@ export function resolveScannerOverride(
   opts: Pick<ScanCommandOptions, "scanners">,
 ): string[] | undefined {
   return opts.scanners ? parseCommaSeparatedList(opts.scanners) : undefined;
+}
+
+function promoteTaskModeForExplicitTasks(config: KuzushiConfig): void {
+  if (config.taskMode === "scanners-only") {
+    config.taskMode = "explicit";
+  }
 }
 
 function applyOptionalPositiveInteger<T extends keyof KuzushiConfig>(
@@ -321,8 +338,11 @@ function coerceNonNegativeInteger(value: number, flagName: string): number {
 }
 
 function coerceUnitInterval(value: number, flagName: string): number {
-  if (!Number.isFinite(value) || value < 0 || value > 1) {
-    throw new CliUsageError(`${flagName} must be a number between 0 and 1.`);
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new CliUsageError(`${flagName} must be a number between 0 and 1 (or 0-100 as a percentage).`);
+  }
+  if (value > 1) {
+    return value / 100;
   }
   return value;
 }

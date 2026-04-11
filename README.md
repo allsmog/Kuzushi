@@ -6,6 +6,8 @@
 [![npm](https://img.shields.io/npm/v/kuzushi)](https://www.npmjs.com/package/kuzushi)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+[kuzushi.dev](https://kuzushi.dev)
+
 SAST tools cry wolf. Semgrep finds 500 issues in your codebase. 480 of them are false positives. You spend hours triaging a wall of noise and still miss the real vulnerability on line 247.
 
 Kuzushi runs the same scanners, then sends an AI agent to investigate each finding — reading the actual code, tracing data flow, checking for sanitization. It tells you which findings are real, which are noise, and optionally proves exploitability by constructing a working PoC.
@@ -174,6 +176,11 @@ kuzushi <repo> --preset deep        # standard + exploit verification
 kuzushi <repo> --preset reference   # verification + PoC generation + threat-informed hunting
                                     # with a frontier model for adversarial CTF-style exploration
 ```
+
+Preset task modes:
+- `fast` uses `taskMode: "scanners-only"`
+- `standard` and `deep` use `taskMode: "explicit"`
+- `reference` uses `taskMode: "compat"` to preserve the legacy full-pipeline behavior
 
 The `reference` preset uses a cost-smart model tiering strategy: a standard model handles bulk scanning and triage, while a frontier model is used surgically for the threat-hunt stage only — where stronger adversarial reasoning has the highest ROI for zero-day discovery. Per-task model overrides keep costs controlled.
 
@@ -366,7 +373,8 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `busBackend` | `"in-process"` | Message bus transport (`in-process`) |
 | `triageConcurrency` | `5` | Parallel LLM triage calls |
 | `scanMode` | `"concurrent"` | Scanner execution mode (`sequential` or `concurrent`) |
-| `enabledTasks` | `["context-gatherer", "context-enricher", "app-model-build", "threat-scenario-build", "secrets-crypto-detect", "crypto-behavioral-test", "code-config-detect", ...]` | Agent tasks to enable beyond scanners |
+| `taskMode` | `"compat"` | Task selection policy: `compat`, `explicit`, or `scanners-only` |
+| `enabledTasks` | `["context-gatherer", "context-enricher", "secrets-crypto-detect", ...]` | Explicit AgentTask list when `taskMode` is `explicit`, or compat overrides in legacy mode |
 | `agentRuntimeBackend` | `"claude"` | Agent runtime backend (`claude` or `pi-ai`) |
 | `verify` | `false` | Enable proof-of-exploitability verification |
 | `verifyModel` | _(uses `triageModel` or `model`)_ | Override model for verification agent |
@@ -412,12 +420,13 @@ Example config:
 {
   "scanners": ["semgrep", "codeql", "agentic"],
   "scanMode": "concurrent",
+  "taskMode": "explicit",
   "triageConcurrency": 3,
   "verify": true,
   "verifyMinConfidence": 0.7,
   "auditLog": true,
   "cryptoBehavioralTestEnabled": false,
-  "enabledTasks": ["context-gatherer", "context-enricher", "app-model-build", "threat-scenario-build", "secrets-crypto-detect", "crypto-behavioral-test", "code-config-detect"],
+  "enabledTasks": ["context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect", "taint-cwe-select", "taint-iris"],
   "scannerConfig": {
     "codeql": { "dbPath": "./codeql-db", "suite": "javascript-security-extended" },
     "semgrep": { "binary": "opengrep", "configFlag": "auto" },

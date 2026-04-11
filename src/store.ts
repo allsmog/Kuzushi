@@ -214,7 +214,7 @@ export function upsertFinding(
 }
 
 /** Default flush threshold for {@link FindingUpsertQueue}. */
-const DEFAULT_FLUSH_THRESHOLD = 50;
+const DEFAULT_FLUSH_THRESHOLD = 1;
 
 /**
  * Batched upsert queue — collects individual upsert calls and flushes them

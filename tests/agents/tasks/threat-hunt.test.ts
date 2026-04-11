@@ -89,24 +89,24 @@ describe("threat-hunt", () => {
         trustZone: "partner-network",
       });
 
-      const prompt = buildPrompt(actor);
+      const prompt = buildPrompt(actor, []);
       expect(prompt).toContain("External API Consumer");
       expect(prompt).toContain("Third-party service calling our REST API");
       expect(prompt).toContain("partner-network");
     });
 
     it("includes CTF framing", () => {
-      const prompt = buildPrompt(makeDfdElement());
+      const prompt = buildPrompt(makeDfdElement(), []);
       expect(prompt).toContain("competing in a CTF");
     });
 
     it("includes anti-hallucination constraints", () => {
-      const prompt = buildPrompt(makeDfdElement());
+      const prompt = buildPrompt(makeDfdElement(), []);
       expect(prompt).toContain("Anti-hallucination constraints");
     });
 
     it("does not include framework awareness", () => {
-      const prompt = buildPrompt(makeDfdElement());
+      const prompt = buildPrompt(makeDfdElement(), []);
       expect(prompt).not.toContain("Framework Awareness");
     });
   });
@@ -147,9 +147,9 @@ describe("threat-hunt", () => {
       expect(config.runsPerActor).toBe(5);
     });
 
-    it("defaults maxConcurrentHunts to 5", () => {
+    it("defaults maxConcurrentHunts to 3", () => {
       const config = resolveConfig(makeCtx());
-      expect(config.maxConcurrentHunts).toBe(5);
+      expect(config.maxConcurrentHunts).toBe(3);
     });
   });
 

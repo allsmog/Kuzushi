@@ -100,8 +100,26 @@ describe("applyScanCommandConfigOverrides", () => {
     const config = structuredClone(DEFAULTS);
 
     expect(() => applyScanCommandConfigOverrides(config, makeOptions({
-      verifyMinConfidence: 1.5,
-    }))).toThrowError(new CliUsageError("--verify-min-confidence must be a number between 0 and 1."));
+      verifyMinConfidence: 101,
+    }))).toThrowError(new CliUsageError("--verify-min-confidence must be a number between 0 and 1 (or 0-100 as a percentage)."));
+  });
+
+  it("normalizes percentage-style verify-min-confidence (90 -> 0.9)", () => {
+    const config = structuredClone(DEFAULTS);
+    applyScanCommandConfigOverrides(config, makeOptions({
+      verify: true,
+      verifyMinConfidence: 90,
+    }));
+    expect(config.verifyMinConfidence).toBe(0.9);
+  });
+
+  it("accepts standard unit interval verify-min-confidence", () => {
+    const config = structuredClone(DEFAULTS);
+    applyScanCommandConfigOverrides(config, makeOptions({
+      verify: true,
+      verifyMinConfidence: 0.7,
+    }));
+    expect(config.verifyMinConfidence).toBe(0.7);
   });
 
   it("rejects poc harness without verification", () => {
@@ -136,6 +154,7 @@ describe("applyScanCommandConfigOverrides", () => {
     expect(config.scannerConfig["taint-analysis"].passes).toEqual([1, 2, 3]);
 
     // Top-level preset fields are applied
+    expect(config.taskMode).toBe("compat");
     expect(config.verify).toBe(true);
     expect(config.pocHarness).toBe(true);
     // Scanners are NOT overridden — user's configured scanners are preserved
@@ -156,6 +175,66 @@ describe("applyScanCommandConfigOverrides", () => {
     expect(config.scanners).toEqual(DEFAULTS.scanners);
     // Threat-hunt gets Orchid from scannerConfig deep-merge
     expect(config.scannerConfig["threat-hunt"].model).toBe("anthropic:claude-orchid-preview");
+  });
+
+  it("applies fast preset as a true scanners-only mode", () => {
+    const config = structuredClone(DEFAULTS);
+
+    applyScanCommandConfigOverrides(config, makeOptions({ preset: "fast" }));
+
+    expect(config.taskMode).toBe("scanners-only");
+    expect(config.enabledTasks).toEqual([]);
+    expect(config.enableDynamicTaskSelection).toBe(false);
+    expect(config.enableContextGathering).toBe(false);
+    expect(config.enableContextEnrichment).toBe(false);
+  });
+
+  it("applies standard preset as explicit task mode", () => {
+    const config = structuredClone(DEFAULTS);
+
+    applyScanCommandConfigOverrides(config, makeOptions({ preset: "standard" }));
+
+    expect(config.taskMode).toBe("explicit");
+    expect(config.enabledTasks).toEqual([
+      "context-gatherer",
+      "context-enricher",
+      "secrets-crypto-detect",
+      "code-config-detect",
+      "taint-cwe-select",
+      "taint-iris",
+    ]);
+    expect(config.enableDynamicTaskSelection).toBe(false);
+  });
+
+  it("applies deep preset as explicit standard coverage plus verification", () => {
+    const config = structuredClone(DEFAULTS);
+
+    applyScanCommandConfigOverrides(config, makeOptions({ preset: "deep" }));
+
+    expect(config.taskMode).toBe("explicit");
+    expect(config.enabledTasks).toEqual([
+      "context-gatherer",
+      "context-enricher",
+      "secrets-crypto-detect",
+      "code-config-detect",
+      "taint-cwe-select",
+      "taint-iris",
+      "threat-model-randori",
+      "threat-hunt",
+    ]);
+    expect(config.verify).toBe(true);
+  });
+
+  it("promotes scanners-only presets to explicit when CLI flags explicitly enable tasks", () => {
+    const config = structuredClone(DEFAULTS);
+
+    applyScanCommandConfigOverrides(config, makeOptions({
+      preset: "fast",
+      enabledTasks: "custom-detector",
+    }));
+
+    expect(config.taskMode).toBe("explicit");
+    expect(config.enabledTasks).toEqual(["custom-detector"]);
   });
 
   it("rejects unknown preset names", () => {

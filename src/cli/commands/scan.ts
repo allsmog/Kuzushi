@@ -37,6 +37,7 @@ import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import { printQualityGateResult } from "../../report.js";
 import { CliCommandError, CliConfigError, CliUsageError } from "../errors.js";
 import { warnPiAiBackendApiKeys, resolveActivePiAiModels, validatePiAiProviderCredentials } from "../pi-ai.js";
+import { resolveInitialTaskPlan } from "../../bus/orchestrator/task-policy.js";
 import {
   applyScanCommandConfigOverrides,
   resolveScanSeverity,
@@ -62,12 +63,22 @@ export interface PipelineParams {
   reportMode?: "full" | "suppress";
   runtime?: AgentRuntime;
   manageCache?: boolean;
+  /** Shared monorepo context injected into per-module pipeline state. */
+  monorepoContext?: import("../../monorepo/types.js").MonorepoSharedContext;
 }
 
 export interface PipelineResult {
   runId: string;
   status: "complete" | "error";
   stats?: PipelineStats;
+}
+
+export interface ScanPlanSummary {
+  scannerIds: string[];
+  taskMode?: KuzushiConfig["taskMode"];
+  resolvedTaskIds: string[];
+  dynamicSelectionActive: boolean;
+  taskSummary: string;
 }
 
 export type MonorepoExecutionReason =
@@ -109,6 +120,19 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   }
 
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
+
+  if (opts.dryRun) {
+    const { scannerIds, taskMode, taskSummary, dynamicSelectionActive } = getScanPlanSummary(config, scanOpts);
+    console.log("\nDry run — no scan will be executed.");
+    console.log(`  Target:    ${scanPath}`);
+    console.log(`  Scanners:  ${scannerIds.join(", ") || "none"}`);
+    if (taskMode) console.log(`  Task mode: ${taskMode}`);
+    console.log(`  Tasks:     ${taskSummary}`);
+    console.log(`  Dynamic:   ${dynamicSelectionActive ? "on" : "off"}`);
+    console.log(`  Model:     ${config.model}`);
+    console.log(`  Severity:  ${scanOpts.severity?.join(", ") || "all"}\n`);
+    return;
+  }
 
   await runPipeline({
     repoRoot,
@@ -179,6 +203,9 @@ export function prepareScanExecution(repoRoot: string, opts: ScanCommandOptions)
   const { pluginScanners, enabledTasks: aliasExpandedTasks } = expandScannerSelections(effectiveScanners, config);
   if (aliasExpandedTasks.length > 0) {
     config.enabledTasks = [...(config.enabledTasks ?? []), ...aliasExpandedTasks];
+    if (config.taskMode === "scanners-only") {
+      config.taskMode = "explicit";
+    }
   }
   if (scannersOverride) {
     scannersOverride = pluginScanners;
@@ -278,6 +305,8 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   const runRepoId = params.runRepoId ?? path.resolve(repoRoot);
   const db = initDb(dbPath);
   let bus: ReturnType<typeof createBus> | undefined;
+  let taskRegistry: Awaited<ReturnType<typeof createDefaultTaskRegistry>> | undefined;
+  const shutdownHookDisposers: Array<() => void> = [];
 
   if (opts.fresh) {
     try {
@@ -291,7 +320,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   try {
     const registry = createDefaultRegistry();
     bus = createBus(config);
-    const taskRegistry = await createDefaultTaskRegistry(registry, config, repoRoot);
+    taskRegistry = await createDefaultTaskRegistry(registry, config, repoRoot);
     await registerAllWorkers(bus, { registry, taskRegistry, db, config, runtime });
   } catch (error) {
     db.close();
@@ -301,20 +330,20 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     throw new CliCommandError(error instanceof Error ? error.message : String(error));
   }
 
-  registerShutdownHook("bus-drain", async () => {
+  shutdownHookDisposers.push(registerShutdownHook("bus-drain", async () => {
     if (bus) {
       try { await bus.close(); } catch { /* best-effort */ }
     }
-  }, 1);
-  registerShutdownHook("db-close", async () => {
+  }, 1));
+  shutdownHookDisposers.push(registerShutdownHook("db-close", async () => {
     try { db.close(); } catch { /* best-effort */ }
-  }, 2);
+  }, 2));
   if (ownsRuntime) {
-    registerShutdownHook("agent-runtime-shutdown", async () => {
+    shutdownHookDisposers.push(registerShutdownHook("agent-runtime-shutdown", async () => {
       if (isShutdownCapableRuntime(runtime)) {
         try { await runtime.shutdown(); } catch { /* best-effort */ }
       }
-    }, 3);
+    }, 3));
   }
 
   let streamingCleanup: (() => Promise<void>) | undefined;
@@ -322,11 +351,11 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     const { startStreamingServer } = await import("../../streaming.js");
     const streaming = startStreamingServer(bus, config.streamingPort ?? 0);
     streamingCleanup = streaming.close;
-    registerShutdownHook("streaming-server", async () => {
+    shutdownHookDisposers.push(registerShutdownHook("streaming-server", async () => {
       if (streamingCleanup) {
         try { await streamingCleanup(); } catch { /* best-effort */ }
       }
-    }, 0);
+    }, 0));
   }
 
   const resumeRunId = resolveResumeRunId(db, runRepoId, repoName, opts.resume);
@@ -361,7 +390,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     .then((event) => ({ kind: "error" as const, event }));
 
   if (reportMode === "full") {
-    printScanPlan(config);
+    printScanPlan(config, scanOpts, taskRegistry);
   }
 
   try {
@@ -371,6 +400,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
         config,
         scanOpts,
         resumeRunId,
+        monorepoContext: params.monorepoContext,
       }),
     );
 
@@ -415,26 +445,62 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
             await runtime.shutdown();
           }
         } finally {
-          db.close();
+          try {
+            db.close();
+          } finally {
+            for (const dispose of shutdownHookDisposers.reverse()) {
+              try { dispose(); } catch { /* best-effort */ }
+            }
+          }
         }
       }
     }
   }
 }
 
-function printScanPlan(config: KuzushiConfig): void {
-  const tasks = config.enabledTasks ?? [];
-  const taskSummary = tasks.length === 0
-    ? "none (scanners only)"
-    : tasks.length === 1 && tasks[0] === "*"
-      ? "all"
-      : `${tasks.length} (${tasks.slice(0, 3).join(", ")}${tasks.length > 3 ? ", ..." : ""})`;
-  const scanners = config.scanners?.join(", ") ?? "semgrep";
-  const dynamic = config.enableDynamicTaskSelection ? "on" : "off";
+export function getScanPlanSummary(
+  config: KuzushiConfig,
+  scanOpts: ScanOpts,
+  taskRegistry?: Awaited<ReturnType<typeof createDefaultTaskRegistry>>,
+): ScanPlanSummary {
+  const scannerIds = scanOpts.scanners ?? config.scanners ?? ["semgrep"];
+  const taskPlan = taskRegistry
+    ? resolveInitialTaskPlan(taskRegistry, scannerIds, config)
+    : undefined;
+  const resolvedTaskIds = taskPlan
+    ? taskPlan.enabledTaskIds.filter((id) => !scannerIds.includes(id))
+    : [];
+  return {
+    scannerIds,
+    taskMode: taskPlan?.taskMode,
+    resolvedTaskIds,
+    dynamicSelectionActive: taskPlan?.dynamicSelectionActive ?? false,
+    taskSummary: taskPlan?.taskMode === "scanners-only"
+    ? "none (scanners-only mode)"
+    : resolvedTaskIds.length === 0
+      ? "none"
+      : `${resolvedTaskIds.length} (${resolvedTaskIds.slice(0, 4).join(", ")}${resolvedTaskIds.length > 4 ? ", ..." : ""})`,
+  };
+}
+
+function printScanPlan(
+  config: KuzushiConfig,
+  scanOpts: ScanOpts,
+  taskRegistry?: Awaited<ReturnType<typeof createDefaultTaskRegistry>>,
+): void {
+  const { scannerIds, taskMode, dynamicSelectionActive, taskSummary } = getScanPlanSummary(
+    config,
+    scanOpts,
+    taskRegistry,
+  );
+  const scanners = scannerIds.join(", ") || "none";
   console.error("\nScan plan:");
   console.error(`  Scanners:  ${scanners}`);
+  if (taskMode) {
+    console.error(`  Task mode: ${taskMode}`);
+  }
   console.error(`  Tasks:     ${taskSummary}`);
-  console.error(`  Dynamic:   ${dynamic}\n`);
+  console.error(`  Dynamic:   ${dynamicSelectionActive ? "on" : "off"}\n`);
 }
 
 function resolveResumeRunId(
