@@ -1,9 +1,26 @@
 import type { KuzushiConfig } from "../types.js";
 
-export type ScanPreset = "fast" | "standard" | "deep" | "reference";
+export type ScanPreset = "safe" | "fast" | "standard" | "deep" | "reference";
 
 export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
+  // Recommended for first-time users: tight cost and turn caps, no expensive optional tasks.
+  safe: {
+    taskMode: "explicit",
+    enabledTasks: [
+      "context-gatherer",
+      "context-enricher",
+      "secrets-crypto-detect",
+      "code-config-detect",
+    ],
+    enableDynamicTaskSelection: false,
+    triageMaxFindings: 20,
+    triageSpecialistMaxTurns: 5,
+    costBudgetUsd: 5,
+    dynamicAnalysisEnabled: false,
+    cryptoBehavioralTestEnabled: false,
+  },
   fast: {
+    taskMode: "scanners-only",
     enabledTasks: [],
     enableDynamicTaskSelection: false,
     enableContextGathering: false,
@@ -11,6 +28,7 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     variantAnalysis: false,
   },
   standard: {
+    taskMode: "explicit",
     enabledTasks: [
       "context-gatherer",
       "context-enricher",
@@ -22,11 +40,27 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     enableDynamicTaskSelection: false,
   },
   deep: {
+    taskMode: "explicit",
+    enabledTasks: [
+      "context-gatherer",
+      "context-enricher",
+      "secrets-crypto-detect",
+      "code-config-detect",
+      "taint-cwe-select",
+      "taint-iris",
+      "threat-model-randori",
+      "threat-hunt",
+    ],
     verify: true,
+    variantAnalysis: true,
+    scannerConfig: {
+      "threat-hunt": { maxActors: 8, runsPerActor: 2 },
+    },
   },
   reference: {
     // Inherits the user's configured model and scanners — does not override.
     // Orchid is used surgically for threat-hunt only (see scannerConfig below).
+    taskMode: "compat",
     verify: true,
     pocHarness: true,
     codeGraphEnabled: true,
@@ -36,6 +70,7 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
       "threat-hunt": {
         model: "anthropic:claude-orchid-preview",
         runsPerActor: 3,
+        maxActors: 10,
         maxConcurrentHunts: 3,
       },
     },
@@ -43,5 +78,5 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
 };
 
 export function isValidPreset(value: string): value is ScanPreset {
-  return value === "fast" || value === "standard" || value === "deep" || value === "reference";
+  return value === "safe" || value === "fast" || value === "standard" || value === "deep" || value === "reference";
 }

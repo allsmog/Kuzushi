@@ -1,5 +1,6 @@
 import type { KuzushiConfig } from "../types.js";
 import path from "node:path";
+import { AGENT_RUNTIME_BACKENDS } from "./defaults.js";
 
 export type ConfigValidationSeverity = "error" | "warning";
 
@@ -12,6 +13,15 @@ export interface ConfigValidationIssue {
 
 export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIssue[] {
   const issues: ConfigValidationIssue[] = [];
+
+  if (config.agentRuntimeBackend != null && !AGENT_RUNTIME_BACKENDS.has(String(config.agentRuntimeBackend))) {
+    issues.push({
+      severity: "error",
+      path: "agentRuntimeBackend",
+      message: `Unsupported agent runtime backend "${String(config.agentRuntimeBackend)}".`,
+      hint: `Valid values: ${[...AGENT_RUNTIME_BACKENDS].join(", ")}.`,
+    });
+  }
 
   if (config.busBackend !== "in-process") {
     issues.push({
@@ -46,6 +56,24 @@ export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIs
       path: "externalTasks",
       message: "externalTasks are configured but enableExternalTasks is false, so they will not load.",
       hint: "Set enableExternalTasks=true to activate the configured external tasks.",
+    });
+  }
+
+  if (config.taskMode === "scanners-only" && (config.enabledTasks?.length ?? 0) > 0) {
+    issues.push({
+      severity: "warning",
+      path: "enabledTasks",
+      message: "enabledTasks are ignored when taskMode is scanners-only.",
+      hint: "Use taskMode=explicit or compat if you want AgentTask execution.",
+    });
+  }
+
+  if (config.taskMode === "scanners-only" && config.enableDynamicTaskSelection === true) {
+    issues.push({
+      severity: "warning",
+      path: "enableDynamicTaskSelection",
+      message: "Dynamic task selection is ignored when taskMode is scanners-only.",
+      hint: "Use taskMode=compat or explicit to allow task-selector to add tasks.",
     });
   }
 

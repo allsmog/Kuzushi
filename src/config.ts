@@ -236,10 +236,10 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
 
   if (key === "verifyMinConfidence") {
     const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0 || n > 1) {
-      throw new Error("verifyMinConfidence must be a number between 0 and 1");
+    if (!Number.isFinite(n) || n < 0 || n > 100) {
+      throw new Error("verifyMinConfidence must be a number between 0 and 1 (or 0-100 as a percentage)");
     }
-    config.verifyMinConfidence = n;
+    config.verifyMinConfidence = n > 1 ? n / 100 : n;
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
@@ -380,6 +380,16 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       throw new Error("scanMode must be one of: sequential, concurrent");
     }
     config.scanMode = mode;
+    saveUpdatedConfigLayer(config, repoRoot);
+    return;
+  }
+
+  if (key === "taskMode") {
+    const mode = raw.trim();
+    if (mode !== "compat" && mode !== "explicit" && mode !== "scanners-only") {
+      throw new Error("taskMode must be one of: compat, explicit, scanners-only");
+    }
+    config.taskMode = mode;
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
@@ -796,6 +806,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     DEFAULTS.retryBackoffMultiplier ?? 2,
   );
   const scanMode = normalizeScanMode(config.scanMode);
+  const taskMode = normalizeTaskMode(config.taskMode);
   const agentRuntimeBackend = normalizeAgentRuntimeBackend(config.agentRuntimeBackend);
   const agentRuntimeConfig = normalizeAgentRuntimeConfig(config.agentRuntimeConfig);
   const confidenceSignalWeights = normalizeConfidenceSignalWeights(config.confidenceSignalWeights);
@@ -877,6 +888,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     triageBatchSize,
     triageConcurrency,
     scanMode,
+    taskMode,
     agentRuntimeBackend,
     agentRuntimeConfig,
     confidenceSignalWeights,
@@ -1319,6 +1331,13 @@ function normalizeScanMode(value: unknown): KuzushiConfig["scanMode"] {
   return DEFAULTS.scanMode;
 }
 
+function normalizeTaskMode(value: unknown): KuzushiConfig["taskMode"] {
+  if (value === "compat" || value === "explicit" || value === "scanners-only") {
+    return value;
+  }
+  return DEFAULTS.taskMode;
+}
+
 function normalizeAgentRuntimeBackend(value: unknown): KuzushiConfig["agentRuntimeBackend"] {
   if (typeof value !== "string") {
     return DEFAULTS.agentRuntimeBackend;
@@ -1360,9 +1379,10 @@ function normalizePositiveNumber(value: unknown, fallback: number): number {
 
 function normalizeUnitInterval(value: unknown, fallback: number): number {
   const n = Number(value);
-  if (!Number.isFinite(n) || n < 0 || n > 1) {
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
     return fallback;
   }
+  if (n > 1) return n / 100;
   return n;
 }
 

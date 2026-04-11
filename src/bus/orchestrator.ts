@@ -89,6 +89,7 @@ import { loadHooksFromFile } from "../hooks/loader.js";
 import {
   collectTransitiveDeps,
   injectThreatModelPolicyCandidates,
+  resolveInitialTaskPlan,
   resolveOrderWithPolicyEdges,
 } from "./orchestrator/task-policy.js";
 import {
@@ -112,6 +113,13 @@ import {
   isVerificationDone as isVerificationQueueDone,
   publishVerifyQueueDepth,
 } from "./orchestrator/verification-dispatcher.js";
+import {
+  deduplicateByPattern,
+  gateVerificationCandidates,
+  registerVerifiedPattern,
+  type VerifyGateResult,
+} from "./orchestrator/verify-gate.js";
+import { cheapVerifyCandidates } from "./orchestrator/cheap-verify.js";
 import type {
   DynamicAnalysisCandidate,
   OrchestratorDeps,
@@ -337,6 +345,11 @@ export class PipelineOrchestrator {
       skippedAlreadyTriaged: 0,
       skippedLowConfidence: 0,
       skippedByFpFilter: 0,
+      skippedByScoreFilter: 0,
+      verifyGateAutoAccepted: 0,
+      verifyGateSkipped: 0,
+      verifyGateCostUsd: 0,
+      verifiedPatterns: new Map<string, string>(),
       triageQueue: [],
       queueCursor: 0,
       triageTotal: 0,
@@ -434,6 +447,12 @@ export class PipelineOrchestrator {
         scanStart: event.meta.timestamp,
       },
     };
+
+    // Inject monorepo shared context into task outputs so downstream tasks
+    // (threat-model-randori, context-enricher, etc.) can read it via upstreamOutputs.
+    if (event.payload.monorepoContext) {
+      state.taskOutputs.set("monorepo-context", event.payload.monorepoContext);
+    }
 
     // Load organization precedents
     try {
@@ -722,11 +741,13 @@ export class PipelineOrchestrator {
       });
     }
 
-    state.verifyTotal = pendingCandidates.length;
-    state.verifyQueue = pendingCandidates.map((item, idx) => ({
+    const gatedCandidates = await this.runVerifyGateOnCandidates(pendingCandidates, state, runId);
+
+    state.verifyTotal = gatedCandidates.length;
+    state.verifyQueue = gatedCandidates.map((item, idx) => ({
       ...item,
       index: idx + 1,
-      total: pendingCandidates.length,
+      total: gatedCandidates.length,
     }));
 
     await this.startVerification(state, runId);
@@ -820,64 +841,14 @@ export class PipelineOrchestrator {
       await this.startLegacyScan(state, runId);
       return;
     }
+    const taskPlan = resolveInitialTaskPlan(this.deps.taskRegistry, state.scanners, state.config);
+    const dynamicSelectionActive = taskPlan.dynamicSelectionActive;
+    let enabledTaskIds = [...taskPlan.enabledTaskIds];
 
-    const enableContextExplicit = state.config.enableContextGathering !== false
-      && this.deps.taskRegistry.has("context-gatherer");
-    const enableContextEnrichment = state.config.enableContextEnrichment === true
-      && this.deps.taskRegistry.has("context-enricher");
-    // When enabledTasks is empty, enable ALL registered tasks.
-    // When set to ["*"], also enable all tasks (explicit opt-in to full suite).
-    // When explicitly set to specific task IDs, use those as the base set.
-    // Note: when dynamic selection is active, task-selector may add tasks beyond the base set.
-    const explicitTasks = state.config.enabledTasks ?? [];
-    const allRegisteredTasks = this.deps.taskRegistry ? this.deps.taskRegistry.ids() : [];
-    const useAllTasks = explicitTasks.length === 1 && explicitTasks[0] === "*";
-
-    const dynamicSelectionActive = state.config.enableDynamicTaskSelection === true
-      && this.deps.taskRegistry.has("task-selector");
-
-    let baseTaskIds: string[];
-    if (useAllTasks) {
-      // User said "run everything" — bypass dynamic selection filtering
-      baseTaskIds = allRegisteredTasks;
-    } else if (explicitTasks.length === 0) {
-      if (dynamicSelectionActive) {
-        // Exclude selectable tasks — task-selector will add the relevant ones
-        baseTaskIds = allRegisteredTasks.filter(id => !SELECTABLE_TASK_IDS.has(id));
-      } else {
-        baseTaskIds = allRegisteredTasks;
-      }
-    } else {
-      baseTaskIds = explicitTasks;
-    }
-
-    const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
-      ...state.scanners,
-      ...(enableContextExplicit ? ["context-gatherer"] : []),
-      ...(enableContextEnrichment ? ["context-enricher"] : []),
-      ...baseTaskIds,
-      ...(dynamicSelectionActive ? ["task-selector"] : []),
-    ]);
-
-    // Auto-inject all transitive dependencies for enabled tasks
-    let enabledTaskIds = collectTransitiveDeps(this.deps.taskRegistry, candidateIds);
-
-    // Respect explicit enableContextGathering: false — only remove context-gatherer
-    // if no other enabled task depends on it (otherwise DAG resolution would throw).
-    if (state.config.enableContextGathering === false && this.deps.taskRegistry) {
-      const othersDepend = enabledTaskIds.some(
-        (id) =>
-          id !== "context-gatherer"
-          && this.deps.taskRegistry!.has(id)
-          && this.deps.taskRegistry!.get(id).dependsOn.includes("context-gatherer"),
+    if (taskPlan.contextGatheringForced) {
+      log.info(
+        "[orchestrator] enableContextGathering: false ignored — task-selector requires context-gatherer",
       );
-      if (!othersDepend) {
-        enabledTaskIds = enabledTaskIds.filter((id) => id !== "context-gatherer");
-      } else if (dynamicSelectionActive) {
-        log.info(
-          "[orchestrator] enableContextGathering: false ignored — task-selector requires context-gatherer",
-        );
-      }
     }
 
     // Track already-completed tasks for dynamic re-resolution
@@ -1057,6 +1028,12 @@ export class PipelineOrchestrator {
             try {
               updateRunCost(this.deps.db, state.checkpointRunId, normalizedCost);
             } catch { /* best-effort cost persistence */ }
+            // Fire budget events after each task so budget:warning/exceeded are
+            // emitted promptly, not just at end-of-stage.
+            await this.emitBudgetCheck(state, runId);
+            if (this.isBudgetExceeded(state)) {
+              await this.emitBudgetExceeded(state, runId);
+            }
           }
 
           if (outputKind === "findings") {
@@ -1334,7 +1311,7 @@ export class PipelineOrchestrator {
       const rescoreResults = await rescoreFindings(rescoreWindow, {
         model: state.config.llmRescoreModel,
         threshold: state.config.llmRescoreThreshold,
-        repoRoot: state.context.repoRoot,
+        repoRoot: state.context.scanPath ?? state.context.repoRoot,
         runtime: this.deps.runtime,
       });
       const applied = applyRescoreResults(rescoreWindow, rescoreResults);
@@ -1351,7 +1328,9 @@ export class PipelineOrchestrator {
       try {
         const reachabilityContext: AgentTaskContext = {
           runId,
-          repoRoot: state.context.repoRoot,
+          projectRoot: state.context.repoRoot,
+          workRoot: state.context.scanPath ?? state.context.repoRoot,
+          repoRoot: state.context.scanPath ?? state.context.repoRoot,
           scanPath: state.context.scanPath,
           repoName: state.context.repoName,
           config: state.config,
@@ -1386,7 +1365,9 @@ export class PipelineOrchestrator {
       try {
         const cgContext: AgentTaskContext = {
           runId,
-          repoRoot: state.context.repoRoot,
+          projectRoot: state.context.repoRoot,
+          workRoot: state.context.scanPath ?? state.context.repoRoot,
+          repoRoot: state.context.scanPath ?? state.context.repoRoot,
           scanPath: state.context.scanPath,
           repoName: state.context.repoName,
           config: state.config,
@@ -1442,7 +1423,22 @@ export class PipelineOrchestrator {
     const pendingFindings = filteredFindings.filter(
       (finding) => !alreadyTriaged.has(finding.fingerprint),
     );
-    let triageCandidates = capFindingsForTriage(pendingFindings, state.scanOpts.maxFindings);
+
+    // Pre-triage score gate: drop findings below triageMinScore before any LLM call.
+    const minScore = state.config.triageMinScore;
+    let pendingAboveThreshold = pendingFindings;
+    if (typeof minScore === "number" && minScore > 0) {
+      pendingAboveThreshold = pendingFindings.filter((f) => getRankingScore(f) >= minScore);
+      state.skippedByScoreFilter = pendingFindings.length - pendingAboveThreshold.length;
+      if (state.skippedByScoreFilter > 0) {
+        log.info(`[score-gate] Dropped ${state.skippedByScoreFilter} findings below score ${minScore}`);
+      }
+    }
+
+    let triageCandidates = capFindingsForTriage(
+      pendingAboveThreshold,
+      state.config.triageMaxFindings ?? state.scanOpts.maxFindings,
+    );
 
     if (state.config.skipTriageForHighConfidenceAgentic) {
       log.warn(
@@ -1535,8 +1531,11 @@ export class PipelineOrchestrator {
 
     // Pipeline: if the finding was added to verifyCandidates by handleTriageResultState,
     // immediately queue it for verification while triage continues.
+    // When the verification gate is enabled, skip pipelining so all candidates go through
+    // the gate in a single batch after triage completes (the gate needs the full picture).
     if (
-      state.verifyCandidates.length > 0
+      state.config.verifyGateEnabled !== true
+      && state.verifyCandidates.length > 0
       && state.verifyCandidates[state.verifyCandidates.length - 1].finding.fingerprint
         === event.payload.finding.fingerprint
     ) {
@@ -1650,6 +1649,7 @@ export class PipelineOrchestrator {
       skippedAlreadyTriaged: state.skippedAlreadyTriaged,
       skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
       skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
+      skippedByScoreFilter: state.skippedByScoreFilter > 0 ? state.skippedByScoreFilter : undefined,
       softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
       skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
       corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
@@ -1847,7 +1847,10 @@ export class PipelineOrchestrator {
       .map((e) => ({ kind: "reasoning-chain" as const, description: e.detail }));
     const rule = await generateRule(finding, evidence.length > 0 ? evidence : undefined, {
       runId,
-      repoRoot: state.context.repoRoot,
+      projectRoot: state.context.repoRoot,
+      workRoot: state.context.scanPath ?? state.context.repoRoot,
+      repoRoot: state.context.scanPath ?? state.context.repoRoot,
+      scanPath: state.context.scanPath,
       repoName: state.context.repoName,
       config: state.config,
       runtime: this.deps.runtime,
@@ -1896,7 +1899,10 @@ export class PipelineOrchestrator {
           const { generateGeneralizedRule } = await import("../strategies/auto-rule.js");
           const taskContext = {
             runId,
-            repoRoot: state.context.repoRoot,
+            projectRoot: state.context.repoRoot,
+            workRoot: state.context.scanPath ?? state.context.repoRoot,
+            repoRoot: state.context.scanPath ?? state.context.repoRoot,
+            scanPath: state.context.scanPath,
             repoName: state.context.repoName,
             config: state.config,
             runtime: this.deps.runtime,
@@ -1982,7 +1988,10 @@ export class PipelineOrchestrator {
         try {
           const taskContext: AgentTaskContext = {
             runId,
-            repoRoot: state.context.repoRoot,
+            projectRoot: state.context.repoRoot,
+            workRoot: state.context.scanPath ?? state.context.repoRoot,
+            repoRoot: state.context.scanPath ?? state.context.repoRoot,
+            scanPath: state.context.scanPath,
             repoName: state.context.repoName,
             config: state.config,
             runtime: this.deps.runtime,
@@ -2246,7 +2255,7 @@ export class PipelineOrchestrator {
       const rescoreResults = await rescoreFindings(rescoreWindow, {
         model: state.config.llmRescoreModel,
         threshold: state.config.llmRescoreThreshold,
-        repoRoot: state.context.repoRoot,
+        repoRoot: state.context.scanPath ?? state.context.repoRoot,
         runtime: this.deps.runtime,
       });
       normalized = [...applyRescoreResults(rescoreWindow, rescoreResults).findings, ...untouched]
@@ -2395,6 +2404,154 @@ export class PipelineOrchestrator {
     await this.dispatchVerification(state, runId);
   }
 
+  /**
+   * Run the verification gate pipeline on a set of candidates:
+   * 1. Pattern dedup — auto-accept findings matching already-verified sink patterns
+   * 2. LLM gate — cheap Haiku call to decide verify / auto-accept / skip
+   * 3. Cheap verify — single-turn Sonnet call for borderline cases
+   *
+   * Returns the filtered candidates that need full multi-turn verification.
+   */
+  private async runVerifyGateOnCandidates(
+    candidates: VerificationCandidate[],
+    state: RunState,
+    runId: string,
+  ): Promise<VerificationCandidate[]> {
+    if (state.config.verifyGateEnabled === false || candidates.length === 0) {
+      return candidates;
+    }
+
+    try {
+      log.info(`Running verification gate on ${candidates.length} candidate(s)`);
+
+      // Step 1: Pattern dedup — auto-accept findings matching verified sink patterns
+      const { remaining: afterDedup, autoAccepted: dedupAccepted } =
+        deduplicateByPattern(candidates, state);
+
+      for (const result of dedupAccepted) {
+        state.verifyGateAutoAccepted += 1;
+        const candidate = candidates.find((c) => c.finding.fingerprint === result.fingerprint)!;
+        await this.emitSyntheticVerification(state, runId, candidate, result.reason);
+      }
+
+      if (dedupAccepted.length > 0) {
+        log.info(`Pattern dedup: ${dedupAccepted.length} auto-accepted, ${afterDedup.length} remaining`);
+      }
+
+      if (afterDedup.length === 0) return [];
+
+      // Step 2: LLM gate
+      const gateResults = await gateVerificationCandidates(
+        afterDedup,
+        {
+          model: state.config.verifyGateModel,
+          runtime: this.deps.runtime,
+          repoRoot: state.context.scanPath ?? state.context.repoRoot,
+        },
+      );
+
+      const gateMap = new Map<string, VerifyGateResult>();
+      for (const gr of gateResults) gateMap.set(gr.fingerprint, gr);
+
+      const toVerify: VerificationCandidate[] = [];
+      const accepted: VerificationCandidate[] = [];
+      const toCheapVerify: VerificationCandidate[] = [];
+      for (const candidate of afterDedup) {
+        const gate = gateMap.get(candidate.finding.fingerprint);
+        if (!gate || gate.decision === "verify") {
+          toVerify.push(candidate);
+        } else if (gate.decision === "auto_accept") {
+          accepted.push(candidate);
+          state.verifyGateAutoAccepted += 1;
+        } else if (gate.decision === "cheap_verify") {
+          toCheapVerify.push(candidate);
+        } else {
+          state.verifyGateSkipped += 1;
+        }
+      }
+
+      for (const candidate of accepted) {
+        const gate = gateMap.get(candidate.finding.fingerprint);
+        await this.emitSyntheticVerification(
+          state, runId, candidate,
+          gate?.reason ?? "Auto-accepted by verification gate",
+        );
+      }
+
+      // Step 3: Cheap single-turn verification for borderline cases
+      if (toCheapVerify.length > 0) {
+        log.info(`Running cheap verification on ${toCheapVerify.length} candidate(s)`);
+        const cheapResults = await cheapVerifyCandidates(
+          toCheapVerify,
+          {
+            model: state.config.verifyModel ?? state.config.model,
+            runtime: this.deps.runtime,
+            repoRoot: state.context.scanPath ?? state.context.repoRoot,
+          },
+        );
+
+        for (const cr of cheapResults) {
+          const candidate = toCheapVerify.find((c) => c.finding.fingerprint === cr.fingerprint)!;
+          state.verifyCostUsd += cr.costUsd;
+          state.totalCostUsd += cr.costUsd;
+          await this.bus.publish(
+            createEvent("verification:result", runId, {
+              context: state.context,
+              finding: candidate.finding,
+              triageResult: candidate.triageResult,
+              result: cr.verification,
+              costUsd: cr.costUsd,
+              index: 0,
+              total: 0,
+            }),
+          );
+        }
+      }
+
+      const skipped = afterDedup.length - toVerify.length - accepted.length - toCheapVerify.length;
+      log.info(
+        `Verification gate: ${toVerify.length} full-verify, ${toCheapVerify.length} cheap-verify, `
+        + `${accepted.length} auto-accepted, ${skipped} skipped`
+        + (dedupAccepted.length > 0 ? ` (+ ${dedupAccepted.length} pattern-deduped)` : ""),
+      );
+
+      return toVerify;
+    } catch (error) {
+      log.warn(`Verification gate failed, proceeding with all candidates: ${toErrorMessage(error)}`);
+      return candidates;
+    }
+  }
+
+  private async emitSyntheticVerification(
+    state: RunState,
+    runId: string,
+    candidate: VerificationCandidate,
+    reason: string,
+  ): Promise<void> {
+    await this.bus.publish(
+      createEvent("verification:result", runId, {
+        context: state.context,
+        finding: candidate.finding,
+        triageResult: candidate.triageResult,
+        result: {
+          fingerprint: candidate.finding.fingerprint,
+          exploitable: true,
+          pocPayload: null,
+          pocDescription: reason,
+          attackVector: null,
+          preconditions: [],
+          confidence: candidate.triageResult.confidence,
+          proofLevel: 1,
+          proofVerdict: "exploited" as const,
+          verifyCostUsd: 0,
+        },
+        costUsd: 0,
+        index: 0,
+        total: 0,
+      }),
+    );
+  }
+
   private async startVerification(state: RunState, runId: string): Promise<void> {
     if (state.verificationStarted || state.reportEmitted) {
       log.info(
@@ -2425,10 +2582,12 @@ export class PipelineOrchestrator {
         return evidenceB - evidenceA;
       });
 
+      const gatedCandidates = await this.runVerifyGateOnCandidates(ranked, state, runId);
+
       // Append newly ranked candidates to the existing queue (pipelined items are already there)
       const pipelinedCount = state.verifyDispatchedFingerprints.size;
-      const finalTotal = pipelinedCount + ranked.length;
-      for (const [idx, item] of ranked.entries()) {
+      const finalTotal = pipelinedCount + gatedCandidates.length;
+      for (const [idx, item] of gatedCandidates.entries()) {
         state.verifyQueue.push({
           ...item,
           index: pipelinedCount + idx + 1,
@@ -2492,6 +2651,15 @@ export class PipelineOrchestrator {
     }
 
     handleVerificationResultState(state, event, this.deps);
+
+    // Register verified exploitable patterns for sink-dedup on subsequent candidates
+    if (event.payload.result.exploitable) {
+      registerVerifiedPattern(
+        state.verifiedPatterns,
+        event.payload.finding,
+        event.payload.triageResult,
+      );
+    }
 
     // Auto-rule generation: fire-and-forget for verified exploitable findings.
     // Skip auth/logic CWEs that can't be pattern-matched by Semgrep.
@@ -3211,6 +3379,7 @@ function buildReportStats(
     skippedAlreadyTriaged: state.skippedAlreadyTriaged,
     skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
     skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
+    skippedByScoreFilter: state.skippedByScoreFilter > 0 ? state.skippedByScoreFilter : undefined,
     softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
     skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
     corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
@@ -3220,6 +3389,9 @@ function buildReportStats(
     verified: state.verifyEnabled ? state.verified : undefined,
     verifyErrors: state.verifyEnabled ? state.verifyErrors : undefined,
     verifyCostUsd: state.verifyEnabled ? state.verifyCostUsd : undefined,
+    verifyGateAutoAccepted: state.verifyGateAutoAccepted > 0 ? state.verifyGateAutoAccepted : undefined,
+    verifyGateSkipped: state.verifyGateSkipped > 0 ? state.verifyGateSkipped : undefined,
+    verifyGateCostUsd: state.verifyGateCostUsd > 0 ? state.verifyGateCostUsd : undefined,
     pocHarnessGenerated: state.pocHarnessEnabled ? state.pocHarnessGenerated : undefined,
     pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : undefined,
     pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,

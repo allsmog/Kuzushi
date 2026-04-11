@@ -70,7 +70,7 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
   async run(_input, context): Promise<CodeGraphOutput> {
     const repo = context.repoName;
     const runId = context.runId;
-    const workingRoot = context.scanPath ?? context.repoRoot;
+    const workingRoot = context.workRoot ?? context.scanPath ?? context.repoRoot;
     const db = context.db;
 
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));

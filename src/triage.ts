@@ -53,6 +53,7 @@ export const TRIAGE_RESULT_SCHEMA_LITE = {
     rationale: { type: "string" },
     verification_steps: { type: "array", items: { type: "string" }, minItems: 1 },
     fix_patch: { type: ["string", "null"] },
+    sink_function: { type: ["string", "null"], description: "The dangerous function or API that data flows into (e.g. 'eval', 'popen', 'SafeExecWithTimeout', 'SQL query'). Null if not applicable." },
   },
 } as const;
 
@@ -504,6 +505,7 @@ function parseBatchTriageOutput(
       fixPatch: normalizeFixPatch((item as Record<string, unknown>)["fix_patch"]),
       source: parsePathAssessment((item as Record<string, unknown>)["source"]),
       sink: parsePathAssessment((item as Record<string, unknown>)["sink"]),
+      sinkFunction: asOptionalString((item as Record<string, unknown>)["sink_function"]),
       isVulnerable: asOptionalBoolean((item as Record<string, unknown>)["is_vulnerable"]),
       exploitScenario: asOptionalString((item as Record<string, unknown>)["exploit_scenario"]),
       recommendedFix: asOptionalString((item as Record<string, unknown>)["recommended_fix"]),
@@ -549,6 +551,7 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
       fixPatch: normalizeFixPatch(raw["fix_patch"]),
       source: parsePathAssessment(raw["source"]),
       sink: parsePathAssessment(raw["sink"]),
+      sinkFunction: asOptionalString(raw["sink_function"]),
       isVulnerable: asOptionalBoolean(raw["is_vulnerable"]),
       exploitScenario: asOptionalString(raw["exploit_scenario"]),
       recommendedFix: asOptionalString(raw["recommended_fix"]),
@@ -662,6 +665,7 @@ export function parseTriageResponse(
       fixPatch: normalizeFixPatch(parsed.fix_patch),
       source: parsePathAssessment(parsed.source),
       sink: parsePathAssessment(parsed.sink),
+      sinkFunction: asOptionalString(parsed.sink_function),
       isVulnerable: asOptionalBoolean(parsed.is_vulnerable),
       exploitScenario: asOptionalString(parsed.exploit_scenario),
       recommendedFix: asOptionalString(parsed.recommended_fix),

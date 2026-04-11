@@ -102,17 +102,21 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
 
     try {
       const taskConfig = resolveTaskConfig(deps.config, taskId);
+      const projectRoot = context.repoRoot;
+      const workRoot = context.scanPath ?? context.repoRoot;
 
       let securityProfiles;
       try {
-        securityProfiles = loadSecurityProfiles(context.repoRoot);
+        securityProfiles = loadSecurityProfiles(projectRoot);
       } catch {
         // Security profiles loading is best-effort.
       }
 
       const taskContext: TaskContext = {
         runId,
-        repoRoot: context.scanPath ?? context.repoRoot,
+        projectRoot,
+        workRoot,
+        repoRoot: workRoot,
         scanPath: context.scanPath,
         repoName: context.repoName,
         config: deps.config,

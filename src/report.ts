@@ -168,6 +168,10 @@ export function printSummary(
   if ((options.stats?.corroboratedClusters ?? 0) > 0) {
     console.log(`  ${chalk.dim("Corroborated clusters:")} ${options.stats?.corroboratedClusters}`);
   }
+  if ((options.stats?.verifyGateAutoAccepted ?? 0) > 0 || (options.stats?.verifyGateSkipped ?? 0) > 0) {
+    console.log(`  ${chalk.dim("Gate auto-accepted:")}   ${options.stats?.verifyGateAutoAccepted ?? 0}`);
+    console.log(`  ${chalk.dim("Gate skipped:")}          ${options.stats?.verifyGateSkipped ?? 0}`);
+  }
   if (hasVerificationData) {
     const verifyErrors = options.stats?.verifyErrors ?? 0;
     console.log("");

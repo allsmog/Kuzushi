@@ -122,6 +122,11 @@ export function selectFindings(
 
   for (const finding of output.findings) {
     const filePath = normalizeFilePath(repoRoot, finding.filePath);
+
+    // Hard scope filter: drop findings with paths that resolve outside the scan root.
+    // Agents can traverse the filesystem freely; this is the post-hoc guarantee.
+    if (isOutOfScope(repoRoot, filePath)) continue;
+
     const fingerprint = computeFingerprint(repoName, ref, scanner, {
       ...finding,
       filePath,
@@ -220,6 +225,18 @@ function normalizeFilePath(repoRoot: string, filePath: string): string {
   const relative = path.relative(repoRoot, filePath);
   if (relative.startsWith("..")) return filePath;
   return relative || filePath;
+}
+
+/**
+ * Returns true if filePath resolves outside the given scope root.
+ * Handles both relative and absolute paths.
+ */
+function isOutOfScope(scopeRoot: string, filePath: string): boolean {
+  const resolved = path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(scopeRoot, filePath);
+  const relative = path.relative(scopeRoot, resolved);
+  return relative.startsWith("..");
 }
 
 function normalizeSeverity(value: unknown, fallback: string): string {

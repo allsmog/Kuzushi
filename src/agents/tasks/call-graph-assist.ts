@@ -29,7 +29,7 @@ export const callGraphAssistTask: AgentTask<Finding[], Finding[]> = {
       return input ?? [];
     }
 
-    const repoRoot = context.scanPath ?? context.repoRoot;
+    const repoRoot = context.workRoot ?? context.scanPath ?? context.repoRoot;
     let provider;
     try {
       provider = await getCodeIntelligenceProvider(repoRoot);

@@ -237,16 +237,21 @@ describe("scan-worker", () => {
     await bus.close();
   });
 
-  it("passes repoRoot and scanPath separately to agent tasks", async () => {
+  it("passes projectRoot and workRoot while preserving repoRoot as a legacy alias", async () => {
     const bus = new InProcessBus();
     const taskRegistry = new TaskRegistry();
-    const task: AgentTask<unknown, { repoRoot: string; scanPath?: string }> = {
+    const task: AgentTask<
+      unknown,
+      { projectRoot?: string; workRoot?: string; repoRoot: string; scanPath?: string }
+    > = {
       id: "context-check",
       displayName: "Context Check",
       outputKind: "custom",
       dependsOn: [],
       async run(_input, context) {
         return {
+          projectRoot: context.projectRoot,
+          workRoot: context.workRoot,
           repoRoot: context.repoRoot,
           scanPath: context.scanPath,
         };
@@ -285,9 +290,9 @@ describe("scan-worker", () => {
     );
 
     const complete = await completePromise;
-    // repoRoot is overridden to scanPath when scanPath is set,
-    // so agent tasks operate on the scan subdirectory by default.
     expect(complete.payload.output).toEqual({
+      projectRoot: "/tmp/repo",
+      workRoot: "/tmp/repo/subdir",
       repoRoot: "/tmp/repo/subdir",
       scanPath: "/tmp/repo/subdir",
     });

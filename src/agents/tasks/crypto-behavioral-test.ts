@@ -49,6 +49,7 @@ export const cryptoBehavioralTestTask: AgentTask<unknown, Finding[]> = {
   },
 
   async run(_input, context): Promise<Finding[]> {
+    const workRoot = context.workRoot ?? context.scanPath ?? context.repoRoot;
     const sourceFindings = getCryptoMisuseFindings(
       context.upstreamOutputs.get("secrets-crypto-detect"),
     );
@@ -92,7 +93,7 @@ export const cryptoBehavioralTestTask: AgentTask<unknown, Finding[]> = {
         const generated = await generateCryptoBehavioralHarness(
           finding,
           testType,
-          context.scanPath ?? context.repoRoot,
+          workRoot,
           context.repoName,
           model,
           {
@@ -121,7 +122,7 @@ export const cryptoBehavioralTestTask: AgentTask<unknown, Finding[]> = {
           const execution = await executor.execute(
             generated.result.scriptPath,
             generated.result.language,
-            context.scanPath ?? context.repoRoot,
+            workRoot,
           );
           executionExitCode = execution.exitCode;
           executionVerdict = execution.verdict;
