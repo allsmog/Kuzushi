@@ -316,6 +316,7 @@ export class PipelineOrchestrator {
       config,
       scanOpts,
       resumeRunId,
+      seedTaskOutputs,
     } = event.payload;
 
     let scanners: string[];
@@ -395,7 +396,7 @@ export class PipelineOrchestrator {
       collectScanFindingEvents: !this.deps.taskRegistry && !resumeRunId,
       repoContext: undefined,
       enrichedRepoContext: undefined,
-      taskOutputs: new Map<string, unknown>(),
+      taskOutputs: new Map<string, unknown>(seedTaskOutputs ?? []),
       failedTasks: [],
       skippedByLlmRescore: 0,
       softSuppressedFindings: 0,
@@ -448,8 +449,6 @@ export class PipelineOrchestrator {
       },
     };
 
-    // Inject monorepo shared context into task outputs so downstream tasks
-    // (threat-model-randori, context-enricher, etc.) can read it via upstreamOutputs.
     if (event.payload.monorepoContext) {
       state.taskOutputs.set("monorepo-context", event.payload.monorepoContext);
     }
@@ -852,7 +851,9 @@ export class PipelineOrchestrator {
     }
 
     // Track already-completed tasks for dynamic re-resolution
-    const completedTaskIds = new Set<string>();
+    const completedTaskIds = new Set<string>(
+      [...state.taskOutputs.keys()].filter((taskId) => this.deps.taskRegistry!.has(taskId)),
+    );
     const taskRetryCount = new Map<string, number>();
     const dynamicTasksProcessed = new Set<string>();
     let taskSelectorFallbackApplied = false;
@@ -882,11 +883,22 @@ export class PipelineOrchestrator {
 
     for (let stageIndex = 0; stageIndex < stages.length; stageIndex += 1) {
       const group = stages[stageIndex];
+      const pendingGroup = group.filter((taskId) => !completedTaskIds.has(taskId));
+      if (pendingGroup.length === 0) {
+        await this.bus.publish(
+          createEvent("stage:complete", runId, {
+            context: state.context,
+            stageIndex,
+            taskIds: [...group],
+          }),
+        );
+        continue;
+      }
 
       // Evaluate conditions: split group into tasks to run vs skip
       const tasksToRun: string[] = [];
       const tasksToSkip: string[] = [];
-      for (const taskId of group) {
+      for (const taskId of pendingGroup) {
         const task = this.deps.taskRegistry.get(taskId);
         if (task.condition && !task.condition(state.taskOutputs, state.config)) {
           tasksToSkip.push(taskId);

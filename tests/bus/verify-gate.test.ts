@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   gateVerificationCandidates,
@@ -6,6 +9,7 @@ import {
 import type { Finding } from "../../src/scanners/types.js";
 import type { TriageResult } from "../../src/types.js";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
+import { buildSystemsHuntArtifactDetail } from "../../src/agents/tasks/systems-hunt/artifacts.js";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -202,5 +206,49 @@ describe("gateVerificationCandidates", () => {
     );
 
     expect(results[0].decision).toBe("verify");
+  });
+
+  it("skips systems-hunt findings unless their artifact is cheap-verifiable", async () => {
+    const repoRoot = path.join(os.tmpdir(), `verify-gate-${Date.now()}`);
+    mkdirSync(path.join(repoRoot, ".kuzushi", "systems-hunt"), { recursive: true });
+    try {
+      writeFileSync(
+        path.join(repoRoot, ".kuzushi", "systems-hunt", "fp-001.json"),
+        JSON.stringify({ cheapVerifiable: false }),
+      );
+      writeFileSync(
+        path.join(repoRoot, ".kuzushi", "systems-hunt", "fp-002.json"),
+        JSON.stringify({ cheapVerifiable: true }),
+      );
+
+      const runtime = {
+        id: "test",
+        queryBatch: vi.fn(),
+      } as unknown as AgentRuntime;
+
+      const results = await gateVerificationCandidates(
+        [
+          makeCandidate({
+            fingerprint: "fp-001",
+            scanner: "systems-hunt",
+            engineProvenance: [{ kind: "agentic", detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-001.json") }],
+          }),
+          makeCandidate({
+            fingerprint: "fp-002",
+            scanner: "systems-hunt",
+            engineProvenance: [{ kind: "agentic", detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-002.json") }],
+          }),
+        ],
+        { runtime, repoRoot },
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({ fingerprint: "fp-001", decision: "skip" }),
+        expect.objectContaining({ fingerprint: "fp-002", decision: "cheap_verify" }),
+      ]);
+      expect(runtime.queryBatch).not.toHaveBeenCalled();
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   });
 });

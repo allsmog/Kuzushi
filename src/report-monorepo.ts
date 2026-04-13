@@ -13,9 +13,17 @@ export interface MonorepoModuleResult {
   verdictCounts: Record<Verdict, number>;
 }
 
+export interface MonorepoAggregateSummary {
+  dedupedActionableFindings: number;
+  stitchedFindingCount: number;
+  tracedPathCount: number;
+  stitchedFindingSamples?: Array<{ ruleId: string; message: string }>;
+}
+
 export function printMonorepoSummary(
   db: Database.Database,
   results: MonorepoModuleResult[],
+  aggregate?: MonorepoAggregateSummary,
 ): void {
   const totalCostUsd = results.reduce((sum, item) => sum + (item.stats?.totalCostUsd ?? 0), 0);
   const completed = results.filter((item) => item.status === "complete");
@@ -30,12 +38,17 @@ export function printMonorepoSummary(
   console.log(`  ${chalk.dim("Completed:")}      ${completed.length}`);
   console.log(`  ${chalk.dim("Failed:")}         ${failed.length}`);
   console.log(`  ${chalk.dim("Total cost:")}     $${totalCostUsd.toFixed(4)}`);
+  if (aggregate) {
+    console.log(`  ${chalk.dim("Deduped findings:")} ${aggregate.dedupedActionableFindings}`);
+    console.log(`  ${chalk.dim("Stitched findings:")} ${aggregate.stitchedFindingCount}`);
+    console.log(`  ${chalk.dim("Cross-module paths:")} ${aggregate.tracedPathCount}`);
+  }
   console.log("");
   console.log(chalk.bold("  Module Breakdown"));
 
   for (const item of sortModules(results)) {
-    const indent = item.module.parentModule ? "    " : "  ";
-    const prefix = item.module.parentModule ? "·" : "•";
+    const indent = item.module.productPath ? "    " : "  ";
+    const prefix = item.module.productPath ? "·" : "•";
     const counts = item.verdictCounts;
     const cost = item.stats?.totalCostUsd ?? 0;
     const status = item.status === "complete" ? chalk.green("complete") : chalk.red("error");
@@ -64,15 +77,11 @@ export function printMonorepoSummary(
     }
   }
 
-  const parentComparisons = buildParentComparisons(results);
-  if (parentComparisons.length > 0) {
+  if ((aggregate?.stitchedFindingSamples?.length ?? 0) > 0) {
     console.log("");
-    console.log(chalk.bold("  Parent vs Cluster Coverage"));
-    for (const entry of parentComparisons) {
-      console.log(
-        `  - ${entry.parent.module.name}: parent tp=${entry.parent.verdictCounts.tp}, `
-        + `clusters tp=${entry.clusterTp}, clusters=${entry.clusterNames.join(", ")}`,
-      );
+    console.log(chalk.bold("  Cross-Module Findings"));
+    for (const finding of aggregate!.stitchedFindingSamples!.slice(0, 5)) {
+      console.log(`  - ${finding.ruleId}: ${finding.message}`);
     }
   }
 
@@ -81,20 +90,7 @@ export function printMonorepoSummary(
 
 function sortModules(results: MonorepoModuleResult[]): MonorepoModuleResult[] {
   return [...results].sort((left, right) => {
-    const leftParent = left.module.parentModule ?? "";
-    const rightParent = right.module.parentModule ?? "";
-    if (leftParent !== rightParent) {
-      if (!leftParent && rightParent) return -1;
-      if (leftParent && !rightParent) return 1;
-      return leftParent.localeCompare(rightParent);
-    }
-    if (left.module.parentModule !== right.module.parentModule) {
-      return (left.module.parentModule ?? "").localeCompare(right.module.parentModule ?? "");
-    }
-    if (left.module.isParent !== right.module.isParent) {
-      return left.module.isParent ? -1 : 1;
-    }
-    return left.module.name.localeCompare(right.module.name);
+    return left.module.path.localeCompare(right.module.path) || left.module.name.localeCompare(right.module.name);
   });
 }
 
@@ -138,33 +134,4 @@ function rankModulesByRisk(
       };
     })
     .sort((left, right) => right.risk - left.risk || left.name.localeCompare(right.name));
-}
-
-function buildParentComparisons(results: MonorepoModuleResult[]): Array<{
-  parent: MonorepoModuleResult;
-  clusterTp: number;
-  clusterNames: string[];
-}> {
-  const parents = results.filter((item) => item.module.isParent);
-  const byParent = new Map<string, MonorepoModuleResult[]>();
-
-  for (const item of results) {
-    if (!item.module.parentModule) {
-      continue;
-    }
-    const siblings = byParent.get(item.module.parentModule) ?? [];
-    siblings.push(item);
-    byParent.set(item.module.parentModule, siblings);
-  }
-
-  return parents
-    .map((parent) => {
-      const children = byParent.get(parent.module.name) ?? [];
-      return {
-        parent,
-        clusterTp: children.reduce((sum, child) => sum + child.verdictCounts.tp, 0),
-        clusterNames: children.map((child) => child.module.name).sort(),
-      };
-    })
-    .filter((entry) => entry.clusterNames.length > 0);
 }

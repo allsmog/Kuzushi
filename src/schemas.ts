@@ -564,11 +564,16 @@ export type AgentRuntimeConfigZ = z.infer<typeof AgentRuntimeConfigSchema>;
 export const DiscoveredModuleSchema = z.object({
   name: z.string(),
   path: z.string(),
+  includePaths: z.array(z.string()).optional(),
   description: z.string(),
   language: z.string(),
   buildSystem: z.string().optional(),
-  isParent: z.boolean().optional(),
-  parentModule: z.string().optional(),
+  moduleKind: z.enum([
+    "workspace-member", "standalone", "solution-project",
+    "bazel-package", "native-root", "go-workspace-member",
+  ]).optional(),
+  productPath: z.string().optional(),
+  discoveryEvidence: z.array(z.string()).optional(),
 });
 
 export const MonorepoConfigSchema = z.object({

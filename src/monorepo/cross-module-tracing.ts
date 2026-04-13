@@ -278,7 +278,7 @@ function buildInteractionGraph(
       (b) => b.serviceId === id && b.entryPoints.some((ep) => ep.protocol === "http-server"),
     ),
     findingCount: perModuleFindings.get(id)?.length ?? 0,
-    riskLevel: threatModel?.moduleRiskAssessments.find((r) => r.moduleName === id)?.riskLevel ?? "medium",
+    riskLevel: threatModel?.modulePlans.find((plan) => plan.modulePath === id)?.riskLevel ?? "medium",
   }));
 
   // Merge static edges + stitched edges

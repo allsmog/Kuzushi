@@ -15,6 +15,7 @@ import type { Finding } from "../../scanners/types.js";
 import type { TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { getLogger } from "../../logger.js";
+import { extractSystemsHuntArtifactPath, readSystemsHuntArtifactByPath } from "../../agents/tasks/systems-hunt/artifacts.js";
 
 const log = getLogger("verify-gate");
 
@@ -201,15 +202,21 @@ export async function gateVerificationCandidates(
 ): Promise<VerifyGateResult[]> {
   if (candidates.length === 0) return [];
 
+  const preclassified = await preclassifySystemsHuntCandidates(candidates, options.repoRoot);
+  const remainingCandidates = preclassified.remaining;
+  if (remainingCandidates.length === 0) {
+    return preclassified.results;
+  }
+
   const model = options.model ?? "anthropic:claude-haiku-4-5-20251001";
 
   // Chunk into batches
   const batches: VerifyGateCandidate[][] = [];
-  for (let i = 0; i < candidates.length; i += MAX_CANDIDATES_PER_BATCH) {
-    batches.push(candidates.slice(i, i + MAX_CANDIDATES_PER_BATCH));
+  for (let i = 0; i < remainingCandidates.length; i += MAX_CANDIDATES_PER_BATCH) {
+    batches.push(remainingCandidates.slice(i, i + MAX_CANDIDATES_PER_BATCH));
   }
 
-  const allResults: VerifyGateResult[] = [];
+  const allResults: VerifyGateResult[] = [...preclassified.results];
   const runtime = options.runtime;
 
   // ── Try Batch API first (50% cost reduction) ──
@@ -302,6 +309,46 @@ export async function gateVerificationCandidates(
   }
 
   return allResults;
+}
+
+async function preclassifySystemsHuntCandidates(
+  candidates: VerifyGateCandidate[],
+  repoRoot: string,
+): Promise<{ remaining: VerifyGateCandidate[]; results: VerifyGateResult[] }> {
+  const remaining: VerifyGateCandidate[] = [];
+  const results: VerifyGateResult[] = [];
+
+  for (const candidate of candidates) {
+    if (candidate.finding.scanner !== "systems-hunt") {
+      remaining.push(candidate);
+      continue;
+    }
+
+    const artifactPath = extractSystemsHuntArtifactPath(candidate.finding);
+    const resolvedPath = artifactPath
+      ? (artifactPath.startsWith("/") ? artifactPath : `${repoRoot}/${artifactPath}`.replace(/\/+/g, "/"))
+      : undefined;
+    const artifact = resolvedPath ? await readSystemsHuntArtifactByPath(resolvedPath) : undefined;
+
+    if (artifact?.cheapVerifiable === true) {
+      results.push({
+        fingerprint: candidate.finding.fingerprint,
+        decision: "cheap_verify",
+        reason: "Systems hunt artifact marked this finding as cheap_verifiable",
+      });
+      continue;
+    }
+
+    results.push({
+      fingerprint: candidate.finding.fingerprint,
+      decision: "skip",
+      reason: artifactPath
+        ? `Systems hunt finding defaults to skip verification in v1 unless artifact is cheap_verifiable (${artifactPath})`
+        : "Systems hunt finding defaults to skip verification in v1 unless its artifact is cheap_verifiable",
+    });
+  }
+
+  return { remaining, results };
 }
 
 function tryParseJson(text: string): unknown {

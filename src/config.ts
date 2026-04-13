@@ -1424,8 +1424,11 @@ function normalizeMonorepoConfig(value: unknown): KuzushiConfig["monorepo"] {
           description: normalizeOptionalString(entry["description"]) ?? "",
           language: normalizeOptionalString(entry["language"]) ?? "unknown",
           buildSystem: normalizeOptionalString(entry["buildSystem"]),
-          isParent: typeof entry["isParent"] === "boolean" ? entry["isParent"] : undefined,
-          parentModule: normalizeOptionalString(entry["parentModule"]),
+          moduleKind: (normalizeOptionalString(entry["moduleKind"]) as import("./discovery/types.js").ModuleKind | undefined) ?? "standalone",
+          productPath: normalizeOptionalString(entry["productPath"]),
+          discoveryEvidence: Array.isArray(entry["discoveryEvidence"])
+            ? entry["discoveryEvidence"].filter((e): e is string => typeof e === "string")
+            : ["config"],
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
@@ -1437,8 +1440,34 @@ function normalizeMonorepoConfig(value: unknown): KuzushiConfig["monorepo"] {
   const maxModules = Number.isFinite(rawMaxModules) && rawMaxModules > 0
     ? Math.floor(rawMaxModules)
     : undefined;
+  const rawBudgetUsd = Number(value["budgetUsd"]);
+  const budgetUsd = Number.isFinite(rawBudgetUsd) && rawBudgetUsd >= 0
+    ? rawBudgetUsd
+    : undefined;
+  const rawCrossModuleReserve = Number(value["crossModuleReserve"]);
+  const crossModuleReserve = Number.isFinite(rawCrossModuleReserve)
+    && rawCrossModuleReserve >= 0
+    && rawCrossModuleReserve <= 1
+    ? rawCrossModuleReserve
+    : undefined;
+  const crossModuleTracing = typeof value["crossModuleTracing"] === "boolean"
+    ? value["crossModuleTracing"]
+    : undefined;
+  const architecturalThreatModel = typeof value["architecturalThreatModel"] === "boolean"
+    ? value["architecturalThreatModel"]
+    : undefined;
 
-  if (!mode && !modules && excludeModules.length === 0 && !discoveryModel && maxModules == null) {
+  if (
+    !mode
+    && !modules
+    && excludeModules.length === 0
+    && !discoveryModel
+    && maxModules == null
+    && budgetUsd == null
+    && crossModuleReserve == null
+    && crossModuleTracing == null
+    && architecturalThreatModel == null
+  ) {
     return undefined;
   }
 
@@ -1448,6 +1477,10 @@ function normalizeMonorepoConfig(value: unknown): KuzushiConfig["monorepo"] {
     excludeModules: excludeModules.length > 0 ? excludeModules : undefined,
     discoveryModel,
     maxModules,
+    budgetUsd,
+    crossModuleReserve,
+    crossModuleTracing,
+    architecturalThreatModel,
   };
 }
 

@@ -40,6 +40,12 @@ import { sharpEdgesDetectTask } from "./tasks/sharp-edges-detect.js";
 import { tobAuditTask } from "./tasks/tob-audit/tob-audit.js";
 import { taintCweSelectTask } from "./tasks/taint-iris/cwe-select.js";
 import { taintIrisTask } from "./tasks/taint-iris/iris.js";
+import { deepSemanticCweSelectTask } from "./tasks/deep-semantic/cwe-select.js";
+import { deepSemanticHuntTask } from "./tasks/deep-semantic/hunt.js";
+import { systemsContextGathererTask } from "./tasks/systems-hunt/context.js";
+import { systemsInvariantExtractTask } from "./tasks/systems-hunt/invariant-extract.js";
+import { systemsTriggerSynthTask } from "./tasks/systems-hunt/trigger-synth.js";
+import { systemsHuntTask } from "./tasks/systems-hunt/hunt.js";
 
 /** Create task registry populated with adapted scanner plugins. */
 export async function createDefaultTaskRegistry(
@@ -109,6 +115,16 @@ export async function createDefaultTaskRegistry(
   // IRIS-style taint analysis (LLM-driven CodeQL)
   tasks.register(taintCweSelectTask);
   tasks.register(taintIrisTask);
+
+  // Systems-code hunt for low-level memory-safety and protocol bugs
+  tasks.register(systemsContextGathererTask);
+  tasks.register(systemsInvariantExtractTask);
+  tasks.register(systemsTriggerSynthTask);
+  tasks.register(systemsHuntTask);
+
+  // Backward-compatible deep-semantic tasks retained while systems-hunt is the public path.
+  tasks.register(deepSemanticCweSelectTask);
+  tasks.register(wrapTask(deepSemanticHuntTask));
 
   // Reachability pre-filter
   tasks.register(reachabilityCheckTask);

@@ -101,6 +101,8 @@ export interface ScanOpts {
   diffBase?: string;
   /** Injected summary of first-pass findings for agentic two-pass review mode. */
   agenticReviewContext?: string;
+  /** Additional target directories for scanners (resolved absolute paths). */
+  scanPaths?: string[];
 }
 
 /** A single step in the fine-grained evidence chain produced during triage. */

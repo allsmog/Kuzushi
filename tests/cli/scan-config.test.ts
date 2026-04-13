@@ -141,11 +141,14 @@ describe("applyScanCommandConfigOverrides", () => {
   it("applies reference preset with deep-merged scannerConfig", () => {
     const config = structuredClone(DEFAULTS);
     const originalSemgrep = { ...config.scannerConfig.semgrep };
+    const originalThreatHunt = { ...config.scannerConfig["threat-hunt"] };
 
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "reference" }));
 
-    // Threat-hunt gets Orchid model from the preset
-    expect(config.scannerConfig["threat-hunt"].model).toBe("anthropic:claude-orchid-preview");
+    // Systems-hunt gets Orchid model from the preset
+    expect(config.scannerConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
+    // Threat-hunt tuning is preserved without overriding its model
+    expect(config.scannerConfig["threat-hunt"].model).toBe(originalThreatHunt.model);
     expect(config.scannerConfig["threat-hunt"].runsPerActor).toBe(3);
 
     // Other scanner configs survive the deep-merge (not wiped out)
@@ -173,8 +176,9 @@ describe("applyScanCommandConfigOverrides", () => {
     expect(config.model).toBe("anthropic:claude-opus-4-6");
     // Scanners stay at user defaults
     expect(config.scanners).toEqual(DEFAULTS.scanners);
-    // Threat-hunt gets Orchid from scannerConfig deep-merge
-    expect(config.scannerConfig["threat-hunt"].model).toBe("anthropic:claude-orchid-preview");
+    // Only systems-hunt gets Orchid from scannerConfig deep-merge
+    expect(config.scannerConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
+    expect(config.scannerConfig["threat-hunt"].model).toBe(DEFAULTS.scannerConfig["threat-hunt"].model);
   });
 
   it("applies fast preset as a true scanners-only mode", () => {
@@ -221,6 +225,9 @@ describe("applyScanCommandConfigOverrides", () => {
       "taint-iris",
       "threat-model-randori",
       "threat-hunt",
+      "systems-context-gatherer",
+      "systems-invariant-extract",
+      "systems-hunt",
     ]);
     expect(config.verify).toBe(true);
   });

@@ -88,6 +88,7 @@ export type PipelineStartEvent = EventEnvelope<
     config: KuzushiConfig;
     scanOpts: ScanOpts;
     resumeRunId?: string;
+    seedTaskOutputs?: Map<string, unknown>;
     monorepoContext?: import("../monorepo/types.js").MonorepoSharedContext;
   }
 >;

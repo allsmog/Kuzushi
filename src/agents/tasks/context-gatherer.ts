@@ -42,6 +42,41 @@ const SECURITY_GREP_PATTERNS: Record<string, { fileFilter?: (p: string) => boole
     fileFilter: (p) => /\.(yml|yaml|json|toml|ini|conf|cfg|env)$/i.test(p) || /config/i.test(p),
     patterns: [/\bcors\b/i, /\bhelmet\b/, /\bcsrf\b/i, /debug\s*[:=]\s*true/i],
   },
+  "protocol-parser": {
+    fileFilter: (p) => /\.(c|cpp|cc|cxx|h|hpp|hxx|rs)$/i.test(p),
+    patterns: [
+      /\btcp\b/i, /\budp\b/i, /\bpacket\b/i, /\bsegment\b/i, /\bsack\b/i,
+      /\brpc\b/i, /\bnfs\b/i, /\bgss\b/i, /\bxdr\b/i,
+      /\bcodec\b/i, /\bdecode\b/i, /\bh264\b/i, /\bslice\b/i, /\bframe\b/i,
+      /\bparser\b/i,
+    ],
+  },
+  "integer-boundary": {
+    fileFilter: (p) => /\.(c|cpp|cc|cxx|h|hpp|hxx)$/i.test(p),
+    patterns: [
+      /\bINT_MAX\b/, /\bINT_MIN\b/, /\bUINT_MAX\b/, /\bSIZE_MAX\b/,
+      /\bUINT16_MAX\b/, /\bUINT32_MAX\b/,
+      /\b0xFFFF\b/i, /\b0xFFFFFFFF\b/i,
+      /\(int\)\s*\w+/, /\(unsigned\)\s*\w+/,
+    ],
+  },
+  "unsafe-memory": {
+    fileFilter: (p) => /\.(c|cpp|cc|cxx|h|hpp|hxx|rs)$/i.test(p),
+    patterns: [
+      /\bunsafe\s*\{/, /\bunsafe\s+fn\b/,
+      /\bmemcpy\s*\(/, /\bmemmove\s*\(/, /\bstrcpy\s*\(/, /\bsprintf\s*\(/,
+      /\bmalloc\s*\(/, /\bcalloc\s*\(/, /\brealloc\s*\(/, /\bfree\s*\(/,
+      /\bptr::write\b/, /\bstd::mem::transmute\b/,
+    ],
+  },
+  "hardening": {
+    fileFilter: (p) => /\.(c|cpp|cc|cxx|h|hpp|hxx|rs|toml|mk|cmake)$/i.test(p),
+    patterns: [
+      /\b__stack_chk_fail\b/, /\bstack[-_ ]canary\b/i, /\bFORTIFY_SOURCE\b/,
+      /\bpanic!\b/, /\bdebug_assert!\b/, /\bassert\s*\(/,
+      /\bfrom_raw_parts\b/, /\bget_unchecked\b/, /\bset_len\b/,
+    ],
+  },
 };
 
 export interface ContextGathererOutput {
@@ -75,48 +110,54 @@ export const contextGathererTask: AgentTask<ScanOpts, ContextGathererOutput> = {
   outputKind: "custom",
   dependsOn: [],
   async run(_input, context): Promise<ContextGathererOutput> {
-    const workRoot = context.workRoot ?? context.repoRoot;
-    const aggregate = createMutableRepoContext();
-
-    await Promise.all([
-      gatherFromPackageJson(workRoot, aggregate),
-      gatherFromGoMod(workRoot, aggregate),
-      gatherFromPython(workRoot, aggregate),
-      gatherFromCargoToml(workRoot, aggregate),
-    ]);
-
-    const pathSignals = await walkRepo(workRoot);
-    gatherFromPathSignals(pathSignals, aggregate);
-
-    const sourceFiles = pathSignals.files
-      .filter(f => SOURCE_EXTENSIONS.has(path.extname(f.relPath).toLowerCase()));
-
-    const tree = sourceFiles
-      .slice(0, MAX_FILE_INDEX_ENTRIES)
-      .map(f => ({ path: f.relPath }));
-
-    const patternMatches = await grepSecurityPatterns(workRoot, sourceFiles);
-
-    const repoContext: RepoContext = {
-      languages: sortValues(aggregate.languages),
-      frameworks: sortValues(aggregate.frameworks),
-      authPatterns: sortValues(aggregate.authPatterns),
-      sanitizationLibs: sortValues(aggregate.sanitizationLibs),
-      ormOrDb: sortValues(aggregate.ormOrDb),
-      entryPoints: sortValues(aggregate.entryPoints),
-    };
-
-    return {
-      repoContext,
-      fileIndex: {
-        tree,
-        totalFiles: sourceFiles.length,
-        truncated: sourceFiles.length > MAX_FILE_INDEX_ENTRIES,
-        patternMatches,
-      },
-    };
+    return gatherContextForRoot(context.workRoot ?? context.repoRoot);
   },
 };
+
+export async function gatherContextForRoot(
+  workRoot: string,
+): Promise<ContextGathererOutput> {
+  const aggregate = createMutableRepoContext();
+
+  await Promise.all([
+    gatherFromPackageJson(workRoot, aggregate),
+    gatherFromGoMod(workRoot, aggregate),
+    gatherFromPython(workRoot, aggregate),
+    gatherFromCargoToml(workRoot, aggregate),
+    gatherFromNativeBuildSystem(workRoot, aggregate),
+  ]);
+
+  const pathSignals = await walkRepo(workRoot);
+  gatherFromPathSignals(pathSignals, aggregate);
+
+  const sourceFiles = pathSignals.files
+    .filter((file) => SOURCE_EXTENSIONS.has(path.extname(file.relPath).toLowerCase()));
+
+  const tree = sourceFiles
+    .slice(0, MAX_FILE_INDEX_ENTRIES)
+    .map((file) => ({ path: file.relPath }));
+
+  const patternMatches = await grepSecurityPatterns(workRoot, sourceFiles);
+
+  const repoContext: RepoContext = {
+    languages: sortValues(aggregate.languages),
+    frameworks: sortValues(aggregate.frameworks),
+    authPatterns: sortValues(aggregate.authPatterns),
+    sanitizationLibs: sortValues(aggregate.sanitizationLibs),
+    ormOrDb: sortValues(aggregate.ormOrDb),
+    entryPoints: sortValues(aggregate.entryPoints),
+  };
+
+  return {
+    repoContext,
+    fileIndex: {
+      tree,
+      totalFiles: sourceFiles.length,
+      truncated: sourceFiles.length > MAX_FILE_INDEX_ENTRIES,
+      patternMatches,
+    },
+  };
+}
 
 const GREP_CONCURRENCY = 16;
 
@@ -358,6 +399,53 @@ async function gatherFromCargoToml(repoRoot: string, out: MutableRepoContext): P
 
   if (await pathExists(path.join(repoRoot, "src/main.rs"))) {
     out.entryPoints.add("src/main.rs");
+  }
+}
+
+async function gatherFromNativeBuildSystem(repoRoot: string, out: MutableRepoContext): Promise<void> {
+  const cmake = await readText(path.join(repoRoot, "CMakeLists.txt"));
+  const makefile = await readText(path.join(repoRoot, "Makefile"));
+  const configure = await readText(path.join(repoRoot, "configure.ac"));
+  const meson = await readText(path.join(repoRoot, "meson.build"));
+  const combined = [cmake, makefile, configure, meson].filter(Boolean).join("\n");
+
+  if (!combined) return;
+
+  const lower = combined.toLowerCase();
+
+  // Detect C/C++ from build system presence
+  if (cmake || configure || meson) {
+    out.languages.add("C");
+    if (lower.includes("cxx") || lower.includes("c++") || lower.includes("cpp")) {
+      out.languages.add("C++");
+    }
+  } else if (makefile) {
+    // Makefile alone is ambiguous; check for C/C++ compiler references
+    if (/\b(?:gcc|g\+\+|clang|clang\+\+|cc)\b/.test(lower)) {
+      out.languages.add("C");
+    }
+    if (/\b(?:g\+\+|clang\+\+|cxx)\b/.test(lower)) {
+      out.languages.add("C++");
+    }
+  }
+
+  // Detect common native libraries/frameworks
+  if (lower.includes("openssl") || lower.includes("libssl")) {
+    out.frameworks.add("OpenSSL");
+  }
+  if (lower.includes("libpcap")) {
+    out.frameworks.add("libpcap");
+  }
+
+  // Detect entry points
+  if (await pathExists(path.join(repoRoot, "src/main.c"))) {
+    out.entryPoints.add("src/main.c");
+  }
+  if (await pathExists(path.join(repoRoot, "src/main.cpp"))) {
+    out.entryPoints.add("src/main.cpp");
+  }
+  if (await pathExists(path.join(repoRoot, "main.c"))) {
+    out.entryPoints.add("main.c");
   }
 }
 

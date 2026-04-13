@@ -50,6 +50,10 @@ const TASK_FILE_SPECS: Record<string, TaskFileSpec> = {
     patternDomains: ["config-security", "crypto-import"],
     pathFilter: (p) => /config|option|setting|default|init|setup|crypto|auth|session/i.test(p),
   },
+  "systems-hunt": {
+    patternDomains: ["protocol-parser", "integer-boundary", "unsafe-memory", "hardening"],
+    pathFilter: (p) => /packet|segment|socket|tcp|udp|rpc|nfs|gss|codec|decode|parser|slice|frame|unsafe|ffi|guest|vmm|virt|copy|buffer/i.test(p),
+  },
 };
 
 export function getTaskFileSpec(taskId: string): TaskFileSpec | undefined {
