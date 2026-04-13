@@ -1,11 +1,13 @@
 import type Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { getTriagedFindingsForRepo } from "../../store.js";
+import { buildBoundaryManifest } from "../../monorepo/boundary-manifest.js";
+import { getActionableFindings, getTriagedFindingsForRepo } from "../../store.js";
 import { isRecord } from "../../utils.js";
 import { safeJsonStringify } from "../../utils/safe-json.js";
 import type { PipelineStartEvent, ReportRequestedEvent, TaskCompleteEvent } from "../events.js";
 import type { MessageBus } from "../types.js";
+import type { MonorepoSharedContext } from "../../monorepo/types.js";
 
 export interface TaintAnalysisArtifactWorkerDeps {
   db: Database.Database;
@@ -13,6 +15,7 @@ export interface TaintAnalysisArtifactWorkerDeps {
 
 interface RunState {
   repoRoot: string;
+  monorepoContext?: MonorepoSharedContext;
 }
 
 /**
@@ -27,6 +30,7 @@ export function registerTaintAnalysisArtifactWorker(
   bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
     runs.set(event.meta.runId, {
       repoRoot: event.payload.context.repoRoot,
+      monorepoContext: event.payload.monorepoContext,
     });
   });
 
@@ -106,6 +110,20 @@ export function registerTaintAnalysisArtifactWorker(
         }, null, 2),
         "utf-8",
       );
+
+      if (state?.monorepoContext?.modulePlan.enabledTasks.includes("taint-iris")) {
+        const actionable = getActionableFindings(deps.db, event.payload.context.repoName);
+        const boundary = buildBoundaryManifest(
+          state.monorepoContext.modulePlan,
+          state.monorepoContext.sharedContext,
+          actionable,
+        );
+        writeFileSync(
+          path.join(runDir, "boundary.json"),
+          safeJsonStringify(boundary, 2),
+          "utf-8",
+        );
+      }
     } catch (error) {
       console.error(`[taint-analysis-artifact-worker] Failed to write artifact: ${error}`);
     }

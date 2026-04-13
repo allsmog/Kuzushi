@@ -31,6 +31,18 @@ const CWE_FREQUENCY_MULTIPLIER: Record<string, number> = {
   "611":  1.0,   // XXE
   "352":  0.95,  // CSRF — context-dependent
   "16":   0.9,   // Misconfig
+  // Memory-safety / deep semantic vulnerability classes
+  "787":  1.3,   // Out-of-bounds write — often RCE
+  "119":  1.3,   // Buffer overflow (generic) — RCE
+  "416":  1.3,   // Use after free — RCE
+  "190":  1.25,  // Integer overflow/wraparound
+  "191":  1.25,  // Integer underflow
+  "681":  1.2,   // Incorrect numeric type conversion
+  "704":  1.2,   // Incorrect type conversion / type confusion
+  "125":  1.15,  // Out-of-bounds read — info leak
+  "693":  1.15,  // Protection mechanism failure
+  "476":  1.1,   // NULL pointer dereference — DoS, sometimes RCE
+  "672":  1.1,   // Operation on expired resource
 };
 
 /**

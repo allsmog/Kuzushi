@@ -148,11 +148,23 @@ function buildPrompt(opts: ScanOpts, maxFindings: number): string {
       ]
     : [];
 
+  const scanPathsContext = opts.scanPaths && opts.scanPaths.length > 1
+    ? [
+        "",
+        "## Scan scope (multi-path module)",
+        "This module spans multiple package directories. Examine files across ALL of these paths:",
+        ...opts.scanPaths.map((p) => `- ${p}`),
+        "Trace data flows ACROSS these directories — they form one deployment unit.",
+        "",
+      ]
+    : [];
+
   return [
     "You are a senior application security researcher with deep expertise in vulnerability discovery.",
     "You think like an attacker: you map attack surfaces, trace data flows, and verify exploitability",
     "before reporting. You know that most static analysis findings are false positives.",
     "",
+    ...scanPathsContext,
     ...reviewContext,
     `Severity filter: ${opts.severity.join(", ") || "ERROR, WARNING, INFO"}`,
     `Max findings: ${maxFindings}`,

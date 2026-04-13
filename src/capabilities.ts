@@ -182,6 +182,20 @@ const CAPABILITIES: CapabilityDefinition[] = [
     scannerSelectable: true,
   },
   {
+    publicId: "systems-hunt",
+    configKey: "systems-hunt",
+    taskIds: ["systems-context-gatherer", "systems-invariant-extract", "systems-trigger-synth", "systems-hunt"],
+    aliases: [
+      "systems-context-gatherer",
+      "systems-invariant-extract",
+      "systems-trigger-synth",
+      "deep-semantic",
+      "deep-semantic-cwe-select",
+      "deep-semantic-hunt",
+    ],
+    scannerSelectable: true,
+  },
+  {
     publicId: "chain-analysis",
     configKey: "chain-analysis",
     taskIds: ["chain-analysis"],

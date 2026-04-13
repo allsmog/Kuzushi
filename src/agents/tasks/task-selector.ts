@@ -1,6 +1,6 @@
-import { coerceRepoContext } from "../../repo-context.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { normalizeTaskCapabilityIds } from "../../capabilities.js";
-import type { RepoContext, ScanOpts } from "../../types.js";
+import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import type { AgentTask, TaskContext } from "../types.js";
 
 /**
@@ -22,7 +22,7 @@ interface SelectionRule {
   /** If any of these frameworks match, recommend these tasks. */
   frameworks?: string[];
   /** Pattern check functions on RepoContext. */
-  condition?: (ctx: RepoContext) => boolean;
+  condition?: (ctx: RepoContext, fileIndex?: FileIndex) => boolean;
   /** Tasks to recommend. */
   tasks: string[];
   /** Reasoning for the recommendation. */
@@ -69,6 +69,16 @@ const SELECTION_RULES: SelectionRule[] = [
     languages: ["PHP"],
     tasks: ["dangerous-api", "ssrf", "secrets", "template-injection", "supply-chain", "command-injection", "deserialization", "xxe"],
     reason: "PHP: high risk for injection, SSRF, templating, command injection, deserialization, and XXE",
+  },
+  {
+    languages: ["C", "C++", "Rust"],
+    tasks: ["systems-hunt"],
+    reason: "Native code: systems hunt for protocol parsing, numeric boundary bugs, and unsafe memory edges",
+  },
+  {
+    condition: (_ctx, fileIndex) => hasSystemsPatternSignals(fileIndex),
+    tasks: ["systems-hunt"],
+    reason: "Packet/parser/unsafe/hardening signals detected — run the systems hunt even without explicit language metadata",
   },
   // Note: auth-access and dangerous-api both resolve to code-config-detect,
   // which is already in ALWAYS_RECOMMENDED via security-misconfig. Dedicated
@@ -134,13 +144,16 @@ export const SELECTABLE_TASK_IDS: ReadonlySet<string> = new Set([
   "sharp-edges-detect",
   "taint-cwe-select",
   "taint-iris",
+  "systems-context-gatherer",
+  "systems-invariant-extract",
+  "systems-hunt",
 ]);
 
 /**
  * Deterministic task selector — no LLM, pure rule-based mapping
  * from repository context to recommended tasks.
  */
-function selectTasks(repoContext: RepoContext | undefined): TaskSelectionResult {
+function selectTasks(repoContext: RepoContext | undefined, fileIndex?: FileIndex): TaskSelectionResult {
   const recommended = new Set<string>(ALWAYS_RECOMMENDED);
   const reasoning: Record<string, string> = {};
 
@@ -173,7 +186,7 @@ function selectTasks(repoContext: RepoContext | undefined): TaskSelectionResult 
     }
 
     if (!matches && rule.condition) {
-      matches = rule.condition(repoContext);
+      matches = rule.condition(repoContext, fileIndex);
     }
 
     if (matches) {
@@ -234,8 +247,10 @@ export const taskSelectorTask: AgentTask<ScanOpts, TaskSelectionResult> = {
   dependsOn: ["context-gatherer"],
 
   async run(_input, context): Promise<TaskSelectionResult> {
-    const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
-    const result = selectTasks(repoContext);
+    const contextGathererOutput = context.upstreamOutputs.get("context-gatherer");
+    const repoContext = coerceRepoContext(contextGathererOutput);
+    const fileIndex = coerceFileIndex(contextGathererOutput);
+    const result = selectTasks(repoContext, fileIndex);
     console.error(
       `[task-selector] Recommended ${result.recommendedTasks.length} tasks: ${result.recommendedTasks.join(", ")}`,
     );
@@ -246,3 +261,9 @@ export const taskSelectorTask: AgentTask<ScanOpts, TaskSelectionResult> = {
 export const __taskSelectorInternals = {
   selectTasks,
 };
+
+function hasSystemsPatternSignals(fileIndex: FileIndex | undefined): boolean {
+  if (!fileIndex) return false;
+  return ["protocol-parser", "integer-boundary", "unsafe-memory", "hardening"]
+    .some((domain) => (fileIndex.patternMatches[domain]?.length ?? 0) > 0);
+}

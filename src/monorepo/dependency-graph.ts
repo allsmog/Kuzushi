@@ -9,25 +9,24 @@
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { DiscoveredModule } from "../discovery/types.js";
-import type { ModuleDependencyGraph, ModuleDependencyNode } from "./types.js";
+import type { DiscoveredModule, DiscoveredProduct } from "../discovery/types.js";
+import type { ModuleDependencyGraph, ModuleDependencyNode, ModuleInteractionEdge } from "./types.js";
 
 /**
  * Build a dependency graph for the given modules within a monorepo.
  *
- * Reads each module's manifest files (package.json, go.mod, Cargo.toml)
- * and resolves references to sibling modules. Returns an adjacency list
- * with per-module in-degree ranking.
+ * Uses discovery evidence to decide which manifest parsers to run per module.
+ * Returns an adjacency list with per-module in-degree ranking.
  */
 export async function buildDependencyGraph(
   monorepoRoot: string,
   modules: DiscoveredModule[],
+  products?: DiscoveredProduct[],
 ): Promise<ModuleDependencyGraph> {
-  const modulesByName = new Map<string, DiscoveredModule>();
   const modulesByPackageName = new Map<string, string>();
 
   for (const m of modules) {
-    modulesByName.set(m.name, m);
+    modulesByPackageName.set(m.name, m.path);
   }
 
   // Phase 1: Resolve package names from manifests (npm packages often have
@@ -36,10 +35,8 @@ export async function buildDependencyGraph(
     const absPath = path.resolve(monorepoRoot, m.path);
     const pkgName = await readPackageName(absPath);
     if (pkgName) {
-      modulesByPackageName.set(pkgName, m.name);
+      modulesByPackageName.set(pkgName, m.path);
     }
-    // Also index by directory-based module name as fallback
-    modulesByPackageName.set(m.name, m.name);
   }
 
   // Phase 2: Parse each module's dependencies and match against siblings
@@ -47,19 +44,19 @@ export async function buildDependencyGraph(
   const dependedOnBy = new Map<string, Set<string>>();
 
   for (const m of modules) {
-    dependsOn.set(m.name, new Set());
-    dependedOnBy.set(m.name, new Set());
+    dependsOn.set(m.path, new Set());
+    dependedOnBy.set(m.path, new Set());
   }
 
   for (const m of modules) {
     const absPath = path.resolve(monorepoRoot, m.path);
-    const deps = await resolveModuleDeps(absPath, m.language);
+    const deps = await resolveModuleDeps(absPath, m);
 
     for (const dep of deps) {
-      const siblingName = modulesByPackageName.get(dep);
-      if (siblingName && siblingName !== m.name) {
-        dependsOn.get(m.name)!.add(siblingName);
-        dependedOnBy.get(siblingName)!.add(m.name);
+      const siblingPath = modulesByPackageName.get(dep);
+      if (siblingPath && siblingPath !== m.path) {
+        dependsOn.get(m.path)!.add(siblingPath);
+        dependedOnBy.get(siblingPath)!.add(m.path);
       }
     }
   }
@@ -68,10 +65,10 @@ export async function buildDependencyGraph(
   const nodes = new Map<string, ModuleDependencyNode>();
   const rankedModules = modules
     .map((m) => ({
-      moduleId: m.name,
+      moduleId: m.path,
       modulePath: m.path,
-      inDegree: dependedOnBy.get(m.name)?.size ?? 0,
-      outDegree: dependsOn.get(m.name)?.size ?? 0,
+      inDegree: dependedOnBy.get(m.path)?.size ?? 0,
+      outDegree: dependsOn.get(m.path)?.size ?? 0,
     }))
     .sort((a, b) => b.inDegree - a.inDegree);
 
@@ -85,7 +82,7 @@ export async function buildDependencyGraph(
 
 // ── Manifest Parsers ───────────────────────────────────────────────────
 
-async function readPackageName(moduleDir: string): Promise<string | null> {
+export async function readPackageName(moduleDir: string): Promise<string | null> {
   const pkgPath = path.join(moduleDir, "package.json");
   try {
     const raw = await readFile(pkgPath, "utf-8");
@@ -96,32 +93,38 @@ async function readPackageName(moduleDir: string): Promise<string | null> {
   }
 }
 
-async function resolveModuleDeps(
+export async function resolveModuleDeps(
   moduleDir: string,
-  language?: string,
+  module: DiscoveredModule,
 ): Promise<string[]> {
   const deps: string[] = [];
+  const evidence = module.discoveryEvidence ?? [];
+  const lang = module.language?.toLowerCase() ?? "";
 
   // npm/yarn/pnpm package.json dependencies
-  const pkgDeps = await parsePackageJsonDeps(moduleDir);
-  deps.push(...pkgDeps);
+  if (evidence.some((e) => e.includes("package.json")) || lang === "javascript" || lang === "typescript") {
+    deps.push(...await parsePackageJsonDeps(moduleDir));
+  }
 
   // go.mod require directives
-  if (language === "go" || language === "Go") {
-    const goDeps = await parseGoModDeps(moduleDir);
-    deps.push(...goDeps);
+  if (evidence.some((e) => e.includes("go.mod")) || lang === "go") {
+    deps.push(...await parseGoModDeps(moduleDir));
   }
 
   // Cargo.toml path dependencies
-  if (language === "rust" || language === "Rust") {
-    const cargoDeps = await parseCargoDeps(moduleDir);
-    deps.push(...cargoDeps);
+  if (evidence.some((e) => e.includes("Cargo.toml")) || lang === "rust") {
+    deps.push(...await parseCargoDeps(moduleDir));
+  }
+
+  // .csproj ProjectReference elements
+  if (module.moduleKind === "solution-project" || evidence.some((e) => e.includes(".csproj") || e.includes(".vcxproj"))) {
+    deps.push(...await parseCsprojReferences(moduleDir));
   }
 
   return deps;
 }
 
-async function parsePackageJsonDeps(moduleDir: string): Promise<string[]> {
+export async function parsePackageJsonDeps(moduleDir: string): Promise<string[]> {
   const pkgPath = path.join(moduleDir, "package.json");
   try {
     const raw = await readFile(pkgPath, "utf-8");
@@ -139,7 +142,7 @@ async function parsePackageJsonDeps(moduleDir: string): Promise<string[]> {
   }
 }
 
-async function parseGoModDeps(moduleDir: string): Promise<string[]> {
+export async function parseGoModDeps(moduleDir: string): Promise<string[]> {
   const goModPath = path.join(moduleDir, "go.mod");
   try {
     const raw = await readFile(goModPath, "utf-8");
@@ -166,7 +169,7 @@ async function parseGoModDeps(moduleDir: string): Promise<string[]> {
   }
 }
 
-async function parseCargoDeps(moduleDir: string): Promise<string[]> {
+export async function parseCargoDeps(moduleDir: string): Promise<string[]> {
   const cargoPath = path.join(moduleDir, "Cargo.toml");
   try {
     const raw = await readFile(cargoPath, "utf-8");
@@ -182,6 +185,34 @@ async function parseCargoDeps(moduleDir: string): Promise<string[]> {
   }
 }
 
+export async function parseCsprojReferences(moduleDir: string): Promise<string[]> {
+  const deps: string[] = [];
+  const { readdir: rd } = await import("node:fs/promises");
+  try {
+    const entries = await rd(moduleDir);
+    for (const entry of entries) {
+      if (!entry.endsWith(".csproj") && !entry.endsWith(".vcxproj") && !entry.endsWith(".fsproj")) continue;
+      const projPath = path.join(moduleDir, entry);
+      try {
+        const raw = await readFile(projPath, "utf-8");
+        const refRegex = /<ProjectReference\s+Include="([^"]+)"/g;
+        let match: RegExpExecArray | null;
+        while ((match = refRegex.exec(raw)) !== null) {
+          // Extract project name from the reference path
+          const refPath = match[1].replace(/\\/g, "/");
+          const refName = path.basename(refPath, path.extname(refPath));
+          deps.push(refName);
+        }
+      } catch {
+        // skip unreadable project files
+      }
+    }
+  } catch {
+    // skip if dir can't be read
+  }
+  return deps;
+}
+
 /**
  * Print a summary of the dependency graph for logging.
  */
@@ -195,4 +226,21 @@ export function formatDependencyGraphSummary(graph: ModuleDependencyGraph): stri
     lines.push(`  #${node.dependencyRank + 1} ${node.moduleId} (in-degree: ${node.inDegree}) ← ${depNames}${suffix}`);
   }
   return lines.join("\n");
+}
+
+export function deriveInteractionEdgesFromDependencyGraph(
+  graph: ModuleDependencyGraph,
+): ModuleInteractionEdge[] {
+  const edges: ModuleInteractionEdge[] = [];
+  for (const [source, targets] of graph.dependsOn.entries()) {
+    for (const target of targets) {
+      edges.push({
+        source,
+        target,
+        interactionType: "import",
+        evidence: ["workspace dependency edge"],
+      });
+    }
+  }
+  return edges;
 }

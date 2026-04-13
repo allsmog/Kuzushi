@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { __taskSelectorInternals, SELECTABLE_TASK_IDS } from "../../../src/agents/tasks/task-selector.js";
-import type { RepoContext } from "../../../src/types.js";
+import type { FileIndex, RepoContext } from "../../../src/types.js";
 
 const { selectTasks } = __taskSelectorInternals;
 
@@ -12,6 +12,16 @@ function makeContext(overrides: Partial<RepoContext> = {}): RepoContext {
     sanitizationLibs: [],
     ormOrDb: [],
     entryPoints: [],
+    ...overrides,
+  };
+}
+
+function makeFileIndex(overrides: Partial<FileIndex> = {}): FileIndex {
+  return {
+    tree: [],
+    totalFiles: 0,
+    truncated: false,
+    patternMatches: {},
     ...overrides,
   };
 }
@@ -74,6 +84,25 @@ describe("selectTasks", () => {
     const result = selectTasks(ctx);
     expect(result.recommendedTasks).toContain("threat-model-randori");
     expect(result.recommendedTasks).toContain("threat-hunt");
+  });
+
+  it("recommends systems-hunt for Rust repos", () => {
+    const ctx = makeContext({ languages: ["Rust"] });
+    const result = selectTasks(ctx);
+    expect(result.recommendedTasks).toContain("systems-hunt");
+  });
+
+  it("recommends systems-hunt when parser and unsafe signals are present", () => {
+    const result = selectTasks(
+      makeContext({ languages: [] }),
+      makeFileIndex({
+        patternMatches: {
+          "protocol-parser": [{ pattern: "packet", filePath: "src/net/tcp_input.c", lineNumber: 8, lineContent: "parse_packet(pkt);" }],
+          "unsafe-memory": [{ pattern: "unsafe", filePath: "src/vmm/guest_mem.rs", lineNumber: 11, lineContent: "unsafe { ... }" }],
+        },
+      }),
+    );
+    expect(result.recommendedTasks).toContain("systems-hunt");
   });
 
   it("provides reasoning for each recommended task", () => {
@@ -163,6 +192,12 @@ describe("SELECTABLE_TASK_IDS", () => {
 
   it("contains threat-hunt", () => {
     expect(SELECTABLE_TASK_IDS.has("threat-hunt")).toBe(true);
+  });
+
+  it("contains systems-hunt tasks", () => {
+    expect(SELECTABLE_TASK_IDS.has("systems-context-gatherer")).toBe(true);
+    expect(SELECTABLE_TASK_IDS.has("systems-invariant-extract")).toBe(true);
+    expect(SELECTABLE_TASK_IDS.has("systems-hunt")).toBe(true);
   });
 
   it("does not contain diff-review", () => {

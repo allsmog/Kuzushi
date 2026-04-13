@@ -85,7 +85,15 @@ export async function runSemgrep(
     args.push("--exclude", pattern);
   }
 
-  args.push(repoRoot);
+  // When scanPaths are provided (monorepo multi-path modules), pass all paths
+  // as targets. Otherwise fall back to the single repoRoot.
+  if (opts.scanPaths && opts.scanPaths.length > 0) {
+    for (const p of opts.scanPaths) {
+      args.push(p);
+    }
+  } else {
+    args.push(repoRoot);
+  }
 
   return new Promise((resolve, reject) => {
     const proc = spawn(scannerBin, args, {
