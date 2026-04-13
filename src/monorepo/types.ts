@@ -9,14 +9,14 @@
 
 import type { DiscoveredModule, ModulePriority } from "../discovery/types.js";
 import type { DfdElement, TrustBoundary, StrideThreat } from "../agents/tasks/threat-modeling/types.js";
-import type { KuzushiConfig } from "../types.js";
+import type { FileIndex, RepoContext } from "../types.js";
 
 // ── Phase 0: Static Intelligence ───────────────────────────────────────
 
 export interface ModuleDependencyGraph {
-  /** Adjacency list: module name → set of module names it depends on. */
+  /** Adjacency list: module path → set of module paths it depends on. */
   dependsOn: Map<string, Set<string>>;
-  /** Reverse adjacency: module name → set of module names that depend on it. */
+  /** Reverse adjacency: module path → set of module paths that depend on it. */
   dependedOnBy: Map<string, Set<string>>;
   /** Per-module metrics derived from the graph. */
   nodes: Map<string, ModuleDependencyNode>;
@@ -72,23 +72,21 @@ export interface StaticIntelligence {
 
 export interface MonorepoDataFlow {
   id: string;
-  sourceModule: string;
-  targetModule: string;
+  sourceModulePath: string;
+  targetModulePath: string;
   dataType: string;
   protocol: string;
   trustBoundaryCrossings: string[];
   securityConcerns: string[];
 }
 
-export interface ModuleRiskAssessment {
-  moduleName: string;
+export interface ModuleTaskRecommendation {
+  modulePath: string;
   riskLevel: ModulePriority;
   rationale: string;
-  recommendedScanDepth: ScanDepth;
+  recommendedTasks: string[];
   focusAreas: string[];
 }
-
-export type ScanDepth = "deep" | "standard" | "fast" | "skip";
 
 export interface CrossModuleHypothesis {
   id: string;
@@ -107,7 +105,7 @@ export interface MonorepoThreatModel {
     dataFlows: MonorepoDataFlow[];
   };
   threats: StrideThreat[];
-  moduleRiskAssessments: ModuleRiskAssessment[];
+  modulePlans: ModuleTaskRecommendation[];
   crossModuleHypotheses: CrossModuleHypothesis[];
 }
 
@@ -126,19 +124,33 @@ export interface MonorepoBudget {
 
 export interface ModuleScanPlan {
   module: DiscoveredModule;
-  scanDepth: ScanDepth;
-  configOverrides: Partial<KuzushiConfig>;
-  /** Cross-module hypotheses relevant to this module. */
-  scanDirectives: CrossModuleHypothesis[];
+  enabledTasks: string[];
+  riskLevel: ModulePriority;
+  rationale: string;
+  focusAreas: string[];
   estimatedCostUsd: number;
 }
 
 // ── Shared Context (passed to per-module pipelines) ────────────────────
 
+export interface ModuleSharedContext {
+  modulePath: string;
+  repoContext: RepoContext;
+  fileIndex: FileIndex;
+  attackSurface: AttackSurfaceAnnotation;
+  dependencyNode?: ModuleDependencyNode;
+  dependsOn: string[];
+  dependedOnBy: string[];
+}
+
+export interface MonorepoContextIndex {
+  modules: Map<string, ModuleSharedContext>;
+}
+
 export interface MonorepoSharedContext {
   architecturalThreatModel: MonorepoThreatModel;
-  moduleRiskAssessment: ModuleRiskAssessment;
-  crossModuleHypotheses: CrossModuleHypothesis[];
+  modulePlan: ModuleScanPlan;
+  sharedContext: ModuleSharedContext;
   dependencyGraph: ModuleDependencyGraph;
   attackSurface: AttackSurfaceAnnotation;
 }

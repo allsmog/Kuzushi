@@ -50,6 +50,9 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
       "taint-iris",
       "threat-model-randori",
       "threat-hunt",
+      "systems-context-gatherer",
+      "systems-invariant-extract",
+      "systems-hunt",
     ],
     verify: true,
     variantAnalysis: true,
@@ -59,7 +62,7 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
   },
   reference: {
     // Inherits the user's configured model and scanners — does not override.
-    // Orchid is used surgically for threat-hunt only (see scannerConfig below).
+    // Orchid is used surgically for systems-hunt only (see scannerConfig below).
     taskMode: "compat",
     verify: true,
     pocHarness: true,
@@ -68,10 +71,14 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     variantAnalysis: true,
     scannerConfig: {
       "threat-hunt": {
-        model: "anthropic:claude-orchid-preview",
         runsPerActor: 3,
         maxActors: 10,
         maxConcurrentHunts: 3,
+      },
+      "systems-hunt": {
+        model: "anthropic:claude-orchid-preview",
+        maxConcurrentSurfaces: 3,
+        maxSurfaces: 12,
       },
     },
   },

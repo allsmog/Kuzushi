@@ -1809,6 +1809,148 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
+  it("treats seeded task outputs as already satisfied DAG dependencies", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const registry = {
+      resolveEnabled: () => [],
+    };
+
+    let contextGathererRuns = 0;
+    const taskStarts: string[] = [];
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        contextGathererRuns += 1;
+        return {
+          repoContext: {
+            languages: ["TypeScript"],
+            frameworks: ["Express"],
+            authPatterns: ["JWT"],
+            sanitizationLibs: [],
+            ormOrDb: [],
+            entryPoints: ["src/api.ts"],
+          },
+          fileIndex: {
+            tree: [{ path: "src/api.ts" }],
+            totalFiles: 1,
+            truncated: false,
+            patternMatches: {},
+          },
+        };
+      },
+    };
+    const dependentTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "code-config-detect",
+      displayName: "Code Config Detect",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run(_input, context) {
+        const seeded = context.upstreamOutputs.get("context-gatherer") as Record<string, unknown> | undefined;
+        if (!seeded || !("repoContext" in seeded)) {
+          throw new Error("missing seeded context");
+        }
+        return [makeFinding("seeded-context", 90)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(dependentTask);
+
+    registerScanWorker(bus, {
+      registry: {
+        get: () => {
+          throw new Error("legacy scan path should not be used in DAG mode");
+        },
+      } as any,
+      taskRegistry,
+      config: makeConfig(),
+    });
+
+    registerOrchestrator(bus, {
+      registry: registry as any,
+      taskRegistry,
+      db,
+    });
+    registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
+
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      taskStarts.push(event.payload.taskId);
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+    bus.subscribe<ReportRequestedEvent>("report:requested", async (event) => {
+      if (event.meta.runId !== runId) {
+        return;
+      }
+      await bus.publish(
+        createEvent("report:complete", runId, {
+          context: event.payload.context,
+        }),
+      );
+    });
+
+    const pipelineCompletePromise = bus.waitFor<PipelineCompleteEvent>(
+      "pipeline:complete",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          scanners: [],
+          taskMode: "explicit",
+          enabledTasks: ["code-config-detect"],
+          enableDynamicTaskSelection: false,
+        },
+        scanOpts: {
+          ...makeScanOpts(),
+          scanners: [],
+        },
+        seedTaskOutputs: new Map([
+          ["context-gatherer", {
+            repoContext: {
+              languages: ["TypeScript"],
+              frameworks: ["Express"],
+              authPatterns: ["JWT"],
+              sanitizationLibs: [],
+              ormOrDb: [],
+              entryPoints: ["src/api.ts"],
+            },
+            fileIndex: {
+              tree: [{ path: "src/api.ts" }],
+              totalFiles: 1,
+              truncated: false,
+              patternMatches: {},
+            },
+          }],
+        ]),
+      }),
+    );
+
+    await pipelineCompletePromise;
+
+    expect(contextGathererRuns).toBe(0);
+    expect(taskStarts).not.toContain("context-gatherer");
+    expect(taskStarts).toContain("code-config-detect");
+
+    await bus.close();
+    db.close();
+  });
+
   it("threads context-enricher output into triage queue events when enabled", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");

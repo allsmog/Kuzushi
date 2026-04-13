@@ -32,7 +32,7 @@ import {
   initDb,
   markStaleRunsAborted,
 } from "../../store.js";
-import { looksLikeMonorepo } from "../../discovery/module-discovery.js";
+import { looksLikeMonorepo } from "../../discovery/repo-discovery.js";
 import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import { printQualityGateResult } from "../../report.js";
 import { CliCommandError, CliConfigError, CliUsageError } from "../errors.js";
@@ -63,6 +63,7 @@ export interface PipelineParams {
   reportMode?: "full" | "suppress";
   runtime?: AgentRuntime;
   manageCache?: boolean;
+  seedTaskOutputs?: Map<string, unknown>;
   /** Shared monorepo context injected into per-module pipeline state. */
   monorepoContext?: import("../../monorepo/types.js").MonorepoSharedContext;
 }
@@ -400,6 +401,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
         config,
         scanOpts,
         resumeRunId,
+        seedTaskOutputs: params.seedTaskOutputs,
         monorepoContext: params.monorepoContext,
       }),
     );

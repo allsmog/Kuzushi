@@ -128,9 +128,11 @@ export async function detectAttackSurfaces(
   const results = new Map<string, AttackSurfaceAnnotation>();
 
   for (const m of modules) {
-    const absPath = path.resolve(monorepoRoot, m.path);
-    const annotation = await detectModuleAttackSurface(absPath);
-    results.set(m.name, annotation);
+    const effectivePaths = m.includePaths ?? [m.path];
+    const annotations = await Promise.all(
+      effectivePaths.map((p) => detectModuleAttackSurface(path.resolve(monorepoRoot, p))),
+    );
+    results.set(m.path, mergeAttackSurfaceAnnotations(annotations));
   }
 
   return results;
@@ -192,6 +194,34 @@ async function detectModuleAttackSurface(
     entryPointTypes,
     entryPointCount,
     detectedFrameworks: detectedFrameworks.map((f) => f.framework),
+  };
+}
+
+function mergeAttackSurfaceAnnotations(
+  annotations: AttackSurfaceAnnotation[],
+): AttackSurfaceAnnotation {
+  if (annotations.length === 0) {
+    return { isExternalFacing: false, entryPointTypes: [], entryPointCount: 0, detectedFrameworks: [] };
+  }
+  if (annotations.length === 1) return annotations[0];
+
+  const entryPointTypes = new Set<EntryPointType>();
+  const detectedFrameworks = new Set<string>();
+  let entryPointCount = 0;
+  let isExternalFacing = false;
+
+  for (const a of annotations) {
+    if (a.isExternalFacing) isExternalFacing = true;
+    for (const t of a.entryPointTypes) entryPointTypes.add(t);
+    for (const f of a.detectedFrameworks) detectedFrameworks.add(f);
+    entryPointCount += a.entryPointCount;
+  }
+
+  return {
+    isExternalFacing,
+    entryPointTypes: [...entryPointTypes],
+    entryPointCount,
+    detectedFrameworks: [...detectedFrameworks],
   };
 }
 

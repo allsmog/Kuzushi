@@ -79,7 +79,7 @@ The terminal report shows true positives first, then needs-review items. False p
 2. **Code graph** — builds a persistent entry-point-to-sink graph via static analysis + LLM discovery mode. For HTTP services, traces pre-identified routes. For CLI tools, daemons, and non-HTTP projects, the LLM identifies entry points itself (main functions, socket listeners, gRPC servers, CLI handlers) and traces security-relevant call/data-flow paths
 3. **Threat modeling** — Randori PASTA plugin (shipped as `@kuzushi/randori-plugin`) performs 4-stage threat analysis: business objectives, technical scope, DFD decomposition, and STRIDE threat scenarios with ATT&CK/CAPEC/OWASP mapping and 5-factor probabilistic scoring. All threat leads are injected into every detector's prompts.
 4. **Threat-informed hunting** — spawns one adversarial Claude agent per DFD external entity (users, services, attackers) to CTF-style hunt for vulnerabilities from each actor's perspective
-5. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently; 13+ specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto, auth logic, sharp edges); multi-strategy mode runs 2-4 analytical approaches per vuln class
+5. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently; 15+ specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto, auth logic, sharp edges, systems-level deep semantic analysis); multi-strategy mode runs 2-4 analytical approaches per vuln class
 4. **Classifier funnel** — cheap single-token pre-filter removes ~80% of noise before expensive triage
 5. **Deduplication** — fingerprints and merges equivalent findings across scanners
 6. **Incremental skip** — findings already triaged in previous runs are skipped automatically
@@ -137,6 +137,8 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 
 **Threat-informed hunting** — spawns adversarial Claude agents for each DFD external entity identified by the threat model. Each agent explores the codebase as that actor (end user, admin, external service, LLM agent) looking for exploitable paths. Findings are deduplicated and fed into triage/verification.
 
+**Systems-level deep semantic hunt** — LLM-driven analysis pipeline for finding the class of bugs that survive decades of code review and fuzzing: integer overflow/wraparound (CWE-190), sentinel value collisions (CWE-787), signed/unsigned comparison bugs (CWE-681), buffer overflows exploitable via missing stack canaries (CWE-693), use-after-free in protocol state machines (CWE-416), and unsafe block violations in Rust (CWE-704). The LLM writes and runs CodeQL queries using range analysis, loop induction analysis, and type predicates — NOT TaintTracking — to find bugs that source-to-sink taint flows cannot express. Activates automatically for C, C++, Rust, and Go codebases. The `reference` preset routes a frontier model to this task for maximum depth.
+
 **Auto rule generation** — verified exploitable findings automatically generate custom Semgrep rules. Rules are persisted to `.kuzushi/custom-rules/` and auto-loaded on subsequent scans, creating a feedback loop where the scanner gets smarter over time. Rules are validated against the original finding and removed if they don't match.
 
 **Diff-aware taint analysis** — narrows analysis to files changed since a base branch. Run `--taint-diff-base main` in CI to only analyze what's new in the PR.
@@ -145,7 +147,7 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 
 **Patch synthesis** — `kuzushi patch <repo> --fingerprint <fp>` generates and validates security patches in disposable git worktrees without touching your working copy.
 
-**15+ specialized detectors** — dedicated detection tasks for command injection, XXE, insecure deserialization, SSRF, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL security, secrets/crypto, code config, auth logic, sharp edges, and crypto behavioral testing. Each has vulnerability-class-specific prompts, anti-hallucination constraints, and multi-lens analysis. All detectors receive threat model leads for threat-informed scanning.
+**15+ specialized detectors** — dedicated detection tasks for command injection, XXE, insecure deserialization, SSRF, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL security, secrets/crypto, code config, auth logic, sharp edges, crypto behavioral testing, and systems-level deep semantic analysis (integer overflow, buffer overflow, sentinel collision, use-after-free, unsafe blocks). Each has vulnerability-class-specific prompts, anti-hallucination constraints, and multi-lens analysis. All detectors receive threat model leads for threat-informed scanning.
 
 **Classifier funnel** — single-token LLM pre-filter using a cheap model removes ~80% of false positives before expensive triage, cutting per-scan cost dramatically.
 
@@ -172,9 +174,9 @@ Presets configure the pipeline for different cost/depth tradeoffs. CLI flags ove
 ```sh
 kuzushi <repo> --preset fast        # scanners only, no context/enrichment/variant analysis
 kuzushi <repo> --preset standard    # scanners + IRIS taint + secrets/crypto detection
-kuzushi <repo> --preset deep        # standard + exploit verification
+kuzushi <repo> --preset deep        # standard + verification + systems-level deep semantic hunt
 kuzushi <repo> --preset reference   # verification + PoC generation + threat-informed hunting
-                                    # with a frontier model for adversarial CTF-style exploration
+                                    # + deep semantic hunt with a frontier model
 ```
 
 Preset task modes:
@@ -182,7 +184,7 @@ Preset task modes:
 - `standard` and `deep` use `taskMode: "explicit"`
 - `reference` uses `taskMode: "compat"` to preserve the legacy full-pipeline behavior
 
-The `reference` preset uses a cost-smart model tiering strategy: a standard model handles bulk scanning and triage, while a frontier model is used surgically for the threat-hunt stage only — where stronger adversarial reasoning has the highest ROI for zero-day discovery. Per-task model overrides keep costs controlled.
+The `reference` preset uses a cost-smart model tiering strategy: a standard model handles bulk scanning and triage, while a frontier model is used surgically for the systems-hunt and threat-hunt stages — where stronger adversarial reasoning has the highest ROI for zero-day discovery. Per-task model overrides keep costs controlled.
 
 ## Scanner Plugins
 
@@ -192,6 +194,7 @@ The `reference` preset uses a cost-smart model tiering strategy: a standard mode
 | `codeql` | Semantic dataflow/taint analysis via GitHub CodeQL CLI | No (opt-in) |
 | `agentic` | AI-driven scanner — LLM with read-only repo tools | N/A |
 | `taint-analysis` | IRIS-style LLM-driven CodeQL taint analysis — dynamic CWE selection, LLM-generated queries, iterative refinement | No (opt-in) |
+| `systems-hunt` | Deep semantic analysis for C/C++/Rust/Go — LLM-driven CodeQL range analysis, loop induction, missing mitigations | No (opt-in) |
 
 ```sh
 kuzushi <repo> --scanners semgrep,codeql    # run multiple scanners

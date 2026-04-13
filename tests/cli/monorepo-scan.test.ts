@@ -42,29 +42,34 @@ describe("monorepo-scan helpers", () => {
       description: "Authentication service for the monorepo",
       language: "TypeScript",
       buildSystem: "package.json",
+      moduleKind: "standalone",
+      discoveryEvidence: ["manual --modules flag"],
     }]);
   });
 
-  it("normalizes configured modules and preserves parent/child metadata", async () => {
+  it("normalizes configured modules using canonical paths", async () => {
     const root = makeTempMonorepo();
-    const parentDir = path.join(root, "platform");
-    const childDir = path.join(parentDir, "gateway");
-    mkdirSync(childDir, { recursive: true });
-    writeFileSync(path.join(parentDir, "README.md"), "Platform parent module", "utf-8");
-    writeFileSync(path.join(childDir, "go.mod"), "module example.com/gateway", "utf-8");
+    const platformDir = path.join(root, "platform");
+    const gatewayDir = path.join(root, "gateway");
+    mkdirSync(platformDir, { recursive: true });
+    mkdirSync(gatewayDir, { recursive: true });
+    writeFileSync(path.join(platformDir, "README.md"), "Platform module", "utf-8");
+    writeFileSync(path.join(gatewayDir, "go.mod"), "module example.com/gateway", "utf-8");
 
     const modules: DiscoveredModule[] = [{
       name: "Platform",
       path: "platform",
       description: "",
       language: "",
-      isParent: true,
+      moduleKind: "standalone",
+      discoveryEvidence: ["config"],
     }, {
       name: "Gateway",
-      path: "platform/gateway",
+      path: "gateway",
       description: "edge traffic",
       language: "",
-      parentModule: "platform",
+      moduleKind: "standalone",
+      discoveryEvidence: ["config"],
     }];
 
     const normalized = await normalizeConfiguredModules(root, modules);
@@ -72,30 +77,53 @@ describe("monorepo-scan helpers", () => {
     expect(normalized[0]).toMatchObject({
       name: "platform",
       path: "platform",
-      isParent: true,
-      description: "Platform parent module",
+      description: "Platform module",
     });
     expect(normalized[1]).toMatchObject({
       name: "gateway",
-      path: "platform/gateway",
-      parentModule: "platform",
+      path: "gateway",
       description: "edge traffic",
       language: "Go",
       buildSystem: "go.mod",
     });
   });
 
+  it("rejects overlapping configured modules", async () => {
+    const root = makeTempMonorepo();
+    const parentDir = path.join(root, "platform");
+    const childDir = path.join(parentDir, "gateway");
+    mkdirSync(childDir, { recursive: true });
+    writeFileSync(path.join(parentDir, "README.md"), "Platform parent module", "utf-8");
+    writeFileSync(path.join(childDir, "go.mod"), "module example.com/gateway", "utf-8");
+
+    await expect(normalizeConfiguredModules(root, [{
+      name: "Platform",
+      path: "platform",
+      description: "",
+      language: "",
+      moduleKind: "standalone",
+      discoveryEvidence: ["config"],
+    }, {
+      name: "Gateway",
+      path: "platform/gateway",
+      description: "",
+      language: "",
+      moduleKind: "standalone",
+      discoveryEvidence: ["config"],
+    }])).rejects.toThrow(/overlapping module roots/);
+  });
+
   it("filters by module name patterns and exclusions", () => {
     const modules: DiscoveredModule[] = [
-      { name: "platform", path: "platform", description: "", language: "TypeScript", isParent: true },
-      { name: "platform-gateway", path: "platform/gateway", description: "", language: "Go", parentModule: "platform" },
-      { name: "billing", path: "billing", description: "", language: "Java" },
+      { name: "platform", path: "platform", description: "", language: "TypeScript", moduleKind: "standalone", discoveryEvidence: [] },
+      { name: "platform-gateway", path: "platform/gateway", description: "", language: "Go", moduleKind: "standalone", discoveryEvidence: [] },
+      { name: "billing", path: "billing", description: "", language: "Java", moduleKind: "standalone", discoveryEvidence: [] },
     ];
 
     const filtered = applyModuleFilters(modules, "platform*", ["*-gateway"]);
 
     expect(filtered).toEqual([
-      { name: "platform", path: "platform", description: "", language: "TypeScript", isParent: true },
+      { name: "platform", path: "platform", description: "", language: "TypeScript", moduleKind: "standalone", discoveryEvidence: [] },
     ]);
   });
 });
