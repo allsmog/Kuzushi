@@ -12,6 +12,7 @@ process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
 });
 
 import { Command } from "commander";
+import { createRequire } from "node:module";
 import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { cleanup as cleanupHttpAgents } from "./http-agent.js";
@@ -66,7 +67,7 @@ program
   .name("kuzushi")
   .description("Kuzushi — Agentic SAST orchestration")
   .option("--verbose", "Show debug-level diagnostics", false)
-  .version("0.1.0");
+  .version((createRequire(import.meta.url)("../package.json") as { version: string }).version);
 
 program.hook("preAction", (_thisCommand, actionCommand) => {
   if (actionCommand.optsWithGlobals().verbose) {
