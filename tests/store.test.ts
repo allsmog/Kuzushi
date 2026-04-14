@@ -35,7 +35,7 @@ let dbPath: string;
 
 function makeFinding(fp: string): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: fp,
     ruleId: "test.rule",
     filePath: "src/test.ts",
@@ -69,11 +69,11 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 2,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: ["node_modules"],
-    scannerConfig: { semgrep: {} },
+    taskConfig: { semgrep: {} },
   };
 }
 
@@ -81,7 +81,7 @@ function makeScanOpts(): ScanOpts {
   return {
     severity: ["ERROR"],
     excludePatterns: ["node_modules"],
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     fresh: false,
   };
 }
@@ -193,12 +193,12 @@ describe("upsertFinding", () => {
   it("inserts a new finding", () => {
     const db = initDb(dbPath);
     upsertFinding(db, makeFinding("fp1"), makeResult("fp1"), "repo", "HEAD");
-    const rows = db.prepare("SELECT scanner, fingerprint FROM findings").all() as Array<{
-      scanner: string;
+    const rows = db.prepare("SELECT task_id AS taskId, fingerprint FROM findings").all() as Array<{
+      taskId: string;
       fingerprint: string;
     }>;
     expect(rows).toHaveLength(1);
-    expect(rows[0].scanner).toBe("semgrep");
+    expect(rows[0].taskId).toBe("semgrep");
     db.close();
   });
 
@@ -251,7 +251,7 @@ describe("upsertFinding", () => {
     finding.adjustedScore = 42;
     finding.corroboratingSignals = [
       {
-        scanner: "codeql",
+        taskId: "codeql",
         fingerprint: "fp-other",
         ruleId: "js/sql-injection",
         filePath: "src/test.ts",
@@ -275,7 +275,7 @@ describe("upsertFinding", () => {
     expect(actionable).toHaveLength(1);
     expect(actionable[0].adjustedScore).toBe(42);
     expect(actionable[0].corroboratingSignals).toEqual([
-      expect.objectContaining({ fingerprint: "fp-other", scanner: "codeql" }),
+      expect.objectContaining({ fingerprint: "fp-other", taskId: "codeql" }),
     ]);
     expect(actionable[0].suppressionReasons).toEqual([
       expect.objectContaining({ id: "open-redirect", kind: "soft" }),
@@ -474,7 +474,7 @@ describe("getActionableFindings", () => {
     upsertFinding(db, makeFinding("b"), makeResult("b", "tp"), "repo", "HEAD");
     const actionable = getActionableFindings(db);
     expect(actionable).toHaveLength(1);
-    expect(actionable[0].scanner).toBe("semgrep");
+    expect(actionable[0].taskId).toBe("semgrep");
     expect(actionable[0].verdict).toBe("tp");
     db.close();
   });

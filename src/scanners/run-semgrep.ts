@@ -174,7 +174,7 @@ export function selectFindings(
     const extra = finding.extra ?? {};
     const meta = extra.metadata ?? {};
     return {
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: fp,
       ruleId: finding.check_id,
       filePath: finding.path,

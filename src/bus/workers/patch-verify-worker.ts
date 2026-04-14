@@ -1,25 +1,30 @@
 import type Database from "better-sqlite3";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
+import type { TaskRegistry } from "../../agents/registry.js";
+import type { TaskContext } from "../../agents/types.js";
+import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
 import type { MessageBus } from "../types.js";
 import type { PatchVerifyRequestedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
+import { executeAgentTask } from "../task-execution.js";
 import { toErrorMessage } from "../../utils.js";
 import { updatePatchResultStatus, getPatchResultsForFinding } from "../../store/patch-results.js";
-import type { ScannerRegistry } from "../../scanners/registry.js";
-import type { KuzushiConfig } from "../../types.js";
+import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import { execFileSync } from "node:child_process";
 
 export interface PatchVerifyWorkerDeps {
   bus: MessageBus;
   db: Database.Database;
   config: KuzushiConfig;
-  registry: ScannerRegistry;
+  runtime: AgentRuntime;
+  taskRegistry: TaskRegistry;
 }
 
 /**
- * Worker that re-verifies patched code by running the scanner on the worktree.
+ * Worker that re-verifies patched code by running configured finding tasks on the worktree.
  */
 export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
-  const { bus, db, config, registry } = deps;
+  const { bus, db, config, runtime, taskRegistry } = deps;
 
   bus.subscribe<PatchVerifyRequestedEvent>("patch-verify:requested", async (event) => {
     const { context, fingerprint, worktreePath, depth } = event.payload;
@@ -28,7 +33,15 @@ export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
     await bus.publish(createEvent("patch-verify:start", runId, { context, fingerprint }));
 
     try {
-      const verified = await verifyPatch(fingerprint, worktreePath, config, registry);
+      const verified = await verifyPatch(
+        fingerprint,
+        worktreePath,
+        context.repoRoot,
+        context.repoName,
+        config,
+        runtime,
+        taskRegistry,
+      );
 
       const patchResults = getPatchResultsForFinding(db, fingerprint);
       const latestPatch = patchResults[0];
@@ -60,24 +73,52 @@ export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
 async function verifyPatch(
   fingerprint: string,
   worktreePath: string,
+  projectRoot: string,
+  repoName: string,
   config: KuzushiConfig,
-  registry: ScannerRegistry,
+  runtime: AgentRuntime,
+  taskRegistry: TaskRegistry,
 ): Promise<boolean> {
-  for (const scannerId of config.scanners) {
-    const plugin = registry.get(scannerId);
-    if (!plugin) continue;
+  const silentBus: MessageBus = {
+    async publish() {},
+    subscribe() {},
+    unsubscribe() {},
+    async waitFor() {
+      throw new Error("waitFor is unavailable in patch verification");
+    },
+    async close() {},
+  };
 
-    const scanOpts = {
+  for (const taskId of config.tasks) {
+    if (!taskRegistry.has(taskId)) continue;
+    const task = taskRegistry.get(taskId);
+    if (task.outputKind !== "findings" && task.outputKind !== "threat-model") {
+      continue;
+    }
+
+    const scanOpts: ScanOpts = {
       severity: config.severity,
       maxFindings: undefined,
       excludePatterns: config.excludePatterns,
-      scanners: [scannerId],
+      tasks: [taskId],
       fresh: true,
     };
-    const scannerConfig = config.scannerConfig[scannerId] ?? {};
-    const findings = await plugin.scan(worktreePath, scanOpts, scannerConfig);
+    const taskContext: TaskContext = {
+      runId: `patch-verify:${fingerprint}`,
+      projectRoot,
+      workRoot: worktreePath,
+      repoRoot: worktreePath,
+      scanPath: worktreePath,
+      repoName,
+      config,
+      runtime,
+      bus: silentBus,
+      upstreamOutputs: new Map(),
+    };
+    const taskConfig = resolveConfiguredTaskConfig(config, taskId);
+    const { emittedFindings } = await executeAgentTask(task, scanOpts, taskContext, taskConfig);
 
-    for (const finding of findings) {
+    for (const finding of emittedFindings) {
       if (finding.fingerprint === fingerprint) {
         return false;
       }

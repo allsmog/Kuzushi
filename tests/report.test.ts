@@ -15,7 +15,7 @@ const TMP_DIR = path.join(import.meta.dirname, ".tmp-report-test");
 
 function makeFinding(fp: string): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: fp,
     ruleId: "test.rule",
     filePath: "src/test.ts",

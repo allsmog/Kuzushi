@@ -1,4 +1,5 @@
 import type { AgentRuntime } from "../../agent-runtime/types.js";
+import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
 import type { Finding } from "../../scanners/types.js";
 import type { KuzushiConfig, RepoContext, TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
@@ -25,7 +26,7 @@ export function registerVariantAnalysisWorker(deps: VariantAnalysisWorkerDeps): 
   bus.subscribe<TriageCompleteEvent>("triage:complete", async (event) => {
     const context = event.payload.context;
     const runId = event.meta.runId;
-    const model = config.variantAnalysisModel || config.model;
+    const model = resolveStageModel(config, "variant-analysis");
     const maxFindings = config.variantAnalysisMaxFindings ?? 10;
 
     // We need triage results and scan findings from the event context
@@ -46,7 +47,7 @@ export async function runVariantAnalysis(
   config: KuzushiConfig,
   runtime: AgentRuntime,
 ): Promise<{ findings: Finding[]; costUsd: number }> {
-  const model = config.variantAnalysisModel || config.model;
+  const model = resolveStageModel(config, "variant-analysis");
   const maxFindingsPerVariant = config.variantAnalysisMaxFindings ?? 10;
   const allFindings: Finding[] = [];
   let totalCost = 0;

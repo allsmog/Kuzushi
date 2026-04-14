@@ -1,4 +1,4 @@
-import type { ScannerConfig, ScannerId } from "./scanners/types.js";
+import type { TaskConfig, TaskId } from "./scanners/types.js";
 import type { EngineProvenance, ProofState, TaintPathStep } from "./scanners/types.js";
 import type { QualityGateConfig } from "./quality-gate.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
@@ -48,9 +48,6 @@ export type BusBackend = "in-process";
 /** Scanner execution mode. */
 export type ScanMode = "sequential" | "concurrent";
 
-/** Agent task selection mode. */
-export type TaskMode = "compat" | "explicit" | "scanners-only";
-
 /** Runtime provider for agent execution. */
 export type AgentRuntimeBackend = "claude" | "pi-ai";
 
@@ -95,13 +92,13 @@ export interface ScanOpts {
   severity: string[];
   maxFindings?: number;
   excludePatterns: string[];
-  scanners?: ScannerId[];
+  tasks?: TaskId[];
   fresh: boolean;
   /** Git ref to diff against for differential review (e.g. "main", "HEAD~5"). */
   diffBase?: string;
   /** Injected summary of first-pass findings for agentic two-pass review mode. */
   agenticReviewContext?: string;
-  /** Additional target directories for scanners (resolved absolute paths). */
+  /** Additional target directories for tasks (resolved absolute paths). */
   scanPaths?: string[];
 }
 
@@ -443,16 +440,10 @@ export interface FileIndex {
 
 /** User configuration stored at ~/.kuzushi/config.json (and optional project override). */
 export interface KuzushiConfig {
-  /** Scanner model identifier (e.g. "anthropic:claude-sonnet-4-6"). */
+  /** Default model identifier for AI tasks and stages (e.g. "anthropic:claude-sonnet-4-6"). */
   model: string;
-  /** Optional override model for triage agents. */
-  triageModel?: string;
-  /** Optional override model for batch triage (classification). Defaults to Haiku. */
-  triageBatchModel?: string;
   /** Enable post-triage exploitability verification phase. */
   verify?: boolean;
-  /** Optional override model for verification agents. */
-  verifyModel?: string;
   /** Max turns for verification agents. */
   verifyMaxTurns?: number;
   /** Number of in-flight verification tasks. */
@@ -465,12 +456,8 @@ export interface KuzushiConfig {
   verifyMinConfidence?: number;
   /** Enable LLM-based verification gate (cheap Haiku call to decide verify/auto-accept/skip). */
   verifyGateEnabled?: boolean;
-  /** Override model for the verification gate LLM call. */
-  verifyGateModel?: string;
   /** Enable post-verification PoC harness generation phase. */
   pocHarness?: boolean;
-  /** Optional override model for PoC harness generation agents. */
-  pocHarnessModel?: string;
   /** Max turns for PoC harness generation agents. */
   pocHarnessMaxTurns?: number;
   /** Number of in-flight PoC harness generation tasks. */
@@ -511,34 +498,28 @@ export interface KuzushiConfig {
   agentRuntimeBackend?: AgentRuntimeBackend;
   /** Optional runtime-level credentials and endpoint overrides. */
   agentRuntimeConfig?: AgentRuntimeConfig;
-  /** Agent task selection policy. compat preserves legacy defaults; explicit honors enabledTasks; scanners-only skips non-scanner tasks. */
-  taskMode?: TaskMode;
-  /** Optional list of AgentTask IDs to enable when taskMode is explicit, or to override compat defaults. */
-  enabledTasks?: string[];
-  /** Enabled scanner IDs, in execution order. */
-  scanners: ScannerId[];
+  /** Enabled task IDs, in execution order. */
+  tasks: TaskId[];
   /** Default severity filter. */
   severity: string[];
-  /** Default exclude patterns for Semgrep-like scanners. */
+  /** Default exclude patterns for task runners such as Semgrep. */
   excludePatterns: string[];
-  /** Scanner-specific config blocks keyed by scanner id. */
-  scannerConfig: Record<string, ScannerConfig>;
+  /** Task-specific config blocks keyed by task id or task family id. */
+  taskConfig: Record<string, TaskConfig>;
   /** Enable pre-triage FP suppression filter. */
   fpFilterEnabled?: boolean;
   /** Additional regex patterns for FP suppression. */
   fpFilterCustomExclusions?: string[];
+  /** Enable pre-triage design-decision auto-classifier (by_design verdict). Default true. */
+  designDecisionClassifier?: boolean;
   /** Enable post-triage variant analysis. */
   variantAnalysis?: boolean;
-  /** Optional override model for variant analysis. */
-  variantAnalysisModel?: string;
   /** Max variant findings per confirmed TP. */
   variantAnalysisMaxFindings?: number;
   /** Enable post-verification sweep of codebase with generated custom rules. */
   variantRuleSweepEnabled?: boolean;
   /** Enable LLM context enrichment task. */
   enableContextEnrichment?: boolean;
-  /** Optional override model for context enrichment. */
-  contextEnrichmentModel?: string;
   /** Optional ensemble models for eligible agentic scan tasks. */
   ensembleModels?: string[];
   /** Git ref for differential review (e.g. "main"). */
@@ -602,19 +583,15 @@ export interface KuzushiConfig {
   /** Trigger threshold for auto-patch: patch after verify, poc, or triage. Default "verify". */
   autoPatchAfter?: "verify" | "poc" | "triage";
   /** Depth of re-verification after patching. Default "scanner". */
-  patchVerifyDepth?: "scanner" | "triage" | "full";
+  patchVerifyDepth?: "task" | "triage" | "full";
   /** Max concurrent patch synthesis tasks. Default 2. */
   patchConcurrency?: number;
   /** Enable two-stage LLM re-scoring after hard FP filter. */
   llmRescoreEnabled?: boolean;
-  /** Model for LLM re-scoring (defaults to haiku for cost efficiency). */
-  llmRescoreModel?: string;
   /** Minimum score (1-10) to keep a finding after LLM re-score. Default 4. */
   llmRescoreThreshold?: number;
   /** Enable post-triage exploitation chain analysis. Default false. */
   chainAnalysis?: boolean;
-  /** Optional override model for chain analysis. */
-  chainAnalysisModel?: string;
   /** Path to organization precedents file. */
   precedentsPath?: string;
   /** Path to security profiles file. */
@@ -653,8 +630,6 @@ export interface KuzushiConfig {
   trajectoryMaxExemplars?: number;
   /** Triage strategy: single agent or multi-agent panel. Default "single". */
   triageStrategy?: "single" | "multi-agent";
-  /** Model for multi-agent triage specialists. Defaults to triageModel. */
-  triageSpecialistModel?: string;
   /** Max turns for each specialist sub-agent. null = unlimited. */
   triageSpecialistMaxTurns?: number | null;
   /** Configuration for triage quality assertion checks. Non-blocking, informational only. */
@@ -722,7 +697,7 @@ export interface KuzushiConfig {
 
 /** A persisted finding row from SQLite. */
 export interface FindingRow {
-  scanner: ScannerId;
+  taskId: TaskId;
   fingerprint: string;
   repo: string;
   ref: string;

@@ -115,7 +115,7 @@ describe("saveTrajectory and retrieveTrajectories", () => {
       id: "t1",
       ruleId: "express.sqli",
       cwes: ["CWE-89"],
-      scanner: "semgrep",
+      taskId: "semgrep",
       verdict: "tp",
       confidence: 0.8,
       steps: [{ toolName: "Read", toolInput: { file_path: "test.ts" }, outcome: "done" }],
@@ -138,7 +138,7 @@ describe("saveTrajectory and retrieveTrajectories", () => {
       id: "t1",
       ruleId: "express.sqli",
       cwes: ["CWE-89"],
-      scanner: "semgrep",
+      taskId: "semgrep",
       verdict: "tp",
       confidence: 0.8,
       steps: [],
@@ -151,7 +151,7 @@ describe("saveTrajectory and retrieveTrajectories", () => {
       id: "t2",
       ruleId: "express.sqli",
       cwes: ["CWE-89"],
-      scanner: "semgrep",
+      taskId: "semgrep",
       verdict: "tp",
       confidence: 0.9,
       steps: [],
@@ -176,7 +176,7 @@ describe("saveTrajectory and retrieveTrajectories", () => {
       id: "t1",
       ruleId: "express.sqli",
       cwes: ["CWE-89"],
-      scanner: "semgrep",
+      taskId: "semgrep",
       verdict: "fp",
       confidence: 0.3,
       steps: [],
@@ -201,7 +201,7 @@ describe("saveTrajectory and retrieveTrajectories", () => {
         id: `t${i}`,
         ruleId: "express.sqli",
         cwes: ["CWE-89"],
-        scanner: "semgrep",
+        taskId: "semgrep",
         verdict: "tp",
         confidence: 0.8,
         steps: [],
@@ -233,7 +233,7 @@ describe("updateTrajectoryCorrectness", () => {
       id: "t1",
       ruleId: "test",
       cwes: [],
-      scanner: "semgrep",
+      taskId: "semgrep",
       verdict: "tp",
       confidence: 0.7,
       steps: [],
@@ -267,7 +267,7 @@ describe("formatTrajectoriesForPrompt", () => {
         id: "t1",
         ruleId: "express.sqli",
         cwesJson: '["CWE-89"]',
-        scanner: "semgrep",
+        taskId: "semgrep",
         verdict: "tp",
         confidence: 0.8,
         wasCorrect: 1,
@@ -295,7 +295,7 @@ describe("formatTrajectoriesForPrompt", () => {
         id: "t1",
         ruleId: "test",
         cwesJson: "[]",
-        scanner: "semgrep",
+        taskId: "semgrep",
         verdict: "fp",
         confidence: 0.5,
         wasCorrect: null,
@@ -321,7 +321,7 @@ describe("pruneOldUnverifiedTrajectories", () => {
     // Insert a trajectory with old date
     const oldDate = "2020-01-01T00:00:00.000Z";
     db.prepare(`
-      INSERT INTO trajectories (id, rule_id, cwes_json, scanner, verdict, confidence, was_correct, steps_json, summary, repo, fingerprint, created_at, updated_at)
+      INSERT INTO trajectories (id, rule_id, cwes_json, task_id, verdict, confidence, was_correct, steps_json, summary, repo, fingerprint, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
     `).run("old-1", "test", "[]", "semgrep", "tp", 0.5, "[]", "old", "repo", null, oldDate, oldDate);
 
@@ -330,7 +330,7 @@ describe("pruneOldUnverifiedTrajectories", () => {
       id: "new-1",
       ruleId: "test",
       cwes: [],
-      scanner: "semgrep",
+      taskId: "semgrep",
       verdict: "tp",
       confidence: 0.5,
       steps: [],
@@ -352,7 +352,7 @@ describe("pruneOldUnverifiedTrajectories", () => {
 
     const oldDate = "2020-01-01T00:00:00.000Z";
     db.prepare(`
-      INSERT INTO trajectories (id, rule_id, cwes_json, scanner, verdict, confidence, was_correct, steps_json, summary, repo, fingerprint, created_at, updated_at)
+      INSERT INTO trajectories (id, rule_id, cwes_json, task_id, verdict, confidence, was_correct, steps_json, summary, repo, fingerprint, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
     `).run("old-verified", "test", "[]", "semgrep", "tp", 0.5, "[]", "old but verified", "repo", null, oldDate, oldDate);
 

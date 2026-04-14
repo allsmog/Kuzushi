@@ -63,30 +63,8 @@ export async function runAgentic(
       },
     },
   })) {
-    if (message.type === "tool-progress") {
-      log.debug(`${tag} [${Math.round(message.elapsedSeconds)}s] Tool: ${message.toolName}`);
-      continue;
-    }
-
-    if (message.type === "tool-summary") {
-      log.debug(`${tag} ${message.summary}`);
-      continue;
-    }
-
-    if (message.type === "assistant") {
-      const toolUses = message.content
-        .filter((b: Record<string, unknown>) => b["type"] === "tool_use")
-        .map((b: Record<string, unknown>) => b["name"]);
-      if (toolUses.length > 0) {
-        log.debug(`${tag} Using tools: ${toolUses.join(", ")}`);
-      } else {
-        const textBlocks = message.content
-          .filter((b: Record<string, unknown>) => b["type"] === "text")
-          .map((b: Record<string, unknown>) => String(b["text"] ?? "").slice(0, 120));
-        if (textBlocks.length > 0) {
-          log.debug(`${tag} ${textBlocks[0]}${textBlocks[0].length >= 120 ? "..." : ""}`);
-        }
-      }
+    // Prompt/message logging handled by LoggingAgentRuntime wrapper
+    if (message.type === "tool-progress" || message.type === "tool-summary" || message.type === "assistant") {
       continue;
     }
 

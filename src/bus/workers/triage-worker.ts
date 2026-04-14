@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
-import type { ScannerRegistry } from "../../scanners/registry.js";
+import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { withRetry } from "../../retry.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
@@ -43,8 +43,7 @@ import type { HookContext } from "../../hooks/types.js";
 import { resolveTemplates } from "../../prompts/loader.js";
 
 export interface TriageWorkerDeps {
-  registry: ScannerRegistry;
-  taskRegistry?: TaskRegistry;
+  taskRegistry: TaskRegistry;
   config: KuzushiConfig;
   runtime: AgentRuntime;
   /** Optional database handle for trajectory memory and calibration features. */
@@ -62,7 +61,7 @@ export interface TriageWorkerDeps {
  * Triage worker: invokes an agentic triage pass per finding.
  */
 export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): void {
-  const triageConfigProvider = createTriageConfigProvider(deps.registry, deps.taskRegistry);
+  const triageConfigProvider = createTriageConfigProvider(deps.taskRegistry);
   const resolvedTemplates = resolveTemplates(deps.config);
   const useMultiAgent = deps.config.triageStrategy === "multi-agent";
   const useTrajectoryMemory = deps.config.trajectoryMemory === true && deps.db != null;
@@ -263,14 +262,17 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             cachedSystemPromptKey = runId;
           }
 
+          const triageModel = resolveStageModel(deps.config, "triage");
+          const triageSpecialistModel = resolveStageModel(deps.config, "triage-specialist", "triage");
+
           if (useMultiAgent) {
             triageOutput = await triageFindingMultiAgent(
               triageConfigProvider,
               finding,
               context.scanPath ?? context.repoRoot,
               context.repoName,
-              deps.config.triageModel ?? deps.config.model,
-              deps.config.triageSpecialistModel ?? deps.config.triageModel ?? deps.config.model,
+              triageModel,
+              triageSpecialistModel,
               coercedRepoContext,
               {
                 runtime: deps.runtime,
@@ -285,7 +287,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               finding,
               context.scanPath ?? context.repoRoot,
               context.repoName,
-              deps.config.triageModel ?? deps.config.model,
+              triageModel,
               coercedRepoContext,
               {
                 runtime: deps.runtime,
@@ -306,7 +308,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
                 id: randomUUID(),
                 ruleId: finding.ruleId,
                 cwes: finding.cwe,
-                scanner: finding.scanner,
+                taskId: finding.taskId,
                 verdict: triageOutput.result.verdict,
                 confidence: triageOutput.result.confidence,
                 steps,
@@ -371,13 +373,15 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
         try {
           const coercedRepoContext = coerceRepoContext(repoContext);
           const coercedEnrichedContext = coerceContextEnrichment(enrichedContext);
+          const triageModel = resolveStageModel(deps.config, "triage");
+          const triageSpecialistModel = resolveStageModel(deps.config, "triage-specialist", "triage");
           const escalatedOutput = await triageFindingMultiAgent(
             triageConfigProvider,
             finding,
             context.scanPath ?? context.repoRoot,
             context.repoName,
-            deps.config.triageModel ?? deps.config.model,
-            deps.config.triageSpecialistModel ?? deps.config.triageModel ?? deps.config.model,
+            triageModel,
+            triageSpecialistModel,
             coercedRepoContext,
             {
               runtime: deps.runtime,
@@ -474,11 +478,12 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
     const runId = event.meta.runId;
 
     try {
+      const batchModel = resolveStageModel(deps.config, "triage-batch", "triage");
       const { results, costUsd, missingFingerprints } = await triageFindingsBatch(
         findings,
         context.scanPath ?? context.repoRoot,
         context.repoName,
-        deps.config.triageBatchModel ?? deps.config.triageModel ?? deps.config.model,
+        batchModel,
         coerceRepoContext(repoContext),
         {
           runtime: deps.runtime,
@@ -562,30 +567,21 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
 }
 
 function createTriageConfigProvider(
-  registry: ScannerRegistry,
-  taskRegistry?: TaskRegistry,
+  taskRegistry: TaskRegistry,
 ): {
   has(id: string): boolean;
   get(id: string): { triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig };
 } {
   return {
     has(id: string): boolean {
-      if (registry.has(id)) {
-        return true;
-      }
-
-      if (!taskRegistry || !taskRegistry.has(id)) {
+      if (!taskRegistry.has(id)) {
         return false;
       }
 
       return typeof taskRegistry.get(id).triageAgentConfig === "function";
     },
     get(id: string): { triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig } {
-      if (registry.has(id)) {
-        return registry.get(id);
-      }
-
-      if (!taskRegistry || !taskRegistry.has(id)) {
+      if (!taskRegistry.has(id)) {
         throw new Error(`Unknown triage provider: ${id}`);
       }
 

@@ -6,7 +6,7 @@ const { buildPrompt, normalizeVariants, computeFingerprint } = __variantAnalysis
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
-    scanner: "test",
+    taskId: "test",
     fingerprint: "abc123",
     ruleId: "sql-injection/parameterized",
     filePath: "src/api/users.ts",
@@ -76,7 +76,7 @@ describe("normalizeVariants", () => {
 
     const variants = normalizeVariants(raw, "/tmp/repo", "test-repo", original, 10);
     expect(variants).toHaveLength(1);
-    expect(variants[0].scanner).toBe("variant-analysis");
+    expect(variants[0].taskId).toBe("variant-analysis");
     expect(variants[0].ruleId).toBe("variant/sql-injection/parameterized");
     expect(variants[0].filePath).toBe("src/api/orders.ts");
   });

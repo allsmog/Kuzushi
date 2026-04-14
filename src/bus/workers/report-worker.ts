@@ -20,7 +20,6 @@ import type {
   PocHarnessStartEvent,
   ReportRequestedEvent,
   ScanCompleteEvent,
-  ScanStartEvent,
   TaskStartEvent,
   TriageAgentActivityEvent,
   TriageErrorEvent,
@@ -36,11 +35,12 @@ import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
 
 interface RunReportState {
-  scanners?: string[];
+  tasks?: string[];
   totalFindings?: number;
   selectedForTriage?: number;
   skippedAlreadyTriaged?: number;
   startPrinted: boolean;
+  resumePrinted: boolean;
 }
 
 export interface ReportWorkerDeps {
@@ -56,14 +56,9 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
 
   bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
-    state.scanners = event.payload.scanOpts.scanners !== undefined
-      ? [...event.payload.scanOpts.scanners]
-      : [...event.payload.config.scanners];
-  });
-
-  bus.subscribe<ScanStartEvent>("scan:start", (event) => {
-    const state = getOrCreateRunState(runState, event.meta.runId);
-    state.scanners = [...event.payload.scanners];
+    state.tasks = event.payload.scanOpts.tasks !== undefined
+      ? [...event.payload.scanOpts.tasks]
+      : [...event.payload.config.tasks];
   });
 
   bus.subscribe<TaskStartEvent>("task:start", (event) => {
@@ -72,9 +67,9 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
     }
 
     const state = getOrCreateRunState(runState, event.meta.runId);
-    const scanners = new Set(state.scanners ?? []);
-    scanners.add(event.payload.taskId);
-    state.scanners = [...scanners];
+    const tasks = new Set(state.tasks ?? []);
+    tasks.add(event.payload.taskId);
+    state.tasks = [...tasks];
   });
 
   bus.subscribe<ScanCompleteEvent>("scan:complete", (event) => {
@@ -247,7 +242,7 @@ export function registerReportWorker(bus: MessageBus, deps: ReportWorkerDeps): v
 
     if (reportMode === "full") {
       if (state.totalFindings === 0) {
-        console.log("  No findings from scanner. Code looks clean.");
+        console.log("  No findings from tasks. Code looks clean.");
       } else if ((state.selectedForTriage ?? 0) === 0) {
         console.log("  All findings already triaged. Nothing to do.");
       }
@@ -358,26 +353,26 @@ function getOrCreateRunState(
     return existing;
   }
 
-  const created: RunReportState = { startPrinted: false };
+  const created: RunReportState = { startPrinted: false, resumePrinted: false };
   map.set(runId, created);
   return created;
 }
 
 function maybePrintStartBanner(state: RunReportState, repoName: string): void {
+  if (!state.resumePrinted && (state.skippedAlreadyTriaged ?? 0) > 0 && state.selectedForTriage != null) {
+    printResumeInfo(state.skippedAlreadyTriaged ?? 0, state.selectedForTriage);
+    state.resumePrinted = true;
+  }
+
   if (state.startPrinted) {
     return;
   }
 
-  if (state.totalFindings == null || state.selectedForTriage == null || !state.scanners) {
+  if (state.totalFindings == null || state.selectedForTriage == null || !state.tasks) {
     return;
   }
 
-  printScanStart(repoName, state.selectedForTriage, state.totalFindings, state.scanners);
-
-  if ((state.skippedAlreadyTriaged ?? 0) > 0) {
-    printResumeInfo(state.skippedAlreadyTriaged ?? 0, state.selectedForTriage);
-  }
-
+  printScanStart(repoName, state.selectedForTriage, state.totalFindings, state.tasks);
   state.startPrinted = true;
 }
 

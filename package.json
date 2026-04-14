@@ -54,6 +54,7 @@
     "@kuzushi/augur": "^0.1.0",
     "@kuzushi/randori-plugin": "github:allsmog/randori-plugin",
     "@kuzushi/tob-skills": "github:allsmog/tob-security-skills",
+    "@kuzushi/vuln-scout": "github:allsmog/vuln-scout",
     "@mariozechner/pi-ai": "^0.57.1",
     "better-sqlite3": "^12.8.0",
     "chalk": "^5.4.1",

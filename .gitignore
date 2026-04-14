@@ -19,3 +19,4 @@ benchmarks/*/results/
 benchmarks/*-results.json
 iris.pdf
 .playwright-mcp/
+.claude/

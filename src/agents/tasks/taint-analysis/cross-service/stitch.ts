@@ -109,7 +109,7 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
         "",
         "## Finding",
         `Repo: ${repoName}`,
-        `Scanner: ${finding.scanner}`,
+        `Scanner: ${finding.taskId}`,
         `Rule: ${finding.ruleId}`,
         `File: ${finding.filePath}:${finding.startLine}`,
         `Severity: ${finding.severity}`,
@@ -266,7 +266,7 @@ function normalizeFindingArray(value: unknown): Finding[] {
     }
 
     return [{
-      scanner: typeof finding["scanner"] === "string" ? finding["scanner"] : "unknown",
+      taskId: typeof finding["scanner"] === "string" ? finding["scanner"] : "unknown",
       fingerprint,
       ruleId,
       filePath,
@@ -819,7 +819,7 @@ function pathToFinding(crossPath: CrossServicePath, repoName: string): Finding {
     .slice(0, 32);
 
   return {
-    scanner: "taint-analysis-stitch",
+    taskId: "taint-analysis-stitch",
     fingerprint,
     ruleId: `taint-analysis/cross-service/${cwe.toLowerCase().replaceAll("-", "")}`,
     filePath: crossPath.ultimateSink.filePath,

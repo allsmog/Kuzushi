@@ -332,7 +332,7 @@ Return:
 }
 
 interface RawFindingRecord {
-  scanner: string;
+  taskId: string;
   ruleId: string;
   filePath: string;
   startLine: number;
@@ -386,7 +386,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
           context.db,
           resolveBaselineCacheRepoRoot(context),
         )
-          .filter((finding) => finding.scanner === "taint-analysis-run");
+          .filter((finding) => finding.taskId === "taint-analysis-run");
         if (cachedBaselineFindings.length === 0) {
           diffScope = {
             ...diffScope,
@@ -742,7 +742,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
         "",
         "## Finding",
         `Repo: ${repoName}`,
-        `Scanner: ${finding.scanner}`,
+        `Scanner: ${finding.taskId}`,
         `Rule: ${finding.ruleId}`,
         `File: ${finding.filePath}:${finding.startLine}`,
         `Severity: ${finding.severity}`,
@@ -1352,7 +1352,7 @@ async function collectRawFindings(
 
     for (const finding of findings) {
       out.push({
-        scanner: "taint-analysis-run",
+        taskId: "taint-analysis-run",
         ruleId: finding.ruleId,
         filePath: finding.filePath,
         startLine: finding.startLine,
@@ -1389,7 +1389,7 @@ function augmentFinding(
 
   const augmented: Finding = {
     ...finding,
-    scanner: "taint-analysis-run",
+    taskId: "taint-analysis-run",
     ruleId: passDef
       ? `taint-analysis/pass${passDef.passId}/${finding.ruleId}`
       : `taint-analysis/${finding.ruleId}`,

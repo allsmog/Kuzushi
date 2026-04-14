@@ -156,7 +156,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const sinkInfo = f.sinkFunction ? ` [${f.sinkFunction}]` : "";
 
     const finding: Finding = {
-      scanner: "command-injection-detect",
+      taskId: "command-injection-detect",
       fingerprint,
       ruleId: `command-injection/${f.category || "unknown"}`,
       filePath,

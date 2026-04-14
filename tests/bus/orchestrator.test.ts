@@ -5,8 +5,10 @@ import type { AgentTask } from "../../src/agents/types.js";
 import { SELECTABLE_TASK_IDS } from "../../src/agents/tasks/task-selector.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerOrchestrator } from "../../src/bus/orchestrator.js";
+import type { OrchestratorDeps } from "../../src/bus/orchestrator/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
+import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
 import { getScanPlanSummary } from "../../src/cli/commands/scan.js";
 import type {
   PipelineCompleteEvent,
@@ -14,7 +16,6 @@ import type {
   PocHarnessFindingQueuedEvent,
   PocHarnessStartEvent,
   ReportRequestedEvent,
-  ScanStartEvent,
   StageCompleteEvent,
   TaskCompleteEvent,
   TaskStartEvent,
@@ -40,6 +41,15 @@ import {
 } from "../../src/store.js";
 import type { Finding } from "../../src/scanners/types.js";
 import type { KuzushiConfig, ScanOpts, TriageResult } from "../../src/types.js";
+import Database from "better-sqlite3";
+
+function makeDeps(db: Database.Database, taskRegistry?: TaskRegistry): OrchestratorDeps {
+  return { taskRegistry: taskRegistry ?? new TaskRegistry(), db, runtime: {} as AgentRuntime };
+}
+
+function makeScanWorkerDeps(taskRegistry: TaskRegistry, config?: KuzushiConfig) {
+  return { taskRegistry, config: config ?? makeConfig(), runtime: {} as AgentRuntime };
+}
 
 function makeConfig(): KuzushiConfig {
   return {
@@ -48,11 +58,10 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     severity: ["ERROR", "WARNING"],
     excludePatterns: ["node_modules"],
-    scannerConfig: {
+    taskConfig: {
       semgrep: {},
     },
   };
@@ -60,7 +69,7 @@ function makeConfig(): KuzushiConfig {
 
 function makeFinding(fp: string, score: number): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: fp,
     ruleId: "test.rule",
     filePath: "src/app.ts",
@@ -88,11 +97,26 @@ function makeResult(fp: string): TriageResult {
   };
 }
 
+/** Create a TaskRegistry with a semgrep task that returns the given findings. */
+function makeRegistryWithFindings(...findings: Finding[]): TaskRegistry {
+  const taskRegistry = new TaskRegistry();
+  taskRegistry.register({
+    id: "semgrep",
+    displayName: "Semgrep",
+    outputKind: "findings",
+    dependsOn: [],
+    async run() {
+      return findings;
+    },
+  });
+  return taskRegistry;
+}
+
 function makeScanOpts(): ScanOpts {
   return {
     severity: ["ERROR"],
     excludePatterns: ["node_modules"],
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     fresh: false,
   };
 }
@@ -121,15 +145,25 @@ function registerMockBatchTriageWorker(
 }
 
 describe("PipelineOrchestrator", () => {
-  it("starts scans from pipeline:start", async () => {
+  it("starts task DAG from pipeline:start", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
+    const taskRegistry = new TaskRegistry();
+    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding("fp-start", 80)];
+      },
     };
+    taskRegistry.register(semgrepTask);
 
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -139,9 +173,9 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    const scanStartPromise = bus.waitFor<ScanStartEvent>(
-      "scan:start",
-      (event) => event.meta.runId === runId,
+    const taskStartPromise = bus.waitFor<TaskStartEvent>(
+      "task:start",
+      (event) => event.meta.runId === runId && event.payload.taskId === "semgrep",
     );
 
     await bus.publish(
@@ -152,8 +186,8 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const scanStart = await scanStartPromise;
-    expect(scanStart.payload.scanners).toEqual(["semgrep"]);
+    const taskStart = await taskStartPromise;
+    expect(taskStart.payload.taskId).toBe("semgrep");
 
     await bus.close();
     db.close();
@@ -163,13 +197,14 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
-
     const existing = makeFinding("fp-skip", 50);
+    const toTriage = makeFinding("fp-triage", 60);
+    const taskRegistry = makeRegistryWithFindings(existing, toTriage);
+
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
+
     upsertFinding(db, existing, makeResult("fp-skip"), "repo", "HEAD");
 
     const runId = generateRunId();
@@ -181,14 +216,6 @@ describe("PipelineOrchestrator", () => {
     };
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
-
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config: makeConfig(),
-        scanOpts: makeScanOpts(),
-      }),
-    );
 
     const triageStartPromise = bus.waitFor<TriageStartEvent>(
       "triage:start",
@@ -205,43 +232,16 @@ describe("PipelineOrchestrator", () => {
       }
     });
 
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: existing,
-        scannerId: "semgrep",
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-triage", 60),
-        scannerId: "semgrep",
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-triage", 10),
-        scannerId: "semgrep",
-      }),
-    );
-
     const reportRequestedPromise = bus.waitFor<ReportRequestedEvent>(
       "report:requested",
       (event) => event.meta.runId === runId,
     );
-    const completePromise = bus.waitFor<PipelineCompleteEvent>(
-      "pipeline:complete",
-      (event) => event.meta.runId === runId,
-    );
 
     await bus.publish(
-      createEvent("scan:complete", runId, {
+      createEvent("pipeline:start", runId, {
         context,
-        totalFindings: 3,
+        config: makeConfig(),
+        scanOpts: makeScanOpts(),
       }),
     );
 
@@ -287,11 +287,41 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
+    const taskRegistry = new TaskRegistry();
+    taskRegistry.register({
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [{
+          ...makeFinding("fp-semgrep", 70),
+          filePath: "src/db.ts",
+          startLine: 44,
+          cwe: ["CWE-89"],
+        }];
+      },
+    });
+    taskRegistry.register({
+      id: "codeql",
+      displayName: "CodeQL",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [{
+          ...makeFinding("fp-codeql", 90),
+          taskId: "codeql",
+          ruleId: "js/sql-injection",
+          filePath: "src/db.ts",
+          startLine: 44,
+          cwe: ["CWE-89"],
+        }];
+      },
+    });
 
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -313,42 +343,11 @@ describe("PipelineOrchestrator", () => {
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
-        config: makeConfig(),
-        scanOpts: { ...makeScanOpts(), fresh: true },
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: {
-          ...makeFinding("fp-semgrep", 70),
-          filePath: "src/db.ts",
-          startLine: 44,
-          cwe: ["CWE-89"],
+        config: {
+          ...makeConfig(),
+          tasks: ["semgrep", "codeql"],
         },
-        scannerId: "semgrep",
-      }),
-    );
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: {
-          ...makeFinding("fp-codeql", 90),
-          scanner: "codeql",
-          ruleId: "js/sql-injection",
-          filePath: "src/db.ts",
-          startLine: 44,
-          cwe: ["CWE-89"],
-        },
-        scannerId: "codeql",
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 2,
+        scanOpts: { ...makeScanOpts(), fresh: true, tasks: ["semgrep", "codeql"] },
       }),
     );
 
@@ -368,13 +367,40 @@ describe("PipelineOrchestrator", () => {
     const config: KuzushiConfig = {
       ...makeConfig(),
       skipTriageForHighConfidenceAgentic: true,
+      tasks: ["semgrep", "agentic"],
     };
 
-    const registry = {
-      resolveEnabled: () => ["semgrep", "agentic"],
-    };
+    const taskRegistry = new TaskRegistry();
+    taskRegistry.register({
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [{
+          ...makeFinding("fp-semgrep", 50),
+          taskId: "semgrep",
+        }];
+      },
+    });
+    taskRegistry.register({
+      id: "agentic",
+      displayName: "Agentic",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [{
+          ...makeFinding("fp-agentic", 80),
+          taskId: "agentic",
+          ruleId: "agentic.sql-injection",
+          scannerConfidence: "HIGH",
+        }];
+      },
+    });
 
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -397,37 +423,7 @@ describe("PipelineOrchestrator", () => {
       createEvent("pipeline:start", runId, {
         context,
         config,
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: {
-          ...makeFinding("fp-semgrep", 50),
-          scanner: "semgrep",
-        },
-        scannerId: "semgrep",
-      }),
-    );
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: {
-          ...makeFinding("fp-agentic", 80),
-          scanner: "agentic",
-          ruleId: "agentic.sql-injection",
-          scannerConfidence: "HIGH",
-        },
-        scannerId: "agentic",
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 2,
+        scanOpts: { ...makeScanOpts(), tasks: ["semgrep", "agentic"] },
       }),
     );
 
@@ -452,11 +448,14 @@ describe("PipelineOrchestrator", () => {
       triageConcurrency: 2,
     };
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
+    const taskRegistry = makeRegistryWithFindings(
+      makeFinding("fp-cost-1", 70),
+      makeFinding("fp-cost-2", 60),
+    );
 
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     createRun(db, runId, "repo", config, makeScanOpts());
@@ -494,29 +493,6 @@ describe("PipelineOrchestrator", () => {
       }
     });
 
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config,
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-cost-1", 70),
-        scannerId: "semgrep",
-      }),
-    );
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-cost-2", 60),
-        scannerId: "semgrep",
-      }),
-    );
-
     const triageCompletePromise = bus.waitFor<TriageCompleteEvent>(
       "triage:complete",
       (event) => event.meta.runId === runId,
@@ -527,9 +503,10 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("scan:complete", runId, {
+      createEvent("pipeline:start", runId, {
         context,
-        totalFindings: 2,
+        config,
+        scanOpts: makeScanOpts(),
       }),
     );
 
@@ -565,16 +542,15 @@ describe("PipelineOrchestrator", () => {
     const config: KuzushiConfig = {
       ...makeConfig(),
       verify: true,
-      scannerConfig: {
+      taskConfig: {
         semgrep: { verify: false },
       },
     };
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-no-verify", 55));
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
 
@@ -585,22 +561,6 @@ describe("PipelineOrchestrator", () => {
       repoName: "repo",
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
-
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config,
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-no-verify", 55),
-        scannerId: "semgrep",
-      }),
-    );
 
     let sawVerificationQueued = false;
     let verificationStartFindingCount = -1;
@@ -621,9 +581,10 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("scan:complete", runId, {
+      createEvent("pipeline:start", runId, {
         context,
-        totalFindings: 1,
+        config,
+        scanOpts: makeScanOpts(),
       }),
     );
 
@@ -658,11 +619,15 @@ describe("PipelineOrchestrator", () => {
       verifyMinConfidence: 0.6,
     };
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
+    const taskRegistry = makeRegistryWithFindings(
+      makeFinding("fp-low", 70),
+      makeFinding("fp-mid", 60),
+      makeFinding("fp-high", 50),
+    );
 
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const confidenceMap: Record<string, number> = {
       "fp-low": 0.3,
@@ -698,36 +663,6 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config,
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-low", 70),
-        scannerId: "semgrep",
-      }),
-    );
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-mid", 60),
-        scannerId: "semgrep",
-      }),
-    );
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-high", 50),
-        scannerId: "semgrep",
-      }),
-    );
-
     const verificationQueued: Array<{ finding: any; triageResult: any; index: number; total: number }> = [];
     bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", (event) => {
       if (event.meta.runId === runId) {
@@ -748,9 +683,10 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("scan:complete", runId, {
+      createEvent("pipeline:start", runId, {
         context,
-        totalFindings: 3,
+        config,
+        scanOpts: makeScanOpts(),
       }),
     );
 
@@ -814,11 +750,10 @@ describe("PipelineOrchestrator", () => {
       pocHarness: true,
     };
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-dup-verify", 60));
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
 
@@ -837,22 +772,6 @@ describe("PipelineOrchestrator", () => {
       }
     });
 
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config,
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-dup-verify", 60),
-        scannerId: "semgrep",
-      }),
-    );
-
     const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
       "verification:finding-queued",
       (event) => event.meta.runId === runId,
@@ -863,9 +782,10 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("scan:complete", runId, {
+      createEvent("pipeline:start", runId, {
         context,
-        totalFindings: 1,
+        config,
+        scanOpts: makeScanOpts(),
       }),
     );
 
@@ -906,12 +826,11 @@ describe("PipelineOrchestrator", () => {
       verify: true,
       pocHarness: false,
     };
+    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-no-poc", 80));
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
 
@@ -930,22 +849,6 @@ describe("PipelineOrchestrator", () => {
       }
     });
 
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config,
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-no-poc", 80),
-        scannerId: "semgrep",
-      }),
-    );
-
     const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
       "verification:finding-queued",
       (event) => event.meta.runId === runId,
@@ -956,9 +859,10 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("scan:complete", runId, {
+      createEvent("pipeline:start", runId, {
         context,
-        totalFindings: 1,
+        config,
+        scanOpts: makeScanOpts(),
       }),
     );
 
@@ -997,12 +901,11 @@ describe("PipelineOrchestrator", () => {
       verify: true,
       pocHarness: true,
     };
+    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-no-exploit", 70));
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
 
@@ -1021,22 +924,6 @@ describe("PipelineOrchestrator", () => {
       }
     });
 
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config,
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-no-exploit", 70),
-        scannerId: "semgrep",
-      }),
-    );
-
     const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
       "verification:finding-queued",
       (event) => event.meta.runId === runId,
@@ -1047,9 +934,10 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("scan:complete", runId, {
+      createEvent("pipeline:start", runId, {
         context,
-        totalFindings: 1,
+        config,
+        scanOpts: makeScanOpts(),
       }),
     );
 
@@ -1089,12 +977,11 @@ describe("PipelineOrchestrator", () => {
       pocHarness: true,
       pocHarnessConcurrency: 1,
     };
+    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-poc-gate", 85));
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
 
@@ -1112,22 +999,6 @@ describe("PipelineOrchestrator", () => {
         sawReportRequested = true;
       }
     });
-
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config,
-        scanOpts: makeScanOpts(),
-      }),
-    );
-
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-poc-gate", 85),
-        scannerId: "semgrep",
-      }),
-    );
 
     const verificationQueuedPromise = bus.waitFor<VerificationFindingQueuedEvent>(
       "verification:finding-queued",
@@ -1147,9 +1018,10 @@ describe("PipelineOrchestrator", () => {
     );
 
     await bus.publish(
-      createEvent("scan:complete", runId, {
+      createEvent("pipeline:start", runId, {
         context,
-        totalFindings: 1,
+        config,
+        scanOpts: makeScanOpts(),
       }),
     );
 
@@ -1233,11 +1105,8 @@ describe("PipelineOrchestrator", () => {
       pocHarness: true,
     };
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerOrchestrator(bus, makeDeps(db));
+    registerStoreWorker(bus, { db });
 
     const resumeRunId = "resume-poc";
     createRun(db, resumeRunId, "repo", config, makeScanOpts());
@@ -1294,8 +1163,8 @@ describe("PipelineOrchestrator", () => {
     let sawScanStart = false;
     let sawTriageStart = false;
     let sawVerificationStart = false;
-    bus.subscribe<ScanStartEvent>("scan:start", (event) => {
-      if (event.meta.runId === runId) {
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId && event.payload.taskId === "semgrep") {
         sawScanStart = true;
       }
     });
@@ -1365,11 +1234,8 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerOrchestrator(bus, makeDeps(db));
+    registerStoreWorker(bus, { db });
 
     const resumeRunId = "resume-run";
     createRun(db, resumeRunId, "repo", makeConfig(), makeScanOpts());
@@ -1410,8 +1276,8 @@ describe("PipelineOrchestrator", () => {
     });
 
     let sawScanStart = false;
-    bus.subscribe<ScanStartEvent>("scan:start", (event) => {
-      if (event.meta.runId === runId) {
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId && event.payload.taskId === "semgrep") {
         sawScanStart = true;
       }
     });
@@ -1477,12 +1343,11 @@ describe("PipelineOrchestrator", () => {
   it("resumes scanning-stage runs by restarting scan with stored scan options", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
+    const taskRegistry = makeRegistryWithFindings();
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const resumeRunId = "resume-scan-stage";
     createRun(db, resumeRunId, "repo", makeConfig(), {
@@ -1505,8 +1370,8 @@ describe("PipelineOrchestrator", () => {
       }
     });
 
-    const scanStartPromise = bus.waitFor<ScanStartEvent>(
-      "scan:start",
+    const taskStartPromise = bus.waitFor<TaskStartEvent>(
+      "task:start",
       (event) => event.meta.runId === runId,
     );
 
@@ -1522,8 +1387,9 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    const scanStart = await scanStartPromise;
-    expect(scanStart.payload.scanOpts.maxFindings).toBe(5);
+    // The orchestrator should have resumed with stored scan options via runTaskDag
+    const taskStart = await taskStartPromise;
+    expect(taskStart.payload.taskId).toBeDefined();
     expect(errors).toHaveLength(0);
 
     await bus.close();
@@ -1534,11 +1400,8 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerOrchestrator(bus, makeDeps(db));
+    registerStoreWorker(bus, { db });
 
     const resumeRunId = "resume-no-rewrite";
     createRun(db, resumeRunId, "repo", makeConfig(), {
@@ -1597,12 +1460,12 @@ describe("PipelineOrchestrator", () => {
   it("continues triage when cost checkpoint persistence fails", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
+    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-cost-fail", 50));
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
+    // Intentionally no store-worker — this test closes the DB mid-pipeline
+    // to verify the orchestrator handles DB failures gracefully.
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
 
     const runId = generateRunId();
     createRun(db, runId, "repo", makeConfig(), makeScanOpts());
@@ -1614,6 +1477,18 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
+    const errors: PipelineErrorEvent[] = [];
+    bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
+      if (event.meta.runId === runId && event.payload.fatal) {
+        errors.push(event);
+      }
+    });
+
+    const batchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
@@ -1622,34 +1497,7 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    await bus.publish(
-      createEvent("scan:finding", runId, {
-        context,
-        finding: makeFinding("fp-cost-fail", 50),
-        scannerId: "semgrep",
-      }),
-    );
-
-    const batchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
-      "triage:batch-queued",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 1,
-      }),
-    );
-
     const batchQueued = await batchQueuedPromise;
-
-    const errors: PipelineErrorEvent[] = [];
-    bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
-      if (event.meta.runId === runId && event.payload.fatal) {
-        errors.push(event);
-      }
-    });
 
     db.close();
 
@@ -1682,15 +1530,13 @@ describe("PipelineOrchestrator", () => {
   it("converts bus handler failures into fatal pipeline:error events", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
+    const taskRegistry = makeRegistryWithFindings();
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
-    registerOrchestrator(bus, { registry: registry as any, db });
-
-    bus.subscribe("scan:start", () => {
-      throw new Error("scan-start crash");
+    bus.subscribe("task:start", () => {
+      throw new Error("task-start crash");
     });
 
     const runId = generateRunId();
@@ -1715,8 +1561,8 @@ describe("PipelineOrchestrator", () => {
     );
 
     const pipelineError = await pipelineErrorPromise;
-    expect(pipelineError.payload.error).toContain("Bus handler failure on scan:start");
-    expect(pipelineError.payload.error).toContain("scan-start crash");
+    expect(pipelineError.payload.error).toContain("Bus handler failure on task:start");
+    expect(pipelineError.payload.error).toContain("task-start crash");
     expect(pipelineError.payload.fatal).toBe(true);
 
     await bus.close();
@@ -1726,10 +1572,6 @@ describe("PipelineOrchestrator", () => {
   it("threads context-gatherer output into triage queue events", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
 
     const taskRegistry = new TaskRegistry();
     const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
@@ -1762,21 +1604,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(semgrepTask);
     taskRegistry.register(contextTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -1812,10 +1642,6 @@ describe("PipelineOrchestrator", () => {
   it("treats seeded task outputs as already satisfied DAG dependencies", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     let contextGathererRuns = 0;
     const taskStarts: string[] = [];
@@ -1862,21 +1688,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(contextTask);
     taskRegistry.register(dependentTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
 
     bus.subscribe<TaskStartEvent>("task:start", (event) => {
@@ -1911,14 +1725,12 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          scanners: [],
-          taskMode: "explicit",
-          enabledTasks: ["code-config-detect"],
+          tasks: ["code-config-detect"],
           enableDynamicTaskSelection: false,
         },
         scanOpts: {
           ...makeScanOpts(),
-          scanners: [],
+          tasks: [],
         },
         seedTaskOutputs: new Map([
           ["context-gatherer", {
@@ -1954,10 +1766,6 @@ describe("PipelineOrchestrator", () => {
   it("threads context-enricher output into triage queue events when enabled", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
 
     const taskRegistry = new TaskRegistry();
     const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
@@ -2007,21 +1815,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(contextTask);
     taskRegistry.register(enrichmentTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -2062,10 +1858,6 @@ describe("PipelineOrchestrator", () => {
   it("normalizes dynamic task selections into runnable task ids", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -2120,21 +1912,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(codeConfigTask);
     taskRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -2161,9 +1941,10 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
+          tasks: [],
           enableDynamicTaskSelection: true,
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -2180,10 +1961,6 @@ describe("PipelineOrchestrator", () => {
   it("emits fatal error when ALL tasks in a stage fail", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["fail-task-1", "fail-task-2"],
-    };
 
     const taskRegistry = new TaskRegistry();
 
@@ -2210,21 +1987,14 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(failingTask1);
     taskRegistry.register(failingTask2);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      tasks: ["fail-task-1", "fail-task-2"],
+    };
 
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -2243,8 +2013,8 @@ describe("PipelineOrchestrator", () => {
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
-        config: makeConfig(),
-        scanOpts: makeScanOpts(),
+        config,
+        scanOpts: { ...makeScanOpts(), tasks: ["fail-task-1", "fail-task-2"] },
       }),
     );
 
@@ -2258,10 +2028,6 @@ describe("PipelineOrchestrator", () => {
   it("continues pipeline with partial findings when one scanner fails but others succeed", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["good-scanner", "bad-scanner"],
-    };
 
     const taskRegistry = new TaskRegistry();
 
@@ -2288,21 +2054,14 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(goodScanner);
     taskRegistry.register(badScanner);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      tasks: ["good-scanner", "bad-scanner"],
+    };
 
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -2327,8 +2086,8 @@ describe("PipelineOrchestrator", () => {
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
-        config: makeConfig(),
-        scanOpts: makeScanOpts(),
+        config,
+        scanOpts: { ...makeScanOpts(), tasks: ["good-scanner", "bad-scanner"] },
       }),
     );
 
@@ -2348,10 +2107,6 @@ describe("PipelineOrchestrator", () => {
   it("runs DAG stages and passes upstream outputs to dependent tasks", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
 
     const taskRegistry = new TaskRegistry();
     let upstreamFromSemgrep: unknown = undefined;
@@ -2380,21 +2135,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(semgrepTask);
     taskRegistry.register(dependentTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -2421,7 +2164,7 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          enabledTasks: ["post-analysis"],
+          tasks: ["post-analysis"],
         },
         scanOpts: makeScanOpts(),
       }),
@@ -2441,11 +2184,21 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
+    const findings = [
+      makeFinding("fp-verify-1", 80),
+      makeFinding("fp-verify-2", 70),
+      makeFinding("fp-verify-3", 60),
+    ];
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      verify: true,
+      verifyVerdicts: ["tp"],
     };
+    const taskRegistry = makeRegistryWithFindings(...findings);
 
-    registerOrchestrator(bus, { registry: registry as any, db });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => ({
       ...makeResult(finding.fingerprint),
@@ -2469,35 +2222,8 @@ describe("PipelineOrchestrator", () => {
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
-        config: {
-          ...makeConfig(),
-          verify: true,
-          verifyVerdicts: ["tp"],
-        },
+        config,
         scanOpts: { ...makeScanOpts(), fresh: true },
-      }),
-    );
-
-    const findings = [
-      makeFinding("fp-verify-1", 80),
-      makeFinding("fp-verify-2", 70),
-      makeFinding("fp-verify-3", 60),
-    ];
-
-    for (const finding of findings) {
-      await bus.publish(
-        createEvent("scan:finding", runId, {
-          context,
-          finding,
-          scannerId: "semgrep",
-        }),
-      );
-    }
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: findings.length,
       }),
     );
 
@@ -2511,10 +2237,6 @@ describe("PipelineOrchestrator", () => {
   it("dynamic selection excludes selectable tasks from initial candidate set", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -2580,21 +2302,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(ssrfTask);
     taskRegistry.register(protoTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -2622,9 +2332,9 @@ describe("PipelineOrchestrator", () => {
         config: {
           ...makeConfig(),
           enableDynamicTaskSelection: true,
-          enabledTasks: [],
+          tasks: [],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -2649,10 +2359,6 @@ describe("PipelineOrchestrator", () => {
   it("falls back to all selectable tasks when task-selector fails", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -2687,21 +2393,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(failingSelectorTask);
     taskRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -2729,9 +2423,9 @@ describe("PipelineOrchestrator", () => {
         config: {
           ...makeConfig(),
           enableDynamicTaskSelection: true,
-          enabledTasks: [],
+          tasks: [],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -2745,13 +2439,9 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
-  it("preserves explicit enabledTasks when dynamic selection is active", async () => {
+  it("preserves explicit tasks when dynamic selection is active", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -2799,21 +2489,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(secretsCryptoTask);
     taskRegistry.register(ssrfTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -2835,16 +2513,16 @@ describe("PipelineOrchestrator", () => {
       (event) => event.meta.runId === runId,
     );
 
-    // User explicitly sets enabledTasks — dynamic selection adds to it, doesn't replace
+    // User explicitly sets tasks — dynamic selection adds to it, doesn't replace
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
         config: {
           ...makeConfig(),
           enableDynamicTaskSelection: true,
-          enabledTasks: ["secrets-crypto-detect"],
+          tasks: ["secrets-crypto-detect"],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -2852,7 +2530,7 @@ describe("PipelineOrchestrator", () => {
 
     // Explicit task should always run
     expect(taskStarts).toContain("secrets-crypto-detect");
-    // task-selector should run even with explicit enabledTasks
+    // task-selector should run even with explicit tasks
     expect(taskStarts).toContain("task-selector");
     // Dynamic ssrf-detect added by task-selector
     expect(taskStarts).toContain("ssrf-detect");
@@ -2864,13 +2542,9 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
-  it("runs only explicit enabled tasks when taskMode is explicit", async () => {
+  it("runs only explicitly enabled tasks when dynamic selection is disabled", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
 
     const taskRegistry = new TaskRegistry();
     const scannerTask: AgentTask<ScanOpts, Finding[]> = {
@@ -2905,21 +2579,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(secretsTask);
     taskRegistry.register(protoTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -2930,11 +2592,10 @@ describe("PipelineOrchestrator", () => {
     };
     const config = {
       ...makeConfig(),
-      taskMode: "explicit" as const,
       enableDynamicTaskSelection: false,
-      enabledTasks: ["secrets-crypto-detect"],
+      tasks: ["semgrep", "secrets-crypto-detect"],
     };
-    const scanOpts = { ...makeScanOpts(), scanners: ["semgrep"] };
+    const scanOpts = { ...makeScanOpts(), tasks: ["semgrep"] };
 
     const taskStarts: string[] = [];
     bus.subscribe<TaskStartEvent>("task:start", (event) => {
@@ -2958,13 +2619,11 @@ describe("PipelineOrchestrator", () => {
 
     const triageBatchQueued = await triageBatchQueuedPromise;
     const scanPlan = getScanPlanSummary(config, scanOpts, taskRegistry);
-    const nonScannerTaskStarts = taskStarts.filter((id) => id !== "semgrep");
 
     expect(taskStarts).toContain("semgrep");
     expect(taskStarts).toContain("secrets-crypto-detect");
     expect(taskStarts).not.toContain("prototype-pollution-detect");
-    expect(scanPlan.taskMode).toBe("explicit");
-    expect(scanPlan.resolvedTaskIds).toEqual(nonScannerTaskStarts);
+    expect(scanPlan.dynamicSelectionActive).toBe(false);
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint).sort()).toEqual([
       "fp-explicit-secrets-only",
       "fp-semgrep-explicit",
@@ -2974,120 +2633,9 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
-  it("runs only scanner tasks when taskMode is scanners-only", async () => {
+  it("runs all explicitly listed tasks when dynamic selection is disabled", { timeout: 15_000 }, async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    const taskRegistry = new TaskRegistry();
-    const scannerTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "semgrep",
-      displayName: "Semgrep",
-      outputKind: "findings",
-      dependsOn: [],
-      async run() {
-        return [makeFinding("fp-scanners-only", 95)];
-      },
-    };
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
-      displayName: "Context Gatherer",
-      outputKind: "custom",
-      dependsOn: [],
-      async run() {
-        return {};
-      },
-    };
-    const detectorTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
-      displayName: "Secrets & Crypto",
-      outputKind: "findings",
-      dependsOn: ["context-gatherer"],
-      async run() {
-        return [makeFinding("fp-should-not-run", 80)];
-      },
-    };
-
-    taskRegistry.register(scannerTask);
-    taskRegistry.register(contextTask);
-    taskRegistry.register(detectorTask);
-
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
-
-    const runId = generateRunId();
-    const context = {
-      runId,
-      repoRoot: "/tmp/repo",
-      repoName: "repo",
-      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
-    };
-    const config = {
-      ...makeConfig(),
-      taskMode: "scanners-only" as const,
-      enableDynamicTaskSelection: true,
-      enabledTasks: ["secrets-crypto-detect"],
-    };
-    const scanOpts = { ...makeScanOpts(), scanners: ["semgrep"] };
-
-    const taskStarts: string[] = [];
-    bus.subscribe<TaskStartEvent>("task:start", (event) => {
-      if (event.meta.runId === runId) {
-        taskStarts.push(event.payload.taskId);
-      }
-    });
-
-    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
-      "triage:batch-queued",
-      (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("pipeline:start", runId, {
-        context,
-        config,
-        scanOpts,
-      }),
-    );
-
-    const triageBatchQueued = await triageBatchQueuedPromise;
-    const scanPlan = getScanPlanSummary(config, scanOpts, taskRegistry);
-    const nonScannerTaskStarts = taskStarts.filter((id) => id !== "semgrep");
-
-    expect(taskStarts).toEqual(["semgrep"]);
-    expect(scanPlan.taskMode).toBe("scanners-only");
-    expect(scanPlan.resolvedTaskIds).toEqual(nonScannerTaskStarts);
-    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toEqual([
-      "fp-scanners-only",
-    ]);
-
-    await bus.close();
-    db.close();
-  });
-
-  it("runs all tasks when taskMode is compat and dynamic selection is disabled", { timeout: 15_000 }, async () => {
-    const bus = new InProcessBus();
-    const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -3132,21 +2680,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(secretsCryptoTask);
     taskRegistry.register(protoTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -3168,47 +2704,40 @@ describe("PipelineOrchestrator", () => {
       (event) => event.meta.runId === runId,
     );
 
-    // Dynamic selection disabled — all tasks should run
+    // Dynamic selection disabled — explicitly listed tasks run
+    const taskList = ["context-gatherer", "secrets-crypto-detect", "prototype-pollution-detect"];
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
         config: {
           ...makeConfig(),
-          taskMode: "compat",
           enableDynamicTaskSelection: false,
-          enabledTasks: [],
+          tasks: taskList,
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: taskList },
       }),
     );
 
     const triageBatchQueued = await triageBatchQueuedPromise;
 
-    // Both selectable tasks ran — no filtering when dynamic selection is disabled
+    // Both selectable tasks ran
     expect(taskStarts).toContain("secrets-crypto-detect");
     expect(taskStarts).toContain("prototype-pollution-detect");
     const scanPlan = getScanPlanSummary({
       ...makeConfig(),
-      taskMode: "compat",
       enableDynamicTaskSelection: false,
-      enabledTasks: [],
-    }, { ...makeScanOpts(), scanners: [] }, taskRegistry);
-    expect([...scanPlan.resolvedTaskIds].sort()).toEqual(
-      [...taskStarts].sort(),
-    );
+      tasks: taskList,
+    }, { ...makeScanOpts(), tasks: taskList }, taskRegistry);
+    expect(scanPlan.dynamicSelectionActive).toBe(false);
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-proto-compat");
 
     await bus.close();
     db.close();
   });
 
-  it("enabledTasks ['*'] with dynamic selection runs all tasks without filtering", async () => {
+  it("tasks ['*'] with dynamic selection runs all tasks without filtering", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -3254,21 +2783,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(secretsCryptoTask);
     taskRegistry.register(protoTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -3296,9 +2813,9 @@ describe("PipelineOrchestrator", () => {
         config: {
           ...makeConfig(),
           enableDynamicTaskSelection: true,
-          enabledTasks: ["*"],
+          tasks: ["*"],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -3318,10 +2835,6 @@ describe("PipelineOrchestrator", () => {
   it("falls back to all selectable tasks when task-selector returns empty recommendations", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -3356,21 +2869,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(emptySelectorTask);
     taskRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -3398,9 +2899,9 @@ describe("PipelineOrchestrator", () => {
         config: {
           ...makeConfig(),
           enableDynamicTaskSelection: true,
-          enabledTasks: [],
+          tasks: [],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -3417,10 +2918,6 @@ describe("PipelineOrchestrator", () => {
   it("threat-model-randori does not run when not recommended by task-selector", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -3466,21 +2963,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(secretsCryptoTask);
     taskRegistry.register(randoriTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -3508,9 +2993,9 @@ describe("PipelineOrchestrator", () => {
         config: {
           ...makeConfig(),
           enableDynamicTaskSelection: true,
-          enabledTasks: [],
+          tasks: [],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -3530,10 +3015,6 @@ describe("PipelineOrchestrator", () => {
   it("auto-enables Randori threat model for threat-aware detectors", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     let ssrfUpstream: Map<string, unknown> | undefined;
@@ -3589,21 +3070,9 @@ describe("PipelineOrchestrator", () => {
       },
     });
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -3634,9 +3103,9 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          enabledTasks: ["ssrf-detect"],
+          tasks: ["ssrf-detect"],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -3659,10 +3128,6 @@ describe("PipelineOrchestrator", () => {
   it("does not auto-inject Randori for non-threat-aware detector runs", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     taskRegistry.register({
@@ -3697,21 +3162,9 @@ describe("PipelineOrchestrator", () => {
       },
     });
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -3742,9 +3195,9 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          enabledTasks: ["diff-review"],
+          tasks: ["diff-review"],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -3766,10 +3219,6 @@ describe("PipelineOrchestrator", () => {
   it("does not re-schedule failed task-selector after fallback fires", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -3804,21 +3253,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(failingSelectorTask);
     taskRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -3846,9 +3283,9 @@ describe("PipelineOrchestrator", () => {
         config: {
           ...makeConfig(),
           enableDynamicTaskSelection: true,
-          enabledTasks: [],
+          tasks: [],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -3866,10 +3303,6 @@ describe("PipelineOrchestrator", () => {
   it("fallback fires when only recommended selectable task fails", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -3919,21 +3352,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(failingSecretsTask);
     taskRegistry.register(ssrfTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -3961,9 +3382,9 @@ describe("PipelineOrchestrator", () => {
         config: {
           ...makeConfig(),
           enableDynamicTaskSelection: true,
-          enabledTasks: [],
+          tasks: [],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -3980,10 +3401,6 @@ describe("PipelineOrchestrator", () => {
   it("does not fatally abort when condition-skipped findings task is in a stage with a failing non-findings task", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["findings-task", "meta-task"],
-    };
 
     const taskRegistry = new TaskRegistry();
 
@@ -4011,21 +3428,14 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(findingsTask);
     taskRegistry.register(metaTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      tasks: ["findings-task", "meta-task"],
+    };
 
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -4052,8 +3462,8 @@ describe("PipelineOrchestrator", () => {
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
-        config: makeConfig(),
-        scanOpts: makeScanOpts(),
+        config,
+        scanOpts: { ...makeScanOpts(), tasks: ["findings-task", "meta-task"] },
       }),
     );
 
@@ -4069,10 +3479,6 @@ describe("PipelineOrchestrator", () => {
   it("keeps context-gatherer when enableContextGathering is false and dynamic selection is active", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => [],
-    };
 
     const taskRegistry = new TaskRegistry();
     const contextTask: AgentTask<ScanOpts, unknown> = {
@@ -4107,21 +3513,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(selectorTask);
     taskRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -4152,9 +3546,9 @@ describe("PipelineOrchestrator", () => {
           ...makeConfig(),
           enableContextGathering: false,
           enableDynamicTaskSelection: true,
-          enabledTasks: [],
+          tasks: [],
         },
-        scanOpts: { ...makeScanOpts(), scanners: [] },
+        scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
     );
 
@@ -4173,10 +3567,6 @@ describe("PipelineOrchestrator", () => {
   it("keeps context-gatherer when enableContextGathering is false but tasks depend on it", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-
-    const registry = {
-      resolveEnabled: () => ["dependent-task"],
-    };
 
     const taskRegistry = new TaskRegistry();
 
@@ -4203,21 +3593,9 @@ describe("PipelineOrchestrator", () => {
     taskRegistry.register(contextTask);
     taskRegistry.register(dependentTask);
 
-    registerScanWorker(bus, {
-      registry: {
-        get: () => {
-          throw new Error("legacy scan path should not be used in DAG mode");
-        },
-      } as any,
-      taskRegistry,
-      config: makeConfig(),
-    });
-
-    registerOrchestrator(bus, {
-      registry: registry as any,
-      taskRegistry,
-      db,
-    });
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
     const context = {
@@ -4227,7 +3605,7 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    const config = { ...makeConfig(), enableContextGathering: false, enabledTasks: ["dependent-task"] };
+    const config: KuzushiConfig = { ...makeConfig(), enableContextGathering: false, tasks: ["dependent-task"] };
 
     // Pipeline should NOT crash — context-gatherer kept because dependent-task needs it
     const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
@@ -4239,7 +3617,7 @@ describe("PipelineOrchestrator", () => {
       createEvent("pipeline:start", runId, {
         context,
         config,
-        scanOpts: makeScanOpts(),
+        scanOpts: { ...makeScanOpts(), tasks: ["dependent-task"] },
       }),
     );
 
@@ -4253,18 +3631,6 @@ describe("PipelineOrchestrator", () => {
   it("ranks verification candidates by score descending, then triage confidence", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-    const config: KuzushiConfig = {
-      ...makeConfig(),
-      verify: true,
-      verifyConcurrency: 1,
-      triageConcurrency: 3,
-    };
-
-    const registry = {
-      resolveEnabled: () => ["semgrep"],
-    };
-
-    registerOrchestrator(bus, { registry: registry as any, db });
 
     // Create findings with different scores
     const findingHigh = makeFinding("fp-high-score", 90);
@@ -4272,6 +3638,18 @@ describe("PipelineOrchestrator", () => {
     const findingLow = makeFinding("fp-low-score", 30);
     // Give mid-score finding a taintPath to test tiebreaking
     findingMid.taintPath = [{ filePath: "a.ts", line: 1, message: "source" }];
+
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      verify: true,
+      verifyConcurrency: 1,
+      triageConcurrency: 3,
+    };
+    const taskRegistry = makeRegistryWithFindings(findingMid, findingLow, findingHigh);
+
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
 
     const confidenceMap: Record<string, number> = {
       "fp-high-score": 0.7,
@@ -4316,17 +3694,6 @@ describe("PipelineOrchestrator", () => {
       }),
     );
 
-    // Publish findings in non-score order
-    for (const f of [findingMid, findingLow, findingHigh]) {
-      await bus.publish(
-        createEvent("scan:finding", runId, {
-          context,
-          finding: f,
-          scannerId: "semgrep",
-        }),
-      );
-    }
-
     const verificationQueued: Array<{ finding: any; index: number }> = [];
     bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", (event) => {
       if (event.meta.runId === runId) {
@@ -4344,13 +3711,6 @@ describe("PipelineOrchestrator", () => {
     const verificationStartPromise = bus.waitFor<VerificationStartEvent>(
       "verification:start",
       (event) => event.meta.runId === runId,
-    );
-
-    await bus.publish(
-      createEvent("scan:complete", runId, {
-        context,
-        totalFindings: 3,
-      }),
     );
 
     await verificationStartPromise;

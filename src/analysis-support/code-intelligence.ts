@@ -163,8 +163,8 @@ class CachedCodeIntelligenceProvider implements CodeIntelligenceProvider {
       return cached;
     }
     const created = this.resolveNameList("GetCallers", {
-      function_name: args.functionName,
-      file_path: args.searchPath ?? ".",
+      name: args.functionName,
+      path: args.searchPath ?? ".",
       max_results: args.maxResults ?? 20,
     });
     this.callersCache.set(key, created);
@@ -181,7 +181,7 @@ class CachedCodeIntelligenceProvider implements CodeIntelligenceProvider {
       return cached;
     }
     const created = this.resolveNameList("GetCallees", {
-      function_name: args.functionName,
+      name: args.functionName,
       file_path: args.filePath,
     });
     this.calleesCache.set(key, created);

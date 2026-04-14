@@ -1,6 +1,7 @@
 import type { AgentHistoryEntry } from "../../agent-runtime/types.js";
 import type { AgentActivity } from "../../agent-runtime/execution.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
+import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
 import { generatePocHarness } from "../../poc-harness.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
 import { verifyFindingWithAgent, verifyFindingsBatch, VerificationExecutionError, resolveDefaultVerificationTools, verificationSystemPromptPrefix, VERIFICATION_RESULT_SCHEMA } from "../../verify.js";
@@ -159,13 +160,14 @@ export function registerVerificationWorker(
     }));
 
     try {
+      const batchModel = resolveStageModel(deps.config, "verify-batch", "verify");
       const { results, costUsd, missingFingerprints } = await withRetry(
         () =>
           verifyFindingsBatch(
             batchItems,
             context.scanPath ?? context.repoRoot,
             context.repoName,
-            deps.config.verifyModel ?? deps.config.triageModel ?? deps.config.model,
+            batchModel,
             coerceRepoContext(repoContext),
             {
               runtime: deps.runtime,
@@ -256,8 +258,8 @@ async function verifyWithRefinement(
   extraPromptContext?: string,
 ): Promise<{ result: VerificationResult; costUsd: number }> {
   const repoRoot = context.scanPath ?? context.repoRoot;
-  const verifyModel = config.verifyModel ?? config.triageModel ?? config.model;
-  const pocModel = config.pocHarnessModel ?? verifyModel;
+  const verifyModel = resolveStageModel(config, "verify");
+  const pocModel = resolveStageModel(config, "poc-harness", "verify");
   const maxIterations = Math.max(1, config.verifyRefinementMaxIterations ?? 3);
   const reflectionInterval = Math.max(1, config.verifyReflectionInterval ?? 2);
   const retryOptions = {

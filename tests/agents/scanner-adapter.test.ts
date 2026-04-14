@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { adaptScannerPlugin } from "../../src/agents/scanner-adapter.js";
-import type { ScannerPlugin, Finding, ScannerConfig, TriageAgentConfig } from "../../src/scanners/types.js";
+import type { ScannerPlugin, Finding, TaskConfig, TriageAgentConfig } from "../../src/scanners/types.js";
 import type { ScanOpts, KuzushiConfig } from "../../src/types.js";
 import type { MessageBus } from "../../src/bus/types.js";
 
@@ -8,20 +8,20 @@ class FakeScannerPlugin implements ScannerPlugin {
   readonly id = "semgrep";
   readonly displayName = "Semgrep";
   initCalled = 0;
-  lastConfig: ScannerConfig | undefined;
+  lastConfig: TaskConfig | undefined;
   lastScanRoot: string | undefined;
 
-  async init(config: ScannerConfig): Promise<void> {
+  async init(config: TaskConfig): Promise<void> {
     this.initCalled += 1;
     this.lastConfig = config;
   }
 
-  async scan(repoRoot: string, _opts: ScanOpts, config: ScannerConfig): Promise<Finding[]> {
+  async scan(repoRoot: string, _opts: ScanOpts, config: TaskConfig): Promise<Finding[]> {
     this.lastConfig = config;
     this.lastScanRoot = repoRoot;
     return [
       {
-        scanner: "semgrep",
+        taskId: "semgrep",
         fingerprint: "fp-1",
         ruleId: "rule",
         filePath: "src/a.ts",
@@ -50,11 +50,11 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: {
+    taskConfig: {
       semgrep: { binary: "opengrep" },
     },
   };
@@ -118,7 +118,7 @@ describe("adaptScannerPlugin", () => {
     const task = adaptScannerPlugin(plugin);
 
     const finding: Finding = {
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: "fp-1",
       ruleId: "rule",
       filePath: "src/a.ts",

@@ -344,7 +344,7 @@ function normalizeDefaultTaintAnalysisPath(): string {
 }
 
 export function resolveTaintAnalysisConfig(config: KuzushiConfig): TaintAnalysisTaskConfig {
-  const raw = config.scannerConfig["taint-analysis"];
+  const raw = config.taskConfig["taint-analysis"];
   const merged = isRecord(raw)
     ? { ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG, ...raw }
     : { ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG };

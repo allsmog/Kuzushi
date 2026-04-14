@@ -1,6 +1,6 @@
 /**
- * Scanner result cache — avoids re-scanning unchanged files across runs.
- * Key: (scanner, config_hash, git_blob_hash, file_path)
+ * Task result cache — avoids re-scanning unchanged files across runs.
+ * Key: (task_id, config_hash, git_blob_hash, file_path)
  * Stores raw finding JSON per file for fast retrieval.
  */
 
@@ -16,22 +16,22 @@ import { safeJsonStringify, safeJsonParse } from "./utils/safe-json.js";
 export function ensureScannerCacheSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS scanner_cache (
-      scanner       TEXT NOT NULL,
+      task_id       TEXT NOT NULL,
       config_hash   TEXT NOT NULL,
       blob_hash     TEXT NOT NULL,
       file_path     TEXT NOT NULL,
       findings_json TEXT NOT NULL,
       created_at    TEXT NOT NULL,
-      PRIMARY KEY (scanner, config_hash, blob_hash, file_path)
+      PRIMARY KEY (task_id, config_hash, blob_hash, file_path)
     )
   `);
 }
 
 /**
- * Compute a hash of the scanner configuration for cache keying.
+ * Compute a hash of the task configuration for cache keying.
  */
-export function hashScannerConfig(scannerName: string, config: Record<string, unknown>): string {
-  const content = safeJsonStringify({ scanner: scannerName, ...config });
+export function hashScannerConfig(taskId: string, config: Record<string, unknown>): string {
+  const content = safeJsonStringify({ taskId, ...config });
   return createHash("sha256").update(content).digest("hex").slice(0, 16);
 }
 
@@ -53,20 +53,20 @@ export function getGitBlobHash(repoRoot: string, filePath: string): string | und
 }
 
 /**
- * Look up cached scanner results for a file.
+ * Look up cached task results for a file.
  * Returns the cached findings if found, undefined otherwise.
  */
 export function getCachedFindings(
   db: Database.Database,
-  scanner: string,
+  taskId: string,
   configHash: string,
   blobHash: string,
   filePath: string,
 ): Finding[] | undefined {
   const row = db.prepare(`
     SELECT findings_json FROM scanner_cache
-    WHERE scanner = ? AND config_hash = ? AND blob_hash = ? AND file_path = ?
-  `).get(scanner, configHash, blobHash, filePath) as { findings_json: string } | undefined;
+    WHERE task_id = ? AND config_hash = ? AND blob_hash = ? AND file_path = ?
+  `).get(taskId, configHash, blobHash, filePath) as { findings_json: string } | undefined;
 
   if (!row) return undefined;
 
@@ -75,11 +75,11 @@ export function getCachedFindings(
 }
 
 /**
- * Store scanner results for a file in the cache.
+ * Store task results for a file in the cache.
  */
 export function setCachedFindings(
   db: Database.Database,
-  scanner: string,
+  taskId: string,
   configHash: string,
   blobHash: string,
   filePath: string,
@@ -87,9 +87,9 @@ export function setCachedFindings(
 ): void {
   const now = new Date().toISOString();
   db.prepare(`
-    INSERT OR REPLACE INTO scanner_cache (scanner, config_hash, blob_hash, file_path, findings_json, created_at)
+    INSERT OR REPLACE INTO scanner_cache (task_id, config_hash, blob_hash, file_path, findings_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(scanner, configHash, blobHash, filePath, safeJsonStringify(findings), now);
+  `).run(taskId, configHash, blobHash, filePath, safeJsonStringify(findings), now);
 }
 
 /**
@@ -97,7 +97,7 @@ export function setCachedFindings(
  */
 export function partitionCachedFiles(
   db: Database.Database,
-  scanner: string,
+  taskId: string,
   configHash: string,
   repoRoot: string,
   filePaths: string[],
@@ -112,7 +112,7 @@ export function partitionCachedFiles(
       continue;
     }
 
-    const findings = getCachedFindings(db, scanner, configHash, blobHash, filePath);
+    const findings = getCachedFindings(db, taskId, configHash, blobHash, filePath);
     if (findings) {
       cached.set(filePath, findings);
     } else {
@@ -124,17 +124,17 @@ export function partitionCachedFiles(
 }
 
 /**
- * Persist scanner results for multiple files after scanning.
+ * Persist task results for multiple files after scanning.
  */
 export function persistScanResults(
   db: Database.Database,
-  scanner: string,
+  taskId: string,
   configHash: string,
   repoRoot: string,
   findingsByFile: Map<string, Finding[]>,
 ): void {
   const insertStmt = db.prepare(`
-    INSERT OR REPLACE INTO scanner_cache (scanner, config_hash, blob_hash, file_path, findings_json, created_at)
+    INSERT OR REPLACE INTO scanner_cache (task_id, config_hash, blob_hash, file_path, findings_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
@@ -143,7 +143,7 @@ export function persistScanResults(
     for (const [filePath, findings] of findingsByFile) {
       const blobHash = getGitBlobHash(repoRoot, filePath);
       if (!blobHash) continue;
-      insertStmt.run(scanner, configHash, blobHash, filePath, safeJsonStringify(findings), now);
+      insertStmt.run(taskId, configHash, blobHash, filePath, safeJsonStringify(findings), now);
     }
   });
 

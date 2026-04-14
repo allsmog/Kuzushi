@@ -1,4 +1,4 @@
-import type { Finding, ScannerId } from "../scanners/types.js";
+import type { Finding, TaskId } from "../scanners/types.js";
 import type { TaskOutputKind } from "../agents/types.js";
 import type {
   DynamicAnalysisRun,
@@ -28,13 +28,14 @@ export interface RunContext {
 }
 
 export interface PipelineStats {
-  scanners: ScannerId[];
+  tasks: TaskId[];
   totalFindings: number;
   queuedForTriage: number;
   skippedAlreadyTriaged: number;
   skippedLowConfidence?: number;
   skippedByFpFilter?: number;
   skippedByScoreFilter?: number;
+  autoClassifiedByDesign?: number;
   softSuppressedFindings?: number;
   skippedByLlmRescore?: number;
   corroboratedClusters?: number;
@@ -182,31 +183,12 @@ export type StageCompleteEvent = EventEnvelope<
   }
 >;
 
-export type ScanStartEvent = EventEnvelope<
-  "scan:start",
-  {
-    context: RunContext;
-    scanners: ScannerId[];
-    scanOpts: ScanOpts;
-  }
->;
-
 export type ScanFindingEvent = EventEnvelope<
   "scan:finding",
   {
     context: RunContext;
     finding: Finding;
-    scannerId: ScannerId;
-  }
->;
-
-export type ScanScannerCompleteEvent = EventEnvelope<
-  "scan:scanner-complete",
-  {
-    context: RunContext;
-    scannerId: ScannerId;
-    findingCount: number;
-    durationMs: number;
+    scannerId: TaskId;
   }
 >;
 
@@ -910,7 +892,7 @@ export type PatchVerifyRequestedEvent = EventEnvelope<
     context: RunContext;
     fingerprint: string;
     worktreePath: string;
-    depth: "scanner" | "triage" | "full";
+    depth: "task" | "triage" | "full";
   }
 >;
 
@@ -928,7 +910,7 @@ export type PatchVerifyCompleteEvent = EventEnvelope<
     context: RunContext;
     fingerprint: string;
     verified: boolean;
-    depth: "scanner" | "triage" | "full";
+    depth: "task" | "triage" | "full";
     details: string;
   }
 >;
@@ -951,6 +933,54 @@ export type AutoRuleGeneratedEvent = EventEnvelope<
   }
 >;
 
+// ── Run lifecycle events (DB persistence via store-worker) ──────────────
+
+export type RunStatusEvent = EventEnvelope<
+  "run:status",
+  {
+    context: RunContext;
+    status: string;
+    extra?: {
+      totalCostUsd?: number;
+      completedAt?: string;
+      findingsJson?: string;
+      metricsJson?: string;
+    };
+  }
+>;
+
+export type RunCostEvent = EventEnvelope<
+  "run:cost",
+  {
+    context: RunContext;
+    costUsd: number;
+  }
+>;
+
+export type RunFindingsCheckpointEvent = EventEnvelope<
+  "run:findings-checkpoint",
+  {
+    context: RunContext;
+    findings: Finding[];
+  }
+>;
+
+export type RunContextCheckpointEvent = EventEnvelope<
+  "run:context-checkpoint",
+  {
+    context: RunContext;
+    repoContext: unknown;
+  }
+>;
+
+export type RunMetricsEvent = EventEnvelope<
+  "run:metrics",
+  {
+    context: RunContext;
+    metrics: RunMetrics;
+  }
+>;
+
 export type KuzushiEvent =
   | PipelineStartEvent
   | PipelineCompleteEvent
@@ -962,9 +992,7 @@ export type KuzushiEvent =
   | TaskErrorEvent
   | TaskSkippedEvent
   | StageCompleteEvent
-  | ScanStartEvent
   | ScanFindingEvent
-  | ScanScannerCompleteEvent
   | ScanCompleteEvent
   | TriageStartEvent
   | TriageFindingQueuedEvent
@@ -1030,4 +1058,9 @@ export type KuzushiEvent =
   | PatchVerifyStartEvent
   | PatchVerifyCompleteEvent
   | PatchVerifyErrorEvent
-  | AutoRuleGeneratedEvent;
+  | AutoRuleGeneratedEvent
+  | RunStatusEvent
+  | RunCostEvent
+  | RunFindingsCheckpointEvent
+  | RunContextCheckpointEvent
+  | RunMetricsEvent;

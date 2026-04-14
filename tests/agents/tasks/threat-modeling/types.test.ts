@@ -12,11 +12,11 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: {},
+    taskConfig: {},
   };
 }
 
@@ -39,9 +39,9 @@ describe("resolveThreatModelConfig", () => {
     expect(resolved.emitFindings).toBe(true);
   });
 
-  it("reads overrides from scannerConfig", () => {
+  it("reads overrides from taskConfig", () => {
     const config = makeConfig();
-    config.scannerConfig["threat-model"] = {
+    config.taskConfig["threat-model"] = {
       model: "openai:gpt-4",
       maxElements: 25,
       maxThreats: 50,
@@ -62,7 +62,7 @@ describe("resolveThreatModelConfig", () => {
   it("falls back to global model", () => {
     const config = makeConfig();
     config.model = "google:gemini-pro";
-    config.scannerConfig["threat-model"] = {};
+    config.taskConfig["threat-model"] = {};
 
     const resolved = resolveThreatModelConfig(config);
     expect(resolved.model).toBe("google:gemini-pro");
@@ -70,7 +70,7 @@ describe("resolveThreatModelConfig", () => {
 
   it("accepts legacy strideModel key for backwards compat", () => {
     const config = makeConfig();
-    config.scannerConfig["threat-model"] = { strideModel: "openai:gpt-4" };
+    config.taskConfig["threat-model"] = { strideModel: "openai:gpt-4" };
 
     const resolved = resolveThreatModelConfig(config);
     expect(resolved.model).toBe("openai:gpt-4");

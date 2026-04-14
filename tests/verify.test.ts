@@ -14,7 +14,7 @@ import {
 
 function makeFinding(): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "verify-fp",
     ruleId: "test.rule",
     filePath: "src/app.ts",

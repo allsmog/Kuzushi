@@ -68,7 +68,7 @@ export const DEFAULT_INVARIANT_ANALYSIS_CONFIG: InvariantAnalysisConfig = {
 };
 
 export function resolveInvariantAnalysisConfig(config: KuzushiConfig): InvariantAnalysisConfig {
-  const raw = config.scannerConfig["invariant-analysis"];
+  const raw = config.taskConfig["invariant-analysis"];
   if (!isRecord(raw)) return { ...DEFAULT_INVARIANT_ANALYSIS_CONFIG, extractionModel: config.model, checkModel: config.model };
 
   return {

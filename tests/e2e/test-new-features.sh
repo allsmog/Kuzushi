@@ -80,7 +80,7 @@ bold "═══ TEST 1: Code Graph (static skeleton + SQLite) ═══"
 # Write config that limits Phase B to 0 entry points (skip LLM tracing — too slow on 8B)
 cat > "$TEST_APP/.kuzushi/config.json" << 'CFGJSON'
 {
-  "scannerConfig": {
+  "taskConfig": {
     "code-graph": { "maxEntryPoints": 0 }
   }
 }
@@ -111,7 +111,7 @@ bold "═══ TEST 2: Incremental Scanning (run twice) ═══"
 cat > "$TEST_APP/.kuzushi/config.json" << 'CFGJSON'
 {
   "enabledTasks": ["context-gatherer"],
-  "scannerConfig": {}
+  "taskConfig": {}
 }
 CFGJSON
 

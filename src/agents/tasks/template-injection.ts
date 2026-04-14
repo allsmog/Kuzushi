@@ -199,7 +199,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const apiInfo = f.apiOrFunction ? ` [${f.apiOrFunction}]` : "";
 
     const finding: Finding = {
-      scanner: "template-injection-detect",
+      taskId: "template-injection-detect",
       fingerprint,
       ruleId: `template-injection/${f.category || "unknown"}`,
       filePath,

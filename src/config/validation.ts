@@ -59,24 +59,6 @@ export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIs
     });
   }
 
-  if (config.taskMode === "scanners-only" && (config.enabledTasks?.length ?? 0) > 0) {
-    issues.push({
-      severity: "warning",
-      path: "enabledTasks",
-      message: "enabledTasks are ignored when taskMode is scanners-only.",
-      hint: "Use taskMode=explicit or compat if you want AgentTask execution.",
-    });
-  }
-
-  if (config.taskMode === "scanners-only" && config.enableDynamicTaskSelection === true) {
-    issues.push({
-      severity: "warning",
-      path: "enableDynamicTaskSelection",
-      message: "Dynamic task selection is ignored when taskMode is scanners-only.",
-      hint: "Use taskMode=compat or explicit to allow task-selector to add tasks.",
-    });
-  }
-
   if (config.qualityGates?.failOnExploitable === true && config.verify !== true) {
     issues.push({
       severity: "warning",

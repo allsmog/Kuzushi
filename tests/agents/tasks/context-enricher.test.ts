@@ -23,11 +23,11 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: {},
+    taskConfig: {},
     ...overrides,
   };
 }
@@ -48,7 +48,7 @@ describe("resolveConfig", () => {
   });
 
   it("uses contextEnrichmentModel when set", () => {
-    const ctx = makeContext({ contextEnrichmentModel: "openai:gpt-4" });
+    const ctx = makeContext({ taskConfig: { "context-enricher": { model: "openai:gpt-4" } } });
     const cfg = resolveConfig(ctx);
     expect(cfg.model).toBe("openai:gpt-4");
   });

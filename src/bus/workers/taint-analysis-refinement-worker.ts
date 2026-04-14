@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
+import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
 import type { TaskContext } from "../../agents/types.js";
 import { taintAnalysisRunTask } from "../../agents/tasks/taint-analysis/analyze.js";
 import { buildTaintModelDocument } from "../../agents/tasks/taint-analysis/label.js";
@@ -11,7 +12,6 @@ import { TAINT_ANALYSIS_PASS_IDS, resolveTaintAnalysisConfig } from "../../agent
 import type { TaintAnalysisLabelOutput, TaintAnalysisLabelsDocument, TaintAnalysisPassEntry, TaintAnalysisPassId } from "../../agents/tasks/taint-analysis/types.js";
 import type { ScanOpts, TriageResult, KuzushiConfig, RepoContext } from "../../types.js";
 import type { Finding } from "../../scanners/types.js";
-import type { ScannerRegistry } from "../../scanners/registry.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { triageFindingsBatch } from "../../triage.js";
 import {
@@ -26,8 +26,7 @@ import type { MessageBus } from "../types.js";
 
 export interface TaintAnalysisRefinementWorkerDeps {
   db: Database.Database;
-  registry: ScannerRegistry;
-  taskRegistry?: TaskRegistry;
+  taskRegistry: TaskRegistry;
   config: KuzushiConfig;
   runtime: AgentRuntime;
 }
@@ -61,7 +60,7 @@ export function registerTaintAnalysisRefinementWorker(
     try {
       const currentTaintAnalysisFingerprints = new Set(
         findings
-          .filter((item) => item.scanner === "taint-analysis-run")
+          .filter((item) => item.taskId === "taint-analysis-run")
           .map((item) => item.fingerprint),
       );
       const signalsByPass = collectSignalsByPass(
@@ -85,7 +84,7 @@ export function registerTaintAnalysisRefinementWorker(
             context,
             iteration,
             affectedPasses: [],
-            updatedFindings: findings.filter((item) => item.scanner === "taint-analysis-run"),
+            updatedFindings: findings.filter((item) => item.taskId === "taint-analysis-run"),
             deltaFindings: [],
             deltaTriaged: 0,
             deltaErrors: 0,
@@ -139,7 +138,7 @@ export function registerTaintAnalysisRefinementWorker(
       };
 
       const refinedPassFindings = await taintAnalysisRunTask.run(defaultScanOpts(deps.config), taskContext);
-      const previousTaintAnalysis = findings.filter((item) => item.scanner === "taint-analysis-run");
+      const previousTaintAnalysis = findings.filter((item) => item.taskId === "taint-analysis-run");
       const affectedPassSet = new Set<number>(affectedPasses);
       const previousAffected = previousTaintAnalysis.filter((item) => affectedPassSet.has(extractPassId(item.ruleId) ?? -1));
       const previousAffectedFp = new Set(previousAffected.map((item) => item.fingerprint));
@@ -199,7 +198,7 @@ function collectSignalsByPass(
     if (currentFingerprints.size > 0 && !currentFingerprints.has(row.fingerprint)) {
       continue;
     }
-    if (row.scanner !== "taint-analysis-run") {
+    if (row.taskId !== "taint-analysis-run") {
       continue;
     }
 
@@ -309,7 +308,7 @@ async function triageDeltaFindings(args: {
       args.deltaFindings,
       args.context.scanPath ?? args.context.repoRoot,
       args.context.repoName,
-      args.deps.config.triageModel ?? args.deps.config.model,
+      resolveStageModel(args.deps.config, "triage"),
       args.repoContext,
       { runtime: args.deps.runtime },
     );
@@ -381,7 +380,7 @@ function defaultScanOpts(config: KuzushiConfig): ScanOpts {
   return {
     severity: config.severity,
     excludePatterns: config.excludePatterns,
-    scanners: config.scanners,
+    tasks: config.tasks,
     maxFindings: undefined,
     fresh: false,
   };

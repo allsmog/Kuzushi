@@ -29,7 +29,7 @@ const SAMPLE_PROOF_STATE: ProofState = "execution_confirmed";
 
 function makeFinding(fp: string): Finding {
   return {
-    scanner: "agentic",
+    taskId: "agentic",
     fingerprint: fp,
     ruleId: "ssrf-detect",
     filePath: "src/routes/api.ts",
@@ -101,7 +101,7 @@ describe("structured evidence round-trip", () => {
   it("null/undefined structured fields round-trip as undefined", () => {
     const db = initDb(dbPath);
     const finding: Finding = {
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: "fp-no-evidence",
       ruleId: "test.rule",
       filePath: "src/test.ts",

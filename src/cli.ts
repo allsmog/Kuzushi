@@ -26,7 +26,6 @@ import {
   getRun,
   initDb,
 } from "./store.js";
-import { createDefaultRegistry } from "./scanners/index.js";
 import { createDefaultTaskRegistry } from "./agents/index.js";
 import { configureAgentRuntime } from "./agent-runtime/index.js";
 import { setGlobalLogLevel } from "./logger.js";
@@ -58,6 +57,11 @@ function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
 
 const program = new Command();
 
+function collectRepeatedOption(value: string, previous: string[] = []): string[] {
+  previous.push(value);
+  return previous;
+}
+
 program
   .name("kuzushi")
   .description("Kuzushi — Agentic SAST orchestration")
@@ -74,25 +78,28 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
 
 program
   .command("scan", { isDefault: true })
-  .description("Scan a repository with configured scanners and triage findings with an agent")
+  .description("Scan a repository with configured tasks and triage findings with an agent")
   .argument("<repo>", "Path to the repository to scan")
   .option("--preset <name>", "Scan preset: fast, standard, deep")
-  .option("--scanners <names>", "Scanners to run (comma-separated scanner ids)")
+  .option("--tasks <names>", "Tasks to run (comma-separated task ids)")
   .option("--severity <levels>", "Severity filter (comma-separated)")
   .option("--max <n>", "Max findings to triage", parseInt)
-  .option("--model <model>", "Model to use for scanners")
+  .option("--model <model>", "Default model to use across tasks and AI stages")
   .option("--ensemble-models <models>", "Run eligible agentic detection tasks across multiple models (comma-separated)")
-  .option("--triage-model <model>", "Override model used by triage agent")
+  .option(
+    "--task-model <taskId=model>",
+    "Override the model for a task or AI stage task id (repeatable)",
+    collectRepeatedOption,
+    [],
+  )
 
   .option("--verify", "Enable post-triage exploitability verification", false)
-  .option("--verify-model <model>", "Override model used by verification agent")
   .option("--verify-concurrency <n>", "Override verification concurrency", parseInt)
   .option("--verify-refinement-max-iterations <n>", "Maximum verification refinement attempts", parseInt)
   .option("--verify-reflection-interval <n>", "Inject verification reflection every N failed attempts", parseInt)
   .option("--verify-min-confidence <n>", "Minimum triage confidence required for verification", parseFloat)
   .option("--verify-gate", "Enable LLM verification gate (cheap pre-verification triage)", true)
   .option("--no-verify-gate", "Disable LLM verification gate")
-  .option("--verify-gate-model <model>", "Override model for verification gate")
   .option("--crypto-behavioral-test", "Enable crypto behavioral runtime confirmation", false)
   .option("--dynamic-analysis", "Enable dynamic analysis using generated PoC harnesses", false)
   .option("--dynamic-max-candidates <n>", "Override maximum number of dynamic analysis candidates", parseInt)
@@ -110,10 +117,9 @@ program
   .option("--github-comment", "Post findings summary as PR comment", false)
   .option("--auto-patch", "Enable automatic patch generation in pipeline", false)
   .option("--auto-patch-after <trigger>", "Trigger threshold: verify|poc|triage")
-  .option("--patch-verify-depth <depth>", "Re-verification depth: scanner|triage|full")
+  .option("--patch-verify-depth <depth>", "Re-verification depth: task|triage|full")
   .option("--patch-concurrency <n>", "Max concurrent patch synthesis tasks", parseInt)
   .option("--poc-harness", "Enable post-verification PoC harness generation", false)
-  .option("--poc-harness-model <model>", "Override model used by PoC harness generator")
   .option("--poc-harness-concurrency <n>", "Override PoC harness generation concurrency", parseInt)
   .option("--poc-refinement-max-iterations <n>", "Maximum PoC refinement attempts when execution feedback is enabled", parseInt)
   .option("--poc-reflection-interval <n>", "Inject PoC reflection every N failed attempts", parseInt)
@@ -131,14 +137,13 @@ program
   .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
-  .option("--enabled-tasks <ids>", "Additional AgentTask IDs to enable (comma-separated)")
   .option("--list-modules", "Discover and print modules without scanning", false)
   .option("--modules <spec>", "Manual module list: \"name:path,name:path,...\"")
   .option("--module-filter <pattern>", "Only scan modules whose names match the pattern")
   .option("--no-module-discovery", "Force a single-root scan even when the target looks like a monorepo")
   .option("--module-priority <level>", "Only scan modules at or above this security priority: critical, high (default), medium, all")
   .option("--max-modules <n>", "Max modules to scan in Phase 2 (top N by priority)", parseInt)
-  .option("--dry-run", "Print scan scope (modules, scanners, tasks) without running", false)
+  .option("--dry-run", "Print scan scope (modules, tasks, tasks) without running", false)
   .option("--enable-external-tasks", "Enable loading of external tasks from config", false)
   .option("--trust-repo-config", "Trust unsafe repo-local config keys such as hooks and external tasks", false)
   .option("--quality-gate", "Enable quality gates (fail CI on threshold violations)", false)
@@ -326,8 +331,7 @@ taskCmd
   .action(async (opts: { repo: string; filter?: string; trustRepoConfig?: boolean }) => {
     const { root } = resolveRepo(opts.repo);
     const config = loadConfig(root, { trustProjectConfig: opts.trustRepoConfig === true });
-    const registry = createDefaultRegistry();
-    const taskRegistry = await createDefaultTaskRegistry(registry, config, root);
+    const taskRegistry = await createDefaultTaskRegistry(config, root);
 
     let tasks = taskRegistry.list();
     if (opts.filter) {
@@ -378,8 +382,7 @@ taskCmd
   .action(wrapCliAction(async (id: string, opts: { repo: string; trustRepoConfig?: boolean }) => {
     const { root } = resolveRepo(opts.repo);
     const config = loadConfig(root, { trustProjectConfig: opts.trustRepoConfig === true });
-    const registry = createDefaultRegistry();
-    const taskRegistry = await createDefaultTaskRegistry(registry, config, root);
+    const taskRegistry = await createDefaultTaskRegistry(config, root);
 
     if (!taskRegistry.has(id)) {
       throw new CliUsageError(`Task "${id}" not found.`);

@@ -93,7 +93,7 @@ export const DEFAULT_THREAT_MODEL_CONFIG: ThreatModelConfig = {
 };
 
 export function resolveThreatModelConfig(config: KuzushiConfig): ThreatModelConfig {
-  const raw = config.scannerConfig["threat-model"];
+  const raw = config.taskConfig["threat-model"];
   if (!isRecord(raw)) return { ...DEFAULT_THREAT_MODEL_CONFIG, model: config.model };
 
   return {

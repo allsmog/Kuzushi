@@ -112,14 +112,14 @@ describe("threat-hunt", () => {
   });
 
   describe("resolveConfig", () => {
-    function makeCtx(scannerConfig: Record<string, unknown> = {}): Parameters<typeof resolveConfig>[0] {
+    function makeCtx(taskConfig: Record<string, unknown> = {}): Parameters<typeof resolveConfig>[0] {
       return {
         runId: "test",
         repoRoot: "/tmp/repo",
         repoName: "test-repo",
         config: {
           model: "anthropic:claude-sonnet-4-6",
-          scannerConfig: { "threat-hunt": scannerConfig },
+          taskConfig: { "threat-hunt": taskConfig },
         } as any,
         runtime: {} as any,
         bus: {} as any,
@@ -127,12 +127,12 @@ describe("threat-hunt", () => {
       };
     }
 
-    it("defaults runsPerActor to 1 when no scannerConfig", () => {
+    it("defaults runsPerActor to 1 when no taskConfig", () => {
       const config = resolveConfig(makeCtx());
       expect(config.runsPerActor).toBe(1);
     });
 
-    it("reads runsPerActor from scannerConfig", () => {
+    it("reads runsPerActor from taskConfig", () => {
       const config = resolveConfig(makeCtx({ runsPerActor: 3 }));
       expect(config.runsPerActor).toBe(3);
     });
@@ -165,7 +165,7 @@ describe("threat-hunt", () => {
 
       const config = threatHuntTask.triageAgentConfig!(
         {
-          scanner: "threat-hunt",
+          taskId: "threat-hunt",
           fingerprint: "abc",
           ruleId: "hunt/sqli",
           filePath: "src/api.ts",

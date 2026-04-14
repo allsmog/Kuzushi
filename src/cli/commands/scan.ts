@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { printBanner } from "../../banner.js";
 import { createDefaultTaskRegistry } from "../../agents/index.js";
 import { configureAgentRuntime } from "../../agent-runtime/index.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
@@ -13,7 +14,7 @@ import {
   type PipelineStats,
 } from "../../bus/index.js";
 import { inflightCache } from "../../cache.js";
-import { expandScannerSelections } from "../../capabilities.js";
+import { expandTaskSelections } from "../../capabilities.js";
 import { loadConfig } from "../../config.js";
 import {
   formatConfigValidationIssue,
@@ -21,7 +22,6 @@ import {
   validateKuzushiConfig,
 } from "../../config/validation.js";
 import { registerShutdownHook } from "../../lifecycle.js";
-import { createDefaultRegistry } from "../../scanners/index.js";
 import { configureRateLimitRegistry } from "../../scheduler/index.js";
 import {
   createRun,
@@ -75,8 +75,7 @@ export interface PipelineResult {
 }
 
 export interface ScanPlanSummary {
-  scannerIds: string[];
-  taskMode?: KuzushiConfig["taskMode"];
+  taskIds: string[];
   resolvedTaskIds: string[];
   dynamicSelectionActive: boolean;
   taskSummary: string;
@@ -97,6 +96,7 @@ export interface MonorepoExecutionDecision {
 }
 
 export async function runScanCommand(repoPath: string, opts: ScanCommandOptions): Promise<void> {
+  printBanner();
   const scanPath = path.resolve(repoPath);
   const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
   const modeConfig = applyScanCommandConfigOverrides(
@@ -123,12 +123,11 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
 
   if (opts.dryRun) {
-    const { scannerIds, taskMode, taskSummary, dynamicSelectionActive } = getScanPlanSummary(config, scanOpts);
+    const { taskIds, taskSummary, dynamicSelectionActive } = getScanPlanSummary(config, scanOpts);
     console.log("\nDry run — no scan will be executed.");
     console.log(`  Target:    ${scanPath}`);
-    console.log(`  Scanners:  ${scannerIds.join(", ") || "none"}`);
-    if (taskMode) console.log(`  Task mode: ${taskMode}`);
-    console.log(`  Tasks:     ${taskSummary}`);
+    console.log(`  Tasks:     ${taskIds.join(", ") || "none"}`);
+    console.log(`  Expanded:  ${taskSummary}`);
     console.log(`  Dynamic:   ${dynamicSelectionActive ? "on" : "off"}`);
     console.log(`  Model:     ${config.model}`);
     console.log(`  Severity:  ${scanOpts.severity?.join(", ") || "all"}\n`);
@@ -198,36 +197,22 @@ export function prepareScanExecution(repoRoot: string, opts: ScanCommandOptions)
   reportConfigValidationIssues(validateKuzushiConfig(config));
 
   const severity = resolveScanSeverity(config, opts);
-  let scannersOverride = resolveScannerOverride(opts);
-
-  const effectiveScanners = scannersOverride ?? [...config.scanners];
-  const { pluginScanners, enabledTasks: aliasExpandedTasks } = expandScannerSelections(effectiveScanners, config);
-  if (aliasExpandedTasks.length > 0) {
-    config.enabledTasks = [...(config.enabledTasks ?? []), ...aliasExpandedTasks];
-    if (config.taskMode === "scanners-only") {
-      config.taskMode = "explicit";
-    }
-  }
-  if (scannersOverride) {
-    scannersOverride = pluginScanners;
+  const taskOverride = resolveScannerOverride(opts);
+  const requestedTasks = taskOverride ?? [...config.tasks];
+  const expandedTasks = expandTaskSelections(requestedTasks, config);
+  if (taskOverride) {
+    config.tasks = expandedTasks;
   } else {
-    config.scanners = pluginScanners;
+    config.tasks = expandedTasks;
   }
 
   const scanOpts: ScanOpts = {
     severity,
     maxFindings: opts.max,
     excludePatterns: config.excludePatterns,
-    scanners: scannersOverride,
+    tasks: taskOverride ?? expandedTasks,
     fresh: opts.fresh,
   };
-
-  const registry = createDefaultRegistry();
-  try {
-    scanOpts.scanners = registry.resolveEnabled(scanOpts, config);
-  } catch (error) {
-    throw new CliUsageError(error instanceof Error ? error.message : String(error));
-  }
 
   return { config, scanOpts };
 }
@@ -235,8 +220,8 @@ export function prepareScanExecution(repoRoot: string, opts: ScanCommandOptions)
 export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts): AgentRuntime {
   const activeModels = resolveActivePiAiModels(
     config,
-    scanOpts.scanners ?? [],
-    config.enabledTasks ?? [],
+    scanOpts.tasks ?? [],
+    config.tasks ?? [],
   );
 
   const isClaudeRuntime = (config.agentRuntimeBackend ?? "claude") === "claude";
@@ -258,9 +243,11 @@ export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts)
     }
   }
 
-  warnPiAiBackendApiKeys(activeModels, {
-    anthropicApiKey: config.agentRuntimeConfig?.apiKey,
-  });
+  if (!isClaudeRuntime) {
+    warnPiAiBackendApiKeys(activeModels, {
+      anthropicApiKey: config.agentRuntimeConfig?.apiKey,
+    });
+  }
 
   configureRateLimitRegistry(config.triageConcurrency);
 
@@ -319,10 +306,9 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   }
 
   try {
-    const registry = createDefaultRegistry();
     bus = createBus(config);
-    taskRegistry = await createDefaultTaskRegistry(registry, config, repoRoot);
-    await registerAllWorkers(bus, { registry, taskRegistry, db, config, runtime });
+    taskRegistry = await createDefaultTaskRegistry(config, repoRoot);
+    await registerAllWorkers(bus, { taskRegistry, db, config, runtime });
   } catch (error) {
     db.close();
     if (ownsRuntime && isShutdownCapableRuntime(runtime)) {
@@ -465,21 +451,18 @@ export function getScanPlanSummary(
   scanOpts: ScanOpts,
   taskRegistry?: Awaited<ReturnType<typeof createDefaultTaskRegistry>>,
 ): ScanPlanSummary {
-  const scannerIds = scanOpts.scanners ?? config.scanners ?? ["semgrep"];
+  const taskIds = scanOpts.tasks ?? config.tasks ?? ["semgrep"];
   const taskPlan = taskRegistry
-    ? resolveInitialTaskPlan(taskRegistry, scannerIds, config)
+    ? resolveInitialTaskPlan(taskRegistry, taskIds, config)
     : undefined;
   const resolvedTaskIds = taskPlan
-    ? taskPlan.enabledTaskIds.filter((id) => !scannerIds.includes(id))
+    ? taskPlan.enabledTaskIds.filter((id) => !taskIds.includes(id))
     : [];
   return {
-    scannerIds,
-    taskMode: taskPlan?.taskMode,
+    taskIds,
     resolvedTaskIds,
     dynamicSelectionActive: taskPlan?.dynamicSelectionActive ?? false,
-    taskSummary: taskPlan?.taskMode === "scanners-only"
-    ? "none (scanners-only mode)"
-    : resolvedTaskIds.length === 0
+    taskSummary: resolvedTaskIds.length === 0
       ? "none"
       : `${resolvedTaskIds.length} (${resolvedTaskIds.slice(0, 4).join(", ")}${resolvedTaskIds.length > 4 ? ", ..." : ""})`,
   };
@@ -490,18 +473,15 @@ function printScanPlan(
   scanOpts: ScanOpts,
   taskRegistry?: Awaited<ReturnType<typeof createDefaultTaskRegistry>>,
 ): void {
-  const { scannerIds, taskMode, dynamicSelectionActive, taskSummary } = getScanPlanSummary(
+  const { taskIds, dynamicSelectionActive, taskSummary } = getScanPlanSummary(
     config,
     scanOpts,
     taskRegistry,
   );
-  const scanners = scannerIds.join(", ") || "none";
+  const tasks = taskIds.join(", ") || "none";
   console.error("\nScan plan:");
-  console.error(`  Scanners:  ${scanners}`);
-  if (taskMode) {
-    console.error(`  Task mode: ${taskMode}`);
-  }
-  console.error(`  Tasks:     ${taskSummary}`);
+  console.error(`  Tasks:     ${tasks}`);
+  console.error(`  Expanded:  ${taskSummary}`);
   console.error(`  Dynamic:   ${dynamicSelectionActive ? "on" : "off"}\n`);
 }
 

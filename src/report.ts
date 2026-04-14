@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import path from "node:path";
 import type { ExploitChain, TriageResult, Verdict } from "./types.js";
-import type { ScannerId } from "./scanners/types.js";
+import type { TaskId } from "./scanners/types.js";
 import type { QualityGateResult } from "./quality-gate.js";
 import { formatTaintPathForDisplay, summarizeTaintPath } from "./findings/taint-path.js";
 import type { RunMetrics } from "./scoring/run-metrics.js";
@@ -277,7 +277,7 @@ export function printSummary(
       const location = chalk.cyan(`${f.filePath}:${f.startLine}`);
       const conf = chalk.dim(`${(f.confidence * 100).toFixed(0)}%`);
       const severity = f.severity === "ERROR" ? chalk.red(f.severity) : chalk.yellow(f.severity);
-      const scanner = chalk.dim(`[${f.scanner}]`);
+      const scanner = chalk.dim(`[${f.taskId}]`);
       const verificationBadge = f.verifyExploitable === 1
         ? chalk.bgRed.white.bold(" EXPLOITABLE ")
         : f.verifyExploitable === 0
@@ -287,7 +287,7 @@ export function printSummary(
       console.log(`  ${verdict} ${conf}  ${severity} ${scanner}${verificationBadge ? ` ${verificationBadge}` : ""}`);
       console.log(`    ${location}`);
       console.log(`    ${chalk.dim(f.ruleId)}`);
-      if (f.scanner.startsWith("threat-model-")) {
+      if (f.taskId.startsWith("threat-model-")) {
         const strideMatch = f.ruleId.match(/^threat-model\/([^/]+)/);
         if (strideMatch) {
           console.log(`    ${chalk.blue("STRIDE:")} ${strideMatch[1]}`);
@@ -317,8 +317,8 @@ export function printSummary(
         }
       }
       if (f.corroboratingSignals.length > 0) {
-        const scanners = [...new Set(f.corroboratingSignals.map((signal) => signal.scanner))];
-        console.log(`    ${chalk.dim("Corroborated by:")} ${scanners.join(", ")} (+${f.corroboratingSignals.length})`);
+        const tasks = [...new Set(f.corroboratingSignals.map((signal) => signal.taskId))];
+        console.log(`    ${chalk.dim("Corroborated by:")} ${tasks.join(", ")} (+${f.corroboratingSignals.length})`);
       }
       if (f.suppressionReasons.length > 0) {
         console.log(`    ${chalk.dim("Suppression notes:")} ${f.suppressionReasons.map((reason) => reason.id).join(", ")}`);
@@ -414,10 +414,10 @@ function printMetricsSummary(metrics: RunMetrics): void {
     console.log(`  ${chalk.dim("Severity:")} ${sevEntries.map(([s, c]) => `${s}=${c}`).join(", ")}`);
   }
 
-  // Scanner yield
-  const yieldEntries = Object.entries(metrics.scannerYield);
+  // Task yield
+  const yieldEntries = Object.entries(metrics.taskYield);
   if (yieldEntries.length > 0) {
-    console.log(`  ${chalk.dim("Scanner yield:")} ${yieldEntries.map(([s, c]) => `${s}=${c}`).join(", ")}`);
+    console.log(`  ${chalk.dim("Task yield:")} ${yieldEntries.map(([s, c]) => `${s}=${c}`).join(", ")}`);
   }
 
   // Average confidence
@@ -466,11 +466,11 @@ export function printScanStart(
   repoName: string,
   findingCount: number,
   total: number,
-  scanners: ScannerId[],
+  tasks: TaskId[],
 ): void {
   console.log("");
   console.log(chalk.bold(`  Kuzushi v0.1 — scanning ${repoName}`));
-  console.log(`  Scanners: ${scanners.join(", ")}`);
+  console.log(`  Scanners: ${tasks.join(", ")}`);
   console.log(`  ${total} findings, ${findingCount} selected for AI triage`);
   console.log("");
 }

@@ -70,7 +70,7 @@ export function registerTaintAnalysisArtifactWorker(
         const details = (row.triageDetails ?? {}) as Record<string, unknown>;
         return {
           id: row.fingerprint,
-          scanner: row.scanner,
+          taskId: row.taskId,
           rule_id: row.ruleId,
           location: {
             file: row.filePath,
@@ -111,7 +111,7 @@ export function registerTaintAnalysisArtifactWorker(
         "utf-8",
       );
 
-      if (state?.monorepoContext?.modulePlan.enabledTasks.includes("taint-iris")) {
+      if (state?.monorepoContext?.modulePlan.tasks.includes("taint-iris")) {
         const actionable = getActionableFindings(deps.db, event.payload.context.repoName);
         const boundary = buildBoundaryManifest(
           state.monorepoContext.modulePlan,

@@ -31,7 +31,7 @@ const { triageFindingMultiAgent } = await import("../src/multi-agent-triage.js")
 
 function makeFinding(): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "fp-1",
     ruleId: "express.sqli.tainted",
     filePath: "src/routes/users.ts",

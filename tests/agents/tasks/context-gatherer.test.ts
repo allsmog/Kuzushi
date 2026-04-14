@@ -14,10 +14,10 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: { semgrep: {} },
+    taskConfig: { semgrep: {} },
   };
 }
 
@@ -25,7 +25,7 @@ function makeScanOpts(): ScanOpts {
   return {
     severity: ["ERROR"],
     excludePatterns: [],
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     fresh: false,
   };
 }

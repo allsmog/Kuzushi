@@ -25,7 +25,7 @@ const runtime = { id: "test-runtime", query: vi.fn() } as unknown as AgentRuntim
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
-    scanner: "test",
+    taskId: "test",
     fingerprint: "fp-" + Math.random().toString(36).slice(2, 8),
     ruleId: "test/rule",
     filePath: "src/app.ts",

@@ -1,6 +1,5 @@
 import { normalizeTaskIds, type TaskRegistry } from "../../agents/registry.js";
-import { SELECTABLE_TASK_IDS } from "../../agents/tasks/task-selector.js";
-import type { KuzushiConfig, TaskMode } from "../../types.js";
+import type { KuzushiConfig } from "../../types.js";
 
 const THREAT_AWARE_DETECTOR_TASK_IDS = new Set([
   "code-config-detect",
@@ -21,7 +20,6 @@ const THREAT_AWARE_DETECTOR_TASK_IDS = new Set([
 const THREAT_MODEL_TASK_ID = "threat-model-randori";
 
 export interface InitialTaskPlan {
-  taskMode: TaskMode;
   baseTaskIds: string[];
   candidateIds: string[];
   enabledTaskIds: string[];
@@ -30,56 +28,27 @@ export interface InitialTaskPlan {
   contextGatheringForced: boolean;
 }
 
-export function resolveTaskMode(config: Pick<KuzushiConfig, "taskMode">): TaskMode {
-  return config.taskMode ?? "compat";
-}
-
 export function resolveInitialTaskPlan(
   registry: TaskRegistry,
-  scanners: string[],
+  tasks: string[],
   config: Pick<
     KuzushiConfig,
-    "taskMode" | "enabledTasks" | "enableContextGathering" | "enableContextEnrichment" | "enableDynamicTaskSelection"
+    "tasks" | "enableContextGathering" | "enableContextEnrichment" | "enableDynamicTaskSelection"
   >,
 ): InitialTaskPlan {
-  const taskMode = resolveTaskMode(config);
-  const explicitTasks = config.enabledTasks ?? [];
+  const configuredTasks = config.tasks ?? [];
   const allRegisteredTasks = registry.ids();
-  const useAllTasks = explicitTasks.length === 1 && explicitTasks[0] === "*";
-  const dynamicSelectionActive = taskMode !== "scanners-only"
-    && config.enableDynamicTaskSelection === true
+  const useAllTasks = configuredTasks.length === 1 && configuredTasks[0] === "*";
+  const dynamicSelectionActive = config.enableDynamicTaskSelection === true
     && registry.has("task-selector");
-  const enableContextExplicit = taskMode !== "scanners-only"
-    && config.enableContextGathering !== false
+  const enableContextExplicit = config.enableContextGathering !== false
     && registry.has("context-gatherer");
-  const enableContextEnrichment = taskMode !== "scanners-only"
-    && config.enableContextEnrichment === true
+  const enableContextEnrichment = config.enableContextEnrichment === true
     && registry.has("context-enricher");
-
-  let baseTaskIds: string[];
-  switch (taskMode) {
-    case "scanners-only":
-      baseTaskIds = [];
-      break;
-    case "explicit":
-      baseTaskIds = useAllTasks ? allRegisteredTasks : explicitTasks;
-      break;
-    case "compat":
-    default:
-      if (useAllTasks) {
-        baseTaskIds = allRegisteredTasks;
-      } else if (explicitTasks.length === 0) {
-        baseTaskIds = dynamicSelectionActive
-          ? allRegisteredTasks.filter((id) => !SELECTABLE_TASK_IDS.has(id))
-          : allRegisteredTasks;
-      } else {
-        baseTaskIds = explicitTasks;
-      }
-      break;
-  }
+  const baseTaskIds = useAllTasks ? allRegisteredTasks : configuredTasks;
 
   const candidateIds = injectThreatModelPolicyCandidates(registry, [
-    ...scanners,
+    ...tasks,
     ...(enableContextExplicit ? ["context-gatherer"] : []),
     ...(enableContextEnrichment ? ["context-enricher"] : []),
     ...baseTaskIds,
@@ -89,7 +58,7 @@ export function resolveInitialTaskPlan(
   let enabledTaskIds = collectTransitiveDeps(registry, candidateIds);
   let contextGatheringForced = false;
 
-  if (taskMode !== "scanners-only" && config.enableContextGathering === false) {
+  if (config.enableContextGathering === false) {
     const othersDepend = enabledTaskIds.some(
       (id) =>
         id !== "context-gatherer"
@@ -105,7 +74,6 @@ export function resolveInitialTaskPlan(
   }
 
   return {
-    taskMode,
     baseTaskIds: normalizeTaskIds(baseTaskIds),
     candidateIds,
     enabledTaskIds,

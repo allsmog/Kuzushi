@@ -54,7 +54,7 @@ export function generateMarkdownReport(
     LIMIT 1
   `).get(runId) as RunMetaRow | undefined;
 
-  const { model, scanners } = parseRunConfig(runMeta?.configJson);
+  const { model, tasks } = parseRunConfig(runMeta?.configJson);
 
   const lines: string[] = [];
   lines.push(`# Kuzushi Security Report - ${repo}`);
@@ -95,7 +95,7 @@ export function generateMarkdownReport(
       lines.push(`### ${finding.ruleId} (${finding.verdict.toUpperCase()})`);
       lines.push("");
       lines.push(`- File: \`${finding.filePath}:${finding.startLine}\``);
-      lines.push(`- Scanner: \`${finding.scanner}\``);
+      lines.push(`- Scanner: \`${finding.taskId}\``);
       lines.push(`- Severity: \`${finding.severity}\``);
       lines.push(`- Confidence: ${(finding.confidence * 100).toFixed(0)}%`);
       if (finding.proofState) {
@@ -215,7 +215,7 @@ export function generateMarkdownReport(
   lines.push(`- Scan started: ${runMeta?.startedAt ?? stats.startedAt ?? "unknown"}`);
   lines.push(`- Scan completed: ${stats.completedAt ?? "unknown"}`);
   lines.push(`- Model: ${model ?? "unknown"}`);
-  lines.push(`- Scanners: ${scanners.length > 0 ? scanners.join(", ") : "unknown"}`);
+  lines.push(`- Scanners: ${tasks.length > 0 ? tasks.join(", ") : "unknown"}`);
 
   return `${lines.join("\n")}\n`;
 }
@@ -261,24 +261,24 @@ function parsePreconditions(raw: string | null): string[] {
   }
 }
 
-function parseRunConfig(raw: string | undefined): { model?: string; scanners: string[] } {
+function parseRunConfig(raw: string | undefined): { model?: string; tasks: string[] } {
   if (!raw) {
-    return { model: undefined, scanners: [] };
+    return { model: undefined, tasks: [] };
   }
 
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const model = typeof parsed["model"] === "string" ? parsed["model"] : undefined;
-    const scanners = Array.isArray(parsed["scanners"])
-      ? parsed["scanners"].map((item) => String(item).trim()).filter(Boolean)
+    const tasks = Array.isArray(parsed["tasks"])
+      ? parsed["tasks"].map((item) => String(item).trim()).filter(Boolean)
       : [];
 
     return {
       model,
-      scanners,
+      tasks,
     };
   } catch {
-    return { model: undefined, scanners: [] };
+    return { model: undefined, tasks: [] };
   }
 }
 
@@ -326,15 +326,15 @@ function appendMetricsSection(lines: string[], metrics: RunMetrics): void {
     lines.push("");
   }
 
-  // Scanner yield
-  const yieldEntries = Object.entries(metrics.scannerYield);
+  // Task yield
+  const yieldEntries = Object.entries(metrics.taskYield);
   if (yieldEntries.length > 0) {
-    lines.push("### Scanner Yield");
+    lines.push("### Task Yield");
     lines.push("");
-    lines.push("| Scanner | Findings |");
+    lines.push("| Task | Findings |");
     lines.push("| --- | ---: |");
-    for (const [scanner, count] of yieldEntries) {
-      lines.push(`| ${scanner} | ${count} |`);
+    for (const [taskId, count] of yieldEntries) {
+      lines.push(`| ${taskId} | ${count} |`);
     }
     lines.push("");
   }

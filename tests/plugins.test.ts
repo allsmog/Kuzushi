@@ -4,9 +4,9 @@ import { AgenticPlugin } from "../src/scanners/agentic.js";
 import { CodeQLPlugin } from "../src/scanners/codeql.js";
 import type { Finding } from "../src/scanners/types.js";
 
-function makeFinding(scanner: string): Finding {
+function makeFinding(taskId: string): Finding {
   return {
-    scanner,
+    taskId,
     fingerprint: "fp",
     ruleId: "rule",
     filePath: "src/app.ts",

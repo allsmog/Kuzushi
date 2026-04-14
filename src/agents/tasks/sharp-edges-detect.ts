@@ -390,7 +390,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const cwe = CATEGORY_CWE[f.category] ?? "CWE-16";
 
     const finding: Finding = {
-      scanner: "sharp-edges-detect",
+      taskId: "sharp-edges-detect",
       fingerprint,
       ruleId: `sharp-edges/${f.category || "unknown"}`,
       filePath,

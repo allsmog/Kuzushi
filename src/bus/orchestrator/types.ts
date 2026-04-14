@@ -2,7 +2,6 @@ import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { Finding } from "../../scanners/types.js";
-import type { ScannerRegistry } from "../../scanners/registry.js";
 import type {
   DynamicAnalysisRun,
   EnrichedRepoContext,
@@ -66,7 +65,7 @@ export interface RunState {
   resuming: boolean;
   config: KuzushiConfig;
   scanOpts: ScanOpts;
-  scanners: string[];
+  tasks: string[];
   startedAt: string;
   scanFindings: Finding[];
   totalFindings: number;
@@ -74,6 +73,7 @@ export interface RunState {
   skippedLowConfidence: number;
   skippedByFpFilter: number;
   skippedByScoreFilter: number;
+  autoClassifiedByDesign: number;
   verifyGateAutoAccepted: number;
   verifyGateSkipped: number;
   verifyGateCostUsd: number;
@@ -177,8 +177,7 @@ export interface RunState {
 }
 
 export interface OrchestratorDeps {
-  registry: ScannerRegistry;
-  taskRegistry?: TaskRegistry;
+  taskRegistry: TaskRegistry;
   db: Database.Database;
   runtime: AgentRuntime;
 }

@@ -3,9 +3,9 @@ import path from "node:path";
 import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 import type { QualityGateConfig } from "./quality-gate.js";
-import type { ScannerConfig } from "./scanners/types.js";
+import type { TaskConfig } from "./scanners/types.js";
 import { isRecord } from "./utils.js";
-import { normalizeScannerConfigAliases } from "./capabilities.js";
+import { normalizeTaskConfigAliases } from "./capabilities.js";
 import { getLogger } from "./logger.js";
 import { KuzushiConfigSchema } from "./schemas.js";
 import {
@@ -70,7 +70,7 @@ const UNSAFE_PROJECT_CONFIG_KEYS = new Set<string>([
   "toolPolicies",
 ]);
 
-const UNSAFE_PROJECT_SCANNER_CONFIG_KEYS = new Set<string>([
+const UNSAFE_PROJECT_TASK_CONFIG_KEYS = new Set<string>([
   "binary",
   "codeqlBinary",
   "python3Binary",
@@ -118,7 +118,7 @@ function writeConfigFile(targetPath: string, config: unknown): void {
   writeFileSync(targetPath, serializeConfig(config, format));
 }
 
-/** Get a config value by key (supports dotted paths like scannerConfig.semgrep.binary). */
+/** Get a config value by key (supports dotted paths like taskConfig.semgrep.binary). */
 export function getConfigValue(key: string, repoRoot?: string): unknown {
   const config = loadConfig(repoRoot);
 
@@ -130,7 +130,7 @@ export function getConfigValue(key: string, repoRoot?: string): unknown {
   return getByPath(config, key.split("."));
 }
 
-/** Set a config value by key (supports dotted paths like scannerConfig.semgrep.binary). */
+/** Set a config value by key (supports dotted paths like taskConfig.semgrep.binary). */
 export function setConfigValue(key: string, raw: string, repoRoot?: string): void {
   const config = loadWritableConfigLayer(repoRoot);
 
@@ -146,24 +146,18 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     throw new Error(`Unknown config key: ${key}. Valid keys: ${[...VALID_TOP_LEVEL_KEYS].join(", ")}`);
   }
 
-  if (key === "scanners") {
-    config.scanners = coerceStringArray(raw);
+  if (key === "tasks") {
+    config.tasks = coerceStringArray(raw);
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
 
-  if (key === "enabledTasks") {
-    config.enabledTasks = coerceStringArray(raw);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "scannerConfig") {
+  if (key === "taskConfig") {
     const parsed = parseFlexibleValue(raw);
     if (!isRecord(parsed)) {
-      throw new Error("scannerConfig must be an object");
+      throw new Error("taskConfig must be an object");
     }
-    config.scannerConfig = coerceScannerConfigMap(parsed);
+    config.taskConfig = coerceTaskConfigMap(parsed);
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
@@ -384,16 +378,6 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
-  if (key === "taskMode") {
-    const mode = raw.trim();
-    if (mode !== "compat" && mode !== "explicit" && mode !== "scanners-only") {
-      throw new Error("taskMode must be one of: compat, explicit, scanners-only");
-    }
-    config.taskMode = mode;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
   if (key === "agentRuntimeBackend") {
     const backend = raw.trim();
     if (!AGENT_RUNTIME_BACKENDS.has(backend)) {
@@ -430,30 +414,6 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
 
   if (key === "model") {
     config.model = raw;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "triageModel") {
-    config.triageModel = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "triageBatchModel") {
-    config.triageBatchModel = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "verifyModel") {
-    config.verifyModel = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "pocHarnessModel") {
-    config.pocHarnessModel = raw.trim() || undefined;
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
@@ -528,12 +488,6 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
-  if (key === "triageSpecialistModel") {
-    config.triageSpecialistModel = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
   if (key === "triageSpecialistMaxTurns") {
     if (raw === "null" || raw === "unlimited" || raw === "0") {
       config.triageSpecialistMaxTurns = null;
@@ -552,12 +506,6 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     const parsed = parseFlexibleValue(raw);
     if (typeof parsed !== "boolean") throw new Error("llmRescoreEnabled must be true or false");
     config.llmRescoreEnabled = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "llmRescoreModel") {
-    config.llmRescoreModel = raw.trim() || undefined;
     saveUpdatedConfigLayer(config, repoRoot);
     return;
   }
@@ -738,7 +686,7 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
 }
 
 function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
-  const scanners = normalizeStringArray(config.scanners);
+  const tasks = normalizeStringArray(config.tasks);
   const severity = normalizeStringArray(config.severity);
   const excludePatterns = normalizeStringArray(config.excludePatterns);
   const busBackend = normalizeBusBackend(config.busBackend);
@@ -746,7 +694,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const triageConcurrency = normalizePositiveInt(config.triageConcurrency, DEFAULTS.triageConcurrency);
 
   const verify = normalizeBoolean(config.verify, DEFAULTS.verify ?? false);
-  const verifyModel = normalizeOptionalString(config.verifyModel);
   const verifyMaxTurns = config.verifyMaxTurns == null
     ? undefined
     : normalizePositiveInt(config.verifyMaxTurns, 15);
@@ -767,7 +714,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     DEFAULTS.verifyMinConfidence ?? 0,
   );
   const pocHarness = normalizeBoolean(config.pocHarness, DEFAULTS.pocHarness ?? false);
-  const pocHarnessModel = normalizeOptionalString(config.pocHarnessModel);
   const pocHarnessMaxTurns = config.pocHarnessMaxTurns == null
     ? undefined
     : normalizePositiveInt(config.pocHarnessMaxTurns, 20);
@@ -806,12 +752,9 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     DEFAULTS.retryBackoffMultiplier ?? 2,
   );
   const scanMode = normalizeScanMode(config.scanMode);
-  const taskMode = normalizeTaskMode(config.taskMode);
   const agentRuntimeBackend = normalizeAgentRuntimeBackend(config.agentRuntimeBackend);
   const agentRuntimeConfig = normalizeAgentRuntimeConfig(config.agentRuntimeConfig);
   const confidenceSignalWeights = normalizeConfidenceSignalWeights(config.confidenceSignalWeights);
-  const triageModel = normalizeOptionalString(config.triageModel);
-  const triageBatchModel = normalizeOptionalString(config.triageBatchModel);
   const ensembleModels = normalizeStringArray(config.ensembleModels);
   const pocRefinementMaxIterations = normalizePositiveInt(
     config.pocRefinementMaxIterations,
@@ -829,7 +772,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     config.verifyReflectionInterval,
     DEFAULTS.verifyReflectionInterval ?? 2,
   );
-  const enabledTasks = normalizeStringArray(config.enabledTasks);
   const cryptoBehavioralTestEnabled = normalizeBoolean(
     config.cryptoBehavioralTestEnabled,
     DEFAULTS.cryptoBehavioralTestEnabled ?? false,
@@ -846,10 +788,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     config.cryptoBehavioralPerFindingBudgetUsd,
     DEFAULTS.cryptoBehavioralPerFindingBudgetUsd ?? 1,
   );
-  const normalizedEnabledTasks = dedupeStringsPreserveOrder([
-    ...enabledTasks,
-    ...(cryptoBehavioralTestEnabled ? ["crypto-behavioral-test"] : []),
-  ]);
   const externalTasks = normalizeStringArray(config.externalTasks);
   const enableExternalTasks = normalizeBoolean(config.enableExternalTasks, DEFAULTS.enableExternalTasks ?? false);
   const monorepo = normalizeMonorepoConfig(config.monorepo);
@@ -858,18 +796,23 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     config.skipTriageForHighConfidenceAgentic,
     DEFAULTS.skipTriageForHighConfidenceAgentic ?? false,
   );
+  const normalizedTasks = tasks.length > 0 ? dedupeStringsPreserveOrder(tasks) : [...DEFAULTS.tasks];
+  if (cryptoBehavioralTestEnabled) {
+    normalizedTasks.push("crypto-behavioral-test");
+  }
+  if (config.codeGraphEnabled === true) {
+    normalizedTasks.push("code-graph-build", "code-graph-enrich");
+  }
 
   return {
     ...config,
     verify,
-    verifyModel,
     verifyMaxTurns,
     verifyConcurrency,
     verifyBatchSize,
     verifyVerdicts,
     verifyMinConfidence,
     pocHarness,
-    pocHarnessModel,
     pocHarnessMaxTurns,
     pocHarnessConcurrency,
     enableContextGathering,
@@ -888,18 +831,14 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     triageBatchSize,
     triageConcurrency,
     scanMode,
-    taskMode,
     agentRuntimeBackend,
     agentRuntimeConfig,
     confidenceSignalWeights,
-    triageModel,
-    triageBatchModel,
     ensembleModels,
     pocRefinementMaxIterations,
     pocReflectionInterval,
     verifyRefinementMaxIterations,
     verifyReflectionInterval,
-    enabledTasks: normalizedEnabledTasks,
     cryptoBehavioralTestEnabled,
     cryptoBehavioralTimeoutMs,
     cryptoBehavioralMaxFindings,
@@ -908,21 +847,20 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     enableExternalTasks,
     monorepo,
     skipTriageForHighConfidenceAgentic,
-    scanners: scanners.length > 0 ? scanners : [...DEFAULTS.scanners],
+    tasks: dedupeStringsPreserveOrder(normalizedTasks),
     severity: severity.length > 0 ? severity : [...DEFAULTS.severity],
     excludePatterns,
-    scannerConfig: normalizeScannerConfigAliases(coerceScannerConfigMap(config.scannerConfig)),
+    taskConfig: normalizeTaskConfigAliases(coerceTaskConfigMap(config.taskConfig)),
   };
 }
 
 function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
   const merged: KuzushiConfig = {
     ...DEFAULTS,
-    scannerConfig: cloneScannerConfig(DEFAULTS.scannerConfig),
-    enabledTasks: [...(DEFAULTS.enabledTasks ?? [])],
+    taskConfig: cloneTaskConfig(DEFAULTS.taskConfig),
     externalTasks: [...(DEFAULTS.externalTasks ?? [])],
     ensembleModels: [...(DEFAULTS.ensembleModels ?? [])],
-    scanners: [...DEFAULTS.scanners],
+    tasks: [...DEFAULTS.tasks],
     severity: [...DEFAULTS.severity],
     excludePatterns: [...DEFAULTS.excludePatterns],
     verifyVerdicts: [...(DEFAULTS.verifyVerdicts ?? [])],
@@ -938,16 +876,16 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
         continue;
       }
 
-      if (key === "scannerConfig") {
+      if (key === "taskConfig") {
         if (!isRecord(value)) {
           continue;
         }
 
-        const layerConfig = coerceScannerConfigMap(value);
-        for (const [scannerId, scannerConfig] of Object.entries(layerConfig)) {
-          merged.scannerConfig[scannerId] = {
-            ...(merged.scannerConfig[scannerId] ?? {}),
-            ...scannerConfig,
+        const layerConfig = coerceTaskConfigMap(value);
+        for (const [taskId, taskConfig] of Object.entries(layerConfig)) {
+          merged.taskConfig[taskId] = {
+            ...(merged.taskConfig[taskId] ?? {}),
+            ...taskConfig,
           };
         }
         continue;
@@ -1175,9 +1113,9 @@ function shouldStripProjectConfigPath(pathParts: string[]): boolean {
     return true;
   }
 
-  return pathParts[0] === "scannerConfig"
+  return pathParts[0] === "taskConfig"
     && pathParts.length >= 3
-    && UNSAFE_PROJECT_SCANNER_CONFIG_KEYS.has(pathParts[pathParts.length - 1]);
+    && UNSAFE_PROJECT_TASK_CONFIG_KEYS.has(pathParts[pathParts.length - 1]);
 }
 
 function sanitizeConfigLayer(value: unknown): unknown {
@@ -1227,10 +1165,10 @@ function cloneLayerValue<T>(value: T): T {
   return value;
 }
 
-function coerceScannerConfigMap(value: unknown): Record<string, ScannerConfig> {
+function coerceTaskConfigMap(value: unknown): Record<string, TaskConfig> {
   if (!isRecord(value)) return {};
 
-  const result: Record<string, ScannerConfig> = {};
+  const result: Record<string, TaskConfig> = {};
   for (const [k, v] of Object.entries(value)) {
     if (!isRecord(v)) continue;
     result[k] = { ...v };
@@ -1329,13 +1267,6 @@ function normalizeScanMode(value: unknown): KuzushiConfig["scanMode"] {
     return value;
   }
   return DEFAULTS.scanMode;
-}
-
-function normalizeTaskMode(value: unknown): KuzushiConfig["taskMode"] {
-  if (value === "compat" || value === "explicit" || value === "scanners-only") {
-    return value;
-  }
-  return DEFAULTS.taskMode;
 }
 
 function normalizeAgentRuntimeBackend(value: unknown): KuzushiConfig["agentRuntimeBackend"] {
@@ -1636,8 +1567,8 @@ function unsetByPath(root: unknown, pathParts: string[]): void {
   delete cursor[pathParts[pathParts.length - 1]];
 }
 
-function cloneScannerConfig(value: Record<string, ScannerConfig>): Record<string, ScannerConfig> {
-  const result: Record<string, ScannerConfig> = {};
+function cloneTaskConfig(value: Record<string, TaskConfig>): Record<string, TaskConfig> {
+  const result: Record<string, TaskConfig> = {};
   for (const [k, v] of Object.entries(value)) {
     result[k] = { ...v };
   }

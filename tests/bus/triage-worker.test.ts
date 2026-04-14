@@ -23,9 +23,9 @@ vi.mock("../../src/triage.js", () => ({
   BATCH_TRIAGE_FALLBACK_RATIONALE: "Finding was not included in batch triage agent response.",
 }));
 
-function makeFinding(scanner = "semgrep"): Finding {
+function makeFinding(taskId = "semgrep"): Finding {
   return {
-    scanner,
+    taskId,
     fingerprint: "fp-1",
     ruleId: "test.rule",
     filePath: "src/app.ts",
@@ -51,10 +51,10 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: { semgrep: {} },
+    taskConfig: { semgrep: {} },
     ...overrides,
   };
 }

@@ -189,7 +189,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const apiInfo = f.apiOrFunction ? ` [${f.apiOrFunction}]` : "";
 
     const finding: Finding = {
-      scanner: "supply-chain-detect",
+      taskId: "supply-chain-detect",
       fingerprint,
       ruleId: `supply-chain/${f.category || "unknown"}`,
       filePath,

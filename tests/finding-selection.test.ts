@@ -4,7 +4,7 @@ import type { Finding } from "../src/scanners/types.js";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "fp-default",
     ruleId: "javascript.security.audit.sql-injection",
     filePath: "src/app.ts",
@@ -37,7 +37,7 @@ describe("selectTopFindings", () => {
 
   it("deduplicates cross-scanner findings by location and CWE", () => {
     const semgrepFinding = makeFinding({
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: "fp-semgrep",
       ruleId: "semgrep.sql-injection",
       filePath: "src/db.ts",
@@ -46,7 +46,7 @@ describe("selectTopFindings", () => {
       cwe: ["CWE-89"],
     });
     const codeqlFinding = makeFinding({
-      scanner: "codeql",
+      taskId: "codeql",
       fingerprint: "fp-codeql",
       ruleId: "js/sql-injection",
       filePath: "/src/db.ts",
@@ -62,7 +62,7 @@ describe("selectTopFindings", () => {
 
   it("deduplicates cross-scanner findings by location and normalized rule id when CWE is missing", () => {
     const semgrepFinding = makeFinding({
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: "fp-semgrep",
       ruleId: "javascript.lang.security.audit.path-traversal",
       filePath: "src/fs.ts",
@@ -71,7 +71,7 @@ describe("selectTopFindings", () => {
       score: 61,
     });
     const codeqlFinding = makeFinding({
-      scanner: "codeql",
+      taskId: "codeql",
       fingerprint: "fp-codeql",
       ruleId: "js/path-traversal",
       filePath: "src/fs.ts",
@@ -87,7 +87,7 @@ describe("selectTopFindings", () => {
 
   it("deduplicates by pure CWE key even when rule ids differ", () => {
     const semgrepFinding = makeFinding({
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: "fp-semgrep-cwe",
       ruleId: "semgrep.ssti.unsafe-template",
       filePath: "src/template.ts",
@@ -97,7 +97,7 @@ describe("selectTopFindings", () => {
       score: 67,
     });
     const codeqlFinding = makeFinding({
-      scanner: "codeql",
+      taskId: "codeql",
       fingerprint: "fp-codeql-cwe",
       ruleId: "js/code-injection",
       filePath: "/src/template.ts",
@@ -114,7 +114,7 @@ describe("selectTopFindings", () => {
 
   it("falls back to message dedupe when rule id has only stop words and CWE is empty", () => {
     const first = makeFinding({
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: "fp-stop-1",
       ruleId: "security.audit.rule",
       filePath: "src/auth.ts",
@@ -124,7 +124,7 @@ describe("selectTopFindings", () => {
       score: 60,
     });
     const second = makeFinding({
-      scanner: "codeql",
+      taskId: "codeql",
       fingerprint: "fp-stop-2",
       ruleId: "js/security/audit/rule",
       filePath: "src/auth.ts",
@@ -141,7 +141,7 @@ describe("selectTopFindings", () => {
 
   it("does not dedupe genuinely different findings at the same line", () => {
     const sql = makeFinding({
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: "fp-diff-1",
       ruleId: "semgrep.sql-injection",
       filePath: "src/handler.ts",
@@ -151,7 +151,7 @@ describe("selectTopFindings", () => {
       score: 65,
     });
     const xss = makeFinding({
-      scanner: "codeql",
+      taskId: "codeql",
       fingerprint: "fp-diff-2",
       ruleId: "js/xss",
       filePath: "src/handler.ts",

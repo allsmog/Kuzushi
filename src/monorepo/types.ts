@@ -124,7 +124,7 @@ export interface MonorepoBudget {
 
 export interface ModuleScanPlan {
   module: DiscoveredModule;
-  enabledTasks: string[];
+  tasks: string[];
   riskLevel: ModulePriority;
   rationale: string;
   focusAreas: string[];

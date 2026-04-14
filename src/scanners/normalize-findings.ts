@@ -115,7 +115,7 @@ export function selectFindings(
   repoRoot: string,
   repoName: string,
   ref: string,
-  scanner: string,
+  taskId: string,
   maxFindings?: number,
 ): Finding[] {
   const deduped = new Map<string, Finding>();
@@ -127,7 +127,7 @@ export function selectFindings(
     // Agents can traverse the filesystem freely; this is the post-hoc guarantee.
     if (isOutOfScope(repoRoot, filePath)) continue;
 
-    const fingerprint = computeFingerprint(repoName, ref, scanner, {
+    const fingerprint = computeFingerprint(repoName, ref, taskId, {
       ...finding,
       filePath,
     });
@@ -141,7 +141,7 @@ export function selectFindings(
     });
 
     const normalized: Finding = {
-      scanner,
+      taskId,
       fingerprint,
       ruleId: finding.ruleId,
       filePath,
@@ -172,13 +172,13 @@ export function selectFindings(
 export function computeFingerprint(
   repoName: string,
   ref: string,
-  scanner: string,
+  taskId: string,
   finding: NormalizedFinding,
 ): string {
   const source = [
     repoName,
     ref,
-    scanner,
+    taskId,
     finding.ruleId,
     finding.filePath,
     String(finding.startLine),

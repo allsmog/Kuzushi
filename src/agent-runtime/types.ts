@@ -14,7 +14,7 @@ export interface AgentHistoryEntry {
   content: string;
 }
 
-export type AgentEffort = "low" | "medium" | "high";
+export type AgentEffort = "low" | "medium" | "high" | "max";
 
 export interface AgentQueryOptions {
   cwd: string;

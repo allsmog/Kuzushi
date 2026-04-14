@@ -27,7 +27,7 @@ conditions needed for exploitation.
 
 ## Finding
 Repo: {{ repoName }}
-Scanner: {{ finding.scanner }}
+Scanner: {{ finding.taskId }}
 Rule: {{ finding.ruleId }}
 File: {{ finding.filePath }}:{{ finding.startLine }}
 Severity: {{ finding.severity }}
@@ -71,7 +71,7 @@ conditions needed for exploitation.
 
 ## Finding
 Repo: {{ repoName }}
-Scanner: {{ finding.scanner }}
+Scanner: {{ finding.taskId }}
 Rule: {{ finding.ruleId }}
 File: {{ finding.filePath }}:{{ finding.startLine }}
 Severity: {{ finding.severity }}
@@ -125,7 +125,7 @@ Repo: {{ repoName }}
  * Expected context shape: VerifyTemplateContext plus { findingIndex: number }
  */
 export const BATCH_VERIFY_FINDING_TEMPLATE = `### Finding {{ findingIndex }}
-Scanner: {{ finding.scanner }}
+Scanner: {{ finding.taskId }}
 Rule: {{ finding.ruleId }}
 File: {{ finding.filePath }}:{{ finding.startLine }}
 Severity: {{ finding.severity }}
@@ -178,7 +178,7 @@ Before concluding not-exploitable, verify the application is NOT vulnerable to t
 {% endfor %}{% endif %}
 ## Finding
 Repo: {{ repoName }}
-Scanner: {{ finding.scanner }}
+Scanner: {{ finding.taskId }}
 Rule: {{ finding.ruleId }}
 File: {{ finding.filePath }}:{{ finding.startLine }}
 Severity: {{ finding.severity }}
@@ -232,7 +232,7 @@ Repo: {{ repoName }}
 ## Findings ({{ findingCount }} total)
 
 {% for item in items %}### Finding {{ loop.index }}
-Scanner: {{ item.finding.scanner }}
+Scanner: {{ item.finding.taskId }}
 Rule: {{ item.finding.ruleId }}
 File: {{ item.finding.filePath }}:{{ item.finding.startLine }}
 Severity: {{ item.finding.severity }}

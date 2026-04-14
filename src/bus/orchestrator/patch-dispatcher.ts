@@ -56,7 +56,7 @@ export function setupPatchDispatching(
     state.patchCostUsd += costUsd;
 
     if (status === "SOUND" && worktreePath) {
-      const depth = state.config.patchVerifyDepth ?? "scanner";
+      const depth = state.config.patchVerifyDepth ?? "task";
       await bus.publish(createEvent("patch-verify:requested", event.meta.runId, {
         context: event.payload.context,
         fingerprint,

@@ -9,10 +9,10 @@ function baseConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     severity: ["ERROR", "WARNING"],
     excludePatterns: ["node_modules"],
-    scannerConfig: {
+    taskConfig: {
       semgrep: {},
     },
   };

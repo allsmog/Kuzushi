@@ -5,7 +5,7 @@ import { getActionableFindings } from "./store.js";
 
 const CSV_COLUMNS = [
   "fingerprint",
-  "scanner",
+  "taskId",
   "filePath",
   "startLine",
   "severity",
@@ -41,7 +41,7 @@ function escapeCsvField(value: unknown): string {
 
 /**
  * Write a CSV report of findings to the specified output path.
- * Columns: fingerprint, scanner, filePath, startLine, severity, verdict,
+ * Columns: fingerprint, taskId, filePath, startLine, severity, verdict,
  * confidence, ruleId, message, verifyCostUsd.
  *
  * The output is RFC 4180 compliant with a header row.

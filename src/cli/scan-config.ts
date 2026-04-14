@@ -6,22 +6,20 @@ import { parseCommaSeparatedList } from "./shared.js";
 
 export interface ScanCommandOptions {
   preset?: string;
-  scanners?: string;
+  tasks?: string;
   severity?: string;
   max?: number;
   model?: string;
   ensembleModels?: string;
-  triageModel?: string;
+  taskModels?: string[];
 
   verify: boolean;
-  verifyModel?: string;
   verifyMaxTurns?: number;
   verifyConcurrency?: number;
   verifyRefinementMaxIterations?: number;
   verifyReflectionInterval?: number;
   verifyMinConfidence?: number;
   verifyGate?: boolean;
-  verifyGateModel?: string;
   cryptoBehavioralTest: boolean;
   dynamicAnalysis?: boolean;
   dynamicMaxCandidates?: number;
@@ -43,7 +41,6 @@ export interface ScanCommandOptions {
   patchVerifyDepth?: string;
   patchConcurrency?: number;
   pocHarness: boolean;
-  pocHarnessModel?: string;
   pocHarnessMaxTurns?: number;
   pocHarnessConcurrency?: number;
   pocRefinementMaxIterations?: number;
@@ -64,7 +61,6 @@ export interface ScanCommandOptions {
   baseUrl?: string;
   enableExternalTasks: boolean;
   trustRepoConfig?: boolean;
-  enabledTasks?: string;
   qualityGate: boolean;
   failOnTp: boolean;
   moduleDiscovery: boolean;
@@ -90,13 +86,13 @@ export function applyScanCommandConfigOverrides(
       throw new CliUsageError(`Unknown preset "${opts.preset}". Valid presets: safe, fast, standard, deep, reference`);
     }
     const preset = SCAN_PRESETS[opts.preset];
-    // Deep-merge scannerConfig so presets can override individual scanner
-    // settings without wiping out defaults for other scanners.
-    if (preset.scannerConfig) {
-      for (const [key, val] of Object.entries(preset.scannerConfig)) {
-        config.scannerConfig[key] = { ...config.scannerConfig[key], ...val };
+    // Deep-merge taskConfig so presets can override individual task
+    // settings without wiping out defaults for other tasks.
+    if (preset.taskConfig) {
+      for (const [key, val] of Object.entries(preset.taskConfig)) {
+        config.taskConfig[key] = { ...config.taskConfig[key], ...val };
       }
-      const { scannerConfig: _, ...rest } = preset;
+      const { taskConfig: _, ...rest } = preset;
       Object.assign(config, rest);
     } else {
       Object.assign(config, preset);
@@ -105,16 +101,14 @@ export function applyScanCommandConfigOverrides(
 
   if (opts.model) config.model = opts.model;
   if (opts.ensembleModels) config.ensembleModels = parseCommaSeparatedList(opts.ensembleModels);
-  if (opts.triageModel) config.triageModel = opts.triageModel;
+  applyTaskModelOverrides(config, opts.taskModels);
   if (opts.verify) config.verify = true;
-  if (opts.verifyModel) config.verifyModel = opts.verifyModel;
   if (opts.cryptoBehavioralTest) {
     config.cryptoBehavioralTestEnabled = true;
-    config.enabledTasks = dedupeStrings([
-      ...(config.enabledTasks ?? []),
+    config.tasks = dedupeStrings([
+      ...(config.tasks ?? []),
       "crypto-behavioral-test",
     ]);
-    promoteTaskModeForExplicitTasks(config);
   }
   if (opts.dynamicAnalysis) config.dynamicAnalysisEnabled = true;
   if (opts.taintDiffBase) config.taintDiffBase = opts.taintDiffBase.trim() || undefined;
@@ -127,12 +121,11 @@ export function applyScanCommandConfigOverrides(
   }
   if (opts.codeGraph) {
     config.codeGraphEnabled = true;
-    config.enabledTasks = dedupeStrings([
-      ...(config.enabledTasks ?? []),
+    config.tasks = dedupeStrings([
+      ...(config.tasks ?? []),
       "code-graph-build",
       "code-graph-enrich",
     ]);
-    promoteTaskModeForExplicitTasks(config);
   }
   if (opts.multiStrategy) config.multiStrategyMode = "adaptive";
   if (opts.multiStrategyFull) config.multiStrategyMode = "full";
@@ -148,7 +141,6 @@ export function applyScanCommandConfigOverrides(
   if (opts.patchVerifyDepth) config.patchVerifyDepth = opts.patchVerifyDepth as typeof config.patchVerifyDepth;
   if (opts.patchConcurrency != null) config.patchConcurrency = opts.patchConcurrency;
   if (opts.pocHarness) config.pocHarness = true;
-  if (opts.pocHarnessModel) config.pocHarnessModel = opts.pocHarnessModel;
   if (opts.context === false) config.enableContextGathering = false;
   if (opts.auditLog) config.auditLog = true;
   if (opts.output) config.reportOutput = path.resolve(opts.output);
@@ -179,12 +171,11 @@ export function applyScanCommandConfigOverrides(
     config.agentRuntimeConfig = runtimeConfig;
   }
 
-  if (opts.enabledTasks) {
-    config.enabledTasks = dedupeStrings([
-      ...(config.enabledTasks ?? []),
-      ...parseCommaSeparatedList(opts.enabledTasks),
+  if (opts.tasks) {
+    config.tasks = dedupeStrings([
+      ...(config.tasks ?? []),
+      ...parseCommaSeparatedList(opts.tasks),
     ]);
-    promoteTaskModeForExplicitTasks(config);
   }
 
   if (opts.qualityGate) {
@@ -205,7 +196,6 @@ export function applyScanCommandConfigOverrides(
   applyOptionalUnitInterval(config, "verifyMinConfidence", opts.verifyMinConfidence, "--verify-min-confidence");
 
   if (opts.verifyGate === false) config.verifyGateEnabled = false;
-  if (opts.verifyGateModel) config.verifyGateModel = opts.verifyGateModel;
 
   applyOptionalPositiveInteger(config, "verifyMaxTurns", opts.verifyMaxTurns, "--verify-max-turns");
   applyOptionalPositiveInteger(config, "verifyConcurrency", opts.verifyConcurrency, "--verify-concurrency");
@@ -264,15 +254,9 @@ export function resolveScanSeverity(
 }
 
 export function resolveScannerOverride(
-  opts: Pick<ScanCommandOptions, "scanners">,
+  opts: Pick<ScanCommandOptions, "tasks">,
 ): string[] | undefined {
-  return opts.scanners ? parseCommaSeparatedList(opts.scanners) : undefined;
-}
-
-function promoteTaskModeForExplicitTasks(config: KuzushiConfig): void {
-  if (config.taskMode === "scanners-only") {
-    config.taskMode = "explicit";
-  }
+  return opts.tasks != null ? parseCommaSeparatedList(opts.tasks) : undefined;
 }
 
 function applyOptionalPositiveInteger<T extends keyof KuzushiConfig>(
@@ -359,4 +343,28 @@ function dedupeStrings(values: Iterable<string>): string[] {
     result.push(value);
   }
   return result;
+}
+
+function applyTaskModelOverrides(config: KuzushiConfig, rawAssignments: string[] | undefined): void {
+  if (!rawAssignments || rawAssignments.length === 0) {
+    return;
+  }
+
+  for (const assignment of rawAssignments.flatMap((value) => parseCommaSeparatedList(value))) {
+    const equalsIndex = assignment.indexOf("=");
+    if (equalsIndex <= 0 || equalsIndex === assignment.length - 1) {
+      throw new CliUsageError(`--task-model must be in the form <taskId=model>; received "${assignment}".`);
+    }
+
+    const taskId = assignment.slice(0, equalsIndex).trim();
+    const model = assignment.slice(equalsIndex + 1).trim();
+    if (!taskId || !model) {
+      throw new CliUsageError(`--task-model must be in the form <taskId=model>; received "${assignment}".`);
+    }
+
+    config.taskConfig[taskId] = {
+      ...(config.taskConfig[taskId] ?? {}),
+      model,
+    };
+  }
 }

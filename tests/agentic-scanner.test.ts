@@ -96,7 +96,7 @@ describe("selectAgenticFindings", () => {
     );
 
     expect(selected).toHaveLength(1);
-    expect(selected[0].scanner).toBe("agentic");
+    expect(selected[0].taskId).toBe("agentic");
     expect(selected[0].filePath).toBe("src/server.ts");
   });
 });

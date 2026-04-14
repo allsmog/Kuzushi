@@ -71,7 +71,7 @@ function buildPrompt(original: Finding, triageResult: TriageResult): string {
     "with the same vulnerability pattern.",
     "",
     "## Confirmed vulnerability",
-    `Scanner: ${original.scanner}`,
+    `Scanner: ${original.taskId}`,
     `Rule: ${original.ruleId}`,
     `File: ${original.filePath}:${original.startLine}`,
     `Severity: ${original.severity}`,
@@ -130,7 +130,7 @@ function normalizeVariants(
     const fingerprint = computeFingerprint(repoName, filePath, v, original.ruleId);
 
     const finding: Finding = {
-      scanner: "variant-analysis",
+      taskId: "variant-analysis",
       fingerprint,
       ruleId: `variant/${original.ruleId}`,
       filePath,
@@ -225,7 +225,7 @@ export async function analyzeVariants(
     try {
       const batchFile = writeBatchFile(repoRoot, runId, "variant-analysis", 0, {
         finding: {
-          scanner: finding.scanner,
+          taskId: finding.taskId,
           ruleId: finding.ruleId,
           filePath: finding.filePath,
           startLine: finding.startLine,
@@ -347,7 +347,7 @@ function buildBatchPrompt(
 ): string {
   const findingDescriptions = items.map((item, idx) => [
     `### Finding ${idx + 1} (fingerprint: ${item.finding.fingerprint})`,
-    `Scanner: ${item.finding.scanner}`,
+    `Scanner: ${item.finding.taskId}`,
     `Rule: ${item.finding.ruleId}`,
     `File: ${item.finding.filePath}:${item.finding.startLine}`,
     `Severity: ${item.finding.severity}`,
@@ -432,7 +432,7 @@ export async function analyzeVariantsBatch(
       const batchFile = writeBatchFile(repoRoot, runId, "variant-batch", 0, {
         findings: items.map((item) => ({
           fingerprint: item.finding.fingerprint,
-          scanner: item.finding.scanner,
+          taskId: item.finding.taskId,
           ruleId: item.finding.ruleId,
           filePath: item.finding.filePath,
           startLine: item.finding.startLine,

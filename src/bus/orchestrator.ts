@@ -5,8 +5,10 @@ import type { TaskContext as AgentTaskContext } from "../agents/types.js";
 import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
 import { reachabilityCheckTask } from "../agents/tasks/reachability-check.js";
 import { callGraphAssistTask } from "../agents/tasks/call-graph-assist.js";
+import { resolveStageModel } from "../agents/tasks/runtime-overrides.js";
 import { SELECTABLE_TASK_IDS } from "../agents/tasks/task-selector.js";
 import type { Finding } from "../scanners/types.js";
+import { DesignDecisionClassifier } from "../scanners/design-decision-classifier.js";
 import { HardExclusionFilter } from "../scanners/fp-filter.js";
 import { rescoreFindings } from "../scanners/llm-rescore.js";
 import {
@@ -16,7 +18,6 @@ import {
   getRankingScore,
   selectFindingsForRescore,
 } from "../scanners/normalization.js";
-import type { ScannerRegistry } from "../scanners/registry.js";
 import {
   computeRunMetrics,
   type StageTimestamps,
@@ -31,11 +32,6 @@ import {
   getRun,
   getTriagedFingerprints,
   getVerifiedFingerprints,
-  updateRunCost,
-  updateRunContext,
-  updateRunFindings,
-  updateRunMetrics,
-  updateRunStatus,
 } from "../store.js";
 import type {
   DynamicAnalysisRun,
@@ -134,7 +130,7 @@ const NON_LLM_SCANNERS = new Set(["semgrep", "codeql"]);
 
 function isHighConfidenceAgenticFinding(finding: Finding): boolean {
   return (
-    !NON_LLM_SCANNERS.has(finding.scanner)
+    !NON_LLM_SCANNERS.has(finding.taskId)
     && finding.scannerConfidence === "HIGH"
     && finding.score >= 8
   );
@@ -194,7 +190,7 @@ export class PipelineOrchestrator {
 
       // Persist interrupted state
       try {
-        updateRunStatus(this.deps.db, state.checkpointRunId, "error");
+        await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "error" }));
       } catch {
         // Best-effort persistence during shutdown.
       }
@@ -291,10 +287,13 @@ export class PipelineOrchestrator {
       if (!event.payload.fatal) {
         return;
       }
-      const state = this.runs.get(event.meta.runId);
-      const checkpointRunId = state?.checkpointRunId ?? event.meta.runId;
+      const fatalRunId = event.meta.runId;
+      const state = this.runs.get(fatalRunId);
+      const checkpointRunId = state?.checkpointRunId ?? fatalRunId;
       try {
-        updateRunStatus(this.deps.db, checkpointRunId, "error");
+        if (state) {
+          await this.bus.publish(createEvent("run:status", fatalRunId, { context: state.context, status: "error" }));
+        }
       } catch {
         // Best-effort status persistence for fatal run failures.
       }
@@ -319,19 +318,7 @@ export class PipelineOrchestrator {
       seedTaskOutputs,
     } = event.payload;
 
-    let scanners: string[];
-    try {
-      scanners = this.deps.registry.resolveEnabled(scanOpts, config);
-    } catch (error) {
-      await this.bus.publish(
-        createEvent("pipeline:error", runId, {
-          context,
-          error: toErrorMessage(error),
-          fatal: true,
-        }),
-      );
-      return;
-    }
+    const tasks = normalizeTaskIds(scanOpts.tasks ?? config.tasks ?? ["semgrep"]);
 
     const state: RunState = {
       context,
@@ -339,7 +326,7 @@ export class PipelineOrchestrator {
       resuming: false,
       config,
       scanOpts,
-      scanners,
+      tasks,
       startedAt: event.meta.timestamp,
       scanFindings: [],
       totalFindings: 0,
@@ -347,6 +334,7 @@ export class PipelineOrchestrator {
       skippedLowConfidence: 0,
       skippedByFpFilter: 0,
       skippedByScoreFilter: 0,
+      autoClassifiedByDesign: 0,
       verifyGateAutoAccepted: 0,
       verifyGateSkipped: 0,
       verifyGateCostUsd: 0,
@@ -393,7 +381,7 @@ export class PipelineOrchestrator {
       refinementIteration: 0,
       refinementInFlight: false,
       dispatching: false,
-      collectScanFindingEvents: !this.deps.taskRegistry && !resumeRunId,
+      collectScanFindingEvents: false,
       repoContext: undefined,
       enrichedRepoContext: undefined,
       taskOutputs: new Map<string, unknown>(seedTaskOutputs ?? []),
@@ -493,15 +481,6 @@ export class PipelineOrchestrator {
       return;
     }
 
-    if (this.deps.taskRegistry) {
-      await this.runTaskDag(state, runId);
-      return;
-    }
-
-    await this.startLegacyScan(state, runId);
-  }
-
-  private async startLegacyScan(state: RunState, runId: string): Promise<void> {
     // Invoke beforeScan hook
     if (state.hookChain) {
       try {
@@ -511,13 +490,7 @@ export class PipelineOrchestrator {
       }
     }
 
-    await this.bus.publish(
-      createEvent("scan:start", runId, {
-        context: state.context,
-        scanners: state.scanners,
-        scanOpts: state.scanOpts,
-      }),
-    );
+    await this.runTaskDag(state, runId);
   }
 
   private async resumeFromCheckpoint(
@@ -618,14 +591,8 @@ export class PipelineOrchestrator {
       if (run.status === "scanning") {
         state.resuming = false;
         state.scanFindings = [];
-        state.collectScanFindingEvents = !this.deps.taskRegistry;
-
-        if (this.deps.taskRegistry) {
-          await this.runTaskDag(state, runId);
-          return;
-        }
-
-        await this.startLegacyScan(state, runId);
+        state.collectScanFindingEvents = false;
+        await this.runTaskDag(state, runId);
         return;
       }
 
@@ -836,11 +803,7 @@ export class PipelineOrchestrator {
   }
 
   private async runTaskDag(state: RunState, runId: string): Promise<void> {
-    if (!this.deps.taskRegistry) {
-      await this.startLegacyScan(state, runId);
-      return;
-    }
-    const taskPlan = resolveInitialTaskPlan(this.deps.taskRegistry, state.scanners, state.config);
+    const taskPlan = resolveInitialTaskPlan(this.deps.taskRegistry, state.tasks, state.config);
     const dynamicSelectionActive = taskPlan.dynamicSelectionActive;
     let enabledTaskIds = [...taskPlan.enabledTaskIds];
 
@@ -1038,7 +1001,7 @@ export class PipelineOrchestrator {
           if (normalizedCost > 0) {
             state.totalCostUsd += normalizedCost;
             try {
-              updateRunCost(this.deps.db, state.checkpointRunId, normalizedCost);
+              await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: normalizedCost }));
             } catch { /* best-effort cost persistence */ }
             // Fire budget events after each task so budget:warning/exceeded are
             // emitted promptly, not just at end-of-stage.
@@ -1165,10 +1128,10 @@ export class PipelineOrchestrator {
 
     if (state.repoContext || state.enrichedRepoContext) {
       try {
-        updateRunContext(this.deps.db, state.checkpointRunId, {
-          base: state.repoContext,
-          enrichment: state.enrichedRepoContext,
-        });
+        await this.bus.publish(createEvent("run:context-checkpoint", state.checkpointRunId, {
+          context: state.context,
+          repoContext: { base: state.repoContext, enrichment: state.enrichedRepoContext },
+        }));
       } catch {
         // Context checkpoint persistence is best-effort.
       }
@@ -1262,9 +1225,9 @@ export class PipelineOrchestrator {
 
     try {
       if (!state.resuming) {
-        updateRunStatus(this.deps.db, state.checkpointRunId, "triaging");
+        await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "triaging" }));
       }
-      updateRunFindings(this.deps.db, state.checkpointRunId, state.scanFindings);
+      await this.bus.publish(createEvent("run:findings-checkpoint", state.checkpointRunId, { context: state.context, findings: state.scanFindings }));
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -1321,7 +1284,7 @@ export class PipelineOrchestrator {
         (finding) => !rescoredFingerprints.has(finding.fingerprint),
       );
       const rescoreResults = await rescoreFindings(rescoreWindow, {
-        model: state.config.llmRescoreModel,
+        model: resolveStageModel(state.config, "llm-rescore"),
         threshold: state.config.llmRescoreThreshold,
         repoRoot: state.context.scanPath ?? state.context.repoRoot,
         runtime: this.deps.runtime,
@@ -1364,7 +1327,7 @@ export class PipelineOrchestrator {
         if (reachCostUsd > 0) {
           state.totalCostUsd += reachCostUsd;
           try {
-            updateRunCost(this.deps.db, state.checkpointRunId, reachCostUsd);
+            await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: reachCostUsd }));
           } catch {
             // Best-effort cost persistence.
           }
@@ -1401,7 +1364,7 @@ export class PipelineOrchestrator {
         if (cgCostUsd > 0) {
           state.totalCostUsd += cgCostUsd;
           try {
-            updateRunCost(this.deps.db, state.checkpointRunId, cgCostUsd);
+            await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: cgCostUsd }));
           } catch {
             // Best-effort cost persistence.
           }
@@ -1461,8 +1424,21 @@ export class PipelineOrchestrator {
       triageCandidates = [...prioritized, ...remaining];
     }
 
+    // Auto-classify design-decision findings before LLM triage.
+    let autoClassifiedResults: Array<{ finding: Finding; result: import("../types.js").TriageResult }> = [];
+    if (state.config.designDecisionClassifier !== false) {
+      const classifier = new DesignDecisionClassifier();
+      const classification = classifier.classify(triageCandidates);
+      autoClassifiedResults = classification.autoClassified;
+      triageCandidates = classification.remaining;
+      state.autoClassifiedByDesign = autoClassifiedResults.length;
+      if (autoClassifiedResults.length > 0) {
+        log.info(`[design-decision] Auto-classified ${autoClassifiedResults.length} findings as by_design`);
+      }
+    }
+
     state.skippedAlreadyTriaged = filteredFindings.length - pendingFindings.length;
-    state.triageTotal = triageCandidates.length;
+    state.triageTotal = triageCandidates.length + autoClassifiedResults.length;
     state.triageQueue = triageCandidates.map((finding, idx) => ({
       finding,
       index: idx + 1,
@@ -1509,12 +1485,27 @@ export class PipelineOrchestrator {
       createEvent("triage:start", runId, {
         context: state.context,
         findingCount: triageCandidates.length,
-        model: state.config.triageModel ?? state.config.model,
+        model: resolveStageModel(state.config, "triage"),
         skippedAlreadyTriaged: state.skippedAlreadyTriaged,
       }),
     );
 
     await this.publishQueueDepth(state, runId);
+
+    // Emit triage:result for auto-classified design-decision findings (zero LLM cost).
+    for (const { finding, result } of autoClassifiedResults) {
+      await this.bus.publish(
+        createEvent("triage:result", runId, {
+          context: state.context,
+          finding,
+          result,
+          costUsd: 0,
+          attempts: 0,
+          index: 0,
+          total: 0,
+        }),
+      );
+    }
 
     if (triageCandidates.length === 0) {
       await this.finishTriageAndRequestReport(state, runId);
@@ -1614,9 +1605,11 @@ export class PipelineOrchestrator {
     }
 
     try {
-      updateRunStatus(this.deps.db, state.checkpointRunId, "complete", {
-        completedAt: event.meta.timestamp,
-      });
+      await this.bus.publish(createEvent("run:status", state.checkpointRunId, {
+        context: state.context,
+        status: "complete",
+        extra: { completedAt: event.meta.timestamp },
+      }));
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -1649,19 +1642,20 @@ export class PipelineOrchestrator {
 
     // Persist metrics to database
     try {
-      updateRunMetrics(this.deps.db, state.checkpointRunId, finalMetrics);
+      await this.bus.publish(createEvent("run:metrics", state.checkpointRunId, { context: state.context, metrics: finalMetrics }));
     } catch {
       // Metrics persistence is best-effort.
     }
 
     const pipelineStats = {
-      scanners: [...state.scanners],
+      tasks: [...state.tasks],
       totalFindings: state.totalFindings,
       queuedForTriage: state.triageTotal,
       skippedAlreadyTriaged: state.skippedAlreadyTriaged,
       skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
       skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
       skippedByScoreFilter: state.skippedByScoreFilter > 0 ? state.skippedByScoreFilter : undefined,
+      autoClassifiedByDesign: state.autoClassifiedByDesign > 0 ? state.autoClassifiedByDesign : undefined,
       softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
       skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
       corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
@@ -1738,7 +1732,7 @@ export class PipelineOrchestrator {
     state.refinementInFlight = false;
     state.refinementIteration = Math.max(state.refinementIteration, event.payload.iteration);
 
-    const nonTaintAnalysis = state.scanFindings.filter((finding) => finding.scanner !== "taint-analysis-run");
+    const nonTaintAnalysis = state.scanFindings.filter((finding) => finding.taskId !== "taint-analysis-run");
     state.scanFindings = [...nonTaintAnalysis, ...event.payload.updatedFindings]
       .sort((a, b) => b.score - a.score);
     state.totalFindings = state.scanFindings.length;
@@ -1748,8 +1742,8 @@ export class PipelineOrchestrator {
     state.totalCostUsd += normalizeCostUsd(event.payload.triageCostUsd);
 
     try {
-      updateRunFindings(this.deps.db, state.checkpointRunId, state.scanFindings);
-      updateRunCost(this.deps.db, state.checkpointRunId, event.payload.triageCostUsd);
+      await this.bus.publish(createEvent("run:findings-checkpoint", state.checkpointRunId, { context: state.context, findings: state.scanFindings }));
+      await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: event.payload.triageCostUsd }));
     } catch {
       // Checkpoint persistence is best-effort for refinement deltas.
     }
@@ -1989,7 +1983,7 @@ export class PipelineOrchestrator {
     if (state.config.chainAnalysis) {
       const confirmedTPs = this.collectConfirmedTPs(state);
       if (confirmedTPs.length >= 2) {
-        const model = state.config.chainAnalysisModel || state.config.model;
+        const model = resolveStageModel(state.config, "chain-analysis");
         await this.bus.publish(
           createEvent("chain-analysis:start", runId, {
             context: state.context,
@@ -2019,7 +2013,7 @@ export class PipelineOrchestrator {
           if (chainMeta?.costUsd) {
             state.chainAnalysisCostUsd = chainMeta.costUsd;
             state.totalCostUsd += chainMeta.costUsd;
-            updateRunCost(this.deps.db, state.checkpointRunId, chainMeta.costUsd);
+            await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: chainMeta.costUsd }));
           }
         } catch (error) {
           log.warn(`Chain analysis error: ${toErrorMessage(error)}`);
@@ -2112,7 +2106,7 @@ export class PipelineOrchestrator {
       return;
     }
 
-    const model = state.config.variantAnalysisModel || state.config.model;
+    const model = resolveStageModel(state.config, "variant-analysis");
     await this.bus.publish(
       createEvent("variant-analysis:start", runId, {
         context: state.context,
@@ -2130,7 +2124,7 @@ export class PipelineOrchestrator {
       state.variantFindings = normalizedVariants.length;
       state.variantAnalysisCostUsd = result.costUsd;
       state.totalCostUsd += result.costUsd;
-      updateRunCost(this.deps.db, state.checkpointRunId, result.costUsd);
+      await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: result.costUsd }));
     } catch (error) {
       log.warn(`Variant analysis error: ${toErrorMessage(error)}`);
     }
@@ -2205,7 +2199,7 @@ export class PipelineOrchestrator {
       );
 
       // Filter out findings already in the scan — check both fingerprint and
-      // location (filePath:startLine) since different scanners use incompatible
+      // location (filePath:startLine) since different tasks use incompatible
       // fingerprint schemes and a sweep finding at the same location as an
       // existing finding is a duplicate.
       const existingFps = new Set(state.scanFindings.map((f) => f.fingerprint));
@@ -2265,7 +2259,7 @@ export class PipelineOrchestrator {
       const rescoredFingerprints = new Set(rescoreWindow.map((finding) => finding.fingerprint));
       const untouched = normalized.filter((finding) => !rescoredFingerprints.has(finding.fingerprint));
       const rescoreResults = await rescoreFindings(rescoreWindow, {
-        model: state.config.llmRescoreModel,
+        model: resolveStageModel(state.config, "llm-rescore"),
         threshold: state.config.llmRescoreThreshold,
         repoRoot: state.context.scanPath ?? state.context.repoRoot,
         runtime: this.deps.runtime,
@@ -2344,7 +2338,7 @@ export class PipelineOrchestrator {
       return false;
     }
     return state.scanFindings.some(
-      (finding) => finding.scanner === "taint-analysis-run" || finding.scanner === "taint-iris",
+      (finding) => finding.taskId === "taint-analysis-run" || finding.taskId === "taint-iris",
     );
   }
 
@@ -2407,7 +2401,7 @@ export class PipelineOrchestrator {
     if (state.verifyTotal === 1) {
       state.stageTimestamps.verifyStart = new Date().toISOString();
       try {
-        updateRunStatus(this.deps.db, state.checkpointRunId, "verifying");
+        await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "verifying" }));
       } catch {
         // Status persistence is best-effort.
       }
@@ -2456,7 +2450,7 @@ export class PipelineOrchestrator {
       const gateResults = await gateVerificationCandidates(
         afterDedup,
         {
-          model: state.config.verifyGateModel,
+          model: resolveStageModel(state.config, "verify-gate", "verify"),
           runtime: this.deps.runtime,
           repoRoot: state.context.scanPath ?? state.context.repoRoot,
         },
@@ -2496,7 +2490,7 @@ export class PipelineOrchestrator {
         const cheapResults = await cheapVerifyCandidates(
           toCheapVerify,
           {
-            model: state.config.verifyModel ?? state.config.model,
+            model: resolveStageModel(state.config, "verify", "triage"),
             runtime: this.deps.runtime,
             repoRoot: state.context.scanPath ?? state.context.repoRoot,
           },
@@ -2612,7 +2606,7 @@ export class PipelineOrchestrator {
 
     if (!state.resumingVerification) {
       try {
-        updateRunStatus(this.deps.db, state.checkpointRunId, "verifying");
+        await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "verifying" }));
       } catch (error) {
         await this.bus.publish(
           createEvent("pipeline:error", runId, {
@@ -2633,7 +2627,7 @@ export class PipelineOrchestrator {
       createEvent("verification:start", runId, {
         context: state.context,
         findingCount: state.verifyTotal,
-        model: state.config.verifyModel ?? state.config.triageModel ?? state.config.model,
+        model: resolveStageModel(state.config, "verify", "triage"),
       }),
     );
 
@@ -2800,7 +2794,7 @@ export class PipelineOrchestrator {
     state.pocHarnessCursor = 0;
 
     try {
-      updateRunStatus(this.deps.db, state.checkpointRunId, "poc-harnessing");
+      await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "poc-harnessing" }));
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -2818,10 +2812,7 @@ export class PipelineOrchestrator {
       createEvent("poc-harness:start", runId, {
         context: state.context,
         findingCount: state.pocHarnessTotal,
-        model: state.config.pocHarnessModel
-          ?? state.config.verifyModel
-          ?? state.config.triageModel
-          ?? state.config.model,
+        model: resolveStageModel(state.config, "poc-harness", "verify"),
       }),
     );
 
@@ -3007,7 +2998,7 @@ export class PipelineOrchestrator {
 
       // Priority 2: Strong taint-analysis findings
       if (
-        (finding.scanner === "taint-iris" || finding.scanner === "taint-analysis-run")
+        (finding.taskId === "taint-iris" || finding.taskId === "taint-analysis-run")
         && score >= minScore
         && finding.taintPath
         && finding.taintPath.length > 0
@@ -3018,7 +3009,7 @@ export class PipelineOrchestrator {
 
       // Priority 3: Corroborated CodeQL or agentic findings
       if (
-        (finding.scanner === "codeql" || finding.scanner === "agentic")
+        (finding.taskId === "codeql" || finding.taskId === "agentic")
         && finding.corroboratingSignals
         && finding.corroboratingSignals.length >= 1
       ) {
@@ -3028,7 +3019,7 @@ export class PipelineOrchestrator {
 
       // Priority 4: Semgrep only if corroborated or critical
       if (
-        finding.scanner === "semgrep"
+        finding.taskId === "semgrep"
         && (
           (finding.corroboratingSignals && finding.corroboratingSignals.length >= 1)
           || finding.severity === "ERROR"
@@ -3058,7 +3049,7 @@ export class PipelineOrchestrator {
     state.dynamicCursor = 0;
 
     try {
-      updateRunStatus(this.deps.db, state.checkpointRunId, "dynamic-analyzing");
+      await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "dynamic-analyzing" }));
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -3076,7 +3067,7 @@ export class PipelineOrchestrator {
       createEvent("dynamic:start", runId, {
         context: state.context,
         findingCount: state.dynamicTotal,
-        model: state.config.pocHarnessModel ?? state.config.model,
+        model: resolveStageModel(state.config, "dynamic-analysis", "poc-harness", "verify"),
       }),
     );
 
@@ -3093,7 +3084,7 @@ export class PipelineOrchestrator {
     const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.dynamicCostUsd += costUsd;
     state.totalCostUsd += costUsd;
-    updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+    await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd }));
 
     const status = event.payload.result.status;
     if (status === "confirmed") state.dynamicConfirmed += 1;
@@ -3119,7 +3110,7 @@ export class PipelineOrchestrator {
     const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.dynamicCostUsd += costUsd;
     state.totalCostUsd += costUsd;
-    updateRunCost(this.deps.db, state.checkpointRunId, costUsd);
+    await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd }));
 
     await this.publishDynamicAnalysisQueueDepth(state, runId);
 
@@ -3235,7 +3226,7 @@ export class PipelineOrchestrator {
 /**
  * Merge findings at the same file:line into one entry, keeping the highest-scored
  * and attaching others as corroborating signals. Prevents N-way triage/verification
- * for findings from different scanners at the same code location.
+ * for findings from different tasks at the same code location.
  *
  * Threat-model findings (scanner starts with "threat-model-") use a scanner-scoped
  * key so they survive alongside detector findings at the same location. This
@@ -3247,8 +3238,8 @@ function deduplicateByLocation(findings: Finding[]): Finding[] {
   for (const f of findings) {
     // Threat-model findings get a scanner-scoped key so they don't merge
     // with detector findings at the same location.
-    const key = isThreatModelScanner(f.scanner)
-      ? `tm:${f.scanner}:${f.filePath}:${f.startLine}`
+    const key = isThreatModelScanner(f.taskId)
+      ? `tm:${f.taskId}:${f.filePath}:${f.startLine}`
       : `${f.filePath}:${f.startLine}`;
     const group = byLocation.get(key);
     if (group) {
@@ -3272,7 +3263,7 @@ function deduplicateByLocation(findings: Finding[]): Finding[] {
     // Attach others as corroborating signals
     const existing = primary.corroboratingSignals ?? [];
     const newSignals = others.map((f) => ({
-      scanner: f.scanner,
+      taskId: f.taskId,
       fingerprint: f.fingerprint,
       ruleId: f.ruleId,
       filePath: f.filePath,
@@ -3290,7 +3281,7 @@ function deduplicateByLocation(findings: Finding[]): Finding[] {
   const threatModelByLoc = new Map<string, Finding[]>();
   for (const f of deduped) {
     const loc = `${f.filePath}:${f.startLine}`;
-    if (isThreatModelScanner(f.scanner)) {
+    if (isThreatModelScanner(f.taskId)) {
       const group = threatModelByLoc.get(loc) ?? [];
       group.push(f);
       threatModelByLoc.set(loc, group);
@@ -3302,7 +3293,7 @@ function deduplicateByLocation(findings: Finding[]): Finding[] {
     const detector = detectorByLoc.get(loc);
     if (!detector) continue;
     const detectorSignal = {
-      scanner: detector.scanner,
+      taskId: detector.taskId,
       fingerprint: detector.fingerprint,
       ruleId: detector.ruleId,
       filePath: detector.filePath,
@@ -3315,7 +3306,7 @@ function deduplicateByLocation(findings: Finding[]): Finding[] {
       tm.corroboratingSignals = [...(tm.corroboratingSignals ?? []), detectorSignal];
       // Attach threat-model as corroborating signal on detector finding
       detector.corroboratingSignals = [...(detector.corroboratingSignals ?? []), {
-        scanner: tm.scanner,
+        taskId: tm.taskId,
         fingerprint: tm.fingerprint,
         ruleId: tm.ruleId,
         filePath: tm.filePath,
@@ -3333,8 +3324,8 @@ function deduplicateByLocation(findings: Finding[]): Finding[] {
   return deduped;
 }
 
-function isThreatModelScanner(scanner: string): boolean {
-  return scanner.startsWith("threat-model-");
+function isThreatModelScanner(taskId: string): boolean {
+  return taskId.startsWith("threat-model-");
 }
 
 export function registerOrchestrator(
@@ -3385,7 +3376,7 @@ function buildReportStats(
   const runMetrics = buildRunMetrics(db, state);
 
   return {
-    scanners: [...state.scanners],
+    tasks: [...state.tasks],
     totalFindings: state.totalFindings,
     queuedForTriage: state.triageTotal,
     skippedAlreadyTriaged: state.skippedAlreadyTriaged,
@@ -3444,9 +3435,10 @@ function buildRunMetrics(
 
   let findings: Finding[] = state.scanFindings;
   try {
+    const fingerprints = state.scanFindings.map((finding) => finding.fingerprint);
     findings = getActionableFindings(db, state.context.repoName, {
       includeFalsePositives: true,
-      fingerprints: state.scanFindings.map((finding) => finding.fingerprint),
+      fingerprints: fingerprints.length > 0 ? fingerprints : undefined,
     }) as unknown as Finding[];
   } catch (error) {
     log.warn(`Falling back to in-memory findings for run metrics: ${toErrorMessage(error)}`);
@@ -3468,7 +3460,7 @@ function buildRunMetrics(
 }
 
 function resolveTaintAnalysisConfig(config: KuzushiConfig): Record<string, unknown> {
-  const raw = config.scannerConfig["taint-analysis"];
+  const raw = config.taskConfig["taint-analysis"];
   return isRecord(raw) ? raw : {};
 }
 
@@ -3499,7 +3491,7 @@ function resolveTaintAnalysisRefinementModel(config: KuzushiConfig): string {
   if (typeof taintAnalysis["refinementModel"] === "string" && taintAnalysis["refinementModel"].trim()) {
     return taintAnalysis["refinementModel"].trim();
   }
-  return config.triageModel ?? config.model;
+  return resolveStageModel(config, "triage");
 }
 
 function normalizeConcurrency(raw: number): number {
@@ -3549,14 +3541,14 @@ function parseScanOptsJson(raw: string): ScanOpts {
     throw new Error("scan opts payload is missing required fields");
   }
 
-  const scannersValue = parsed["scanners"];
-  let scanners: string[] | undefined;
+  const scannersValue = parsed["tasks"];
+  let tasks: string[] | undefined;
   if (scannersValue != null) {
     const parsedScanners = asStringArray(scannersValue);
     if (!parsedScanners) {
-      throw new Error("scan opts payload has invalid scanners");
+      throw new Error("scan opts payload has invalid tasks");
     }
-    scanners = parsedScanners;
+    tasks = parsedScanners;
   }
 
   const maxFindingsValue = parsed["maxFindings"];
@@ -3573,7 +3565,7 @@ function parseScanOptsJson(raw: string): ScanOpts {
     severity,
     maxFindings,
     excludePatterns,
-    scanners,
+    tasks,
     fresh,
   };
 }
@@ -3591,7 +3583,7 @@ function shouldVerifyFinding(
     return false;
   }
 
-  if (!isScannerVerificationEnabled(state.config, finding.scanner)) {
+  if (!isScannerVerificationEnabled(state.config, finding.taskId)) {
     return false;
   }
 
@@ -3606,7 +3598,7 @@ function shouldVerifyFinding(
 
 function isScannerVerificationEnabled(config: KuzushiConfig, scannerId: string): boolean {
   const configKey = resolveCapabilityConfigKey(scannerId);
-  const scannerCfg = config.scannerConfig[configKey];
+  const scannerCfg = config.taskConfig[configKey];
   if (!isRecord(scannerCfg)) {
     return true;
   }

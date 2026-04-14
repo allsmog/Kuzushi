@@ -138,7 +138,7 @@ function mergeCorroboration(primary: Finding, corroborating: Finding[]): Corrobo
     }
     seen.add(finding.fingerprint);
     result.push({
-      scanner: finding.scanner,
+      taskId: finding.taskId,
       fingerprint: finding.fingerprint,
       ruleId: finding.ruleId,
       filePath: finding.filePath,

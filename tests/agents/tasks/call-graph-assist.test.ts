@@ -13,7 +13,7 @@ const mockedGetProvider = vi.mocked(getCodeIntelligenceProvider);
 
 function makeFinding(fp: string, score: number, extras?: Partial<Finding>): Finding {
   return {
-    scanner: "agentic",
+    taskId: "agentic",
     fingerprint: fp,
     ruleId: "ssrf-detect",
     filePath: "src/routes/api.ts",
@@ -41,11 +41,11 @@ function makeContext(): TaskContext {
       triageBatchSize: 15,
       triageConcurrency: 1,
       scanMode: "sequential",
-      enabledTasks: [],
-      scanners: ["semgrep"],
+      tasks: [],
+      tasks: ["semgrep"],
       severity: ["ERROR"],
       excludePatterns: [],
-      scannerConfig: {},
+      taskConfig: {},
     },
     bus: { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() } as any,
     upstreamOutputs: new Map(),

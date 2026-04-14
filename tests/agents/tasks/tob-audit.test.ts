@@ -38,7 +38,7 @@ describe("tob-audit", () => {
 
       const config = tobAuditTask.triageAgentConfig!(
         {
-          scanner: "tob-audit",
+          taskId: "tob-audit",
           fingerprint: "abc123",
           ruleId: "insecure-default/jwt-secret",
           filePath: "src/config.ts",

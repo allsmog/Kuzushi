@@ -23,11 +23,11 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: overrides.scannerConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
   };
 }
 
@@ -47,9 +47,9 @@ describe("resolveConfig", () => {
     expect(cfg.maxFindings).toBe(50);
   });
 
-  it("reads overrides from scannerConfig", () => {
+  it("reads overrides from taskConfig", () => {
     const ctx = makeContext({
-      scannerConfig: {
+      taskConfig: {
         "sharp-edges-detect": { model: "openai:gpt-4", maxFindings: 20 },
       },
     });
@@ -133,7 +133,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 50);
     expect(findings).toHaveLength(1);
-    expect(findings[0].scanner).toBe("sharp-edges-detect");
+    expect(findings[0].taskId).toBe("sharp-edges-detect");
     expect(findings[0].ruleId).toBe("sharp-edges/dangerous-defaults");
     expect(findings[0].filePath).toBe("src/auth/session.ts");
     expect(findings[0].cwe).toEqual(["CWE-1188"]);
@@ -226,7 +226,7 @@ describe("computeFingerprint", () => {
 describe("triageAgentConfig", () => {
   it("returns a prompt with finding details", () => {
     const finding = {
-      scanner: "sharp-edges-detect",
+      taskId: "sharp-edges-detect",
       fingerprint: "abc",
       ruleId: "sharp-edges/dangerous-defaults",
       filePath: "src/auth/session.ts",

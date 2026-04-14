@@ -17,16 +17,16 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: { semgrep: {} },
+    taskConfig: { semgrep: {} },
   };
 }
 
 function makeFinding(): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "fp-audit-1",
     ruleId: "test.rule",
     filePath: "src/app.ts",
@@ -83,7 +83,7 @@ describe("audit-worker", () => {
         scanOpts: {
           severity: ["ERROR"],
           excludePatterns: [],
-          scanners: ["semgrep"],
+          tasks: ["semgrep"],
           fresh: false,
         },
       }),
@@ -128,7 +128,7 @@ describe("audit-worker", () => {
       createEvent("pipeline:complete", runId, {
         context,
         stats: {
-          scanners: ["semgrep"],
+          tasks: ["semgrep"],
           totalFindings: 1,
           queuedForTriage: 1,
           skippedAlreadyTriaged: 0,

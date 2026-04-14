@@ -13,7 +13,7 @@ import type { Finding } from "../src/scanners/types.js";
 
 function makeFinding(): Finding {
   return {
-    scanner: "codeql",
+    taskId: "codeql",
     fingerprint: "fp-codeql",
     ruleId: "codeql.test.rule",
     filePath: "src/app.ts",
@@ -116,7 +116,7 @@ describe("selectFindings (CodeQL)", () => {
 
     const errorFinding = findings.find((finding) => finding.ruleId === "codeql.rule.error");
     expect(errorFinding).toBeDefined();
-    expect(errorFinding?.scanner).toBe("codeql");
+    expect(errorFinding?.taskId).toBe("codeql");
     expect(errorFinding?.severity).toBe("ERROR");
     expect(errorFinding?.scannerConfidence).toBe("HIGH");
     expect(errorFinding?.filePath).toBe("src/db.ts");

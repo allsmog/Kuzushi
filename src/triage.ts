@@ -369,7 +369,7 @@ async function triageSingleBatchSession(
     findingCount: chunk.length,
     findings: chunk.map((f) => ({
       fingerprint: f.fingerprint,
-      scanner: f.scanner,
+      taskId: f.taskId,
       ruleId: f.ruleId,
       filePath: f.filePath,
       startLine: f.startLine,
@@ -586,12 +586,12 @@ function resolveAgentConfig(
   repoName: string,
   template?: string,
 ): TriageAgentConfig {
-  if (!registry.has(finding.scanner)) {
+  if (!registry.has(finding.taskId)) {
     return buildDefaultTriageAgentConfig(finding, repoName, template);
   }
 
   try {
-    const config = registry.get(finding.scanner).triageAgentConfig(finding, repoName);
+    const config = registry.get(finding.taskId).triageAgentConfig(finding, repoName);
     if (!config.prompt || !config.prompt.trim()) {
       return buildDefaultTriageAgentConfig(finding, repoName, template);
     }

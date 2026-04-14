@@ -1,4 +1,4 @@
-import type { ScannerConfig } from "./scanners/types.js";
+import type { TaskConfig } from "./scanners/types.js";
 import type { KuzushiConfig } from "./types.js";
 import { isRecord } from "./utils.js";
 
@@ -13,173 +13,172 @@ export const TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS = [] as const;
 export interface CapabilityDefinition {
   publicId: string;
   configKey?: string;
-  pluginId?: string;
   taskIds?: readonly string[];
   aliases?: readonly string[];
-  scannerSelectable?: boolean;
+  taskSelectable?: boolean;
 }
 
 const CAPABILITIES: CapabilityDefinition[] = [
-  { publicId: "semgrep", configKey: "semgrep", pluginId: "semgrep", scannerSelectable: true },
-  { publicId: "agentic", configKey: "agentic", pluginId: "agentic", scannerSelectable: true },
-  { publicId: "codeql", configKey: "codeql", pluginId: "codeql", scannerSelectable: true },
+  { publicId: "semgrep", configKey: "semgrep", taskIds: ["semgrep"], taskSelectable: true },
+  { publicId: "agentic", configKey: "agentic", taskIds: ["agentic"], taskSelectable: true },
+  { publicId: "codeql", configKey: "codeql", taskIds: ["codeql"], taskSelectable: true },
   {
     publicId: "taint-analysis",
     configKey: "taint-analysis",
     taskIds: TAINT_ANALYSIS_TASK_IDS,
     aliases: ["taint-cwe-select", "taint-iris"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "secrets",
     configKey: "secrets-crypto-detect",
     taskIds: ["secrets-crypto-detect"],
     aliases: ["secrets-detection", "secrets-detect", "secrets-crypto-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "crypto-misuse",
     configKey: "secrets-crypto-detect",
     taskIds: ["secrets-crypto-detect"],
     aliases: ["crypto-misuse-detect", "secrets-crypto-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "auth-access",
     configKey: "code-config-detect",
     taskIds: ["code-config-detect"],
     aliases: ["auth-access-detect", "code-config-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "race-condition",
     configKey: "race-condition",
     taskIds: ["race-condition-detect"],
     aliases: ["race-condition-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "dangerous-api",
     configKey: "code-config-detect",
     taskIds: ["code-config-detect"],
     aliases: ["dangerous-api-detect", "code-config-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "diff-review",
     configKey: "diff-review",
     taskIds: ["diff-review"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "security-misconfig",
     configKey: "code-config-detect",
     taskIds: ["code-config-detect"],
     aliases: ["security-misconfig-detect", "code-config-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "ssrf",
     configKey: "ssrf-detect",
     taskIds: ["ssrf-detect"],
     aliases: ["ssrf-detect", "ssrf-detection"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "prototype-pollution",
     configKey: "prototype-pollution",
     taskIds: ["prototype-pollution-detect"],
     aliases: ["prototype-pollution-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "nosql-injection",
     configKey: "nosql-injection",
     taskIds: ["nosql-injection-detect"],
     aliases: ["nosql-injection-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "template-injection",
     configKey: "template-injection",
     taskIds: ["template-injection-detect"],
     aliases: ["template-injection-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "supply-chain",
     configKey: "supply-chain",
     taskIds: ["supply-chain-detect"],
     aliases: ["supply-chain-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "graphql-security",
     configKey: "graphql-security",
     taskIds: ["graphql-security-detect"],
     aliases: ["graphql-security-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "auth-logic",
     configKey: "auth-logic",
     taskIds: ["auth-logic-detect"],
     aliases: ["auth-logic-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "command-injection",
     configKey: "command-injection",
     taskIds: ["command-injection-detect"],
     aliases: ["command-injection-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "xxe",
     configKey: "xxe",
     taskIds: ["xxe-detect"],
     aliases: ["xxe-detect", "xxe-detection-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "deserialization",
     configKey: "deserialization",
     taskIds: ["deserialization-detect"],
     aliases: ["deserialization-detect", "deserialization-detection-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "invariant-analysis",
     configKey: "invariant-analysis",
     taskIds: ["invariant-extract", "invariant-check"],
     aliases: ["invariant-extract", "invariant-check"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "threat-model",
     configKey: "threat-model",
     taskIds: ["threat-model-randori"],
     aliases: ["threat-model-randori"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "threat-hunt",
     configKey: "threat-hunt",
     taskIds: ["threat-hunt"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "tob-audit",
     configKey: "tob-audit",
     taskIds: ["tob-audit"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "sharp-edges",
     configKey: "sharp-edges-detect",
     taskIds: ["sharp-edges-detect"],
     aliases: ["sharp-edges-detect"],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "systems-hunt",
@@ -193,7 +192,7 @@ const CAPABILITIES: CapabilityDefinition[] = [
       "deep-semantic-cwe-select",
       "deep-semantic-hunt",
     ],
-    scannerSelectable: true,
+    taskSelectable: true,
   },
   {
     publicId: "chain-analysis",
@@ -223,7 +222,6 @@ for (const capability of CAPABILITIES) {
     capability.publicId,
     ...(capability.aliases ?? []),
     ...(capability.taskIds ?? []),
-    ...(capability.pluginId ? [capability.pluginId] : []),
   ]);
   for (const key of keys) {
     CAPABILITY_LOOKUP.set(key, capability);
@@ -239,7 +237,9 @@ function dedupeStrings(values: Iterable<string>): string[] {
   const seen = new Set<string>();
   for (const raw of values) {
     const value = normalizeId(raw);
-    if (!value || seen.has(value)) continue;
+    if (!value || seen.has(value)) {
+      continue;
+    }
     seen.add(value);
     result.push(value);
   }
@@ -248,25 +248,25 @@ function dedupeStrings(values: Iterable<string>): string[] {
 
 export function resolveCapability(id: string): CapabilityDefinition | undefined {
   const normalized = normalizeId(id);
-  if (!normalized) return undefined;
+  if (!normalized) {
+    return undefined;
+  }
   return CAPABILITY_LOOKUP.get(normalized);
 }
 
-export function isKnownScannerSelectionId(id: string): boolean {
+export function isKnownTaskSelectionId(id: string): boolean {
   const capability = resolveCapability(id);
-  return capability?.scannerSelectable === true;
+  return capability?.taskSelectable === true;
 }
 
 export function resolveRunnableIds(id: string): string[] {
   const normalized = normalizeId(id);
-  if (!normalized) return [];
+  if (!normalized) {
+    return [];
+  }
 
   const capability = resolveCapability(normalized);
   if (!capability) {
-    return [normalized];
-  }
-
-  if (capability.pluginId === normalized) {
     return [normalized];
   }
 
@@ -274,8 +274,6 @@ export function resolveRunnableIds(id: string): string[] {
     return [normalized];
   }
 
-  // Pass through concrete taint task IDs (e.g. "taint-cwe-select", "taint-iris")
-  // but expand the capability alias "taint-analysis" to its task IDs
   if (capability.publicId === "taint-analysis" && normalized !== "taint-analysis" && normalized.startsWith("taint-")) {
     return [normalized];
   }
@@ -284,22 +282,22 @@ export function resolveRunnableIds(id: string): string[] {
     return dedupeStrings(capability.taskIds);
   }
 
-  if (capability.pluginId) {
-    return [capability.pluginId];
-  }
-
   return [normalized];
 }
 
 export function resolveCapabilityConfigKey(id: string): string {
   const normalized = normalizeId(id);
-  if (!normalized) return normalized;
+  if (!normalized) {
+    return normalized;
+  }
   return resolveCapability(normalized)?.configKey ?? normalized;
 }
 
 export function getCapabilityLookupIds(id: string): string[] {
   const normalized = normalizeId(id);
-  if (!normalized) return [];
+  if (!normalized) {
+    return [];
+  }
 
   const capability = resolveCapability(normalized);
   if (!capability) {
@@ -310,70 +308,59 @@ export function getCapabilityLookupIds(id: string): string[] {
     capability.publicId,
     ...(capability.aliases ?? []),
     ...(capability.taskIds ?? []),
-    ...(capability.pluginId ? [capability.pluginId] : []),
     ...(capability.configKey ? [capability.configKey] : []),
     normalized,
   ]);
 }
 
-export function resolveScannerConfig(
+export function resolveTaskConfig(
   config: KuzushiConfig,
   id: string,
-): ScannerConfig {
-  const resolved: ScannerConfig = {};
+): TaskConfig {
+  const resolved: TaskConfig = {};
 
   for (const key of getCapabilityLookupIds(id)) {
-    const raw = config.scannerConfig[key];
-    if (!isRecord(raw)) continue;
+    const raw = config.taskConfig[key];
+    if (!isRecord(raw)) {
+      continue;
+    }
     Object.assign(resolved, raw);
   }
 
   return resolved;
 }
 
-export function expandScannerSelections(
+export function expandTaskSelections(
   selections: string[],
   config: KuzushiConfig,
-): { pluginScanners: string[]; enabledTasks: string[] } {
-  const pluginScanners: string[] = [];
-  const enabledTasks: string[] = [];
+): string[] {
+  const tasks: string[] = [];
 
   for (const raw of selections) {
     const id = normalizeId(raw);
-    if (!id) continue;
+    if (!id) {
+      continue;
+    }
 
     const capability = resolveCapability(id);
     if (!capability) {
-      pluginScanners.push(id);
+      tasks.push(id);
       continue;
     }
 
     if (capability.publicId === "taint-analysis") {
-      const taintConfig = resolveScannerConfig(config, capability.publicId);
+      const taintConfig = resolveTaskConfig(config, capability.publicId);
       const crossServiceEnabled = taintConfig["crossService"] === true;
-      enabledTasks.push(
+      tasks.push(
         ...(crossServiceEnabled ? TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS : TAINT_ANALYSIS_TASK_IDS),
       );
       continue;
     }
 
-    if (capability.taskIds && capability.taskIds.length > 0) {
-      enabledTasks.push(...capability.taskIds);
-      continue;
-    }
-
-    if (capability.pluginId) {
-      pluginScanners.push(capability.pluginId);
-      continue;
-    }
-
-    pluginScanners.push(id);
+    tasks.push(...resolveRunnableIds(id));
   }
 
-  return {
-    pluginScanners: dedupeStrings(pluginScanners),
-    enabledTasks: dedupeStrings(enabledTasks),
-  };
+  return dedupeStrings(tasks);
 }
 
 export function normalizeTaskCapabilityIds(ids: string[]): string[] {
@@ -394,12 +381,12 @@ export function taskCapabilityMatches(expected: string, taskId: string): boolean
   return false;
 }
 
-export function normalizeScannerConfigAliases(
-  scannerConfig: Record<string, ScannerConfig>,
-): Record<string, ScannerConfig> {
-  const normalized: Record<string, ScannerConfig> = {};
+export function normalizeTaskConfigAliases(
+  taskConfig: Record<string, TaskConfig>,
+): Record<string, TaskConfig> {
+  const normalized: Record<string, TaskConfig> = {};
 
-  for (const [key, value] of Object.entries(scannerConfig)) {
+  for (const [key, value] of Object.entries(taskConfig)) {
     if (!isRecord(value)) {
       continue;
     }

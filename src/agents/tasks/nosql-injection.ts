@@ -186,7 +186,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const apiInfo = f.apiOrFunction ? ` [${f.apiOrFunction}]` : "";
 
     const finding: Finding = {
-      scanner: "nosql-injection-detect",
+      taskId: "nosql-injection-detect",
       fingerprint,
       ruleId: `nosql-injection/${f.category || "unknown"}`,
       filePath,

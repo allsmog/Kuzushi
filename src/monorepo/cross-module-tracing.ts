@@ -240,7 +240,7 @@ function pathToFinding(crossPath: CrossServicePath, monorepoRoot: string): Findi
 
   return {
     fingerprint,
-    scanner: "cross-module-tracing",
+    taskId: "cross-module-tracing",
     ruleId: `cross-module/${crossPath.ultimateSource.serviceId}-to-${crossPath.ultimateSink.serviceId}`,
     filePath: crossPath.ultimateSource.filePath,
     startLine: crossPath.ultimateSource.startLine,

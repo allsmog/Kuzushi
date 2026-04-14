@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { executeAgentTask, type ExecutedTaskResult } from "../../../../bus/task-execution.js";
-import type { ScannerConfig } from "../../../../scanners/types.js";
+import type { TaskConfig } from "../../../../scanners/types.js";
 import { attachTaskOutputMeta, getTaskOutputMeta } from "../../../../task-output-meta.js";
 import type { Finding } from "../../../../scanners/types.js";
 import type { ScanOpts } from "../../../../types.js";
@@ -251,10 +251,10 @@ async function runTaintAnalysisForService(
   // Override the workspace dir for this service
   const serviceConfig = {
     ...parentContext.config,
-    scannerConfig: {
-      ...parentContext.config.scannerConfig,
+    taskConfig: {
+      ...parentContext.config.taskConfig,
       "taint-analysis": {
-        ...(parentContext.config.scannerConfig["taint-analysis"] ?? {}),
+        ...(parentContext.config.taskConfig["taint-analysis"] ?? {}),
         workspaceDir: crossServiceWorkspace,
       },
     },
@@ -344,8 +344,8 @@ async function executeNestedTask<TOutput>(
   }
 }
 
-function resolveTaskConfig(config: TaskContext["config"], taskId: string): ScannerConfig {
-  const raw = config.scannerConfig[taskId];
+function resolveTaskConfig(config: TaskContext["config"], taskId: string): TaskConfig {
+  const raw = config.taskConfig[taskId];
   if (isRecord(raw)) {
     return raw;
   }

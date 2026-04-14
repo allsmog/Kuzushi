@@ -4,7 +4,7 @@ import type { AgentRuntime } from "../agent-runtime/types.js";
 import type {
   CorroboratingSignal,
   EngineProvenance,
-  ScannerConfig,
+  TaskConfig,
   ScannerPlugin,
   Finding,
   ProofState,
@@ -31,7 +31,7 @@ export async function executeAgentTask(
   task: AgentTask,
   input: unknown,
   context: TaskContext,
-  config: ScannerConfig,
+  config: TaskConfig,
 ): Promise<ExecutedTaskResult> {
   const startedAt = Date.now();
 
@@ -53,7 +53,7 @@ export async function executeScannerPlugin(
   plugin: ScannerPlugin,
   repoRoot: string,
   input: Parameters<ScannerPlugin["scan"]>[1],
-  config: ScannerConfig,
+  config: TaskConfig,
   runtime: AgentRuntime,
 ): Promise<ExecutedScannerResult> {
   const startedAt = Date.now();
@@ -127,7 +127,7 @@ function asFinding(item: Record<string, unknown>): Finding | null {
   }
 
   return {
-    scanner: asString(item["scanner"]) || "unknown",
+    taskId: asString(item["taskId"]) || "unknown",
     fingerprint,
     ruleId,
     filePath,
@@ -200,7 +200,7 @@ function asCorroboratingSignals(value: unknown): CorroboratingSignal[] | undefin
       continue;
     }
     signals.push({
-      scanner: asString(item["scanner"]) || "unknown",
+      taskId: asString(item["taskId"]) || "unknown",
       fingerprint,
       ruleId,
       filePath,

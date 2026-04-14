@@ -2,7 +2,6 @@ import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import { createDefaultKnowledgeRegistry } from "../knowledge/index.js";
-import type { ScannerRegistry } from "../scanners/registry.js";
 import type { KuzushiConfig } from "../types.js";
 import { createBus } from "./adapters/index.js";
 import { registerOrchestrator } from "./orchestrator.js";
@@ -24,7 +23,6 @@ import { registerGitHubWorker } from "./workers/github-worker.js";
 import { createPocExecutor } from "../poc-executor/index.js";
 
 export interface RegisterWorkersDeps {
-  registry: ScannerRegistry;
   taskRegistry: TaskRegistry;
   db: Database.Database;
   config: KuzushiConfig;
@@ -44,14 +42,12 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
 
   // Register orchestrator first so workers can reference it for hook resolution
   const orchestrator = registerOrchestrator(bus, {
-    registry: deps.registry,
     taskRegistry,
     db: deps.db,
     runtime: deps.runtime,
   });
 
   registerScanWorker(bus, {
-    registry: deps.registry,
     taskRegistry,
     config: deps.config,
     runtime: deps.runtime,
@@ -60,7 +56,6 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
   });
 
   registerTriageWorker(bus, {
-    registry: deps.registry,
     taskRegistry,
     config: deps.config,
     runtime: deps.runtime,
@@ -101,7 +96,6 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
 
   registerTaintAnalysisRefinementWorker(bus, {
     db: deps.db,
-    registry: deps.registry,
     taskRegistry,
     config: deps.config,
     runtime: deps.runtime,
@@ -117,7 +111,13 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
 
   if (deps.config.autoPatchEnabled) {
     registerPatchWorker({ bus, db: deps.db, runtime: deps.runtime, config: deps.config });
-    registerPatchVerifyWorker({ bus, db: deps.db, config: deps.config, registry: deps.registry });
+    registerPatchVerifyWorker({
+      bus,
+      db: deps.db,
+      config: deps.config,
+      runtime: deps.runtime,
+      taskRegistry,
+    });
   }
 
   // GitHub integration (fix PRs + findings comments)

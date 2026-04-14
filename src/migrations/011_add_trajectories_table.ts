@@ -10,7 +10,7 @@ export const migration011: Migration = {
         id              TEXT PRIMARY KEY,
         rule_id         TEXT NOT NULL,
         cwes_json       TEXT NOT NULL,
-        scanner         TEXT NOT NULL,
+        task_id         TEXT NOT NULL,
         verdict         TEXT NOT NULL,
         confidence      REAL NOT NULL,
         was_correct     INTEGER,

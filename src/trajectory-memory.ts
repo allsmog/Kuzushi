@@ -20,7 +20,7 @@ export interface TrajectoryRecord {
   id: string;
   ruleId: string;
   cwesJson: string;
-  scanner: string;
+  taskId: string;
   verdict: string;
   confidence: number;
   wasCorrect: number | null;
@@ -127,7 +127,7 @@ export function ensureTrajectoryTable(db: Database.Database): void {
       id              TEXT PRIMARY KEY,
       rule_id         TEXT NOT NULL,
       cwes_json       TEXT NOT NULL,
-      scanner         TEXT NOT NULL,
+      task_id         TEXT NOT NULL,
       verdict         TEXT NOT NULL,
       confidence      REAL NOT NULL,
       was_correct     INTEGER,
@@ -152,7 +152,7 @@ export function saveTrajectory(
     id: string;
     ruleId: string;
     cwes: string[];
-    scanner: string;
+    taskId: string;
     verdict: string;
     confidence: number;
     steps: TrajectoryStep[];
@@ -165,7 +165,7 @@ export function saveTrajectory(
 
   db.prepare(`
     INSERT INTO trajectories (
-      id, rule_id, cwes_json, scanner, verdict, confidence,
+      id, rule_id, cwes_json, task_id, verdict, confidence,
       was_correct, steps_json, summary, repo, fingerprint,
       created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
@@ -173,7 +173,7 @@ export function saveTrajectory(
     trajectory.id,
     trajectory.ruleId,
     safeJsonStringify(trajectory.cwes),
-    trajectory.scanner,
+    trajectory.taskId,
     trajectory.verdict,
     trajectory.confidence,
     safeJsonStringify(trajectory.steps),

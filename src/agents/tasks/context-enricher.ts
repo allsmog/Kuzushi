@@ -3,7 +3,7 @@ import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { EnrichedRepoContext, RepoContext } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { resolveTaskAllowedTools } from "./runtime-overrides.js";
+import { resolveTaskAllowedTools, resolveTaskModel } from "./runtime-overrides.js";
 
 const ENRICHED_CONTEXT_SCHEMA = {
   type: "object",
@@ -76,7 +76,7 @@ interface ContextEnricherConfig {
 }
 
 function resolveConfig(ctx: TaskContext): ContextEnricherConfig {
-  const model = ctx.config.contextEnrichmentModel?.trim() || ctx.config.model;
+  const model = resolveTaskModel(ctx, "context-enricher", "context-enrichment");
   return { model };
 }
 

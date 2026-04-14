@@ -197,7 +197,7 @@ cat > "$TARGET_DIR/.kuzushi/config.json" << 'CONFIG'
   "maxTriageRetries": 2,
   "maxVerifyRetries": 1,
   "auditLog": true,
-  "scannerConfig": {
+  "taskConfig": {
     "taint-analysis": {
       "labelingModel": "openai:qwen3:8b",
       "extractionModel": "openai:qwen3:8b"

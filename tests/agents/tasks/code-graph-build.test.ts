@@ -58,11 +58,11 @@ function makeContext(repoRoot: string, runtime: AgentRuntime): TaskContext {
       triageBatchSize: 5,
       triageConcurrency: 1,
       scanMode: "sequential",
-      enabledTasks: [],
-      scanners: ["semgrep"],
+      tasks: [],
+      tasks: ["semgrep"],
       severity: ["ERROR"],
       excludePatterns: [],
-      scannerConfig: {
+      taskConfig: {
         "code-graph": {},
       },
     } as any,

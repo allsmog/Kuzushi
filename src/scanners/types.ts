@@ -1,11 +1,13 @@
 import type { ScanOpts } from "../types.js";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 
-export type ScannerId = string;
-export type ScannerConfig = Record<string, unknown>;
+export type TaskId = string;
+export type TaskConfig = Record<string, unknown>;
+export type ScannerId = TaskId;
+export type ScannerConfig = TaskConfig;
 
 export interface CorroboratingSignal {
-  scanner: ScannerId;
+  taskId: TaskId;
   fingerprint: string;
   ruleId: string;
   filePath: string;
@@ -40,9 +42,9 @@ export interface EngineProvenance {
   detail: string;
 }
 
-// Single finding type shared by all scanners.
+// Single finding type shared by all finding-producing tasks.
 export interface Finding {
-  scanner: ScannerId;
+  taskId: TaskId;
   fingerprint: string;
   ruleId: string;
   filePath: string;
