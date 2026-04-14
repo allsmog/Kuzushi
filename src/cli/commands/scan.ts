@@ -13,6 +13,7 @@ import {
   type PipelineErrorEvent,
   type PipelineStats,
 } from "../../bus/index.js";
+import type { UIStore } from "../../ui/state.js";
 import { inflightCache } from "../../cache.js";
 import { expandTaskSelections } from "../../capabilities.js";
 import { loadConfig } from "../../config.js";
@@ -66,6 +67,8 @@ export interface PipelineParams {
   seedTaskOutputs?: Map<string, unknown>;
   /** Shared monorepo context injected into per-module pipeline state. */
   monorepoContext?: import("../../monorepo/types.js").MonorepoSharedContext;
+  /** Optional UI store for Ink-based terminal rendering. */
+  uiStore?: UIStore;
 }
 
 export interface PipelineResult {
@@ -96,7 +99,15 @@ export interface MonorepoExecutionDecision {
 }
 
 export async function runScanCommand(repoPath: string, opts: ScanCommandOptions): Promise<void> {
+  // Initialize the Ink-based UI renderer (falls back to plain text in non-TTY)
+  const { createUIRenderer } = await import("../../ui/render.js");
+  const renderer = await createUIRenderer();
+  const { store: uiStore, cleanup: cleanupUI } = renderer;
+
+  // Show the banner via the old printBanner for compatibility with monorepo/dry-run paths
   printBanner();
+  uiStore.update({ bannerShown: true });
+
   const scanPath = path.resolve(repoPath);
   const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
   const modeConfig = applyScanCommandConfigOverrides(
@@ -111,18 +122,21 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   });
 
   if (monorepoDecision.useMonorepo) {
+    cleanupUI();
     const { runMonorepoScan } = await import("./monorepo-scan.js");
     await runMonorepoScan(repoPath, opts);
     return;
   }
 
   if (opts.moduleFilter) {
+    cleanupUI();
     throw new CliUsageError("--module-filter can only be used when module discovery or manual modules are active.");
   }
 
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
 
   if (opts.dryRun) {
+    cleanupUI();
     const { taskIds, taskSummary, dynamicSelectionActive } = getScanPlanSummary(config, scanOpts);
     console.log("\nDry run — no scan will be executed.");
     console.log(`  Target:    ${scanPath}`);
@@ -134,14 +148,21 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     return;
   }
 
-  await runPipeline({
-    repoRoot,
-    scanPath,
-    repoName,
-    config,
-    scanOpts,
-    opts,
-  });
+  try {
+    await runPipeline({
+      repoRoot,
+      scanPath,
+      repoName,
+      config,
+      scanOpts,
+      opts,
+      uiStore,
+    });
+  } finally {
+    // Let the UI render one final frame before unmounting
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    cleanupUI();
+  }
 }
 
 export async function resolveMonorepoExecution(params: {
@@ -308,7 +329,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   try {
     bus = createBus(config);
     taskRegistry = await createDefaultTaskRegistry(config, repoRoot);
-    await registerAllWorkers(bus, { taskRegistry, db, config, runtime });
+    await registerAllWorkers(bus, { taskRegistry, db, config, runtime, uiStore: params.uiStore });
   } catch (error) {
     db.close();
     if (ownsRuntime && isShutdownCapableRuntime(runtime)) {
@@ -405,7 +426,11 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     if (reportMode === "full") {
       const { stats } = outcome.event.payload;
       if (stats.qualityGateResult) {
-        printQualityGateResult(stats.qualityGateResult);
+        if (params.uiStore) {
+          params.uiStore.update({ qualityGate: stats.qualityGateResult });
+        } else {
+          printQualityGateResult(stats.qualityGateResult);
+        }
       }
       if (stats.deadLetterCount && stats.deadLetterCount > 0) {
         console.error(
