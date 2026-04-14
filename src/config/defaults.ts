@@ -12,7 +12,6 @@ export const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.t
 
 export const DEFAULTS: KuzushiConfig = {
   model: "anthropic:claude-sonnet-4-6",
-  triageBatchModel: "anthropic:claude-haiku-4-5",
   verify: false,
   verifyMaxTurns: undefined,
   verifyConcurrency: 3,
@@ -39,11 +38,9 @@ export const DEFAULTS: KuzushiConfig = {
   triageBatchSize: 5,
   triageConcurrency: 5,
   scanMode: "concurrent",
-  taskMode: "compat",
   agentRuntimeBackend: "claude",
   agentRuntimeConfig: undefined,
-  enabledTasks: [],
-  scanners: ["semgrep"],
+  tasks: ["semgrep"],
   severity: ["ERROR", "WARNING"],
   excludePatterns: [
     "test", "tests", "spec", "vendor",
@@ -52,6 +49,7 @@ export const DEFAULTS: KuzushiConfig = {
   llmRescoreEnabled: true,
   fpFilterEnabled: true,
   fpFilterCustomExclusions: [],
+  designDecisionClassifier: true,
   enableDynamicTaskSelection: true,
   pocExecute: false,
   pocSandbox: "process",
@@ -59,7 +57,6 @@ export const DEFAULTS: KuzushiConfig = {
   variantAnalysis: false,
   variantAnalysisMaxFindings: 10,
   variantRuleSweepEnabled: true,
-  contextEnrichmentModel: undefined,
   enableContextEnrichment: true,
   ensembleModels: [],
   taintDiffBase: undefined,
@@ -91,7 +88,7 @@ export const DEFAULTS: KuzushiConfig = {
   patchTestCommand: undefined,
   autoPatchEnabled: false,
   autoPatchAfter: "verify",
-  patchVerifyDepth: "scanner",
+  patchVerifyDepth: "task",
   patchConcurrency: 2,
   pocRefinementMaxIterations: 3,
   pocReflectionInterval: 2,
@@ -115,7 +112,8 @@ export const DEFAULTS: KuzushiConfig = {
   incrementalCacheTtlDays: 30,
   skipTriageForHighConfidenceAgentic: false,
   monorepo: undefined,
-  scannerConfig: {
+  taskConfig: {
+    "triage-batch": { model: "anthropic:claude-haiku-4-5" },
     semgrep: { configFlag: ["auto", "p/security-audit", "p/owasp-top-ten", "p/cwe-top-25"] },
     agentic: { maxFindings: 20 },
     codeql: {},

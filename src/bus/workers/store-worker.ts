@@ -4,13 +4,24 @@ import {
   saveAssertionResults,
   updatePocHarnessCost,
   updatePocHarnessResult,
+  updateRunContext,
+  updateRunCost,
+  updateRunFindings,
+  updateRunMetrics,
+  updateRunStatus,
   updateVerificationCost,
   updateVerificationResult,
   upsertFinding,
+  type PipelineRunStatus,
 } from "../../store.js";
 import type {
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
+  RunContextCheckpointEvent,
+  RunCostEvent,
+  RunFindingsCheckpointEvent,
+  RunMetricsEvent,
+  RunStatusEvent,
   TriageAssertionsEvent,
   TriageCompleteEvent,
   TriageResultEvent,
@@ -179,6 +190,28 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
       deps.ref ?? "HEAD",
     );
     updatePocHarnessCost(deps.db, finding.fingerprint, costUsd);
+  });
+
+  // ── Run lifecycle persistence (best-effort — DB failures must not kill the pipeline) ──
+
+  bus.subscribe<RunStatusEvent>("run:status", (event) => {
+    try { updateRunStatus(deps.db, event.meta.runId, event.payload.status as PipelineRunStatus, event.payload.extra); } catch { /* best-effort */ }
+  });
+
+  bus.subscribe<RunCostEvent>("run:cost", (event) => {
+    try { updateRunCost(deps.db, event.meta.runId, event.payload.costUsd); } catch { /* best-effort */ }
+  });
+
+  bus.subscribe<RunFindingsCheckpointEvent>("run:findings-checkpoint", (event) => {
+    try { updateRunFindings(deps.db, event.meta.runId, event.payload.findings); } catch { /* best-effort */ }
+  });
+
+  bus.subscribe<RunContextCheckpointEvent>("run:context-checkpoint", (event) => {
+    try { updateRunContext(deps.db, event.meta.runId, event.payload.repoContext); } catch { /* best-effort */ }
+  });
+
+  bus.subscribe<RunMetricsEvent>("run:metrics", (event) => {
+    try { updateRunMetrics(deps.db, event.meta.runId, event.payload.metrics); } catch { /* best-effort */ }
   });
 
   return { flush: () => upsertQueue.flush() };

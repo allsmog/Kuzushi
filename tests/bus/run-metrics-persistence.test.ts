@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { AgentRuntime } from "../../src/agent-runtime/types.js";
+import { TaskRegistry } from "../../src/agents/registry.js";
+import type { AgentTask } from "../../src/agents/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerOrchestrator } from "../../src/bus/orchestrator.js";
+import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
 import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
 import type {
   PipelineCompleteEvent,
@@ -19,11 +23,11 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: { semgrep: {} },
+    taskConfig: { semgrep: {} },
   };
 }
 
@@ -31,14 +35,14 @@ function makeScanOpts(): ScanOpts {
   return {
     severity: ["ERROR"],
     excludePatterns: [],
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     fresh: false,
   };
 }
 
 function makeFinding(): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "fp-metrics-1",
     ruleId: "test.rule",
     filePath: "src/app.ts",
@@ -71,9 +75,20 @@ describe("run metrics persistence", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
     const config = makeConfig();
-    const registry = { resolveEnabled: () => ["semgrep"] };
 
-    registerOrchestrator(bus, { registry: registry as any, db });
+    const taskRegistry = new TaskRegistry();
+    taskRegistry.register({
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return [makeFinding()];
+      },
+    } as AgentTask<any, any>);
+
+    registerScanWorker(bus, { taskRegistry, config, runtime: {} as AgentRuntime });
+    registerOrchestrator(bus, { taskRegistry, db, runtime: {} as AgentRuntime });
     registerStoreWorker(bus, { db });
 
     bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {
@@ -97,17 +112,6 @@ describe("run metrics persistence", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    await bus.publish(createEvent("pipeline:start", runId, {
-      context,
-      config,
-      scanOpts: makeScanOpts(),
-    }));
-    await bus.publish(createEvent("scan:finding", runId, {
-      context,
-      finding: makeFinding(),
-      scannerId: "semgrep",
-    }));
-
     const reportRequested = bus.waitFor<ReportRequestedEvent>(
       "report:requested",
       (event) => event.meta.runId === runId,
@@ -117,9 +121,10 @@ describe("run metrics persistence", () => {
       (event) => event.meta.runId === runId,
     );
 
-    await bus.publish(createEvent("scan:complete", runId, {
+    await bus.publish(createEvent("pipeline:start", runId, {
       context,
-      totalFindings: 1,
+      config,
+      scanOpts: makeScanOpts(),
     }));
 
     await reportRequested;
@@ -133,7 +138,7 @@ describe("run metrics persistence", () => {
     expect(metrics.verdictCounts.tp).toBe(1);
     expect(metrics.averageConfidence).toBe(0.9);
     expect(metrics.tpRate).toBe(1);
-    expect(metrics.scannerYield.semgrep).toBe(1);
+    expect(metrics.taskYield.semgrep).toBe(1);
 
     await bus.close();
     db.close();

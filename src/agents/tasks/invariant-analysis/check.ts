@@ -93,7 +93,7 @@ function violationToFinding(
   const confidenceLabel = violation.confidence >= 0.8 ? "HIGH" : violation.confidence >= 0.5 ? "MEDIUM" : "LOW";
 
   return {
-    scanner: "invariant-check",
+    taskId: "invariant-check",
     fingerprint,
     ruleId: `invariant/${violation.invariantId}${violation.cwe ? `/${violation.cwe}` : ""}`,
     filePath,

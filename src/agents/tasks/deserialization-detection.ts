@@ -159,7 +159,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const fingerprint = createHash("sha256").update(source).digest("hex");
 
     const finding: Finding = {
-      scanner: "deserialization-detect",
+      taskId: "deserialization-detect",
       fingerprint,
       ruleId: `deserialization/${f.category || "unknown"}`,
       filePath,

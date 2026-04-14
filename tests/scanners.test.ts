@@ -2,15 +2,15 @@ import { describe, expect, it } from "vitest";
 import { ScannerRegistry } from "../src/scanners/registry.js";
 import type {
   Finding,
-  ScannerConfig,
+  TaskConfig,
   ScannerPlugin,
   TriageAgentConfig,
 } from "../src/scanners/types.js";
 import type { KuzushiConfig, ScanOpts } from "../src/types.js";
 
-function makeFinding(fp: string, scanner: string, score: number): Finding {
+function makeFinding(fp: string, taskId: string, score: number): Finding {
   return {
-    scanner,
+    taskId,
     fingerprint: fp,
     ruleId: "test.rule",
     filePath: "src/test.ts",
@@ -37,11 +37,11 @@ class FakePlugin implements ScannerPlugin {
     this.displayName = id;
   }
 
-  async init(_config: ScannerConfig): Promise<void> {
+  async init(_config: TaskConfig): Promise<void> {
     this.initCalled += 1;
   }
 
-  async scan(_repoRoot: string, _opts: ScanOpts, _config: ScannerConfig): Promise<Finding[]> {
+  async scan(_repoRoot: string, _opts: ScanOpts, _config: TaskConfig): Promise<Finding[]> {
     return this.findings;
   }
 
@@ -57,10 +57,10 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    scanners: ["a", "b"],
+    tasks: ["a", "b"],
     severity: ["ERROR", "WARNING"],
     excludePatterns: ["node_modules"],
-    scannerConfig: {
+    taskConfig: {
       a: {},
       b: {},
     },
@@ -87,7 +87,7 @@ describe("ScannerRegistry", () => {
       severity: ["ERROR"],
       excludePatterns: [],
       fresh: false,
-      scanners: ["a", "taint-analysis"],
+      tasks: ["a", "taint-analysis"],
     };
 
     // "taint-analysis" is not a registered plugin — it should be silently dropped.
@@ -102,7 +102,7 @@ describe("ScannerRegistry", () => {
       severity: ["ERROR"],
       excludePatterns: [],
       fresh: false,
-      scanners: ["a", "semgrpe"],
+      tasks: ["a", "semgrpe"],
     };
 
     expect(() => registry.resolveEnabled(opts, makeConfig())).toThrow("Unknown scanner");
@@ -116,17 +116,17 @@ describe("ScannerRegistry", () => {
       severity: ["ERROR"],
       excludePatterns: [],
       fresh: false,
-      scanners: ["taint-analysis"],
+      tasks: ["taint-analysis"],
     };
 
     expect(registry.resolveEnabled(opts, makeConfig())).toEqual([]);
   });
 
-  it("resolveEnabled validates unknown scanners in config defaults", () => {
+  it("resolveEnabled validates unknown tasks in config defaults", () => {
     const registry = new ScannerRegistry();
     registry.register(new FakePlugin("a", []));
 
-    // No explicit override — falls through to config.scanners which has unknown "b".
+    // No explicit override — falls through to config.tasks which has unknown "b".
     const opts: ScanOpts = {
       severity: ["ERROR"],
       excludePatterns: [],
@@ -147,7 +147,7 @@ describe("ScannerRegistry", () => {
     };
     const config: KuzushiConfig = {
       ...makeConfig(),
-      scanners: ["semgrep", "crypto-misuse"],
+      tasks: ["semgrep", "crypto-misuse"],
     };
 
     // "crypto-misuse" is in NON_PLUGIN_SCANNER_ALIASES — should not throw

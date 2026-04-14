@@ -1,17 +1,17 @@
 import type { KuzushiConfig, ScanOpts } from "../types.js";
-import { isKnownScannerSelectionId } from "../capabilities.js";
+import { isKnownTaskSelectionId } from "../capabilities.js";
 import { isRecord } from "../utils.js";
-import type { Finding, ScannerConfig, ScannerId, ScannerPlugin } from "./types.js";
+import type { Finding, TaskConfig, TaskId, ScannerPlugin } from "./types.js";
 
 /** Registry and orchestrator for scanner plugins (throws/waza). */
 export class ScannerRegistry {
-  private readonly plugins = new Map<ScannerId, ScannerPlugin>();
+  private readonly plugins = new Map<TaskId, ScannerPlugin>();
 
   register(plugin: ScannerPlugin): void {
     this.plugins.set(plugin.id, plugin);
   }
 
-  get(id: ScannerId): ScannerPlugin {
+  get(id: TaskId): ScannerPlugin {
     const plugin = this.plugins.get(id);
     if (!plugin) {
       throw new Error(`Unknown scanner plugin: ${id}`);
@@ -19,34 +19,34 @@ export class ScannerRegistry {
     return plugin;
   }
 
-  has(id: ScannerId): boolean {
+  has(id: TaskId): boolean {
     return this.plugins.has(id);
   }
 
-  ids(): ScannerId[] {
+  ids(): TaskId[] {
     return [...this.plugins.keys()];
   }
 
-  resolveEnabled(opts: ScanOpts, config: KuzushiConfig): ScannerId[] {
-    // When the user explicitly passes --scanners, validate unknown IDs.
+  resolveEnabled(opts: ScanOpts, config: KuzushiConfig): TaskId[] {
+    // When the user explicitly passes --tasks, validate unknown IDs.
     // Keep non-plugin aliases that intentionally map to AgentTasks (e.g. "taint-analysis").
-    const isExplicitOverride = opts.scanners !== undefined;
+    const isExplicitOverride = opts.tasks !== undefined;
 
     if (isExplicitOverride) {
-      const normalized = [...new Set(opts.scanners!
+      const normalized = [...new Set(opts.tasks!
         .map((id) => id.trim())
         .filter(Boolean))];
 
-      const unknown = normalized.filter((id) => !this.has(id) && !isKnownScannerSelectionId(id));
+      const unknown = normalized.filter((id) => !this.has(id) && !isKnownTaskSelectionId(id));
       if (unknown.length > 0) {
         throw new Error(`Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`);
       }
 
-      // An empty result is valid (e.g. "--scanners taint-analysis" -> no scanner plugins).
+      // An empty result is valid (e.g. "--tasks taint-analysis" -> no scanner plugins).
       return normalized.filter((id) => this.has(id));
     }
 
-    const selected = config.scanners;
+    const selected = config.tasks;
 
     const normalized = selected
       .map((id) => id.trim())
@@ -57,7 +57,7 @@ export class ScannerRegistry {
       throw new Error("At least one scanner must be configured.");
     }
 
-    const unknown = normalized.filter((id) => !this.has(id) && !isKnownScannerSelectionId(id));
+    const unknown = normalized.filter((id) => !this.has(id) && !isKnownTaskSelectionId(id));
     if (unknown.length > 0) {
       throw new Error(`Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`);
     }
@@ -71,7 +71,7 @@ export class ScannerRegistry {
 
     for (const id of enabled) {
       const plugin = this.get(id);
-      const pluginConfig = resolvePluginConfig(config.scannerConfig, id);
+      const pluginConfig = resolvePluginConfig(config.taskConfig, id);
 
       if (plugin.init) {
         await plugin.init(pluginConfig);
@@ -86,9 +86,9 @@ export class ScannerRegistry {
 }
 
 function resolvePluginConfig(
-  allConfig: Record<string, ScannerConfig>,
-  scannerId: ScannerId,
-): ScannerConfig {
+  allConfig: Record<string, TaskConfig>,
+  scannerId: TaskId,
+): TaskConfig {
   const cfg = allConfig[scannerId];
   if (!isRecord(cfg)) return {};
   return cfg;

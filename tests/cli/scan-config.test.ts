@@ -46,13 +46,13 @@ describe("applyScanCommandConfigOverrides", () => {
     const config = structuredClone(DEFAULTS);
 
     applyScanCommandConfigOverrides(config, makeOptions({
-      enabledTasks: "custom-a, custom-b",
+      tasks: "custom-a, custom-b",
       apiKey: "  sk-test  ",
       baseUrl: " https://proxy.example/ ",
       qualityGate: true,
     }));
 
-    expect(config.enabledTasks).toEqual([...DEFAULTS.enabledTasks, "custom-a", "custom-b"]);
+    expect(config.tasks).toEqual([...DEFAULTS.tasks, "custom-a", "custom-b"]);
     expect(config.agentRuntimeConfig).toEqual({
       apiKey: "sk-test",
       baseUrl: "https://proxy.example/",
@@ -65,15 +65,15 @@ describe("applyScanCommandConfigOverrides", () => {
 
   it("enables crypto behavioral testing and injects the task id", () => {
     const config = structuredClone(DEFAULTS);
-    config.enabledTasks = ["custom-task"];
+    config.tasks = ["custom-task"];
 
     applyScanCommandConfigOverrides(config, makeOptions({
       cryptoBehavioralTest: true,
     }));
 
     expect(config.cryptoBehavioralTestEnabled).toBe(true);
-    expect(config.enabledTasks).toContain("custom-task");
-    expect(config.enabledTasks).toContain("crypto-behavioral-test");
+    expect(config.tasks).toContain("custom-task");
+    expect(config.tasks).toContain("crypto-behavioral-test");
   });
 
   it("applies dynamic analysis and taint-diff overrides", () => {
@@ -138,33 +138,32 @@ describe("applyScanCommandConfigOverrides", () => {
     }))).toThrowError(new CliUsageError("--taint-diff-mode must be one of: delta, baseline."));
   });
 
-  it("applies reference preset with deep-merged scannerConfig", () => {
+  it("applies reference preset with deep-merged taskConfig", () => {
     const config = structuredClone(DEFAULTS);
-    const originalSemgrep = { ...config.scannerConfig.semgrep };
-    const originalThreatHunt = { ...config.scannerConfig["threat-hunt"] };
+    const originalSemgrep = { ...config.taskConfig.semgrep };
+    const originalThreatHunt = { ...config.taskConfig["threat-hunt"] };
 
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "reference" }));
 
     // Systems-hunt gets Orchid model from the preset
-    expect(config.scannerConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
+    expect(config.taskConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
     // Threat-hunt tuning is preserved without overriding its model
-    expect(config.scannerConfig["threat-hunt"].model).toBe(originalThreatHunt.model);
-    expect(config.scannerConfig["threat-hunt"].runsPerActor).toBe(3);
+    expect(config.taskConfig["threat-hunt"].model).toBe(originalThreatHunt.model);
+    expect(config.taskConfig["threat-hunt"].runsPerActor).toBe(3);
 
     // Other scanner configs survive the deep-merge (not wiped out)
-    expect(config.scannerConfig.semgrep).toEqual(originalSemgrep);
-    expect(config.scannerConfig["taint-analysis"]).toBeDefined();
-    expect(config.scannerConfig["taint-analysis"].passes).toEqual([1, 2, 3]);
+    expect(config.taskConfig.semgrep).toEqual(originalSemgrep);
+    expect(config.taskConfig["taint-analysis"]).toBeDefined();
+    expect(config.taskConfig["taint-analysis"].passes).toEqual([1, 2, 3]);
 
     // Top-level preset fields are applied
-    expect(config.taskMode).toBe("compat");
     expect(config.verify).toBe(true);
     expect(config.pocHarness).toBe(true);
-    // Scanners are NOT overridden — user's configured scanners are preserved
-    expect(config.scanners).toEqual(DEFAULTS.scanners);
+    // Scanners are NOT overridden — user's configured tasks are preserved
+    expect(config.tasks).toEqual(DEFAULTS.tasks);
   });
 
-  it("reference preset does not override global model or scanners", () => {
+  it("reference preset does not override global model or tasks", () => {
     const config = structuredClone(DEFAULTS);
 
     applyScanCommandConfigOverrides(config, makeOptions({
@@ -175,19 +174,18 @@ describe("applyScanCommandConfigOverrides", () => {
     // CLI --model sets the global model; preset doesn't fight it
     expect(config.model).toBe("anthropic:claude-opus-4-6");
     // Scanners stay at user defaults
-    expect(config.scanners).toEqual(DEFAULTS.scanners);
-    // Only systems-hunt gets Orchid from scannerConfig deep-merge
-    expect(config.scannerConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
-    expect(config.scannerConfig["threat-hunt"].model).toBe(DEFAULTS.scannerConfig["threat-hunt"].model);
+    expect(config.tasks).toEqual(DEFAULTS.tasks);
+    // Only systems-hunt gets Orchid from taskConfig deep-merge
+    expect(config.taskConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
+    expect(config.taskConfig["threat-hunt"].model).toBe(DEFAULTS.taskConfig["threat-hunt"].model);
   });
 
-  it("applies fast preset as a true scanners-only mode", () => {
+  it("applies fast preset as a true tasks-only mode", () => {
     const config = structuredClone(DEFAULTS);
 
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "fast" }));
 
-    expect(config.taskMode).toBe("scanners-only");
-    expect(config.enabledTasks).toEqual([]);
+    expect(config.tasks).toEqual(["semgrep"]);
     expect(config.enableDynamicTaskSelection).toBe(false);
     expect(config.enableContextGathering).toBe(false);
     expect(config.enableContextEnrichment).toBe(false);
@@ -198,8 +196,7 @@ describe("applyScanCommandConfigOverrides", () => {
 
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "standard" }));
 
-    expect(config.taskMode).toBe("explicit");
-    expect(config.enabledTasks).toEqual([
+    expect(config.tasks).toEqual([
       "context-gatherer",
       "context-enricher",
       "secrets-crypto-detect",
@@ -215,8 +212,7 @@ describe("applyScanCommandConfigOverrides", () => {
 
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "deep" }));
 
-    expect(config.taskMode).toBe("explicit");
-    expect(config.enabledTasks).toEqual([
+    expect(config.tasks).toEqual([
       "context-gatherer",
       "context-enricher",
       "secrets-crypto-detect",
@@ -227,21 +223,21 @@ describe("applyScanCommandConfigOverrides", () => {
       "threat-hunt",
       "systems-context-gatherer",
       "systems-invariant-extract",
+      "systems-trigger-synth",
       "systems-hunt",
     ]);
     expect(config.verify).toBe(true);
   });
 
-  it("promotes scanners-only presets to explicit when CLI flags explicitly enable tasks", () => {
+  it("promotes tasks-only presets to explicit when CLI flags explicitly enable tasks", () => {
     const config = structuredClone(DEFAULTS);
 
     applyScanCommandConfigOverrides(config, makeOptions({
       preset: "fast",
-      enabledTasks: "custom-detector",
+      tasks: "custom-detector",
     }));
 
-    expect(config.taskMode).toBe("explicit");
-    expect(config.enabledTasks).toEqual(["custom-detector"]);
+    expect(config.tasks).toEqual(["semgrep", "custom-detector"]);
   });
 
   it("rejects unknown preset names", () => {

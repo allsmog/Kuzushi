@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Gate: run the full CI suite before publishing ───────────────
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # ── Publish to npm ──────────────────────────────────────────────
+  publish-npm:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ── Create GitHub Release ───────────────────────────────────────
+  github-release:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      # Pack the tarball for users who want to install from the release
+      - run: npm pack
+
+      - name: Generate changelog from commits since last tag
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1 || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            git log --pretty=format:"- %s (%h)" HEAD > /tmp/changelog.txt
+          else
+            git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" > /tmp/changelog.txt
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body_path: /tmp/changelog.txt
+          files: |
+            kuzushi-*.tgz

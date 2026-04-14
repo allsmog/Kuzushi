@@ -189,7 +189,7 @@ function threatsToFindings(
     const fingerprint = computeFingerprint(repoName, threat);
 
     const finding: Finding = {
-      scanner: "threat-model-randori",
+      taskId: "threat-model-randori",
       fingerprint,
       ruleId: `threat-model/${threat.category}${cweSegment}`,
       filePath: primary.filePath,

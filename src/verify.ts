@@ -453,7 +453,7 @@ async function verifySingleBatchSession(
     items: items.map(({ finding, triageResult }) => ({
       finding: {
         fingerprint: finding.fingerprint,
-        scanner: finding.scanner,
+        taskId: finding.taskId,
         ruleId: finding.ruleId,
         filePath: finding.filePath,
         startLine: finding.startLine,

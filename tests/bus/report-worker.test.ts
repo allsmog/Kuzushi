@@ -12,7 +12,7 @@ import type { ReportCompleteEvent } from "../../src/bus/events.js";
 
 function makeFinding(fp: string): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: fp,
     ruleId: "test.rule",
     filePath: "src/app.ts",
@@ -66,10 +66,10 @@ describe("report-worker", () => {
       triageBatchSize: 15,
       triageConcurrency: 1,
       scanMode: "sequential",
-      scanners: ["semgrep"],
+      tasks: ["semgrep"],
       severity: ["ERROR"],
       excludePatterns: [],
-      scannerConfig: { semgrep: {} },
+      taskConfig: { semgrep: {} },
     };
 
     registerReportWorker(bus, { db, config });
@@ -85,7 +85,7 @@ describe("report-worker", () => {
     await bus.publish(
       createEvent("scan:start", runId, {
         context,
-        scanners: ["semgrep"],
+        tasks: ["semgrep"],
         scanOpts: {
           severity: ["ERROR"],
           excludePatterns: [],
@@ -164,10 +164,10 @@ describe("report-worker", () => {
       triageBatchSize: 15,
       triageConcurrency: 1,
       scanMode: "sequential",
-      scanners: ["semgrep"],
+      tasks: ["semgrep"],
       severity: ["ERROR"],
       excludePatterns: [],
-      scannerConfig: { semgrep: {} },
+      taskConfig: { semgrep: {} },
     };
 
     registerReportWorker(bus, { db, config });
@@ -182,7 +182,7 @@ describe("report-worker", () => {
 
     await bus.publish(createEvent("scan:start", runId, {
       context,
-      scanners: ["semgrep"],
+      tasks: ["semgrep"],
       scanOpts: {
         severity: ["ERROR"],
         excludePatterns: [],
@@ -218,11 +218,11 @@ describe("report-worker", () => {
       triageBatchSize: 15,
       triageConcurrency: 1,
       scanMode: "sequential",
-      scanners: ["semgrep"],
+      tasks: ["semgrep"],
       severity: ["ERROR"],
       excludePatterns: [],
       reportOutput: reportPath,
-      scannerConfig: { semgrep: {} },
+      taskConfig: { semgrep: {} },
     };
 
     registerReportWorker(bus, { db, config });
@@ -270,10 +270,10 @@ describe("report-worker", () => {
       triageBatchSize: 15,
       triageConcurrency: 1,
       scanMode: "sequential",
-      scanners: ["semgrep"],
+      tasks: ["semgrep"],
       severity: ["ERROR"],
       excludePatterns: [],
-      scannerConfig: { semgrep: {} },
+      taskConfig: { semgrep: {} },
     };
 
     registerReportWorker(bus, { db, config });
@@ -288,7 +288,7 @@ describe("report-worker", () => {
 
     await bus.publish(createEvent("scan:start", runId, {
       context,
-      scanners: ["semgrep"],
+      tasks: ["semgrep"],
       scanOpts: {
         severity: ["ERROR"],
         excludePatterns: [],
@@ -320,10 +320,10 @@ describe("report-worker", () => {
       triageBatchSize: 15,
       triageConcurrency: 1,
       scanMode: "sequential",
-      scanners: ["semgrep"],
+      tasks: ["semgrep"],
       severity: ["ERROR"],
       excludePatterns: [],
-      scannerConfig: { semgrep: {} },
+      taskConfig: { semgrep: {} },
     };
 
     registerReportWorker(bus, { db, config });
@@ -386,10 +386,10 @@ describe("report-worker", () => {
       triageBatchSize: 15,
       triageConcurrency: 1,
       scanMode: "sequential",
-      scanners: ["semgrep"],
+      tasks: ["semgrep"],
       severity: ["ERROR"],
       excludePatterns: [],
-      scannerConfig: { semgrep: {} },
+      taskConfig: { semgrep: {} },
     };
 
     registerReportWorker(bus, { db, config });

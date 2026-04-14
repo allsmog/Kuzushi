@@ -168,7 +168,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const resourceInfo = f.sharedResource ? ` [resource: ${f.sharedResource}]` : "";
 
     const finding: Finding = {
-      scanner: "race-condition-detect",
+      taskId: "race-condition-detect",
       fingerprint,
       ruleId: `race-condition/${f.pattern || "unknown"}`,
       filePath,

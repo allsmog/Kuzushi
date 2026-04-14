@@ -88,7 +88,7 @@ function buildPrompt(
     return [
       `### Finding ${idx + 1}`,
       `Fingerprint: ${f.fingerprint}`,
-      `Scanner: ${f.scanner}`,
+      `Scanner: ${f.taskId}`,
       `Rule: ${f.ruleId}`,
       `File: ${f.filePath}:${f.startLine}`,
       `Severity: ${f.severity}`,
@@ -202,9 +202,9 @@ export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
     }
 
     const model =
-      (isRecord(context.config.scannerConfig["chain-analysis"]) &&
-        typeof context.config.scannerConfig["chain-analysis"]["model"] === "string"
-        ? context.config.scannerConfig["chain-analysis"]["model"]
+      (isRecord(context.config.taskConfig["chain-analysis"]) &&
+        typeof context.config.taskConfig["chain-analysis"]["model"] === "string"
+        ? context.config.taskConfig["chain-analysis"]["model"]
         : undefined) ??
       context.config.model;
 

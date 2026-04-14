@@ -186,7 +186,7 @@ describe("selectFindings", () => {
     const output: SemgrepOutput = { results: [makeFinding()] };
     const [f] = selectFindings(output, "repo", "HEAD");
     expect(f.ruleId).toBe("javascript.express.security.audit.xss");
-    expect(f.scanner).toBe("semgrep");
+    expect(f.taskId).toBe("semgrep");
     expect(f.filePath).toBe("src/app.ts");
     expect(f.startLine).toBe(42);
     expect(f.severity).toBe("ERROR");

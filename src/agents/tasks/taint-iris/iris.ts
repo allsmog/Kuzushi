@@ -268,7 +268,7 @@ function parseFindings(raw: unknown, repoRoot: string, repoName: string): Findin
       .digest("hex");
 
     out.push({
-      scanner: "taint-iris",
+      taskId: "taint-iris",
       fingerprint,
       ruleId: `taint-iris/${cwe || "unknown"}`,
       filePath: normalizePath(repoRoot, filePath),

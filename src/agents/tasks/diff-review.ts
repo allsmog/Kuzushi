@@ -94,7 +94,7 @@ interface DiffReviewConfig {
 }
 
 function resolveConfig(ctx: TaskContext): DiffReviewConfig {
-  const raw = ctx.config.scannerConfig["diff-review"];
+  const raw = ctx.config.taskConfig["diff-review"];
   const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
     ? raw["model"].trim()
     : ctx.config.model;
@@ -234,7 +234,7 @@ function normalizeFindings(
     const fingerprint = computeFingerprint(repoName, diffBase, filePath, f);
 
     const finding: Finding = {
-      scanner: "diff-review",
+      taskId: "diff-review",
       fingerprint,
       ruleId: f.ruleId || "diff-review/security-issue",
       filePath,
@@ -380,7 +380,7 @@ async function detectRegressions(
       .digest("hex");
 
     findings.push({
-      scanner: "diff-review",
+      taskId: "diff-review",
       fingerprint,
       ruleId: `regression/${r.ruleId}`,
       filePath,

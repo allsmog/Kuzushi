@@ -23,11 +23,11 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: overrides.scannerConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
   };
 }
 
@@ -47,9 +47,9 @@ describe("resolveConfig", () => {
     expect(cfg.maxFindings).toBe(50);
   });
 
-  it("reads overrides from scannerConfig", () => {
+  it("reads overrides from taskConfig", () => {
     const ctx = makeContext({
-      scannerConfig: {
+      taskConfig: {
         "ssrf-detect": { model: "openai:gpt-4", maxFindings: 20 },
       },
     });
@@ -119,7 +119,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 50);
     expect(findings).toHaveLength(1);
-    expect(findings[0].scanner).toBe("ssrf-detect");
+    expect(findings[0].taskId).toBe("ssrf-detect");
     expect(findings[0].ruleId).toBe("ssrf/url-from-user-input");
     expect(findings[0].filePath).toBe("src/api/proxy.ts");
     expect(findings[0].cwe).toEqual(["CWE-918"]);
@@ -181,7 +181,7 @@ describe("computeFingerprint", () => {
 describe("triageAgentConfig", () => {
   it("returns a prompt with finding details", () => {
     const finding = {
-      scanner: "ssrf-detect",
+      taskId: "ssrf-detect",
       fingerprint: "abc",
       ruleId: "ssrf/url-from-user-input",
       filePath: "src/api/proxy.ts",

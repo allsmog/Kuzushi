@@ -23,11 +23,11 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     triageBatchSize: 40,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: overrides.scannerConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
   };
 }
 
@@ -47,9 +47,9 @@ describe("resolveConfig", () => {
     expect(cfg.maxFindings).toBe(100);
   });
 
-  it("reads overrides from scannerConfig", () => {
+  it("reads overrides from taskConfig", () => {
     const ctx = makeContext({
-      scannerConfig: {
+      taskConfig: {
         "secrets-crypto-detect": { model: "openai:gpt-4", maxFindings: 25 },
       },
     });
@@ -129,7 +129,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 100);
     expect(findings).toHaveLength(1);
-    expect(findings[0].scanner).toBe("secrets-detect");
+    expect(findings[0].taskId).toBe("secrets-detect");
     expect(findings[0].ruleId).toBe("secrets/api-key");
     expect(findings[0].cwe).toEqual(["CWE-798"]);
   });
@@ -153,7 +153,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 100);
     expect(findings).toHaveLength(1);
-    expect(findings[0].scanner).toBe("crypto-misuse-detect");
+    expect(findings[0].taskId).toBe("crypto-misuse-detect");
     expect(findings[0].ruleId).toBe("crypto-misuse/hash-for-auth");
     expect(findings[0].cwe).toEqual(["CWE-328"]);
   });
@@ -188,7 +188,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 100);
     expect(findings).toHaveLength(2);
-    expect(findings.map(f => f.scanner).sort()).toEqual(["crypto-misuse-detect", "secrets-detect"]);
+    expect(findings.map(f => f.taskId).sort()).toEqual(["crypto-misuse-detect", "secrets-detect"]);
   });
 
   it("deduplicates by fingerprint", () => {
@@ -247,7 +247,7 @@ describe("computeFingerprint", () => {
 describe("triageAgentConfig", () => {
   it("returns secrets-specific prompt for secrets findings", () => {
     const finding = {
-      scanner: "secrets-detect",
+      taskId: "secrets-detect",
       fingerprint: "abc",
       ruleId: "secrets/api-key",
       filePath: "src/config.ts",
@@ -271,7 +271,7 @@ describe("triageAgentConfig", () => {
 
   it("returns crypto-specific prompt for crypto findings", () => {
     const finding = {
-      scanner: "crypto-misuse-detect",
+      taskId: "crypto-misuse-detect",
       fingerprint: "def",
       ruleId: "crypto-misuse/hash-for-auth",
       filePath: "src/auth.ts",

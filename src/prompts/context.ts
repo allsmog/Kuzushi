@@ -11,7 +11,7 @@ import { sanitizeForPrompt } from "./sanitize.js";
 /** Context shape available inside triage prompt templates. */
 export interface TriageTemplateContext {
   finding: {
-    scanner: string;
+    taskId: string;
     ruleId: string;
     filePath: string;
     startLine: number;
@@ -51,7 +51,7 @@ export interface VerifyTemplateContext {
 export function buildTriageContext(finding: Finding, repoName: string): TriageTemplateContext {
   return {
     finding: {
-      scanner: finding.scanner,
+      taskId: finding.taskId,
       ruleId: finding.ruleId,
       filePath: finding.filePath,
       startLine: finding.startLine,
@@ -82,7 +82,7 @@ export function buildVerifyContext(
 ): VerifyTemplateContext {
   return {
     finding: {
-      scanner: finding.scanner,
+      taskId: finding.taskId,
       ruleId: finding.ruleId,
       filePath: finding.filePath,
       startLine: finding.startLine,
@@ -130,7 +130,7 @@ export function buildBatchTriageContext(
     repoName,
     findingCount: findings.length,
     findings: findings.map(f => ({
-      scanner: f.scanner,
+      taskId: f.taskId,
       ruleId: f.ruleId,
       filePath: f.filePath,
       startLine: f.startLine,
@@ -171,7 +171,7 @@ export function buildBatchVerifyContext(
     findingCount: items.length,
     items: items.map(({ finding, triageResult }) => ({
       finding: {
-        scanner: finding.scanner,
+        taskId: finding.taskId,
         ruleId: finding.ruleId,
         filePath: finding.filePath,
         startLine: finding.startLine,

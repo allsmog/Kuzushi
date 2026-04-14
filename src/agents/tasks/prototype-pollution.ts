@@ -184,7 +184,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const apiInfo = f.apiOrFunction ? ` [${f.apiOrFunction}]` : "";
 
     const finding: Finding = {
-      scanner: "prototype-pollution-detect",
+      taskId: "prototype-pollution-detect",
       fingerprint,
       ruleId: `prototype-pollution/${f.category || "unknown"}`,
       filePath,

@@ -5,8 +5,7 @@ export type ScanPreset = "safe" | "fast" | "standard" | "deep" | "reference";
 export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
   // Recommended for first-time users: tight cost and turn caps, no expensive optional tasks.
   safe: {
-    taskMode: "explicit",
-    enabledTasks: [
+    tasks: [
       "context-gatherer",
       "context-enricher",
       "secrets-crypto-detect",
@@ -20,16 +19,14 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     cryptoBehavioralTestEnabled: false,
   },
   fast: {
-    taskMode: "scanners-only",
-    enabledTasks: [],
+    tasks: ["semgrep"],
     enableDynamicTaskSelection: false,
     enableContextGathering: false,
     enableContextEnrichment: false,
     variantAnalysis: false,
   },
   standard: {
-    taskMode: "explicit",
-    enabledTasks: [
+    tasks: [
       "context-gatherer",
       "context-enricher",
       "secrets-crypto-detect",
@@ -40,8 +37,7 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     enableDynamicTaskSelection: false,
   },
   deep: {
-    taskMode: "explicit",
-    enabledTasks: [
+    tasks: [
       "context-gatherer",
       "context-enricher",
       "secrets-crypto-detect",
@@ -52,24 +48,24 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
       "threat-hunt",
       "systems-context-gatherer",
       "systems-invariant-extract",
+      "systems-trigger-synth",
       "systems-hunt",
     ],
     verify: true,
     variantAnalysis: true,
-    scannerConfig: {
+    taskConfig: {
       "threat-hunt": { maxActors: 8, runsPerActor: 2 },
     },
   },
   reference: {
-    // Inherits the user's configured model and scanners — does not override.
-    // Orchid is used surgically for systems-hunt only (see scannerConfig below).
-    taskMode: "compat",
+    // Inherits the user's configured task list — does not override it.
+    // Orchid is used surgically for systems-hunt only (see taskConfig below).
     verify: true,
     pocHarness: true,
     codeGraphEnabled: true,
     enableDynamicTaskSelection: true,
     variantAnalysis: true,
-    scannerConfig: {
+    taskConfig: {
       "threat-hunt": {
         runsPerActor: 3,
         maxActors: 10,
@@ -79,6 +75,8 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
         model: "anthropic:claude-orchid-preview",
         maxConcurrentSurfaces: 3,
         maxSurfaces: 12,
+        surfacePackDepth: 6,
+        maxTriggerHypothesesPerSurface: 4,
       },
     },
   },

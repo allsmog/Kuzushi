@@ -10,7 +10,7 @@ describe("types", () => {
 
   it("Finding shape is constructible", () => {
     const finding: Finding = {
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: "abc123",
       ruleId: "test.rule",
       filePath: "src/app.ts",
@@ -44,7 +44,7 @@ describe("types", () => {
       severity: ["ERROR"],
       maxFindings: 10,
       excludePatterns: ["node_modules"],
-      scanners: ["semgrep"],
+      tasks: ["semgrep"],
       fresh: false,
     };
     expect(opts.severity).toEqual(["ERROR"]);

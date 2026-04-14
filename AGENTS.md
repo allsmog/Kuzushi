@@ -5,17 +5,16 @@
 ## Project Structure & Module Organization
 
 - Source: `src/` — CLI entry in `src/cli.ts`, core types in `src/types.ts`, config in `src/config.ts`.
-- Agents (new primary abstraction): `src/agents/`
+- Agents (primary abstraction): `src/agents/`
   - Types: `src/agents/types.ts` (`AgentTask`, `TaskContext`, `TaskOutputKind`)
   - Registry: `src/agents/registry.ts` (`TaskRegistry`, DAG resolution + cycle detection)
-  - Scanner adapter: `src/agents/scanner-adapter.ts` (`ScannerPlugin` -> `AgentTask`)
-  - Factory: `src/agents/index.ts` (`createDefaultTaskRegistry()`)
-- Scanners: `src/scanners/` — plugin-based (`ScannerPlugin` stays supported for scanner implementations)
+  - Factory: `src/agents/index.ts` (`createDefaultTaskRegistry()` — registers all native tasks including semgrep/codeql/agentic)
+- Scanner implementations: `src/scanners/` — native task wrappers
   - Semgrep: `src/scanners/semgrep.ts`, `src/scanners/run-semgrep.ts`, `src/scanners/resolve-semgrep.ts`
   - CodeQL: `src/scanners/codeql.ts`, `src/scanners/run-codeql.ts`, `src/scanners/resolve-codeql.ts`
   - Agentic scanner: `src/scanners/agentic.ts`, `src/scanners/run-agentic.ts`
   - Scoring: `src/scanners/scoring.ts`
-  - Registry: `src/scanners/registry.ts`
+  - Types: `src/scanners/types.ts` (`Finding`, `TaskId`, `ScannerPlugin`)
 - Event bus: `src/bus/` — transport-agnostic message bus + coordinator
   - Interface: `src/bus/types.ts`
   - Events: `src/bus/events.ts`
@@ -50,16 +49,14 @@
 - `TaskRegistry.resolveOrder(enabledIds)` returns DAG stages as parallel groups.
 - Orchestrator flow:
   1. `pipeline:start`
-  2. Resolve enabled task DAG
-  3. Execute each stage concurrently
-  4. Emit `stage:complete` per group
-  5. Forward upstream outputs to dependent tasks via `TaskContext.upstreamOutputs`
-  6. Continue triage/report pipeline
-- New generic task events:
-  - `task:start`, `task:progress`, `task:complete`, `task:error`, `stage:complete`
-- Backward compatibility:
-  - Existing scan events (`scan:finding`, `scan:scanner-complete`, etc.) remain emitted for scanner-like tasks.
-  - Existing `ScannerPlugin` implementations continue to work through `adaptScannerPlugin()`.
+  2. `resolveInitialTaskPlan()` determines enabled task IDs from `config.tasks` + transitive deps
+  3. `resolveOrderWithPolicyEdges()` topological-sorts into parallel stage groups
+  4. `runTaskDag()` executes each stage: publishes `task:start`, waits for `task:complete`/`task:error`
+  5. Emit `stage:complete` per group
+  6. Forward upstream outputs to dependent tasks via `TaskContext.upstreamOutputs`
+  7. Continue triage/report pipeline
+- Task events: `task:start`, `task:progress`, `task:complete`, `task:error`, `stage:complete`
+- Finding events: `scan:finding` still emitted by scan worker for finding-producing tasks
 
 ## Adding a New Agent Task
 
@@ -72,11 +69,14 @@
 ## Configuration
 
 - Layered precedence: defaults -> `~/.kuzushi/config.json` -> `<repo>/.kuzushi/config.json` -> CLI flags.
+- Task selection: `config.tasks: TaskId[]` — the single public selection surface.
+- Per-task config: `config.taskConfig: Record<string, TaskConfig>` — keyed by task ID or reserved stage ID.
+- Stage model overrides: `taskConfig["triage"].model`, `taskConfig["verify"].model`, `taskConfig["poc-harness"].model` (replaces old top-level `triageModel`/`verifyModel`/`pocHarnessModel`).
+- CLI: `--tasks <csv>`, `--task-model <taskId>=<model>`, `--preset <name>`.
 - Key fields:
-  - `model`, `triageModel`, `triageMaxTurns`
+  - `model`, `tasks`, `taskConfig`
   - `agentRuntimeBackend` (`pi-ai`)
-  - `scanners`, optional `enabledTasks`
-  - `severity`, `excludePatterns`, `scannerConfig`
+  - `severity`, `excludePatterns`
   - `busBackend`, `triageConcurrency`, `scanMode`
 
 ## Testing Guidelines

@@ -455,7 +455,7 @@ function parseFindings(raw: unknown, repoRoot: string, repoName: string): Findin
       .digest("hex");
 
     out.push({
-      scanner: "deep-semantic-hunt",
+      taskId: "deep-semantic-hunt",
       fingerprint,
       ruleId: `deep-semantic/${cwe || "unknown"}`,
       filePath: normalizePath(repoRoot, filePath),

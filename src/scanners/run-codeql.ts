@@ -352,7 +352,7 @@ export function selectFindings(
       });
 
       const finding: Finding = {
-        scanner: "codeql",
+        taskId: "codeql",
         fingerprint,
         ruleId,
         filePath,
@@ -463,7 +463,7 @@ export async function detectCodeQLLanguage(repoRoot: string, codeqlBin: string):
   }
 
   throw new Error(
-    "Unable to determine CodeQL language automatically. Set scannerConfig.codeql.language.",
+    "Unable to determine CodeQL language automatically. Set taskConfig.codeql.language.",
   );
 }
 

@@ -19,10 +19,10 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     severity: ["ERROR", "WARNING", "INFO"],
     excludePatterns: [],
-    scannerConfig: { semgrep: {} },
+    taskConfig: { semgrep: {} },
   };
 }
 
@@ -30,14 +30,14 @@ function makeScanOpts(): ScanOpts {
   return {
     severity: ["ERROR", "WARNING", "INFO"],
     excludePatterns: [],
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     fresh: false,
   };
 }
 
 function makeFinding(overrides: Partial<Finding>): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "fp-default",
     ruleId: "test.rule",
     filePath: "src/app.ts",

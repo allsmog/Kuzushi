@@ -16,7 +16,7 @@ Kuzushi runs the same scanners, then sends an AI agent to investigate each findi
 npx kuzushi /path/to/your/repo
 ```
 
-No install. No config files. Just point it at a repo.
+No config files. Just point it at a repo.
 
 <!-- TODO: Add terminal recording / asciinema GIF here -->
 
@@ -25,19 +25,27 @@ No install. No config files. Just point it at a repo.
 Prereqs: Node 22+, and either an API key or Claude Code OAuth login.
 
 ```sh
-# With Claude Code OAuth (no API key needed — uses your Claude login)
+# Install globally (recommended — get upgrades with npm update -g kuzushi)
+npm install -g kuzushi
+
+# Or run without installing
 npx kuzushi /path/to/your/repo
+```
+
+```sh
+# With Claude Code OAuth (no API key needed — uses your Claude login)
+kuzushi /path/to/your/repo
 
 # With Anthropic API key
 export ANTHROPIC_API_KEY=sk-ant-...
-npx kuzushi /path/to/your/repo
+kuzushi /path/to/your/repo
 
 # With OpenAI
 export OPENAI_API_KEY=sk-...
-npx kuzushi /path/to/repo --model openai:gpt-4o
+kuzushi /path/to/repo --model openai:gpt-4o
 
 # With Google, Groq, Mistral, or 15+ other providers
-npx kuzushi /path/to/repo --model google:gemini-2.0-flash
+kuzushi /path/to/repo --model google:gemini-2.0-flash
 ```
 
 Kuzushi auto-downloads Opengrep if you don't have a scanner installed. Zero dependencies to manage.
@@ -68,10 +76,10 @@ The terminal report shows true positives first, then needs-review items. False p
 
 ```
   ┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌─────────┐     ┌──────────┐
-  │   Scanners   │────▶│  AI Triage   │────▶│ Verification │────▶│  Patch  │────▶│  Report  │
+  │  Task DAG    │────▶│  AI Triage   │────▶│ Verification │────▶│  Patch  │────▶│  Report  │
   │ Semgrep      │     │ Investigate  │     │ Construct    │     │ Generate │     │ TP only  │
   │ CodeQL       │     │ each finding │     │ PoC exploits │     │ & verify │     │ + export │
-  │ Agentic      │     │ with context │     │ (optional)   │     │ (opt-in) │     │ + stream │
+  │ 15+ tasks    │     │ with context │     │ (optional)   │     │ (opt-in) │     │ + stream │
   └─────────────┘     └──────────────┘     └──────────────┘     └─────────┘     └──────────┘
 ```
 
@@ -79,7 +87,7 @@ The terminal report shows true positives first, then needs-review items. False p
 2. **Code graph** — builds a persistent entry-point-to-sink graph via static analysis + LLM discovery mode. For HTTP services, traces pre-identified routes. For CLI tools, daemons, and non-HTTP projects, the LLM identifies entry points itself (main functions, socket listeners, gRPC servers, CLI handlers) and traces security-relevant call/data-flow paths
 3. **Threat modeling** — Randori PASTA plugin (shipped as `@kuzushi/randori-plugin`) performs 4-stage threat analysis: business objectives, technical scope, DFD decomposition, and STRIDE threat scenarios with ATT&CK/CAPEC/OWASP mapping and 5-factor probabilistic scoring. All threat leads are injected into every detector's prompts.
 4. **Threat-informed hunting** — spawns one adversarial Claude agent per DFD external entity (users, services, attackers) to CTF-style hunt for vulnerabilities from each actor's perspective
-5. **Scanning** — runs Semgrep, CodeQL, and/or an agentic scanner concurrently; 15+ specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto, auth logic, sharp edges, systems-level deep semantic analysis); multi-strategy mode runs 2-4 analytical approaches per vuln class
+5. **Task DAG execution** — runs enabled tasks as a dependency-aware DAG: Semgrep, CodeQL, agentic scanner, and 15+ specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto, auth logic, sharp edges, systems-level deep semantic analysis); multi-strategy mode runs 2-4 analytical approaches per vuln class
 4. **Classifier funnel** — cheap single-token pre-filter removes ~80% of noise before expensive triage
 5. **Deduplication** — fingerprints and merges equivalent findings across scanners
 6. **Incremental skip** — findings already triaged in previous runs are skipped automatically
@@ -172,33 +180,37 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 Presets configure the pipeline for different cost/depth tradeoffs. CLI flags override preset values.
 
 ```sh
-kuzushi <repo> --preset fast        # scanners only, no context/enrichment/variant analysis
-kuzushi <repo> --preset standard    # scanners + IRIS taint + secrets/crypto detection
-kuzushi <repo> --preset deep        # standard + verification + systems-level deep semantic hunt
+kuzushi <repo> --preset fast        # semgrep only, no context/enrichment/variant analysis
+kuzushi <repo> --preset standard    # semgrep + IRIS taint + secrets/crypto detection
+kuzushi <repo> --preset deep        # standard + verification + threat modeling + systems-level hunt
 kuzushi <repo> --preset reference   # verification + PoC generation + threat-informed hunting
                                     # + deep semantic hunt with a frontier model
 ```
 
-Preset task modes:
-- `fast` uses `taskMode: "scanners-only"`
-- `standard` and `deep` use `taskMode: "explicit"`
-- `reference` uses `taskMode: "compat"` to preserve the legacy full-pipeline behavior
-
 The `reference` preset uses a cost-smart model tiering strategy: a standard model handles bulk scanning and triage, while a frontier model is used surgically for the systems-hunt and threat-hunt stages — where stronger adversarial reasoning has the highest ROI for zero-day discovery. Per-task model overrides keep costs controlled.
 
-## Scanner Plugins
+## Tasks
 
-| Scanner | Description | Auto-download |
+Every stage of the pipeline is an **AgentTask** — a composable unit with explicit dependencies that the orchestrator runs as a DAG. Tasks are selected via `--tasks` or `config.tasks`, and per-task config (including model overrides) lives in `config.taskConfig`.
+
+| Task ID | Description | Auto-download |
 |---------|-------------|---------------|
 | `semgrep` (default) | Traditional SAST via Opengrep/Semgrep | Yes |
 | `codeql` | Semantic dataflow/taint analysis via GitHub CodeQL CLI | No (opt-in) |
 | `agentic` | AI-driven scanner — LLM with read-only repo tools | N/A |
-| `taint-analysis` | IRIS-style LLM-driven CodeQL taint analysis — dynamic CWE selection, LLM-generated queries, iterative refinement | No (opt-in) |
+| `taint-cwe-select` / `taint-iris` | IRIS-style LLM-driven CodeQL taint analysis — dynamic CWE selection, LLM-generated queries, iterative refinement | No (opt-in) |
 | `systems-hunt` | Deep semantic analysis for C/C++/Rust/Go — LLM-driven CodeQL range analysis, loop induction, missing mitigations | No (opt-in) |
+| `secrets-crypto-detect` | Secrets, API keys, and cryptographic misuse detection | N/A |
+| `code-config-detect` | Security-relevant code and configuration issues | N/A |
+| `threat-model-randori` | PASTA threat modeling with STRIDE analysis | N/A |
+| `threat-hunt` | Adversarial CTF-style hunting per DFD entity | N/A |
+| `context-gatherer` | Auto-detects tech stack, frameworks, auth patterns | N/A |
+| `context-enricher` | Deep context enrichment (middleware, trust boundaries) | N/A |
 
 ```sh
-kuzushi <repo> --scanners semgrep,codeql    # run multiple scanners
-kuzushi <repo> --scanners agentic           # AI-only scan
+kuzushi <repo> --tasks semgrep,codeql               # run specific tasks
+kuzushi <repo> --tasks agentic                       # AI-only scan
+kuzushi <repo> --task-model threat-hunt=anthropic:claude-opus-4-6  # per-task model override
 ```
 
 ---
@@ -210,14 +222,13 @@ kuzushi <repo> --scanners agentic           # AI-only scan
 
 ```
 kuzushi <repo>                        # scan with defaults
-kuzushi <repo> --scanners codeql
-kuzushi <repo> --scanners semgrep,codeql
-kuzushi <repo> --scanners semgrep,agentic
+kuzushi <repo> --tasks codeql
+kuzushi <repo> --tasks semgrep,codeql
+kuzushi <repo> --tasks semgrep,agentic
 kuzushi <repo> --severity ERROR       # only ERROR-level findings
 kuzushi <repo> --max 20               # triage top 20 findings only
 kuzushi <repo> --model anthropic:claude-sonnet-4-6  # use a different model
-kuzushi <repo> --triage-model openai:gpt-4o  # separate model for triage
-kuzushi <repo> --triage-max-turns 15  # triage agent turn budget
+kuzushi <repo> --task-model triage=openai:gpt-4o  # separate model for triage stage
 kuzushi <repo> --api-key sk-ant-... --base-url https://api.example.com/  # custom API endpoint
 kuzushi <repo> --fresh                # clear prior results, re-triage everything
 kuzushi <repo> --db ./my.sqlite3      # custom database path
@@ -229,7 +240,7 @@ kuzushi <repo> --resume <run-id>      # resume a specific run by ID
 
 ```
 kuzushi <repo> --verify               # enable exploit verification for TPs
-kuzushi <repo> --verify --verify-model openai:gpt-4o-mini  # cheaper model for verification
+kuzushi <repo> --verify --task-model verify=openai:gpt-4o-mini  # cheaper model for verification
 kuzushi <repo> --verify --verify-max-turns 20
 kuzushi <repo> --verify --verify-concurrency 3
 kuzushi <repo> --verify --verify-min-confidence 0.7  # skip low-confidence TPs
@@ -239,7 +250,7 @@ kuzushi <repo> --verify --verify-min-confidence 0.7  # skip low-confidence TPs
 
 ```
 kuzushi <repo> --verify --poc-harness                          # generate exploit scripts for verified findings
-kuzushi <repo> --verify --poc-harness --poc-harness-model openai:gpt-4o-mini
+kuzushi <repo> --verify --poc-harness --task-model poc-harness=openai:gpt-4o-mini
 kuzushi <repo> --verify --poc-harness --poc-harness-max-turns 25
 kuzushi <repo> --verify --poc-harness --poc-harness-concurrency 2
 ```
@@ -336,13 +347,15 @@ kuzushi <repo> --retry-backoff-ms 10000     # initial backoff delay (default: 50
 kuzushi config get                    # show all config
 kuzushi config get model              # show one key
 kuzushi config set model anthropic:claude-sonnet-4-6
-kuzushi config set scanners semgrep,agentic
-kuzushi config set scannerConfig.codeql.dbPath ./codeql-db
-kuzushi config set scannerConfig.codeql.suite javascript-security-extended
-kuzushi config set scannerConfig.semgrep.binary opengrep
-kuzushi config set scannerConfig.semgrep.configFlag auto
-kuzushi config set scannerConfig.agentic.model anthropic:claude-sonnet-4-6
-kuzushi config set scannerConfig.agentic.maxFindings 25
+kuzushi config set tasks semgrep,agentic
+kuzushi config set taskConfig.codeql.dbPath ./codeql-db
+kuzushi config set taskConfig.codeql.suite javascript-security-extended
+kuzushi config set taskConfig.semgrep.binary opengrep
+kuzushi config set taskConfig.semgrep.configFlag auto
+kuzushi config set taskConfig.agentic.model anthropic:claude-sonnet-4-6
+kuzushi config set taskConfig.agentic.maxFindings 25
+kuzushi config set taskConfig.triage.model anthropic:claude-opus-4-6
+kuzushi config set taskConfig.verify.model openai:gpt-4o-mini
 kuzushi config set severity ERROR,WARNING,INFO
 kuzushi config set verify true
 kuzushi config set verifyMinConfidence 0.7
@@ -365,28 +378,21 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `model` | `anthropic:claude-sonnet-4-6` | LLM model for scanners and default triage model |
-| `triageModel` | _(uses `model`)_ | Override model used by the triage agent |
-| `triageBatchModel` | `anthropic:claude-haiku-4-5` | Model for batch triage (falls back to `triageModel`, then `model`) |
-| `triageMaxTurns` | `null` (uses runtime default: `10`) | Max agentic turns per triage call |
-| `scanners` | `["semgrep"]` | Scanner plugins to run, in order |
+| `model` | `anthropic:claude-sonnet-4-6` | Default LLM model for all tasks and stages |
+| `tasks` | `["semgrep"]` | Enabled task IDs, in execution order |
+| `taskConfig` | `{ semgrep: {...}, triage: {...}, ... }` | Per-task config blocks keyed by task ID or stage ID (see below) |
 | `severity` | `["ERROR","WARNING"]` | Semgrep severity filter |
 | `excludePatterns` | `["test","tests","node_modules",...]` | Directories/globs to skip |
-| `scannerConfig` | `{ semgrep: {...}, agentic: {...}, codeql: {...} }` | Per-scanner config blocks keyed by scanner id |
 | `busBackend` | `"in-process"` | Message bus transport (`in-process`) |
 | `triageConcurrency` | `5` | Parallel LLM triage calls |
-| `scanMode` | `"concurrent"` | Scanner execution mode (`sequential` or `concurrent`) |
-| `taskMode` | `"compat"` | Task selection policy: `compat`, `explicit`, or `scanners-only` |
-| `enabledTasks` | `["context-gatherer", "context-enricher", "secrets-crypto-detect", ...]` | Explicit AgentTask list when `taskMode` is `explicit`, or compat overrides in legacy mode |
-| `agentRuntimeBackend` | `"claude"` | Agent runtime backend (`claude` or `pi-ai`) |
+| `scanMode` | `"concurrent"` | Task execution mode (`sequential` or `concurrent`) |
+| `agentRuntimeBackend` | `"pi-ai"` | Agent runtime backend (`pi-ai`) |
 | `verify` | `false` | Enable proof-of-exploitability verification |
-| `verifyModel` | _(uses `triageModel` or `model`)_ | Override model for verification agent |
 | `verifyMaxTurns` | `15` | Max turns for verification agent |
 | `verifyConcurrency` | `3` | Parallel verification calls |
 | `verifyVerdicts` | `["tp"]` | Which triage verdicts to verify |
 | `verifyMinConfidence` | `0` | Minimum triage confidence to trigger verification (0-1) |
 | `pocHarness` | `false` | Enable post-verification PoC harness generation (requires `--verify`) |
-| `pocHarnessModel` | _(uses `triageModel` or `model`)_ | Override model for PoC harness agent |
 | `pocHarnessMaxTurns` | `20` | Max turns for PoC harness agent |
 | `pocHarnessConcurrency` | `2` | Parallel PoC harness generation calls |
 | `cryptoBehavioralTestEnabled` | `false` | Enable crypto behavioral testing for crypto misuse findings |
@@ -394,11 +400,19 @@ Security note: `agentRuntimeConfig.apiKey` is stored in plaintext in config file
 | `cryptoBehavioralTimeoutMs` | `120000` | Execution timeout per harness in ms |
 | `cryptoBehavioralPerFindingBudgetUsd` | `1` | Cost budget per finding for harness generation |
 | `codeGraphEnabled` | `true` | Enable LLM-powered code graph construction and enrichment |
+
+**Stage model overrides** — set per-stage models via `taskConfig` instead of top-level fields:
+
+| `taskConfig` key | Fallback chain | Purpose |
+| --- | --- | --- |
+| `taskConfig.triage.model` | `model` | Model for triage agents |
+| `taskConfig.verify.model` | `model` | Model for verification agents |
+| `taskConfig.poc-harness.model` | `taskConfig.verify.model` → `model` | Model for PoC harness generation |
 | `multiStrategyMode` | `"off"` | Multi-strategy analysis mode (`off`, `adaptive`, `full`) |
 | `multiStrategyBudgetUsd` | `2.0` | Per-finding budget across all strategies (USD) |
 | `autoPatchEnabled` | `false` | Enable automatic patch generation in pipeline |
 | `autoPatchAfter` | `"verify"` | Trigger threshold for auto-patch (`verify`, `poc`, `triage`) |
-| `patchVerifyDepth` | `"scanner"` | Re-verification depth after patching (`scanner`, `triage`, `full`) |
+| `patchVerifyDepth` | `"task"` | Re-verification depth after patching (`task`, `triage`, `full`) |
 | `patchConcurrency` | `2` | Max concurrent patch synthesis tasks |
 | `incrementalCache` | `true` | Enable incremental scanning (skip unchanged findings across runs) |
 | `incrementalDepTracking` | `true` | Include importers of changed files in rescan scope |
@@ -421,19 +435,18 @@ Example config:
 
 ```json
 {
-  "scanners": ["semgrep", "codeql", "agentic"],
+  "tasks": ["semgrep", "codeql", "context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect", "taint-cwe-select", "taint-iris"],
   "scanMode": "concurrent",
-  "taskMode": "explicit",
   "triageConcurrency": 3,
   "verify": true,
   "verifyMinConfidence": 0.7,
   "auditLog": true,
-  "cryptoBehavioralTestEnabled": false,
-  "enabledTasks": ["context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect", "taint-cwe-select", "taint-iris"],
-  "scannerConfig": {
+  "taskConfig": {
     "codeql": { "dbPath": "./codeql-db", "suite": "javascript-security-extended" },
     "semgrep": { "binary": "opengrep", "configFlag": "auto" },
-    "agentic": { "model": "anthropic:claude-sonnet-4-6", "maxFindings": 20 }
+    "agentic": { "model": "anthropic:claude-sonnet-4-6", "maxFindings": 20 },
+    "triage": { "model": "anthropic:claude-opus-4-6" },
+    "verify": { "model": "openai:gpt-4o-mini" }
   }
 }
 ```

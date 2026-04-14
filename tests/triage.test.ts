@@ -16,7 +16,7 @@ import type { AgentMessage, AgentRuntime } from "../src/agent-runtime/types.js";
 
 function makeFinding(): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "test-fp",
     ruleId: "test.rule",
     filePath: "src/test.ts",

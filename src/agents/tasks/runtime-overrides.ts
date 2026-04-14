@@ -1,7 +1,9 @@
 import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
-import type { AgentRuntime } from "../../agent-runtime/types.js";
+import type { AgentEffort, AgentRuntime } from "../../agent-runtime/types.js";
+import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
 import { ALL_TOOLS, buildPolicyLayers, resolveToolPolicy, type ToolPolicy } from "../../prompts/tool-policy.js";
 import { isRecord } from "../../utils.js";
+import type { KuzushiConfig } from "../../types.js";
 import type { TaskContext } from "../types.js";
 
 export function resolveTaskModel(
@@ -42,8 +44,68 @@ export function resolveTaskAllowedTools(
   return dedupeTools(resolveToolPolicy(availableTools.length > 0 ? availableTools : ALL_TOOLS, layers));
 }
 
+export function resolveTaskEffort(
+  context: TaskContext,
+  configKey: string,
+  ...fallbackConfigKeys: string[]
+): AgentEffort | undefined {
+  const configured = resolveTaskStringConfig(context, configKey, "effort", ...fallbackConfigKeys);
+  if (configured === "low" || configured === "medium" || configured === "high" || configured === "max") {
+    return configured;
+  }
+  return undefined;
+}
+
+export function resolveTaskThinkingDisabled(
+  context: TaskContext,
+  configKey: string,
+  ...fallbackConfigKeys: string[]
+): boolean | undefined {
+  for (const key of [configKey, ...fallbackConfigKeys]) {
+    const raw = context.config.taskConfig[key];
+    if (isRecord(raw) && typeof raw["thinkingDisabled"] === "boolean") {
+      return raw["thinkingDisabled"];
+    }
+  }
+  return undefined;
+}
+
 export function resolveTaskRuntime(context: TaskContext): AgentRuntime {
   return context.runtime;
+}
+
+export function resolveStageModel(
+  config: Pick<KuzushiConfig, "model" | "taskConfig">,
+  configKey: string,
+  ...fallbackConfigKeys: string[]
+): string {
+  return resolveStageStringConfig(config, configKey, "model", ...fallbackConfigKeys) ?? config.model;
+}
+
+export function resolveStageEffort(
+  config: Pick<KuzushiConfig, "taskConfig">,
+  configKey: string,
+  ...fallbackConfigKeys: string[]
+): AgentEffort | undefined {
+  const configured = resolveStageStringConfig(config, configKey, "effort", ...fallbackConfigKeys);
+  if (configured === "low" || configured === "medium" || configured === "high" || configured === "max") {
+    return configured;
+  }
+  return undefined;
+}
+
+export function resolveStageThinkingDisabled(
+  config: Pick<KuzushiConfig, "taskConfig">,
+  configKey: string,
+  ...fallbackConfigKeys: string[]
+): boolean | undefined {
+  for (const key of [configKey, ...fallbackConfigKeys]) {
+    const raw = resolveConfiguredTaskConfig(config as KuzushiConfig, key);
+    if (typeof raw["thinkingDisabled"] === "boolean") {
+      return raw["thinkingDisabled"];
+    }
+  }
+  return undefined;
 }
 
 function resolveTaskStringConfig(
@@ -53,8 +115,8 @@ function resolveTaskStringConfig(
   ...fallbackConfigKeys: string[]
 ): string | undefined {
   for (const key of [configKey, ...fallbackConfigKeys]) {
-    const raw = context.config.scannerConfig[key];
-    if (isRecord(raw) && typeof raw[optionKey] === "string" && raw[optionKey].trim()) {
+    const raw = resolveConfiguredTaskConfig(context.config, key);
+    if (typeof raw[optionKey] === "string" && raw[optionKey].trim()) {
       return raw[optionKey].trim();
     }
   }
@@ -68,9 +130,24 @@ function resolveTaskNumberConfig(
   ...fallbackConfigKeys: string[]
 ): number | undefined {
   for (const key of [configKey, ...fallbackConfigKeys]) {
-    const raw = context.config.scannerConfig[key];
-    if (isRecord(raw) && typeof raw[optionKey] === "number" && Number.isFinite(raw[optionKey])) {
+    const raw = resolveConfiguredTaskConfig(context.config, key);
+    if (typeof raw[optionKey] === "number" && Number.isFinite(raw[optionKey])) {
       return raw[optionKey];
+    }
+  }
+  return undefined;
+}
+
+function resolveStageStringConfig(
+  config: Pick<KuzushiConfig, "taskConfig">,
+  configKey: string,
+  optionKey: string,
+  ...fallbackConfigKeys: string[]
+): string | undefined {
+  for (const key of [configKey, ...fallbackConfigKeys]) {
+    const raw = resolveConfiguredTaskConfig(config as KuzushiConfig, key);
+    if (typeof raw[optionKey] === "string" && raw[optionKey].trim()) {
+      return raw[optionKey].trim();
     }
   }
   return undefined;

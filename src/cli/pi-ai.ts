@@ -1,5 +1,6 @@
 import { parsePiAiModelSpec } from "../agent-runtime/model-spec.js";
-import { resolveScannerConfig, TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS, TAINT_ANALYSIS_TASK_IDS } from "../capabilities.js";
+import { resolveStageModel } from "../agents/tasks/runtime-overrides.js";
+import { resolveTaskConfig, TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS, TAINT_ANALYSIS_TASK_IDS } from "../capabilities.js";
 import type { KuzushiConfig } from "../types.js";
 
 const DEFAULT_AGENTIC_MODEL = "anthropic:claude-sonnet-4-6";
@@ -63,26 +64,46 @@ export function warnPiAiBackendApiKeys(
 
 export function resolveActivePiAiModels(
   config: KuzushiConfig,
-  selectedScanners: string[],
+  selectedTasks: string[],
   enabledTaskIds: string[],
 ): string[] {
   const models = new Set<string>();
-  const scannerSet = new Set(selectedScanners);
-  const enabledTaskSet = new Set(enabledTaskIds);
+  const enabledTaskSet = new Set([...selectedTasks, ...enabledTaskIds]);
 
-  const triageModel = config.triageModel ?? config.model;
-  models.add(triageModel);
+  models.add(resolveStageModel(config, "triage"));
+  models.add(resolveStageModel(config, "triage-batch", "triage"));
+  models.add(resolveStageModel(config, "triage-specialist", "triage"));
 
   if (config.verify === true) {
-    models.add(config.verifyModel ?? triageModel);
+    models.add(resolveStageModel(config, "verify"));
+    models.add(resolveStageModel(config, "verify-batch", "verify"));
+    if (config.verifyGateEnabled !== false) {
+      models.add(resolveStageModel(config, "verify-gate", "verify"));
+    }
   }
 
   if (config.pocHarness === true) {
-    models.add(
-      config.pocHarnessModel
-      ?? config.verifyModel
-      ?? triageModel,
-    );
+    models.add(resolveStageModel(config, "poc-harness", "verify"));
+  }
+
+  if (config.dynamicAnalysisEnabled === true) {
+    models.add(resolveStageModel(config, "dynamic-analysis", "poc-harness", "verify"));
+  }
+
+  if (config.variantAnalysis === true) {
+    models.add(resolveStageModel(config, "variant-analysis"));
+  }
+
+  if (config.chainAnalysis === true) {
+    models.add(resolveStageModel(config, "chain-analysis"));
+  }
+
+  if (config.llmRescoreEnabled === true) {
+    models.add(resolveStageModel(config, "llm-rescore"));
+  }
+
+  if (config.autoPatchEnabled === true) {
+    models.add(resolveStageModel(config, "patch"));
   }
 
   for (const model of config.ensembleModels ?? []) {
@@ -92,15 +113,22 @@ export function resolveActivePiAiModels(
     }
   }
 
-  if (scannerSet.has("agentic")) {
-    const model = asModel(resolveScannerConfig(config, "agentic")["model"]) ?? DEFAULT_AGENTIC_MODEL;
+  for (const taskId of enabledTaskSet) {
+    const model = asModel(resolveTaskConfig(config, taskId)["model"]);
+    if (model) {
+      models.add(model);
+    }
+  }
+
+  if (enabledTaskSet.has("agentic")) {
+    const model = asModel(resolveTaskConfig(config, "agentic")["model"]) ?? DEFAULT_AGENTIC_MODEL;
     models.add(model);
   }
 
   const usesTaintAnalysis = TAINT_ANALYSIS_TASK_IDS.some((id) => enabledTaskSet.has(id));
   const usesCrossService = TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS.some((id) => enabledTaskSet.has(id));
   if (usesTaintAnalysis || usesCrossService) {
-    const taCfg = config.scannerConfig["taint-analysis"];
+    const taCfg = config.taskConfig["taint-analysis"];
     const labelingModel = asModel(taCfg?.["labelingModel"]) ?? config.model;
     const extractionModel = asModel(taCfg?.["extractionModel"]) ?? labelingModel;
     models.add(labelingModel);
@@ -121,19 +149,19 @@ export function resolveActivePiAiModels(
     "race-condition-detect",
   ]) {
     if (enabledTaskSet.has(taskId)) {
-      const model = asModel(resolveScannerConfig(config, taskId)["model"]) ?? config.model;
+      const model = asModel(resolveTaskConfig(config, taskId)["model"]) ?? config.model;
       models.add(model);
     }
   }
 
   if (enabledTaskSet.has("invariant-extract") || enabledTaskSet.has("invariant-check")) {
-    const iaCfg = resolveScannerConfig(config, "invariant-analysis");
+    const iaCfg = resolveTaskConfig(config, "invariant-analysis");
     models.add(asModel(iaCfg?.["extractionModel"]) ?? config.model);
     models.add(asModel(iaCfg?.["checkModel"]) ?? config.model);
   }
 
   if (enabledTaskSet.has("threat-model-randori")) {
-    const tmCfg = resolveScannerConfig(config, "threat-model");
+    const tmCfg = resolveTaskConfig(config, "threat-model");
     models.add(asModel(tmCfg?.["model"] ?? tmCfg?.["strideModel"]) ?? config.model);
   }
 

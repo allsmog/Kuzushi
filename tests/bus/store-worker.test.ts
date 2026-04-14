@@ -9,7 +9,7 @@ import type { StoreUpsertedEvent } from "../../src/bus/events.js";
 
 function makeFinding(fp: string): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: fp,
     ruleId: "test.rule",
     filePath: "src/app.ts",

@@ -13,7 +13,7 @@ interface RunMetaRow {
 
 interface ParsedRunConfig {
   model?: string;
-  scanners: string[];
+  tasks: string[];
 }
 
 interface CheckpointFindingMeta {
@@ -193,7 +193,7 @@ export function generateSarifReport(
           repo,
           runId,
           model: runConfig.model,
-          scanners: runConfig.scanners,
+          tasks: runConfig.tasks,
           summary: {
             totalFindings: stats.totalFindings ?? verdictCounts.tp + verdictCounts.fp + verdictCounts.needs_review,
             queuedForTriage: stats.queuedForTriage ?? 0,
@@ -228,19 +228,19 @@ export function generateSarifReport(
 
 function parseRunConfig(raw: string | undefined): ParsedRunConfig {
   if (!raw) {
-    return { model: undefined, scanners: [] };
+    return { model: undefined, tasks: [] };
   }
 
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const model = typeof parsed["model"] === "string" ? parsed["model"] : undefined;
-    const scanners = Array.isArray(parsed["scanners"])
-      ? parsed["scanners"].map((item) => String(item).trim()).filter(Boolean)
+    const tasks = Array.isArray(parsed["tasks"])
+      ? parsed["tasks"].map((item) => String(item).trim()).filter(Boolean)
       : [];
 
-    return { model, scanners };
+    return { model, tasks };
   } catch {
-    return { model: undefined, scanners: [] };
+    return { model: undefined, tasks: [] };
   }
 }
 

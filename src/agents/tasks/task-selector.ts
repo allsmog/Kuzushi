@@ -146,6 +146,7 @@ export const SELECTABLE_TASK_IDS: ReadonlySet<string> = new Set([
   "taint-iris",
   "systems-context-gatherer",
   "systems-invariant-extract",
+  "systems-trigger-synth",
   "systems-hunt",
 ]);
 

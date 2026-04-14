@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import type { AgentHistoryEntry } from "../../agent-runtime/types.js";
 import type { AgentActivity } from "../../agent-runtime/execution.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
+import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
 import { generatePocHarness, PocHarnessExecutionError } from "../../poc-harness.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
 import { withRetry } from "../../retry.js";
@@ -192,10 +193,7 @@ async function runDynamicAnalysis(
   onAttempt: () => void,
 ): Promise<DynamicAnalysisRun> {
   const repoRoot = context.scanPath ?? context.repoRoot;
-  const model = config.pocHarnessModel
-    ?? config.verifyModel
-    ?? config.triageModel
-    ?? config.model;
+  const model = resolveStageModel(config, "dynamic-analysis", "poc-harness", "verify");
   const maxIterations = Math.max(1, config.dynamicMaxIterations ?? 3);
   const budgetUsd = config.dynamicPerFindingBudgetUsd ?? 2;
   const coverageMode = detectCoverageMode(

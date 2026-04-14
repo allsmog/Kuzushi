@@ -20,7 +20,7 @@ import type { ScanOpts } from "../../types.js";
 import { toErrorMessage } from "../../utils.js";
 import { createLogger } from "../../logger.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { resolveTaskModel, resolveTaskRuntime, resolveTaskAllowedTools, resolveTaskPositiveInt } from "./runtime-overrides.js";
+import { resolveTaskModel, resolveTaskRuntime, resolveTaskAllowedTools, resolveTaskPositiveInt, resolveTaskEffort, resolveTaskThinkingDisabled } from "./runtime-overrides.js";
 import { resolveThreatModelOutput } from "./threat-model-guidance.js";
 import type { DfdElement, StrideThreat, ThreatModelDocument } from "./threat-modeling/types.js";
 import { isRecord } from "../../utils.js";
@@ -29,6 +29,8 @@ const log = createLogger({ stage: "threat-hunt" });
 
 interface ThreatHuntConfig {
   model: string;
+  effort?: import("../../agent-runtime/types.js").AgentEffort;
+  thinkingDisabled?: boolean;
   maxFindings: number;
   maxActors: number;
   runsPerActor: number;
@@ -41,14 +43,24 @@ interface ActorWithThreats {
   threats: StrideThreat[];
 }
 
+// Threat-hunt defaults to Opus with max thinking — deep reasoning is required
+// to avoid false positives on defended code (e.g., sandbox escapes with frozen constructors).
+// Users can still override via taskConfig["threat-hunt"].model / .effort.
+const DEFAULT_THREAT_HUNT_MODEL = "anthropic:claude-opus-4-6";
+const DEFAULT_THREAT_HUNT_EFFORT: import("../../agent-runtime/types.js").AgentEffort = "max";
+
 function resolveConfig(ctx: TaskContext): ThreatHuntConfig {
-  const model = resolveTaskModel(ctx, "threat-hunt");
+  const model = resolveTaskModel(ctx, "threat-hunt") === ctx.config.model
+    ? DEFAULT_THREAT_HUNT_MODEL  // no explicit override → use Opus
+    : resolveTaskModel(ctx, "threat-hunt");  // user explicitly set a model → respect it
   const maxFindings = resolveTaskPositiveInt(ctx, "threat-hunt", "maxFindings", 50);
   const maxActors = resolveTaskPositiveInt(ctx, "threat-hunt", "maxActors", 5);
   const runsPerActor = Math.min(resolveTaskPositiveInt(ctx, "threat-hunt", "runsPerActor", 1), 5);
   const maxConcurrentHunts = resolveTaskPositiveInt(ctx, "threat-hunt", "maxConcurrentHunts", 3);
   const maxTurnsPerHunt = resolveTaskPositiveInt(ctx, "threat-hunt", "maxTurnsPerHunt", 30);
-  return { model, maxFindings, maxActors, runsPerActor, maxConcurrentHunts, maxTurnsPerHunt };
+  const effort = resolveTaskEffort(ctx, "threat-hunt") ?? DEFAULT_THREAT_HUNT_EFFORT;
+  const thinkingDisabled = resolveTaskThinkingDisabled(ctx, "threat-hunt") ?? false;
+  return { model, maxFindings, maxActors, runsPerActor, maxConcurrentHunts, maxTurnsPerHunt, effort, thinkingDisabled };
 }
 
 /**
@@ -162,6 +174,8 @@ async function runActorHunt(
       model: config.model,
       allowedTools: resolveTaskAllowedTools(context),
       permissionMode: "dontAsk",
+      effort: config.effort,
+      thinkingDisabled: config.thinkingDisabled,
       outputFormat: {
         type: "json_schema",
         schema: FINDING_SCHEMA,

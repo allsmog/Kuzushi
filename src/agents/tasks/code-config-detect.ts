@@ -467,23 +467,23 @@ function normalizeFindings(
       continue;
     }
 
-    let scanner: string;
+    let taskId: string;
     let rulePrefix: string;
     let fingerprintPrefix: string;
 
     switch (f.detectorId) {
       case "auth-access-detect":
-        scanner = "auth-access-detect";
+        taskId = "auth-access-detect";
         rulePrefix = "auth-access";
         fingerprintPrefix = "auth-access";
         break;
       case "security-misconfig-detect":
-        scanner = "security-misconfig-detect";
+        taskId = "security-misconfig-detect";
         rulePrefix = "security-misconfig";
         fingerprintPrefix = "security-misconfig";
         break;
       default:
-        scanner = "dangerous-api-detect";
+        taskId = "dangerous-api-detect";
         rulePrefix = "dangerous-api";
         fingerprintPrefix = "dangerous-api";
         break;
@@ -500,7 +500,7 @@ function normalizeFindings(
       : "";
 
     const finding: Finding = {
-      scanner,
+      taskId,
       fingerprint,
       ruleId: `${rulePrefix}/${f.category || "unknown"}`,
       filePath,

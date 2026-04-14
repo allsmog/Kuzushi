@@ -197,6 +197,7 @@ describe("SELECTABLE_TASK_IDS", () => {
   it("contains systems-hunt tasks", () => {
     expect(SELECTABLE_TASK_IDS.has("systems-context-gatherer")).toBe(true);
     expect(SELECTABLE_TASK_IDS.has("systems-invariant-extract")).toBe(true);
+    expect(SELECTABLE_TASK_IDS.has("systems-trigger-synth")).toBe(true);
     expect(SELECTABLE_TASK_IDS.has("systems-hunt")).toBe(true);
   });
 

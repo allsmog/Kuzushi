@@ -169,7 +169,7 @@ const GATE_SYSTEM_PROMPT = [
   "",
   "  auto_accept  — The finding is clearly a true positive. The triage rationale is strong,",
   "                  confidence is high (>= 0.85), there is concrete evidence (taint path,",
-  "                  multiple scanners, clear exploit scenario), and verification would be",
+  "                  multiple tasks, clear exploit scenario), and verification would be",
   "                  redundant. Examples: hardcoded secrets with high-entropy values, SQL injection",
   "                  with clear unsanitized user input to query, command injection with obvious",
   "                  shell metacharacter passthrough.",
@@ -183,7 +183,7 @@ const GATE_SYSTEM_PROMPT = [
   "",
   "Consider these signals:",
   "- Triage confidence score and rationale quality",
-  "- Whether corroborating evidence exists (taint path, multiple scanners)",
+  "- Whether corroborating evidence exists (taint path, multiple tasks)",
   "- Severity and CWE class (critical/high RCE, injection → lean toward verify or auto_accept)",
   "- Whether verification steps are actionable or vague",
   "- Proof state from prior analysis (execution_confirmed → auto_accept)",
@@ -319,7 +319,7 @@ async function preclassifySystemsHuntCandidates(
   const results: VerifyGateResult[] = [];
 
   for (const candidate of candidates) {
-    if (candidate.finding.scanner !== "systems-hunt") {
+    if (candidate.finding.taskId !== "systems-hunt") {
       remaining.push(candidate);
       continue;
     }
@@ -411,7 +411,7 @@ function formatCandidateEntry(candidate: VerifyGateCandidate): string {
     signals.push(`taint path (${finding.taintPath.length} steps)`);
   }
   if (finding.corroboratingSignals?.length) {
-    signals.push(`${finding.corroboratingSignals.length} corroborating scanner(s)`);
+    signals.push(`${finding.corroboratingSignals.length} corroborating task(s)`);
   }
   if (finding.proofState) {
     signals.push(`proof: ${finding.proofState}`);
@@ -429,7 +429,7 @@ function formatCandidateEntry(candidate: VerifyGateCandidate): string {
 
   return [
     `### Finding: ${finding.fingerprint}`,
-    `Scanner: ${finding.scanner} | Rule: ${finding.ruleId}`,
+    `Scanner: ${finding.taskId} | Rule: ${finding.ruleId}`,
     `File: ${finding.filePath}:${finding.startLine}`,
     `Severity: ${finding.severity} | CWE: ${finding.cwe?.join(", ") || "none"}`,
     `Verdict: ${triageResult.verdict} | Confidence: ${triageResult.confidence.toFixed(2)}`,

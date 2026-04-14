@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { ScanOpts } from "../types.js";
 import { formatTaintPathForPrompt } from "../findings/taint-path.js";
-import type { Finding, ScannerConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
+import type { Finding, TaskConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
 import { resolveCodeQLBinary } from "./resolve-codeql.js";
 import { ensureDatabase, runCodeQL, selectFindings, detectAllCodeQLLanguages } from "./run-codeql.js";
 
@@ -17,7 +17,7 @@ export class CodeQLPlugin implements ScannerPlugin {
   private ram: number | undefined;
   private multiLanguage = false;
 
-  async init(config: ScannerConfig): Promise<void> {
+  async init(config: TaskConfig): Promise<void> {
     const configuredBinary = asOptionalString(config["binary"]);
     this.dbPath = asOptionalString(config["dbPath"]);
     this.language = asOptionalString(config["language"]);
@@ -34,7 +34,7 @@ export class CodeQLPlugin implements ScannerPlugin {
     this.codeqlBin = await resolveCodeQLBinary();
   }
 
-  async scan(repoRoot: string, opts: ScanOpts, _config: ScannerConfig): Promise<Finding[]> {
+  async scan(repoRoot: string, opts: ScanOpts, _config: TaskConfig): Promise<Finding[]> {
     const repoName = path.basename(repoRoot);
 
     if (this.multiLanguage && !this.language) {
@@ -53,7 +53,7 @@ export class CodeQLPlugin implements ScannerPlugin {
     });
 
     // Do not apply maxFindings here — the registry's dedupeFindings applies
-    // the single final cap across all scanners to avoid double-capping.
+    // the single final cap across all tasks to avoid double-capping.
     return selectFindings(sarif, repoName, "HEAD");
   }
 
@@ -90,7 +90,7 @@ export class CodeQLPlugin implements ScannerPlugin {
         "",
         "## Finding",
         `Repo: ${repoName}`,
-        `Scanner: ${finding.scanner}`,
+        `Scanner: ${finding.taskId}`,
         `Rule: ${finding.ruleId}`,
         `File: ${finding.filePath}:${finding.startLine}`,
         `Severity: ${finding.severity}`,

@@ -36,11 +36,11 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
     triageBatchSize: 10,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: {
+    taskConfig: {
       "crypto-behavioral-test": {
         model: "anthropic:claude-haiku-4-5",
         timingIterations: 10_000,
@@ -56,7 +56,7 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
 
 function makeFinding(ruleId = "crypto-misuse/timing-attack", fingerprint = "fp-1") {
   return {
-    scanner: "crypto-misuse-detect",
+    taskId: "crypto-misuse-detect",
     fingerprint,
     ruleId,
     filePath: "src/auth.ts",

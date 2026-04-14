@@ -111,7 +111,7 @@ export function mergeStrategyResults(results: StrategyResult[]): MergedStrategyR
     const corroboratingSignals: CorroboratingSignal[] = group
       .filter((g) => g.finding.fingerprint !== best.finding.fingerprint)
       .map((g) => ({
-        scanner: `strategy:${g.strategyId}`,
+        taskId: `strategy:${g.strategyId}`,
         fingerprint: g.finding.fingerprint,
         ruleId: g.finding.ruleId,
         filePath: g.finding.filePath,

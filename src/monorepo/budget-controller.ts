@@ -102,14 +102,14 @@ export function planModuleScans(
 
   return modules.map((module) => {
     const recommendation = recommendationByPath.get(module.path);
-    const enabledTasks = [...new Set(recommendation?.recommendedTasks ?? [])];
+    const tasks = [...new Set(recommendation?.recommendedTasks ?? [])];
     return {
       module,
-      enabledTasks,
+      tasks,
       riskLevel: recommendation?.riskLevel ?? module.priority ?? "medium",
       rationale: recommendation?.rationale ?? "No architectural rationale returned.",
       focusAreas: recommendation?.focusAreas ?? [],
-      estimatedCostUsd: estimateModuleTaskCost(enabledTasks),
+      estimatedCostUsd: estimateModuleTaskCost(tasks),
     };
   });
 }
@@ -159,8 +159,8 @@ export function formatScanPlan(plans: ModuleScanPlan[], budget: MonorepoBudget):
   lines.push(`Scan plan (${plans.length} modules, est. $${totalEstimated.toFixed(2)} / ${budgetStr} budget):`);
   for (const plan of plans) {
     const risk = plan.riskLevel.toUpperCase().padEnd(8);
-    const tasks = plan.enabledTasks.length > 0
-      ? plan.enabledTasks.join(", ")
+    const tasks = plan.tasks.length > 0
+      ? plan.tasks.join(", ")
       : "no explicit tasks";
     lines.push(`  [${risk}] ${plan.module.path} (~$${plan.estimatedCostUsd.toFixed(2)}) :: ${tasks}`);
   }

@@ -194,7 +194,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const sourceInfo = f.inputSource ? ` from ${f.inputSource}` : "";
 
     const finding: Finding = {
-      scanner: "ssrf-detect",
+      taskId: "ssrf-detect",
       fingerprint,
       ruleId: `ssrf/${f.category || "unknown"}`,
       filePath,

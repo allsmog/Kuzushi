@@ -23,6 +23,9 @@ importers:
       '@kuzushi/tob-skills':
         specifier: github:allsmog/tob-security-skills
         version: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2
+      '@kuzushi/vuln-scout':
+        specifier: github:allsmog/vuln-scout
+        version: https://codeload.github.com/allsmog/vuln-scout/tar.gz/d0d537a528f82c438539d0ef3d6cdb75e8cb82cd
       '@mariozechner/pi-ai':
         specifier: ^0.57.1
         version: 0.57.1(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
@@ -559,6 +562,10 @@ packages:
   '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2':
     resolution: {tarball: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2}
     version: 1.0.0
+
+  '@kuzushi/vuln-scout@https://codeload.github.com/allsmog/vuln-scout/tar.gz/d0d537a528f82c438539d0ef3d6cdb75e8cb82cd':
+    resolution: {tarball: https://codeload.github.com/allsmog/vuln-scout/tar.gz/d0d537a528f82c438539d0ef3d6cdb75e8cb82cd}
+    version: 1.4.0
 
   '@mariozechner/pi-ai@0.57.1':
     resolution: {integrity: sha512-Bd/J4a3YpdzJVyHLih0vDSdB0QPL4ti0XsAwtHOK/8eVhB0fHM1CpcgIrcBFJ23TMcKXMi0qamz18ERfp8tmgg==}
@@ -2702,6 +2709,8 @@ snapshots:
   '@kuzushi/randori-plugin@https://codeload.github.com/allsmog/randori-plugin/tar.gz/e977f2d6ebe2142a5c325f822f9cc9ccb67e84c0': {}
 
   '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2': {}
+
+  '@kuzushi/vuln-scout@https://codeload.github.com/allsmog/vuln-scout/tar.gz/d0d537a528f82c438539d0ef3d6cdb75e8cb82cd': {}
 
   '@mariozechner/pi-ai@0.57.1(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)':
     dependencies:

@@ -23,11 +23,11 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: {},
+    taskConfig: {},
     ...overrides,
   };
 }
@@ -49,9 +49,9 @@ describe("resolveConfig", () => {
     expect(cfg.diffBase).toBe("main");
   });
 
-  it("reads overrides from scannerConfig", () => {
+  it("reads overrides from taskConfig", () => {
     const ctx = makeContext({
-      scannerConfig: {
+      taskConfig: {
         "diff-review": { model: "openai:gpt-4", maxFindings: 10 },
       },
     });
@@ -114,7 +114,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", "main", 30);
     expect(findings).toHaveLength(1);
-    expect(findings[0].scanner).toBe("diff-review");
+    expect(findings[0].taskId).toBe("diff-review");
     expect(findings[0].scannerConfidence).toBe("HIGH");
   });
 
@@ -174,7 +174,7 @@ describe("computeFingerprint", () => {
 describe("triageAgentConfig", () => {
   it("returns a prompt with finding details", () => {
     const finding = {
-      scanner: "diff-review",
+      taskId: "diff-review",
       fingerprint: "abc",
       ruleId: "sql-injection",
       filePath: "src/api.ts",

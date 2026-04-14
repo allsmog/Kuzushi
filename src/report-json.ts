@@ -76,7 +76,7 @@ export function writeJsonReport(
 
   const findings: Array<Record<string, unknown>> = allFindings.map((f) => ({
     fingerprint: f.fingerprint,
-    scanner: f.scanner,
+    taskId: f.taskId,
     ruleId: f.ruleId,
     filePath: f.filePath,
     startLine: f.startLine,

@@ -59,7 +59,7 @@ export function detectParameterRiskBoost(text: string): number {
   return 0;
 }
 
-/** Shared risk scoring used by all scanners. */
+/** Shared risk scoring used by all tasks. */
 export function scoreFindingMetadata(input: {
   severity?: string;
   likelihood?: string;

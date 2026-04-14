@@ -107,7 +107,7 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
           const cweList = Array.isArray(f["cwe"]) ? f["cwe"].map(String) : ["CWE-862"];
 
           return {
-            scanner: "auth-logic-detect",
+            taskId: "auth-logic-detect",
             fingerprint: createHash("sha256").update([context.repoName, "auth-logic", filePath, String(f["title"]), String(startLine)].join("|")).digest("hex"),
             ruleId: "auth-logic/" + (String(f["title"] ?? "missing-authz")).toLowerCase().replace(/\s+/g, "-").slice(0, 50),
             filePath,

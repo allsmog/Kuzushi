@@ -25,7 +25,7 @@ Use available repo tools to investigate whether this finding is a true or false 
 
 ## Finding
 Repo: {{ repoName }}
-Scanner: {{ finding.scanner }}
+Scanner: {{ finding.taskId }}
 Rule: {{ finding.ruleId }}
 File: {{ finding.filePath }}:{{ finding.startLine }}
 Severity: {{ finding.severity }}
@@ -81,7 +81,7 @@ Repo: {{ repoName }}
  * plus { findingIndex: number }
  */
 export const BATCH_TRIAGE_FINDING_TEMPLATE = `### Finding {{ findingIndex }}
-Scanner: {{ finding.scanner }}
+Scanner: {{ finding.taskId }}
 Rule: {{ finding.ruleId }}
 File: {{ finding.filePath }}:{{ finding.startLine }}
 Severity: {{ finding.severity }}
@@ -129,7 +129,7 @@ Repo: {{ repoName }}
 ## Findings ({{ findingCount }} total)
 
 {% for finding in findings %}### Finding {{ loop.index }}
-Scanner: {{ finding.scanner }}
+Scanner: {{ finding.taskId }}
 Rule: {{ finding.ruleId }}
 File: {{ finding.filePath }}:{{ finding.startLine }}
 Severity: {{ finding.severity }}

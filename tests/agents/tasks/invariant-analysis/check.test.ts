@@ -141,7 +141,7 @@ describe("violationToFinding", () => {
     };
 
     const finding = violationToFinding(violation, "/tmp/repo", "test-repo");
-    expect(finding.scanner).toBe("invariant-check");
+    expect(finding.taskId).toBe("invariant-check");
     expect(finding.ruleId).toBe("invariant/inv-1/862");
     expect(finding.filePath).toBe("src/api.ts");
     expect(finding.startLine).toBe(10);
@@ -181,7 +181,7 @@ describe("computeFingerprint", () => {
 describe("triageAgentConfig", () => {
   it("returns a prompt mentioning invariant verification", () => {
     const finding = {
-      scanner: "invariant-check",
+      taskId: "invariant-check",
       fingerprint: "abc",
       ruleId: "invariant/inv-1/862",
       filePath: "src/api.ts",

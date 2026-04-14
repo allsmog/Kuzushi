@@ -264,7 +264,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const fingerprint = computeFingerprint(repoName, fingerprintPrefix, f.category, filePath, f.startLine);
 
     const finding: Finding = {
-      scanner,
+      taskId: scanner,
       fingerprint,
       ruleId: `${rulePrefix}/${f.category || "unknown"}`,
       filePath,

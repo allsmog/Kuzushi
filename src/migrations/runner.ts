@@ -85,9 +85,9 @@ function detectAndMarkLegacyDatabase(
   insertVersion.run(1, "initial_schema", now);
   applied.add(1);
 
-  // Migration 002: scanner column
-  if (findingsColumns.has("scanner")) {
-    insertVersion.run(2, "add_scanner_column", now);
+  // Migration 002: task_id column
+  if (findingsColumns.has("task_id")) {
+    insertVersion.run(2, "add_task_id_column", now);
     applied.add(2);
   }
 

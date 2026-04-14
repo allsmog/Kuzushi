@@ -47,17 +47,17 @@ function buildExitPoints(
   findings: StoredFindingRecord[],
 ): BoundaryPoint[] {
   const taintLikeFindings = findings
-    .filter((finding) => finding.scanner === "taint-iris" || finding.ruleId.startsWith("cross-module/"))
+    .filter((finding) => finding.taskId === "taint-iris" || finding.ruleId.startsWith("cross-module/"))
     .slice(0, 10);
 
   if (taintLikeFindings.length > 0) {
     return taintLikeFindings.map((finding, index) => ({
       id: `exit-${index + 1}`,
       direction: "exit",
-      protocol: resolveExitProtocol(finding.scanner),
+      protocol: resolveExitProtocol(finding.taskId),
       filePath: canonicalizeModuleFilePath(modulePath, finding.filePath),
       startLine: finding.startLine,
-      callable: `${finding.scanner}:${finding.ruleId}`,
+      callable: `${finding.taskId}:${finding.ruleId}`,
       dataDescription: finding.message,
       taintedParameters: [],
       confidence: finding.confidence,

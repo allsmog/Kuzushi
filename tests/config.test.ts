@@ -47,7 +47,6 @@ describe("loadConfig", () => {
     expect(config.busBackend).toBe(DEFAULTS.busBackend);
     expect(config.triageConcurrency).toBe(DEFAULTS.triageConcurrency);
     expect(config.scanMode).toBe(DEFAULTS.scanMode);
-    expect(config.triageModel).toBeUndefined();
     expect(config.verify).toBe(DEFAULTS.verify);
     expect(config.verifyMaxTurns).toBe(DEFAULTS.verifyMaxTurns);
     expect(config.verifyConcurrency).toBe(DEFAULTS.verifyConcurrency);
@@ -68,33 +67,29 @@ describe("loadConfig", () => {
     expect(config.pocRefinementMaxIterations).toBe(DEFAULTS.pocRefinementMaxIterations);
     expect(config.verifyRefinementMaxIterations).toBe(DEFAULTS.verifyRefinementMaxIterations);
     expect(config.agentRuntimeConfig).toBe(DEFAULTS.agentRuntimeConfig);
-    expect(config.scanners).toEqual(DEFAULTS.scanners);
-    expect(config.taskMode).toBe(DEFAULTS.taskMode);
+    expect(config.tasks).toEqual(DEFAULTS.tasks);
   });
 
-  it("injects crypto-behavioral-test into explicit enabledTasks when the feature is enabled", () => {
+  it("injects crypto-behavioral-test into explicit tasks when the feature is enabled", () => {
     writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
-      enabledTasks: ["custom-task"],
+      tasks: ["custom-task"],
       cryptoBehavioralTestEnabled: true,
     }));
 
     const config = loadConfig();
     expect(config.cryptoBehavioralTestEnabled).toBe(true);
-    expect(config.enabledTasks).toEqual(["custom-task", "crypto-behavioral-test"]);
+    expect(config.tasks).toEqual(["custom-task", "crypto-behavioral-test"]);
   });
 
   it("merges global config over defaults", () => {
     writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
       model: "custom-model",
-      triageModel: "triage-model",
       verify: true,
-      verifyModel: "verify-model",
       verifyMaxTurns: 25,
       verifyConcurrency: 2,
       verifyVerdicts: ["tp", "needs_review"],
       verifyMinConfidence: 0.7,
       pocHarness: true,
-      pocHarnessModel: "poc-model",
       pocHarnessMaxTurns: 30,
       pocHarnessConcurrency: 4,
       enableContextGathering: false,
@@ -115,19 +110,24 @@ describe("loadConfig", () => {
         apiKey: "sk-test",
         baseUrl: "https://api.example.com/",
       },
-      scannerConfig: { semgrep: { verify: false } },
+      taskConfig: {
+        semgrep: { verify: false },
+        triage: { model: "triage-model" },
+        verify: { model: "verify-model" },
+        "poc-harness": { model: "poc-model" },
+      },
     }));
     const config = loadConfig();
     expect(config.model).toBe("custom-model");
-    expect(config.triageModel).toBe("triage-model");
+    expect(config.taskConfig.triage?.model).toBe("triage-model");
     expect(config.verify).toBe(true);
-    expect(config.verifyModel).toBe("verify-model");
+    expect(config.taskConfig.verify?.model).toBe("verify-model");
     expect(config.verifyMaxTurns).toBe(25);
     expect(config.verifyConcurrency).toBe(2);
     expect(config.verifyVerdicts).toEqual(["tp", "needs_review"]);
     expect(config.verifyMinConfidence).toBe(0.7);
     expect(config.pocHarness).toBe(true);
-    expect(config.pocHarnessModel).toBe("poc-model");
+    expect(config.taskConfig["poc-harness"]?.model).toBe("poc-model");
     expect(config.pocHarnessMaxTurns).toBe(30);
     expect(config.pocHarnessConcurrency).toBe(4);
     expect(config.enableContextGathering).toBe(false);
@@ -148,16 +148,16 @@ describe("loadConfig", () => {
       apiKey: "sk-test",
       baseUrl: "https://api.example.com/",
     });
-    expect(config.scannerConfig.semgrep?.verify).toBe(false);
+    expect(config.taskConfig.semgrep?.verify).toBe(false);
   });
 
   it("applies project-level override when repoRoot is provided", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "global-model", scanners: ["semgrep"] }));
-    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({ model: "project-model", scanners: ["agentic"] }));
+    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "global-model", tasks: ["semgrep"] }));
+    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({ model: "project-model", tasks: ["agentic"] }));
 
     const config = loadConfig(TMP_REPO);
     expect(config.model).toBe("project-model");
-    expect(config.scanners).toEqual(["agentic"]);
+    expect(config.tasks).toEqual(["agentic"]);
   });
 
   it("merges agentRuntimeConfig shallowly across config layers", () => {
@@ -190,7 +190,7 @@ describe("loadConfig", () => {
       agentRuntimeConfig: {
         baseUrl: "https://evil.example/",
       },
-      scannerConfig: {
+      taskConfig: {
         semgrep: {
           binary: "/tmp/evil-semgrep",
         },
@@ -206,8 +206,8 @@ describe("loadConfig", () => {
     expect(config.agentRuntimeConfig).toEqual({
       apiKey: "global-key",
     });
-    expect(config.scannerConfig.semgrep?.binary).toBeUndefined();
-    expect(config.scannerConfig["code-graph"]?.maxEntryPoints).toBe(5);
+    expect(config.taskConfig.semgrep?.binary).toBeUndefined();
+    expect(config.taskConfig["code-graph"]?.maxEntryPoints).toBe(5);
   });
 
   it("loads unsafe repo-local config when trustProjectConfig is enabled", () => {
@@ -275,9 +275,9 @@ describe("getConfigValue", () => {
     expect(getConfigValue("model")).toBe("get-test");
   });
 
-  it("returns nested scannerConfig values", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ scannerConfig: { semgrep: { binary: "opengrep" } } }));
-    expect(getConfigValue("scannerConfig.semgrep.binary")).toBe("opengrep");
+  it("returns nested taskConfig values", () => {
+    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ taskConfig: { semgrep: { binary: "opengrep" } } }));
+    expect(getConfigValue("taskConfig.semgrep.binary")).toBe("opengrep");
   });
 
   it("returns undefined for unknown keys", () => {
@@ -291,20 +291,20 @@ describe("setConfigValue", () => {
     expect(getConfigValue("model")).toBe("new-model");
   });
 
-  it("sets triageModel", () => {
-    setConfigValue("triageModel", "claude-opus-4-20250514");
-    expect(getConfigValue("triageModel")).toBe("claude-opus-4-20250514");
+  it("sets stage model overrides via taskConfig", () => {
+    setConfigValue("taskConfig.triage.model", "claude-opus-4-20250514");
+    expect(getConfigValue("taskConfig.triage.model")).toBe("claude-opus-4-20250514");
   });
 
   it("sets verify settings", () => {
     setConfigValue("verify", "true");
-    setConfigValue("verifyModel", "claude-haiku-4-5-20251001");
+    setConfigValue("taskConfig.verify.model", "claude-haiku-4-5-20251001");
     setConfigValue("verifyMaxTurns", "20");
     setConfigValue("verifyConcurrency", "3");
     setConfigValue("verifyVerdicts", "tp,needs_review");
 
     expect(getConfigValue("verify")).toBe(true);
-    expect(getConfigValue("verifyModel")).toBe("claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.verify.model")).toBe("claude-haiku-4-5-20251001");
     expect(getConfigValue("verifyMaxTurns")).toBe(20);
     expect(getConfigValue("verifyConcurrency")).toBe(3);
     expect(getConfigValue("verifyVerdicts")).toEqual(["tp", "needs_review"]);
@@ -312,12 +312,12 @@ describe("setConfigValue", () => {
 
   it("sets poc harness settings", () => {
     setConfigValue("pocHarness", "true");
-    setConfigValue("pocHarnessModel", "claude-haiku-4-5-20251001");
+    setConfigValue("taskConfig.poc-harness.model", "claude-haiku-4-5-20251001");
     setConfigValue("pocHarnessMaxTurns", "28");
     setConfigValue("pocHarnessConcurrency", "2");
 
     expect(getConfigValue("pocHarness")).toBe(true);
-    expect(getConfigValue("pocHarnessModel")).toBe("claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.poc-harness.model")).toBe("claude-haiku-4-5-20251001");
     expect(getConfigValue("pocHarnessMaxTurns")).toBe(28);
     expect(getConfigValue("pocHarnessConcurrency")).toBe(2);
   });
@@ -404,19 +404,19 @@ describe("setConfigValue", () => {
     expect(getConfigValue("agentRuntimeConfig.baseUrl")).toBe("https://proxy.example/");
   });
 
-  it("sets scanners from comma-separated string", () => {
-    setConfigValue("scanners", "semgrep,custom-scanner");
-    expect(getConfigValue("scanners")).toEqual(["semgrep", "custom-scanner"]);
+  it("sets tasks from comma-separated string", () => {
+    setConfigValue("tasks", "semgrep,custom-scanner");
+    expect(getConfigValue("tasks")).toEqual(["semgrep", "custom-scanner"]);
   });
 
-  it("sets nested scannerConfig values", () => {
-    setConfigValue("scannerConfig.semgrep.binary", "opengrep");
-    expect(getConfigValue("scannerConfig.semgrep.binary")).toBe("opengrep");
+  it("sets nested taskConfig values", () => {
+    setConfigValue("taskConfig.semgrep.binary", "opengrep");
+    expect(getConfigValue("taskConfig.semgrep.binary")).toBe("opengrep");
   });
 
   it("sets nested scanner verify flag values", () => {
-    setConfigValue("scannerConfig.semgrep.verify", "false");
-    expect(getConfigValue("scannerConfig.semgrep.verify")).toBe(false);
+    setConfigValue("taskConfig.semgrep.verify", "false");
+    expect(getConfigValue("taskConfig.semgrep.verify")).toBe(false);
   });
 
   it("preserves repo-local layering when writing project config", () => {
@@ -520,25 +520,25 @@ describe("unsetConfigValue", () => {
     expect(getConfigValue("model")).toBe(DEFAULTS.model);
   });
 
-  it("unsets optional triageModel", () => {
-    setConfigValue("triageModel", "claude-opus-4-20250514");
-    expect(getConfigValue("triageModel")).toBe("claude-opus-4-20250514");
-    unsetConfigValue("triageModel");
-    expect(getConfigValue("triageModel")).toBeUndefined();
+  it("unsets stage model via taskConfig", () => {
+    setConfigValue("taskConfig.triage.model", "claude-opus-4-20250514");
+    expect(getConfigValue("taskConfig.triage.model")).toBe("claude-opus-4-20250514");
+    unsetConfigValue("taskConfig.triage.model");
+    expect(getConfigValue("taskConfig.triage.model")).toBeUndefined();
   });
 
-  it("unsets optional verifyModel", () => {
-    setConfigValue("verifyModel", "claude-haiku-4-5-20251001");
-    expect(getConfigValue("verifyModel")).toBe("claude-haiku-4-5-20251001");
-    unsetConfigValue("verifyModel");
-    expect(getConfigValue("verifyModel")).toBeUndefined();
+  it("unsets verify model via taskConfig", () => {
+    setConfigValue("taskConfig.verify.model", "claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.verify.model")).toBe("claude-haiku-4-5-20251001");
+    unsetConfigValue("taskConfig.verify.model");
+    expect(getConfigValue("taskConfig.verify.model")).toBeUndefined();
   });
 
-  it("unsets optional pocHarnessModel", () => {
-    setConfigValue("pocHarnessModel", "claude-haiku-4-5-20251001");
-    expect(getConfigValue("pocHarnessModel")).toBe("claude-haiku-4-5-20251001");
-    unsetConfigValue("pocHarnessModel");
-    expect(getConfigValue("pocHarnessModel")).toBeUndefined();
+  it("unsets poc-harness model via taskConfig", () => {
+    setConfigValue("taskConfig.poc-harness.model", "claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.poc-harness.model")).toBe("claude-haiku-4-5-20251001");
+    unsetConfigValue("taskConfig.poc-harness.model");
+    expect(getConfigValue("taskConfig.poc-harness.model")).toBeUndefined();
   });
 
   it("resets verify keys to defaults", () => {
@@ -615,9 +615,9 @@ describe("unsetConfigValue", () => {
   });
 
   it("removes nested key", () => {
-    setConfigValue("scannerConfig.semgrep.binary", "opengrep");
-    unsetConfigValue("scannerConfig.semgrep.binary");
-    expect(getConfigValue("scannerConfig.semgrep.binary")).toBeUndefined();
+    setConfigValue("taskConfig.semgrep.binary", "opengrep");
+    unsetConfigValue("taskConfig.semgrep.binary");
+    expect(getConfigValue("taskConfig.semgrep.binary")).toBeUndefined();
   });
 
   it("restores inherited values when removing a project override", () => {
@@ -723,7 +723,7 @@ describe("prototype pollution prevention", () => {
   });
 
   it("rejects prototype in dotted path for set", () => {
-    expect(() => setConfigValue("scannerConfig.prototype.x", "true")).toThrow("Invalid config key segment");
+    expect(() => setConfigValue("taskConfig.prototype.x", "true")).toThrow("Invalid config key segment");
   });
 
   it("rejects __proto__ in dotted path for unset", () => {

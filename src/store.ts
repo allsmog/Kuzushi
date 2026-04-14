@@ -16,7 +16,7 @@ import type {
   EngineProvenance,
   Finding,
   ProofState,
-  ScannerId,
+  TaskId,
   SuppressionReason,
   TaintPathStep,
 } from "./scanners/types.js";
@@ -53,7 +53,7 @@ export interface PipelineRunRecord {
 }
 
 export interface StoredFindingRecord {
-  scanner: ScannerId;
+  taskId: TaskId;
   fingerprint: string;
   repo: string;
   ref: string;
@@ -122,14 +122,14 @@ export function defaultDbPath(repoRoot: string): string {
 
 const UPSERT_FINDING_SQL = `
     INSERT INTO findings (
-      fingerprint, scanner, repo, ref, rule_id, file_path, start_line,
+      fingerprint, task_id, repo, ref, rule_id, file_path, start_line,
       severity, message, adjusted_score, corroboration_json, suppression_json, verdict, confidence,
       rationale, verification_steps, fix_patch, triage_cost_usd, triage_details_json,
       composite_confidence, confidence_signals_json, taint_path_json, proof_state, engine_provenance_json,
       finding_metadata_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fingerprint) DO UPDATE SET
-      scanner=excluded.scanner,
+      task_id=excluded.task_id,
       repo=excluded.repo,
       ref=excluded.ref,
       rule_id=excluded.rule_id,
@@ -164,7 +164,7 @@ function upsertFindingParams(
 ): unknown[] {
   return [
     triage.fingerprint,
-    finding.scanner,
+    finding.taskId,
     repo,
     ref,
     finding.ruleId,
@@ -647,7 +647,7 @@ export function getActionableFindings(
   const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
 
   const query = `
-    SELECT scanner, fingerprint, repo, ref, rule_id as ruleId, file_path as filePath, start_line as startLine,
+    SELECT task_id as taskId, fingerprint, repo, ref, rule_id as ruleId, file_path as filePath, start_line as startLine,
            severity, message, verdict, confidence, rationale,
            verification_steps as verificationSteps,
            triage_details_json as triageDetailsJson,
@@ -685,7 +685,7 @@ export function getActionableFindings(
   `;
 
   const rows = db.prepare(query).all(...params) as Array<{
-    scanner: ScannerId;
+    taskId: TaskId;
     fingerprint: string;
     repo: string;
     ref: string;
@@ -729,7 +729,7 @@ export function getActionableFindings(
   }>;
 
   return rows.map((row) => ({
-    scanner: row.scanner,
+    taskId: row.taskId,
     fingerprint: row.fingerprint,
     repo: row.repo,
     ref: row.ref,
@@ -777,7 +777,7 @@ export function getTriagedFindingsForRepo(
   db: Database.Database,
   repo: string,
 ): Array<{
-  scanner: ScannerId;
+  taskId: TaskId;
   fingerprint: string;
   ruleId: string;
   filePath: string;
@@ -793,7 +793,7 @@ export function getTriagedFindingsForRepo(
 }> {
   const rows = db.prepare(`
     SELECT
-      scanner,
+      task_id as taskId,
       fingerprint,
       rule_id as ruleId,
       file_path as filePath,
@@ -810,7 +810,7 @@ export function getTriagedFindingsForRepo(
     WHERE repo = ?
     ORDER BY updated_at DESC, confidence DESC
   `).all(repo) as Array<{
-    scanner: ScannerId;
+    taskId: TaskId;
     fingerprint: string;
     ruleId: string;
     filePath: string;
@@ -840,7 +840,7 @@ export function getTriagedFindingsForRepo(
     }
 
     return {
-      scanner: row.scanner,
+      taskId: row.taskId,
       fingerprint: row.fingerprint,
       ruleId: row.ruleId,
       filePath: row.filePath,
@@ -1001,20 +1001,20 @@ function parseCorroboratingSignals(raw: string | null): CorroboratingSignal[] {
       continue;
     }
     const record = item as Record<string, unknown>;
-    const scanner = asOptionalString(record["scanner"]);
+    const taskId = asOptionalString(record["taskId"]);
     const fingerprint = asOptionalString(record["fingerprint"]);
     const ruleId = asOptionalString(record["ruleId"]);
     const filePath = asOptionalString(record["filePath"]);
     const startLine = asFiniteNumber(record["startLine"]);
     const score = asFiniteNumber(record["score"]);
-    if (!scanner || !fingerprint || !ruleId || !filePath || startLine == null || score == null) {
+    if (!taskId || !fingerprint || !ruleId || !filePath || startLine == null || score == null) {
       continue;
     }
     const cwe = Array.isArray(record["cwe"])
       ? record["cwe"].map((value) => String(value).trim()).filter(Boolean)
       : [];
     signals.push({
-      scanner,
+      taskId,
       fingerprint,
       ruleId,
       filePath,
@@ -1442,6 +1442,47 @@ export function getLatestResumableRun(
   `).get(repo) as PipelineRunRecord | undefined;
 
   return row;
+}
+
+/**
+ * List all resumable module runs for a monorepo.
+ * Returns one run per module (the latest resumable run for each repo name
+ * that starts with the given prefix).
+ */
+export function getResumableModuleRuns(
+  db: Database.Database,
+  monorepoPrefix: string,
+): PipelineRunRecord[] {
+  const rows = db.prepare(`
+    SELECT
+      run_id as runId,
+      repo,
+      started_at as startedAt,
+      status,
+      config_json as configJson,
+      scan_opts_json as scanOptsJson,
+      findings_json as findingsJson,
+      context_json as contextJson,
+      total_cost_usd as totalCostUsd,
+      completed_at as completedAt,
+      updated_at as updatedAt,
+      metrics_json as metricsJson,
+      assertions_json as assertionsJson,
+      prompt_hash as promptHash
+    FROM pipeline_runs
+    WHERE repo LIKE ? || '/%'
+      AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing', 'dynamic-analyzing', 'complete')
+    ORDER BY started_at DESC, rowid DESC
+  `).all(monorepoPrefix) as PipelineRunRecord[];
+
+  // Dedupe: keep only the latest run per repo (module)
+  const byRepo = new Map<string, PipelineRunRecord>();
+  for (const row of rows) {
+    if (!byRepo.has(row.repo)) {
+      byRepo.set(row.repo, row);
+    }
+  }
+  return [...byRepo.values()];
 }
 
 /** Get persisted run checkpoint by run id. */

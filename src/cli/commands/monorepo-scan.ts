@@ -40,7 +40,7 @@ import type {
   StaticIntelligence,
 } from "../../monorepo/types.js";
 import { printMonorepoSummary, type MonorepoAggregateSummary, type MonorepoModuleResult } from "../../report-monorepo.js";
-import { defaultDbPath, getActionableFindings, getVerdictCounts, initDb, type StoredFindingRecord } from "../../store.js";
+import { defaultDbPath, getActionableFindings, getLatestResumableRun, getResumableModuleRuns, getVerdictCounts, initDb, type StoredFindingRecord } from "../../store.js";
 import type { Finding } from "../../scanners/types.js";
 import { CliUsageError } from "../errors.js";
 import type { ScanCommandOptions } from "../scan-config.js";
@@ -63,10 +63,6 @@ export async function runMonorepoScan(
   repoPath: string,
   opts: ScanCommandOptions,
 ): Promise<void> {
-  if (opts.resume !== undefined) {
-    throw new CliUsageError("--resume is not supported with monorepo module scanning.");
-  }
-
   const { root: monorepoRoot, name: monorepoName } = resolveRepo(repoPath);
   const { config, scanOpts } = prepareScanExecution(monorepoRoot, opts);
   let runtime: AgentRuntime | undefined;
@@ -95,6 +91,106 @@ export async function runMonorepoScan(
     applyPipelineCacheOptions(opts);
     runtime = createPipelineRuntime(config, scanOpts);
 
+    const dbPath = opts.db ?? defaultDbPath(monorepoRoot);
+    const budget = createBudget(config);
+
+    // ── Resume fast-path: skip discovery/Phase 0/Phase 1 entirely ────
+    // Reconstruct the module list from existing DB runs and jump to Phase 2.
+    if (opts.resume !== undefined) {
+      const db = initDb(dbPath);
+      let moduleRuns;
+      try {
+        moduleRuns = getResumableModuleRuns(db, monorepoName);
+      } finally {
+        db.close();
+      }
+
+      if (moduleRuns.length === 0) {
+        throw new CliUsageError(`no resumable module runs found for "${monorepoName}". Run without --resume to start fresh.`);
+      }
+
+      // Reconstruct minimal module + plan objects from the DB records
+      const resumePlans: ModuleScanPlan[] = moduleRuns.map((run) => {
+        const modulePath = run.repo.slice(monorepoName.length + 1); // strip "monorepoName/"
+        const module: DiscoveredModule = {
+          name: normalizeModuleName(path.basename(modulePath)),
+          path: modulePath,
+          description: "",
+          language: "unknown",
+          moduleKind: "standalone",
+          discoveryEvidence: ["resume"],
+        };
+        return {
+          module,
+          tasks: [],
+          riskLevel: "medium" as ModulePriority,
+          rationale: "Resumed from previous run",
+          focusAreas: [],
+          estimatedCostUsd: 0,
+        };
+      });
+
+      const nonComplete = resumePlans.filter((p) => {
+        const run = moduleRuns.find((r) => r.repo === `${monorepoName}/${p.module.path}`);
+        return run?.status !== "complete";
+      });
+
+      console.log(`\nResuming ${resumePlans.length} module(s) from previous run (${nonComplete.length} need triage)...`);
+
+      // Build minimal static intel + context for the fan-in/reporting phases
+      const filteredModules = resumePlans.map((p) => p.module);
+      const dependencyGraph = await buildDependencyGraph(monorepoRoot, filteredModules);
+      const staticIntel: StaticIntelligence = {
+        dependencyGraph,
+        attackSurfaces: new Map(),
+        interactionEdges: deriveInteractionEdgesFromDependencyGraph(dependencyGraph),
+      };
+      const contextIndex = await buildMonorepoContextIndex(monorepoRoot, filteredModules, staticIntel);
+      const threatModel = buildDeterministicThreatModel(filteredModules, staticIntel, contextIndex);
+
+      console.log(`\n[Phase 2] Resuming ${resumePlans.length} modules...`);
+      const results = await runPlansInParallel({
+        plans: resumePlans,
+        monorepoRoot,
+        monorepoName,
+        config,
+        scanOpts,
+        opts,
+        dbPath,
+        runtime,
+        threatModel,
+        staticIntel,
+        contextIndex,
+        budget,
+      });
+
+      const db2 = initDb(dbPath);
+      try {
+        const summarized = results.map((result) => ({
+          ...result,
+          verdictCounts: getVerdictCounts(db2, result.repoName),
+        }));
+        const aggregate = await runFanIn({
+          monorepoRoot,
+          runtime,
+          model: config.monorepo?.discoveryModel ?? config.model,
+          results,
+          threatModel,
+          staticIntel,
+          contextIndex,
+          db: db2,
+          enabled: config.monorepo?.crossModuleTracing !== false,
+        });
+        budget.phase3CostUsd = aggregate.phase3CostUsd;
+        budget.spentUsd += aggregate.phase3CostUsd;
+        printMonorepoSummary(db2, summarized, aggregate.summary);
+      } finally {
+        db2.close();
+      }
+      return;
+    }
+
+    // ── Normal (non-resume) path ─────────────────────────────────────
     const { modules, products, costUsd: discoveryCostUsd } = await resolveMonorepoModules(monorepoRoot, config, opts, runtime);
     const filteredModules = applyModuleFilters(
       modules,
@@ -107,8 +203,6 @@ export async function runMonorepoScan(
       return;
     }
 
-    const dbPath = opts.db ?? defaultDbPath(monorepoRoot);
-    const budget = createBudget(config);
     budget.phase0CostUsd += discoveryCostUsd;
     budget.spentUsd += discoveryCostUsd;
 
@@ -300,23 +394,47 @@ async function runPlansInParallel(params: {
     budget,
   } = params;
 
+  const resuming = opts.resume !== undefined;
   const limiter = createConcurrencyLimiter(DEFAULT_MONOREPO_CONCURRENCY);
   const settled = await Promise.allSettled(
     plans.map((plan, index) =>
       limiter(async () => {
         const moduleRoot = resolveModuleDirectory(monorepoRoot, plan.module.path);
         const repoName = `${monorepoName}/${plan.module.path}`;
+
+        // When resuming, skip modules that already completed
+        if (resuming) {
+          const db = initDb(dbPath);
+          try {
+            const existingRun = getLatestResumableRun(db, repoName);
+            if (existingRun?.status === "complete") {
+              console.log(`  [${index + 1}/${plans.length}] ${plan.module.path} :: SKIPPED (already complete)`);
+              return {
+                plan,
+                module: plan.module,
+                repoName,
+                runId: existingRun.runId,
+                status: "complete",
+                stats: undefined,
+                verdictCounts: getVerdictCounts(db, repoName),
+              } satisfies ModuleExecutionResult;
+            }
+          } finally {
+            db.close();
+          }
+        }
+
         const sharedContext = contextIndex.modules.get(plan.module.path);
         if (!sharedContext) {
           throw new Error(`missing shared context for module ${plan.module.path}`);
         }
 
-        console.log(`  [${index + 1}/${plans.length}] ${plan.module.path} :: ${plan.enabledTasks.join(", ") || "no explicit tasks"}`);
+        const resumeLabel = resuming ? " (resuming)" : "";
+        console.log(`  [${index + 1}/${plans.length}] ${plan.module.path}${resumeLabel} :: ${plan.tasks.join(", ") || "no explicit tasks"}`);
 
         const moduleConfig = {
           ...config,
-          taskMode: "explicit" as const,
-          enabledTasks: [...plan.enabledTasks],
+          tasks: [...plan.tasks],
           enableDynamicTaskSelection: false,
         };
         const monorepoContext: MonorepoSharedContext = {
@@ -337,6 +455,12 @@ async function runPlansInParallel(params: {
             }
           : scanOpts;
 
+        // When resuming, pass resume:true so each module's pipeline
+        // finds its own latest resumable run and picks up from checkpoint
+        const moduleOpts = resuming
+          ? { ...opts, resume: true as const }
+          : opts;
+
         const pipelineResult = await runPipeline({
           repoRoot: monorepoRoot,
           scanPath: moduleRoot,
@@ -344,7 +468,7 @@ async function runPlansInParallel(params: {
           runRepoId: repoName,
           config: moduleConfig,
           scanOpts: moduleScanOpts,
-          opts,
+          opts: moduleOpts,
           dbPath,
           reportMode: "suppress",
           runtime,
@@ -435,7 +559,7 @@ async function runFanIn(params: {
       : null;
     if (persistedBoundary) {
       boundaries.push(persistedBoundary);
-    } else if (result.plan.enabledTasks.includes("taint-iris")) {
+    } else if (result.plan.tasks.includes("taint-iris")) {
       boundaries.push(buildBoundaryManifest(result.plan, sharedContext, actionable));
     }
   }
@@ -609,7 +733,7 @@ function printModulePlans(plans: ModuleScanPlan[], budget: ReturnType<typeof cre
   console.log("");
   for (const plan of plans) {
     console.log(`${plan.module.path} [${plan.riskLevel}]`);
-    console.log(`  Tasks: ${plan.enabledTasks.join(", ") || "none"}`);
+    console.log(`  Tasks: ${plan.tasks.join(", ") || "none"}`);
     console.log(`  Why:   ${plan.rationale}`);
   }
 }
@@ -703,7 +827,7 @@ function buildFindingDedupeKey(finding: StoredFindingRecord): string {
 function toTracingFinding(finding: StoredFindingRecord): Finding {
   return {
     fingerprint: finding.fingerprint,
-    scanner: finding.scanner,
+    taskId: finding.taskId,
     ruleId: finding.ruleId,
     filePath: finding.filePath,
     startLine: finding.startLine,

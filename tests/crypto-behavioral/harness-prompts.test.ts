@@ -13,7 +13,7 @@ import type { Finding } from "../../src/scanners/types.js";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
-    scanner: "crypto-misuse-detect",
+    taskId: "crypto-misuse-detect",
     fingerprint: "fp-1",
     ruleId: "crypto-misuse/timing-attack",
     filePath: "src/auth.ts",

@@ -254,19 +254,13 @@ export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
         surfaceOutput?.metadata.codeqlDbPath,
       );
       totalCostUsd += corroboration.costUsd;
-      const enoughLensAgreement = value.lenses.size >= config.minLensAgreement && coherentTrigger;
-      if (corroboration.status === "counterexample-found") {
-        continue;
-      }
-
-      let corroborationStatus: SystemsCorroborationStatus;
-      let cheapVerifiable = false;
-      if (corroboration.status === "survived") {
-        corroborationStatus = "survived";
-        cheapVerifiable = corroboration.cheapVerifiable && corroboration.coherentTrigger;
-      } else if (enoughLensAgreement) {
-        corroborationStatus = "lens-agreement-only";
-      } else {
+      const emission = resolveEmissionDecision({
+        lensCount: value.lenses.size,
+        minLensAgreement: config.minLensAgreement,
+        coherentTrigger,
+        corroboration,
+      });
+      if (!emission.emit || !emission.corroborationStatus) {
         continue;
       }
 
@@ -290,19 +284,19 @@ export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
         attackerControlledFields: [...value.attackerControlledFields],
         memoryPrimitive: value.memoryPrimitive,
         hardeningNotes: [...value.hardeningNotes],
-        cheapVerifiable,
+        cheapVerifiable: emission.cheapVerifiable,
         reasoning: [value.rationales.join(" | "), corroboration.rationale].filter(Boolean).join(" | "),
         analysisPath: value.analysisPath,
         guardLocations: corroboration.guardLocations,
         counterexampleNotes: corroboration.counterexampleNotes,
         relatedFiles: packBySurfaceId.get(value.surface.id)?.relatedFiles ?? [value.surface.filePath],
-        corroborationStatus,
+        corroborationStatus: emission.corroborationStatus,
       };
 
       const artifactPath = await writeSystemsHuntArtifact(config.artifactRoot, artifact);
       const relativeArtifactPath = normalizeArtifactPath(context.repoRoot, artifactPath);
       findings.push({
-        scanner: "systems-hunt",
+        taskId: "systems-hunt",
         fingerprint,
         ruleId: buildRuleId(value.surface.kind, value.cwe),
         filePath: value.filePath,
@@ -320,7 +314,7 @@ export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
         proofState: "symbolic_only",
         engineProvenance: [
           { kind: "agentic", detail: `Systems hunt lenses: ${[...value.lenses].join(", ")}` },
-          { kind: "agentic", detail: `Systems hunt corroboration: ${corroborationStatus}` },
+          { kind: "agentic", detail: `Systems hunt corroboration: ${emission.corroborationStatus}` },
           { kind: "agentic", detail: buildSystemsHuntArtifactDetail(relativeArtifactPath) },
         ],
       });
@@ -395,6 +389,8 @@ async function analyzeSurface(
         options: {
           cwd: context.repoRoot,
           model: config.model,
+          effort: config.effort,
+          thinkingDisabled: config.thinkingDisabled,
           allowedTools,
           permissionMode: "dontAsk",
           canUseTool,
@@ -569,6 +565,8 @@ async function corroborateFinding(
       options: {
         cwd: context.repoRoot,
         model: config.model,
+        effort: config.effort,
+        thinkingDisabled: config.thinkingDisabled,
         allowedTools,
         permissionMode: "dontAsk",
         canUseTool,
@@ -676,6 +674,36 @@ export function parseCorroborationOutput(
     counterexampleNotes: stringArray(raw["counterexampleNotes"]),
     costUsd,
   };
+}
+
+export function resolveEmissionDecision(args: {
+  lensCount: number;
+  minLensAgreement: number;
+  coherentTrigger: boolean;
+  corroboration: CorroborationResult;
+}): {
+  emit: boolean;
+  corroborationStatus?: SystemsCorroborationStatus;
+  cheapVerifiable: boolean;
+} {
+  if (args.corroboration.status === "counterexample-found") {
+    return { emit: false, cheapVerifiable: false };
+  }
+  if (args.corroboration.status === "survived") {
+    return {
+      emit: true,
+      corroborationStatus: "survived",
+      cheapVerifiable: args.corroboration.cheapVerifiable && args.corroboration.coherentTrigger,
+    };
+  }
+  if (args.lensCount >= args.minLensAgreement && args.coherentTrigger) {
+    return {
+      emit: true,
+      corroborationStatus: "lens-agreement-only",
+      cheapVerifiable: false,
+    };
+  }
+  return { emit: false, cheapVerifiable: false };
 }
 
 export function parseLensOutput(
@@ -1052,6 +1080,7 @@ export const __systemsHuntInternals = {
   buildCorroborationPrompt,
   parseLensOutput,
   parseCorroborationOutput,
+  resolveEmissionDecision,
   mergeLensFindings,
   createSystemsHuntToolGuard,
 };

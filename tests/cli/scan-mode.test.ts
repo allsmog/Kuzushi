@@ -164,17 +164,16 @@ describe("resolveMonorepoExecution", () => {
     });
   });
 
-  it("promotes scanners-only mode when CLI scanner selections expand to AgentTasks", () => {
+  it("promotes tasks-only mode when CLI scanner selections expand to AgentTasks", () => {
     const root = makeTempRoot();
     writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "repo" }), "utf-8");
 
     const { config, scanOpts } = prepareScanExecution(root, makeOptions({
       preset: "fast",
-      scanners: "secrets",
+      tasks: "secrets",
     }));
 
-    expect(config.taskMode).toBe("explicit");
-    expect(config.enabledTasks).toContain("secrets-crypto-detect");
-    expect(scanOpts.scanners).toEqual([]);
+    expect(config.tasks).toContain("secrets-crypto-detect");
+    expect(scanOpts.tasks).toContain("secrets");
   });
 });

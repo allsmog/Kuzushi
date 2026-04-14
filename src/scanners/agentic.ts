@@ -2,7 +2,7 @@ import path from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import { attachTaskOutputMeta } from "../task-output-meta.js";
 import type { ScanOpts } from "../types.js";
-import type { Finding, ScannerConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
+import type { Finding, TaskConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
 import { runAgentic, selectAgenticFindings } from "./run-agentic.js";
 
 const DEFAULT_MODEL = "anthropic:claude-sonnet-4-6";
@@ -16,7 +16,7 @@ export class AgenticPlugin implements ScannerPlugin {
   private maxFindings = DEFAULT_MAX_FINDINGS;
   private passes: 1 | 2 = 1;
 
-  async init(config: ScannerConfig): Promise<void> {
+  async init(config: TaskConfig): Promise<void> {
     const configuredModel = asOptionalString(config["model"]);
     const configuredMax = asPositiveInt(config["maxFindings"]);
 
@@ -28,7 +28,7 @@ export class AgenticPlugin implements ScannerPlugin {
   async scan(
     repoRoot: string,
     opts: ScanOpts,
-    _config: ScannerConfig,
+    _config: TaskConfig,
     runtime?: AgentRuntime,
   ): Promise<Finding[]> {
     const repoName = path.basename(repoRoot);
@@ -62,7 +62,7 @@ export class AgenticPlugin implements ScannerPlugin {
     }
 
     // Do not apply maxFindings here — the registry's dedupeFindings applies
-    // the single final cap across all scanners to avoid double-capping.
+    // the single final cap across all tasks to avoid double-capping.
     return attachTaskOutputMeta(findings, { costUsd: totalCost });
   }
 
@@ -74,7 +74,7 @@ export class AgenticPlugin implements ScannerPlugin {
         "",
         "## Finding",
         `Repo: ${repoName}`,
-        `Scanner: ${finding.scanner}`,
+        `Scanner: ${finding.taskId}`,
         `Rule: ${finding.ruleId}`,
         `File: ${finding.filePath}:${finding.startLine}`,
         `Severity: ${finding.severity}`,

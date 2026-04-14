@@ -4,7 +4,7 @@ import type { Finding } from "../../src/scanners/types.js";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
-    scanner: "test",
+    taskId: "test",
     fingerprint: "abc123",
     ruleId: "test/rule",
     filePath: "src/app.ts",

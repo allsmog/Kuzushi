@@ -12,11 +12,11 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: {},
+    taskConfig: {},
   };
 }
 
@@ -40,9 +40,9 @@ describe("resolveInvariantAnalysisConfig", () => {
     expect(resolved.checkBatchSize).toBe(50);
   });
 
-  it("reads overrides from scannerConfig", () => {
+  it("reads overrides from taskConfig", () => {
     const config = makeConfig();
-    config.scannerConfig["invariant-analysis"] = {
+    config.taskConfig["invariant-analysis"] = {
       extractionModel: "openai:gpt-4",
       checkModel: "openai:gpt-4",
       maxInvariants: 100,
@@ -61,7 +61,7 @@ describe("resolveInvariantAnalysisConfig", () => {
   it("falls back to global model for extraction/check models", () => {
     const config = makeConfig();
     config.model = "google:gemini-pro";
-    config.scannerConfig["invariant-analysis"] = {};
+    config.taskConfig["invariant-analysis"] = {};
 
     const resolved = resolveInvariantAnalysisConfig(config);
     expect(resolved.extractionModel).toBe("google:gemini-pro");
@@ -70,7 +70,7 @@ describe("resolveInvariantAnalysisConfig", () => {
 
   it("clamps invalid confidenceThreshold", () => {
     const config = makeConfig();
-    config.scannerConfig["invariant-analysis"] = { confidenceThreshold: 2.0 };
+    config.taskConfig["invariant-analysis"] = { confidenceThreshold: 2.0 };
 
     const resolved = resolveInvariantAnalysisConfig(config);
     expect(resolved.confidenceThreshold).toBe(0.4);

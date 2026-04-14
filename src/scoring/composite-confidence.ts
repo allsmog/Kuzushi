@@ -55,7 +55,7 @@ export function extractScannerSignal(finding: Finding): ConfidenceSignal {
     name: "scanner",
     score,
     weight: 0,
-    source: finding.scanner ?? "unknown",
+    source: finding.taskId ?? "unknown",
   };
 }
 

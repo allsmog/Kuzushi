@@ -77,7 +77,7 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
     const enrichment = coerceContextEnrichment(context.upstreamOutputs.get("context-enricher"));
     const appModel = coerceApplicationModel(context.upstreamOutputs.get("app-model-build"));
 
-    const graphConfig = (context.config.scannerConfig["code-graph"] ?? {}) as Record<string, unknown>;
+    const graphConfig = (context.config.taskConfig["code-graph"] ?? {}) as Record<string, unknown>;
     const rawMaxEntryPoints = typeof graphConfig["maxEntryPoints"] === "number" ? graphConfig["maxEntryPoints"] : null;
     const maxEntryPoints = rawMaxEntryPoints != null ? rawMaxEntryPoints : DEFAULT_MAX_ENTRY_POINTS;
     const model = resolveTaskModel(context, "code-graph");

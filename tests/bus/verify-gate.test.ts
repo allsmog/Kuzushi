@@ -14,7 +14,7 @@ import { buildSystemsHuntArtifactDetail } from "../../src/agents/tasks/systems-h
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
     fingerprint: "fp-001",
-    scanner: "semgrep",
+    taskId: "semgrep",
     ruleId: "javascript.lang.security.audit.xss.no-xss",
     filePath: "src/app.ts",
     startLine: 42,
@@ -230,12 +230,12 @@ describe("gateVerificationCandidates", () => {
         [
           makeCandidate({
             fingerprint: "fp-001",
-            scanner: "systems-hunt",
+            taskId: "systems-hunt",
             engineProvenance: [{ kind: "agentic", detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-001.json") }],
           }),
           makeCandidate({
             fingerprint: "fp-002",
-            scanner: "systems-hunt",
+            taskId: "systems-hunt",
             engineProvenance: [{ kind: "agentic", detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-002.json") }],
           }),
         ],

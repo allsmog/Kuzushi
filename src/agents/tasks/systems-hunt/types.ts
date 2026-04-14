@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { FileIndex, KuzushiConfig } from "../../../types.js";
-import { resolveScannerConfig } from "../../../capabilities.js";
+import { resolveTaskConfig } from "../../../capabilities.js";
 import type { TaskContext } from "../../types.js";
 import { isPathWithinRoot } from "../../../utils.js";
 
@@ -187,6 +187,8 @@ export interface SystemsHuntArtifact {
 
 export interface SystemsHuntConfig {
   model: string;
+  effort?: import("../../../agent-runtime/types.js").AgentEffort;
+  thinkingDisabled?: boolean;
   maxFindings: number;
   maxSurfaces: number;
   surfacePackDepth: number;
@@ -216,7 +218,7 @@ export function hasSystemsSignals(fileIndex: FileIndex | undefined): boolean {
 export function resolveSystemsHuntConfig(
   context: Pick<TaskContext, "config" | "repoRoot" | "modelOverride">,
 ): SystemsHuntConfig {
-  const raw = resolveScannerConfig(context.config as KuzushiConfig, "systems-hunt");
+  const raw = resolveTaskConfig(context.config as KuzushiConfig, "systems-hunt");
   const configuredModel = asNonEmptyString(raw["model"]);
   const artifactRootRelative = normalizeArtifactDir(asNonEmptyString(raw["artifactDir"]) || ".kuzushi/systems-hunt");
   const artifactRoot = path.resolve(context.repoRoot, artifactRootRelative);
@@ -225,8 +227,17 @@ export function resolveSystemsHuntConfig(
     throw new Error(`systems-hunt artifactDir must stay inside the repository root: ${artifactRootRelative}`);
   }
 
+  const DEFAULT_MODEL = "anthropic:claude-opus-4-6";
+  const resolvedModel = context.modelOverride ?? configuredModel ?? DEFAULT_MODEL;
+  const configuredEffort = asNonEmptyString(raw["effort"]);
+  const effort = (configuredEffort === "low" || configuredEffort === "medium" || configuredEffort === "high" || configuredEffort === "max")
+    ? configuredEffort as import("../../../agent-runtime/types.js").AgentEffort
+    : "max" as const;
+
   return {
-    model: context.modelOverride ?? configuredModel ?? context.config.model,
+    model: resolvedModel,
+    effort,
+    thinkingDisabled: asBoolean(raw["thinkingDisabled"], false),
     maxFindings: asPositiveInt(raw["maxFindings"], 30),
     maxSurfaces: asPositiveInt(raw["maxSurfaces"], 10),
     surfacePackDepth: asPositiveInt(raw["surfacePackDepth"], 4),

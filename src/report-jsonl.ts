@@ -45,7 +45,7 @@ export function writeJsonlReport(
   for (const f of allFindings) {
     lines.push(toJsonLine({
       fingerprint: f.fingerprint,
-      scanner: f.scanner,
+      taskId: f.taskId,
       ruleId: f.ruleId,
       filePath: f.filePath,
       startLine: f.startLine,

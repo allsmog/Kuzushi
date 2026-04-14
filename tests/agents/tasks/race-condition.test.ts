@@ -23,11 +23,11 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: overrides.scannerConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
   };
 }
 
@@ -47,9 +47,9 @@ describe("resolveConfig", () => {
     expect(cfg.maxFindings).toBe(50);
   });
 
-  it("reads overrides from scannerConfig", () => {
+  it("reads overrides from taskConfig", () => {
     const ctx = makeContext({
-      scannerConfig: {
+      taskConfig: {
         "race-condition": { model: "openai:gpt-4", maxFindings: 30 },
       },
     });
@@ -96,7 +96,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 50);
     expect(findings).toHaveLength(1);
-    expect(findings[0].scanner).toBe("race-condition-detect");
+    expect(findings[0].taskId).toBe("race-condition-detect");
     expect(findings[0].ruleId).toBe("race-condition/toctou");
     expect(findings[0].message).toContain("/tmp/upload");
     expect(findings[0].cwe).toEqual(["367"]);
@@ -152,7 +152,7 @@ describe("computeFingerprint", () => {
 describe("triageAgentConfig", () => {
   it("returns a prompt with finding details", () => {
     const finding = {
-      scanner: "race-condition-detect",
+      taskId: "race-condition-detect",
       fingerprint: "abc",
       ruleId: "race-condition/toctou",
       filePath: "src/upload.go",

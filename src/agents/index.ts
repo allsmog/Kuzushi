@@ -1,13 +1,14 @@
-import { createDefaultRegistry } from "../scanners/index.js";
-import type { ScannerRegistry } from "../scanners/registry.js";
-import type { KuzushiConfig } from "../types.js";
-import { adaptScannerPlugin } from "./scanner-adapter.js";
+import type { KuzushiConfig, ScanOpts } from "../types.js";
 import { TaskRegistry } from "./registry.js";
 import { loadAllExternalTasksWithManifest } from "./task-loader.js";
 import { withMultiStrategy } from "../strategies/multi-strategy-task.js";
 import { createPopulatedRegistry } from "../strategies/init.js";
 import { getProfileForTask } from "../strategies/task-profile-map.js";
 import type { AgentTask } from "./types.js";
+import type { Finding, ScannerPlugin, TaskConfig } from "../scanners/types.js";
+import { SemgrepPlugin } from "../scanners/semgrep.js";
+import { CodeQLPlugin } from "../scanners/codeql.js";
+import { AgenticPlugin } from "../scanners/agentic.js";
 import { contextGathererTask } from "./tasks/context-gatherer.js";
 import { contextEnricherTask } from "./tasks/context-enricher.js";
 import { secretsCryptoDetectTask } from "./tasks/secrets-crypto-detect.js";
@@ -38,6 +39,7 @@ import { deserializationDetectionTask } from "./tasks/deserialization-detection.
 import { threatHuntTask } from "./tasks/threat-hunt.js";
 import { sharpEdgesDetectTask } from "./tasks/sharp-edges-detect.js";
 import { tobAuditTask } from "./tasks/tob-audit/tob-audit.js";
+import { vulnScoutTask } from "./tasks/vuln-scout/vuln-scout.js";
 import { taintCweSelectTask } from "./tasks/taint-iris/cwe-select.js";
 import { taintIrisTask } from "./tasks/taint-iris/iris.js";
 import { deepSemanticCweSelectTask } from "./tasks/deep-semantic/cwe-select.js";
@@ -47,14 +49,43 @@ import { systemsInvariantExtractTask } from "./tasks/systems-hunt/invariant-extr
 import { systemsTriggerSynthTask } from "./tasks/systems-hunt/trigger-synth.js";
 import { systemsHuntTask } from "./tasks/systems-hunt/hunt.js";
 
-/** Create task registry populated with adapted scanner plugins. */
+function createNativeFindingTask(plugin: ScannerPlugin): AgentTask<ScanOpts, Finding[]> {
+  let taskConfig: TaskConfig = {};
+
+  const task: AgentTask<ScanOpts, Finding[]> = {
+    id: plugin.id,
+    displayName: plugin.displayName,
+    outputKind: "findings",
+    dependsOn: [],
+    async init(config: Record<string, unknown>): Promise<void> {
+      taskConfig = config;
+      if (plugin.init) {
+        await plugin.init(config);
+      }
+    },
+    async run(input: ScanOpts, context): Promise<Finding[]> {
+      return plugin.scan(
+        context.workRoot ?? context.repoRoot,
+        input,
+        taskConfig,
+        context.runtime,
+      );
+    },
+  };
+
+  if (typeof plugin.triageAgentConfig === "function") {
+    task.triageAgentConfig = (finding, repoName) => plugin.triageAgentConfig!(finding, repoName);
+  }
+
+  return task;
+}
+
+/** Create task registry populated with native and external tasks. */
 export async function createDefaultTaskRegistry(
-  scannerRegistry?: ScannerRegistry,
   config?: KuzushiConfig,
   repoRoot?: string,
 ): Promise<TaskRegistry> {
   const tasks = new TaskRegistry();
-  const registry = scannerRegistry ?? createDefaultRegistry();
 
   // Multi-strategy registry — wraps eligible detection tasks with parallel strategy analysis.
   // When multiStrategyMode === "off" (default), the wrapper is a no-op.
@@ -63,6 +94,10 @@ export async function createDefaultTaskRegistry(
     const profile = getProfileForTask(task.id);
     return profile ? withMultiStrategy(task, profile, () => strategyRegistry) : task;
   };
+
+  tasks.register(createNativeFindingTask(new SemgrepPlugin()));
+  tasks.register(createNativeFindingTask(new CodeQLPlugin()));
+  tasks.register(createNativeFindingTask(new AgenticPlugin()));
 
   tasks.register(contextGathererTask);
 
@@ -109,6 +144,9 @@ export async function createDefaultTaskRegistry(
   // Trail of Bits audit (loads ToB security skills plugin)
   tasks.register(wrapTask(tobAuditTask));
 
+  // Vuln Scout pentest (loads vuln-scout whitebox pentesting plugin)
+  tasks.register(wrapTask(vulnScoutTask));
+
   // Authorization logic detection
   tasks.register(authLogicDetectTask);
 
@@ -139,10 +177,6 @@ export async function createDefaultTaskRegistry(
   // Dynamic task selection
   tasks.register(taskSelectorTask);
 
-  for (const id of registry.ids()) {
-    tasks.register(adaptScannerPlugin(registry.get(id)));
-  }
-
   // Load external tasks from config
   if (config?.externalTasks && config.externalTasks.length > 0) {
     if (config.enableExternalTasks) {
@@ -169,4 +203,3 @@ export async function createDefaultTaskRegistry(
 
 export * from "./types.js";
 export * from "./registry.js";
-export * from "./scanner-adapter.js";

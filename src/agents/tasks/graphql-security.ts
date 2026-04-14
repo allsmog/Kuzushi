@@ -207,7 +207,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const apiInfo = f.apiOrFunction ? ` [${f.apiOrFunction}]` : "";
 
     const finding: Finding = {
-      scanner: "graphql-security-detect",
+      taskId: "graphql-security-detect",
       fingerprint,
       ruleId: `graphql-security/${f.category || "unknown"}`,
       filePath,

@@ -349,7 +349,7 @@ describe("pathToFinding", () => {
 
     const finding = pathToFinding(crossPath, "test-repo");
 
-    expect(finding.scanner).toBe("taint-analysis-stitch");
+    expect(finding.taskId).toBe("taint-analysis-stitch");
     expect(finding.ruleId).toContain("taint-analysis/cross-service/");
     expect(finding.filePath).toBe("user-svc/db.ts");
     expect(finding.startLine).toBe(100);
@@ -506,7 +506,7 @@ describe("buildCrossServicePaths", () => {
           service: { id: "backend", displayName: "Backend", rootPath: "backend", language: "javascript", framework: null, discoveryMethod: "auto", manifestFiles: [] },
           boundary: boundaries[1],
           intraServiceFindings: [{
-            scanner: "taint-analysis-run",
+            taskId: "taint-analysis-run",
             fingerprint: "abc123",
             ruleId: "taint-analysis/pass5/sql",
             filePath: "backend/db.ts",
@@ -609,14 +609,14 @@ describe("buildCrossServicePaths", () => {
         {
           service: { id: "a", displayName: "A", rootPath: "a", language: "javascript", framework: null, discoveryMethod: "auto", manifestFiles: [] },
           boundary: boundaries[0],
-          intraServiceFindings: [{ scanner: "taint-analysis-run", fingerprint: "x", ruleId: "r", filePath: "f", startLine: 1, severity: "ERROR", message: "m", scannerConfidence: "HIGH", subcategory: ["vuln"], likelihood: "HIGH", impact: "HIGH", cwe: [], score: 1 }],
+          intraServiceFindings: [{ taskId: "taint-analysis-run", fingerprint: "x", ruleId: "r", filePath: "f", startLine: 1, severity: "ERROR", message: "m", scannerConfidence: "HIGH", subcategory: ["vuln"], likelihood: "HIGH", impact: "HIGH", cwe: [], score: 1 }],
           taintAnalysisSkipped: false,
           durationMs: 100,
         },
         {
           service: { id: "b", displayName: "B", rootPath: "b", language: "javascript", framework: null, discoveryMethod: "auto", manifestFiles: [] },
           boundary: boundaries[1],
-          intraServiceFindings: [{ scanner: "taint-analysis-run", fingerprint: "y", ruleId: "r", filePath: "f", startLine: 1, severity: "ERROR", message: "m", scannerConfidence: "HIGH", subcategory: ["vuln"], likelihood: "HIGH", impact: "HIGH", cwe: [], score: 1 }],
+          intraServiceFindings: [{ taskId: "taint-analysis-run", fingerprint: "y", ruleId: "r", filePath: "f", startLine: 1, severity: "ERROR", message: "m", scannerConfidence: "HIGH", subcategory: ["vuln"], likelihood: "HIGH", impact: "HIGH", cwe: [], score: 1 }],
           taintAnalysisSkipped: false,
           durationMs: 100,
         },
@@ -687,7 +687,7 @@ describe("buildCrossServicePaths — maxDepth enforcement", () => {
         service: { id, displayName: id, rootPath: id, language: "javascript", framework: null, discoveryMethod: "auto" as const, manifestFiles: [] },
         boundary: boundaries[i],
         intraServiceFindings: i >= 1 ? [{
-          scanner: "taint-analysis-run", fingerprint: `fp-${id}`, ruleId: "r", filePath: `${id}/f.ts`,
+          taskId: "taint-analysis-run", fingerprint: `fp-${id}`, ruleId: "r", filePath: `${id}/f.ts`,
           startLine: 1, severity: "ERROR", message: "vuln", scannerConfidence: "HIGH",
           subcategory: ["vuln"], likelihood: "HIGH", impact: "HIGH", cwe: [], score: 1,
         }] : [],
@@ -724,7 +724,7 @@ describe("taintAnalysisStitchTask metadata", () => {
 
 describe("stitch degradation metadata", () => {
   it("attaches and retrieves degradation via TaskOutputMeta", () => {
-    const findings = [{ scanner: "taint-analysis-stitch", fingerprint: "abc" }];
+    const findings = [{ taskId: "taint-analysis-stitch", fingerprint: "abc" }];
     const meta = {
       costUsd: 0.01,
       degradation: {

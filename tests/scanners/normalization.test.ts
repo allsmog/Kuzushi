@@ -9,7 +9,7 @@ import type { Finding } from "../../src/scanners/types.js";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "fp-default",
     ruleId: "javascript.security.audit.sql-injection",
     filePath: "src/app.ts",
@@ -30,7 +30,7 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
 describe("normalization pipeline", () => {
   it("clusters cross-scanner duplicates and preserves corroborating signals", () => {
     const semgrepFinding = makeFinding({
-      scanner: "semgrep",
+      taskId: "semgrep",
       fingerprint: "fp-semgrep",
       filePath: "src/db.ts",
       startLine: 44,
@@ -38,7 +38,7 @@ describe("normalization pipeline", () => {
       cwe: ["CWE-89"],
     });
     const codeqlFinding = makeFinding({
-      scanner: "codeql",
+      taskId: "codeql",
       fingerprint: "fp-codeql",
       ruleId: "js/sql-injection",
       filePath: "/src/db.ts",
@@ -54,7 +54,7 @@ describe("normalization pipeline", () => {
     expect(clustered.findings[0].corroboratingSignals).toEqual([
       expect.objectContaining({
         fingerprint: "fp-semgrep",
-        scanner: "semgrep",
+        taskId: "semgrep",
       }),
     ]);
   });

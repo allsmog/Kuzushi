@@ -28,7 +28,7 @@ function makeCosts(): StageCosts {
 
 function makeFinding(overrides: Partial<Finding> & { verdict?: string; confidence?: number; verifyExploitable?: boolean | number } = {}): Finding {
   return {
-    scanner: "agentic",
+    taskId: "agentic",
     fingerprint: `fp-${Math.random().toString(36).slice(2, 8)}`,
     ruleId: "test.rule",
     filePath: "src/test.ts",

@@ -18,7 +18,7 @@ const tempDirs: string[] = [];
 
 function makeFinding(): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "poc-fp-1",
     ruleId: "test.rule",
     filePath: "src/app.ts",

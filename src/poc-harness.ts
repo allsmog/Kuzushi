@@ -136,7 +136,7 @@ export async function generatePocHarness(
       const batchFile = writeBatchFile(repoRoot, runId, "poc-harness", 0, {
         fingerprint: finding.fingerprint,
         finding: {
-          scanner: finding.scanner,
+          taskId: finding.taskId,
           ruleId: finding.ruleId,
           filePath: finding.filePath,
           startLine: finding.startLine,
@@ -271,7 +271,7 @@ export function buildPocHarnessPrompt(
     "",
     "## Finding",
     `Repo: ${repoName}`,
-    `Scanner: ${finding.scanner}`,
+    `Scanner: ${finding.taskId}`,
     `Rule: ${finding.ruleId}`,
     `File: ${finding.filePath}:${finding.startLine}`,
     `Severity: ${finding.severity}`,

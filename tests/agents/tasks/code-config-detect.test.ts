@@ -23,11 +23,11 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     triageBatchSize: 40,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: overrides.scannerConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
   };
 }
 
@@ -47,9 +47,9 @@ describe("resolveConfig", () => {
     expect(cfg.maxFindings).toBe(50);
   });
 
-  it("reads overrides from scannerConfig", () => {
+  it("reads overrides from taskConfig", () => {
     const ctx = makeContext({
-      scannerConfig: {
+      taskConfig: {
         "code-config-detect": { model: "openai:gpt-4", maxFindings: 20 },
       },
     });
@@ -248,7 +248,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 50);
     expect(findings).toHaveLength(1);
-    expect(findings[0].scanner).toBe("dangerous-api-detect");
+    expect(findings[0].taskId).toBe("dangerous-api-detect");
     expect(findings[0].ruleId).toBe("dangerous-api/unsafe-deserialization");
     expect(findings[0].message).toContain("yaml.load()");
   });
@@ -274,7 +274,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 50);
     expect(findings).toHaveLength(1);
-    expect(findings[0].scanner).toBe("auth-access-detect");
+    expect(findings[0].taskId).toBe("auth-access-detect");
     expect(findings[0].ruleId).toBe("auth-access/unprotected-endpoint");
     expect(findings[0].message).toContain("POST /api/admin/users");
   });
@@ -298,7 +298,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 50);
     expect(findings).toHaveLength(1);
-    expect(findings[0].scanner).toBe("security-misconfig-detect");
+    expect(findings[0].taskId).toBe("security-misconfig-detect");
     expect(findings[0].ruleId).toBe("security-misconfig/debug-mode");
   });
 
@@ -313,7 +313,7 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 50);
     expect(findings).toHaveLength(3);
-    expect(findings.map(f => f.scanner).sort()).toEqual(["auth-access-detect", "dangerous-api-detect", "security-misconfig-detect"]);
+    expect(findings.map(f => f.taskId).sort()).toEqual(["auth-access-detect", "dangerous-api-detect", "security-misconfig-detect"]);
   });
 
   it("deduplicates by fingerprint", () => {
@@ -370,7 +370,7 @@ describe("computeFingerprint", () => {
 describe("triageAgentConfig", () => {
   it("returns dangerous-api-specific prompt for dangerous-api findings", () => {
     const finding = {
-      scanner: "dangerous-api-detect",
+      taskId: "dangerous-api-detect",
       fingerprint: "abc",
       ruleId: "dangerous-api/unsafe-subprocess",
       filePath: "src/handler.ts",
@@ -393,7 +393,7 @@ describe("triageAgentConfig", () => {
 
   it("returns auth-specific prompt for auth findings", () => {
     const finding = {
-      scanner: "auth-access-detect",
+      taskId: "auth-access-detect",
       fingerprint: "def",
       ruleId: "auth-access/unprotected-endpoint",
       filePath: "src/routes.ts",
@@ -416,7 +416,7 @@ describe("triageAgentConfig", () => {
 
   it("returns misconfig-specific prompt for security-misconfig findings", () => {
     const finding = {
-      scanner: "security-misconfig-detect",
+      taskId: "security-misconfig-detect",
       fingerprint: "ghi",
       ruleId: "security-misconfig/debug-mode",
       filePath: "src/app.ts",

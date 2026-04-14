@@ -315,7 +315,7 @@ describe("taint-analysis-run internals", () => {
 
   it("augments findings with Taint Analysis metadata", () => {
     const base: Finding = {
-      scanner: "codeql",
+      taskId: "codeql",
       fingerprint: "fp",
       ruleId: "rule",
       filePath: "src/a.py",
@@ -338,7 +338,7 @@ describe("taint-analysis-run internals", () => {
       cwes: ["022", "023"],
     }, makeLabels());
 
-    expect(augmented.scanner).toBe("taint-analysis-run");
+    expect(augmented.taskId).toBe("taint-analysis-run");
     expect(augmented.ruleId).toContain("taint-analysis/pass1/");
     expect(augmented.message).toContain("[Taint Analysis Path Traversal]");
     expect(augmented.cwe).toEqual(["CWE-22", "CWE-23"]);
@@ -731,7 +731,7 @@ describe("taint-analysis-run internals", () => {
 
     it("augmentFinding preserves structured taint paths and adds taint provenance", () => {
       const finding: Finding = {
-        scanner: "codeql",
+        taskId: "codeql",
         fingerprint: "fp-1",
         ruleId: "codeql.py/path-problem",
         filePath: "src/db.py",
@@ -780,7 +780,7 @@ describe("taint-analysis-run internals", () => {
 
     it("taint triage prompt renders the structured taint path", () => {
       const finding: Finding = {
-        scanner: "taint-analysis-run",
+        taskId: "taint-analysis-run",
         fingerprint: "fp-taint",
         ruleId: "taint-analysis/pass5/codeql.py/path-problem",
         filePath: "src/db.py",
@@ -820,7 +820,7 @@ describe("taint-analysis-run internals", () => {
     it("merges cached unaffected baseline findings with rerun affected passes", () => {
       const cached: Finding[] = [
         {
-          scanner: "taint-analysis-run",
+          taskId: "taint-analysis-run",
           fingerprint: "cached-pass1",
           ruleId: "taint-analysis/pass1/test.rule",
           filePath: "src/a.ts",
@@ -835,7 +835,7 @@ describe("taint-analysis-run internals", () => {
           score: 80,
         },
         {
-          scanner: "taint-analysis-run",
+          taskId: "taint-analysis-run",
           fingerprint: "cached-pass2-old",
           ruleId: "taint-analysis/pass2/test.rule",
           filePath: "src/b.ts",
@@ -853,7 +853,7 @@ describe("taint-analysis-run internals", () => {
 
       const rerun: Finding[] = [
         {
-          scanner: "taint-analysis-run",
+          taskId: "taint-analysis-run",
           fingerprint: "cached-pass2-old",
           ruleId: "taint-analysis/pass2/test.rule",
           filePath: "src/b.ts",
@@ -868,7 +868,7 @@ describe("taint-analysis-run internals", () => {
           score: 90,
         },
         {
-          scanner: "taint-analysis-run",
+          taskId: "taint-analysis-run",
           fingerprint: "rerun-pass2-new",
           ruleId: "taint-analysis/pass2/test.rule2",
           filePath: "src/c.ts",

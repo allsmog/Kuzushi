@@ -10,7 +10,7 @@ export function adaptScannerPlugin(plugin: ScannerPlugin): AgentTask<ScanOpts, F
     outputKind: "findings",
     dependsOn: [],
     async run(opts, context) {
-      const pluginConfig = context.config.scannerConfig[plugin.id] ?? {};
+      const pluginConfig = context.config.taskConfig[plugin.id] ?? {};
       return plugin.scan(context.scanPath ?? context.repoRoot, opts, pluginConfig, context.runtime);
     },
     init: plugin.init

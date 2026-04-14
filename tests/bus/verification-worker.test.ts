@@ -54,7 +54,7 @@ vi.mock("../../src/poc-executor/index.js", () => ({
 
 function makeFinding(): Finding {
   return {
-    scanner: "semgrep",
+    taskId: "semgrep",
     fingerprint: "fp-verify-1",
     ruleId: "test.rule",
     filePath: "src/app.ts",
@@ -104,10 +104,10 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    scanners: ["semgrep"],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: { semgrep: {} },
+    taskConfig: { semgrep: {} },
     ...overrides,
   };
 }
@@ -124,8 +124,8 @@ describe("verification-worker", () => {
   it("publishes verification:result on success", async () => {
     const bus = new InProcessBus();
     const config = makeConfig({
-      verifyModel: "claude-haiku-4-5-20251001",
       verifyMaxTurns: 17,
+      taskConfig: { semgrep: {}, verify: { model: "claude-haiku-4-5-20251001" } },
     });
 
     verifyFindingWithAgentMock.mockResolvedValue({

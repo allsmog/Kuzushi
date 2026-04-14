@@ -16,7 +16,6 @@ export const VerdictSchema = z.enum(["tp", "fp", "needs_review", "by_design"]);
 export const BusBackendSchema = z.enum(["in-process"]);
 
 export const ScanModeSchema = z.enum(["sequential", "concurrent"]);
-export const TaskModeSchema = z.enum(["compat", "explicit", "scanners-only"]);
 
 export const AgentRuntimeBackendSchema = z.enum(["claude", "pi-ai"]);
 
@@ -70,7 +69,7 @@ export const PatchStatusSchema = z.enum([
 ]);
 
 // ---------------------------------------------------------------------------
-// Finding (scanner output)
+// Finding (task output)
 // ---------------------------------------------------------------------------
 
 export const TaintPathStepSchema = z.object({
@@ -86,7 +85,7 @@ export const EngineProvenanceSchema = z.object({
 });
 
 export const FindingSchema = z.object({
-  scanner: z.string(),
+  taskId: z.string(),
   fingerprint: z.string(),
   ruleId: z.string(),
   filePath: z.string(),
@@ -106,7 +105,7 @@ export const FindingSchema = z.object({
   engineProvenance: z.array(EngineProvenanceSchema).optional(),
   corroboratingSignals: z.array(
     z.object({
-      scanner: z.string(),
+      taskId: z.string(),
       fingerprint: z.string(),
       ruleId: z.string(),
       filePath: z.string(),
@@ -542,7 +541,7 @@ export const ScanOptsSchema = z.object({
   severity: z.array(z.string()),
   maxFindings: z.number().optional(),
   excludePatterns: z.array(z.string()),
-  scanners: z.array(z.string()).optional(),
+  tasks: z.array(z.string()).optional(),
   fresh: z.boolean(),
   diffBase: z.string().optional(),
   agenticReviewContext: z.string().optional(),
@@ -592,17 +591,13 @@ export type MonorepoConfigZ = z.infer<typeof MonorepoConfigSchema>;
 
 export const KuzushiConfigSchema = z.object({
   model: z.string(),
-  triageModel: z.string().optional(),
-  triageBatchModel: z.string().optional(),
   verify: z.boolean().optional(),
-  verifyModel: z.string().optional(),
   verifyMaxTurns: z.number().optional(),
   verifyConcurrency: z.number().optional(),
   verifyBatchSize: z.number().optional(),
   verifyVerdicts: z.array(VerdictSchema).optional(),
   verifyMinConfidence: z.number().optional(),
   pocHarness: z.boolean().optional(),
-  pocHarnessModel: z.string().optional(),
   pocHarnessMaxTurns: z.number().optional(),
   pocHarnessConcurrency: z.number().optional(),
   enableContextGathering: z.boolean().optional(),
@@ -618,22 +613,19 @@ export const KuzushiConfigSchema = z.object({
   triageBatchSize: z.number(),
   triageConcurrency: z.number(),
   scanMode: ScanModeSchema,
-  taskMode: TaskModeSchema.optional(),
   agentRuntimeBackend: AgentRuntimeBackendSchema.optional(),
   agentRuntimeConfig: AgentRuntimeConfigSchema.optional(),
-  enabledTasks: z.array(z.string()).optional(),
-  scanners: z.array(z.string()),
+  tasks: z.array(z.string()),
   severity: z.array(z.string()),
   excludePatterns: z.array(z.string()),
-  scannerConfig: z.record(z.string(), z.record(z.string(), z.unknown())),
+  taskConfig: z.record(z.string(), z.record(z.string(), z.unknown())),
   fpFilterEnabled: z.boolean().optional(),
   fpFilterCustomExclusions: z.array(z.string()).optional(),
+  designDecisionClassifier: z.boolean().optional(),
   variantAnalysis: z.boolean().optional(),
-  variantAnalysisModel: z.string().optional(),
   variantAnalysisMaxFindings: z.number().optional(),
   variantRuleSweepEnabled: z.boolean().optional(),
   enableContextEnrichment: z.boolean().optional(),
-  contextEnrichmentModel: z.string().optional(),
   ensembleModels: z.array(z.string()).optional(),
   diffBase: z.string().optional(),
   taintDiffBase: z.string().optional(),
@@ -657,13 +649,11 @@ export const KuzushiConfigSchema = z.object({
   patchTestCommand: z.string().optional(),
   autoPatchEnabled: z.boolean().optional(),
   autoPatchAfter: z.enum(["verify", "poc", "triage"]).optional(),
-  patchVerifyDepth: z.enum(["scanner", "triage", "full"]).optional(),
+  patchVerifyDepth: z.enum(["task", "triage", "full"]).optional(),
   patchConcurrency: z.number().int().positive().optional(),
   llmRescoreEnabled: z.boolean().optional(),
-  llmRescoreModel: z.string().optional(),
   llmRescoreThreshold: z.number().optional(),
   chainAnalysis: z.boolean().optional(),
-  chainAnalysisModel: z.string().optional(),
   precedentsPath: z.string().optional(),
   securityProfilesPath: z.string().optional(),
   prioritizeFindings: z.boolean().optional(),
@@ -680,7 +670,7 @@ export const KuzushiConfigSchema = z.object({
   verifyReflectionInterval: z.number().optional(),
   confidenceCalibration: z.boolean().optional(),
   confidenceSignalWeights: z.object({
-    scanner: z.number().optional(),
+    taskId: z.number().optional(),
     triage: z.number().optional(),
     verification: z.number().optional(),
     history: z.number().optional(),
@@ -689,7 +679,6 @@ export const KuzushiConfigSchema = z.object({
   trajectoryMemory: z.boolean().optional(),
   trajectoryMaxExemplars: z.number().optional(),
   triageStrategy: TriageStrategySchema.optional(),
-  triageSpecialistModel: z.string().optional(),
   triageSpecialistMaxTurns: z.number().nullable().optional(),
   triageAssertions: z.object({
     enabled: z.boolean().optional(),
@@ -750,7 +739,7 @@ export type KuzushiConfigZ = z.infer<typeof KuzushiConfigSchema>;
 // ---------------------------------------------------------------------------
 
 export const FindingRowSchema = z.object({
-  scanner: z.string(),
+  taskId: z.string(),
   fingerprint: z.string(),
   repo: z.string(),
   ref: z.string(),

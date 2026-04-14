@@ -28,7 +28,7 @@ export interface StructuredEvidenceMetrics {
 export interface RunMetrics {
   verdictCounts: Record<string, number>;
   severityCounts: Record<string, number>;
-  scannerYield: Record<string, number>;
+  taskYield: Record<string, number>;
   averageConfidence: number;
   tpRate: number;
   fpRate: number;
@@ -96,7 +96,7 @@ export function computeRunMetrics(
   // Verdict counts
   const verdictCounts: Record<string, number> = {};
   const severityCounts: Record<string, number> = {};
-  const scannerYield: Record<string, number> = {};
+  const taskYield: Record<string, number> = {};
   const proofStateCounts: Record<string, number> = {};
   const engineKindCounts: Record<string, number> = {};
   let findingsWithTaintPath = 0;
@@ -118,8 +118,8 @@ export function computeRunMetrics(
     const sev = f.severity.toUpperCase();
     severityCounts[sev] = (severityCounts[sev] ?? 0) + 1;
 
-    // Scanner yield
-    scannerYield[f.scanner] = (scannerYield[f.scanner] ?? 0) + 1;
+    // Task yield
+    taskYield[f.taskId] = (taskYield[f.taskId] ?? 0) + 1;
 
     // Confidence accumulation
     const confidence = record["confidence"] as number | undefined;
@@ -235,7 +235,7 @@ export function computeRunMetrics(
   return {
     verdictCounts,
     severityCounts,
-    scannerYield,
+    taskYield,
     averageConfidence,
     tpRate,
     fpRate,
@@ -286,10 +286,10 @@ export function formatMetricsSummary(metrics: RunMetrics): string {
   }
   lines.push("");
 
-  // Scanner yield
-  lines.push("Scanner Yield:");
-  for (const [scanner, count] of Object.entries(metrics.scannerYield)) {
-    lines.push(`  ${scanner}: ${count} findings`);
+  // Task yield
+  lines.push("Task Yield:");
+  for (const [taskId, count] of Object.entries(metrics.taskYield)) {
+    lines.push(`  ${taskId}: ${count} findings`);
   }
   lines.push("");
 

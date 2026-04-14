@@ -13,18 +13,18 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    enabledTasks: [],
-    scanners: ["semgrep"],
+    tasks: [],
+    tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    scannerConfig: {
+    taskConfig: {
       semgrep: {},
     },
   };
 }
 
 describe("resolveTaintAnalysisConfig", () => {
-  it('returns defaults when scannerConfig["taint-analysis"] is not configured', () => {
+  it('returns defaults when taskConfig["taint-analysis"] is not configured', () => {
     const resolved = resolveTaintAnalysisConfig(makeConfig());
 
     expect(resolved.passes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
@@ -47,7 +47,7 @@ describe("resolveTaintAnalysisConfig", () => {
 
   it("normalizes configured values and filters invalid pass ids", () => {
     const config = makeConfig();
-    config.scannerConfig["taint-analysis"] = {
+    config.taskConfig["taint-analysis"] = {
       taintAnalysisPath: "./custom-taint-analysis",
       dbPath: "/tmp/db",
       passes: [0, 1, 2, 6, 14, 20],
@@ -99,7 +99,7 @@ describe("resolveTaintAnalysisConfig", () => {
 
   it("normalizePasses accepts pass ids 7 through 13", () => {
     const config = makeConfig();
-    config.scannerConfig["taint-analysis"] = {
+    config.taskConfig["taint-analysis"] = {
       passes: [7, 8, 9, 10, 11, 12, 13],
     };
 
@@ -109,7 +109,7 @@ describe("resolveTaintAnalysisConfig", () => {
 
   it("normalizePasses filters out ids above 19", () => {
     const config = makeConfig();
-    config.scannerConfig["taint-analysis"] = {
+    config.taskConfig["taint-analysis"] = {
       passes: [1, 13, 19, 20, 99],
     };
 
