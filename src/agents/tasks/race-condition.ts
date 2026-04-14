@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -103,6 +108,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "",
     "## Patterns to detect",
     "",
+    languageTuningModule({ taskId: "race-condition", repoContext, frameworks: repoContext?.frameworks }) ||
     "### toctou (CWE-367)",
     "Time-of-check to time-of-use: checking a condition then acting on it without atomicity.",
     "Examples: file existence check then open, permission check then action, balance check then debit.",
@@ -146,6 +152,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Only report issues where concurrent access is plausible and has security impact.",
         "Verify that the code is actually executed concurrently before reporting.",
         "Confidence HIGH only if race is clearly exploitable.",
+        ...languageAntiHallucinationExtras({ taskId: "race-condition", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),

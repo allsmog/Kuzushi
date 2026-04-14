@@ -1,4 +1,5 @@
 import { coerceRepoContext } from "../../repo-context.js";
+import { languageGeneralHintsModule } from "../../prompts/language-tuning.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { EnrichedRepoContext, RepoContext } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
@@ -99,6 +100,7 @@ function buildPrompt(repoContext: RepoContext | undefined): string {
     "Your goal is to discover security-relevant architectural details that heuristic analysis misses.",
     "",
     ...contextLines,
+    languageGeneralHintsModule(repoContext),
     "## Analysis tasks",
     "",
     "### 1. Custom middleware discovery",

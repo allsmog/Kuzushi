@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -102,6 +107,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to check",
     "",
+    languageTuningModule({ taskId: "ssrf-detection", repoContext, frameworks: repoContext?.frameworks }) ||
     "### url-from-user-input (CWE-918)",
     "User-controlled URLs passed to HTTP client functions without validation.",
     "Sink functions: fetch, axios, http.get, urllib, HttpClient, requests.get, http.request.",
@@ -172,6 +178,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Only report SSRF where you can verify user input reaches an HTTP request sink.",
         "Do NOT report internal-only HTTP calls with hardcoded URLs.",
         "Do NOT report HTTP calls in test files or development scripts.",
+        ...languageAntiHallucinationExtras({ taskId: "ssrf-detection", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
@@ -427,6 +434,7 @@ function buildLocalSinkPrompt(
       extra: [
         "Only report SSRF where user input reaches an HTTP request sink in the provided files.",
         "Do NOT report internal-only HTTP calls with hardcoded URLs.",
+        ...languageAntiHallucinationExtras({ taskId: "ssrf-detection", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
@@ -469,6 +477,7 @@ function buildCrossFunctionPrompt(
       extra: [
         "Only report SSRF where you can verify user input crosses at least one function boundary to reach an HTTP sink.",
         "Do NOT report single-file, obvious cases — focus on non-trivial data flows.",
+        ...languageAntiHallucinationExtras({ taskId: "ssrf-detection", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),

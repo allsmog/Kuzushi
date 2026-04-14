@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -117,6 +122,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
+    languageTuningModule({ taskId: "graphql-security", repoContext, frameworks: repoContext?.frameworks }) ||
     "### introspection-enabled (CWE-200)",
     "GraphQL introspection queries enabled in production environments. Introspection exposes",
     "the entire schema including types, fields, queries, mutations, and subscriptions.",
@@ -182,6 +188,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Do NOT flag development-only GraphQL configurations (check NODE_ENV/environment toggles).",
         "Do NOT flag resolvers that correctly check authentication context.",
         "Confidence HIGH only if the misconfiguration or missing protection is clearly verified.",
+        ...languageAntiHallucinationExtras({ taskId: "graphql-security", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),

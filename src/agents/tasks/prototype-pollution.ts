@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -117,6 +122,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
+    languageTuningModule({ taskId: "prototype-pollution", repoContext, frameworks: repoContext?.frameworks }) ||
     "### merge-pollution (CWE-1321)",
     "Deep merge or extend operations with user-controlled input that can inject __proto__ or constructor.prototype.",
     "Common sinks: _.merge, _.defaultsDeep, deepmerge, extend(true, ...), Object.assign with nested user objects,",
@@ -159,6 +165,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Confidence HIGH only if source-to-sink is fully verified.",
         "Do NOT flag Object.assign with only flat/non-nested objects.",
         "Do NOT flag property access with hardcoded keys.",
+        ...languageAntiHallucinationExtras({ taskId: "prototype-pollution", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),

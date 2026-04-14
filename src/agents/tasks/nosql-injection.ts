@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -117,6 +122,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
+    languageTuningModule({ taskId: "nosql-injection", repoContext, frameworks: repoContext?.frameworks }) ||
     "### query-operator-injection (CWE-943)",
     "MongoDB operator injection via user-controlled objects passed directly to query methods.",
     "If req.body or req.query is passed to find(), findOne(), updateOne(), deleteMany() etc. without",
@@ -161,6 +167,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Confidence HIGH only if source-to-sink is fully verified.",
         "Do NOT flag queries with hardcoded filter objects.",
         "Do NOT flag queries protected by express-mongo-sanitize or equivalent middleware.",
+        ...languageAntiHallucinationExtras({ taskId: "nosql-injection", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
@@ -405,7 +412,7 @@ function buildQueryBuilderLensPrompt(
     "",
     `Return at most ${maxFindings} findings.`,
     "",
-    antiHallucinationModule({ extra: ["Only report where user input reaches a query filter without sanitization."] }),
+    antiHallucinationModule({ extra: ["Only report where user input reaches a query filter without sanitization.", ...languageAntiHallucinationExtras({ taskId: "nosql-injection", repoContext, frameworks: repoContext?.frameworks })] }),
     frameworkAwarenessModule(repoContext),
   ].filter(Boolean).join("\n");
 }
@@ -442,7 +449,7 @@ function buildRawOperatorLensPrompt(
     "",
     `Return at most ${maxFindings} findings.`,
     "",
-    antiHallucinationModule({ extra: ["Only report where raw operators receive user-controlled data."] }),
+    antiHallucinationModule({ extra: ["Only report where raw operators receive user-controlled data.", ...languageAntiHallucinationExtras({ taskId: "nosql-injection", repoContext, frameworks: repoContext?.frameworks })] }),
     frameworkAwarenessModule(repoContext),
   ].filter(Boolean).join("\n");
 }

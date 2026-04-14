@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -110,6 +115,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(profileLines.length > 0 ? [...profileLines, ""] : []),
     "## Categories to detect",
     "",
+    languageTuningModule({ taskId: "supply-chain", repoContext, frameworks: repoContext?.frameworks }) ||
     "### postinstall-scripts (CWE-829)",
     "npm/yarn/pnpm postinstall, preinstall, or install lifecycle scripts that download or execute",
     "external code. Dangerous patterns:",
@@ -164,6 +170,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Do NOT flag well-known build tools (node-gyp, esbuild, husky) for postinstall scripts.",
         "Do NOT flag missing lockfiles in library packages that intentionally omit them.",
         "Confidence HIGH only if the risk vector is clearly verified in the repository.",
+        ...languageAntiHallucinationExtras({ taskId: "supply-chain", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
