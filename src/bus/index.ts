@@ -27,6 +27,7 @@ export interface RegisterWorkersDeps {
   db: Database.Database;
   config: KuzushiConfig;
   runtime: AgentRuntime;
+  uiStore?: import("../ui/state.js").UIStore;
 }
 
 export function shouldRegisterPocExecutorWorker(config: KuzushiConfig): boolean {
@@ -132,7 +133,7 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
   registerReportWorker(bus, {
     db: deps.db,
     config: deps.config,
-  });
+  }, deps.uiStore);
 }
 
 export { createBus };
