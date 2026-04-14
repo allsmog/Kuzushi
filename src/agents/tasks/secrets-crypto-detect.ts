@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -123,6 +128,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "",
     "For secrets findings, set `detectorId: \"secrets-detect\"` and `category` to the secret type.",
     "",
+    languageTuningModule({ taskId: "secrets-crypto-detect", repoContext, frameworks: repoContext?.frameworks }) || "",
     "## Secret patterns to detect",
     "",
     "### api-key (CWE-798)",
@@ -239,6 +245,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Files in `test/`, `tests/`, `__tests__/`, `spec/`, `fixtures/`, `mocks/` are test fixtures — be extra skeptical.",
         "`.env.example` and `.env.sample` files contain placeholders, not real secrets.",
         "For crypto findings, only report genuinely insecure usage — not merely suboptimal.",
+        ...languageAntiHallucinationExtras({ taskId: "secrets-crypto-detect", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),

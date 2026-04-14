@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -117,6 +122,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
+    languageTuningModule({ taskId: "template-injection", repoContext, frameworks: repoContext?.frameworks }) ||
     "### jinja2-ssti (CWE-1336)",
     "Jinja2/Flask Server-Side Template Injection. Dangerous patterns:",
     "- render_template_string(user_input) or Template(user_input).render()",
@@ -174,6 +180,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Confidence HIGH only if source-to-sink is fully verified.",
         "Do NOT flag render_template() with static file names and safe context variables.",
         "Do NOT flag template rendering in test files or development-only code.",
+        ...languageAntiHallucinationExtras({ taskId: "template-injection", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
@@ -418,7 +425,7 @@ function buildTemplateConstructionLensPrompt(
     "",
     `Return at most ${maxFindings} findings.`,
     "",
-    antiHallucinationModule({ extra: ["Only report where user input is part of the template source, not template data."] }),
+    antiHallucinationModule({ extra: ["Only report where user input is part of the template source, not template data.", ...languageAntiHallucinationExtras({ taskId: "template-injection", repoContext, frameworks: repoContext?.frameworks })] }),
     frameworkAwarenessModule(repoContext),
   ].filter(Boolean).join("\n");
 }
@@ -455,7 +462,7 @@ function buildRendererConfigLensPrompt(
     "",
     `Return at most ${maxFindings} findings.`,
     "",
-    antiHallucinationModule({ extra: ["Only report where template engine config is insecure AND user input reaches it."] }),
+    antiHallucinationModule({ extra: ["Only report where template engine config is insecure AND user input reaches it.", ...languageAntiHallucinationExtras({ taskId: "template-injection", repoContext, frameworks: repoContext?.frameworks })] }),
     frameworkAwarenessModule(repoContext),
   ].filter(Boolean).join("\n");
 }

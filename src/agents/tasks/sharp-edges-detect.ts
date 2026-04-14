@@ -17,6 +17,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -138,6 +143,7 @@ function buildScoundrelPrompt(
     "Find places where a single config change, flag toggle, or parameter override can",
     "disable or weaken security. Focus on:",
     "",
+    languageTuningModule({ taskId: "sharp-edges-detect", repoContext, frameworks: repoContext?.frameworks }) || "",
     "### algorithm-selection (CWE-327)",
     "Can a caller choose a weak algorithm (e.g., AES-ECB, MD5, SHA1) when the API offers stronger options?",
     "Is the algorithm parameter user-controllable or easily overridden?",
@@ -170,6 +176,7 @@ function buildScoundrelPrompt(
         "Only report findings where you can point to a specific config option, flag, or parameter that weakens security.",
         "Do NOT report general coding style issues or theoretical concerns without concrete code locations.",
         "Do NOT re-report simple misconfiguration findings — focus on API DESIGN issues where the insecure path is easy.",
+        ...languageAntiHallucinationExtras({ taskId: "sharp-edges-detect", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
@@ -237,6 +244,7 @@ function buildLazyDeveloperPrompt(
         "Only report findings where the default or most obvious usage path is insecure.",
         "Do NOT report issues that require intentional misconfiguration — focus on what happens with zero effort.",
         "Do NOT report findings in test files or development scripts.",
+        ...languageAntiHallucinationExtras({ taskId: "sharp-edges-detect", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
@@ -305,6 +313,7 @@ function buildConfusedDeveloperPrompt(
         "Only report findings where parameter confusion, string comparison, or error handling issues lead to a concrete security bypass.",
         "Do NOT report general code quality issues or stylistic concerns.",
         "Do NOT report findings where types already prevent the confusion.",
+        ...languageAntiHallucinationExtras({ taskId: "sharp-edges-detect", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),

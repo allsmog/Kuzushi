@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -385,6 +390,7 @@ function buildPrompt(
     ...(applicationModelContext ? [applicationModelContext] : []),
     ...(scenarioContext ? [scenarioContext] : []),
     ...(isFiltered ? CATEGORY_SCOPE_HEADER : []),
+    languageTuningModule({ taskId: "code-config-detect", repoContext, frameworks: repoContext?.frameworks }) || "",
     ...(part1Lines.length > 0 ? [
       "# Part 1: Dangerous API Detection",
       "",
@@ -443,6 +449,7 @@ function buildPrompt(
         "If unsure whether middleware protects a route, READ the middleware registration.",
         "Only report misconfigurations you can verify in code. Do not assume defaults.",
         "Account for framework defaults that may provide secure configuration automatically.",
+        ...languageAntiHallucinationExtras({ taskId: "code-config-detect", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),

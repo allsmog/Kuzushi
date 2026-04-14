@@ -8,6 +8,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -86,6 +91,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
+    languageTuningModule({ taskId: "deserialization-detection", repoContext, frameworks: repoContext?.frameworks }) ||
     "### unsafe-deserialize (CWE-502)",
     "Deserialization of untrusted data using dangerous APIs.",
     "Python: unsafe deserialization via binary object loaders, shelve, marshal, yaml.load without SafeLoader.",
@@ -135,6 +141,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "yaml.safe_load() and YAML.safe_load() are SAFE.",
         "Deserialization of hardcoded/internal data with no user input path is low risk.",
         "Do NOT flag serialization (only deserialization of untrusted data).",
+        ...languageAntiHallucinationExtras({ taskId: "deserialization-detection", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),

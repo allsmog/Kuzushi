@@ -1,6 +1,7 @@
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import { getLogger } from "../logger.js";
-import type { ScanOpts } from "../types.js";
+import type { RepoContext, ScanOpts } from "../types.js";
+import { languageTuningModule } from "../prompts/language-tuning.js";
 import type { Finding } from "./types.js";
 import {
   FINDING_SCHEMA,
@@ -31,9 +32,10 @@ export async function runAgentic(
   model: string,
   defaultMaxFindings: number,
   runtimeOptions: AgenticRuntimeOptions = {},
+  repoContext?: RepoContext,
 ): Promise<AgenticOutput> {
   const requestedMax = Math.max(1, opts.maxFindings ?? defaultMaxFindings);
-  const prompt = buildPrompt(opts, requestedMax);
+  const prompt = buildPrompt(opts, requestedMax, repoContext);
   const runtime = runtimeOptions.runtime;
   if (!runtime) {
     throw new Error("Agentic scanner requires an explicit runtime.");
@@ -114,7 +116,7 @@ export function computeAgenticFingerprint(
   return computeFingerprint(repoName, ref, "agentic", finding);
 }
 
-function buildPrompt(opts: ScanOpts, maxFindings: number): string {
+function buildPrompt(opts: ScanOpts, maxFindings: number, repoContext?: RepoContext): string {
   const reviewContext = opts.agenticReviewContext
     ? [
         "",
@@ -144,6 +146,13 @@ function buildPrompt(opts: ScanOpts, maxFindings: number): string {
     "",
     ...scanPathsContext,
     ...reviewContext,
+    ...(repoContext?.languages.length
+      ? [
+          `## Detected stack: ${repoContext.languages.join(", ")}${repoContext.frameworks.length ? ` (${repoContext.frameworks.join(", ")})` : ""}`,
+          languageTuningModule({ taskId: "agentic", repoContext, frameworks: repoContext.frameworks }),
+          "",
+        ]
+      : []),
     `Severity filter: ${opts.severity.join(", ") || "ERROR, WARNING, INFO"}`,
     `Max findings: ${maxFindings}`,
     `Exclude paths/globs: ${opts.excludePatterns.join(", ") || "(none)"}`,

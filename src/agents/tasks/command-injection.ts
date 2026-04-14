@@ -8,6 +8,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -86,14 +91,13 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
-    "### shell-execution (CWE-78)",
-    "Direct shell command execution with user input via shell-invoking APIs.",
-    "In Node.js: child_process functions with shell interpretation enabled, or template-string command building.",
-    "In Python: os.system(), subprocess with shell=True, os.popen().",
-    "In Ruby: backticks, system(), %x{}.",
-    "In Java: Runtime.getRuntime().exec() with shell wrapper.",
-    "Key: execFile/spawn WITHOUT shell option are SAFE against metacharacter injection.",
-    "Only flag when user-controlled input reaches a shell-interpreting function.",
+    languageTuningModule({ taskId: "command-injection", repoContext, frameworks: repoContext?.frameworks }) ||
+    [
+      "### shell-execution (CWE-78)",
+      "Direct shell command execution with user input via shell-invoking APIs.",
+      "Key: execFile/spawn WITHOUT shell option are SAFE against metacharacter injection.",
+      "Only flag when user-controlled input reaches a shell-interpreting function.",
+    ].join("\n"),
     "",
     "### argument-injection (CWE-88)",
     "User input passed as arguments to commands can inject flags/options.",
@@ -125,12 +129,14 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         ]),
     "4. Verify no input validation/sanitization (allowlists, shell-quote, escapeShellArg).",
     "5. Distinguish shell-invoking from non-shell APIs — this is critical.",
+    languageInvestigationModule({ taskId: "command-injection", repoContext, frameworks: repoContext?.frameworks }),
     "",
     antiHallucinationModule({
       extra: [
         "execFile/spawn WITHOUT shell:true do NOT allow shell metacharacter injection.",
         "Do NOT flag commands with hardcoded strings and no user input.",
         "Do NOT flag uses of shell-quote, escapeshellarg, or equivalent sanitization.",
+        ...languageAntiHallucinationExtras({ taskId: "command-injection", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),

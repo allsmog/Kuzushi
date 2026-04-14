@@ -4,6 +4,11 @@ import {
   antiHallucinationModule,
   frameworkAwarenessModule,
 } from "../../prompts/modules.js";
+import {
+  languageTuningModule,
+  languageInvestigationModule,
+  languageAntiHallucinationExtras,
+} from "../../prompts/language-tuning.js";
 import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -80,6 +85,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
+    languageTuningModule({ taskId: "xxe-detection", repoContext, frameworks: repoContext?.frameworks }) ||
     "### xxe-parse (CWE-611)",
     "XML parsers processing untrusted input without disabling external entities.",
     "Java: DocumentBuilderFactory, SAXParserFactory, XMLInputFactory without FEATURE_SECURE_PROCESSING,",
@@ -128,6 +134,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "xml2js in Node.js is safe by default — only flag if explicitXMLEntities is enabled.",
         "Do NOT flag XML parsing of hardcoded/internal-only XML.",
         "Do NOT flag parsers that have external entities explicitly disabled.",
+        ...languageAntiHallucinationExtras({ taskId: "xxe-detection", repoContext, frameworks: repoContext?.frameworks }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
