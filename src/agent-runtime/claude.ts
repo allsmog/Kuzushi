@@ -2,7 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   query as claudeQuery,
   type Options as ClaudeOptions,
+  type SDKAssistantMessage,
   type SDKMessage,
+  type SDKResultMessage,
+  type SDKToolProgressMessage,
+  type SDKToolUseSummaryMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentRuntimeConfig } from "../types.js";
@@ -25,6 +29,16 @@ import type {
 import type { AgentQueryExecutionResult } from "./execution.js";
 
 const log = getLogger("claude-runtime");
+
+/**
+ * Extension of Anthropic.Message for responses that include parsed structured output.
+ * The SDK's ParsedMessage type adds `parsed_output` when structured output (JSON schema)
+ * is used, but the base Message type doesn't include it. This interface allows safe access
+ * without double-casting through `unknown`.
+ */
+interface MessageWithParsedOutput extends Anthropic.Message {
+  parsed_output?: unknown;
+}
 
 // Prevent EPIPE from crashing the process when Claude SDK subprocesses die.
 // Multiple concurrent query() calls each spawn a Claude Code subprocess;
@@ -218,12 +232,12 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         const usage = msg.usage;
         const inputCost = (usage.input_tokens / 1_000_000) * inputRate;
         const outputCost = (usage.output_tokens / 1_000_000) * outputRate;
-        const cacheReadTokens = (usage as unknown as Record<string, unknown>)["cache_read_input_tokens"] as number ?? 0;
+        const cacheReadTokens = usage.cache_read_input_tokens ?? 0;
         const cacheSavings = (cacheReadTokens / 1_000_000) * (inputRate * 0.9);
 
         results.set(item.custom_id, {
           resultText: textBlock?.text ?? "",
-          structuredOutput: (msg as unknown as Record<string, unknown>)["parsed_output"] ?? undefined,
+          structuredOutput: (msg as MessageWithParsedOutput).parsed_output ?? undefined,
           executionError: null,
           costUsd: normalizeCostUsd(inputCost + outputCost - cacheSavings),
         });
@@ -357,7 +371,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       const outputRate = isHaiku ? 5 : isOrchid ? 125 : isOpus ? 25 : 15;
       const inputCost = (response.usage.input_tokens / 1_000_000) * inputRate;
       const outputCost = (response.usage.output_tokens / 1_000_000) * outputRate;
-      const cacheReadTokens = (response.usage as unknown as Record<string, unknown>)["cache_read_input_tokens"] as number ?? 0;
+      const cacheReadTokens = response.usage.cache_read_input_tokens ?? 0;
       const cacheSavings = (cacheReadTokens / 1_000_000) * (inputRate * 0.9); // 90% savings on cached tokens
       const totalCostUsd = normalizeCostUsd(inputCost + outputCost - cacheSavings);
 
@@ -380,7 +394,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         type: "result",
         subtype: "success",
         result: resultText,
-        structuredOutput: (response as unknown as Record<string, unknown>)["parsed_output"] ?? undefined,
+        structuredOutput: (response as MessageWithParsedOutput).parsed_output ?? undefined,
         durationMs,
         numTurns: 1,
         totalCostUsd,
@@ -559,18 +573,18 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
         if (mapped.type === "result") {
           // Extract cost and metadata from SDK result
-          const sdkMsg = message as Record<string, unknown>;
-          totalCostUsd = normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined);
-          numTurns = (sdkMsg["num_turns"] as number) ?? 0;
+          const sdkResult = message as SDKResultMessage;
+          totalCostUsd = normalizeCostUsd(sdkResult.total_cost_usd);
+          numTurns = sdkResult.num_turns ?? 0;
 
           const durationMs = Date.now() - startedAtMs;
 
-          if (mapped.subtype === "success" && "result" in mapped) {
+          if (sdkResult.subtype === "success" && "result" in mapped) {
             yield {
               type: "result",
               subtype: "success",
               result: mapped.result,
-              structuredOutput: (sdkMsg as Record<string, unknown>)["structured_output"],
+              structuredOutput: sdkResult.structured_output,
               durationMs,
               numTurns,
               totalCostUsd,
@@ -864,16 +878,16 @@ class ClaudeSession implements AgentSession {
         if (!mapped) continue;
 
         if (mapped.type === "result") {
-          const sdkMsg = value as Record<string, unknown>;
-          const totalCostUsd = normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined);
-          const numTurns = (sdkMsg["num_turns"] as number) ?? 0;
+          const sdkResult = value as SDKResultMessage;
+          const totalCostUsd = normalizeCostUsd(sdkResult.total_cost_usd);
+          const numTurns = sdkResult.num_turns ?? 0;
 
-          if (mapped.subtype === "success" && "result" in mapped) {
+          if (sdkResult.subtype === "success" && "result" in mapped) {
             yield {
               type: "result",
               subtype: "success",
               result: mapped.result,
-              structuredOutput: sdkMsg["structured_output"],
+              structuredOutput: sdkResult.structured_output,
               numTurns,
               totalCostUsd,
             };
@@ -926,56 +940,56 @@ function mapPermissionMode(
 }
 
 function mapMessage(msg: SDKMessage): AgentMessage | null {
-  const type = (msg as Record<string, unknown>)["type"] as string;
-
-  switch (type) {
+  switch (msg.type) {
     case "result": {
-      const sdkMsg = msg as Record<string, unknown>;
-      const subtype = sdkMsg["subtype"] as string;
-      if (subtype === "success") {
+      const sdkResult = msg as SDKResultMessage;
+      if (sdkResult.subtype === "success") {
         return {
           type: "result",
           subtype: "success",
-          result: (sdkMsg["result"] as string) ?? "",
-          structuredOutput: sdkMsg["structured_output"],
-          totalCostUsd: normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined),
+          result: sdkResult.result ?? "",
+          structuredOutput: sdkResult.structured_output,
+          totalCostUsd: normalizeCostUsd(sdkResult.total_cost_usd),
         };
       }
       return {
         type: "result",
-        subtype: subtype ?? "error_runtime",
-        errors: Array.isArray(sdkMsg["errors"])
-          ? (sdkMsg["errors"] as string[])
-          : [String(sdkMsg["errors"] ?? "Unknown error")],
-        totalCostUsd: normalizeCostUsd(sdkMsg["total_cost_usd"] as number | undefined),
+        subtype: sdkResult.subtype ?? "error_runtime",
+        errors: Array.isArray(sdkResult.errors)
+          ? sdkResult.errors
+          : [String(sdkResult.errors ?? "Unknown error")],
+        totalCostUsd: normalizeCostUsd(sdkResult.total_cost_usd),
       };
     }
 
     case "assistant": {
-      const sdkMsg = msg as Record<string, unknown>;
+      const sdkAssistant = msg as SDKAssistantMessage;
+      const content = sdkAssistant.message?.content;
       return {
         type: "assistant",
-        content: Array.isArray(sdkMsg["content"]) ? sdkMsg["content"] : [],
+        // BetaContentBlock[] -> Record<string, unknown>[] via spread to satisfy
+        // the AgentAssistantMessage interface (strips the rigid index signature constraint)
+        content: Array.isArray(content) ? content.map((block) => ({ ...block })) : [],
       };
     }
 
-    case "tool_use_progress": {
-      const sdkMsg = msg as Record<string, unknown>;
+    case "tool_progress": {
+      const sdkProgress = msg as SDKToolProgressMessage;
       return {
         type: "tool-progress",
-        toolUseId: String(sdkMsg["tool_use_id"] ?? ""),
-        toolName: String(sdkMsg["tool_name"] ?? ""),
-        elapsedSeconds: (sdkMsg["elapsed_seconds"] as number) ?? 0,
+        toolUseId: sdkProgress.tool_use_id ?? "",
+        toolName: sdkProgress.tool_name ?? "",
+        elapsedSeconds: sdkProgress.elapsed_time_seconds ?? 0,
       };
     }
 
     case "tool_use_summary": {
-      const sdkMsg = msg as Record<string, unknown>;
+      const sdkSummary = msg as SDKToolUseSummaryMessage;
       return {
         type: "tool-summary",
-        summary: String(sdkMsg["summary"] ?? ""),
-        precedingToolUseIds: Array.isArray(sdkMsg["preceding_tool_use_ids"])
-          ? sdkMsg["preceding_tool_use_ids"] as string[]
+        summary: sdkSummary.summary ?? "",
+        precedingToolUseIds: Array.isArray(sdkSummary.preceding_tool_use_ids)
+          ? sdkSummary.preceding_tool_use_ids
           : [],
       };
     }
