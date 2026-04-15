@@ -112,6 +112,11 @@ export function initDb(dbPath: string): Database.Database {
 
   runMigrations(db, allMigrations);
 
+  // Force a WAL checkpoint so the main DB file is fully written before the
+  // scan starts.  This prevents data loss if the process crashes before
+  // SQLite's automatic checkpoint threshold is reached.
+  db.pragma("wal_checkpoint(TRUNCATE)");
+
   return db;
 }
 

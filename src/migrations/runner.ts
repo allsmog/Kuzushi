@@ -169,6 +169,14 @@ function detectAndMarkLegacyDatabase(
     applied.add(17);
   }
 
+  // Migration 024: scanner → task_id rename
+  // Only mark as applied if `task_id` already exists (i.e. the rename isn't needed).
+  // Legacy DBs with `scanner` but not `task_id` must NOT skip this migration.
+  if (findingsColumns.has("task_id")) {
+    insertVersion.run(24, "rename_scanner_to_task_id", now);
+    applied.add(24);
+  }
+
   return applied;
 }
 

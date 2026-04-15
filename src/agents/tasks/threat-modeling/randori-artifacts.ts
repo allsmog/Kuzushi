@@ -32,28 +32,42 @@ export function readRandoriArtifacts(repoRoot: string, relativeOutputDir?: strin
  * - S4: { threats[] }  (not threat_scenarios!)
  */
 export function mergeRandoriStageOutputs(artifacts: RandoriArtifacts): Record<string, unknown> | null {
+  // Build the DFD from S2+S3 regardless of whether S4 exists.
+  // Previously this returned null when S4 was missing, which discarded
+  // the entire DFD and left threat-hunt with no external entities.
+  const s2 = artifacts.s2Scope;
+  const s3 = artifacts.s3Decomposition;
   const s4 = artifacts.s4Threats;
-  if (!s4) return null;
 
-  const merged: Record<string, unknown> = { ...s4 };
+  if (!s2 && !s3 && !s4) return null;
+
+  const merged: Record<string, unknown> = s4 ? { ...s4 } : {};
 
   // S4 uses "threats" not "threat_scenarios" — normalize
   if (merged["threats"] && !merged["threat_scenarios"]) {
     merged["threat_scenarios"] = merged["threats"];
   }
+  // Ensure threats array exists even without S4 so downstream gets a valid document
+  if (!merged["threat_scenarios"] && !merged["threats"]) {
+    merged["threat_scenarios"] = [];
+    merged["threats"] = [];
+  }
 
-  // Build synthetic DFD from S2 actors/services + S3 trust boundaries
+  // Build DFD from S2 actors/services + S3 dfd_elements + S3 trust boundaries
   const dfd: Record<string, unknown> = {};
+  const seenIds = new Set<string>();
+  const elements: Array<Record<string, unknown>> = [];
 
   // Synthesize DFD elements from S2 actors and services
-  const elements: Array<Record<string, unknown>> = [];
-  const s2 = artifacts.s2Scope;
   if (s2) {
     // Actors → external entities or processes
     for (const actor of asArray(s2["actors"])) {
+      const id = str(actor["id"]);
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
       const type = actorTypeToDfdType(str(actor["type"]));
       elements.push({
-        id: str(actor["id"]),
+        id,
         type,
         name: str(actor["name"]),
         description: str(actor["description"]),
@@ -62,8 +76,11 @@ export function mergeRandoriStageOutputs(artifacts: RandoriArtifacts): Record<st
     }
     // Services → processes
     for (const svc of asArray(s2["services"])) {
+      const id = str(svc["id"]);
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
       elements.push({
-        id: str(svc["id"]),
+        id,
         type: "process",
         name: str(svc["name"]),
         description: str(svc["description"]),
@@ -72,8 +89,11 @@ export function mergeRandoriStageOutputs(artifacts: RandoriArtifacts): Record<st
     }
     // Databases → data stores
     for (const db of asArray(s2["databases"])) {
+      const id = str(db["id"]);
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
       elements.push({
-        id: str(db["id"]),
+        id,
         type: "data-store",
         name: str(db["name"]),
         description: str(db["description"]),
@@ -82,8 +102,11 @@ export function mergeRandoriStageOutputs(artifacts: RandoriArtifacts): Record<st
     }
     // Data flows
     for (const flow of asArray(s2["data_flows"])) {
+      const id = str(flow["id"]);
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
       elements.push({
-        id: str(flow["id"]),
+        id,
         type: "data-flow",
         name: str(flow["data"]) || `${str(flow["source"])} → ${str(flow["destination"])}`,
         description: str(flow["data"]),
@@ -95,11 +118,24 @@ export function mergeRandoriStageOutputs(artifacts: RandoriArtifacts): Record<st
       });
     }
   }
-  dfd["elements"] = elements;
 
-  // Trust boundaries from S3
-  const s3 = artifacts.s3Decomposition;
+  // Incorporate S3's own dfd_elements (the agent often writes richer elements
+  // directly in S3 that aren't present in S2's actor/service breakdown).
   if (s3) {
+    for (const elem of asArray(s3["dfd_elements"])) {
+      const id = str(elem["id"]);
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      elements.push({
+        id,
+        type: normalizeDfdType(str(elem["type"])),
+        name: str(elem["name"]),
+        description: str(elem["description"]),
+        trust_zone: str(elem["trust_zone"]) || str(elem["component"]) || "unknown",
+      });
+    }
+
+    // Trust boundaries from S3
     const boundaries: Array<Record<string, unknown>> = [];
     for (const tb of asArray(s3["trust_boundaries"])) {
       boundaries.push({
@@ -107,14 +143,32 @@ export function mergeRandoriStageOutputs(artifacts: RandoriArtifacts): Record<st
         name: str(tb["name"]),
         inner_zone: str(tb["name"]),
         outer_zone: "external",
-        crossing_flows: asArray(tb["components"]).map((c) => str(c)),
+        crossing_flows: asArray(tb["components"] ?? tb["crossing_components"]).map((c) => str(c)),
       });
     }
     dfd["trust_boundaries"] = boundaries;
   }
 
+  dfd["elements"] = elements;
   merged["dfd"] = dfd;
   return merged;
+}
+
+/** Normalize DFD element types from agent output to canonical form. */
+function normalizeDfdType(t: string): string {
+  switch (t.toLowerCase()) {
+    case "external":
+    case "external_entity":
+      return "external-entity";
+    case "datastore":
+    case "data_store":
+      return "data-store";
+    case "dataflow":
+    case "data_flow":
+      return "data-flow";
+    default:
+      return t;
+  }
 }
 
 /** Map Randori actor types to DFD element types. */

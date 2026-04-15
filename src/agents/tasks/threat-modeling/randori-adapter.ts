@@ -62,8 +62,25 @@ function parseDfdElements(dfd: unknown): DfdElement[] {
 }
 
 function normalizeElementType(t: string): DfdElement["type"] {
-  const valid = new Set(["external-entity", "process", "data-store", "data-flow"]);
-  return valid.has(t) ? (t as DfdElement["type"]) : "process";
+  // Map common agent output variants to canonical types
+  switch (t.toLowerCase()) {
+    case "external-entity":
+    case "external":
+    case "external_entity":
+      return "external-entity";
+    case "data-store":
+    case "datastore":
+    case "data_store":
+      return "data-store";
+    case "data-flow":
+    case "dataflow":
+    case "data_flow":
+      return "data-flow";
+    case "process":
+      return "process";
+    default:
+      return "process";
+  }
 }
 
 // ── Trust Boundaries ──
