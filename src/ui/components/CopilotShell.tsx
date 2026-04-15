@@ -101,11 +101,11 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         </Box>
       )}
 
-      {/* Thinking indicator (no specific tool) */}
+      {/* Processing indicator (no specific tool) */}
       {shell.processing && !shell.currentTool && (
         <Box paddingLeft={2}>
           <Spinner />
-          <Text>{" "}{chalk.dim("thinking...")}</Text>
+          <Text>{" "}{chalk.dim("running...")}</Text>
         </Box>
       )}
 
