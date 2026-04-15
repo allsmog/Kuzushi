@@ -110,6 +110,47 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
 
   const scanPath = path.resolve(repoPath);
   const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
+
+  // Interactive setup flow (skip for --resume)
+  if (!opts.resume && process.stdout.isTTY) {
+    const { isFirstRun, runSetupWizard, runConfigConfirmation } = await import("../../ui/setup.js");
+
+    if (isFirstRun(repoRoot)) {
+      // First-time user: show setup wizard
+      const outcome = await runSetupWizard(repoName, repoRoot);
+      if (outcome.action === "cancel") {
+        cleanupUI();
+        return;
+      }
+      // Apply wizard selections as CLI overrides
+      if (outcome.preset && !opts.preset) {
+        opts.preset = outcome.preset;
+      }
+      if (outcome.model && !opts.model) {
+        opts.model = outcome.model;
+      }
+    } else {
+      // Returning user: show config confirmation
+      const resolvedConfig = loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true });
+      const outcome = await runConfigConfirmation(
+        {
+          model: resolvedConfig.model,
+          tasks: resolvedConfig.tasks,
+          severity: resolvedConfig.severity,
+          concurrency: resolvedConfig.triageConcurrency,
+          verify: resolvedConfig.verify,
+          pocHarness: resolvedConfig.pocHarness,
+          budget: resolvedConfig.costBudgetUsd,
+        },
+        repoName,
+      );
+      if (outcome.action === "cancel") {
+        cleanupUI();
+        return;
+      }
+    }
+  }
+
   const modeConfig = applyScanCommandConfigOverrides(
     loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true }),
     opts,

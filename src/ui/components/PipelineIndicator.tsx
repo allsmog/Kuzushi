@@ -308,6 +308,10 @@ function formatToolLine(line: AgentActivityLine): string {
       return line.detail
         ? `${chalk.green(icons.success)} ${line.detail}`
         : chalk.green(icons.success);
+    case "reasoning":
+      return line.detail
+        ? `${chalk.italic.dim(line.detail.slice(0, 80))}${(line.detail.length ?? 0) > 80 ? "..." : ""}`
+        : "";
     case "summary":
       return line.detail
         ? `${chalk.dim(icons.dot)} ${chalk.dim(line.detail)}`

@@ -38,6 +38,7 @@ import type { MessageBus } from "../types.js";
 import type { UIStore } from "../../ui/state.js";
 import { buildSummaryData } from "../../ui/summary-data.js";
 import { getRateLimitRegistry } from "../../scheduler/index.js";
+import { sendCompletionNotification, buildScanNotification } from "../../ui/notify.js";
 
 interface RunReportState {
   tasks?: string[];
@@ -471,6 +472,15 @@ export function registerReportWorker(
           summary: summaryData,
           qualityGate: qualityGateResult,
         });
+
+        // Send completion notification
+        const { title, message } = buildScanNotification({
+          tp: summaryData.verdictCounts.tp,
+          needsReview: summaryData.verdictCounts.needs_review,
+          totalCostUsd: summaryData.triageCostUsd + summaryData.verificationCostUsd,
+          repoName: summaryData.repoName,
+        });
+        sendCompletionNotification(title, message);
       }
     } else {
       maybePrintStartBanner(state, event.payload.context.repoName);

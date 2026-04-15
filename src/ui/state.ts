@@ -53,7 +53,7 @@ export interface ResultLine {
 }
 
 export interface AgentActivityLine {
-  kind: "tool-start" | "tool-progress" | "tool-complete" | "summary";
+  kind: "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning";
   toolName?: string;
   detail?: string;
   elapsedSeconds?: number;
