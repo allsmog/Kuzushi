@@ -5,6 +5,7 @@ import { access, mkdir, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { emitDiagnostic } from "../ui/output.js";
 import { isRecord, toErrorMessage } from "../utils.js";
 import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
 import type { Finding, TaintPathStep } from "./types.js";
@@ -861,11 +862,9 @@ async function resolveGoDependencies(repoRoot: string): Promise<void> {
       timeout: 120_000,
       maxBuffer: 16 * 1024 * 1024,
     });
-    process.stderr.write(`[codeql] Pre-fetched Go modules from ${goModDir}\n`);
+    emitDiagnostic("codeql", `Pre-fetched Go modules from ${goModDir}`);
   } catch (error) {
-    process.stderr.write(
-      `[codeql] go mod download failed (non-fatal): ${toErrorMessage(error)}\n`,
-    );
+    emitDiagnostic("codeql", `go mod download failed (non-fatal): ${toErrorMessage(error)}`, "warning");
   }
 }
 

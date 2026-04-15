@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AgentRuntime, AgentSession } from "../agent-runtime/types.js";
 import { runStructuredAgentQuery, runStructuredSessionQuery, runStructuredBatchQuery } from "../agent-runtime/execution.js";
 import { writeBatchFile, cleanupBatchFiles } from "../agent-runtime/batch-files.js";
+import { emitDiagnostic } from "../ui/output.js";
 import type { Finding } from "./types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
 
@@ -85,7 +86,7 @@ export async function rescoreFindings(
 
   // ── Priority 1: Batch API path (50% cost reduction) ──
   if (runtime.queryBatch) {
-    process.stderr.write(`[llm-rescore] Using Batch API for ${batches.length} batch(es) (50% cost reduction)\n`);
+    emitDiagnostic("llm-rescore", `Using Batch API for ${batches.length} batch(es) (50% cost reduction)`);
 
     // Collect all batch prompts upfront
     const batchRequests: Array<{ id: string; prompt: string; systemPrompt?: string }> = [];
@@ -170,7 +171,7 @@ export async function rescoreFindings(
         };
       }));
 
-      process.stderr.write(`[llm-rescore] Batch ${batchIdx + 1}/${batches.length}: rescored ${batch.length} findings\n`);
+      emitDiagnostic("llm-rescore", `Batch ${batchIdx + 1}/${batches.length}: rescored ${batch.length} findings`);
     }
 
     return allResults;
@@ -196,7 +197,7 @@ export async function rescoreFindings(
   try {
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       const batch = batches[batchIdx];
-      process.stderr.write(`[llm-rescore] Batch ${batchIdx + 1}/${batches.length}: rescoring ${batch.length} findings...\n`);
+      emitDiagnostic("llm-rescore", `Batch ${batchIdx + 1}/${batches.length}: rescoring ${batch.length} findings...`);
 
       const batchResults = session
         ? await rescoreBatchSession(

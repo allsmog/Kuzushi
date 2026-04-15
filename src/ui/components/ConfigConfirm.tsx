@@ -13,10 +13,10 @@
  *   [enter] proceed  [e] edit (opens wizard)  [q] quit
  */
 import React from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput } from "ink";
 import chalk from "chalk";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter, formatCost } from "../format.js";
+import { boxHeader, boxFooter, formatCost, terminalCardWidth } from "../format.js";
 
 export interface ConfigConfirmData {
   model: string;
@@ -44,7 +44,7 @@ export function ConfigConfirm({
   onEdit,
   onQuit,
 }: ConfigConfirmProps): React.ReactElement {
-  const { exit } = useApp();
+  const width = terminalCardWidth();
 
   useInput((input, key) => {
     if (key.return || input === "y") {
@@ -53,7 +53,6 @@ export function ConfigConfirm({
       onEdit();
     } else if (input === "q" || key.escape) {
       onQuit();
-      exit();
     }
   });
 
@@ -64,7 +63,9 @@ export function ConfigConfirm({
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
-      <Text>{boxHeader(`${repoName}`, 58)}</Text>
+      <Text>{boxHeader(`${repoName}`, width)}</Text>
+      <Text>{""}</Text>
+      <Text>{"  "}{chalk.dim("Press Enter to start this scan with the resolved config below.")}</Text>
       <Text>{""}</Text>
 
       <Text>{"  "}{chalk.dim("Model:")}        {chalk.white(modelShort)}</Text>
@@ -90,8 +91,8 @@ export function ConfigConfirm({
       )}
 
       <Text>{""}</Text>
-      <Text>{"  "}{chalk.redBright.bold("[enter]")} proceed  {chalk.dim("[e]")} edit  {chalk.dim("[q]")} quit</Text>
-      <Text>{boxFooter(58)}</Text>
+      <Text>{"  "}{chalk.redBright.bold("[enter]")} start scan  {chalk.dim("[e]")} edit  {chalk.dim("[q]")} quit</Text>
+      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

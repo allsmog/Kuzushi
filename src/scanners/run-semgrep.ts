@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { ScanOpts } from "../types.js";
+import { emitDiagnostic } from "../ui/output.js";
 import type { Finding } from "./types.js";
 import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
 
@@ -106,7 +107,10 @@ export async function runSemgrep(
 
     proc.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
     proc.stderr.on("data", (chunk: Buffer) => {
-      process.stderr.write(`  [${binName}] ${chunk.toString()}`);
+      const text = chunk.toString().trimEnd();
+      if (text.length > 0) {
+        emitDiagnostic(binName, text);
+      }
     });
 
     proc.on("close", (code) => {

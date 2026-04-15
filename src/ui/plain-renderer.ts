@@ -10,13 +10,10 @@ import {
   colorVerdict,
   formatCost,
   formatDuration,
-  progressBar,
   miniBarChart,
-  badge,
   boxHeader,
   boxFooter,
-  boxDivider,
-  treeLines,
+  terminalCardWidth,
 } from "./format.js";
 import type { UIStore, Phase, ResultLine, SummaryData } from "./state.js";
 
@@ -29,8 +26,10 @@ import type { UIStore, Phase, ResultLine, SummaryData } from "./state.js";
 export function registerPlainTextRenderer(store: UIStore): () => void {
   let lastPhase: Phase = "idle";
   let lastResultCount = 0;
+  let lastNoticeCount = 0;
   let bannerPrinted = false;
   let startBannerPrinted = false;
+  const taskState = new Map<string, { status: string; findingCount: number; detail?: string }>();
 
   const unsubscribe = store.subscribe(() => {
     const state = store.getState();
@@ -67,12 +66,34 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
       lastPhase = state.phase;
     }
 
+    const scanStage = state.stages.find((stage) => stage.id === "scan");
+    if (scanStage) {
+      for (const task of scanStage.subTasks) {
+        const previous = taskState.get(task.id);
+        const current = {
+          status: task.status,
+          findingCount: task.findingCount ?? 0,
+          detail: task.detail,
+        };
+        if (!previous || previous.status !== current.status || previous.findingCount !== current.findingCount || previous.detail !== current.detail) {
+          printScanTaskLine(task.label, task.status, current.findingCount, task.detail, task.elapsedMs);
+          taskState.set(task.id, current);
+        }
+      }
+    }
+
     // Print new results
     const newResults = state.results.slice(lastResultCount);
     for (const result of newResults) {
       printResultLine(result);
     }
     lastResultCount = state.results.length;
+
+    const newNotices = state.notices.slice(lastNoticeCount);
+    for (const notice of newNotices) {
+      printNotice(notice.level, notice.message, notice.detail);
+    }
+    lastNoticeCount = state.notices.length;
 
     // Print summary
     if (state.phase === "summary" && state.summary) {
@@ -122,13 +143,54 @@ function printResultLine(result: ResultLine): void {
   }
 }
 
+function printScanTaskLine(
+  taskId: string,
+  status: string,
+  findingCount: number,
+  detail?: string,
+  elapsedMs?: number,
+): void {
+  const findings = findingCount > 0 ? ` ${chalk.dim(`(${findingCount} finding${findingCount === 1 ? "" : "s"})`)}` : "";
+  const suffix = detail ? ` ${chalk.dim(detail)}` : "";
+  const elapsed = elapsedMs != null ? ` ${chalk.dim(formatDuration(elapsedMs))}` : "";
+
+  if (status === "done") {
+    console.log(`  ${chalk.dim(icons.complete)} ${taskId}${findings}${elapsed}${suffix}`);
+    return;
+  }
+  if (status === "error") {
+    console.log(`  ${chalk.red(icons.error)} ${taskId}${suffix}`);
+    return;
+  }
+  if (status === "active") {
+    console.log(`  ${chalk.yellow(icons.active)} ${taskId}${findings}${suffix}`);
+  }
+}
+
+function printNotice(level: "info" | "warning" | "error" | "success", message: string, detail?: string): void {
+  const icon = level === "success"
+    ? chalk.green(icons.success)
+    : level === "warning"
+      ? chalk.yellow(icons.warning)
+      : level === "error"
+        ? chalk.red(icons.error)
+        : chalk.blue(icons.info);
+  const body = level === "error"
+    ? chalk.red(message)
+    : level === "warning"
+      ? chalk.yellow(message)
+      : message;
+  console.log(`  ${icon} ${body}${detail ? ` ${chalk.dim(detail)}` : ""}`);
+}
+
 function printPlainSummary(data: SummaryData): void {
   // Delegate to the existing console.log approach with enhanced formatting
   const { verdictCounts: counts } = data;
   const total = counts.tp + counts.fp + counts.needs_review;
+  const width = terminalCardWidth(96, 60);
 
   console.log("");
-  console.log(boxHeader(`${icons.complete} Scan Results`, 60));
+  console.log(boxHeader(`${icons.complete} Scan Results`, width));
   console.log("");
 
   if (data.failedTasks.length > 0) {
@@ -157,5 +219,5 @@ function printPlainSummary(data: SummaryData): void {
   if (data.verificationCostUsd > 0) {
     console.log(`  ${chalk.dim("Verification cost:")} ${formatCost(data.verificationCostUsd)}`);
   }
-  console.log(boxFooter(60));
+  console.log(boxFooter(width));
 }

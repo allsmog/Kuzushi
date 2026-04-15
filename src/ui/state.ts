@@ -8,10 +8,47 @@ import type { Verdict } from "../types.js";
 import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
 import type { ExploitChain } from "../types.js";
+import type { WizardResult } from "./components/SetupWizard.js";
+import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
 
 export type Phase = "idle" | "scanning" | "triaging" | "verifying" | "poc" | "summary" | "done";
+export type UIMode = "preflight" | "running" | "summary" | "review" | "done";
 
 export type StageStatus = "pending" | "active" | "done" | "error";
+export type NoticeLevel = "info" | "warning" | "error" | "success";
+
+export interface UINotice {
+  id: string;
+  level: NoticeLevel;
+  message: string;
+  detail?: string;
+  source?: string;
+  createdAt: number;
+}
+
+export type PreflightState =
+  | {
+    kind: "wizard";
+    repoName: string;
+    repoRoot: string;
+    onComplete: (result: WizardResult) => void;
+    onCancel: () => void;
+  }
+  | {
+    kind: "confirm";
+    repoName: string;
+    repoRoot: string;
+    config: ConfigConfirmData;
+    onProceed: () => void;
+    onEdit: () => void;
+    onQuit: () => void;
+  };
+
+export interface ReviewSession {
+  findings: ActionableFinding[];
+  onVerdict: (fingerprint: string, verdict: Verdict) => void;
+  onQuit: () => void;
+}
 
 export interface SubTask {
   id: string;
@@ -20,6 +57,8 @@ export interface SubTask {
   detail?: string;
   elapsedMs?: number;
   startedAt?: number;
+  findingCount?: number;
+  lastFinding?: string;
 }
 
 export interface PipelineStage {
@@ -145,6 +184,7 @@ export interface ActionableFinding {
 }
 
 export interface UIState {
+  mode: UIMode;
   phase: Phase;
   repoName: string;
   tasks: string[];
@@ -173,8 +213,10 @@ export interface UIState {
   agentActivity: Map<string, AgentActivityLine[]>;
   summary: SummaryData | null;
   qualityGate: QualityGateResult | null;
+  notices: UINotice[];
   warnings: string[];
   bannerShown: boolean;
+  compactBannerShown?: boolean;
   startBannerShown: boolean;
   /** Resume diff data — shown when resuming a previous run. */
   resumeDiff?: import("./components/ResumeDiff.js").ResumeDiffData | null;
@@ -187,6 +229,8 @@ export interface UIState {
   };
   /** Pipeline stage indicator — tracks all stages for the ○/●/◆ display. */
   stages: PipelineStage[];
+  preflight: PreflightState | null;
+  review: ReviewSession | null;
 }
 
 type Listener = () => void;
@@ -197,6 +241,7 @@ export class UIStore {
 
   constructor() {
     this.state = {
+      mode: "preflight",
       phase: "idle",
       repoName: "",
       tasks: [],
@@ -210,10 +255,14 @@ export class UIStore {
       agentActivity: new Map(),
       summary: null,
       qualityGate: null,
+      notices: [],
       warnings: [],
       bannerShown: false,
+      compactBannerShown: false,
       startBannerShown: false,
       stages: [],
+      preflight: null,
+      review: null,
     };
   }
 
@@ -223,6 +272,29 @@ export class UIStore {
 
   update(partial: Partial<UIState>): void {
     this.state = { ...this.state, ...partial };
+    this.notify();
+  }
+
+  setMode(mode: UIMode): void {
+    this.state = { ...this.state, mode };
+    this.notify();
+  }
+
+  setPreflight(preflight: PreflightState | null): void {
+    this.state = {
+      ...this.state,
+      preflight,
+      mode: preflight ? "preflight" : this.state.mode === "preflight" ? "running" : this.state.mode,
+    };
+    this.notify();
+  }
+
+  setReview(review: ReviewSession | null): void {
+    this.state = {
+      ...this.state,
+      review,
+      mode: review ? "review" : this.state.mode === "review" ? "summary" : this.state.mode,
+    };
     this.notify();
   }
 
@@ -236,11 +308,47 @@ export class UIStore {
     this.notify();
   }
 
+  addNotice(notice: Omit<UINotice, "id" | "createdAt"> & { id?: string; createdAt?: number }): void {
+    const createdAt = notice.createdAt ?? Date.now();
+    const id = notice.id ?? `${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
+    const duplicate = this.state.notices.find((entry) =>
+      entry.level === notice.level
+      && entry.message === notice.message
+      && entry.detail === notice.detail,
+    );
+    if (duplicate) {
+      return;
+    }
+
+    this.state = {
+      ...this.state,
+      notices: [...this.state.notices, { ...notice, id, createdAt }].slice(-8),
+    };
+    this.notify();
+  }
+
+  clearNotices(): void {
+    if (this.state.notices.length === 0) {
+      return;
+    }
+    this.state = { ...this.state, notices: [] };
+    this.notify();
+  }
+
   addAgentActivity(fingerprint: string, line: AgentActivityLine): void {
     const newMap = new Map(this.state.agentActivity);
     const lines = newMap.get(fingerprint) ?? [];
-    // Keep only latest 5 activity lines per finding to avoid clutter
-    const updated = [...lines, line].slice(-5);
+    const previous = lines[lines.length - 1];
+    if (
+      previous
+      && previous.kind === line.kind
+      && previous.toolName === line.toolName
+      && previous.detail === line.detail
+    ) {
+      return;
+    }
+    // Keep only the latest 4 activity lines per finding to avoid clutter.
+    const updated = [...lines, line].slice(-4);
     newMap.set(fingerprint, updated);
     this.state = { ...this.state, agentActivity: newMap };
     this.notify();
@@ -299,7 +407,7 @@ export class UIStore {
         const existing = s.subTasks.findIndex((t) => t.id === subTask.id);
         const updated = [...s.subTasks];
         if (existing >= 0) {
-          updated[existing] = subTask;
+          updated[existing] = { ...updated[existing], ...subTask };
         } else {
           updated.push(subTask);
         }
@@ -307,6 +415,34 @@ export class UIStore {
       }
       return s;
     });
+    this.state = { ...this.state, stages };
+    this.notify();
+  }
+
+  recordSubTaskFinding(stageId: string, taskId: string, detail: string): void {
+    const now = Date.now();
+    const stages = this.state.stages.map((s) => {
+      if (s.id !== stageId) {
+        return s;
+      }
+
+      const updated = s.subTasks.map((task) => {
+        if (task.id !== taskId) {
+          return task;
+        }
+
+        return {
+          ...task,
+          findingCount: (task.findingCount ?? 0) + 1,
+          lastFinding: detail,
+          detail,
+          startedAt: task.startedAt ?? now,
+        };
+      });
+
+      return { ...s, subTasks: updated };
+    });
+
     this.state = { ...this.state, stages };
     this.notify();
   }

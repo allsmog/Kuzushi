@@ -28,16 +28,15 @@
 import React from "react";
 import { Box, Text } from "ink";
 import chalk from "chalk";
-import { formatCost, formatDuration } from "../format.js";
+import { formatCost, formatDuration, terminalCardWidth } from "../format.js";
 import type { SummaryData } from "../state.js";
 
 interface TrophyScreenProps {
   data: SummaryData;
 }
 
-const WIDTH = 56;
-
 export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
+  const innerWidth = Math.max(44, terminalCardWidth(74, 56) - 2);
   const tp = data.verdictCounts.tp;
   const isClean = tp === 0;
   const hasExploitable = data.exploitable > 0;
@@ -50,9 +49,9 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   const cornerBR = isClean ? chalk.green("┘") : chalk.red("┘");
   const side = isClean ? chalk.green("│") : chalk.red("│");
 
-  const topBorder = `${cornerTL}${borderChar.repeat(WIDTH)}${cornerTR}`;
-  const bottomBorder = `${cornerBL}${borderChar.repeat(WIDTH)}${cornerBR}`;
-  const emptyLine = `${side}${" ".repeat(WIDTH)}${side}`;
+  const topBorder = `${cornerTL}${borderChar.repeat(innerWidth)}${cornerTR}`;
+  const bottomBorder = `${cornerBL}${borderChar.repeat(innerWidth)}${cornerBR}`;
+  const emptyLine = `${side}${" ".repeat(innerWidth)}${side}`;
 
   // Stats line
   const totalCost = data.triageCostUsd + data.verificationCostUsd + data.pocHarnessCostUsd;
@@ -74,12 +73,12 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
       <Box flexDirection="column">
         <Text>{"  "}{topBorder}</Text>
         <Text>{"  "}{emptyLine}</Text>
-        <Text>{"  "}{side}{centerPad(headline, WIDTH)}{side}</Text>
+        <Text>{"  "}{side}{centerPad(headline, innerWidth)}{side}</Text>
         <Text>{"  "}{emptyLine}</Text>
-        <Text>{"  "}{side}{centerPad(subline, WIDTH)}{side}</Text>
-        <Text>{"  "}{side}{centerPad(statsLine, WIDTH)}{side}</Text>
+        <Text>{"  "}{side}{centerPad(subline, innerWidth)}{side}</Text>
+        <Text>{"  "}{side}{centerPad(statsLine, innerWidth)}{side}</Text>
         <Text>{"  "}{emptyLine}</Text>
-        <Text>{"  "}{side}{centerPad(chalk.dim(message), WIDTH)}{side}</Text>
+        <Text>{"  "}{side}{centerPad(chalk.dim(message), innerWidth)}{side}</Text>
         <Text>{"  "}{emptyLine}</Text>
         <Text>{"  "}{bottomBorder}</Text>
       </Box>
@@ -101,18 +100,24 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   const reviewStat = needsReview > 0
     ? chalk.yellow(`${needsReview} finding${needsReview > 1 ? "s" : ""} need review`)
     : null;
+  const nextAction = hasExploitable
+    ? "Next: investigate exploitable findings first."
+    : tp > 0
+      ? "Next: fix confirmed true positives."
+      : "Next: review remaining undecided findings.";
 
   return (
     <Box flexDirection="column">
       <Text>{"  "}{topBorder}</Text>
       <Text>{"  "}{emptyLine}</Text>
-      <Text>{"  "}{side}{centerPad(headline, WIDTH)}{side}</Text>
+      <Text>{"  "}{side}{centerPad(headline, innerWidth)}{side}</Text>
       <Text>{"  "}{emptyLine}</Text>
-      <Text>{"  "}{side}{centerPad(mainStat, WIDTH)}{side}</Text>
-      {chainStat && <Text>{"  "}{side}{centerPad(chainStat, WIDTH)}{side}</Text>}
-      {reviewStat && <Text>{"  "}{side}{centerPad(reviewStat, WIDTH)}{side}</Text>}
+      <Text>{"  "}{side}{centerPad(mainStat, innerWidth)}{side}</Text>
+      {chainStat && <Text>{"  "}{side}{centerPad(chainStat, innerWidth)}{side}</Text>}
+      {reviewStat && <Text>{"  "}{side}{centerPad(reviewStat, innerWidth)}{side}</Text>}
       <Text>{"  "}{emptyLine}</Text>
-      <Text>{"  "}{side}{centerPad(statsLine, WIDTH)}{side}</Text>
+      <Text>{"  "}{side}{centerPad(statsLine, innerWidth)}{side}</Text>
+      <Text>{"  "}{side}{centerPad(chalk.dim(nextAction), innerWidth)}{side}</Text>
       <Text>{"  "}{emptyLine}</Text>
       <Text>{"  "}{bottomBorder}</Text>
     </Box>

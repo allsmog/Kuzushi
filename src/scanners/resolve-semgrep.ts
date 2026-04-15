@@ -6,6 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import type { IncomingMessage } from "node:http";
 import { getHttpsAgent } from "../http-agent.js";
+import { emitOutputNotice } from "../ui/output.js";
 
 const BIN_DIR = path.join(os.homedir(), ".kuzushi", "bin");
 const GITHUB_RELEASE_URL =
@@ -134,19 +135,34 @@ export async function resolveSemgrepBinary(): Promise<string> {
   const localBin = path.join(BIN_DIR, process.platform === "win32" ? "opengrep.exe" : "opengrep");
   if (existsSync(localBin)) return localBin;
 
-  console.log("  No scanner found on PATH. Downloading opengrep...");
+  emitOutputNotice({
+    level: "warning",
+    message: "Scanner binary not found on PATH",
+    detail: "Downloading opengrep...",
+    source: "semgrep",
+  });
   const assetName = getAssetName();
   const downloadUrl = await getLatestReleaseDownloadUrl(assetName);
 
   if (!existsSync(BIN_DIR)) mkdirSync(BIN_DIR, { recursive: true });
 
-  console.log(`  Downloading ${assetName}...`);
+  emitOutputNotice({
+    level: "info",
+    message: "Downloading opengrep",
+    detail: assetName,
+    source: "semgrep",
+  });
   await downloadFile(downloadUrl, localBin);
 
   if (process.platform !== "win32") {
     chmodSync(localBin, 0o755);
   }
 
-  console.log(`  Installed opengrep to ${localBin}`);
+  emitOutputNotice({
+    level: "success",
+    message: "Installed opengrep",
+    detail: localBin,
+    source: "semgrep",
+  });
   return localBin;
 }

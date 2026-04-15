@@ -6,7 +6,7 @@
  * to `pino` when the dependency is added — call sites stay unchanged.
  *
  * Features:
- * - Level filtering (debug only shown with --verbose / KUZUSHI_LOG_LEVEL=debug)
+ * - Level filtering (quiet by default, debug only shown with --verbose / KUZUSHI_LOG_LEVEL=debug)
  * - Secret redaction: API key patterns auto-masked (preserves first 6 / last 4 chars)
  * - Logger caching via getLogger() factory
  * - Child loggers with additional context bindings
@@ -144,5 +144,5 @@ function resolveInitialLogLevel(): LogLevel {
   if (env && env in LEVEL_ORDER) {
     return env as LogLevel;
   }
-  return "info";
+  return "warn";
 }

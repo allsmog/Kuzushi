@@ -50,11 +50,28 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
   const [input, setInput] = useState("");
   const [lastResult, setLastResult] = useState<CommandResult | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   // Guard: stdin must support raw mode for useInput to work
   const canUseInput = active && process.stdin.isTTY === true;
 
   useInput((char, key) => {
+    if (!expanded && char === "/") {
+      setExpanded(true);
+      setInput("/");
+      return;
+    }
+
+    if (!expanded && char === "?") {
+      setExpanded(true);
+      setShowHelp(true);
+      setLastResult({ message: "", type: "info" });
+      return;
+    }
+
+    if (!expanded) {
+      return;
+    }
 
     if (key.return && input.length > 0) {
       const cmd = parseCommand(input);
@@ -71,6 +88,7 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
         setLastResult({ message: `Unknown command: ${input}`, type: "error" });
       }
       setInput("");
+      setExpanded(false);
       return;
     }
 
@@ -83,6 +101,7 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
       setInput("");
       setLastResult(null);
       setShowHelp(false);
+      setExpanded(false);
       return;
     }
 
@@ -121,10 +140,12 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
       )}
 
       {/* Input line */}
-      <Text>
-        {"  "}{chalk.dim(icons.arrow)} {input}{chalk.redBright("█")}
-        {input.length === 0 && chalk.dim(" type / for commands, ? for help")}
-      </Text>
+      {expanded && (
+        <Text>
+          {"  "}{chalk.dim(icons.arrow)} {input}{chalk.redBright("█")}
+          {input.length === 0 && chalk.dim(" type / for commands, ? for help")}
+        </Text>
+      )}
     </Box>
   );
 }

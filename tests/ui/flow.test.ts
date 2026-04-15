@@ -1,0 +1,158 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runConfigConfirmation, runSetupWizard } from "../../src/ui/setup.js";
+import { runInteractiveReview } from "../../src/ui/review.js";
+import { createUIStore } from "../../src/ui/state.js";
+import { getActionableFindings, initDb, upsertFinding } from "../../src/store.js";
+import type { Finding } from "../../src/scanners/types.js";
+import type { TriageResult } from "../../src/types.js";
+
+function makeFinding(fp: string): Finding {
+  return {
+    taskId: "semgrep",
+    fingerprint: fp,
+    ruleId: "test.rule",
+    filePath: "src/app.ts",
+    startLine: 10,
+    severity: "ERROR",
+    message: "test",
+    scannerConfidence: "HIGH",
+    subcategory: ["vuln"],
+    likelihood: "HIGH",
+    impact: "HIGH",
+    cwe: ["CWE-79"],
+    score: 54,
+  };
+}
+
+function makeResult(fp: string, verdict: TriageResult["verdict"] = "tp"): TriageResult {
+  return {
+    fingerprint: fp,
+    verdict,
+    confidence: 0.92,
+    rationale: "confirmed",
+    verificationSteps: ["step"],
+    fixPatch: null,
+  };
+}
+
+describe("ui flow helpers", () => {
+  const originalStdoutIsTTY = process.stdout.isTTY;
+
+  beforeEach(() => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process.stdout, "isTTY", { value: originalStdoutIsTTY, configurable: true });
+  });
+
+  it("exposes first-run wizard state through the shared store", async () => {
+    const store = createUIStore();
+    const promise = runSetupWizard(store, "repo", "/tmp/repo");
+
+    const preflight = store.getState().preflight;
+    expect(store.getState().mode).toBe("preflight");
+    expect(preflight?.kind).toBe("wizard");
+    expect(preflight?.repoRoot).toBe("/tmp/repo");
+
+    preflight?.onComplete({
+      preset: "safe",
+      model: "anthropic:claude-sonnet-4-6",
+      saveLocation: "none",
+    });
+
+    await expect(promise).resolves.toEqual({
+      action: "proceed",
+      preset: "safe",
+      model: "anthropic:claude-sonnet-4-6",
+    });
+    expect(store.getState().preflight).toBeNull();
+    expect(store.getState().mode).toBe("running");
+  });
+
+  it("shows the returning-user confirm card inside the shared store", async () => {
+    const store = createUIStore();
+    const promise = runConfigConfirmation(
+      store,
+      {
+        model: "anthropic:claude-sonnet-4-6",
+        tasks: ["semgrep", "codeql"],
+        preset: "deep",
+        verify: true,
+      },
+      "repo",
+      "/tmp/repo",
+    );
+
+    const preflight = store.getState().preflight;
+    expect(store.getState().mode).toBe("preflight");
+    expect(preflight?.kind).toBe("confirm");
+    expect(preflight?.repoRoot).toBe("/tmp/repo");
+
+    preflight?.onProceed();
+
+    await expect(promise).resolves.toEqual({ action: "proceed" });
+    expect(store.getState().preflight).toBeNull();
+    expect(store.getState().mode).toBe("running");
+  });
+
+  it("preserves the real repo root when editing from confirm back into the wizard", async () => {
+    const store = createUIStore();
+    const promise = runConfigConfirmation(
+      store,
+      {
+        model: "anthropic:claude-sonnet-4-6",
+        tasks: ["semgrep"],
+      },
+      "repo",
+      "/tmp/real-root",
+    );
+
+    store.getState().preflight?.kind === "confirm" && store.getState().preflight.onEdit();
+    await Promise.resolve();
+
+    const wizard = store.getState().preflight;
+    expect(wizard?.kind).toBe("wizard");
+    expect(wizard?.repoRoot).toBe("/tmp/real-root");
+
+    wizard?.kind === "wizard" && wizard.onComplete({
+      preset: "fast",
+      model: "anthropic:claude-haiku-4-5",
+      saveLocation: "none",
+    });
+
+    await expect(promise).resolves.toEqual({
+      action: "proceed",
+      preset: "fast",
+      model: "anthropic:claude-haiku-4-5",
+    });
+  });
+
+  it("runs interactive review inside the main store and updates verdicts", async () => {
+    const db = initDb(":memory:");
+    upsertFinding(db, makeFinding("fp-review"), makeResult("fp-review", "needs_review"), "repo", "HEAD");
+
+    const store = createUIStore();
+    const promise = runInteractiveReview(db, "repo", store);
+
+    const review = store.getState().review;
+    expect(store.getState().mode).toBe("review");
+    expect(review?.findings).toHaveLength(1);
+
+    review?.onVerdict("fp-review", "tp");
+    review?.onQuit();
+
+    await expect(promise).resolves.toEqual({
+      reviewed: 1,
+      tp: 1,
+      fp: 0,
+      byDesign: 0,
+      skipped: 0,
+    });
+
+    expect(store.getState().review).toBeNull();
+    expect(store.getState().mode).toBe("summary");
+    expect(getActionableFindings(db, "repo", { includeFalsePositives: true })[0]?.verdict).toBe("tp");
+    db.close();
+  });
+});

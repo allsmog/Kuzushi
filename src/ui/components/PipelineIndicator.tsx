@@ -177,7 +177,12 @@ function SubTaskBranches({ subTasks, hasMoreBelow }: {
               ? chalk.redBright(icons.active)
               : chalk.dim(icons.pending);
         const elapsed = task.elapsedMs != null ? `  ${chalk.dim(formatDuration(task.elapsedMs))}` : "";
-        const detail = task.detail ? `  ${chalk.dim(task.detail)}` : "";
+        const count = task.findingCount && task.findingCount > 0
+          ? `  ${chalk.white(`${task.findingCount} finding${task.findingCount === 1 ? "" : "s"}`)}`
+          : "";
+        const detail = task.detail
+          ? `  ${chalk.dim(task.detail.length > 72 ? `${task.detail.slice(0, 69)}...` : task.detail)}`
+          : "";
         const labelColor = task.status === "active" ? chalk.white : chalk.dim;
 
         return (
@@ -186,11 +191,11 @@ function SubTaskBranches({ subTasks, hasMoreBelow }: {
               <Box>
                 <Text>{"  "}{pipe}  {chalk.dim(connector)} </Text>
                 <Spinner color="red" />
-                <Text> {chalk.white(task.label)}{detail}{elapsed}</Text>
+                <Text> {chalk.white(task.label)}{count}{detail}{elapsed}</Text>
               </Box>
             ) : (
               <Text>
-                {"  "}{pipe}  {chalk.dim(connector)} {statusIcon} {labelColor(task.label)}{detail}{elapsed}
+                {"  "}{pipe}  {chalk.dim(connector)} {statusIcon} {labelColor(task.label)}{count}{detail}{elapsed}
               </Text>
             )}
           </Box>

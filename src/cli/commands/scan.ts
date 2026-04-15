@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { printBanner } from "../../banner.js";
 import { createDefaultTaskRegistry } from "../../agents/index.js";
 import { configureAgentRuntime } from "../../agent-runtime/index.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
@@ -22,6 +21,7 @@ import {
   hasConfigValidationErrors,
   validateKuzushiConfig,
 } from "../../config/validation.js";
+import { getGlobalLogLevel } from "../../logger.js";
 import { registerShutdownHook } from "../../lifecycle.js";
 import { configureRateLimitRegistry } from "../../scheduler/index.js";
 import {
@@ -46,6 +46,7 @@ import {
   type ScanCommandOptions,
 } from "../scan-config.js";
 import { isShutdownCapableRuntime, resolveRepo } from "../shared.js";
+import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js";
 
 export interface PreparedScanExecution {
   config: KuzushiConfig;
@@ -99,20 +100,19 @@ export interface MonorepoExecutionDecision {
 }
 
 export async function runScanCommand(repoPath: string, opts: ScanCommandOptions): Promise<void> {
-  // Initialize the Ink-based UI renderer (falls back to plain text in non-TTY)
+  // Initialize the renderer before preflight so one session owns the entire run.
   const { createUIRenderer } = await import("../../ui/render.js");
   const renderer = await createUIRenderer();
   const { store: uiStore, cleanup: cleanupUI } = renderer;
-
-  // The Ink UI renders its own <Banner /> when bannerShown is true.
-  // Only use the old printBanner() for non-TTY / plain-text fallback.
-  if (!process.stdout.isTTY) {
-    printBanner();
-  }
-  uiStore.update({ bannerShown: true });
+  configureTerminalOutput({
+    store: uiStore,
+    verbose: getGlobalLogLevel() === "debug",
+    quiet: true,
+  });
 
   const scanPath = path.resolve(repoPath);
   const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
+  uiStore.update({ repoName });
 
   // Interactive setup flow (skip for --resume)
   if (!opts.resume && process.stdout.isTTY) {
@@ -120,8 +120,9 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
 
     if (isFirstRun(repoRoot)) {
       // First-time user: show setup wizard
-      const outcome = await runSetupWizard(repoName, repoRoot);
+      const outcome = await runSetupWizard(uiStore, repoName, repoRoot);
       if (outcome.action === "cancel") {
+        resetTerminalOutput();
         cleanupUI();
         return;
       }
@@ -136,6 +137,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
       // Returning user: show config confirmation
       const resolvedConfig = loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true });
       const outcome = await runConfigConfirmation(
+        uiStore,
         {
           model: resolvedConfig.model,
           tasks: resolvedConfig.tasks,
@@ -146,8 +148,10 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
           budget: resolvedConfig.costBudgetUsd,
         },
         repoName,
+        repoRoot,
       );
       if (outcome.action === "cancel") {
+        resetTerminalOutput();
         cleanupUI();
         return;
       }
@@ -166,6 +170,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   });
 
   if (monorepoDecision.useMonorepo) {
+    resetTerminalOutput();
     cleanupUI();
     const { runMonorepoScan } = await import("./monorepo-scan.js");
     await runMonorepoScan(repoPath, opts);
@@ -173,6 +178,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   }
 
   if (opts.moduleFilter) {
+    resetTerminalOutput();
     cleanupUI();
     throw new CliUsageError("--module-filter can only be used when module discovery or manual modules are active.");
   }
@@ -180,6 +186,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
 
   if (opts.dryRun) {
+    resetTerminalOutput();
     cleanupUI();
     const { taskIds, taskSummary, dynamicSelectionActive } = getScanPlanSummary(config, scanOpts);
     console.log("\nDry run — no scan will be executed.");
@@ -205,6 +212,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   } finally {
     // Let the UI render one final frame before unmounting
     await new Promise((resolve) => setTimeout(resolve, 100));
+    resetTerminalOutput();
     cleanupUI();
   }
 }
@@ -441,7 +449,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     )
     .then((event) => ({ kind: "error" as const, event }));
 
-  if (reportMode === "full") {
+  if (reportMode === "full" && !params.uiStore) {
     printScanPlan(config, scanOpts, taskRegistry);
   }
 
@@ -459,7 +467,16 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
 
     const outcome = await Promise.race([pipelineComplete, pipelineError]);
     if (outcome.kind === "error") {
-      printPipelineError(outcome.event.payload.error, outcome.event.payload.errorCategory);
+      if (params.uiStore) {
+        params.uiStore.addNotice({
+          level: "error",
+          message: "Pipeline failed",
+          detail: outcome.event.payload.error,
+          source: "pipeline",
+        });
+      } else {
+        printPipelineError(outcome.event.payload.error, outcome.event.payload.errorCategory);
+      }
       process.exitCode = 1;
       return {
         runId,
@@ -487,9 +504,19 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     if (process.stdout.isTTY && reportMode === "full") {
       try {
         const { runInteractiveReview } = await import("../../ui/review.js");
-        const reviewResult = await runInteractiveReview(db, repoName);
+        const reviewResult = await runInteractiveReview(db, repoName, params.uiStore);
         if (reviewResult && reviewResult.reviewed > 0) {
-          console.log(`\n  Review complete: ${reviewResult.tp} tp, ${reviewResult.fp} fp, ${reviewResult.byDesign} by_design, ${reviewResult.skipped} skipped`);
+          if (params.uiStore) {
+            params.uiStore.addNotice({
+              level: "success",
+              message: "Review complete",
+              detail: `${reviewResult.tp} tp · ${reviewResult.fp} fp · ${reviewResult.byDesign} by_design · ${reviewResult.skipped} skipped`,
+              source: "review",
+            });
+            params.uiStore.setMode("summary");
+          } else {
+            console.log(`\n  Review complete: ${reviewResult.tp} tp, ${reviewResult.fp} fp, ${reviewResult.byDesign} by_design, ${reviewResult.skipped} skipped`);
+          }
         }
       } catch {
         // Review is best-effort — don't fail the pipeline
