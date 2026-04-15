@@ -500,6 +500,18 @@ function handleLocalCommand(
     }
   }
 
+  // Global shorthand — "scan ." at top level, search all modules for a
+  // tool ending in ":scan". If exactly one match, run it.
+  const allTools = core.registry.allTools();
+  const actionName = cmd.toLowerCase();
+  const matches = allTools.filter(({ tool }) => {
+    const action = tool.name.split(":")[1];
+    return action?.toLowerCase() === actionName;
+  });
+  if (matches.length === 1) {
+    return resolveToolExecution(matches[0].tool.name, args, core, opts, ctx);
+  }
+
   // Not a local command — pass to AgentSession
   return undefined;
 }
