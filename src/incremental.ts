@@ -39,7 +39,7 @@ export function storeHeadRef(db: Database.Database, runId: string, repoRoot: str
 /**
  * Get the current HEAD commit hash.
  */
-export function getCurrentHeadRef(repoRoot: string): string | null {
+function getCurrentHeadRef(repoRoot: string): string | null {
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: repoRoot,
@@ -55,7 +55,7 @@ export function getCurrentHeadRef(repoRoot: string): string | null {
  * Compute files changed between a base ref and HEAD.
  * Returns relative file paths.
  */
-export function computeChangedFiles(repoRoot: string, baseRef: string): string[] {
+function computeChangedFiles(repoRoot: string, baseRef: string): string[] {
   try {
     const output = execFileSync(
       "git",

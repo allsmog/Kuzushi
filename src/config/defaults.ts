@@ -8,7 +8,7 @@ export const AGENT_RUNTIME_BACKENDS = new Set<string>([
   "pi-ai",
 ]);
 
-export const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() || taintAnalysisRoot;
+const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() || taintAnalysisRoot;
 
 export const DEFAULTS: KuzushiConfig = {
   model: "anthropic:claude-sonnet-4-6",
