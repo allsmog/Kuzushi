@@ -3,6 +3,7 @@ import type { EngineProvenance, ProofState, TaintPathStep } from "./scanners/typ
 import type { QualityGateConfig } from "./quality-gate.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 import type { DiscoveredModule } from "./discovery/types.js";
+import type { EvidenceAnchor } from "./agents/tasks/threat-modeling/types.js";
 
 // Re-export Zod schemas for consumers that need runtime validation.
 export {
@@ -78,7 +79,13 @@ export interface TriageAssertionConfig {
   };
 }
 
-/** Verdict assigned by AI triage. */
+/**
+ * Verdict assigned by AI triage for scan findings.
+ *
+ * Part of the Kuzushi verdict taxonomy:
+ * @see {@link ProofVerdict} — proof-level verdict from exploitability verification
+ * @see CryptoBehavioralVerdict in `src/crypto-behavioral/types.ts` — behavioral test verdict for crypto findings
+ */
 export type Verdict = "tp" | "fp" | "needs_review" | "by_design";
 
 export interface TriagePathAssessment {
@@ -143,7 +150,13 @@ export interface TriageResult {
   evidenceChain?: EvidenceStep[];
 }
 
-/** Proof-level verdict for verification. */
+/**
+ * Proof-level verdict for exploitability verification.
+ *
+ * Part of the Kuzushi verdict taxonomy:
+ * @see {@link Verdict} — AI triage verdict for scan findings
+ * @see CryptoBehavioralVerdict in `src/crypto-behavioral/types.ts` — behavioral test verdict for crypto findings
+ */
 export type ProofVerdict = "exploited" | "blocked_by_security" | "out_of_scope" | "false_positive";
 
 /** Result of exploitability verification for a triaged finding. */
@@ -280,11 +293,14 @@ export interface EnrichedRepoContext {
   };
 }
 
-export interface ModelEvidenceAnchor {
-  filePath: string;
-  startLine: number;
-  description: string;
-}
+/**
+ * Evidence anchor tying a model element to a source location.
+ *
+ * This is a backward-compatible alias for the canonical {@link EvidenceAnchor}
+ * defined in `src/agents/tasks/threat-modeling/types.ts`. New code should
+ * prefer importing `EvidenceAnchor` directly from the threat-modeling module.
+ */
+export type ModelEvidenceAnchor = EvidenceAnchor;
 
 export interface ApplicationRoute {
   id: string;
