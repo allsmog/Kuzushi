@@ -2,8 +2,6 @@
 // References to deserialization APIs are DETECTION TARGETS in scanned repositories.
 // This file does NOT perform any deserialization itself.
 
-import { createHash } from "node:crypto";
-import path from "node:path";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -26,6 +24,7 @@ import { formatFileTreeForPrompt, formatPreReadForPrompt } from "./pre-read-prom
 import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime, resolveTaskAllowedTools } from "./runtime-overrides.js";
 import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
 import type { ApplicationModel } from "../../types.js";
+import { normalizeFilePath, computeDetectionFingerprint } from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "deserialization" });
 
@@ -160,10 +159,9 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const f = item as unknown as DeserializationFinding;
     if (!f.filePath?.trim()) continue;
 
-    const filePath = path.isAbsolute(f.filePath) ? (path.relative(repoRoot, f.filePath) || f.filePath) : f.filePath;
+    const filePath = normalizeFilePath(repoRoot, f.filePath);
     const cweList = f.cwe ? [f.cwe] : ["CWE-502"];
-    const source = [repoName, "deserialization", f.category, filePath, String(f.startLine)].join("|");
-    const fingerprint = createHash("sha256").update(source).digest("hex");
+    const fingerprint = computeDetectionFingerprint([repoName, "deserialization", f.category, filePath, String(f.startLine)]);
 
     const finding: Finding = {
       taskId: "deserialization-detect",

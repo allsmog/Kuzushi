@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import path from "node:path";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -31,6 +29,7 @@ import {
 import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
 import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
 import type { ToolPolicy } from "../../prompts/tool-policy.js";
+import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "code-config-detect" });
 
@@ -541,15 +540,7 @@ function normalizeFindings(
 }
 
 function computeFingerprint(repoName: string, prefix: string, category: string, filePath: string, startLine: number): string {
-  const source = [repoName, prefix, category, filePath, String(startLine)].join("|");
-  return createHash("sha256").update(source).digest("hex");
-}
-
-function normalizeFilePath(repoRoot: string, filePath: string): string {
-  if (!path.isAbsolute(filePath)) return filePath;
-  const relative = path.relative(repoRoot, filePath);
-  if (relative.startsWith("..")) return filePath;
-  return relative || filePath;
+  return computeDetectionFingerprint([repoName, prefix, category, filePath, String(startLine)]);
 }
 
 export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
@@ -679,14 +670,6 @@ export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
     };
   },
 };
-
-function parseJson(text: string, tag: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
-  }
-}
 
 export const __codeConfigDetectInternals = {
   resolveConfig,

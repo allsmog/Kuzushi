@@ -6,7 +6,7 @@ import type { AgentTask, TaskContext } from "../types.js";
 import { resolveTaskRuntime, resolveTaskModel } from "./runtime-overrides.js";
 import { resolveThreatModelOutput } from "./threat-model-guidance.js";
 import { getLogger } from "../../logger.js";
-import { createHash } from "node:crypto";
+import { computeDetectionFingerprint } from "./detection-task-utils.js";
 
 const log = getLogger("auth-logic-detect");
 
@@ -108,7 +108,7 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
 
           return {
             taskId: "auth-logic-detect",
-            fingerprint: createHash("sha256").update([context.repoName, "auth-logic", filePath, String(f["title"]), String(startLine)].join("|")).digest("hex"),
+            fingerprint: computeDetectionFingerprint([context.repoName, "auth-logic", filePath, String(f["title"]), String(startLine)]),
             ruleId: "auth-logic/" + (String(f["title"] ?? "missing-authz")).toLowerCase().replace(/\s+/g, "-").slice(0, 50),
             filePath,
             startLine,
