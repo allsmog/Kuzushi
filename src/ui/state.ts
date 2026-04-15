@@ -255,6 +255,42 @@ export interface ShellHistoryEntry {
   type: "input" | "output" | "error";
   text: string;
   timestamp: number;
+  prompt?: string;
+}
+
+/**
+ * Generated application context for a target repository.
+ * Platform-level state — readable by all modules, not owned by any single one.
+ * Task outputs stored as `unknown` to avoid coupling state.ts to heavy task types.
+ * Formatting/display functions do runtime shape checks.
+ */
+export interface ContextSnapshot {
+  /** Which target this context was generated for. */
+  target: string;
+  /** When this context was generated (epoch ms). */
+  timestamp: number;
+  /** Discovery mode used during generation. */
+  discovery: "auto" | "flat" | "modules";
+  /** Which optional steps were enabled when generated. */
+  options: { enrichment: boolean; threatModel: boolean; scenarios: boolean };
+
+  // --- Single-project context (discovery=flat, or auto with single project) ---
+  /** RepoContext from context-gatherer (languages, frameworks, auth, entry points). */
+  repoContext?: unknown;
+  /** FileIndex from context-gatherer (file tree, security pattern matches). */
+  fileIndex?: unknown;
+  /** Enrichment object from context-enricher (custom middleware, sanitizers, trust boundaries). */
+  enrichedContext?: unknown;
+  /** ApplicationModel from app-model-build (routes, outbound clients, data stores, jobs). */
+  appModel?: unknown;
+  /** ThreatModelDocument from threat-model-randori (DFD, STRIDE threats, summary). */
+  threatModel?: unknown;
+  /** ThreatScenario[] from threat-scenario-build. */
+  scenarios?: unknown[];
+
+  // --- Monorepo context (discovery=modules) ---
+  /** Per-module contexts, keyed by relative path (e.g. "api/", "auth-service/"). */
+  modules?: Record<string, Omit<ContextSnapshot, "modules" | "discovery" | "options">>;
 }
 
 export interface ShellState {
@@ -270,6 +306,16 @@ export interface ShellState {
   workspace: string | null;
   /** Conversation history (rendered in the scroll region). */
   history: ShellHistoryEntry[];
+  /** Submitted commands, capped and persisted for prompt recall. */
+  commandHistory: string[];
+  /** Per-tool stored options from /set, keyed by fully-qualified tool name. */
+  moduleOptions: Record<string, Record<string, unknown>>;
+  /** Last selected or successfully executed tool. */
+  lastUsedTool?: string;
+  /** Generated context for the current target. Platform-level — readable by all modules. */
+  contextSnapshot?: ContextSnapshot | null;
+  /** Transient assistant text streamed before the turn finalizes. */
+  pendingAssistantText?: string;
   /** Whether the agent is currently processing a query. */
   processing: boolean;
   /** Currently executing tool (shown as inline activity). */
@@ -278,6 +324,8 @@ export interface ShellState {
   onInput?: (input: string) => void;
   /** Callback to exit the shell. */
   onExit?: () => void;
+  /** Callback to abort the active shell action. */
+  onAbort?: () => void;
 }
 
 type Listener = () => void;
@@ -285,6 +333,8 @@ type Listener = () => void;
 export class UIStore {
   private state: UIState;
   private listeners = new Set<Listener>();
+  private preflightReturnMode: UIMode = "running";
+  private reviewReturnMode: UIMode = "summary";
 
   constructor() {
     this.state = {
@@ -327,20 +377,26 @@ export class UIStore {
     this.notify();
   }
 
-  setPreflight(preflight: PreflightState | null): void {
+  setPreflight(preflight: PreflightState | null, returnMode?: UIMode): void {
+    if (preflight) {
+      this.preflightReturnMode = returnMode ?? this.state.mode;
+    }
     this.state = {
       ...this.state,
       preflight,
-      mode: preflight ? "preflight" : this.state.mode === "preflight" ? "running" : this.state.mode,
+      mode: preflight ? "preflight" : this.state.mode === "preflight" ? this.preflightReturnMode : this.state.mode,
     };
     this.notify();
   }
 
-  setReview(review: ReviewSession | null): void {
+  setReview(review: ReviewSession | null, returnMode?: UIMode): void {
+    if (review) {
+      this.reviewReturnMode = returnMode ?? this.state.mode;
+    }
     this.state = {
       ...this.state,
       review,
-      mode: review ? "review" : this.state.mode === "review" ? "summary" : this.state.mode,
+      mode: review ? "review" : this.state.mode === "review" ? this.reviewReturnMode : this.state.mode,
     };
     this.notify();
   }

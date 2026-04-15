@@ -32,6 +32,20 @@ describe("report-worker with UI store", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
     const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shell: {
+        modules: ["sast"],
+        tools: ["sast:scan"],
+        focusedModule: "sast",
+        target: "/tmp/repo",
+        workspace: "acme",
+        history: [],
+        commandHistory: ["scan ."],
+        moduleOptions: {},
+        processing: false,
+      },
+    });
 
     const config: KuzushiConfig = {
       model: "anthropic:claude-sonnet-4-6",
@@ -136,6 +150,9 @@ describe("report-worker with UI store", () => {
     const codeqlTask = scanStage?.subTasks.find((task) => task.id === "codeql");
 
     expect(state.mode).toBe("summary");
+    expect(state.shell?.focusedModule).toBe("sast");
+    expect(state.shell?.workspace).toBe("acme");
+    expect(state.shell?.commandHistory).toEqual(["scan ."]);
     expect(scanStage?.detail).toContain("2 scanners");
     expect(scanStage?.detail).toContain("1 finding");
     expect(semgrepTask?.findingCount).toBe(1);
@@ -147,6 +164,53 @@ describe("report-worker with UI store", () => {
     expect(existsSync(reportPath)).toBe(true);
     expect(console.log).not.toHaveBeenCalled();
     expect(console.error).not.toHaveBeenCalled();
+
+    await bus.close();
+    db.close();
+  });
+
+  it("uses scan/report stages only for scan-only runs", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const store = createUIStore();
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 2,
+      scanMode: "parallel",
+      tasks: ["semgrep"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      taskConfig: { semgrep: {} },
+    };
+
+    registerReportWorker(bus, { db, config }, store);
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+      postProcessMode: "scan-only" as const,
+    };
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          tasks: ["semgrep"],
+          fresh: false,
+        },
+      }),
+    );
+
+    expect(store.getState().stages.map((stage) => stage.id)).toEqual(["scan", "report"]);
 
     await bus.close();
     db.close();

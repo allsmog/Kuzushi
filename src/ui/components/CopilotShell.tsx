@@ -6,12 +6,13 @@
  * transitions — when a scan runs, the app switches to "running" mode
  * and renders PipelineIndicator/StatusFooter, then switches back here.
  */
-import React, { useState, useEffect } from "react";
+import React, { useRef, useState } from "react";
 import { Box, Text, useInput, useApp, Static } from "ink";
 import chalk from "chalk";
 import { useUIState } from "../hooks.js";
 import { Spinner } from "./Spinner.js";
-import type { UIStore, ShellHistoryEntry } from "../state.js";
+import type { ShellHistoryEntry, ShellState, UIStore } from "../state.js";
+import { buildShellPrompt } from "../../copilot/shell.js";
 
 interface CopilotShellProps {
   store: UIStore;
@@ -22,49 +23,87 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const shell = state.shell;
   const { exit } = useApp();
   const [input, setInput] = useState("");
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const draftInputRef = useRef("");
 
   useInput((char, key) => {
-    if (!shell || shell.processing) return;
-
-    if (key.return && input.length > 0) {
-      const currentShell = store.getState().shell;
-      if (currentShell) {
-        store.update({
-          shell: {
-            ...currentShell,
-            history: [
-              ...currentShell.history,
-              { type: "input", text: input, timestamp: Date.now() },
-            ],
-            processing: true,
-          },
-        });
-      }
-      shell.onInput?.(input);
-      setInput("");
-      return;
-    }
-
-    if (key.backspace || key.delete) {
-      setInput((v) => v.slice(0, -1));
-      return;
-    }
+    if (!shell) return;
 
     if ((key.ctrl && char === "c") || (key.ctrl && char === "d")) {
+      if (shell.processing) {
+        shell.onAbort?.();
+        return;
+      }
       shell.onExit?.();
       exit();
       return;
     }
 
+    if (shell.processing) {
+      return;
+    }
+
+    if (key.return && input.length > 0) {
+      shell.onInput?.(input);
+      setInput("");
+      setHistoryIndex(null);
+      draftInputRef.current = "";
+      return;
+    }
+
+    if (key.backspace || key.delete) {
+      setInput((v) => v.slice(0, -1));
+      setHistoryIndex(null);
+      return;
+    }
+
+    if (key.upArrow) {
+      if (shell.commandHistory.length === 0) {
+        return;
+      }
+      if (historyIndex === null) {
+        draftInputRef.current = input;
+        const nextIndex = shell.commandHistory.length - 1;
+        setHistoryIndex(nextIndex);
+        setInput(shell.commandHistory[nextIndex] ?? "");
+        return;
+      }
+      const nextIndex = Math.max(0, historyIndex - 1);
+      setHistoryIndex(nextIndex);
+      setInput(shell.commandHistory[nextIndex] ?? "");
+      return;
+    }
+
+    if (key.downArrow) {
+      if (historyIndex === null) {
+        return;
+      }
+      const nextIndex = historyIndex + 1;
+      if (nextIndex >= shell.commandHistory.length) {
+        setHistoryIndex(null);
+        setInput(draftInputRef.current);
+        return;
+      }
+      setHistoryIndex(nextIndex);
+      setInput(shell.commandHistory[nextIndex] ?? "");
+      return;
+    }
+
     if (key.escape) {
       setInput("");
+      setHistoryIndex(null);
+      draftInputRef.current = "";
       return;
     }
 
     if (char && !key.ctrl && !key.meta && !key.tab) {
+      if (historyIndex === null) {
+        draftInputRef.current = "";
+      }
       setInput((v) => v + char);
+      setHistoryIndex(null);
     }
-  }, { isActive: process.stdin.isTTY === true && !!shell && !shell.processing });
+  }, { isActive: process.stdin.isTTY === true && !!shell });
 
   if (!shell) return <Text>Loading...</Text>;
 
@@ -79,6 +118,10 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
   return (
     <Box flexDirection="column">
+      <Static items={["shell-banner"]}>
+        {() => <ShellBanner key="shell-banner" shell={shell} />}
+      </Static>
+
       {/* Static region — rendered once */}
       <Static items={staticHistory.map((entry, i) => ({ ...entry, _key: `h-${i}` }))}>
         {(item) => (
@@ -92,6 +135,16 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           <HistoryEntry key={`live-${i}`} entry={entry} />
         ))}
       </Box>
+
+      {shell.pendingAssistantText && (
+        <HistoryEntry
+          entry={{
+            type: "output",
+            text: shell.pendingAssistantText,
+            timestamp: Date.now(),
+          }}
+        />
+      )}
 
       {/* Tool activity */}
       {shell.processing && shell.currentTool && (
@@ -117,10 +170,27 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       {!shell.processing && (
         <Box marginTop={1}>
           <Text>
-            {chalk.bold.cyan("> ")}{input}{chalk.dim("█")}
+            {chalk.bold.cyan(buildShellPrompt(shell.focusedModule))}{input}{chalk.dim("█")}
           </Text>
         </Box>
       )}
+    </Box>
+  );
+}
+
+function ShellBanner({ shell }: { shell: ShellState }): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text>{""}</Text>
+      <Text>{chalk.bold("  Kuzushi")}</Text>
+      <Text>{chalk.dim("  security-native AI operating environment")}</Text>
+      <Text>{""}</Text>
+      <Text>{`  Modules:   ${shell.modules.join(", ") || "none"}`}</Text>
+      <Text>{`  Tools:     ${shell.tools.length} available`}</Text>
+      {shell.target && <Text>{`  Target:    ${shell.target}`}</Text>}
+      {shell.workspace && <Text>{`  Workspace: ${shell.workspace}`}</Text>}
+      <Text>{""}</Text>
+      <Text>{chalk.dim('  Type "/help" for commands, or just describe what you need.')}</Text>
     </Box>
   );
 }
@@ -130,7 +200,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
     case "input":
       return (
         <Box marginTop={1}>
-          <Text>{chalk.bold.cyan("> ")}{entry.text}</Text>
+          <Text>{chalk.bold.cyan(entry.prompt ?? buildShellPrompt(null))}{entry.text}</Text>
         </Box>
       );
     case "output":

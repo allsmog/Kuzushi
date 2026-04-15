@@ -24,6 +24,7 @@ export interface RunContext {
   scanPath?: string;
   repoName: string;
   dbPath: string;
+  postProcessMode?: "full" | "scan-only";
   reportMode?: "full" | "suppress";
 }
 

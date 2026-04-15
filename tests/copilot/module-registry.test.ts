@@ -156,9 +156,15 @@ describe("createCoreSastModule", () => {
     const mod = createCoreSastModule();
     expect(mod.id).toBe("sast");
     expect(mod.category).toBe("offense");
-    expect(mod.tools).toHaveLength(5);
+    expect(mod.tools).toHaveLength(11);
     expect(mod.tools.map((t) => t.name)).toEqual([
+      "sast:context",
       "sast:scan",
+      "sast:semgrep",
+      "sast:codeql",
+      "sast:agentic",
+      "sast:threat-hunt",
+      "sast:taint-iris",
       "sast:triage",
       "sast:verify",
       "sast:patch",
@@ -168,5 +174,18 @@ describe("createCoreSastModule", () => {
     for (const tool of mod.tools) {
       expect(tool.headless).toBe(true);
     }
+  });
+
+  it("resolves the standalone SAST task tools", () => {
+    const reg = new ModuleRegistry();
+    const mod = createCoreSastModule();
+    reg.register(mod);
+    (reg as any).initialized.add("sast");
+
+    expect(reg.resolveTool("sast:semgrep")?.tool.name).toBe("sast:semgrep");
+    expect(reg.resolveTool("sast:codeql")?.tool.name).toBe("sast:codeql");
+    expect(reg.resolveTool("sast:agentic")?.tool.name).toBe("sast:agentic");
+    expect(reg.resolveTool("sast:threat-hunt")?.tool.name).toBe("sast:threat-hunt");
+    expect(reg.resolveTool("sast:taint-iris")?.tool.name).toBe("sast:taint-iris");
   });
 });

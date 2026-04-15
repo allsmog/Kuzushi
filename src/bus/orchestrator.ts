@@ -1145,6 +1145,48 @@ export class PipelineOrchestrator {
     );
   }
 
+  private async persistPendingScanOnlyFindings(
+    state: RunState,
+    findings: Finding[],
+  ): Promise<void> {
+    if (!this.deps.db || findings.length === 0) {
+      return;
+    }
+
+    const { upsertFinding } = await import("../store.js");
+    for (const finding of findings) {
+      upsertFinding(this.deps.db, finding, {
+        fingerprint: finding.fingerprint,
+        verdict: "needs_review",
+        confidence: 0.5,
+        rationale: "Captured in scan-only mode — pending triage",
+        verificationSteps: [],
+        fixPatch: null,
+        triageCostUsd: 0,
+      }, state.context.repoName, "HEAD");
+    }
+  }
+
+  private async requestScanOnlyReport(state: RunState, runId: string): Promise<void> {
+    if (state.reportRequested) {
+      return;
+    }
+
+    state.reportRequested = true;
+
+    await this.bus.publish(
+      createEvent("report:requested", runId, {
+        context: state.context,
+        stats: buildReportStats(this.deps.db, state),
+        fingerprints: state.scanFindings.map((finding) => finding.fingerprint),
+        exploitChains: undefined,
+        reportMode: state.context.reportMode,
+      }),
+    );
+
+    state.reportEmitted = true;
+  }
+
   /**
    * Duck-type check: extract recommended tasks from any completed task
    * that produced a TaskSelectionResult (has `recommendedTasks` array).
@@ -1211,6 +1253,7 @@ export class PipelineOrchestrator {
     if (!state) {
       return;
     }
+    const scanOnly = state.context.postProcessMode === "scan-only";
 
     state.stageTimestamps.scanEnd = event.meta.timestamp;
 
@@ -1224,7 +1267,7 @@ export class PipelineOrchestrator {
     state.corroboratedClusters = clustered.corroboratedClusters;
 
     try {
-      if (!state.resuming) {
+      if (!state.resuming && !scanOnly) {
         await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "triaging" }));
       }
       await this.bus.publish(createEvent("run:findings-checkpoint", state.checkpointRunId, { context: state.context, findings: state.scanFindings }));
@@ -1399,6 +1442,14 @@ export class PipelineOrchestrator {
       (finding) => !alreadyTriaged.has(finding.fingerprint),
     );
 
+    state.skippedAlreadyTriaged = filteredFindings.length - pendingFindings.length;
+
+    if (scanOnly) {
+      await this.persistPendingScanOnlyFindings(state, pendingFindings);
+      await this.requestScanOnlyReport(state, runId);
+      return;
+    }
+
     // Pre-triage score gate: drop findings below triageMinScore before any LLM call.
     const minScore = state.config.triageMinScore;
     let pendingAboveThreshold = pendingFindings;
@@ -1437,7 +1488,6 @@ export class PipelineOrchestrator {
       }
     }
 
-    state.skippedAlreadyTriaged = filteredFindings.length - pendingFindings.length;
     state.triageTotal = triageCandidates.length + autoClassifiedResults.length;
     state.triageQueue = triageCandidates.map((finding, idx) => ({
       finding,

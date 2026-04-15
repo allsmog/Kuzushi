@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runConfigConfirmation, runSetupWizard } from "../../src/ui/setup.js";
+import { runConfigConfirmation, runCredentialPrompt, runSetupWizard } from "../../src/ui/setup.js";
 import { runInteractiveReview } from "../../src/ui/review.js";
 import { createUIStore } from "../../src/ui/state.js";
 import { getActionableFindings, initDb, upsertFinding } from "../../src/store.js";
@@ -96,6 +96,23 @@ describe("ui flow helpers", () => {
     expect(store.getState().mode).toBe("running");
   });
 
+  it("returns shell-mode preflight prompts back to shell", async () => {
+    const store = createUIStore();
+    store.update({ mode: "shell" });
+
+    const promise = runCredentialPrompt(store, "shell");
+
+    const preflight = store.getState().preflight;
+    expect(store.getState().mode).toBe("preflight");
+    expect(preflight?.kind).toBe("credentials");
+
+    preflight?.onCancel();
+
+    await expect(promise).resolves.toEqual({ action: "cancel" });
+    expect(store.getState().preflight).toBeNull();
+    expect(store.getState().mode).toBe("shell");
+  });
+
   it("preserves the real repo root when editing from confirm back into the wizard", async () => {
     const store = createUIStore();
     const promise = runConfigConfirmation(
@@ -153,6 +170,47 @@ describe("ui flow helpers", () => {
     expect(store.getState().review).toBeNull();
     expect(store.getState().mode).toBe("summary");
     expect(getActionableFindings(db, "repo", { includeFalsePositives: true })[0]?.verdict).toBe("tp");
+    db.close();
+  });
+
+  it("returns shell review sessions back to shell without clearing state", async () => {
+    const db = initDb(":memory:");
+    upsertFinding(db, makeFinding("fp-shell-review"), makeResult("fp-shell-review", "needs_review"), "repo", "HEAD");
+
+    const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shell: {
+        modules: ["sast"],
+        tools: ["sast:scan"],
+        focusedModule: "sast",
+        target: "/tmp/repo",
+        workspace: "acme",
+        history: [],
+        commandHistory: [],
+        moduleOptions: {},
+        processing: false,
+      },
+    });
+
+    const promise = runInteractiveReview(db, "repo", store, "shell");
+
+    const review = store.getState().review;
+    expect(store.getState().mode).toBe("review");
+    expect(review?.findings).toHaveLength(1);
+
+    review?.onQuit();
+
+    await expect(promise).resolves.toEqual({
+      reviewed: 0,
+      tp: 0,
+      fp: 0,
+      byDesign: 0,
+      skipped: 0,
+    });
+    expect(store.getState().mode).toBe("shell");
+    expect(store.getState().shell?.focusedModule).toBe("sast");
+    expect(store.getState().shell?.workspace).toBe("acme");
     db.close();
   });
 });
