@@ -1,27 +1,16 @@
 import type { FindingRow, Verdict } from "./types.js";
 
-export interface QualityGateConfig {
-  /** Any high/critical severity true positive = fail. */
-  failOnHighSeverityTP?: boolean;
-  /** Maximum number of non-FP (open) findings allowed. */
-  maxOpenFindings?: number;
-  /** Minimum triage confidence threshold (0-1). Findings below this cause failure. */
-  minTriageConfidence?: number;
-  /** Any confirmed exploitable finding = fail. */
-  failOnExploitable?: boolean;
-}
+export type {
+  QualityGateConfig,
+  QualityGateViolation,
+  QualityGateResult,
+} from "./quality-gate-types.js";
 
-export interface QualityGateViolation {
-  rule: string;
-  message: string;
-  fingerprints?: string[];
-}
-
-export interface QualityGateResult {
-  passed: boolean;
-  violations: QualityGateViolation[];
-  summary: string;
-}
+import type {
+  QualityGateConfig,
+  QualityGateResult,
+  QualityGateViolation,
+} from "./quality-gate-types.js";
 
 /** Severity values considered high/critical for the failOnHighSeverityTP gate. */
 const HIGH_SEVERITIES = new Set(["ERROR", "CRITICAL", "HIGH"]);
