@@ -9,13 +9,11 @@ import { useUIState } from "./hooks.js";
 import { icons } from "./icons.js";
 import type { UIStore, ResultLine as ResultLineData } from "./state.js";
 import { Banner } from "./components/Banner.js";
-import { StageHeader } from "./components/StageHeader.js";
-import { ProgressBar } from "./components/ProgressBar.js";
 import { AgentActivity } from "./components/AgentActivity.js";
 import { ResultLine } from "./components/ResultLine.js";
 import { ScanSummary } from "./components/ScanSummary.js";
 import { QualityGate } from "./components/QualityGate.js";
-import { Spinner } from "./components/Spinner.js";
+import { PipelineIndicator } from "./components/PipelineIndicator.js";
 
 interface AppProps {
   store: UIStore;
@@ -23,9 +21,6 @@ interface AppProps {
 
 export function App({ store }: AppProps): React.ReactElement {
   const state = useUIState(store);
-
-  // Build a stage label based on current phase
-  const stageLabel = buildStageLabel(state);
 
   // Separate completed results (rendered as static/permanent) from in-progress
   const completedResults = state.results;
@@ -61,14 +56,9 @@ export function App({ store }: AppProps): React.ReactElement {
         </Static>
       )}
 
-      {/* Stage header */}
-      {stageLabel && (state.phase === "scanning" || state.phase === "triaging" || state.phase === "verifying" || state.phase === "poc") && (
-        <StageHeader phase={state.phase} label={stageLabel} />
-      )}
-
-      {/* Progress bar (during triage/verify/poc) */}
-      {state.progress.total > 0 && (state.phase === "triaging" || state.phase === "verifying" || state.phase === "poc") && (
-        <ProgressBar current={state.progress.current} total={state.progress.total} />
+      {/* Pipeline stage indicator — always visible during execution */}
+      {state.stages.length > 0 && state.phase !== "summary" && state.phase !== "done" && (
+        <PipelineIndicator stages={state.stages} progress={state.progress} />
       )}
 
       {/* Completed results — rendered as static (scroll off) */}
@@ -80,14 +70,6 @@ export function App({ store }: AppProps): React.ReactElement {
       {activeActivities.map(([fp, lines]) => (
         <AgentActivity key={fp} fingerprint={fp} lines={lines} />
       ))}
-
-      {/* Scanning spinner (when no progress yet) */}
-      {state.phase === "scanning" && state.progress.total === 0 && (
-        <Box>
-          <Text>{"  "}</Text>
-          <Spinner color="green" label="Running scanners..." />
-        </Box>
-      )}
 
       {/* Summary */}
       {state.phase === "summary" && state.summary && (
@@ -102,17 +84,3 @@ export function App({ store }: AppProps): React.ReactElement {
   );
 }
 
-function buildStageLabel(state: ReturnType<typeof useUIState>): string | null {
-  switch (state.phase) {
-    case "scanning":
-      return `Scanning with ${state.tasks.join(", ")}...`;
-    case "triaging":
-      return `Triaging ${state.progress.total || state.selectedForTriage} findings via ${state.model}...`;
-    case "verifying":
-      return `Verifying ${state.progress.total} findings via ${state.model}...`;
-    case "poc":
-      return `Generating ${state.progress.total} PoC harnesses via ${state.model}...`;
-    default:
-      return null;
-  }
-}
