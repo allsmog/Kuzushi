@@ -54,10 +54,7 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     const prov = finding.engineProvenance.map((e) => `${e.kind}:${e.detail}`).join(", ");
     details.push(`${chalk.dim("Engine:")} ${prov}`);
   }
-  if (finding.corroboratingSignals.length > 0) {
-    const tasks = [...new Set(finding.corroboratingSignals.map((s) => s.taskId))];
-    details.push(`${chalk.dim("Corroborated by:")} ${tasks.join(", ")} (+${finding.corroboratingSignals.length})`);
-  }
+  // Corroboration is handled separately as a nested tree (below)
   if (finding.pocHarnessPath) {
     details.push(`${chalk.blue("PoC Harness:")} ${fileLink(finding.pocHarnessPath)}`);
   } else if (finding.pocHarnessSkipped === 1) {
@@ -84,12 +81,48 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
       <Text>{"    "}{chalk.dim(finding.ruleId)}</Text>
       <Text>{"    "}{renderMarkdownInline(finding.rationale.slice(0, 120))}{finding.rationale.length > 120 ? "..." : ""}</Text>
       {details.length > 0 && details.map((detail, i) => {
-        const connector = i === details.length - 1 ? icons.treeLast : icons.treeMiddle;
+        const isLast = i === details.length - 1 && finding.corroboratingSignals.length === 0;
+        const connector = isLast ? icons.treeLast : icons.treeMiddle;
         return (
           <Text key={i}>{"    "}{chalk.dim(connector)} {detail}</Text>
         );
       })}
+
+      {/* Corroboration cluster tree */}
+      {finding.corroboratingSignals.length > 0 && (
+        <CorroborationTree signals={finding.corroboratingSignals} isLastDetail={true} />
+      )}
+
       <Text>{" "}</Text>
+    </Box>
+  );
+}
+
+type CorroborationSignal = ActionableFinding["corroboratingSignals"][number];
+
+function CorroborationTree({ signals, isLastDetail }: {
+  signals: CorroborationSignal[];
+  isLastDetail: boolean;
+}): React.ReactElement {
+  const uniqueTasks = [...new Set(signals.map((s) => s.taskId))];
+  const connector = isLastDetail ? icons.treeLast : icons.treeMiddle;
+  const continuation = isLastDetail ? " " : chalk.dim(icons.treePipe);
+
+  return (
+    <Box flexDirection="column">
+      <Text>{"    "}{chalk.dim(connector)} {chalk.dim("Corroborated by")} {chalk.white(`${signals.length}`)} {chalk.dim(`scanner${signals.length > 1 ? "s" : ""}:`)} {chalk.dim(uniqueTasks.join(", "))}</Text>
+      {signals.map((signal, i) => {
+        const sigConnector = i === signals.length - 1 ? icons.treeLast : icons.treeMiddle;
+        const cwes = signal.cwe && signal.cwe.length > 0 ? signal.cwe.join(",") : "";
+        const score = signal.score != null ? chalk.dim(`score=${signal.score}`) : "";
+        const loc = signal.filePath && signal.startLine
+          ? chalk.cyan(fileLink(signal.filePath, `${signal.filePath}:${signal.startLine}`, signal.startLine))
+          : "";
+        const parts = [chalk.white(signal.taskId), cwes, score, loc].filter(Boolean);
+        return (
+          <Text key={i}>{"    "}{continuation}  {chalk.dim(sigConnector)} {parts.join("  ")}</Text>
+        );
+      })}
     </Box>
   );
 }

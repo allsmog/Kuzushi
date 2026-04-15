@@ -19,6 +19,7 @@ import { QualityGate } from "./components/QualityGate.js";
 import { PipelineIndicator } from "./components/PipelineIndicator.js";
 import { ConfigBanner } from "./components/ConfigBanner.js";
 import { StatusFooter } from "./components/StatusFooter.js";
+import { ResumeDiff } from "./components/ResumeDiff.js";
 
 interface AppProps {
   store: UIStore;
@@ -63,8 +64,15 @@ export function App({ store }: AppProps): React.ReactElement {
         </Static>
       )}
 
-      {/* Skipped info */}
-      {state.skippedAlreadyTriaged > 0 && state.phase === "triaging" && (
+      {/* Resume diff — shown when resuming a previous run */}
+      {state.resumeDiff && (
+        <Static items={["resume-diff"]}>
+          {() => <ResumeDiff key="resume-diff" data={state.resumeDiff!} />}
+        </Static>
+      )}
+
+      {/* Skipped info (plain fallback if no resume diff) */}
+      {!state.resumeDiff && state.skippedAlreadyTriaged > 0 && state.phase === "triaging" && (
         <Static items={["skip-info"]}>
           {() => (
             <Text key="skip-info">{"  "}{chalk.dim(`Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`)}</Text>

@@ -183,10 +183,25 @@ export function registerReportWorker(
 
     if (store) {
       store.activateStage("triage", `${event.payload.findingCount} findings via ${event.payload.model}`);
+
+      const skipped = event.payload.skippedAlreadyTriaged ?? 0;
+      if (skipped > 0) {
+        store.update({
+          resumeDiff: {
+            previousFindingCount: (state.totalFindings ?? 0),
+            previousTriagedCount: skipped,
+            newFindings: event.payload.findingCount,
+            skipped,
+            pendingRetriage: 0,
+            verdictChanges: [],
+          },
+        });
+      }
+
       store.update({
         phase: "triaging",
         selectedForTriage: event.payload.findingCount,
-        skippedAlreadyTriaged: event.payload.skippedAlreadyTriaged ?? 0,
+        skippedAlreadyTriaged: skipped,
         model: event.payload.model,
         progress: { current: 0, total: event.payload.findingCount },
       });
