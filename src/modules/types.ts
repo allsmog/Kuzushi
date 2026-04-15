@@ -57,6 +57,12 @@ export interface ToolExecutionContext {
   config: KuzushiConfig;
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
+  /**
+   * UIStore for Ink rendering. When provided, tools that run pipelines
+   * should pass this through so the Ink UI renders progress natively
+   * (PipelineIndicator, StatusFooter, etc.) instead of capturing stdout.
+   */
+  uiStore?: import("../ui/state.js").UIStore;
 }
 
 /**

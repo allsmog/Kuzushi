@@ -1,8 +1,10 @@
 /**
- * Ink component for the copilot shell — renders like Claude Code.
+ * Ink component for the copilot shell.
  *
- * Clean conversation stream: user messages, agent responses, inline
- * tool activity. No REPL chrome, no command menus. Just a conversation.
+ * Clean conversation stream with proper spacing. User messages,
+ * agent responses, inline tool activity. The Ink App handles mode
+ * transitions — when a scan runs, the app switches to "running" mode
+ * and renders PipelineIndicator/StatusFooter, then switches back here.
  */
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput, useApp, Static } from "ink";
@@ -25,7 +27,6 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     if (!shell || shell.processing) return;
 
     if (key.return && input.length > 0) {
-      // Append user input to history and mark processing
       const currentShell = store.getState().shell;
       if (currentShell) {
         store.update({
@@ -67,53 +68,56 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
   if (!shell) return <Text>Loading...</Text>;
 
-  // Split history into static (already rendered) and live (recent)
-  const staticHistory = shell.history.slice(0, -6);
-  const liveHistory = shell.history.length > 6
-    ? shell.history.slice(-6)
+  // Split history: older entries go to Static (never re-rendered)
+  const LIVE_COUNT = 8;
+  const staticHistory = shell.history.length > LIVE_COUNT
+    ? shell.history.slice(0, -LIVE_COUNT)
+    : [];
+  const liveHistory = shell.history.length > LIVE_COUNT
+    ? shell.history.slice(-LIVE_COUNT)
     : shell.history;
 
   return (
     <Box flexDirection="column">
-      {/* Static region — rendered once, never re-rendered */}
+      {/* Static region — rendered once */}
       <Static items={staticHistory.map((entry, i) => ({ ...entry, _key: `h-${i}` }))}>
         {(item) => (
           <HistoryEntry key={(item as { _key: string })._key} entry={item as ShellHistoryEntry} />
         )}
       </Static>
 
-      {/* Live region — recent entries + current activity */}
+      {/* Live region */}
       <Box flexDirection="column">
         {liveHistory.map((entry, i) => (
           <HistoryEntry key={`live-${i}`} entry={entry} />
         ))}
       </Box>
 
-      {/* Tool activity indicator */}
+      {/* Tool activity */}
       {shell.processing && shell.currentTool && (
-        <Box paddingLeft={2}>
+        <Box marginTop={1} paddingLeft={2}>
           <Spinner />
           <Text>
-            {" "}{chalk.dim(shell.currentTool.name)}
+            {"  "}{chalk.dim(shell.currentTool.name)}
             {shell.currentTool.elapsedSeconds > 0 &&
               chalk.dim(` ${shell.currentTool.elapsedSeconds.toFixed(0)}s`)}
           </Text>
         </Box>
       )}
 
-      {/* Processing indicator (no specific tool) */}
+      {/* Processing indicator */}
       {shell.processing && !shell.currentTool && (
-        <Box paddingLeft={2}>
+        <Box marginTop={1} paddingLeft={2}>
           <Spinner />
-          <Text>{" "}{chalk.dim("running...")}</Text>
+          <Text>{"  "}{chalk.dim("running...")}</Text>
         </Box>
       )}
 
       {/* Input prompt */}
       {!shell.processing && (
-        <Box>
+        <Box marginTop={1}>
           <Text>
-            {chalk.bold.white("> ")}{input}{chalk.dim("█")}
+            {chalk.bold.cyan("> ")}{input}{chalk.dim("█")}
           </Text>
         </Box>
       )}
@@ -125,13 +129,13 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
   switch (entry.type) {
     case "input":
       return (
-        <Box>
-          <Text>{chalk.bold.white("> ")}{entry.text}</Text>
+        <Box marginTop={1}>
+          <Text>{chalk.bold.cyan("> ")}{entry.text}</Text>
         </Box>
       );
     case "output":
       return (
-        <Box flexDirection="column" paddingLeft={0}>
+        <Box flexDirection="column" marginTop={1}>
           {entry.text.split("\n").map((line, i) => (
             <Text key={i}>{line}</Text>
           ))}
@@ -139,7 +143,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
       );
     case "error":
       return (
-        <Box>
+        <Box marginTop={1}>
           <Text>{chalk.red(entry.text)}</Text>
         </Box>
       );
