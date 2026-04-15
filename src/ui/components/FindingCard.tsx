@@ -16,6 +16,7 @@ import chalk from "chalk";
 import { icons } from "../icons.js";
 import { colorVerdict, badge, severityLabel } from "../format.js";
 import { fileLink } from "../hyperlink.js";
+import { renderMarkdownInline } from "../markdown.js";
 import type { ActionableFinding } from "../state.js";
 
 interface FindingCardProps {
@@ -81,7 +82,7 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
       <Text>{"  "}{verdict} {conf}  {severity} {scanner}{verificationBadge}</Text>
       <Text>{"    "}{location}</Text>
       <Text>{"    "}{chalk.dim(finding.ruleId)}</Text>
-      <Text>{"    "}{finding.rationale.slice(0, 120)}{finding.rationale.length > 120 ? "..." : ""}</Text>
+      <Text>{"    "}{renderMarkdownInline(finding.rationale.slice(0, 120))}{finding.rationale.length > 120 ? "..." : ""}</Text>
       {details.length > 0 && details.map((detail, i) => {
         const connector = i === details.length - 1 ? icons.treeLast : icons.treeMiddle;
         return (

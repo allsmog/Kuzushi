@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   store.activateStage("triage", "15 findings via claude-opus");
   store.update({
     phase: "triaging",
-    model: "claude-opus",
+    model: "anthropic:claude-opus",
     selectedForTriage: 15,
     progress: { current: 0, total: 15 },
   });
@@ -318,7 +318,7 @@ function makeFakeFindings(): ActionableFinding[] {
       filePath: "src/api/users.ts",
       startLine: 42,
       ruleId: "javascript.express.security.sql-injection",
-      rationale: "User input from req.body.name flows directly into SQL query without parameterization or sanitization, enabling SQL injection attacks.",
+      rationale: "User input from `req.body.name` flows directly into `db.query()` without parameterization, enabling **SQL injection** (CWE-89).",
       fingerprint: "a1b2c3d4e5f6",
       verifyExploitable: 1,
       verifyPocPayload: "' OR 1=1 --",
@@ -334,7 +334,7 @@ function makeFakeFindings(): ActionableFinding[] {
       filePath: "src/auth/login.ts",
       startLine: 78,
       ruleId: "javascript.express.security.timing-attack",
-      rationale: "Password comparison uses === instead of constant-time comparison, potentially leaking information via timing side-channel.",
+      rationale: "Password comparison uses `===` instead of `crypto.timingSafeEqual()`, potentially leaking info via *timing side-channel* (CWE-208).",
       fingerprint: "aabbccddeeff",
       verifyExploitable: 1,
       corroboratingSignals: [],

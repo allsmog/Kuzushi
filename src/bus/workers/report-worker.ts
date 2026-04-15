@@ -93,6 +93,7 @@ export function registerReportWorker(
       store.update({
         tasks: state.tasks,
         bannerShown: true,
+        pipelineStartedAt: Date.now(),
         configBanner: {
           model: event.payload.config.model,
           tasks: state.tasks ?? [],
