@@ -173,6 +173,13 @@ export async function createDefaultTaskRegistry(
   tasks.register(systemsHuntTask);
 
   // Backward-compatible deep-semantic tasks retained while systems-hunt is the public path.
+  // @deprecated deep-semantic-cwe-select and deep-semantic-hunt are superseded by the
+  // systems-hunt task chain (systems-context-gatherer -> systems-invariant-extract ->
+  // systems-trigger-synth -> systems-hunt). The systems-hunt pipeline covers the same
+  // memory-safety and low-level vulnerability classes with better invariant extraction
+  // and trigger synthesis. These registrations remain so that existing configs referencing
+  // "deep-semantic-cwe-select" or "deep-semantic-hunt" continue to resolve. Migrate
+  // task selections to "systems-hunt" and remove these entries in a future major version.
   tasks.register(deepSemanticCweSelectTask);
   tasks.register(wrapTask(deepSemanticHuntTask));
 
