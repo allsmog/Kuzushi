@@ -7,7 +7,7 @@
 import type Database from "better-sqlite3";
 import { getActionableFindings, updateFindingVerdict } from "../store.js";
 import type { Verdict } from "../types.js";
-import type { ActionableFinding, UIStore } from "./state.js";
+import type { ActionableFinding, UIStore, UIMode } from "./state.js";
 
 export interface ReviewResult {
   reviewed: number;
@@ -26,6 +26,7 @@ export async function runInteractiveReview(
   db: Database.Database,
   repo: string,
   store?: UIStore,
+  returnMode: UIMode = "summary",
 ): Promise<ReviewResult | null> {
   if (!process.stdout.isTTY) {
     return null;
@@ -84,7 +85,7 @@ export async function runInteractiveReview(
           store.setReview(null);
           resolve(result);
         },
-      });
+      }, returnMode);
     });
   }
 

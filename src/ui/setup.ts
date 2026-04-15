@@ -11,7 +11,7 @@ import type { WizardResult } from "./components/SetupWizard.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
 import { emitOutputNotice } from "./output.js";
-import type { UIStore } from "./state.js";
+import type { UIStore, UIMode } from "./state.js";
 
 export type SetupOutcome =
   | { action: "proceed"; preset?: string; model?: string }
@@ -40,6 +40,7 @@ export async function runSetupWizard(
   store: UIStore | undefined,
   repoName: string,
   repoRoot: string,
+  returnMode: UIMode = "running",
 ): Promise<SetupOutcome> {
   if (!process.stdout.isTTY) {
     return { action: "proceed" };
@@ -69,7 +70,7 @@ export async function runSetupWizard(
         store.setPreflight(null);
         resolve({ action: "cancel" });
       },
-    });
+    }, returnMode);
   });
 }
 
@@ -81,6 +82,7 @@ export async function runConfigConfirmation(
   config: ConfigConfirmData,
   repoName: string,
   repoRoot: string,
+  returnMode: UIMode = "running",
 ): Promise<SetupOutcome> {
   if (!process.stdout.isTTY) {
     return { action: "proceed" };
@@ -102,13 +104,13 @@ export async function runConfigConfirmation(
       },
       onEdit: () => {
         store.setPreflight(null);
-        runSetupWizard(store, repoName, repoRoot).then(resolve);
+        runSetupWizard(store, repoName, repoRoot, returnMode).then(resolve);
       },
       onQuit: () => {
         store.setPreflight(null);
         resolve({ action: "cancel" });
       },
-    });
+    }, returnMode);
   });
 }
 
@@ -186,6 +188,7 @@ export type CredentialOutcome =
  */
 export async function runCredentialPrompt(
   store: UIStore | undefined,
+  returnMode: UIMode = "running",
 ): Promise<CredentialOutcome> {
   if (!process.stdout.isTTY || !store) {
     return { action: "cancel" };
@@ -202,6 +205,6 @@ export async function runCredentialPrompt(
         store.setPreflight(null);
         resolve({ action: "cancel" });
       },
-    });
+    }, returnMode);
   });
 }

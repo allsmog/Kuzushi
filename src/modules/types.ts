@@ -63,6 +63,11 @@ export interface ToolExecutionContext {
    * (PipelineIndicator, StatusFooter, etc.) instead of capturing stdout.
    */
   uiStore?: import("../ui/state.js").UIStore;
+  /**
+   * Pre-computed task outputs to inject into a pipeline run, keyed by task ID.
+   * Avoids re-running context tasks when the shell already has a ContextSnapshot.
+   */
+  seedTaskOutputs?: Map<string, unknown>;
 }
 
 /**

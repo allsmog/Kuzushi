@@ -107,6 +107,36 @@
 - The built-in `sast` module (`src/modules/core-sast.ts`) wraps the existing 40+ task pipeline.
 - Three execution modes share the same core: pipeline (`kuzushi scan`), shell (`kuzushi` default), run (`kuzushi run`).
 
+## Release Workflow
+
+When releasing a new version:
+
+```bash
+# 1. Bump version in package.json
+# 2. Stage, commit, tag
+git add <files>
+git commit -m "feat/fix/chore: description
+
+git tag v<version>
+
+# 3. Push
+git push origin main
+git push origin v<version>
+
+# 4. Publish to npm
+npm publish
+
+# 5. Update global install
+npm cache clean --force
+npm install -g kuzushi@<version>
+kuzushi --version
+```
+
+- Always bump `version` in `package.json` before publishing.
+- Tag format: `v0.11.4` (prefixed with `v`).
+- Wait a few seconds after `npm publish` if `npm install` returns `notarget` — registry propagation delay.
+- Run `pnpm typecheck && pnpm test` before committing.
+
 ## Agent-Specific Notes
 
 - Verify behavior in code; do not guess.

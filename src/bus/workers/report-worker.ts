@@ -89,6 +89,7 @@ export function registerReportWorker(
 
   bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
+    const scanOnly = event.payload.context.postProcessMode === "scan-only";
     state.tasks = event.payload.scanOpts.tasks !== undefined
       ? [...event.payload.scanOpts.tasks]
       : [...event.payload.config.tasks];
@@ -97,13 +98,15 @@ export function registerReportWorker(
       // Build pipeline stages from config
       const stageList: Array<{ id: string; label: string }> = [
         { id: "scan", label: "Scan" },
-        { id: "triage", label: "Triage" },
       ];
-      if (event.payload.config.verify) {
-        stageList.push({ id: "verify", label: "Verify" });
-      }
-      if (event.payload.config.pocHarness) {
-        stageList.push({ id: "poc", label: "PoC Harness" });
+      if (!scanOnly) {
+        stageList.push({ id: "triage", label: "Triage" });
+        if (event.payload.config.verify) {
+          stageList.push({ id: "verify", label: "Verify" });
+        }
+        if (event.payload.config.pocHarness) {
+          stageList.push({ id: "poc", label: "PoC Harness" });
+        }
       }
       stageList.push({ id: "report", label: "Report" });
 
@@ -615,6 +618,7 @@ export function registerReportWorker(
   bus.subscribe<ReportRequestedEvent>("report:requested", async (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     const reportMode = event.payload.reportMode ?? event.payload.context.reportMode ?? "full";
+    const scanOnly = event.payload.context.postProcessMode === "scan-only";
 
     if (store) {
       if (reportMode === "full") {
@@ -625,6 +629,13 @@ export function registerReportWorker(
             level: "success",
             message: "No findings from tasks",
             detail: "Code looks clean.",
+            source: "report",
+          });
+        } else if (scanOnly) {
+          store.addNotice({
+            level: "info",
+            message: "Scan-only run complete",
+            detail: "Findings were saved as needs_review without running triage.",
             source: "report",
           });
         } else if ((state.selectedForTriage ?? 0) === 0) {
@@ -671,6 +682,8 @@ export function registerReportWorker(
       if (reportMode === "full") {
         if (state.totalFindings === 0) {
           console.log("  No findings from tasks. Code looks clean.");
+        } else if (scanOnly) {
+          console.log("  Scan-only run complete. Findings were saved as needs_review without triage.");
         } else if ((state.selectedForTriage ?? 0) === 0) {
           console.log("  All findings already triaged. Nothing to do.");
         }

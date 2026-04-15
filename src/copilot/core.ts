@@ -150,6 +150,7 @@ export class CopilotCore {
       target: ctxOverrides?.target,
       signal: ctxOverrides?.signal,
       uiStore: ctxOverrides?.uiStore,
+      seedTaskOutputs: ctxOverrides?.seedTaskOutputs,
     };
 
     return tool.execute(input, ctx);
@@ -247,27 +248,81 @@ export class CopilotCore {
   }
 
   private async loadLocalModule(modulePath: string): Promise<void> {
-    // Phase 2: Load module.manifest.json from path, dynamically import entry
-    // For now, throw with a helpful message
-    throw new Error(
-      `Local module loading from "${modulePath}" is not yet implemented. ` +
-      `This will be available in Phase 2 (external module integration).`,
-    );
+    const { loadManifestFromPath, checkRequirements, dynamicImportModule } =
+      await import("../modules/loader.js");
+    const path = await import("node:path");
+
+    const manifest = loadManifestFromPath(modulePath);
+
+    if (manifest.requires) {
+      const reqCheck = checkRequirements(manifest.requires);
+      if (!reqCheck.satisfied) {
+        throw new Error(
+          `Module "${manifest.id}" requirements not met: ${reqCheck.missing.join(", ")}`,
+        );
+      }
+    }
+
+    const entryPath = path.resolve(modulePath, manifest.entry);
+    const mod = await dynamicImportModule(entryPath);
+
+    if (mod.id !== manifest.id) {
+      throw new Error(
+        `Module ID mismatch: manifest declares "${manifest.id}" but module exports "${mod.id}"`,
+      );
+    }
+
+    await this.registry.loadModule(mod, this.moduleCtx, {
+      taskRegistry: this.taskRegistry,
+    });
   }
 
   private async loadPackageModule(packageName: string): Promise<void> {
-    // Phase 2: require/import the npm package, validate it exports CopilotModule
-    throw new Error(
-      `Package module loading for "${packageName}" is not yet implemented. ` +
-      `This will be available in Phase 2 (external module integration).`,
-    );
+    const { createRequire } = await import("node:module");
+    const path = await import("node:path");
+    const { existsSync } = await import("node:fs");
+
+    const require = createRequire(import.meta.url);
+    let packageDir: string;
+
+    try {
+      packageDir = path.dirname(require.resolve(packageName + "/package.json"));
+    } catch {
+      throw new Error(
+        `Package "${packageName}" is not installed. ` +
+        `Install it with: pnpm add ${packageName}`,
+      );
+    }
+
+    // If the package has a module.manifest.json, use the full manifest loader
+    const manifestPath = path.join(packageDir, "module.manifest.json");
+    if (existsSync(manifestPath)) {
+      await this.loadLocalModule(packageDir);
+      return;
+    }
+
+    // Otherwise try direct import as CopilotModule
+    const { dynamicImportModule } = await import("../modules/loader.js");
+    const mod = await dynamicImportModule(require.resolve(packageName));
+    await this.registry.loadModule(mod, this.moduleCtx, {
+      taskRegistry: this.taskRegistry,
+    });
   }
 
-  private async loadMcpModule(serverUrl: string): Promise<void> {
-    // Phase 2: Connect to MCP server, wrap its tools as ModuleTools
-    throw new Error(
-      `MCP module loading from "${serverUrl}" is not yet implemented. ` +
-      `This will be available in Phase 2 (external module integration).`,
-    );
+  private async loadMcpModule(serverSpec: string): Promise<void> {
+    const { createMcpModule } = await import("../modules/mcp-bridge.js");
+
+    // Derive a module ID from the server spec
+    const moduleId = serverSpec
+      .replace(/^(https?:\/\/|npx\s+|node\s+|python\s+)/, "")
+      .replace(/[^a-z0-9-]/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 30) || "mcp";
+
+    const { module: mod } = await createMcpModule(serverSpec, moduleId);
+    await this.registry.loadModule(mod, this.moduleCtx, {
+      taskRegistry: this.taskRegistry,
+    });
   }
 }

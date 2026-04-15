@@ -60,6 +60,7 @@ export interface PipelineParams {
   config: KuzushiConfig;
   scanOpts: ScanOpts;
   opts: ScanCommandOptions;
+  postProcessMode?: "full" | "scan-only";
   dbPath?: string;
   runRepoId?: string;
   reportMode?: "full" | "suppress";
@@ -70,12 +71,17 @@ export interface PipelineParams {
   monorepoContext?: import("../../monorepo/types.js").MonorepoSharedContext;
   /** Optional UI store for Ink-based terminal rendering. */
   uiStore?: UIStore;
+  /** Optional abort signal for shell-origin tool execution. */
+  signal?: AbortSignal;
+  /** Optional mode to restore after pipeline/report/review completion. */
+  returnModeOnComplete?: import("../../ui/state.js").UIMode;
 }
 
 export interface PipelineResult {
   runId: string;
   status: "complete" | "error";
   stats?: PipelineStats;
+  aborted?: boolean;
 }
 
 export interface ScanPlanSummary {
@@ -455,6 +461,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     scanPath,
     repoName,
     dbPath,
+    postProcessMode: params.postProcessMode ?? "full",
     reportMode,
   };
 
@@ -471,6 +478,16 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       (event) => event.meta.runId === runId && event.payload.fatal,
     )
     .then((event) => ({ kind: "error" as const, event }));
+  const pipelineAbort = params.signal
+    ? new Promise<{ kind: "aborted" }>((resolve) => {
+      const signal = params.signal!;
+      if (signal.aborted) {
+        resolve({ kind: "aborted" });
+        return;
+      }
+      signal.addEventListener("abort", () => resolve({ kind: "aborted" }), { once: true });
+    })
+    : undefined;
 
   if (reportMode === "full" && !params.uiStore) {
     printScanPlan(config, scanOpts, taskRegistry);
@@ -488,7 +505,29 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       }),
     );
 
-    const outcome = await Promise.race([pipelineComplete, pipelineError]);
+    const outcome = await Promise.race([
+      pipelineComplete,
+      pipelineError,
+      ...(pipelineAbort ? [pipelineAbort] : []),
+    ]);
+    if (outcome.kind === "aborted") {
+      if (params.uiStore) {
+        params.uiStore.addNotice({
+          level: "warning",
+          message: "Pipeline cancelled",
+          detail: "Stopped by shell request.",
+          source: "pipeline",
+        });
+        if (params.returnModeOnComplete) {
+          params.uiStore.setMode(params.returnModeOnComplete);
+        }
+      }
+      return {
+        runId,
+        status: "error",
+        aborted: true,
+      };
+    }
     if (outcome.kind === "error") {
       if (params.uiStore) {
         params.uiStore.addNotice({
@@ -497,10 +536,15 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
           detail: outcome.event.payload.error,
           source: "pipeline",
         });
+        if (params.returnModeOnComplete) {
+          params.uiStore.setMode(params.returnModeOnComplete);
+        }
       } else {
         printPipelineError(outcome.event.payload.error, outcome.event.payload.errorCategory);
       }
-      process.exitCode = 1;
+      if (!params.returnModeOnComplete) {
+        process.exitCode = 1;
+      }
       return {
         runId,
         status: "error",
@@ -527,7 +571,12 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     if (process.stdout.isTTY && reportMode === "full") {
       try {
         const { runInteractiveReview } = await import("../../ui/review.js");
-        const reviewResult = await runInteractiveReview(db, repoName, params.uiStore);
+        const reviewResult = await runInteractiveReview(
+          db,
+          repoName,
+          params.uiStore,
+          params.returnModeOnComplete ?? "summary",
+        );
         if (reviewResult && reviewResult.reviewed > 0) {
           if (params.uiStore) {
             params.uiStore.addNotice({
@@ -536,7 +585,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
               detail: `${reviewResult.tp} tp · ${reviewResult.fp} fp · ${reviewResult.byDesign} by_design · ${reviewResult.skipped} skipped`,
               source: "review",
             });
-            params.uiStore.setMode("summary");
+            params.uiStore.setMode(params.returnModeOnComplete ?? "summary");
           } else {
             console.log(`\n  Review complete: ${reviewResult.tp} tp, ${reviewResult.fp} fp, ${reviewResult.byDesign} by_design, ${reviewResult.skipped} skipped`);
           }
@@ -544,6 +593,10 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       } catch {
         // Review is best-effort — don't fail the pipeline
       }
+    }
+
+    if (params.uiStore && params.returnModeOnComplete) {
+      params.uiStore.setMode(params.returnModeOnComplete);
     }
 
     return {
