@@ -50,11 +50,10 @@ export function App({ store }: AppProps): React.ReactElement {
     ? state.results.slice(-LIVE_RESULT_COUNT)
     : state.results;
   const showCompactHeader = state.mode !== "preflight" && state.repoName.length > 0;
-  const showFullBanner = state.mode === "preflight" && state.preflight?.kind === "wizard";
 
   return (
     <Box flexDirection="column">
-      {showFullBanner && <Banner />}
+      <Banner />
       {showCompactHeader && (
         <CompactHeader
           repoName={state.repoName}
