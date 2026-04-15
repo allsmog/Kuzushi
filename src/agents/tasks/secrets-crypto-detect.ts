@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import path from "node:path";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -22,6 +20,7 @@ import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
 import { filterCategories, type CategoryRelevance } from "./category-filter.js";
 import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
+import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "secrets-crypto-detect" });
 
@@ -305,15 +304,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
 }
 
 function computeFingerprint(repoName: string, prefix: string, category: string, filePath: string, startLine: number): string {
-  const source = [repoName, prefix, category, filePath, String(startLine)].join("|");
-  return createHash("sha256").update(source).digest("hex");
-}
-
-function normalizeFilePath(repoRoot: string, filePath: string): string {
-  if (!path.isAbsolute(filePath)) return filePath;
-  const relative = path.relative(repoRoot, filePath);
-  if (relative.startsWith("..")) return filePath;
-  return relative || filePath;
+  return computeDetectionFingerprint([repoName, prefix, category, filePath, String(startLine)]);
 }
 
 export const secretsCryptoDetectTask: AgentTask<ScanOpts, Finding[]> = {
@@ -419,14 +410,6 @@ export const secretsCryptoDetectTask: AgentTask<ScanOpts, Finding[]> = {
     };
   },
 };
-
-function parseJson(text: string, tag: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
-  }
-}
 
 export const __secretsCryptoDetectInternals = {
   resolveConfig,

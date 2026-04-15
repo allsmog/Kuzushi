@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import path from "node:path";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
@@ -12,6 +10,7 @@ import { createLogger } from "../../logger.js";
 import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
 import { resolveTaskAllowedTools } from "./runtime-overrides.js";
+import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "diff-review" });
 
@@ -280,15 +279,7 @@ function computeFingerprint(
   filePath: string,
   f: DiffReviewFinding,
 ): string {
-  const source = [repoName, "diff-review", diffBase, f.ruleId, filePath, String(f.startLine)].join("|");
-  return createHash("sha256").update(source).digest("hex");
-}
-
-function normalizeFilePath(repoRoot: string, filePath: string): string {
-  if (!path.isAbsolute(filePath)) return filePath;
-  const relative = path.relative(repoRoot, filePath);
-  if (relative.startsWith("..")) return filePath;
-  return relative || filePath;
+  return computeDetectionFingerprint([repoName, "diff-review", diffBase, f.ruleId, filePath, String(f.startLine)]);
 }
 
 function buildRegressionPrompt(
@@ -375,9 +366,7 @@ async function detectRegressions(
     if (!r.filePath?.trim() || typeof r.confidence !== "number" || r.confidence < 0.5) continue;
 
     const filePath = normalizeFilePath(context.repoRoot, r.filePath);
-    const fingerprint = createHash("sha256")
-      .update([context.repoName, "regression", r.originalFingerprint, filePath, String(r.startLine)].join("|"))
-      .digest("hex");
+    const fingerprint = computeDetectionFingerprint([context.repoName, "regression", r.originalFingerprint, filePath, String(r.startLine)]);
 
     findings.push({
       taskId: "diff-review",
@@ -518,14 +507,6 @@ export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
     };
   },
 };
-
-function parseJson(text: string, tag: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
-  }
-}
 
 export const __diffReviewInternals = {
   resolveConfig,

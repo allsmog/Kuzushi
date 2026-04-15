@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import path from "node:path";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -25,6 +23,13 @@ import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat
 import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
 import { resolveTaskAllowedTools } from "./runtime-overrides.js";
 import type { ApplicationModel } from "../../types.js";
+import {
+  normalizeFilePath,
+  computeDetectionFingerprint,
+  dedupAndRankFindings,
+  runLens,
+  type LensResult,
+} from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "template-injection" });
 
@@ -242,15 +247,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
 }
 
 function computeFingerprint(repoName: string, filePath: string, f: TemplateInjectionFinding): string {
-  const source = [repoName, "template-injection", f.category, filePath, String(f.startLine)].join("|");
-  return createHash("sha256").update(source).digest("hex");
-}
-
-function normalizeFilePath(repoRoot: string, filePath: string): string {
-  if (!path.isAbsolute(filePath)) return filePath;
-  const relative = path.relative(repoRoot, filePath);
-  if (relative.startsWith("..")) return filePath;
-  return relative || filePath;
+  return computeDetectionFingerprint([repoName, "template-injection", f.category, filePath, String(f.startLine)]);
 }
 
 export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
@@ -285,14 +282,14 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
     log.info(`Starting multi-lens scan (model=${model})`);
 
     const lensResults = await Promise.all([
-      runLens(
+      runTemplateLens(
         buildTemplateConstructionLensPrompt(repoContext, perLensMax, profileLines, preRead, threatModelContext, appModelContext, scenarioContext),
         context, model, `${tag}/construction`,
       ).catch((error) => {
         log.error(`${tag}/construction lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
       }),
-      runLens(
+      runTemplateLens(
         buildRendererConfigLensPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
         context, model, `${tag}/renderer-config`,
       ).catch((error) => {
@@ -308,16 +305,8 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
       allFindings.push(...normalizeFindings(result.output, context.repoRoot, context.repoName, perLensMax));
     }
 
-    const deduped = new Map<string, Finding>();
-    for (const f of allFindings) {
-      const existing = deduped.get(f.fingerprint);
-      if (!existing || f.score > existing.score) {
-        deduped.set(f.fingerprint, f);
-      }
-    }
-
     return attachTaskOutputMeta(
-      [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings),
+      dedupAndRankFindings(allFindings, maxFindings),
       { costUsd: totalCostUsd },
     );
   },
@@ -341,61 +330,13 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
   },
 };
 
-function parseJson(text: string, tag: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
-  }
-}
-
-interface LensResult {
-  output: unknown;
-  costUsd: number;
-}
-
-async function runLens(
+function runTemplateLens(
   prompt: string,
   context: TaskContext,
   model: string,
   tag: string,
 ): Promise<LensResult> {
-  const runtime = resolveTaskRuntime(context);
-  let structuredOutput: unknown;
-  let resultText = "";
-  let costUsd = 0;
-
-  for await (const message of runtime.query({
-    prompt,
-    options: {
-      cwd: context.repoRoot,
-      model,
-      allowedTools: resolveTaskAllowedTools(context),
-      permissionMode: "dontAsk",
-      outputFormat: {
-        type: "json_schema",
-        schema: TEMPLATE_INJECTION_SCHEMA,
-        strict: true,
-        retryInvalidStructuredOutput: 1,
-      },
-    },
-  })) {
-    if (message.type !== "result") continue;
-    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-      costUsd = message.totalCostUsd;
-    }
-    if ("result" in message) {
-      resultText = message.result;
-      structuredOutput = message.structuredOutput;
-    } else if ("errors" in message) {
-      throw new Error(`${tag} runtime error: ${(message as { errors: string[] }).errors?.join("; ") ?? "unknown"}`);
-    }
-  }
-
-  if (structuredOutput === undefined && resultText === "") {
-    throw new Error(`${tag} runtime returned no output`);
-  }
-  return { output: structuredOutput ?? parseJson(resultText, tag), costUsd };
+  return runLens(prompt, context, model, tag, TEMPLATE_INJECTION_SCHEMA);
 }
 
 function buildTemplateConstructionLensPrompt(

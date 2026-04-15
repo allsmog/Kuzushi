@@ -2,8 +2,6 @@
 // The patterns match dangerous coding practices in scanned repositories.
 // References to exec(), system(), etc. are DETECTION TARGETS, not code this file runs.
 
-import { createHash } from "node:crypto";
-import path from "node:path";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -26,6 +24,7 @@ import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesFo
 import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime, resolveTaskAllowedTools } from "./runtime-overrides.js";
 import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
 import type { ApplicationModel } from "../../types.js";
+import { normalizeFilePath, computeDetectionFingerprint } from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "command-injection" });
 
@@ -155,10 +154,9 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     const f = item as unknown as CommandInjectionFinding;
     if (!f.filePath?.trim()) continue;
 
-    const filePath = path.isAbsolute(f.filePath) ? (path.relative(repoRoot, f.filePath) || f.filePath) : f.filePath;
+    const filePath = normalizeFilePath(repoRoot, f.filePath);
     const cweList = f.cwe ? [f.cwe] : ["CWE-78"];
-    const source = [repoName, "command-injection", f.category, filePath, String(f.startLine)].join("|");
-    const fingerprint = createHash("sha256").update(source).digest("hex");
+    const fingerprint = computeDetectionFingerprint([repoName, "command-injection", f.category, filePath, String(f.startLine)]);
     const sinkInfo = f.sinkFunction ? ` [${f.sinkFunction}]` : "";
 
     const finding: Finding = {

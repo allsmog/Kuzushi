@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import path from "node:path";
 import {
   antiHallucinationModule,
   frameworkAwarenessModule,
@@ -25,6 +23,7 @@ import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat
 import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
 import { resolveTaskAllowedTools } from "./runtime-overrides.js";
 import type { ApplicationModel } from "../../types.js";
+import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "graphql-security" });
 
@@ -250,15 +249,7 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
 }
 
 function computeFingerprint(repoName: string, filePath: string, f: GraphqlSecurityFinding): string {
-  const source = [repoName, "graphql-security", f.category, filePath, String(f.startLine)].join("|");
-  return createHash("sha256").update(source).digest("hex");
-}
-
-function normalizeFilePath(repoRoot: string, filePath: string): string {
-  if (!path.isAbsolute(filePath)) return filePath;
-  const relative = path.relative(repoRoot, filePath);
-  if (relative.startsWith("..")) return filePath;
-  return relative || filePath;
+  return computeDetectionFingerprint([repoName, "graphql-security", f.category, filePath, String(f.startLine)]);
 }
 
 export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
@@ -355,14 +346,6 @@ export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
     };
   },
 };
-
-function parseJson(text: string, tag: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
-  }
-}
 
 export const __graphqlSecurityInternals = {
   resolveConfig,
