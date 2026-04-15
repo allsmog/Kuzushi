@@ -23,6 +23,18 @@ async function main(): Promise<void> {
   store.update({ bannerShown: true });
   await sleep(800);
 
+  // --- Config banner ---
+  store.update({
+    configBanner: {
+      model: "anthropic:claude-opus",
+      tasks: ["semgrep", "codeql", "agentic"],
+      severity: ["ERROR", "WARNING"],
+      concurrency: 5,
+      backend: "pi-ai",
+    },
+  });
+  await sleep(600);
+
   // --- Init pipeline stages ---
   store.initStages([
     { id: "scan", label: "Scan" },

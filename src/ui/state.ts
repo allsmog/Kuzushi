@@ -145,6 +145,20 @@ export interface UIState {
   skippedAlreadyTriaged: number;
   model: string;
   progress: { current: number; total: number };
+  /** Running cost total — updated on every result. */
+  runningCostUsd: number;
+  /** Rate limit / throttle info — shown when active. */
+  throttle?: { concurrency: number; reason: string } | null;
+  /** Resolved config for the pre-scan banner. */
+  configBanner?: {
+    model: string;
+    tasks: string[];
+    severity?: string[];
+    concurrency?: number;
+    backend?: string;
+    budget?: number;
+    scanMode?: string;
+  } | null;
   results: ResultLine[];
   agentActivity: Map<string, AgentActivityLine[]>;
   summary: SummaryData | null;
@@ -172,6 +186,7 @@ export class UIStore {
       skippedAlreadyTriaged: 0,
       model: "",
       progress: { current: 0, total: 0 },
+      runningCostUsd: 0,
       results: [],
       agentActivity: new Map(),
       summary: null,
@@ -197,6 +212,7 @@ export class UIStore {
       ...this.state,
       results: [...this.state.results, result],
       progress: { current: result.index, total: result.total },
+      runningCostUsd: this.state.runningCostUsd + (result.costUsd ?? 0),
     };
     this.notify();
   }

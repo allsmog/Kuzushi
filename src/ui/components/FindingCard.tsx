@@ -15,6 +15,7 @@ import { Box, Text } from "ink";
 import chalk from "chalk";
 import { icons } from "../icons.js";
 import { colorVerdict, badge, severityLabel } from "../format.js";
+import { fileLink } from "../hyperlink.js";
 import type { ActionableFinding } from "../state.js";
 
 interface FindingCardProps {
@@ -31,7 +32,7 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     : finding.verifyExploitable === 0
       ? ` ${badge("NOT EXPLOITABLE", "green")}`
       : "";
-  const location = chalk.cyan(`${finding.filePath}:${finding.startLine}`);
+  const location = chalk.cyan(fileLink(finding.filePath, `${finding.filePath}:${finding.startLine}`, finding.startLine));
 
   // Collect detail tree items
   const details: string[] = [];
@@ -57,7 +58,7 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     details.push(`${chalk.dim("Corroborated by:")} ${tasks.join(", ")} (+${finding.corroboratingSignals.length})`);
   }
   if (finding.pocHarnessPath) {
-    details.push(`${chalk.blue("PoC Harness:")} ${finding.pocHarnessPath}`);
+    details.push(`${chalk.blue("PoC Harness:")} ${fileLink(finding.pocHarnessPath)}`);
   } else if (finding.pocHarnessSkipped === 1) {
     details.push(`${chalk.yellow("PoC Harness:")} skipped (${finding.pocHarnessSkipReason ?? "no reason"})`);
   }
