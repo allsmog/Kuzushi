@@ -873,6 +873,21 @@ export function getStoredFinding(
   return rows[0];
 }
 
+/**
+ * Update a finding's verdict (used by interactive review mode).
+ * Only changes the verdict and confidence — preserves all other fields.
+ */
+export function updateFindingVerdict(
+  db: Database.Database,
+  fingerprint: string,
+  verdict: "tp" | "fp" | "needs_review" | "by_design",
+  confidence = 1.0,
+): void {
+  db.prepare(
+    "UPDATE findings SET verdict = ?, confidence = ? WHERE fingerprint = ?",
+  ).run(verdict, confidence, fingerprint);
+}
+
 /** Delete findings by fingerprint for a specific repo. Returns number of deleted rows. */
 export function deleteFindingsByFingerprints(
   db: Database.Database,

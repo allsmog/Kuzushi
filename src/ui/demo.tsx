@@ -323,7 +323,10 @@ function makeFakeFindings(): ActionableFinding[] {
       verifyExploitable: 1,
       verifyPocPayload: "' OR 1=1 --",
       verifyAttackVector: "HTTP POST /api/users",
-      corroboratingSignals: [{ taskId: "codeql" }],
+      corroboratingSignals: [
+        { taskId: "codeql", ruleId: "js/sql-injection", filePath: "src/api/users.ts", startLine: 42, cwe: ["CWE-89"], score: 78 },
+        { taskId: "agentic", ruleId: "deep-semantic/sqli", filePath: "src/api/users.ts", startLine: 40, cwe: ["CWE-89"], score: 65 },
+      ],
       suppressionReasons: [],
     },
     {

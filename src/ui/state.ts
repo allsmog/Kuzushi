@@ -125,7 +125,15 @@ export interface ActionableFinding {
   proofState?: string;
   engineProvenance?: Array<{ kind: string; detail: string }>;
   taintPath?: unknown;
-  corroboratingSignals: Array<{ taskId: string }>;
+  corroboratingSignals: Array<{
+    taskId: string;
+    fingerprint?: string;
+    ruleId?: string;
+    filePath?: string;
+    startLine?: number;
+    cwe?: string[];
+    score?: number;
+  }>;
   suppressionReasons: Array<{ id: string }>;
   pocHarnessPath?: string;
   pocHarnessSkipped?: number;
@@ -168,6 +176,8 @@ export interface UIState {
   warnings: string[];
   bannerShown: boolean;
   startBannerShown: boolean;
+  /** Resume diff data — shown when resuming a previous run. */
+  resumeDiff?: import("./components/ResumeDiff.js").ResumeDiffData | null;
   /** Pipeline stage indicator — tracks all stages for the ○/●/◆ display. */
   stages: PipelineStage[];
 }

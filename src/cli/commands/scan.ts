@@ -439,6 +439,19 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       }
     }
 
+    // Interactive review: offer to review needs_review findings
+    if (process.stdout.isTTY && reportMode === "full") {
+      try {
+        const { runInteractiveReview } = await import("../../ui/review.js");
+        const reviewResult = await runInteractiveReview(db, repoName);
+        if (reviewResult && reviewResult.reviewed > 0) {
+          console.log(`\n  Review complete: ${reviewResult.tp} tp, ${reviewResult.fp} fp, ${reviewResult.byDesign} by_design, ${reviewResult.skipped} skipped`);
+        }
+      } catch {
+        // Review is best-effort — don't fail the pipeline
+      }
+    }
+
     return {
       runId,
       status: "complete",
