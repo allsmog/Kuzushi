@@ -3,6 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { executeTool } from "../agent-runtime/tools.js";
+import { getLogger } from "../logger.js";
 import { createSimpleTextIndexProvider } from "./simple-index.js";
 import type {
   CodeIntelligenceProvider,
@@ -15,6 +16,7 @@ import type {
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+const log = getLogger("code-intelligence");
 const IMPORT_SCAN_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
@@ -68,7 +70,10 @@ async function resolveRepoScopeKey(repoRoot: string): Promise<string> {
     const head = headStdout.trim() || "unknown";
     const dirty = dirtyResult.stdout.trim().length > 0 ? ":dirty" : "";
     return `${head}${dirty}`;
-  } catch {
+  } catch (err) {
+    // Fallback for non-git directories or missing git binary.
+    // Uses a workspace-path key so caching still works, just without commit granularity.
+    log.debug({ err, repoRoot }, "git rev-parse failed, falling back to workspace scope key");
     return `workspace:${repoRoot}`;
   }
 }
@@ -273,7 +278,10 @@ async function collectImportGraph(repoRoot: string): Promise<ImportGraphEdge[]> 
     let content = "";
     try {
       content = await readFile(absolutePath, "utf-8");
-    } catch {
+    } catch (err) {
+      // File may have been deleted between directory walk and read, or may have
+      // restrictive permissions. Skip it and continue building the import graph.
+      log.debug({ err, path: absolutePath }, "skipping unreadable file during import graph collection");
       continue;
     }
 

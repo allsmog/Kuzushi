@@ -257,6 +257,8 @@ function parsePreconditions(raw: string | null): string[] {
       .map((item) => String(item).trim())
       .filter(Boolean);
   } catch {
+    // Graceful degradation: preconditions JSON from the DB may be malformed.
+    // Return empty list so the markdown report renders without this section.
     return [];
   }
 }
@@ -278,6 +280,9 @@ function parseRunConfig(raw: string | undefined): { model?: string; tasks: strin
       tasks,
     };
   } catch {
+    // Graceful degradation: config JSON from the DB may be corrupted or
+    // written by a different schema version. Return safe defaults so markdown
+    // generation still succeeds with partial metadata.
     return { model: undefined, tasks: [] };
   }
 }

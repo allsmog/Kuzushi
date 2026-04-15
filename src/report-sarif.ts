@@ -240,6 +240,9 @@ function parseRunConfig(raw: string | undefined): ParsedRunConfig {
 
     return { model, tasks };
   } catch {
+    // Graceful degradation: config JSON from the DB may be corrupted or
+    // written by a different schema version. Return safe defaults so SARIF
+    // generation still succeeds with partial metadata.
     return { model: undefined, tasks: [] };
   }
 }
@@ -272,6 +275,8 @@ function parseCheckpointFindingMeta(raw: string | undefined): Map<string, Checkp
       });
     }
   } catch {
+    // Graceful degradation: findings JSON checkpoint may be malformed.
+    // Return whatever was parsed so far rather than failing the entire report.
     return byFingerprint;
   }
 
