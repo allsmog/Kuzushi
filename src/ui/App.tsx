@@ -1,14 +1,19 @@
 /**
  * Main Ink application component.
  * Renders the full Kuzushi terminal UI based on UIStore state.
+ *
+ * Completed results go into <Static> (rendered once, never re-rendered).
+ * Only the pipeline indicator + active finding stay in the live area
+ * to minimize flicker from spinner ticks.
  */
 import React from "react";
 import { Box, Text, Static } from "ink";
 import chalk from "chalk";
 import { useUIState } from "./hooks.js";
 import { icons } from "./icons.js";
-import type { UIStore } from "./state.js";
+import type { UIStore, ResultLine as ResultLineData } from "./state.js";
 import { Banner } from "./components/Banner.js";
+import { ResultLine } from "./components/ResultLine.js";
 import { ScanSummary } from "./components/ScanSummary.js";
 import { QualityGate } from "./components/QualityGate.js";
 import { PipelineIndicator } from "./components/PipelineIndicator.js";
@@ -19,6 +24,16 @@ interface AppProps {
 
 export function App({ store }: AppProps): React.ReactElement {
   const state = useUIState(store);
+
+  // Results that have scrolled past the live window go to Static (no re-render).
+  // Only the last few stay in the live PipelineIndicator.
+  const LIVE_RESULT_COUNT = 3;
+  const staticResults = state.results.length > LIVE_RESULT_COUNT
+    ? state.results.slice(0, -LIVE_RESULT_COUNT)
+    : [];
+  const liveResults = state.results.length > LIVE_RESULT_COUNT
+    ? state.results.slice(-LIVE_RESULT_COUNT)
+    : state.results;
 
   return (
     <Box flexDirection="column">
@@ -48,12 +63,17 @@ export function App({ store }: AppProps): React.ReactElement {
         </Static>
       )}
 
-      {/* Pipeline indicator with nested branches — the whole live display */}
+      {/* Completed results — rendered once via Static, never re-rendered */}
+      <Static items={staticResults.map((r, i) => ({ ...r, _key: `r-${i}` }))}>
+        {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
+      </Static>
+
+      {/* Pipeline indicator with live branches — the only re-rendering area */}
       {state.stages.length > 0 && state.phase !== "summary" && state.phase !== "done" && (
         <PipelineIndicator
           stages={state.stages}
           progress={state.progress}
-          results={state.results}
+          results={liveResults}
           agentActivity={state.agentActivity}
         />
       )}
