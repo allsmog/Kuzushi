@@ -104,8 +104,11 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   const renderer = await createUIRenderer();
   const { store: uiStore, cleanup: cleanupUI } = renderer;
 
-  // Show the banner via the old printBanner for compatibility with monorepo/dry-run paths
-  printBanner();
+  // The Ink UI renders its own <Banner /> when bannerShown is true.
+  // Only use the old printBanner() for non-TTY / plain-text fallback.
+  if (!process.stdout.isTTY) {
+    printBanner();
+  }
   uiStore.update({ bannerShown: true });
 
   const scanPath = path.resolve(repoPath);
