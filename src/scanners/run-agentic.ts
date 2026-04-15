@@ -18,9 +18,28 @@ import {
 
 const log = getLogger("agentic-scan");
 
-// Re-export under old names for backward compatibility
+/**
+ * @deprecated Use {@link FINDING_SCHEMA} from `./normalize-findings.js` instead.
+ * This alias was retained for backward compatibility when the agentic scanner's
+ * schema was consolidated into the shared normalize-findings module.
+ * Will be removed in a future major version.
+ */
 export { FINDING_SCHEMA as AGENTIC_SCHEMA };
+
+/**
+ * @deprecated Use {@link NormalizedFinding} from `./normalize-findings.js` instead.
+ * This type alias was retained for backward compatibility when finding types
+ * were unified across all scanner backends.
+ * Will be removed in a future major version.
+ */
 export type AgenticFinding = NormalizedFinding;
+
+/**
+ * @deprecated Use {@link FindingOutput} from `./normalize-findings.js` instead.
+ * This type alias was retained for backward compatibility when finding output
+ * types were unified across all scanner backends.
+ * Will be removed in a future major version.
+ */
 export type AgenticOutput = FindingOutput;
 
 export interface AgenticRuntimeOptions {
