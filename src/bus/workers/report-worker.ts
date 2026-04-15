@@ -21,6 +21,8 @@ import type {
   ReportRequestedEvent,
   ScanCompleteEvent,
   TaskStartEvent,
+  TaskCompleteEvent,
+  TaskErrorEvent,
   TriageAgentActivityEvent,
   TriageErrorEvent,
   TriageResultEvent,
@@ -106,6 +108,35 @@ export function registerReportWorker(
 
     if (store) {
       store.update({ tasks: state.tasks, phase: "scanning" });
+      // Add scanner as a sub-task branch under the Scan stage
+      store.upsertSubTask("scan", {
+        id: event.payload.taskId,
+        label: event.payload.taskId,
+        status: "active",
+        startedAt: Date.now(),
+      });
+    }
+  });
+
+  bus.subscribe<TaskCompleteEvent>("task:complete", (event) => {
+    if (store) {
+      store.upsertSubTask("scan", {
+        id: event.payload.taskId,
+        label: event.payload.taskId,
+        status: "done",
+        elapsedMs: event.payload.durationMs,
+      });
+    }
+  });
+
+  bus.subscribe<TaskErrorEvent>("task:error", (event) => {
+    if (store) {
+      store.upsertSubTask("scan", {
+        id: event.payload.taskId,
+        label: event.payload.taskId,
+        status: "error",
+        detail: event.payload.error?.slice(0, 60),
+      });
     }
   });
 

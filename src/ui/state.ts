@@ -13,6 +13,15 @@ export type Phase = "idle" | "scanning" | "triaging" | "verifying" | "poc" | "su
 
 export type StageStatus = "pending" | "active" | "done" | "error";
 
+export interface SubTask {
+  id: string;
+  label: string;
+  status: StageStatus;
+  detail?: string;
+  elapsedMs?: number;
+  startedAt?: number;
+}
+
 export interface PipelineStage {
   id: string;
   label: string;
@@ -20,6 +29,8 @@ export interface PipelineStage {
   detail?: string;
   elapsedMs?: number;
   startedAt?: number;
+  /** Sub-tasks branching off this stage (e.g. individual scanners, findings). */
+  subTasks: SubTask[];
 }
 
 export interface ResultLine {
@@ -211,7 +222,7 @@ export class UIStore {
   initStages(stageIds: Array<{ id: string; label: string }>): void {
     this.state = {
       ...this.state,
-      stages: stageIds.map((s) => ({ id: s.id, label: s.label, status: "pending" as StageStatus })),
+      stages: stageIds.map((s) => ({ id: s.id, label: s.label, status: "pending" as StageStatus, subTasks: [] })),
     };
     this.notify();
   }
@@ -221,7 +232,7 @@ export class UIStore {
     const now = Date.now();
     const stages = this.state.stages.map((s) => {
       if (s.id === stageId) {
-        return { ...s, status: "active" as StageStatus, detail, startedAt: now };
+        return { ...s, status: "active" as StageStatus, detail, startedAt: now, subTasks: [] };
       }
       // Auto-complete any previously active stage
       if (s.status === "active") {
@@ -239,6 +250,25 @@ export class UIStore {
     const stages = this.state.stages.map((s) => {
       if (s.id === stageId) {
         return { ...s, status: "done" as StageStatus, elapsedMs: now - (s.startedAt ?? now) };
+      }
+      return s;
+    });
+    this.state = { ...this.state, stages };
+    this.notify();
+  }
+
+  /** Add or update a sub-task under a stage (e.g. individual scanner, finding). */
+  upsertSubTask(stageId: string, subTask: SubTask): void {
+    const stages = this.state.stages.map((s) => {
+      if (s.id === stageId) {
+        const existing = s.subTasks.findIndex((t) => t.id === subTask.id);
+        const updated = [...s.subTasks];
+        if (existing >= 0) {
+          updated[existing] = subTask;
+        } else {
+          updated.push(subTask);
+        }
+        return { ...s, subTasks: updated };
       }
       return s;
     });
