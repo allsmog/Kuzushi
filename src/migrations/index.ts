@@ -24,6 +24,7 @@ import { migration020 } from "./020_add_verified_patch_status.js";
 import { migration021 } from "./021_add_incremental_scanning_support.js";
 import { migration022 } from "./022_add_verdict_index.js";
 import { migration023 } from "./023_expand_pipeline_status_constraint.js";
+import { migration024 } from "./024_rename_scanner_to_task_id.js";
 import type { Migration } from "./types.js";
 
 /** All registered migrations in version order. */
@@ -51,4 +52,5 @@ export const allMigrations: Migration[] = [
   migration021,
   migration022,
   migration023,
+  migration024,
 ];

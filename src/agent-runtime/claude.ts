@@ -154,16 +154,24 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         outputConfig.effort = baseOptions.effort;
       }
 
+      const thinkingDisabled = baseOptions.thinkingDisabled || isHaiku || baseOptions.effort === "low";
+
       const params: Anthropic.MessageCreateParamsNonStreaming = {
         model,
         max_tokens: baseOptions.maxOutputTokens ?? 16000,
-        temperature: baseOptions.temperature ?? 0,
+        // When thinking is enabled, temperature must be 1 (or omitted).
+        // Only set temperature explicitly when thinking is disabled.
+        ...(baseOptions.temperature !== undefined
+          ? { temperature: baseOptions.temperature }
+          : thinkingDisabled
+            ? { temperature: 0 }
+            : {}),
         system: systemBlocks.length > 0 ? systemBlocks : undefined,
         messages: [{ role: "user" as const, content: req.prompt }],
         stream: false,
         service_tier: "standard_only",
         ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
-        ...(baseOptions.thinkingDisabled || isHaiku || baseOptions.effort === "low"
+        ...(thinkingDisabled
           ? { thinking: { type: "disabled" as const } }
           : {}),
       };
@@ -307,7 +315,12 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       const stream = this.client.messages.stream({
         model,
         max_tokens: maxTokens,
-        temperature: request.options.temperature ?? 0,
+        // When thinking is enabled, temperature must be 1 (or omitted).
+        ...(request.options.temperature !== undefined
+          ? { temperature: request.options.temperature }
+          : shouldDisableThinking
+            ? { temperature: 0 }
+            : {}),
         metadata: { user_id: turnRunId || "kuzushi" },
         system: systemBlocks.length > 0 ? systemBlocks : undefined,
         messages: [{ role: "user", content: request.prompt }],

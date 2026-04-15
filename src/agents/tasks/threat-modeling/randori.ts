@@ -7,7 +7,6 @@
  */
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { coerceRepoContext } from "../../../repo-context.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
@@ -34,20 +33,32 @@ const IMPACT_TO_SEVERITY: Record<string, string> = {
   low: "INFO",
 };
 
-function buildRandoriPrompt(stages: string[], maxThreats: number, maxElements: number, outputDir: string): string {
-  const stageList = stages.join(", ");
+function buildScopePrompt(maxElements: number, outputDir: string): string {
   return [
     "You are running a PASTA threat model analysis on the current repository.",
     "",
-    `Run stages: ${stageList}`,
+    "Run stages: s1, s2, s3",
     "",
-    `For each stage, write the output JSON to the ${outputDir}/ directory:`,
+    `Write the output JSON to the ${outputDir}/ directory:`,
     "- Stage S1: Write pasta-s1.json (business objectives and security requirements)",
     "- Stage S2: Write pasta-s2.json (technical scope — components, actors, data flows)",
     "- Stage S3: Write pasta-s3.json (DFD, trust boundaries, entry points) and dfd.mmd",
-    "- Stage S4: Write pasta-s4.json (STRIDE threat scenarios with evidence anchors)",
     "",
-    `Also write ${outputDir}/randori-state.json tracking which stages completed.`,
+    `Include up to ${maxElements} DFD elements in the technical scope.`,
+    "",
+    "Explore the codebase thoroughly using Glob, Grep, and Read.",
+    "Ground every DFD element in actual code, not theoretical architecture.",
+  ].join("\n");
+}
+
+function buildStridePrompt(maxThreats: number, outputDir: string): string {
+  return [
+    "You are running Stage S4 of a PASTA threat model analysis.",
+    "",
+    `Read the prior stage outputs from ${outputDir}/pasta-s1.json, pasta-s2.json, pasta-s3.json, and dfd.mmd.`,
+    "These describe the application's business context, technical scope, and data flow diagram.",
+    "",
+    `Write ${outputDir}/pasta-s4.json with STRIDE threat scenarios grounded in code evidence.`,
     "",
     "CRITICAL requirements for S4 threat scenarios:",
     "- Every threat MUST have evidence_anchors with file_path, start_line, description",
@@ -56,10 +67,10 @@ function buildRandoriPrompt(stages: string[], maxThreats: number, maxElements: n
     "- Map to MITRE ATT&CK technique IDs where applicable",
     "- Include OWASP category mapping (e.g., A01, A03)",
     `- Identify up to ${maxThreats} distinct threat scenarios across all STRIDE categories`,
-    `- Include up to ${maxElements} DFD elements in the technical scope`,
     "",
-    "Explore the codebase thoroughly using Glob, Grep, and Read before writing threats.",
-    "Ground every threat in actual code evidence, not theoretical concerns.",
+    "Use the DFD elements and trust boundaries from S3 to identify attack surfaces.",
+    "Read the actual source files referenced in the DFD to ground threats in real code.",
+    "Focus on the highest-impact threats first.",
   ].join("\n");
 }
 
@@ -72,7 +83,6 @@ export const threatModelRandoriTask: AgentTask<ScanOpts, { document: ThreatModel
   async run(_input, context): Promise<{ document: ThreatModelDocument; findings: Finding[] }> {
     const cfg = resolveThreatModelConfig(context.config);
     const pluginPath = resolveRandoriPluginPath();
-    const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const tag = "[threat-model-randori]";
 
     // Write artifacts directly into .kuzushi/runs/<runId>/randori-output/
@@ -80,30 +90,62 @@ export const threatModelRandoriTask: AgentTask<ScanOpts, { document: ThreatModel
 
     log.info(`Starting Randori PASTA analysis (stages=${cfg.randoriStages.join(",")}, model=${cfg.model})`);
 
-    const prompt = buildRandoriPrompt(cfg.randoriStages, cfg.maxThreats, cfg.maxElements, artifactDir);
+    const allowedTools = [...resolveTaskAllowedTools(context), "Write"];
+    const baseOpts = {
+      cwd: context.repoRoot,
+      model: cfg.model,
+      allowedTools,
+      permissionMode: "dontAsk" as const,
+      plugins: [{ type: "local" as const, path: pluginPath }],
+    };
     let costUsd = 0;
 
-    try {
-      for await (const message of context.runtime.query({
-        prompt,
-        options: {
-          cwd: context.repoRoot,
-          model: cfg.model,
-          allowedTools: [...resolveTaskAllowedTools(context), "Write"],
-          permissionMode: "dontAsk",
-          plugins: [{ type: "local", path: pluginPath }],
-        },
-      })) {
-        if (message.type !== "result") continue;
-        if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-          costUsd = message.totalCostUsd;
+    // ── Phase 1: S1-S3 (scope, tech decomposition, DFD) ──
+    const hasS4 = cfg.randoriStages.includes("s4");
+    const scopeStages = hasS4
+      ? cfg.randoriStages.filter((s) => s !== "s4")
+      : cfg.randoriStages;
+
+    if (scopeStages.length > 0) {
+      log.info(`${tag} Phase 1: running stages ${scopeStages.join(",")}`);
+      try {
+        for await (const message of context.runtime.query({
+          prompt: buildScopePrompt(cfg.maxElements, artifactDir),
+          options: baseOpts,
+        })) {
+          if (message.type === "result" && typeof message.totalCostUsd === "number") {
+            costUsd += message.totalCostUsd;
+          }
         }
+      } catch (error) {
+        log.warn(`${tag} Phase 1 error: ${toErrorMessage(error)}`);
       }
-    } catch (error) {
-      throw new Error(`${tag} Agent error: ${toErrorMessage(error)}`);
     }
 
-    // Read artifacts written by the plugin
+    // ── Phase 2: S4 (STRIDE threat scenarios with evidence) ──
+    if (hasS4) {
+      // Only run S4 if S3 produced artifacts to build on
+      const scopeArtifacts = readRandoriArtifacts(context.repoRoot, artifactDir);
+      if (Object.keys(scopeArtifacts).length > 0) {
+        log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
+        try {
+          for await (const message of context.runtime.query({
+            prompt: buildStridePrompt(cfg.maxThreats, artifactDir),
+            options: baseOpts,
+          })) {
+            if (message.type === "result" && typeof message.totalCostUsd === "number") {
+              costUsd += message.totalCostUsd;
+            }
+          }
+        } catch (error) {
+          log.warn(`${tag} Phase 2 (S4) error: ${toErrorMessage(error)}`);
+        }
+      } else {
+        log.warn(`${tag} Skipping S4 — no scope artifacts from S1-S3`);
+      }
+    }
+
+    // Read all artifacts (from both phases)
     const artifacts = readRandoriArtifacts(context.repoRoot, artifactDir);
     const merged = mergeRandoriStageOutputs(artifacts);
 

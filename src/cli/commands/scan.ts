@@ -284,7 +284,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
 
   const runtime = runtimeOverride ?? createPipelineRuntime(config, scanOpts);
   const ownsRuntime = runtimeOverride == null;
-  const dbPath = params.dbPath ?? defaultDbPath(repoRoot);
+  const dbPath = params.dbPath ?? resolveDbPath(repoRoot, scanPath);
   const dbDir = path.dirname(dbPath);
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });
@@ -345,7 +345,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     }, 0));
   }
 
-  const resumeRunId = resolveResumeRunId(db, runRepoId, repoName, opts.resume);
+  const resumeRunId = resolveResumeRunId(db, runRepoId, repoName, opts.resume, scanPath);
   const runId = resumeRunId ?? generateRunId();
 
   if (!resumeRunId) {
@@ -490,6 +490,7 @@ function resolveResumeRunId(
   repoId: string,
   repoName: string,
   resume: string | boolean | undefined,
+  scanPath?: string,
 ): string | undefined {
   if (resume === undefined) {
     return undefined;
@@ -497,7 +498,9 @@ function resolveResumeRunId(
 
   let resumeRunId: string | undefined;
   if (resume === true) {
-    const latest = getLatestResumableRun(db, repoId) ?? getLatestResumableRun(db, repoName);
+    const latest = getLatestResumableRun(db, repoId)
+      ?? getLatestResumableRun(db, repoName)
+      ?? (scanPath ? getLatestResumableRun(db, scanPath) : undefined);
     if (!latest) {
       throw new CliUsageError(`no resumable runs found for repo "${repoId}".`);
     }
@@ -515,7 +518,11 @@ function resolveResumeRunId(
     throw new CliUsageError(`run "${resumeRunId}" was not found.`);
   }
 
-  if (run.repo !== repoId && run.repo !== repoName) {
+  // Accept the run if its repo matches the git root, the repo name, or the
+  // scan target path (for subdirectory scans within a monorepo).
+  const knownIds = new Set([repoId, repoName]);
+  if (scanPath) knownIds.add(path.resolve(scanPath));
+  if (!knownIds.has(run.repo)) {
     throw new CliUsageError(`run "${resumeRunId}" belongs to repo "${run.repo}", not "${repoId}".`);
   }
 
@@ -524,6 +531,34 @@ function resolveResumeRunId(
   }
 
   return resumeRunId;
+}
+
+/**
+ * Resolve the DB path, checking both the git root and the scan target.
+ *
+ * When scanning a subdirectory of a monorepo the git root (`repoRoot`) may
+ * differ from the scan target (`scanPath`).  The DB could live at either
+ * location depending on how previous scans were invoked.  We prefer an
+ * existing DB at the scan target, then the git root, then default to the git
+ * root for new databases.
+ */
+function resolveDbPath(repoRoot: string, scanPath: string): string {
+  const gitRootDb = defaultDbPath(repoRoot);
+
+  // When scan target is the git root there's nothing else to check.
+  if (path.resolve(scanPath) === path.resolve(repoRoot)) {
+    return gitRootDb;
+  }
+
+  const scanTargetDb = defaultDbPath(scanPath);
+
+  // Prefer an existing DB at the scan target (more specific).
+  if (existsSync(scanTargetDb)) {
+    return scanTargetDb;
+  }
+
+  // Fall back to git root (shared monorepo DB).
+  return gitRootDb;
 }
 
 function reportConfigValidationIssues(issues: ReturnType<typeof validateKuzushiConfig>): void {
