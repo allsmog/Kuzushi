@@ -707,6 +707,105 @@ program
     }
   }));
 
+// ── intel (security intelligence management) ──────────────────────────────
+
+const intelCmd = program
+  .command("intel")
+  .description("Manage the security intelligence store (CVEs, ATT&CK, CAPEC, custom docs)");
+
+intelCmd
+  .command("search")
+  .description("Search the intel store")
+  .argument("<query>", "Search query")
+  .option("--source <source>", "Filter by source (nvd, attack, capec, cwe, compliance, findings, custom)")
+  .option("--limit <n>", "Max results", "10")
+  .action(wrapCliAction(async (query: string, searchOpts: { source?: string; limit: string }) => {
+    const dataDir = path.resolve(process.cwd(), ".kuzushi");
+    const dbPath = path.join(dataDir, "intel.sqlite3");
+    if (!existsSync(dbPath)) {
+      console.log("No intel store found. Run `kuzushi intel add <file>` to ingest documents.");
+      return;
+    }
+    const Database = (await import("better-sqlite3")).default;
+    const { createIntelTables, SqliteIntelStore } = await import("./intel/store.js");
+    const db = new Database(dbPath);
+    createIntelTables(db);
+    const store = new SqliteIntelStore(db);
+
+    const results = store.search(query, {
+      limit: parseInt(searchOpts.limit, 10),
+      sources: searchOpts.source ? [searchOpts.source as import("./intel/types.js").IntelSource] : undefined,
+    });
+
+    if (results.length === 0) {
+      console.log("No results found.");
+      return;
+    }
+
+    for (const r of results) {
+      console.log(`\n  ${r.document.title} [${r.document.source}]`);
+      if (r.snippet) console.log(`  ${r.snippet}`);
+    }
+    console.log(`\n  ${results.length} result(s)`);
+  }));
+
+intelCmd
+  .command("add")
+  .description("Ingest a document into the intel store")
+  .argument("<file>", "Path to a text file to ingest")
+  .option("--source <source>", "Source type", "custom")
+  .option("--title <title>", "Document title (defaults to filename)")
+  .action(wrapCliAction(async (file: string, addOpts: { source: string; title?: string }) => {
+    const { readFileSync } = await import("node:fs");
+    const dataDir = path.resolve(process.cwd(), ".kuzushi");
+    if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+    const dbPath = path.join(dataDir, "intel.sqlite3");
+
+    const Database = (await import("better-sqlite3")).default;
+    const { createIntelTables, SqliteIntelStore } = await import("./intel/store.js");
+    const db = new Database(dbPath);
+    db.pragma("journal_mode = WAL");
+    createIntelTables(db);
+    const store = new SqliteIntelStore(db);
+
+    const content = readFileSync(path.resolve(file), "utf-8");
+    const title = addOpts.title ?? path.basename(file);
+    const id = store.ingest({
+      source: addOpts.source as import("./intel/types.js").IntelSource,
+      title,
+      content,
+      metadata: { originalPath: file },
+    });
+
+    console.log(`Ingested: ${title} (${id.slice(0, 8)}) — ${content.length} chars`);
+  }));
+
+intelCmd
+  .command("stats")
+  .description("Show intel store statistics")
+  .action(wrapCliAction(async () => {
+    const dataDir = path.resolve(process.cwd(), ".kuzushi");
+    const dbPath = path.join(dataDir, "intel.sqlite3");
+    if (!existsSync(dbPath)) {
+      console.log("No intel store found.");
+      return;
+    }
+    const Database = (await import("better-sqlite3")).default;
+    const { createIntelTables, SqliteIntelStore } = await import("./intel/store.js");
+    const db = new Database(dbPath);
+    createIntelTables(db);
+    const store = new SqliteIntelStore(db);
+
+    const sources = ["nvd", "attack", "capec", "cwe", "compliance", "findings", "custom"] as const;
+    const total = store.count();
+    console.log(`\n  Intel Store: ${total} documents`);
+    for (const source of sources) {
+      const count = store.count(source);
+      if (count > 0) console.log(`    ${source.padEnd(12)} ${count}`);
+    }
+    console.log();
+  }));
+
 // Graceful shutdown via lifecycle coordinator.
 // Hooks are registered with priority: bus drain (1), DB close (2), HTTP cleanup (3).
 registerShutdownHook("http-cleanup", async () => {

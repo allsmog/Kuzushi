@@ -1513,6 +1513,19 @@ function resolveToolExecution(
         seedTaskOutputs,
       });
 
+      // Track cost in workspace
+      if (result.costUsd && opts.workspace && ctx.workspaceManager) {
+        try {
+          const ws = ctx.workspaceManager.get(opts.workspace);
+          if (ws) {
+            const prevCost = typeof ws.metadata.totalCostUsd === "number" ? ws.metadata.totalCostUsd : 0;
+            ctx.workspaceManager.update(ws.id, {
+              metadata: { ...ws.metadata, totalCostUsd: prevCost + result.costUsd },
+            });
+          }
+        } catch { /* non-critical */ }
+      }
+
       return result.output;
     },
   };
