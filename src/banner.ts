@@ -1,37 +1,55 @@
 import chalk from "chalk";
+import { spawn } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function playStartupSound(): void {
+  try {
+    const soundsDir = path.resolve(__dirname, "..", "assets", "sounds");
+    const files = readdirSync(soundsDir).filter((f) => f.endsWith(".wav"));
+    if (files.length === 0) return;
+    const pick = files[Math.floor(Math.random() * files.length)];
+    const filePath = path.join(soundsDir, pick);
+
+    const cmd = process.platform === "darwin" ? "afplay" : process.platform === "linux" ? "aplay" : null;
+    if (!cmd) return;
+
+    const child = spawn(cmd, [filePath], { stdio: "ignore", detached: true });
+    child.unref();
+  } catch {
+    // Best-effort — don't break startup if sound fails
+  }
+}
 
 /**
- * Print the Kuzushi startup banner — coral belt (red & white alternating
- * blocks) above the title, as worn by judo 9th/10th dan grandmasters.
+ * Print the Kuzushi startup banner — ASCII logo above the title.
  */
 export function printBanner(): void {
-  const r = chalk.bgRedBright.redBright;
-  const w = chalk.bgWhite.white;
-  const rb = chalk.redBright.bold;
+  playStartupSound();
+
+  const rb = chalk.white.bold;
   const dim = chalk.dim;
 
-  // Coral belt — 2 rows, 53 visible chars (matches title width of 56 minus 3-space indent = 53).
-  // Alternating red/white stripe segments. Knot hangs from center (col ~27).
-  // 53 chars = r5 w4 r4 w4 r5 w4 r5 w4 r4 w4 r5 w5 = 53
+  // Print ASCII logo with "Bismillah" quote to the right
+  try {
+    const logoPath = path.resolve(__dirname, "..", "assets", "ascii", "logo-color.txt");
+    const logoLines = readFileSync(logoPath, "utf-8").split("\n");
+    const quoteRow = Math.min(3, logoLines.length - 1);
+    console.log("");
+    for (let i = 0; i < logoLines.length; i++) {
+      if (i === quoteRow) {
+        process.stdout.write(logoLines[i] + "  " + dim(chalk.italic("\"Bismillah\"")) + "\n");
+      } else {
+        process.stdout.write(logoLines[i] + "\n");
+      }
+    }
+  } catch {
+    // Fallback: skip logo if file is missing
+  }
 
-  // Belt = 53 visible chars (+ 3-space indent = 56 total, matching title width).
-  // Pattern: (r5 w4) x 5  then  r5 w3  = 25+20+5+3 = 53
-  const beltRow =
-    r("█████") + w("████") +
-    r("█████") + w("████") +
-    r("█████") + w("████") +
-    r("█████") + w("████") +
-    r("█████") + w("████") +
-    r("█████") + w("███");
-
-  // Knot center: col 27 of 53 => indent = 3 + 25 = 28 spaces before ▐██▌
-  console.log("");
-  console.log("   " + beltRow);
-  console.log("   " + beltRow);
-  console.log("                            " + r("▐") + w("██") + r("▌"));
-  console.log("                           " + r("▐") + w("█") + r("▌") + " " + r("▐") + w("█") + r("▌"));
-  console.log("                            " + r("▀") + w("▀") + "  " + r("▀") + w("▀"));
-  console.log("");
   console.log("");
   console.log(rb("   ██╗  ██╗██╗   ██╗███████╗██╗   ██╗███████╗██╗  ██╗██╗"));
   console.log(rb("   ██║ ██╔╝██║   ██║╚══███╔╝██║   ██║██╔════╝██║  ██║██║"));

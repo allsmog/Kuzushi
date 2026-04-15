@@ -40,6 +40,8 @@ interface PipelineIndicatorProps {
 }
 
 const MAX_VISIBLE_RESULTS = 5;
+/** Seconds without a visible scan event before showing a heartbeat. */
+const HEARTBEAT_STALE_SECONDS = 15;
 
 export function PipelineIndicator({
   stages,
@@ -49,6 +51,18 @@ export function PipelineIndicator({
   results,
   agentActivity,
 }: PipelineIndicatorProps): React.ReactElement | null {
+  // Heartbeat timer — re-renders every 5s when scan tasks are active so
+  // "still analyzing..." and elapsed time stay fresh.
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const hasActiveScanTasks = stages.some(
+      (s) => s.id === "scan" && s.subTasks.some((t) => t.status === "active"),
+    );
+    if (!hasActiveScanTasks) return;
+    const id = setInterval(() => setTick((t) => t + 1), 5000);
+    return () => clearInterval(id);
+  }, [stages]);
+
   if (stages.length === 0) return null;
 
   return (
@@ -129,6 +143,9 @@ function StageHeaderLine({ stage, progress, runningCostUsd, throttle }: {
     const bar = progress && progress.total > 0
       ? `  ${progressBar(progress.current, progress.total, 12)}`
       : "";
+    const elapsed = stage.startedAt
+      ? `  ${chalk.dim(formatDuration(Date.now() - stage.startedAt))}`
+      : "";
     return (
       <Box>
         <Text>{"  "}</Text>
@@ -136,7 +153,7 @@ function StageHeaderLine({ stage, progress, runningCostUsd, throttle }: {
         <Text>
           {" "}{chalk.redBright.bold(paddedLabel)}
           {detail ? `  ${chalk.white(detail)}` : ""}
-          {cost}{throttleLabel}{bar}
+          {cost}{throttleLabel}{bar}{elapsed}
         </Text>
       </Box>
     );
@@ -164,10 +181,17 @@ function SubTaskBranches({ subTasks, hasMoreBelow }: {
 }): React.ReactElement {
   const pipe = hasMoreBelow ? chalk.dim(icons.treePipe) : " ";
 
+  // Sort: primary detector tasks first, then support tasks.
+  const sorted = [...subTasks].sort((a, b) => {
+    const aWeight = a.role === "support" ? 1 : 0;
+    const bWeight = b.role === "support" ? 1 : 0;
+    return aWeight - bWeight;
+  });
+
   return (
     <Box flexDirection="column">
-      {subTasks.map((task, i) => {
-        const isLast = i === subTasks.length - 1;
+      {sorted.map((task, i) => {
+        const isLast = i === sorted.length - 1;
         const connector = isLast ? icons.treeLast : icons.treeMiddle;
         const statusIcon = task.status === "done"
           ? chalk.dim(icons.complete)
@@ -176,7 +200,11 @@ function SubTaskBranches({ subTasks, hasMoreBelow }: {
             : task.status === "active"
               ? chalk.redBright(icons.active)
               : chalk.dim(icons.pending);
-        const elapsed = task.elapsedMs != null ? `  ${chalk.dim(formatDuration(task.elapsedMs))}` : "";
+        const elapsed = task.elapsedMs != null
+          ? `  ${chalk.dim(formatDuration(task.elapsedMs))}`
+          : task.status === "active" && task.startedAt
+            ? `  ${chalk.dim(formatDuration(Date.now() - task.startedAt))}`
+            : "";
         const count = task.findingCount && task.findingCount > 0
           ? `  ${chalk.white(`${task.findingCount} finding${task.findingCount === 1 ? "" : "s"}`)}`
           : "";
@@ -184,18 +212,60 @@ function SubTaskBranches({ subTasks, hasMoreBelow }: {
           ? `  ${chalk.dim(task.detail.length > 72 ? `${task.detail.slice(0, 69)}...` : task.detail)}`
           : "";
         const labelColor = task.status === "active" ? chalk.white : chalk.dim;
+        const roleTag = task.role === "support" ? chalk.dim(" [setup]") : "";
+        const retryTag = task.retryCount && task.retryCount > 0
+          ? chalk.yellow(` (retry #${task.retryCount})`)
+          : "";
+
+        const hasActivity = task.activityLines && task.activityLines.length > 0;
+        // Heartbeat: show "still analyzing..." when active but quiet for > 15s
+        const now = Date.now();
+        const isStale = task.status === "active"
+          && task.startedAt
+          && (!task.lastEventAt || (now - task.lastEventAt) > HEARTBEAT_STALE_SECONDS * 1000);
 
         return (
-          <Box key={task.id}>
+          <Box key={task.id} flexDirection="column">
+            {/* Task header row */}
             {task.status === "active" ? (
               <Box>
                 <Text>{"  "}{pipe}  {chalk.dim(connector)} </Text>
                 <Spinner color="red" />
-                <Text> {chalk.white(task.label)}{count}{detail}{elapsed}</Text>
+                <Text> {chalk.white(task.label)}{roleTag}{count}{detail}{elapsed}{retryTag}</Text>
               </Box>
+            ) : task.status === "error" ? (
+              <Text>
+                {"  "}{pipe}  {chalk.dim(connector)} {statusIcon} {chalk.red(task.label)}
+                {task.lastError ? `  ${chalk.red(task.lastError.slice(0, 72))}` : detail}
+                {retryTag}
+                {chalk.dim("  continuing with remaining tasks")}
+              </Text>
             ) : (
               <Text>
-                {"  "}{pipe}  {chalk.dim(connector)} {statusIcon} {labelColor(task.label)}{count}{detail}{elapsed}
+                {"  "}{pipe}  {chalk.dim(connector)} {statusIcon} {labelColor(task.label)}{roleTag}{count}{detail}{elapsed}
+              </Text>
+            )}
+
+            {/* Activity lines nested under active scan tasks */}
+            {task.status === "active" && hasActivity && (
+              <Box flexDirection="column">
+                {task.activityLines!.map((line, li) => {
+                  const toolIsLast = li === task.activityLines!.length - 1;
+                  const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
+                  const branchPipe = isLast ? " " : chalk.dim(icons.treePipe);
+                  return (
+                    <Text key={li}>
+                      {"  "}{pipe}  {"  "}{branchPipe}  {chalk.dim(toolConnector)} {formatToolLine(line)}
+                    </Text>
+                  );
+                })}
+              </Box>
+            )}
+
+            {/* Heartbeat when quiet */}
+            {task.status === "active" && !hasActivity && isStale && (
+              <Text>
+                {"  "}{pipe}  {"  "}{isLast ? " " : chalk.dim(icons.treePipe)}  {chalk.dim(icons.treeLast)} {chalk.dim.italic(`still analyzing... ${formatDuration(now - task.startedAt!)}`)}
               </Text>
             )}
           </Box>
@@ -302,7 +372,7 @@ function formatToolLine(line: AgentActivityLine): string {
   switch (line.kind) {
     case "tool-start": {
       const detail = line.detail ?? line.toolName ?? "Tool";
-      return `${icons.arrow} ${detail}`;
+      return chalk.dim(`${icons.arrow} ${detail}`);
     }
     case "tool-progress": {
       const toolName = line.toolName ?? "tool";
@@ -314,12 +384,17 @@ function formatToolLine(line: AgentActivityLine): string {
         ? `${chalk.green(icons.success)} ${line.detail}`
         : chalk.green(icons.success);
     case "reasoning":
+      // Reasoning IS the story — show it prominently, not dimmed.
       return line.detail
-        ? `${chalk.italic.dim(line.detail.slice(0, 80))}${(line.detail.length ?? 0) > 80 ? "..." : ""}`
+        ? chalk.white(line.detail.slice(0, 120) + ((line.detail.length ?? 0) > 120 ? "..." : ""))
         : "";
     case "summary":
       return line.detail
-        ? `${chalk.dim(icons.dot)} ${chalk.dim(line.detail)}`
+        ? `${chalk.cyan(icons.dot)} ${line.detail.slice(0, 120)}`
+        : "";
+    case "finding-preview":
+      return line.detail
+        ? `${chalk.redBright(icons.error)} ${chalk.white(line.detail.slice(0, 120))}`
         : "";
   }
 }

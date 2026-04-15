@@ -200,6 +200,19 @@ export type ScanCompleteEvent = EventEnvelope<
   }
 >;
 
+export type ScanAgentActivityEvent = EventEnvelope<
+  "scan:agent-activity",
+  {
+    context: RunContext;
+    taskId: string;
+    kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
+    toolName?: string;
+    toolInput?: Record<string, unknown>;
+    summary?: string;
+    elapsedSeconds?: number;
+  }
+>;
+
 export type TriageStartEvent = EventEnvelope<
   "triage:start",
   {
@@ -994,6 +1007,7 @@ export type KuzushiEvent =
   | StageCompleteEvent
   | ScanFindingEvent
   | ScanCompleteEvent
+  | ScanAgentActivityEvent
   | TriageStartEvent
   | TriageFindingQueuedEvent
   | TriageBatchQueuedEvent

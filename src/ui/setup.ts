@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { WizardResult } from "./components/SetupWizard.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
+import type { CredentialChoice } from "./components/CredentialPrompt.js";
 import { emitOutputNotice } from "./output.js";
 import type { UIStore } from "./state.js";
 
@@ -158,4 +159,49 @@ function saveWizardConfig(result: WizardResult, repoRoot: string, store?: UIStor
       source: "setup",
     });
   }
+}
+
+/**
+ * Check whether valid Anthropic credentials are available for the Claude backend.
+ *
+ * Returns `true` when at least one credential source is present:
+ *   - explicit `apiKey` in config
+ *   - `ANTHROPIC_API_KEY` environment variable
+ *   - `ANTHROPIC_OAUTH_TOKEN` environment variable
+ */
+export function hasAnthropicCredentials(configApiKey?: string): boolean {
+  if (configApiKey) return true;
+  if (process.env["ANTHROPIC_API_KEY"]) return true;
+  if (process.env["ANTHROPIC_OAUTH_TOKEN"]) return true;
+  return false;
+}
+
+export type CredentialOutcome =
+  | { action: "proceed"; choice: CredentialChoice }
+  | { action: "cancel" };
+
+/**
+ * Show interactive credential prompt (TTY only).
+ * Returns the user's chosen auth method so the caller can apply it to config/env.
+ */
+export async function runCredentialPrompt(
+  store: UIStore | undefined,
+): Promise<CredentialOutcome> {
+  if (!process.stdout.isTTY || !store) {
+    return { action: "cancel" };
+  }
+
+  return new Promise<CredentialOutcome>((resolve) => {
+    store.setPreflight({
+      kind: "credentials",
+      onComplete: (choice: CredentialChoice) => {
+        store.setPreflight(null);
+        resolve({ action: "proceed", choice });
+      },
+      onCancel: () => {
+        store.setPreflight(null);
+        resolve({ action: "cancel" });
+      },
+    });
+  });
 }

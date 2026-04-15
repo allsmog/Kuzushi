@@ -1,4 +1,8 @@
 import type { AgentRuntime } from "../agent-runtime/types.js";
+import {
+  emitAssistantActivity,
+  type AgentActivityCallback,
+} from "../agent-runtime/execution.js";
 import { getLogger } from "../logger.js";
 import type { RepoContext, ScanOpts } from "../types.js";
 import { languageTuningModule } from "../prompts/language-tuning.js";
@@ -23,6 +27,7 @@ export interface AgenticRuntimeOptions {
   runtime?: AgentRuntime;
   abortController?: AbortController;
   maxBudgetUsd?: number;
+  activityCallback?: AgentActivityCallback;
 }
 
 /** Run the agentic scanner and return structured findings. */
@@ -65,8 +70,25 @@ export async function runAgentic(
       },
     },
   })) {
-    // Prompt/message logging handled by LoggingAgentRuntime wrapper
-    if (message.type === "tool-progress" || message.type === "tool-summary" || message.type === "assistant") {
+    // Emit structured activity for assistant / tool messages so the UI can
+    // show live scan progress instead of looking idle.
+    if (message.type === "assistant") {
+      await emitAssistantActivity(message.content, runtimeOptions.activityCallback);
+      continue;
+    }
+    if (message.type === "tool-progress") {
+      await runtimeOptions.activityCallback?.({
+        kind: "tool-progress",
+        toolName: message.toolName,
+        elapsedSeconds: message.elapsedSeconds,
+      });
+      continue;
+    }
+    if (message.type === "tool-summary") {
+      await runtimeOptions.activityCallback?.({
+        kind: "tool-complete",
+        summary: message.summary,
+      });
       continue;
     }
 

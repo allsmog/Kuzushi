@@ -23,9 +23,11 @@ import { ResumeDiff } from "./components/ResumeDiff.js";
 import { CommandInput, type ReplCommand, type CommandResult } from "./components/CommandInput.js";
 import { SetupWizard } from "./components/SetupWizard.js";
 import { ConfigConfirm } from "./components/ConfigConfirm.js";
+import { CredentialPrompt } from "./components/CredentialPrompt.js";
 import { InteractiveReview } from "./components/InteractiveReview.js";
 import { CompactHeader } from "./components/CompactHeader.js";
 import { NoticeRail } from "./components/NoticeRail.js";
+import { CopilotShell } from "./components/CopilotShell.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
 
 interface AppProps {
@@ -49,7 +51,7 @@ export function App({ store }: AppProps): React.ReactElement {
   const liveResults = state.results.length > LIVE_RESULT_COUNT
     ? state.results.slice(-LIVE_RESULT_COUNT)
     : state.results;
-  const showCompactHeader = state.mode !== "preflight" && state.repoName.length > 0;
+  const showCompactHeader = state.mode !== "preflight" && state.mode !== "shell" && state.repoName.length > 0;
 
   return (
     <Box flexDirection="column">
@@ -102,6 +104,12 @@ export function App({ store }: AppProps): React.ReactElement {
           onProceed={state.preflight.onProceed}
           onEdit={state.preflight.onEdit}
           onQuit={state.preflight.onQuit}
+        />
+      )}
+      {state.mode === "preflight" && state.preflight?.kind === "credentials" && (
+        <CredentialPrompt
+          onComplete={state.preflight.onComplete}
+          onCancel={state.preflight.onCancel}
         />
       )}
 
@@ -157,6 +165,10 @@ export function App({ store }: AppProps): React.ReactElement {
           onVerdict={state.review.onVerdict}
           onQuit={state.review.onQuit}
         />
+      )}
+
+      {state.mode === "shell" && state.shell && (
+        <CopilotShell store={store} />
       )}
     </Box>
   );

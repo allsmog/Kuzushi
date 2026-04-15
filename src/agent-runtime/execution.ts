@@ -458,7 +458,7 @@ function looksLikeRuntimeOptions<T extends AgentRuntimeOptions>(
   );
 }
 
-async function emitAssistantActivity(
+export async function emitAssistantActivity(
   blocks: Array<Record<string, unknown>>,
   callback: AgentActivityCallback | undefined,
 ): Promise<void> {

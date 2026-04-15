@@ -136,7 +136,7 @@ describe("report-worker with UI store", () => {
     const codeqlTask = scanStage?.subTasks.find((task) => task.id === "codeql");
 
     expect(state.mode).toBe("summary");
-    expect(scanStage?.detail).toContain("2 tasks");
+    expect(scanStage?.detail).toContain("2 scanners");
     expect(scanStage?.detail).toContain("1 finding");
     expect(semgrepTask?.findingCount).toBe(1);
     expect(semgrepTask?.detail).toContain("test.rule");

@@ -25,6 +25,8 @@ export interface MonorepoModuleState {
   status: ModuleStatus;
   tasks?: string[];
   detail?: string;
+  /** Latest scan activity text (e.g. current tool call). */
+  activityDetail?: string;
   tp?: number;
   fp?: number;
   needsReview?: number;
@@ -123,11 +125,12 @@ function ModuleLine({ module: mod, connector }: {
 
   // Active states: scanning, triaging, verifying
   const statusLabel = mod.detail ?? mod.status;
+  const activity = mod.activityDetail ? `  ${chalk.dim(mod.activityDetail.slice(0, 60))}` : "";
   return (
     <Box>
       <Text>{chalk.dim(connector)} </Text>
       <Spinner color="yellow" />
-      <Text> {chalk.white(paddedName)}  {chalk.dim(statusLabel)}</Text>
+      <Text> {chalk.white(paddedName)}  {chalk.dim(statusLabel)}{activity}</Text>
     </Box>
   );
 }

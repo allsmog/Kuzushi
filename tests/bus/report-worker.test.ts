@@ -147,7 +147,7 @@ describe("report-worker", () => {
 
     expect(console.log).toHaveBeenCalled();
     expect(vi.mocked(console.log).mock.calls.some(
-      (call) => call.some((arg) => String(arg).includes("Reading src/app.ts")),
+      (call) => call.some((arg) => String(arg).includes("Inspecting src/app.ts")),
     )).toBe(true);
 
     await bus.close();

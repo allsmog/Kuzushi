@@ -185,6 +185,29 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
 
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
 
+  // Interactive credential prompt for the Claude backend when no credentials are detected.
+  const isClaudeBackend = (config.agentRuntimeBackend ?? "claude") === "claude";
+  if (isClaudeBackend && !opts.resume && process.stdout.isTTY) {
+    const { hasAnthropicCredentials, runCredentialPrompt } = await import("../../ui/setup.js");
+    if (!hasAnthropicCredentials(config.agentRuntimeConfig?.apiKey)) {
+      const credOutcome = await runCredentialPrompt(uiStore);
+      if (credOutcome.action === "cancel") {
+        resetTerminalOutput();
+        cleanupUI();
+        return;
+      }
+
+      const choice = credOutcome.choice;
+      if (choice.kind === "api-key") {
+        config.agentRuntimeConfig = { ...config.agentRuntimeConfig, apiKey: choice.value };
+        process.env["ANTHROPIC_API_KEY"] = choice.value;
+      } else if (choice.kind === "oauth-token") {
+        process.env["ANTHROPIC_OAUTH_TOKEN"] = choice.value;
+      }
+      // "inherited" — no changes needed, subprocess will use parent env
+    }
+  }
+
   if (opts.dryRun) {
     resetTerminalOutput();
     cleanupUI();

@@ -10,9 +10,10 @@ import type { RunMetrics } from "../scoring/run-metrics.js";
 import type { ExploitChain } from "../types.js";
 import type { WizardResult } from "./components/SetupWizard.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
+import type { CredentialChoice } from "./components/CredentialPrompt.js";
 
 export type Phase = "idle" | "scanning" | "triaging" | "verifying" | "poc" | "summary" | "done";
-export type UIMode = "preflight" | "running" | "summary" | "review" | "done";
+export type UIMode = "preflight" | "running" | "summary" | "review" | "done" | "shell";
 
 export type StageStatus = "pending" | "active" | "done" | "error";
 export type NoticeLevel = "info" | "warning" | "error" | "success";
@@ -42,6 +43,11 @@ export type PreflightState =
     onProceed: () => void;
     onEdit: () => void;
     onQuit: () => void;
+  }
+  | {
+    kind: "credentials";
+    onComplete: (choice: CredentialChoice) => void;
+    onCancel: () => void;
   };
 
 export interface ReviewSession {
@@ -59,6 +65,16 @@ export interface SubTask {
   startedAt?: number;
   findingCount?: number;
   lastFinding?: string;
+  /** Whether this is a primary detector or a support/setup task. */
+  role?: "primary" | "support";
+  /** Live agent activity lines (last 4 kept). */
+  activityLines?: AgentActivityLine[];
+  /** Timestamp of last visible activity event — used for heartbeat logic. */
+  lastEventAt?: number;
+  /** Number of retries attempted so far. */
+  retryCount?: number;
+  /** Last error message (sticky for display). */
+  lastError?: string;
 }
 
 export interface PipelineStage {
@@ -92,7 +108,7 @@ export interface ResultLine {
 }
 
 export interface AgentActivityLine {
-  kind: "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning";
+  kind: "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning" | "finding-preview";
   toolName?: string;
   detail?: string;
   elapsedSeconds?: number;
@@ -231,6 +247,35 @@ export interface UIState {
   stages: PipelineStage[];
   preflight: PreflightState | null;
   review: ReviewSession | null;
+  /** Shell mode state — interactive copilot. */
+  shell?: ShellState | null;
+}
+
+export interface ShellHistoryEntry {
+  type: "input" | "output" | "error";
+  text: string;
+  timestamp: number;
+}
+
+export interface ShellState {
+  /** Loaded module IDs. */
+  modules: string[];
+  /** Available tool names. */
+  tools: string[];
+  /** Currently focused module (for shorthand commands). */
+  focusedModule: string | null;
+  /** Active target. */
+  target: string | null;
+  /** Workspace ID. */
+  workspace: string | null;
+  /** Conversation history (rendered in the scroll region). */
+  history: ShellHistoryEntry[];
+  /** Whether a command is currently executing. */
+  processing: boolean;
+  /** Callback to handle user input from the Ink component. */
+  onInput?: (input: string) => void;
+  /** Callback to exit the shell. */
+  onExit?: () => void;
 }
 
 type Listener = () => void;
@@ -447,6 +492,58 @@ export class UIStore {
     this.notify();
   }
 
+  /**
+   * Append an activity line to a scan sub-task.
+   *
+   * Prioritizes narrative lines (reasoning, finding-preview, tool-complete)
+   * over mechanical ones (tool-start, tool-progress). Keeps up to 4 lines
+   * but ensures the latest reasoning/finding always displaces old tool calls.
+   */
+  addScanActivity(taskId: string, line: Omit<AgentActivityLine, "index" | "total">): void {
+    const now = Date.now();
+    const stages = this.state.stages.map((s) => {
+      if (s.id !== "scan") return s;
+      const updated = s.subTasks.map((task) => {
+        if (task.id !== taskId) return task;
+        const existing = task.activityLines ?? [];
+        const prev = existing[existing.length - 1];
+        // Deduplicate consecutive identical lines.
+        if (
+          prev
+          && prev.kind === line.kind
+          && prev.toolName === line.toolName
+          && prev.detail === line.detail
+        ) {
+          return { ...task, lastEventAt: now };
+        }
+        const entry = { ...line, index: 0, total: 0 };
+        const all = [...existing, entry];
+        // Smart cap: keep narrative lines (reasoning, finding-preview,
+        // tool-complete) and only the most recent tool-start/tool-progress.
+        const activityLines = curateScanActivityLines(all, 4);
+        return { ...task, activityLines, lastEventAt: now };
+      });
+      return { ...s, subTasks: updated };
+    });
+    this.state = { ...this.state, stages };
+    this.notify();
+  }
+
+  /** Clear activity lines for a scan sub-task (e.g. on completion). */
+  clearScanActivity(taskId: string): void {
+    const stages = this.state.stages.map((s) => {
+      if (s.id !== "scan") return s;
+      const updated = s.subTasks.map((task) => {
+        if (task.id !== taskId || !task.activityLines?.length) return task;
+        const { activityLines: _, ...rest } = task;
+        return rest;
+      });
+      return { ...s, subTasks: updated };
+    });
+    this.state = { ...this.state, stages };
+    this.notify();
+  }
+
   /** Update the detail text on an active stage. */
   updateStageDetail(stageId: string, detail: string): void {
     const stages = this.state.stages.map((s) => {
@@ -475,4 +572,40 @@ export class UIStore {
 
 export function createUIStore(): UIStore {
   return new UIStore();
+}
+
+/** Narrative line kinds that tell the investigation story. */
+const NARRATIVE_KINDS = new Set<string>(["reasoning", "finding-preview", "tool-complete", "summary"]);
+
+/**
+ * Keep up to `max` lines, prioritizing narrative (reasoning, findings,
+ * summaries) over mechanical tool calls. Always keeps the most recent
+ * tool-start so users can see what's happening right now.
+ */
+function curateScanActivityLines(lines: AgentActivityLine[], max: number): AgentActivityLine[] {
+  if (lines.length <= max) return lines;
+
+  const narrative: AgentActivityLine[] = [];
+  const mechanical: AgentActivityLine[] = [];
+
+  for (const line of lines) {
+    if (NARRATIVE_KINDS.has(line.kind)) {
+      narrative.push(line);
+    } else {
+      mechanical.push(line);
+    }
+  }
+
+  // Keep all narrative (up to max), fill remaining slots with the latest tool calls.
+  const kept = narrative.slice(-max);
+  const remaining = max - kept.length;
+  if (remaining > 0) {
+    kept.push(...mechanical.slice(-remaining));
+  }
+
+  // Re-sort to preserve chronological order (by original position).
+  const indexMap = new Map(lines.map((l, i) => [l, i]));
+  kept.sort((a, b) => (indexMap.get(a) ?? 0) - (indexMap.get(b) ?? 0));
+
+  return kept.slice(-max);
 }

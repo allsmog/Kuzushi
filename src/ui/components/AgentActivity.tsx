@@ -64,11 +64,15 @@ function formatActivityLine(line: AgentActivityLine): string {
         : chalk.green(icons.success);
     case "reasoning":
       return line.detail
-        ? chalk.italic.dim(line.detail.slice(0, 80) + (line.detail.length > 80 ? "..." : ""))
+        ? chalk.white(line.detail.slice(0, 120) + (line.detail.length > 120 ? "..." : ""))
         : "";
     case "summary":
       return line.detail
         ? `${chalk.dim(icons.dot)} ${chalk.dim(line.detail)}`
+        : "";
+    case "finding-preview":
+      return line.detail
+        ? `${chalk.redBright(icons.error)} ${chalk.white(line.detail.slice(0, 120))}`
         : "";
   }
 }

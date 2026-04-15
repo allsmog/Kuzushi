@@ -23,6 +23,7 @@ import type {
   PocHarnessStartEvent,
   PromptReportEvent,
   ReportRequestedEvent,
+  ScanAgentActivityEvent,
   ScanCompleteEvent,
   TaskStartEvent,
   TaskProgressEvent,
@@ -45,6 +46,17 @@ import { buildSummaryData } from "../../ui/summary-data.js";
 import { getRateLimitRegistry } from "../../scheduler/index.js";
 import { sendCompletionNotification, buildScanNotification } from "../../ui/notify.js";
 import { emitOutputNotice } from "../../ui/output.js";
+
+/** Task IDs classified as support/setup work (not primary detectors). */
+const SUPPORT_TASK_IDS = new Set([
+  "context-gatherer",
+  "context-enricher",
+  "code-graph-build",
+  "code-graph-enrich",
+  "app-model-build",
+  "reachability-check",
+  "call-graph-assist",
+]);
 
 interface RunReportState {
   tasks?: string[];
@@ -141,12 +153,14 @@ export function registerReportWorker(
     if (store) {
       store.update({ tasks: state.tasks, phase: "scanning", mode: "running" });
       // Add scanner as a sub-task branch under the Scan stage
+      const role = SUPPORT_TASK_IDS.has(event.payload.taskId) ? "support" as const : "primary" as const;
       store.upsertSubTask("scan", {
         id: event.payload.taskId,
         label: event.payload.taskId,
         status: "active",
         startedAt: Date.now(),
-        detail: "starting",
+        detail: scanTaskStartDetail(event.payload.taskId),
+        role,
       });
     }
   });
@@ -161,6 +175,7 @@ export function registerReportWorker(
       const detail = findingCount > 0
         ? `${findingCount} finding${findingCount === 1 ? "" : "s"}${lastFinding ? ` · ${truncate(lastFinding, 60)}` : ""}`
         : "complete";
+      store.clearScanActivity(event.payload.taskId);
       store.upsertSubTask("scan", {
         id: event.payload.taskId,
         label: event.payload.taskId,
@@ -179,17 +194,30 @@ export function registerReportWorker(
       return;
     }
 
-    store.recordSubTaskFinding("scan", event.payload.taskId, describeTaskProgress(event.payload.progress));
+    const detail = describeTaskProgress(event.payload.progress);
+    store.recordSubTaskFinding("scan", event.payload.taskId, detail);
+    // Inject the provisional finding as a story beat in the activity lines.
+    store.addScanActivity(event.payload.taskId, {
+      kind: "finding-preview",
+      detail: `Found: ${detail}`,
+    });
     updateScanStageDetail(store);
   });
 
   bus.subscribe<TaskErrorEvent>("task:error", (event) => {
     if (store) {
+      const existing = store.getState().stages
+        .find((stage) => stage.id === "scan")
+        ?.subTasks.find((task) => task.id === event.payload.taskId);
+      const prevRetries = existing?.retryCount ?? 0;
+      store.clearScanActivity(event.payload.taskId);
       store.upsertSubTask("scan", {
         id: event.payload.taskId,
         label: event.payload.taskId,
         status: "error",
         detail: event.payload.error?.slice(0, 60),
+        lastError: event.payload.error?.slice(0, 120),
+        retryCount: prevRetries,
       });
       store.addNotice({
         level: "error",
@@ -207,6 +235,9 @@ export function registerReportWorker(
 
     if (store) {
       store.update({ totalFindings: state.totalFindings });
+      // Signal that scan tasks are done but post-processing (dedup, filter, rank) is happening.
+      const count = event.payload.totalFindings;
+      store.updateStageDetail("scan", `${count} finding${count === 1 ? "" : "s"} · deduplicating and ranking`);
       maybeUpdateStartBanner(store, state, event.payload.context.repoName);
     } else {
       maybePrintStartBanner(state, event.payload.context.repoName);
@@ -219,7 +250,13 @@ export function registerReportWorker(
     state.skippedAlreadyTriaged = event.payload.skippedAlreadyTriaged;
 
     if (store) {
-      store.activateStage("triage", `${event.payload.findingCount} findings via ${event.payload.model}`);
+      const total = state.totalFindings ?? 0;
+      const selected = event.payload.findingCount;
+      const filtered = total - selected - (event.payload.skippedAlreadyTriaged ?? 0);
+      const triageDetail = filtered > 0
+        ? `${selected} of ${total} findings selected · ${filtered} filtered`
+        : `${selected} findings via ${event.payload.model}`;
+      store.activateStage("triage", triageDetail);
 
       const skipped = event.payload.skippedAlreadyTriaged ?? 0;
       if (skipped > 0) {
@@ -478,6 +515,39 @@ export function registerReportWorker(
   bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", handleAgentActivity);
   bus.subscribe<VerificationAgentActivityEvent>("verification:agent-activity", handleAgentActivity);
   bus.subscribe<PocHarnessAgentActivityEvent>("poc-harness:agent-activity", handleAgentActivity);
+
+  // Scan-time agent activity — keyed by taskId (not fingerprint)
+  bus.subscribe<ScanAgentActivityEvent>("scan:agent-activity", (event) => {
+    const { kind, taskId, toolName, toolInput, elapsedSeconds, summary } = event.payload;
+
+    if (store) {
+      const detail = kind === "tool-start"
+        ? summarizeToolInput(toolName, toolInput)
+        : kind === "tool-complete"
+          ? summary ?? undefined
+          : kind === "tool-progress"
+            ? undefined
+            : summary ?? undefined;
+
+      store.addScanActivity(taskId, {
+        kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning",
+        toolName,
+        detail,
+        elapsedSeconds,
+      });
+      return;
+    }
+
+    // Plain-text fallback
+    if (kind === "tool-start") {
+      const detail = summarizeToolInput(toolName, toolInput);
+      console.log(`  [${taskId}] -> ${detail}`);
+    } else if (kind === "tool-complete" && summary) {
+      console.log(`  [${taskId}] ✓ ${truncate(summary, 140)}`);
+    } else if (kind === "reasoning" && summary) {
+      console.log(`  [${taskId}] · ${truncate(summary, 120)}`);
+    }
+  });
 
   bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
     if (store) {
@@ -797,15 +867,16 @@ function summarizeToolInput(
   const glob = asString(toolInput["glob"]);
 
   if (name === "Read" && filePath) {
-    return `Reading ${filePath}`;
+    return `Inspecting ${filePath}`;
   }
 
   if (name === "Grep" && pattern) {
-    return `Grepping "${pattern}"`;
+    const truncatedPattern = pattern.length > 40 ? pattern.slice(0, 37) + "..." : pattern;
+    return `Searching for "${truncatedPattern}"`;
   }
 
   if (name === "Glob" && glob) {
-    return `Globbing "${glob}"`;
+    return `Scanning ${glob}`;
   }
 
   if (filePath) {
@@ -841,22 +912,34 @@ function updateScanStageDetail(store: UIStore): void {
   }
 
   const taskCount = scanStage.subTasks.length;
+  const doneCount = scanStage.subTasks.filter((task) => task.status === "done").length;
   const findingCount = scanStage.subTasks.reduce((sum, task) => sum + (task.findingCount ?? 0), 0);
-  const activeCount = scanStage.subTasks.filter((task) => task.status === "active").length;
   const parts: string[] = [];
 
-  if (taskCount > 0) {
-    parts.push(`${taskCount} task${taskCount === 1 ? "" : "s"}`);
+  if (taskCount > 0 && doneCount < taskCount) {
+    parts.push(`${doneCount} of ${taskCount} scanners done`);
+  } else if (taskCount > 0) {
+    parts.push(`${taskCount} scanner${taskCount === 1 ? "" : "s"} complete`);
   }
   if (findingCount > 0) {
     parts.push(`${findingCount} finding${findingCount === 1 ? "" : "s"}`);
   }
-  if (activeCount > 0) {
-    parts.push(`${activeCount} running`);
-  }
 
   if (parts.length > 0) {
     store.updateStageDetail("scan", parts.join(" · "));
+  }
+}
+
+/** Human-readable start detail for scan tasks. */
+function scanTaskStartDetail(taskId: string): string {
+  switch (taskId) {
+    case "agentic": return "analyzing codebase";
+    case "semgrep": return "running rules";
+    case "codeql": return "building database";
+    case "context-gatherer": return "mapping attack surface";
+    case "context-enricher": return "enriching context";
+    case "threat-model-randori": return "modeling threats";
+    default: return "initializing";
   }
 }
 
