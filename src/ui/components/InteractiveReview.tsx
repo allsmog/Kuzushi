@@ -16,10 +16,10 @@
  *   └────────────────────────────────────────────────────┘
  */
 import React, { useState } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput } from "ink";
 import chalk from "chalk";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter, badge } from "../format.js";
+import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
 import { FindingCard } from "./FindingCard.js";
 import type { ActionableFinding } from "../state.js";
 import type { Verdict } from "../../types.js";
@@ -42,9 +42,9 @@ export function InteractiveReview({
   onVerdict,
   onQuit,
 }: InteractiveReviewProps): React.ReactElement {
-  const { exit } = useApp();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [tally, setTally] = useState<ReviewTally>({ tp: 0, fp: 0, by_design: 0, skipped: 0 });
+  const width = terminalCardWidth();
 
   const finding = findings[currentIndex];
   const isLast = currentIndex >= findings.length - 1;
@@ -52,7 +52,6 @@ export function InteractiveReview({
   const advance = () => {
     if (isLast) {
       onQuit();
-      exit();
     } else {
       setCurrentIndex((i) => i + 1);
     }
@@ -78,7 +77,6 @@ export function InteractiveReview({
       advance();
     } else if (input === "q" || key.escape) {
       onQuit();
-      exit();
     }
   });
 
@@ -96,7 +94,7 @@ export function InteractiveReview({
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
-      <Text>{boxHeader(`Review: ${currentIndex + 1}/${findings.length}`, 58)}</Text>
+      <Text>{boxHeader(`Review: ${currentIndex + 1}/${findings.length}`, width)}</Text>
       <Text>{""}</Text>
 
       <FindingCard finding={finding} />
@@ -121,7 +119,7 @@ export function InteractiveReview({
         {"  "}{chalk.blue.bold("[b]")} by design      {chalk.dim("[q]")} quit review
       </Text>
 
-      <Text>{boxFooter(58)}</Text>
+      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

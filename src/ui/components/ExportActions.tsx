@@ -8,10 +8,10 @@
  *   [enter] done
  */
 import React, { useState } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput } from "ink";
 import chalk from "chalk";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter } from "../format.js";
+import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
 import type { ActionableFinding } from "../state.js";
 
 interface ExportActionsProps {
@@ -21,15 +21,14 @@ interface ExportActionsProps {
 }
 
 export function ExportActions({ findings, repoName, onDone }: ExportActionsProps): React.ReactElement {
-  const { exit } = useApp();
   const [status, setStatus] = useState<string | null>(null);
+  const width = terminalCardWidth();
 
   const actionableCount = findings.filter((f) => f.verdict !== "fp").length;
 
   useInput((input, key) => {
     if (key.return || key.escape) {
       onDone();
-      exit();
       return;
     }
 
@@ -51,7 +50,7 @@ export function ExportActions({ findings, repoName, onDone }: ExportActionsProps
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
-      <Text>{boxHeader("Export", 58)}</Text>
+      <Text>{boxHeader("Export", width)}</Text>
       <Text>{""}</Text>
       <Text>{"  "}{chalk.dim(`${actionableCount} actionable findings available`)}</Text>
       <Text>{""}</Text>
@@ -68,7 +67,7 @@ export function ExportActions({ findings, repoName, onDone }: ExportActionsProps
       )}
 
       <Text>{""}</Text>
-      <Text>{boxFooter(58)}</Text>
+      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

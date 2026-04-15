@@ -14,13 +14,18 @@ import { writeCsvReport } from "../../report-csv.js";
 import { writeJsonlReport } from "../../report-jsonl.js";
 import type { KuzushiConfig } from "../../types.js";
 import type {
+  BudgetExceededEvent,
+  BudgetWarningEvent,
   PipelineStartEvent,
+  PipelineErrorEvent,
   PocHarnessAgentActivityEvent,
   PocHarnessResultEvent,
   PocHarnessStartEvent,
+  PromptReportEvent,
   ReportRequestedEvent,
   ScanCompleteEvent,
   TaskStartEvent,
+  TaskProgressEvent,
   TaskCompleteEvent,
   TaskErrorEvent,
   TriageAgentActivityEvent,
@@ -39,6 +44,7 @@ import type { UIStore } from "../../ui/state.js";
 import { buildSummaryData } from "../../ui/summary-data.js";
 import { getRateLimitRegistry } from "../../scheduler/index.js";
 import { sendCompletionNotification, buildScanNotification } from "../../ui/notify.js";
+import { emitOutputNotice } from "../../ui/output.js";
 
 interface RunReportState {
   tasks?: string[];
@@ -92,8 +98,8 @@ export function registerReportWorker(
       store.initStages(stageList);
       store.activateStage("scan", state.tasks?.join(", "));
       store.update({
+        mode: "running",
         tasks: state.tasks,
-        bannerShown: true,
         pipelineStartedAt: Date.now(),
         configBanner: {
           model: event.payload.config.model,
@@ -104,6 +110,7 @@ export function registerReportWorker(
           scanMode: event.payload.config.scanMode,
         },
       });
+      store.clearNotices();
 
       // Bridge rate limit events to UIStore
       try {
@@ -132,26 +139,48 @@ export function registerReportWorker(
     state.tasks = [...tasks];
 
     if (store) {
-      store.update({ tasks: state.tasks, phase: "scanning" });
+      store.update({ tasks: state.tasks, phase: "scanning", mode: "running" });
       // Add scanner as a sub-task branch under the Scan stage
       store.upsertSubTask("scan", {
         id: event.payload.taskId,
         label: event.payload.taskId,
         status: "active",
         startedAt: Date.now(),
+        detail: "starting",
       });
     }
   });
 
   bus.subscribe<TaskCompleteEvent>("task:complete", (event) => {
     if (store) {
+      const existing = store.getState().stages
+        .find((stage) => stage.id === "scan")
+        ?.subTasks.find((task) => task.id === event.payload.taskId);
+      const findingCount = existing?.findingCount ?? 0;
+      const lastFinding = existing?.lastFinding;
+      const detail = findingCount > 0
+        ? `${findingCount} finding${findingCount === 1 ? "" : "s"}${lastFinding ? ` · ${truncate(lastFinding, 60)}` : ""}`
+        : "complete";
       store.upsertSubTask("scan", {
         id: event.payload.taskId,
         label: event.payload.taskId,
         status: "done",
         elapsedMs: event.payload.durationMs,
+        findingCount,
+        lastFinding,
+        detail,
       });
+      updateScanStageDetail(store);
     }
+  });
+
+  bus.subscribe<TaskProgressEvent>("task:progress", (event) => {
+    if (!store || event.payload.outputKind !== "findings") {
+      return;
+    }
+
+    store.recordSubTaskFinding("scan", event.payload.taskId, describeTaskProgress(event.payload.progress));
+    updateScanStageDetail(store);
   });
 
   bus.subscribe<TaskErrorEvent>("task:error", (event) => {
@@ -162,6 +191,13 @@ export function registerReportWorker(
         status: "error",
         detail: event.payload.error?.slice(0, 60),
       });
+      store.addNotice({
+        level: "error",
+        message: `Task failed: ${event.payload.taskId}`,
+        detail: truncate(event.payload.error, 120),
+        source: "scan",
+      });
+      updateScanStageDetail(store);
     }
   });
 
@@ -205,6 +241,7 @@ export function registerReportWorker(
         skippedAlreadyTriaged: skipped,
         model: event.payload.model,
         progress: { current: 0, total: event.payload.findingCount },
+        mode: "running",
       });
       maybeUpdateStartBanner(store, state, event.payload.context.repoName);
     } else {
@@ -264,6 +301,7 @@ export function registerReportWorker(
         model: event.payload.model,
         progress: { current: 0, total: event.payload.findingCount },
         results: [], // clear triage results from live view
+        mode: "running",
       });
     } else {
       if (event.payload.findingCount > 0) {
@@ -325,6 +363,7 @@ export function registerReportWorker(
         model: event.payload.model,
         progress: { current: 0, total: event.payload.findingCount },
         results: [],
+        mode: "running",
       });
     } else {
       if (event.payload.findingCount > 0) {
@@ -440,6 +479,69 @@ export function registerReportWorker(
   bus.subscribe<VerificationAgentActivityEvent>("verification:agent-activity", handleAgentActivity);
   bus.subscribe<PocHarnessAgentActivityEvent>("poc-harness:agent-activity", handleAgentActivity);
 
+  bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
+    if (store) {
+      store.addNotice({
+        level: event.payload.fatal ? "error" : "warning",
+        message: event.payload.fatal ? "Pipeline failed" : "Pipeline warning",
+        detail: truncate(event.payload.error, 140),
+        source: "pipeline",
+      });
+      return;
+    }
+
+    console.log(`  ${event.payload.fatal ? "PIPELINE ERROR" : "PIPELINE WARNING"} ${truncate(event.payload.error, 140)}`);
+  });
+
+  bus.subscribe<BudgetWarningEvent>("budget:warning", (event) => {
+    const detail = `${event.payload.percentUsed.toFixed(0)}% used (${event.payload.currentSpend.toFixed(4)} / ${event.payload.maxBudget.toFixed(4)})`;
+    if (store) {
+      store.addNotice({
+        level: "warning",
+        message: "Budget nearing limit",
+        detail,
+        source: "budget",
+      });
+      return;
+    }
+
+    console.log(`  Budget warning: ${detail}`);
+  });
+
+  bus.subscribe<BudgetExceededEvent>("budget:exceeded", (event) => {
+    const detail = `${event.payload.totalCostUsd.toFixed(4)} spent against ${event.payload.budgetUsd.toFixed(4)}`;
+    if (store) {
+      store.addNotice({
+        level: "error",
+        message: "Budget exceeded",
+        detail,
+        source: "budget",
+      });
+      return;
+    }
+
+    console.log(`  Budget exceeded: ${detail}`);
+  });
+
+  bus.subscribe<PromptReportEvent>("prompt:report", (event) => {
+    if (event.payload.warnings.length === 0) {
+      return;
+    }
+
+    const detail = truncate(event.payload.warnings[0]!, 140);
+    if (store) {
+      store.addNotice({
+        level: "warning",
+        message: `Prompt pressure in ${event.payload.taskId}`,
+        detail,
+        source: "prompt",
+      });
+      return;
+    }
+
+    console.log(`  Prompt warning (${event.payload.taskId}): ${detail}`);
+  });
+
   bus.subscribe<ReportRequestedEvent>("report:requested", async (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     const reportMode = event.payload.reportMode ?? event.payload.context.reportMode ?? "full";
@@ -449,9 +551,19 @@ export function registerReportWorker(
         maybeUpdateStartBanner(store, state, event.payload.context.repoName);
 
         if (state.totalFindings === 0) {
-          store.update({ warnings: [...store.getState().warnings, "No findings from tasks. Code looks clean."] });
+          store.addNotice({
+            level: "success",
+            message: "No findings from tasks",
+            detail: "Code looks clean.",
+            source: "report",
+          });
         } else if ((state.selectedForTriage ?? 0) === 0) {
-          store.update({ warnings: [...store.getState().warnings, "All findings already triaged. Nothing to do."] });
+          store.addNotice({
+            level: "info",
+            message: "All findings already triaged",
+            detail: "Nothing new to review in this run.",
+            source: "report",
+          });
         }
 
         const summaryData = buildSummaryData(deps.db, event.payload.context.repoName, {
@@ -468,6 +580,7 @@ export function registerReportWorker(
         store.activateStage("report");
         store.completeStage("report");
         store.update({
+          mode: "summary",
           phase: "summary",
           summary: summaryData,
           qualityGate: qualityGateResult,
@@ -505,7 +618,7 @@ export function registerReportWorker(
 
     // File report generation (always happens, store or not)
     if (reportMode === "full") {
-      writeFileReports(deps, event);
+      writeFileReports(deps, event, store);
     }
 
     await bus.publish(
@@ -518,7 +631,11 @@ export function registerReportWorker(
   });
 }
 
-function writeFileReports(deps: ReportWorkerDeps, event: { payload: ReportRequestedEvent["payload"]; meta: { runId: string } }): void {
+function writeFileReports(
+  deps: ReportWorkerDeps,
+  event: { payload: ReportRequestedEvent["payload"]; meta: { runId: string } },
+  store?: UIStore,
+): void {
   if (deps.config.reportOutput) {
     const outputDir = path.dirname(deps.config.reportOutput);
     if (!existsSync(outputDir)) {
@@ -532,7 +649,7 @@ function writeFileReports(deps: ReportWorkerDeps, event: { payload: ReportReques
       event.payload.fingerprints,
     );
     writeFileSync(deps.config.reportOutput, markdown, "utf-8");
-    console.log(`  Report written to ${deps.config.reportOutput}`);
+    notifyReportArtifact(store, "Markdown report written", deps.config.reportOutput);
   }
 
   if (deps.config.sarifOutput) {
@@ -548,7 +665,7 @@ function writeFileReports(deps: ReportWorkerDeps, event: { payload: ReportReques
       event.payload.fingerprints,
     );
     writeFileSync(deps.config.sarifOutput, sarif, "utf-8");
-    console.log(`  SARIF report written to ${deps.config.sarifOutput}`);
+    notifyReportArtifact(store, "SARIF report written", deps.config.sarifOutput);
   }
 
   if (deps.config.jsonOutput) {
@@ -565,7 +682,7 @@ function writeFileReports(deps: ReportWorkerDeps, event: { payload: ReportReques
       deps.config.scanMode,
       event.payload.fingerprints,
     );
-    console.log(`  JSON report written to ${deps.config.jsonOutput}`);
+    notifyReportArtifact(store, "JSON report written", deps.config.jsonOutput);
   }
 
   if (deps.config.csvOutput) {
@@ -579,7 +696,7 @@ function writeFileReports(deps: ReportWorkerDeps, event: { payload: ReportReques
       event.payload.context.repoName,
       event.payload.fingerprints,
     );
-    console.log(`  CSV report written to ${deps.config.csvOutput}`);
+    notifyReportArtifact(store, "CSV report written", deps.config.csvOutput);
   }
 
   if (deps.config.jsonlOutput) {
@@ -593,8 +710,27 @@ function writeFileReports(deps: ReportWorkerDeps, event: { payload: ReportReques
       event.payload.context.repoName,
       event.payload.fingerprints,
     );
-    console.log(`  JSONL report written to ${deps.config.jsonlOutput}`);
+    notifyReportArtifact(store, "JSONL report written", deps.config.jsonlOutput);
   }
+}
+
+function notifyReportArtifact(store: UIStore | undefined, message: string, detail: string): void {
+  if (store) {
+    store.addNotice({
+      level: "success",
+      message,
+      detail,
+      source: "report",
+    });
+    return;
+  }
+
+  emitOutputNotice({
+    level: "success",
+    message,
+    detail,
+    source: "report",
+  });
 }
 
 function getOrCreateRunState(
@@ -677,6 +813,51 @@ function summarizeToolInput(
   }
 
   return name;
+}
+
+function describeTaskProgress(progress: unknown): string {
+  if (!progress || typeof progress !== "object") {
+    return "finding emitted";
+  }
+
+  const record = progress as Record<string, unknown>;
+  const ruleId = asString(record["ruleId"]);
+  const filePath = asString(record["filePath"]);
+  const startLine = typeof record["startLine"] === "number" ? record["startLine"] : null;
+
+  if (ruleId && filePath && startLine != null) {
+    return `${ruleId} · ${filePath}:${startLine}`;
+  }
+  if (ruleId && filePath) {
+    return `${ruleId} · ${filePath}`;
+  }
+  return ruleId ?? filePath ?? "finding emitted";
+}
+
+function updateScanStageDetail(store: UIStore): void {
+  const scanStage = store.getState().stages.find((stage) => stage.id === "scan");
+  if (!scanStage) {
+    return;
+  }
+
+  const taskCount = scanStage.subTasks.length;
+  const findingCount = scanStage.subTasks.reduce((sum, task) => sum + (task.findingCount ?? 0), 0);
+  const activeCount = scanStage.subTasks.filter((task) => task.status === "active").length;
+  const parts: string[] = [];
+
+  if (taskCount > 0) {
+    parts.push(`${taskCount} task${taskCount === 1 ? "" : "s"}`);
+  }
+  if (findingCount > 0) {
+    parts.push(`${findingCount} finding${findingCount === 1 ? "" : "s"}`);
+  }
+  if (activeCount > 0) {
+    parts.push(`${activeCount} running`);
+  }
+
+  if (parts.length > 0) {
+    store.updateStageDetail("scan", parts.join(" · "));
+  }
 }
 
 function truncate(text: string, max: number): string {

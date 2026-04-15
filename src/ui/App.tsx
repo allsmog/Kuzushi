@@ -21,7 +21,11 @@ import { ConfigBanner } from "./components/ConfigBanner.js";
 import { StatusFooter } from "./components/StatusFooter.js";
 import { ResumeDiff } from "./components/ResumeDiff.js";
 import { CommandInput, type ReplCommand, type CommandResult } from "./components/CommandInput.js";
-import { AnimatedCounter } from "./components/AnimatedCounter.js";
+import { SetupWizard } from "./components/SetupWizard.js";
+import { ConfigConfirm } from "./components/ConfigConfirm.js";
+import { InteractiveReview } from "./components/InteractiveReview.js";
+import { CompactHeader } from "./components/CompactHeader.js";
+import { NoticeRail } from "./components/NoticeRail.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
 
 interface AppProps {
@@ -45,36 +49,23 @@ export function App({ store }: AppProps): React.ReactElement {
   const liveResults = state.results.length > LIVE_RESULT_COUNT
     ? state.results.slice(-LIVE_RESULT_COUNT)
     : state.results;
+  const showCompactHeader = state.mode !== "preflight" && state.repoName.length > 0;
+  const showFullBanner = state.mode === "preflight" && state.preflight?.kind === "wizard";
 
   return (
     <Box flexDirection="column">
-      {/* Banner — rendered once */}
-      {state.bannerShown && <Banner />}
-
-      {/* Scan start info with animated finding count */}
-      {state.startBannerShown && (
-        <Static items={["start-banner"]}>
-          {() => (
-            <Box key="start-banner" flexDirection="column">
-              <Text>{chalk.bold(`  ${icons.complete} Kuzushi — scanning ${state.repoName}`)}</Text>
-              <Text>{"  "}{chalk.dim(icons.treeMiddle)} Scanners: {state.tasks.join(", ")}</Text>
-            </Box>
-          )}
-        </Static>
-      )}
-
-      {/* Animated finding count — live area so it animates */}
-      {state.startBannerShown && state.totalFindings > 0 && (
-        <AnimatedCounter
-          target={state.totalFindings}
-          prefix={`  ${chalk.dim(icons.treeLast)} `}
-          suffix={chalk.dim(` findings, ${state.selectedForTriage} selected for AI triage`)}
-          color={chalk.white.bold}
+      {showFullBanner && <Banner />}
+      {showCompactHeader && (
+        <CompactHeader
+          repoName={state.repoName}
+          tasks={state.tasks}
+          totalFindings={state.startBannerShown ? state.totalFindings : undefined}
+          selectedForTriage={state.startBannerShown ? state.selectedForTriage : undefined}
         />
       )}
 
       {/* Config banner — rendered once */}
-      {state.configBanner && (
+      {state.configBanner && state.mode !== "preflight" && (
         <Static items={["config-banner"]}>
           {() => <ConfigBanner key="config-banner" config={state.configBanner!} />}
         </Static>
@@ -88,7 +79,7 @@ export function App({ store }: AppProps): React.ReactElement {
       )}
 
       {/* Skipped info (plain fallback if no resume diff) */}
-      {!state.resumeDiff && state.skippedAlreadyTriaged > 0 && state.phase === "triaging" && (
+      {!state.resumeDiff && state.skippedAlreadyTriaged > 0 && state.phase === "triaging" && state.mode === "running" && (
         <Static items={["skip-info"]}>
           {() => (
             <Text key="skip-info">{"  "}{chalk.dim(`Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`)}</Text>
@@ -96,50 +87,78 @@ export function App({ store }: AppProps): React.ReactElement {
         </Static>
       )}
 
-      {/* Completed results — rendered once via Static, never re-rendered */}
-      <Static items={staticResults.map((r, i) => ({ ...r, _key: `r-${i}` }))}>
-        {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
-      </Static>
+      <NoticeRail notices={state.notices} />
 
-      {/* Pipeline indicator with live branches — the only re-rendering area */}
-      {state.stages.length > 0 && state.phase !== "summary" && state.phase !== "done" && (
-        <PipelineIndicator
-          stages={state.stages}
-          progress={state.progress}
-          runningCostUsd={state.runningCostUsd}
-          throttle={state.throttle}
-          results={liveResults}
-          agentActivity={state.agentActivity}
+      {state.mode === "preflight" && state.preflight?.kind === "wizard" && (
+        <SetupWizard
+          repoName={state.preflight.repoName}
+          onComplete={state.preflight.onComplete}
+          onCancel={state.preflight.onCancel}
+        />
+      )}
+      {state.mode === "preflight" && state.preflight?.kind === "confirm" && (
+        <ConfigConfirm
+          config={state.preflight.config}
+          repoName={state.preflight.repoName}
+          onProceed={state.preflight.onProceed}
+          onEdit={state.preflight.onEdit}
+          onQuit={state.preflight.onQuit}
         />
       )}
 
-      {/* Summary */}
-      {state.phase === "summary" && state.summary && (
-        <ScanSummary data={state.summary} />
+      {state.mode === "running" && (
+        <>
+          <Static items={staticResults.map((r, i) => ({ ...r, _key: `r-${i}` }))}>
+            {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
+          </Static>
+
+          {state.stages.length > 0 && (
+            <PipelineIndicator
+              stages={state.stages}
+              progress={state.progress}
+              runningCostUsd={state.runningCostUsd}
+              throttle={state.throttle}
+              results={liveResults}
+              agentActivity={state.agentActivity}
+            />
+          )}
+
+          {state.qualityGate && (
+            <QualityGate result={state.qualityGate} />
+          )}
+
+          {state.phase !== "idle" && state.phase !== "done" && state.phase !== "summary" && (
+            <StatusFooter
+              model={state.model || state.configBanner?.model || ""}
+              phase={state.phase}
+              runningCostUsd={state.runningCostUsd}
+              progress={state.progress}
+              startedAt={state.pipelineStartedAt}
+              throttle={state.throttle}
+            />
+          )}
+
+          <CommandInput
+            active={state.phase === "triaging" || state.phase === "verifying" || state.phase === "scanning"}
+            onCommand={handleCommand}
+          />
+        </>
       )}
 
-      {/* Quality gate */}
-      {state.qualityGate && (
-        <QualityGate result={state.qualityGate} />
+      {state.mode === "summary" && state.summary && (
+        <>
+          <ScanSummary data={state.summary} />
+          {state.qualityGate && <QualityGate result={state.qualityGate} />}
+        </>
       )}
 
-      {/* Persistent status footer */}
-      {state.phase !== "idle" && state.phase !== "done" && state.phase !== "summary" && (
-        <StatusFooter
-          model={state.model || state.configBanner?.model || ""}
-          phase={state.phase}
-          runningCostUsd={state.runningCostUsd}
-          progress={state.progress}
-          startedAt={state.pipelineStartedAt}
-          throttle={state.throttle}
+      {state.mode === "review" && state.review && (
+        <InteractiveReview
+          findings={state.review.findings}
+          onVerdict={state.review.onVerdict}
+          onQuit={state.review.onQuit}
         />
       )}
-
-      {/* Interactive REPL — active during scanning/triaging/verifying */}
-      <CommandInput
-        active={state.phase === "triaging" || state.phase === "verifying" || state.phase === "scanning"}
-        onCommand={handleCommand}
-      />
     </Box>
   );
 }

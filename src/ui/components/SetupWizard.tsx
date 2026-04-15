@@ -17,10 +17,10 @@
  *   └────────────────────────────────────────────────────────┘
  */
 import React, { useState } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput } from "ink";
 import chalk from "chalk";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter } from "../format.js";
+import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
 
 export interface WizardResult {
   preset: string;
@@ -43,43 +43,49 @@ interface PresetOption {
   name: string;
   description: string;
   detail: string;
+  summary: string;
 }
 
 const PRESETS: PresetOption[] = [
   {
     id: "fast",
     icon: icons.lightning,
-    name: "Quick",
+    name: "Fast",
     description: "semgrep only",
-    detail: "~30s, minimal cost. Great for CI/CD gates.",
+    detail: "One scanner, no context-gathering, lowest cost.",
+    summary: "Best for a quick pass or CI smoke scan.",
   },
   {
     id: "safe",
     icon: icons.complete,
     name: "Safe",
     description: "context + secrets detection",
-    detail: "~2min, ~$5. Good for first-time scans.",
+    detail: "Context gatherer + enricher + secrets/config tasks, triage capped to 20 findings.",
+    summary: "Recommended first interactive scan. No verify or PoC stages.",
   },
   {
     id: "standard",
     icon: icons.active,
     name: "Standard",
-    description: "semgrep + taint analysis",
-    detail: "~5min, moderate cost. Production baseline.",
+    description: "context + taint pipeline",
+    detail: "Adds taint CWE selection and IRIS taint analysis to the safe baseline.",
+    summary: "Good default for application code with meaningful data-flow coverage.",
   },
   {
     id: "deep",
     icon: icons.gear,
     name: "Deep",
-    description: "all scanners + threat model + verify",
-    detail: "~10-20min, higher cost. Full security review.",
+    description: "threat model + hunt + verify",
+    detail: "Adds threat modeling, hunt/system tasks, verification, and variant analysis.",
+    summary: "Use when you want a full interactive audit, not just a baseline scan.",
   },
   {
     id: "reference",
     icon: chalk.redBright("◉"),
-    name: "Maximum",
-    description: "everything + PoC generation + patching",
-    detail: "~30min+, highest cost. Comprehensive audit.",
+    name: "Reference",
+    description: "augment current config",
+    detail: "Keeps your configured tasks and adds verify, PoC harnesses, code graph, and dynamic selection.",
+    summary: "Highest operator cost. Does not auto-enable patching by itself.",
   },
 ];
 
@@ -98,10 +104,10 @@ const SAVE_OPTIONS = [
 ];
 
 export function SetupWizard({ repoName, onComplete, onCancel }: SetupWizardProps): React.ReactElement {
-  const { exit } = useApp();
   const [step, setStep] = useState<WizardStep>("preset");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [result, setResult] = useState<Partial<WizardResult>>({});
+  const width = terminalCardWidth();
 
   const currentOptions = step === "preset" ? PRESETS
     : step === "model" ? MODELS
@@ -111,7 +117,6 @@ export function SetupWizard({ repoName, onComplete, onCancel }: SetupWizardProps
   useInput((input, key) => {
     if (input === "q" || key.escape) {
       onCancel();
-      exit();
       return;
     }
 
@@ -158,7 +163,7 @@ export function SetupWizard({ repoName, onComplete, onCancel }: SetupWizardProps
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
-      <Text>{boxHeader(stepTitle, 58)}</Text>
+      <Text>{boxHeader(stepTitle, width)}</Text>
       <Text>{""}</Text>
       <Text>{"  "}{chalk.dim(stepHint)}</Text>
       <Text>{""}</Text>
@@ -171,12 +176,16 @@ export function SetupWizard({ repoName, onComplete, onCancel }: SetupWizardProps
         const desc = "description" in option
           ? chalk.dim((option as PresetOption).description)
           : chalk.dim(option.detail);
+        const summary = "summary" in option ? (option as PresetOption).summary : option.detail;
 
         return (
           <Box key={i} flexDirection="column">
             <Text>{"  "}{prefix} {icon} {name}  {desc}</Text>
             {isSelected && (
-              <Text>{"      "}{chalk.dim(option.detail)}</Text>
+              <>
+                <Text>{"      "}{chalk.dim(option.detail)}</Text>
+                <Text>{"      "}{chalk.white(summary)}</Text>
+              </>
             )}
           </Box>
         );
@@ -184,7 +193,7 @@ export function SetupWizard({ repoName, onComplete, onCancel }: SetupWizardProps
 
       <Text>{""}</Text>
       <Text>{"  "}{chalk.dim("[↑↓] navigate  [enter] select  [q] quit")}</Text>
-      <Text>{boxFooter(58)}</Text>
+      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

@@ -13,7 +13,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import chalk from "chalk";
-import { boxHeader, boxFooter, formatCost } from "../format.js";
+import { boxHeader, boxFooter, formatCost, terminalCardWidth } from "../format.js";
 
 export interface ConfigBannerData {
   model: string;
@@ -30,42 +30,34 @@ interface ConfigBannerProps {
 }
 
 export function ConfigBanner({ config }: ConfigBannerProps): React.ReactElement {
-  const leftCol: Array<[string, string]> = [
+  const width = terminalCardWidth();
+  const rows: Array<[string, string]> = [
     ["Model", config.model],
     ["Tasks", config.tasks.join(", ")],
   ];
   if (config.backend && config.backend !== "claude") {
-    leftCol.push(["Backend", config.backend]);
+    rows.push(["Backend", config.backend]);
   }
   if (config.scanMode && config.scanMode !== "sequential") {
-    leftCol.push(["Scan mode", config.scanMode]);
+    rows.push(["Scan mode", config.scanMode]);
   }
-
-  const rightCol: Array<[string, string]> = [];
   if (config.severity && config.severity.length > 0) {
-    rightCol.push(["Severity", config.severity.join(", ")]);
+    rows.push(["Severity", config.severity.join(", ")]);
   }
   if (config.concurrency && config.concurrency > 1) {
-    rightCol.push(["Concurrency", String(config.concurrency)]);
+    rows.push(["Concurrency", String(config.concurrency)]);
   }
   if (config.budget != null && config.budget > 0) {
-    rightCol.push(["Budget", formatCost(config.budget)]);
+    rows.push(["Budget", formatCost(config.budget)]);
   }
 
   return (
     <Box flexDirection="column">
-      <Text>{boxHeader("Config", 58)}</Text>
-      {leftCol.map(([label, value], i) => {
-        const right = rightCol[i];
-        const leftPart = `${chalk.dim(label + ":")} ${value}`;
-        const rightPart = right ? `  ${chalk.dim(right[0] + ":")} ${right[1]}` : "";
-        return <Text key={i}>{"  "}{leftPart}{rightPart}</Text>;
-      })}
-      {/* Render any remaining right-column items */}
-      {rightCol.slice(leftCol.length).map(([label, value], i) => (
-        <Text key={`r-${i}`}>{"  "}{" ".repeat(30)}{chalk.dim(label + ":")} {value}</Text>
+      <Text>{boxHeader("Config", width)}</Text>
+      {rows.map(([label, value]) => (
+        <Text key={label}>{"  "}{chalk.dim(`${label}:`)} {value}</Text>
       ))}
-      <Text>{boxFooter(58)}</Text>
+      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

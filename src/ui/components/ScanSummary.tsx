@@ -6,15 +6,13 @@ import { Box, Text } from "ink";
 import chalk from "chalk";
 import { icons } from "../icons.js";
 import {
-  colorVerdict,
   formatCost,
   formatDuration,
   miniBarChart,
-  badge,
   boxHeader,
   boxFooter,
   boxDivider,
-  treeLines,
+  terminalCardWidth,
 } from "../format.js";
 import { FindingCard } from "./FindingCard.js";
 import { AttackChainDiagram } from "./AttackChainDiagram.js";
@@ -26,8 +24,24 @@ interface ScanSummaryProps {
 }
 
 export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
+  const width = terminalCardWidth(96, 60);
   const { verdictCounts: counts } = data;
   const total = counts.tp + counts.fp + counts.needs_review;
+  const actionableCount = counts.tp + counts.needs_review;
+  const riskLabel = data.exploitable > 0
+    ? chalk.red.bold("Critical")
+    : counts.tp > 0
+      ? chalk.red("High")
+      : counts.needs_review > 0
+        ? chalk.yellow("Review")
+        : chalk.green("Low");
+  const nextAction = data.exploitable > 0
+    ? "Fix exploitable findings first."
+    : counts.tp > 0
+      ? "Address confirmed true positives."
+      : counts.needs_review > 0
+        ? "Review undecided findings."
+        : "No immediate action required.";
 
   const hasVerificationData = data.exploitable + data.notExploitable > 0
     || data.verifyErrors > 0
@@ -50,8 +64,15 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       <TrophyScreen data={data} />
 
       <Text>{""}</Text>
-      <Text>{boxHeader(`${icons.complete} Scan Results`, 60)}</Text>
+      <Text>{boxHeader(`${icons.complete} Scan Results`, width)}</Text>
       <Text>{""}</Text>
+
+      <Text>{"  "}{chalk.dim("Risk:")} {riskLabel}</Text>
+      <Text>{"  "}{chalk.dim("Actionable:")} {actionableCount} of {total} triaged</Text>
+      {hasVerificationData && (
+        <Text>{"  "}{chalk.dim("Exploitable:")} {data.exploitable}</Text>
+      )}
+      <Text>{"  "}{chalk.dim("Next:")} {nextAction}</Text>
 
       {/* Failed tasks warning */}
       {data.failedTasks.length > 0 && (
@@ -118,7 +139,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {hasVerificationData && (
         <>
           <Text>{""}</Text>
-          <Text>{boxDivider(60)}</Text>
+          <Text>{boxDivider(width)}</Text>
           <Text>{"  "}{chalk.bold("Verification")}</Text>
           <Text>{"  "}{chalk.red.bold(`${icons.error} Exploitable:`)}      {data.exploitable}</Text>
           <Text>{"  "}{chalk.green(`${icons.success} Not exploitable:`)}  {data.notExploitable}</Text>
@@ -132,7 +153,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {hasPocData && (
         <>
           <Text>{""}</Text>
-          <Text>{boxDivider(60)}</Text>
+          <Text>{boxDivider(width)}</Text>
           <Text>{"  "}{chalk.bold("PoC Harnesses")}</Text>
           <Text>{"  "}{chalk.cyan(`${icons.gear} Generated:`)} {data.pocGenerated}</Text>
           <Text>{"  "}{chalk.yellow(`${icons.pending} Skipped:`)}   {data.pocSkipped}</Text>
@@ -157,7 +178,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {hasDynamic && (
         <>
           <Text>{""}</Text>
-          <Text>{boxDivider(60)}</Text>
+          <Text>{boxDivider(width)}</Text>
           <Text>{"  "}{chalk.bold("Dynamic Analysis")}</Text>
           <Text>{"    "}{chalk.red.bold(`Confirmed:`)}   {data.dynamicConfirmed}</Text>
           <Text>{"    "}{chalk.yellow(`Interesting:`)} {data.dynamicInteresting}</Text>
@@ -183,7 +204,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {hasPatch && (
         <>
           <Text>{""}</Text>
-          <Text>{boxDivider(60)}</Text>
+          <Text>{boxDivider(width)}</Text>
           <Text>{"  "}{chalk.bold("Patch Synthesis")}</Text>
           <Text>{"    "}{chalk.cyan("Generated:")}  {data.patchGenerated}</Text>
           <Text>{"    "}{chalk.green("Verified:")}   {data.patchVerified} (finding eliminated after patch)</Text>
@@ -203,7 +224,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {data.exploitChains.length > 0 && (
         <>
           <Text>{""}</Text>
-          <Text>{boxDivider(60)}</Text>
+          <Text>{boxDivider(width)}</Text>
           <Text>{"  "}{chalk.bold("Exploitation Chains")}</Text>
           <Text>{""}</Text>
           {data.exploitChains.map((chain, ci) => (
@@ -219,7 +240,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {data.actionableFindings.length > 0 && (
         <>
           <Text>{""}</Text>
-          <Text>{boxDivider(60)}</Text>
+          <Text>{boxDivider(width)}</Text>
           <Text>{"  "}{chalk.bold("Actionable Findings")}</Text>
           <Text>{""}</Text>
           {data.actionableFindings.map((f, i) => (
@@ -236,7 +257,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
 
       {/* Cost summary */}
       <Text>{""}</Text>
-      <Text>{boxDivider(60)}</Text>
+      <Text>{boxDivider(width)}</Text>
       <Text>{"  "}{chalk.dim("Triage cost:")} {formatCost(data.triageCostUsd)}</Text>
       {hasVerificationData && (
         <Text>{"  "}{chalk.dim("Verification cost:")} {formatCost(data.verificationCostUsd)}</Text>
@@ -260,7 +281,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {/* Run metrics */}
       {data.runMetrics && <RunMetricsSummary metrics={data.runMetrics} />}
 
-      <Text>{boxFooter(60)}</Text>
+      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }
@@ -271,7 +292,7 @@ function RunMetricsSummary({ metrics }: { metrics: import("../../scoring/run-met
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
-      <Text>{boxDivider(60)}</Text>
+      <Text>{boxDivider(terminalCardWidth(96, 60))}</Text>
       <Text>{"  "}{chalk.bold("Run Metrics")}</Text>
       <Text>{""}</Text>
 

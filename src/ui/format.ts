@@ -227,3 +227,11 @@ export function boxLine(content: string, width = 60): string {
   // We can't easily measure ANSI string width, so just use the borders
   return `${chalk.dim(icons.boxVertical)}  ${content}`;
 }
+
+/**
+ * Compute a card width that fits the current terminal while keeping a sensible minimum.
+ */
+export function terminalCardWidth(maxWidth = 88, minWidth = 56): number {
+  const columns = process.stdout.columns ?? maxWidth;
+  return Math.max(minWidth, Math.min(maxWidth, columns - 4));
+}

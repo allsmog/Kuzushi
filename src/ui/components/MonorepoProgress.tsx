@@ -14,7 +14,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import chalk from "chalk";
 import { icons } from "../icons.js";
-import { formatDuration, formatCost } from "../format.js";
+import { formatDuration, formatCost, terminalCardWidth } from "../format.js";
 import { Spinner } from "./Spinner.js";
 
 export type ModuleStatus = "pending" | "scanning" | "triaging" | "verifying" | "complete" | "error" | "skipped";
@@ -79,7 +79,7 @@ function ModuleLine({ module: mod, connector }: {
   module: MonorepoModuleState;
   connector: string;
 }): React.ReactElement {
-  const nameWidth = 20;
+  const nameWidth = Math.max(16, Math.min(26, terminalCardWidth(96, 60) - 44));
   const paddedName = mod.name.length > nameWidth
     ? mod.name.slice(0, nameWidth - 1) + "…"
     : mod.name.padEnd(nameWidth);

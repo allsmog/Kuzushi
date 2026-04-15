@@ -7,7 +7,7 @@
 import type Database from "better-sqlite3";
 import { getActionableFindings, updateFindingVerdict } from "../store.js";
 import type { Verdict } from "../types.js";
-import type { ActionableFinding } from "./state.js";
+import type { ActionableFinding, UIStore } from "./state.js";
 
 export interface ReviewResult {
   reviewed: number;
@@ -25,6 +25,7 @@ export interface ReviewResult {
 export async function runInteractiveReview(
   db: Database.Database,
   repo: string,
+  store?: UIStore,
 ): Promise<ReviewResult | null> {
   if (!process.stdout.isTTY) {
     return null;
@@ -68,7 +69,26 @@ export async function runInteractiveReview(
 
   const result: ReviewResult = { reviewed: 0, tp: 0, fp: 0, byDesign: 0, skipped: 0 };
 
-  // Render Ink app
+  if (store) {
+    return await new Promise<ReviewResult>((resolve) => {
+      store.setReview({
+        findings,
+        onVerdict: (fingerprint: string, verdict: Verdict) => {
+          updateFindingVerdict(db, fingerprint, verdict);
+          result.reviewed++;
+          if (verdict === "tp") result.tp++;
+          else if (verdict === "fp") result.fp++;
+          else if (verdict === "by_design") result.byDesign++;
+        },
+        onQuit: () => {
+          store.setReview(null);
+          resolve(result);
+        },
+      });
+    });
+  }
+
+  // Backward-compatible fallback when no shared UI store is present.
   const { render } = await import("ink");
   const { createElement } = await import("react");
   const { InteractiveReview } = await import("./components/InteractiveReview.js");

@@ -15,7 +15,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import chalk from "chalk";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter } from "../format.js";
+import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
 
 export interface ResumeDiffData {
   previousRunDate?: string;
@@ -40,10 +40,11 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
   const prevDate = data.previousRunDate
     ? new Date(data.previousRunDate).toLocaleDateString()
     : "unknown";
+  const width = terminalCardWidth();
 
   return (
     <Box flexDirection="column">
-      <Text>{boxHeader("Resume", 58)}</Text>
+      <Text>{boxHeader("Resume", width)}</Text>
       <Text>
         {"  "}{chalk.dim("Previous run:")} {prevDate} ({data.previousFindingCount} findings, {data.previousTriagedCount} triaged)
       </Text>
@@ -77,7 +78,7 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
         </>
       )}
 
-      <Text>{boxFooter(58)}</Text>
+      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

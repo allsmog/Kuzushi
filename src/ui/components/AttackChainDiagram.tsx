@@ -19,7 +19,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import chalk from "chalk";
 import { icons } from "../icons.js";
-import { badge } from "../format.js";
+import { terminalCardWidth } from "../format.js";
 import type { ExploitChain } from "../../types.js";
 
 interface AttackChainDiagramProps {
@@ -31,6 +31,7 @@ const STEP_INNER_WIDTH = 18;
 const ARROW = " ───→ ";
 
 export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.ReactElement {
+  const availableWidth = Math.max(38, terminalCardWidth(96, 60) - 6);
   const sevColor = chain.overallSeverity === "CRITICAL" ? chalk.red.bold
     : chain.overallSeverity === "HIGH" ? chalk.red
     : chalk.yellow;
@@ -45,7 +46,8 @@ export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.Re
   // Calculate total width
   const boxWidth = STEP_INNER_WIDTH + 2; // +2 for borders
   const totalInner = (boxWidth * steps.length) + (ARROW.length * (steps.length - 1)) + 4;
-  const outerWidth = Math.max(totalInner, chain.name.length + chain.overallSeverity.length + 12);
+  const outerWidth = Math.max(40, Math.min(availableWidth, Math.max(totalInner, chain.name.length + chain.overallSeverity.length + 12)));
+  const useVerticalLayout = totalInner > availableWidth;
 
   // Render title bar
   const titleText = ` ${chain.name} `;
@@ -59,22 +61,39 @@ export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.Re
   const stepMid2 = steps.map((s) => s.line2).join(chalk.dim(ARROW.replace(/[─→]/g, " ")));
   const stepRole = steps.map((s) => s.role).join(chalk.dim(ARROW.replace(/[─→]/g, " ")));
   const stepBot = steps.map((s) => s.bottom).join(chalk.dim(ARROW.replace(/[─→]/g, " ")));
+  const impactLines = wrapText(`${icons.warning} ${chain.impactDescription}`, outerWidth - 4);
+  const preconditionLines = chain.preconditions.length > 0
+    ? wrapText(`Requires: ${chain.preconditions.join(", ")}`, outerWidth - 4)
+    : [];
 
   return (
     <Box flexDirection="column">
       <Text>{"  "}{titleLine}</Text>
       <Text>{"  "}{borderColor("│")}</Text>
-      <Text>{"  "}{borderColor("│")}  {stepTop}</Text>
-      <Text>{"  "}{borderColor("│")}  {stepMid1}</Text>
-      <Text>{"  "}{borderColor("│")}  {stepMid2}</Text>
-      <Text>{"  "}{borderColor("│")}  {stepRole}</Text>
-      <Text>{"  "}{borderColor("│")}  {stepBot}</Text>
-      <Text>{"  "}{borderColor("│")}</Text>
-      <Text>{"  "}{borderColor("│")}  {icons.warning} {chain.impactDescription}</Text>
-      {chain.preconditions.length > 0 && (
-        <Text>{"  "}{borderColor("│")}  {chalk.dim(`Requires: ${chain.preconditions.join(", ")}`)}</Text>
+      {!useVerticalLayout && (
+        <>
+          <Text>{"  "}{borderColor("│")}  {stepTop}</Text>
+          <Text>{"  "}{borderColor("│")}  {stepMid1}</Text>
+          <Text>{"  "}{borderColor("│")}  {stepMid2}</Text>
+          <Text>{"  "}{borderColor("│")}  {stepRole}</Text>
+          <Text>{"  "}{borderColor("│")}  {stepBot}</Text>
+        </>
       )}
-      <Text>{"  "}{borderColor(`╰${"─".repeat(Math.max(outerWidth, 40))}╯`)}</Text>
+      {useVerticalLayout && chain.steps.map((step, index) => (
+        <React.Fragment key={`${step.findingFingerprint}-${index}`}>
+          <Text>{"  "}{borderColor("│")}  {chalk.dim(`${index + 1}.`)} {step.description}</Text>
+          <Text>{"  "}{borderColor("│")}     {chalk.dim(`(${step.role})`)}</Text>
+          {index < chain.steps.length - 1 && <Text>{"  "}{borderColor("│")}     {chalk.dim("↓")}</Text>}
+        </React.Fragment>
+      ))}
+      <Text>{"  "}{borderColor("│")}</Text>
+      {impactLines.map((line, index) => (
+        <Text key={`impact-${index}`}>{"  "}{borderColor("│")}  {index === 0 ? line : chalk.dim(line)}</Text>
+      ))}
+      {preconditionLines.map((line, index) => (
+        <Text key={`pre-${index}`}>{"  "}{borderColor("│")}  {chalk.dim(line)}</Text>
+      ))}
+      <Text>{"  "}{borderColor(`╰${"─".repeat(outerWidth)}╯`)}</Text>
     </Box>
   );
 }
@@ -117,4 +136,32 @@ function buildStepBox(description: string, role: string): StepBox {
     role: chalk.dim("│") + chalk.dim(padRole.padEnd(w)) + chalk.dim("│"),
     bottom: chalk.dim(`└${"─".repeat(w)}┘`),
   };
+}
+
+function wrapText(text: string, width: number): string[] {
+  if (text.length <= width) {
+    return [text];
+  }
+
+  const words = text.split(/\s+/u);
+  const lines: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    const next = current.length === 0 ? word : `${current} ${word}`;
+    if (next.length <= width) {
+      current = next;
+      continue;
+    }
+    if (current.length > 0) {
+      lines.push(current);
+    }
+    current = word;
+  }
+
+  if (current.length > 0) {
+    lines.push(current);
+  }
+
+  return lines;
 }

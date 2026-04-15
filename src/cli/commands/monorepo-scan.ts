@@ -43,6 +43,8 @@ import type {
 import { printMonorepoSummary, type MonorepoAggregateSummary, type MonorepoModuleResult } from "../../report-monorepo.js";
 import { defaultDbPath, getActionableFindings, getLatestResumableRun, getResumableModuleRuns, getVerdictCounts, initDb, type StoredFindingRecord } from "../../store.js";
 import type { Finding } from "../../scanners/types.js";
+import { getGlobalLogLevel } from "../../logger.js";
+import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js";
 import { CliUsageError } from "../errors.js";
 import type { ScanCommandOptions } from "../scan-config.js";
 import { isShutdownCapableRuntime, resolveRepo } from "../shared.js";
@@ -67,6 +69,10 @@ export async function runMonorepoScan(
   const { root: monorepoRoot, name: monorepoName } = resolveRepo(repoPath);
   const { config, scanOpts } = prepareScanExecution(monorepoRoot, opts);
   let runtime: AgentRuntime | undefined;
+  configureTerminalOutput({
+    verbose: getGlobalLogLevel() === "debug",
+    quiet: true,
+  });
 
   try {
     // For --list-modules, resolve without runtime (no LLM).
@@ -331,6 +337,7 @@ export async function runMonorepoScan(
       db.close();
     }
   } finally {
+    resetTerminalOutput();
     if (runtime && isShutdownCapableRuntime(runtime)) {
       await runtime.shutdown();
     }
@@ -420,6 +427,7 @@ async function runPlansInParallel(params: {
       limiter(async () => {
         const moduleRoot = resolveModuleDirectory(monorepoRoot, plan.module.path);
         const repoName = `${monorepoName}/${plan.module.path}`;
+        const startedAt = Date.now();
 
         // When resuming, skip modules that already completed
         if (resuming) {
@@ -427,6 +435,7 @@ async function runPlansInParallel(params: {
           try {
             const existingRun = getLatestResumableRun(db, repoName);
             if (existingRun?.status === "complete") {
+              const verdictCounts = getVerdictCounts(db, repoName);
               monorepoUI?.updateModule(plan.module.path, { status: "skipped" });
               console.log(`  [${index + 1}/${plans.length}] ${plan.module.path} :: SKIPPED (already complete)`);
               return {
@@ -436,7 +445,7 @@ async function runPlansInParallel(params: {
                 runId: existingRun.runId,
                 status: "complete",
                 stats: undefined,
-                verdictCounts: getVerdictCounts(db, repoName),
+                verdictCounts,
               } satisfies ModuleExecutionResult;
             }
           } finally {
@@ -509,12 +518,21 @@ async function runPlansInParallel(params: {
 
         const moduleCost = pipelineResult.stats?.totalCostUsd ?? 0;
         recordModuleCost(budget, moduleCost);
-
-        const elapsed = Date.now() - (monorepoUI ? Date.now() : Date.now());
+        const elapsed = Date.now() - startedAt;
+        let verdictCounts = { tp: 0, fp: 0, needs_review: 0, by_design: 0 };
+        const db = initDb(dbPath);
+        try {
+          verdictCounts = getVerdictCounts(db, repoName);
+        } finally {
+          db.close();
+        }
         monorepoUI?.updateModule(plan.module.path, {
           status: pipelineResult.status === "complete" ? "complete" : "error",
           costUsd: moduleCost,
-          tp: pipelineResult.stats?.triaged ? undefined : 0,
+          tp: verdictCounts.tp,
+          fp: verdictCounts.fp,
+          needsReview: verdictCounts.needs_review,
+          elapsedMs: elapsed,
           detail: pipelineResult.status === "error" ? "pipeline error" : undefined,
         });
 
@@ -525,7 +543,7 @@ async function runPlansInParallel(params: {
           runId: pipelineResult.runId,
           status: pipelineResult.status,
           stats: pipelineResult.stats,
-          verdictCounts: { tp: 0, fp: 0, needs_review: 0, by_design: 0 },
+          verdictCounts,
         } satisfies ModuleExecutionResult;
       }),
     ),
