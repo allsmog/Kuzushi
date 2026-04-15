@@ -63,6 +63,7 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
     db: deps.db,
     knowledgeRegistry,
     getRunHooks: (runId) => orchestrator.getRunHooks(runId),
+    getReplState: deps.uiStore ? () => deps.uiStore!.getState().replState ?? undefined : undefined,
   });
 
   registerVerificationWorker(bus, {

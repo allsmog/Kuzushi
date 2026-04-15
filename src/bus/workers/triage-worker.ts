@@ -55,6 +55,13 @@ export interface TriageWorkerDeps {
    * Returns undefined if no hooks are configured for this run.
    */
   getRunHooks?: (runId: string) => { hookChain: PipelineHookChain; hookContext: HookContext } | undefined;
+  /** Optional REPL state reader for interactive skip/suppress/pause. */
+  getReplState?: () => {
+    skippedFingerprints: Set<string>;
+    suppressedRules: Set<string>;
+    focusPath: string | null;
+    paused: boolean;
+  } | undefined;
 }
 
 /**
@@ -115,6 +122,43 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
         finding = hookResult;
       } catch (error) {
         console.error(`[hooks] beforeTriage hook error: ${toErrorMessage(error)}`);
+      }
+    }
+
+    // REPL interactive skip/suppress/pause check
+    const replState = deps.getReplState?.();
+    if (replState) {
+      // Wait while paused
+      while (replState.paused) {
+        await new Promise((r) => setTimeout(r, 500));
+        const fresh = deps.getReplState?.();
+        if (!fresh?.paused) break;
+      }
+
+      // Check if finding was skipped or its rule suppressed
+      const shouldSkip = replState.skippedFingerprints.has(finding.fingerprint)
+        || replState.suppressedRules.has(finding.ruleId);
+
+      if (shouldSkip) {
+        await bus.publish(
+          createEvent("triage:result", runId, {
+            context,
+            finding,
+            result: {
+              fingerprint: finding.fingerprint,
+              verdict: "fp" as const,
+              confidence: 1,
+              rationale: "Skipped via interactive REPL command",
+              verificationSteps: [],
+              fixPatch: null,
+            },
+            costUsd: 0,
+            attempts: 0,
+            index,
+            total,
+          }),
+        );
+        return;
       }
     }
 

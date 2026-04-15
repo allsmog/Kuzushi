@@ -178,6 +178,13 @@ export interface UIState {
   startBannerShown: boolean;
   /** Resume diff data — shown when resuming a previous run. */
   resumeDiff?: import("./components/ResumeDiff.js").ResumeDiffData | null;
+  /** REPL state — controls live scan behavior via slash commands. */
+  replState?: {
+    skippedFingerprints: Set<string>;
+    suppressedRules: Set<string>;
+    focusPath: string | null;
+    paused: boolean;
+  };
   /** Pipeline stage indicator — tracks all stages for the ○/●/◆ display. */
   stages: PipelineStage[];
 }
