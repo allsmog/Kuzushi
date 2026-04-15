@@ -7,9 +7,6 @@ export const TAINT_ANALYSIS_TASK_IDS = [
   "taint-iris",
 ] as const;
 
-/** @deprecated Old cross-service taint tasks replaced by taint-iris. */
-export const TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS = [] as const;
-
 export interface CapabilityDefinition {
   publicId: string;
   configKey?: string;
@@ -349,11 +346,7 @@ export function expandTaskSelections(
     }
 
     if (capability.publicId === "taint-analysis") {
-      const taintConfig = resolveTaskConfig(config, capability.publicId);
-      const crossServiceEnabled = taintConfig["crossService"] === true;
-      tasks.push(
-        ...(crossServiceEnabled ? TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS : TAINT_ANALYSIS_TASK_IDS),
-      );
+      tasks.push(...TAINT_ANALYSIS_TASK_IDS);
       continue;
     }
 

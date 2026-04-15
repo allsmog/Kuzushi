@@ -64,7 +64,7 @@ export class RateLimitError extends KuzushiError {
   }
 }
 
-export class ValidationError extends KuzushiError {
+class ValidationError extends KuzushiError {
   constructor(message: string, options?: { cause?: unknown; costUsd?: number }) {
     super(message, "validation", options);
     this.name = "ValidationError";
@@ -78,7 +78,7 @@ export class AuthError extends KuzushiError {
   }
 }
 
-export class BudgetError extends KuzushiError {
+class BudgetError extends KuzushiError {
   constructor(message: string, options?: { cause?: unknown; costUsd?: number }) {
     super(message, "budget", options);
     this.name = "BudgetError";
