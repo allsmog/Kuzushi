@@ -11,6 +11,17 @@ import type { ExploitChain } from "../types.js";
 
 export type Phase = "idle" | "scanning" | "triaging" | "verifying" | "poc" | "summary" | "done";
 
+export type StageStatus = "pending" | "active" | "done" | "error";
+
+export interface PipelineStage {
+  id: string;
+  label: string;
+  status: StageStatus;
+  detail?: string;
+  elapsedMs?: number;
+  startedAt?: number;
+}
+
 export interface ResultLine {
   kind: "triage" | "verify" | "poc" | "error";
   verdict?: Verdict;
@@ -130,6 +141,8 @@ export interface UIState {
   warnings: string[];
   bannerShown: boolean;
   startBannerShown: boolean;
+  /** Pipeline stage indicator — tracks all stages for the ○/●/◆ display. */
+  stages: PipelineStage[];
 }
 
 type Listener = () => void;
@@ -155,6 +168,7 @@ export class UIStore {
       warnings: [],
       bannerShown: false,
       startBannerShown: false,
+      stages: [],
     };
   }
 
@@ -190,6 +204,57 @@ export class UIStore {
     const newMap = new Map(this.state.agentActivity);
     newMap.delete(fingerprint);
     this.state = { ...this.state, agentActivity: newMap };
+    this.notify();
+  }
+
+  /** Initialize the pipeline stages. */
+  initStages(stageIds: Array<{ id: string; label: string }>): void {
+    this.state = {
+      ...this.state,
+      stages: stageIds.map((s) => ({ id: s.id, label: s.label, status: "pending" as StageStatus })),
+    };
+    this.notify();
+  }
+
+  /** Mark a stage as active (and complete any previously active stage). */
+  activateStage(stageId: string, detail?: string): void {
+    const now = Date.now();
+    const stages = this.state.stages.map((s) => {
+      if (s.id === stageId) {
+        return { ...s, status: "active" as StageStatus, detail, startedAt: now };
+      }
+      // Auto-complete any previously active stage
+      if (s.status === "active") {
+        return { ...s, status: "done" as StageStatus, elapsedMs: now - (s.startedAt ?? now) };
+      }
+      return s;
+    });
+    this.state = { ...this.state, stages };
+    this.notify();
+  }
+
+  /** Mark a stage as done. */
+  completeStage(stageId: string): void {
+    const now = Date.now();
+    const stages = this.state.stages.map((s) => {
+      if (s.id === stageId) {
+        return { ...s, status: "done" as StageStatus, elapsedMs: now - (s.startedAt ?? now) };
+      }
+      return s;
+    });
+    this.state = { ...this.state, stages };
+    this.notify();
+  }
+
+  /** Update the detail text on an active stage. */
+  updateStageDetail(stageId: string, detail: string): void {
+    const stages = this.state.stages.map((s) => {
+      if (s.id === stageId) {
+        return { ...s, detail };
+      }
+      return s;
+    });
+    this.state = { ...this.state, stages };
     this.notify();
   }
 

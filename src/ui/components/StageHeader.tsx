@@ -17,10 +17,10 @@ const STAGE_ICONS: Record<string, string> = {
 };
 
 const STAGE_COLORS: Record<string, (s: string) => string> = {
-  scanning: chalk.green,
-  triaging: chalk.yellow,
-  verifying: chalk.cyan,
-  poc: chalk.magenta,
+  scanning: chalk.redBright,
+  triaging: chalk.red,
+  verifying: chalk.yellow,
+  poc: chalk.white,
 };
 
 interface StageHeaderProps {

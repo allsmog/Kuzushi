@@ -23,11 +23,11 @@ export const icons = {
   treeLast: "\u2514\u2500", // └─
   treePipe: "\u2502", // │
 
-  // Box drawing
-  boxTopLeft: "\u256D", // ╭
-  boxTopRight: "\u256E", // ╮
-  boxBottomLeft: "\u2570", // ╰
-  boxBottomRight: "\u256F", // ╯
+  // Box drawing (sharp corners — Kuzushi style)
+  boxTopLeft: "\u250C", // ┌
+  boxTopRight: "\u2510", // ┐
+  boxBottomLeft: "\u2514", // └
+  boxBottomRight: "\u2518", // ┘
   boxHorizontal: "\u2500", // ─
   boxVertical: "\u2502", // │
   boxDividerLeft: "\u251C", // ├

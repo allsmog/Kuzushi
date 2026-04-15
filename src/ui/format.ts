@@ -26,8 +26,8 @@ export function progressBar(current: number, total: number, width = 20): string 
   const partialIndex = Math.floor((ratio * width - filledFull) * 8);
   const emptyCount = width - filledFull - (partialIndex > 0 ? 1 : 0);
 
-  const filled = chalk.green(FULL_BLOCK.repeat(filledFull));
-  const partial = partialIndex > 0 ? chalk.green(PARTIAL_BLOCKS[partialIndex]!) : "";
+  const filled = chalk.redBright(FULL_BLOCK.repeat(filledFull));
+  const partial = partialIndex > 0 ? chalk.redBright(PARTIAL_BLOCKS[partialIndex]!) : "";
   const empty = chalk.dim(EMPTY_BLOCK.repeat(Math.max(0, emptyCount)));
 
   return `${filled}${partial}${empty} ${current}/${total}`;

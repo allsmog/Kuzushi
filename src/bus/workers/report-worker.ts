@@ -72,6 +72,21 @@ export function registerReportWorker(
       : [...event.payload.config.tasks];
 
     if (store) {
+      // Build pipeline stages from config
+      const stageList: Array<{ id: string; label: string }> = [
+        { id: "scan", label: "Scan" },
+        { id: "triage", label: "Triage" },
+      ];
+      if (event.payload.config.verify) {
+        stageList.push({ id: "verify", label: "Verify" });
+      }
+      if (event.payload.config.pocHarness) {
+        stageList.push({ id: "poc", label: "PoC Harness" });
+      }
+      stageList.push({ id: "report", label: "Report" });
+
+      store.initStages(stageList);
+      store.activateStage("scan", state.tasks?.join(", "));
       store.update({
         tasks: state.tasks,
         bannerShown: true,
@@ -112,6 +127,7 @@ export function registerReportWorker(
     state.skippedAlreadyTriaged = event.payload.skippedAlreadyTriaged;
 
     if (store) {
+      store.activateStage("triage", `${event.payload.findingCount} findings via ${event.payload.model}`);
       store.update({
         phase: "triaging",
         selectedForTriage: event.payload.findingCount,
@@ -171,6 +187,7 @@ export function registerReportWorker(
 
   bus.subscribe<VerificationStartEvent>("verification:start", (event) => {
     if (store) {
+      store.activateStage("verify", `${event.payload.findingCount} findings via ${event.payload.model}`);
       store.update({
         phase: "verifying",
         model: event.payload.model,
@@ -231,6 +248,7 @@ export function registerReportWorker(
 
   bus.subscribe<PocHarnessStartEvent>("poc-harness:start", (event) => {
     if (store) {
+      store.activateStage("poc", `${event.payload.findingCount} harnesses via ${event.payload.model}`);
       store.update({
         phase: "poc",
         model: event.payload.model,
@@ -376,6 +394,8 @@ export function registerReportWorker(
 
         const qualityGateResult = event.payload.stats?.qualityGateResult ?? null;
 
+        store.activateStage("report");
+        store.completeStage("report");
         store.update({
           phase: "summary",
           summary: summaryData,
