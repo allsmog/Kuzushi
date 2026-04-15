@@ -149,6 +149,8 @@ export interface UIState {
   runningCostUsd: number;
   /** Rate limit / throttle info — shown when active. */
   throttle?: { concurrency: number; reason: string } | null;
+  /** Timestamp when pipeline started (for elapsed timer). */
+  pipelineStartedAt?: number;
   /** Resolved config for the pre-scan banner. */
   configBanner?: {
     model: string;

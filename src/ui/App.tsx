@@ -18,6 +18,7 @@ import { ScanSummary } from "./components/ScanSummary.js";
 import { QualityGate } from "./components/QualityGate.js";
 import { PipelineIndicator } from "./components/PipelineIndicator.js";
 import { ConfigBanner } from "./components/ConfigBanner.js";
+import { StatusFooter } from "./components/StatusFooter.js";
 
 interface AppProps {
   store: UIStore;
@@ -96,6 +97,18 @@ export function App({ store }: AppProps): React.ReactElement {
       {/* Quality gate */}
       {state.qualityGate && (
         <QualityGate result={state.qualityGate} />
+      )}
+
+      {/* Persistent status footer */}
+      {state.phase !== "idle" && state.phase !== "done" && state.phase !== "summary" && (
+        <StatusFooter
+          model={state.model || state.configBanner?.model || ""}
+          phase={state.phase}
+          runningCostUsd={state.runningCostUsd}
+          progress={state.progress}
+          startedAt={state.pipelineStartedAt}
+          throttle={state.throttle}
+        />
       )}
     </Box>
   );

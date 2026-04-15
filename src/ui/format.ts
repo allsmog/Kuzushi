@@ -5,6 +5,16 @@
 import chalk from "chalk";
 import type { Verdict } from "../types.js";
 import { icons } from "./icons.js";
+import { getTheme } from "./theme.js";
+
+/**
+ * Returns a chalk function appropriate for "secondary" text based on theme.
+ * Dark terminals: chalk.dim works great.
+ * Light terminals: chalk.dim can be invisible, so use chalk.gray instead.
+ */
+export function secondary(text: string): string {
+  return getTheme() === "light" ? chalk.gray(text) : chalk.dim(text);
+}
 
 // Partial block characters from thin to full (8 steps)
 const PARTIAL_BLOCKS = [" ", "\u258F", "\u258E", "\u258D", "\u258C", "\u258B", "\u258A", "\u2589"];

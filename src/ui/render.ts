@@ -21,6 +21,10 @@ export async function createUIRenderer(): Promise<UIRenderer> {
   const store = createUIStore();
 
   if (process.stdout.isTTY) {
+    // Detect terminal theme before rendering so colors adapt
+    const { detectTheme } = await import("./theme.js");
+    await detectTheme(200).catch(() => {}); // best-effort, don't block
+
     // Dynamic import to avoid loading React/Ink when not needed (CI, pipes)
     const { render } = await import("ink");
     const { App } = await import("./App.js");
