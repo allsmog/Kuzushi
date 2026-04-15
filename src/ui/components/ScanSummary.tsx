@@ -17,6 +17,8 @@ import {
   treeLines,
 } from "../format.js";
 import { FindingCard } from "./FindingCard.js";
+import { AttackChainDiagram } from "./AttackChainDiagram.js";
+import { TrophyScreen } from "./TrophyScreen.js";
 import type { SummaryData } from "../state.js";
 
 interface ScanSummaryProps {
@@ -44,6 +46,9 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
 
   return (
     <Box flexDirection="column">
+      {/* Trophy / completion screen */}
+      <TrophyScreen data={data} />
+
       <Text>{""}</Text>
       <Text>{boxHeader(`${icons.complete} Scan Results`, 60)}</Text>
       <Text>{""}</Text>
@@ -194,32 +199,19 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
         </>
       )}
 
-      {/* Exploit chains */}
+      {/* Exploit chains — flow diagram */}
       {data.exploitChains.length > 0 && (
         <>
           <Text>{""}</Text>
           <Text>{boxDivider(60)}</Text>
           <Text>{"  "}{chalk.bold("Exploitation Chains")}</Text>
           <Text>{""}</Text>
-          {data.exploitChains.map((chain, ci) => {
-            const sevColor = chain.overallSeverity === "CRITICAL" ? chalk.red.bold
-              : chain.overallSeverity === "HIGH" ? chalk.red : chalk.yellow;
-            const stepTexts = chain.steps.map((step) =>
-              `${chalk.dim(step.role + ":")} ${step.description} ${chalk.dim(`[${step.findingFingerprint.slice(0, 8)}]`)}`,
-            );
-            const treeSteps = treeLines(stepTexts, 4);
-            return (
-              <Box key={ci} flexDirection="column">
-                <Text>{"  "}{sevColor(chain.overallSeverity)} {chalk.bold(chain.name)}</Text>
-                {treeSteps.map((line, li) => <Text key={li}>{line}</Text>)}
-                {chain.preconditions.length > 0 && (
-                  <Text>{"    "}{chalk.dim("Preconditions:")} {chain.preconditions.join(", ")}</Text>
-                )}
-                <Text>{"    "}{chalk.dim("Impact:")} {chain.impactDescription}</Text>
-                <Text>{""}</Text>
-              </Box>
-            );
-          })}
+          {data.exploitChains.map((chain, ci) => (
+            <Box key={ci} flexDirection="column">
+              <AttackChainDiagram chain={chain} />
+              <Text>{""}</Text>
+            </Box>
+          ))}
         </>
       )}
 

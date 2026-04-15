@@ -21,6 +21,7 @@ import { ConfigBanner } from "./components/ConfigBanner.js";
 import { StatusFooter } from "./components/StatusFooter.js";
 import { ResumeDiff } from "./components/ResumeDiff.js";
 import { CommandInput, type ReplCommand, type CommandResult } from "./components/CommandInput.js";
+import { AnimatedCounter } from "./components/AnimatedCounter.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
 
 interface AppProps {
@@ -50,18 +51,26 @@ export function App({ store }: AppProps): React.ReactElement {
       {/* Banner — rendered once */}
       {state.bannerShown && <Banner />}
 
-      {/* Scan start info */}
+      {/* Scan start info with animated finding count */}
       {state.startBannerShown && (
         <Static items={["start-banner"]}>
           {() => (
             <Box key="start-banner" flexDirection="column">
               <Text>{chalk.bold(`  ${icons.complete} Kuzushi — scanning ${state.repoName}`)}</Text>
               <Text>{"  "}{chalk.dim(icons.treeMiddle)} Scanners: {state.tasks.join(", ")}</Text>
-              <Text>{"  "}{chalk.dim(icons.treeLast)} {state.totalFindings} findings, {state.selectedForTriage} selected for AI triage</Text>
-              <Text>{""}</Text>
             </Box>
           )}
         </Static>
+      )}
+
+      {/* Animated finding count — live area so it animates */}
+      {state.startBannerShown && state.totalFindings > 0 && (
+        <AnimatedCounter
+          target={state.totalFindings}
+          prefix={`  ${chalk.dim(icons.treeLast)} `}
+          suffix={chalk.dim(` findings, ${state.selectedForTriage} selected for AI triage`)}
+          color={chalk.white.bold}
+        />
       )}
 
       {/* Config banner — rendered once */}
