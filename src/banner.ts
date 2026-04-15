@@ -20,7 +20,8 @@ function playStartupSound(): void {
     const child = spawn(cmd, [filePath], { stdio: "ignore", detached: true });
     child.unref();
   } catch {
-    // Best-effort — don't break startup if sound fails
+    // Best-effort cosmetic feature — sound playback may fail due to missing
+    // audio binary, missing assets dir, or headless environment. Never fatal.
   }
 }
 
@@ -47,7 +48,8 @@ export function printBanner(): void {
       }
     }
   } catch {
-    // Fallback: skip logo if file is missing
+    // Cosmetic fallback: ASCII logo file may be missing in minimal installs
+    // or when running from source without assets. The text banner below still renders.
   }
 
   console.log("");
