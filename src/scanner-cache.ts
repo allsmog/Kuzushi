@@ -70,7 +70,7 @@ export function getCachedFindings(
 
   if (!row) return undefined;
 
-  const parsed = safeJsonParse<Finding[]>(row.findings_json, undefined as any);
+  const parsed = safeJsonParse<Finding[] | undefined>(row.findings_json, undefined);
   return Array.isArray(parsed) ? parsed : undefined;
 }
 

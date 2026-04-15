@@ -65,12 +65,30 @@ function buildPrompt(findings: Finding[]): string {
   ].join("\n");
 }
 
+interface ReachabilityRawOutput {
+  results: Array<{
+    fingerprint?: unknown;
+    reachable?: unknown;
+    reason?: unknown;
+    entryPoints?: unknown;
+  }>;
+}
+
+function isReachabilityRawOutput(raw: unknown): raw is ReachabilityRawOutput {
+  return (
+    raw !== null &&
+    typeof raw === "object" &&
+    "results" in raw &&
+    Array.isArray((raw as ReachabilityRawOutput).results)
+  );
+}
+
 function parseResults(raw: unknown, findings: Finding[]): Map<string, ReachabilityResult> {
   const results = new Map<string, ReachabilityResult>();
   const fingerprintSet = new Set(findings.map((f) => f.fingerprint));
 
-  if (raw && typeof raw === "object" && "results" in raw && Array.isArray((raw as any).results)) {
-    for (const item of (raw as any).results) {
+  if (isReachabilityRawOutput(raw)) {
+    for (const item of raw.results) {
       if (!item || typeof item !== "object") continue;
       const fp = String(item.fingerprint ?? "");
       if (!fp || !fingerprintSet.has(fp)) continue;

@@ -60,6 +60,8 @@ export interface Finding {
   cwe: string[];
   score: number;
   adjustedScore?: number;
+  /** Reachability status set by the reachability-check task. */
+  reachable?: "true" | "false" | "unknown";
   taintPath?: TaintPathStep[];
   proofState?: ProofState;
   engineProvenance?: EngineProvenance[];
