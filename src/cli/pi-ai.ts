@@ -1,11 +1,11 @@
 import { parsePiAiModelSpec } from "../agent-runtime/model-spec.js";
 import { resolveStageModel } from "../agents/tasks/runtime-overrides.js";
-import { resolveTaskConfig, TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS, TAINT_ANALYSIS_TASK_IDS } from "../capabilities.js";
+import { resolveTaskConfig, TAINT_ANALYSIS_TASK_IDS } from "../capabilities.js";
 import type { KuzushiConfig } from "../types.js";
 
 const DEFAULT_AGENTIC_MODEL = "anthropic:claude-sonnet-4-6";
 
-export function requiredEnvVarsForProvider(provider: string): string[] {
+function requiredEnvVarsForProvider(provider: string): string[] {
   if (provider === "anthropic") {
     return ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"];
   }
@@ -21,7 +21,7 @@ export function requiredEnvVarsForProvider(provider: string): string[] {
   return [];
 }
 
-export function maybeWarnPiAiApiKeyForModel(
+function maybeWarnPiAiApiKeyForModel(
   model: string | undefined,
   options: { anthropicApiKey?: string } = {},
 ): void {
@@ -126,20 +126,12 @@ export function resolveActivePiAiModels(
   }
 
   const usesTaintAnalysis = TAINT_ANALYSIS_TASK_IDS.some((id) => enabledTaskSet.has(id));
-  const usesCrossService = TAINT_ANALYSIS_CROSS_SERVICE_TASK_IDS.some((id) => enabledTaskSet.has(id));
-  if (usesTaintAnalysis || usesCrossService) {
+  if (usesTaintAnalysis) {
     const taCfg = config.taskConfig["taint-analysis"];
     const labelingModel = asModel(taCfg?.["labelingModel"]) ?? config.model;
     const extractionModel = asModel(taCfg?.["extractionModel"]) ?? labelingModel;
     models.add(labelingModel);
     models.add(extractionModel);
-
-    if (usesCrossService) {
-      const boundaryModel = asModel(taCfg?.["crossServiceBoundaryModel"]) ?? labelingModel;
-      const stitchModel = asModel(taCfg?.["crossServiceStitchModel"]) ?? labelingModel;
-      models.add(boundaryModel);
-      models.add(stitchModel);
-    }
   }
 
   for (const taskId of [

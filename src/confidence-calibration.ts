@@ -10,19 +10,6 @@ import type Database from "better-sqlite3";
 import type { EvidenceStep } from "./types.js";
 import { safeJsonStringify } from "./utils/safe-json.js";
 
-/** Recognized evidence step types for calibration. */
-export const EVIDENCE_STEP_TYPES = [
-  "source-reachability",
-  "sink-danger",
-  "sanitization-check",
-  "config-review",
-  "dataflow-trace",
-  "exploit-feasibility",
-  "framework-protection",
-] as const;
-
-export type EvidenceStepType = (typeof EVIDENCE_STEP_TYPES)[number];
-
 export interface CalibrationWeight {
   stepType: string;
   ruleFamily: string;

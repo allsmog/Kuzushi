@@ -35,7 +35,7 @@ export type PipelineRunStatus =
   | "complete"
   | "error";
 
-export interface PipelineRunRecord {
+interface PipelineRunRecord {
   runId: string;
   repo: string;
   startedAt: string;
@@ -526,7 +526,7 @@ export function getTotalCost(db: Database.Database, repo?: string): number {
 }
 
 /** Get total verification cost in USD from persisted findings. */
-export function getTotalVerificationCost(db: Database.Database, repo?: string): number {
+function getTotalVerificationCost(db: Database.Database, repo?: string): number {
   const query = repo
     ? "SELECT COALESCE(SUM(COALESCE(verify_cost_usd, 0)), 0) as total FROM findings WHERE repo = ?"
     : "SELECT COALESCE(SUM(COALESCE(verify_cost_usd, 0)), 0) as total FROM findings";
@@ -556,7 +556,7 @@ export function getTotalPocHarnessCost(db: Database.Database, repo?: string): nu
 }
 
 /** Get verification counts grouped by exploitability outcome. */
-export function getVerificationCounts(
+function getVerificationCounts(
   db: Database.Database,
   repo?: string,
 ): { exploitable: number; notExploitable: number } {
@@ -1240,7 +1240,7 @@ export function updateRunCost(
 }
 
 /** Persist composite confidence result on a finding row. */
-export function updateFindingCompositeConfidence(
+function updateFindingCompositeConfidence(
   db: Database.Database,
   fingerprint: string,
   compositeConfidence: number,
@@ -1588,7 +1588,7 @@ export function saveAssertionResults(
 }
 
 /** Get assertion results for a specific run. */
-export function getRunAssertions(
+function getRunAssertions(
   db: Database.Database,
   runId: string,
 ): Array<{ fingerprint: string; assertionName: string; passed: boolean; score: number; weight: number; reason: string }> {
@@ -1605,7 +1605,7 @@ export function getRunAssertions(
 }
 
 /** Update prompt hash for a pipeline run. */
-export function updatePromptHash(
+function updatePromptHash(
   db: Database.Database,
   runId: string,
   promptHash: string,
@@ -1616,7 +1616,7 @@ export function updatePromptHash(
 }
 
 /** Update assertions JSON summary for a pipeline run. */
-export function updateRunAssertions(
+function updateRunAssertions(
   db: Database.Database,
   runId: string,
   assertionsJson: string,
