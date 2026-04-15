@@ -12,21 +12,14 @@ import type {
   VerificationResult,
   Verdict,
 } from "../types.js";
-import type { QualityGateResult } from "../quality-gate.js";
-import type { RunMetrics } from "../scoring/run-metrics.js";
+import type { QualityGateResult } from "../quality-gate-types.js";
+import type { RunMetrics } from "../scoring/run-metrics-types.js";
 import type { EventEnvelope } from "./types.js";
 import type { ErrorCategory } from "../errors.js";
 import type { GeneratedRule } from "../strategies/types.js";
 
-export interface RunContext {
-  runId: string;
-  repoRoot: string;
-  scanPath?: string;
-  repoName: string;
-  dbPath: string;
-  postProcessMode?: "full" | "scan-only";
-  reportMode?: "full" | "suppress";
-}
+export type { RunContext } from "./run-context.js";
+import type { RunContext } from "./run-context.js";
 
 export interface PipelineStats {
   tasks: TaskId[];

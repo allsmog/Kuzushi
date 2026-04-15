@@ -1,6 +1,6 @@
 import type { TaskConfig, TaskId } from "./scanners/types.js";
 import type { EngineProvenance, ProofState, TaintPathStep } from "./scanners/types.js";
-import type { QualityGateConfig } from "./quality-gate.js";
+import type { QualityGateConfig } from "./quality-gate-types.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 import type { DiscoveredModule } from "./discovery/types.js";
 
@@ -87,20 +87,7 @@ export interface TriagePathAssessment {
   evidence: string;
 }
 
-/** Options for running a scan. */
-export interface ScanOpts {
-  severity: string[];
-  maxFindings?: number;
-  excludePatterns: string[];
-  tasks?: TaskId[];
-  fresh: boolean;
-  /** Git ref to diff against for differential review (e.g. "main", "HEAD~5"). */
-  diffBase?: string;
-  /** Injected summary of first-pass findings for agentic two-pass review mode. */
-  agenticReviewContext?: string;
-  /** Additional target directories for tasks (resolved absolute paths). */
-  scanPaths?: string[];
-}
+export type { ScanOpts } from "./scan-opts.js";
 
 /** A single step in the fine-grained evidence chain produced during triage. */
 export interface EvidenceStep {

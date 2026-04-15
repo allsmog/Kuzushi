@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, lstatSync, realpath
 import path from "node:path";
 import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
-import type { QualityGateConfig } from "./quality-gate.js";
+import type { QualityGateConfig } from "./quality-gate-types.js";
 import type { TaskConfig } from "./scanners/types.js";
 import { isRecord } from "./utils.js";
 import { normalizeTaskConfigAliases } from "./capabilities.js";

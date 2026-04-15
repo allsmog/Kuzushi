@@ -38,7 +38,8 @@
     "benchmark:freeze": "tsx benchmarks/freeze-baseline.ts",
     "benchmark:diff": "tsx benchmarks/sarif-diff.ts",
     "benchmark:regression": "tsx benchmarks/regression-check.ts",
-    "typecheck:benchmarks": "tsc -p benchmarks/tsconfig.json --noEmit"
+    "typecheck:benchmarks": "tsc -p benchmarks/tsconfig.json --noEmit",
+    "check:circular": "madge --ts-config tsconfig.json --extensions ts,tsx --circular src/"
   },
   "files": [
     "dist",
@@ -72,6 +73,7 @@
     "@types/node": "^22.13.4",
     "@types/react": "^18",
     "@vitest/coverage-v8": "^3.0.5",
+    "madge": "^8.0.0",
     "tsx": "^4.19.2",
     "vitest": "^3.0.5"
   },
