@@ -1,6 +1,6 @@
 {
   "name": "kuzushi",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "description": "Kuzushi — Agentic SAST scanner with AI triage",
   "author": "Shayaun Nejad",
   "repository": {

@@ -32,6 +32,7 @@ export function printBanner(): void {
   console.log("                           " + r("▐") + w("█") + r("▌") + " " + r("▐") + w("█") + r("▌"));
   console.log("                            " + r("▀") + w("▀") + "  " + r("▀") + w("▀"));
   console.log("");
+  console.log("");
   console.log(rb("   ██╗  ██╗██╗   ██╗███████╗██╗   ██╗███████╗██╗  ██╗██╗"));
   console.log(rb("   ██║ ██╔╝██║   ██║╚══███╔╝██║   ██║██╔════╝██║  ██║██║"));
   console.log(rb("   █████╔╝ ██║   ██║  ███╔╝ ██║   ██║███████╗███████║██║"));
