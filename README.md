@@ -175,6 +175,8 @@ kuzushi <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
 
 **Live streaming** — SSE server streams pipeline events in real-time (`--stream`). Connect with `curl`, `EventSource`, or any SSE client to watch findings appear as they're triaged.
 
+**Interactive terminal UI** — React+Ink-powered live display with pipeline progress tree, spinners, attack chain diagrams, and a trophy screen for confirmed exploits. Includes an interactive REPL during scans (pause, skip, inspect findings), a first-run setup wizard, config confirmation flow, inline code preview, and clickable file paths. Auto-detects terminal theme and falls back to plain text in non-TTY environments.
+
 **Audit logging** — optional JSONL audit trail of every agent decision for debugging, accountability, and compliance records.
 
 ## Scan Presets
