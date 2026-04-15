@@ -51,8 +51,10 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
   const [lastResult, setLastResult] = useState<CommandResult | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
+  // Guard: stdin must support raw mode for useInput to work
+  const canUseInput = active && process.stdin.isTTY === true;
+
   useInput((char, key) => {
-    if (!active) return;
 
     if (key.return && input.length > 0) {
       const cmd = parseCommand(input);
@@ -88,9 +90,9 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
     if (char && !key.ctrl && !key.meta && char.length === 1) {
       setInput((v) => v + char);
     }
-  });
+  }, { isActive: canUseInput });
 
-  if (!active) return null;
+  if (!active || !process.stdin.isTTY) return null;
 
   return (
     <Box flexDirection="column" marginTop={1}>
