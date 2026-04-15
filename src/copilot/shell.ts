@@ -86,7 +86,7 @@ async function startInkShell(
   const tools = core.registry.allTools();
 
   let alive = true;
-  const shellCtx: ShellContext = { focusedModule: null };
+  const shellCtx: ShellContext = { focusedModule: null, uiStore: store };
   const exitPromise = new Promise<void>((resolve) => {
 
     function handleExit(): void {
@@ -399,6 +399,8 @@ function clearToolActivity(
 
 interface ShellContext {
   focusedModule: string | null;
+  /** UIStore for passing to tool execution (so pipeline renders through Ink). */
+  uiStore?: import("../ui/state.js").UIStore;
 }
 
 interface LocalCommandResult {
@@ -517,7 +519,9 @@ function handleLocalCommand(
 }
 
 /**
- * Build a tool execution result — runs the tool via executeRun().
+ * Build a tool execution result — runs the tool directly through CopilotCore.
+ * Passes the UIStore so pipeline tools render through the Ink UI
+ * (PipelineIndicator, StatusFooter, ResultLine — the full scan experience).
  */
 function resolveToolExecution(
   toolName: string,
@@ -537,34 +541,38 @@ function resolveToolExecution(
     return { output: `Unknown tool: "${toolName}". Type "tools" to list available.` };
   }
 
+  const finalToolName = toolName;
+
   return {
     asyncExecute: async () => {
-      const { executeRun, formatRunOutput, parseToolArgs } = await import("./run.js");
+      const { parseToolArgs } = await import("./run.js");
       const parsedArgs = parseToolArgs(toolArgs);
       if (opts.target && !parsedArgs.target) {
         parsedArgs.target = opts.target;
       }
 
-      const bus = createBus(opts.config);
-      const dataDir = path.resolve(process.cwd(), ".kuzushi");
-
-      const result = await executeRun({
-        toolName,
-        input: parsedArgs,
-        format: "text",
-        cwd: process.cwd(),
-        target: parsedArgs.target as string | undefined,
+      // Execute through CopilotCore with UIStore — the pipeline will
+      // render through the same Ink app (mode transitions to "running",
+      // then back to "shell" when done).
+      const result = await core.executeTool(finalToolName, parsedArgs, {
+        cwd: opts.target ? path.resolve(opts.target) : process.cwd(),
+        target: (parsedArgs.target as string) ?? opts.target,
         workspaceId: opts.workspace,
-        runtime: opts.runtime,
-        bus,
-        config: opts.config,
-        dataDir,
-        modules: opts.modules,
+        uiStore: ctx.uiStore,
       });
 
-      await bus.close();
-      const output = formatRunOutput(result, "text");
-      return output || (result.ok ? "Done." : `Tool failed (exit code ${result.exitCode}).`);
+      // If the UIStore mode changed during execution (e.g. to "summary"),
+      // transition back to shell mode.
+      if (ctx.uiStore) {
+        const currentMode = ctx.uiStore.getState().mode;
+        if (currentMode !== "shell") {
+          // Brief pause so user can see summary, then return to shell
+          await new Promise((r) => setTimeout(r, 500));
+          ctx.uiStore.setMode("shell");
+        }
+      }
+
+      return result.output;
     },
   };
 }
@@ -661,11 +669,17 @@ export function formatWelcome(core: CopilotCore, opts: ShellOptions): string {
   const toolCount = core.registry.allTools().length;
 
   const lines = [
-    `  modules: ${modules.map((m) => m.id).join(", ") || "none"}  tools: ${toolCount}`,
+    "",
+    "  Kuzushi",
+    "  security-native AI operating environment",
+    "",
+    `  Modules:  ${modules.map((m) => m.id).join(", ") || "none"}`,
+    `  Tools:    ${toolCount} available`,
   ];
-  if (opts.target) lines.push(`  target:  ${opts.target}`);
-  if (opts.workspace) lines.push(`  workspace: ${opts.workspace}`);
+  if (opts.target) lines.push(`  Target:   ${opts.target}`);
+  if (opts.workspace) lines.push(`  Workspace: ${opts.workspace}`);
   lines.push("");
   lines.push('  Type "help" for commands, or just describe what you need.');
+  lines.push("");
   return lines.join("\n");
 }

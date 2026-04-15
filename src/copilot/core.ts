@@ -149,6 +149,7 @@ export class CopilotCore {
       workspaceId: ctxOverrides?.workspaceId,
       target: ctxOverrides?.target,
       signal: ctxOverrides?.signal,
+      uiStore: ctxOverrides?.uiStore,
     };
 
     return tool.execute(input, ctx);
