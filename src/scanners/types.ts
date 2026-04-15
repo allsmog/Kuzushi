@@ -1,4 +1,3 @@
-import type { ScanOpts } from "../types.js";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 
 export type TaskId = string;
@@ -92,13 +91,13 @@ export interface ScanContext {
   bus?: import("../bus/types.js").MessageBus;
   taskId?: string;
   runId?: string;
-  runContext?: import("../bus/events.js").RunContext;
+  runContext?: import("../bus/run-context.js").RunContext;
 }
 
 export interface ScannerPlugin {
   readonly id: ScannerId;
   readonly displayName: string;
-  scan(repoRoot: string, opts: ScanOpts, config: ScannerConfig, runtime?: AgentRuntime, scanContext?: ScanContext): Promise<Finding[]>;
+  scan(repoRoot: string, opts: import("../scan-opts.js").ScanOpts, config: ScannerConfig, runtime?: AgentRuntime, scanContext?: ScanContext): Promise<Finding[]>;
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig;
   init?(config: ScannerConfig): Promise<void>;
 }
