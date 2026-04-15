@@ -20,13 +20,27 @@ export interface ReplContext {
 }
 
 export function createReplContext(store: UIStore): ReplContext {
-  return {
+  const ctx: ReplContext = {
     store,
     skippedFingerprints: new Set(),
     suppressedRules: new Set(),
     focusPath: null,
     paused: false,
   };
+  // Expose REPL state on the store so the orchestrator can read it
+  syncReplState(ctx);
+  return ctx;
+}
+
+function syncReplState(ctx: ReplContext): void {
+  ctx.store.update({
+    replState: {
+      skippedFingerprints: ctx.skippedFingerprints,
+      suppressedRules: ctx.suppressedRules,
+      focusPath: ctx.focusPath,
+      paused: ctx.paused,
+    },
+  });
 }
 
 export function handleReplCommand(ctx: ReplContext, cmd: ReplCommand): CommandResult {
@@ -37,6 +51,7 @@ export function handleReplCommand(ctx: ReplContext, cmd: ReplCommand): CommandRe
       }
       const fp = cmd.args[0]!;
       ctx.skippedFingerprints.add(fp);
+      syncReplState(ctx);
       return { message: `Skipping finding ${fp.slice(0, 12)}...`, type: "success" };
     }
 
@@ -46,6 +61,7 @@ export function handleReplCommand(ctx: ReplContext, cmd: ReplCommand): CommandRe
       }
       const rule = cmd.args[0]!;
       ctx.suppressedRules.add(rule);
+      syncReplState(ctx);
       return { message: `Suppressing rule: ${rule}`, type: "success" };
     }
 
@@ -53,21 +69,25 @@ export function handleReplCommand(ctx: ReplContext, cmd: ReplCommand): CommandRe
       if (cmd.args.length === 0) {
         if (ctx.focusPath) {
           ctx.focusPath = null;
+          syncReplState(ctx);
           return { message: "Focus cleared", type: "success" };
         }
         return { message: "Usage: /focus <path> (or /focus to clear)", type: "error" };
       }
       ctx.focusPath = cmd.args[0]!;
+      syncReplState(ctx);
       return { message: `Focusing on: ${ctx.focusPath}`, type: "success" };
     }
 
     case "pause": {
       ctx.paused = true;
+      syncReplState(ctx);
       return { message: "Pausing after current finding...", type: "success" };
     }
 
     case "resume": {
       ctx.paused = false;
+      syncReplState(ctx);
       return { message: "Resuming triage", type: "success" };
     }
 
