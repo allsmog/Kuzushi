@@ -43,6 +43,10 @@ export interface CopilotCoreOptions {
   modules?: string[];
   /** Whether to load the built-in SAST module. Defaults to true. */
   loadCoreSast?: boolean;
+  /** Optional governance enforcer for scope/budget/tier checks. */
+  enforcer?: import("../governance/enforcer.js").GovernanceEnforcer;
+  /** Optional audit trail for logging tool executions. */
+  auditTrail?: import("../governance/audit.js").AuditTrail;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,19 +145,56 @@ export class CopilotCore {
 
     const { tool } = resolved;
 
+    // Governance enforcement — check scope, budget, tier before execution
+    const inputRecord = (input && typeof input === "object" && !Array.isArray(input))
+      ? input as Record<string, unknown>
+      : {};
+    const target = ctxOverrides?.target ?? (inputRecord.target as string | undefined);
+
+    if (this.opts.enforcer) {
+      const check = this.opts.enforcer.checkExecution(qualifiedName, target);
+      if (!check.allowed) {
+        if (this.opts.auditTrail) {
+          this.opts.auditTrail.record(
+            this.opts.enforcer.buildAuditEntry(qualifiedName, inputRecord, check, {
+              workspaceId: ctxOverrides?.workspaceId,
+            }),
+          );
+        }
+        return { ok: false, output: `Blocked by governance: ${check.reason}` };
+      }
+    }
+
     const ctx: ToolExecutionContext = {
       cwd: ctxOverrides?.cwd ?? this.opts.dataDir,
       runtime: ctxOverrides?.runtime ?? this.opts.runtime,
       bus: ctxOverrides?.bus ?? this.opts.bus,
       config: ctxOverrides?.config ?? this.opts.config,
       workspaceId: ctxOverrides?.workspaceId,
-      target: ctxOverrides?.target,
+      target,
       signal: ctxOverrides?.signal,
       uiStore: ctxOverrides?.uiStore,
       seedTaskOutputs: ctxOverrides?.seedTaskOutputs,
     };
 
-    return tool.execute(input, ctx);
+    const result = await tool.execute(input, ctx);
+
+    // Post-execution: record audit + track cost
+    if (this.opts.enforcer && result.costUsd) {
+      this.opts.enforcer.addCost(result.costUsd);
+    }
+    if (this.opts.auditTrail) {
+      this.opts.auditTrail.record(
+        (this.opts.enforcer ?? new (await import("../governance/enforcer.js")).GovernanceEnforcer(
+          (await import("../governance/types.js")).defaultScopePolicy(),
+        )).buildAuditEntry(qualifiedName, inputRecord, { allowed: true }, {
+          costUsd: result.costUsd,
+          workspaceId: ctxOverrides?.workspaceId,
+        }),
+      );
+    }
+
+    return result;
   }
 
   // -------------------------------------------------------------------------
