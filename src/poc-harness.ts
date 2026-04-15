@@ -305,8 +305,6 @@ export function buildPocHarnessPrompt(
 
 export function parsePocHarnessOutput(raw: unknown, fingerprint: string): PocHarnessResult {
   if (isRecord(raw)) {
-    // Validate raw LLM output against schema; log warnings but proceed
-    // with lenient parsing to handle partial/non-conforming outputs gracefully.
     const validation = RawPocHarnessOutputSchema.safeParse(raw);
     if (!validation.success) {
       const errors = formatZodErrors(validation.error.issues);

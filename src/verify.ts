@@ -196,8 +196,6 @@ export function buildVerificationPrompt(
 
 export function parseVerificationOutput(raw: unknown, fingerprint: string): VerificationResult {
   if (isRecord(raw)) {
-    // Validate raw LLM output against schema; log warnings but proceed
-    // with lenient parsing to handle partial/non-conforming outputs gracefully.
     const validation = RawVerificationOutputSchema.safeParse(raw);
     if (!validation.success) {
       const errors = formatZodErrors(validation.error.issues);
@@ -232,7 +230,6 @@ function parseVerificationResponse(text: string, fingerprint: string): Verificat
     const jsonStr = extractJson(text);
     const parsed = JSON.parse(jsonStr);
 
-    // Validate parsed JSON against schema; log warnings but proceed leniently
     const validation = RawVerificationOutputSchema.safeParse(parsed);
     if (!validation.success) {
       const errors = formatZodErrors(validation.error.issues);

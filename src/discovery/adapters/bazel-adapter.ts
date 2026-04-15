@@ -88,9 +88,6 @@ export class BazelAdapter implements DiscoveryAdapter {
       });
     }
 
-    // Collapse dense subtrees: group packages by their depth-1 prefix,
-    // and if any prefix has too many packages, replace them with one
-    // module at the prefix root.
     const collapsed = collapseDenseSubtrees(packages);
 
     const childPaths: string[] = [];

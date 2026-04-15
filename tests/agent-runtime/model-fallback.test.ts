@@ -48,7 +48,6 @@ describe("ModelFallbackManager", () => {
     manager.recordFailure("primary", "auth");
     expect(manager.selectModel(chain)).toBe("fallback1");
 
-    // Wait for cooldown
     return new Promise<void>((resolve) => {
       setTimeout(() => {
         expect(manager.selectModel(chain)).toBe("primary");
@@ -69,11 +68,8 @@ describe("ModelFallbackManager", () => {
 
   it("falls through chain when all fallbacks are in cooldown", () => {
     const chain = ModelFallbackManager.buildChain("primary", ["fallback1", "fallback2"]);
-    // Put primary in cooldown
     for (let i = 0; i < 3; i++) manager.recordFailure("primary", "auth");
-    // Put fallback1 in cooldown
     for (let i = 0; i < 3; i++) manager.recordFailure("fallback1", "auth");
-    // fallback2 should be selected
     expect(manager.selectModel(chain)).toBe("fallback2");
   });
 
