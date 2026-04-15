@@ -86,6 +86,7 @@ async function startInkShell(
   const tools = core.registry.allTools();
 
   let alive = true;
+  const shellCtx: ShellContext = { focusedModule: null };
   const exitPromise = new Promise<void>((resolve) => {
 
     function handleExit(): void {
@@ -97,14 +98,33 @@ async function startInkShell(
       if (!alive) return;
 
       // Local commands — handled without the LLM
-      const localResult = handleLocalCommand(input, core, opts);
+      const localResult = handleLocalCommand(input, core, opts, shellCtx);
       if (localResult !== undefined) {
-        if (localResult === "exit") {
+        if (localResult.exit) {
           handleExit();
           return;
         }
-        if (localResult) {
-          appendToHistory(store, { type: "output", text: localResult, timestamp: Date.now() });
+        if (localResult.setFocus !== undefined) {
+          shellCtx.focusedModule = localResult.setFocus;
+          // Update ShellState so the Ink component can show focused prompt
+          const currentShell = store.getState().shell;
+          if (currentShell) {
+            store.update({ shell: { ...currentShell, focusedModule: localResult.setFocus } });
+          }
+        }
+        if (localResult.asyncExecute) {
+          // Tool execution — run async, append result when done
+          localResult.asyncExecute().then((output) => {
+            appendToHistory(store, { type: "output", text: output, timestamp: Date.now() });
+            setProcessing(store, false);
+          }).catch((err) => {
+            appendToHistory(store, { type: "error", text: err instanceof Error ? err.message : String(err), timestamp: Date.now() });
+            setProcessing(store, false);
+          });
+          return;
+        }
+        if (localResult.output) {
+          appendToHistory(store, { type: "output", text: localResult.output, timestamp: Date.now() });
         }
         setProcessing(store, false);
         return;
@@ -234,7 +254,13 @@ async function startReadlineShell(
   if (opts.target) console.error(`target: ${opts.target}`);
 
   const rl = createInterface({ input: process.stdin, output: process.stderr });
-  rl.setPrompt("kuzushi> ");
+  const rlCtx: ShellContext = { focusedModule: null };
+
+  const updatePrompt = () => {
+    const prefix = rlCtx.focusedModule ? `kuzushi/${rlCtx.focusedModule}> ` : "kuzushi> ";
+    rl.setPrompt(prefix);
+  };
+  updatePrompt();
   rl.prompt();
 
   for await (const line of rl) {
@@ -242,10 +268,24 @@ async function startReadlineShell(
     if (!input) { rl.prompt(); continue; }
 
     // Local commands first
-    const localResult = handleLocalCommand(input, core, opts);
-    if (localResult === "exit") break;
+    const localResult = handleLocalCommand(input, core, opts, rlCtx);
+    if (localResult?.exit) break;
     if (localResult !== undefined) {
-      if (localResult) console.log(localResult);
+      if (localResult.setFocus !== undefined) {
+        rlCtx.focusedModule = localResult.setFocus;
+        updatePrompt();
+      }
+      if (localResult.asyncExecute) {
+        try {
+          const output = await localResult.asyncExecute();
+          console.log(output);
+        } catch (err) {
+          console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        rl.prompt();
+        continue;
+      }
+      if (localResult.output) console.log(localResult.output);
       rl.prompt();
       continue;
     }
@@ -357,45 +397,58 @@ function clearToolActivity(
 // Local commands — handled without the LLM
 // ---------------------------------------------------------------------------
 
+interface ShellContext {
+  focusedModule: string | null;
+}
+
+interface LocalCommandResult {
+  output?: string;
+  exit?: boolean;
+  /** Update focusedModule. */
+  setFocus?: string | null;
+  /** Async tool execution needed — returns a promise of output. */
+  asyncExecute?: () => Promise<string>;
+}
+
 /**
  * Handle local commands. Returns:
- *   - "exit" to exit the shell
- *   - a string to display as output
+ *   - a LocalCommandResult if handled
  *   - undefined if the input is NOT a local command (should go to AgentSession)
  */
 function handleLocalCommand(
   input: string,
   core: CopilotCore,
   opts: ShellOptions,
-): string | "exit" | undefined {
+  ctx: ShellContext,
+): LocalCommandResult | undefined {
   const trimmed = input.trim();
   const lower = trimmed.toLowerCase();
   const [cmd, ...args] = trimmed.split(/\s+/);
 
   // Exit
   if (lower === "exit" || lower === "quit" || lower === "q") {
-    return "exit";
+    return { exit: true };
   }
 
   // Help
   if (lower === "help" || lower === "/help" || lower === "?") {
-    return formatHelp(core, opts);
+    return { output: formatHelp(core, opts) };
   }
 
   // Modules
   if (lower === "modules" || lower === "/modules" ||
       (cmd.toLowerCase() === "module" && (!args[0] || args[0] === "list"))) {
-    return formatModuleList(core);
+    return { output: formatModuleList(core) };
   }
 
   // Module info
   if (cmd.toLowerCase() === "module" && args[0] === "info" && args[1]) {
-    return formatModuleInfo(core, args[1]);
+    return { output: formatModuleInfo(core, args[1]) };
   }
 
   // Tools
   if (lower === "tools" || lower === "/tools") {
-    return formatTools(core);
+    return { output: formatTools(core) };
   }
 
   // Target
@@ -403,13 +456,105 @@ function handleLocalCommand(
     const newTarget = args[0];
     if (newTarget) {
       opts.target = newTarget;
-      return `Target set to: ${newTarget}`;
+      return { output: `Target set to: ${newTarget}` };
     }
-    return opts.target ? `Current target: ${opts.target}` : "No target set. Usage: target <path>";
+    return { output: opts.target ? `Current target: ${opts.target}` : "No target set. Usage: target <path>" };
+  }
+
+  // Use — focus on a module
+  if (cmd.toLowerCase() === "use") {
+    const moduleId = args[0];
+    if (!moduleId) return { output: "Usage: use <module>" };
+    if (!core.hasModule(moduleId)) {
+      return { output: `Unknown module: "${moduleId}". Type "modules" to list available.` };
+    }
+    const mod = core.registry.get(moduleId);
+    const toolNames = mod.tools.map((t) => t.name).join(", ");
+    return { setFocus: moduleId, output: `Focused on ${mod.displayName}. Tools: ${toolNames}` };
+  }
+
+  // Back — unfocus module
+  if (lower === "back") {
+    if (ctx.focusedModule) {
+      return { setFocus: null, output: "Returned to top level." };
+    }
+    return { output: "Already at top level." };
+  }
+
+  // Run — explicit tool execution: "run sast:scan ." or "run scan ." (when focused)
+  if (cmd.toLowerCase() === "run" && args.length > 0) {
+    return resolveToolExecution(args[0], args.slice(1), core, opts, ctx);
+  }
+
+  // Direct tool invocation — "sast:scan ." (qualified name with colon)
+  if (cmd.includes(":")) {
+    return resolveToolExecution(cmd, args, core, opts, ctx);
+  }
+
+  // Focused shorthand — "scan ." when focused on sast → "sast:scan ."
+  if (ctx.focusedModule) {
+    const qualifiedName = `${ctx.focusedModule}:${cmd}`;
+    const resolved = core.registry.resolveTool(qualifiedName);
+    if (resolved) {
+      return resolveToolExecution(qualifiedName, args, core, opts, ctx);
+    }
   }
 
   // Not a local command — pass to AgentSession
   return undefined;
+}
+
+/**
+ * Build a tool execution result — runs the tool via executeRun().
+ */
+function resolveToolExecution(
+  toolName: string,
+  toolArgs: string[],
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+): LocalCommandResult {
+  // Resolve shorthand when focused
+  if (!toolName.includes(":") && ctx.focusedModule) {
+    toolName = `${ctx.focusedModule}:${toolName}`;
+  }
+
+  // Check tool exists
+  const resolved = core.registry.resolveTool(toolName);
+  if (!resolved) {
+    return { output: `Unknown tool: "${toolName}". Type "tools" to list available.` };
+  }
+
+  return {
+    asyncExecute: async () => {
+      const { executeRun, formatRunOutput, parseToolArgs } = await import("./run.js");
+      const parsedArgs = parseToolArgs(toolArgs);
+      if (opts.target && !parsedArgs.target) {
+        parsedArgs.target = opts.target;
+      }
+
+      const bus = createBus(opts.config);
+      const dataDir = path.resolve(process.cwd(), ".kuzushi");
+
+      const result = await executeRun({
+        toolName,
+        input: parsedArgs,
+        format: "text",
+        cwd: process.cwd(),
+        target: parsedArgs.target as string | undefined,
+        workspaceId: opts.workspace,
+        runtime: opts.runtime,
+        bus,
+        config: opts.config,
+        dataDir,
+        modules: opts.modules,
+      });
+
+      await bus.close();
+      const output = formatRunOutput(result, "text");
+      return output || (result.ok ? "Done." : `Tool failed (exit code ${result.exitCode}).`);
+    },
+  };
 }
 
 function formatHelp(core: CopilotCore, opts: ShellOptions): string {
@@ -429,15 +574,21 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
     "    modules             List loaded modules",
     "    module info <id>    Detailed module info",
     "    tools               List all available tools",
+    "    use <module>        Focus on a module (shorthand commands)",
+    "    back                Return to top level",
+    "    run <tool> [args]   Execute a tool (e.g. run sast:scan .)",
     "    target <path>       Set/show the active target",
     "    exit                Exit the shell",
+    "",
+    "  Tool shortcuts:",
+    "    sast:scan .         Direct tool invocation",
+    "    use sast; scan .    Shorthand when focused",
     "",
     "  Or just type naturally — the agent handles the rest.",
     "  Examples:",
     "    > What's the attack surface of this repo?",
     "    > Hunt for SSRF chains in ./src",
     "    > Are we PCI DSS compliant?",
-    "    > Generate a patch for finding abc123",
     "",
   ].filter(Boolean);
 
