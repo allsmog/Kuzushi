@@ -53,6 +53,15 @@ export function App({ store }: AppProps): React.ReactElement {
     : state.results;
   const showCompactHeader = state.mode !== "preflight" && state.mode !== "shell" && state.repoName.length > 0;
 
+  // Shell mode renders only the CopilotShell — no scan banner/header/pipeline chrome
+  if (state.mode === "shell") {
+    return (
+      <Box flexDirection="column">
+        {state.shell && <CopilotShell store={store} />}
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column">
       <Banner />
@@ -167,9 +176,6 @@ export function App({ store }: AppProps): React.ReactElement {
         />
       )}
 
-      {state.mode === "shell" && state.shell && (
-        <CopilotShell store={store} />
-      )}
     </Box>
   );
 }
