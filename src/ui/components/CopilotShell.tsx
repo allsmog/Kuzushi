@@ -1,57 +1,44 @@
 /**
- * Ink component for the interactive copilot shell.
+ * Ink component for the copilot shell — renders like Claude Code.
  *
- * Renders:
- * - Shell header (modules, tools, target)
- * - Scrollable conversation history
- * - Text input prompt with module-aware prefix
- * - Processing indicator when a command is running
+ * Clean conversation stream: user messages, agent responses, inline
+ * tool activity. No REPL chrome, no command menus. Just a conversation.
  */
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput, useApp, Static } from "ink";
 import chalk from "chalk";
 import { useUIState } from "../hooks.js";
-import type { UIStore, ShellState, ShellHistoryEntry } from "../state.js";
+import { Spinner } from "./Spinner.js";
+import type { UIStore, ShellHistoryEntry } from "../state.js";
 
 interface CopilotShellProps {
   store: UIStore;
 }
-
-const CATEGORY_COLORS: Record<string, (s: string) => string> = {
-  offense: chalk.red,
-  defense: chalk.blue,
-  governance: chalk.yellow,
-  intel: chalk.green,
-};
 
 export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const state = useUIState(store);
   const shell = state.shell;
   const { exit } = useApp();
   const [input, setInput] = useState("");
-  const [cursorVisible, setCursorVisible] = useState(true);
-
-  // Cursor blink
-  useEffect(() => {
-    const id = setInterval(() => setCursorVisible((v) => !v), 530);
-    return () => clearInterval(id);
-  }, []);
 
   useInput((char, key) => {
     if (!shell || shell.processing) return;
 
     if (key.return && input.length > 0) {
-      // Append input to history
-      store.update({
-        shell: {
-          ...shell,
-          history: [
-            ...shell.history,
-            { type: "input", text: input, timestamp: Date.now() },
-          ],
-          processing: true,
-        },
-      });
+      // Append user input to history and mark processing
+      const currentShell = store.getState().shell;
+      if (currentShell) {
+        store.update({
+          shell: {
+            ...currentShell,
+            history: [
+              ...currentShell.history,
+              { type: "input", text: input, timestamp: Date.now() },
+            ],
+            processing: true,
+          },
+        });
+      }
       shell.onInput?.(input);
       setInput("");
       return;
@@ -62,66 +49,63 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       return;
     }
 
-    // Ctrl+C or Ctrl+D
     if ((key.ctrl && char === "c") || (key.ctrl && char === "d")) {
       shell.onExit?.();
       exit();
       return;
     }
 
-    // Escape clears input
     if (key.escape) {
       setInput("");
       return;
     }
 
-    // Regular character
-    if (char && !key.ctrl && !key.meta) {
+    if (char && !key.ctrl && !key.meta && !key.tab) {
       setInput((v) => v + char);
     }
   }, { isActive: process.stdin.isTTY === true && !!shell && !shell.processing });
 
-  if (!shell) return <Text>Loading shell...</Text>;
+  if (!shell) return <Text>Loading...</Text>;
 
-  const prompt = shell.focusedModule
-    ? `${chalk.white("kuzushi")}${chalk.dim("/")}${chalk.cyan(shell.focusedModule)}${chalk.white("> ")}`
-    : `${chalk.white("kuzushi> ")}`;
-
-  // Show last N history entries
-  const visibleHistory = shell.history.slice(-20);
+  // Split history into static (already rendered) and live (recent)
+  const staticHistory = shell.history.slice(0, -6);
+  const liveHistory = shell.history.length > 6
+    ? shell.history.slice(-6)
+    : shell.history;
 
   return (
-    <Box flexDirection="column" paddingLeft={1}>
-      {/* Header */}
-      <Box flexDirection="column" marginBottom={1}>
-        <Text>
-          {chalk.white.bold("kuzushi shell")}
-          {chalk.dim("  security-native AI operating environment")}
-        </Text>
-        <Text>
-          {chalk.dim("modules: ")}
-          {shell.modules.map((id, i) => {
-            // Try to color by category — default to white
-            const colorFn = CATEGORY_COLORS.offense; // Will be refined when we have category info
-            return (i > 0 ? chalk.dim(", ") : "") + colorFn(id);
-          }).join("")}
-          {chalk.dim("  tools: ")}
-          {chalk.white(`${shell.tools.length}`)}
-          {shell.target ? `${chalk.dim("  target: ")}${chalk.white(shell.target)}` : ""}
-          {shell.workspace ? `${chalk.dim("  workspace: ")}${chalk.white(shell.workspace)}` : ""}
-        </Text>
-        <Text>{chalk.dim('Type "help" for commands, or describe what you need.')}</Text>
+    <Box flexDirection="column">
+      {/* Static region — rendered once, never re-rendered */}
+      <Static items={staticHistory.map((entry, i) => ({ ...entry, _key: `h-${i}` }))}>
+        {(item) => (
+          <HistoryEntry key={(item as { _key: string })._key} entry={item as ShellHistoryEntry} />
+        )}
+      </Static>
+
+      {/* Live region — recent entries + current activity */}
+      <Box flexDirection="column">
+        {liveHistory.map((entry, i) => (
+          <HistoryEntry key={`live-${i}`} entry={entry} />
+        ))}
       </Box>
 
-      {/* History */}
-      {visibleHistory.map((entry, i) => (
-        <HistoryLine key={i} entry={entry} />
-      ))}
+      {/* Tool activity indicator */}
+      {shell.processing && shell.currentTool && (
+        <Box paddingLeft={2}>
+          <Spinner />
+          <Text>
+            {" "}{chalk.dim(shell.currentTool.name)}
+            {shell.currentTool.elapsedSeconds > 0 &&
+              chalk.dim(` ${shell.currentTool.elapsedSeconds.toFixed(0)}s`)}
+          </Text>
+        </Box>
+      )}
 
-      {/* Processing indicator */}
-      {shell.processing && (
-        <Box>
-          <Text>{chalk.cyan("  thinking...")}</Text>
+      {/* Thinking indicator (no specific tool) */}
+      {shell.processing && !shell.currentTool && (
+        <Box paddingLeft={2}>
+          <Spinner />
+          <Text>{" "}{chalk.dim("thinking...")}</Text>
         </Box>
       )}
 
@@ -129,7 +113,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       {!shell.processing && (
         <Box>
           <Text>
-            {prompt}{input}{cursorVisible ? chalk.white("█") : " "}
+            {chalk.bold.white("> ")}{input}{chalk.dim("█")}
           </Text>
         </Box>
       )}
@@ -137,15 +121,17 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   );
 }
 
-function HistoryLine({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
+function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
   switch (entry.type) {
     case "input":
       return (
-        <Text>{chalk.dim("you> ")}{chalk.white(entry.text)}</Text>
+        <Box>
+          <Text>{chalk.bold.white("> ")}{entry.text}</Text>
+        </Box>
       );
     case "output":
       return (
-        <Box flexDirection="column" paddingLeft={2}>
+        <Box flexDirection="column" paddingLeft={0}>
           {entry.text.split("\n").map((line, i) => (
             <Text key={i}>{line}</Text>
           ))}
@@ -153,7 +139,9 @@ function HistoryLine({ entry }: { entry: ShellHistoryEntry }): React.ReactElemen
       );
     case "error":
       return (
-        <Text>{chalk.red(`  Error: ${entry.text}`)}</Text>
+        <Box>
+          <Text>{chalk.red(entry.text)}</Text>
+        </Box>
       );
   }
 }

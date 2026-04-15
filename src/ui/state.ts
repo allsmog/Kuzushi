@@ -270,8 +270,10 @@ export interface ShellState {
   workspace: string | null;
   /** Conversation history (rendered in the scroll region). */
   history: ShellHistoryEntry[];
-  /** Whether a command is currently executing. */
+  /** Whether the agent is currently processing a query. */
   processing: boolean;
+  /** Currently executing tool (shown as inline activity). */
+  currentTool?: { name: string; elapsedSeconds: number };
   /** Callback to handle user input from the Ink component. */
   onInput?: (input: string) => void;
   /** Callback to exit the shell. */
