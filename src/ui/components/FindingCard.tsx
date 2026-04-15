@@ -17,6 +17,7 @@ import { icons } from "../icons.js";
 import { colorVerdict, badge, severityLabel } from "../format.js";
 import { fileLink } from "../hyperlink.js";
 import { renderMarkdownInline } from "../markdown.js";
+import { CodePreview } from "./CodePreview.js";
 import type { ActionableFinding } from "../state.js";
 
 interface FindingCardProps {
@@ -78,6 +79,7 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     <Box flexDirection="column">
       <Text>{"  "}{verdict} {conf}  {severity} {scanner}{verificationBadge}</Text>
       <Text>{"    "}{location}</Text>
+      <CodePreview filePath={finding.filePath} line={finding.startLine} context={2} />
       <Text>{"    "}{chalk.dim(finding.ruleId)}</Text>
       <Text>{"    "}{renderMarkdownInline(finding.rationale.slice(0, 120))}{finding.rationale.length > 120 ? "..." : ""}</Text>
       {details.length > 0 && details.map((detail, i) => {
