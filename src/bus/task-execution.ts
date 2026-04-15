@@ -62,7 +62,7 @@ export async function executeScannerPlugin(
     await plugin.init(config);
   }
 
-  const findings = await plugin.scan(repoRoot, input, config, runtime);
+  const findings = await plugin.scan(repoRoot, input, config, runtime, undefined);
 
   return {
     findings,

@@ -85,10 +85,18 @@ export interface TriageAgentConfig {
   allowedTools?: AllowedTriageTool[];
 }
 
+/** Optional context passed to scanner plugins for bus integration. */
+export interface ScanContext {
+  bus?: import("../bus/types.js").MessageBus;
+  taskId?: string;
+  runId?: string;
+  runContext?: import("../bus/events.js").RunContext;
+}
+
 export interface ScannerPlugin {
   readonly id: ScannerId;
   readonly displayName: string;
-  scan(repoRoot: string, opts: ScanOpts, config: ScannerConfig, runtime?: AgentRuntime): Promise<Finding[]>;
+  scan(repoRoot: string, opts: ScanOpts, config: ScannerConfig, runtime?: AgentRuntime, scanContext?: ScanContext): Promise<Finding[]>;
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig;
   init?(config: ScannerConfig): Promise<void>;
 }

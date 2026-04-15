@@ -15,7 +15,7 @@ import {
   boxFooter,
   terminalCardWidth,
 } from "./format.js";
-import type { UIStore, Phase, ResultLine, SummaryData } from "./state.js";
+import type { UIStore, Phase, ResultLine, SummaryData, AgentActivityLine } from "./state.js";
 
 /**
  * Register a plain-text renderer that subscribes to store changes
@@ -30,6 +30,7 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
   let bannerPrinted = false;
   let startBannerPrinted = false;
   const taskState = new Map<string, { status: string; findingCount: number; detail?: string }>();
+  const scanActivityPrinted = new Map<string, number>();
 
   const unsubscribe = store.subscribe(() => {
     const state = store.getState();
@@ -76,8 +77,18 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
           detail: task.detail,
         };
         if (!previous || previous.status !== current.status || previous.findingCount !== current.findingCount || previous.detail !== current.detail) {
-          printScanTaskLine(task.label, task.status, current.findingCount, task.detail, task.elapsedMs);
+          printScanTaskLine(task.label, task.status, current.findingCount, task.detail, task.elapsedMs, task.lastError, task.retryCount);
           taskState.set(task.id, current);
+        }
+
+        // Print new scan activity lines (curated tool calls)
+        const lines = task.activityLines ?? [];
+        const prevCount = scanActivityPrinted.get(task.id) ?? 0;
+        if (lines.length > prevCount) {
+          for (const line of lines.slice(prevCount)) {
+            printScanActivityLine(task.id, line);
+          }
+          scanActivityPrinted.set(task.id, lines.length);
         }
       }
     }
@@ -149,21 +160,34 @@ function printScanTaskLine(
   findingCount: number,
   detail?: string,
   elapsedMs?: number,
+  lastError?: string,
+  retryCount?: number,
 ): void {
   const findings = findingCount > 0 ? ` ${chalk.dim(`(${findingCount} finding${findingCount === 1 ? "" : "s"})`)}` : "";
   const suffix = detail ? ` ${chalk.dim(detail)}` : "";
   const elapsed = elapsedMs != null ? ` ${chalk.dim(formatDuration(elapsedMs))}` : "";
+  const retryTag = retryCount && retryCount > 0 ? chalk.yellow(` (retry #${retryCount})`) : "";
 
   if (status === "done") {
     console.log(`  ${chalk.dim(icons.complete)} ${taskId}${findings}${elapsed}${suffix}`);
     return;
   }
   if (status === "error") {
-    console.log(`  ${chalk.red(icons.error)} ${taskId}${suffix}`);
+    const errorDetail = lastError ? ` ${chalk.red(lastError.slice(0, 80))}` : suffix;
+    console.log(`  ${chalk.red(icons.error)} ${taskId}${errorDetail}${retryTag}  ${chalk.dim("continuing with remaining tasks")}`);
     return;
   }
   if (status === "active") {
-    console.log(`  ${chalk.yellow(icons.active)} ${taskId}${findings}${suffix}`);
+    console.log(`  ${chalk.yellow(icons.active)} ${taskId}${findings}${suffix}${retryTag}`);
+  }
+}
+
+function printScanActivityLine(taskId: string, line: AgentActivityLine): void {
+  if (line.kind === "tool-start") {
+    const detail = line.detail ?? line.toolName ?? "tool";
+    console.log(`    ${icons.arrow} [${taskId}] ${detail}`);
+  } else if (line.kind === "tool-complete" && line.detail) {
+    console.log(`    ${chalk.green(icons.success)} [${taskId}] ${line.detail.slice(0, 120)}`);
   }
 }
 

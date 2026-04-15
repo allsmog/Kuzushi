@@ -26,6 +26,7 @@ export interface TaskContext {
   repoRoot: string;
   scanPath?: string;
   repoName: string;
+  dbPath?: string;
   config: KuzushiConfig;
   runtime: AgentRuntime;
   bus: MessageBus;

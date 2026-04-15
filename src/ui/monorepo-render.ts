@@ -43,7 +43,8 @@ export async function createMonorepoRenderer(
         } else if (update.status === "error") {
           console.log(`  ✗ ${mod.name}  ${update.detail ?? "error"}`);
         } else if (update.status === "scanning" || update.status === "triaging") {
-          console.log(`  ● ${mod.name}  ${update.detail ?? update.status}...`);
+          const activity = update.activityDetail ? `  ${update.activityDetail}` : "";
+          console.log(`  ● ${mod.name}  ${update.detail ?? update.status}...${activity}`);
         }
       },
       cleanup() {},

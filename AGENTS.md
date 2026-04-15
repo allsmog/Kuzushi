@@ -90,6 +90,23 @@
 - Never commit API keys or `ANTHROPIC_API_KEY` values.
 - Do not commit findings DB files (`<repo>/.kuzushi/findings.sqlite3`).
 
+## Terminal UI (Ink)
+
+- **All UI must go through the Ink shell.** Never use raw `readline`, `process.stdout.write`, or `console.log` for interactive terminal output. The Ink React app (`src/ui/App.tsx`) owns the terminal.
+- UI state lives in `UIStore` (`src/ui/state.ts`). Components subscribe via `useUIState(store)`.
+- UI modes: `"preflight"`, `"running"`, `"summary"`, `"review"`, `"done"`, `"shell"`. Each mode renders a different component tree in `App.tsx`.
+- The copilot shell (`"shell"` mode) is rendered by `src/ui/components/CopilotShell.tsx`. Command logic lives in `src/copilot/shell.ts` — keep React components pure (display only).
+- Non-TTY environments fall back to `src/ui/plain-renderer.ts` (subscribe-based console.log).
+- New UI features: add state to `UIState`, create a component in `src/ui/components/`, wire it into `App.tsx` conditionally on `state.mode` or `state.phase`.
+
+## Copilot Module System
+
+- `CopilotModule` (`src/modules/types.ts`) is the pluggable capability unit. Each module exposes tools + optional tasks + knowledge.
+- `ModuleRegistry` (`src/modules/registry.ts`) manages module lifecycle. Tools are namespaced as `module:action`.
+- `CopilotCore` (`src/copilot/core.ts`) coordinates modules, dispatches tools, assembles agent context.
+- The built-in `sast` module (`src/modules/core-sast.ts`) wraps the existing 40+ task pipeline.
+- Three execution modes share the same core: pipeline (`kuzushi scan`), shell (`kuzushi` default), run (`kuzushi run`).
+
 ## Agent-Specific Notes
 
 - Verify behavior in code; do not guess.

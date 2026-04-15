@@ -65,7 +65,7 @@ function collectRepeatedOption(value: string, previous: string[] = []): string[]
 
 program
   .name("kuzushi")
-  .description("Kuzushi — Agentic SAST orchestration")
+  .description("Kuzushi — security-native AI operating environment")
   .option("--verbose", "Show debug-level diagnostics", false)
   .version((createRequire(import.meta.url)("../package.json") as { version: string }).version);
 
@@ -75,10 +75,47 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
   }
 });
 
-// ── scan (default command) ────────────────────────────────────────────────
+// ── shell (default command) ──────────────────────────────────────────────
 
 program
-  .command("scan", { isDefault: true })
+  .command("shell", { isDefault: true })
+  .description("Interactive security copilot shell")
+  .option("--workspace <id>", "Resume a workspace")
+  .option("--load <modules>", "Additional modules to load (comma-separated)")
+  .option("--target <path>", "Set initial target (repo path, host, URL)")
+  .option("--scope <path>", "Load rules of engagement from YAML file")
+  .option("--model <model>", "Default model for AI operations")
+  .option("--api-key <key>", "Override ANTHROPIC_API_KEY")
+  .action(wrapCliAction(async (opts: {
+    workspace?: string;
+    load?: string;
+    target?: string;
+    scope?: string;
+    model?: string;
+    apiKey?: string;
+  }) => {
+    const { startShell } = await import("./copilot/shell.js");
+    const config = loadConfig();
+    if (opts.model) {
+      config.model = opts.model;
+    }
+    if (opts.apiKey) {
+      process.env.ANTHROPIC_API_KEY = opts.apiKey;
+    }
+    const runtime = configureAgentRuntime(config);
+    await startShell({
+      config,
+      runtime,
+      workspace: opts.workspace,
+      modules: opts.load?.split(",").map((m) => m.trim()).filter(Boolean),
+      target: opts.target,
+    });
+  }));
+
+// ── scan ──────────────────────────────────────────────────────────────────
+
+program
+  .command("scan")
   .description("Scan a repository with configured tasks and triage findings with an agent")
   .argument("<repo>", "Path to the repository to scan")
   .option("--preset <name>", "Scan preset: fast, standard, deep")
@@ -571,6 +608,104 @@ program
       { from: "user" },
     );
   });
+
+// ── run (headless module tool invocation) ────────────────────────────────
+
+program
+  .command("run")
+  .description("Execute a module tool headlessly (e.g. kuzushi run sast:scan ./repo)")
+  .argument("<tool>", "Fully-qualified tool name (module:action)")
+  .argument("[args...]", "Tool arguments (positional or key=value pairs)")
+  .option("--json", "Output as JSON", false)
+  .option("--quiet", "Suppress output (exit code only)", false)
+  .option("--input <json>", "Tool input as JSON string")
+  .option("--target <path>", "Target override (repo path, host, URL)")
+  .option("--workspace <id>", "Workspace to write results to")
+  .option("--load <modules>", "Additional modules to load (comma-separated)")
+  .option("--model <model>", "Model override for AI operations")
+  .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
+  .action(wrapCliAction(async (
+    toolName: string,
+    args: string[],
+    opts: {
+      json?: boolean;
+      quiet?: boolean;
+      input?: string;
+      target?: string;
+      workspace?: string;
+      load?: string;
+      model?: string;
+      apiKey?: string;
+    },
+  ) => {
+    const { executeRun, formatRunOutput, parseToolArgs } = await import("./copilot/run.js");
+    const { createBus } = await import("./bus/index.js");
+
+    // Build tool input from args or --input
+    let input: Record<string, unknown>;
+    if (opts.input) {
+      try {
+        input = JSON.parse(opts.input);
+      } catch {
+        throw new CliUsageError("Invalid JSON in --input");
+      }
+    } else {
+      input = parseToolArgs(args);
+    }
+
+    // Target from positional arg or --target
+    if (opts.target && !input.target) {
+      input.target = opts.target;
+    }
+
+    // Resolve config
+    const config = loadConfig();
+    if (opts.model) {
+      config.model = opts.model;
+    }
+
+    // Configure runtime
+    if (opts.apiKey) {
+      process.env.ANTHROPIC_API_KEY = opts.apiKey;
+    }
+    const runtime = configureAgentRuntime(config);
+
+    const bus = createBus(config);
+
+    // Data directory
+    const dataDir = path.resolve(process.cwd(), ".kuzushi");
+    if (!existsSync(dataDir)) {
+      mkdirSync(dataDir, { recursive: true });
+    }
+
+    const format = opts.quiet ? "quiet" as const : opts.json ? "json" as const : "text" as const;
+    const modules = opts.load?.split(",").map((m) => m.trim()).filter(Boolean);
+
+    const result = await executeRun({
+      toolName,
+      input,
+      format,
+      cwd: process.cwd(),
+      target: opts.target ?? (input.target as string | undefined),
+      workspaceId: opts.workspace,
+      runtime,
+      bus,
+      config,
+      dataDir,
+      modules,
+    });
+
+    const output = formatRunOutput(result, format);
+    if (output) {
+      console.log(output);
+    }
+
+    await bus.close();
+
+    if (result.exitCode !== 0) {
+      process.exit(result.exitCode);
+    }
+  }));
 
 // Graceful shutdown via lifecycle coordinator.
 // Hooks are registered with priority: bus drain (1), DB close (2), HTTP cleanup (3).
