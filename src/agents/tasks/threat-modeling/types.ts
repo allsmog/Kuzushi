@@ -34,6 +34,13 @@ export type StrideCategory =
   | "denial-of-service"
   | "elevation-of-privilege";
 
+/**
+ * Evidence anchor tying a threat-model element or finding to a source location.
+ *
+ * This is the canonical definition. The `ModelEvidenceAnchor` alias in
+ * `src/types.ts` re-exports this type for backward compatibility with
+ * application-model and threat-scenario consumers.
+ */
 export interface EvidenceAnchor {
   filePath: string;
   startLine: number;
