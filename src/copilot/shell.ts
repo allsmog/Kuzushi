@@ -963,7 +963,7 @@ async function startReadlineShell(
   systemPrompt: string,
   dataDir: string,
   loadedSnapshot?: ContextSnapshot | null,
-  _workspaceManager?: import("../workspace/manager.js").WorkspaceManager,
+  workspaceManager?: import("../workspace/manager.js").WorkspaceManager,
 ): Promise<void> {
   const { createInterface } = await import("node:readline");
 
@@ -971,7 +971,7 @@ async function startReadlineShell(
   const modules = core.listModules();
   const tools = core.registry.allTools();
   const rl = createInterface({ input: process.stdin, output: process.stderr });
-  const rlCtx: ShellContext = { focusedModule: null };
+  const rlCtx: ShellContext = { focusedModule: null, workspaceManager };
   let rlState: ShellState = {
     modules: modules.map((module) => module.id),
     tools: tools.map(({ tool }) => tool.name),
