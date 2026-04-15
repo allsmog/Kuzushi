@@ -29,6 +29,10 @@ import type { PipelineStage, SubTask, ResultLine, AgentActivityLine } from "../s
 interface PipelineIndicatorProps {
   stages: PipelineStage[];
   progress?: { current: number; total: number };
+  /** Running cost total for live display. */
+  runningCostUsd?: number;
+  /** Rate limit throttle info — shown when active. */
+  throttle?: { concurrency: number; reason: string } | null;
   /** Recent results to show as sub-task branches under the active stage. */
   results?: ResultLine[];
   /** Active agent activity to nest under the current finding. */
@@ -40,6 +44,8 @@ const MAX_VISIBLE_RESULTS = 5;
 export function PipelineIndicator({
   stages,
   progress,
+  runningCostUsd,
+  throttle,
   results,
   agentActivity,
 }: PipelineIndicatorProps): React.ReactElement | null {
@@ -57,6 +63,8 @@ export function PipelineIndicator({
             <StageHeaderLine
               stage={stage}
               progress={stage.status === "active" ? progress : undefined}
+              runningCostUsd={stage.status === "active" ? runningCostUsd : undefined}
+              throttle={stage.status === "active" ? throttle : undefined}
             />
 
             {/* Sub-task branches for scanner tasks (scan stage) */}
@@ -89,9 +97,11 @@ export function PipelineIndicator({
 
 // --- Stage header ---
 
-function StageHeaderLine({ stage, progress }: {
+function StageHeaderLine({ stage, progress, runningCostUsd, throttle }: {
   stage: PipelineStage;
   progress?: { current: number; total: number };
+  runningCostUsd?: number;
+  throttle?: { concurrency: number; reason: string } | null;
 }): React.ReactElement {
   const labelWidth = 14;
   const paddedLabel = stage.label.padEnd(labelWidth);
@@ -110,6 +120,12 @@ function StageHeaderLine({ stage, progress }: {
 
   if (stage.status === "active") {
     const detail = stage.detail ?? "";
+    const cost = runningCostUsd && runningCostUsd > 0
+      ? `  ${chalk.dim(formatCost(runningCostUsd))}`
+      : "";
+    const throttleLabel = throttle
+      ? `  ${chalk.yellow(`${icons.warning} ${throttle.concurrency} concurrent`)}`
+      : "";
     const bar = progress && progress.total > 0
       ? `  ${progressBar(progress.current, progress.total, 12)}`
       : "";
@@ -120,7 +136,7 @@ function StageHeaderLine({ stage, progress }: {
         <Text>
           {" "}{chalk.redBright.bold(paddedLabel)}
           {detail ? `  ${chalk.white(detail)}` : ""}
-          {bar}
+          {cost}{throttleLabel}{bar}
         </Text>
       </Box>
     );

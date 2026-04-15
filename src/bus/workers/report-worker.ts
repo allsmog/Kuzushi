@@ -37,6 +37,7 @@ import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
 import type { UIStore } from "../../ui/state.js";
 import { buildSummaryData } from "../../ui/summary-data.js";
+import { getRateLimitRegistry } from "../../scheduler/index.js";
 
 interface RunReportState {
   tasks?: string[];
@@ -92,7 +93,29 @@ export function registerReportWorker(
       store.update({
         tasks: state.tasks,
         bannerShown: true,
+        configBanner: {
+          model: event.payload.config.model,
+          tasks: state.tasks ?? [],
+          severity: event.payload.scanOpts.severity,
+          concurrency: event.payload.config.triageConcurrency,
+          backend: event.payload.config.agentRuntimeBackend,
+          scanMode: event.payload.config.scanMode,
+        },
       });
+
+      // Bridge rate limit events to UIStore
+      try {
+        const registry = getRateLimitRegistry();
+        registry.on("concurrency:changed", (data: { model: string; from: number; to: number; reason: string }) => {
+          store.update({
+            throttle: data.to < data.from
+              ? { concurrency: data.to, reason: data.reason }
+              : null,
+          });
+        });
+      } catch {
+        // Rate limit registry may not be configured — ignore
+      }
     }
   });
 

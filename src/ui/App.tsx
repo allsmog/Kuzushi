@@ -17,6 +17,7 @@ import { ResultLine } from "./components/ResultLine.js";
 import { ScanSummary } from "./components/ScanSummary.js";
 import { QualityGate } from "./components/QualityGate.js";
 import { PipelineIndicator } from "./components/PipelineIndicator.js";
+import { ConfigBanner } from "./components/ConfigBanner.js";
 
 interface AppProps {
   store: UIStore;
@@ -54,6 +55,13 @@ export function App({ store }: AppProps): React.ReactElement {
         </Static>
       )}
 
+      {/* Config banner — rendered once */}
+      {state.configBanner && (
+        <Static items={["config-banner"]}>
+          {() => <ConfigBanner key="config-banner" config={state.configBanner!} />}
+        </Static>
+      )}
+
       {/* Skipped info */}
       {state.skippedAlreadyTriaged > 0 && state.phase === "triaging" && (
         <Static items={["skip-info"]}>
@@ -73,6 +81,8 @@ export function App({ store }: AppProps): React.ReactElement {
         <PipelineIndicator
           stages={state.stages}
           progress={state.progress}
+          runningCostUsd={state.runningCostUsd}
+          throttle={state.throttle}
           results={liveResults}
           agentActivity={state.agentActivity}
         />
