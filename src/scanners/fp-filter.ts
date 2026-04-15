@@ -103,7 +103,7 @@ const EXCLUSION_RULES: ExclusionRule[] = [
     description: "Findings in code tagged as unreachable by reachability analysis",
     kind: "soft",
     scorePenalty: 15,
-    match: (f) => (f as any).reachable === "false",
+    match: (f) => f.reachable === "false",
   },
 ];
 
