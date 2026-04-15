@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import type { MonorepoUIHandle } from "../../ui/monorepo-render.js";
 import type { BoundaryManifest } from "../../agents/tasks/taint-analysis/cross-service/types.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { buildBoundaryManifest } from "../../monorepo/boundary-manifest.js";
@@ -275,6 +276,19 @@ export async function runMonorepoScan(
     }
 
     console.log(`\n[Phase 2] Scanning ${scanPlans.length} modules in parallel...`);
+
+    // Create monorepo UI renderer for live module progress
+    let monorepoUI: MonorepoUIHandle | undefined;
+    try {
+      const { createMonorepoRenderer } = await import("../../ui/monorepo-render.js");
+      monorepoUI = await createMonorepoRenderer(
+        scanPlans.map((p) => ({ name: p.module.name, path: p.module.path, tasks: p.tasks })),
+        "Scanning",
+      );
+    } catch {
+      // UI not available — fallback to console.log (handled in runPlansInParallel)
+    }
+
     const results = await runPlansInParallel({
       plans: scanPlans,
       monorepoRoot,
@@ -288,7 +302,10 @@ export async function runMonorepoScan(
       staticIntel,
       contextIndex,
       budget,
+      monorepoUI,
     });
+
+    monorepoUI?.cleanup();
 
     const db = initDb(dbPath);
     try {
@@ -378,6 +395,7 @@ async function runPlansInParallel(params: {
   staticIntel: StaticIntelligence;
   contextIndex: MonorepoContextIndex;
   budget: ReturnType<typeof createBudget>;
+  monorepoUI?: MonorepoUIHandle;
 }): Promise<ModuleExecutionResult[]> {
   const {
     plans,
@@ -392,6 +410,7 @@ async function runPlansInParallel(params: {
     staticIntel,
     contextIndex,
     budget,
+    monorepoUI,
   } = params;
 
   const resuming = opts.resume !== undefined;
@@ -408,6 +427,7 @@ async function runPlansInParallel(params: {
           try {
             const existingRun = getLatestResumableRun(db, repoName);
             if (existingRun?.status === "complete") {
+              monorepoUI?.updateModule(plan.module.path, { status: "skipped" });
               console.log(`  [${index + 1}/${plans.length}] ${plan.module.path} :: SKIPPED (already complete)`);
               return {
                 plan,
@@ -430,6 +450,11 @@ async function runPlansInParallel(params: {
         }
 
         const resumeLabel = resuming ? " (resuming)" : "";
+        monorepoUI?.updateModule(plan.module.path, {
+          status: "scanning",
+          detail: plan.tasks.join(", ") || "scanning",
+          startedAt: Date.now(),
+        });
         console.log(`  [${index + 1}/${plans.length}] ${plan.module.path}${resumeLabel} :: ${plan.tasks.join(", ") || "no explicit tasks"}`);
 
         const moduleConfig = {
@@ -485,6 +510,14 @@ async function runPlansInParallel(params: {
         const moduleCost = pipelineResult.stats?.totalCostUsd ?? 0;
         recordModuleCost(budget, moduleCost);
 
+        const elapsed = Date.now() - (monorepoUI ? Date.now() : Date.now());
+        monorepoUI?.updateModule(plan.module.path, {
+          status: pipelineResult.status === "complete" ? "complete" : "error",
+          costUsd: moduleCost,
+          tp: pipelineResult.stats?.triaged ? undefined : 0,
+          detail: pipelineResult.status === "error" ? "pipeline error" : undefined,
+        });
+
         return {
           plan,
           module: plan.module,
@@ -502,7 +535,11 @@ async function runPlansInParallel(params: {
     if (entry.status === "fulfilled") {
       return entry.value;
     }
-    const plan = plans[index];
+    const plan = plans[index]!;
+    monorepoUI?.updateModule(plan.module.path, {
+      status: "error",
+      detail: entry.reason instanceof Error ? entry.reason.message.slice(0, 60) : "error",
+    });
     return {
       plan,
       module: plan.module,
