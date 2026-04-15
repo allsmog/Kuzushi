@@ -31,12 +31,47 @@ async function main(): Promise<void> {
     { id: "poc", label: "PoC Harness" },
     { id: "report", label: "Report" },
   ]);
-  store.activateStage("scan", "semgrep, codeql");
+  store.activateStage("scan", "semgrep, codeql, agentic");
   store.update({
     phase: "scanning",
-    tasks: ["semgrep", "codeql"],
+    tasks: ["semgrep", "codeql", "agentic"],
   });
-  await sleep(2000);
+
+  // --- Individual scanner sub-tasks start in parallel ---
+  store.upsertSubTask("scan", {
+    id: "semgrep", label: "semgrep", status: "active", startedAt: Date.now(),
+  });
+  store.upsertSubTask("scan", {
+    id: "codeql", label: "codeql", status: "active", startedAt: Date.now(),
+  });
+  store.upsertSubTask("scan", {
+    id: "agentic", label: "agentic", status: "pending",
+  });
+  await sleep(1500);
+
+  // Semgrep finishes first
+  store.upsertSubTask("scan", {
+    id: "semgrep", label: "semgrep", status: "done", elapsedMs: 1500,
+  });
+  await sleep(800);
+
+  // Agentic starts
+  store.upsertSubTask("scan", {
+    id: "agentic", label: "agentic", status: "active", startedAt: Date.now(),
+  });
+  await sleep(1200);
+
+  // CodeQL finishes
+  store.upsertSubTask("scan", {
+    id: "codeql", label: "codeql", status: "done", elapsedMs: 3500,
+  });
+  await sleep(800);
+
+  // Agentic finishes
+  store.upsertSubTask("scan", {
+    id: "agentic", label: "agentic", status: "done", elapsedMs: 2000,
+  });
+  await sleep(500);
 
   // --- Scan complete ---
   store.update({

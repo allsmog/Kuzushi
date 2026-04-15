@@ -7,10 +7,8 @@ import { Box, Text, Static } from "ink";
 import chalk from "chalk";
 import { useUIState } from "./hooks.js";
 import { icons } from "./icons.js";
-import type { UIStore, ResultLine as ResultLineData } from "./state.js";
+import type { UIStore } from "./state.js";
 import { Banner } from "./components/Banner.js";
-import { AgentActivity } from "./components/AgentActivity.js";
-import { ResultLine } from "./components/ResultLine.js";
 import { ScanSummary } from "./components/ScanSummary.js";
 import { QualityGate } from "./components/QualityGate.js";
 import { PipelineIndicator } from "./components/PipelineIndicator.js";
@@ -22,15 +20,9 @@ interface AppProps {
 export function App({ store }: AppProps): React.ReactElement {
   const state = useUIState(store);
 
-  // Separate completed results (rendered as static/permanent) from in-progress
-  const completedResults = state.results;
-
-  // Active agent activities
-  const activeActivities = [...state.agentActivity.entries()];
-
   return (
     <Box flexDirection="column">
-      {/* Banner — rendered once via Static */}
+      {/* Banner — rendered once */}
       {state.bannerShown && <Banner />}
 
       {/* Scan start info */}
@@ -56,20 +48,15 @@ export function App({ store }: AppProps): React.ReactElement {
         </Static>
       )}
 
-      {/* Pipeline stage indicator — always visible during execution */}
+      {/* Pipeline indicator with nested branches — the whole live display */}
       {state.stages.length > 0 && state.phase !== "summary" && state.phase !== "done" && (
-        <PipelineIndicator stages={state.stages} progress={state.progress} />
+        <PipelineIndicator
+          stages={state.stages}
+          progress={state.progress}
+          results={state.results}
+          agentActivity={state.agentActivity}
+        />
       )}
-
-      {/* Completed results — rendered as static (scroll off) */}
-      <Static items={completedResults.map((r, i) => ({ ...r, _key: `result-${i}` }))}>
-        {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
-      </Static>
-
-      {/* Active agent activities — live, re-renders in place */}
-      {activeActivities.map(([fp, lines]) => (
-        <AgentActivity key={fp} fingerprint={fp} lines={lines} />
-      ))}
 
       {/* Summary */}
       {state.phase === "summary" && state.summary && (
@@ -83,4 +70,3 @@ export function App({ store }: AppProps): React.ReactElement {
     </Box>
   );
 }
-
