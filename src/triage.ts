@@ -529,8 +529,6 @@ function parseBatchTriageOutput(
 
 export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResult {
   if (isRecord(raw)) {
-    // Validate raw LLM output against schema; log warnings but proceed
-    // with lenient parsing to handle partial/non-conforming outputs gracefully.
     const validation = RawTriageOutputSchema.safeParse(raw);
     if (!validation.success) {
       const errors = formatZodErrors(validation.error.issues);
@@ -644,7 +642,6 @@ export function parseTriageResponse(
     const jsonStr = extractJson(text);
     const parsed = JSON.parse(jsonStr);
 
-    // Validate parsed JSON against schema; log warnings but proceed leniently
     const validation = RawTriageOutputSchema.safeParse(parsed);
     if (!validation.success) {
       const errors = formatZodErrors(validation.error.issues);
@@ -803,7 +800,6 @@ export async function preReadForTriage(
     }
 
     if (raw.length > PRE_READ_BYTE_CAP * 2) {
-      // For very large files, only use a window
     }
     const lines = raw.split("\n");
     const start = Math.max(0, finding.startLine - 1 - surroundingLines);
