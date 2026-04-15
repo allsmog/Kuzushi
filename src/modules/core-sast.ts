@@ -72,6 +72,17 @@ const scanTool: ModuleTool = {
       return { ok: false, output: "sast:scan requires a target (repo path)." };
     }
 
+    // Capture stdout/stderr so pipeline internals don't leak into the shell
+    const captured: string[] = [];
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    const capture = (chunk: unknown) => {
+      captured.push(String(chunk));
+      return true;
+    };
+    process.stdout.write = capture as typeof process.stdout.write;
+    process.stderr.write = capture as typeof process.stderr.write;
+
     try {
       const path = await import("node:path");
       const { runPipeline } = await import("../cli/commands/scan.js");
@@ -133,11 +144,7 @@ const scanTool: ModuleTool = {
 
       return {
         ok: result.status === "complete",
-        output: result.status === "complete"
-          ? `[sast:scan] Pipeline complete for "${repoName}" (run: ${result.runId}). ` +
-            `${result.stats?.totalFindings ?? 0} findings, ` +
-            `${result.stats?.triaged ?? 0} triaged.`
-          : `[sast:scan] Pipeline failed for "${repoName}" (run: ${result.runId}).`,
+        output: summarizePipelineResult(result, repoName, captured),
         data: {
           runId: result.runId,
           status: result.status,
@@ -146,10 +153,16 @@ const scanTool: ModuleTool = {
         costUsd: result.stats?.totalCostUsd,
       };
     } catch (err) {
-      return {
-        ok: false,
-        output: `[sast:scan] Error: ${err instanceof Error ? err.message : String(err)}`,
-      };
+      const msg = err instanceof Error ? err.message : String(err);
+      // Translate common internal errors to human-readable messages
+      if (msg.includes("Could not resolve authentication")) {
+        return { ok: false, output: "Scan requires an API key. Set ANTHROPIC_API_KEY or use Claude Code OAuth." };
+      }
+      return { ok: false, output: `Scan error: ${msg}` };
+    } finally {
+      // Always restore stdout/stderr
+      process.stdout.write = origStdoutWrite;
+      process.stderr.write = origStderrWrite;
     }
   },
 };
@@ -334,4 +347,85 @@ export function createCoreSastModule(): CopilotModule {
       // Pipeline cleanup is handled by the orchestrator's shutdown logic.
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Intelligent output summarization
+// ---------------------------------------------------------------------------
+
+function summarizePipelineResult(
+  result: { runId: string; status: string; stats?: { totalFindings?: number; triaged?: number; totalCostUsd?: number } | null },
+  repoName: string,
+  captured: string[],
+): string {
+  const lines: string[] = [];
+  const allOutput = captured.join("");
+
+  // Extract semgrep finding count from captured output
+  const semgrepMatch = allOutput.match(/Findings:\s*(\d+)/);
+  const semgrepFindings = semgrepMatch ? parseInt(semgrepMatch[1], 10) : null;
+
+  // Categorize failures from captured output
+  const authFailures: string[] = [];
+  const jsonFailures: string[] = [];
+  const otherFailures: string[] = [];
+
+  for (const chunk of captured) {
+    if (chunk.includes("Could not resolve authentication")) {
+      const taskMatch = chunk.match(/\[([^\]]+)\]/);
+      if (taskMatch && !authFailures.includes(taskMatch[1])) {
+        authFailures.push(taskMatch[1]);
+      }
+    } else if (chunk.includes("Invalid JSON output") || chunk.includes("Unexpected end of JSON")) {
+      const taskMatch = chunk.match(/Task "([^"]+)"/);
+      if (taskMatch && !jsonFailures.includes(taskMatch[1])) {
+        jsonFailures.push(taskMatch[1]);
+      }
+    } else if (chunk.includes("PIPELINE ERROR")) {
+      const msg = chunk.replace(/.*PIPELINE ERROR\s*/, "").trim();
+      if (msg && !otherFailures.includes(msg)) {
+        otherFailures.push(msg);
+      }
+    }
+  }
+
+  // Header
+  if (result.status === "complete") {
+    const findings = result.stats?.totalFindings ?? semgrepFindings ?? 0;
+    const triaged = result.stats?.triaged ?? 0;
+    const cost = result.stats?.totalCostUsd;
+
+    lines.push(`Scan complete: ${repoName}`);
+    lines.push(`  ${findings} findings found${triaged > 0 ? `, ${triaged} triaged` : ""}`);
+    if (cost && cost > 0) {
+      lines.push(`  Cost: $${cost.toFixed(2)}`);
+    }
+  } else {
+    lines.push(`Scan finished with errors: ${repoName}`);
+    if (semgrepFindings !== null) {
+      lines.push(`  Semgrep found ${semgrepFindings} findings (static analysis succeeded)`);
+    }
+  }
+
+  // Summarize failures intelligently — don't list 15 identical errors
+  const needsApiKey = authFailures.length > 0 || jsonFailures.length > 0;
+  if (needsApiKey) {
+    const total = authFailures.length + jsonFailures.length;
+    lines.push("");
+    lines.push(`  ${total} task${total > 1 ? "s" : ""} skipped — requires API key for AI analysis`);
+    lines.push("  Set ANTHROPIC_API_KEY or use Claude Code OAuth to enable triage");
+  }
+
+  if (otherFailures.length > 0) {
+    lines.push("");
+    for (const f of otherFailures.slice(0, 3)) {
+      lines.push(`  Error: ${f}`);
+    }
+    if (otherFailures.length > 3) {
+      lines.push(`  ...and ${otherFailures.length - 3} more`);
+    }
+  }
+
+  lines.push(`  Run ID: ${result.runId}`);
+  return lines.join("\n");
 }
