@@ -13,7 +13,7 @@ export interface AssertionResult {
   weight: number;
 }
 
-export const DEFAULT_ASSERTION_WEIGHTS = {
+const DEFAULT_ASSERTION_WEIGHTS = {
   rationaleHasEvidence: 1.0,
   verificationStepsActionable: 1.0,
   confidenceMatchesEvidence: 1.0,
@@ -47,7 +47,7 @@ interface TriageOutput {
 /**
  * Check that the rationale references specific files or line numbers.
  */
-export function assertRationaleHasEvidence(output: TriageOutput): AssertionResult {
+function assertRationaleHasEvidence(output: TriageOutput): AssertionResult {
   const weight = DEFAULT_ASSERTION_WEIGHTS.rationaleHasEvidence;
   const rationale = output.rationale ?? "";
 
@@ -74,7 +74,7 @@ export function assertRationaleHasEvidence(output: TriageOutput): AssertionResul
 /**
  * Check that verification steps are concrete and actionable.
  */
-export function assertVerificationStepsActionable(output: TriageOutput): AssertionResult {
+function assertVerificationStepsActionable(output: TriageOutput): AssertionResult {
   const weight = DEFAULT_ASSERTION_WEIGHTS.verificationStepsActionable;
   const steps = output.verificationSteps ?? [];
 
@@ -108,7 +108,7 @@ export function assertVerificationStepsActionable(output: TriageOutput): Asserti
  * Check that high confidence is backed by strong evidence.
  * High confidence (>0.8) should have evidence; low confidence (<0.3) shouldn't claim certainty.
  */
-export function assertConfidenceMatchesEvidence(output: TriageOutput): AssertionResult {
+function assertConfidenceMatchesEvidence(output: TriageOutput): AssertionResult {
   const weight = DEFAULT_ASSERTION_WEIGHTS.confidenceMatchesEvidence;
   const confidence = output.confidence;
   const rationale = output.rationale ?? "";
@@ -144,7 +144,7 @@ export function assertConfidenceMatchesEvidence(output: TriageOutput): Assertion
 /**
  * Check that rationale is not empty or too short.
  */
-export function assertNoEmptyRationale(output: TriageOutput): AssertionResult {
+function assertNoEmptyRationale(output: TriageOutput): AssertionResult {
   const weight = DEFAULT_ASSERTION_WEIGHTS.noEmptyRationale;
   const rationale = output.rationale ?? "";
   const length = rationale.trim().length;
@@ -190,7 +190,7 @@ const CWE_KEYWORD_MAP: Record<string, string[]> = {
  * Check that the rationale mentions keywords relevant to the finding's CWEs.
  * Only runs when `findingCwe` is provided and non-empty.
  */
-export function assertCweMentionsRelevant(output: TriageOutput): AssertionResult | null {
+function assertCweMentionsRelevant(output: TriageOutput): AssertionResult | null {
   const weight = DEFAULT_ASSERTION_WEIGHTS.cweMentionsRelevant;
   const cwes = output.findingCwe;
 
@@ -236,7 +236,7 @@ export function assertCweMentionsRelevant(output: TriageOutput): AssertionResult
  * Check that a provided fixPatch contains actual code/diff content, not just prose.
  * Only runs when `fixPatch` is provided.
  */
-export function assertFixPatchValid(output: TriageOutput): AssertionResult | null {
+function assertFixPatchValid(output: TriageOutput): AssertionResult | null {
   const weight = DEFAULT_ASSERTION_WEIGHTS.fixPatchValid;
   const patch = output.fixPatch;
 
@@ -262,7 +262,7 @@ export function assertFixPatchValid(output: TriageOutput): AssertionResult | nul
  * High/CRITICAL severity marked FP with low confidence is suspicious.
  * Only runs when `findingSeverity` is provided.
  */
-export function assertSeverityVerdictAlignment(output: TriageOutput): AssertionResult | null {
+function assertSeverityVerdictAlignment(output: TriageOutput): AssertionResult | null {
   const weight = DEFAULT_ASSERTION_WEIGHTS.severityVerdictAlignment;
   const severity = output.findingSeverity;
 
@@ -290,7 +290,7 @@ export function assertSeverityVerdictAlignment(output: TriageOutput): AssertionR
  * Check verdict consistency across historical runs for the same fingerprint.
  * Only runs when `historicalVerdicts` is provided and non-empty.
  */
-export function assertVerdictConsistency(output: TriageOutput): AssertionResult | null {
+function assertVerdictConsistency(output: TriageOutput): AssertionResult | null {
   const weight = DEFAULT_ASSERTION_WEIGHTS.verdictConsistency;
   const history = output.historicalVerdicts;
 
@@ -316,7 +316,7 @@ export function assertVerdictConsistency(output: TriageOutput): AssertionResult 
  * Flag findings that cost significantly more than the run median.
  * Only runs when both `costUsd` and `runMedianCostUsd` are provided.
  */
-export function assertCostEfficiency(output: TriageOutput): AssertionResult | null {
+function assertCostEfficiency(output: TriageOutput): AssertionResult | null {
   const weight = DEFAULT_ASSERTION_WEIGHTS.costEfficiency;
 
   if (output.costUsd === undefined || output.runMedianCostUsd === undefined) return null;
@@ -355,7 +355,7 @@ export function assertCostEfficiency(output: TriageOutput): AssertionResult | nu
  * Score based on triage duration. Flags excessively slow triages.
  * Only runs when `durationMs` is provided.
  */
-export function assertLatencyReasonable(output: TriageOutput): AssertionResult | null {
+function assertLatencyReasonable(output: TriageOutput): AssertionResult | null {
   const weight = DEFAULT_ASSERTION_WEIGHTS.latencyReasonable;
 
   if (output.durationMs === undefined) return null;

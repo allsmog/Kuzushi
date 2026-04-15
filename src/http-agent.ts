@@ -71,7 +71,7 @@ let globalDispatcherInstalled = false;
 /**
  * Return a cached `http.Agent` with keepAlive enabled.
  */
-export function getHttpAgent(): http.Agent {
+function getHttpAgent(): http.Agent {
   if (!cachedHttpAgent) {
     cachedHttpAgent = new http.Agent({
       keepAlive: true,

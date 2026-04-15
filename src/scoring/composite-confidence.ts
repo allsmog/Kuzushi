@@ -28,7 +28,7 @@ export interface ConfidenceSignalWeights {
   context?: number;
 }
 
-export const DEFAULT_SIGNAL_WEIGHTS: Required<ConfidenceSignalWeights> = {
+const DEFAULT_SIGNAL_WEIGHTS: Required<ConfidenceSignalWeights> = {
   scanner: 1.0,
   triage: 3.0,
   verification: 2.0,
@@ -88,7 +88,7 @@ export function extractVerificationSignal(
  * Extract confidence signal from finding history (trajectory memory).
  * Recurring findings that were previously confirmed as TP get higher scores.
  */
-export function extractHistorySignal(
+function extractHistorySignal(
   previousVerdicts: string[],
 ): ConfidenceSignal {
   if (previousVerdicts.length === 0) {
@@ -102,7 +102,7 @@ export function extractHistorySignal(
 /**
  * Extract confidence signal from data sensitivity context.
  */
-export function extractContextSignal(
+function extractContextSignal(
   hasAuthContext: boolean,
   hasSensitiveData: boolean,
 ): ConfidenceSignal {
