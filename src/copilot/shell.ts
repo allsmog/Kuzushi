@@ -96,17 +96,25 @@ async function startInkShell(
     async function handleInput(input: string): Promise<void> {
       if (!alive) return;
 
-      // Exit commands
-      const lower = input.trim().toLowerCase();
-      if (lower === "exit" || lower === "quit" || lower === "q") {
-        handleExit();
+      // Local commands — handled without the LLM
+      const localResult = handleLocalCommand(input, core, opts);
+      if (localResult !== undefined) {
+        if (localResult === "exit") {
+          handleExit();
+          return;
+        }
+        if (localResult) {
+          appendToHistory(store, { type: "output", text: localResult, timestamp: Date.now() });
+        }
+        setProcessing(store, false);
         return;
       }
 
+      // Everything else goes to the AgentSession
       if (!session) {
         appendToHistory(store, {
           type: "error",
-          text: "No agent session available. The runtime may not support createSession().",
+          text: "No agent session available.\nSet ANTHROPIC_API_KEY or use Claude Code OAuth to enable the copilot.",
           timestamp: Date.now(),
         });
         setProcessing(store, false);
@@ -184,7 +192,7 @@ async function startInkShell(
         focusedModule: null,
         target: opts.target ?? null,
         workspace: opts.workspace ?? null,
-        history: [],
+        history: [{ type: "output" as const, text: formatWelcome(core, opts), timestamp: Date.now() }],
         processing: false,
         onInput: handleInput,
         onExit: handleExit,
@@ -233,11 +241,18 @@ async function startReadlineShell(
     const input = line.trim();
     if (!input) { rl.prompt(); continue; }
 
-    const lower = input.toLowerCase();
-    if (lower === "exit" || lower === "quit" || lower === "q") break;
+    // Local commands first
+    const localResult = handleLocalCommand(input, core, opts);
+    if (localResult === "exit") break;
+    if (localResult !== undefined) {
+      if (localResult) console.log(localResult);
+      rl.prompt();
+      continue;
+    }
 
+    // Natural language → AgentSession
     if (!session) {
-      console.log("No agent session available.");
+      console.log("No agent session available. Set ANTHROPIC_API_KEY or use Claude Code OAuth.");
       rl.prompt();
       continue;
     }
@@ -336,4 +351,158 @@ function clearToolActivity(
   store.update({
     shell: { ...shell, currentTool: undefined },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Local commands — handled without the LLM
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle local commands. Returns:
+ *   - "exit" to exit the shell
+ *   - a string to display as output
+ *   - undefined if the input is NOT a local command (should go to AgentSession)
+ */
+function handleLocalCommand(
+  input: string,
+  core: CopilotCore,
+  opts: ShellOptions,
+): string | "exit" | undefined {
+  const trimmed = input.trim();
+  const lower = trimmed.toLowerCase();
+  const [cmd, ...args] = trimmed.split(/\s+/);
+
+  // Exit
+  if (lower === "exit" || lower === "quit" || lower === "q") {
+    return "exit";
+  }
+
+  // Help
+  if (lower === "help" || lower === "/help" || lower === "?") {
+    return formatHelp(core, opts);
+  }
+
+  // Modules
+  if (lower === "modules" || lower === "/modules" ||
+      (cmd.toLowerCase() === "module" && (!args[0] || args[0] === "list"))) {
+    return formatModuleList(core);
+  }
+
+  // Module info
+  if (cmd.toLowerCase() === "module" && args[0] === "info" && args[1]) {
+    return formatModuleInfo(core, args[1]);
+  }
+
+  // Tools
+  if (lower === "tools" || lower === "/tools") {
+    return formatTools(core);
+  }
+
+  // Target
+  if (cmd.toLowerCase() === "target" || cmd.toLowerCase() === "/target") {
+    const newTarget = args[0];
+    if (newTarget) {
+      opts.target = newTarget;
+      return `Target set to: ${newTarget}`;
+    }
+    return opts.target ? `Current target: ${opts.target}` : "No target set. Usage: target <path>";
+  }
+
+  // Not a local command — pass to AgentSession
+  return undefined;
+}
+
+function formatHelp(core: CopilotCore, opts: ShellOptions): string {
+  const modules = core.listModules();
+  const toolCount = core.registry.allTools().length;
+
+  const lines = [
+    "",
+    "  Kuzushi — security-native AI operating environment",
+    "",
+    `  Modules: ${modules.map((m) => m.id).join(", ") || "none"}`,
+    `  Tools:   ${toolCount} available`,
+    opts.target ? `  Target:  ${opts.target}` : "",
+    "",
+    "  Commands:",
+    "    help                Show this help",
+    "    modules             List loaded modules",
+    "    module info <id>    Detailed module info",
+    "    tools               List all available tools",
+    "    target <path>       Set/show the active target",
+    "    exit                Exit the shell",
+    "",
+    "  Or just type naturally — the agent handles the rest.",
+    "  Examples:",
+    "    > What's the attack surface of this repo?",
+    "    > Hunt for SSRF chains in ./src",
+    "    > Are we PCI DSS compliant?",
+    "    > Generate a patch for finding abc123",
+    "",
+  ].filter(Boolean);
+
+  return lines.join("\n");
+}
+
+function formatModuleList(core: CopilotCore): string {
+  const modules = core.listModules();
+  if (modules.length === 0) return "  No modules loaded.";
+
+  const lines = [""];
+  for (const mod of modules) {
+    const tools = core.registry.moduleTools(mod.id).map((t) => t.name.split(":")[1]).join(", ");
+    lines.push(`  ${mod.id} [${mod.category}] — ${mod.description.split(".")[0]}`);
+    if (tools) lines.push(`    tools: ${tools}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function formatModuleInfo(core: CopilotCore, id: string): string {
+  if (!core.hasModule(id)) return `  Unknown module: "${id}"`;
+
+  const mod = core.registry.get(id);
+  const lines = [
+    "",
+    `  ${mod.displayName} v${mod.version} [${mod.category}]`,
+    `  ${mod.description}`,
+    "",
+  ];
+  for (const tool of mod.tools) {
+    const mode = tool.headless ? "[headless]" : "[interactive]";
+    lines.push(`  ${tool.name} ${mode}`);
+    lines.push(`    ${tool.description.split(".")[0]}.`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function formatTools(core: CopilotCore): string {
+  const tools = core.registry.allTools();
+  if (tools.length === 0) return "  No tools available.";
+
+  const lines = [""];
+  for (const { tool } of tools) {
+    const mode = tool.headless ? "[h]" : "[i]";
+    lines.push(`  ${tool.name} ${mode} — ${tool.description.split(".")[0]}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Welcome message shown when the shell starts.
+ */
+export function formatWelcome(core: CopilotCore, opts: ShellOptions): string {
+  const modules = core.listModules();
+  const toolCount = core.registry.allTools().length;
+
+  const lines = [
+    `  modules: ${modules.map((m) => m.id).join(", ") || "none"}  tools: ${toolCount}`,
+  ];
+  if (opts.target) lines.push(`  target:  ${opts.target}`);
+  if (opts.workspace) lines.push(`  workspace: ${opts.workspace}`);
+  lines.push("");
+  lines.push('  Type "help" for commands, or just describe what you need.');
+  return lines.join("\n");
 }
