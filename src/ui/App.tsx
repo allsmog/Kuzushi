@@ -20,6 +20,8 @@ import { PipelineIndicator } from "./components/PipelineIndicator.js";
 import { ConfigBanner } from "./components/ConfigBanner.js";
 import { StatusFooter } from "./components/StatusFooter.js";
 import { ResumeDiff } from "./components/ResumeDiff.js";
+import { CommandInput, type ReplCommand, type CommandResult } from "./components/CommandInput.js";
+import { createReplContext, handleReplCommand } from "./repl.js";
 
 interface AppProps {
   store: UIStore;
@@ -27,6 +29,11 @@ interface AppProps {
 
 export function App({ store }: AppProps): React.ReactElement {
   const state = useUIState(store);
+  const [replCtx] = React.useState(() => createReplContext(store));
+
+  const handleCommand = React.useCallback((cmd: ReplCommand): CommandResult => {
+    return handleReplCommand(replCtx, cmd);
+  }, [replCtx]);
 
   // Results that have scrolled past the live window go to Static (no re-render).
   // Only the last few stay in the live PipelineIndicator.
@@ -118,6 +125,12 @@ export function App({ store }: AppProps): React.ReactElement {
           throttle={state.throttle}
         />
       )}
+
+      {/* Interactive REPL — active during scanning/triaging/verifying */}
+      <CommandInput
+        active={state.phase === "triaging" || state.phase === "verifying" || state.phase === "scanning"}
+        onCommand={handleCommand}
+      />
     </Box>
   );
 }
