@@ -90,6 +90,14 @@
 - Never commit API keys or `ANTHROPIC_API_KEY` values.
 - Do not commit findings DB files (`<repo>/.kuzushi/findings.sqlite3`).
 
+## Commits & Git Hooks
+
+- Commit messages must pass `commitlint` (conventional-commits format). Allowed types: `feat, fix, chore, perf, refactor, docs, test, style, ci, build, revert, merge`.
+- Header: `<type>(<scope>): <subject>` — max 100 chars, imperative mood.
+- Pre-commit hook (`.husky/pre-commit`) runs `lint-staged` on staged files only (kept <5s). Full config: `commitlint.config.js` + `.lintstagedrc.json`.
+- Escape hatches: `HUSKY=0` disables all hooks; `git commit --no-verify` bypasses for a single commit; `SKIP=<task>` skips a specific lint-staged task. See `docs/devex/05-conventions-assessment.md` for when each is acceptable.
+- Activate the commit-message template locally: `git config commit.template .gitmessage`.
+
 ## Terminal UI (Ink)
 
 - **All UI must go through the Ink shell.** Never use raw `readline`, `process.stdout.write`, or `console.log` for interactive terminal output. The Ink React app (`src/ui/App.tsx`) owns the terminal.
