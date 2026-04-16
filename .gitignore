@@ -21,3 +21,5 @@ iris.pdf
 .playwright-mcp/
 .claude/
 cc-repo/
+.codex
+.worktrees
