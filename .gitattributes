@@ -1,0 +1,19 @@
+# Mark machine-generated trees so GitHub collapses their diffs, excludes
+# them from language stats, and reviewers aren't nagged by noise.
+#
+# See docs/devex/04-codegen-assessment.md and generated/README.md.
+
+generated/**    linguist-generated=true
+generated/**    -diff
+
+# Lockfiles and test snapshots are not interesting to read in PRs.
+pnpm-lock.yaml  linguist-generated=true
+*.snap          linguist-generated=true
+
+# Binary assets — never attempt a text diff.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.pdf           binary
+*.sqlite3       binary
