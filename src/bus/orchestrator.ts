@@ -440,7 +440,9 @@ export class PipelineOrchestrator {
 
     // Load operator scan context for prompt injection
     try {
-      const { loadOperatorScanContext, formatOperatorContextForPrompt } = await import("../operator-context.js");
+      const { loadOperatorScanContext, formatOperatorContextForPrompt } = await import(
+        "../operator-context.js"
+      );
       const opCtx = loadOperatorScanContext(context.repoRoot);
       if (opCtx) {
         state.operatorContext = formatOperatorContextForPrompt(opCtx);
@@ -1775,13 +1777,33 @@ export class PipelineOrchestrator {
 
     // Auto-generate operator scan context if none exists (first run)
     try {
-      const { loadOperatorScanContext, saveOperatorScanContext, generateOperatorContextFromOutputs } = await import("../operator-context.js");
+      const {
+        loadOperatorScanContext,
+        saveOperatorScanContext,
+        generateOperatorContextFromOutputs,
+      } = await import("../operator-context.js");
       if (!loadOperatorScanContext(state.context.repoRoot)) {
         const opCtx = generateOperatorContextFromOutputs({
           repoContext: state.repoContext,
-          enrichedContext: state.enrichedRepoContext ? { base: state.repoContext ?? { languages: [], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] }, enrichment: state.enrichedRepoContext } : undefined,
-          appModel: state.taskOutputs.get("app-model-build") as import("../types.js").ApplicationModel | undefined,
-          threatModel: state.taskOutputs.get("threat-model-randori") as import("../agents/tasks/threat-modeling/types.js").ThreatModelDocument | undefined,
+          enrichedContext: state.enrichedRepoContext
+            ? {
+                base: state.repoContext ?? {
+                  languages: [],
+                  frameworks: [],
+                  authPatterns: [],
+                  sanitizationLibs: [],
+                  ormOrDb: [],
+                  entryPoints: [],
+                },
+                enrichment: state.enrichedRepoContext,
+              }
+            : undefined,
+          appModel: state.taskOutputs.get("app-model-build") as
+            | import("../types.js").ApplicationModel
+            | undefined,
+          threatModel: state.taskOutputs.get("threat-model-randori") as
+            | import("../agents/tasks/threat-modeling/types.js").ThreatModelDocument
+            | undefined,
         });
         saveOperatorScanContext(state.context.repoRoot, opCtx);
       }

@@ -1,35 +1,43 @@
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import type { ToolPolicy } from "../../prompts/tool-policy.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../security-profiles.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
-import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
-import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
 import {
-  filterCategories,
-  filterBlocks,
   CATEGORY_SCOPE_HEADER,
-  type CategoryRelevance,
   type CategoryBlock,
+  type CategoryRelevance,
+  filterBlocks,
+  filterCategories,
 } from "./category-filter.js";
-import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
-import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
-import type { ToolPolicy } from "../../prompts/tool-policy.js";
-import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
+import {
+  computeDetectionFingerprint,
+  normalizeFilePath,
+  parseJson,
+} from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
+import {
+  formatFileTreeForPrompt,
+  formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
+} from "./pre-read-prompt.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
+import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
 
 const log = createLogger({ stage: "code-config-detect" });
 
@@ -43,9 +51,22 @@ const CODE_CONFIG_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["detectorId", "category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "detectorId",
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
-          detectorId: { type: "string", enum: ["dangerous-api-detect", "auth-access-detect", "security-misconfig-detect"] },
+          detectorId: {
+            type: "string",
+            enum: ["dangerous-api-detect", "auth-access-detect", "security-misconfig-detect"],
+          },
           category: { type: "string" },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
@@ -90,16 +111,19 @@ type CodeConfigDetectorId =
   | "auth-access-detect"
   | "security-misconfig-detect";
 
-const CODE_CONFIG_ANALYSIS_TOOL_POLICY: ToolPolicy = {
+const _CODE_CONFIG_ANALYSIS_TOOL_POLICY: ToolPolicy = {
   allow: ["group:readonly", "group:analysis"],
 };
 
-function resolveConfig(
-  ctx: TaskContext,
-  configKey = "code-config-detect",
-): CodeConfigConfig {
+function resolveConfig(ctx: TaskContext, configKey = "code-config-detect"): CodeConfigConfig {
   const model = resolveTaskModel(ctx, configKey, "code-config-detect");
-  const maxFindings = resolveTaskPositiveInt(ctx, configKey, "maxFindings", 50, "code-config-detect");
+  const maxFindings = resolveTaskPositiveInt(
+    ctx,
+    configKey,
+    "maxFindings",
+    50,
+    "code-config-detect",
+  );
   return { model, maxFindings };
 }
 
@@ -117,7 +141,10 @@ const CODE_CONFIG_RELEVANCE: CategoryRelevance[] = [
   { id: "unsafe-regex", always: true },
   { id: "prototype-pollution", languages: ["JavaScript", "TypeScript"] },
   { id: "nosql-injection", ormOrDbPattern: /mongo|mongoose|dynamo|cosmos|couchdb/i },
-  { id: "template-injection", languages: ["JavaScript", "TypeScript", "Python", "Ruby", "PHP", "Java", "Kotlin"] },
+  {
+    id: "template-injection",
+    languages: ["JavaScript", "TypeScript", "Python", "Ruby", "PHP", "Java", "Kotlin"],
+  },
   { id: "ldap-injection", languages: ["Java", "Kotlin", "Python", "PHP", "Ruby"] },
   { id: "xml-injection", languages: ["Java", "Kotlin", "Python", "PHP", "Ruby", "Go"] },
   // Part 2: Auth/Access
@@ -141,202 +168,298 @@ const CODE_CONFIG_RELEVANCE: CategoryRelevance[] = [
   { id: "missing-rate-limit", always: true },
   { id: "exposed-endpoints", always: true },
   { id: "container-misconfig", fileTreePattern: /Dockerfile|docker-compose|\.dockerignore/i },
-  { id: "cicd-misconfig", fileTreePattern: /\.github\/workflows|\.gitlab-ci|Jenkinsfile|\.circleci/i },
+  {
+    id: "cicd-misconfig",
+    fileTreePattern: /\.github\/workflows|\.gitlab-ci|Jenkinsfile|\.circleci/i,
+  },
 ];
 
 const DANGEROUS_API_BLOCKS: CategoryBlock[] = [
-  { id: "unsafe-deserialization", lines: [
-    "### unsafe-deserialization (CWE-502)",
-    "Deserializing untrusted data: pickle.loads, yaml.unsafe_load, Java ObjectInputStream,",
-    "PHP unserialize, JSON.parse with reviver on untrusted input, eval-based JSON parsing.",
-    "Only flag when input source is attacker-controlled (request body, URL params, file upload, message queue).",
-    "",
-  ] },
-  { id: "unsafe-eval", lines: [
-    "### unsafe-eval (CWE-94, CWE-95)",
-    "Dynamic code execution: eval(), Function(), vm.runInNewContext, setTimeout/setInterval with strings,",
-    "template injection (Jinja2, EJS, Pug with unescaped), Python compile, Ruby instance_eval.",
-    "Only flag when the evaluated string includes user-controlled data.",
-    "",
-  ] },
-  { id: "unsafe-subprocess", lines: [
-    "### unsafe-subprocess (CWE-78)",
-    "Shell command injection: child_process.exec with string concatenation, os.system, subprocess.call(shell=True),",
-    "Runtime.exec with user input, backtick execution in Ruby/Perl.",
-    "Do NOT flag subprocess.run([...]) with array arguments (safe) or hardcoded commands.",
-    "",
-  ] },
-  { id: "unsafe-file-ops", lines: [
-    "### unsafe-file-ops (CWE-22, CWE-59)",
-    "Path traversal / symlink attacks: fs.readFile/writeFile with user-controlled paths without path.resolve + startsWith check,",
-    "open() with user input, file uploads without filename sanitization, directory listing without access control.",
-    "Additional patterns to check:",
-    "- path.resolve(baseDir, externalInput) or path.join(baseDir, externalInput) without a subsequent",
-    "  startsWith(baseDir) check — the resolved path can escape baseDir via '../' sequences.",
-    "- fs.readFile/readFileSync on paths derived from external data (config, JSON fields, tool output,",
-    "  LLM responses) without realpath validation — symlinks in the working directory can point outside.",
-    "- File paths from parsed JSON/YAML, scanner findings, or API responses used in file operations",
-    "  without boundary checks — these are injection vectors even without direct user HTTP input.",
-    "",
-  ] },
-  { id: "insecure-defaults", lines: [
-    "### insecure-defaults (CWE-16)",
-    "Dangerous default configurations: CORS allow-all (*), debug mode in production config,",
-    "disabled CSRF protection, permissive CSP, missing secure/httpOnly on cookies, weak session config,",
-    "TLS verification disabled, verbose error messages exposing internals.",
-    "",
-    "For CLI tools and developer tools, also check:",
-    "- Dangerous tool/capability defaults: LLM agent sessions created with Bash/Write/Edit in",
-    "  allowedTools by default — enables prompt injection to command execution.",
-    "- Subprocess execution modes that run untrusted code by default (e.g., autobuild, shell:true,",
-    "  --build-mode=autobuild) without explicit opt-in or sandboxing.",
-    "- Permission/sandbox bypass: allowDangerouslySkipPermissions=true, --no-verify, --trust-repo-config",
-    "  enabled by default rather than requiring explicit operator opt-in.",
-    "- Unauthenticated server defaults: SSE/HTTP servers bound to 0.0.0.0 with Access-Control-Allow-Origin: *.",
-    "",
-  ] },
-  { id: "unsafe-regex", lines: [
-    "### unsafe-regex (CWE-1333)",
-    "Regular expressions vulnerable to catastrophic backtracking when applied to user input.",
-    "Only flag regex patterns with nested quantifiers that process user-controlled strings.",
-    "",
-  ] },
-  { id: "prototype-pollution", lines: [
-    "### prototype-pollution (CWE-1321)",
-    "Deep merge/extend operations with user-controlled input:",
-    "- `_.merge({}, userInput)`, `deepmerge(target, userInput)`, `Object.assign` with nested objects",
-    "- Property access via `obj[userKey]` where userKey can be `__proto__`, `constructor.prototype`",
-    "",
-  ] },
-  { id: "nosql-injection", lines: [
-    "### nosql-injection (CWE-943)",
-    "MongoDB operator injection via user-controlled query objects:",
-    "- `db.collection.find(req.body)` where body can contain `$gt`, `$ne`, `$regex`, `$where`",
-    "",
-  ] },
-  { id: "template-injection", lines: [
-    "### template-injection (CWE-1336)",
-    "Server-side template injection (SSTI):",
-    "- Jinja2: `render_template_string(user_input)`, `Template(user_input).render()`",
-    "- EJS: `ejs.render(user_input)` or unescaped output `<%- userVar %>`",
-    "",
-  ] },
-  { id: "ldap-injection", lines: [
-    "### ldap-injection (CWE-90)",
-    "User input concatenated into LDAP filter strings without escaping.",
-    "",
-  ] },
-  { id: "xml-injection", lines: [
-    "### xml-injection (CWE-611)",
-    "XML External Entity (XXE) via unsafe XML parsing with external entities enabled.",
-    "",
-  ] },
+  {
+    id: "unsafe-deserialization",
+    lines: [
+      "### unsafe-deserialization (CWE-502)",
+      "Deserializing untrusted data: pickle.loads, yaml.unsafe_load, Java ObjectInputStream,",
+      "PHP unserialize, JSON.parse with reviver on untrusted input, eval-based JSON parsing.",
+      "Only flag when input source is attacker-controlled (request body, URL params, file upload, message queue).",
+      "",
+    ],
+  },
+  {
+    id: "unsafe-eval",
+    lines: [
+      "### unsafe-eval (CWE-94, CWE-95)",
+      "Dynamic code execution: eval(), Function(), vm.runInNewContext, setTimeout/setInterval with strings,",
+      "template injection (Jinja2, EJS, Pug with unescaped), Python compile, Ruby instance_eval.",
+      "Only flag when the evaluated string includes user-controlled data.",
+      "",
+    ],
+  },
+  {
+    id: "unsafe-subprocess",
+    lines: [
+      "### unsafe-subprocess (CWE-78)",
+      "Shell command injection: child_process.exec with string concatenation, os.system, subprocess.call(shell=True),",
+      "Runtime.exec with user input, backtick execution in Ruby/Perl.",
+      "Do NOT flag subprocess.run([...]) with array arguments (safe) or hardcoded commands.",
+      "",
+    ],
+  },
+  {
+    id: "unsafe-file-ops",
+    lines: [
+      "### unsafe-file-ops (CWE-22, CWE-59)",
+      "Path traversal / symlink attacks: fs.readFile/writeFile with user-controlled paths without path.resolve + startsWith check,",
+      "open() with user input, file uploads without filename sanitization, directory listing without access control.",
+      "Additional patterns to check:",
+      "- path.resolve(baseDir, externalInput) or path.join(baseDir, externalInput) without a subsequent",
+      "  startsWith(baseDir) check — the resolved path can escape baseDir via '../' sequences.",
+      "- fs.readFile/readFileSync on paths derived from external data (config, JSON fields, tool output,",
+      "  LLM responses) without realpath validation — symlinks in the working directory can point outside.",
+      "- File paths from parsed JSON/YAML, scanner findings, or API responses used in file operations",
+      "  without boundary checks — these are injection vectors even without direct user HTTP input.",
+      "",
+    ],
+  },
+  {
+    id: "insecure-defaults",
+    lines: [
+      "### insecure-defaults (CWE-16)",
+      "Dangerous default configurations: CORS allow-all (*), debug mode in production config,",
+      "disabled CSRF protection, permissive CSP, missing secure/httpOnly on cookies, weak session config,",
+      "TLS verification disabled, verbose error messages exposing internals.",
+      "",
+      "For CLI tools and developer tools, also check:",
+      "- Dangerous tool/capability defaults: LLM agent sessions created with Bash/Write/Edit in",
+      "  allowedTools by default — enables prompt injection to command execution.",
+      "- Subprocess execution modes that run untrusted code by default (e.g., autobuild, shell:true,",
+      "  --build-mode=autobuild) without explicit opt-in or sandboxing.",
+      "- Permission/sandbox bypass: allowDangerouslySkipPermissions=true, --no-verify, --trust-repo-config",
+      "  enabled by default rather than requiring explicit operator opt-in.",
+      "- Unauthenticated server defaults: SSE/HTTP servers bound to 0.0.0.0 with Access-Control-Allow-Origin: *.",
+      "",
+    ],
+  },
+  {
+    id: "unsafe-regex",
+    lines: [
+      "### unsafe-regex (CWE-1333)",
+      "Regular expressions vulnerable to catastrophic backtracking when applied to user input.",
+      "Only flag regex patterns with nested quantifiers that process user-controlled strings.",
+      "",
+    ],
+  },
+  {
+    id: "prototype-pollution",
+    lines: [
+      "### prototype-pollution (CWE-1321)",
+      "Deep merge/extend operations with user-controlled input:",
+      "- `_.merge({}, userInput)`, `deepmerge(target, userInput)`, `Object.assign` with nested objects",
+      "- Property access via `obj[userKey]` where userKey can be `__proto__`, `constructor.prototype`",
+      "",
+    ],
+  },
+  {
+    id: "nosql-injection",
+    lines: [
+      "### nosql-injection (CWE-943)",
+      "MongoDB operator injection via user-controlled query objects:",
+      "- `db.collection.find(req.body)` where body can contain `$gt`, `$ne`, `$regex`, `$where`",
+      "",
+    ],
+  },
+  {
+    id: "template-injection",
+    lines: [
+      "### template-injection (CWE-1336)",
+      "Server-side template injection (SSTI):",
+      "- Jinja2: `render_template_string(user_input)`, `Template(user_input).render()`",
+      "- EJS: `ejs.render(user_input)` or unescaped output `<%- userVar %>`",
+      "",
+    ],
+  },
+  {
+    id: "ldap-injection",
+    lines: [
+      "### ldap-injection (CWE-90)",
+      "User input concatenated into LDAP filter strings without escaping.",
+      "",
+    ],
+  },
+  {
+    id: "xml-injection",
+    lines: [
+      "### xml-injection (CWE-611)",
+      "XML External Entity (XXE) via unsafe XML parsing with external entities enabled.",
+      "",
+    ],
+  },
 ];
 
 const AUTH_ACCESS_BLOCKS: CategoryBlock[] = [
-  { id: "unprotected-endpoint", lines: [
-    "### unprotected-endpoint (CWE-862)",
-    "State-changing endpoint (POST/PUT/DELETE) without auth middleware.",
-    "",
-  ] },
-  { id: "missing-role-check", lines: [
-    "### missing-role-check (CWE-863)",
-    "Admin/privileged endpoint accessible to regular users.",
-    "",
-  ] },
-  { id: "idor", lines: [
-    "### idor (CWE-639)",
-    "Resource access using user-supplied ID without ownership validation.",
-    "",
-  ] },
-  { id: "default-credentials", lines: [
-    "### default-credentials (CWE-798)",
-    "Hardcoded passwords in seed/migration/config files.",
-    "",
-  ] },
-  { id: "mass-assignment", lines: [
-    "### mass-assignment (CWE-915)",
-    "Object spread or assign from request body to model without field filtering.",
-    "",
-  ] },
-  { id: "jwt-claim-manipulation", lines: [
-    "### jwt-claim-manipulation (CWE-345)",
-    "JWT claims trusted without server-side validation.",
-    "",
-  ] },
-  { id: "session-fixation", lines: [
-    "### session-fixation (CWE-384)",
-    "Session ID not regenerated after authentication state change.",
-    "",
-  ] },
-  { id: "horizontal-privesc", lines: [
-    "### horizontal-privesc (CWE-639)",
-    "Resource access using user-supplied ID without verifying the requesting user owns the resource.",
-    "",
-  ] },
+  {
+    id: "unprotected-endpoint",
+    lines: [
+      "### unprotected-endpoint (CWE-862)",
+      "State-changing endpoint (POST/PUT/DELETE) without auth middleware.",
+      "",
+    ],
+  },
+  {
+    id: "missing-role-check",
+    lines: [
+      "### missing-role-check (CWE-863)",
+      "Admin/privileged endpoint accessible to regular users.",
+      "",
+    ],
+  },
+  {
+    id: "idor",
+    lines: [
+      "### idor (CWE-639)",
+      "Resource access using user-supplied ID without ownership validation.",
+      "",
+    ],
+  },
+  {
+    id: "default-credentials",
+    lines: [
+      "### default-credentials (CWE-798)",
+      "Hardcoded passwords in seed/migration/config files.",
+      "",
+    ],
+  },
+  {
+    id: "mass-assignment",
+    lines: [
+      "### mass-assignment (CWE-915)",
+      "Object spread or assign from request body to model without field filtering.",
+      "",
+    ],
+  },
+  {
+    id: "jwt-claim-manipulation",
+    lines: [
+      "### jwt-claim-manipulation (CWE-345)",
+      "JWT claims trusted without server-side validation.",
+      "",
+    ],
+  },
+  {
+    id: "session-fixation",
+    lines: [
+      "### session-fixation (CWE-384)",
+      "Session ID not regenerated after authentication state change.",
+      "",
+    ],
+  },
+  {
+    id: "horizontal-privesc",
+    lines: [
+      "### horizontal-privesc (CWE-639)",
+      "Resource access using user-supplied ID without verifying the requesting user owns the resource.",
+      "",
+    ],
+  },
 ];
 
 const SECURITY_MISCONFIG_BLOCKS: CategoryBlock[] = [
-  { id: "debug-mode", lines: [
-    "### debug-mode (CWE-489)",
-    "DEBUG=True in production Django, Flask debug=True, Express morgan dev mode in production.",
-    "",
-  ] },
-  { id: "missing-headers", lines: [
-    "### missing-headers (CWE-16)",
-    "Missing Content-Security-Policy, HSTS, X-Frame-Options, X-Content-Type-Options headers.",
-    "",
-  ] },
-  { id: "insecure-cors", lines: [
-    "### insecure-cors (CWE-942)",
-    "CORS with `*` origin combined with credentials, reflecting arbitrary Origin headers.",
-    "",
-  ] },
-  { id: "insecure-cookies", lines: [
-    "### insecure-cookies (CWE-614)",
-    "Missing Secure flag, HttpOnly flag, or SameSite attribute on session cookies.",
-    "",
-  ] },
-  { id: "exposed-admin", lines: [
-    "### exposed-admin (CWE-200)",
-    "Admin panels or debug endpoints accessible without authentication.",
-    "",
-  ] },
-  { id: "verbose-errors", lines: [
-    "### verbose-errors (CWE-209)",
-    "Stack traces or detailed error messages with internal paths exposed to users.",
-    "",
-  ] },
-  { id: "jwt-misconfiguration", lines: [
-    "### jwt-misconfiguration (CWE-347)",
-    "JWT with alg:none accepted, algorithm confusion, short/guessable JWT secret.",
-    "",
-  ] },
-  { id: "session-storage", lines: [
-    "### session-storage (CWE-539)",
-    "Session data in localStorage, session tokens in URL, missing session expiration.",
-    "",
-  ] },
-  { id: "missing-rate-limit", lines: [
-    "### missing-rate-limit (CWE-307)",
-    "Authentication endpoints without rate limiting.",
-    "",
-  ] },
-  { id: "exposed-endpoints", lines: [
-    "### exposed-endpoints (CWE-200)",
-    "Debug/monitoring endpoints exposed without auth (/actuator/*, /metrics, /swagger-ui).",
-    "",
-  ] },
-  { id: "container-misconfig", lines: [
-    "### container-misconfig (CWE-250)",
-    "Dockerfile running as root, privileged containers, host network mode.",
-    "",
-  ] },
-  { id: "cicd-misconfig", lines: [
-    "### cicd-misconfig (CWE-829)",
-    "GitHub Actions script injection, secrets exposed in logs, overly permissive GITHUB_TOKEN.",
-    "",
-  ] },
+  {
+    id: "debug-mode",
+    lines: [
+      "### debug-mode (CWE-489)",
+      "DEBUG=True in production Django, Flask debug=True, Express morgan dev mode in production.",
+      "",
+    ],
+  },
+  {
+    id: "missing-headers",
+    lines: [
+      "### missing-headers (CWE-16)",
+      "Missing Content-Security-Policy, HSTS, X-Frame-Options, X-Content-Type-Options headers.",
+      "",
+    ],
+  },
+  {
+    id: "insecure-cors",
+    lines: [
+      "### insecure-cors (CWE-942)",
+      "CORS with `*` origin combined with credentials, reflecting arbitrary Origin headers.",
+      "",
+    ],
+  },
+  {
+    id: "insecure-cookies",
+    lines: [
+      "### insecure-cookies (CWE-614)",
+      "Missing Secure flag, HttpOnly flag, or SameSite attribute on session cookies.",
+      "",
+    ],
+  },
+  {
+    id: "exposed-admin",
+    lines: [
+      "### exposed-admin (CWE-200)",
+      "Admin panels or debug endpoints accessible without authentication.",
+      "",
+    ],
+  },
+  {
+    id: "verbose-errors",
+    lines: [
+      "### verbose-errors (CWE-209)",
+      "Stack traces or detailed error messages with internal paths exposed to users.",
+      "",
+    ],
+  },
+  {
+    id: "jwt-misconfiguration",
+    lines: [
+      "### jwt-misconfiguration (CWE-347)",
+      "JWT with alg:none accepted, algorithm confusion, short/guessable JWT secret.",
+      "",
+    ],
+  },
+  {
+    id: "session-storage",
+    lines: [
+      "### session-storage (CWE-539)",
+      "Session data in localStorage, session tokens in URL, missing session expiration.",
+      "",
+    ],
+  },
+  {
+    id: "missing-rate-limit",
+    lines: [
+      "### missing-rate-limit (CWE-307)",
+      "Authentication endpoints without rate limiting.",
+      "",
+    ],
+  },
+  {
+    id: "exposed-endpoints",
+    lines: [
+      "### exposed-endpoints (CWE-200)",
+      "Debug/monitoring endpoints exposed without auth (/actuator/*, /metrics, /swagger-ui).",
+      "",
+    ],
+  },
+  {
+    id: "container-misconfig",
+    lines: [
+      "### container-misconfig (CWE-250)",
+      "Dockerfile running as root, privileged containers, host network mode.",
+      "",
+    ],
+  },
+  {
+    id: "cicd-misconfig",
+    lines: [
+      "### cicd-misconfig (CWE-829)",
+      "GitHub Actions script injection, secrets exposed in logs, overly permissive GITHUB_TOKEN.",
+      "",
+    ],
+  },
 ];
 
 function buildPrompt(
@@ -348,10 +471,7 @@ function buildPrompt(
   threatModelContext?: string,
   applicationModelContext?: string,
   scenarioContext?: string,
-  detectorScope: CodeConfigDetectorId[] = [
-    "dangerous-api-detect",
-    "security-misconfig-detect",
-  ],
+  detectorScope: CodeConfigDetectorId[] = ["dangerous-api-detect", "security-misconfig-detect"],
 ): string {
   const contextLines = repoContext
     ? [
@@ -384,11 +504,17 @@ function buildPrompt(
   const enableAuthAccess = detectorScope.includes("auth-access-detect");
   const enableSecurityMisconfig = detectorScope.includes("security-misconfig-detect");
 
-  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec", "auth-session", "config-security"]);
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, [
+    "eval-exec",
+    "auth-session",
+    "config-security",
+  ]);
 
   const part1Lines = enableDangerousApi ? filterBlocks(DANGEROUS_API_BLOCKS, included) : [];
   const part2Lines = enableAuthAccess ? filterBlocks(AUTH_ACCESS_BLOCKS, included) : [];
-  const part3Lines = enableSecurityMisconfig ? filterBlocks(SECURITY_MISCONFIG_BLOCKS, included) : [];
+  const part3Lines = enableSecurityMisconfig
+    ? filterBlocks(SECURITY_MISCONFIG_BLOCKS, included)
+    : [];
 
   return [
     "You are a senior application security engineer with 10+ years of experience auditing production",
@@ -405,37 +531,47 @@ function buildPrompt(
     ...(applicationModelContext ? [applicationModelContext] : []),
     ...(scenarioContext ? [scenarioContext] : []),
     ...(isFiltered ? CATEGORY_SCOPE_HEADER : []),
-    languageTuningModule({ taskId: "code-config-detect", repoContext, frameworks: repoContext?.frameworks }) || "",
-    ...(part1Lines.length > 0 ? [
-      "# Part 1: Dangerous API Detection",
-      "",
-      "For dangerous API findings, set `detectorId: \"dangerous-api-detect\"` and `category` to the API category.",
-      "",
-      "## Categories to detect",
-      "",
-      ...part1Lines,
-    ] : []),
-    ...(part2Lines.length > 0 ? [
-      "# Part 2: Auth/Access Control Detection",
-      "",
-      "For auth findings, set `detectorId: \"auth-access-detect\"` and `category` to the auth pattern.",
-      "Include `endpoint` and `httpMethod` fields when applicable.",
-      "",
-      "## Phase 1: Map auth architecture",
-      "Identify the auth patterns used (JWT, session, OAuth, etc.).",
-      "Build a map of which route groups are protected, including router/app/controller-level middleware.",
-      "",
-      "## Phase 2: Find violations",
-      "",
-      ...part2Lines,
-    ] : []),
-    ...(part3Lines.length > 0 ? [
-      "# Part 3: Security Misconfiguration Detection",
-      "",
-      "For misconfiguration findings, set `detectorId: \"security-misconfig-detect\"` and `category` to the config category.",
-      "",
-      ...part3Lines,
-    ] : []),
+    languageTuningModule({
+      taskId: "code-config-detect",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "",
+    ...(part1Lines.length > 0
+      ? [
+          "# Part 1: Dangerous API Detection",
+          "",
+          'For dangerous API findings, set `detectorId: "dangerous-api-detect"` and `category` to the API category.',
+          "",
+          "## Categories to detect",
+          "",
+          ...part1Lines,
+        ]
+      : []),
+    ...(part2Lines.length > 0
+      ? [
+          "# Part 2: Auth/Access Control Detection",
+          "",
+          'For auth findings, set `detectorId: "auth-access-detect"` and `category` to the auth pattern.',
+          "Include `endpoint` and `httpMethod` fields when applicable.",
+          "",
+          "## Phase 1: Map auth architecture",
+          "Identify the auth patterns used (JWT, session, OAuth, etc.).",
+          "Build a map of which route groups are protected, including router/app/controller-level middleware.",
+          "",
+          "## Phase 2: Find violations",
+          "",
+          ...part2Lines,
+        ]
+      : []),
+    ...(part3Lines.length > 0
+      ? [
+          "# Part 3: Security Misconfiguration Detection",
+          "",
+          'For misconfiguration findings, set `detectorId: "security-misconfig-detect"` and `category` to the config category.',
+          "",
+          ...part3Lines,
+        ]
+      : []),
     formatFileTreeForPrompt(fileIndex, patternMatchText.length > 0),
     formatPreReadForPrompt(preRead ?? { files: [], totalBytes: 0, truncated: false }),
     patternMatchText,
@@ -464,11 +600,17 @@ function buildPrompt(
         "If unsure whether middleware protects a route, READ the middleware registration.",
         "Only report misconfigurations you can verify in code. Do not assume defaults.",
         "Account for framework defaults that may provide secure configuration automatically.",
-        ...languageAntiHallucinationExtras({ taskId: "code-config-detect", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "code-config-detect",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function normalizeFindings(
@@ -485,7 +627,10 @@ function normalizeFindings(
     if (!isRecord(item)) continue;
     const f = item as unknown as CodeConfigFinding;
     if (!f.filePath?.trim()) continue;
-    if (detectorScope && !detectorScope.has((f.detectorId || "dangerous-api-detect") as CodeConfigDetectorId)) {
+    if (
+      detectorScope &&
+      !detectorScope.has((f.detectorId || "dangerous-api-detect") as CodeConfigDetectorId)
+    ) {
       continue;
     }
 
@@ -513,13 +658,22 @@ function normalizeFindings(
 
     const filePath = normalizeFilePath(repoRoot, f.filePath);
     const cweList = f.cwe ? [f.cwe] : [];
-    const fingerprint = computeFingerprint(repoName, fingerprintPrefix, f.category, filePath, f.startLine);
+    const fingerprint = computeFingerprint(
+      repoName,
+      fingerprintPrefix,
+      f.category,
+      filePath,
+      f.startLine,
+    );
 
     const apiInfo = f.apiOrFunction ? ` [${f.apiOrFunction}]` : "";
     const endpointInfo = f.endpoint ? ` (${f.httpMethod ?? "?"} ${f.endpoint})` : "";
-    const extraInfo = f.detectorId === "dangerous-api-detect" ? apiInfo
-      : f.detectorId === "auth-access-detect" ? endpointInfo
-      : "";
+    const extraInfo =
+      f.detectorId === "dangerous-api-detect"
+        ? apiInfo
+        : f.detectorId === "auth-access-detect"
+          ? endpointInfo
+          : "";
 
     const finding: Finding = {
       taskId,
@@ -550,12 +704,16 @@ function normalizeFindings(
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
-function computeFingerprint(repoName: string, prefix: string, category: string, filePath: string, startLine: number): string {
+function computeFingerprint(
+  repoName: string,
+  prefix: string,
+  category: string,
+  filePath: string,
+  startLine: number,
+): string {
   return computeDetectionFingerprint([repoName, prefix, category, filePath, String(startLine)]);
 }
 
@@ -585,7 +743,14 @@ export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
       fileIndex,
       preRead,
     );
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead, threatModelContext);
+    const prompt = buildPrompt(
+      repoContext,
+      maxFindings,
+      profileLines,
+      fileIndex,
+      preRead,
+      threatModelContext,
+    );
     const runtime = resolveTaskRuntime(context);
 
     let structuredOutput: unknown;
@@ -649,7 +814,9 @@ export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
           "",
           "Verify the endpoint is truly unprotected or the access control is genuinely missing.",
           "Check for middleware applied at router/app level that might not be visible at the handler.",
-        ].filter(Boolean).join("\n"),
+        ]
+          .filter(Boolean)
+          .join("\n"),
       };
     }
 
@@ -665,7 +832,9 @@ export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
           "",
           "Verify the misconfiguration is genuine and affects production environments.",
           "Check if there are compensating controls or if the setting only applies to development.",
-        ].filter(Boolean).join("\n"),
+        ]
+          .filter(Boolean)
+          .join("\n"),
       };
     }
 
@@ -682,7 +851,9 @@ export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
         "1. The dangerous API call actually exists at the reported location.",
         "2. The input to the API is genuinely attacker-controlled.",
         "3. No sanitization, validation, or access control guards prevent exploitation.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

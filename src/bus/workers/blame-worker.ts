@@ -1,17 +1,14 @@
-import { getBlameForLine } from "../../git/blame.js";
-import type { MessageBus } from "../types.js";
-import type { TriageResultEvent } from "../events.js";
-import { updateFindingMetadata } from "../../store.js";
 import type Database from "better-sqlite3";
+import { getBlameForLine } from "../../git/blame.js";
+import { updateFindingMetadata } from "../../store.js";
+import type { TriageResultEvent } from "../events.js";
+import type { MessageBus } from "../types.js";
 
 export interface BlameWorkerDeps {
   db: Database.Database;
 }
 
-export function registerBlameWorker(
-  bus: MessageBus,
-  deps: BlameWorkerDeps,
-): void {
+export function registerBlameWorker(bus: MessageBus, deps: BlameWorkerDeps): void {
   bus.subscribe<TriageResultEvent>("triage:result", (event) => {
     const { finding, result, context } = event.payload;
 
@@ -22,11 +19,7 @@ export function registerBlameWorker(
     if (!finding.filePath || finding.filePath === ".") return;
 
     try {
-      const blame = getBlameForLine(
-        context.repoRoot,
-        finding.filePath,
-        finding.startLine,
-      );
+      const blame = getBlameForLine(context.repoRoot, finding.filePath, finding.startLine);
 
       if (blame) {
         updateFindingMetadata(deps.db, finding.fingerprint, {

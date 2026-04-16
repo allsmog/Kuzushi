@@ -1,25 +1,34 @@
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../security-profiles.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
-import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
-import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
-import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
+import {
+  computeDetectionFingerprint,
+  normalizeFilePath,
+  parseJson,
+} from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
+import {
+  formatFileTreeForPrompt,
+  formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
+} from "./pre-read-prompt.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
 
 const log = createLogger({ stage: "supply-chain" });
 
@@ -33,9 +42,26 @@ const SUPPLY_CHAIN_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
-          category: { type: "string", enum: ["postinstall-scripts", "lockfile-integrity", "internal-package-exposure", "rule-config-autoload"] },
+          category: {
+            type: "string",
+            enum: [
+              "postinstall-scripts",
+              "lockfile-integrity",
+              "internal-package-exposure",
+              "rule-config-autoload",
+            ],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -75,7 +101,13 @@ function resolveConfig(ctx: TaskContext): SupplyChainConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[] = [],
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, []);
 
   const contextLines = repoContext
@@ -114,8 +146,11 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(profileLines.length > 0 ? [...profileLines, ""] : []),
     "## Categories to detect",
     "",
-    languageTuningModule({ taskId: "supply-chain", repoContext, frameworks: repoContext?.frameworks }) ||
-    "### postinstall-scripts (CWE-829)",
+    languageTuningModule({
+      taskId: "supply-chain",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "### postinstall-scripts (CWE-829)",
     "npm/yarn/pnpm postinstall, preinstall, or install lifecycle scripts that download or execute",
     "external code. Dangerous patterns:",
     "- Scripts that use curl/wget to download and execute remote code",
@@ -181,17 +216,28 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Do NOT flag well-known build tools (node-gyp, esbuild, husky) for postinstall scripts.",
         "Do NOT flag missing lockfiles in library packages that intentionally omit them.",
         "Confidence HIGH only if the risk vector is clearly verified in the repository.",
-        ...languageAntiHallucinationExtras({ taskId: "supply-chain", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "supply-chain",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
     "",
     `Return at most ${maxFindings} findings, prioritized by severity and confidence.`,
     "Filter out any finding where your confidence would be below MEDIUM.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -235,13 +281,17 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 function computeFingerprint(repoName: string, filePath: string, f: SupplyChainFinding): string {
-  return computeDetectionFingerprint([repoName, "supply-chain", f.category, filePath, String(f.startLine)]);
+  return computeDetectionFingerprint([
+    repoName,
+    "supply-chain",
+    f.category,
+    filePath,
+    String(f.startLine),
+  ]);
 }
 
 export const supplyChainTask: AgentTask<ScanOpts, Finding[]> = {
@@ -324,7 +374,9 @@ export const supplyChainTask: AgentTask<ScanOpts, Finding[]> = {
         "1. The supply chain risk actually exists in the reported configuration file.",
         "2. The risk is genuine and not mitigated by other security controls.",
         "3. No lockfile enforcement, integrity checks, or scope protection prevents exploitation.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

@@ -1,27 +1,16 @@
+import { cleanupBatchFiles, writeBatchFile } from "./agent-runtime/batch-files.js";
 import {
+  type AgentRuntimeOptions,
   extractJson,
   resolveDefaultReadOnlyTools,
   resolveRepoContextAndRuntimeOptions,
   runStructuredAgentQuery,
   runStructuredSessionQuery,
-  type AgentActivityCallback,
-  type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
 import type { AgentSession } from "./agent-runtime/types.js";
-import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
-import type { AllowedTriageTool, Finding } from "./scanners/types.js";
-import type {
-  CodeCitation,
-  AttackPathAnalysis,
-  SecurityControl,
-  EnrichedRepoContext,
-  ProofVerdict,
-  RepoContext,
-  TriageResult,
-  VerificationResult,
-} from "./types.js";
 import { getBypassKnowledge } from "./bypass-knowledge.js";
-import { formatEnrichedRepoContext, formatRepoContext } from "./repo-context.js";
+import { getLogger } from "./logger.js";
+import { buildBatchVerifyContext, buildVerifyContext } from "./prompts/context.js";
 import {
   bypassExhaustionModule,
   composePromptModules,
@@ -29,13 +18,26 @@ import {
   frameworkAwarenessModule,
   proofLevelModule,
 } from "./prompts/modules.js";
-import { getLogger } from "./logger.js";
-import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
-import { RawVerificationOutputSchema, RawBatchVerificationOutputSchema, formatZodErrors } from "./schemas.js";
 import { renderTemplate } from "./prompts/template.js";
-import { VERIFY_UNIFIED_TEMPLATE } from "./prompts/templates/verify.js";
-import { BATCH_VERIFY_TEMPLATE } from "./prompts/templates/verify.js";
-import { buildVerifyContext, buildBatchVerifyContext } from "./prompts/context.js";
+import { BATCH_VERIFY_TEMPLATE, VERIFY_UNIFIED_TEMPLATE } from "./prompts/templates/verify.js";
+import { formatEnrichedRepoContext, formatRepoContext } from "./repo-context.js";
+import type { AllowedTriageTool, Finding } from "./scanners/types.js";
+import {
+  formatZodErrors,
+  RawBatchVerificationOutputSchema,
+  RawVerificationOutputSchema,
+} from "./schemas.js";
+import type {
+  AttackPathAnalysis,
+  CodeCitation,
+  EnrichedRepoContext,
+  ProofVerdict,
+  RepoContext,
+  SecurityControl,
+  TriageResult,
+  VerificationResult,
+} from "./types.js";
+import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 
 const log = getLogger("verify");
 
@@ -130,7 +132,11 @@ export function resolveDefaultVerificationTools(
 ): AllowedTriageTool[] {
   const tools = normalizeAllowedTriageToolNames(resolveDefaultReadOnlyTools(runtime));
   if (enableInstrumentation) {
-    tools.push("Write" as AllowedTriageTool, "Bash" as AllowedTriageTool, "Edit" as AllowedTriageTool);
+    tools.push(
+      "Write" as AllowedTriageTool,
+      "Bash" as AllowedTriageTool,
+      "Edit" as AllowedTriageTool,
+    );
   }
   return tools;
 }
@@ -153,32 +159,36 @@ export function verificationSystemPromptPrefix(
 ): string {
   const repoSection = formatRepoContext(repoContext);
   const enrichedSection = formatEnrichedRepoContext(enrichedContext);
-  const repoBlock = repoSection.length > 0
-    ? "## Repository Context\n" + repoSection.join("\n") + "\n\n"
-    : "";
-  const enrichedBlock = enrichedSection.length > 0
-    ? "## Enriched Repository Context\n" + enrichedSection.join("\n") + "\n\n"
-    : "";
-  const extraBlock = extraPromptContext
-    ? "\n\n" + extraPromptContext
-    : "";
+  const repoBlock =
+    repoSection.length > 0 ? `## Repository Context\n${repoSection.join("\n")}\n\n` : "";
+  const enrichedBlock =
+    enrichedSection.length > 0
+      ? `## Enriched Repository Context\n${enrichedSection.join("\n")}\n\n`
+      : "";
+  const extraBlock = extraPromptContext ? `\n\n${extraPromptContext}` : "";
   const instrumentationBlock = enableInstrumentation
-    ? "\n\n## Runtime Instrumentation\n"
-      + "You have Write, Edit, and Bash tools available for runtime instrumentation.\n"
-      + "When exploitability is unclear from static analysis alone:\n"
-      + "1. Insert trace/debug statements (print, log, assert) at key points in the code path\n"
-      + "2. Use Bash to run tests, compile, or execute the modified code\n"
-      + "3. Read the output to observe actual data flow and behavior\n"
-      + "4. Iterate: refine instrumentation based on what you observe\n"
-      + "5. Determine exploitability from runtime evidence, not just code review\n"
-      + "All changes are in a disposable sandbox — do not worry about breaking things.\n"
+    ? "\n\n## Runtime Instrumentation\n" +
+      "You have Write, Edit, and Bash tools available for runtime instrumentation.\n" +
+      "When exploitability is unclear from static analysis alone:\n" +
+      "1. Insert trace/debug statements (print, log, assert) at key points in the code path\n" +
+      "2. Use Bash to run tests, compile, or execute the modified code\n" +
+      "3. Read the output to observe actual data flow and behavior\n" +
+      "4. Iterate: refine instrumentation based on what you observe\n" +
+      "5. Determine exploitability from runtime evidence, not just code review\n" +
+      "All changes are in a disposable sandbox — do not worry about breaking things.\n"
     : "";
-  return repoBlock + enrichedBlock + instrumentationBlock + composePromptModules(
-    frameworkAwarenessModule(repoContext),
-    proofLevelModule(),
-    bypassExhaustionModule(),
-    confidenceEscalationModule("verification"),
-  ) + extraBlock;
+  return (
+    repoBlock +
+    enrichedBlock +
+    instrumentationBlock +
+    composePromptModules(
+      frameworkAwarenessModule(repoContext),
+      proofLevelModule(),
+      bypassExhaustionModule(),
+      confidenceEscalationModule("verification"),
+    ) +
+    extraBlock
+  );
 }
 
 export async function verifyFindingWithAgent(
@@ -201,9 +211,17 @@ export async function verifyFindingWithAgent(
     prompt,
     cwd: repoRoot,
     model,
-    allowedTools: resolveDefaultVerificationTools(runtimeOptions.runtime, runtimeOptions.enableInstrumentation),
+    allowedTools: resolveDefaultVerificationTools(
+      runtimeOptions.runtime,
+      runtimeOptions.enableInstrumentation,
+    ),
     runtimeOptions,
-    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext, runtimeOptions.enableInstrumentation),
+    systemPromptPrefix: verificationSystemPromptPrefix(
+      repoContext,
+      runtimeOptions.enrichedContext,
+      runtimeOptions.extraPromptContext,
+      runtimeOptions.enableInstrumentation,
+    ),
     schema: VERIFICATION_RESULT_SCHEMA,
   });
 
@@ -377,7 +395,7 @@ function parseCodeCitations(value: unknown): CodeCitation[] | undefined {
     let snippet = typeof rec["snippet"] === "string" ? rec["snippet"] : "";
     const description = typeof rec["description"] === "string" ? rec["description"].trim() : "";
     if (!filePath || !Number.isFinite(startLine) || !description) continue;
-    if (snippet.length > 2000) snippet = snippet.slice(0, 2000) + "\n...truncated";
+    if (snippet.length > 2000) snippet = `${snippet.slice(0, 2000)}\n...truncated`;
     citations.push({
       filePath,
       startLine,
@@ -396,10 +414,10 @@ function parseAttackPath(value: unknown): AttackPathAnalysis | undefined {
     ? rec["chain"].map((s: unknown) => String(s).trim()).filter(Boolean)
     : [];
   const narrative = typeof rec["narrative"] === "string" ? rec["narrative"].trim() : "";
-  const likelihoodReasoning = typeof rec["likelihood_reasoning"] === "string"
-    ? rec["likelihood_reasoning"].trim() : "";
-  const impactReasoning = typeof rec["impact_reasoning"] === "string"
-    ? rec["impact_reasoning"].trim() : "";
+  const likelihoodReasoning =
+    typeof rec["likelihood_reasoning"] === "string" ? rec["likelihood_reasoning"].trim() : "";
+  const impactReasoning =
+    typeof rec["impact_reasoning"] === "string" ? rec["impact_reasoning"].trim() : "";
   if (chain.length === 0 && !narrative) return undefined;
   return { chain, narrative, likelihoodReasoning, impactReasoning };
 }
@@ -437,7 +455,8 @@ export const BATCH_VERIFICATION_SCHEMA = {
 
 export const DEFAULT_VERIFY_BATCH_SIZE = 5;
 
-export const BATCH_VERIFICATION_FALLBACK_DESCRIPTION = "Finding was not included in batch verification agent response.";
+export const BATCH_VERIFICATION_FALLBACK_DESCRIPTION =
+  "Finding was not included in batch verification agent response.";
 
 export interface BatchVerificationOutput {
   results: Map<string, VerificationResult>;
@@ -470,7 +489,15 @@ export async function verifyFindingsBatch(
   const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
 
   if (items.length <= effectiveBatchSize) {
-    return verifySingleBatch(items, repoRoot, repoName, model, repoContext, runtimeOptions, verifyTemplate);
+    return verifySingleBatch(
+      items,
+      repoRoot,
+      repoName,
+      model,
+      repoContext,
+      runtimeOptions,
+      verifyTemplate,
+    );
   }
 
   const allResults = new Map<string, VerificationResult>();
@@ -482,14 +509,21 @@ export async function verifyFindingsBatch(
   const session = runtime?.createSession?.({
     cwd: repoRoot,
     model,
-    allowedTools: [...resolveDefaultVerificationTools(runtime, runtimeOptions.enableInstrumentation)],
+    allowedTools: [
+      ...resolveDefaultVerificationTools(runtime, runtimeOptions.enableInstrumentation),
+    ],
     permissionMode: "dontAsk",
     outputFormat: {
       type: "json_schema",
       schema: BATCH_VERIFICATION_SCHEMA,
       strict: true,
     },
-    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext, runtimeOptions.enableInstrumentation),
+    systemPromptPrefix: verificationSystemPromptPrefix(
+      repoContext,
+      runtimeOptions.enrichedContext,
+      runtimeOptions.extraPromptContext,
+      runtimeOptions.enableInstrumentation,
+    ),
   });
 
   const runId = session ? crypto.randomUUID() : "";
@@ -588,7 +622,10 @@ async function verifySingleBatchSession(
   );
 
   if (executionError) {
-    throw new VerificationExecutionError(`batch verification agent failed: ${executionError}`, costUsd);
+    throw new VerificationExecutionError(
+      `batch verification agent failed: ${executionError}`,
+      costUsd,
+    );
   }
 
   const parsed = parseBatchVerificationOutput(structuredOutput ?? resultText, items);
@@ -613,16 +650,27 @@ async function verifySingleBatch(
     prompt,
     cwd: repoRoot,
     model,
-    allowedTools: resolveDefaultVerificationTools(runtimeOptions.runtime, runtimeOptions.enableInstrumentation),
+    allowedTools: resolveDefaultVerificationTools(
+      runtimeOptions.runtime,
+      runtimeOptions.enableInstrumentation,
+    ),
     runtimeOptions,
-    systemPromptPrefix: verificationSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext, runtimeOptions.extraPromptContext, runtimeOptions.enableInstrumentation),
+    systemPromptPrefix: verificationSystemPromptPrefix(
+      repoContext,
+      runtimeOptions.enrichedContext,
+      runtimeOptions.extraPromptContext,
+      runtimeOptions.enableInstrumentation,
+    ),
     schema: BATCH_VERIFICATION_SCHEMA,
     strict: true,
     retryInvalidStructuredOutput: 2,
   });
 
   if (executionError) {
-    throw new VerificationExecutionError(`batch verification agent failed: ${executionError}`, costUsd);
+    throw new VerificationExecutionError(
+      `batch verification agent failed: ${executionError}`,
+      costUsd,
+    );
   }
 
   const parsed = parseBatchVerificationOutput(structuredOutput ?? resultText, items);
@@ -697,7 +745,9 @@ function parseBatchVerificationOutput(
       confidence: clampConfidence((item as Record<string, unknown>)["confidence"]),
       proofLevel: parseProofLevel((item as Record<string, unknown>)["proof_level"]),
       proofVerdict: parseProofVerdict((item as Record<string, unknown>)["proof_verdict"]),
-      bypassAttempts: parseOptionalStringArray((item as Record<string, unknown>)["bypass_attempts"]),
+      bypassAttempts: parseOptionalStringArray(
+        (item as Record<string, unknown>)["bypass_attempts"],
+      ),
       codeCitations: parseCodeCitations((item as Record<string, unknown>)["code_citations"]),
       attackPath: parseAttackPath((item as Record<string, unknown>)["attack_path"]),
       assumptions: parseOptionalStringArray((item as Record<string, unknown>)["assumptions"]),
@@ -718,15 +768,16 @@ function parseBatchVerificationOutput(
 }
 
 function normalizeAllowedTriageToolNames(tools: readonly string[]): AllowedTriageTool[] {
-  return tools.filter((tool): tool is AllowedTriageTool => (
-    tool === "Read"
-    || tool === "Glob"
-    || tool === "Grep"
-    || tool === "GetCallers"
-    || tool === "GetCallees"
-    || tool === "GetFunctionBody"
-    || tool === "GoToDefinition"
-    || tool === "FindReferences"
-    || tool === "TypeAtPosition"
-  ));
+  return tools.filter(
+    (tool): tool is AllowedTriageTool =>
+      tool === "Read" ||
+      tool === "Glob" ||
+      tool === "Grep" ||
+      tool === "GetCallers" ||
+      tool === "GetCallees" ||
+      tool === "GetFunctionBody" ||
+      tool === "GoToDefinition" ||
+      tool === "FindReferences" ||
+      tool === "TypeAtPosition",
+  );
 }

@@ -4,15 +4,21 @@
  * The report-worker writes state updates via `store.update()`.
  * The Ink app subscribes via `store.subscribe()` and re-renders reactively.
  */
-import type { Verdict, OperatorScanContext } from "../types.js";
+
+import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
 import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
-import type { ExploitChain } from "../types.js";
-import type { CodeCitation, AttackPathAnalysis, SecurityControl } from "../types.js";
-import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
-import type { WizardResult } from "./components/SetupWizard.js";
+import type {
+  AttackPathAnalysis,
+  CodeCitation,
+  ExploitChain,
+  OperatorScanContext,
+  SecurityControl,
+  Verdict,
+} from "../types.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
+import type { WizardResult } from "./components/SetupWizard.js";
 
 export type Phase = "idle" | "scanning" | "triaging" | "verifying" | "poc" | "summary" | "done";
 export type UIMode = "preflight" | "running" | "summary" | "review" | "done" | "shell";
@@ -31,44 +37,44 @@ export interface UINotice {
 
 export type PreflightState =
   | {
-    kind: "wizard";
-    repoName: string;
-    repoRoot: string;
-    onComplete: (result: WizardResult) => void;
-    onCancel: () => void;
-  }
+      kind: "wizard";
+      repoName: string;
+      repoRoot: string;
+      onComplete: (result: WizardResult) => void;
+      onCancel: () => void;
+    }
   | {
-    kind: "confirm";
-    repoName: string;
-    repoRoot: string;
-    config: ConfigConfirmData;
-    onProceed: () => void;
-    onEdit: () => void;
-    onQuit: () => void;
-  }
+      kind: "confirm";
+      repoName: string;
+      repoRoot: string;
+      config: ConfigConfirmData;
+      onProceed: () => void;
+      onEdit: () => void;
+      onQuit: () => void;
+    }
   | {
-    kind: "credentials";
-    onComplete: (choice: CredentialChoice) => void;
-    onCancel: () => void;
-  }
+      kind: "credentials";
+      onComplete: (choice: CredentialChoice) => void;
+      onCancel: () => void;
+    }
   | {
-    kind: "context-intake";
-    repoName: string;
-    repoRoot: string;
-    initialContext: OperatorScanContext;
-    onComplete: (context: OperatorScanContext) => void;
-    onSkip: () => void;
-    onCancel: () => void;
-  }
+      kind: "context-intake";
+      repoName: string;
+      repoRoot: string;
+      initialContext: OperatorScanContext;
+      onComplete: (context: OperatorScanContext) => void;
+      onSkip: () => void;
+      onCancel: () => void;
+    }
   | {
-    kind: "threat-editor";
-    repoName: string;
-    repoRoot: string;
-    threatModel: ThreatModelDocument;
-    onComplete: (updated: ThreatModelDocument) => void;
-    onSkip: () => void;
-    onCancel: () => void;
-  };
+      kind: "threat-editor";
+      repoName: string;
+      repoRoot: string;
+      threatModel: ThreatModelDocument;
+      onComplete: (updated: ThreatModelDocument) => void;
+      onSkip: () => void;
+      onCancel: () => void;
+    };
 
 export interface ReviewSession {
   findings: ActionableFinding[];
@@ -128,7 +134,13 @@ export interface ResultLine {
 }
 
 export interface AgentActivityLine {
-  kind: "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning" | "finding-preview";
+  kind:
+    | "tool-start"
+    | "tool-progress"
+    | "tool-complete"
+    | "summary"
+    | "reasoning"
+    | "finding-preview";
   toolName?: string;
   detail?: string;
   elapsedSeconds?: number;
@@ -414,7 +426,11 @@ export class UIStore {
     this.state = {
       ...this.state,
       preflight,
-      mode: preflight ? "preflight" : this.state.mode === "preflight" ? this.preflightReturnMode : this.state.mode,
+      mode: preflight
+        ? "preflight"
+        : this.state.mode === "preflight"
+          ? this.preflightReturnMode
+          : this.state.mode,
     };
     this.notify();
   }
@@ -426,7 +442,11 @@ export class UIStore {
     this.state = {
       ...this.state,
       review,
-      mode: review ? "review" : this.state.mode === "review" ? this.reviewReturnMode : this.state.mode,
+      mode: review
+        ? "review"
+        : this.state.mode === "review"
+          ? this.reviewReturnMode
+          : this.state.mode,
     };
     this.notify();
   }
@@ -441,13 +461,16 @@ export class UIStore {
     this.notify();
   }
 
-  addNotice(notice: Omit<UINotice, "id" | "createdAt"> & { id?: string; createdAt?: number }): void {
+  addNotice(
+    notice: Omit<UINotice, "id" | "createdAt"> & { id?: string; createdAt?: number },
+  ): void {
     const createdAt = notice.createdAt ?? Date.now();
     const id = notice.id ?? `${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
-    const duplicate = this.state.notices.find((entry) =>
-      entry.level === notice.level
-      && entry.message === notice.message
-      && entry.detail === notice.detail,
+    const duplicate = this.state.notices.find(
+      (entry) =>
+        entry.level === notice.level &&
+        entry.message === notice.message &&
+        entry.detail === notice.detail,
     );
     if (duplicate) {
       return;
@@ -473,10 +496,10 @@ export class UIStore {
     const lines = newMap.get(fingerprint) ?? [];
     const previous = lines[lines.length - 1];
     if (
-      previous
-      && previous.kind === line.kind
-      && previous.toolName === line.toolName
-      && previous.detail === line.detail
+      previous &&
+      previous.kind === line.kind &&
+      previous.toolName === line.toolName &&
+      previous.detail === line.detail
     ) {
       return;
     }
@@ -498,7 +521,12 @@ export class UIStore {
   initStages(stageIds: Array<{ id: string; label: string }>): void {
     this.state = {
       ...this.state,
-      stages: stageIds.map((s) => ({ id: s.id, label: s.label, status: "pending" as StageStatus, subTasks: [] })),
+      stages: stageIds.map((s) => ({
+        id: s.id,
+        label: s.label,
+        status: "pending" as StageStatus,
+        subTasks: [],
+      })),
     };
     this.notify();
   }
@@ -597,10 +625,10 @@ export class UIStore {
         const prev = existing[existing.length - 1];
         // Deduplicate consecutive identical lines.
         if (
-          prev
-          && prev.kind === line.kind
-          && prev.toolName === line.toolName
-          && prev.detail === line.detail
+          prev &&
+          prev.kind === line.kind &&
+          prev.toolName === line.toolName &&
+          prev.detail === line.detail
         ) {
           return { ...task, lastEventAt: now };
         }
@@ -663,7 +691,12 @@ export function createUIStore(): UIStore {
 }
 
 /** Narrative line kinds that tell the investigation story. */
-const NARRATIVE_KINDS = new Set<string>(["reasoning", "finding-preview", "tool-complete", "summary"]);
+const NARRATIVE_KINDS = new Set<string>([
+  "reasoning",
+  "finding-preview",
+  "tool-complete",
+  "summary",
+]);
 
 /**
  * Keep up to `max` lines, prioritizing narrative (reasoning, findings,

@@ -188,7 +188,12 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
 
     const existingThreatModel = loadPersistentThreatModel(repoRoot);
     if (existingThreatModel) {
-      const tmOutcome = await runThreatModelEditor(uiStore, existingThreatModel, repoName, repoRoot);
+      const tmOutcome = await runThreatModelEditor(
+        uiStore,
+        existingThreatModel,
+        repoName,
+        repoRoot,
+      );
       if (tmOutcome.action === "cancel") {
         resetTerminalOutput();
         cleanupUI();
