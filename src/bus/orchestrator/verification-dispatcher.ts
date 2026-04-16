@@ -153,6 +153,7 @@ export async function dispatchVerification(
             enrichedContext: state.enrichedRepoContext,
             precedents: state.precedents,
             threatModelSummary: buildThreatModelSummary(state.taskOutputs),
+            operatorContext: state.operatorContext,
             index: item.index,
             total: item.total,
           }),
@@ -164,6 +165,7 @@ export async function dispatchVerification(
             items: batchItems,
             repoContext: state.repoContext,
             enrichedContext: state.enrichedRepoContext,
+            operatorContext: state.operatorContext,
           }),
         );
       }

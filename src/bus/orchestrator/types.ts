@@ -178,6 +178,8 @@ export interface RunState {
   generatingRuleFingerprints?: Set<string>;
   ruleSweepCompleted: boolean;
   ruleSweepFindings: number;
+  /** Formatted operator context string for prompt injection. */
+  operatorContext?: string;
 }
 
 export interface OrchestratorDeps {

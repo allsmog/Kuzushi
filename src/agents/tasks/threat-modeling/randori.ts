@@ -7,18 +7,23 @@
  */
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { createLogger } from "../../../logger.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import { createLogger } from "../../../logger.js";
+import { loadPersistentThreatModel } from "../../../threat-model-renderer.js";
+import type { AgentTask, TaskContext } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
-import { convertRandoriToThreatModel } from "./randori-adapter.js";
-import { mergeRandoriStageOutputs, readRandoriArtifacts } from "./randori-artifacts.js";
 import { resolveRandoriPluginPath } from "./resolve-randori.js";
-import { resolveThreatModelConfig, type StrideThreat, type ThreatModelDocument } from "./types.js";
+import { readRandoriArtifacts, mergeRandoriStageOutputs } from "./randori-artifacts.js";
+import { convertRandoriToThreatModel } from "./randori-adapter.js";
+import {
+  resolveThreatModelConfig,
+  type StrideThreat,
+  type ThreatModelDocument,
+} from "./types.js";
 
 const log = createLogger({ stage: "threat-model-randori" });
 
@@ -47,8 +52,23 @@ function buildScopePrompt(maxElements: number, outputDir: string): string {
   ].join("\n");
 }
 
-function buildStridePrompt(maxThreats: number, outputDir: string): string {
+function buildStridePrompt(maxThreats: number, outputDir: string, previousModel?: ThreatModelDocument | null): string {
+  const preamble: string[] = [];
+  if (previousModel) {
+    preamble.push(
+      "The following threat model was generated in a previous scan. Use it as a starting point:",
+      "- Preserve threats that are still relevant to the current code.",
+      "- Remove threats that no longer apply (deleted code, fixed vulnerabilities).",
+      "- Add new threats for new code or changed attack surface.",
+      "- Preserve any userAnnotations, confirmedMitigations, and dismissedThreats from the previous model.",
+      "",
+      "Previous threat model:",
+      JSON.stringify(previousModel, null, 2),
+      "",
+    );
+  }
   return [
+    ...preamble,
     "You are running Stage S4 of a PASTA threat model analysis.",
     "",
     `Read the prior stage outputs from ${outputDir}/pasta-s1.json, pasta-s2.json, pasta-s3.json, and dfd.mmd.`,
@@ -67,13 +87,18 @@ function buildStridePrompt(maxThreats: number, outputDir: string): string {
     "Use the DFD elements and trust boundaries from S3 to identify attack surfaces.",
     "Read the actual source files referenced in the DFD to ground threats in real code.",
     "Focus on the highest-impact threats first.",
+    "",
+    "If this application is a CLI tool, build system, or security scanner that processes external",
+    "repositories or files, also model these threat scenarios:",
+    "- Repository content as attacker-controlled input (malicious file names, symlinks, configs)",
+    "- Build-time execution (autobuild, postinstall scripts, custom rules/plugins loaded from repo)",
+    "- LLM/AI prompt injection via repository content influencing tool behavior or tool invocation",
+    "- Path traversal via symlinks or relative paths in repo content escaping the project root",
+    "- Subprocess invocation with repo-derived metadata (names, paths) as unsanitized arguments",
   ].join("\n");
 }
 
-export const threatModelRandoriTask: AgentTask<
-  ScanOpts,
-  { document: ThreatModelDocument; findings: Finding[] }
-> = {
+export const threatModelRandoriTask: AgentTask<ScanOpts, { document: ThreatModelDocument; findings: Finding[] }> = {
   id: "threat-model-randori",
   displayName: "Randori PASTA Threat Model",
   outputKind: "threat-model",
@@ -84,12 +109,13 @@ export const threatModelRandoriTask: AgentTask<
     const pluginPath = resolveRandoriPluginPath();
     const tag = "[threat-model-randori]";
 
+    // Load persistent threat model from a previous scan (if any) to seed S4
+    const previousModel = loadPersistentThreatModel(context.repoRoot);
+
     // Write artifacts directly into .kuzushi/runs/<runId>/randori-output/
     const artifactDir = path.join(".kuzushi", "runs", context.runId, "randori-output");
 
-    log.info(
-      `Starting Randori PASTA analysis (stages=${cfg.randoriStages.join(",")}, model=${cfg.model})`,
-    );
+    log.info(`Starting Randori PASTA analysis (stages=${cfg.randoriStages.join(",")}, model=${cfg.model})`);
 
     const allowedTools = [...resolveTaskAllowedTools(context), "Write"];
     const baseOpts = {
@@ -103,7 +129,9 @@ export const threatModelRandoriTask: AgentTask<
 
     // ── Phase 1: S1-S3 (scope, tech decomposition, DFD) ──
     const hasS4 = cfg.randoriStages.includes("s4");
-    const scopeStages = hasS4 ? cfg.randoriStages.filter((s) => s !== "s4") : cfg.randoriStages;
+    const scopeStages = hasS4
+      ? cfg.randoriStages.filter((s) => s !== "s4")
+      : cfg.randoriStages;
 
     if (scopeStages.length > 0) {
       log.info(`${tag} Phase 1: running stages ${scopeStages.join(",")}`);
@@ -129,7 +157,7 @@ export const threatModelRandoriTask: AgentTask<
         log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
         try {
           for await (const message of context.runtime.query({
-            prompt: buildStridePrompt(cfg.maxThreats, artifactDir),
+            prompt: buildStridePrompt(cfg.maxThreats, artifactDir, previousModel),
             options: baseOpts,
           })) {
             if (message.type === "result" && typeof message.totalCostUsd === "number") {
@@ -154,11 +182,7 @@ export const threatModelRandoriTask: AgentTask<
         version: "1.0",
         dfd: { elements: [], trustBoundaries: [] },
         threats: [],
-        summary: {
-          total: 0,
-          bySeverity: {},
-          byCategory: {} as ThreatModelDocument["summary"]["byCategory"],
-        },
+        summary: { total: 0, bySeverity: {}, byCategory: {} as ThreatModelDocument["summary"]["byCategory"] },
       };
       return attachTaskOutputMeta({ document: empty, findings: [] }, { costUsd });
     }
@@ -168,17 +192,10 @@ export const threatModelRandoriTask: AgentTask<
       throw new Error(`${tag} Failed to convert Randori output to ThreatModelDocument`);
     }
 
-    log.info(
-      `Converted ${document.threats.length} Randori threats, ${document.dfd.elements.length} DFD elements`,
-    );
+    log.info(`Converted ${document.threats.length} Randori threats, ${document.dfd.elements.length} DFD elements`);
 
     const findings = cfg.emitFindings
-      ? threatsToFindings(
-          document.threats,
-          context.repoRoot,
-          context.repoName,
-          cfg.findingThreshold,
-        )
+      ? threatsToFindings(document.threats, context.repoRoot, context.repoName, cfg.findingThreshold)
       : [];
 
     return attachTaskOutputMeta({ document, findings }, { costUsd });
@@ -207,9 +224,7 @@ export const threatModelRandoriTask: AgentTask<
         "2. Check if existing mitigations (input validation, auth checks, TLS) address this threat",
         "3. For offensive/pentest tools: distinguish between DESIGN CHOICES (by_design) and actual bugs",
         "4. Provide a concrete attack scenario if the threat is valid",
-      ]
-        .filter(Boolean)
-        .join("\n"),
+      ].filter(Boolean).join("\n"),
     };
   },
 };
@@ -234,13 +249,9 @@ function threatsToFindings(
     if (!thresholdSet.has(threat.impact)) continue;
     syntheticIndex += 1;
 
-    const primary =
-      threat.affectedFiles.length > 0
-        ? {
-            filePath: normalizeFilePath(repoRoot, threat.affectedFiles[0].filePath),
-            startLine: threat.affectedFiles[0].startLine,
-          }
-        : { filePath: ".", startLine: syntheticIndex };
+    const primary = threat.affectedFiles.length > 0
+      ? { filePath: normalizeFilePath(repoRoot, threat.affectedFiles[0].filePath), startLine: threat.affectedFiles[0].startLine }
+      : { filePath: ".", startLine: syntheticIndex };
     const severity = IMPACT_TO_SEVERITY[threat.impact] || "WARNING";
     const cweList = threat.relatedCwe;
     const cweSegment = cweList.length > 0 ? `/${cweList[0]}` : "";
@@ -256,17 +267,10 @@ function threatsToFindings(
       message: `[STRIDE/${threat.category}] ${threat.title}: ${threat.description}`,
       evidence: [
         `Attack vector: ${threat.attackVector}`,
-        threat.missingMitigations.length > 0
-          ? `Missing mitigations: ${threat.missingMitigations.join(", ")}`
-          : "",
-        ...(threat.evidenceAnchors ?? []).map(
-          (a) => `Evidence: ${a.filePath}:${a.startLine} — ${a.description}`,
-        ),
-      ]
-        .filter(Boolean)
-        .join(". "),
-      scannerConfidence:
-        threat.likelihood === "high" ? "HIGH" : threat.likelihood === "medium" ? "MEDIUM" : "LOW",
+        threat.missingMitigations.length > 0 ? `Missing mitigations: ${threat.missingMitigations.join(", ")}` : "",
+        ...(threat.evidenceAnchors ?? []).map((a) => `Evidence: ${a.filePath}:${a.startLine} — ${a.description}`),
+      ].filter(Boolean).join(". "),
+      scannerConfidence: threat.likelihood === "high" ? "HIGH" : threat.likelihood === "medium" ? "MEDIUM" : "LOW",
       subcategory: ["vuln"],
       likelihood: threat.likelihood.toUpperCase(),
       impact: threat.impact === "critical" || threat.impact === "high" ? "HIGH" : "MEDIUM",
@@ -290,18 +294,8 @@ function threatsToFindings(
 
 function computeFingerprint(repoName: string, threat: StrideThreat): string {
   const cwes = [...threat.relatedCwe].sort().join(",");
-  const files = threat.affectedFiles
-    .map((f) => `${f.filePath}:${f.startLine}`)
-    .sort()
-    .join(",");
-  const source = [
-    repoName,
-    "threat-model-randori",
-    threat.category,
-    cwes,
-    files,
-    threat.title,
-  ].join("|");
+  const files = threat.affectedFiles.map((f) => `${f.filePath}:${f.startLine}`).sort().join(",");
+  const source = [repoName, "threat-model-randori", threat.category, cwes, files, threat.title].join("|");
   return createHash("sha256").update(source).digest("hex");
 }
 

@@ -6,16 +6,20 @@
  */
 
 import type { Finding } from "../../scanners/types.js";
-import { updateRunCost } from "../../store.js";
 import type { TriageResult } from "../../types.js";
 import { isRecord, normalizeCostUsd } from "../../utils.js";
+import { updateRunCost } from "../../store.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import type { OrchestratorDeps, RunState } from "./types.js";
+import type { RunState, OrchestratorDeps } from "./types.js";
 
 /**
- * Extract a concise threat model summary from upstream task outputs
- * to provide application-context for triage decisions.
+ * Extract a rich threat model context from upstream task outputs
+ * to provide application-context for triage/verification decisions.
+ *
+ * Produces a structured document matching Codex Cyber output fidelity:
+ * trust boundaries, attacker-controlled inputs, attack surface with
+ * mitigations, and criticality calibration.
  */
 export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): string | undefined {
   const raw = taskOutputs.get("threat-model-randori");
@@ -23,73 +27,121 @@ export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): stri
 
   const parts: string[] = [];
 
-  // Extract DFD external entities (these describe what the app IS)
   const dfd = isRecord(raw["dfd"]) ? raw["dfd"] : undefined;
-  if (dfd) {
-    const elements = Array.isArray(dfd["elements"]) ? dfd["elements"] : [];
-    const externalEntities = elements
-      .filter((e: unknown) => isRecord(e) && e["type"] === "external-entity")
-      .map((e: unknown) => (isRecord(e) ? String(e["name"] ?? "") : ""))
-      .filter(Boolean);
-    if (externalEntities.length > 0) {
-      parts.push(`External actors: ${externalEntities.join(", ")}`);
-    }
+  const elements = dfd && Array.isArray(dfd["elements"]) ? dfd["elements"] : [];
+  const trustBoundaries = dfd && Array.isArray(dfd["trustBoundaries"]) ? dfd["trustBoundaries"] : [];
+  const threats = Array.isArray(raw["threats"]) ? raw["threats"] : [];
 
-    const trustBoundaries = Array.isArray(dfd["trustBoundaries"]) ? dfd["trustBoundaries"] : [];
-    const boundaryNames = trustBoundaries
-      .map((b: unknown) => (isRecord(b) ? String(b["name"] ?? "") : ""))
-      .filter(Boolean);
-    if (boundaryNames.length > 0) {
-      parts.push(`Trust boundaries: ${boundaryNames.join(", ")}`);
+  // ── 1. Trust boundaries & input classification ──
+  const externalEntities = elements
+    .filter((e: unknown) => isRecord(e) && e["type"] === "external-entity")
+    .map((e: unknown) => {
+      if (!isRecord(e)) return null;
+      return {
+        name: String(e["name"] ?? ""),
+        description: String(e["description"] ?? ""),
+        trustZone: String(e["trustZone"] ?? ""),
+      };
+    })
+    .filter((e): e is { name: string; description: string; trustZone: string } => !!e?.name);
+
+  if (externalEntities.length > 0 || trustBoundaries.length > 0) {
+    const tbLines = ["### Trust boundaries and assumptions"];
+    if (trustBoundaries.length > 0) {
+      for (const b of trustBoundaries) {
+        if (!isRecord(b)) continue;
+        const name = String(b["name"] ?? "");
+        const inner = String(b["innerZone"] ?? "");
+        const outer = String(b["outerZone"] ?? "");
+        if (name) tbLines.push(`- **${name}**: ${inner} ↔ ${outer}`);
+      }
     }
+    if (externalEntities.length > 0) {
+      tbLines.push("");
+      tbLines.push("Attacker-controlled inputs:");
+      for (const entity of externalEntities) {
+        tbLines.push(`- **${entity.name}** (${entity.trustZone}): ${entity.description}`);
+      }
+    }
+    parts.push(tbLines.join("\n"));
   }
 
-  // Extract threat summary to understand app purpose
+  // ── 2. Attack surface with mitigations ──
+  if (threats.length > 0) {
+    const surfaceLines = ["### Attack surface, mitigations and attacker stories"];
+    // Group threats by STRIDE category
+    const byCategory = new Map<string, Array<Record<string, unknown>>>();
+    for (const t of threats) {
+      if (!isRecord(t)) continue;
+      const cat = String(t["category"] ?? "unknown");
+      let list = byCategory.get(cat);
+      if (!list) { list = []; byCategory.set(cat, list); }
+      list.push(t);
+    }
+
+    for (const [category, catThreats] of byCategory) {
+      surfaceLines.push(`\n**${formatCategory(category)}** (${catThreats.length}):`);
+      for (const t of catThreats.slice(0, 8)) {
+        const title = String(t["title"] ?? "");
+        const impact = String(t["impact"] ?? "");
+        const vector = String(t["attackVector"] ?? "");
+        const id = String(t["id"] ?? "");
+        surfaceLines.push(`- [${id}] **${title}** [${impact}]`);
+        if (vector) surfaceLines.push(`  Attack vector: ${vector}`);
+        const existing = Array.isArray(t["existingMitigations"]) ? t["existingMitigations"] : [];
+        if (existing.length > 0) {
+          surfaceLines.push(`  Existing mitigations: ${existing.map(String).join("; ")}`);
+        }
+        const missing = Array.isArray(t["missingMitigations"]) ? t["missingMitigations"] : [];
+        if (missing.length > 0) {
+          surfaceLines.push(`  Missing mitigations: ${missing.map(String).join("; ")}`);
+        }
+        const cwes = Array.isArray(t["relatedCwe"]) ? t["relatedCwe"] : [];
+        if (cwes.length > 0) {
+          surfaceLines.push(`  CWE: ${cwes.map(String).join(", ")}`);
+        }
+      }
+    }
+    parts.push(surfaceLines.join("\n"));
+  }
+
+  // ── 3. Criticality calibration ──
   const summary = isRecord(raw["summary"]) ? raw["summary"] : undefined;
   if (summary) {
     const total = Number(summary["total"] ?? 0);
-    const byCategory = isRecord(summary["byCategory"]) ? summary["byCategory"] : {};
-    const cats = Object.entries(byCategory)
-      .filter(([, v]) => Number(v) > 0)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(", ");
-    if (cats) parts.push(`Threat profile: ${total} threats (${cats})`);
+    const bySeverity = isRecord(summary["bySeverity"]) ? summary["bySeverity"] : {};
+    const calLines = ["### Criticality calibration"];
+    calLines.push(`Total threats: ${total}`);
+    const sevEntries = Object.entries(bySeverity).filter(([, v]) => Number(v) > 0);
+    if (sevEntries.length > 0) {
+      for (const [sev, count] of sevEntries) {
+        calLines.push(`- ${sev}: ${count}`);
+      }
+    }
+    parts.push(calLines.join("\n"));
   }
 
-  // Extract top threats for context
-  const threats = Array.isArray(raw["threats"]) ? raw["threats"] : [];
-  const topThreats = threats
-    .slice(0, 5)
-    .map((t: unknown) => {
-      if (!isRecord(t)) return "";
-      return `- ${String(t["title"] ?? "")} [${String(t["category"] ?? "")}]`;
-    })
-    .filter(Boolean);
-  if (topThreats.length > 0) {
-    parts.push(`Top threats:\n${topThreats.join("\n")}`);
-  }
-
-  // Detect offensive/pentest tool patterns from threat actors and descriptions
+  // ── 4. Offensive tool detection ──
   const allText = JSON.stringify(raw).toLowerCase();
-  const offensivePatterns = [
-    "pentest",
-    "offensive",
-    "red team",
-    "tunneling",
-    "pivoting",
-    "c2",
-    "implant",
-    "exploitation framework",
-    "attack tool",
-  ];
+  const offensivePatterns = ["pentest", "offensive", "red team", "tunneling", "pivoting", "c2", "implant", "exploitation framework", "attack tool"];
   const isOffensiveTool = offensivePatterns.some((p) => allText.includes(p));
   if (isOffensiveTool) {
-    parts.push(
-      "Application type: OFFENSIVE SECURITY / PENTEST TOOL — findings about missing authentication, encryption, or access control may be BY DESIGN for this tool's intended use case. Focus on bugs that harm the tool's OPERATOR (crashes, data races, credential leaks) rather than design choices about target interaction.",
-    );
+    parts.push("Application type: OFFENSIVE SECURITY / PENTEST TOOL — findings about missing authentication, encryption, or access control may be BY DESIGN for this tool's intended use case. Focus on bugs that harm the tool's OPERATOR (crashes, data races, credential leaks) rather than design choices about target interaction.");
   }
 
   return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
+function formatCategory(cat: string): string {
+  switch (cat) {
+    case "spoofing": return "Spoofing";
+    case "tampering": return "Tampering";
+    case "repudiation": return "Repudiation";
+    case "information-disclosure": return "Information Disclosure";
+    case "denial-of-service": return "Denial of Service";
+    case "elevation-of-privilege": return "Elevation of Privilege";
+    default: return cat;
+  }
 }
 
 export function handleTriageResult(
@@ -164,10 +216,10 @@ export function handleTriageError(
 export function isTriageDone(state: RunState): boolean {
   const processed = state.triaged + state.triageErrors;
   return (
-    state.triageTotal > 0 &&
-    processed >= state.triageTotal &&
-    state.inFlight === 0 &&
-    !state.reportRequested
+    state.triageTotal > 0
+    && processed >= state.triageTotal
+    && state.inFlight === 0
+    && !state.reportRequested
   );
 }
 
@@ -204,6 +256,7 @@ export async function dispatchTriage(
           enrichedContext: state.enrichedRepoContext,
           precedents: state.precedents,
           threatModelSummary: buildThreatModelSummary(state.taskOutputs),
+          operatorContext: state.operatorContext,
           index: item.index,
           total: item.total,
         }),

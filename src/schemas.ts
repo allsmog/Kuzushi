@@ -142,6 +142,33 @@ export const EvidenceStepSchema = z.object({
 
 export type EvidenceStepZ = z.infer<typeof EvidenceStepSchema>;
 
+export const CodeCitationSchema = z.object({
+  filePath: z.string(),
+  startLine: z.number(),
+  endLine: z.number(),
+  snippet: z.string(),
+  description: z.string(),
+});
+
+export type CodeCitationZ = z.infer<typeof CodeCitationSchema>;
+
+export const AttackPathAnalysisSchema = z.object({
+  chain: z.array(z.string()),
+  narrative: z.string(),
+  likelihoodReasoning: z.string(),
+  impactReasoning: z.string(),
+});
+
+export type AttackPathAnalysisZ = z.infer<typeof AttackPathAnalysisSchema>;
+
+export const SecurityControlSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  filePath: z.string().optional(),
+});
+
+export type SecurityControlZ = z.infer<typeof SecurityControlSchema>;
+
 export const TriageResultSchema = z.object({
   fingerprint: z.string(),
   verdict: VerdictSchema,
@@ -161,6 +188,12 @@ export const TriageResultSchema = z.object({
   triageCostUsd: z.number().optional(),
   calibratedConfidence: z.number().optional(),
   evidenceChain: z.array(EvidenceStepSchema).optional(),
+  codeCitations: z.array(CodeCitationSchema).optional(),
+  attackPath: AttackPathAnalysisSchema.optional(),
+  assumptions: z.array(z.string()).optional(),
+  controls: z.array(SecurityControlSchema).optional(),
+  blindspots: z.array(z.string()).optional(),
+  sourceThreatIds: z.array(z.string()).optional(),
 });
 
 export type TriageResultZ = z.infer<typeof TriageResultSchema>;
@@ -181,6 +214,11 @@ export const VerificationResultSchema = z.object({
   proofVerdict: ProofVerdictSchema.optional(),
   bypassAttempts: z.array(z.string()).optional(),
   verifyCostUsd: z.number().optional(),
+  codeCitations: z.array(CodeCitationSchema).optional(),
+  attackPath: AttackPathAnalysisSchema.optional(),
+  assumptions: z.array(z.string()).optional(),
+  controls: z.array(SecurityControlSchema).optional(),
+  blindspots: z.array(z.string()).optional(),
 });
 
 export type VerificationResultZ = z.infer<typeof VerificationResultSchema>;
@@ -860,6 +898,37 @@ export const RawTriageOutputSchema = z.object({
       }),
     )
     .optional(),
+  code_citations: z
+    .array(
+      z.object({
+        file_path: z.string(),
+        start_line: z.number(),
+        end_line: z.number(),
+        snippet: z.string(),
+        description: z.string(),
+      }),
+    )
+    .optional(),
+  attack_path: z
+    .object({
+      chain: z.array(z.string()),
+      narrative: z.string(),
+      likelihood_reasoning: z.string(),
+      impact_reasoning: z.string(),
+    })
+    .optional(),
+  assumptions: z.array(z.string()).optional(),
+  controls: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        file_path: z.string().optional(),
+      }),
+    )
+    .optional(),
+  blindspots: z.array(z.string()).optional(),
+  source_threat_ids: z.array(z.string()).optional(),
 });
 
 export type RawTriageOutput = z.infer<typeof RawTriageOutputSchema>;
@@ -878,6 +947,36 @@ export const RawVerificationOutputSchema = z.object({
   proof_level: z.number().int().min(1).max(4).optional(),
   proof_verdict: z.string().optional(),
   bypass_attempts: z.array(z.string()).optional(),
+  code_citations: z
+    .array(
+      z.object({
+        file_path: z.string(),
+        start_line: z.number(),
+        end_line: z.number(),
+        snippet: z.string(),
+        description: z.string(),
+      }),
+    )
+    .optional(),
+  attack_path: z
+    .object({
+      chain: z.array(z.string()),
+      narrative: z.string(),
+      likelihood_reasoning: z.string(),
+      impact_reasoning: z.string(),
+    })
+    .optional(),
+  assumptions: z.array(z.string()).optional(),
+  controls: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        file_path: z.string().optional(),
+      }),
+    )
+    .optional(),
+  blindspots: z.array(z.string()).optional(),
 });
 
 export type RawVerificationOutput = z.infer<typeof RawVerificationOutputSchema>;
