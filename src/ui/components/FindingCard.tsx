@@ -75,6 +75,40 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     details.push(`${verdictColor(`PoC Execution: ${finding.pocRunVerdict}`)}${durationStr}`);
   }
 
+  if (finding.attackPath) {
+    if (finding.attackPath.chain.length > 0) {
+      details.push(`${chalk.cyan("Path:")} ${finding.attackPath.chain.join(" → ")}`);
+    }
+    if (finding.attackPath.likelihoodReasoning) {
+      details.push(`${chalk.dim("Likelihood:")} ${finding.attackPath.likelihoodReasoning}`);
+    }
+    if (finding.attackPath.impactReasoning) {
+      details.push(`${chalk.dim("Impact:")} ${finding.attackPath.impactReasoning}`);
+    }
+  }
+
+  if (finding.codeCitations && finding.codeCitations.length > 0) {
+    for (const cite of finding.codeCitations.slice(0, 3)) {
+      details.push(`${chalk.blue("Evidence:")} ${cite.filePath}:${cite.startLine} — ${cite.description}`);
+    }
+    if (finding.codeCitations.length > 3) {
+      details.push(`${chalk.dim(`  ...and ${finding.codeCitations.length - 3} more citations`)}`);
+    }
+  }
+
+  if (finding.assumptions && finding.assumptions.length > 0) {
+    details.push(`${chalk.yellow("Assumptions:")} ${finding.assumptions.join("; ")}`);
+  }
+
+  if (finding.controls && finding.controls.length > 0) {
+    const controlNames = finding.controls.map(c => c.name).join(", ");
+    details.push(`${chalk.green("Controls:")} ${controlNames}`);
+  }
+
+  if (finding.blindspots && finding.blindspots.length > 0) {
+    details.push(`${chalk.yellow("Blindspots:")} ${finding.blindspots.join("; ")}`);
+  }
+
   return (
     <Box flexDirection="column">
       <Text>{"  "}{verdict} {conf}  {severity} {scanner}{verificationBadge}</Text>

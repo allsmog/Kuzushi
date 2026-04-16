@@ -1,12 +1,15 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import type {
+  AttackPathAnalysis,
+  CodeCitation,
   DynamicAnalysisStatus,
   FindingMetadata,
   KuzushiConfig,
   PatchStatus,
   PocHarnessResult,
   ScanOpts,
+  SecurityControl,
   TriageResult,
   VerificationResult,
   Verdict,
@@ -94,6 +97,11 @@ export interface StoredFindingRecord {
   findingMetadata: FindingMetadata | undefined;
   corroboratingSignals: CorroboratingSignal[];
   suppressionReasons: SuppressionReason[];
+  codeCitations: CodeCitation[] | undefined;
+  attackPath: AttackPathAnalysis | undefined;
+  assumptions: string[] | undefined;
+  controls: SecurityControl[] | undefined;
+  blindspots: string[] | undefined;
 }
 
 const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
@@ -197,6 +205,16 @@ function upsertFindingParams(
       recommended_fix: triage.recommendedFix ?? null,
       rule_refinement_hint: triage.ruleRefinementHint ?? null,
       triage_schema_version: triage.triageSchemaVersion ?? null,
+      code_citations: triage.codeCitations ?? null,
+      attack_path: triage.attackPath ? {
+        chain: triage.attackPath.chain,
+        narrative: triage.attackPath.narrative,
+        likelihood_reasoning: triage.attackPath.likelihoodReasoning,
+        impact_reasoning: triage.attackPath.impactReasoning,
+      } : null,
+      assumptions: triage.assumptions ?? null,
+      controls: triage.controls ?? null,
+      blindspots: triage.blindspots ?? null,
     }),
     triage.compositeConfidence ?? null,
     null, // confidence_signals_json — populated by updateFindingCompositeConfidence if needed
@@ -382,7 +400,73 @@ function parseTriageDetails(raw: string | null): Partial<TriageResult> {
     recommendedFix: asOptionalString(record["recommended_fix"]),
     ruleRefinementHint: asOptionalString(record["rule_refinement_hint"]),
     triageSchemaVersion: asOptionalString(record["triage_schema_version"]),
+    codeCitations: parseCodeCitationsFromDetails(record["code_citations"]),
+    attackPath: parseAttackPathFromDetails(record["attack_path"]),
+    assumptions: parseStringArrayFromDetails(record["assumptions"]),
+    controls: parseControlsFromDetails(record["controls"]),
+    blindspots: parseStringArrayFromDetails(record["blindspots"]),
   };
+}
+
+function parseCodeCitationsFromDetails(value: unknown): CodeCitation[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const citations: CodeCitation[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const filePath = typeof rec["file_path"] === "string" ? rec["file_path"] :
+      typeof rec["filePath"] === "string" ? rec["filePath"] : "";
+    const startLine = Number(rec["start_line"] ?? rec["startLine"]);
+    const endLine = Number(rec["end_line"] ?? rec["endLine"]);
+    const snippet = typeof rec["snippet"] === "string" ? rec["snippet"] : "";
+    const description = typeof rec["description"] === "string" ? rec["description"] : "";
+    if (!filePath || !Number.isFinite(startLine) || !description) continue;
+    citations.push({
+      filePath,
+      startLine,
+      endLine: Number.isFinite(endLine) ? endLine : startLine,
+      snippet,
+      description,
+    });
+  }
+  return citations.length > 0 ? citations : undefined;
+}
+
+function parseAttackPathFromDetails(value: unknown): AttackPathAnalysis | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const rec = value as Record<string, unknown>;
+  const chain = Array.isArray(rec["chain"])
+    ? rec["chain"].map((s: unknown) => String(s).trim()).filter(Boolean)
+    : [];
+  const narrative = typeof rec["narrative"] === "string" ? rec["narrative"].trim() : "";
+  const likelihoodReasoning = typeof (rec["likelihood_reasoning"] ?? rec["likelihoodReasoning"]) === "string"
+    ? String(rec["likelihood_reasoning"] ?? rec["likelihoodReasoning"]).trim() : "";
+  const impactReasoning = typeof (rec["impact_reasoning"] ?? rec["impactReasoning"]) === "string"
+    ? String(rec["impact_reasoning"] ?? rec["impactReasoning"]).trim() : "";
+  if (chain.length === 0 && !narrative) return undefined;
+  return { chain, narrative, likelihoodReasoning, impactReasoning };
+}
+
+function parseControlsFromDetails(value: unknown): SecurityControl[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const controls: SecurityControl[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";
+    const description = typeof rec["description"] === "string" ? rec["description"].trim() : "";
+    const filePath = typeof (rec["file_path"] ?? rec["filePath"]) === "string"
+      ? String(rec["file_path"] ?? rec["filePath"]).trim() : undefined;
+    if (!name || !description) continue;
+    controls.push({ name, description, filePath: filePath || undefined });
+  }
+  return controls.length > 0 ? controls : undefined;
+}
+
+function parseStringArrayFromDetails(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result = value.map((s: unknown) => String(s).trim()).filter(Boolean);
+  return result.length > 0 ? result : undefined;
 }
 
 function parsePathAssessment(value: unknown): TriageResult["source"] | undefined {
@@ -733,49 +817,57 @@ export function getActionableFindings(
     pocRunDurationMs: number | null;
   }>;
 
-  return rows.map((row) => ({
-    taskId: row.taskId,
-    fingerprint: row.fingerprint,
-    repo: row.repo,
-    ref: row.ref,
-    ruleId: row.ruleId,
-    filePath: row.filePath,
-    startLine: row.startLine,
-    severity: row.severity,
-    message: row.message,
-    verdict: row.verdict,
-    confidence: row.confidence,
-    rationale: row.rationale,
-    verificationSteps: parseVerificationSteps(row.verificationSteps),
-    triageDetails: parseTriageDetailsRecord(row.triageDetailsJson),
-    adjustedScore: row.adjustedScore,
-    taintPath: parseTaintPath(row.taintPathJson),
-    proofState: parseProofState(row.proofState),
-    engineProvenance: parseEngineProvenance(row.engineProvenanceJson),
-    findingMetadata: parseFindingMetadata(row.findingMetadataJson),
-    corroboratingSignals: parseCorroboratingSignals(row.corroborationJson),
-    suppressionReasons: parseSuppressionReasons(row.suppressionJson),
-    fixPatch: row.fixPatch,
-    verifyExploitable: row.verifyExploitable,
-    verifyPocPayload: row.verifyPocPayload,
-    verifyPocDescription: row.verifyPocDescription,
-    verifyAttackVector: row.verifyAttackVector,
-    verifyPreconditions: parsePreconditions(row.verifyPreconditions),
-    verifyConfidence: row.verifyConfidence,
-    verifyCostUsd: row.verifyCostUsd,
-    pocHarnessPath: row.pocHarnessPath,
-    pocHarnessLanguage: row.pocHarnessLanguage,
-    pocHarnessParsed: row.pocHarnessParsed,
-    pocHarnessParseError: row.pocHarnessParseError,
-    pocHarnessSkipped: row.pocHarnessSkipped,
-    pocHarnessSkipReason: row.pocHarnessSkipReason,
-    pocHarnessCostUsd: row.pocHarnessCostUsd,
-    pocRunExitCode: row.pocRunExitCode,
-    pocRunStdout: row.pocRunStdout,
-    pocRunStderr: row.pocRunStderr,
-    pocRunVerdict: row.pocRunVerdict,
-    pocRunDurationMs: row.pocRunDurationMs,
-  }));
+  return rows.map((row) => {
+    const detailsRecord = parseTriageDetailsRecord(row.triageDetailsJson);
+    return {
+      taskId: row.taskId,
+      fingerprint: row.fingerprint,
+      repo: row.repo,
+      ref: row.ref,
+      ruleId: row.ruleId,
+      filePath: row.filePath,
+      startLine: row.startLine,
+      severity: row.severity,
+      message: row.message,
+      verdict: row.verdict,
+      confidence: row.confidence,
+      rationale: row.rationale,
+      verificationSteps: parseVerificationSteps(row.verificationSteps),
+      triageDetails: detailsRecord,
+      adjustedScore: row.adjustedScore,
+      taintPath: parseTaintPath(row.taintPathJson),
+      proofState: parseProofState(row.proofState),
+      engineProvenance: parseEngineProvenance(row.engineProvenanceJson),
+      findingMetadata: parseFindingMetadata(row.findingMetadataJson),
+      corroboratingSignals: parseCorroboratingSignals(row.corroborationJson),
+      suppressionReasons: parseSuppressionReasons(row.suppressionJson),
+      fixPatch: row.fixPatch,
+      verifyExploitable: row.verifyExploitable,
+      verifyPocPayload: row.verifyPocPayload,
+      verifyPocDescription: row.verifyPocDescription,
+      verifyAttackVector: row.verifyAttackVector,
+      verifyPreconditions: parsePreconditions(row.verifyPreconditions),
+      verifyConfidence: row.verifyConfidence,
+      verifyCostUsd: row.verifyCostUsd,
+      pocHarnessPath: row.pocHarnessPath,
+      pocHarnessLanguage: row.pocHarnessLanguage,
+      pocHarnessParsed: row.pocHarnessParsed,
+      pocHarnessParseError: row.pocHarnessParseError,
+      pocHarnessSkipped: row.pocHarnessSkipped,
+      pocHarnessSkipReason: row.pocHarnessSkipReason,
+      pocHarnessCostUsd: row.pocHarnessCostUsd,
+      pocRunExitCode: row.pocRunExitCode,
+      pocRunStdout: row.pocRunStdout,
+      pocRunStderr: row.pocRunStderr,
+      pocRunVerdict: row.pocRunVerdict,
+      pocRunDurationMs: row.pocRunDurationMs,
+      codeCitations: detailsRecord ? parseCodeCitationsFromDetails(detailsRecord["code_citations"]) : undefined,
+      attackPath: detailsRecord ? parseAttackPathFromDetails(detailsRecord["attack_path"]) : undefined,
+      assumptions: detailsRecord ? parseStringArrayFromDetails(detailsRecord["assumptions"]) : undefined,
+      controls: detailsRecord ? parseControlsFromDetails(detailsRecord["controls"]) : undefined,
+      blindspots: detailsRecord ? parseStringArrayFromDetails(detailsRecord["blindspots"]) : undefined,
+    };
+  });
 }
 
 export function getTriagedFindingsForRepo(

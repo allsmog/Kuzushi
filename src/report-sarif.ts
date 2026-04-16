@@ -3,6 +3,7 @@ import type { PipelineStats } from "./bus/events.js";
 import {
   getActionableFindings,
 } from "./store.js";
+import { loadThreatModelDocument } from "./threat-model-renderer.js";
 import { isRecord } from "./utils.js";
 
 interface RunMetaRow {
@@ -35,6 +36,7 @@ export function generateSarifReport(
   stats: Partial<PipelineStats>,
   runId: string,
   fingerprints?: string[],
+  repoRoot?: string,
 ): string {
   const findings = getActionableFindings(db, repo, { includeFalsePositives: true, fingerprints });
 
@@ -102,6 +104,11 @@ export function generateSarifReport(
         pocPayload: finding.verifyPocPayload ?? undefined,
         pocRunVerdict: finding.pocRunVerdict ?? undefined,
         pocRunDurationMs: finding.pocRunDurationMs ?? undefined,
+        codeCitations: finding.codeCitations?.length ? finding.codeCitations : undefined,
+        attackPath: finding.attackPath ?? undefined,
+        assumptions: finding.assumptions?.length ? finding.assumptions : undefined,
+        controls: finding.controls?.length ? finding.controls : undefined,
+        blindspots: finding.blindspots?.length ? finding.blindspots : undefined,
       },
     };
 
@@ -166,6 +173,8 @@ export function generateSarifReport(
       return serialized;
     });
 
+  const threatModel = repoRoot ? loadThreatModelDocument(repoRoot, runId) : null;
+
   const sarif = {
     $schema: "https://json.schemastore.org/sarif-2.1.0.json",
     version: "2.1.0",
@@ -194,6 +203,7 @@ export function generateSarifReport(
           runId,
           model: runConfig.model,
           tasks: runConfig.tasks,
+          threatModel: threatModel ?? undefined,
           summary: {
             totalFindings: stats.totalFindings ?? verdictCounts.tp + verdictCounts.fp + verdictCounts.needs_review,
             queuedForTriage: stats.queuedForTriage ?? 0,

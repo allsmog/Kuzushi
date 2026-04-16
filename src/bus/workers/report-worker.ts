@@ -730,6 +730,7 @@ function writeFileReports(
       event.payload.stats ?? {},
       event.meta.runId,
       event.payload.fingerprints,
+      event.payload.context.repoRoot,
     );
     writeFileSync(deps.config.reportOutput, markdown, "utf-8");
     notifyReportArtifact(store, "Markdown report written", deps.config.reportOutput);
@@ -746,6 +747,7 @@ function writeFileReports(
       event.payload.stats ?? {},
       event.meta.runId,
       event.payload.fingerprints,
+      event.payload.context.repoRoot,
     );
     writeFileSync(deps.config.sarifOutput, sarif, "utf-8");
     notifyReportArtifact(store, "SARIF report written", deps.config.sarifOutput);
@@ -764,6 +766,8 @@ function writeFileReports(
       event.payload.exploitChains ?? [],
       deps.config.scanMode,
       event.payload.fingerprints,
+      event.payload.context.repoRoot,
+      event.meta.runId,
     );
     notifyReportArtifact(store, "JSON report written", deps.config.jsonOutput);
   }
