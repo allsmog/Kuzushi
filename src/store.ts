@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { allMigrations, runMigrations } from "./migrations/index.js";
@@ -36,7 +37,8 @@ export type PipelineRunStatus =
   | "poc-harnessing"
   | "dynamic-analyzing"
   | "complete"
-  | "error";
+  | "error"
+  | "aborted";
 
 interface PipelineRunRecord {
   runId: string;
@@ -115,15 +117,71 @@ const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
   execution_confirmed: 4,
 };
 
+/** Current canonical schema version. Databases below this get reset. */
+const CURRENT_SCHEMA_VERSION = 100;
+
+/** Options for {@link initDb}. */
+export interface InitDbOpts {
+  /** Injected clock for deterministic tests. Defaults to () => new Date(). */
+  now?: () => Date;
+  /** Called on successful schema reset. Prod wires a warning; tests spy. */
+  onReset?: (info: { oldVersion: number; backupPath: string }) => void;
+}
+
+/** Schema state used by the reset branch. */
+type SchemaState =
+  | { kind: "fresh" }
+  | { kind: "already-current" }
+  | { kind: "legacy-pre-reset"; version: number }
+  | { kind: "corrupt"; reason: string };
+
+/** Thrown when the DB is in an unrecoverable state. */
+export class SchemaStateError extends Error {
+  constructor(
+    message: string,
+    readonly dbPath: string,
+  ) {
+    super(message);
+    this.name = "SchemaStateError";
+  }
+}
+
 /** Initialize the SQLite database with the findings schema. */
-export function initDb(dbPath: string): Database.Database {
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("busy_timeout = 5000");
-  // synchronous=NORMAL is safe under WAL (durability preserved on crash;
-  // only window is a power loss in the seconds between checkpoints) and
-  // eliminates a fsync per transaction.
-  db.pragma("synchronous = NORMAL");
+export function initDb(dbPath: string, opts?: InitDbOpts): Database.Database {
+  let db = openWithPragmas(dbPath);
+
+  const state = inspectSchemaState(db);
+  if (state.kind === "corrupt") {
+    db.close();
+    throw new SchemaStateError(
+      `DB at ${dbPath} is in an unexpected state: ${state.reason}`,
+      dbPath,
+    );
+  }
+
+  if (state.kind === "legacy-pre-reset") {
+    const lockPath = `${dbPath}.reset-lock`;
+    acquireResetLock(lockPath);
+    try {
+      // Re-check under lock — another process may have just reset.
+      const reverified = inspectSchemaState(db);
+      if (reverified.kind === "legacy-pre-reset") {
+        db.close();
+        const now = (opts?.now ?? (() => new Date()))();
+        const backupPath = renameWithCollisionSuffix(
+          dbPath,
+          computeBackupPath(dbPath, state.version, now),
+        );
+        (opts?.onReset ?? defaultResetLogger)({
+          oldVersion: state.version,
+          backupPath,
+        });
+        db = openWithPragmas(dbPath);
+      }
+    } finally {
+      releaseResetLock(lockPath);
+    }
+  }
 
   runMigrations(db, allMigrations);
 
@@ -140,14 +198,125 @@ export function defaultDbPath(repoRoot: string): string {
   return path.join(repoRoot, ".kuzushi", "findings.sqlite3");
 }
 
+function openWithPragmas(dbPath: string): Database.Database {
+  const db = new Database(dbPath);
+  db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
+  // synchronous=NORMAL is safe under WAL (durability preserved on crash;
+  // only window is a power loss in the seconds between checkpoints) and
+  // eliminates a fsync per transaction.
+  db.pragma("synchronous = NORMAL");
+  // foreign_keys is per-connection and must be set before migrations so that
+  // FK-bearing tables are created in an FK-enforced session.
+  db.pragma("foreign_keys = ON");
+  return db;
+}
+
+function tableExists(db: Database.Database, name: string): boolean {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(name);
+  return !!row;
+}
+
+function inspectSchemaState(db: Database.Database): SchemaState {
+  try {
+    const hasSchemaVersion = tableExists(db, "schema_version");
+    const hasFindings = tableExists(db, "findings");
+
+    if (!hasSchemaVersion && !hasFindings) return { kind: "fresh" };
+
+    const maxVersion = hasSchemaVersion
+      ? ((
+          db.prepare("SELECT MAX(version) AS v FROM schema_version").get() as
+            | { v: number | null }
+            | undefined
+        )?.v ?? 0)
+      : 0;
+
+    if (maxVersion > CURRENT_SCHEMA_VERSION) {
+      return {
+        kind: "corrupt",
+        reason: `schema_version ${maxVersion} is ahead of this build (v${CURRENT_SCHEMA_VERSION}); downgrade is not supported`,
+      };
+    }
+    if (maxVersion === CURRENT_SCHEMA_VERSION) return { kind: "already-current" };
+    return { kind: "legacy-pre-reset", version: maxVersion };
+  } catch (err) {
+    return { kind: "corrupt", reason: String(err) };
+  }
+}
+
+function computeBackupPath(dbPath: string, oldVersion: number, now: Date): string {
+  const ts = now
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d+Z$/, "");
+  return `${dbPath}.bak-v${oldVersion}-${ts}`;
+}
+
+function renameWithCollisionSuffix(src: string, dst: string, maxRetries = 10): string {
+  // POSIX rename silently overwrites the destination, so we check existence
+  // before each attempt. The resulting TOCTOU window is acceptable for a
+  // single-user local DB upgrade; the reset-lock already serialises processes.
+  for (let i = 0; i < maxRetries; i++) {
+    const attempt = i === 0 ? dst : `${dst}-${i}`;
+    if (!fs.existsSync(attempt)) {
+      fs.renameSync(src, attempt);
+      return attempt;
+    }
+  }
+  throw new Error(`Could not find a free backup path after ${maxRetries} attempts: ${dst}`);
+}
+
+function acquireResetLock(lockPath: string, timeoutMs = 30_000): void {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+      return;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Timed out waiting for schema-reset lock at ${lockPath}. Another kuzushi process may be upgrading the DB; if none is running, delete the lock file manually.`,
+        );
+      }
+      // Poll at ~200ms — cheap, no cache concerns at this level.
+      const waitMs = 200;
+      const start = Date.now();
+      while (Date.now() - start < waitMs) {
+        // no-op busy wait; acceptable here (sync context, short delay)
+      }
+    }
+  }
+}
+
+function releaseResetLock(lockPath: string): void {
+  try {
+    fs.unlinkSync(lockPath);
+  } catch {
+    // already gone — safe to ignore
+  }
+}
+
+function defaultResetLogger(info: { oldVersion: number; backupPath: string }): void {
+  // Infrastructure-level notice fired once on upgrade. stderr so it doesn't
+  // interleave with scan output on stdout. UI-aware callers should pass
+  // `onReset` in InitDbOpts to route through their own renderer.
+  console.warn(
+    `kuzushi: schema reset v${info.oldVersion} \u2192 v${CURRENT_SCHEMA_VERSION}; previous DB saved to ${info.backupPath}`,
+  );
+}
+
 const UPSERT_FINDING_SQL = `
     INSERT INTO findings (
       fingerprint, task_id, repo, ref, rule_id, file_path, start_line,
       severity, message, adjusted_score, corroboration_json, suppression_json, verdict, confidence,
       rationale, verification_steps, fix_patch, triage_cost_usd, triage_details_json,
-      composite_confidence, confidence_signals_json, taint_path_json, proof_state, engine_provenance_json,
+      taint_path_json, proof_state, engine_provenance_json,
       finding_metadata_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fingerprint) DO UPDATE SET
       task_id=excluded.task_id,
       repo=excluded.repo,
@@ -167,8 +336,6 @@ const UPSERT_FINDING_SQL = `
       fix_patch=excluded.fix_patch,
       triage_cost_usd=excluded.triage_cost_usd,
       triage_details_json=excluded.triage_details_json,
-      composite_confidence=excluded.composite_confidence,
-      confidence_signals_json=excluded.confidence_signals_json,
       taint_path_json=excluded.taint_path_json,
       proof_state=excluded.proof_state,
       engine_provenance_json=excluded.engine_provenance_json,
@@ -192,7 +359,10 @@ function upsertFindingParams(
     finding.startLine,
     finding.severity,
     finding.message,
-    finding.adjustedScore ?? finding.score,
+    // Write only genuine adjustments; readers fall back to `score` via `?? score`.
+    // A5 analysis: keeping NULL when unadjusted avoids masking drift between
+    // base score and adjusted score.
+    finding.adjustedScore ?? null,
     finding.corroboratingSignals ? safeJsonStringify(finding.corroboratingSignals) : null,
     finding.suppressionReasons ? safeJsonStringify(finding.suppressionReasons) : null,
     triage.verdict,
@@ -226,8 +396,6 @@ function upsertFindingParams(
       blindspots: triage.blindspots ?? null,
       source_threat_ids: triage.sourceThreatIds ?? null,
     }),
-    triage.compositeConfidence ?? null,
-    null, // confidence_signals_json — populated by updateFindingCompositeConfidence if needed
     finding.taintPath ? safeJsonStringify(finding.taintPath) : null,
     finding.proofState ?? null,
     finding.engineProvenance ? safeJsonStringify(finding.engineProvenance) : null,
@@ -1399,20 +1567,6 @@ export function updateRunCost(db: Database.Database, runId: string, costUsd: num
   `).run(costUsd, runId);
 }
 
-/** Persist composite confidence result on a finding row. */
-function _updateFindingCompositeConfidence(
-  db: Database.Database,
-  fingerprint: string,
-  compositeConfidence: number,
-  signalsJson: string,
-): void {
-  db.prepare(`
-    UPDATE findings
-    SET composite_confidence = ?, confidence_signals_json = ?, updated_at = datetime('now')
-    WHERE fingerprint = ?
-  `).run(compositeConfidence, signalsJson, fingerprint);
-}
-
 /** Persist run metrics JSON for a pipeline run. */
 export function updateRunMetrics(db: Database.Database, runId: string, metrics: RunMetrics): void {
   db.prepare(`
@@ -1753,53 +1907,6 @@ export function saveAssertionResults(
     }
   });
   insertAll();
-}
-
-/** Get assertion results for a specific run. */
-function _getRunAssertions(
-  db: Database.Database,
-  runId: string,
-): Array<{
-  fingerprint: string;
-  assertionName: string;
-  passed: boolean;
-  score: number;
-  weight: number;
-  reason: string;
-}> {
-  const rows = db
-    .prepare(`
-    SELECT fingerprint, assertion_name as assertionName, passed, score, weight, reason
-    FROM finding_assertions
-    WHERE run_id = ?
-  `)
-    .all(runId) as Array<{
-    fingerprint: string;
-    assertionName: string;
-    passed: number;
-    score: number;
-    weight: number;
-    reason: string;
-  }>;
-
-  return rows.map((row) => ({
-    ...row,
-    passed: row.passed === 1,
-  }));
-}
-
-/** Update prompt hash for a pipeline run. */
-function _updatePromptHash(db: Database.Database, runId: string, promptHash: string): void {
-  db.prepare(`
-    UPDATE pipeline_runs SET prompt_hash = ?, updated_at = datetime('now') WHERE run_id = ?
-  `).run(promptHash, runId);
-}
-
-/** Update assertions JSON summary for a pipeline run. */
-function _updateRunAssertions(db: Database.Database, runId: string, assertionsJson: string): void {
-  db.prepare(`
-    UPDATE pipeline_runs SET assertions_json = ?, updated_at = datetime('now') WHERE run_id = ?
-  `).run(assertionsJson, runId);
 }
 
 /**

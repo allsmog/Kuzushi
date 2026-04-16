@@ -34,17 +34,11 @@ export function makePathId(entryNodeId: string, targetNodeId: string, nodeIds: s
 
 // ── Node operations ──────────────────────────────────────────────────────
 
-export function upsertGraphNode(
-  db: Database.Database,
-  repo: string,
-  runId: string,
-  node: CodeGraphNode,
-): void {
+export function upsertGraphNode(db: Database.Database, repo: string, node: CodeGraphNode): void {
   db.prepare(`
-    INSERT INTO code_graph_nodes (node_id, repo, run_id, file_path, start_line, symbol, node_kind, framework, metadata_json, confidence, source)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO code_graph_nodes (node_id, repo, file_path, start_line, symbol, node_kind, framework, metadata_json, confidence, source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(node_id) DO UPDATE SET
-      run_id = excluded.run_id,
       node_kind = excluded.node_kind,
       framework = excluded.framework,
       metadata_json = excluded.metadata_json,
@@ -54,7 +48,6 @@ export function upsertGraphNode(
   `).run(
     node.nodeId,
     repo,
-    runId,
     node.filePath,
     node.startLine,
     node.symbol,
@@ -66,23 +59,16 @@ export function upsertGraphNode(
   );
 }
 
-export function upsertGraphEdge(
-  db: Database.Database,
-  repo: string,
-  runId: string,
-  edge: CodeGraphEdge,
-): void {
+export function upsertGraphEdge(db: Database.Database, repo: string, edge: CodeGraphEdge): void {
   db.prepare(`
-    INSERT INTO code_graph_edges (edge_id, repo, run_id, from_node_id, to_node_id, edge_kind, data_label, ordinal, confidence, source)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO code_graph_edges (edge_id, repo, from_node_id, to_node_id, edge_kind, data_label, ordinal, confidence, source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(edge_id) DO UPDATE SET
-      run_id = excluded.run_id,
       confidence = MAX(code_graph_edges.confidence, excluded.confidence),
       source = CASE WHEN code_graph_edges.source != excluded.source THEN 'hybrid' ELSE excluded.source END
   `).run(
     edge.edgeId,
     repo,
-    runId,
     edge.fromNodeId,
     edge.toNodeId,
     edge.edgeKind,
@@ -93,22 +79,15 @@ export function upsertGraphEdge(
   );
 }
 
-export function upsertGraphPath(
-  db: Database.Database,
-  repo: string,
-  runId: string,
-  path: CodeGraphPath,
-): void {
+export function upsertGraphPath(db: Database.Database, repo: string, path: CodeGraphPath): void {
   db.prepare(`
-    INSERT INTO code_graph_paths (path_id, repo, run_id, entry_node_id, target_node_id, hop_count, path_node_ids, path_edge_ids, has_sanitizer, sanitizer_nodes, confidence)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO code_graph_paths (path_id, repo, entry_node_id, target_node_id, hop_count, path_node_ids, path_edge_ids, has_sanitizer, sanitizer_nodes, confidence)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(path_id) DO UPDATE SET
-      run_id = excluded.run_id,
       confidence = MAX(code_graph_paths.confidence, excluded.confidence)
   `).run(
     path.pathId,
     repo,
-    runId,
     path.entryNodeId,
     path.targetNodeId,
     path.hopCount,

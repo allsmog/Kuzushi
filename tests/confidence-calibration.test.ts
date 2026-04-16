@@ -3,29 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
   type CalibrationWeight,
   computeCalibratedConfidence,
-  ensureCalibrationSchema,
   extractRuleFamily,
   loadCalibrationWeights,
   updateCalibrationWeights,
-  updateFindingCalibration,
 } from "../src/confidence-calibration.js";
-import type { EvidenceStep } from "../src/types.js";
+import { migration100 } from "../src/migrations/100_schema_reset.js";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
   db.pragma("journal_mode = WAL");
-  // Minimal findings table for testing
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS findings (
-      fingerprint TEXT PRIMARY KEY,
-      verdict TEXT NOT NULL DEFAULT 'needs_review',
-      confidence REAL NOT NULL DEFAULT 0,
-      rationale TEXT NOT NULL DEFAULT '',
-      verification_steps TEXT NOT NULL DEFAULT '[]',
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )
-  `);
-  ensureCalibrationSchema(db);
+  db.pragma("foreign_keys = OFF");
+  migration100.up(db);
   return db;
 }
 
@@ -258,68 +246,6 @@ describe("updateCalibrationWeights", () => {
       .get("source-reachability", "__global__") as { weight: number };
 
     expect(row.weight).toBeGreaterThanOrEqual(0.1);
-    db.close();
-  });
-});
-
-describe("updateFindingCalibration", () => {
-  it("persists calibrated confidence and evidence chain", () => {
-    const db = createTestDb();
-    db.prepare(
-      "INSERT INTO findings (fingerprint, verdict, confidence, rationale, verification_steps) VALUES (?, ?, ?, ?, ?)",
-    ).run("fp-1", "tp", 0.8, "test", "[]");
-
-    const chain: EvidenceStep[] = [
-      {
-        stepType: "source-reachability",
-        description: "traced",
-        confidence: 0.9,
-        evidence: "direct flow",
-      },
-    ];
-
-    updateFindingCalibration(db, "fp-1", 0.85, chain);
-
-    const row = db
-      .prepare(
-        "SELECT calibrated_confidence, evidence_chain_json FROM findings WHERE fingerprint = ?",
-      )
-      .get("fp-1") as { calibrated_confidence: number; evidence_chain_json: string };
-
-    expect(row.calibrated_confidence).toBe(0.85);
-    expect(JSON.parse(row.evidence_chain_json)).toHaveLength(1);
-    expect(JSON.parse(row.evidence_chain_json)[0].stepType).toBe("source-reachability");
-    db.close();
-  });
-});
-
-describe("ensureCalibrationSchema", () => {
-  it("creates calibration_weights table", () => {
-    const db = createTestDb();
-    const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='calibration_weights'")
-      .all();
-    expect(tables).toHaveLength(1);
-    db.close();
-  });
-
-  it("adds columns to findings table", () => {
-    const db = createTestDb();
-    const columns = db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
-    const names = columns.map((c) => c.name);
-    expect(names).toContain("calibrated_confidence");
-    expect(names).toContain("evidence_chain_json");
-    db.close();
-  });
-
-  it("is idempotent", () => {
-    const db = createTestDb();
-    ensureCalibrationSchema(db);
-    ensureCalibrationSchema(db);
-    const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='calibration_weights'")
-      .all();
-    expect(tables).toHaveLength(1);
     db.close();
   });
 });

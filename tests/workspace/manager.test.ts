@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { migration025 } from "../../src/migrations/025_add_workspaces_table.js";
+import { migration100 } from "../../src/migrations/100_schema_reset.js";
 import type { ContextSnapshot } from "../../src/ui/state.js";
 import { WorkspaceManager } from "../../src/workspace/manager.js";
 
@@ -14,7 +14,8 @@ function createTestDb(): Database.Database {
   tempDirs.push(dir);
   const db = new Database(path.join(dir, "test.sqlite3"));
   db.pragma("journal_mode = WAL");
-  migration025.up(db);
+  db.pragma("foreign_keys = ON");
+  migration100.up(db);
   return db;
 }
 

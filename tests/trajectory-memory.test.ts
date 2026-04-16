@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
+import { migration100 } from "../src/migrations/100_schema_reset.js";
 import {
-  ensureTrajectoryTable,
   formatTrajectoriesForPrompt,
   pruneOldUnverifiedTrajectories,
   retrieveTrajectories,
@@ -16,7 +16,10 @@ import {
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
   db.pragma("journal_mode = WAL");
-  ensureTrajectoryTable(db);
+  // Trajectories reference findings via FK, but these tests focus on trajectory
+  // retrieval/pruning logic and don't care about cross-table integrity.
+  db.pragma("foreign_keys = OFF");
+  migration100.up(db);
   return db;
 }
 
@@ -128,12 +131,9 @@ describe("saveTrajectory and retrieveTrajectories", () => {
       id: "t1",
       ruleId: "express.sqli",
       cwes: ["CWE-89"],
-      taskId: "semgrep",
       verdict: "tp",
-      confidence: 0.8,
       steps: [{ toolName: "Read", toolInput: { file_path: "test.ts" }, outcome: "done" }],
       summary: "Found SQL injection",
-      repo: "test-repo",
       fingerprint: "fp-1",
     });
 
@@ -151,12 +151,9 @@ describe("saveTrajectory and retrieveTrajectories", () => {
       id: "t1",
       ruleId: "express.sqli",
       cwes: ["CWE-89"],
-      taskId: "semgrep",
       verdict: "tp",
-      confidence: 0.8,
       steps: [],
       summary: "unverified",
-      repo: "repo",
       fingerprint: "fp-1",
     });
 
@@ -164,12 +161,9 @@ describe("saveTrajectory and retrieveTrajectories", () => {
       id: "t2",
       ruleId: "express.sqli",
       cwes: ["CWE-89"],
-      taskId: "semgrep",
       verdict: "tp",
-      confidence: 0.9,
       steps: [],
       summary: "verified correct",
-      repo: "repo",
       fingerprint: "fp-2",
     });
 
@@ -189,12 +183,9 @@ describe("saveTrajectory and retrieveTrajectories", () => {
       id: "t1",
       ruleId: "express.sqli",
       cwes: ["CWE-89"],
-      taskId: "semgrep",
       verdict: "fp",
-      confidence: 0.3,
       steps: [],
       summary: "wrong",
-      repo: "repo",
       fingerprint: "fp-1",
     });
 
@@ -214,12 +205,9 @@ describe("saveTrajectory and retrieveTrajectories", () => {
         id: `t${i}`,
         ruleId: "express.sqli",
         cwes: ["CWE-89"],
-        taskId: "semgrep",
         verdict: "tp",
-        confidence: 0.8,
         steps: [],
         summary: `exemplar ${i}`,
-        repo: "repo",
         fingerprint: `fp-${i}`,
       });
       updateTrajectoryCorrectness(db, `fp-${i}`, true);
@@ -246,12 +234,9 @@ describe("updateTrajectoryCorrectness", () => {
       id: "t1",
       ruleId: "test",
       cwes: [],
-      taskId: "semgrep",
       verdict: "tp",
-      confidence: 0.7,
       steps: [],
       summary: "test",
-      repo: "repo",
       fingerprint: "fp-1",
     });
 
@@ -284,15 +269,12 @@ describe("formatTrajectoriesForPrompt", () => {
         id: "t1",
         ruleId: "express.sqli",
         cwesJson: '["CWE-89"]',
-        taskId: "semgrep",
         verdict: "tp",
-        confidence: 0.8,
         wasCorrect: 1,
         stepsJson: JSON.stringify([
           { toolName: "Read", toolInput: { file_path: "src/app.ts" }, outcome: "found raw SQL" },
         ]),
         summary: "Traced SQL injection path",
-        repo: "repo",
         fingerprint: "fp-1",
         createdAt: "",
         updatedAt: "",
@@ -312,13 +294,10 @@ describe("formatTrajectoriesForPrompt", () => {
         id: "t1",
         ruleId: "test",
         cwesJson: "[]",
-        taskId: "semgrep",
         verdict: "fp",
-        confidence: 0.5,
         wasCorrect: null,
         stepsJson: "invalid json",
         summary: "test summary",
-        repo: "repo",
         fingerprint: null,
         createdAt: "",
         updatedAt: "",
@@ -338,34 +317,18 @@ describe("pruneOldUnverifiedTrajectories", () => {
     // Insert a trajectory with old date
     const oldDate = "2020-01-01T00:00:00.000Z";
     db.prepare(`
-      INSERT INTO trajectories (id, rule_id, cwes_json, task_id, verdict, confidence, was_correct, steps_json, summary, repo, fingerprint, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
-    `).run(
-      "old-1",
-      "test",
-      "[]",
-      "semgrep",
-      "tp",
-      0.5,
-      "[]",
-      "old",
-      "repo",
-      null,
-      oldDate,
-      oldDate,
-    );
+      INSERT INTO trajectories (id, rule_id, cwes_json, verdict, was_correct, steps_json, summary, fingerprint, created_at, updated_at)
+      VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+    `).run("old-1", "test", "[]", "tp", "[]", "old", null, oldDate, oldDate);
 
     // Insert a recent one
     saveTrajectory(db, {
       id: "new-1",
       ruleId: "test",
       cwes: [],
-      taskId: "semgrep",
       verdict: "tp",
-      confidence: 0.5,
       steps: [],
       summary: "new",
-      repo: "repo",
       fingerprint: null,
     });
 
@@ -384,47 +347,12 @@ describe("pruneOldUnverifiedTrajectories", () => {
 
     const oldDate = "2020-01-01T00:00:00.000Z";
     db.prepare(`
-      INSERT INTO trajectories (id, rule_id, cwes_json, task_id, verdict, confidence, was_correct, steps_json, summary, repo, fingerprint, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
-    `).run(
-      "old-verified",
-      "test",
-      "[]",
-      "semgrep",
-      "tp",
-      0.5,
-      "[]",
-      "old but verified",
-      "repo",
-      null,
-      oldDate,
-      oldDate,
-    );
+      INSERT INTO trajectories (id, rule_id, cwes_json, verdict, was_correct, steps_json, summary, fingerprint, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+    `).run("old-verified", "test", "[]", "tp", "[]", "old but verified", null, oldDate, oldDate);
 
     const deleted = pruneOldUnverifiedTrajectories(db, 90);
     expect(deleted).toBe(0);
-    db.close();
-  });
-});
-
-describe("ensureTrajectoryTable", () => {
-  it("creates trajectories table", () => {
-    const db = createTestDb();
-    const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='trajectories'")
-      .all();
-    expect(tables).toHaveLength(1);
-    db.close();
-  });
-
-  it("is idempotent", () => {
-    const db = createTestDb();
-    ensureTrajectoryTable(db);
-    ensureTrajectoryTable(db);
-    const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='trajectories'")
-      .all();
-    expect(tables).toHaveLength(1);
     db.close();
   });
 });

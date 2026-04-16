@@ -11,6 +11,10 @@ import type { PatchResult } from "../../src/types.js";
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
   db.pragma("journal_mode = WAL");
+  // These tests focus on patch_results UPDATE semantics and use synthetic
+  // fingerprints that don't exist in `findings`; turn off FK enforcement
+  // to keep the focus narrow. FK verification lives in schema-reset tests.
+  db.pragma("foreign_keys = OFF");
   runMigrations(db, allMigrations);
   return db;
 }

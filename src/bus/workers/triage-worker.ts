@@ -9,7 +9,6 @@ import {
   extractRuleFamily,
   formatCalibrationWeightsForPrompt,
   loadCalibrationWeights,
-  updateFindingCalibration,
 } from "../../confidence-calibration.js";
 import type { PipelineHookChain } from "../../hooks/chain.js";
 import type { HookContext } from "../../hooks/types.js";
@@ -389,12 +388,9 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
                 id: randomUUID(),
                 ruleId: finding.ruleId,
                 cwes: finding.cwe,
-                taskId: finding.taskId,
                 verdict: triageOutput.result.verdict,
-                confidence: triageOutput.result.confidence,
                 steps,
                 summary: summarizeTrajectory(steps, triageOutput.result.verdict),
-                repo: context.repoName,
                 fingerprint: finding.fingerprint,
               });
             } catch {
@@ -412,13 +408,6 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
                 weights,
               );
               triageOutput.result.calibratedConfidence = calibrated;
-
-              updateFindingCalibration(
-                deps.db,
-                finding.fingerprint,
-                calibrated,
-                triageOutput.result.evidenceChain,
-              );
             } catch {
               // Non-fatal: calibration failure shouldn't break triage
             }

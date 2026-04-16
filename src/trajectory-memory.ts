@@ -20,13 +20,10 @@ export interface TrajectoryRecord {
   id: string;
   ruleId: string;
   cwesJson: string;
-  taskId: string;
   verdict: string;
-  confidence: number;
   wasCorrect: number | null;
   stepsJson: string;
   summary: string;
-  repo: string;
   fingerprint: string | null;
   createdAt: string;
   updatedAt: string;
@@ -116,31 +113,6 @@ export function summarizeTrajectory(steps: TrajectoryStep[], verdict: string): s
 }
 
 /**
- * Ensure the trajectories table exists.
- */
-export function ensureTrajectoryTable(db: Database.Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS trajectories (
-      id              TEXT PRIMARY KEY,
-      rule_id         TEXT NOT NULL,
-      cwes_json       TEXT NOT NULL,
-      task_id         TEXT NOT NULL,
-      verdict         TEXT NOT NULL,
-      confidence      REAL NOT NULL,
-      was_correct     INTEGER,
-      steps_json      TEXT NOT NULL,
-      summary         TEXT NOT NULL,
-      repo            TEXT NOT NULL,
-      fingerprint     TEXT,
-      created_at      TEXT NOT NULL,
-      updated_at      TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_trajectories_rule_id ON trajectories(rule_id);
-    CREATE INDEX IF NOT EXISTS idx_trajectories_was_correct ON trajectories(was_correct);
-  `);
-}
-
-/**
  * Save a trajectory record after triage completes.
  */
 export function saveTrajectory(
@@ -149,12 +121,9 @@ export function saveTrajectory(
     id: string;
     ruleId: string;
     cwes: string[];
-    taskId: string;
     verdict: string;
-    confidence: number;
     steps: TrajectoryStep[];
     summary: string;
-    repo: string;
     fingerprint: string | null;
   },
 ): void {
@@ -162,20 +131,17 @@ export function saveTrajectory(
 
   db.prepare(`
     INSERT INTO trajectories (
-      id, rule_id, cwes_json, task_id, verdict, confidence,
-      was_correct, steps_json, summary, repo, fingerprint,
+      id, rule_id, cwes_json, verdict,
+      was_correct, steps_json, summary, fingerprint,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
   `).run(
     trajectory.id,
     trajectory.ruleId,
     safeJsonStringify(trajectory.cwes),
-    trajectory.taskId,
     trajectory.verdict,
-    trajectory.confidence,
     safeJsonStringify(trajectory.steps),
     trajectory.summary,
-    trajectory.repo,
     trajectory.fingerprint,
     now,
     now,

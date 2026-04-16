@@ -8,7 +8,6 @@
 
 import type Database from "better-sqlite3";
 import type { EvidenceStep } from "./types.js";
-import { safeJsonStringify } from "./utils/safe-json.js";
 
 export interface CalibrationWeight {
   stepType: string;
@@ -196,48 +195,6 @@ export function updateCalibrationWeights(
       upsertStmt.run(step.stepType, family, newWeight, now, newWeight, now);
     }
   }
-}
-
-/**
- * Ensure the calibration_weights table and findings columns exist.
- */
-export function ensureCalibrationSchema(db: Database.Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS calibration_weights (
-      step_type     TEXT NOT NULL,
-      rule_family   TEXT NOT NULL,
-      weight        REAL NOT NULL DEFAULT 1.0,
-      sample_count  INTEGER NOT NULL DEFAULT 0,
-      updated_at    TEXT NOT NULL,
-      PRIMARY KEY (step_type, rule_family)
-    )
-  `);
-
-  const columns = db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
-  const names = new Set(columns.map((c) => c.name));
-
-  if (!names.has("calibrated_confidence")) {
-    db.exec("ALTER TABLE findings ADD COLUMN calibrated_confidence REAL");
-  }
-  if (!names.has("evidence_chain_json")) {
-    db.exec("ALTER TABLE findings ADD COLUMN evidence_chain_json TEXT");
-  }
-}
-
-/**
- * Persist calibrated confidence and evidence chain on a finding row.
- */
-export function updateFindingCalibration(
-  db: Database.Database,
-  fingerprint: string,
-  calibratedConfidence: number,
-  evidenceChain: EvidenceStep[],
-): void {
-  db.prepare(`
-    UPDATE findings
-    SET calibrated_confidence = ?, evidence_chain_json = ?, updated_at = datetime('now')
-    WHERE fingerprint = ?
-  `).run(calibratedConfidence, safeJsonStringify(evidenceChain), fingerprint);
 }
 
 /**
