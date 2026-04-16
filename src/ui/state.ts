@@ -336,11 +336,28 @@ export interface ShellState {
 
 type Listener = () => void;
 
+/**
+ * Hard cap on `agentActivity` map size. Long-running shell/scan sessions can
+ * emit activity for thousands of distinct fingerprints; without a cap the map
+ * grows unboundedly and retains display strings that no longer matter.
+ */
+const MAX_AGENT_ACTIVITY_ENTRIES = 1000;
+
+/** Default TTL for stale-activity eviction (seconds). */
+const DEFAULT_AGENT_ACTIVITY_TTL_SEC = 600; // 10 minutes
+
 export class UIStore {
   private state: UIState;
   private listeners = new Set<Listener>();
   private preflightReturnMode: UIMode = "running";
   private reviewReturnMode: UIMode = "summary";
+  /**
+   * Insertion time of each `agentActivity` map key (ms since epoch).
+   * Kept in parallel with the public `Map` so we can evict by age without
+   * storing timestamps inside the activity lines themselves (display shape
+   * is load-bearing for the UI).
+   */
+  private agentActivityTimestamps = new Map<string, number>();
 
   constructor() {
     this.state = {
@@ -470,6 +487,20 @@ export class UIStore {
     // Keep only the latest 4 activity lines per finding to avoid clutter.
     const updated = [...lines, line].slice(-4);
     newMap.set(fingerprint, updated);
+    // Refresh insertion time so this entry floats to the tail of FIFO order.
+    // Map preserves insertion order, so we delete first to re-insert at tail.
+    this.agentActivityTimestamps.delete(fingerprint);
+    this.agentActivityTimestamps.set(fingerprint, Date.now());
+
+    // Backstop: cap total entries via FIFO eviction.
+    // Map iteration order is insertion order — the oldest-inserted key comes first.
+    while (newMap.size > MAX_AGENT_ACTIVITY_ENTRIES) {
+      const oldest = newMap.keys().next();
+      if (oldest.done || oldest.value === undefined) break;
+      newMap.delete(oldest.value);
+      this.agentActivityTimestamps.delete(oldest.value);
+    }
+
     this.state = { ...this.state, agentActivity: newMap };
     this.notify();
   }
@@ -477,7 +508,46 @@ export class UIStore {
   clearAgentActivity(fingerprint: string): void {
     const newMap = new Map(this.state.agentActivity);
     newMap.delete(fingerprint);
+    this.agentActivityTimestamps.delete(fingerprint);
     this.state = { ...this.state, agentActivity: newMap };
+    this.notify();
+  }
+
+  /**
+   * Drop `agentActivity` entries older than `maxAgeSec` seconds.
+   *
+   * Called at phase boundaries (e.g. scan -> triage -> verify) so stale
+   * activity lines don't linger across phases. Also safe to call on a timer
+   * — non-destructive if no entries are expired.
+   */
+  clearStaleActivity(maxAgeSec: number = DEFAULT_AGENT_ACTIVITY_TTL_SEC): void {
+    const cutoff = Date.now() - maxAgeSec * 1000;
+    let changed = false;
+    const newMap = new Map(this.state.agentActivity);
+    for (const [fingerprint, insertedAt] of this.agentActivityTimestamps) {
+      if (insertedAt < cutoff) {
+        newMap.delete(fingerprint);
+        this.agentActivityTimestamps.delete(fingerprint);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.state = { ...this.state, agentActivity: newMap };
+    this.notify();
+  }
+
+  /**
+   * Drop every `agentActivity` entry. Intended for phase boundaries where
+   * fingerprints from the previous phase are no longer relevant (e.g. moving
+   * from triage to verify — the verify phase receives a different set of
+   * findings).
+   */
+  resetAgentActivity(): void {
+    if (this.state.agentActivity.size === 0 && this.agentActivityTimestamps.size === 0) {
+      return;
+    }
+    this.agentActivityTimestamps.clear();
+    this.state = { ...this.state, agentActivity: new Map() };
     this.notify();
   }
 

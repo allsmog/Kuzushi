@@ -102,4 +102,51 @@ describe("InProcessBus", () => {
 
     await bus.close();
   });
+
+  it("waitFor cleans up the listener when the predicate throws", async () => {
+    const bus = new InProcessBus();
+    // Pre-access the private emitter via a small side channel: we listen
+    // for a different event name and count listeners there to avoid
+    // depending on bus internals. Instead, we'll loop waitFor many times
+    // and confirm listener count does not grow.
+    // node:events exposes listenerCount via `emit` — we'll use the
+    // public bus API to probe growth with timeouts.
+
+    for (let i = 0; i < 25; i++) {
+      const wait = bus.waitFor<{ type: "test:flaky"; payload: { n: number } }>("test:flaky", () => {
+        // Predicate always throws — historically this left the listener registered.
+        throw new Error(`boom ${i}`);
+      });
+
+      await bus.publish({
+        type: "test:flaky",
+        meta: { id: String(i), timestamp: new Date().toISOString(), runId: "run-1" },
+        payload: { n: i },
+      });
+
+      await expect(wait).rejects.toThrow(/boom/);
+    }
+
+    // After 25 thrown rejections, the EventEmitter listener count for
+    // "test:flaky" should be 0 — no leaked listeners.
+    // Access the underlying emitter via a test-only probe on the bus.
+    const emitter = (bus as unknown as { emitter: { listenerCount: (name: string) => number } })
+      .emitter;
+    expect(emitter.listenerCount("test:flaky")).toBe(0);
+
+    await bus.close();
+  });
+
+  it("waitFor cleans up the listener when waitFor times out", async () => {
+    const bus = new InProcessBus();
+
+    const promise = bus.waitFor("never:ever:happens", undefined, 15);
+    await expect(promise).rejects.toThrow("Timed out");
+
+    const emitter = (bus as unknown as { emitter: { listenerCount: (name: string) => number } })
+      .emitter;
+    expect(emitter.listenerCount("never:ever:happens")).toBe(0);
+
+    await bus.close();
+  });
 });
