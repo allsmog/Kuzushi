@@ -13,6 +13,11 @@ MOCK_MODE_NOTE="${TEST_LOG_DIR}/mock-mode.txt"
 MOCK_URL_FILE="${TEST_LOG_DIR}/mock-base-url.txt"
 MOCK_SERVER_LOG="${TEST_LOG_DIR}/mock-server.log"
 
+# Command used to invoke the Kuzushi CLI. Default `pnpm dev` (tsx) is handy
+# locally; CI sets KUZUSHI_CMD="node dist/cli.js" to exercise the built
+# artifact. Tokens are whitespace-split (no quoted args).
+read -r -a KUZUSHI_CMD_ARR <<<"${KUZUSHI_CMD:-pnpm dev}"
+
 mkdir -p "${TEST_LOG_DIR}"
 cat > "${MOCK_MODE_NOTE}" <<'EOF'
 Deterministic smoke run using tests/fixtures/mock-anthropic-server.mjs.
@@ -97,8 +102,8 @@ cat > "${TEST_APP_DIR}/.kuzushi/config.json" <<JSON
 }
 JSON
 
-pnpm dev config validate --repo "${TEST_APP_DIR}" --trust-repo-config >"${TEST_LOG_DIR}/config-validate.log" 2>&1
-pnpm dev scan "${TEST_APP_DIR}" --trust-repo-config --fresh --max 3 --sarif "${SARIF_PATH}" >"${TEST_LOG_DIR}/scan.log" 2>&1
+"${KUZUSHI_CMD_ARR[@]}" config validate --repo "${TEST_APP_DIR}" --trust-repo-config >"${TEST_LOG_DIR}/config-validate.log" 2>&1
+"${KUZUSHI_CMD_ARR[@]}" scan "${TEST_APP_DIR}" --trust-repo-config --fresh --max 3 --sarif "${SARIF_PATH}" >"${TEST_LOG_DIR}/scan.log" 2>&1
 
 if [[ ! -f "${SARIF_PATH}" ]]; then
   echo "expected SARIF output at ${SARIF_PATH}" >&2

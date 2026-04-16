@@ -5,18 +5,30 @@ on:
     tags:
       - "v*"
 
+# Serialize concurrent release runs; don't cancel mid-publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  # ── Gate: run the full CI suite before publishing ───────────────
+  # ── Gate: run the full CI suite (which also uploads the dist artifact) ──
   ci:
     uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
-  # ── Publish to npm ──────────────────────────────────────────────
+  # ── Publish to npm (reuses dist artifact produced by CI gate) ───────────
   publish-npm:
     needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # id-token is only required when NPM_PROVENANCE is opted in; safe to declare.
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -26,15 +38,33 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: npm publish --access public
+      - name: Download dist artifact from CI
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # Opt-in provenance: set repo variable NPM_PROVENANCE=true to enable.
+      # Requires npm ≥9.5 and a public repository. See docs/devex/02-cicd-assessment.md.
+      - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_PROVENANCE: ${{ vars.NPM_PROVENANCE }}
+        run: |
+          set -euo pipefail
+          if [ "${NPM_PROVENANCE:-}" = "true" ]; then
+            echo "Publishing with --provenance"
+            npm publish --access public --provenance
+          else
+            npm publish --access public
+          fi
 
-  # ── Create GitHub Release ───────────────────────────────────────
+  # ── Create GitHub Release (reuses dist artifact + robust changelog) ─────
   github-release:
     needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,24 +75,37 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      - name: Download dist artifact from CI
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
 
-      # Pack the tarball for users who want to install from the release
+      # Pack the tarball for users who want to install from the release.
+      # `prepack` (= pnpm build) is a no-op because dist/ is already populated.
       - run: npm pack
 
-      - name: Generate changelog from commits since last tag
+      - name: Generate changelog from commits since previous tag
         run: |
-          PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1 || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            git log --pretty=format:"- %s (%h)" HEAD > /tmp/changelog.txt
+          set -euo pipefail
+          CHANGELOG="${RUNNER_TEMP}/changelog.txt"
+          # Canonical "previous tag reachable from the parent of the release commit";
+          # fall back to the initial commit for first-ever releases.
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -z "${PREV_TAG}" ]; then
+            INITIAL_COMMIT=$(git rev-list --max-parents=0 HEAD | head -n 1)
+            echo "No previous tag; using initial commit ${INITIAL_COMMIT}."
+            git log --pretty=format:"- %s (%h)" "${INITIAL_COMMIT}..HEAD" > "${CHANGELOG}"
           else
-            git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" > /tmp/changelog.txt
+            echo "Previous tag: ${PREV_TAG}"
+            git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" > "${CHANGELOG}"
           fi
+          echo "CHANGELOG_PATH=${CHANGELOG}" >> "${GITHUB_ENV}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          body_path: /tmp/changelog.txt
+          body_path: ${{ env.CHANGELOG_PATH }}
           files: |
             kuzushi-*.tgz
