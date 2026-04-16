@@ -93,6 +93,39 @@ kuzushi scan /path/to/repo --model google:gemini-2.0-flash
 
 Kuzushi auto-downloads Opengrep if you don't have a scanner installed. Zero dependencies to manage.
 
+## Quick Start (Contributors)
+
+Two commands, deterministic, loud on failure:
+
+```sh
+git clone https://github.com/allsmog/Kuzushi.git
+cd Kuzushi
+pnpm setup      # verifies Node 22+, pins pnpm via corepack, checks externals, pnpm install
+pnpm doctor     # optional: re-verify the environment at any time
+```
+
+Then:
+
+```sh
+pnpm dev --help       # run the CLI from source via tsx
+pnpm test             # unit tests (vitest)
+pnpm check:types      # typecheck src + benchmarks + perf (in parallel)
+pnpm build            # incremental compile to dist/ — incremental, fast
+pnpm build:clean      # wipe dist/ and rebuild from scratch (used by `pnpm prepack`)
+```
+
+Optional benchmark corpuses (clones 3rd-party vulnerable apps on demand):
+
+```sh
+pnpm setup:benchmarks list          # list available corpuses
+pnpm setup:benchmarks govwa         # clone one
+pnpm setup:benchmarks all           # clone everything
+```
+
+Prefer a containerised environment? Open the repo in VS Code / Codespaces and
+"Reopen in Container" — the `.devcontainer/devcontainer.json` runs
+`pnpm setup --strict` automatically and installs semgrep + python for you.
+
 ## Module System
 
 Kuzushi's capabilities come from pluggable modules. Each module exposes tools (for shell and run modes) and optionally pipeline tasks (for scan mode DAG execution).
