@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { sanitizeForPrompt, sanitizeLight } from "../../src/prompts/sanitize.js";
 
 describe("sanitizeForPrompt", () => {
@@ -84,7 +84,7 @@ describe("sanitizeForPrompt", () => {
 
   it("normalizes smart quotes", () => {
     const result = sanitizeForPrompt("\u201CHello\u201D \u2018World\u2019");
-    expect(result).toContain('"Hello" \'World\'');
+    expect(result).toContain("\"Hello\" 'World'");
   });
 
   it("uses unique boundary markers per call", () => {

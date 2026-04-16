@@ -1,11 +1,17 @@
 import path from "node:path";
-import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { AgentActivity } from "../agent-runtime/execution.js";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import { createEvent } from "../bus/helpers.js";
 import { attachTaskOutputMeta } from "../task-output-meta.js";
 import type { ScanOpts } from "../types.js";
-import type { Finding, TaskConfig, ScannerPlugin, ScanContext, TriageAgentConfig } from "./types.js";
 import { runAgentic, selectAgenticFindings } from "./run-agentic.js";
+import type {
+  Finding,
+  ScanContext,
+  ScannerPlugin,
+  TaskConfig,
+  TriageAgentConfig,
+} from "./types.js";
 
 const DEFAULT_MODEL = "anthropic:claude-sonnet-4-6";
 const DEFAULT_MAX_FINDINGS = 40;
@@ -37,21 +43,22 @@ export class AgenticPlugin implements ScannerPlugin {
     const repoName = path.basename(repoRoot);
 
     // Build activity callback so the UI can show live scan progress.
-    const activityCallback = scanContext?.bus && scanContext?.taskId && scanContext?.runContext
-      ? async (activity: AgentActivity) => {
-          await scanContext.bus!.publish(
-            createEvent("scan:agent-activity", scanContext.runId ?? "", {
-              context: scanContext.runContext!,
-              taskId: scanContext.taskId!,
-              kind: activity.kind,
-              toolName: activity.toolName,
-              toolInput: activity.toolInput,
-              summary: activity.summary,
-              elapsedSeconds: activity.elapsedSeconds,
-            }),
-          );
-        }
-      : undefined;
+    const activityCallback =
+      scanContext?.bus && scanContext?.taskId && scanContext?.runContext
+        ? async (activity: AgentActivity) => {
+            await scanContext.bus!.publish(
+              createEvent("scan:agent-activity", scanContext.runId ?? "", {
+                context: scanContext.runContext!,
+                taskId: scanContext.taskId!,
+                kind: activity.kind,
+                toolName: activity.toolName,
+                toolInput: activity.toolInput,
+                summary: activity.summary,
+                elapsedSeconds: activity.elapsedSeconds,
+              }),
+            );
+          }
+        : undefined;
 
     const output = await runAgentic(repoRoot, opts, this.model, this.maxFindings, {
       runtime,
@@ -137,7 +144,9 @@ function summarizeFindingsForReview(findings: Finding[]): string {
     "",
   ];
   for (const f of findings.slice(0, 20)) {
-    lines.push(`- [${f.severity}] ${f.ruleId} at ${f.filePath}:${f.startLine}: ${f.message.slice(0, 100)}`);
+    lines.push(
+      `- [${f.severity}] ${f.ruleId} at ${f.filePath}:${f.startLine}: ${f.message.slice(0, 100)}`,
+    );
   }
   if (findings.length > 20) {
     lines.push(`... and ${findings.length - 20} more findings.`);

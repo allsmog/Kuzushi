@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { __taintAnalysisRefinementInternals } from "../../src/bus/workers/taint-analysis-refinement-worker.js";
 import type { TaintAnalysisLabelsDocument } from "../../src/agents/tasks/taint-analysis/types.js";
+import { __taintAnalysisRefinementInternals } from "../../src/bus/workers/taint-analysis-refinement-worker.js";
 
 function makeLabels(): TaintAnalysisLabelsDocument {
   return {
@@ -61,13 +61,18 @@ describe("taint-analysis refinement internals", () => {
   it("downgrades role entries using deterministic false-positive signals", () => {
     const refined = __taintAnalysisRefinementInternals.applyDeterministicPatch(
       makeLabels(),
-      new Map([[1, {
-        sourceFalsePositive: true,
-        sinkFalsePositive: false,
-        sourceFpCount: 1,
-        sinkFpCount: 0,
-        hints: [],
-      }]]),
+      new Map([
+        [
+          1,
+          {
+            sourceFalsePositive: true,
+            sinkFalsePositive: false,
+            sourceFpCount: 1,
+            sinkFpCount: 0,
+            hints: [],
+          },
+        ],
+      ]),
       0.3,
     );
 
@@ -89,13 +94,18 @@ describe("taint-analysis refinement internals", () => {
 
     const refined = __taintAnalysisRefinementInternals.applyDeterministicPatch(
       labels,
-      new Map([[1, {
-        sourceFalsePositive: true,
-        sinkFalsePositive: false,
-        sourceFpCount: 1,
-        sinkFpCount: 0,
-        hints: [],
-      }]]),
+      new Map([
+        [
+          1,
+          {
+            sourceFalsePositive: true,
+            sinkFalsePositive: false,
+            sourceFpCount: 1,
+            sinkFpCount: 0,
+            hints: [],
+          },
+        ],
+      ]),
       0.3,
     );
 
@@ -113,13 +123,18 @@ describe("taint-analysis refinement internals", () => {
 
     const refined = __taintAnalysisRefinementInternals.applyDeterministicPatch(
       labels,
-      new Map([[1, {
-        sourceFalsePositive: true,
-        sinkFalsePositive: false,
-        sourceFpCount: 2,
-        sinkFpCount: 0,
-        hints: [],
-      }]]),
+      new Map([
+        [
+          1,
+          {
+            sourceFalsePositive: true,
+            sinkFalsePositive: false,
+            sourceFpCount: 2,
+            sinkFpCount: 0,
+            hints: [],
+          },
+        ],
+      ]),
       0.3,
     );
 
@@ -131,13 +146,18 @@ describe("taint-analysis refinement internals", () => {
   it("respects custom confidence cap", () => {
     const refined = __taintAnalysisRefinementInternals.applyDeterministicPatch(
       makeLabels(),
-      new Map([[1, {
-        sourceFalsePositive: true,
-        sinkFalsePositive: false,
-        sourceFpCount: 1,
-        sinkFpCount: 0,
-        hints: [],
-      }]]),
+      new Map([
+        [
+          1,
+          {
+            sourceFalsePositive: true,
+            sinkFalsePositive: false,
+            sourceFpCount: 1,
+            sinkFpCount: 0,
+            hints: [],
+          },
+        ],
+      ]),
       0.15,
     );
 
@@ -146,16 +166,22 @@ describe("taint-analysis refinement internals", () => {
   });
 
   it("extracts pass id from taint-analysis rule ids", () => {
-    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass2/js/path-traversal")).toBe(2);
+    expect(
+      __taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass2/js/path-traversal"),
+    ).toBe(2);
     expect(__taintAnalysisRefinementInternals.extractPassId("semgrep/rule")).toBeUndefined();
   });
 
   it("rejects pass id 0 (below valid range)", () => {
-    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass0/test")).toBeUndefined();
+    expect(
+      __taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass0/test"),
+    ).toBeUndefined();
   });
 
   it("rejects pass id 20 (above valid range)", () => {
-    expect(__taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass20/test")).toBeUndefined();
+    expect(
+      __taintAnalysisRefinementInternals.extractPassId("taint-analysis/pass20/test"),
+    ).toBeUndefined();
   });
 
   it("accepts pass id 1 (lower bound)", () => {

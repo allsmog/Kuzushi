@@ -7,23 +7,30 @@
  * [un]prompted 2026, but driven by the Randori PASTA threat model
  * instead of blind file iteration.
  */
+
+import { createLogger } from "../../logger.js";
 import { antiHallucinationModule } from "../../prompts/modules.js";
 import {
   FINDING_SCHEMA,
+  type FindingOutput,
   parseFindingOutput,
   selectFindings,
-  type FindingOutput,
 } from "../../scanners/normalize-findings.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ScanOpts } from "../../types.js";
-import { toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
+import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { resolveTaskModel, resolveTaskRuntime, resolveTaskAllowedTools, resolveTaskPositiveInt, resolveTaskEffort, resolveTaskThinkingDisabled } from "./runtime-overrides.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskEffort,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+  resolveTaskThinkingDisabled,
+} from "./runtime-overrides.js";
 import { resolveThreatModelOutput } from "./threat-model-guidance.js";
 import type { DfdElement, StrideThreat, ThreatModelDocument } from "./threat-modeling/types.js";
-import { isRecord } from "../../utils.js";
 
 const log = createLogger({ stage: "threat-hunt" });
 
@@ -50,9 +57,10 @@ const DEFAULT_THREAT_HUNT_MODEL = "anthropic:claude-opus-4-6";
 const DEFAULT_THREAT_HUNT_EFFORT: import("../../agent-runtime/types.js").AgentEffort = "max";
 
 function resolveConfig(ctx: TaskContext): ThreatHuntConfig {
-  const model = resolveTaskModel(ctx, "threat-hunt") === ctx.config.model
-    ? DEFAULT_THREAT_HUNT_MODEL  // no explicit override → use Opus
-    : resolveTaskModel(ctx, "threat-hunt");  // user explicitly set a model → respect it
+  const model =
+    resolveTaskModel(ctx, "threat-hunt") === ctx.config.model
+      ? DEFAULT_THREAT_HUNT_MODEL // no explicit override → use Opus
+      : resolveTaskModel(ctx, "threat-hunt"); // user explicitly set a model → respect it
   const maxFindings = resolveTaskPositiveInt(ctx, "threat-hunt", "maxFindings", 50);
   const maxActors = resolveTaskPositiveInt(ctx, "threat-hunt", "maxActors", 5);
   const runsPerActor = Math.min(resolveTaskPositiveInt(ctx, "threat-hunt", "runsPerActor", 1), 5);
@@ -60,7 +68,16 @@ function resolveConfig(ctx: TaskContext): ThreatHuntConfig {
   const maxTurnsPerHunt = resolveTaskPositiveInt(ctx, "threat-hunt", "maxTurnsPerHunt", 30);
   const effort = resolveTaskEffort(ctx, "threat-hunt") ?? DEFAULT_THREAT_HUNT_EFFORT;
   const thinkingDisabled = resolveTaskThinkingDisabled(ctx, "threat-hunt") ?? false;
-  return { model, maxFindings, maxActors, runsPerActor, maxConcurrentHunts, maxTurnsPerHunt, effort, thinkingDisabled };
+  return {
+    model,
+    maxFindings,
+    maxActors,
+    runsPerActor,
+    maxConcurrentHunts,
+    maxTurnsPerHunt,
+    effort,
+    thinkingDisabled,
+  };
 }
 
 /**
@@ -76,7 +93,8 @@ function extractActorsWithThreats(upstreamOutputs: Map<string, unknown>): {
   const raw = resolveThreatModelOutput(upstreamOutputs);
   if (!isRecord(raw) || !isRecord(raw["document"])) return { prioritized: [], allActors: [] };
   const doc = raw["document"] as unknown as ThreatModelDocument;
-  if (!doc.dfd?.elements || !Array.isArray(doc.dfd.elements)) return { prioritized: [], allActors: [] };
+  if (!doc.dfd?.elements || !Array.isArray(doc.dfd.elements))
+    return { prioritized: [], allActors: [] };
 
   const allActors = doc.dfd.elements.filter((el) => el.type === "external-entity");
   const threats: StrideThreat[] = Array.isArray(doc.threats) ? doc.threats : [];
@@ -113,10 +131,15 @@ function buildPrompt(actor: DfdElement, threats: StrideThreat[]): string {
     for (const [i, t] of threats.entries()) {
       threatLines.push(`${i + 1}. [${t.impact.toUpperCase()}/${t.category}] ${t.title}`);
       threatLines.push(`   Attack vector: ${t.attackVector}`);
-      const files = t.affectedFiles.slice(0, 2).map((f) => `${f.filePath}:${f.startLine}`).join(", ");
+      const files = t.affectedFiles
+        .slice(0, 2)
+        .map((f) => `${f.filePath}:${f.startLine}`)
+        .join(", ");
       if (files) threatLines.push(`   Affected code: ${files}`);
-      const anchors = (t.evidenceAnchors ?? []).slice(0, 2)
-        .map((a) => `${a.filePath}:${a.startLine} — ${a.description}`).join("; ");
+      const anchors = (t.evidenceAnchors ?? [])
+        .slice(0, 2)
+        .map((a) => `${a.filePath}:${a.startLine} — ${a.description}`)
+        .join("; ");
       if (anchors) threatLines.push(`   Evidence: ${anchors}`);
     }
     threatLines.push(
@@ -163,7 +186,7 @@ async function runActorHunt(
   log.info(`${tag} Starting hunt (model=${config.model})`);
 
   let resultText = "";
-  let structuredOutput: unknown = undefined;
+  let structuredOutput: unknown;
   let costUsd = 0;
   let executionError: string | null = null;
 
@@ -184,7 +207,11 @@ async function runActorHunt(
       },
     },
   })) {
-    if (message.type === "tool-progress" || message.type === "tool-summary" || message.type === "assistant") {
+    if (
+      message.type === "tool-progress" ||
+      message.type === "tool-summary" ||
+      message.type === "assistant"
+    ) {
       continue;
     }
     if (message.type !== "result") continue;
@@ -196,10 +223,15 @@ async function runActorHunt(
       resultText = message.result;
       structuredOutput = message.structuredOutput;
       const durationSec = message.durationMs ? (message.durationMs / 1000).toFixed(1) : "?";
-      log.info(`${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`);
+      log.info(
+        `${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`,
+      );
       break;
     }
-    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
+    executionError =
+      (Array.isArray(message.errors) ? message.errors.join("; ") : "") ||
+      message.subtype ||
+      "unknown error";
   }
 
   if (executionError) {
@@ -207,9 +239,10 @@ async function runActorHunt(
     return { findings: [], costUsd };
   }
 
-  const parsed = structuredOutput != null || resultText
-    ? parseFindingOutput(structuredOutput ?? resultText)
-    : { findings: [] };
+  const parsed =
+    structuredOutput != null || resultText
+      ? parseFindingOutput(structuredOutput ?? resultText)
+      : { findings: [] };
   return { findings: parsed.findings, costUsd };
 }
 
@@ -232,9 +265,8 @@ async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
   }
 
   // Prefer actors with HIGH/CRITICAL threats; fall back to all actors if none qualify.
-  const actorsToHunt: ActorWithThreats[] = prioritized.length > 0
-    ? prioritized
-    : allActors.map((a) => ({ actor: a, threats: [] }));
+  const actorsToHunt: ActorWithThreats[] =
+    prioritized.length > 0 ? prioritized : allActors.map((a) => ({ actor: a, threats: [] }));
 
   const capped = actorsToHunt.slice(0, config.maxActors);
   const totalRuns = capped.length * config.runsPerActor;
@@ -305,7 +337,9 @@ export const threatHuntTask: AgentTask<ScanOpts, Finding[]> = {
         "- Trace the complete data flow from source to sink",
         "- Check for sanitization or framework protections",
         "- Confirm the code is reachable from the stated actor's trust zone",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

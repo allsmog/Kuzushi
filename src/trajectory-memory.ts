@@ -6,7 +6,7 @@
 
 import type Database from "better-sqlite3";
 import type { AgentActivity } from "./agent-runtime/execution.js";
-import { safeJsonStringify, safeJsonParse } from "./utils/safe-json.js";
+import { safeJsonParse, safeJsonStringify } from "./utils/safe-json.js";
 
 /** A single tool-call step recorded during triage. */
 export interface TrajectoryStep {
@@ -98,10 +98,7 @@ function summarizeToolInput(input: Record<string, unknown>): Record<string, unkn
 /**
  * Generate a 2-3 sentence strategy summary from trajectory steps.
  */
-export function summarizeTrajectory(
-  steps: TrajectoryStep[],
-  verdict: string,
-): string {
+export function summarizeTrajectory(steps: TrajectoryStep[], verdict: string): string {
   if (steps.length === 0) {
     return `Verdict: ${verdict}. No tool calls recorded.`;
   }
@@ -221,12 +218,14 @@ export function retrieveTrajectories(
   const results: TrajectoryRecord[] = [];
 
   // 1. Exact rule_id match, verified correct
-  const exactCorrect = db.prepare(`
+  const exactCorrect = db
+    .prepare(`
     SELECT * FROM trajectories
     WHERE rule_id = ? AND was_correct = 1
     ORDER BY updated_at DESC
     LIMIT ?
-  `).all(ruleId, maxExemplars) as TrajectoryRecord[];
+  `)
+    .all(ruleId, maxExemplars) as TrajectoryRecord[];
   results.push(...exactCorrect);
 
   if (results.length >= maxExemplars) {
@@ -240,12 +239,14 @@ export function retrieveTrajectories(
 
     for (const cwe of cwes) {
       if (results.length >= maxExemplars) break;
-      const cweRows = db.prepare(`
+      const cweRows = db
+        .prepare(`
         SELECT * FROM trajectories
         WHERE cwes_json LIKE ? AND was_correct = 1 AND rule_id != ?
         ORDER BY updated_at DESC
         LIMIT ?
-      `).all(`%${cwe}%`, ruleId, remaining) as TrajectoryRecord[];
+      `)
+        .all(`%${cwe}%`, ruleId, remaining) as TrajectoryRecord[];
 
       for (const row of cweRows) {
         if (!existingIds.has(row.id) && results.length < maxExemplars) {
@@ -267,12 +268,14 @@ export function retrieveTrajectories(
 
     for (const cwe of cwes) {
       if (results.length >= maxExemplars) break;
-      const unverified = db.prepare(`
+      const unverified = db
+        .prepare(`
         SELECT * FROM trajectories
         WHERE cwes_json LIKE ? AND was_correct IS NULL
         ORDER BY updated_at DESC
         LIMIT ?
-      `).all(`%${cwe}%`, remaining) as TrajectoryRecord[];
+      `)
+        .all(`%${cwe}%`, remaining) as TrajectoryRecord[];
 
       for (const row of unverified) {
         if (!existingIds.has(row.id) && results.length < maxExemplars) {
@@ -289,19 +292,18 @@ export function retrieveTrajectories(
 /**
  * Format retrieved trajectories into a prompt section for injection.
  */
-export function formatTrajectoriesForPrompt(
-  trajectories: TrajectoryRecord[],
-): string {
+export function formatTrajectoriesForPrompt(trajectories: TrajectoryRecord[]): string {
   if (trajectories.length === 0) {
     return "";
   }
 
   const sections = trajectories.map((t, idx) => {
-    const verifiedTag = t.wasCorrect === 1
-      ? " [VERIFIED CORRECT]"
-      : t.wasCorrect === 0
-        ? " [VERIFIED INCORRECT]"
-        : "";
+    const verifiedTag =
+      t.wasCorrect === 1
+        ? " [VERIFIED CORRECT]"
+        : t.wasCorrect === 0
+          ? " [VERIFIED INCORRECT]"
+          : "";
 
     const parsedSteps = safeJsonParse<unknown>(t.stepsJson, []);
     const steps: TrajectoryStep[] = Array.isArray(parsedSteps)
@@ -310,7 +312,10 @@ export function formatTrajectoriesForPrompt(
 
     const stepsStr = steps
       .slice(0, 5)
-      .map((s, i) => `${i + 1}. ${s.toolName}(${safeJsonStringify(Object.values(s.toolInput)[0] ?? "").slice(0, 60)}) → ${s.outcome.slice(0, 80)}`)
+      .map(
+        (s, i) =>
+          `${i + 1}. ${s.toolName}(${safeJsonStringify(Object.values(s.toolInput)[0] ?? "").slice(0, 60)}) → ${s.outcome.slice(0, 80)}`,
+      )
       .join("\n");
 
     return [
@@ -321,10 +326,7 @@ export function formatTrajectoriesForPrompt(
     ].join("\n");
   });
 
-  return [
-    "## Prior Investigation Exemplars",
-    ...sections,
-  ].join("\n\n");
+  return ["## Prior Investigation Exemplars", ...sections].join("\n\n");
 }
 
 /**
@@ -338,12 +340,14 @@ export function getSpecialistAccuracy(
 ): number | undefined {
   // Query trajectories that have been verified (was_correct IS NOT NULL)
   // and match the rule pattern
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT was_correct FROM trajectories
     WHERE rule_id = ? AND was_correct IS NOT NULL
     ORDER BY updated_at DESC
     LIMIT 20
-  `).all(ruleId) as Array<{ was_correct: number }>;
+  `)
+    .all(ruleId) as Array<{ was_correct: number }>;
 
   if (rows.length < 3) {
     return undefined;
@@ -356,11 +360,7 @@ export function getSpecialistAccuracy(
 /**
  * Prune old trajectories for a rule_id, keeping the newest N.
  */
-function pruneTrajectories(
-  db: Database.Database,
-  ruleId: string,
-  maxPerRule: number,
-): void {
+function pruneTrajectories(db: Database.Database, ruleId: string, maxPerRule: number): void {
   db.prepare(`
     DELETE FROM trajectories
     WHERE rule_id = ? AND id NOT IN (
@@ -379,11 +379,13 @@ export function pruneOldUnverifiedTrajectories(
   db: Database.Database,
   maxAgeDays: number = 90,
 ): number {
-  const result = db.prepare(`
+  const result = db
+    .prepare(`
     DELETE FROM trajectories
     WHERE was_correct IS NULL
       AND created_at < datetime('now', ?)
-  `).run(`-${maxAgeDays} days`);
+  `)
+    .run(`-${maxAgeDays} days`);
 
   return result.changes;
 }

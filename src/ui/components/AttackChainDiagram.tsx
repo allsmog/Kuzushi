@@ -15,12 +15,13 @@
  *   │  Requires: User can submit comments                   │
  *   ╰───────────────────────────────────────────────────────╯
  */
-import React from "react";
-import { Box, Text } from "ink";
+
 import chalk from "chalk";
-import { icons } from "../icons.js";
-import { terminalCardWidth } from "../format.js";
+import { Box, Text } from "ink";
+import React from "react";
 import type { ExploitChain } from "../../types.js";
+import { terminalCardWidth } from "../format.js";
+import { icons } from "../icons.js";
 
 interface AttackChainDiagramProps {
   chain: ExploitChain;
@@ -32,21 +33,33 @@ const ARROW = " ───→ ";
 
 export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.ReactElement {
   const availableWidth = Math.max(38, terminalCardWidth(96, 60) - 6);
-  const sevColor = chain.overallSeverity === "CRITICAL" ? chalk.red.bold
-    : chain.overallSeverity === "HIGH" ? chalk.red
-    : chalk.yellow;
+  const sevColor =
+    chain.overallSeverity === "CRITICAL"
+      ? chalk.red.bold
+      : chain.overallSeverity === "HIGH"
+        ? chalk.red
+        : chalk.yellow;
 
-  const borderColor = chain.overallSeverity === "CRITICAL" ? chalk.red
-    : chain.overallSeverity === "HIGH" ? chalk.red
-    : chalk.yellow;
+  const borderColor =
+    chain.overallSeverity === "CRITICAL"
+      ? chalk.red
+      : chain.overallSeverity === "HIGH"
+        ? chalk.red
+        : chalk.yellow;
 
   // Build step boxes
   const steps = chain.steps.map((step) => buildStepBox(step.description, step.role));
 
   // Calculate total width
   const boxWidth = STEP_INNER_WIDTH + 2; // +2 for borders
-  const totalInner = (boxWidth * steps.length) + (ARROW.length * (steps.length - 1)) + 4;
-  const outerWidth = Math.max(40, Math.min(availableWidth, Math.max(totalInner, chain.name.length + chain.overallSeverity.length + 12)));
+  const totalInner = boxWidth * steps.length + ARROW.length * (steps.length - 1) + 4;
+  const outerWidth = Math.max(
+    40,
+    Math.min(
+      availableWidth,
+      Math.max(totalInner, chain.name.length + chain.overallSeverity.length + 12),
+    ),
+  );
   const useVerticalLayout = totalInner > availableWidth;
 
   // Render title bar
@@ -62,38 +75,84 @@ export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.Re
   const stepRole = steps.map((s) => s.role).join(chalk.dim(ARROW.replace(/[─→]/g, " ")));
   const stepBot = steps.map((s) => s.bottom).join(chalk.dim(ARROW.replace(/[─→]/g, " ")));
   const impactLines = wrapText(`${icons.warning} ${chain.impactDescription}`, outerWidth - 4);
-  const preconditionLines = chain.preconditions.length > 0
-    ? wrapText(`Requires: ${chain.preconditions.join(", ")}`, outerWidth - 4)
-    : [];
+  const preconditionLines =
+    chain.preconditions.length > 0
+      ? wrapText(`Requires: ${chain.preconditions.join(", ")}`, outerWidth - 4)
+      : [];
 
   return (
     <Box flexDirection="column">
-      <Text>{"  "}{titleLine}</Text>
-      <Text>{"  "}{borderColor("│")}</Text>
+      <Text>
+        {"  "}
+        {titleLine}
+      </Text>
+      <Text>
+        {"  "}
+        {borderColor("│")}
+      </Text>
       {!useVerticalLayout && (
         <>
-          <Text>{"  "}{borderColor("│")}  {stepTop}</Text>
-          <Text>{"  "}{borderColor("│")}  {stepMid1}</Text>
-          <Text>{"  "}{borderColor("│")}  {stepMid2}</Text>
-          <Text>{"  "}{borderColor("│")}  {stepRole}</Text>
-          <Text>{"  "}{borderColor("│")}  {stepBot}</Text>
+          <Text>
+            {"  "}
+            {borderColor("│")} {stepTop}
+          </Text>
+          <Text>
+            {"  "}
+            {borderColor("│")} {stepMid1}
+          </Text>
+          <Text>
+            {"  "}
+            {borderColor("│")} {stepMid2}
+          </Text>
+          <Text>
+            {"  "}
+            {borderColor("│")} {stepRole}
+          </Text>
+          <Text>
+            {"  "}
+            {borderColor("│")} {stepBot}
+          </Text>
         </>
       )}
-      {useVerticalLayout && chain.steps.map((step, index) => (
-        <React.Fragment key={`${step.findingFingerprint}-${index}`}>
-          <Text>{"  "}{borderColor("│")}  {chalk.dim(`${index + 1}.`)} {step.description}</Text>
-          <Text>{"  "}{borderColor("│")}     {chalk.dim(`(${step.role})`)}</Text>
-          {index < chain.steps.length - 1 && <Text>{"  "}{borderColor("│")}     {chalk.dim("↓")}</Text>}
-        </React.Fragment>
-      ))}
-      <Text>{"  "}{borderColor("│")}</Text>
+      {useVerticalLayout &&
+        chain.steps.map((step, index) => (
+          <React.Fragment key={`${step.findingFingerprint}-${index}`}>
+            <Text>
+              {"  "}
+              {borderColor("│")} {chalk.dim(`${index + 1}.`)} {step.description}
+            </Text>
+            <Text>
+              {"  "}
+              {borderColor("│")} {chalk.dim(`(${step.role})`)}
+            </Text>
+            {index < chain.steps.length - 1 && (
+              <Text>
+                {"  "}
+                {borderColor("│")} {chalk.dim("↓")}
+              </Text>
+            )}
+          </React.Fragment>
+        ))}
+      <Text>
+        {"  "}
+        {borderColor("│")}
+      </Text>
       {impactLines.map((line, index) => (
-        <Text key={`impact-${index}`}>{"  "}{borderColor("│")}  {index === 0 ? line : chalk.dim(line)}</Text>
+        <Text key={`impact-${index}`}>
+          {"  "}
+          {borderColor("│")} {index === 0 ? line : chalk.dim(line)}
+        </Text>
       ))}
       {preconditionLines.map((line, index) => (
-        <Text key={`pre-${index}`}>{"  "}{borderColor("│")}  {chalk.dim(line)}</Text>
+        <Text key={`pre-${index}`}>
+          {"  "}
+          {borderColor("│")} {chalk.dim(line)}
+        </Text>
       ))}
-      <Text>{"  "}{borderColor(`╰${"─".repeat(outerWidth)}╯`)}</Text>
+      <Text>
+        {"  "}
+        {borderColor(`╰${"─".repeat(outerWidth)}╯`)}
+      </Text>
     </Box>
   );
 }

@@ -33,20 +33,61 @@ export const cCppProfile: LanguageProfile = {
   vulnClasses: {
     "buffer-overflow": {
       sinks: [
-        { api: "memcpy(dst, src, len)", risk: "Copies len bytes without checking dst capacity", cwes: ["CWE-120", "CWE-787"] },
-        { api: "memmove(dst, src, len)", risk: "Same risk as memcpy — no bounds check on dst", cwes: ["CWE-120"] },
-        { api: "strcpy(dst, src)", risk: "Copies until NUL with no length limit", cwes: ["CWE-120"] },
-        { api: "strcat(dst, src)", risk: "Appends without checking remaining dst capacity", cwes: ["CWE-120"] },
-        { api: "sprintf(buf, fmt, ...)", risk: "Formats into buf with no size limit", cwes: ["CWE-120"] },
-        { api: "gets(buf)", risk: "Reads from stdin until newline with no buffer limit", cwes: ["CWE-120"] },
-        { api: "sscanf with %s", risk: "Reads unbounded string into fixed buffer", cwes: ["CWE-120"] },
-        { api: "read/recv into fixed buffer", risk: "Network/file reads with attacker-controlled length", cwes: ["CWE-120"] },
+        {
+          api: "memcpy(dst, src, len)",
+          risk: "Copies len bytes without checking dst capacity",
+          cwes: ["CWE-120", "CWE-787"],
+        },
+        {
+          api: "memmove(dst, src, len)",
+          risk: "Same risk as memcpy — no bounds check on dst",
+          cwes: ["CWE-120"],
+        },
+        {
+          api: "strcpy(dst, src)",
+          risk: "Copies until NUL with no length limit",
+          cwes: ["CWE-120"],
+        },
+        {
+          api: "strcat(dst, src)",
+          risk: "Appends without checking remaining dst capacity",
+          cwes: ["CWE-120"],
+        },
+        {
+          api: "sprintf(buf, fmt, ...)",
+          risk: "Formats into buf with no size limit",
+          cwes: ["CWE-120"],
+        },
+        {
+          api: "gets(buf)",
+          risk: "Reads from stdin until newline with no buffer limit",
+          cwes: ["CWE-120"],
+        },
+        {
+          api: "sscanf with %s",
+          risk: "Reads unbounded string into fixed buffer",
+          cwes: ["CWE-120"],
+        },
+        {
+          api: "read/recv into fixed buffer",
+          risk: "Network/file reads with attacker-controlled length",
+          cwes: ["CWE-120"],
+        },
       ],
       safePatterns: [
-        { api: "strncpy(dst, src, sizeof(dst))", why: "Bounded copy — but check for NUL termination" },
-        { api: "snprintf(buf, sizeof(buf), ...)", why: "Bounded format — safe if size arg is correct" },
+        {
+          api: "strncpy(dst, src, sizeof(dst))",
+          why: "Bounded copy — but check for NUL termination",
+        },
+        {
+          api: "snprintf(buf, sizeof(buf), ...)",
+          why: "Bounded format — safe if size arg is correct",
+        },
         { api: "strlcpy/strlcat", why: "BSD bounded string functions (if available)" },
-        { api: "memcpy with static src and known len", why: "Hardcoded lengths with no attacker control are safe" },
+        {
+          api: "memcpy with static src and known len",
+          why: "Hardcoded lengths with no attacker control are safe",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -76,13 +117,17 @@ export const cCppProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Network packet parsing with unchecked length",
-          vulnerableCode: "uint16_t opt_len = ntohs(hdr->length);\nchar buf[256];\nmemcpy(buf, hdr->data, opt_len);",
-          explanation: "Attacker controls hdr->length via network packet. opt_len can exceed 256 (buf size). No bounds check before memcpy — stack buffer overflow.",
+          vulnerableCode:
+            "uint16_t opt_len = ntohs(hdr->length);\nchar buf[256];\nmemcpy(buf, hdr->data, opt_len);",
+          explanation:
+            "Attacker controls hdr->length via network packet. opt_len can exceed 256 (buf size). No bounds check before memcpy — stack buffer overflow.",
         },
         {
           scenario: "XDR deserialization with signed/unsigned mismatch",
-          vulnerableCode: "int len = xdr_getint(xdr);\nif (len > MAX_NAME) return -1;\nchar name[MAX_NAME];\nmemcpy(name, xdr_getbytes(xdr), len);",
-          explanation: "len is signed int. A negative value passes the > MAX_NAME check but wraps to a huge unsigned value in memcpy's size_t parameter — massive overflow.",
+          vulnerableCode:
+            "int len = xdr_getint(xdr);\nif (len > MAX_NAME) return -1;\nchar name[MAX_NAME];\nmemcpy(name, xdr_getbytes(xdr), len);",
+          explanation:
+            "len is signed int. A negative value passes the > MAX_NAME check but wraps to a huge unsigned value in memcpy's size_t parameter — massive overflow.",
         },
       ],
       antiHallucinationExtra: [
@@ -93,14 +138,36 @@ export const cCppProfile: LanguageProfile = {
     },
     "integer-overflow": {
       sinks: [
-        { api: "malloc(n * size)", risk: "Multiplication can wrap to small value, leading to undersized allocation", cwes: ["CWE-190"] },
-        { api: "len1 + len2 used as allocation size", risk: "Addition overflow wraps to small value", cwes: ["CWE-190"] },
-        { api: "signed int used as array index or size", risk: "Negative values bypass upper-bound checks", cwes: ["CWE-190", "CWE-681"] },
-        { api: "ntohs/ntohl results used in arithmetic", risk: "Network-controlled values in size calculations", cwes: ["CWE-190"] },
+        {
+          api: "malloc(n * size)",
+          risk: "Multiplication can wrap to small value, leading to undersized allocation",
+          cwes: ["CWE-190"],
+        },
+        {
+          api: "len1 + len2 used as allocation size",
+          risk: "Addition overflow wraps to small value",
+          cwes: ["CWE-190"],
+        },
+        {
+          api: "signed int used as array index or size",
+          risk: "Negative values bypass upper-bound checks",
+          cwes: ["CWE-190", "CWE-681"],
+        },
+        {
+          api: "ntohs/ntohl results used in arithmetic",
+          risk: "Network-controlled values in size calculations",
+          cwes: ["CWE-190"],
+        },
       ],
       safePatterns: [
-        { api: "calloc(n, size)", why: "calloc checks for overflow internally on most implementations" },
-        { api: "Explicit overflow check before arithmetic", why: "if (a > SIZE_MAX / b) return error" },
+        {
+          api: "calloc(n, size)",
+          why: "calloc checks for overflow internally on most implementations",
+        },
+        {
+          api: "Explicit overflow check before arithmetic",
+          why: "if (a > SIZE_MAX / b) return error",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -125,8 +192,10 @@ export const cCppProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Image dimension multiplication overflow",
-          vulnerableCode: "uint32_t width = read_u32(input);\nuint32_t height = read_u32(input);\nchar *pixels = malloc(width * height * 4);\nmemcpy(pixels, data, width * height * 4);",
-          explanation: "width * height * 4 can overflow uint32_t, wrapping to a small value. malloc allocates too little, memcpy overflows the heap buffer.",
+          vulnerableCode:
+            "uint32_t width = read_u32(input);\nuint32_t height = read_u32(input);\nchar *pixels = malloc(width * height * 4);\nmemcpy(pixels, data, width * height * 4);",
+          explanation:
+            "width * height * 4 can overflow uint32_t, wrapping to a small value. malloc allocates too little, memcpy overflows the heap buffer.",
         },
       ],
       antiHallucinationExtra: [
@@ -136,13 +205,31 @@ export const cCppProfile: LanguageProfile = {
     },
     "use-after-free": {
       sinks: [
-        { api: "free(ptr); ... use(ptr)", risk: "Accessing freed memory — attacker may control reallocated content", cwes: ["CWE-416"] },
-        { api: "realloc may return different ptr", risk: "Old pointer becomes dangling if realloc moves the allocation", cwes: ["CWE-416"] },
-        { api: "Double free", risk: "Freeing same pointer twice corrupts allocator metadata", cwes: ["CWE-415"] },
+        {
+          api: "free(ptr); ... use(ptr)",
+          risk: "Accessing freed memory — attacker may control reallocated content",
+          cwes: ["CWE-416"],
+        },
+        {
+          api: "realloc may return different ptr",
+          risk: "Old pointer becomes dangling if realloc moves the allocation",
+          cwes: ["CWE-416"],
+        },
+        {
+          api: "Double free",
+          risk: "Freeing same pointer twice corrupts allocator metadata",
+          cwes: ["CWE-415"],
+        },
       ],
       safePatterns: [
-        { api: "ptr = NULL after free", why: "Prevents use-after-free if subsequent code checks for NULL" },
-        { api: "Reference counting with atomic ops", why: "Prevents premature free in concurrent code" },
+        {
+          api: "ptr = NULL after free",
+          why: "Prevents use-after-free if subsequent code checks for NULL",
+        },
+        {
+          api: "Reference counting with atomic ops",
+          why: "Prevents premature free in concurrent code",
+        },
       ],
       investigationHints: {
         grepPatterns: ["free\\(", "realloc\\(", "->.*=.*NULL"],
@@ -161,8 +248,10 @@ export const cCppProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Error path use-after-free",
-          vulnerableCode: "buf = malloc(size);\nif (parse(buf, input) < 0) {\n    free(buf);\n    log_error(\"parse failed for %s\", buf->name);\n    return -1;\n}",
-          explanation: "On parse failure, buf is freed but then dereferenced in the log_error call to access buf->name.",
+          vulnerableCode:
+            'buf = malloc(size);\nif (parse(buf, input) < 0) {\n    free(buf);\n    log_error("parse failed for %s", buf->name);\n    return -1;\n}',
+          explanation:
+            "On parse failure, buf is freed but then dereferenced in the log_error call to access buf->name.",
         },
       ],
       antiHallucinationExtra: [
@@ -172,23 +261,32 @@ export const cCppProfile: LanguageProfile = {
     },
     "format-string": {
       sinks: [
-        { api: "printf(user_str)", risk: "User-controlled format string enables read/write of stack memory", cwes: ["CWE-134"] },
-        { api: "fprintf(f, user_str)", risk: "Same as printf — format string from untrusted source", cwes: ["CWE-134"] },
+        {
+          api: "printf(user_str)",
+          risk: "User-controlled format string enables read/write of stack memory",
+          cwes: ["CWE-134"],
+        },
+        {
+          api: "fprintf(f, user_str)",
+          risk: "Same as printf — format string from untrusted source",
+          cwes: ["CWE-134"],
+        },
         { api: "syslog(priority, user_str)", risk: "Format string via syslog", cwes: ["CWE-134"] },
-        { api: "snprintf(buf, size, user_str)", risk: "Bounded output but format string still attacker-controlled", cwes: ["CWE-134"] },
+        {
+          api: "snprintf(buf, size, user_str)",
+          risk: "Bounded output but format string still attacker-controlled",
+          cwes: ["CWE-134"],
+        },
       ],
       safePatterns: [
         { api: 'printf("%s", user_str)', why: "User string passed as argument, not format — safe" },
-        { api: "Hardcoded format string with user args", why: "Format is constant, only arguments vary" },
+        {
+          api: "Hardcoded format string with user args",
+          why: "Format is constant, only arguments vary",
+        },
       ],
       investigationHints: {
-        grepPatterns: [
-          "printf\\(",
-          "fprintf\\(",
-          "syslog\\(",
-          "snprintf\\(",
-          "sprintf\\(",
-        ],
+        grepPatterns: ["printf\\(", "fprintf\\(", "syslog\\(", "snprintf\\(", "sprintf\\("],
         fileHints: ["Logging functions", "Error message handlers", "Debug output code"],
         instructions: [
           "Check if the first argument to printf-family functions is a variable (not a string literal)",
@@ -199,27 +297,46 @@ export const cCppProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "SNMP error handler format string",
-          vulnerableCode: 'char *community = snmp_get_community(pdu);\nsnprintf(errbuf, sizeof(errbuf), community);',
-          explanation: "community string comes from network SNMP packet and is used as format string in snprintf. Attacker sends %x%x%x%n to read/write stack.",
+          vulnerableCode:
+            "char *community = snmp_get_community(pdu);\nsnprintf(errbuf, sizeof(errbuf), community);",
+          explanation:
+            "community string comes from network SNMP packet and is used as format string in snprintf. Attacker sends %x%x%x%n to read/write stack.",
         },
       ],
       antiHallucinationExtra: [
-        "printf(\"%s\", var) is SAFE — the format string is the literal \"%s\", not the variable",
+        'printf("%s", var) is SAFE — the format string is the literal "%s", not the variable',
         "Do NOT flag printf with hardcoded format strings and user data as arguments",
       ],
     },
     "type-confusion": {
       sinks: [
-        { api: "Tagged union access without type check", risk: "Accessing wrong union member reads garbage or attacker-controlled data", cwes: ["CWE-843"] },
-        { api: "void* cast without validation", risk: "Casting to wrong concrete type", cwes: ["CWE-843"] },
-        { api: "Variant/discriminated type access", risk: "Missing discriminator check before accessing type-specific fields", cwes: ["CWE-843"] },
+        {
+          api: "Tagged union access without type check",
+          risk: "Accessing wrong union member reads garbage or attacker-controlled data",
+          cwes: ["CWE-843"],
+        },
+        {
+          api: "void* cast without validation",
+          risk: "Casting to wrong concrete type",
+          cwes: ["CWE-843"],
+        },
+        {
+          api: "Variant/discriminated type access",
+          risk: "Missing discriminator check before accessing type-specific fields",
+          cwes: ["CWE-843"],
+        },
       ],
       safePatterns: [
         { api: "switch(tag) with all cases", why: "Exhaustive tag check before union access" },
         { api: "assert(obj->type == EXPECTED) before cast", why: "Runtime type validation" },
       ],
       investigationHints: {
-        grepPatterns: ["union\\s+\\{", "\\.type\\s*==", "->type\\s*==", "\\(struct\\s+\\w+\\s*\\*\\)"],
+        grepPatterns: [
+          "union\\s+\\{",
+          "\\.type\\s*==",
+          "->type\\s*==",
+          "\\(struct\\s+\\w+\\s*\\*\\)",
+        ],
         fileHints: [
           "ASN.1 / TLV parsing code",
           "Protocol message handlers with type-dispatched processing",
@@ -234,8 +351,10 @@ export const cCppProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "ASN.1 value access without tag check",
-          vulnerableCode: "ASN1_VALUE *val = asn1_parse(input);\nint len = val->value.str_val->length;",
-          explanation: "val could be INTEGER, BOOLEAN, or STRING type. Accessing str_val without checking val->type reads memory from the wrong union member if val is not a string.",
+          vulnerableCode:
+            "ASN1_VALUE *val = asn1_parse(input);\nint len = val->value.str_val->length;",
+          explanation:
+            "val could be INTEGER, BOOLEAN, or STRING type. Accessing str_val without checking val->type reads memory from the wrong union member if val is not a string.",
         },
       ],
       antiHallucinationExtra: [
@@ -245,12 +364,30 @@ export const cCppProfile: LanguageProfile = {
     },
     "command-injection": {
       sinks: [
-        { api: "system(cmd)", risk: "Passes cmd to /bin/sh -c for full shell interpretation", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "popen(cmd, mode)", risk: "Shell interpretation of cmd string", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "execlp/execvp with shell wrapper", risk: "If first arg is a shell and command is user-controlled", shellInvoking: true, cwes: ["CWE-78"] },
+        {
+          api: "system(cmd)",
+          risk: "Passes cmd to /bin/sh -c for full shell interpretation",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "popen(cmd, mode)",
+          risk: "Shell interpretation of cmd string",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "execlp/execvp with shell wrapper",
+          risk: "If first arg is a shell and command is user-controlled",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
       ],
       safePatterns: [
-        { api: "execve with argument array", why: "No shell interpretation when using direct exec with argv" },
+        {
+          api: "execve with argument array",
+          why: "No shell interpretation when using direct exec with argv",
+        },
         { api: "Hardcoded command string", why: "No attacker-controlled input in the command" },
       ],
       investigationHints: {
@@ -264,8 +401,10 @@ export const cCppProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "CGI handler building shell command",
-          vulnerableCode: 'char cmd[512];\nsnprintf(cmd, sizeof(cmd), "convert %s output.png", filename);\nsystem(cmd);',
-          explanation: "filename comes from user upload/request. Attacker sends 'img.png; rm -rf /' — shell interprets the semicolon as command separator.",
+          vulnerableCode:
+            'char cmd[512];\nsnprintf(cmd, sizeof(cmd), "convert %s output.png", filename);\nsystem(cmd);',
+          explanation:
+            "filename comes from user upload/request. Attacker sends 'img.png; rm -rf /' — shell interprets the semicolon as command separator.",
         },
       ],
       antiHallucinationExtra: [

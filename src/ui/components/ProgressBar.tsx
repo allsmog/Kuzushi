@@ -2,8 +2,9 @@
  * Unicode progress bar Ink component.
  * Uses partial block characters for smooth sub-character progress.
  */
-import React from "react";
+
 import { Text } from "ink";
+import type React from "react";
 import { progressBar } from "../format.js";
 
 interface ProgressBarProps {

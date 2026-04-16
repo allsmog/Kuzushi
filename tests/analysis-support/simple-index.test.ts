@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -67,7 +67,8 @@ describe("SimpleTextIndexProvider", () => {
   it("indexes multi-language repos with many files", async () => {
     const files: Record<string, string> = {};
     for (let i = 0; i < 50; i++) {
-      files[`src/module${i}.ts`] = `export function handler${i}(req: Request) { return fetch(req.url); }\n`;
+      files[`src/module${i}.ts`] =
+        `export function handler${i}(req: Request) { return fetch(req.url); }\n`;
     }
     for (let i = 0; i < 20; i++) {
       files[`lib/util${i}.py`] = `def process${i}(data):\n    return data.strip()\n`;

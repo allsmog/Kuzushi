@@ -9,21 +9,17 @@
  * as the conversation flows.
  */
 
-import path from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { CopilotCore } from "./core.js";
-import type {
-  AgentQueryOptions,
-  AgentRuntime,
-  AgentSession,
-} from "../agent-runtime/types.js";
-import type { MessageBus } from "../bus/types.js";
-import type { KuzushiConfig } from "../types.js";
-import type { ContextSnapshot, ShellHistoryEntry, ShellState, UIStore } from "../ui/state.js";
+import path from "node:path";
+import type { AgentQueryOptions, AgentRuntime, AgentSession } from "../agent-runtime/types.js";
 import { createBus } from "../bus/index.js";
-import { parseToolArgs } from "./run.js";
+import type { MessageBus } from "../bus/types.js";
 import { formatContextSummary } from "../modules/core-sast.js";
 import type { ModuleTool } from "../modules/types.js";
+import type { KuzushiConfig } from "../types.js";
+import type { ContextSnapshot, ShellHistoryEntry, ShellState, UIStore } from "../ui/state.js";
+import { CopilotCore } from "./core.js";
+import { parseToolArgs } from "./run.js";
 
 const SHELL_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "LS"];
 const SHELL_HISTORY_FILENAME = "shell-history.json";
@@ -36,16 +32,16 @@ const CANCELLED_TOOL_MESSAGE = "Cancelled active operation.";
 const CANCELLED_AGENT_MESSAGE = "Cancelled active request.";
 
 /** Tools that require a ContextSnapshot before they can execute from the shell. */
-const CONTEXT_REQUIRED_TOOLS = new Set([
-  "sast:threat-hunt",
-  "sast:taint-iris",
-]);
+const CONTEXT_REQUIRED_TOOLS = new Set(["sast:threat-hunt", "sast:taint-iris"]);
 
 /** Build a seed map from a ContextSnapshot to inject into pipelines. */
 function buildSeedMapFromSnapshot(snapshot: ContextSnapshot): Map<string, unknown> {
   const seed = new Map<string, unknown>();
   if (snapshot.repoContext || snapshot.fileIndex) {
-    seed.set("context-gatherer", { repoContext: snapshot.repoContext, fileIndex: snapshot.fileIndex });
+    seed.set("context-gatherer", {
+      repoContext: snapshot.repoContext,
+      fileIndex: snapshot.fileIndex,
+    });
   }
   if (snapshot.enrichedContext) seed.set("context-enricher", snapshot.enrichedContext);
   if (snapshot.appModel) seed.set("app-model-build", snapshot.appModel);
@@ -135,15 +131,16 @@ export function saveShellCommandHistory(dataDir: string, history: string[]): voi
 
 export function extractAssistantText(content: Array<Record<string, unknown>>): string {
   return content
-    .map((block) => (
-      block["type"] === "text" && typeof block["text"] === "string"
-        ? block["text"]
-        : ""
-    ))
+    .map((block) =>
+      block["type"] === "text" && typeof block["text"] === "string" ? block["text"] : "",
+    )
     .join("");
 }
 
-export function finalizeAssistantText(pendingAssistantText: string | undefined, resultText: string): string {
+export function finalizeAssistantText(
+  pendingAssistantText: string | undefined,
+  resultText: string,
+): string {
   return pendingAssistantText && pendingAssistantText.length > 0
     ? pendingAssistantText
     : resultText;
@@ -170,10 +167,7 @@ export function createShellSession(
   }
 }
 
-function buildSessionOptions(
-  opts: ShellOptions,
-  systemPrompt: string,
-): AgentQueryOptions {
+function buildSessionOptions(opts: ShellOptions, systemPrompt: string): AgentQueryOptions {
   return {
     cwd: opts.target ? path.resolve(opts.target) : process.cwd(),
     model: opts.config.model,
@@ -232,12 +226,15 @@ function getToolProperties(tool: ModuleTool): Record<string, ToolPropertySchema>
     return {};
   }
 
-  return Object.entries(properties).reduce<Record<string, ToolPropertySchema>>((acc, [key, value]) => {
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      acc[key] = value as ToolPropertySchema;
-    }
-    return acc;
-  }, {});
+  return Object.entries(properties).reduce<Record<string, ToolPropertySchema>>(
+    (acc, [key, value]) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        acc[key] = value as ToolPropertySchema;
+      }
+      return acc;
+    },
+    {},
+  );
 }
 
 function resolveToolName(
@@ -373,7 +370,7 @@ function validateOptionType(
   if (schemaIncludesType(schema, "boolean") && typeof value !== "boolean") {
     return `Invalid value for ${optionKey}: expected true or false.`;
   }
-  if (schemaIncludesType(schema, "integer") && (!Number.isInteger(value))) {
+  if (schemaIncludesType(schema, "integer") && !Number.isInteger(value)) {
     return `Invalid value for ${optionKey}: expected an integer.`;
   }
   if (schemaIncludesType(schema, "number") && typeof value !== "number") {
@@ -409,30 +406,20 @@ function formatHistory(commandHistory: string[]): string {
   ]);
 }
 
-function updateShell(
-  store: UIStore,
-  updater: (shell: ShellState) => ShellState,
-): void {
+function updateShell(store: UIStore, updater: (shell: ShellState) => ShellState): void {
   const shell = store.getState().shell;
   if (!shell) return;
   store.update({ shell: updater(shell) });
 }
 
-function appendToHistory(
-  store: UIStore,
-  entry: ShellHistoryEntry,
-): void {
+function appendToHistory(store: UIStore, entry: ShellHistoryEntry): void {
   updateShell(store, (shell) => ({
     ...shell,
     history: [...shell.history, entry],
   }));
 }
 
-function beginShellTurn(
-  store: UIStore,
-  input: string,
-  focusedModule: string | null,
-): void {
+function beginShellTurn(store: UIStore, input: string, focusedModule: string | null): void {
   updateShell(store, (shell) => ({
     ...shell,
     history: [
@@ -451,40 +438,28 @@ function beginShellTurn(
   }));
 }
 
-function setProcessing(
-  store: UIStore,
-  processing: boolean,
-): void {
+function setProcessing(store: UIStore, processing: boolean): void {
   updateShell(store, (shell) => ({
     ...shell,
     processing,
   }));
 }
 
-function setAbortHandler(
-  store: UIStore,
-  onAbort?: () => void,
-): void {
+function setAbortHandler(store: UIStore, onAbort?: () => void): void {
   updateShell(store, (shell) => ({
     ...shell,
     onAbort,
   }));
 }
 
-function setPendingAssistantText(
-  store: UIStore,
-  text: string | undefined,
-): void {
+function setPendingAssistantText(store: UIStore, text: string | undefined): void {
   updateShell(store, (shell) => ({
     ...shell,
     pendingAssistantText: text,
   }));
 }
 
-function appendPendingAssistantText(
-  store: UIStore,
-  text: string,
-): void {
+function appendPendingAssistantText(store: UIStore, text: string): void {
   if (!text) return;
   updateShell(store, (shell) => ({
     ...shell,
@@ -492,11 +467,7 @@ function appendPendingAssistantText(
   }));
 }
 
-function syncShellState(
-  store: UIStore,
-  opts: ShellOptions,
-  focusedModule: string | null,
-): void {
+function syncShellState(store: UIStore, opts: ShellOptions, focusedModule: string | null): void {
   updateShell(store, (shell) => ({
     ...shell,
     focusedModule,
@@ -505,21 +476,14 @@ function syncShellState(
   }));
 }
 
-function updateToolActivity(
-  store: UIStore,
-  toolName: string,
-  elapsedSeconds: number,
-): void {
+function updateToolActivity(store: UIStore, toolName: string, elapsedSeconds: number): void {
   updateShell(store, (shell) => ({
     ...shell,
     currentTool: { name: toolName, elapsedSeconds },
   }));
 }
 
-function updateToolSummary(
-  store: UIStore,
-  summary: string,
-): void {
+function updateToolSummary(store: UIStore, summary: string): void {
   updateShell(store, (shell) => ({
     ...shell,
     history: [...shell.history, { type: "output", text: `  ${summary}`, timestamp: Date.now() }],
@@ -527,9 +491,7 @@ function updateToolSummary(
   }));
 }
 
-function clearTransientShellState(
-  store: UIStore,
-): void {
+function clearTransientShellState(store: UIStore): void {
   updateShell(store, (shell) => ({
     ...shell,
     currentTool: undefined,
@@ -570,10 +532,7 @@ export async function startShell(opts: ShellOptions): Promise<void> {
     workspaceManager = new WorkspaceManager(db);
 
     if (opts.workspace) {
-      const ws = workspaceManager.getOrCreate(
-        opts.workspace,
-        opts.target ? [opts.target] : [],
-      );
+      const ws = workspaceManager.getOrCreate(opts.workspace, opts.target ? [opts.target] : []);
       workspaceManager.touchAccessed(ws.id);
       opts.workspace = ws.id;
       if (opts.target) workspaceManager.addTarget(ws.id, opts.target);
@@ -598,7 +557,15 @@ export async function startShell(opts: ShellOptions): Promise<void> {
   if (process.stdout.isTTY && process.stdin.isTTY) {
     await startInkShell(core, opts, bus, systemPrompt, dataDir, loadedSnapshot, workspaceManager);
   } else {
-    await startReadlineShell(core, opts, bus, systemPrompt, dataDir, loadedSnapshot, workspaceManager);
+    await startReadlineShell(
+      core,
+      opts,
+      bus,
+      systemPrompt,
+      dataDir,
+      loadedSnapshot,
+      workspaceManager,
+    );
   }
 }
 
@@ -759,7 +726,11 @@ async function startInkShell(
           }
         } catch (error) {
           if (finishActiveAction()) {
-            appendToHistory(store, { type: "output", text: CANCELLED_TOOL_MESSAGE, timestamp: Date.now() });
+            appendToHistory(store, {
+              type: "output",
+              text: CANCELLED_TOOL_MESSAGE,
+              timestamp: Date.now(),
+            });
           } else {
             appendToHistory(store, {
               type: "error",
@@ -842,10 +813,16 @@ async function startInkShell(
       const wasAborted = finishActiveAction();
       const message = wasAborted
         ? CANCELLED_AGENT_MESSAGE
-        : error instanceof Error ? error.message : String(error);
+        : error instanceof Error
+          ? error.message
+          : String(error);
       const pendingAssistantText = store.getState().shell?.pendingAssistantText;
       if (pendingAssistantText) {
-        appendToHistory(store, { type: "output", text: pendingAssistantText, timestamp: Date.now() });
+        appendToHistory(store, {
+          type: "output",
+          text: pendingAssistantText,
+          timestamp: Date.now(),
+        });
       }
       setPendingAssistantText(store, undefined);
       appendToHistory(store, {
@@ -1107,7 +1084,9 @@ async function startReadlineShell(
           } catch (error) {
             const message = activeAbortRequested
               ? CANCELLED_TOOL_MESSAGE
-              : error instanceof Error ? error.message : String(error);
+              : error instanceof Error
+                ? error.message
+                : String(error);
             process.stdout.write(`${message}\n`);
           }
           activeActionKind = null;
@@ -1125,7 +1104,9 @@ async function startReadlineShell(
 
       const currentSession = await ensureSession();
       if (!currentSession) {
-        process.stdout.write(`${assistantDisabledReason ?? sessionError ?? DEFAULT_NO_SESSION_MESSAGE}\n`);
+        process.stdout.write(
+          `${assistantDisabledReason ?? sessionError ?? DEFAULT_NO_SESSION_MESSAGE}\n`,
+        );
         rl.prompt();
         continue;
       }
@@ -1164,7 +1145,9 @@ async function startReadlineShell(
       } catch (error) {
         const message = activeAbortRequested
           ? CANCELLED_AGENT_MESSAGE
-          : error instanceof Error ? error.message : String(error);
+          : error instanceof Error
+            ? error.message
+            : String(error);
         if (pendingAssistantText) {
           process.stdout.write(`${pendingAssistantText}\n`);
         }
@@ -1176,7 +1159,9 @@ async function startReadlineShell(
       }
 
       if (pendingAssistantText || fallbackResultText) {
-        process.stdout.write(`${finalizeAssistantText(pendingAssistantText, fallbackResultText)}\n`);
+        process.stdout.write(
+          `${finalizeAssistantText(pendingAssistantText, fallbackResultText)}\n`,
+        );
       }
       if (pendingErrorText) {
         process.stdout.write(`${pendingErrorText}\n`);
@@ -1277,7 +1262,12 @@ function handleSlashCommand(
       return { output: "Already at top level." };
 
     case "options": {
-      const resolved = resolveOptionsTool(core, args[0], ctx.focusedModule, shellState.lastUsedTool);
+      const resolved = resolveOptionsTool(
+        core,
+        args[0],
+        ctx.focusedModule,
+        shellState.lastUsedTool,
+      );
       if (!resolved.ok) {
         return { output: resolved.output };
       }
@@ -1308,8 +1298,11 @@ function handleSlashCommand(
       }
 
       // /context — show current snapshot if valid for current target
-      if (shellState.contextSnapshot && opts.target
-        && shellState.contextSnapshot.target === path.resolve(opts.target)) {
+      if (
+        shellState.contextSnapshot &&
+        opts.target &&
+        shellState.contextSnapshot.target === path.resolve(opts.target)
+      ) {
         return { output: formatContextSummary(shellState.contextSnapshot) };
       }
 
@@ -1332,7 +1325,11 @@ function handleSlashCommand(
         }
         return { output: `Target set to: ${newTarget}` };
       }
-      return { output: opts.target ? `Current target: ${opts.target}` : "No target set. Usage: /target <path>" };
+      return {
+        output: opts.target
+          ? `Current target: ${opts.target}`
+          : "No target set. Usage: /target <path>",
+      };
     }
 
     case "workspace": {
@@ -1366,7 +1363,9 @@ function handleSlashCommand(
           const ws = mgr.getOrCreate(name, opts.target ? [opts.target] : []);
           mgr.touchAccessed(ws.id);
           opts.workspace = ws.id;
-          return { output: `Workspace: ${ws.name} (${ws.targets.length} targets, last accessed ${ws.lastAccessedAt.slice(0, 10)})` };
+          return {
+            output: `Workspace: ${ws.name} (${ws.targets.length} targets, last accessed ${ws.lastAccessedAt.slice(0, 10)})`,
+          };
         }
         opts.workspace = name;
         return { output: `Workspace set to: ${name}` };
@@ -1376,23 +1375,32 @@ function handleSlashCommand(
       if (opts.workspace && mgr) {
         const ws = mgr.get(opts.workspace);
         if (ws) {
-          const cost = typeof ws.metadata.totalCostUsd === "number"
-            ? `$${ws.metadata.totalCostUsd.toFixed(2)}` : "—";
-          return { output: formatSections([
-            [`  Workspace: ${ws.name}`,
-              ...formatLabelValueRows([
-                ["ID:", ws.id.slice(0, 8)],
-                ["Targets:", ws.targets.join(", ") || "none"],
-                ["Created:", ws.createdAt.slice(0, 10)],
-                ["Last accessed:", ws.lastAccessedAt.slice(0, 10)],
-                ["Total cost:", cost],
-              ]),
-            ],
-          ]) };
+          const cost =
+            typeof ws.metadata.totalCostUsd === "number"
+              ? `$${ws.metadata.totalCostUsd.toFixed(2)}`
+              : "—";
+          return {
+            output: formatSections([
+              [
+                `  Workspace: ${ws.name}`,
+                ...formatLabelValueRows([
+                  ["ID:", ws.id.slice(0, 8)],
+                  ["Targets:", ws.targets.join(", ") || "none"],
+                  ["Created:", ws.createdAt.slice(0, 10)],
+                  ["Last accessed:", ws.lastAccessedAt.slice(0, 10)],
+                  ["Total cost:", cost],
+                ]),
+              ],
+            ]),
+          };
         }
       }
 
-      return { output: opts.workspace ? `Current workspace: ${opts.workspace}` : "No workspace set. Usage: /workspace <name>" };
+      return {
+        output: opts.workspace
+          ? `Current workspace: ${opts.workspace}`
+          : "No workspace set. Usage: /workspace <name>",
+      };
     }
 
     case "clear":
@@ -1407,7 +1415,11 @@ function handleSlashCommand(
 
     case "load": {
       const specifier = args.join(" ").trim();
-      if (!specifier) return { output: "Usage: /load <module-specifier>\n  Examples: /load file:///path/to/module, /load package:@kuzushi/blackbox" };
+      if (!specifier)
+        return {
+          output:
+            "Usage: /load <module-specifier>\n  Examples: /load file:///path/to/module, /load package:@kuzushi/blackbox",
+        };
       return {
         asyncExecute: async () => {
           try {
@@ -1518,12 +1530,15 @@ function resolveToolExecution(
         try {
           const ws = ctx.workspaceManager.get(opts.workspace);
           if (ws) {
-            const prevCost = typeof ws.metadata.totalCostUsd === "number" ? ws.metadata.totalCostUsd : 0;
+            const prevCost =
+              typeof ws.metadata.totalCostUsd === "number" ? ws.metadata.totalCostUsd : 0;
             ctx.workspaceManager.update(ws.id, {
               metadata: { ...ws.metadata, totalCostUsd: prevCost + result.costUsd },
             });
           }
-        } catch { /* non-critical */ }
+        } catch {
+          /* non-critical */
+        }
       }
 
       return result.output;
@@ -1550,7 +1565,10 @@ function resolveOptionsTool(
   }
 
   if (focusedModule && !lastUsedTool.startsWith(`${focusedModule}:`)) {
-    return { ok: false, output: `No active tool selected for ${focusedModule}. Use /options <tool> first.` };
+    return {
+      ok: false,
+      output: `No active tool selected for ${focusedModule}. Use /options <tool> first.`,
+    };
   }
 
   return { ok: true, toolName: lastUsedTool };
@@ -1576,7 +1594,7 @@ function formatOptions(
   const storedValues = shellState.moduleOptions[toolName] ?? {};
   const rows = optionNames.map((optionName) => {
     const schema = properties[optionName]!;
-    const hasStoredValue = Object.prototype.hasOwnProperty.call(storedValues, optionName);
+    const hasStoredValue = Object.hasOwn(storedValues, optionName);
     const value = hasStoredValue
       ? storedValues[optionName]
       : optionName === "target" && opts.target
@@ -1600,9 +1618,10 @@ function formatOptions(
       "",
       `  ${"Option".padEnd(optionWidth)}  ${"Value".padEnd(valueWidth)}  ${"Default".padEnd(defaultWidth)}  Description`,
       `  ${"-".repeat(optionWidth)}  ${"-".repeat(valueWidth)}  ${"-".repeat(defaultWidth)}  -----------`,
-      ...rows.map((row) => (
-        `  ${row.optionName.padEnd(optionWidth)}  ${row.valueLabel.padEnd(valueWidth)}  ${row.defaultLabel.padEnd(defaultWidth)}  ${row.description}`
-      )),
+      ...rows.map(
+        (row) =>
+          `  ${row.optionName.padEnd(optionWidth)}  ${row.valueLabel.padEnd(valueWidth)}  ${row.defaultLabel.padEnd(defaultWidth)}  ${row.description}`,
+      ),
     ],
   ]);
 }
@@ -1731,16 +1750,19 @@ function formatModuleList(core: CopilotCore): string {
   const modules = core.listModules();
   if (modules.length === 0) return "  No modules loaded.";
 
-  return formatSections(modules.map((module) => {
-    const tools = core.registry.moduleTools(module.id)
-      .map((tool) => tool.name.split(":")[1])
-      .join(", ");
-    return [
-      `  ${module.id} [${module.category}]`,
-      `  ${formatModuleDescription(module.description)}`,
-      ...formatLabelValueRows([["Tools:", tools || "none"]]),
-    ];
-  }));
+  return formatSections(
+    modules.map((module) => {
+      const tools = core.registry
+        .moduleTools(module.id)
+        .map((tool) => tool.name.split(":")[1])
+        .join(", ");
+      return [
+        `  ${module.id} [${module.category}]`,
+        `  ${formatModuleDescription(module.description)}`,
+        ...formatLabelValueRows([["Tools:", tools || "none"]]),
+      ];
+    }),
+  );
 }
 
 function formatModuleInfo(core: CopilotCore, id: string): string {
@@ -1774,10 +1796,12 @@ function formatTools(core: CopilotCore, focusedModule: string | null): string {
     return formatSections([
       [
         `  ${module.displayName}`,
-        ...formatCommandRows(module.tools.map((tool) => [
-          toolActionName(tool.name),
-          formatModuleDescription(tool.description),
-        ])),
+        ...formatCommandRows(
+          module.tools.map((tool) => [
+            toolActionName(tool.name),
+            formatModuleDescription(tool.description),
+          ]),
+        ),
       ],
     ]);
   }
@@ -1788,10 +1812,9 @@ function formatTools(core: CopilotCore, focusedModule: string | null): string {
   return formatSections([
     [
       "  Available Tools",
-      ...formatCommandRows(tools.map(({ tool }) => [
-        tool.name,
-        formatModuleDescription(tool.description),
-      ])),
+      ...formatCommandRows(
+        tools.map(({ tool }) => [tool.name, formatModuleDescription(tool.description)]),
+      ),
     ],
   ]);
 }
@@ -1813,7 +1836,7 @@ export function formatWelcome(core: CopilotCore, opts: ShellOptions): string {
         ["Target:", opts.target ?? null],
         ["Workspace:", opts.workspace ?? null],
       ]),
-      "  Type \"/help\" for commands, or just describe what you need.",
+      '  Type "/help" for commands, or just describe what you need.',
     ],
   ]);
 }

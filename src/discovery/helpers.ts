@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_IGNORED_DIRS } from "../repo-walk.js";
 import type { DiscoveredModule, ModuleKind } from "./types.js";
@@ -54,7 +54,10 @@ export function resolveModuleDirectory(monorepoRoot: string, modulePath: string)
 }
 
 export function normalizePromptPath(value: string): string {
-  const normalized = value.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+/g, "/");
+  const normalized = value
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/\/+/g, "/");
   return normalized === "" ? "." : normalized.replace(/\/$/, "") || ".";
 }
 
@@ -105,7 +108,7 @@ export async function readJson(absolutePath: string): Promise<Record<string, unk
 
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
   } catch {
     return null;
   }
@@ -174,13 +177,17 @@ export async function detectBuildFiles(rootPath: string): Promise<string[]> {
 export async function detectLanguage(rootPath: string, buildFiles: string[] = []): Promise<string> {
   if (buildFiles.includes("Cargo.toml")) return "Rust";
   if (buildFiles.includes("go.mod") || buildFiles.includes("go.work")) return "Go";
-  if (buildFiles.includes("pom.xml") || buildFiles.includes("build.gradle") || buildFiles.includes("build.gradle.kts")) {
+  if (
+    buildFiles.includes("pom.xml") ||
+    buildFiles.includes("build.gradle") ||
+    buildFiles.includes("build.gradle.kts")
+  ) {
     return "Java";
   }
   if (buildFiles.includes("SConstruct")) return "C/C++";
   if (buildFiles.includes("package.json") || buildFiles.includes("pnpm-workspace.yaml")) {
     const packageJson = await readText(path.join(rootPath, "package.json"));
-    if (packageJson.includes("\"typescript\"")) {
+    if (packageJson.includes('"typescript"')) {
       return "TypeScript";
     }
     return "JavaScript";

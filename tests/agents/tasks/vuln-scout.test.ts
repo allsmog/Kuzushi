@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { __vulnScoutInternals, vulnScoutTask } from "../../../src/agents/tasks/vuln-scout/vuln-scout.js";
+import {
+  __vulnScoutInternals,
+  vulnScoutTask,
+} from "../../../src/agents/tasks/vuln-scout/vuln-scout.js";
 
 const { buildPrompt, resolveConfig } = __vulnScoutInternals;
 

@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  __systemsInvariantExtractInternals,
-} from "../../../src/agents/tasks/systems-hunt/invariant-extract.js";
+import { __systemsInvariantExtractInternals } from "../../../src/agents/tasks/systems-hunt/invariant-extract.js";
 import type { RankedSystemsSurface } from "../../../src/agents/tasks/systems-hunt/types.js";
 
 const { buildInvariantPrompt, parseInvariants } = __systemsInvariantExtractInternals;
@@ -65,4 +63,3 @@ describe("systems-invariant-extract", () => {
     ]);
   });
 });
-

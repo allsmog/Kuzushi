@@ -2,15 +2,15 @@
  * Language profile registry — maps language names to profiles.
  */
 
-import type { LanguageProfile } from "./types.js";
 import { cCppProfile } from "./c-cpp.js";
-import { javaKotlinProfile } from "./java-kotlin.js";
-import { pythonProfile } from "./python.js";
 import { goProfile } from "./go.js";
+import { javaKotlinProfile } from "./java-kotlin.js";
 import { jstsProfile } from "./javascript-typescript.js";
-import { rustProfile } from "./rust.js";
 import { phpProfile } from "./php.js";
+import { pythonProfile } from "./python.js";
 import { rubyProfile } from "./ruby.js";
+import { rustProfile } from "./rust.js";
+import type { LanguageProfile } from "./types.js";
 
 const PROFILES: LanguageProfile[] = [
   cCppProfile,
@@ -31,9 +31,7 @@ for (const profile of PROFILES) {
   }
 }
 
-export function getLanguageProfile(
-  language: string,
-): LanguageProfile | undefined {
+export function getLanguageProfile(language: string): LanguageProfile | undefined {
   return BY_ID.get(language.toLowerCase());
 }
 

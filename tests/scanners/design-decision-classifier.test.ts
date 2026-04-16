@@ -126,10 +126,22 @@ describe("DesignDecisionClassifier", () => {
   it("correctly splits a mixed batch", () => {
     const findings = [
       makeFinding({ fingerprint: "a", message: "SQL injection", ruleId: "sqli" }),
-      makeFinding({ fingerprint: "b", message: "NODE_TLS_REJECT_UNAUTHORIZED disabled", evidence: "process.env.NODE_TLS_REJECT_UNAUTHORIZED" }),
+      makeFinding({
+        fingerprint: "b",
+        message: "NODE_TLS_REJECT_UNAUTHORIZED disabled",
+        evidence: "process.env.NODE_TLS_REJECT_UNAUTHORIZED",
+      }),
       makeFinding({ fingerprint: "c", message: "XSS in template rendering", ruleId: "xss" }),
-      makeFinding({ fingerprint: "d", message: "RFC 7591 dynamic client registration endpoint", evidence: "client_registration_endpoint" }),
-      makeFinding({ fingerprint: "e", message: "Path traversal in file upload", ruleId: "path-traversal" }),
+      makeFinding({
+        fingerprint: "d",
+        message: "RFC 7591 dynamic client registration endpoint",
+        evidence: "client_registration_endpoint",
+      }),
+      makeFinding({
+        fingerprint: "e",
+        message: "Path traversal in file upload",
+        ruleId: "path-traversal",
+      }),
     ];
     const { autoClassified, remaining } = classifier.classify(findings);
     expect(autoClassified).toHaveLength(2);

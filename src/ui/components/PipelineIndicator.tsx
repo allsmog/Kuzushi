@@ -18,13 +18,14 @@
  *   ○ PoC Harness
  *   ○ Report
  */
-import React from "react";
-import { Box, Text } from "ink";
+
 import chalk from "chalk";
+import { Box, Text } from "ink";
+import React from "react";
+import { colorVerdict, formatCost, formatDuration, progressBar } from "../format.js";
 import { icons } from "../icons.js";
-import { progressBar, formatDuration, colorVerdict, formatCost } from "../format.js";
+import type { AgentActivityLine, PipelineStage, ResultLine, SubTask } from "../state.js";
 import { Spinner } from "./Spinner.js";
-import type { PipelineStage, SubTask, ResultLine, AgentActivityLine } from "../state.js";
 
 interface PipelineIndicatorProps {
   stages: PipelineStage[];
@@ -69,7 +70,8 @@ export function PipelineIndicator({
     <Box flexDirection="column" marginTop={1}>
       {stages.map((stage, stageIdx) => {
         const isLast = stageIdx === stages.length - 1;
-        const hasContent = stage.status === "active" || (stage.status === "done" && stage.subTasks.length > 0);
+        const hasContent =
+          stage.status === "active" || (stage.status === "done" && stage.subTasks.length > 0);
 
         return (
           <Box key={stage.id} flexDirection="column">
@@ -83,10 +85,7 @@ export function PipelineIndicator({
 
             {/* Sub-task branches for scanner tasks (scan stage) */}
             {stage.subTasks.length > 0 && (
-              <SubTaskBranches
-                subTasks={stage.subTasks}
-                hasMoreBelow={!isLast}
-              />
+              <SubTaskBranches subTasks={stage.subTasks} hasMoreBelow={!isLast} />
             )}
 
             {/* Result branches for active triage/verify/poc stages */}
@@ -100,7 +99,10 @@ export function PipelineIndicator({
 
             {/* Vertical connector to next stage */}
             {hasContent && !isLast && (
-              <Text>{"  "}{chalk.dim(icons.treePipe)}</Text>
+              <Text>
+                {"  "}
+                {chalk.dim(icons.treePipe)}
+              </Text>
             )}
           </Box>
         );
@@ -111,7 +113,12 @@ export function PipelineIndicator({
 
 // --- Stage header ---
 
-function StageHeaderLine({ stage, progress, runningCostUsd, throttle }: {
+function StageHeaderLine({
+  stage,
+  progress,
+  runningCostUsd,
+  throttle,
+}: {
   stage: PipelineStage;
   progress?: { current: number; total: number };
   runningCostUsd?: number;
@@ -125,7 +132,8 @@ function StageHeaderLine({ stage, progress, runningCostUsd, throttle }: {
     const detail = stage.detail ? chalk.dim(stage.detail) : "";
     return (
       <Text>
-        {"  "}{chalk.dim(`${icons.complete} ${paddedLabel}`)}
+        {"  "}
+        {chalk.dim(`${icons.complete} ${paddedLabel}`)}
         {detail ? `  ${detail}` : ""}
         {elapsed ? `  ${elapsed}` : ""}
       </Text>
@@ -134,15 +142,15 @@ function StageHeaderLine({ stage, progress, runningCostUsd, throttle }: {
 
   if (stage.status === "active") {
     const detail = stage.detail ?? "";
-    const cost = runningCostUsd && runningCostUsd > 0
-      ? `  ${chalk.dim(formatCost(runningCostUsd))}`
-      : "";
+    const cost =
+      runningCostUsd && runningCostUsd > 0 ? `  ${chalk.dim(formatCost(runningCostUsd))}` : "";
     const throttleLabel = throttle
       ? `  ${chalk.yellow(`${icons.warning} ${throttle.concurrency} concurrent`)}`
       : "";
-    const bar = progress && progress.total > 0
-      ? `  ${progressBar(progress.current, progress.total, 12)}`
-      : "";
+    const bar =
+      progress && progress.total > 0
+        ? `  ${progressBar(progress.current, progress.total, 12)}`
+        : "";
     const elapsed = stage.startedAt
       ? `  ${chalk.dim(formatDuration(Date.now() - stage.startedAt))}`
       : "";
@@ -151,9 +159,13 @@ function StageHeaderLine({ stage, progress, runningCostUsd, throttle }: {
         <Text>{"  "}</Text>
         <Spinner color="red" />
         <Text>
-          {" "}{chalk.redBright.bold(paddedLabel)}
+          {" "}
+          {chalk.redBright.bold(paddedLabel)}
           {detail ? `  ${chalk.white(detail)}` : ""}
-          {cost}{throttleLabel}{bar}{elapsed}
+          {cost}
+          {throttleLabel}
+          {bar}
+          {elapsed}
         </Text>
       </Box>
     );
@@ -162,20 +174,27 @@ function StageHeaderLine({ stage, progress, runningCostUsd, throttle }: {
   if (stage.status === "error") {
     return (
       <Text>
-        {"  "}{chalk.red(`${icons.error} ${paddedLabel}`)}
+        {"  "}
+        {chalk.red(`${icons.error} ${paddedLabel}`)}
         {stage.detail ? `  ${chalk.red(stage.detail)}` : ""}
       </Text>
     );
   }
 
   return (
-    <Text>{"  "}{chalk.dim(`${icons.pending} ${paddedLabel}`)}</Text>
+    <Text>
+      {"  "}
+      {chalk.dim(`${icons.pending} ${paddedLabel}`)}
+    </Text>
   );
 }
 
 // --- Sub-task branches (scanners under Scan stage) ---
 
-function SubTaskBranches({ subTasks, hasMoreBelow }: {
+function SubTaskBranches({
+  subTasks,
+  hasMoreBelow,
+}: {
   subTasks: SubTask[];
   hasMoreBelow: boolean;
 }): React.ReactElement {
@@ -193,56 +212,78 @@ function SubTaskBranches({ subTasks, hasMoreBelow }: {
       {sorted.map((task, i) => {
         const isLast = i === sorted.length - 1;
         const connector = isLast ? icons.treeLast : icons.treeMiddle;
-        const statusIcon = task.status === "done"
-          ? chalk.dim(icons.complete)
-          : task.status === "error"
-            ? chalk.red(icons.error)
-            : task.status === "active"
-              ? chalk.redBright(icons.active)
-              : chalk.dim(icons.pending);
-        const elapsed = task.elapsedMs != null
-          ? `  ${chalk.dim(formatDuration(task.elapsedMs))}`
-          : task.status === "active" && task.startedAt
-            ? `  ${chalk.dim(formatDuration(Date.now() - task.startedAt))}`
+        const statusIcon =
+          task.status === "done"
+            ? chalk.dim(icons.complete)
+            : task.status === "error"
+              ? chalk.red(icons.error)
+              : task.status === "active"
+                ? chalk.redBright(icons.active)
+                : chalk.dim(icons.pending);
+        const elapsed =
+          task.elapsedMs != null
+            ? `  ${chalk.dim(formatDuration(task.elapsedMs))}`
+            : task.status === "active" && task.startedAt
+              ? `  ${chalk.dim(formatDuration(Date.now() - task.startedAt))}`
+              : "";
+        const count =
+          task.findingCount && task.findingCount > 0
+            ? `  ${chalk.white(`${task.findingCount} finding${task.findingCount === 1 ? "" : "s"}`)}`
             : "";
-        const count = task.findingCount && task.findingCount > 0
-          ? `  ${chalk.white(`${task.findingCount} finding${task.findingCount === 1 ? "" : "s"}`)}`
-          : "";
         const detail = task.detail
           ? `  ${chalk.dim(task.detail.length > 72 ? `${task.detail.slice(0, 69)}...` : task.detail)}`
           : "";
         const labelColor = task.status === "active" ? chalk.white : chalk.dim;
         const roleTag = task.role === "support" ? chalk.dim(" [setup]") : "";
-        const retryTag = task.retryCount && task.retryCount > 0
-          ? chalk.yellow(` (retry #${task.retryCount})`)
-          : "";
+        const retryTag =
+          task.retryCount && task.retryCount > 0
+            ? chalk.yellow(` (retry #${task.retryCount})`)
+            : "";
 
         const hasActivity = task.activityLines && task.activityLines.length > 0;
         // Heartbeat: show "still analyzing..." when active but quiet for > 15s
         const now = Date.now();
-        const isStale = task.status === "active"
-          && task.startedAt
-          && (!task.lastEventAt || (now - task.lastEventAt) > HEARTBEAT_STALE_SECONDS * 1000);
+        const isStale =
+          task.status === "active" &&
+          task.startedAt &&
+          (!task.lastEventAt || now - task.lastEventAt > HEARTBEAT_STALE_SECONDS * 1000);
 
         return (
           <Box key={task.id} flexDirection="column">
             {/* Task header row */}
             {task.status === "active" ? (
               <Box>
-                <Text>{"  "}{pipe}  {chalk.dim(connector)} </Text>
+                <Text>
+                  {"  "}
+                  {pipe} {chalk.dim(connector)}{" "}
+                </Text>
                 <Spinner color="red" />
-                <Text> {chalk.white(task.label)}{roleTag}{count}{detail}{elapsed}{retryTag}</Text>
+                <Text>
+                  {" "}
+                  {chalk.white(task.label)}
+                  {roleTag}
+                  {count}
+                  {detail}
+                  {elapsed}
+                  {retryTag}
+                </Text>
               </Box>
             ) : task.status === "error" ? (
               <Text>
-                {"  "}{pipe}  {chalk.dim(connector)} {statusIcon} {chalk.red(task.label)}
+                {"  "}
+                {pipe} {chalk.dim(connector)} {statusIcon} {chalk.red(task.label)}
                 {task.lastError ? `  ${chalk.red(task.lastError.slice(0, 72))}` : detail}
                 {retryTag}
                 {chalk.dim("  continuing with remaining tasks")}
               </Text>
             ) : (
               <Text>
-                {"  "}{pipe}  {chalk.dim(connector)} {statusIcon} {labelColor(task.label)}{roleTag}{count}{detail}{elapsed}
+                {"  "}
+                {pipe} {chalk.dim(connector)} {statusIcon} {labelColor(task.label)}
+                {roleTag}
+                {count}
+                {detail}
+                {elapsed}
               </Text>
             )}
 
@@ -255,7 +296,9 @@ function SubTaskBranches({ subTasks, hasMoreBelow }: {
                   const branchPipe = isLast ? " " : chalk.dim(icons.treePipe);
                   return (
                     <Text key={li}>
-                      {"  "}{pipe}  {"  "}{branchPipe}  {chalk.dim(toolConnector)} {formatToolLine(line)}
+                      {"  "}
+                      {pipe} {"  "}
+                      {branchPipe} {chalk.dim(toolConnector)} {formatToolLine(line)}
                     </Text>
                   );
                 })}
@@ -265,7 +308,10 @@ function SubTaskBranches({ subTasks, hasMoreBelow }: {
             {/* Heartbeat when quiet */}
             {task.status === "active" && !hasActivity && isStale && (
               <Text>
-                {"  "}{pipe}  {"  "}{isLast ? " " : chalk.dim(icons.treePipe)}  {chalk.dim(icons.treeLast)} {chalk.dim.italic(`still analyzing... ${formatDuration(now - task.startedAt!)}`)}
+                {"  "}
+                {pipe} {"  "}
+                {isLast ? " " : chalk.dim(icons.treePipe)} {chalk.dim(icons.treeLast)}{" "}
+                {chalk.dim.italic(`still analyzing... ${formatDuration(now - task.startedAt!)}`)}
               </Text>
             )}
           </Box>
@@ -277,7 +323,11 @@ function SubTaskBranches({ subTasks, hasMoreBelow }: {
 
 // --- Result branches (findings under Triage/Verify/PoC) ---
 
-function ResultBranches({ results, agentActivity, hasMoreBelow }: {
+function ResultBranches({
+  results,
+  agentActivity,
+  hasMoreBelow,
+}: {
   results: ResultLine[];
   agentActivity?: Map<string, AgentActivityLine[]>;
   hasMoreBelow: boolean;
@@ -291,14 +341,18 @@ function ResultBranches({ results, agentActivity, hasMoreBelow }: {
   return (
     <Box flexDirection="column">
       {skipped > 0 && (
-        <Text>{"  "}{pipe}  {chalk.dim(`${icons.treeMiddle} ... ${skipped} more above`)}</Text>
+        <Text>
+          {"  "}
+          {pipe} {chalk.dim(`${icons.treeMiddle} ... ${skipped} more above`)}
+        </Text>
       )}
       {visible.map((r, i) => {
         const isLast = i === visible.length - 1 && activeEntries.length === 0;
         const connector = isLast ? icons.treeLast : icons.treeMiddle;
         return (
           <Text key={i}>
-            {"  "}{pipe}  {chalk.dim(connector)} {formatResultBranchLine(r)}
+            {"  "}
+            {pipe} {chalk.dim(connector)} {formatResultBranchLine(r)}
           </Text>
         );
       })}
@@ -313,9 +367,15 @@ function ResultBranches({ results, agentActivity, hasMoreBelow }: {
           <Box key={fp} flexDirection="column">
             {/* Active finding header */}
             <Box>
-              <Text>{"  "}{pipe}  {chalk.dim(connector)} </Text>
+              <Text>
+                {"  "}
+                {pipe} {chalk.dim(connector)}{" "}
+              </Text>
               <Spinner color="yellow" />
-              <Text> {chalk.white(prefix)} {chalk.dim(fp.slice(0, 12))}...</Text>
+              <Text>
+                {" "}
+                {chalk.white(prefix)} {chalk.dim(fp.slice(0, 12))}...
+              </Text>
             </Box>
             {/* Tool call sub-branches */}
             {lines.map((line, li) => {
@@ -325,7 +385,9 @@ function ResultBranches({ results, agentActivity, hasMoreBelow }: {
               const branchPipe = isLast ? " " : chalk.dim(icons.treePipe);
               return (
                 <Text key={li}>
-                  {"  "}{pipe}  {"  "}{branchPipe}  {chalk.dim(toolConnector)} {formatToolLine(line)}
+                  {"  "}
+                  {pipe} {"  "}
+                  {branchPipe} {chalk.dim(toolConnector)} {formatToolLine(line)}
                 </Text>
               );
             })}
@@ -376,7 +438,8 @@ function formatToolLine(line: AgentActivityLine): string {
     }
     case "tool-progress": {
       const toolName = line.toolName ?? "tool";
-      const elapsed = line.elapsedSeconds != null ? ` (${formatDuration(line.elapsedSeconds * 1000)})` : "";
+      const elapsed =
+        line.elapsedSeconds != null ? ` (${formatDuration(line.elapsedSeconds * 1000)})` : "";
       return chalk.dim(`${icons.ellipsis} ${toolName}${elapsed}`);
     }
     case "tool-complete":
@@ -389,9 +452,7 @@ function formatToolLine(line: AgentActivityLine): string {
         ? chalk.white(line.detail.slice(0, 120) + ((line.detail.length ?? 0) > 120 ? "..." : ""))
         : "";
     case "summary":
-      return line.detail
-        ? `${chalk.cyan(icons.dot)} ${line.detail.slice(0, 120)}`
-        : "";
+      return line.detail ? `${chalk.cyan(icons.dot)} ${line.detail.slice(0, 120)}` : "";
     case "finding-preview":
       return line.detail
         ? `${chalk.redBright(icons.error)} ${chalk.white(line.detail.slice(0, 120))}`

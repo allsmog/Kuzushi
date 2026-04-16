@@ -9,10 +9,10 @@
  * - Timeout with configurable default action
  */
 
-import type { AgentTask, TaskContext, TaskOutputKind } from "../types.js";
-import type { KuzushiConfig } from "../../types.js";
 import { createInterface } from "node:readline";
 import { getLogger } from "../../logger.js";
+import type { KuzushiConfig } from "../../types.js";
+import type { AgentTask, TaskContext, TaskOutputKind } from "../types.js";
 
 export interface ApprovalGateInput {
   description?: string;
@@ -56,7 +56,8 @@ export function createApprovalGate(
     promptMode: "none",
 
     async run(_input: ApprovalGateInput, context: TaskContext): Promise<ApprovalOutput> {
-      const description = options?.description ?? `Pipeline requires approval to continue past "${displayName}"`;
+      const description =
+        options?.description ?? `Pipeline requires approval to continue past "${displayName}"`;
       const timeoutMs = options?.timeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
       const defaultOnTimeout = options?.defaultOnTimeout ?? false;
 
@@ -149,7 +150,8 @@ export const approvalBeforeVerification = createApprovalGate(
   "Approval Gate: Before Verification",
   [],
   {
-    description: "High-severity findings detected. Approve to proceed with exploitability verification.",
+    description:
+      "High-severity findings detected. Approve to proceed with exploitability verification.",
     condition: (upstreamOutputs) => {
       // Only require approval if there are findings to verify
       for (const [, output] of upstreamOutputs) {

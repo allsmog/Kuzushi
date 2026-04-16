@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
+import { describe, expect, it } from "vitest";
 import { allMigrations, runMigrations } from "../../src/migrations/index.js";
-import { insertPatchResult, updatePatchResultStatus, getPatchResult } from "../../src/store/patch-results.js";
+import {
+  getPatchResult,
+  insertPatchResult,
+  updatePatchResultStatus,
+} from "../../src/store/patch-results.js";
 import type { PatchResult } from "../../src/types.js";
 
 function createTestDb(): Database.Database {

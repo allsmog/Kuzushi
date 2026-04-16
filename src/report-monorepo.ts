@@ -1,5 +1,5 @@
-import chalk from "chalk";
 import type Database from "better-sqlite3";
+import chalk from "chalk";
 import type { PipelineStats } from "./bus/events.js";
 import type { DiscoveredModule } from "./discovery/types.js";
 import { getActionableFindings } from "./store.js";
@@ -53,9 +53,9 @@ export function printMonorepoSummary(
     const cost = item.stats?.totalCostUsd ?? 0;
     const status = item.status === "complete" ? chalk.green("complete") : chalk.red("error");
     console.log(
-      `${indent}${prefix} ${item.module.name} ${chalk.dim(`(${item.module.path})`)} `
-      + `${chalk.red(`tp=${counts.tp}`)} ${chalk.yellow(`nr=${counts.needs_review}`)} `
-      + `${chalk.green(`fp=${counts.fp}`)} ${chalk.dim(`$${cost.toFixed(4)}`)} ${status}`,
+      `${indent}${prefix} ${item.module.name} ${chalk.dim(`(${item.module.path})`)} ` +
+        `${chalk.red(`tp=${counts.tp}`)} ${chalk.yellow(`nr=${counts.needs_review}`)} ` +
+        `${chalk.green(`fp=${counts.fp}`)} ${chalk.dim(`$${cost.toFixed(4)}`)} ${status}`,
     );
   }
 
@@ -73,7 +73,9 @@ export function printMonorepoSummary(
     console.log("");
     console.log(chalk.bold("  Highest-Risk Modules"));
     for (const item of ranked.slice(0, 5)) {
-      console.log(`  - ${item.name}: risk=${item.risk} tp=${item.tp} highOrCritical=${item.highOrCritical}`);
+      console.log(
+        `  - ${item.name}: risk=${item.risk} tp=${item.tp} highOrCritical=${item.highOrCritical}`,
+      );
     }
   }
 
@@ -90,7 +92,10 @@ export function printMonorepoSummary(
 
 function sortModules(results: MonorepoModuleResult[]): MonorepoModuleResult[] {
   return [...results].sort((left, right) => {
-    return left.module.path.localeCompare(right.module.path) || left.module.name.localeCompare(right.module.name);
+    return (
+      left.module.path.localeCompare(right.module.path) ||
+      left.module.name.localeCompare(right.module.name)
+    );
   });
 }
 
@@ -124,7 +129,9 @@ function rankModulesByRisk(
   return results
     .map((item) => {
       const findings = getActionableFindings(db, item.repoName);
-      const highOrCritical = findings.filter((finding) => finding.severity === "HIGH" || finding.severity === "CRITICAL").length;
+      const highOrCritical = findings.filter(
+        (finding) => finding.severity === "HIGH" || finding.severity === "CRITICAL",
+      ).length;
       const tp = item.verdictCounts.tp;
       return {
         name: item.module.name,

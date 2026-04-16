@@ -1,22 +1,27 @@
-import { execFile, type ExecFileException } from "node:child_process";
+import { type ExecFileException, execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import {
+  resolveDefaultReadOnlyTools,
+  runStructuredAgentQuery,
+} from "../../../agent-runtime/execution.js";
 import type { AgentRuntime } from "../../../agent-runtime/types.js";
-import { ensureDatabase, withCodeQLDatabase } from "../../../scanners/run-codeql.js";
-import { resolveCodeQLBinary } from "../../../scanners/resolve-codeql.js";
+import { createSimpleTextIndexProvider } from "../../../analysis-support/index.js";
 import { getLogger } from "../../../logger.js";
+import { coerceRepoContext } from "../../../repo-context.js";
+import { resolveCodeQLBinary } from "../../../scanners/resolve-codeql.js";
+import { ensureDatabase, withCodeQLDatabase } from "../../../scanners/run-codeql.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import { resolveDefaultReadOnlyTools, runStructuredAgentQuery } from "../../../agent-runtime/execution.js";
-import { createSimpleTextIndexProvider } from "../../../analysis-support/index.js";
 import type { AgentTask } from "../../types.js";
 import {
-  generateExtractionQuery,
-  hasBodyPlaceholders,
-} from "./extraction-agent.js";
+  CodeqlProfileDetectionError,
+  detectWorkingProfile,
+  resolveCodeqlVersion,
+} from "./codeql-compat.js";
 import {
   countCandidateCsvRecords,
   isCsvRecordBlank,
@@ -24,29 +29,24 @@ import {
   parseCsvRecords,
   toCsvRow,
 } from "./csv.js";
-import {
-  CodeqlProfileDetectionError,
-  detectWorkingProfile,
-  resolveCodeqlVersion,
-} from "./codeql-compat.js";
+import { generateExtractionQuery, hasBodyPlaceholders } from "./extraction-agent.js";
+import { groundCallableTargets } from "./grounding.js";
+import { buildTiPriorArtifacts } from "./ti-prior.js";
 import {
   DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
-  TAINT_ANALYSIS_PASSES,
-  mapFrameworkToReference,
-  normalizeTaintAnalysisLanguage,
-  resolveTaintAnalysisConfig,
-  resolveContextAwarePasses,
   type DiffScope,
   type ExtractionDegradation,
   type ExtractionDegradationReason,
+  mapFrameworkToReference,
+  normalizeTaintAnalysisLanguage,
+  resolveContextAwarePasses,
+  resolveTaintAnalysisConfig,
+  TAINT_ANALYSIS_PASSES,
   type TaintAnalysisLanguage,
   type TaintAnalysisPassId,
   type TaintAnalysisPreflightOutput,
   type TaintAnalysisTaskConfig,
 } from "./types.js";
-import { coerceRepoContext } from "../../../repo-context.js";
-import { buildTiPriorArtifacts } from "./ti-prior.js";
-import { groundCallableTargets } from "./grounding.js";
 
 interface ExtractionAgentContext {
   referenceFiles: string[];
@@ -64,12 +64,7 @@ interface ExtractionAgentContext {
 
 const execFileAsync = promisify(execFile);
 
-const REQUIRED_TAINT_ANALYSIS_PATHS = [
-  "WORKFLOW.md",
-  "references",
-  "assets",
-  "scripts",
-];
+const REQUIRED_TAINT_ANALYSIS_PATHS = ["WORKFLOW.md", "references", "assets", "scripts"];
 
 const WORKSPACE_SUBDIRS = [
   "exploration",
@@ -148,11 +143,21 @@ const EXTRACTION_SUPPLEMENT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["candidateKind", "callable", "flowKind", "receiverHint", "argIndex", "rationale"],
+        required: [
+          "candidateKind",
+          "callable",
+          "flowKind",
+          "receiverHint",
+          "argIndex",
+          "rationale",
+        ],
         properties: {
           candidateKind: { type: "string", enum: ["source_candidate", "sink_candidate"] },
           callable: { type: "string" },
-          flowKind: { type: "string", enum: ["param", "arg", "return", "receiver", "field", "unknown"] },
+          flowKind: {
+            type: "string",
+            enum: ["param", "arg", "return", "receiver", "field", "unknown"],
+          },
           receiverHint: { type: "string" },
           argIndex: { type: ["integer", "null"] },
           rationale: { type: "string" },
@@ -177,10 +182,11 @@ async function discoverExtractionSupplements(
 ): Promise<{ candidates: ExtractionSupplementCandidate[]; costUsd: number }> {
   const { language, framework, repoRoot, model, runtime, sourcesRowCount, sinksRowCount } = args;
 
-  const coverageNote = (sourcesRowCount < 5 || sinksRowCount < 5)
-    ? `\n\nNOTE: The main extraction found very few results (${sourcesRowCount} sources, ${sinksRowCount} sinks). ` +
-      `This means CodeQL's type resolution may be incomplete — extra discovery is especially important.`
-    : `\n\nThe main extraction found ${sourcesRowCount} sources and ${sinksRowCount} sinks.`;
+  const coverageNote =
+    sourcesRowCount < 5 || sinksRowCount < 5
+      ? `\n\nNOTE: The main extraction found very few results (${sourcesRowCount} sources, ${sinksRowCount} sinks). ` +
+        `This means CodeQL's type resolution may be incomplete — extra discovery is especially important.`
+      : `\n\nThe main extraction found ${sourcesRowCount} sources and ${sinksRowCount} sinks.`;
 
   const prompt = `You are a security-focused code analysis agent. Your job is to identify additional **taint sources** and **taint sinks** in this ${language} codebase${framework ? ` (${framework} framework)` : ""} that automated CodeQL extraction may have missed.
 ${coverageNote}
@@ -250,9 +256,14 @@ For each candidate provide:
     candidates.push({
       candidateKind,
       callable,
-      flowKind: validFlowKinds.has(flowKind) ? flowKind as ExtractionSupplementCandidate["flowKind"] : "unknown",
+      flowKind: validFlowKinds.has(flowKind)
+        ? (flowKind as ExtractionSupplementCandidate["flowKind"])
+        : "unknown",
       receiverHint: typeof item["receiverHint"] === "string" ? item["receiverHint"] : "",
-      argIndex: typeof item["argIndex"] === "number" && Number.isInteger(item["argIndex"]) ? item["argIndex"] : null,
+      argIndex:
+        typeof item["argIndex"] === "number" && Number.isInteger(item["argIndex"])
+          ? item["argIndex"]
+          : null,
       rationale: typeof item["rationale"] === "string" ? item["rationale"] : "",
     });
   }
@@ -260,9 +271,10 @@ For each candidate provide:
   return { candidates, costUsd: result.costUsd };
 }
 
-function supplementCandidatesToCsvRows(
-  candidates: ExtractionSupplementCandidate[],
-): { sourceRows: string[]; sinkRows: string[] } {
+function supplementCandidatesToCsvRows(candidates: ExtractionSupplementCandidate[]): {
+  sourceRows: string[];
+  sinkRows: string[];
+} {
   const sourceRows: string[] = [];
   const sinkRows: string[] = [];
   for (const c of candidates) {
@@ -322,7 +334,10 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
     );
 
     const language = normalizeTaintAnalysisLanguage(detectedLanguage);
-    const framework = await detectPrimaryFramework(context.repoRoot, context.upstreamOutputs.get("context-gatherer"));
+    const framework = await detectPrimaryFramework(
+      context.repoRoot,
+      context.upstreamOutputs.get("context-gatherer"),
+    );
     const referenceFiles = await resolveReferenceFiles(taintAnalysisPath, language, framework);
     const extractionModelSelection = resolveExtractionModel(cfg);
     if (extractionModelSelection.usedLabelingFallback) {
@@ -333,11 +348,7 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
     const extractionModel = extractionModelSelection.model;
 
     await writeQlpack(workspaceDir, language);
-    await runCodeql(
-      codeqlBinary,
-      ["pack", "install"],
-      workspaceDir,
-    );
+    await runCodeql(codeqlBinary, ["pack", "install"], workspaceDir);
 
     const codeqlVersion = await resolveCodeqlVersion(codeqlBinary);
     let profileDetection: Awaited<ReturnType<typeof detectWorkingProfile>>;
@@ -351,9 +362,7 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
         probeTimeoutMs: cfg.codeqlProbeTimeoutMs,
       });
     } catch (error) {
-      const tried = error instanceof CodeqlProfileDetectionError
-        ? error.tried
-        : [];
+      const tried = error instanceof CodeqlProfileDetectionError ? error.tried : [];
       await writeCodeqlCompatibility(
         workspaceDir,
         language,
@@ -401,10 +410,14 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       );
       await writeFile(
         path.join(explorationDir, "diff_scope.json"),
-        JSON.stringify({
-          generatedAt: new Date().toISOString(),
-          ...diffScope,
-        }, null, 2),
+        JSON.stringify(
+          {
+            generatedAt: new Date().toISOString(),
+            ...diffScope,
+          },
+          null,
+          2,
+        ),
         "utf-8",
       );
       process.stderr.write(
@@ -425,8 +438,18 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
     const sourcesQueryPath = path.join(extractionDir, "sources.ql");
     const sinksQueryPath = path.join(extractionDir, "sinks.ql");
 
-    const sourcesTemplatePath = path.join(taintAnalysisPath, "assets", "extraction", `${language}_sources.ql.tmpl`);
-    const sinksTemplatePath = path.join(taintAnalysisPath, "assets", "extraction", `${language}_sinks.ql.tmpl`);
+    const sourcesTemplatePath = path.join(
+      taintAnalysisPath,
+      "assets",
+      "extraction",
+      `${language}_sources.ql.tmpl`,
+    );
+    const sinksTemplatePath = path.join(
+      taintAnalysisPath,
+      "assets",
+      "extraction",
+      `${language}_sinks.ql.tmpl`,
+    );
 
     const agentCtx: ExtractionAgentContext = {
       referenceFiles,
@@ -487,31 +510,34 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
         `[taint-analysis-preflight] Extraction unavailable; taint analysis will stop before labeling (${extractionDegradation.reasons.join(", ") || "unknown_reason"}).\n`,
       );
 
-      return attachTaskOutputMeta({
-        taintAnalysisPath,
-        workspaceDir,
-        dbPath,
-        codeqlBinary,
-        codeqlVersion,
-        codeqlApiProfileId,
-        language,
-        framework,
-        referenceFiles,
-        passes: cfg.passes,
-        tiPriorMarkdownPath,
-        tiPriorJsonPath,
-        tiPriorDegraded: tiPriorArtifacts.document.degraded,
-        extraction: {
-          sourcesQueryPath,
-          sinksQueryPath,
-          sourcesCsvPath,
-          sinksCsvPath,
-          sourcesRowCount: 0,
-          sinksRowCount: 0,
+      return attachTaskOutputMeta(
+        {
+          taintAnalysisPath,
+          workspaceDir,
+          dbPath,
+          codeqlBinary,
+          codeqlVersion,
+          codeqlApiProfileId,
+          language,
+          framework,
+          referenceFiles,
+          passes: cfg.passes,
+          tiPriorMarkdownPath,
+          tiPriorJsonPath,
+          tiPriorDegraded: tiPriorArtifacts.document.degraded,
+          extraction: {
+            sourcesQueryPath,
+            sinksQueryPath,
+            sourcesCsvPath,
+            sinksCsvPath,
+            sourcesRowCount: 0,
+            sinksRowCount: 0,
+          },
+          extractionDegradation,
+          diffScope,
         },
-        extractionDegradation,
-        diffScope,
-      }, { costUsd: extractionCostUsd });
+        { costUsd: extractionCostUsd },
+      );
     }
 
     await writeFile(sourcesQueryPath, sourcesQueryResult.query, "utf-8");
@@ -520,55 +546,33 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
     process.stderr.write(`[taint-analysis-preflight] Running CodeQL query: sources.ql...\n`);
     await runCodeql(
       codeqlBinary,
-      withResources([
-        "query",
-        "run",
-        sourcesQueryPath,
-        "--database",
-        dbPath,
-        "--output",
-        sourcesBqrsPath,
-      ], cfg),
+      withResources(
+        ["query", "run", sourcesQueryPath, "--database", dbPath, "--output", sourcesBqrsPath],
+        cfg,
+      ),
       workspaceDir,
     );
 
     process.stderr.write(`[taint-analysis-preflight] Running CodeQL query: sinks.ql...\n`);
     await runCodeql(
       codeqlBinary,
-      withResources([
-        "query",
-        "run",
-        sinksQueryPath,
-        "--database",
-        dbPath,
-        "--output",
-        sinksBqrsPath,
-      ], cfg),
+      withResources(
+        ["query", "run", sinksQueryPath, "--database", dbPath, "--output", sinksBqrsPath],
+        cfg,
+      ),
       workspaceDir,
     );
 
     process.stderr.write(`[taint-analysis-preflight] Decoding BQRS results...\n`);
     await runCodeql(
       codeqlBinary,
-      [
-        "bqrs",
-        "decode",
-        sourcesBqrsPath,
-        "--format=csv",
-        `--output=${sourcesCsvPath}`,
-      ],
+      ["bqrs", "decode", sourcesBqrsPath, "--format=csv", `--output=${sourcesCsvPath}`],
       workspaceDir,
     );
 
     await runCodeql(
       codeqlBinary,
-      [
-        "bqrs",
-        "decode",
-        sinksBqrsPath,
-        "--format=csv",
-        `--output=${sinksCsvPath}`,
-      ],
+      ["bqrs", "decode", sinksBqrsPath, "--format=csv", `--output=${sinksCsvPath}`],
       workspaceDir,
     );
 
@@ -592,14 +596,14 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
         const groundedCandidates = cfg.groundingEnabled
           ? await groundCallableTargets(context.repoRoot, supplementResult.candidates)
           : supplementResult.candidates.map((candidate) => ({
-            item: candidate,
-            grounding: {
-              status: "weak" as const,
-              reasons: ["grounding_disabled"],
-              matchCount: 0,
-              evidence: [],
-            },
-          }));
+              item: candidate,
+              grounding: {
+                status: "weak" as const,
+                reasons: ["grounding_disabled"],
+                matchCount: 0,
+                evidence: [],
+              },
+            }));
         const acceptedCandidates = groundedCandidates
           .filter((candidate) => candidate.grounding.status !== "invalid")
           .map((candidate) => candidate.item);
@@ -609,25 +613,31 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
 
         await writeFile(
           path.join(extractionDir, "extraction_supplements.json"),
-          JSON.stringify({
-            generatedAt: new Date().toISOString(),
-            language,
-            framework,
-            costUsd: supplementResult.costUsd,
-            candidates: acceptedCandidates,
-            droppedCandidates: groundedCandidates
-              .filter((candidate) => candidate.grounding.status === "invalid")
-              .map((candidate) => candidate.item),
-            grounding: groundedCandidates.map((candidate) => ({
-              ...candidate.item,
-              grounding: candidate.grounding,
-            })),
-          }, null, 2),
+          JSON.stringify(
+            {
+              generatedAt: new Date().toISOString(),
+              language,
+              framework,
+              costUsd: supplementResult.costUsd,
+              candidates: acceptedCandidates,
+              droppedCandidates: groundedCandidates
+                .filter((candidate) => candidate.grounding.status === "invalid")
+                .map((candidate) => candidate.item),
+              grounding: groundedCandidates.map((candidate) => ({
+                ...candidate.item,
+                grounding: candidate.grounding,
+              })),
+            },
+            null,
+            2,
+          ),
           "utf-8",
         );
 
         if (csvRows.sourceRows.length > 0) {
-          const existing = existsSync(sourcesCsvPath) ? await readFile(sourcesCsvPath, "utf-8") : "";
+          const existing = existsSync(sourcesCsvPath)
+            ? await readFile(sourcesCsvPath, "utf-8")
+            : "";
           const existingKeys = new Set(
             parseCsvRecords(existing)
               .filter((r) => !isCsvRecordBlank(r))
@@ -664,18 +674,27 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
           `[taint-analysis-preflight] Agentic extraction supplements: sources=${agenticSupplementSources} sinks=${agenticSupplementSinks}\n`,
         );
       } catch (error) {
-        process.stderr.write(`[taint-analysis-preflight] Extraction supplement discovery failed (non-fatal): ${toErrorMessage(error)}\n`);
+        process.stderr.write(
+          `[taint-analysis-preflight] Extraction supplement discovery failed (non-fatal): ${toErrorMessage(error)}\n`,
+        );
       }
     }
 
     const sourcesRowCount = await countCsvRows(sourcesCsvPath);
     const sinksRowCount = await countCsvRows(sinksCsvPath);
-    process.stderr.write(`[taint-analysis-preflight] Extraction complete: ${sourcesRowCount} sources, ${sinksRowCount} sinks\n`);
+    process.stderr.write(
+      `[taint-analysis-preflight] Extraction complete: ${sourcesRowCount} sources, ${sinksRowCount} sinks\n`,
+    );
 
-    if (language === "go" && framework && isGrpcOrProtoFramework(framework) && sourcesRowCount < 5) {
+    if (
+      language === "go" &&
+      framework &&
+      isGrpcOrProtoFramework(framework) &&
+      sourcesRowCount < 5
+    ) {
       process.stderr.write(
         `[taint-analysis-preflight] WARNING: Detected Go gRPC service but found ${sourcesRowCount} sources.\n` +
-        `  CodeQL may have incomplete type resolution. Agentic extraction supplements may provide additional coverage.\n`,
+          `  CodeQL may have incomplete type resolution. Agentic extraction supplements may provide additional coverage.\n`,
       );
     }
 
@@ -707,31 +726,34 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
       );
     }
 
-    return attachTaskOutputMeta({
-      taintAnalysisPath,
-      workspaceDir,
-      dbPath,
-      codeqlBinary,
-      codeqlVersion,
-      codeqlApiProfileId,
-      language,
-      framework,
-      referenceFiles,
-      passes: cfg.passes,
-      tiPriorMarkdownPath,
-      tiPriorJsonPath,
-      tiPriorDegraded: tiPriorArtifacts.document.degraded,
-      extraction: {
-        sourcesQueryPath,
-        sinksQueryPath,
-        sourcesCsvPath,
-        sinksCsvPath,
-        sourcesRowCount,
-        sinksRowCount,
+    return attachTaskOutputMeta(
+      {
+        taintAnalysisPath,
+        workspaceDir,
+        dbPath,
+        codeqlBinary,
+        codeqlVersion,
+        codeqlApiProfileId,
+        language,
+        framework,
+        referenceFiles,
+        passes: cfg.passes,
+        tiPriorMarkdownPath,
+        tiPriorJsonPath,
+        tiPriorDegraded: tiPriorArtifacts.document.degraded,
+        extraction: {
+          sourcesQueryPath,
+          sinksQueryPath,
+          sourcesCsvPath,
+          sinksCsvPath,
+          sourcesRowCount,
+          sinksRowCount,
+        },
+        extractionDegradation,
+        diffScope,
       },
-      extractionDegradation,
-      diffScope,
-    }, { costUsd: extractionCostUsd });
+      { costUsd: extractionCostUsd },
+    );
   },
 };
 
@@ -820,7 +842,7 @@ async function writeQlpack(workspaceDir: string, language: TaintAnalysisLanguage
     "name: iris/generated",
     "version: 0.0.1",
     "dependencies:",
-    `  codeql/${language}-all: \"*\"`,
+    `  codeql/${language}-all: "*"`,
     "",
   ].join("\n");
 
@@ -844,28 +866,36 @@ async function writeManifestAndDetection(
 
   await writeFile(
     manifestPath,
-    JSON.stringify({
-      timestamp: generatedAt,
-      dbPath,
-      language,
-      selectedPasses: cfg.passes,
-      model: extractionModel,
-      extractionModel,
-      labelingModel: cfg.labelingModel,
-      codeqlVersion,
-      codeqlApiProfileId,
-    }, null, 2),
+    JSON.stringify(
+      {
+        timestamp: generatedAt,
+        dbPath,
+        language,
+        selectedPasses: cfg.passes,
+        model: extractionModel,
+        extractionModel,
+        labelingModel: cfg.labelingModel,
+        codeqlVersion,
+        codeqlApiProfileId,
+      },
+      null,
+      2,
+    ),
     "utf-8",
   );
 
   await writeFile(
     detectionPath,
-    JSON.stringify({
-      language,
-      framework,
-      referenceFiles,
-      generatedAt,
-    }, null, 2),
+    JSON.stringify(
+      {
+        language,
+        framework,
+        referenceFiles,
+        generatedAt,
+      },
+      null,
+      2,
+    ),
     "utf-8",
   );
 }
@@ -883,17 +913,21 @@ async function writeCodeqlCompatibility(
   const generatedAt = new Date().toISOString();
   await writeFile(
     compatPath,
-    JSON.stringify({
-      generatedAt,
-      language,
-      codeqlVersion,
-      requestedProfile: cfg.codeqlApiProfile ?? "auto",
-      profileFallbacks: cfg.codeqlProfileFallbacks ?? true,
-      probeTimeoutMs: cfg.codeqlProbeTimeoutMs ?? 20_000,
-      selectedProfileId,
-      triedProfiles: tried,
-      ...(failureReason ? { failureReason } : {}),
-    }, null, 2),
+    JSON.stringify(
+      {
+        generatedAt,
+        language,
+        codeqlVersion,
+        requestedProfile: cfg.codeqlApiProfile ?? "auto",
+        profileFallbacks: cfg.codeqlProfileFallbacks ?? true,
+        probeTimeoutMs: cfg.codeqlProbeTimeoutMs ?? 20_000,
+        selectedProfileId,
+        triedProfiles: tried,
+        ...(failureReason ? { failureReason } : {}),
+      },
+      null,
+      2,
+    ),
     "utf-8",
   );
 }
@@ -924,13 +958,19 @@ function computeExtractionDegradation(
 
   for (const diag of diagnostics) {
     if (diag.selectedQuerySource === "unavailable") {
-      reasons.push(diag.kind === "source" ? "sources_extraction_unavailable" : "sinks_extraction_unavailable");
+      reasons.push(
+        diag.kind === "source" ? "sources_extraction_unavailable" : "sinks_extraction_unavailable",
+      );
     }
     if (
-      diag.fallbackReason?.includes("agent_returned_no_query")
-      || diag.fallbackReason?.includes("retry_returned_no_query")
+      diag.fallbackReason?.includes("agent_returned_no_query") ||
+      diag.fallbackReason?.includes("retry_returned_no_query")
     ) {
-      reasons.push(diag.kind === "source" ? "sources_agent_returned_no_query" : "sinks_agent_returned_no_query");
+      reasons.push(
+        diag.kind === "source"
+          ? "sources_agent_returned_no_query"
+          : "sinks_agent_returned_no_query",
+      );
     }
   }
 
@@ -942,11 +982,11 @@ function computeExtractionDegradation(
   }
 
   if (
-    language === "go"
-    && framework
-    && isGrpcOrProtoFramework(framework)
-    && sourcesRowCount < 5
-    && sourcesRowCount > 0
+    language === "go" &&
+    framework &&
+    isGrpcOrProtoFramework(framework) &&
+    sourcesRowCount < 5 &&
+    sourcesRowCount > 0
   ) {
     reasons.push("low_source_count_for_framework");
   }
@@ -1032,7 +1072,7 @@ async function detectFrameworkCandidates(repoRoot: string): Promise<FrameworkCan
   };
 
   const packageJson = await readText(path.join(repoRoot, "package.json"));
-  if (packageJson.includes("\"express\"")) add("express", 0.45, "package.json dependency: express");
+  if (packageJson.includes('"express"')) add("express", 0.45, "package.json dependency: express");
 
   const requirements = await readText(path.join(repoRoot, "requirements.txt"));
   const pyproject = await readText(path.join(repoRoot, "pyproject.toml"));
@@ -1259,12 +1299,12 @@ async function renderExtractionTemplateWithDiagnostic(
     .replaceAll("{{LANGUAGE_IMPORTS}}", `import ${language}`)
     .replaceAll("{{HELPER_PREDICATES}}", "")
     .replaceAll(`{{${kind.toUpperCase()}_CLAUSES}}`, "")
-    .replaceAll("{{SELECT_NODE}}", "\"n/a\"")
-    .replaceAll("{{SELECT_CALLABLE}}", "\"unknown\"")
-    .replaceAll("{{SELECT_FLOW_KIND}}", "\"flow_kind=unknown\"")
-    .replaceAll("{{SELECT_RECEIVER}}", "\"receiver=\"")
-    .replaceAll("{{SELECT_MODULE}}", "\"module=\"")
-    .replaceAll("{{SELECT_ARG_INDEX}}", "\"arg_index=-1\"")
+    .replaceAll("{{SELECT_NODE}}", '"n/a"')
+    .replaceAll("{{SELECT_CALLABLE}}", '"unknown"')
+    .replaceAll("{{SELECT_FLOW_KIND}}", '"flow_kind=unknown"')
+    .replaceAll("{{SELECT_RECEIVER}}", '"receiver="')
+    .replaceAll("{{SELECT_MODULE}}", '"module="')
+    .replaceAll("{{SELECT_ARG_INDEX}}", '"arg_index=-1"')
     .replaceAll("{{SELECT_LINE}}", "1");
 
   if (rendered.includes("{{")) {
@@ -1326,15 +1366,15 @@ async function tryCompileQuery(
   const tmpQueryPath = path.join(ctx.workspaceDir, "extraction", "_compile_check.ql");
   try {
     await writeFile(tmpQueryPath, query, "utf-8");
-    await execFileAsync(ctx.codeqlBinary, [
-      "query", "compile",
-      tmpQueryPath,
-      "--search-path", ctx.workspaceDir,
-    ], {
-      cwd: ctx.workspaceDir,
-      encoding: "utf-8",
-      maxBuffer: 32 * 1024 * 1024,
-    });
+    await execFileAsync(
+      ctx.codeqlBinary,
+      ["query", "compile", tmpQueryPath, "--search-path", ctx.workspaceDir],
+      {
+        cwd: ctx.workspaceDir,
+        encoding: "utf-8",
+        maxBuffer: 32 * 1024 * 1024,
+      },
+    );
     return { ok: true, errorExcerpt: null };
   } catch (error) {
     const err = error as ExecFileException & { stderr?: string };
@@ -1373,13 +1413,13 @@ async function runCodeql(codeqlBinary: string, args: string[], cwd: string): Pro
 
 function isGrpcOrProtoFramework(framework: string): boolean {
   const normalized = framework.trim().toLowerCase();
-  return normalized.includes("grpc")
-    || normalized.includes("proto")
-    || normalized.includes("protobuf");
+  return (
+    normalized.includes("grpc") || normalized.includes("proto") || normalized.includes("protobuf")
+  );
 }
 
 function escapeQllString(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 async function countCsvCandidateRows(
@@ -1423,19 +1463,21 @@ async function mergeCandidateCsvFiles(
   const primaryRecords = parseCsvRecords(primaryContent);
   const supplementRecords = parseCsvRecords(supplementContent);
 
-  const findHeader = (records: string[][]): string[] | undefined => records.find((record) => {
-    if (isCsvRecordBlank(record)) {
-      return false;
-    }
-    return normalizeCandidateMarker(record[1]) == null;
-  });
+  const findHeader = (records: string[][]): string[] | undefined =>
+    records.find((record) => {
+      if (isCsvRecordBlank(record)) {
+        return false;
+      }
+      return normalizeCandidateMarker(record[1]) == null;
+    });
   const primaryHeader = findHeader(primaryRecords);
   const supplementHeader = findHeader(supplementRecords);
   const header = primaryHeader ?? supplementHeader ?? [];
 
-  const collect = (records: string[][]): string[][] => records
-    .filter((record) => !isCsvRecordBlank(record))
-    .filter((record) => normalizeCandidateMarker(record[1]) === candidateKind);
+  const collect = (records: string[][]): string[][] =>
+    records
+      .filter((record) => !isCsvRecordBlank(record))
+      .filter((record) => normalizeCandidateMarker(record[1]) === candidateKind);
 
   const primaryData = collect(primaryRecords);
   const supplementData = collect(supplementRecords);
@@ -1504,9 +1546,7 @@ async function readAnyCsproj(repoRoot: string): Promise<string> {
 }
 
 function capitalize(value: string): string {
-  return value.length === 0
-    ? value
-    : value[0].toUpperCase() + value.slice(1);
+  return value.length === 0 ? value : value[0].toUpperCase() + value.slice(1);
 }
 
 function resolveExtractionModel(cfg: TaintAnalysisTaskConfig): {
@@ -1541,7 +1581,10 @@ export function resolveWorkspaceDir(repoRoot: string, workspaceDir: string): str
     return resolvedWorkspace;
   }
 
-  const fallbackWorkspace = toAbsolutePath(absoluteRepoRoot, DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.workspaceDir);
+  const fallbackWorkspace = toAbsolutePath(
+    absoluteRepoRoot,
+    DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.workspaceDir,
+  );
   log.warn(
     { workspaceDir, fallbackWorkspace },
     "Ignoring workspaceDir outside repo root; using fallback workspace",

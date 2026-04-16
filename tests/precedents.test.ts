@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // We need to test the parsing logic. Let's mock fs.readFileSync.
 vi.mock("node:fs", async () => {
@@ -10,7 +10,7 @@ vi.mock("node:fs", async () => {
   };
 });
 
-import { loadPrecedents, formatPrecedentsForPrompt, type Precedents } from "../src/precedents.js";
+import { formatPrecedentsForPrompt, loadPrecedents, type Precedents } from "../src/precedents.js";
 
 const SAMPLE_PRECEDENTS = `## Hard Exclusions
 - All SQL queries use parameterized Prisma client
@@ -47,7 +47,9 @@ describe("loadPrecedents", () => {
     expect(result.hardExclusions).toContain("All routes behind Cognito JWT middleware");
     expect(result.signalCriteria).toContain("Only flag XSS if raw template output is confirmed");
     expect(result.signalCriteria).toContain("Ignore CSRF on stateless REST APIs with token auth");
-    expect(result.architecturalPrecedents).toContain("Auth is handled by AWS Cognito with JWT validation");
+    expect(result.architecturalPrecedents).toContain(
+      "Auth is handled by AWS Cognito with JWT validation",
+    );
     expect(result.architecturalPrecedents).toContain("mTLS enforced between all k8s services");
     expect(result.architecturalPrecedents).toContain("React auto-escapes all template output");
   });

@@ -45,11 +45,7 @@ export function discoverConfigFile(
  * parsed (JSON or YAML based on extension), and recursively resolved.
  * Depth is capped at 3 to prevent unbounded recursion.
  */
-export function resolveFileReferences(
-  value: unknown,
-  baseDir: string,
-  depth: number = 0,
-): unknown {
+export function resolveFileReferences(value: unknown, baseDir: string, depth: number = 0): unknown {
   if (depth > 3) {
     throw new Error("Config file reference depth limit exceeded (max 3)");
   }
@@ -59,9 +55,7 @@ export function resolveFileReferences(
     const resolved = path.resolve(baseDir, refPath);
     // Security: prevent path traversal outside baseDir
     if (!isPathWithinRoot(baseDir, resolved)) {
-      throw new Error(
-        `Config file reference escapes base directory: ${refPath}`,
-      );
+      throw new Error(`Config file reference escapes base directory: ${refPath}`);
     }
     const content = fs.readFileSync(resolved, "utf-8");
     const format = detectConfigFormat(resolved);
@@ -75,9 +69,7 @@ export function resolveFileReferences(
 
   if (value !== null && typeof value === "object") {
     const result: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
       result[key] = resolveFileReferences(val, baseDir, depth);
     }
     return result;

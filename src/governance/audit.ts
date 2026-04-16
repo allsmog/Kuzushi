@@ -3,7 +3,7 @@
  * Appends one JSON line per action to a workspace-specific audit file.
  */
 
-import { appendFileSync, mkdirSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type { AuditEntry } from "./types.js";
 
@@ -20,9 +20,7 @@ export class AuditTrail {
       mkdirSync(auditDir, { recursive: true });
     }
 
-    const filename = workspaceId
-      ? `audit-${workspaceId}.jsonl`
-      : "audit-global.jsonl";
+    const filename = workspaceId ? `audit-${workspaceId}.jsonl` : "audit-global.jsonl";
     this.logPath = path.join(auditDir, filename);
   }
 

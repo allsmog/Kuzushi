@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Finding } from "../../src/scanners/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
-import { createEvent, generateRunId } from "../../src/bus/helpers.js";
-import { registerTriageWorker } from "../../src/bus/workers/triage-worker.js";
 import type {
   TriageAgentActivityEvent,
   TriageErrorEvent,
   TriageResultEvent,
 } from "../../src/bus/events.js";
+import { createEvent, generateRunId } from "../../src/bus/helpers.js";
+import { registerTriageWorker } from "../../src/bus/workers/triage-worker.js";
+import type { Finding } from "../../src/scanners/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
 const { triageFindingWithAgentMock, triageFindingsBatchMock } = vi.hoisted(() => ({
@@ -300,8 +300,9 @@ describe("triage-worker", () => {
 
     const provider = triageFindingWithAgentMock.mock.calls[0]?.[0];
     expect(provider?.has("custom-task")).toBe(true);
-    expect(provider?.get("custom-task").triageAgentConfig(finding, "repo").prompt)
-      .toContain("task triage prompt");
+    expect(provider?.get("custom-task").triageAgentConfig(finding, "repo").prompt).toContain(
+      "task triage prompt",
+    );
 
     await bus.close();
   });
@@ -431,14 +432,17 @@ describe("triage-worker", () => {
 
     triageFindingsBatchMock.mockResolvedValue({
       results: new Map([
-        ["fp-1", {
-          fingerprint: "fp-1",
-          verdict: "tp",
-          confidence: 0.9,
-          rationale: "batch result",
-          verificationSteps: ["check"],
-          fixPatch: null,
-        }],
+        [
+          "fp-1",
+          {
+            fingerprint: "fp-1",
+            verdict: "tp",
+            confidence: 0.9,
+            rationale: "batch result",
+            verificationSteps: ["check"],
+            fixPatch: null,
+          },
+        ],
       ]),
       costUsd: 0.01,
       missingFingerprints: ["fp-2"],

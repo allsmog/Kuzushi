@@ -1,18 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { Finding } from "../../src/scanners/types.js";
-import type { ScanOpts, KuzushiConfig } from "../../src/types.js";
-import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
-import { InProcessBus } from "../../src/bus/adapters/in-process.js";
-import { createEvent, generateRunId } from "../../src/bus/helpers.js";
-import { attachTaskOutputMeta } from "../../src/task-output-meta.js";
-import type {
-  ScanFindingEvent,
-  TaskCompleteEvent,
-  TaskErrorEvent,
-} from "../../src/bus/events.js";
+import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import { TaskRegistry } from "../../src/agents/registry.js";
 import type { AgentTask, TaskContext } from "../../src/agents/types.js";
-import type { AgentRuntime } from "../../src/agent-runtime/types.js";
+import { InProcessBus } from "../../src/bus/adapters/in-process.js";
+import type { ScanFindingEvent, TaskCompleteEvent, TaskErrorEvent } from "../../src/bus/events.js";
+import { createEvent, generateRunId } from "../../src/bus/helpers.js";
+import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
+import type { Finding } from "../../src/scanners/types.js";
+import { attachTaskOutputMeta } from "../../src/task-output-meta.js";
+import type { KuzushiConfig, ScanOpts } from "../../src/types.js";
 
 function makeFinding(taskId: string, fp: string): Finding {
   return {
@@ -367,10 +363,13 @@ describe("scan-worker", () => {
     };
     taskRegistry.register(task as AgentTask<any, any>);
 
-    registerScanWorker(bus, makeDeps(taskRegistry, {
-      ...makeConfig(),
-      ensembleModels: ["anthropic:claude-haiku-4-5", "openai:gpt-4o"],
-    }));
+    registerScanWorker(
+      bus,
+      makeDeps(taskRegistry, {
+        ...makeConfig(),
+        ensembleModels: ["anthropic:claude-haiku-4-5", "openai:gpt-4o"],
+      }),
+    );
 
     const runId = generateRunId();
     const context = {

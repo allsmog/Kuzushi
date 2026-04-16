@@ -4,8 +4,9 @@
  * Commands modify the UIStore state and/or publish bus events
  * to control the running pipeline.
  */
+
+import type { CommandResult, ReplCommand } from "./components/CommandInput.js";
 import type { UIStore } from "./state.js";
-import type { ReplCommand, CommandResult } from "./components/CommandInput.js";
 
 export interface ReplContext {
   store: UIStore;

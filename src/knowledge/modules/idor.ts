@@ -6,17 +6,46 @@ export const idorModule: KnowledgeModule = {
   languages: [],
   frameworks: [],
   dangerousPatterns: [
-    { pattern: "Resource lookup by user-supplied ID without ownership check", why: "Attacker can access other users' resources by guessing IDs", severity: "ERROR" },
-    { pattern: "Sequential/predictable resource identifiers", why: "Auto-increment IDs are trivially enumerable", severity: "WARNING" },
-    { pattern: "Direct database lookup from route parameter", why: "No authorization between authentication and data access", severity: "ERROR" },
-    { pattern: "File download using user-supplied path or ID", why: "Access to arbitrary files via ID manipulation", severity: "ERROR" },
-    { pattern: "API endpoint returning data based solely on request parameter", why: "Missing ownership validation", severity: "WARNING" },
+    {
+      pattern: "Resource lookup by user-supplied ID without ownership check",
+      why: "Attacker can access other users' resources by guessing IDs",
+      severity: "ERROR",
+    },
+    {
+      pattern: "Sequential/predictable resource identifiers",
+      why: "Auto-increment IDs are trivially enumerable",
+      severity: "WARNING",
+    },
+    {
+      pattern: "Direct database lookup from route parameter",
+      why: "No authorization between authentication and data access",
+      severity: "ERROR",
+    },
+    {
+      pattern: "File download using user-supplied path or ID",
+      why: "Access to arbitrary files via ID manipulation",
+      severity: "ERROR",
+    },
+    {
+      pattern: "API endpoint returning data based solely on request parameter",
+      why: "Missing ownership validation",
+      severity: "WARNING",
+    },
   ],
   safePatterns: [
-    { pattern: "Ownership check: WHERE user_id = currentUser.id AND id = params.id", why: "Scopes query to authenticated user" },
+    {
+      pattern: "Ownership check: WHERE user_id = currentUser.id AND id = params.id",
+      why: "Scopes query to authenticated user",
+    },
     { pattern: "UUID/ULID resource identifiers", why: "Non-enumerable, unpredictable identifiers" },
-    { pattern: "Policy-based authorization (CASL, Pundit, Spring Security ACL)", why: "Framework enforces resource-level permissions" },
-    { pattern: "Tenant isolation in multi-tenant apps", why: "Database-level row security prevents cross-tenant access" },
+    {
+      pattern: "Policy-based authorization (CASL, Pundit, Spring Security ACL)",
+      why: "Framework enforces resource-level permissions",
+    },
+    {
+      pattern: "Tenant isolation in multi-tenant apps",
+      why: "Database-level row security prevents cross-tenant access",
+    },
   ],
   bypassTechniques: [
     "Incrementing numeric IDs in API requests (/api/users/1, /api/users/2, ...)",
@@ -27,10 +56,16 @@ export const idorModule: KnowledgeModule = {
     "Accessing soft-deleted resources via direct ID reference",
   ],
   detectionKeywords: [
-    "findById", "findByPk", "get_object_or_404",
-    "params.id", "req.params", "request.args.get",
-    "PathVariable", "route param",
-    "/api/users/:id", "/api/orders/:id",
+    "findById",
+    "findByPk",
+    "get_object_or_404",
+    "params.id",
+    "req.params",
+    "request.args.get",
+    "PathVariable",
+    "route param",
+    "/api/users/:id",
+    "/api/orders/:id",
   ],
   fixExamples: [
     {

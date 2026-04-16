@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { ScannerRegistry } from "../src/scanners/registry.js";
 import type {
   Finding,
-  TaskConfig,
   ScannerPlugin,
+  TaskConfig,
   TriageAgentConfig,
 } from "../src/scanners/types.js";
 import type { KuzushiConfig, ScanOpts } from "../src/types.js";

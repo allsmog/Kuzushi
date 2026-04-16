@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { PreReadResult } from "../../../src/agents/tasks/pre-read.js";
 import {
   __threatModelGuidanceInternals,
   buildThreatModelLeadsSection,
 } from "../../../src/agents/tasks/threat-model-guidance.js";
 import type { FileIndex } from "../../../src/types.js";
-import type { PreReadResult } from "../../../src/agents/tasks/pre-read.js";
 
 function makeStrideOutput(threats: Array<Record<string, unknown>>): unknown {
   return {
@@ -77,7 +77,9 @@ describe("buildThreatModelLeadsSection", () => {
           missingMitigations: ["allowlist"],
           relatedCwe: ["CWE-918"],
           affectedFiles: [{ filePath: "src/http/proxy.ts", startLine: 14 }],
-          evidenceAnchors: [{ filePath: "src/http/proxy.ts", startLine: 14, description: "fetch(targetUrl)" }],
+          evidenceAnchors: [
+            { filePath: "src/http/proxy.ts", startLine: 14, description: "fetch(targetUrl)" },
+          ],
         },
       ]),
       makeFileIndex(["src/http/proxy.ts"]),
@@ -92,7 +94,9 @@ describe("buildThreatModelLeadsSection", () => {
 
   it("prefers file overlap over a loose keyword-only match", () => {
     const fileIndex = makeFileIndex(["src/http/proxy.ts", "src/other.ts"]);
-    const preRead = makePreRead([{ path: "src/http/proxy.ts", content: "return fetch(targetUrl);" }]);
+    const preRead = makePreRead([
+      { path: "src/http/proxy.ts", content: "return fetch(targetUrl);" },
+    ]);
     const scoreWithOverlap = __threatModelGuidanceInternals.scoreThreatForTask(
       "ssrf-detect",
       {
@@ -151,6 +155,8 @@ describe("buildThreatModelLeadsSection", () => {
 
   it("omits the section when no valid STRIDE output exists", () => {
     expect(buildThreatModelLeadsSection("ssrf-detect", undefined, undefined, undefined)).toBe("");
-    expect(buildThreatModelLeadsSection("ssrf-detect", { nope: true }, undefined, undefined)).toBe("");
+    expect(buildThreatModelLeadsSection("ssrf-detect", { nope: true }, undefined, undefined)).toBe(
+      "",
+    );
   });
 });

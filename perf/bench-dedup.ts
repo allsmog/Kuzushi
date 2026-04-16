@@ -1,6 +1,6 @@
-import type { BenchCase } from "./harness.js";
 import { deduplicateFindings } from "../src/scanners/dedup.js";
 import { makeFindings } from "./fixtures.js";
+import type { BenchCase } from "./harness.js";
 
 export function benchDedup(): BenchCase[] {
   const cases: BenchCase[] = [];

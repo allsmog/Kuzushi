@@ -37,9 +37,22 @@ export function extractRuleFamily(ruleId: string): string {
   const normalized = ruleId.toLowerCase();
 
   const families = [
-    "sqli", "xss", "ssrf", "rce", "lfi", "rfi", "xxe",
-    "idor", "csrf", "ssti", "nosqli", "cmdi", "path-traversal",
-    "open-redirect", "deserialization", "auth-bypass",
+    "sqli",
+    "xss",
+    "ssrf",
+    "rce",
+    "lfi",
+    "rfi",
+    "xxe",
+    "idor",
+    "csrf",
+    "ssti",
+    "nosqli",
+    "cmdi",
+    "path-traversal",
+    "open-redirect",
+    "deserialization",
+    "auth-bypass",
   ];
 
   for (const family of families) {
@@ -70,9 +83,11 @@ export function loadCalibrationWeights(
   const weights = new Map<string, CalibrationWeight>();
 
   // Load global weights first
-  const globalRows = db.prepare(
-    "SELECT step_type, rule_family, weight, sample_count, updated_at FROM calibration_weights WHERE rule_family = ?",
-  ).all("__global__") as Array<{
+  const globalRows = db
+    .prepare(
+      "SELECT step_type, rule_family, weight, sample_count, updated_at FROM calibration_weights WHERE rule_family = ?",
+    )
+    .all("__global__") as Array<{
     step_type: string;
     rule_family: string;
     weight: number;
@@ -92,9 +107,11 @@ export function loadCalibrationWeights(
 
   // Override with family-specific weights if they have enough samples
   if (ruleFamily !== "__global__") {
-    const familyRows = db.prepare(
-      "SELECT step_type, rule_family, weight, sample_count, updated_at FROM calibration_weights WHERE rule_family = ?",
-    ).all(ruleFamily) as typeof globalRows;
+    const familyRows = db
+      .prepare(
+        "SELECT step_type, rule_family, weight, sample_count, updated_at FROM calibration_weights WHERE rule_family = ?",
+      )
+      .all(ruleFamily) as typeof globalRows;
 
     for (const row of familyRows) {
       if (row.sample_count >= MIN_FAMILY_SAMPLES) {
@@ -165,9 +182,9 @@ export function updateCalibrationWeights(
   for (const family of [ruleFamily, "__global__"]) {
     for (const step of evidenceChain) {
       // Load current weight
-      const row = db.prepare(
-        "SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?",
-      ).get(step.stepType, family) as { weight: number } | undefined;
+      const row = db
+        .prepare("SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?")
+        .get(step.stepType, family) as { weight: number } | undefined;
 
       const oldWeight = row?.weight ?? 1.0;
       const direction = wasCorrect ? 1.05 : 0.95;
@@ -176,14 +193,7 @@ export function updateCalibrationWeights(
         Math.min(WEIGHT_MAX, (1 - ALPHA) * oldWeight + ALPHA * (oldWeight * direction)),
       );
 
-      upsertStmt.run(
-        step.stepType,
-        family,
-        newWeight,
-        now,
-        newWeight,
-        now,
-      );
+      upsertStmt.run(step.stepType, family, newWeight, now, newWeight, now);
     }
   }
 }
@@ -234,9 +244,7 @@ export function updateFindingCalibration(
  * Format calibration weights into a prompt section showing investigation priorities.
  * Returns empty string if no weights are available.
  */
-export function formatCalibrationWeightsForPrompt(
-  weights: Map<string, CalibrationWeight>,
-): string {
+export function formatCalibrationWeightsForPrompt(weights: Map<string, CalibrationWeight>): string {
   if (weights.size === 0) {
     return "";
   }

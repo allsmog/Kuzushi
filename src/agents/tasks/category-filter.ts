@@ -36,32 +36,42 @@ export function normalizeLanguageName(lang: string): string {
 }
 
 export const WEB_FRAMEWORKS = new Set([
-  "express", "koa", "fastify", "hapi",
-  "django", "flask", "fastapi",
+  "express",
+  "koa",
+  "fastify",
+  "hapi",
+  "django",
+  "flask",
+  "fastapi",
   "rails",
   "spring",
-  "asp.net", "aspnet",
-  "gin", "echo", "fiber",
-  "laravel", "symfony",
+  "asp.net",
+  "aspnet",
+  "gin",
+  "echo",
+  "fiber",
+  "laravel",
+  "symfony",
   "phoenix",
 ]);
 
-export const SQL_DB_PATTERN = /sql|postgres|mysql|sqlite|prisma|sequelize|typeorm|knex|hibernate|sqlalchemy|activerecord|diesel/i;
+export const SQL_DB_PATTERN =
+  /sql|postgres|mysql|sqlite|prisma|sequelize|typeorm|knex|hibernate|sqlalchemy|activerecord|diesel/i;
 
 export function filterCategories(
   mappings: CategoryRelevance[],
   repoContext: RepoContext | undefined,
   fileIndex?: FileIndex,
 ): Set<string> {
-  if (!repoContext) return new Set(mappings.map(m => m.id));
+  if (!repoContext) return new Set(mappings.map((m) => m.id));
 
   const repoLangs = new Set(repoContext.languages.map(normalizeLanguageName));
-  const repoFrameworks = new Set(repoContext.frameworks.map(f => f.toLowerCase().trim()));
+  const repoFrameworks = new Set(repoContext.frameworks.map((f) => f.toLowerCase().trim()));
   const hasAuth = repoContext.authPatterns.length > 0;
-  const hasWebFramework = repoContext.frameworks.some(f =>
+  const hasWebFramework = repoContext.frameworks.some((f) =>
     WEB_FRAMEWORKS.has(f.toLowerCase().trim()),
   );
-  const filePaths = fileIndex?.tree.map(f => f.path) ?? [];
+  const filePaths = fileIndex?.tree.map((f) => f.path) ?? [];
 
   const included = new Set<string>();
 
@@ -73,13 +83,16 @@ export function filterCategories(
 
     let match = false;
 
-    if (mapping.languages?.some(l => repoLangs.has(normalizeLanguageName(l)))) {
+    if (mapping.languages?.some((l) => repoLangs.has(normalizeLanguageName(l)))) {
       match = true;
     }
 
-    if (!match && mapping.frameworks?.some(f =>
-      [...repoFrameworks].some(rf => rf.includes(f.toLowerCase())),
-    )) {
+    if (
+      !match &&
+      mapping.frameworks?.some((f) =>
+        [...repoFrameworks].some((rf) => rf.includes(f.toLowerCase())),
+      )
+    ) {
       match = true;
     }
 
@@ -91,11 +104,19 @@ export function filterCategories(
       match = true;
     }
 
-    if (!match && mapping.ormOrDbPattern && repoContext.ormOrDb.some(db => mapping.ormOrDbPattern!.test(db))) {
+    if (
+      !match &&
+      mapping.ormOrDbPattern &&
+      repoContext.ormOrDb.some((db) => mapping.ormOrDbPattern!.test(db))
+    ) {
       match = true;
     }
 
-    if (!match && mapping.fileTreePattern && filePaths.some(f => mapping.fileTreePattern!.test(f))) {
+    if (
+      !match &&
+      mapping.fileTreePattern &&
+      filePaths.some((f) => mapping.fileTreePattern!.test(f))
+    ) {
       match = true;
     }
 
@@ -107,11 +128,8 @@ export function filterCategories(
   return included;
 }
 
-export function filterBlocks(
-  blocks: CategoryBlock[],
-  included: Set<string>,
-): string[] {
-  return blocks.filter(b => included.has(b.id)).flatMap(b => b.lines);
+export function filterBlocks(blocks: CategoryBlock[], included: Set<string>): string[] {
+  return blocks.filter((b) => included.has(b.id)).flatMap((b) => b.lines);
 }
 
 export const CATEGORY_SCOPE_HEADER = [

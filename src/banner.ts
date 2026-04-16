@@ -1,8 +1,8 @@
-import chalk from "chalk";
 import { spawn } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import chalk from "chalk";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,7 +14,8 @@ function playStartupSound(): void {
     const pick = files[Math.floor(Math.random() * files.length)];
     const filePath = path.join(soundsDir, pick);
 
-    const cmd = process.platform === "darwin" ? "afplay" : process.platform === "linux" ? "aplay" : null;
+    const cmd =
+      process.platform === "darwin" ? "afplay" : process.platform === "linux" ? "aplay" : null;
     if (!cmd) return;
 
     const child = spawn(cmd, [filePath], { stdio: "ignore", detached: true });
@@ -42,7 +43,7 @@ export function printBanner(): void {
     console.log("");
     for (let i = 0; i < logoLines.length; i++) {
       if (i === quoteRow) {
-        process.stdout.write(logoLines[i] + "  " + dim(chalk.italic("\"Bismillah\"")) + "\n");
+        process.stdout.write(logoLines[i] + "  " + dim(chalk.italic('"Bismillah"')) + "\n");
       } else {
         process.stdout.write(logoLines[i] + "\n");
       }

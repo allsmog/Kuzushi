@@ -25,9 +25,10 @@
  *   │                                                      │
  *   └──────────────────────────────────────────────────────┘
  */
-import React from "react";
-import { Box, Text } from "ink";
+
 import chalk from "chalk";
+import { Box, Text } from "ink";
+import type React from "react";
 import { formatCost, formatDuration, terminalCardWidth } from "../format.js";
 import type { SummaryData } from "../state.js";
 
@@ -56,10 +57,7 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   // Stats line
   const totalCost = data.triageCostUsd + data.verificationCostUsd + data.pocHarnessCostUsd;
   const duration = data.runMetrics?.durationBreakdown?.total;
-  const statsParts = [
-    `${data.totalTriaged} triaged`,
-    formatCost(totalCost),
-  ];
+  const statsParts = [`${data.totalTriaged} triaged`, formatCost(totalCost)];
   if (duration) statsParts.push(formatDuration(duration));
   const statsLine = statsParts.join(chalk.dim("  ·  "));
 
@@ -71,16 +69,54 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
 
     return (
       <Box flexDirection="column">
-        <Text>{"  "}{topBorder}</Text>
-        <Text>{"  "}{emptyLine}</Text>
-        <Text>{"  "}{side}{centerPad(headline, innerWidth)}{side}</Text>
-        <Text>{"  "}{emptyLine}</Text>
-        <Text>{"  "}{side}{centerPad(subline, innerWidth)}{side}</Text>
-        <Text>{"  "}{side}{centerPad(statsLine, innerWidth)}{side}</Text>
-        <Text>{"  "}{emptyLine}</Text>
-        <Text>{"  "}{side}{centerPad(chalk.dim(message), innerWidth)}{side}</Text>
-        <Text>{"  "}{emptyLine}</Text>
-        <Text>{"  "}{bottomBorder}</Text>
+        <Text>
+          {"  "}
+          {topBorder}
+        </Text>
+        <Text>
+          {"  "}
+          {emptyLine}
+        </Text>
+        <Text>
+          {"  "}
+          {side}
+          {centerPad(headline, innerWidth)}
+          {side}
+        </Text>
+        <Text>
+          {"  "}
+          {emptyLine}
+        </Text>
+        <Text>
+          {"  "}
+          {side}
+          {centerPad(subline, innerWidth)}
+          {side}
+        </Text>
+        <Text>
+          {"  "}
+          {side}
+          {centerPad(statsLine, innerWidth)}
+          {side}
+        </Text>
+        <Text>
+          {"  "}
+          {emptyLine}
+        </Text>
+        <Text>
+          {"  "}
+          {side}
+          {centerPad(chalk.dim(message), innerWidth)}
+          {side}
+        </Text>
+        <Text>
+          {"  "}
+          {emptyLine}
+        </Text>
+        <Text>
+          {"  "}
+          {bottomBorder}
+        </Text>
       </Box>
     );
   }
@@ -90,16 +126,19 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   const mainStat = [
     chalk.red.bold(`${tp} true positive${tp > 1 ? "s" : ""}`),
     hasExploitable ? chalk.red(`${data.exploitable} exploitable`) : null,
-  ].filter(Boolean).join(chalk.dim("  ·  "));
+  ]
+    .filter(Boolean)
+    .join(chalk.dim("  ·  "));
 
   const chainStat = hasChains
     ? `${data.exploitChains.length} attack chain${data.exploitChains.length > 1 ? "s" : ""} (${data.exploitChains.map((c) => c.overallSeverity).join(", ")})`
     : null;
 
   const needsReview = data.verdictCounts.needs_review;
-  const reviewStat = needsReview > 0
-    ? chalk.yellow(`${needsReview} finding${needsReview > 1 ? "s" : ""} need review`)
-    : null;
+  const reviewStat =
+    needsReview > 0
+      ? chalk.yellow(`${needsReview} finding${needsReview > 1 ? "s" : ""} need review`)
+      : null;
   const nextAction = hasExploitable
     ? "Next: investigate exploitable findings first."
     : tp > 0
@@ -108,18 +147,70 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
 
   return (
     <Box flexDirection="column">
-      <Text>{"  "}{topBorder}</Text>
-      <Text>{"  "}{emptyLine}</Text>
-      <Text>{"  "}{side}{centerPad(headline, innerWidth)}{side}</Text>
-      <Text>{"  "}{emptyLine}</Text>
-      <Text>{"  "}{side}{centerPad(mainStat, innerWidth)}{side}</Text>
-      {chainStat && <Text>{"  "}{side}{centerPad(chainStat, innerWidth)}{side}</Text>}
-      {reviewStat && <Text>{"  "}{side}{centerPad(reviewStat, innerWidth)}{side}</Text>}
-      <Text>{"  "}{emptyLine}</Text>
-      <Text>{"  "}{side}{centerPad(statsLine, innerWidth)}{side}</Text>
-      <Text>{"  "}{side}{centerPad(chalk.dim(nextAction), innerWidth)}{side}</Text>
-      <Text>{"  "}{emptyLine}</Text>
-      <Text>{"  "}{bottomBorder}</Text>
+      <Text>
+        {"  "}
+        {topBorder}
+      </Text>
+      <Text>
+        {"  "}
+        {emptyLine}
+      </Text>
+      <Text>
+        {"  "}
+        {side}
+        {centerPad(headline, innerWidth)}
+        {side}
+      </Text>
+      <Text>
+        {"  "}
+        {emptyLine}
+      </Text>
+      <Text>
+        {"  "}
+        {side}
+        {centerPad(mainStat, innerWidth)}
+        {side}
+      </Text>
+      {chainStat && (
+        <Text>
+          {"  "}
+          {side}
+          {centerPad(chainStat, innerWidth)}
+          {side}
+        </Text>
+      )}
+      {reviewStat && (
+        <Text>
+          {"  "}
+          {side}
+          {centerPad(reviewStat, innerWidth)}
+          {side}
+        </Text>
+      )}
+      <Text>
+        {"  "}
+        {emptyLine}
+      </Text>
+      <Text>
+        {"  "}
+        {side}
+        {centerPad(statsLine, innerWidth)}
+        {side}
+      </Text>
+      <Text>
+        {"  "}
+        {side}
+        {centerPad(chalk.dim(nextAction), innerWidth)}
+        {side}
+      </Text>
+      <Text>
+        {"  "}
+        {emptyLine}
+      </Text>
+      <Text>
+        {"  "}
+        {bottomBorder}
+      </Text>
     </Box>
   );
 }

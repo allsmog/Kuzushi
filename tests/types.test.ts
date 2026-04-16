@@ -1,6 +1,12 @@
-import { describe, it, expect } from "vitest";
-import type { PocHarnessResult, RepoContext, Verdict, TriageResult, ScanOpts } from "../src/types.js";
+import { describe, expect, it } from "vitest";
 import type { Finding } from "../src/scanners/types.js";
+import type {
+  PocHarnessResult,
+  RepoContext,
+  ScanOpts,
+  TriageResult,
+  Verdict,
+} from "../src/types.js";
 
 describe("types", () => {
   it("Verdict accepts valid values", () => {

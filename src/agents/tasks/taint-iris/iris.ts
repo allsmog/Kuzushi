@@ -13,16 +13,20 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { createLogger } from "../../../logger.js";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TaintPathStep } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import { createLogger } from "../../../logger.js";
 import type { AgentTask, TaskContext } from "../../types.js";
-import { resolveTaskModel, resolveTaskRuntime, resolveTaskAllowedTools } from "../runtime-overrides.js";
-import type { CweSelectOutput, CweSelection } from "./cwe-select.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskRuntime,
+} from "../runtime-overrides.js";
+import type { CweSelection, CweSelectOutput } from "./cwe-select.js";
 
 const log = createLogger({ stage: "taint-iris" });
 
@@ -36,7 +40,15 @@ const IRIS_FINDING_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "cwe", "severity", "filePath", "startLine", "message", "sourceSinkTrace"],
+        required: [
+          "title",
+          "cwe",
+          "severity",
+          "filePath",
+          "startLine",
+          "message",
+          "sourceSinkTrace",
+        ],
         properties: {
           title: { type: "string" },
           cwe: { type: "string" },
@@ -174,7 +186,9 @@ export const taintIrisTask: AgentTask<ScanOpts, Finding[]> = {
     const runtime = resolveTaskRuntime(context);
     const model = resolveTaskModel(context, "taint-iris");
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
-    const cweOutput = context.upstreamOutputs.get("taint-cwe-select") as CweSelectOutput | undefined;
+    const cweOutput = context.upstreamOutputs.get("taint-cwe-select") as
+      | CweSelectOutput
+      | undefined;
     const cwes = cweOutput?.cwes ?? [];
 
     if (cwes.length === 0) {
@@ -185,7 +199,9 @@ export const taintIrisTask: AgentTask<ScanOpts, Finding[]> = {
     const codeqlDbPath = resolveCodeqlDbPath(context);
     const prompt = buildIrisPrompt(cwes, codeqlDbPath, repoContext);
 
-    log.info(`Starting IRIS taint analysis for ${cwes.length} CWE classes (model=${model}, codeql=${!!codeqlDbPath})`);
+    log.info(
+      `Starting IRIS taint analysis for ${cwes.length} CWE classes (model=${model}, codeql=${!!codeqlDbPath})`,
+    );
 
     let structuredOutput: unknown;
     let resultText = "";

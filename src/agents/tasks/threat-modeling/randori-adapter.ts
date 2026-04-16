@@ -6,15 +6,19 @@ import { isRecord } from "../../../utils.js";
 import type {
   DfdElement,
   EvidenceAnchor,
-  StrideThreat,
   StrideCategory,
+  StrideThreat,
   ThreatModelDocument,
   TrustBoundary,
 } from "./types.js";
 
 const VALID_STRIDE_CATEGORIES = new Set<StrideCategory>([
-  "spoofing", "tampering", "repudiation",
-  "information-disclosure", "denial-of-service", "elevation-of-privilege",
+  "spoofing",
+  "tampering",
+  "repudiation",
+  "information-disclosure",
+  "denial-of-service",
+  "elevation-of-privilege",
 ]);
 const VALID_IMPACTS = new Set(["critical", "high", "medium", "low"]);
 
@@ -25,7 +29,9 @@ export function convertRandoriToThreatModel(randoriOutput: unknown): ThreatModel
 
   const elements = parseDfdElements(randoriOutput["dfd"]);
   const trustBoundaries = parseTrustBoundaries(randoriOutput["dfd"]);
-  const threats = parseThreatScenarios(randoriOutput["threat_scenarios"] ?? randoriOutput["threats"]);
+  const threats = parseThreatScenarios(
+    randoriOutput["threat_scenarios"] ?? randoriOutput["threats"],
+  );
 
   return {
     version: "1.0",
@@ -122,16 +128,13 @@ function parseThreatScenarios(scenarios: unknown): StrideThreat[] {
     const evidenceAnchors = parseEvidenceAnchors(item["evidence_anchors"]);
 
     // Handle both schema-ideal and actual Randori field names
-    const elementId = strArray(item["target_assets"])[0]
-      || strArray(item["affected_components"])[0]
-      || "unknown";
+    const elementId =
+      strArray(item["target_assets"])[0] || strArray(item["affected_components"])[0] || "unknown";
     // mitre_attack can be a string or array of strings
     const mitre = item["mitre_attack"];
     const mitreStr = Array.isArray(mitre) ? mitre.map(String).join(", ") : str(mitre);
-    const attackVector = str(item["attack_technique_id"])
-      || mitreStr
-      || str(item["attack_scenario"])
-      || "unknown";
+    const attackVector =
+      str(item["attack_technique_id"]) || mitreStr || str(item["attack_scenario"]) || "unknown";
 
     out.push({
       id,
@@ -144,8 +147,9 @@ function parseThreatScenarios(scenarios: unknown): StrideThreat[] {
       impact,
       likelihood: probabilityToLikelihood(probability),
       existingMitigations: strArray(item["existing_controls"]),
-      missingMitigations: strArray(item["recommended_mitigations"])
-        || (str(item["recommended_remediation"]) ? [str(item["recommended_remediation"])] : []),
+      missingMitigations:
+        strArray(item["recommended_mitigations"]) ||
+        (str(item["recommended_remediation"]) ? [str(item["recommended_remediation"])] : []),
       relatedCwe: buildCweList(item),
       affectedFiles: evidenceAnchors.map((a) => ({ filePath: a.filePath, startLine: a.startLine })),
       ...(evidenceAnchors.length > 0 ? { evidenceAnchors } : {}),
@@ -157,7 +161,9 @@ function parseThreatScenarios(scenarios: unknown): StrideThreat[] {
 function normalizeStrideCategory(value: string): StrideCategory | null {
   // Handle both hyphenated and underscored variants
   const normalized = value.replace(/_/g, "-");
-  return VALID_STRIDE_CATEGORIES.has(normalized as StrideCategory) ? (normalized as StrideCategory) : null;
+  return VALID_STRIDE_CATEGORIES.has(normalized as StrideCategory)
+    ? (normalized as StrideCategory)
+    : null;
 }
 
 function normalizeImpact(value: string): StrideThreat["impact"] {

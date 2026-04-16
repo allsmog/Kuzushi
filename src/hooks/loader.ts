@@ -1,9 +1,9 @@
-import type { PipelineHooks } from "./types.js";
-import * as path from "node:path";
 import { existsSync } from "node:fs";
+import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getLogger } from "../logger.js";
 import { isPathWithinRoot } from "../utils.js";
+import type { PipelineHooks } from "./types.js";
 
 const log = getLogger("hooks");
 
@@ -12,7 +12,10 @@ const log = getLogger("hooks");
  *
  * The file must export (default or named) an object conforming to PipelineHooks.
  */
-export async function loadHooksFromFile(filePath: string, repoRoot: string): Promise<PipelineHooks> {
+export async function loadHooksFromFile(
+  filePath: string,
+  repoRoot: string,
+): Promise<PipelineHooks> {
   const resolved = path.resolve(repoRoot, filePath);
   if (!isPathWithinRoot(repoRoot, resolved)) {
     throw new Error(`Hooks file path escapes repo root: ${filePath}`);

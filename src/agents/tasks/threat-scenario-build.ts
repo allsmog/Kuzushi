@@ -1,6 +1,3 @@
-import type { ThreatModelDocument } from "./threat-modeling/types.js";
-import { resolveThreatModelOutput } from "./threat-model-guidance.js";
-import { isRecord } from "../../utils.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type {
   ApplicationModel,
@@ -8,7 +5,10 @@ import type {
   ThreatScenario,
   ThreatScenarioDetectorId,
 } from "../../types.js";
+import { isRecord } from "../../utils.js";
 import type { AgentTask } from "../types.js";
+import { resolveThreatModelOutput } from "./threat-model-guidance.js";
+import type { ThreatModelDocument } from "./threat-modeling/types.js";
 
 export interface ThreatScenarioBuildOutput {
   scenarios: ThreatScenario[];
@@ -29,7 +29,16 @@ const DETECTOR_MATCHERS: Array<{
   {
     detectorId: "auth-access-detect",
     cwes: ["639", "862", "863", "915", "384", "345"],
-    keywords: ["auth", "authorization", "idor", "permission", "role", "session", "tenant", "ownership"],
+    keywords: [
+      "auth",
+      "authorization",
+      "idor",
+      "permission",
+      "role",
+      "session",
+      "tenant",
+      "ownership",
+    ],
     expectedGuard: "Router-level authentication and object-level authorization checks",
   },
   {
@@ -124,7 +133,9 @@ function buildThreatScenarios(
         detectorId: matcher.detectorId,
         title: threat.title,
         rationale: threat.description || threat.attackVector,
-        attackSurface: relatedRoute ? `${relatedRoute.method} ${relatedRoute.path}` : threat.attackVector,
+        attackSurface: relatedRoute
+          ? `${relatedRoute.method} ${relatedRoute.path}`
+          : threat.attackVector,
         expectedGuard: matcher.expectedGuard,
         relatedFiles,
         relatedSymbols,
@@ -180,8 +191,10 @@ function matchesDetector(
   }
 
   if (matcher.detectorId === "graphql-security-detect") {
-    return relatedFiles.some((file) => /graphql|resolver|schema/i.test(file))
-      || appModel.routes.some((route) => /graphql/i.test(route.path));
+    return (
+      relatedFiles.some((file) => /graphql|resolver|schema/i.test(file)) ||
+      appModel.routes.some((route) => /graphql/i.test(route.path))
+    );
   }
 
   if (matcher.detectorId === "security-misconfig-detect") {
@@ -189,15 +202,15 @@ function matchesDetector(
   }
 
   if (matcher.detectorId === "auth-access-detect") {
-    return appModel.routes.some((route) => relatedFiles.includes(route.filePath) && route.authMechanisms.length > 0);
+    return appModel.routes.some(
+      (route) => relatedFiles.includes(route.filePath) && route.authMechanisms.length > 0,
+    );
   }
 
   return false;
 }
 
-function collectThreatFiles(
-  threat: ThreatModelDocument["threats"][number],
-): string[] {
+function collectThreatFiles(threat: ThreatModelDocument["threats"][number]): string[] {
   const files = new Set<string>();
   for (const file of threat.affectedFiles) {
     files.add(normalizePath(file.filePath));
@@ -232,11 +245,15 @@ function findRelatedRoute(appModel: ApplicationModel, files: string[]) {
 }
 
 function findRelatedClient(appModel: ApplicationModel, files: string[]) {
-  return appModel.outboundClients.find((client) => files.some((file) => pathsOverlap(file, client.filePath)));
+  return appModel.outboundClients.find((client) =>
+    files.some((file) => pathsOverlap(file, client.filePath)),
+  );
 }
 
 function findRelatedStore(appModel: ApplicationModel, files: string[]) {
-  return appModel.dataStores.find((store) => files.some((file) => pathsOverlap(file, store.filePath)));
+  return appModel.dataStores.find((store) =>
+    files.some((file) => pathsOverlap(file, store.filePath)),
+  );
 }
 
 function normalizeThreatText(threat: ThreatModelDocument["threats"][number]): string {
@@ -247,7 +264,9 @@ function normalizeThreatText(threat: ThreatModelDocument["threats"][number]): st
     ...threat.preconditions,
     ...threat.existingMitigations,
     ...threat.missingMitigations,
-  ].join(" ").toLowerCase();
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function normalizeCwes(values: string[]): Set<string> {
@@ -283,7 +302,11 @@ function asStrideDocument(value: unknown): ThreatModelDocument | undefined {
 }
 
 function asApplicationModel(value: unknown): ApplicationModel | undefined {
-  if (!isRecord(value) || !Array.isArray(value["routes"]) || !Array.isArray(value["serviceBoundaries"])) {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value["routes"]) ||
+    !Array.isArray(value["serviceBoundaries"])
+  ) {
     return undefined;
   }
   return value as unknown as ApplicationModel;

@@ -9,14 +9,14 @@
 import path from "node:path";
 import { getLogger } from "../logger.js";
 import {
-  readPackageName,
-  parsePackageJsonDeps,
-  parseGoModDeps,
   parseCargoDeps,
+  parseGoModDeps,
+  parsePackageJsonDeps,
+  readPackageName,
 } from "../monorepo/dependency-graph.js";
 import type { RawDiscoveryNode } from "./adapters/types.js";
-import type { DiscoveredModule, DiscoveredProduct } from "./types.js";
 import { compareModulePaths, normalizeModuleName } from "./helpers.js";
+import type { DiscoveredModule, DiscoveredProduct } from "./types.js";
 
 const log = getLogger("discovery-clustering");
 
@@ -115,22 +115,19 @@ export async function buildWorkspaceDependencyMap(
   return { internalDeps, packageNameToPath, promptSummary };
 }
 
-async function resolveLeafDeps(
-  absPath: string,
-  leaf: RawDiscoveryNode,
-): Promise<string[]> {
+async function resolveLeafDeps(absPath: string, leaf: RawDiscoveryNode): Promise<string[]> {
   const deps: string[] = [];
   const bs = leaf.buildSystem?.toLowerCase() ?? "";
   const lang = leaf.language?.toLowerCase() ?? "";
 
   if (bs.includes("package.json") || lang === "javascript" || lang === "typescript") {
-    deps.push(...await parsePackageJsonDeps(absPath));
+    deps.push(...(await parsePackageJsonDeps(absPath)));
   }
   if (bs.includes("go.mod") || lang === "go") {
-    deps.push(...await parseGoModDeps(absPath));
+    deps.push(...(await parseGoModDeps(absPath)));
   }
   if (bs.includes("cargo") || lang === "rust") {
-    deps.push(...await parseCargoDeps(absPath));
+    deps.push(...(await parseCargoDeps(absPath)));
   }
 
   return deps;
@@ -268,9 +265,7 @@ export function clusterWorkspaceMembers(
       const hub = pickHub(scannable, internalDeps);
       const hubLeaf = leaves.find((l) => l.path === hub);
 
-      const includePaths = scannable.length > 1
-        ? scannable.sort(compareModulePaths)
-        : undefined;
+      const includePaths = scannable.length > 1 ? scannable.sort(compareModulePaths) : undefined;
 
       modules.push({
         name: deriveClusterName(hub, hubLeaf, container, product),

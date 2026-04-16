@@ -22,7 +22,7 @@ export function formatFileTreeForPrompt(
     "## Repository file tree",
     `${fileIndex.totalFiles} source files${fileIndex.truncated ? " (truncated)" : ""}:`,
     "```",
-    ...entries.map(e => e.path),
+    ...entries.map((e) => e.path),
     "```",
     "",
     "Use this listing instead of Glob for initial file discovery. Only use Glob if you need files not shown above.",
@@ -77,7 +77,9 @@ export function formatPatternMatchesForPrompt(
 
     for (const [filePath, fileMatches] of byFile) {
       for (const fm of fileMatches) {
-        matchLines.push(`- **${filePath}** L${fm.lineNumber}: ${fm.lineContent.trim().slice(0, 120)}`);
+        matchLines.push(
+          `- **${filePath}** L${fm.lineNumber}: ${fm.lineContent.trim().slice(0, 120)}`,
+        );
       }
     }
   }

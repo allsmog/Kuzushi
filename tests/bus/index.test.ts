@@ -27,21 +27,33 @@ describe("shouldRegisterPocExecutorWorker", () => {
   });
 
   it("requires a PoC executor for refined verification when verification is enabled", () => {
-    expect(shouldRegisterPocExecutorWorker(makeConfig({
-      verify: true,
-      verifyRefinementMaxIterations: 2,
-    }))).toBe(true);
+    expect(
+      shouldRegisterPocExecutorWorker(
+        makeConfig({
+          verify: true,
+          verifyRefinementMaxIterations: 2,
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("requires a PoC executor when harness generation is enabled", () => {
-    expect(shouldRegisterPocExecutorWorker(makeConfig({
-      pocHarness: true,
-    }))).toBe(true);
+    expect(
+      shouldRegisterPocExecutorWorker(
+        makeConfig({
+          pocHarness: true,
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("requires a PoC executor when direct PoC execution is enabled", () => {
-    expect(shouldRegisterPocExecutorWorker(makeConfig({
-      pocExecute: true,
-    }))).toBe(true);
+    expect(
+      shouldRegisterPocExecutorWorker(
+        makeConfig({
+          pocExecute: true,
+        }),
+      ),
+    ).toBe(true);
   });
 });

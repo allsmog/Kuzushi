@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { Workspace } from "./types.js";
 import type { ContextSnapshot } from "../ui/state.js";
+import type { Workspace } from "./types.js";
 
 /** Manages workspace CRUD and snapshot persistence via SQLite. */
 export class WorkspaceManager {
@@ -10,20 +10,26 @@ export class WorkspaceManager {
   create(name: string, targets: string[] = []): Workspace {
     const id = randomUUID();
     const now = new Date().toISOString();
-    this.db.prepare(
-      `INSERT INTO workspaces (id, name, targets_json, created_at, last_accessed_at, metadata_json)
+    this.db
+      .prepare(
+        `INSERT INTO workspaces (id, name, targets_json, created_at, last_accessed_at, metadata_json)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, name, JSON.stringify(targets), now, now, "{}");
+      )
+      .run(id, name, JSON.stringify(targets), now, now, "{}");
     return { id, name, targets, createdAt: now, lastAccessedAt: now, metadata: {} };
   }
 
   get(id: string): Workspace | null {
-    const row = this.db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as WorkspaceRow | undefined;
+    const row = this.db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as
+      | WorkspaceRow
+      | undefined;
     return row ? rowToWorkspace(row) : null;
   }
 
   getByName(name: string): Workspace | null {
-    const row = this.db.prepare("SELECT * FROM workspaces WHERE name = ?").get(name) as WorkspaceRow | undefined;
+    const row = this.db.prepare("SELECT * FROM workspaces WHERE name = ?").get(name) as
+      | WorkspaceRow
+      | undefined;
     return row ? rowToWorkspace(row) : null;
   }
 
@@ -34,7 +40,9 @@ export class WorkspaceManager {
   }
 
   list(): Workspace[] {
-    const rows = this.db.prepare("SELECT * FROM workspaces ORDER BY last_accessed_at DESC").all() as WorkspaceRow[];
+    const rows = this.db
+      .prepare("SELECT * FROM workspaces ORDER BY last_accessed_at DESC")
+      .all() as WorkspaceRow[];
     return rows.map(rowToWorkspace);
   }
 
@@ -47,10 +55,12 @@ export class WorkspaceManager {
     const metadata = partial.metadata ?? ws.metadata;
     const now = new Date().toISOString();
 
-    this.db.prepare(
-      `UPDATE workspaces SET name = ?, targets_json = ?, metadata_json = ?, updated_at = ?
+    this.db
+      .prepare(
+        `UPDATE workspaces SET name = ?, targets_json = ?, metadata_json = ?, updated_at = ?
        WHERE id = ?`,
-    ).run(name, JSON.stringify(targets), JSON.stringify(metadata), now, id);
+      )
+      .run(name, JSON.stringify(targets), JSON.stringify(metadata), now, id);
   }
 
   delete(id: string): void {
@@ -70,15 +80,17 @@ export class WorkspaceManager {
   }
 
   saveSnapshot(workspaceId: string, snapshot: ContextSnapshot): void {
-    this.db.prepare(
-      "INSERT INTO workspace_snapshots (workspace_id, snapshot_json) VALUES (?, ?)",
-    ).run(workspaceId, JSON.stringify(snapshot));
+    this.db
+      .prepare("INSERT INTO workspace_snapshots (workspace_id, snapshot_json) VALUES (?, ?)")
+      .run(workspaceId, JSON.stringify(snapshot));
   }
 
   loadLatestSnapshot(workspaceId: string): ContextSnapshot | null {
-    const row = this.db.prepare(
-      "SELECT snapshot_json FROM workspace_snapshots WHERE workspace_id = ? ORDER BY id DESC LIMIT 1",
-    ).get(workspaceId) as { snapshot_json: string } | undefined;
+    const row = this.db
+      .prepare(
+        "SELECT snapshot_json FROM workspace_snapshots WHERE workspace_id = ? ORDER BY id DESC LIMIT 1",
+      )
+      .get(workspaceId) as { snapshot_json: string } | undefined;
     if (!row) return null;
     try {
       return JSON.parse(row.snapshot_json) as ContextSnapshot;

@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
-  getShutdownHookCount,
-  registerShutdownHook,
-  isShuttingDown,
   clearShutdownHooks,
+  getShutdownHookCount,
+  isShuttingDown,
+  registerShutdownHook,
 } from "../src/lifecycle.js";
 
 describe("lifecycle", () => {

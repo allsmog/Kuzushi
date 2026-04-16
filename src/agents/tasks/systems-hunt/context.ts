@@ -4,22 +4,22 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { getCodeIntelligenceProvider } from "../../../analysis-support/index.js";
+import { createLogger } from "../../../logger.js";
 import { coerceFileIndex, coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts, SecurityPatternMatch } from "../../../types.js";
-import { createLogger } from "../../../logger.js";
 import type { AgentTask, TaskContext } from "../../types.js";
+import { buildSystemsSurfacePack } from "./helpers.js";
 import {
+  hasSystemsSignals,
+  isSystemsLanguage,
   type RankedSystemsSurface,
+  resolveSystemsCodeqlDbPath,
+  resolveSystemsHuntConfig,
   type SystemsContextOutput,
   type SystemsPatternDomain,
   type SystemsSurfaceKind,
-  resolveSystemsCodeqlDbPath,
-  resolveSystemsHuntConfig,
-  hasSystemsSignals,
-  isSystemsLanguage,
 } from "./types.js";
-import { buildSystemsSurfacePack } from "./helpers.js";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger({ stage: "systems-context-gatherer" });
@@ -28,15 +28,45 @@ const DOMAIN_WEIGHTS: Record<SystemsPatternDomain, number> = {
   "protocol-parser": 7,
   "integer-boundary": 5,
   "unsafe-memory": 6,
-  "hardening": 2,
+  hardening: 2,
 };
 
-const PATH_HINTS: Array<{ pattern: RegExp; kind: SystemsSurfaceKind; score: number; reason: string }> = [
-  { pattern: /(tcp|udp|packet|segment|socket|skb|net|sack)/i, kind: "protocol-parser", score: 5, reason: "network or packet-processing path" },
-  { pattern: /(rpc|nfs|gss|xdr)/i, kind: "rpc-handler", score: 6, reason: "RPC or NFS parsing path" },
-  { pattern: /(codec|decode|parser|h264|slice|frame|ffmpeg|avcodec)/i, kind: "codec-parser", score: 6, reason: "codec or parser path" },
-  { pattern: /(vmm|hypervisor|guest|virt|vmexit|virtio)/i, kind: "hypervisor-boundary", score: 7, reason: "hypervisor or guest/host boundary path" },
-  { pattern: /(unsafe|ptr|ffi|memory|buffer|copy)/i, kind: "unsafe-region", score: 4, reason: "unsafe or memory-manipulation path" },
+const PATH_HINTS: Array<{
+  pattern: RegExp;
+  kind: SystemsSurfaceKind;
+  score: number;
+  reason: string;
+}> = [
+  {
+    pattern: /(tcp|udp|packet|segment|socket|skb|net|sack)/i,
+    kind: "protocol-parser",
+    score: 5,
+    reason: "network or packet-processing path",
+  },
+  {
+    pattern: /(rpc|nfs|gss|xdr)/i,
+    kind: "rpc-handler",
+    score: 6,
+    reason: "RPC or NFS parsing path",
+  },
+  {
+    pattern: /(codec|decode|parser|h264|slice|frame|ffmpeg|avcodec)/i,
+    kind: "codec-parser",
+    score: 6,
+    reason: "codec or parser path",
+  },
+  {
+    pattern: /(vmm|hypervisor|guest|virt|vmexit|virtio)/i,
+    kind: "hypervisor-boundary",
+    score: 7,
+    reason: "hypervisor or guest/host boundary path",
+  },
+  {
+    pattern: /(unsafe|ptr|ffi|memory|buffer|copy)/i,
+    kind: "unsafe-region",
+    score: 4,
+    reason: "unsafe or memory-manipulation path",
+  },
 ];
 
 type SurfaceAccumulator = RankedSystemsSurface & {
@@ -54,15 +84,19 @@ export const systemsContextGathererTask: AgentTask<ScanOpts, SystemsContextOutpu
   condition(upstreamOutputs) {
     const repoContext = coerceRepoContext(upstreamOutputs.get("context-gatherer"));
     const fileIndex = coerceFileIndex(upstreamOutputs.get("context-gatherer"));
-    return repoContext?.languages.some((language) => isSystemsLanguage(language)) === true
-      || hasSystemsSignals(fileIndex);
+    return (
+      repoContext?.languages.some((language) => isSystemsLanguage(language)) === true ||
+      hasSystemsSignals(fileIndex)
+    );
   },
 
   async run(_input, context): Promise<SystemsContextOutput> {
     const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const config = resolveSystemsHuntConfig(context);
-    const codeqlDbPath = config.enableCodeqlAssist ? resolveSystemsCodeqlDbPath(context.repoRoot) : undefined;
+    const codeqlDbPath = config.enableCodeqlAssist
+      ? resolveSystemsCodeqlDbPath(context.repoRoot)
+      : undefined;
     const bashMatches = config.enableBashProbing ? await runBashSurfaceProbe(context.repoRoot) : [];
     const surfaces = await rankSystemsSurfaces(
       fileIndex,
@@ -82,7 +116,8 @@ export const systemsContextGathererTask: AgentTask<ScanOpts, SystemsContextOutpu
           surfacePackDepth: config.surfacePackDepth,
           enableCodeqlTemplates: config.enableCodeqlTemplates,
           codeqlDbPath,
-        })),
+        }),
+      ),
     );
 
     return attachTaskOutputMeta(
@@ -111,7 +146,12 @@ export async function rankSystemsSurfaces(
 
   const accumulators = new Map<string, SurfaceAccumulator>();
   const hardeningByFile = new Map<string, string[]>();
-  const targetDomains: SystemsPatternDomain[] = ["protocol-parser", "integer-boundary", "unsafe-memory", "hardening"];
+  const targetDomains: SystemsPatternDomain[] = [
+    "protocol-parser",
+    "integer-boundary",
+    "unsafe-memory",
+    "hardening",
+  ];
 
   for (const match of extraMatches) {
     fileIndex.patternMatches["protocol-parser"] = dedupeMatches([
@@ -131,7 +171,9 @@ export async function rankSystemsSurfaces(
 
       const kind = inferSurfaceKind(match.filePath, match.lineContent, domain);
       const key = `${kind}:${match.filePath}`;
-      const accumulator = accumulators.get(key) ?? createAccumulator(kind, match.filePath, match.lineNumber, repoRoot);
+      const accumulator =
+        accumulators.get(key) ??
+        createAccumulator(kind, match.filePath, match.lineNumber, repoRoot);
       accumulator.startLine = Math.min(accumulator.startLine, match.lineNumber);
       accumulator.score += DOMAIN_WEIGHTS[domain];
       accumulator.domainSet.add(domain);
@@ -150,7 +192,9 @@ export async function rankSystemsSurfaces(
   }
 
   for (const accumulator of accumulators.values()) {
-    const pathHint = PATH_HINTS.find((hint) => hint.kind === accumulator.kind && hint.pattern.test(accumulator.filePath));
+    const pathHint = PATH_HINTS.find(
+      (hint) => hint.kind === accumulator.kind && hint.pattern.test(accumulator.filePath),
+    );
     if (pathHint) {
       accumulator.score += pathHint.score;
       accumulator.reasons.push(`Path hint: ${pathHint.reason}`);
@@ -177,7 +221,9 @@ export async function rankSystemsSurfaces(
   }
 
   const surfaces = [...accumulators.values()]
-    .map((accumulator) => finalizeSurface(accumulator, hardeningByFile.get(accumulator.filePath) ?? []))
+    .map((accumulator) =>
+      finalizeSurface(accumulator, hardeningByFile.get(accumulator.filePath) ?? []),
+    )
     .sort((left, right) => {
       if (right.score !== left.score) return right.score - left.score;
       if (left.filePath !== right.filePath) return left.filePath.localeCompare(right.filePath);
@@ -255,7 +301,11 @@ export function inferSurfaceKind(
   if (domain === "protocol-parser" || /tcp|udp|packet|segment|socket|skb|sack/i.test(haystack)) {
     return "protocol-parser";
   }
-  if (domain === "unsafe-memory" || /\.rs$/i.test(filePath) || /\bunsafe\b|memcpy|ptr::|transmute/i.test(lineContent)) {
+  if (
+    domain === "unsafe-memory" ||
+    /\.rs$/i.test(filePath) ||
+    /\bunsafe\b|memcpy|ptr::|transmute/i.test(lineContent)
+  ) {
     return "unsafe-region";
   }
   if (/memcpy|memmove|strcpy|copy|alloca|malloc|realloc/i.test(lineContent)) {
@@ -292,7 +342,11 @@ function extractAttackerFields(lineContent: string): string[] {
   return [...fields];
 }
 
-async function readSnippet(repoRoot: string, filePath: string, lineNumber: number): Promise<string | undefined> {
+async function readSnippet(
+  repoRoot: string,
+  filePath: string,
+  lineNumber: number,
+): Promise<string | undefined> {
   try {
     const content = await readFile(path.join(repoRoot, filePath), "utf-8");
     const lines = content.split(/\r?\n/u);

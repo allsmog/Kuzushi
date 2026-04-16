@@ -65,9 +65,9 @@ describe("InProcessBus", () => {
   it("waitFor rejects on timeout", async () => {
     const bus = new InProcessBus();
 
-    await expect(
-      bus.waitFor("never:happens", undefined, 20),
-    ).rejects.toThrow("Timed out waiting for event");
+    await expect(bus.waitFor("never:happens", undefined, 20)).rejects.toThrow(
+      "Timed out waiting for event",
+    );
 
     await bus.close();
   });
@@ -88,10 +88,7 @@ describe("InProcessBus", () => {
       meta: {
         runId: string;
       };
-    }>(
-      "bus:handler-error",
-      (event) => event.meta.runId === "run-err",
-    );
+    }>("bus:handler-error", (event) => event.meta.runId === "run-err");
 
     await bus.publish({
       type: "test:event",

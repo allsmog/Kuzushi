@@ -1,5 +1,5 @@
-import type { PipelineHooks, HookContext } from "./types.js";
 import type { Finding } from "../scanners/types.js";
+import type { HookContext, PipelineHooks } from "./types.js";
 
 /**
  * Chains multiple PipelineHooks objects into a single composite hook.

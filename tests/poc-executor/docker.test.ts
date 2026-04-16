@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DockerPocExecutor } from "../../src/poc-executor/docker.js";
 
 // Mock child_process
@@ -7,7 +7,7 @@ vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
 }));
 
-import { execFileSync, execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 
 describe("DockerPocExecutor", () => {
   beforeEach(() => {

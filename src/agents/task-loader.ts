@@ -1,14 +1,19 @@
-import type { AgentTask } from "./types.js";
-import { loadManifestForTaskFile, checkRequirements, fingerprintTaskCode, type TaskManifest } from "./task-manifest.js";
-import * as path from "node:path";
 import { lstatSync, realpathSync } from "node:fs";
+import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isPathWithinRoot } from "../utils.js";
+import {
+  checkRequirements,
+  fingerprintTaskCode,
+  loadManifestForTaskFile,
+  type TaskManifest,
+} from "./task-manifest.js";
+import type { AgentTask } from "./types.js";
 
 export interface TaskSpecifier {
   type: "file" | "package";
   path: string;
-  exportName?: string;  // for named exports from packages
+  exportName?: string; // for named exports from packages
 }
 
 /**
@@ -37,10 +42,7 @@ export function parseTaskSpecifier(specifier: string): TaskSpecifier {
 /**
  * Load an external task from a specifier.
  */
-export async function loadExternalTask(
-  spec: TaskSpecifier,
-  repoRoot: string,
-): Promise<AgentTask> {
+export async function loadExternalTask(spec: TaskSpecifier, repoRoot: string): Promise<AgentTask> {
   let mod: Record<string, unknown>;
 
   if (spec.type === "file") {
@@ -144,7 +146,9 @@ export async function loadExternalTaskWithManifest(
         if (reqCheck.missing.nodeVersion) {
           warnings.push(`Node version: ${reqCheck.missing.nodeVersion}`);
         }
-        console.warn(`[task-loader] Task "${task.id}" requirements not met: ${warnings.join("; ")}`);
+        console.warn(
+          `[task-loader] Task "${task.id}" requirements not met: ${warnings.join("; ")}`,
+        );
       }
     } else if (manifestResult && !manifestResult.valid) {
       console.warn(

@@ -1,10 +1,14 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import path from "node:path";
+import { cleanupBatchFiles, writeBatchFile } from "../../../agent-runtime/batch-files.js";
+import {
+  runStructuredAgentQuery,
+  runStructuredBatchQuery,
+  runStructuredSessionQuery,
+} from "../../../agent-runtime/execution.js";
 import type { AgentRuntime } from "../../../agent-runtime/types.js";
-import { runStructuredAgentQuery, runStructuredSessionQuery, runStructuredBatchQuery } from "../../../agent-runtime/execution.js";
-import { writeBatchFile, cleanupBatchFiles } from "../../../agent-runtime/batch-files.js";
 import { withRetry } from "../../../retry.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
@@ -16,81 +20,174 @@ import {
   normalizeCandidateMarker,
   parseCsvRecords,
 } from "./csv.js";
+import type { TiPriorCwe, TiPriorDocument } from "./ti-prior.js";
 import {
-  TAINT_ANALYSIS_PASSES,
-  resolveTaintAnalysisConfig,
   type ExtractionDegradation,
+  resolveTaintAnalysisConfig,
+  TAINT_ANALYSIS_PASSES,
   type TaintAnalysisCandidate,
   type TaintAnalysisLabelOutput,
-  type TaintAnalysisLanguage,
   type TaintAnalysisLabelsDocument,
+  type TaintAnalysisLanguage,
   type TaintAnalysisPassDefinition,
   type TaintAnalysisPassEntry,
   type TaintAnalysisPassId,
   type TaintAnalysisPreflightOutput,
 } from "./types.js";
-import type { TiPriorCwe, TiPriorDocument } from "./ti-prior.js";
 
 export const SINK_DENY_LIST: Record<TaintAnalysisLanguage, Set<string>> = {
   go: new Set([
-    "Sprintf", "Fprintf", "Printf", "Errorf",
-    "Fatalf", "Panicf", "Logf", "Warnf", "Infof", "Debugf", "Tracef",
-    "Sprint", "Fprint", "Print", "Sprintln", "Fprintln", "Println",
-    "Warnw", "Infow", "Debugw",
-    "String", "Error", "GoString", "Format",
+    "Sprintf",
+    "Fprintf",
+    "Printf",
+    "Errorf",
+    "Fatalf",
+    "Panicf",
+    "Logf",
+    "Warnf",
+    "Infof",
+    "Debugf",
+    "Tracef",
+    "Sprint",
+    "Fprint",
+    "Print",
+    "Sprintln",
+    "Fprintln",
+    "Println",
+    "Warnw",
+    "Infow",
+    "Debugw",
+    "String",
+    "Error",
+    "GoString",
+    "Format",
   ]),
   python: new Set([
-    "format", "join", "print",
-    "debug", "info", "warning", "error", "critical", "exception",
-    "repr", "str", "__str__", "__repr__", "encode", "decode",
+    "format",
+    "join",
+    "print",
+    "debug",
+    "info",
+    "warning",
+    "error",
+    "critical",
+    "exception",
+    "repr",
+    "str",
+    "__str__",
+    "__repr__",
+    "encode",
+    "decode",
   ]),
   java: new Set([
-    "format", "printf",
-    "log", "fine", "finer", "finest", "info", "warning", "severe",
-    "debug", "warn", "error", "trace", "valueOf",
-    "toString", "hashCode", "equals", "getClass", "getName",
+    "format",
+    "printf",
+    "log",
+    "fine",
+    "finer",
+    "finest",
+    "info",
+    "warning",
+    "severe",
+    "debug",
+    "warn",
+    "error",
+    "trace",
+    "valueOf",
+    "toString",
+    "hashCode",
+    "equals",
+    "getClass",
+    "getName",
   ]),
   javascript: new Set([
-    "log", "warn", "error", "info", "debug", "trace", "format",
-    "toString", "valueOf", "JSON.stringify", "String", "Number", "Boolean",
+    "log",
+    "warn",
+    "error",
+    "info",
+    "debug",
+    "trace",
+    "format",
+    "toString",
+    "valueOf",
+    "JSON.stringify",
+    "String",
+    "Number",
+    "Boolean",
   ]),
   csharp: new Set([
     "Format",
-    "LogDebug", "LogInformation", "LogWarning", "LogError", "LogCritical",
-    "Debug", "Information", "Warning", "Error", "Fatal",
-    "ToString", "GetType", "GetHashCode", "Equals",
+    "LogDebug",
+    "LogInformation",
+    "LogWarning",
+    "LogError",
+    "LogCritical",
+    "Debug",
+    "Information",
+    "Warning",
+    "Error",
+    "Fatal",
+    "ToString",
+    "GetType",
+    "GetHashCode",
+    "Equals",
   ]),
 };
 
 export const FRAMEWORK_SANITIZER_CATALOG: Record<TaintAnalysisLanguage, string[]> = {
   go: [
-    "html.EscapeString", "url.QueryEscape", "url.PathEscape",
-    "filepath.Clean", "filepath.Base", "strconv.Quote",
-    "template.HTMLEscapeString", "template.JSEscapeString",
+    "html.EscapeString",
+    "url.QueryEscape",
+    "url.PathEscape",
+    "filepath.Clean",
+    "filepath.Base",
+    "strconv.Quote",
+    "template.HTMLEscapeString",
+    "template.JSEscapeString",
   ],
   python: [
-    "escape", "mark_safe", "bleach.clean", "bleach.linkify",
-    "html.escape", "markupsafe.escape", "Markup.escape",
-    "urllib.parse.quote", "shlex.quote",
-    "django.utils.html.escape", "django.utils.http.urlencode",
+    "escape",
+    "mark_safe",
+    "bleach.clean",
+    "bleach.linkify",
+    "html.escape",
+    "markupsafe.escape",
+    "Markup.escape",
+    "urllib.parse.quote",
+    "shlex.quote",
+    "django.utils.html.escape",
+    "django.utils.http.urlencode",
   ],
   java: [
-    "HtmlUtils.htmlEscape", "StringEscapeUtils.escapeHtml4",
-    "StringEscapeUtils.escapeXml", "URLEncoder.encode",
-    "ESAPI.encoder().encodeForHTML", "Jsoup.clean",
-    "PreparedStatement.setString", "PreparedStatement.setInt",
+    "HtmlUtils.htmlEscape",
+    "StringEscapeUtils.escapeHtml4",
+    "StringEscapeUtils.escapeXml",
+    "URLEncoder.encode",
+    "ESAPI.encoder().encodeForHTML",
+    "Jsoup.clean",
+    "PreparedStatement.setString",
+    "PreparedStatement.setInt",
   ],
   javascript: [
-    "encodeURIComponent", "encodeURI",
-    "DOMPurify.sanitize", "sanitizeHtml",
-    "escape", "validator.escape", "xss",
-    "helmet", "csurf",
+    "encodeURIComponent",
+    "encodeURI",
+    "DOMPurify.sanitize",
+    "sanitizeHtml",
+    "escape",
+    "validator.escape",
+    "xss",
+    "helmet",
+    "csurf",
   ],
   csharp: [
-    "HtmlEncoder.Encode", "UrlEncoder.Encode", "JavaScriptEncoder.Encode",
-    "HttpUtility.HtmlEncode", "HttpUtility.UrlEncode",
+    "HtmlEncoder.Encode",
+    "UrlEncoder.Encode",
+    "JavaScriptEncoder.Encode",
+    "HttpUtility.HtmlEncode",
+    "HttpUtility.UrlEncode",
     "AntiXssEncoder.HtmlEncode",
-    "WebUtility.HtmlEncode", "WebUtility.UrlEncode",
+    "WebUtility.HtmlEncode",
+    "WebUtility.UrlEncode",
   ],
 };
 
@@ -200,16 +297,16 @@ type LabelCheckpointFormat = "v2" | "legacy";
 
 type LoadPassCheckpointResult =
   | {
-    hit: true;
-    format: LabelCheckpointFormat;
-    entries: TaintAnalysisPassEntry[];
-    deniedCount: number;
-    needsRewrite: boolean;
-  }
+      hit: true;
+      format: LabelCheckpointFormat;
+      entries: TaintAnalysisPassEntry[];
+      deniedCount: number;
+      needsRewrite: boolean;
+    }
   | {
-    hit: false;
-    reason: string;
-  };
+      hit: false;
+      reason: string;
+    };
 
 /**
  * Taint Analysis Step 3 task: LLM labeling + checkpoint payload generation.
@@ -223,7 +320,9 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
     const cfg = resolveTaintAnalysisConfig(context.config);
     const preflight = asPreflightOutput(context.upstreamOutputs.get("taint-analysis-preflight"));
     if (!preflight) {
-      throw new Error("taint-analysis-label requires upstream output from taint-analysis-preflight");
+      throw new Error(
+        "taint-analysis-label requires upstream output from taint-analysis-preflight",
+      );
     }
     if (preflight.extractionDegradation.status === "failed") {
       throw new Error(
@@ -250,7 +349,9 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
 
     // Enrich only representative candidates with code snippets
     await enrichCandidateSnippets(representatives, context.repoRoot);
-    process.stderr.write(`[taint-analysis-label] Loaded ${allCandidates.length} candidates (${preflight.extraction.sourcesRowCount} sources, ${preflight.extraction.sinksRowCount} sinks)\n`);
+    process.stderr.write(
+      `[taint-analysis-label] Loaded ${allCandidates.length} candidates (${preflight.extraction.sourcesRowCount} sources, ${preflight.extraction.sinksRowCount} sinks)\n`,
+    );
     const sourceStatus = resolveSourceAvailability(preflight, allCandidates);
     const noSourcesExtracted = sourceStatus.noSourcesExtracted;
     if (noSourcesExtracted) {
@@ -263,15 +364,17 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
     const references = noSourcesExtracted
       ? ""
       : await loadReferenceContent(preflight.referenceFiles);
-    const runtime = noSourcesExtracted
-      ? null
-      : context.runtime;
+    const runtime = noSourcesExtracted ? null : context.runtime;
 
     const labelsByPass = new Map<number, TaintAnalysisPassEntry[]>();
     let totalCostUsd = 0;
     if (noSourcesExtracted) {
       for (const passId of preflight.passes) {
-        const checkpointPath = path.join(preflight.workspaceDir, "labels", `labels_raw_pass${passId}.json`);
+        const checkpointPath = path.join(
+          preflight.workspaceDir,
+          "labels",
+          `labels_raw_pass${passId}.json`,
+        );
         labelsByPass.set(passId, []);
         await writePassCheckpointV2(
           checkpointPath,
@@ -284,10 +387,14 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
     } else {
       // ── Optimization: label sources once, share across all passes ──
       // Use deduplicated representatives for labeling, propagate to all instances later
-      const sourceCandidates = representatives.filter((c) => c.candidateKind === "source_candidate");
+      const sourceCandidates = representatives.filter(
+        (c) => c.candidateKind === "source_candidate",
+      );
       const sinkCandidates = representatives.filter((c) => c.candidateKind === "sink_candidate");
 
-      process.stderr.write(`[taint-analysis-label] Split (deduped): ${sourceCandidates.length} sources, ${sinkCandidates.length} sinks\n`);
+      process.stderr.write(
+        `[taint-analysis-label] Split (deduped): ${sourceCandidates.length} sources, ${sinkCandidates.length} sinks\n`,
+      );
 
       const sourceLabels = await labelSourcesOnce(
         runtime!,
@@ -306,7 +413,11 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
           continue;
         }
 
-        const checkpointPath = path.join(preflight.workspaceDir, "labels", `labels_raw_pass${passId}.json`);
+        const checkpointPath = path.join(
+          preflight.workspaceDir,
+          "labels",
+          `labels_raw_pass${passId}.json`,
+        );
         const cached = loadPassCheckpoint({
           checkpointPath,
           passId,
@@ -315,7 +426,9 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
           candidateFingerprint,
         });
         if (cached.hit) {
-          process.stderr.write(`[taint-analysis-label] Pass ${passId} (${passDef.focus}): loaded ${cached.entries.length} entries from ${cached.format} checkpoint\n`);
+          process.stderr.write(
+            `[taint-analysis-label] Pass ${passId} (${passDef.focus}): loaded ${cached.entries.length} entries from ${cached.format} checkpoint\n`,
+          );
           if (cached.deniedCount > 0) {
             process.stderr.write(
               `[taint-analysis-label]   Deny-list reclassified ${cached.deniedCount} formatting/logging sink(s) as non-sinks during checkpoint load\n`,
@@ -337,7 +450,9 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
           continue;
         }
 
-        process.stderr.write(`[taint-analysis-label] Pass ${passId} (${passDef.focus}): checkpoint miss (${cached.reason})\n`);
+        process.stderr.write(
+          `[taint-analysis-label] Pass ${passId} (${passDef.focus}): checkpoint miss (${cached.reason})\n`,
+        );
 
         // ── Optimization: two-phase sink triage ──
         // Phase 1: cheap bulk pre-filter — which sinks are plausibly relevant to this CWE?
@@ -354,7 +469,9 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
 
         // Combine pre-labeled sources with filtered sinks for detailed labeling
         const passCandidates = [...sourceCandidates, ...filteredSinks];
-        process.stderr.write(`[taint-analysis-label] Labeling pass ${passId} (${passDef.focus}): ${passCandidates.length} candidates (${sourceCandidates.length} sources + ${filteredSinks.length} sinks)...\n`);
+        process.stderr.write(
+          `[taint-analysis-label] Labeling pass ${passId} (${passDef.focus}): ${passCandidates.length} candidates (${sourceCandidates.length} sources + ${filteredSinks.length} sinks)...\n`,
+        );
 
         const passEntries = await labelPass(
           runtime,
@@ -399,7 +516,9 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
 
         labelsByPass.set(passId, dedupedEntries);
         totalCostUsd += passEntries.costUsd;
-        process.stderr.write(`[taint-analysis-label] Pass ${passId} complete: ${dedupedEntries.length} entries (deduped)\n`);
+        process.stderr.write(
+          `[taint-analysis-label] Pass ${passId} complete: ${dedupedEntries.length} entries (deduped)\n`,
+        );
 
         await writePassCheckpointV2(
           checkpointPath,
@@ -433,8 +552,8 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
           `internal.label_parser_version=${LABEL_PARSER_VERSION}`,
           ...(noSourcesExtracted
             ? [
-              `Labeling skipped because source extraction returned zero source candidates (${preflight.extraction.sourcesRowCount} rows).`,
-            ]
+                `Labeling skipped because source extraction returned zero source candidates (${preflight.extraction.sourcesRowCount} rows).`,
+              ]
             : []),
         ],
       },
@@ -475,27 +594,30 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
       "utf-8",
     );
 
-    return attachTaskOutputMeta({
-      taintAnalysisPath: preflight.taintAnalysisPath,
-      workspaceDir: preflight.workspaceDir,
-      dbPath: preflight.dbPath,
-      codeqlBinary: preflight.codeqlBinary,
-      codeqlVersion: preflight.codeqlVersion,
-      codeqlApiProfileId: preflight.codeqlApiProfileId,
-      language: preflight.language,
-      framework: preflight.framework,
-      passes: preflight.passes,
-      tiPriorMarkdownPath: preflight.tiPriorMarkdownPath,
-      tiPriorJsonPath: preflight.tiPriorJsonPath,
-      tiPriorDegraded: preflight.tiPriorDegraded,
-      extractionDegradation: preflight.extractionDegradation,
-      diffScope: preflight.diffScope,
-      labelsPath,
-      labels,
-      taintModelPath,
-      reviewSummary,
-      labelCounts,
-    }, { costUsd: totalCostUsd });
+    return attachTaskOutputMeta(
+      {
+        taintAnalysisPath: preflight.taintAnalysisPath,
+        workspaceDir: preflight.workspaceDir,
+        dbPath: preflight.dbPath,
+        codeqlBinary: preflight.codeqlBinary,
+        codeqlVersion: preflight.codeqlVersion,
+        codeqlApiProfileId: preflight.codeqlApiProfileId,
+        language: preflight.language,
+        framework: preflight.framework,
+        passes: preflight.passes,
+        tiPriorMarkdownPath: preflight.tiPriorMarkdownPath,
+        tiPriorJsonPath: preflight.tiPriorJsonPath,
+        tiPriorDegraded: preflight.tiPriorDegraded,
+        extractionDegradation: preflight.extractionDegradation,
+        diffScope: preflight.diffScope,
+        labelsPath,
+        labels,
+        taintModelPath,
+        reviewSummary,
+        labelCounts,
+      },
+      { costUsd: totalCostUsd },
+    );
   },
 };
 
@@ -513,7 +635,9 @@ async function labelPass(
   const byCandidateId = new Map<string, LabelResponseEntry>();
   const batches = chunk(candidates, cfg.labelingBatchSize);
   let totalCostUsd = 0;
-  process.stderr.write(`[taint-analysis-label]   ${batches.length} batch(es) of up to ${cfg.labelingBatchSize} candidates\n`);
+  process.stderr.write(
+    `[taint-analysis-label]   ${batches.length} batch(es) of up to ${cfg.labelingBatchSize} candidates\n`,
+  );
 
   // Session path: reuse a single subprocess for all batches in this pass
   const session = runtime.createSession?.({
@@ -535,7 +659,9 @@ async function labelPass(
   try {
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       const batch = batches[batchIdx];
-      process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: querying LLM with ${batch.length} candidates...\n`);
+      process.stderr.write(
+        `[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: querying LLM with ${batch.length} candidates...\n`,
+      );
 
       let initial: { response: LabelResponse; costUsd: number };
 
@@ -551,17 +677,32 @@ async function labelPass(
           location: { file: c.locationFile, line: c.locationLine },
           snippet: c.snippet ?? "",
         }));
-        const batchFile = writeBatchFile(repoRoot, runId, `label-pass${passDef.passId}`, batchIdx, candidatePayload);
-        const turnPrompt = `Read ${batchFile} and classify each candidate. Return JSON with your assessment.`;
-        const result = await withRetry(
-          () => runStructuredSessionQuery(session, turnPrompt),
-          { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
+        const batchFile = writeBatchFile(
+          repoRoot,
+          runId,
+          `label-pass${passDef.passId}`,
+          batchIdx,
+          candidatePayload,
         );
+        const turnPrompt = `Read ${batchFile} and classify each candidate. Return JSON with your assessment.`;
+        const result = await withRetry(() => runStructuredSessionQuery(session, turnPrompt), {
+          maxRetries: 3,
+          backoffMs: 5_000,
+          multiplier: 2,
+        });
         const parsed = parseLabelResponse(result.structuredOutput ?? result.resultText);
         initial = { response: parsed, costUsd: result.costUsd };
       } else {
         // Fallback: spawn a new subprocess per batch (pi-ai runtime)
-        const prompt = buildLabelPrompt(passDef, batch, references, tiPrior, language, framework, false);
+        const prompt = buildLabelPrompt(
+          passDef,
+          batch,
+          references,
+          tiPrior,
+          language,
+          framework,
+          false,
+        );
         initial = await withRetry(
           () => queryLabelBatch(runtime, prompt, repoRoot, cfg.labelingModel),
           { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
@@ -569,7 +710,9 @@ async function labelPass(
       }
       totalCostUsd += initial.costUsd;
 
-      process.stderr.write(`[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: LLM returned ${initial.response.entries.length} entries\n`);
+      process.stderr.write(
+        `[taint-analysis-label]   Batch ${batchIdx + 1}/${batches.length}: LLM returned ${initial.response.entries.length} entries\n`,
+      );
       for (const entry of initial.response.entries) {
         byCandidateId.set(entry.id, entry);
       }
@@ -602,7 +745,13 @@ async function labelPass(
             location: { file: c.locationFile, line: c.locationLine },
             snippet: c.snippet ?? "",
           }));
-          const retryFile = writeBatchFile(repoRoot, runId, `label-pass${passDef.passId}-retry`, batchIdx, retryPayload);
+          const retryFile = writeBatchFile(
+            repoRoot,
+            runId,
+            `label-pass${passDef.passId}-retry`,
+            batchIdx,
+            retryPayload,
+          );
           const retryTurnPrompt = `This is a retry pass for low-confidence items. Re-evaluate carefully with stricter confidence calibration. Read ${retryFile} and classify each candidate. Return JSON with your assessment.`;
           const result = await withRetry(
             () => runStructuredSessionQuery(session, retryTurnPrompt),
@@ -611,7 +760,15 @@ async function labelPass(
           const parsed = parseLabelResponse(result.structuredOutput ?? result.resultText);
           retry = { response: parsed, costUsd: result.costUsd };
         } else {
-          const retryPrompt = buildLabelPrompt(passDef, retryCandidates, references, tiPrior, language, framework, true);
+          const retryPrompt = buildLabelPrompt(
+            passDef,
+            retryCandidates,
+            references,
+            tiPrior,
+            language,
+            framework,
+            true,
+          );
           retry = await withRetry(
             () => queryLabelBatch(runtime, retryPrompt, repoRoot, cfg.labelingModel),
             { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
@@ -646,8 +803,9 @@ async function labelPass(
   });
 
   const validated = applySinkDenyList(entries, language);
-  const deniedCount = entries.filter((entry) => entry.role === "sink").length
-    - validated.filter((entry) => entry.role === "sink").length;
+  const deniedCount =
+    entries.filter((entry) => entry.role === "sink").length -
+    validated.filter((entry) => entry.role === "sink").length;
   if (deniedCount > 0) {
     process.stderr.write(
       `[taint-analysis-label]   Deny-list reclassified ${deniedCount} formatting/logging sink(s) as non-sinks during fresh labeling\n`,
@@ -682,7 +840,9 @@ async function labelSourcesOnce(
   const batches = chunk(sourceCandidates, cfg.labelingBatchSize);
   let totalCostUsd = 0;
 
-  process.stderr.write(`[taint-analysis-label] Labeling ${sourceCandidates.length} sources once (${batches.length} batch(es))...\n`);
+  process.stderr.write(
+    `[taint-analysis-label] Labeling ${sourceCandidates.length} sources once (${batches.length} batch(es))...\n`,
+  );
 
   const sourceSystemPrompt = [
     "You are a taint analysis source labeling agent.",
@@ -742,13 +902,21 @@ async function labelSourcesOnce(
       let result: { response: LabelResponse; costUsd: number };
 
       if (session) {
-        const batchFile = writeBatchFile(repoRoot, runId, "label-sources", batchIdx, candidatePayload);
+        const batchFile = writeBatchFile(
+          repoRoot,
+          runId,
+          "label-sources",
+          batchIdx,
+          candidatePayload,
+        );
         const turnPrompt = `Read ${batchFile} and classify each candidate. Return JSON with your assessment.`;
         const sessionResult = await withRetry(
           () => runStructuredSessionQuery(session, turnPrompt),
           { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
         );
-        const parsed = parseLabelResponse(sessionResult.structuredOutput ?? sessionResult.resultText);
+        const parsed = parseLabelResponse(
+          sessionResult.structuredOutput ?? sessionResult.resultText,
+        );
         result = { response: parsed, costUsd: sessionResult.costUsd };
       } else {
         // Fallback: spawn a new subprocess per batch (pi-ai runtime)
@@ -792,30 +960,42 @@ async function labelSourcesOnce(
             location: { file: c.locationFile, line: c.locationLine },
             snippet: c.snippet ?? "",
           }));
-          const retryFile = writeBatchFile(repoRoot, runId, "label-sources-retry", batchIdx, retryPayload);
+          const retryFile = writeBatchFile(
+            repoRoot,
+            runId,
+            "label-sources-retry",
+            batchIdx,
+            retryPayload,
+          );
           const retryTurnPrompt = `Retry only the omitted candidates. Read ${retryFile} and classify each candidate. Return JSON with your assessment.`;
           const sessionResult = await withRetry(
             () => runStructuredSessionQuery(session, retryTurnPrompt),
             { maxRetries: 3, backoffMs: 5_000, multiplier: 2 },
           );
-          const parsed = parseLabelResponse(sessionResult.structuredOutput ?? sessionResult.resultText);
+          const parsed = parseLabelResponse(
+            sessionResult.structuredOutput ?? sessionResult.resultText,
+          );
           retryResult = { response: parsed, costUsd: sessionResult.costUsd };
         } else {
           const retryPrompt = [
             sourceSystemPrompt,
             "",
             "Candidates:",
-            JSON.stringify(retryCandidates.map((c) => ({
-              id: c.id,
-              candidate_kind: c.candidateKind,
-              callable: c.callable,
-              flow_kind: c.flowKind,
-              arg_index: c.argIndex,
-              receiver_hint: c.receiverHint ?? null,
-              module_hint: c.moduleHint ?? null,
-              location: { file: c.locationFile, line: c.locationLine },
-              snippet: c.snippet ?? "",
-            })), null, 2),
+            JSON.stringify(
+              retryCandidates.map((c) => ({
+                id: c.id,
+                candidate_kind: c.candidateKind,
+                callable: c.callable,
+                flow_kind: c.flowKind,
+                arg_index: c.argIndex,
+                receiver_hint: c.receiverHint ?? null,
+                module_hint: c.moduleHint ?? null,
+                location: { file: c.locationFile, line: c.locationLine },
+                snippet: c.snippet ?? "",
+              })),
+              null,
+              2,
+            ),
           ].join("\n");
           retryResult = await withRetry(
             () => queryLabelBatch(runtime, retryPrompt, repoRoot, cfg.labelingModel),
@@ -832,13 +1012,13 @@ async function labelSourcesOnce(
         .map((candidate) => candidate.id)
         .filter((candidateId) => !byCandidateId.has(candidateId));
       if (unresolvedIds.length > 0) {
-        throw new Error(
-          `Source labeling omitted candidates: ${unresolvedIds.join(", ")}`,
-        );
+        throw new Error(`Source labeling omitted candidates: ${unresolvedIds.join(", ")}`);
       }
 
       if ((batchIdx + 1) % 50 === 0 || batchIdx === batches.length - 1) {
-        process.stderr.write(`[taint-analysis-label]   Source labeling: ${batchIdx + 1}/${batches.length} batches done\n`);
+        process.stderr.write(
+          `[taint-analysis-label]   Source labeling: ${batchIdx + 1}/${batches.length} batches done\n`,
+        );
       }
     }
   } finally {
@@ -846,7 +1026,9 @@ async function labelSourcesOnce(
     if (runId) cleanupBatchFiles(repoRoot, runId);
   }
 
-  process.stderr.write(`[taint-analysis-label] Source labeling complete: ${byCandidateId.size} entries\n`);
+  process.stderr.write(
+    `[taint-analysis-label] Source labeling complete: ${byCandidateId.size} entries\n`,
+  );
   return { entries: byCandidateId, costUsd: totalCostUsd };
 }
 
@@ -875,7 +1057,9 @@ async function triageSinkRelevance(
   const batches = chunk(sinkCandidates, TRIAGE_BATCH_SIZE);
   let totalCostUsd = 0;
 
-  process.stderr.write(`[taint-analysis-label]   Sink triage for ${passDef.focus}: ${sinkCandidates.length} sinks in ${batches.length} batch(es)...\n`);
+  process.stderr.write(
+    `[taint-analysis-label]   Sink triage for ${passDef.focus}: ${sinkCandidates.length} sinks in ${batches.length} batch(es)...\n`,
+  );
 
   const systemPrompt = [
     `You are a taint analysis triage agent. For CWE ${passDef.cwes.join("/")} (${passDef.focus}):`,
@@ -889,7 +1073,9 @@ async function triageSinkRelevance(
 
   // ── Priority 1: Batch API path (50% cost reduction) ──
   if (runtime.queryBatch) {
-    process.stderr.write(`[taint-analysis-label]   Using Batch API for sink triage (50% cost reduction)\n`);
+    process.stderr.write(
+      `[taint-analysis-label]   Using Batch API for sink triage (50% cost reduction)\n`,
+    );
 
     // Collect all batch prompts upfront
     const batchRequests: Array<{ id: string; prompt: string; systemPrompt?: string }> = [];
@@ -904,10 +1090,7 @@ async function triageSinkRelevance(
 
       batchRequests.push({
         id: `triage-pass${passDef.passId}-batch${batchIdx}`,
-        prompt: [
-          "Candidates:",
-          JSON.stringify(compactPayload, null, 2),
-        ].join("\n"),
+        prompt: ["Candidates:", JSON.stringify(compactPayload, null, 2)].join("\n"),
         systemPrompt,
       });
     }
@@ -938,10 +1121,7 @@ async function triageSinkRelevance(
         process.stderr.write(
           `[taint-analysis-label]   Sink triage batch ${batchIdx + 1}/${batches.length}: retrying ${retryPayload.length} omitted candidates...\n`,
         );
-        const retryPrompt = [
-          "Candidates:",
-          JSON.stringify(retryPayload, null, 2),
-        ].join("\n");
+        const retryPrompt = ["Candidates:", JSON.stringify(retryPayload, null, 2)].join("\n");
         const retryResult = await runStructuredAgentQuery({
           prompt: retryPrompt,
           cwd: repoRoot,
@@ -978,11 +1158,15 @@ async function triageSinkRelevance(
       }
       // Log progress for large batch sets
       if ((batchIdx + 1) % 20 === 0 || batchIdx === batches.length - 1) {
-        process.stderr.write(`[taint-analysis-label]   Sink triage: ${batchIdx + 1}/${batches.length} batches processed, ${relevantIds.size} relevant so far\n`);
+        process.stderr.write(
+          `[taint-analysis-label]   Sink triage: ${batchIdx + 1}/${batches.length} batches processed, ${relevantIds.size} relevant so far\n`,
+        );
       }
     }
 
-    process.stderr.write(`[taint-analysis-label]   Sink triage complete: ${relevantIds.size}/${sinkCandidates.length} sinks relevant to ${passDef.focus}\n`);
+    process.stderr.write(
+      `[taint-analysis-label]   Sink triage complete: ${relevantIds.size}/${sinkCandidates.length} sinks relevant to ${passDef.focus}\n`,
+    );
     return { relevantIds, costUsd: totalCostUsd };
   }
 
@@ -1076,7 +1260,13 @@ async function triageSinkRelevance(
         );
 
         if (session) {
-          const retryFile = writeBatchFile(repoRoot, runId, "triage-sink-retry", batchIdx, retryPayload);
+          const retryFile = writeBatchFile(
+            repoRoot,
+            runId,
+            "triage-sink-retry",
+            batchIdx,
+            retryPayload,
+          );
           const retryTurnPrompt = `Retry only the omitted candidates. Read ${retryFile} and classify each candidate. Return JSON with your assessment.`;
           const retryResult = await runStructuredSessionQuery(session, retryTurnPrompt);
           totalCostUsd += retryResult.costUsd;
@@ -1133,7 +1323,9 @@ async function triageSinkRelevance(
       }
 
       if ((batchIdx + 1) % 20 === 0 || batchIdx === batches.length - 1) {
-        process.stderr.write(`[taint-analysis-label]   Sink triage: ${batchIdx + 1}/${batches.length} batches, ${relevantIds.size} relevant so far\n`);
+        process.stderr.write(
+          `[taint-analysis-label]   Sink triage: ${batchIdx + 1}/${batches.length} batches, ${relevantIds.size} relevant so far\n`,
+        );
       }
     }
   } finally {
@@ -1141,7 +1333,9 @@ async function triageSinkRelevance(
     if (runId) cleanupBatchFiles(repoRoot, runId);
   }
 
-  process.stderr.write(`[taint-analysis-label]   Sink triage complete: ${relevantIds.size}/${sinkCandidates.length} sinks relevant to ${passDef.focus}\n`);
+  process.stderr.write(
+    `[taint-analysis-label]   Sink triage complete: ${relevantIds.size}/${sinkCandidates.length} sinks relevant to ${passDef.focus}\n`,
+  );
   return { relevantIds, costUsd: totalCostUsd };
 }
 
@@ -1247,9 +1441,7 @@ async function queryLabelBatch(
   }
 
   if (resultError) {
-    const withSubtype = resultErrorSubtype
-      ? ` (${resultErrorSubtype})`
-      : "";
+    const withSubtype = resultErrorSubtype ? ` (${resultErrorSubtype})` : "";
     throw new Error(`Taint analysis labeling runtime failed${withSubtype}: ${resultError}`);
   }
 
@@ -1274,7 +1466,9 @@ function parseLabelResponse(value: unknown): LabelResponse {
       const parsed = JSON.parse(extractJson(value));
       return parseLabelResponse(parsed);
     } catch (error) {
-      throw new Error(`Could not parse taint analysis label response JSON: ${toErrorMessage(error)}`);
+      throw new Error(
+        `Could not parse taint analysis label response JSON: ${toErrorMessage(error)}`,
+      );
     }
   }
 
@@ -1310,7 +1504,10 @@ function normalizeLabelResponseEntry(value: unknown): LabelResponseEntry | null 
   };
 }
 
-function normalizePassEntry(candidate: TaintAnalysisCandidate, entry: LabelResponseEntry): TaintAnalysisPassEntry {
+function normalizePassEntry(
+  candidate: TaintAnalysisCandidate,
+  entry: LabelResponseEntry,
+): TaintAnalysisPassEntry {
   return {
     id: candidate.id,
     role: entry.role,
@@ -1399,9 +1596,11 @@ function mergeCrossPassLabels(labelsByPass: Map<number, TaintAnalysisPassEntry[]
       }
       // If this pass has a lower-confidence or "none" label, upgrade it
       if (
-        (entry.role === "none" || entry.classification === "fp" || entry.confidence < best.confidence)
-        && best.role !== "none"
-        && best.classification !== "fp"
+        (entry.role === "none" ||
+          entry.classification === "fp" ||
+          entry.confidence < best.confidence) &&
+        best.role !== "none" &&
+        best.classification !== "fp"
       ) {
         entries[i] = {
           ...entry,
@@ -1416,8 +1615,7 @@ function mergeCrossPassLabels(labelsByPass: Map<number, TaintAnalysisPassEntry[]
 
   const upgradedCount = [...labelsByPass.values()]
     .flat()
-    .filter((e) => e.rationale.includes("[Cross-pass upgrade"))
-    .length;
+    .filter((e) => e.rationale.includes("[Cross-pass upgrade")).length;
   if (upgradedCount > 0) {
     process.stderr.write(
       `[taint-analysis-label] Cross-pass label sharing: upgraded ${upgradedCount} entries across passes\n`,
@@ -1518,14 +1716,18 @@ function buildLabelSystemPrompt(
     JSON.stringify(passTiPrior, null, 2),
     "",
     "Pass context:",
-    JSON.stringify({
-      pass_id: passDef.passId,
-      pass_key: passDef.passKey,
-      focus: passDef.focus,
-      cwes: passDef.cwes,
-      language,
-      framework,
-    }, null, 2),
+    JSON.stringify(
+      {
+        pass_id: passDef.passId,
+        pass_key: passDef.passKey,
+        focus: passDef.focus,
+        cwes: passDef.cwes,
+        language,
+        framework,
+      },
+      null,
+      2,
+    ),
     "",
     "References (trimmed):",
     references,
@@ -1586,14 +1788,18 @@ function buildLabelPrompt(
     JSON.stringify(passTiPrior, null, 2),
     "",
     "Pass context:",
-    JSON.stringify({
-      pass_id: passDef.passId,
-      pass_key: passDef.passKey,
-      focus: passDef.focus,
-      cwes: passDef.cwes,
-      language,
-      framework,
-    }, null, 2),
+    JSON.stringify(
+      {
+        pass_id: passDef.passId,
+        pass_key: passDef.passKey,
+        focus: passDef.focus,
+        cwes: passDef.cwes,
+        language,
+        framework,
+      },
+      null,
+      2,
+    ),
     "",
     "Candidates:",
     JSON.stringify(candidatePayload, null, 2),
@@ -1699,17 +1905,26 @@ function loadPassCheckpoint({
 
   const parserVersion = Number(parsed["parserVersion"]);
   if (!Number.isFinite(parserVersion) || parserVersion !== LABEL_PARSER_VERSION) {
-    return { hit: false, reason: `parser version mismatch (expected ${LABEL_PARSER_VERSION}, found ${String(parsed["parserVersion"]) || "unknown"})` };
+    return {
+      hit: false,
+      reason: `parser version mismatch (expected ${LABEL_PARSER_VERSION}, found ${String(parsed["parserVersion"]) || "unknown"})`,
+    };
   }
 
   const parsedPassId = Number(parsed["passId"]);
   if (!Number.isFinite(parsedPassId) || parsedPassId !== passId) {
-    return { hit: false, reason: `pass mismatch (expected ${passId}, found ${String(parsed["passId"])})` };
+    return {
+      hit: false,
+      reason: `pass mismatch (expected ${passId}, found ${String(parsed["passId"])})`,
+    };
   }
 
   const parsedLanguage = asString(parsed["language"]).trim();
   if (parsedLanguage !== language) {
-    return { hit: false, reason: `language mismatch (expected ${language}, found ${parsedLanguage || "unknown"})` };
+    return {
+      hit: false,
+      reason: `language mismatch (expected ${language}, found ${parsedLanguage || "unknown"})`,
+    };
   }
 
   const storedFingerprint = asString(parsed["candidateFingerprint"]).trim();
@@ -1726,8 +1941,9 @@ function loadPassCheckpoint({
   }
 
   const validated = applySinkDenyList(entries, language);
-  const deniedCount = entries.filter((entry) => entry.role === "sink").length
-    - validated.filter((entry) => entry.role === "sink").length;
+  const deniedCount =
+    entries.filter((entry) => entry.role === "sink").length -
+    validated.filter((entry) => entry.role === "sink").length;
   return {
     hit: true,
     format: "v2",
@@ -1749,12 +1965,16 @@ function loadLegacyPassCheckpoint(
 
   const entriesFingerprint = computeEntriesFingerprint(entries);
   if (entriesFingerprint !== candidateFingerprint) {
-    return { hit: false, reason: `legacy fingerprint mismatch (parserVersion=legacy-unknown, expected=${LABEL_PARSER_VERSION})` };
+    return {
+      hit: false,
+      reason: `legacy fingerprint mismatch (parserVersion=legacy-unknown, expected=${LABEL_PARSER_VERSION})`,
+    };
   }
 
   const validated = applySinkDenyList(entries, language);
-  const deniedCount = entries.filter((entry) => entry.role === "sink").length
-    - validated.filter((entry) => entry.role === "sink").length;
+  const deniedCount =
+    entries.filter((entry) => entry.role === "sink").length -
+    validated.filter((entry) => entry.role === "sink").length;
   return {
     hit: true,
     format: "legacy",
@@ -1893,18 +2113,12 @@ function canonicalizeEntryForFingerprint(entry: TaintAnalysisPassEntry): string 
 }
 
 function computeCandidatesFingerprint(candidates: TaintAnalysisCandidate[]): string {
-  const canonical = candidates
-    .map(canonicalizeCandidateForFingerprint)
-    .sort()
-    .join("\n");
+  const canonical = candidates.map(canonicalizeCandidateForFingerprint).sort().join("\n");
   return sha256Hex(canonical);
 }
 
 function computeEntriesFingerprint(entries: TaintAnalysisPassEntry[]): string {
-  const canonical = entries
-    .map(canonicalizeEntryForFingerprint)
-    .sort()
-    .join("\n");
+  const canonical = entries.map(canonicalizeEntryForFingerprint).sort().join("\n");
   return sha256Hex(canonical);
 }
 
@@ -1940,7 +2154,10 @@ function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-async function loadCandidates(sourcesCsvPath: string, sinksCsvPath: string): Promise<TaintAnalysisCandidate[]> {
+async function loadCandidates(
+  sourcesCsvPath: string,
+  sinksCsvPath: string,
+): Promise<TaintAnalysisCandidate[]> {
   const sources = await parseCsvCandidates(sourcesCsvPath, "source_candidate");
   const sinks = await parseCsvCandidates(sinksCsvPath, "sink_candidate");
   return [...sources, ...sinks];
@@ -1953,9 +2170,9 @@ function resolveSourceAvailability(
   parsedSourceCount: number;
   noSourcesExtracted: boolean;
 } {
-  const parsedSourceCount = candidates
-    .filter((candidate) => candidate.candidateKind === "source_candidate")
-    .length;
+  const parsedSourceCount = candidates.filter(
+    (candidate) => candidate.candidateKind === "source_candidate",
+  ).length;
   return {
     parsedSourceCount,
     noSourcesExtracted: preflight.extraction.sourcesRowCount <= 0 || parsedSourceCount <= 0,
@@ -1984,11 +2201,17 @@ function summarizeExtractionCounts(
 ): ExtractionCountSummary {
   const expectedSources = Math.max(0, Math.floor(preflight.extraction.sourcesRowCount));
   const expectedSinks = Math.max(0, Math.floor(preflight.extraction.sinksRowCount));
-  const parsedSources = candidates.filter((candidate) => candidate.candidateKind === "source_candidate").length;
-  const parsedSinks = candidates.filter((candidate) => candidate.candidateKind === "sink_candidate").length;
+  const parsedSources = candidates.filter(
+    (candidate) => candidate.candidateKind === "source_candidate",
+  ).length;
+  const parsedSinks = candidates.filter(
+    (candidate) => candidate.candidateKind === "sink_candidate",
+  ).length;
   const expectedTotal = expectedSources + expectedSinks;
   const parsedTotal = parsedSources + parsedSinks;
-  const unknownFlowCount = candidates.filter((candidate) => candidate.flowKind === "unknown").length;
+  const unknownFlowCount = candidates.filter(
+    (candidate) => candidate.flowKind === "unknown",
+  ).length;
   const lineOneCount = candidates.filter((candidate) => candidate.locationLine === 1).length;
 
   return {
@@ -2046,7 +2269,10 @@ function emitExtractionQualityDiagnostics(summary: ExtractionCountSummary): void
   }
 }
 
-function assertExtractionQualityThresholds(summary: ExtractionCountSummary, workspaceDir: string): void {
+function assertExtractionQualityThresholds(
+  summary: ExtractionCountSummary,
+  workspaceDir: string,
+): void {
   const minSampleSize = 50;
   if (summary.parsedTotal < minSampleSize) {
     return;
@@ -2129,10 +2355,15 @@ export function buildTaintModelDocument(
   const cwes: TaintModelCwe[] = [];
 
   for (const pass of labels.passes) {
-    const tiForPass = (tiPrior?.cwes ?? []).filter((entry) => pass.cwes.some((cwe) => normalizeCweId(cwe) === normalizeCweId(entry.cwe)));
-    const tiBasisText = tiForPass.length > 0
-      ? tiForPass.map((entry) => `${entry.cwe} weight=${entry.tiWeight} refs=${entry.references.length}`).join("; ")
-      : "No live TI references available for this pass";
+    const tiForPass = (tiPrior?.cwes ?? []).filter((entry) =>
+      pass.cwes.some((cwe) => normalizeCweId(cwe) === normalizeCweId(entry.cwe)),
+    );
+    const tiBasisText =
+      tiForPass.length > 0
+        ? tiForPass
+            .map((entry) => `${entry.cwe} weight=${entry.tiWeight} refs=${entry.references.length}`)
+            .join("; ")
+        : "No live TI references available for this pass";
     const tiWeight = tiForPass.some((entry) => entry.tiWeight === "HIGH")
       ? "HIGH"
       : tiForPass.some((entry) => entry.tiWeight === "MEDIUM")
@@ -2260,11 +2491,17 @@ function summarizeLabels(
       }
 
       if (entry.role === "source") {
-        sourceFrequency.set(entry.signature.callable, (sourceFrequency.get(entry.signature.callable) ?? 0) + 1);
+        sourceFrequency.set(
+          entry.signature.callable,
+          (sourceFrequency.get(entry.signature.callable) ?? 0) + 1,
+        );
       }
 
       if (entry.role === "sink") {
-        sinkFrequency.set(entry.signature.callable, (sinkFrequency.get(entry.signature.callable) ?? 0) + 1);
+        sinkFrequency.set(
+          entry.signature.callable,
+          (sinkFrequency.get(entry.signature.callable) ?? 0) + 1,
+        );
       }
     }
   }
@@ -2276,12 +2513,14 @@ function summarizeLabels(
     return `- pass ${pass.pass_id} (${pass.focus}): ${passCounts}`;
   });
 
-  const topSources = topItems(sourceFrequency, 5)
-    .map(([name, count]) => `${name}(${count})`)
-    .join(", ") || "none";
-  const topSinks = topItems(sinkFrequency, 5)
-    .map(([name, count]) => `${name}(${count})`)
-    .join(", ") || "none";
+  const topSources =
+    topItems(sourceFrequency, 5)
+      .map(([name, count]) => `${name}(${count})`)
+      .join(", ") || "none";
+  const topSinks =
+    topItems(sinkFrequency, 5)
+      .map(([name, count]) => `${name}(${count})`)
+      .join(", ") || "none";
 
   const reviewSummary = [
     "> **Advisory only** — this report is for human review. No pipeline stage gates on approval.",
@@ -2303,9 +2542,7 @@ function summarizeLabels(
 }
 
 function topItems(map: Map<string, number>, maxItems: number): Array<[string, number]> {
-  return [...map.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxItems);
+  return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, maxItems);
 }
 
 function validateLabelsDocument(labels: TaintAnalysisLabelsDocument): string | null {
@@ -2331,7 +2568,12 @@ function validateLabelsDocument(labels: TaintAnalysisLabelsDocument): string | n
     }
 
     for (const entry of pass.entries) {
-      if (!entry.id || !entry.signature.callable || !entry.location.file || entry.location.line < 1) {
+      if (
+        !entry.id ||
+        !entry.signature.callable ||
+        !entry.location.file ||
+        entry.location.line < 1
+      ) {
         return `invalid entry in pass ${pass.pass_id}: missing id/signature/location`;
       }
 
@@ -2377,17 +2619,17 @@ function asPreflightOutput(value: unknown): TaintAnalysisPreflightOutput | null 
   };
 
   if (
-    !output.taintAnalysisPath
-    || !output.workspaceDir
-    || !output.dbPath
-    || !output.codeqlBinary
-    || !output.codeqlVersion
-    || !output.codeqlApiProfileId
-    || !output.language
-    || !output.tiPriorMarkdownPath
-    || !output.tiPriorJsonPath
-    || !output.extraction.sourcesCsvPath
-    || !output.extraction.sinksCsvPath
+    !output.taintAnalysisPath ||
+    !output.workspaceDir ||
+    !output.dbPath ||
+    !output.codeqlBinary ||
+    !output.codeqlVersion ||
+    !output.codeqlApiProfileId ||
+    !output.language ||
+    !output.tiPriorMarkdownPath ||
+    !output.tiPriorJsonPath ||
+    !output.extraction.sourcesCsvPath ||
+    !output.extraction.sinksCsvPath
   ) {
     return null;
   }
@@ -2412,19 +2654,20 @@ function extractJson(value: string): string {
 
 function parseFlowKind(value: string | undefined): TaintAnalysisCandidate["flowKind"] {
   const normalized = parseKeyValue(value, "flow_kind")?.toLowerCase() ?? "unknown";
-  const canonical = normalized === "arg"
-    ? "argument"
-    : normalized === "parameter"
-      ? "param"
-      : normalized === "result" || normalized === "ret"
-        ? "return"
-        : normalized;
+  const canonical =
+    normalized === "arg"
+      ? "argument"
+      : normalized === "parameter"
+        ? "param"
+        : normalized === "result" || normalized === "ret"
+          ? "return"
+          : normalized;
   if (
-    canonical === "param"
-    || canonical === "argument"
-    || canonical === "return"
-    || canonical === "receiver"
-    || canonical === "field"
+    canonical === "param" ||
+    canonical === "argument" ||
+    canonical === "return" ||
+    canonical === "receiver" ||
+    canonical === "field"
   ) {
     return canonical;
   }
@@ -2433,21 +2676,24 @@ function parseFlowKind(value: string | undefined): TaintAnalysisCandidate["flowK
 }
 
 function asFlowKind(value: unknown): TaintAnalysisCandidate["flowKind"] | null {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  const canonical = normalized === "arg"
-    ? "argument"
-    : normalized === "parameter"
-      ? "param"
-      : normalized === "result" || normalized === "ret"
-        ? "return"
-        : normalized;
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  const canonical =
+    normalized === "arg"
+      ? "argument"
+      : normalized === "parameter"
+        ? "param"
+        : normalized === "result" || normalized === "ret"
+          ? "return"
+          : normalized;
   if (
-    canonical === "param"
-    || canonical === "argument"
-    || canonical === "return"
-    || canonical === "receiver"
-    || canonical === "field"
-    || canonical === "unknown"
+    canonical === "param" ||
+    canonical === "argument" ||
+    canonical === "return" ||
+    canonical === "receiver" ||
+    canonical === "field" ||
+    canonical === "unknown"
   ) {
     return canonical;
   }
@@ -2508,11 +2754,11 @@ function sanitizeString(value: string | undefined): string {
 function asRole(value: unknown): LabelResponseEntry["role"] | null {
   const normalized = String(value ?? "").trim();
   if (
-    normalized === "source"
-    || normalized === "sink"
-    || normalized === "sanitizer"
-    || normalized === "summary"
-    || normalized === "none"
+    normalized === "source" ||
+    normalized === "sink" ||
+    normalized === "sanitizer" ||
+    normalized === "summary" ||
+    normalized === "none"
   ) {
     return normalized;
   }
@@ -2522,7 +2768,12 @@ function asRole(value: unknown): LabelResponseEntry["role"] | null {
 
 function asClassification(value: unknown): LabelResponseEntry["classification"] | null {
   const normalized = String(value ?? "").trim();
-  if (normalized === "tp" || normalized === "fp" || normalized === "candidate" || normalized === "unknown") {
+  if (
+    normalized === "tp" ||
+    normalized === "fp" ||
+    normalized === "candidate" ||
+    normalized === "unknown"
+  ) {
     return normalized;
   }
 
@@ -2551,9 +2802,7 @@ function asStringArray(value: unknown): string[] {
     return [];
   }
 
-  return value
-    .map((item) => String(item).trim())
-    .filter(Boolean);
+  return value.map((item) => String(item).trim()).filter(Boolean);
 }
 
 function asPassArray(value: unknown): TaintAnalysisPassId[] {
@@ -2589,7 +2838,12 @@ function asExtractionDegradation(value: unknown): ExtractionDegradation {
   if (isRecord(value) && typeof value["status"] === "string" && Array.isArray(value["reasons"])) {
     const status = value["status"];
     if (status === "ok" || status === "degraded" || status === "failed") {
-      return { status, reasons: value["reasons"].filter((r): r is string => typeof r === "string") as ExtractionDegradation["reasons"] };
+      return {
+        status,
+        reasons: value["reasons"].filter(
+          (r): r is string => typeof r === "string",
+        ) as ExtractionDegradation["reasons"],
+      };
     }
   }
   return { status: "ok", reasons: [] };

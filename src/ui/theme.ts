@@ -96,7 +96,11 @@ function queryTerminalBackground(timeoutMs: number): Promise<[number, number, nu
       clearTimeout(timer);
       stdin.removeListener("data", onData);
       if (wasRaw !== undefined) {
-        try { stdin.setRawMode(wasRaw); } catch { /* ignore */ }
+        try {
+          stdin.setRawMode(wasRaw);
+        } catch {
+          /* ignore */
+        }
       }
     };
 
@@ -138,23 +142,15 @@ function parseOsc11Response(response: string): [number, number, number] | null {
   if (rgbMatch) {
     const [, r, g, b] = rgbMatch;
     // Normalize to 0-1 based on hex string length (4 hex = 16 bit, 2 hex = 8 bit)
-    const maxVal = r!.length === 4 ? 0xFFFF : r!.length === 2 ? 0xFF : 0xFFFF;
-    return [
-      parseInt(r!, 16) / maxVal,
-      parseInt(g!, 16) / maxVal,
-      parseInt(b!, 16) / maxVal,
-    ];
+    const maxVal = r!.length === 4 ? 0xffff : r!.length === 2 ? 0xff : 0xffff;
+    return [parseInt(r!, 16) / maxVal, parseInt(g!, 16) / maxVal, parseInt(b!, 16) / maxVal];
   }
 
   // #RRGGBB format
   const hexMatch = response.match(/#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})/);
   if (hexMatch) {
     const [, r, g, b] = hexMatch;
-    return [
-      parseInt(r!, 16) / 255,
-      parseInt(g!, 16) / 255,
-      parseInt(b!, 16) / 255,
-    ];
+    return [parseInt(r!, 16) / 255, parseInt(g!, 16) / 255, parseInt(b!, 16) / 255];
   }
 
   return null;

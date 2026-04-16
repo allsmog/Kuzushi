@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { ssrfDetectionTask, __ssrfDetectionInternals } from "../../../src/agents/tasks/ssrf-detection.js";
-import type { KuzushiConfig } from "../../../src/types.js";
+import {
+  __ssrfDetectionInternals,
+  ssrfDetectionTask,
+} from "../../../src/agents/tasks/ssrf-detection.js";
 import type { TaskContext } from "../../../src/agents/types.js";
+import type { KuzushiConfig } from "../../../src/types.js";
 
-const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint } = __ssrfDetectionInternals;
+const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint } =
+  __ssrfDetectionInternals;
 
 function makeContext(overrides: Record<string, unknown> = {}): TaskContext {
   return {
@@ -27,7 +31,7 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: (overrides.taskConfig as Record<string, Record<string, unknown>>) ?? {},
   };
 }
 
@@ -35,7 +39,11 @@ describe("ssrfDetectionTask", () => {
   it("has correct metadata", () => {
     expect(ssrfDetectionTask.id).toBe("ssrf-detect");
     expect(ssrfDetectionTask.outputKind).toBe("findings");
-    expect(ssrfDetectionTask.dependsOn).toEqual(["context-gatherer", "app-model-build", "threat-scenario-build"]);
+    expect(ssrfDetectionTask.dependsOn).toEqual([
+      "context-gatherer",
+      "app-model-build",
+      "threat-scenario-build",
+    ]);
   });
 });
 
@@ -62,7 +70,14 @@ describe("resolveConfig", () => {
 describe("buildPrompt", () => {
   it("includes repo context when provided", () => {
     const prompt = buildPrompt(
-      { languages: ["Java"], frameworks: ["Spring"], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Java"],
+        frameworks: ["Spring"],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       25,
     );
     expect(prompt).toContain("Java");
@@ -92,9 +107,18 @@ describe("buildPrompt", () => {
   });
 
   it("inserts threat-model guidance when provided", () => {
-    const prompt = buildPrompt(undefined, 50, [], undefined, undefined, "## Threat model leads from STRIDE\n- lead");
+    const prompt = buildPrompt(
+      undefined,
+      50,
+      [],
+      undefined,
+      undefined,
+      "## Threat model leads from STRIDE\n- lead",
+    );
     expect(prompt).toContain("## Threat model leads from STRIDE");
-    expect(prompt.indexOf("## Threat model leads from STRIDE")).toBeLessThan(prompt.indexOf("## Categories to check"));
+    expect(prompt.indexOf("## Threat model leads from STRIDE")).toBeLessThan(
+      prompt.indexOf("## Categories to check"),
+    );
   });
 });
 
@@ -128,8 +152,26 @@ describe("normalizeFindings", () => {
   it("deduplicates by fingerprint", () => {
     const raw = {
       findings: [
-        { category: "url-from-user-input", filePath: "src/api/proxy.ts", startLine: 42, severity: "ERROR", description: "SSRF", cwe: "CWE-918", confidence: "HIGH", rationale: "r" },
-        { category: "url-from-user-input", filePath: "src/api/proxy.ts", startLine: 42, severity: "WARNING", description: "SSRF", cwe: "CWE-918", confidence: "MEDIUM", rationale: "r" },
+        {
+          category: "url-from-user-input",
+          filePath: "src/api/proxy.ts",
+          startLine: 42,
+          severity: "ERROR",
+          description: "SSRF",
+          cwe: "CWE-918",
+          confidence: "HIGH",
+          rationale: "r",
+        },
+        {
+          category: "url-from-user-input",
+          filePath: "src/api/proxy.ts",
+          startLine: 42,
+          severity: "WARNING",
+          description: "SSRF",
+          cwe: "CWE-918",
+          confidence: "MEDIUM",
+          rationale: "r",
+        },
       ],
     };
 
@@ -164,7 +206,16 @@ describe("normalizeFindings", () => {
 
 describe("computeFingerprint", () => {
   it("produces stable fingerprints", () => {
-    const f = { category: "url-from-user-input", filePath: "src/proxy.ts", startLine: 42, severity: "ERROR", description: "", cwe: "CWE-918", confidence: "HIGH", rationale: "" };
+    const f = {
+      category: "url-from-user-input",
+      filePath: "src/proxy.ts",
+      startLine: 42,
+      severity: "ERROR",
+      description: "",
+      cwe: "CWE-918",
+      confidence: "HIGH",
+      rationale: "",
+    };
     const fp1 = computeFingerprint("repo", "src/proxy.ts", f);
     const fp2 = computeFingerprint("repo", "src/proxy.ts", f);
     expect(fp1).toBe(fp2);
@@ -172,9 +223,20 @@ describe("computeFingerprint", () => {
   });
 
   it("produces different fingerprints for different inputs", () => {
-    const f1 = { category: "url-from-user-input", filePath: "src/proxy.ts", startLine: 42, severity: "ERROR", description: "", cwe: "", confidence: "", rationale: "" };
+    const f1 = {
+      category: "url-from-user-input",
+      filePath: "src/proxy.ts",
+      startLine: 42,
+      severity: "ERROR",
+      description: "",
+      cwe: "",
+      confidence: "",
+      rationale: "",
+    };
     const f2 = { ...f1, startLine: 43 };
-    expect(computeFingerprint("repo", "src/proxy.ts", f1)).not.toBe(computeFingerprint("repo", "src/proxy.ts", f2));
+    expect(computeFingerprint("repo", "src/proxy.ts", f1)).not.toBe(
+      computeFingerprint("repo", "src/proxy.ts", f2),
+    );
   });
 });
 

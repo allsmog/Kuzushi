@@ -3,17 +3,17 @@ import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import { TaskRegistry } from "../../src/agents/registry.js";
 import type { AgentTask } from "../../src/agents/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
-import { createEvent, generateRunId } from "../../src/bus/helpers.js";
-import { registerOrchestrator } from "../../src/bus/orchestrator.js";
-import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
-import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
 import type {
   PipelineCompleteEvent,
   ReportRequestedEvent,
   TriageBatchQueuedEvent,
 } from "../../src/bus/events.js";
-import { createRun, getRun, initDb } from "../../src/store.js";
+import { createEvent, generateRunId } from "../../src/bus/helpers.js";
+import { registerOrchestrator } from "../../src/bus/orchestrator.js";
+import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
+import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
 import type { Finding } from "../../src/scanners/types.js";
+import { createRun, getRun, initDb } from "../../src/store.js";
 import type { KuzushiConfig, ScanOpts, TriageResult } from "../../src/types.js";
 
 function makeConfig(): KuzushiConfig {
@@ -92,14 +92,16 @@ describe("run metrics persistence", () => {
     registerStoreWorker(bus, { db });
 
     bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {
-      await bus.publish(createEvent("triage:result", event.meta.runId, {
-        context: event.payload.context,
-        finding: event.payload.findings[0],
-        result: makeResult(),
-        costUsd: 0,
-        index: 1,
-        total: event.payload.total,
-      }));
+      await bus.publish(
+        createEvent("triage:result", event.meta.runId, {
+          context: event.payload.context,
+          finding: event.payload.findings[0],
+          result: makeResult(),
+          costUsd: 0,
+          index: 1,
+          total: event.payload.total,
+        }),
+      );
     });
 
     const runId = generateRunId();
@@ -121,11 +123,13 @@ describe("run metrics persistence", () => {
       (event) => event.meta.runId === runId,
     );
 
-    await bus.publish(createEvent("pipeline:start", runId, {
-      context,
-      config,
-      scanOpts: makeScanOpts(),
-    }));
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: makeScanOpts(),
+      }),
+    );
 
     await reportRequested;
     await bus.publish(createEvent("report:complete", runId, { context }));

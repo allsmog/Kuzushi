@@ -5,7 +5,9 @@ export const migration015: Migration = {
   name: "add_assertion_tracking",
   up(db) {
     // Add new columns to pipeline_runs (idempotent check)
-    const pipelineCols = db.prepare("PRAGMA table_info(pipeline_runs)").all() as Array<{ name: string }>;
+    const pipelineCols = db.prepare("PRAGMA table_info(pipeline_runs)").all() as Array<{
+      name: string;
+    }>;
     const pipelineColNames = new Set(pipelineCols.map((c) => c.name));
 
     if (!pipelineColNames.has("assertions_json")) {
@@ -31,7 +33,7 @@ export const migration015: Migration = {
     `).run();
 
     db.prepare(
-      "CREATE INDEX IF NOT EXISTS idx_finding_assertions_run ON finding_assertions(run_id)"
+      "CREATE INDEX IF NOT EXISTS idx_finding_assertions_run ON finding_assertions(run_id)",
     ).run();
   },
 };

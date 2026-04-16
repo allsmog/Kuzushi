@@ -11,37 +11,46 @@
  * Categories: algorithm-selection, dangerous-defaults, primitive-vs-semantic,
  * configuration-cliff, silent-failure, stringly-typed-security.
  */
+
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageInvestigationModule,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../security-profiles.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
+import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
-import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
-import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime, resolveTaskAllowedTools } from "./runtime-overrides.js";
-import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
-import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
-import type { ApplicationModel } from "../../types.js";
 import {
-  normalizeFilePath,
   computeDetectionFingerprint,
   dedupAndRankFindings,
-  runLens,
   type LensResult,
+  normalizeFilePath,
+  runLens,
 } from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
+import {
+  formatFileTreeForPrompt,
+  formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
+} from "./pre-read-prompt.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
+import {
+  buildApplicationModelSection,
+  buildThreatScenarioEvidenceSection,
+} from "./scenario-guidance.js";
+import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
 
 const log = createLogger({ stage: "sharp-edges-detect" });
 
@@ -75,9 +84,29 @@ const SHARP_EDGES_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale", "persona"],
+        required: [
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+          "persona",
+        ],
         properties: {
-          category: { type: "string", enum: ["algorithm-selection", "dangerous-defaults", "primitive-vs-semantic", "configuration-cliff", "silent-failure", "stringly-typed-security"] },
+          category: {
+            type: "string",
+            enum: [
+              "algorithm-selection",
+              "dangerous-defaults",
+              "primitive-vs-semantic",
+              "configuration-cliff",
+              "silent-failure",
+              "stringly-typed-security",
+            ],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -129,7 +158,10 @@ function buildScoundrelPrompt(
   appModelContext?: string,
   scenarioContext?: string,
 ): string {
-  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["config-security", "crypto-import"]);
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, [
+    "config-security",
+    "crypto-import",
+  ]);
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -148,7 +180,11 @@ function buildScoundrelPrompt(
     "Find places where a single config change, flag toggle, or parameter override can",
     "disable or weaken security. Focus on:",
     "",
-    languageTuningModule({ taskId: "sharp-edges-detect", repoContext, frameworks: repoContext?.frameworks }) || "",
+    languageTuningModule({
+      taskId: "sharp-edges-detect",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "",
     "### algorithm-selection (CWE-327)",
     "Can a caller choose a weak algorithm (e.g., AES-ECB, MD5, SHA1) when the API offers stronger options?",
     "Is the algorithm parameter user-controllable or easily overridden?",
@@ -181,11 +217,17 @@ function buildScoundrelPrompt(
         "Only report findings where you can point to a specific config option, flag, or parameter that weakens security.",
         "Do NOT report general coding style issues or theoretical concerns without concrete code locations.",
         "Do NOT re-report simple misconfiguration findings — focus on API DESIGN issues where the insecure path is easy.",
-        ...languageAntiHallucinationExtras({ taskId: "sharp-edges-detect", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "sharp-edges-detect",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildLazyDeveloperPrompt(
@@ -198,7 +240,10 @@ function buildLazyDeveloperPrompt(
   appModelContext?: string,
   scenarioContext?: string,
 ): string {
-  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["config-security", "crypto-import"]);
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, [
+    "config-security",
+    "crypto-import",
+  ]);
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -249,11 +294,17 @@ function buildLazyDeveloperPrompt(
         "Only report findings where the default or most obvious usage path is insecure.",
         "Do NOT report issues that require intentional misconfiguration — focus on what happens with zero effort.",
         "Do NOT report findings in test files or development scripts.",
-        ...languageAntiHallucinationExtras({ taskId: "sharp-edges-detect", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "sharp-edges-detect",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildConfusedDeveloperPrompt(
@@ -266,7 +317,10 @@ function buildConfusedDeveloperPrompt(
   appModelContext?: string,
   scenarioContext?: string,
 ): string {
-  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["config-security", "crypto-import"]);
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, [
+    "config-security",
+    "crypto-import",
+  ]);
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -318,11 +372,17 @@ function buildConfusedDeveloperPrompt(
         "Only report findings where parameter confusion, string comparison, or error handling issues lead to a concrete security bypass.",
         "Do NOT report general code quality issues or stylistic concerns.",
         "Do NOT report findings where types already prevent the confusion.",
-        ...languageAntiHallucinationExtras({ taskId: "sharp-edges-detect", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "sharp-edges-detect",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -342,7 +402,12 @@ function runSharpEdgesLens(
 // Finding normalization
 // ---------------------------------------------------------------------------
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -386,13 +451,17 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 function computeFingerprint(repoName: string, filePath: string, f: SharpEdgesFinding): string {
-  return computeDetectionFingerprint([repoName, "sharp-edges-detect", f.category, filePath, String(f.startLine)]);
+  return computeDetectionFingerprint([
+    repoName,
+    "sharp-edges-detect",
+    f.category,
+    filePath,
+    String(f.startLine),
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -420,10 +489,17 @@ export const sharpEdgesDetectTask: AgentTask<ScanOpts, Finding[]> = {
       fileIndex,
       preRead,
     );
-    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as
+      | ApplicationModel
+      | undefined;
     const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
     const appModelContext = buildApplicationModelSection("sharp-edges-detect", applicationModel);
-    const scenarioContext = await buildThreatScenarioEvidenceSection("sharp-edges-detect", context.repoRoot, applicationModel, scenarioOutput);
+    const scenarioContext = await buildThreatScenarioEvidenceSection(
+      "sharp-edges-detect",
+      context.repoRoot,
+      applicationModel,
+      scenarioOutput,
+    );
 
     const tag = "[sharp-edges-detect]";
     const perLensMax = Math.ceil(maxFindings / 3);
@@ -431,22 +507,55 @@ export const sharpEdgesDetectTask: AgentTask<ScanOpts, Finding[]> = {
 
     const lensPromises: Array<Promise<LensResult>> = [
       runSharpEdgesLens(
-        buildScoundrelPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
-        context, model, `${tag}/scoundrel`,
+        buildScoundrelPrompt(
+          repoContext,
+          perLensMax,
+          profileLines,
+          fileIndex,
+          preRead,
+          threatModelContext,
+          appModelContext,
+          scenarioContext,
+        ),
+        context,
+        model,
+        `${tag}/scoundrel`,
       ).catch((error) => {
         log.error(`${tag}/scoundrel lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
       }),
       runSharpEdgesLens(
-        buildLazyDeveloperPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
-        context, model, `${tag}/lazy-developer`,
+        buildLazyDeveloperPrompt(
+          repoContext,
+          perLensMax,
+          profileLines,
+          fileIndex,
+          preRead,
+          threatModelContext,
+          appModelContext,
+          scenarioContext,
+        ),
+        context,
+        model,
+        `${tag}/lazy-developer`,
       ).catch((error) => {
         log.error(`${tag}/lazy-developer lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
       }),
       runSharpEdgesLens(
-        buildConfusedDeveloperPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
-        context, model, `${tag}/confused-developer`,
+        buildConfusedDeveloperPrompt(
+          repoContext,
+          perLensMax,
+          profileLines,
+          fileIndex,
+          preRead,
+          threatModelContext,
+          appModelContext,
+          scenarioContext,
+        ),
+        context,
+        model,
+        `${tag}/confused-developer`,
       ).catch((error) => {
         log.error(`${tag}/confused-developer lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
@@ -459,13 +568,14 @@ export const sharpEdgesDetectTask: AgentTask<ScanOpts, Finding[]> = {
     const allFindings: Finding[] = [];
     for (const result of lensResults) {
       totalCostUsd += result.costUsd;
-      allFindings.push(...normalizeFindings(result.output, context.repoRoot, context.repoName, perLensMax));
+      allFindings.push(
+        ...normalizeFindings(result.output, context.repoRoot, context.repoName, perLensMax),
+      );
     }
 
-    return attachTaskOutputMeta(
-      dedupAndRankFindings(allFindings, maxFindings),
-      { costUsd: totalCostUsd },
-    );
+    return attachTaskOutputMeta(dedupAndRankFindings(allFindings, maxFindings), {
+      costUsd: totalCostUsd,
+    });
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
@@ -482,7 +592,9 @@ export const sharpEdgesDetectTask: AgentTask<ScanOpts, Finding[]> = {
         "- Is the insecure default/path actually reachable in production?",
         "- Can the config change/parameter confusion lead to a concrete security bypass?",
         "- Are there compensating controls elsewhere that mitigate this?",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

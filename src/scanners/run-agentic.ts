@@ -1,20 +1,17 @@
+import { type AgentActivityCallback, emitAssistantActivity } from "../agent-runtime/execution.js";
 import type { AgentRuntime } from "../agent-runtime/types.js";
-import {
-  emitAssistantActivity,
-  type AgentActivityCallback,
-} from "../agent-runtime/execution.js";
 import { getLogger } from "../logger.js";
-import type { RepoContext, ScanOpts } from "../types.js";
 import { languageTuningModule } from "../prompts/language-tuning.js";
-import type { Finding } from "./types.js";
+import type { RepoContext, ScanOpts } from "../types.js";
 import {
-  FINDING_SCHEMA,
-  parseFindingOutput,
-  selectFindings,
   computeFingerprint,
+  FINDING_SCHEMA,
   type FindingOutput,
   type NormalizedFinding,
+  parseFindingOutput,
+  selectFindings,
 } from "./normalize-findings.js";
+import type { Finding } from "./types.js";
 
 const log = getLogger("agentic-scan");
 
@@ -65,7 +62,7 @@ export async function runAgentic(
     throw new Error("Agentic scanner requires an explicit runtime.");
   }
   let resultText = "";
-  let structuredOutput: unknown = undefined;
+  let structuredOutput: unknown;
   let executionError: string | null = null;
   let costUsd = 0;
 
@@ -119,11 +116,16 @@ export async function runAgentic(
       resultText = message.result;
       structuredOutput = message.structuredOutput;
       const durationSec = message.durationMs ? (message.durationMs / 1000).toFixed(1) : "?";
-      log.info(`${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`);
+      log.info(
+        `${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`,
+      );
       break;
     }
 
-    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
+    executionError =
+      (Array.isArray(message.errors) ? message.errors.join("; ") : "") ||
+      message.subtype ||
+      "unknown error";
   }
 
   if (executionError) {
@@ -169,16 +171,17 @@ function buildPrompt(opts: ScanOpts, maxFindings: number, repoContext?: RepoCont
       ]
     : [];
 
-  const scanPathsContext = opts.scanPaths && opts.scanPaths.length > 1
-    ? [
-        "",
-        "## Scan scope (multi-path module)",
-        "This module spans multiple package directories. Examine files across ALL of these paths:",
-        ...opts.scanPaths.map((p) => `- ${p}`),
-        "Trace data flows ACROSS these directories — they form one deployment unit.",
-        "",
-      ]
-    : [];
+  const scanPathsContext =
+    opts.scanPaths && opts.scanPaths.length > 1
+      ? [
+          "",
+          "## Scan scope (multi-path module)",
+          "This module spans multiple package directories. Examine files across ALL of these paths:",
+          ...opts.scanPaths.map((p) => `- ${p}`),
+          "Trace data flows ACROSS these directories — they form one deployment unit.",
+          "",
+        ]
+      : [];
 
   return [
     "You are a senior application security researcher with deep expertise in vulnerability discovery.",
@@ -190,7 +193,11 @@ function buildPrompt(opts: ScanOpts, maxFindings: number, repoContext?: RepoCont
     ...(repoContext?.languages.length
       ? [
           `## Detected stack: ${repoContext.languages.join(", ")}${repoContext.frameworks.length ? ` (${repoContext.frameworks.join(", ")})` : ""}`,
-          languageTuningModule({ taskId: "agentic", repoContext, frameworks: repoContext.frameworks }),
+          languageTuningModule({
+            taskId: "agentic",
+            repoContext,
+            frameworks: repoContext.frameworks,
+          }),
           "",
         ]
       : []),
@@ -263,4 +270,3 @@ function buildPrompt(opts: ScanOpts, maxFindings: number, repoContext?: RepoCont
     "- If unsure, do NOT report — false negatives are better than false positives.",
   ].join("\n");
 }
-

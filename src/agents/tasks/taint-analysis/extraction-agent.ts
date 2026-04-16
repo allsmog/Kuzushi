@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getLogger } from "../../../logger.js";
 import type {
-  AgentRuntime,
   AgentResultErrorMessage,
   AgentResultSuccessMessage,
+  AgentRuntime,
   AgentToolDecision,
 } from "../../../agent-runtime/types.js";
+import { getLogger } from "../../../logger.js";
 import { toErrorMessage } from "../../../utils.js";
 import type { TaintAnalysisLanguage } from "./types.js";
 
@@ -102,20 +102,20 @@ export async function generateExtractionQuery(
   }
 
   // --- Build system prompt ---
-    const systemPrompt = await buildExtractionPrompt({
-      language,
-      kind,
-      template,
-      referenceContent,
-      taintAnalysisPath,
-      queryPath,
-      codeqlBinary,
-      workspaceDir,
-      dbPath,
-      codeqlApiProfileId,
-      dataFlowImport,
-      taintTrackingImport,
-    });
+  const systemPrompt = await buildExtractionPrompt({
+    language,
+    kind,
+    template,
+    referenceContent,
+    taintAnalysisPath,
+    queryPath,
+    codeqlBinary,
+    workspaceDir,
+    dbPath,
+    codeqlApiProfileId,
+    dataFlowImport,
+    taintTrackingImport,
+  });
 
   // --- Call LLM (with retry for transient API errors) ---
   const MAX_RETRIES = 2;
@@ -147,7 +147,11 @@ export async function generateExtractionQuery(
           canUseTool,
         },
       })) {
-        if (message.type === "result" && typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
+        if (
+          message.type === "result" &&
+          typeof message.totalCostUsd === "number" &&
+          Number.isFinite(message.totalCostUsd)
+        ) {
           costUsd = message.totalCostUsd;
         }
         if (message.type === "result" && message.subtype === "success") {
@@ -180,7 +184,8 @@ export async function generateExtractionQuery(
     }
 
     // Retry on transient runtime errors; don't retry on non-transient failures like max_turns
-    const isTransient = lastErrorSubtype === "error_runtime" || lastErrorSubtype === "error_aborted";
+    const isTransient =
+      lastErrorSubtype === "error_runtime" || lastErrorSubtype === "error_aborted";
     if (!isTransient || attempt >= MAX_RETRIES) {
       break;
     }
@@ -321,11 +326,7 @@ async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> 
   }
 
   if (referenceContent) {
-    lines.push(
-      "## Reference documentation",
-      referenceContent,
-      "",
-    );
+    lines.push("## Reference documentation", referenceContent, "");
   }
 
   lines.push(
@@ -362,8 +363,16 @@ async function loadWorkflowStep2(taintAnalysisPath: string): Promise<string> {
   }
 }
 
-async function loadPythonExample(taintAnalysisPath: string, kind: "source" | "sink"): Promise<string | null> {
-  const referencePath = path.join(taintAnalysisPath, "assets", "extraction", `python_${kind}s_reference.ql`);
+async function loadPythonExample(
+  taintAnalysisPath: string,
+  kind: "source" | "sink",
+): Promise<string | null> {
+  const referencePath = path.join(
+    taintAnalysisPath,
+    "assets",
+    "extraction",
+    `python_${kind}s_reference.ql`,
+  );
   try {
     return await readFile(referencePath, "utf-8");
   } catch {
@@ -438,12 +447,14 @@ function createExtractionToolGuard(options: ExtractionToolGuardOptions) {
 
     if (toolName === "Bash") {
       const command = typeof args["command"] === "string" ? args["command"] : "";
-      if (!isAllowedCodeqlCompileCommand(command, {
-        repoRoot,
-        codeqlBinary,
-        queryPath,
-        workspaceDir,
-      })) {
+      if (
+        !isAllowedCodeqlCompileCommand(command, {
+          repoRoot,
+          codeqlBinary,
+          queryPath,
+          workspaceDir,
+        })
+      ) {
         return {
           behavior: "deny",
           message: "Bash is restricted to a single CodeQL query compile command",
@@ -467,10 +478,7 @@ interface CompileCommandOptions {
   workspaceDir: string;
 }
 
-function isAllowedCodeqlCompileCommand(
-  command: string,
-  options: CompileCommandOptions,
-): boolean {
+function isAllowedCodeqlCompileCommand(command: string, options: CompileCommandOptions): boolean {
   const words = splitShellWords(command);
   if (!words || words.length < 5) {
     return false;
@@ -510,7 +518,7 @@ function isAllowedCodeqlCompileCommand(
 function splitShellWords(command: string): string[] | null {
   const words: string[] = [];
   let current = "";
-  let quote: "\"" | "'" | null = null;
+  let quote: '"' | "'" | null = null;
   let escaping = false;
 
   for (const char of command.trim()) {
@@ -530,8 +538,8 @@ function splitShellWords(command: string): string[] | null {
       continue;
     }
 
-    if (quote === "\"") {
-      if (char === "\"") {
+    if (quote === '"') {
+      if (char === '"') {
         quote = null;
         continue;
       }
@@ -550,12 +558,20 @@ function splitShellWords(command: string): string[] | null {
       continue;
     }
 
-    if (char === "\"" || char === "'") {
+    if (char === '"' || char === "'") {
       quote = char;
       continue;
     }
 
-    if (char === "$" || char === ";" || char === "|" || char === "&" || char === ">" || char === "<" || char === "`") {
+    if (
+      char === "$" ||
+      char === ";" ||
+      char === "|" ||
+      char === "&" ||
+      char === ">" ||
+      char === "<" ||
+      char === "`"
+    ) {
       return null;
     }
 
@@ -607,9 +623,7 @@ function isPathWithinRoot(rootPath: string, candidatePath: string): boolean {
 function isSamePath(left: string, right: string): boolean {
   const a = path.resolve(left);
   const b = path.resolve(right);
-  return process.platform === "win32"
-    ? a.toLowerCase() === b.toLowerCase()
-    : a === b;
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 function extractQueryFromResult(text: string): string | null {
@@ -647,7 +661,9 @@ function extractQueryFromResult(text: string): string | null {
   return candidates[0].query;
 }
 
-function extractFencedBlocks(text: string): Array<{ language: string | undefined; content: string }> {
+function extractFencedBlocks(
+  text: string,
+): Array<{ language: string | undefined; content: string }> {
   const out: Array<{ language: string | undefined; content: string }> = [];
   const matches = text.matchAll(QUERY_FENCE_REGEX);
   for (const match of matches) {
@@ -722,15 +738,25 @@ function trimTrailingNonQueryLines(queryText: string): string {
     return queryText.trim();
   }
 
-  return lines.slice(0, lastCodeLine + 1).join("\n").trim();
+  return lines
+    .slice(0, lastCodeLine + 1)
+    .join("\n")
+    .trim();
 }
 
 function looksLikeCodeqlLine(line: string): boolean {
-  if (line.startsWith("//") || line.startsWith("/*") || line.startsWith("*") || line.startsWith("*/")) {
+  if (
+    line.startsWith("//") ||
+    line.startsWith("/*") ||
+    line.startsWith("*") ||
+    line.startsWith("*/")
+  ) {
     return true;
   }
 
-  return /^(?:@|import\b|private\b|module\b|class\b|predicate\b|from\b|where\b|select\b|exists\b|if\b|then\b|else\b|and\b|or\b|not\b|[A-Za-z_][A-Za-z0-9_:.<>()\[\], ]*[,{)]?|"(?:[^"\\]|\\.)*"\s*,?|'(?:[^'\\]|\\.)*'\s*,?|-?\d+(?:\.\d+)?\s*,?)$/.test(line);
+  return /^(?:@|import\b|private\b|module\b|class\b|predicate\b|from\b|where\b|select\b|exists\b|if\b|then\b|else\b|and\b|or\b|not\b|[A-Za-z_][A-Za-z0-9_:.<>()[\], ]*[,{)]?|"(?:[^"\\]|\\.)*"\s*,?|'(?:[^'\\]|\\.)*'\s*,?|-?\d+(?:\.\d+)?\s*,?)$/.test(
+    line,
+  );
 }
 
 function isLikelyCodeqlQuery(candidate: string): boolean {

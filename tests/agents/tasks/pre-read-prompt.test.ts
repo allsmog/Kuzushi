@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   formatFileTreeForPrompt,
-  formatPreReadForPrompt,
   formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
 } from "../../../src/agents/tasks/pre-read-prompt.js";
 import type { FileIndex } from "../../../src/types.js";
 
@@ -22,7 +22,9 @@ describe("formatFileTreeForPrompt", () => {
   });
 
   it("returns empty for empty tree", () => {
-    expect(formatFileTreeForPrompt({ tree: [], totalFiles: 0, truncated: false, patternMatches: {} })).toBe("");
+    expect(
+      formatFileTreeForPrompt({ tree: [], totalFiles: 0, truncated: false, patternMatches: {} }),
+    ).toBe("");
   });
 
   it("returns full tree when no pattern matches flag", () => {
@@ -88,7 +90,9 @@ describe("formatPatternMatchesForPrompt", () => {
 
   it("returns empty for empty domains array", () => {
     const fileIndex = makeFileIndex({
-      patternMatches: { "secret-pattern": [{ filePath: "src/a.ts", lineNumber: 1, lineContent: "API_KEY=abc123" }] },
+      patternMatches: {
+        "secret-pattern": [{ filePath: "src/a.ts", lineNumber: 1, lineContent: "API_KEY=abc123" }],
+      },
     });
     expect(formatPatternMatchesForPrompt(fileIndex, [])).toBe("");
   });

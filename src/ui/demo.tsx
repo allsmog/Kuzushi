@@ -10,8 +10,8 @@
 import { render } from "ink";
 import { createElement } from "react";
 import { App } from "./App.js";
+import type { ActionableFinding, SummaryData } from "./state.js";
 import { createUIStore } from "./state.js";
-import type { SummaryData, ActionableFinding } from "./state.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -51,37 +51,57 @@ async function main(): Promise<void> {
 
   // --- Individual scanner sub-tasks start in parallel ---
   store.upsertSubTask("scan", {
-    id: "semgrep", label: "semgrep", status: "active", startedAt: Date.now(),
+    id: "semgrep",
+    label: "semgrep",
+    status: "active",
+    startedAt: Date.now(),
   });
   store.upsertSubTask("scan", {
-    id: "codeql", label: "codeql", status: "active", startedAt: Date.now(),
+    id: "codeql",
+    label: "codeql",
+    status: "active",
+    startedAt: Date.now(),
   });
   store.upsertSubTask("scan", {
-    id: "agentic", label: "agentic", status: "pending",
+    id: "agentic",
+    label: "agentic",
+    status: "pending",
   });
   await sleep(1500);
 
   // Semgrep finishes first
   store.upsertSubTask("scan", {
-    id: "semgrep", label: "semgrep", status: "done", elapsedMs: 1500,
+    id: "semgrep",
+    label: "semgrep",
+    status: "done",
+    elapsedMs: 1500,
   });
   await sleep(800);
 
   // Agentic starts
   store.upsertSubTask("scan", {
-    id: "agentic", label: "agentic", status: "active", startedAt: Date.now(),
+    id: "agentic",
+    label: "agentic",
+    status: "active",
+    startedAt: Date.now(),
   });
   await sleep(1200);
 
   // CodeQL finishes
   store.upsertSubTask("scan", {
-    id: "codeql", label: "codeql", status: "done", elapsedMs: 3500,
+    id: "codeql",
+    label: "codeql",
+    status: "done",
+    elapsedMs: 3500,
   });
   await sleep(800);
 
   // Agentic finishes
   store.upsertSubTask("scan", {
-    id: "agentic", label: "agentic", status: "done", elapsedMs: 2000,
+    id: "agentic",
+    label: "agentic",
+    status: "done",
+    elapsedMs: 2000,
   });
   await sleep(500);
 
@@ -106,17 +126,39 @@ async function main(): Promise<void> {
 
   // --- Simulate triage with agent activity ---
   const fingerprints = [
-    "a1b2c3d4e5f6", "f6e5d4c3b2a1", "111222333444",
-    "555666777888", "999000aabbcc", "ddeeff112233",
-    "aabbccddeeff", "112233445566", "778899001122",
-    "334455667788", "990011223344", "556677889900",
-    "abcdef123456", "654321fedcba", "abcabc123123",
+    "a1b2c3d4e5f6",
+    "f6e5d4c3b2a1",
+    "111222333444",
+    "555666777888",
+    "999000aabbcc",
+    "ddeeff112233",
+    "aabbccddeeff",
+    "112233445566",
+    "778899001122",
+    "334455667788",
+    "990011223344",
+    "556677889900",
+    "abcdef123456",
+    "654321fedcba",
+    "abcabc123123",
   ];
 
   const verdicts: Array<"tp" | "fp" | "needs_review"> = [
-    "tp", "fp", "fp", "needs_review", "fp",
-    "fp", "tp", "fp", "fp", "needs_review",
-    "fp", "fp", "tp", "fp", "fp",
+    "tp",
+    "fp",
+    "fp",
+    "needs_review",
+    "fp",
+    "fp",
+    "tp",
+    "fp",
+    "fp",
+    "needs_review",
+    "fp",
+    "fp",
+    "tp",
+    "fp",
+    "fp",
   ];
 
   for (let i = 0; i < 15; i++) {
@@ -143,7 +185,8 @@ async function main(): Promise<void> {
 
     store.addAgentActivity(fp, {
       kind: "tool-complete",
-      detail: i % 3 === 0 ? "Found unsanitized input in query builder" : "No injection vector found",
+      detail:
+        i % 3 === 0 ? "Found unsanitized input in query builder" : "No injection vector found",
       index: i + 1,
       total: 15,
     });
@@ -191,7 +234,8 @@ async function main(): Promise<void> {
 
     store.addAgentActivity(fp, {
       kind: "tool-complete",
-      detail: i < 2 ? "Exploit confirmed — response contains injected data" : "No exploitation possible",
+      detail:
+        i < 2 ? "Exploit confirmed — response contains injected data" : "No exploitation possible",
       index: i + 1,
       total: 3,
     });
@@ -248,7 +292,7 @@ async function main(): Promise<void> {
     totalTriaged: 15,
     triageCostUsd: 0.42,
     verificationCostUsd: 0.11,
-    pocHarnessCostUsd: 0.10,
+    pocHarnessCostUsd: 0.1,
     variantAnalysisCostUsd: 0,
     exploitable: 2,
     notExploitable: 1,
@@ -287,9 +331,21 @@ async function main(): Promise<void> {
         name: "Stored XSS via template injection",
         overallSeverity: "CRITICAL",
         steps: [
-          { role: "entry", description: "User-controlled input via POST /api/comments", findingFingerprint: "a1b2c3d4e5f6" },
-          { role: "propagation", description: "Data flows through template engine", findingFingerprint: "555666777888" },
-          { role: "sink", description: "Rendered directly in user's browser", findingFingerprint: "aabbccddeeff" },
+          {
+            role: "entry",
+            description: "User-controlled input via POST /api/comments",
+            findingFingerprint: "a1b2c3d4e5f6",
+          },
+          {
+            role: "propagation",
+            description: "Data flows through template engine",
+            findingFingerprint: "555666777888",
+          },
+          {
+            role: "sink",
+            description: "Rendered directly in user's browser",
+            findingFingerprint: "aabbccddeeff",
+          },
         ],
         preconditions: ["User can submit comments"],
         impactDescription: "Full account takeover via session cookie theft",
@@ -318,14 +374,29 @@ function makeFakeFindings(): ActionableFinding[] {
       filePath: "src/api/users.ts",
       startLine: 42,
       ruleId: "javascript.express.security.sql-injection",
-      rationale: "User input from `req.body.name` flows directly into `db.query()` without parameterization, enabling **SQL injection** (CWE-89).",
+      rationale:
+        "User input from `req.body.name` flows directly into `db.query()` without parameterization, enabling **SQL injection** (CWE-89).",
       fingerprint: "a1b2c3d4e5f6",
       verifyExploitable: 1,
       verifyPocPayload: "' OR 1=1 --",
       verifyAttackVector: "HTTP POST /api/users",
       corroboratingSignals: [
-        { taskId: "codeql", ruleId: "js/sql-injection", filePath: "src/api/users.ts", startLine: 42, cwe: ["CWE-89"], score: 78 },
-        { taskId: "agentic", ruleId: "deep-semantic/sqli", filePath: "src/api/users.ts", startLine: 40, cwe: ["CWE-89"], score: 65 },
+        {
+          taskId: "codeql",
+          ruleId: "js/sql-injection",
+          filePath: "src/api/users.ts",
+          startLine: 42,
+          cwe: ["CWE-89"],
+          score: 78,
+        },
+        {
+          taskId: "agentic",
+          ruleId: "deep-semantic/sqli",
+          filePath: "src/api/users.ts",
+          startLine: 40,
+          cwe: ["CWE-89"],
+          score: 65,
+        },
       ],
       suppressionReasons: [],
     },
@@ -337,7 +408,8 @@ function makeFakeFindings(): ActionableFinding[] {
       filePath: "src/auth/login.ts",
       startLine: 78,
       ruleId: "javascript.express.security.timing-attack",
-      rationale: "Password comparison uses `===` instead of `crypto.timingSafeEqual()`, potentially leaking info via *timing side-channel* (CWE-208).",
+      rationale:
+        "Password comparison uses `===` instead of `crypto.timingSafeEqual()`, potentially leaking info via *timing side-channel* (CWE-208).",
       fingerprint: "aabbccddeeff",
       verifyExploitable: 1,
       corroboratingSignals: [],
@@ -351,7 +423,8 @@ function makeFakeFindings(): ActionableFinding[] {
       filePath: "src/utils/crypto.ts",
       startLine: 15,
       ruleId: "javascript.crypto.weak-hash",
-      rationale: "SHA-1 used for hashing — may be acceptable for non-security purposes but should be reviewed.",
+      rationale:
+        "SHA-1 used for hashing — may be acceptable for non-security purposes but should be reviewed.",
       fingerprint: "999000aabbcc",
       corroboratingSignals: [],
       suppressionReasons: [],

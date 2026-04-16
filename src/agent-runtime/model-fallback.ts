@@ -74,11 +74,7 @@ export class ModelFallbackManager {
   }
 
   /** Build a FallbackChain from config. */
-  static buildChain(
-    primary: string,
-    fallbacks?: string[],
-    cooldownMs?: number,
-  ): FallbackChain {
+  static buildChain(primary: string, fallbacks?: string[], cooldownMs?: number): FallbackChain {
     return {
       primary,
       fallbacks: fallbacks ?? [],

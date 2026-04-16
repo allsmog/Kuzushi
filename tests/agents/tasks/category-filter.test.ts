@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  filterCategories,
-  filterBlocks,
-  normalizeLanguageName,
   CATEGORY_SCOPE_HEADER,
-  type CategoryRelevance,
   type CategoryBlock,
+  type CategoryRelevance,
+  filterBlocks,
+  filterCategories,
+  normalizeLanguageName,
 } from "../../../src/agents/tasks/category-filter.js";
 import type { FileIndex, RepoContext } from "../../../src/types.js";
 
@@ -23,7 +23,7 @@ function makeContext(overrides: Partial<RepoContext> = {}): RepoContext {
 
 function makeFileIndex(paths: string[]): FileIndex {
   return {
-    tree: paths.map(p => ({ path: p })),
+    tree: paths.map((p) => ({ path: p })),
     totalFiles: paths.length,
     truncated: false,
     patternMatches: {},

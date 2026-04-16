@@ -70,7 +70,12 @@ export function classifyVerdict(
   }
 
   const rawVerdict = parsed?.result?.verdict;
-  if (rawVerdict === "vulnerable" || rawVerdict === "secure" || rawVerdict === "inconclusive" || rawVerdict === "error") {
+  if (
+    rawVerdict === "vulnerable" ||
+    rawVerdict === "secure" ||
+    rawVerdict === "inconclusive" ||
+    rawVerdict === "error"
+  ) {
     return rawVerdict;
   }
 
@@ -110,10 +115,14 @@ function parseCryptoResult(stdout: string): CryptoBehavioralScriptOutput {
       testType: asTestType(parsed["testType"] ?? parsed["test_type"]),
       verdict,
       summary: asString(parsed["summary"]),
-      timing: isRecord(parsed["timing"]) ? normalizeTiming(parsed["timing"]) ?? undefined : undefined,
+      timing: isRecord(parsed["timing"])
+        ? (normalizeTiming(parsed["timing"]) ?? undefined)
+        : undefined,
       observedBehavior: asOptionalString(parsed["observedBehavior"] ?? parsed["observed_behavior"]),
       expectedBehavior: asOptionalString(parsed["expectedBehavior"] ?? parsed["expected_behavior"]),
-      algorithmConfirmed: asOptionalString(parsed["algorithmConfirmed"] ?? parsed["algorithm_confirmed"]),
+      algorithmConfirmed: asOptionalString(
+        parsed["algorithmConfirmed"] ?? parsed["algorithm_confirmed"],
+      ),
       keyLengthBits: asOptionalNumber(parsed["keyLengthBits"] ?? parsed["key_length_bits"]),
       confirmed: asOptionalBoolean(parsed["confirmed"]),
     };
@@ -122,9 +131,7 @@ function parseCryptoResult(stdout: string): CryptoBehavioralScriptOutput {
   }
 }
 
-function parseTimingFromResult(
-  result: CryptoBehavioralScriptOutput,
-): TimingAnalysisResult | null {
+function parseTimingFromResult(result: CryptoBehavioralScriptOutput): TimingAnalysisResult | null {
   if (result.timing && typeof result.timing.constantTime === "boolean") {
     return {
       constantTime: result.timing.constantTime,
@@ -139,10 +146,12 @@ function parseTimingFromResult(
   return null;
 }
 
-function parseWycheproofFromResult(
-  result: CryptoBehavioralScriptOutput,
-): WycheproofResult | null {
-  if (!result.observedBehavior && !result.expectedBehavior && typeof result.confirmed !== "boolean") {
+function parseWycheproofFromResult(result: CryptoBehavioralScriptOutput): WycheproofResult | null {
+  if (
+    !result.observedBehavior &&
+    !result.expectedBehavior &&
+    typeof result.confirmed !== "boolean"
+  ) {
     return null;
   }
 
@@ -153,9 +162,7 @@ function parseWycheproofFromResult(
   };
 }
 
-function normalizeTiming(
-  value: Record<string, unknown>,
-): Partial<TimingAnalysisResult> | null {
+function normalizeTiming(value: Record<string, unknown>): Partial<TimingAnalysisResult> | null {
   const constantTime = asOptionalBoolean(value["constantTime"] ?? value["constant_time"]);
   if (typeof constantTime !== "boolean") {
     return null;
@@ -193,7 +200,10 @@ function asOptionalBoolean(value: unknown): boolean | undefined {
 }
 
 function asVerdict(value: unknown): CryptoBehavioralVerdict {
-  return value === "vulnerable" || value === "secure" || value === "inconclusive" || value === "error"
+  return value === "vulnerable" ||
+    value === "secure" ||
+    value === "inconclusive" ||
+    value === "error"
     ? value
     : "inconclusive";
 }

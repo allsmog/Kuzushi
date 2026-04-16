@@ -108,8 +108,14 @@ export function resolveThreatModelConfig(config: KuzushiConfig): ThreatModelConf
     maxElements: normalizePositiveInt(raw["maxElements"], DEFAULT_THREAT_MODEL_CONFIG.maxElements),
     maxThreats: normalizePositiveInt(raw["maxThreats"], DEFAULT_THREAT_MODEL_CONFIG.maxThreats),
     emitFindings: normalizeBoolean(raw["emitFindings"], DEFAULT_THREAT_MODEL_CONFIG.emitFindings),
-    findingThreshold: normalizeString(raw["findingThreshold"], DEFAULT_THREAT_MODEL_CONFIG.findingThreshold),
-    randoriStages: normalizeStringArray(raw["randoriStages"], DEFAULT_THREAT_MODEL_CONFIG.randoriStages),
+    findingThreshold: normalizeString(
+      raw["findingThreshold"],
+      DEFAULT_THREAT_MODEL_CONFIG.findingThreshold,
+    ),
+    randoriStages: normalizeStringArray(
+      raw["randoriStages"],
+      DEFAULT_THREAT_MODEL_CONFIG.randoriStages,
+    ),
   };
 }
 

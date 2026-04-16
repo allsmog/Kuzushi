@@ -2,12 +2,12 @@
  * PoC harness dispatch logic extracted from PipelineOrchestrator.
  */
 
-import { normalizeCostUsd } from "../../utils.js";
 import { updateRunCost } from "../../store.js";
+import { normalizeCostUsd } from "../../utils.js";
+import type { PocHarnessErrorEvent, PocHarnessResultEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import type { PocHarnessResultEvent, PocHarnessErrorEvent } from "../events.js";
-import type { RunState, OrchestratorDeps } from "./types.js";
+import type { OrchestratorDeps, RunState } from "./types.js";
 
 export function handlePocHarnessResultState(
   state: RunState,
@@ -52,10 +52,10 @@ export function handlePocHarnessErrorState(
 export function isPocHarnessDone(state: RunState): boolean {
   const processed = state.pocHarnessGenerated + state.pocHarnessSkipped + state.pocHarnessErrors;
   return (
-    state.pocHarnessTotal > 0
-    && processed >= state.pocHarnessTotal
-    && state.pocHarnessInFlight === 0
-    && !state.reportEmitted
+    state.pocHarnessTotal > 0 &&
+    processed >= state.pocHarnessTotal &&
+    state.pocHarnessInFlight === 0 &&
+    !state.reportEmitted
   );
 }
 
@@ -75,8 +75,8 @@ export async function dispatchPocHarness(
     const concurrency = normalizeConcurrency(state.config.pocHarnessConcurrency ?? 1);
 
     while (
-      state.pocHarnessInFlight < concurrency
-      && state.pocHarnessCursor < state.pocHarnessQueue.length
+      state.pocHarnessInFlight < concurrency &&
+      state.pocHarnessCursor < state.pocHarnessQueue.length
     ) {
       await emitBudgetCheck(state, runId);
       if (isBudgetExceeded(state)) {

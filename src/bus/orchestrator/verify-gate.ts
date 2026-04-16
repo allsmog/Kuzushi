@@ -11,11 +11,14 @@
  */
 
 import type { AgentRuntime } from "../../agent-runtime/types.js";
+import {
+  extractSystemsHuntArtifactPath,
+  readSystemsHuntArtifactByPath,
+} from "../../agents/tasks/systems-hunt/artifacts.js";
+import { getLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import type { TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { getLogger } from "../../logger.js";
-import { extractSystemsHuntArtifactPath, readSystemsHuntArtifactByPath } from "../../agents/tasks/systems-hunt/artifacts.js";
 
 const log = getLogger("verify-gate");
 
@@ -24,7 +27,8 @@ const log = getLogger("verify-gate");
 // ---------------------------------------------------------------------------
 
 /* eslint-disable no-useless-escape -- sink names contain dots and parens */
-const KNOWN_SINKS = /\b(SafeExecWithTimeout|ExecWithOutput|popen|system|exec|eval|subprocess\.(?:call|run|Popen)|os\.system|os\.popen|Runtime\.exec|ProcessBuilder|child_process\.exec|child_process\.spawn|execSync|spawnSync|query|execute|raw|prepare|createConnection|innerHTML|document\.write)\b/i;
+const KNOWN_SINKS =
+  /\b(SafeExecWithTimeout|ExecWithOutput|popen|system|exec|eval|subprocess\.(?:call|run|Popen)|os\.system|os\.popen|Runtime\.exec|ProcessBuilder|child_process\.exec|child_process\.spawn|execSync|spawnSync|query|execute|raw|prepare|createConnection|innerHTML|document\.write)\b/i;
 
 /**
  * Extract the sink function from a triage result.
@@ -178,7 +182,7 @@ const GATE_SYSTEM_PROMPT = [
   "                  confidence is low, the evidence is speculative, or the vulnerability class",
   "                  is informational/best-practice. Verification would waste budget.",
   "                  Examples: informational findings, style issues flagged as security,",
-  "                  findings where triage rationale says \"might be\" or \"could potentially\"",
+  '                  findings where triage rationale says "might be" or "could potentially"',
   "                  with no concrete evidence.",
   "",
   "Consider these signals:",
@@ -237,7 +241,10 @@ export async function gateVerificationCandidates(
       const resultsMap = await runtime.queryBatch(batchRequests, {
         cwd: options.repoRoot,
         model,
-        outputFormat: { type: "json_schema", schema: GATE_SCHEMA as unknown as Record<string, unknown> },
+        outputFormat: {
+          type: "json_schema",
+          schema: GATE_SCHEMA as unknown as Record<string, unknown>,
+        },
         thinkingDisabled: true,
         permissionMode: "dontAsk",
       });
@@ -266,7 +273,7 @@ export async function gateVerificationCandidates(
 
     try {
       let resultText = "";
-      let structuredOutput: unknown = undefined;
+      let structuredOutput: unknown;
       for await (const message of runtime.query({
         prompt,
         options: {
@@ -291,20 +298,24 @@ export async function gateVerificationCandidates(
       }
 
       const parsed = structuredOutput ?? (resultText ? tryParseJson(resultText) : undefined);
-      allResults.push(...parseBatchResult(batch, {
-        resultText: resultText ?? "",
-        structuredOutput: parsed,
-        executionError: null,
-        costUsd: 0,
-      }));
+      allResults.push(
+        ...parseBatchResult(batch, {
+          resultText: resultText ?? "",
+          structuredOutput: parsed,
+          executionError: null,
+          costUsd: 0,
+        }),
+      );
       log.info(`Gate batch ${batchIdx + 1}/${batches.length}: gated ${batch.length} candidates`);
     } catch (err) {
       log.warn(`Gate batch ${batchIdx + 1} failed: ${toErrorMessage(err)}`);
-      allResults.push(...batch.map((c) => ({
-        fingerprint: c.finding.fingerprint,
-        decision: "verify" as const,
-        reason: `Gate query failed — defaulting to verify`,
-      })));
+      allResults.push(
+        ...batch.map((c) => ({
+          fingerprint: c.finding.fingerprint,
+          decision: "verify" as const,
+          reason: `Gate query failed — defaulting to verify`,
+        })),
+      );
     }
   }
 
@@ -326,7 +337,9 @@ async function preclassifySystemsHuntCandidates(
 
     const artifactPath = extractSystemsHuntArtifactPath(candidate.finding);
     const resolvedPath = artifactPath
-      ? (artifactPath.startsWith("/") ? artifactPath : `${repoRoot}/${artifactPath}`.replace(/\/+/g, "/"))
+      ? artifactPath.startsWith("/")
+        ? artifactPath
+        : `${repoRoot}/${artifactPath}`.replace(/\/+/g, "/")
       : undefined;
     const artifact = resolvedPath ? await readSystemsHuntArtifactByPath(resolvedPath) : undefined;
 
@@ -363,7 +376,14 @@ function tryParseJson(text: string): unknown {
 
 function parseBatchResult(
   batch: VerifyGateCandidate[],
-  result: { resultText: string; structuredOutput: unknown; executionError: string | null; costUsd: number } | undefined,
+  result:
+    | {
+        resultText: string;
+        structuredOutput: unknown;
+        executionError: string | null;
+        costUsd: number;
+      }
+    | undefined,
 ): VerifyGateResult[] {
   if (!result || result.executionError || !isRecord(result.structuredOutput)) {
     return batch.map((c) => ({
@@ -384,7 +404,7 @@ function parseBatchResult(
         d === "auto_accept" || d === "skip" || d === "cheap_verify" ? d : "verify";
       decisionMap.set(entry["fingerprint"] as string, {
         decision,
-        reason: typeof entry["reason"] === "string" ? entry["reason"] as string : "",
+        reason: typeof entry["reason"] === "string" ? (entry["reason"] as string) : "",
       });
     }
   }
@@ -435,7 +455,9 @@ function formatCandidateEntry(candidate: VerifyGateCandidate): string {
     `Verdict: ${triageResult.verdict} | Confidence: ${triageResult.confidence.toFixed(2)}`,
     `Rationale: ${triageResult.rationale}`,
     `Verification steps: ${verificationSteps}`,
-    signals.length > 0 ? `Corroborating evidence: ${signals.join(", ")}` : "Corroborating evidence: none",
+    signals.length > 0
+      ? `Corroborating evidence: ${signals.join(", ")}`
+      : "Corroborating evidence: none",
     "",
   ].join("\n");
 }

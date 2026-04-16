@@ -16,7 +16,7 @@ export function loadManifestFromPath(dirPath: string): ModuleManifest {
   if (!existsSync(manifestPath)) {
     throw new Error(
       `No module.manifest.json found in "${dirPath}". ` +
-      `Kuzushi modules must include a manifest file.`,
+        `Kuzushi modules must include a manifest file.`,
     );
   }
 
@@ -37,9 +37,12 @@ export function validateManifest(raw: unknown, source?: string): ModuleManifest 
   const errors: string[] = [];
 
   if (typeof obj.id !== "string" || !obj.id) errors.push("missing or invalid 'id' (string)");
-  if (typeof obj.displayName !== "string" || !obj.displayName) errors.push("missing or invalid 'displayName' (string)");
-  if (typeof obj.version !== "string" || !obj.version) errors.push("missing or invalid 'version' (string)");
-  if (typeof obj.entry !== "string" || !obj.entry) errors.push("missing or invalid 'entry' (string)");
+  if (typeof obj.displayName !== "string" || !obj.displayName)
+    errors.push("missing or invalid 'displayName' (string)");
+  if (typeof obj.version !== "string" || !obj.version)
+    errors.push("missing or invalid 'version' (string)");
+  if (typeof obj.entry !== "string" || !obj.entry)
+    errors.push("missing or invalid 'entry' (string)");
 
   const validCategories = ["offense", "defense", "governance", "intel"];
   if (typeof obj.category !== "string" || !validCategories.includes(obj.category)) {
@@ -68,9 +71,10 @@ export function validateManifest(raw: unknown, source?: string): ModuleManifest 
  * Check if module requirements are satisfied.
  * Returns a result with satisfaction status and any missing items.
  */
-export function checkRequirements(
-  reqs: NonNullable<ModuleManifest["requires"]>,
-): { satisfied: boolean; missing: string[] } {
+export function checkRequirements(reqs: NonNullable<ModuleManifest["requires"]>): {
+  satisfied: boolean;
+  missing: string[];
+} {
   const missing: string[] = [];
 
   if (reqs.env) {
@@ -103,7 +107,7 @@ export async function dynamicImportModule(entryPath: string): Promise<CopilotMod
     throw new Error(`Module entry point not found: "${absolutePath}"`);
   }
 
-  const imported = await import(absolutePath) as Record<string, unknown>;
+  const imported = (await import(absolutePath)) as Record<string, unknown>;
 
   // Check for default export or named module export
   const mod = (imported.default ?? imported.module ?? imported) as unknown;
@@ -136,7 +140,8 @@ export function validateModuleExport(mod: unknown): asserts mod is CopilotModule
         continue;
       }
       if (typeof tool.name !== "string") errors.push(`tools[${i}]: missing 'name'`);
-      if (typeof tool.execute !== "function") errors.push(`tools[${i}]: missing 'execute' function`);
+      if (typeof tool.execute !== "function")
+        errors.push(`tools[${i}]: missing 'execute' function`);
     }
   }
 

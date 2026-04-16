@@ -1,26 +1,36 @@
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageInvestigationModule,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../security-profiles.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
-import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
-import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { filterCategories, type CategoryRelevance } from "./category-filter.js";
-import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
-import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
+import { type CategoryRelevance, filterCategories } from "./category-filter.js";
+import {
+  computeDetectionFingerprint,
+  normalizeFilePath,
+  parseJson,
+} from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
+import {
+  formatFileTreeForPrompt,
+  formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
+} from "./pre-read-prompt.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
 
 const log = createLogger({ stage: "secrets-crypto-detect" });
 
@@ -34,7 +44,17 @@ const SECRETS_CRYPTO_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["detectorId", "category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "detectorId",
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
           detectorId: { type: "string", enum: ["secrets-detect", "crypto-misuse-detect"] },
           category: { type: "string" },
@@ -97,12 +117,21 @@ const SECRETS_CRYPTO_RELEVANCE: CategoryRelevance[] = [
   { id: "cert-validation", always: true },
 ];
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[] = [],
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+): string {
   // All secrets/crypto categories are language-agnostic (always included).
   // Filter infrastructure wired for forward compatibility.
   filterCategories(SECRETS_CRYPTO_RELEVANCE, repoContext, fileIndex);
 
-  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["secret-pattern", "crypto-import"]);
+  const patternMatchText = formatPatternMatchesForPrompt(fileIndex, [
+    "secret-pattern",
+    "crypto-import",
+  ]);
 
   const contextLines = repoContext
     ? [
@@ -125,9 +154,13 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(profileLines.length > 0 ? [...profileLines, ""] : []),
     "# Part 1: Secrets Detection",
     "",
-    "For secrets findings, set `detectorId: \"secrets-detect\"` and `category` to the secret type.",
+    'For secrets findings, set `detectorId: "secrets-detect"` and `category` to the secret type.',
     "",
-    languageTuningModule({ taskId: "secrets-crypto-detect", repoContext, frameworks: repoContext?.frameworks }) || "",
+    languageTuningModule({
+      taskId: "secrets-crypto-detect",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "",
     "## Secret patterns to detect",
     "",
     "### api-key (CWE-798)",
@@ -145,7 +178,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "",
     "### password (CWE-798)",
     "- Hardcoded passwords in connection strings or config",
-    "- Password assignments in source code (e.g., `password = \"...\"`, `passwd: \"...\"`)",
+    '- Password assignments in source code (e.g., `password = "..."`, `passwd: "..."`)',
     "",
     "### token (CWE-798)",
     "- JWT secrets hardcoded in source",
@@ -179,7 +212,7 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "",
     "# Part 2: Cryptographic Misuse Detection",
     "",
-    "For crypto findings, set `detectorId: \"crypto-misuse-detect\"` and `category` to the crypto category.",
+    'For crypto findings, set `detectorId: "crypto-misuse-detect"` and `category` to the crypto category.',
     "",
     "## Categories to check",
     "",
@@ -244,14 +277,25 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Files in `test/`, `tests/`, `__tests__/`, `spec/`, `fixtures/`, `mocks/` are test fixtures — be extra skeptical.",
         "`.env.example` and `.env.sample` files contain placeholders, not real secrets.",
         "For crypto findings, only report genuinely insecure usage — not merely suboptimal.",
-        ...languageAntiHallucinationExtras({ taskId: "secrets-crypto-detect", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "secrets-crypto-detect",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -267,7 +311,13 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
 
     const filePath = normalizeFilePath(repoRoot, f.filePath);
     const cweList = f.cwe ? [f.cwe] : [];
-    const fingerprint = computeFingerprint(repoName, fingerprintPrefix, f.category, filePath, f.startLine);
+    const fingerprint = computeFingerprint(
+      repoName,
+      fingerprintPrefix,
+      f.category,
+      filePath,
+      f.startLine,
+    );
 
     const finding: Finding = {
       taskId: scanner,
@@ -282,13 +332,13 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
       subcategory: ["vuln"],
       likelihood: f.confidence || "MEDIUM",
       impact: f.severity === "ERROR" ? "HIGH" : f.severity === "INFO" ? "LOW" : "MEDIUM",
-      cwe: cweList.length > 0 ? cweList : (isSecrets ? ["CWE-798"] : []),
+      cwe: cweList.length > 0 ? cweList : isSecrets ? ["CWE-798"] : [],
       score: scoreFindingMetadata({
         severity: f.severity,
         likelihood: f.confidence,
         impact: f.severity === "ERROR" ? "HIGH" : f.severity === "INFO" ? "LOW" : "MEDIUM",
         subcategory: ["vuln"],
-        cwe: cweList.length > 0 ? cweList : (isSecrets ? ["CWE-798"] : []),
+        cwe: cweList.length > 0 ? cweList : isSecrets ? ["CWE-798"] : [],
       }),
     };
 
@@ -298,12 +348,16 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
-function computeFingerprint(repoName: string, prefix: string, category: string, filePath: string, startLine: number): string {
+function computeFingerprint(
+  repoName: string,
+  prefix: string,
+  category: string,
+  filePath: string,
+  startLine: number,
+): string {
   return computeDetectionFingerprint([repoName, prefix, category, filePath, String(startLine)]);
 }
 
@@ -391,7 +445,9 @@ export const secretsCryptoDetectTask: AgentTask<ScanOpts, Finding[]> = {
           "Verify if the detected secret is a real credential or a placeholder/test fixture.",
           "Check if it's in a test file, example config, or documentation.",
           "Check if the value looks like a real secret (sufficient entropy, proper format).",
-        ].filter(Boolean).join("\n"),
+        ]
+          .filter(Boolean)
+          .join("\n"),
       };
     }
 
@@ -406,7 +462,9 @@ export const secretsCryptoDetectTask: AgentTask<ScanOpts, Finding[]> = {
         "",
         "Verify the cryptographic usage is genuinely insecure in context.",
         "Check if there are compensating controls or if the usage is non-security-critical.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

@@ -2,15 +2,19 @@ import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "../../../src/agent-runtime/types.js";
+import type {
+  AgentMessage,
+  AgentQueryRequest,
+  AgentRuntime,
+} from "../../../src/agent-runtime/types.js";
 import { gatherContextForRoot } from "../../../src/agents/tasks/context-gatherer.js";
+import { extractSystemsHuntArtifactPath } from "../../../src/agents/tasks/systems-hunt/artifacts.js";
 import { systemsContextGathererTask } from "../../../src/agents/tasks/systems-hunt/context.js";
+import { systemsHuntTask } from "../../../src/agents/tasks/systems-hunt/hunt.js";
 import { systemsInvariantExtractTask } from "../../../src/agents/tasks/systems-hunt/invariant-extract.js";
 import { systemsTriggerSynthTask } from "../../../src/agents/tasks/systems-hunt/trigger-synth.js";
-import { systemsHuntTask } from "../../../src/agents/tasks/systems-hunt/hunt.js";
-import { extractSystemsHuntArtifactPath } from "../../../src/agents/tasks/systems-hunt/artifacts.js";
-import { DEFAULTS } from "../../../src/config.js";
 import type { TaskContext } from "../../../src/agents/types.js";
+import { DEFAULTS } from "../../../src/config.js";
 
 const FIXTURE_ROOT = path.resolve("tests/fixtures/systems-hunt");
 
@@ -21,9 +25,17 @@ interface ReplayCase {
 }
 
 const CASES: ReplayCase[] = [
-  { fixture: "protocol-wraparound-positive", shouldFind: true, expectedPrimitive: "null pointer dereference" },
+  {
+    fixture: "protocol-wraparound-positive",
+    shouldFind: true,
+    expectedPrimitive: "null pointer dereference",
+  },
   { fixture: "protocol-wraparound-negative", shouldFind: false },
-  { fixture: "sentinel-slice-positive", shouldFind: true, expectedPrimitive: "out-of-bounds write" },
+  {
+    fixture: "sentinel-slice-positive",
+    shouldFind: true,
+    expectedPrimitive: "out-of-bounds write",
+  },
   { fixture: "sentinel-slice-negative", shouldFind: false },
   { fixture: "rpc-stack-positive", shouldFind: true, expectedPrimitive: "stack buffer overflow" },
   { fixture: "rpc-stack-negative", shouldFind: false },
@@ -48,7 +60,12 @@ describe("systems-hunt replay fixtures", () => {
           enableCounterexamplePass: true,
         };
 
-        const baseContext = makeTaskContext(repoRoot, path.basename(path.dirname(repoRoot)), runtime, config);
+        const baseContext = makeTaskContext(
+          repoRoot,
+          path.basename(path.dirname(repoRoot)),
+          runtime,
+          config,
+        );
         const systemsContext = await systemsContextGathererTask.run({} as never, {
           ...baseContext,
           upstreamOutputs: new Map([["context-gatherer", baseContextOutput]]),
@@ -226,27 +243,29 @@ function buildLensFindings(prompt: string): object[] {
     return [];
   }
 
-  return [{
-    title: titleFor(kind),
-    cwe: cweFor(kind),
-    severity: "ERROR",
-    confidence: lens === enabledLenses[0] ? "HIGH" : "MEDIUM",
-    filePath: location.filePath,
-    startLine: location.startLine,
-    message: messageFor(kind),
-    rationale: `${lens} corroborates ${kind}`,
-    triggerHypothesisIds: triggerIds.slice(0, 1),
-    violatedInvariantIds: [`inv-${location.surfaceId}`],
-    violatedInvariant: invariantSummaryFor(kind),
-    triggerSequence: triggerStepsFor(kind),
-    attackerControlledFields: attackerFieldsFor(kind),
-    memoryPrimitive: primitiveFor(kind),
-    hardeningNotes: guardedPrompt(prompt)
-      ? ["Guard present near sink"]
-      : ["No effective guard found before primitive"],
-    cheapVerifiable: kind === "sentinel-slice" || kind === "rust-guest",
-    analysisPath: [{ filePath: location.filePath, line: location.startLine, role: "sink" }],
-  }];
+  return [
+    {
+      title: titleFor(kind),
+      cwe: cweFor(kind),
+      severity: "ERROR",
+      confidence: lens === enabledLenses[0] ? "HIGH" : "MEDIUM",
+      filePath: location.filePath,
+      startLine: location.startLine,
+      message: messageFor(kind),
+      rationale: `${lens} corroborates ${kind}`,
+      triggerHypothesisIds: triggerIds.slice(0, 1),
+      violatedInvariantIds: [`inv-${location.surfaceId}`],
+      violatedInvariant: invariantSummaryFor(kind),
+      triggerSequence: triggerStepsFor(kind),
+      attackerControlledFields: attackerFieldsFor(kind),
+      memoryPrimitive: primitiveFor(kind),
+      hardeningNotes: guardedPrompt(prompt)
+        ? ["Guard present near sink"]
+        : ["No effective guard found before primitive"],
+      cheapVerifiable: kind === "sentinel-slice" || kind === "rust-guest",
+      analysisPath: [{ filePath: location.filePath, line: location.startLine, role: "sink" }],
+    },
+  ];
 }
 
 function buildCorroborationOutput(prompt: string, cwd: string): object {
@@ -297,7 +316,9 @@ function parseTriggerIds(prompt: string): string[] {
   return [...prompt.matchAll(/\[([^\]]+)\]\s+Steps:/g)].map((match) => match[1]!.trim());
 }
 
-function classifyFixture(filePath: string): "protocol-wraparound" | "sentinel-slice" | "rpc-stack" | "rust-guest" {
+function classifyFixture(
+  filePath: string,
+): "protocol-wraparound" | "sentinel-slice" | "rpc-stack" | "rust-guest" {
   if (/tcp_sack/i.test(filePath)) return "protocol-wraparound";
   if (/h264_slice/i.test(filePath)) return "sentinel-slice";
   if (/rpcsec_gss/i.test(filePath)) return "rpc-stack";
@@ -461,20 +482,47 @@ function lensesFor(kind: ReturnType<typeof classifyFixture>): string[] {
 }
 
 function guardedPrompt(prompt: string, cwd = ""): boolean {
-  return /negative/.test(cwd)
-    || /guarded|if\s*\(!state\)|>=\s*1024|sizeof\(stack_buf\)|guest_len\s*>\s*4096/.test(prompt);
+  return (
+    /negative/.test(cwd) ||
+    /guarded|if\s*\(!state\)|>=\s*1024|sizeof\(stack_buf\)|guest_len\s*>\s*4096/.test(prompt)
+  );
 }
 
-function guardLocationForPrompt(prompt: string): { filePath: string; line: number; role: string; snippet: string } {
+function guardLocationForPrompt(prompt: string): {
+  filePath: string;
+  line: number;
+  role: string;
+  snippet: string;
+} {
   const location = parseLocation(prompt);
   if (/tcp_sack_guarded/.test(prompt)) {
-    return { filePath: location.filePath, line: 6, role: "null-guard", snippet: "if (!state) { return -1; }" };
+    return {
+      filePath: location.filePath,
+      line: 6,
+      role: "null-guard",
+      snippet: "if (!state) { return -1; }",
+    };
   }
   if (/h264_slice_guarded/.test(prompt)) {
-    return { filePath: location.filePath, line: 6, role: "slice-cap", snippet: "if (slice_count >= 1024 || slice_count == 0xFFFF) { return -1; }" };
+    return {
+      filePath: location.filePath,
+      line: 6,
+      role: "slice-cap",
+      snippet: "if (slice_count >= 1024 || slice_count == 0xFFFF) { return -1; }",
+    };
   }
   if (/rpcsec_gss_guarded/.test(prompt)) {
-    return { filePath: location.filePath, line: 3, role: "length-cap", snippet: "if (len > sizeof(stack_buf)) { return -1; }" };
+    return {
+      filePath: location.filePath,
+      line: 3,
+      role: "length-cap",
+      snippet: "if (len > sizeof(stack_buf)) { return -1; }",
+    };
   }
-  return { filePath: location.filePath, line: 7, role: "guest-len-cap", snippet: "if desc.guest_len > 4096 { return; }" };
+  return {
+    filePath: location.filePath,
+    line: 7,
+    role: "guest-len-cap",
+    snippet: "if desc.guest_len > 4096 { return; }",
+  };
 }

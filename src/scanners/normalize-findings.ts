@@ -5,8 +5,8 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { isRecord } from "../utils.js";
+import { detectParameterRiskBoost, scoreFindingMetadata } from "./scoring.js";
 import type { Finding } from "./types.js";
-import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
 
 const SEVERITY_LEVELS = new Set(["ERROR", "WARNING", "INFO"]);
 const CONFIDENCE_LEVELS = new Set(["HIGH", "MEDIUM", "LOW"]);
@@ -163,9 +163,7 @@ export function selectFindings(
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 /** Stable fingerprint for findings. */
@@ -232,9 +230,7 @@ function normalizeFilePath(repoRoot: string, filePath: string): string {
  * Handles both relative and absolute paths.
  */
 function isOutOfScope(scopeRoot: string, filePath: string): boolean {
-  const resolved = path.isAbsolute(filePath)
-    ? filePath
-    : path.resolve(scopeRoot, filePath);
+  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(scopeRoot, filePath);
   const relative = path.relative(scopeRoot, resolved);
   return relative.startsWith("..");
 }

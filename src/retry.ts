@@ -1,6 +1,6 @@
-import { KuzushiError, classifyError, type ErrorCategory } from "./errors.js";
-import type { MessageBus } from "./bus/types.js";
 import type { RetryAttemptEvent, RetryExhaustedEvent } from "./bus/events.js";
+import type { MessageBus } from "./bus/types.js";
+import { classifyError, type ErrorCategory, KuzushiError } from "./errors.js";
 import { toErrorMessage } from "./utils.js";
 
 export interface RetryOptions {
@@ -26,10 +26,7 @@ const NON_RETRYABLE: ReadonlySet<ErrorCategory> = new Set<ErrorCategory>([
 /** Multiplier applied on top of the normal backoff for rate-limit errors. */
 const RATE_LIMIT_BACKOFF_FACTOR = 3;
 
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  options: RetryOptions,
-): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions): Promise<T> {
   let lastError: unknown;
   const operation = options.operation ?? "unknown";
 
@@ -40,9 +37,8 @@ export async function withRetry<T>(
       lastError = error;
 
       // Classify the error — works for both KuzushiError and plain errors.
-      const category: ErrorCategory = error instanceof KuzushiError
-        ? error.category
-        : classifyError(error);
+      const category: ErrorCategory =
+        error instanceof KuzushiError ? error.category : classifyError(error);
 
       // Non-retryable categories should fail immediately.
       if (NON_RETRYABLE.has(category)) {
@@ -50,7 +46,7 @@ export async function withRetry<T>(
       }
 
       if (attempt < options.maxRetries) {
-        let delay = options.backoffMs * Math.pow(options.multiplier, attempt);
+        let delay = options.backoffMs * options.multiplier ** attempt;
 
         // Rate-limit errors get extra breathing room.
         if (category === "rate_limit") {

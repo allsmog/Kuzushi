@@ -10,10 +10,11 @@
  *   │  Backend: pi-ai           Budget: $5.00             │
  *   └────────────────────────────────────────────────────┘
  */
-import React from "react";
-import { Box, Text } from "ink";
+
 import chalk from "chalk";
-import { boxHeader, boxFooter, formatCost, terminalCardWidth } from "../format.js";
+import { Box, Text } from "ink";
+import type React from "react";
+import { boxFooter, boxHeader, formatCost, terminalCardWidth } from "../format.js";
 
 export interface ConfigBannerData {
   model: string;
@@ -55,7 +56,10 @@ export function ConfigBanner({ config }: ConfigBannerProps): React.ReactElement 
     <Box flexDirection="column">
       <Text>{boxHeader("Config", width)}</Text>
       {rows.map(([label, value]) => (
-        <Text key={label}>{"  "}{chalk.dim(`${label}:`)} {value}</Text>
+        <Text key={label}>
+          {"  "}
+          {chalk.dim(`${label}:`)} {value}
+        </Text>
       ))}
       <Text>{boxFooter(width)}</Text>
     </Box>

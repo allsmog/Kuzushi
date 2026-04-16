@@ -1,4 +1,4 @@
-import { execFile, type ExecFileException } from "node:child_process";
+import { type ExecFileException, execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -101,7 +101,7 @@ const PROFILE_MATRIX: Record<TaintAnalysisLanguage, CodeqlProfile[]> = {
       getArgumentMethod: "getArg",
       getAnArgumentExpr: "call.getArg(_)",
       callResultExpr: "call",
-      calleeNamePattern: "call.getFunction().toString().matches(\"%{NAME}%\")",
+      calleeNamePattern: 'call.getFunction().toString().matches("%{NAME}%")',
     },
     {
       id: "python-dataflow-old",
@@ -112,7 +112,7 @@ const PROFILE_MATRIX: Record<TaintAnalysisLanguage, CodeqlProfile[]> = {
       getArgumentMethod: "getArg",
       getAnArgumentExpr: "call.getArg(_)",
       callResultExpr: "call",
-      calleeNamePattern: "call.getFunction().toString().matches(\"%{NAME}%\")",
+      calleeNamePattern: 'call.getFunction().toString().matches("%{NAME}%")',
     },
   ],
   java: [
@@ -196,7 +196,9 @@ export async function resolveCodeqlVersion(codeqlBinary: string): Promise<string
   }
 }
 
-export async function detectWorkingProfile(args: DetectWorkingProfileArgs): Promise<DetectWorkingProfileResult> {
+export async function detectWorkingProfile(
+  args: DetectWorkingProfileArgs,
+): Promise<DetectWorkingProfileResult> {
   const requestedProfile = normalizeRequestedProfile(args.codeqlApiProfile);
   const fallbackEnabled = args.codeqlProfileFallbacks ?? true;
   const validate = args.validate ?? validateProfile;
@@ -207,11 +209,7 @@ export async function detectWorkingProfile(args: DetectWorkingProfileArgs): Prom
     probeTimeoutMs: args.probeTimeoutMs,
   };
 
-  const candidates = resolveCandidateOrder(
-    args.language,
-    requestedProfile,
-    fallbackEnabled,
-  );
+  const candidates = resolveCandidateOrder(args.language, requestedProfile, fallbackEnabled);
 
   for (const candidate of candidates) {
     try {
@@ -259,12 +257,7 @@ export async function validateProfile(profile: CodeqlProfile, args: ProbeArgs): 
     );
   } catch (error) {
     const details = extractCommandFailure(error);
-    throw new Error(
-      [
-        `CodeQL profile probe failed for ${profile.id}.`,
-        details,
-      ].join("\n"),
-    );
+    throw new Error([`CodeQL profile probe failed for ${profile.id}.`, details].join("\n"));
   }
 }
 
@@ -285,10 +278,7 @@ export function queryImportsForProfile(profile: CodeqlProfile): string {
 }
 
 export function libraryImportsForProfile(profile: CodeqlProfile): string {
-  return [
-    languageBaseImport(profile.language),
-    `import ${profile.dataFlowImport}`,
-  ].join("\n");
+  return [languageBaseImport(profile.language), `import ${profile.dataFlowImport}`].join("\n");
 }
 
 export function formatProfileDiagnostics(args: {
@@ -313,9 +303,10 @@ export function formatProfileDiagnostics(args: {
     `Profile fallbacks enabled: ${args.fallbackEnabled ? "true" : "false"}`,
     `Compatibility report: ${args.compatRecordPath}`,
     "Tried profiles:",
-    ...args.tried.map((entry) => (
-      `- ${entry.id}: ${entry.ok ? "ok" : `failed${entry.error ? ` (${excerptError(entry.error)})` : ""}`}`
-    )),
+    ...args.tried.map(
+      (entry) =>
+        `- ${entry.id}: ${entry.ok ? "ok" : `failed${entry.error ? ` (${excerptError(entry.error)})` : ""}`}`,
+    ),
   ].join("\n");
 }
 
@@ -334,7 +325,7 @@ function renderProbeQuery(profile: CodeqlProfile): string {
     "",
     "from DataFlow::Node n",
     "where 1 = 0",
-    "select n, \"profile_probe\"",
+    'select n, "profile_probe"',
     "",
   ].join("\n");
 }

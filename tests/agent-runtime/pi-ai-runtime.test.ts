@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentMessage, AgentQueryRequest } from "../../src/agent-runtime/types.js";
 
 const ORIGINAL_ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"];
@@ -23,7 +23,7 @@ vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
   };
 });
 
-import { PiAiAgentRuntime, isTransientError } from "../../src/agent-runtime/pi-ai.js";
+import { isTransientError, PiAiAgentRuntime } from "../../src/agent-runtime/pi-ai.js";
 
 const tempDirs: string[] = [];
 
@@ -139,10 +139,7 @@ describe("PiAiAgentRuntime", () => {
   it("returns a single-turn successful result", async () => {
     const cwd = makeTempDir();
     completeMock.mockResolvedValue(
-      makeAssistantMessage(
-        [{ type: "text", text: "{\"ok\":true}" }],
-        { totalCost: 0.0123 },
-      ),
+      makeAssistantMessage([{ type: "text", text: '{"ok":true}' }], { totalCost: 0.0123 }),
     );
 
     const runtime = new PiAiAgentRuntime();
@@ -153,7 +150,7 @@ describe("PiAiAgentRuntime", () => {
     expect(messages[messages.length - 1]).toMatchObject({
       type: "result",
       subtype: "success",
-      result: "{\"ok\":true}",
+      result: '{"ok":true}',
       numTurns: 1,
       totalCostUsd: 0.0123,
     });
@@ -166,9 +163,7 @@ describe("PiAiAgentRuntime", () => {
     completeMock.mockImplementation(async () => {
       expect(process.env["ANTHROPIC_API_KEY"]).toBe("sk-config");
       expect(process.env["ANTHROPIC_BASE_URL"]).toBe("https://api.example.com/");
-      return makeAssistantMessage(
-        [{ type: "text", text: "{\"ok\":true}" }],
-      );
+      return makeAssistantMessage([{ type: "text", text: '{"ok":true}' }]);
     });
 
     const runtime = new PiAiAgentRuntime({
@@ -186,21 +181,22 @@ describe("PiAiAgentRuntime", () => {
     writeFileSync(path.join(cwd, "target.ts"), "line1\nline2\nline3\n", "utf8");
 
     completeMock
-      .mockResolvedValueOnce(makeAssistantMessage(
-        [
-          {
-            type: "toolCall",
-            id: "tool-read-1",
-            name: "Read",
-            arguments: { path: "target.ts", offset: 1, limit: 1 },
-          },
-        ],
-        { stopReason: "toolUse", totalCost: 0.004 },
-      ))
-      .mockResolvedValueOnce(makeAssistantMessage(
-        [{ type: "text", text: "{\"verdict\":\"fp\"}" }],
-        { totalCost: 0.006 },
-      ));
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "tool-read-1",
+              name: "Read",
+              arguments: { path: "target.ts", offset: 1, limit: 1 },
+            },
+          ],
+          { stopReason: "toolUse", totalCost: 0.004 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage([{ type: "text", text: '{"verdict":"fp"}' }], { totalCost: 0.006 }),
+      );
 
     const runtime = new PiAiAgentRuntime();
     const messages = await collectMessages(runtime, makeRequest(cwd));
@@ -211,52 +207,55 @@ describe("PiAiAgentRuntime", () => {
     expect(messages[messages.length - 1]).toMatchObject({
       type: "result",
       subtype: "success",
-      result: "{\"verdict\":\"fp\"}",
+      result: '{"verdict":"fp"}',
       numTurns: 2,
       totalCostUsd: 0.01,
     });
 
     const secondContext = completeMock.mock.calls[1]?.[1];
-    expect(secondContext.messages.some((message: { role: string }) => message.role === "toolResult")).toBe(true);
+    expect(
+      secondContext.messages.some((message: { role: string }) => message.role === "toolResult"),
+    ).toBe(true);
   });
 
   it("treats allowedTools=[] as explicit no-tools mode", async () => {
     const cwd = makeTempDir();
     completeMock
-      .mockResolvedValueOnce(makeAssistantMessage(
-        [{
-          type: "toolCall",
-          id: "tool-read-1",
-          name: "Read",
-          arguments: { path: "target.ts" },
-        }],
-        { stopReason: "toolUse" },
-      ))
-      .mockResolvedValueOnce(makeAssistantMessage(
-        [{ type: "text", text: "{\"ok\":true}" }],
-      ));
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "tool-read-1",
+              name: "Read",
+              arguments: { path: "target.ts" },
+            },
+          ],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: '{"ok":true}' }]));
 
     const runtime = new PiAiAgentRuntime();
-    const messages = await collectMessages(
-      runtime,
-      makeRequest(cwd, { allowedTools: [] }),
-    );
+    const messages = await collectMessages(runtime, makeRequest(cwd, { allowedTools: [] }));
 
     expect(completeMock).toHaveBeenCalledTimes(2);
     const firstContext = completeMock.mock.calls[0]?.[1];
     expect(firstContext.tools).toBeUndefined();
     const secondContext = completeMock.mock.calls[1]?.[1];
-    const deniedToolResult = secondContext.messages.find((message: { role?: string; content?: unknown }) => (
-      message.role === "toolResult"
-      && Array.isArray(message.content)
-      && message.content.some((block) => (
-        typeof block === "object"
-        && block !== null
-        && "text" in block
-        && typeof (block as { text?: unknown }).text === "string"
-        && (block as { text: string }).text.includes("Tool \"Read\" is not enabled")
-      ))
-    ));
+    const deniedToolResult = secondContext.messages.find(
+      (message: { role?: string; content?: unknown }) =>
+        message.role === "toolResult" &&
+        Array.isArray(message.content) &&
+        message.content.some(
+          (block) =>
+            typeof block === "object" &&
+            block !== null &&
+            "text" in block &&
+            typeof (block as { text?: unknown }).text === "string" &&
+            (block as { text: string }).text.includes('Tool "Read" is not enabled'),
+        ),
+    );
     expect(deniedToolResult).toBeDefined();
     expect(messages[messages.length - 1]).toMatchObject({
       type: "result",
@@ -270,10 +269,7 @@ describe("PiAiAgentRuntime", () => {
     abortController.abort();
 
     const runtime = new PiAiAgentRuntime();
-    const messages = await collectMessages(
-      runtime,
-      makeRequest(cwd, { abortController }),
-    );
+    const messages = await collectMessages(runtime, makeRequest(cwd, { abortController }));
 
     expect(completeMock).not.toHaveBeenCalled();
     expect(messages[messages.length - 1]).toMatchObject({
@@ -284,21 +280,22 @@ describe("PiAiAgentRuntime", () => {
 
   it("enforces max budget when another tool turn would be required", async () => {
     const cwd = makeTempDir();
-    completeMock.mockResolvedValue(makeAssistantMessage(
-      [{
-        type: "toolCall",
-        id: "tool-read-1",
-        name: "Read",
-        arguments: { path: "target.ts" },
-      }],
-      { stopReason: "toolUse", totalCost: 1.2 },
-    ));
+    completeMock.mockResolvedValue(
+      makeAssistantMessage(
+        [
+          {
+            type: "toolCall",
+            id: "tool-read-1",
+            name: "Read",
+            arguments: { path: "target.ts" },
+          },
+        ],
+        { stopReason: "toolUse", totalCost: 1.2 },
+      ),
+    );
 
     const runtime = new PiAiAgentRuntime();
-    const messages = await collectMessages(
-      runtime,
-      makeRequest(cwd, { maxBudgetUsd: 1 }),
-    );
+    const messages = await collectMessages(runtime, makeRequest(cwd, { maxBudgetUsd: 1 }));
 
     expect(messages[messages.length - 1]).toMatchObject({
       type: "result",
@@ -309,40 +306,38 @@ describe("PiAiAgentRuntime", () => {
   it("returns success for final responses even if they exceed budget", async () => {
     const cwd = makeTempDir();
     completeMock.mockResolvedValue(
-      makeAssistantMessage(
-        [{ type: "text", text: "{\"ok\":true}" }],
-        { totalCost: 1.2 },
-      ),
+      makeAssistantMessage([{ type: "text", text: '{"ok":true}' }], { totalCost: 1.2 }),
     );
 
     const runtime = new PiAiAgentRuntime();
-    const messages = await collectMessages(
-      runtime,
-      makeRequest(cwd, { maxBudgetUsd: 1 }),
-    );
+    const messages = await collectMessages(runtime, makeRequest(cwd, { maxBudgetUsd: 1 }));
 
     expect(messages[messages.length - 1]).toMatchObject({
       type: "result",
       subtype: "success",
-      result: "{\"ok\":true}",
+      result: '{"ok":true}',
     });
   });
 
   it("returns tool deny as error to LLM instead of hard-stopping", async () => {
     const cwd = makeTempDir();
     completeMock
-      .mockResolvedValueOnce(makeAssistantMessage(
-        [{
-          type: "toolCall",
-          id: "tool-read-1",
-          name: "Read",
-          arguments: { path: "target.ts" },
-        }],
-        { stopReason: "toolUse", totalCost: 0.01 },
-      ))
-      .mockResolvedValueOnce(makeAssistantMessage(
-        [{ type: "text", text: "Understood, Read is not allowed." }],
-      ));
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "tool-read-1",
+              name: "Read",
+              arguments: { path: "target.ts" },
+            },
+          ],
+          { stopReason: "toolUse", totalCost: 0.01 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage([{ type: "text", text: "Understood, Read is not allowed." }]),
+      );
 
     const runtime = new PiAiAgentRuntime();
     const messages = await collectMessages(
@@ -369,32 +364,33 @@ describe("PiAiAgentRuntime", () => {
     writeFileSync(path.join(cwd, "target.ts"), "line1\nline2\n", "utf8");
 
     completeMock
-      .mockResolvedValueOnce(makeAssistantMessage(
-        [
-          {
-            type: "toolCall",
-            name: "Read",
-            arguments: { path: "target.ts", offset: 0, limit: 1 },
-          },
-          {
-            type: "toolCall",
-            name: "Read",
-            arguments: { path: "target.ts", offset: 1, limit: 1 },
-          },
-        ],
-        { stopReason: "toolUse" },
-      ))
-      .mockResolvedValueOnce(makeAssistantMessage(
-        [{ type: "text", text: "{\"ok\":true}" }],
-      ));
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              name: "Read",
+              arguments: { path: "target.ts", offset: 0, limit: 1 },
+            },
+            {
+              type: "toolCall",
+              name: "Read",
+              arguments: { path: "target.ts", offset: 1, limit: 1 },
+            },
+          ],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: '{"ok":true}' }]));
 
     const runtime = new PiAiAgentRuntime();
     const messages = await collectMessages(runtime, makeRequest(cwd));
 
     const toolProgressIds = messages
-      .filter((message): message is Extract<AgentMessage, { type: "tool-progress" }> => (
-        message.type === "tool-progress"
-      ))
+      .filter(
+        (message): message is Extract<AgentMessage, { type: "tool-progress" }> =>
+          message.type === "tool-progress",
+      )
       .map((message) => message.toolUseId);
 
     expect(toolProgressIds).toHaveLength(2);
@@ -407,7 +403,7 @@ describe("PiAiAgentRuntime", () => {
       makeAssistantMessage([
         {
           type: "text",
-          text: "```json\n{\"fingerprint\":\"abc\",\"verdict\":\"fp\"}\n```",
+          text: '```json\n{"fingerprint":"abc","verdict":"fp"}\n```',
         },
       ]),
     );
@@ -442,24 +438,28 @@ describe("PiAiAgentRuntime", () => {
 
     const firstContext = completeMock.mock.calls[0]?.[1];
     expect(firstContext.systemPrompt).toContain("must match this schema");
-    expect(firstContext.systemPrompt).toContain("\"fingerprint\"");
+    expect(firstContext.systemPrompt).toContain('"fingerprint"');
   });
 
   it("retries strict structured output when the first response is invalid", async () => {
     const cwd = makeTempDir();
     completeMock
-      .mockResolvedValueOnce(makeAssistantMessage([
-        {
-          type: "text",
-          text: "not valid json",
-        },
-      ]))
-      .mockResolvedValueOnce(makeAssistantMessage([
-        {
-          type: "text",
-          text: "{\"fingerprint\":\"abc\",\"verdict\":\"tp\"}",
-        },
-      ]));
+      .mockResolvedValueOnce(
+        makeAssistantMessage([
+          {
+            type: "text",
+            text: "not valid json",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage([
+          {
+            type: "text",
+            text: '{"fingerprint":"abc","verdict":"tp"}',
+          },
+        ]),
+      );
 
     const runtime = new PiAiAgentRuntime();
     const messages = await collectMessages(
@@ -483,11 +483,12 @@ describe("PiAiAgentRuntime", () => {
 
     expect(completeMock).toHaveBeenCalledTimes(2);
     const secondContext = completeMock.mock.calls[1]?.[1];
-    const correctiveUserMessage = secondContext.messages.find((message: { role?: string; content?: unknown }) => (
-      message.role === "user"
-      && typeof message.content === "string"
-      && message.content.includes("Return JSON only matching schema; no prose/code fences.")
-    ));
+    const correctiveUserMessage = secondContext.messages.find(
+      (message: { role?: string; content?: unknown }) =>
+        message.role === "user" &&
+        typeof message.content === "string" &&
+        message.content.includes("Return JSON only matching schema; no prose/code fences."),
+    );
     expect(correctiveUserMessage).toBeDefined();
     expect(messages[messages.length - 1]).toMatchObject({
       type: "result",
@@ -502,18 +503,22 @@ describe("PiAiAgentRuntime", () => {
   it("returns error_output_format when strict structured output retries are exhausted", async () => {
     const cwd = makeTempDir();
     completeMock
-      .mockResolvedValueOnce(makeAssistantMessage([
-        {
-          type: "text",
-          text: "still not json",
-        },
-      ]))
-      .mockResolvedValueOnce(makeAssistantMessage([
-        {
-          type: "text",
-          text: "still invalid",
-        },
-      ]));
+      .mockResolvedValueOnce(
+        makeAssistantMessage([
+          {
+            type: "text",
+            text: "still not json",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage([
+          {
+            type: "text",
+            text: "still invalid",
+          },
+        ]),
+      );
 
     const runtime = new PiAiAgentRuntime();
     const messages = await collectMessages(
@@ -549,10 +554,7 @@ describe("PiAiAgentRuntime", () => {
       completeMock
         .mockRejectedValueOnce(new Error("503 Service Temporarily Unavailable"))
         .mockResolvedValueOnce(
-          makeAssistantMessage(
-            [{ type: "text", text: "{\"ok\":true}" }],
-            { totalCost: 0.01 },
-          ),
+          makeAssistantMessage([{ type: "text", text: '{"ok":true}' }], { totalCost: 0.01 }),
         );
 
       const runtime = new PiAiAgentRuntime();
@@ -567,7 +569,7 @@ describe("PiAiAgentRuntime", () => {
       expect(messages[messages.length - 1]).toMatchObject({
         type: "result",
         subtype: "success",
-        result: "{\"ok\":true}",
+        result: '{"ok":true}',
       });
     } finally {
       vi.useRealTimers();
@@ -594,16 +596,13 @@ describe("PiAiAgentRuntime", () => {
       const cwd = makeTempDir();
       completeMock
         .mockResolvedValueOnce(
-          makeAssistantMessage(
-            [{ type: "text", text: "" }],
-            { stopReason: "error", errorMessage: "overloaded" },
-          ),
+          makeAssistantMessage([{ type: "text", text: "" }], {
+            stopReason: "error",
+            errorMessage: "overloaded",
+          }),
         )
         .mockResolvedValueOnce(
-          makeAssistantMessage(
-            [{ type: "text", text: "{\"ok\":true}" }],
-            { totalCost: 0.01 },
-          ),
+          makeAssistantMessage([{ type: "text", text: '{"ok":true}' }], { totalCost: 0.01 }),
         );
 
       const runtime = new PiAiAgentRuntime();
@@ -618,7 +617,7 @@ describe("PiAiAgentRuntime", () => {
       expect(messages[messages.length - 1]).toMatchObject({
         type: "result",
         subtype: "success",
-        result: "{\"ok\":true}",
+        result: '{"ok":true}',
       });
     } finally {
       vi.useRealTimers();
@@ -628,10 +627,10 @@ describe("PiAiAgentRuntime", () => {
   it("does not retry non-transient soft errors (stopReason=error)", async () => {
     const cwd = makeTempDir();
     completeMock.mockResolvedValue(
-      makeAssistantMessage(
-        [{ type: "text", text: "" }],
-        { stopReason: "error", errorMessage: "content policy violation" },
-      ),
+      makeAssistantMessage([{ type: "text", text: "" }], {
+        stopReason: "error",
+        errorMessage: "content policy violation",
+      }),
     );
 
     const runtime = new PiAiAgentRuntime();

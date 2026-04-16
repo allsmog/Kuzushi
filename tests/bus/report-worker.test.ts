@@ -1,14 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { InProcessBus } from "../../src/bus/adapters/in-process.js";
-import { createEvent, generateRunId } from "../../src/bus/helpers.js";
-import { registerReportWorker } from "../../src/bus/workers/report-worker.js";
-import { initDb } from "../../src/store.js";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Finding } from "../../src/scanners/types.js";
-import type { KuzushiConfig, TriageResult } from "../../src/types.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import type { ReportCompleteEvent } from "../../src/bus/events.js";
+import { createEvent, generateRunId } from "../../src/bus/helpers.js";
+import { registerReportWorker } from "../../src/bus/workers/report-worker.js";
+import type { Finding } from "../../src/scanners/types.js";
+import { initDb } from "../../src/store.js";
+import type { KuzushiConfig, TriageResult } from "../../src/types.js";
 
 function makeFinding(fp: string): Finding {
   return {
@@ -146,9 +146,13 @@ describe("report-worker", () => {
     await reportCompletePromise;
 
     expect(console.log).toHaveBeenCalled();
-    expect(vi.mocked(console.log).mock.calls.some(
-      (call) => call.some((arg) => String(arg).includes("Inspecting src/app.ts")),
-    )).toBe(true);
+    expect(
+      vi
+        .mocked(console.log)
+        .mock.calls.some((call) =>
+          call.some((arg) => String(arg).includes("Inspecting src/app.ts")),
+        ),
+    ).toBe(true);
 
     await bus.close();
     db.close();
@@ -180,22 +184,26 @@ describe("report-worker", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    await bus.publish(createEvent("scan:start", runId, {
-      context,
-      tasks: ["semgrep"],
-      scanOpts: {
-        severity: ["ERROR"],
-        excludePatterns: [],
-        fresh: false,
-      },
-    }));
+    await bus.publish(
+      createEvent("scan:start", runId, {
+        context,
+        tasks: ["semgrep"],
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          fresh: false,
+        },
+      }),
+    );
     await bus.publish(createEvent("scan:complete", runId, { context, totalFindings: 5 }));
-    await bus.publish(createEvent("triage:start", runId, {
-      context,
-      findingCount: 1,
-      model: "anthropic:claude-sonnet-4-6",
-      skippedAlreadyTriaged: 0,
-    }));
+    await bus.publish(
+      createEvent("triage:start", runId, {
+        context,
+        findingCount: 1,
+        model: "anthropic:claude-sonnet-4-6",
+        skippedAlreadyTriaged: 0,
+      }),
+    );
 
     const output = vi.mocked(console.log).mock.calls.flat().join("\n");
     expect(output).not.toContain("already-triaged");
@@ -286,22 +294,26 @@ describe("report-worker", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    await bus.publish(createEvent("scan:start", runId, {
-      context,
-      tasks: ["semgrep"],
-      scanOpts: {
-        severity: ["ERROR"],
-        excludePatterns: [],
-        fresh: false,
-      },
-    }));
+    await bus.publish(
+      createEvent("scan:start", runId, {
+        context,
+        tasks: ["semgrep"],
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          fresh: false,
+        },
+      }),
+    );
     await bus.publish(createEvent("scan:complete", runId, { context, totalFindings: 3 }));
-    await bus.publish(createEvent("triage:start", runId, {
-      context,
-      findingCount: 1,
-      model: "anthropic:claude-sonnet-4-6",
-      skippedAlreadyTriaged: 2,
-    }));
+    await bus.publish(
+      createEvent("triage:start", runId, {
+        context,
+        findingCount: 1,
+        model: "anthropic:claude-sonnet-4-6",
+        skippedAlreadyTriaged: 2,
+      }),
+    );
 
     const output = vi.mocked(console.log).mock.calls.flat().join("\n");
     expect(output).toContain("Skipping 2 already-triaged findings, 1 remaining");
@@ -366,8 +378,9 @@ describe("report-worker", () => {
       }),
     );
 
-    const output = vi.mocked(console.log).mock.calls
-      .map((call) => call.map((arg) => String(arg)).join(" "))
+    const output = vi
+      .mocked(console.log)
+      .mock.calls.map((call) => call.map((arg) => String(arg)).join(" "))
       .join("\n");
     expect(output).toContain("SKIPPED");
     expect(output).not.toContain("parse-error");
@@ -443,8 +456,9 @@ describe("report-worker", () => {
       }),
     );
 
-    const output = vi.mocked(console.log).mock.calls
-      .map((call) => call.map((arg) => String(arg)).join(" "))
+    const output = vi
+      .mocked(console.log)
+      .mock.calls.map((call) => call.map((arg) => String(arg)).join(" "))
       .join("\n");
 
     expect(output).toContain("TRIAGE ERROR");

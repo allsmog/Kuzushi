@@ -11,11 +11,12 @@
  *   │  Pending re-triage:  4                               │
  *   └────────────────────────────────────────────────────┘
  */
-import React from "react";
-import { Box, Text } from "ink";
+
 import chalk from "chalk";
+import { Box, Text } from "ink";
+import type React from "react";
+import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
 
 export interface ResumeDiffData {
   previousRunDate?: string;
@@ -46,34 +47,53 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
     <Box flexDirection="column">
       <Text>{boxHeader("Resume", width)}</Text>
       <Text>
-        {"  "}{chalk.dim("Previous run:")} {prevDate} ({data.previousFindingCount} findings, {data.previousTriagedCount} triaged)
+        {"  "}
+        {chalk.dim("Previous run:")} {prevDate} ({data.previousFindingCount} findings,{" "}
+        {data.previousTriagedCount} triaged)
       </Text>
       <Text>{""}</Text>
 
       {data.newFindings > 0 && (
-        <Text>{"  "}{chalk.redBright(`${icons.active} New findings:`)}       {data.newFindings}</Text>
+        <Text>
+          {"  "}
+          {chalk.redBright(`${icons.active} New findings:`)} {data.newFindings}
+        </Text>
       )}
-      <Text>{"  "}{chalk.dim(`${icons.complete} Previously triaged:`)} {data.skipped} {chalk.dim("(skipped)")}</Text>
+      <Text>
+        {"  "}
+        {chalk.dim(`${icons.complete} Previously triaged:`)} {data.skipped} {chalk.dim("(skipped)")}
+      </Text>
       {data.pendingRetriage > 0 && (
-        <Text>{"  "}{chalk.yellow(`${icons.warning} Pending re-triage:`)}  {data.pendingRetriage}</Text>
+        <Text>
+          {"  "}
+          {chalk.yellow(`${icons.warning} Pending re-triage:`)} {data.pendingRetriage}
+        </Text>
       )}
 
       {data.verdictChanges.length > 0 && (
         <>
           <Text>{""}</Text>
-          <Text>{"  "}{chalk.yellow(`${icons.warning} Verdict changes:`)}   {data.verdictChanges.length}</Text>
+          <Text>
+            {"  "}
+            {chalk.yellow(`${icons.warning} Verdict changes:`)} {data.verdictChanges.length}
+          </Text>
           {data.verdictChanges.slice(0, 5).map((change, i) => {
             const isLast = i === Math.min(data.verdictChanges.length, 5) - 1;
             const connector = isLast ? icons.treeLast : icons.treeMiddle;
             return (
               <Text key={i}>
-                {"    "}{chalk.dim(connector)} {chalk.dim(change.fingerprint.slice(0, 12))} {chalk.red(change.fromVerdict)} {icons.arrow} {chalk.green(change.toVerdict)}
+                {"    "}
+                {chalk.dim(connector)} {chalk.dim(change.fingerprint.slice(0, 12))}{" "}
+                {chalk.red(change.fromVerdict)} {icons.arrow} {chalk.green(change.toVerdict)}
                 {change.reason ? chalk.dim(` (${change.reason})`) : ""}
               </Text>
             );
           })}
           {data.verdictChanges.length > 5 && (
-            <Text>{"    "}{chalk.dim(`... and ${data.verdictChanges.length - 5} more`)}</Text>
+            <Text>
+              {"    "}
+              {chalk.dim(`... and ${data.verdictChanges.length - 5} more`)}
+            </Text>
           )}
         </>
       )}

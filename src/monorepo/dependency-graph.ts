@@ -10,7 +10,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { DiscoveredModule, DiscoveredProduct } from "../discovery/types.js";
-import type { ModuleDependencyGraph, ModuleDependencyNode, ModuleInteractionEdge } from "./types.js";
+import type {
+  ModuleDependencyGraph,
+  ModuleDependencyNode,
+  ModuleInteractionEdge,
+} from "./types.js";
 
 /**
  * Build a dependency graph for the given modules within a monorepo.
@@ -102,23 +106,30 @@ export async function resolveModuleDeps(
   const lang = module.language?.toLowerCase() ?? "";
 
   // npm/yarn/pnpm package.json dependencies
-  if (evidence.some((e) => e.includes("package.json")) || lang === "javascript" || lang === "typescript") {
-    deps.push(...await parsePackageJsonDeps(moduleDir));
+  if (
+    evidence.some((e) => e.includes("package.json")) ||
+    lang === "javascript" ||
+    lang === "typescript"
+  ) {
+    deps.push(...(await parsePackageJsonDeps(moduleDir)));
   }
 
   // go.mod require directives
   if (evidence.some((e) => e.includes("go.mod")) || lang === "go") {
-    deps.push(...await parseGoModDeps(moduleDir));
+    deps.push(...(await parseGoModDeps(moduleDir)));
   }
 
   // Cargo.toml path dependencies
   if (evidence.some((e) => e.includes("Cargo.toml")) || lang === "rust") {
-    deps.push(...await parseCargoDeps(moduleDir));
+    deps.push(...(await parseCargoDeps(moduleDir)));
   }
 
   // .csproj ProjectReference elements
-  if (module.moduleKind === "solution-project" || evidence.some((e) => e.includes(".csproj") || e.includes(".vcxproj"))) {
-    deps.push(...await parseCsprojReferences(moduleDir));
+  if (
+    module.moduleKind === "solution-project" ||
+    evidence.some((e) => e.includes(".csproj") || e.includes(".vcxproj"))
+  ) {
+    deps.push(...(await parseCsprojReferences(moduleDir)));
   }
 
   return deps;
@@ -191,7 +202,8 @@ export async function parseCsprojReferences(moduleDir: string): Promise<string[]
   try {
     const entries = await rd(moduleDir);
     for (const entry of entries) {
-      if (!entry.endsWith(".csproj") && !entry.endsWith(".vcxproj") && !entry.endsWith(".fsproj")) continue;
+      if (!entry.endsWith(".csproj") && !entry.endsWith(".vcxproj") && !entry.endsWith(".fsproj"))
+        continue;
       const projPath = path.join(moduleDir, entry);
       try {
         const raw = await readFile(projPath, "utf-8");
@@ -223,7 +235,9 @@ export function formatDependencyGraphSummary(graph: ModuleDependencyGraph): stri
     const dependedBy = graph.dependedOnBy.get(node.moduleId);
     const depNames = dependedBy ? [...dependedBy].slice(0, 5).join(", ") : "";
     const suffix = (dependedBy?.size ?? 0) > 5 ? ` +${(dependedBy?.size ?? 0) - 5} more` : "";
-    lines.push(`  #${node.dependencyRank + 1} ${node.moduleId} (in-degree: ${node.inDegree}) ← ${depNames}${suffix}`);
+    lines.push(
+      `  #${node.dependencyRank + 1} ${node.moduleId} (in-degree: ${node.inDegree}) ← ${depNames}${suffix}`,
+    );
   }
   return lines.join("\n");
 }

@@ -1,7 +1,7 @@
 import type { FileIndex } from "../../types.js";
 import { isRecord } from "../../utils.js";
 import { getTaskFileSpec, type PreReadResult } from "./pre-read.js";
-import type { ThreatModelDocument, StrideThreat } from "./threat-modeling/types.js";
+import type { StrideThreat, ThreatModelDocument } from "./threat-modeling/types.js";
 
 interface ThreatScore {
   threat: StrideThreat;
@@ -69,7 +69,15 @@ const DETECTOR_THREAT_METADATA: Record<string, DetectorThreatMetadata> = {
   },
   "sharp-edges-detect": {
     cwes: new Set(["327", "1188", "676", "16", "755", "697"]),
-    keywords: ["config", "default", "algorithm", "parameter", "silent failure", "string comparison", "api design"],
+    keywords: [
+      "config",
+      "default",
+      "algorithm",
+      "parameter",
+      "silent failure",
+      "string comparison",
+      "api design",
+    ],
   },
 };
 
@@ -143,9 +151,8 @@ export function buildThreatModelLeadsSection(
 
   const lines = ["## Threat model leads from STRIDE"];
   for (const entry of scored) {
-    const cweSummary = entry.threat.relatedCwe.length > 0
-      ? ` / ${entry.threat.relatedCwe.join(", ")}`
-      : "";
+    const cweSummary =
+      entry.threat.relatedCwe.length > 0 ? ` / ${entry.threat.relatedCwe.join(", ")}` : "";
     lines.push(
       `- [${entry.threat.id}] ${entry.threat.category} / ${entry.threat.impact}${cweSummary}: ${entry.threat.title}`,
     );
@@ -174,10 +181,14 @@ function scoreThreatForTask(
     reasons.push("file overlap");
   }
 
-  const cweOverlap = [...normalizeThreatCwes(threat.relatedCwe)].some((cwe) => metadata.cwes.has(cwe));
+  const cweOverlap = [...normalizeThreatCwes(threat.relatedCwe)].some((cwe) =>
+    metadata.cwes.has(cwe),
+  );
   if (cweOverlap) {
     score += 3;
-    reasons.push(`CWE-${[...normalizeThreatCwes(threat.relatedCwe)].find((cwe) => metadata.cwes.has(cwe))}`);
+    reasons.push(
+      `CWE-${[...normalizeThreatCwes(threat.relatedCwe)].find((cwe) => metadata.cwes.has(cwe))}`,
+    );
   }
 
   if (matchesThreatKeywords(taskId, metadata, threat, shortlistCorpus)) {
@@ -204,7 +215,9 @@ function matchesThreatKeywords(
 ): boolean {
   const threatText = normalizeThreatText(threat);
   if (taskId === "code-config-detect") {
-    return [...extractThreatKeywords(threatText)].some((keyword) => shortlistCorpus.includes(keyword));
+    return [...extractThreatKeywords(threatText)].some((keyword) =>
+      shortlistCorpus.includes(keyword),
+    );
   }
 
   return metadata.keywords.some((keyword) => threatText.includes(keyword.toLowerCase()));
@@ -392,10 +405,12 @@ function asStrideTaskOutput(
 }
 
 function isThreatModelDocument(value: unknown): value is ThreatModelDocument {
-  return isRecord(value)
-    && Array.isArray(value["threats"])
-    && isRecord(value["dfd"])
-    && isRecord(value["summary"]);
+  return (
+    isRecord(value) &&
+    Array.isArray(value["threats"]) &&
+    isRecord(value["dfd"]) &&
+    isRecord(value["summary"])
+  );
 }
 
 export const __threatModelGuidanceInternals = {

@@ -1,13 +1,13 @@
-import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
+import { describe, expect, it } from "vitest";
 import {
+  type CalibrationWeight,
   computeCalibratedConfidence,
   ensureCalibrationSchema,
   extractRuleFamily,
   loadCalibrationWeights,
   updateCalibrationWeights,
   updateFindingCalibration,
-  type CalibrationWeight,
 } from "../src/confidence-calibration.js";
 import type { EvidenceStep } from "../src/types.js";
 
@@ -75,8 +75,26 @@ describe("computeCalibratedConfidence", () => {
       { stepType: "sink-danger", description: "test", confidence: 0.4, evidence: "e2" },
     ];
     const weights = new Map<string, CalibrationWeight>([
-      ["source-reachability", { stepType: "source-reachability", ruleFamily: "__global__", weight: 2.0, sampleCount: 5, updatedAt: "" }],
-      ["sink-danger", { stepType: "sink-danger", ruleFamily: "__global__", weight: 1.0, sampleCount: 5, updatedAt: "" }],
+      [
+        "source-reachability",
+        {
+          stepType: "source-reachability",
+          ruleFamily: "__global__",
+          weight: 2.0,
+          sampleCount: 5,
+          updatedAt: "",
+        },
+      ],
+      [
+        "sink-danger",
+        {
+          stepType: "sink-danger",
+          ruleFamily: "__global__",
+          weight: 1.0,
+          sampleCount: 5,
+          updatedAt: "",
+        },
+      ],
     ]);
     // weighted: (0.8 * 2.0 + 0.4 * 1.0) / (2.0 + 1.0) = 2.0 / 3.0 = 0.6667
     const result = computeCalibratedConfidence(chain, weights);
@@ -88,7 +106,16 @@ describe("computeCalibratedConfidence", () => {
       { stepType: "source-reachability", description: "test", confidence: 1.0, evidence: "e" },
     ];
     const weights = new Map<string, CalibrationWeight>([
-      ["source-reachability", { stepType: "source-reachability", ruleFamily: "__global__", weight: 3.0, sampleCount: 5, updatedAt: "" }],
+      [
+        "source-reachability",
+        {
+          stepType: "source-reachability",
+          ruleFamily: "__global__",
+          weight: 3.0,
+          sampleCount: 5,
+          updatedAt: "",
+        },
+      ],
     ]);
     expect(computeCalibratedConfidence(chain, weights)).toBe(1);
   });
@@ -160,9 +187,11 @@ describe("updateCalibrationWeights", () => {
 
     updateCalibrationWeights(db, chain, "sqli", true);
 
-    const row = db.prepare(
-      "SELECT weight, sample_count FROM calibration_weights WHERE step_type = ? AND rule_family = ?",
-    ).get("source-reachability", "__global__") as { weight: number; sample_count: number };
+    const row = db
+      .prepare(
+        "SELECT weight, sample_count FROM calibration_weights WHERE step_type = ? AND rule_family = ?",
+      )
+      .get("source-reachability", "__global__") as { weight: number; sample_count: number };
 
     expect(row).toBeDefined();
     expect(row.sample_count).toBe(1);
@@ -179,9 +208,9 @@ describe("updateCalibrationWeights", () => {
 
     updateCalibrationWeights(db, chain, "sqli", false);
 
-    const row = db.prepare(
-      "SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?",
-    ).get("source-reachability", "__global__") as { weight: number };
+    const row = db
+      .prepare("SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?")
+      .get("source-reachability", "__global__") as { weight: number };
 
     // New weight: (1 - 0.1) * 1.0 + 0.1 * (1.0 * 0.95) = 0.9 + 0.095 = 0.995
     expect(row.weight).toBeCloseTo(0.995, 3);
@@ -196,12 +225,12 @@ describe("updateCalibrationWeights", () => {
 
     updateCalibrationWeights(db, chain, "xss", true);
 
-    const global = db.prepare(
-      "SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?",
-    ).get("sink-danger", "__global__") as { weight: number };
-    const family = db.prepare(
-      "SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?",
-    ).get("sink-danger", "xss") as { weight: number };
+    const global = db
+      .prepare("SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?")
+      .get("sink-danger", "__global__") as { weight: number };
+    const family = db
+      .prepare("SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?")
+      .get("sink-danger", "xss") as { weight: number };
 
     expect(global).toBeDefined();
     expect(family).toBeDefined();
@@ -224,9 +253,9 @@ describe("updateCalibrationWeights", () => {
       updateCalibrationWeights(db, chain, "sqli", false);
     }
 
-    const row = db.prepare(
-      "SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?",
-    ).get("source-reachability", "__global__") as { weight: number };
+    const row = db
+      .prepare("SELECT weight FROM calibration_weights WHERE step_type = ? AND rule_family = ?")
+      .get("source-reachability", "__global__") as { weight: number };
 
     expect(row.weight).toBeGreaterThanOrEqual(0.1);
     db.close();
@@ -241,14 +270,21 @@ describe("updateFindingCalibration", () => {
     ).run("fp-1", "tp", 0.8, "test", "[]");
 
     const chain: EvidenceStep[] = [
-      { stepType: "source-reachability", description: "traced", confidence: 0.9, evidence: "direct flow" },
+      {
+        stepType: "source-reachability",
+        description: "traced",
+        confidence: 0.9,
+        evidence: "direct flow",
+      },
     ];
 
     updateFindingCalibration(db, "fp-1", 0.85, chain);
 
-    const row = db.prepare(
-      "SELECT calibrated_confidence, evidence_chain_json FROM findings WHERE fingerprint = ?",
-    ).get("fp-1") as { calibrated_confidence: number; evidence_chain_json: string };
+    const row = db
+      .prepare(
+        "SELECT calibrated_confidence, evidence_chain_json FROM findings WHERE fingerprint = ?",
+      )
+      .get("fp-1") as { calibrated_confidence: number; evidence_chain_json: string };
 
     expect(row.calibrated_confidence).toBe(0.85);
     expect(JSON.parse(row.evidence_chain_json)).toHaveLength(1);
@@ -260,9 +296,9 @@ describe("updateFindingCalibration", () => {
 describe("ensureCalibrationSchema", () => {
   it("creates calibration_weights table", () => {
     const db = createTestDb();
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='calibration_weights'",
-    ).all();
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='calibration_weights'")
+      .all();
     expect(tables).toHaveLength(1);
     db.close();
   });
@@ -280,9 +316,9 @@ describe("ensureCalibrationSchema", () => {
     const db = createTestDb();
     ensureCalibrationSchema(db);
     ensureCalibrationSchema(db);
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='calibration_weights'",
-    ).all();
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='calibration_weights'")
+      .all();
     expect(tables).toHaveLength(1);
     db.close();
   });

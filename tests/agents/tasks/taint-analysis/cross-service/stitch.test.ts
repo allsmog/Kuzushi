@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { __stitchInternals, matchBoundariesHeuristically } from "../../../../../src/agents/tasks/taint-analysis/cross-service/stitch.js";
-import { attachTaskOutputMeta, getTaskOutputMeta } from "../../../../../src/task-output-meta.js";
+import {
+  __stitchInternals,
+  matchBoundariesHeuristically,
+} from "../../../../../src/agents/tasks/taint-analysis/cross-service/stitch.js";
 import type {
   BoundaryManifest,
   BoundaryPoint,
@@ -8,6 +10,7 @@ import type {
   CrossServicePath,
   StitchedEdge,
 } from "../../../../../src/agents/tasks/taint-analysis/cross-service/types.js";
+import { attachTaskOutputMeta, getTaskOutputMeta } from "../../../../../src/task-output-meta.js";
 
 const {
   matchPair,
@@ -21,7 +24,9 @@ const {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-function makePoint(overrides: Partial<BoundaryPoint> & { id: string; direction: "entry" | "exit" }): BoundaryPoint {
+function makePoint(
+  overrides: Partial<BoundaryPoint> & { id: string; direction: "entry" | "exit" },
+): BoundaryPoint {
   return {
     protocol: "unknown",
     filePath: "test.ts",
@@ -61,32 +66,42 @@ describe("normalizeRoute", () => {
 
 describe("isUserFacingEntry", () => {
   it("returns true for http-server entries", () => {
-    expect(isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "http-server" }))).toBe(true);
+    expect(
+      isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "http-server" })),
+    ).toBe(true);
   });
 
   it("returns true for grpc-server entries", () => {
-    expect(isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "grpc-server" }))).toBe(true);
+    expect(
+      isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "grpc-server" })),
+    ).toBe(true);
   });
 
   it("returns true for message-consume entries", () => {
-    expect(isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "message-consume" }))).toBe(true);
+    expect(
+      isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "message-consume" })),
+    ).toBe(true);
   });
 
   it("returns true for database-read entries (second-order source)", () => {
-    expect(isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "database-read" }))).toBe(true);
+    expect(
+      isUserFacingEntry(makePoint({ id: "e1", direction: "entry", protocol: "database-read" })),
+    ).toBe(true);
   });
 });
 
 describe("matchPair — heuristic matching", () => {
   it("matches exact URL path with confidence 0.9", () => {
     const exit = makePoint({
-      id: "x1", direction: "exit",
+      id: "x1",
+      direction: "exit",
       protocol: "http-client",
       routePath: "/api/users",
       httpMethod: "GET",
     });
     const entry = makePoint({
-      id: "e1", direction: "entry",
+      id: "e1",
+      direction: "entry",
       protocol: "http-server",
       routePath: "/api/users",
       httpMethod: "GET",
@@ -100,12 +115,14 @@ describe("matchPair — heuristic matching", () => {
 
   it("matches URL path prefix with confidence 0.7", () => {
     const exit = makePoint({
-      id: "x1", direction: "exit",
+      id: "x1",
+      direction: "exit",
       protocol: "http-client",
       routePath: "/api/users/profile",
     });
     const entry = makePoint({
-      id: "e1", direction: "entry",
+      id: "e1",
+      direction: "entry",
       protocol: "http-server",
       routePath: "/api/users",
     });
@@ -118,12 +135,14 @@ describe("matchPair — heuristic matching", () => {
 
   it("matches topic/queue name with confidence 0.85", () => {
     const exit = makePoint({
-      id: "x1", direction: "exit",
+      id: "x1",
+      direction: "exit",
       protocol: "message-publish",
       topicOrQueue: "user.events",
     });
     const entry = makePoint({
-      id: "e1", direction: "entry",
+      id: "e1",
+      direction: "entry",
       protocol: "message-consume",
       topicOrQueue: "user.events",
     });
@@ -136,12 +155,14 @@ describe("matchPair — heuristic matching", () => {
 
   it("matches gRPC method with confidence 0.9", () => {
     const exit = makePoint({
-      id: "x1", direction: "exit",
+      id: "x1",
+      direction: "exit",
       protocol: "grpc-client",
       grpcMethod: "UserService.GetUser",
     });
     const entry = makePoint({
-      id: "e1", direction: "entry",
+      id: "e1",
+      direction: "entry",
       protocol: "grpc-server",
       grpcMethod: "UserService.GetUser",
     });
@@ -154,12 +175,14 @@ describe("matchPair — heuristic matching", () => {
 
   it("matches data entity with confidence 0.6", () => {
     const exit = makePoint({
-      id: "x1", direction: "exit",
+      id: "x1",
+      direction: "exit",
       protocol: "database-write",
       dataEntity: "users",
     });
     const entry = makePoint({
-      id: "e1", direction: "entry",
+      id: "e1",
+      direction: "entry",
       protocol: "database-read",
       dataEntity: "users",
     });
@@ -172,12 +195,14 @@ describe("matchPair — heuristic matching", () => {
 
   it("matches service name in URL with confidence 0.5", () => {
     const exit = makePoint({
-      id: "x1", direction: "exit",
+      id: "x1",
+      direction: "exit",
       protocol: "http-client",
       routePath: "http://auth-service/api/login",
     });
     const entry = makePoint({
-      id: "e1", direction: "entry",
+      id: "e1",
+      direction: "entry",
       protocol: "http-server",
     });
 
@@ -189,12 +214,14 @@ describe("matchPair — heuristic matching", () => {
 
   it("returns null when no match found", () => {
     const exit = makePoint({
-      id: "x1", direction: "exit",
+      id: "x1",
+      direction: "exit",
       protocol: "http-client",
       routePath: "/api/orders",
     });
     const entry = makePoint({
-      id: "e1", direction: "entry",
+      id: "e1",
+      direction: "entry",
       protocol: "http-server",
       routePath: "/api/payments",
     });
@@ -209,8 +236,22 @@ describe("matchBoundariesHeuristically", () => {
     const boundaries = [
       makeBoundary(
         "svc-a",
-        [makePoint({ id: "e1", direction: "entry", protocol: "http-server", routePath: "/api/users" })],
-        [makePoint({ id: "x1", direction: "exit", protocol: "http-client", routePath: "/api/users" })],
+        [
+          makePoint({
+            id: "e1",
+            direction: "entry",
+            protocol: "http-server",
+            routePath: "/api/users",
+          }),
+        ],
+        [
+          makePoint({
+            id: "x1",
+            direction: "exit",
+            protocol: "http-client",
+            routePath: "/api/users",
+          }),
+        ],
       ),
     ];
 
@@ -222,12 +263,33 @@ describe("matchBoundariesHeuristically", () => {
     const boundaries = [
       makeBoundary(
         "gateway",
-        [makePoint({ id: "e1", direction: "entry", protocol: "http-server", routePath: "/api/users" })],
-        [makePoint({ id: "x1", direction: "exit", protocol: "http-client", routePath: "/api/users" })],
+        [
+          makePoint({
+            id: "e1",
+            direction: "entry",
+            protocol: "http-server",
+            routePath: "/api/users",
+          }),
+        ],
+        [
+          makePoint({
+            id: "x1",
+            direction: "exit",
+            protocol: "http-client",
+            routePath: "/api/users",
+          }),
+        ],
       ),
       makeBoundary(
         "user-svc",
-        [makePoint({ id: "e2", direction: "entry", protocol: "http-server", routePath: "/api/users" })],
+        [
+          makePoint({
+            id: "e2",
+            direction: "entry",
+            protocol: "http-server",
+            routePath: "/api/users",
+          }),
+        ],
         [],
       ),
     ];
@@ -243,27 +305,37 @@ describe("matchBoundariesHeuristically", () => {
 
 describe("inferCweFromPath", () => {
   it("detects SQL injection", () => {
-    const path = { ultimateSink: { description: "SQL query injection detected" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "SQL query injection detected" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-89");
   });
 
   it("detects command injection", () => {
-    const path = { ultimateSink: { description: "command execution vulnerability" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "command execution vulnerability" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-78");
   });
 
   it("detects SSRF", () => {
-    const path = { ultimateSink: { description: "SSRF through URL parameter" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "SSRF through URL parameter" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-918");
   });
 
   it("detects path traversal", () => {
-    const path = { ultimateSink: { description: "path traversal via user-supplied file name" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "path traversal via user-supplied file name" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-22");
   });
 
   it("detects deserialization", () => {
-    const path = { ultimateSink: { description: "unsafe deserialization of request body" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "unsafe deserialization of request body" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-502");
   });
 
@@ -273,32 +345,44 @@ describe("inferCweFromPath", () => {
   });
 
   it("detects XXE", () => {
-    const path = { ultimateSink: { description: "xxe via xml external entity" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "xxe via xml external entity" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-611");
   });
 
   it("detects open redirect", () => {
-    const path = { ultimateSink: { description: "open redirect to attacker URL" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "open redirect to attacker URL" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-601");
   });
 
   it("detects header injection", () => {
-    const path = { ultimateSink: { description: "header injection via user input" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "header injection via user input" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-113");
   });
 
   it("detects log injection", () => {
-    const path = { ultimateSink: { description: "log injection through crafted input" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "log injection through crafted input" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-117");
   });
 
   it("detects LDAP injection", () => {
-    const path = { ultimateSink: { description: "ldap query with unsanitized filter" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "ldap query with unsanitized filter" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-90");
   });
 
   it("detects SSTI", () => {
-    const path = { ultimateSink: { description: "ssti via template rendering" } } as CrossServicePath;
+    const path = {
+      ultimateSink: { description: "ssti via template rendering" },
+    } as CrossServicePath;
     expect(inferCweFromPath(path)).toBe("CWE-1336");
   });
 
@@ -317,21 +401,33 @@ describe("pathToFinding", () => {
   it("generates a valid Finding from a CrossServicePath", () => {
     const crossPath: CrossServicePath = {
       serviceChain: ["gateway", "user-svc"],
-      edges: [{
-        source: {
-          serviceId: "gateway",
-          boundaryPointId: "x1",
-          point: makePoint({ id: "x1", direction: "exit", protocol: "http-client", routePath: "/api/users" }),
+      edges: [
+        {
+          source: {
+            serviceId: "gateway",
+            boundaryPointId: "x1",
+            point: makePoint({
+              id: "x1",
+              direction: "exit",
+              protocol: "http-client",
+              routePath: "/api/users",
+            }),
+          },
+          target: {
+            serviceId: "user-svc",
+            boundaryPointId: "e1",
+            point: makePoint({
+              id: "e1",
+              direction: "entry",
+              protocol: "http-server",
+              routePath: "/api/users",
+            }),
+          },
+          matchMethod: "url-path",
+          confidence: 0.9,
+          rationale: "Exact route match",
         },
-        target: {
-          serviceId: "user-svc",
-          boundaryPointId: "e1",
-          point: makePoint({ id: "e1", direction: "entry", protocol: "http-server", routePath: "/api/users" }),
-        },
-        matchMethod: "url-path",
-        confidence: 0.9,
-        rationale: "Exact route match",
-      }],
+      ],
       ultimateSource: {
         serviceId: "gateway",
         filePath: "gateway/routes.ts",
@@ -367,21 +463,23 @@ describe("pathToFinding", () => {
   it("assigns WARNING severity for lower confidence paths", () => {
     const crossPath: CrossServicePath = {
       serviceChain: ["a", "b"],
-      edges: [{
-        source: {
-          serviceId: "a",
-          boundaryPointId: "x1",
-          point: makePoint({ id: "x1", direction: "exit" }),
+      edges: [
+        {
+          source: {
+            serviceId: "a",
+            boundaryPointId: "x1",
+            point: makePoint({ id: "x1", direction: "exit" }),
+          },
+          target: {
+            serviceId: "b",
+            boundaryPointId: "e1",
+            point: makePoint({ id: "e1", direction: "entry" }),
+          },
+          matchMethod: "data-entity",
+          confidence: 0.6,
+          rationale: "Shared table",
         },
-        target: {
-          serviceId: "b",
-          boundaryPointId: "e1",
-          point: makePoint({ id: "e1", direction: "entry" }),
-        },
-        matchMethod: "data-entity",
-        confidence: 0.6,
-        rationale: "Shared table",
-      }],
+      ],
       ultimateSource: {
         serviceId: "a",
         filePath: "a/handler.ts",
@@ -407,18 +505,39 @@ describe("parseStitchResponse", () => {
   it("parses a valid structured response", () => {
     const response = parseStitchResponse({
       validatedEdges: [
-        { sourcePointId: "x1", targetPointId: "e1", valid: true, confidence: 0.95, rationale: "Confirmed" },
-        { sourcePointId: "x2", targetPointId: "e2", valid: false, confidence: 0.3, rationale: "Not a match" },
+        {
+          sourcePointId: "x1",
+          targetPointId: "e1",
+          valid: true,
+          confidence: 0.95,
+          rationale: "Confirmed",
+        },
+        {
+          sourcePointId: "x2",
+          targetPointId: "e2",
+          valid: false,
+          confidence: 0.3,
+          rationale: "Not a match",
+        },
       ],
       additionalEdges: [
         {
-          sourceServiceId: "a", sourcePointId: "x3",
-          targetServiceId: "b", targetPointId: "e3",
-          matchMethod: "llm-semantic", confidence: 0.8, rationale: "Semantic match",
+          sourceServiceId: "a",
+          sourcePointId: "x3",
+          targetServiceId: "b",
+          targetPointId: "e3",
+          matchMethod: "llm-semantic",
+          confidence: 0.8,
+          rationale: "Semantic match",
         },
       ],
       paths: [
-        { serviceChain: ["a", "b", "c"], description: "User data flows through", cwe: "CWE-89", severity: "ERROR" },
+        {
+          serviceChain: ["a", "b", "c"],
+          description: "User data flows through",
+          cwe: "CWE-89",
+          severity: "ERROR",
+        },
       ],
     });
 
@@ -450,7 +569,8 @@ describe("parseStitchResponse", () => {
   });
 
   it("parses JSON from fenced code block", () => {
-    const fenced = "Here is the analysis:\n```json\n{\"validatedEdges\": [], \"additionalEdges\": [], \"paths\": [{\"serviceChain\": [\"a\"], \"description\": \"test\", \"cwe\": \"CWE-89\", \"severity\": \"ERROR\"}]}\n```";
+    const fenced =
+      'Here is the analysis:\n```json\n{"validatedEdges": [], "additionalEdges": [], "paths": [{"serviceChain": ["a"], "description": "test", "cwe": "CWE-89", "severity": "ERROR"}]}\n```';
 
     const response = parseStitchResponse(fenced);
     expect(response.paths).toHaveLength(1);
@@ -458,32 +578,43 @@ describe("parseStitchResponse", () => {
   });
 
   it("throws for unparseable input", () => {
-    expect(() => parseStitchResponse("not valid json {{{")).toThrow(/Could not parse stitch response JSON/i);
+    expect(() => parseStitchResponse("not valid json {{{")).toThrow(
+      /Could not parse stitch response JSON/i,
+    );
   });
 });
 
 describe("buildCrossServicePaths", () => {
   it("builds paths from user-facing entry to service with findings", () => {
-    const edges: StitchedEdge[] = [{
-      source: {
-        serviceId: "gateway",
-        boundaryPointId: "x1",
-        point: makePoint({ id: "x1", direction: "exit", protocol: "http-client" }),
+    const edges: StitchedEdge[] = [
+      {
+        source: {
+          serviceId: "gateway",
+          boundaryPointId: "x1",
+          point: makePoint({ id: "x1", direction: "exit", protocol: "http-client" }),
+        },
+        target: {
+          serviceId: "backend",
+          boundaryPointId: "e1",
+          point: makePoint({ id: "e1", direction: "entry", protocol: "http-server" }),
+        },
+        matchMethod: "url-path",
+        confidence: 0.9,
+        rationale: "test",
       },
-      target: {
-        serviceId: "backend",
-        boundaryPointId: "e1",
-        point: makePoint({ id: "e1", direction: "entry", protocol: "http-server" }),
-      },
-      matchMethod: "url-path",
-      confidence: 0.9,
-      rationale: "test",
-    }];
+    ];
 
     const boundaries = [
       makeBoundary(
         "gateway",
-        [makePoint({ id: "ge1", direction: "entry", protocol: "http-server", callable: "handleRequest" })],
+        [
+          makePoint({
+            id: "ge1",
+            direction: "entry",
+            protocol: "http-server",
+            callable: "handleRequest",
+          }),
+        ],
         [makePoint({ id: "x1", direction: "exit", protocol: "http-client" })],
       ),
       makeBoundary(
@@ -496,30 +627,48 @@ describe("buildCrossServicePaths", () => {
     const analyzeOutput: CrossServiceAnalysisOutput = {
       services: [
         {
-          service: { id: "gateway", displayName: "Gateway", rootPath: "gateway", language: "javascript", framework: null, discoveryMethod: "auto", manifestFiles: [] },
+          service: {
+            id: "gateway",
+            displayName: "Gateway",
+            rootPath: "gateway",
+            language: "javascript",
+            framework: null,
+            discoveryMethod: "auto",
+            manifestFiles: [],
+          },
           boundary: boundaries[0],
           intraServiceFindings: [],
           taintAnalysisSkipped: false,
           durationMs: 100,
         },
         {
-          service: { id: "backend", displayName: "Backend", rootPath: "backend", language: "javascript", framework: null, discoveryMethod: "auto", manifestFiles: [] },
+          service: {
+            id: "backend",
+            displayName: "Backend",
+            rootPath: "backend",
+            language: "javascript",
+            framework: null,
+            discoveryMethod: "auto",
+            manifestFiles: [],
+          },
           boundary: boundaries[1],
-          intraServiceFindings: [{
-            taskId: "taint-analysis-run",
-            fingerprint: "abc123",
-            ruleId: "taint-analysis/pass5/sql",
-            filePath: "backend/db.ts",
-            startLine: 50,
-            severity: "ERROR",
-            message: "SQL injection",
-            scannerConfidence: "HIGH",
-            subcategory: ["vuln"],
-            likelihood: "HIGH",
-            impact: "HIGH",
-            cwe: ["CWE-89"],
-            score: 54,
-          }],
+          intraServiceFindings: [
+            {
+              taskId: "taint-analysis-run",
+              fingerprint: "abc123",
+              ruleId: "taint-analysis/pass5/sql",
+              filePath: "backend/db.ts",
+              startLine: 50,
+              severity: "ERROR",
+              message: "SQL injection",
+              scannerConfidence: "HIGH",
+              subcategory: ["vuln"],
+              likelihood: "HIGH",
+              impact: "HIGH",
+              cwe: ["CWE-89"],
+              score: 54,
+            },
+          ],
           taintAnalysisSkipped: false,
           durationMs: 200,
         },
@@ -536,38 +685,60 @@ describe("buildCrossServicePaths", () => {
   });
 
   it("does not create paths when there are no sink services", () => {
-    const edges: StitchedEdge[] = [{
-      source: {
-        serviceId: "a",
-        boundaryPointId: "x1",
-        point: makePoint({ id: "x1", direction: "exit", protocol: "http-client" }),
+    const edges: StitchedEdge[] = [
+      {
+        source: {
+          serviceId: "a",
+          boundaryPointId: "x1",
+          point: makePoint({ id: "x1", direction: "exit", protocol: "http-client" }),
+        },
+        target: {
+          serviceId: "b",
+          boundaryPointId: "e1",
+          point: makePoint({ id: "e1", direction: "entry", protocol: "http-server" }),
+        },
+        matchMethod: "url-path",
+        confidence: 0.9,
+        rationale: "test",
       },
-      target: {
-        serviceId: "b",
-        boundaryPointId: "e1",
-        point: makePoint({ id: "e1", direction: "entry", protocol: "http-server" }),
-      },
-      matchMethod: "url-path",
-      confidence: 0.9,
-      rationale: "test",
-    }];
+    ];
 
     const boundaries = [
-      makeBoundary("a", [makePoint({ id: "ae1", direction: "entry", protocol: "http-server" })], []),
+      makeBoundary(
+        "a",
+        [makePoint({ id: "ae1", direction: "entry", protocol: "http-server" })],
+        [],
+      ),
       makeBoundary("b", [makePoint({ id: "e1", direction: "entry", protocol: "http-server" })], []),
     ];
 
     const analyzeOutput: CrossServiceAnalysisOutput = {
       services: [
         {
-          service: { id: "a", displayName: "A", rootPath: "a", language: "javascript", framework: null, discoveryMethod: "auto", manifestFiles: [] },
+          service: {
+            id: "a",
+            displayName: "A",
+            rootPath: "a",
+            language: "javascript",
+            framework: null,
+            discoveryMethod: "auto",
+            manifestFiles: [],
+          },
           boundary: boundaries[0],
           intraServiceFindings: [],
           taintAnalysisSkipped: false,
           durationMs: 100,
         },
         {
-          service: { id: "b", displayName: "B", rootPath: "b", language: "javascript", framework: null, discoveryMethod: "auto", manifestFiles: [] },
+          service: {
+            id: "b",
+            displayName: "B",
+            rootPath: "b",
+            language: "javascript",
+            framework: null,
+            discoveryMethod: "auto",
+            manifestFiles: [],
+          },
           boundary: boundaries[1],
           intraServiceFindings: [],
           taintAnalysisSkipped: false,
@@ -584,15 +755,31 @@ describe("buildCrossServicePaths", () => {
   it("avoids cycles in path building", () => {
     const edges: StitchedEdge[] = [
       {
-        source: { serviceId: "a", boundaryPointId: "x1", point: makePoint({ id: "x1", direction: "exit" }) },
-        target: { serviceId: "b", boundaryPointId: "e1", point: makePoint({ id: "e1", direction: "entry" }) },
+        source: {
+          serviceId: "a",
+          boundaryPointId: "x1",
+          point: makePoint({ id: "x1", direction: "exit" }),
+        },
+        target: {
+          serviceId: "b",
+          boundaryPointId: "e1",
+          point: makePoint({ id: "e1", direction: "entry" }),
+        },
         matchMethod: "url-path",
         confidence: 0.9,
         rationale: "test",
       },
       {
-        source: { serviceId: "b", boundaryPointId: "x2", point: makePoint({ id: "x2", direction: "exit" }) },
-        target: { serviceId: "a", boundaryPointId: "e2", point: makePoint({ id: "e2", direction: "entry" }) },
+        source: {
+          serviceId: "b",
+          boundaryPointId: "x2",
+          point: makePoint({ id: "x2", direction: "exit" }),
+        },
+        target: {
+          serviceId: "a",
+          boundaryPointId: "e2",
+          point: makePoint({ id: "e2", direction: "entry" }),
+        },
         matchMethod: "url-path",
         confidence: 0.9,
         rationale: "test",
@@ -600,23 +787,75 @@ describe("buildCrossServicePaths", () => {
     ];
 
     const boundaries = [
-      makeBoundary("a", [makePoint({ id: "ae1", direction: "entry", protocol: "http-server" })], []),
+      makeBoundary(
+        "a",
+        [makePoint({ id: "ae1", direction: "entry", protocol: "http-server" })],
+        [],
+      ),
       makeBoundary("b", [makePoint({ id: "e1", direction: "entry", protocol: "http-server" })], []),
     ];
 
     const analyzeOutput: CrossServiceAnalysisOutput = {
       services: [
         {
-          service: { id: "a", displayName: "A", rootPath: "a", language: "javascript", framework: null, discoveryMethod: "auto", manifestFiles: [] },
+          service: {
+            id: "a",
+            displayName: "A",
+            rootPath: "a",
+            language: "javascript",
+            framework: null,
+            discoveryMethod: "auto",
+            manifestFiles: [],
+          },
           boundary: boundaries[0],
-          intraServiceFindings: [{ taskId: "taint-analysis-run", fingerprint: "x", ruleId: "r", filePath: "f", startLine: 1, severity: "ERROR", message: "m", scannerConfidence: "HIGH", subcategory: ["vuln"], likelihood: "HIGH", impact: "HIGH", cwe: [], score: 1 }],
+          intraServiceFindings: [
+            {
+              taskId: "taint-analysis-run",
+              fingerprint: "x",
+              ruleId: "r",
+              filePath: "f",
+              startLine: 1,
+              severity: "ERROR",
+              message: "m",
+              scannerConfidence: "HIGH",
+              subcategory: ["vuln"],
+              likelihood: "HIGH",
+              impact: "HIGH",
+              cwe: [],
+              score: 1,
+            },
+          ],
           taintAnalysisSkipped: false,
           durationMs: 100,
         },
         {
-          service: { id: "b", displayName: "B", rootPath: "b", language: "javascript", framework: null, discoveryMethod: "auto", manifestFiles: [] },
+          service: {
+            id: "b",
+            displayName: "B",
+            rootPath: "b",
+            language: "javascript",
+            framework: null,
+            discoveryMethod: "auto",
+            manifestFiles: [],
+          },
           boundary: boundaries[1],
-          intraServiceFindings: [{ taskId: "taint-analysis-run", fingerprint: "y", ruleId: "r", filePath: "f", startLine: 1, severity: "ERROR", message: "m", scannerConfidence: "HIGH", subcategory: ["vuln"], likelihood: "HIGH", impact: "HIGH", cwe: [], score: 1 }],
+          intraServiceFindings: [
+            {
+              taskId: "taint-analysis-run",
+              fingerprint: "y",
+              ruleId: "r",
+              filePath: "f",
+              startLine: 1,
+              severity: "ERROR",
+              message: "m",
+              scannerConfidence: "HIGH",
+              subcategory: ["vuln"],
+              likelihood: "HIGH",
+              impact: "HIGH",
+              cwe: [],
+              score: 1,
+            },
+          ],
           taintAnalysisSkipped: false,
           durationMs: 100,
         },
@@ -640,7 +879,12 @@ describe("pathToFinding — fingerprint uniqueness", () => {
       serviceChain: ["a", "b", "c"],
       edges: [],
       ultimateSource: { serviceId: "a", filePath: "a/src.ts", startLine: 1, description: "input" },
-      ultimateSink: { serviceId: "c", filePath: "c/sink.ts", startLine: 10, description: "SQL query" },
+      ultimateSink: {
+        serviceId: "c",
+        filePath: "c/sink.ts",
+        startLine: 10,
+        description: "SQL query",
+      },
       pathConfidence: 0.9,
     };
 
@@ -666,15 +910,20 @@ describe("buildCrossServicePaths — maxDepth enforcement", () => {
 
     for (let i = 0; i < serviceIds.length; i++) {
       const entryPoints = [makePoint({ id: `e${i}`, direction: "entry", protocol: "http-server" })];
-      const exitPoints = i < serviceIds.length - 1
-        ? [makePoint({ id: `x${i}`, direction: "exit", protocol: "http-client" })]
-        : [];
+      const exitPoints =
+        i < serviceIds.length - 1
+          ? [makePoint({ id: `x${i}`, direction: "exit", protocol: "http-client" })]
+          : [];
       boundaries.push(makeBoundary(serviceIds[i], entryPoints, exitPoints));
 
       if (i < serviceIds.length - 1) {
         edges.push({
           source: { serviceId: serviceIds[i], boundaryPointId: `x${i}`, point: exitPoints[0] },
-          target: { serviceId: serviceIds[i + 1], boundaryPointId: `e${i + 1}`, point: entryPoints[0] },
+          target: {
+            serviceId: serviceIds[i + 1],
+            boundaryPointId: `e${i + 1}`,
+            point: entryPoints[0],
+          },
           matchMethod: "url-path",
           confidence: 0.9,
           rationale: "test",
@@ -684,13 +933,36 @@ describe("buildCrossServicePaths — maxDepth enforcement", () => {
 
     const analyzeOutput: CrossServiceAnalysisOutput = {
       services: serviceIds.map((id, i) => ({
-        service: { id, displayName: id, rootPath: id, language: "javascript", framework: null, discoveryMethod: "auto" as const, manifestFiles: [] },
+        service: {
+          id,
+          displayName: id,
+          rootPath: id,
+          language: "javascript",
+          framework: null,
+          discoveryMethod: "auto" as const,
+          manifestFiles: [],
+        },
         boundary: boundaries[i],
-        intraServiceFindings: i >= 1 ? [{
-          taskId: "taint-analysis-run", fingerprint: `fp-${id}`, ruleId: "r", filePath: `${id}/f.ts`,
-          startLine: 1, severity: "ERROR", message: "vuln", scannerConfidence: "HIGH",
-          subcategory: ["vuln"], likelihood: "HIGH", impact: "HIGH", cwe: [], score: 1,
-        }] : [],
+        intraServiceFindings:
+          i >= 1
+            ? [
+                {
+                  taskId: "taint-analysis-run",
+                  fingerprint: `fp-${id}`,
+                  ruleId: "r",
+                  filePath: `${id}/f.ts`,
+                  startLine: 1,
+                  severity: "ERROR",
+                  message: "vuln",
+                  scannerConfidence: "HIGH",
+                  subcategory: ["vuln"],
+                  likelihood: "HIGH",
+                  impact: "HIGH",
+                  cwe: [],
+                  score: 1,
+                },
+              ]
+            : [],
         taintAnalysisSkipped: false,
         durationMs: 100,
       })),

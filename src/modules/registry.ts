@@ -8,16 +8,16 @@
  * Module tools are namespaced as "moduleId:toolAction" (e.g. "blackbox:recon").
  */
 
+import type { TaskRegistry } from "../agents/registry.js";
+import type { AgentTask } from "../agents/types.js";
+import type { KnowledgeRegistry } from "../knowledge/types.js";
 import type {
   CopilotModule,
   ModuleContext,
   ModuleInfo,
-  ModuleTool,
   ModuleSpecifier,
+  ModuleTool,
 } from "./types.js";
-import type { AgentTask } from "../agents/types.js";
-import type { TaskRegistry } from "../agents/registry.js";
-import type { KnowledgeRegistry } from "../knowledge/types.js";
 
 /** Events emitted by the registry itself. */
 export interface ModuleRegistryEvents {

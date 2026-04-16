@@ -53,5 +53,11 @@ server.listen(0, "127.0.0.1", () => {
 });
 
 // Shut down cleanly when the parent process exits.
-process.on("SIGTERM", () => { server.close(); process.exit(0); });
-process.on("SIGINT", () => { server.close(); process.exit(0); });
+process.on("SIGTERM", () => {
+  server.close();
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  server.close();
+  process.exit(0);
+});

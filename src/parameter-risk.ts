@@ -6,27 +6,88 @@ export interface ParameterRisk {
 }
 
 const SQLI_PRONE: string[] = [
-  "id", "uid", "rid", "cid", "pid", "aid", "sort_id", "type", "typeId",
-  "action", "act", "mod", "username", "s", "keyword", "search", "page",
-  "order", "cat_id", "category_id", "product_id", "item_id", "user_id",
-  "group_id", "dept_id", "org_id",
+  "id",
+  "uid",
+  "rid",
+  "cid",
+  "pid",
+  "aid",
+  "sort_id",
+  "type",
+  "typeId",
+  "action",
+  "act",
+  "mod",
+  "username",
+  "s",
+  "keyword",
+  "search",
+  "page",
+  "order",
+  "cat_id",
+  "category_id",
+  "product_id",
+  "item_id",
+  "user_id",
+  "group_id",
+  "dept_id",
+  "org_id",
 ];
 
 const SSRF_PRONE: string[] = [
-  "url", "target", "imageUrl", "callback", "s_url", "link", "src", "ref",
-  "inputFile", "image_url", "redirect_url", "return_url", "next", "dest",
-  "destination", "uri", "endpoint",
+  "url",
+  "target",
+  "imageUrl",
+  "callback",
+  "s_url",
+  "link",
+  "src",
+  "ref",
+  "inputFile",
+  "image_url",
+  "redirect_url",
+  "return_url",
+  "next",
+  "dest",
+  "destination",
+  "uri",
+  "endpoint",
 ];
 
 const PATH_TRAVERSAL_PRONE: string[] = [
-  "file", "path", "filename", "filepath", "dir", "template", "include",
-  "download", "hdfile", "document", "folder", "root", "pg", "style",
-  "pdf", "img", "attachment",
+  "file",
+  "path",
+  "filename",
+  "filepath",
+  "dir",
+  "template",
+  "include",
+  "download",
+  "hdfile",
+  "document",
+  "folder",
+  "root",
+  "pg",
+  "style",
+  "pdf",
+  "img",
+  "attachment",
 ];
 
 const AUTH_SENSITIVE: string[] = [
-  "password", "token", "session", "role", "admin", "user_id", "account",
-  "secret", "key", "auth", "credential", "api_key", "access_token",
+  "password",
+  "token",
+  "session",
+  "role",
+  "admin",
+  "user_id",
+  "account",
+  "secret",
+  "key",
+  "auth",
+  "credential",
+  "api_key",
+  "access_token",
 ];
 
 interface ParameterEntry {
@@ -64,7 +125,7 @@ for (const name of AUTH_SENSITIVE) {
   const existing = PARAMETER_MAP.get(name.toLowerCase());
   PARAMETER_MAP.set(name.toLowerCase(), {
     categories: [...(existing?.categories ?? []), "Auth-sensitive"],
-    boost: Math.max(existing?.boost ?? 0, 0.10),
+    boost: Math.max(existing?.boost ?? 0, 0.1),
   });
 }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { __chainAnalysisInternals } from "../../../src/agents/tasks/chain-analysis.js";
 import type { Finding } from "../../../src/scanners/types.js";
 import type { TriageResult } from "../../../src/types.js";
@@ -40,8 +40,14 @@ function makeTriageResult(overrides: Partial<TriageResult> = {}): TriageResult {
 describe("buildPrompt", () => {
   it("includes all confirmed findings in the prompt", () => {
     const findings = [
-      { finding: makeFinding({ fingerprint: "fp-1", ruleId: "sqli/unsafe" }), triageResult: makeTriageResult() },
-      { finding: makeFinding({ fingerprint: "fp-2", ruleId: "ssrf/fetch" }), triageResult: makeTriageResult() },
+      {
+        finding: makeFinding({ fingerprint: "fp-1", ruleId: "sqli/unsafe" }),
+        triageResult: makeTriageResult(),
+      },
+      {
+        finding: makeFinding({ fingerprint: "fp-2", ruleId: "ssrf/fetch" }),
+        triageResult: makeTriageResult(),
+      },
     ];
 
     const prompt = buildPrompt(findings, "test-repo");
@@ -64,8 +70,16 @@ describe("parseOutput", () => {
           id: "chain-1",
           name: "SQLi to Config Leak",
           steps: [
-            { finding_fingerprint: "fp-1", role: "initial access", description: "SQL injection extracts config" },
-            { finding_fingerprint: "fp-2", role: "escalation", description: "Config reveals admin creds" },
+            {
+              finding_fingerprint: "fp-1",
+              role: "initial access",
+              description: "SQL injection extracts config",
+            },
+            {
+              finding_fingerprint: "fp-2",
+              role: "escalation",
+              description: "Config reveals admin creds",
+            },
           ],
           overall_severity: "CRITICAL",
           preconditions: ["Database accessible"],

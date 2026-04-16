@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { SemgrepPlugin } from "../src/scanners/semgrep.js";
 import { AgenticPlugin } from "../src/scanners/agentic.js";
 import { CodeQLPlugin } from "../src/scanners/codeql.js";
+import { SemgrepPlugin } from "../src/scanners/semgrep.js";
 import type { Finding } from "../src/scanners/types.js";
 
 function makeFinding(taskId: string): Finding {

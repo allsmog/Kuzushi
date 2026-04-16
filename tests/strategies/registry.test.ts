@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { StrategyRegistry } from "../../src/strategies/registry.js";
-import type { AnalysisStrategy, StrategyInput, StrategyResult } from "../../src/strategies/types.js";
+import type {
+  AnalysisStrategy,
+  StrategyInput,
+  StrategyResult,
+} from "../../src/strategies/types.js";
 
-function makeStrategy(id: string, kind: "syntactic" | "dataflow" | "reasoning" | "execution", costTier: number, cwes: string[]): AnalysisStrategy {
+function makeStrategy(
+  id: string,
+  kind: "syntactic" | "dataflow" | "reasoning" | "execution",
+  costTier: number,
+  cwes: string[],
+): AnalysisStrategy {
   return {
     id,
     kind,
@@ -13,9 +22,13 @@ function makeStrategy(id: string, kind: "syntactic" | "dataflow" | "reasoning" |
     },
     async run(): Promise<StrategyResult> {
       return {
-        strategyKind: kind, strategyId: id,
-        findings: [], confidence: 0.5, costUsd: 0.01,
-        durationMs: 100, evidence: [],
+        strategyKind: kind,
+        strategyId: id,
+        findings: [],
+        confidence: 0.5,
+        costUsd: 0.01,
+        durationMs: 100,
+        evidence: [],
       };
     },
   };
@@ -33,7 +46,9 @@ describe("StrategyRegistry", () => {
   it("throws on duplicate registration", () => {
     const reg = new StrategyRegistry();
     reg.register(makeStrategy("s1", "syntactic", 1, ["CWE-89"]));
-    expect(() => reg.register(makeStrategy("s1", "dataflow", 3, ["CWE-89"]))).toThrow(/already registered/);
+    expect(() => reg.register(makeStrategy("s1", "dataflow", 3, ["CWE-89"]))).toThrow(
+      /already registered/,
+    );
   });
 
   it("filters by CWE", () => {

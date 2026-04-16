@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import type { Finding } from "../../src/scanners/types.js";
 
@@ -17,8 +17,8 @@ vi.mock("node:fs", async () => {
   };
 });
 
-import { rescoreFindings, type LlmRescoreResult } from "../../src/scanners/llm-rescore.js";
 import { runStructuredAgentQuery } from "../../src/agent-runtime/execution.js";
+import { type LlmRescoreResult, rescoreFindings } from "../../src/scanners/llm-rescore.js";
 
 const mockRunQuery = vi.mocked(runStructuredAgentQuery);
 const runtime = { id: "test-runtime", query: vi.fn() } as unknown as AgentRuntime;
@@ -78,7 +78,9 @@ describe("rescoreFindings", () => {
     const fp = "fp-1";
     mockRunQuery.mockResolvedValue({
       resultText: "",
-      structuredOutput: { scores: [{ fingerprint: fp, score: 2, reason: "Clearly a false positive" }] },
+      structuredOutput: {
+        scores: [{ fingerprint: fp, score: 2, reason: "Clearly a false positive" }],
+      },
       executionError: null,
       costUsd: 0.001,
     });

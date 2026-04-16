@@ -65,7 +65,17 @@ export class LoggingAgentRuntime implements AgentRuntime {
   queryBatch?(
     requests: AgentBatchRequest[],
     baseOptions: AgentQueryOptions,
-  ): Promise<Map<string, { resultText: string; structuredOutput: unknown; executionError: string | null; costUsd: number }>> {
+  ): Promise<
+    Map<
+      string,
+      {
+        resultText: string;
+        structuredOutput: unknown;
+        executionError: string | null;
+        costUsd: number;
+      }
+    >
+  > {
     if (!this.inner.queryBatch) return undefined as never;
     log.info(`Batch request: ${requests.length} prompts -> ${baseOptions.model}`);
     return this.inner.queryBatch(requests, baseOptions);
@@ -104,9 +114,13 @@ function logMessage(message: AgentMessage): void {
     case "result":
       if ("result" in message && message.subtype === "success") {
         const dur = message.durationMs ? `${(message.durationMs / 1000).toFixed(1)}s` : "?";
-        log.info(`  Result: ${dur}, ${message.numTurns ?? "?"} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`);
+        log.info(
+          `  Result: ${dur}, ${message.numTurns ?? "?"} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`,
+        );
       } else if ("errors" in message) {
-        log.info(`  Error: ${message.subtype} — ${(message as { errors: string[] }).errors.join("; ")}`);
+        log.info(
+          `  Error: ${message.subtype} — ${(message as { errors: string[] }).errors.join("; ")}`,
+        );
       }
       break;
   }

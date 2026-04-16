@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resolveDiscoveryGraph } from "../../src/discovery/graph.js";
 import type { RawDiscoveryNode } from "../../src/discovery/adapters/types.js";
+import { resolveDiscoveryGraph } from "../../src/discovery/graph.js";
 
 function makeNode(overrides: Partial<RawDiscoveryNode> & { path: string }): RawDiscoveryNode {
   return {

@@ -1,6 +1,6 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { existsSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 
@@ -19,8 +19,8 @@ export function resolveRandoriPluginPath(): string {
   const manifest = path.join(pluginRoot, ".claude-plugin", "plugin.json");
   if (!existsSync(manifest)) {
     throw new Error(
-      `@kuzushi/randori-plugin is installed but missing .claude-plugin/plugin.json at ${pluginRoot}. `
-      + "Try reinstalling: pnpm install",
+      `@kuzushi/randori-plugin is installed but missing .claude-plugin/plugin.json at ${pluginRoot}. ` +
+        "Try reinstalling: pnpm install",
     );
   }
 

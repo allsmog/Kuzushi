@@ -1,47 +1,51 @@
-import type { TaskConfig, TaskId } from "./scanners/types.js";
-import type { EngineProvenance, ProofState, TaintPathStep } from "./scanners/types.js";
-import type { QualityGateConfig } from "./quality-gate-types.js";
-import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
-import type { DiscoveredModule } from "./discovery/types.js";
 import type { EvidenceAnchor } from "./agents/tasks/threat-modeling/types.js";
-
-// Re-export Zod schemas for consumers that need runtime validation.
-export {
-  CryptoBehavioralVerdictSchema,
-  CryptoBehavioralRunSchema,
-  TaintPathStepSchema,
-  EngineProvenanceSchema,
-  ProofStateSchema,
-  DynamicAnalysisStatusSchema,
-  DynamicCoverageModeSchema,
-  DynamicAnalysisRunSchema,
-  PatchStatusSchema,
-  PatchResultSchema,
-  FindingMetadataSchema,
-  FindingSchema,
-  TriageResultSchema,
-  VerificationResultSchema,
-  KuzushiConfigSchema,
-  PocHarnessResultSchema,
-  RepoContextSchema,
-  EnrichedRepoContextSchema,
-  ApplicationModelSchema,
-  ThreatScenarioSchema,
-  ExploitChainSchema,
-  PrecedentsSchema,
-  SecurityProfileSchema,
-  FindingRowSchema,
-  VerdictSchema,
-  EvidenceStepSchema,
-  TriagePathAssessmentSchema,
-  RawTriageOutputSchema,
-  RawVerificationOutputSchema,
-  RawPocHarnessOutputSchema,
-  formatZodErrors,
-  formatValidationErrorMessage,
-} from "./schemas.js";
+import type { DiscoveredModule } from "./discovery/types.js";
+import type { QualityGateConfig } from "./quality-gate-types.js";
+import type {
+  EngineProvenance,
+  ProofState,
+  TaintPathStep,
+  TaskConfig,
+  TaskId,
+} from "./scanners/types.js";
+import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 
 export type { CryptoBehavioralRun } from "./crypto-behavioral/types.js";
+// Re-export Zod schemas for consumers that need runtime validation.
+export {
+  ApplicationModelSchema,
+  CryptoBehavioralRunSchema,
+  CryptoBehavioralVerdictSchema,
+  DynamicAnalysisRunSchema,
+  DynamicAnalysisStatusSchema,
+  DynamicCoverageModeSchema,
+  EngineProvenanceSchema,
+  EnrichedRepoContextSchema,
+  EvidenceStepSchema,
+  ExploitChainSchema,
+  FindingMetadataSchema,
+  FindingRowSchema,
+  FindingSchema,
+  formatValidationErrorMessage,
+  formatZodErrors,
+  KuzushiConfigSchema,
+  PatchResultSchema,
+  PatchStatusSchema,
+  PocHarnessResultSchema,
+  PrecedentsSchema,
+  ProofStateSchema,
+  RawPocHarnessOutputSchema,
+  RawTriageOutputSchema,
+  RawVerificationOutputSchema,
+  RepoContextSchema,
+  SecurityProfileSchema,
+  TaintPathStepSchema,
+  ThreatScenarioSchema,
+  TriagePathAssessmentSchema,
+  TriageResultSchema,
+  VerdictSchema,
+  VerificationResultSchema,
+} from "./schemas.js";
 
 /** Pluggable message bus backend. */
 export type BusBackend = "in-process";
@@ -272,10 +276,24 @@ export interface RepoContext {
 export interface EnrichedRepoContext {
   base: RepoContext;
   enrichment: {
-    customMiddleware: Array<{ name: string; filePath: string; purpose: string; appliesTo?: string }>;
-    customSanitizers: Array<{ name: string; filePath: string; sanitizationType: string; usedBy?: string }>;
+    customMiddleware: Array<{
+      name: string;
+      filePath: string;
+      purpose: string;
+      appliesTo?: string;
+    }>;
+    customSanitizers: Array<{
+      name: string;
+      filePath: string;
+      sanitizationType: string;
+      usedBy?: string;
+    }>;
     trustBoundaries: Array<{ name: string; description: string; entryPoints?: string[] }>;
-    dataClassifications: Array<{ dataType: string; sensitivity: "public" | "internal" | "confidential" | "restricted"; locations?: string[] }>;
+    dataClassifications: Array<{
+      dataType: string;
+      sensitivity: "public" | "internal" | "confidential" | "restricted";
+      locations?: string[];
+    }>;
     architecturalNotes: string[];
   };
 }

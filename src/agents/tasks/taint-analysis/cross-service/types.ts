@@ -143,9 +143,7 @@ export interface CrossServiceConfig {
 }
 
 /** Resolve cross-service config from a full TaintAnalysisTaskConfig. */
-export function resolveCrossServiceConfig(
-  cfg: TaintAnalysisTaskConfig,
-): CrossServiceConfig {
+export function resolveCrossServiceConfig(cfg: TaintAnalysisTaskConfig): CrossServiceConfig {
   return {
     enabled: cfg.crossService ?? false,
     boundaryModel: cfg.crossServiceBoundaryModel ?? cfg.labelingModel,
@@ -189,11 +187,16 @@ export const BOUNDARY_RESPONSE_SCHEMA = {
           protocol: {
             type: "string",
             enum: [
-              "http-server", "http-client",
-              "grpc-server", "grpc-client",
-              "message-publish", "message-consume",
-              "database-write", "database-read",
-              "event-emit", "event-listen",
+              "http-server",
+              "http-client",
+              "grpc-server",
+              "grpc-client",
+              "message-publish",
+              "message-consume",
+              "database-write",
+              "database-read",
+              "event-emit",
+              "event-listen",
               "unknown",
             ],
           },
@@ -235,11 +238,16 @@ export const BOUNDARY_RESPONSE_SCHEMA = {
           protocol: {
             type: "string",
             enum: [
-              "http-server", "http-client",
-              "grpc-server", "grpc-client",
-              "message-publish", "message-consume",
-              "database-write", "database-read",
-              "event-emit", "event-listen",
+              "http-server",
+              "http-client",
+              "grpc-server",
+              "grpc-client",
+              "message-publish",
+              "message-consume",
+              "database-write",
+              "database-read",
+              "event-emit",
+              "event-listen",
               "unknown",
             ],
           },
@@ -289,9 +297,13 @@ export const STITCH_RESPONSE_SCHEMA = {
         type: "object",
         additionalProperties: false,
         required: [
-          "sourceServiceId", "sourcePointId",
-          "targetServiceId", "targetPointId",
-          "matchMethod", "confidence", "rationale",
+          "sourceServiceId",
+          "sourcePointId",
+          "targetServiceId",
+          "targetPointId",
+          "matchMethod",
+          "confidence",
+          "rationale",
         ],
         properties: {
           sourceServiceId: { type: "string" },
@@ -352,7 +364,11 @@ export interface StitchLlmResponse {
 // ── Supported Taint Analysis Languages ──────────────────────────────────
 
 const TAINT_ANALYSIS_LANGUAGES: Set<TaintAnalysisLanguage> = new Set([
-  "python", "go", "java", "javascript", "csharp",
+  "python",
+  "go",
+  "java",
+  "javascript",
+  "csharp",
 ]);
 
 export function isTaintAnalysisLanguage(lang: string): lang is TaintAnalysisLanguage {

@@ -3,7 +3,7 @@ import { globSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node
 import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
-import { Type, type Tool } from "@mariozechner/pi-ai";
+import { type Tool, Type } from "@mariozechner/pi-ai";
 import { isRecord, toErrorMessage } from "../utils.js";
 
 const execFileAsync = promisify(execFile);
@@ -33,9 +33,15 @@ const ReadParameters = Type.Object(
     offset: Type.Optional(Type.Integer({ minimum: 0, description: "0-based line offset" })),
     start_line: Type.Optional(Type.Integer({ minimum: 1, description: "1-based starting line" })),
     startLine: Type.Optional(Type.Integer({ minimum: 1, description: "1-based starting line" })),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000, description: "Lines to return" })),
-    lines: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000, description: "Lines to return" })),
-    end_line: Type.Optional(Type.Integer({ minimum: 1, description: "1-based ending line (inclusive)" })),
+    limit: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 2000, description: "Lines to return" }),
+    ),
+    lines: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 2000, description: "Lines to return" }),
+    ),
+    end_line: Type.Optional(
+      Type.Integer({ minimum: 1, description: "1-based ending line (inclusive)" }),
+    ),
   },
   { additionalProperties: true },
 );
@@ -89,8 +95,12 @@ const GrepParameters = Type.Object(
 const GetFunctionBodyParameters = Type.Object(
   {
     name: Type.String({ description: "Function or method name to find" }),
-    file_path: Type.Optional(Type.String({ description: "File to search in (searches repo if omitted)" })),
-    language: Type.Optional(Type.String({ description: "Language hint (js, ts, py, go, java, rust, rb, php, cs)" })),
+    file_path: Type.Optional(
+      Type.String({ description: "File to search in (searches repo if omitted)" }),
+    ),
+    language: Type.Optional(
+      Type.String({ description: "Language hint (js, ts, py, go, java, rust, rb, php, cs)" }),
+    ),
   },
   { additionalProperties: true },
 );
@@ -99,7 +109,9 @@ const GetCallersParameters = Type.Object(
   {
     name: Type.String({ description: "Function or method name to find callers of" }),
     path: Type.Optional(Type.String({ description: "Directory to scope the search" })),
-    max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description: "Max results (default 20)" })),
+    max_results: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 100, description: "Max results (default 20)" }),
+    ),
   },
   { additionalProperties: true },
 );
@@ -165,32 +177,38 @@ export const PI_AI_TOOL_DEFINITIONS: Tool[] = [
   },
   {
     name: "GetFunctionBody",
-    description: "Find a function/method definition by name and return its body with surrounding context (~50 lines before and after).",
+    description:
+      "Find a function/method definition by name and return its body with surrounding context (~50 lines before and after).",
     parameters: GetFunctionBodyParameters,
   },
   {
     name: "GetCallers",
-    description: "Find all call sites of a function/method across the codebase. Returns file:line:content for each call site.",
+    description:
+      "Find all call sites of a function/method across the codebase. Returns file:line:content for each call site.",
     parameters: GetCallersParameters,
   },
   {
     name: "GetCallees",
-    description: "Given a function, list all functions/methods it calls. Returns deduplicated list of callee names.",
+    description:
+      "Given a function, list all functions/methods it calls. Returns deduplicated list of callee names.",
     parameters: GetCalleesParameters,
   },
   {
     name: "GoToDefinition",
-    description: "Resolve the definition location for the symbol at a TypeScript/JavaScript position.",
+    description:
+      "Resolve the definition location for the symbol at a TypeScript/JavaScript position.",
     parameters: SemanticPositionParameters,
   },
   {
     name: "FindReferences",
-    description: "Find symbol references at a TypeScript/JavaScript position using semantic analysis.",
+    description:
+      "Find symbol references at a TypeScript/JavaScript position using semantic analysis.",
     parameters: FindReferencesParameters,
   },
   {
     name: "TypeAtPosition",
-    description: "Return the inferred or declared type for the symbol at a TypeScript/JavaScript position.",
+    description:
+      "Return the inferred or declared type for the symbol at a TypeScript/JavaScript position.",
     parameters: SemanticPositionParameters,
   },
 ];
@@ -491,11 +509,14 @@ interface TsServerResponse {
 class TsServerSession {
   private readonly child;
 
-  private readonly pending = new Map<number, {
-    resolve: (response: TsServerResponse) => void;
-    reject: (error: Error) => void;
-    timeout: ReturnType<typeof setTimeout>;
-  }>();
+  private readonly pending = new Map<
+    number,
+    {
+      resolve: (response: TsServerResponse) => void;
+      reject: (error: Error) => void;
+      timeout: ReturnType<typeof setTimeout>;
+    }
+  >();
 
   private stdoutBuffer = Buffer.alloc(0);
   private stderrText = "";
@@ -613,7 +634,9 @@ class TsServerSession {
       const header = this.stdoutBuffer.subarray(0, headerEnd).toString("utf8");
       const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
       if (!lengthMatch) {
-        this.stdoutBuffer = this.stdoutBuffer.subarray(headerEnd + TSSERVER_HEADER_SEPARATOR.length);
+        this.stdoutBuffer = this.stdoutBuffer.subarray(
+          headerEnd + TSSERVER_HEADER_SEPARATOR.length,
+        );
         continue;
       }
 
@@ -771,17 +794,19 @@ async function executeFindReferences(args: Record<string, unknown>, cwd: string)
     const definitions = Array.isArray(definition.body?.definitions)
       ? definition.body.definitions
       : [];
-    const refs = Array.isArray(references.body?.refs)
-      ? references.body.refs
-      : [];
+    const refs = Array.isArray(references.body?.refs) ? references.body.refs : [];
 
-    const filtered = refs.filter((reference) =>
-      !definitions.some((definitionLocation) => isSameSemanticLocation(definitionLocation, reference)),
+    const filtered = refs.filter(
+      (reference) =>
+        !definitions.some((definitionLocation) =>
+          isSameSemanticLocation(definitionLocation, reference),
+        ),
     );
 
     if (filtered.length === 0) {
-      const symbolName = references.body?.symbolName
-        ?? extractSymbolName(quickInfo.success ? quickInfo.body : undefined, position);
+      const symbolName =
+        references.body?.symbolName ??
+        extractSymbolName(quickInfo.success ? quickInfo.body : undefined, position);
       return `No references found for "${symbolName}" in ${position.displayPath}:${position.line}:${position.column}.`;
     }
 
@@ -839,44 +864,135 @@ const FUNCTION_DEF_CONTEXT_LINES = 50;
 const DEFAULT_GET_CALLERS_LIMIT = 20;
 
 const TEXT_FILE_EXTENSIONS = new Set([
-  "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
-  "py", "pyi", "pyw",
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "mts",
+  "cts",
+  "py",
+  "pyi",
+  "pyw",
   "go",
-  "java", "kt", "kts", "scala",
-  "cs", "fs", "vb",
+  "java",
+  "kt",
+  "kts",
+  "scala",
+  "cs",
+  "fs",
+  "vb",
   "rs",
-  "rb", "erb",
+  "rb",
+  "erb",
   "php",
-  "c", "h", "cpp", "hpp", "cc", "cxx", "hxx",
-  "swift", "m", "mm",
-  "lua", "pl", "pm", "r", "R", "jl",
-  "sh", "bash", "zsh", "fish",
-  "sql", "graphql", "gql",
-  "html", "htm", "xml", "xsl", "xslt", "svg",
-  "css", "scss", "sass", "less",
-  "json", "yaml", "yml", "toml", "ini", "cfg", "conf",
-  "md", "txt", "rst", "adoc",
-  "vue", "svelte", "astro",
-  "tf", "hcl",
-  "proto", "thrift", "avsc",
-  "ex", "exs", "erl", "hrl",
-  "hs", "lhs", "ml", "mli", "clj", "cljs", "cljc", "el", "lisp", "scm",
-  "dart", "nim", "zig", "v",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "cc",
+  "cxx",
+  "hxx",
+  "swift",
+  "m",
+  "mm",
+  "lua",
+  "pl",
+  "pm",
+  "r",
+  "R",
+  "jl",
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+  "sql",
+  "graphql",
+  "gql",
+  "html",
+  "htm",
+  "xml",
+  "xsl",
+  "xslt",
+  "svg",
+  "css",
+  "scss",
+  "sass",
+  "less",
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "cfg",
+  "conf",
+  "md",
+  "txt",
+  "rst",
+  "adoc",
+  "vue",
+  "svelte",
+  "astro",
+  "tf",
+  "hcl",
+  "proto",
+  "thrift",
+  "avsc",
+  "ex",
+  "exs",
+  "erl",
+  "hrl",
+  "hs",
+  "lhs",
+  "ml",
+  "mli",
+  "clj",
+  "cljs",
+  "cljc",
+  "el",
+  "lisp",
+  "scm",
+  "dart",
+  "nim",
+  "zig",
+  "v",
 ]);
 
 function extToLangHint(ext: string): string | undefined {
   switch (ext) {
-    case "ts": case "tsx": case "mts": case "cts": return "ts";
-    case "js": case "jsx": case "mjs": case "cjs": return "js";
-    case "py": case "pyi": case "pyw": return "py";
-    case "go": return "go";
-    case "java": return "java";
-    case "kt": case "kts": return "kotlin";
-    case "cs": return "cs";
-    case "rs": return "rust";
-    case "rb": case "erb": return "rb";
-    case "php": return "php";
-    default: return undefined;
+    case "ts":
+    case "tsx":
+    case "mts":
+    case "cts":
+      return "ts";
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+      return "js";
+    case "py":
+    case "pyi":
+    case "pyw":
+      return "py";
+    case "go":
+      return "go";
+    case "java":
+      return "java";
+    case "kt":
+    case "kts":
+      return "kotlin";
+    case "cs":
+      return "cs";
+    case "rs":
+      return "rust";
+    case "rb":
+    case "erb":
+      return "rb";
+    case "php":
+      return "php";
+    default:
+      return undefined;
   }
 }
 
@@ -895,19 +1011,114 @@ const GENERIC_FUNCTION_DEF_PATTERNS: RegExp[] = [
 ];
 
 const LANGUAGE_KEYWORDS = new Set([
-  "if", "else", "for", "while", "do", "switch", "case", "catch", "throw",
-  "return", "new", "delete", "typeof", "instanceof", "void", "in", "of",
-  "try", "finally", "break", "continue", "default", "with", "yield", "await",
-  "import", "export", "from", "as", "class", "extends", "super", "this",
-  "const", "let", "var", "static", "async", "function",
-  "print", "assert", "raise", "pass", "lambda", "elif", "except", "not", "and", "or", "is",
-  "range", "len", "type", "list", "dict", "set", "tuple", "str", "int", "float", "bool",
-  "fmt", "make", "append", "panic", "recover", "defer", "go", "select", "chan",
-  "match", "enum", "impl", "trait", "pub", "mod", "use", "crate", "self", "Self",
-  "require", "require_once", "include", "include_once", "echo", "isset", "unset", "empty",
-  "puts", "attr_accessor", "attr_reader", "attr_writer",
-  "System", "String", "Integer", "Boolean", "Object", "Array", "Map", "Set",
-  "console", "Math", "JSON", "Promise", "Error", "RegExp", "Date", "Number",
+  "if",
+  "else",
+  "for",
+  "while",
+  "do",
+  "switch",
+  "case",
+  "catch",
+  "throw",
+  "return",
+  "new",
+  "delete",
+  "typeof",
+  "instanceof",
+  "void",
+  "in",
+  "of",
+  "try",
+  "finally",
+  "break",
+  "continue",
+  "default",
+  "with",
+  "yield",
+  "await",
+  "import",
+  "export",
+  "from",
+  "as",
+  "class",
+  "extends",
+  "super",
+  "this",
+  "const",
+  "let",
+  "var",
+  "static",
+  "async",
+  "function",
+  "print",
+  "assert",
+  "raise",
+  "pass",
+  "lambda",
+  "elif",
+  "except",
+  "not",
+  "and",
+  "or",
+  "is",
+  "range",
+  "len",
+  "type",
+  "list",
+  "dict",
+  "set",
+  "tuple",
+  "str",
+  "int",
+  "float",
+  "bool",
+  "fmt",
+  "make",
+  "append",
+  "panic",
+  "recover",
+  "defer",
+  "go",
+  "select",
+  "chan",
+  "match",
+  "enum",
+  "impl",
+  "trait",
+  "pub",
+  "mod",
+  "use",
+  "crate",
+  "self",
+  "Self",
+  "require",
+  "require_once",
+  "include",
+  "include_once",
+  "echo",
+  "isset",
+  "unset",
+  "empty",
+  "puts",
+  "attr_accessor",
+  "attr_reader",
+  "attr_writer",
+  "System",
+  "String",
+  "Integer",
+  "Boolean",
+  "Object",
+  "Array",
+  "Map",
+  "Set",
+  "console",
+  "Math",
+  "JSON",
+  "Promise",
+  "Error",
+  "RegExp",
+  "Date",
+  "Number",
 ]);
 
 function buildFunctionDefPatterns(name: string, language?: string): RegExp[] {
@@ -942,25 +1153,32 @@ function buildFunctionDefPatterns(name: string, language?: string): RegExp[] {
   }
 
   // Java/Kotlin/C# patterns
-  if (!lang || lang === "java" || lang === "kotlin" || lang === "kt" || lang === "cs" || lang === "csharp") {
+  if (
+    !lang ||
+    lang === "java" ||
+    lang === "kotlin" ||
+    lang === "kt" ||
+    lang === "cs" ||
+    lang === "csharp"
+  ) {
     patterns.push(
-      new RegExp(`(?:public|private|protected|internal|static|final|abstract|override|suspend|synchronized)\\s+.*\\b${escapedName}\\s*\\(`),
-      new RegExp(`^\\s*(?:fun|void|int|long|double|float|boolean|char|byte|short|string|var|val|dynamic|object|Task|async)\\s+${escapedName}\\s*[<(]`),
+      new RegExp(
+        `(?:public|private|protected|internal|static|final|abstract|override|suspend|synchronized)\\s+.*\\b${escapedName}\\s*\\(`,
+      ),
+      new RegExp(
+        `^\\s*(?:fun|void|int|long|double|float|boolean|char|byte|short|string|var|val|dynamic|object|Task|async)\\s+${escapedName}\\s*[<(]`,
+      ),
     );
   }
 
   // Rust patterns
   if (!lang || lang === "rust" || lang === "rs") {
-    patterns.push(
-      new RegExp(`^\\s*(?:pub\\s+)?(?:async\\s+)?fn\\s+${escapedName}\\s*[<(]`),
-    );
+    patterns.push(new RegExp(`^\\s*(?:pub\\s+)?(?:async\\s+)?fn\\s+${escapedName}\\s*[<(]`));
   }
 
   // Ruby patterns
   if (!lang || lang === "ruby" || lang === "rb") {
-    patterns.push(
-      new RegExp(`^\\s*def\\s+(?:self\\.)?${escapedName}\\b`),
-    );
+    patterns.push(new RegExp(`^\\s*def\\s+(?:self\\.)?${escapedName}\\b`));
   }
 
   // PHP patterns
@@ -1061,7 +1279,8 @@ function executeGetCallers(args: Record<string, unknown>, cwd: string): string {
     throw new Error(`GetCallers path is not a directory: ${searchPath}`);
   }
 
-  const maxResults = toPositiveInt(args["max_results"] ?? args["maxResults"]) ?? DEFAULT_GET_CALLERS_LIMIT;
+  const maxResults =
+    toPositiveInt(args["max_results"] ?? args["maxResults"]) ?? DEFAULT_GET_CALLERS_LIMIT;
 
   const callPattern = new RegExp(`(?<![\\w$])${escapeRegex(name)}\\s*\\(`, "g");
 
@@ -1286,19 +1505,17 @@ function formatSemanticHeader(
     column: position.column,
   });
   const kind = quickInfo?.kind ?? "unknown";
-  return [
-    `Symbol: ${symbolName}`,
-    `Kind: ${kind}`,
-  ];
+  return [`Symbol: ${symbolName}`, `Kind: ${kind}`];
 }
 
 function extractSymbolName(
   quickInfo: TsServerQuickInfoBody | undefined,
   position: { absolutePath?: string; displayPath: string; line: number; column: number },
 ): string {
-  const textFromSpan = quickInfo?.start && quickInfo?.end && position.absolutePath
-    ? readSpanText(position.absolutePath, quickInfo.start, quickInfo.end)
-    : undefined;
+  const textFromSpan =
+    quickInfo?.start && quickInfo?.end && position.absolutePath
+      ? readSpanText(position.absolutePath, quickInfo.start, quickInfo.end)
+      : undefined;
   if (textFromSpan) {
     return textFromSpan;
   }
@@ -1316,7 +1533,11 @@ function extractSymbolName(
 }
 
 function normalizeTypeDisplay(displayString: string | undefined): string {
-  const normalized = displayString?.split("\n").map((line) => line.trim()).filter(Boolean).join(" | ");
+  const normalized = displayString
+    ?.split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" | ");
   return normalized && normalized.length > 0 ? normalized : "unknown";
 }
 
@@ -1360,24 +1581,26 @@ function readSpanText(
     if (line == null) {
       return undefined;
     }
-    return line.slice(Math.max(0, start.offset - 1), Math.max(0, end.offset - 1)).trim() || undefined;
+    return (
+      line.slice(Math.max(0, start.offset - 1), Math.max(0, end.offset - 1)).trim() || undefined
+    );
   } catch {
     return undefined;
   }
 }
 
 function isSameSemanticLocation(left: TsServerLocation, right: TsServerLocation): boolean {
-  return path.normalize(left.file) === path.normalize(right.file)
-    && left.start.line === right.start.line
-    && left.start.offset === right.start.offset
-    && left.end.line === right.end.line
-    && left.end.offset === right.end.offset;
+  return (
+    path.normalize(left.file) === path.normalize(right.file) &&
+    left.start.line === right.start.line &&
+    left.start.offset === right.start.offset &&
+    left.end.line === right.end.line &&
+    left.end.offset === right.end.offset
+  );
 }
 
 function isTsServerResponse(value: unknown): value is TsServerResponse {
-  return isRecord(value)
-    && value["type"] === "response"
-    && typeof value["success"] === "boolean";
+  return isRecord(value) && value["type"] === "response" && typeof value["success"] === "boolean";
 }
 
 function isSupportedSemanticPath(absolutePath: string): boolean {
@@ -1391,7 +1614,8 @@ function resolvePath(cwd: string, targetPath: string): string {
     : path.resolve(root, targetPath);
   const relative = path.relative(root, resolved);
 
-  const isInsideRoot = relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  const isInsideRoot =
+    relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
   if (!isInsideRoot) {
     throw new Error(`Path escapes repository root: ${targetPath}`);
   }
@@ -1408,9 +1632,7 @@ function normalizeStringArray(value: unknown): string[] {
     return [];
   }
 
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
+  return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
 }
 
 function getString(obj: Record<string, unknown>, keys: string[]): string | undefined {

@@ -1,10 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  scoreSemgrepFinding,
   computeFingerprint,
-  selectFindings,
-  type SemgrepResult,
   type SemgrepOutput,
+  type SemgrepResult,
+  scoreSemgrepFinding,
+  selectFindings,
 } from "../src/scanners/run-semgrep.js";
 
 function makeFinding(overrides: Partial<SemgrepResult> = {}): SemgrepResult {
@@ -129,7 +129,10 @@ describe("selectFindings", () => {
   it("returns ranked findings", () => {
     const output: SemgrepOutput = {
       results: [
-        makeFinding({ check_id: "low-sev", extra: { severity: "INFO", message: "low", metadata: {} } }),
+        makeFinding({
+          check_id: "low-sev",
+          extra: { severity: "INFO", message: "low", metadata: {} },
+        }),
         makeFinding({ check_id: "high-sev" }),
       ],
     };

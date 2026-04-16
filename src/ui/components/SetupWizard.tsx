@@ -16,11 +16,13 @@
  *   │  [↑↓] navigate  [enter] select                        │
  *   └────────────────────────────────────────────────────────┘
  */
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+
 import chalk from "chalk";
+import { Box, Text, useInput } from "ink";
+import type React from "react";
+import { useState } from "react";
+import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
 
 export interface WizardResult {
   preset: string;
@@ -84,7 +86,8 @@ const PRESETS: PresetOption[] = [
     icon: chalk.redBright("◉"),
     name: "Reference",
     description: "augment current config",
-    detail: "Keeps your configured tasks and adds verify, PoC harnesses, code graph, and dynamic selection.",
+    detail:
+      "Keeps your configured tasks and adds verify, PoC harnesses, code graph, and dynamic selection.",
     summary: "Highest operator cost. Does not auto-enable patching by itself.",
   },
 ];
@@ -92,27 +95,37 @@ const PRESETS: PresetOption[] = [
 type WizardStep = "preset" | "model" | "save" | "done";
 
 const MODELS = [
-  { id: "anthropic:claude-sonnet-4-6", name: "Claude Sonnet", detail: "Fast, cost-effective (default)" },
+  {
+    id: "anthropic:claude-sonnet-4-6",
+    name: "Claude Sonnet",
+    detail: "Fast, cost-effective (default)",
+  },
   { id: "anthropic:claude-opus-4-6", name: "Claude Opus", detail: "Most accurate, slower" },
   { id: "anthropic:claude-haiku-4-5", name: "Claude Haiku", detail: "Fastest, cheapest" },
 ];
 
 const SAVE_OPTIONS = [
-  { id: "project" as const, name: "Save to project", detail: ".kuzushi/config.json (shared with team)" },
+  {
+    id: "project" as const,
+    name: "Save to project",
+    detail: ".kuzushi/config.json (shared with team)",
+  },
   { id: "global" as const, name: "Save globally", detail: "~/.kuzushi/config.json (personal)" },
   { id: "none" as const, name: "Don't save", detail: "Use these settings for this run only" },
 ];
 
-export function SetupWizard({ repoName, onComplete, onCancel }: SetupWizardProps): React.ReactElement {
+export function SetupWizard({
+  repoName,
+  onComplete,
+  onCancel,
+}: SetupWizardProps): React.ReactElement {
   const [step, setStep] = useState<WizardStep>("preset");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [result, setResult] = useState<Partial<WizardResult>>({});
   const width = terminalCardWidth();
 
-  const currentOptions = step === "preset" ? PRESETS
-    : step === "model" ? MODELS
-    : step === "save" ? SAVE_OPTIONS
-    : [];
+  const currentOptions =
+    step === "preset" ? PRESETS : step === "model" ? MODELS : step === "save" ? SAVE_OPTIONS : [];
 
   useInput((input, key) => {
     if (input === "q" || key.escape) {
@@ -152,20 +165,29 @@ export function SetupWizard({ repoName, onComplete, onCancel }: SetupWizardProps
     }
   });
 
-  const stepTitle = step === "preset" ? `Setup — ${repoName}`
-    : step === "model" ? "Choose a model"
-    : "Save configuration?";
+  const stepTitle =
+    step === "preset"
+      ? `Setup — ${repoName}`
+      : step === "model"
+        ? "Choose a model"
+        : "Save configuration?";
 
-  const stepHint = step === "preset" ? "Choose a scan preset:"
-    : step === "model" ? "Which AI model for triage?"
-    : "Where should we save these settings?";
+  const stepHint =
+    step === "preset"
+      ? "Choose a scan preset:"
+      : step === "model"
+        ? "Which AI model for triage?"
+        : "Where should we save these settings?";
 
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
       <Text>{boxHeader(stepTitle, width)}</Text>
       <Text>{""}</Text>
-      <Text>{"  "}{chalk.dim(stepHint)}</Text>
+      <Text>
+        {"  "}
+        {chalk.dim(stepHint)}
+      </Text>
       <Text>{""}</Text>
 
       {currentOptions.map((option, i) => {
@@ -173,18 +195,28 @@ export function SetupWizard({ repoName, onComplete, onCancel }: SetupWizardProps
         const prefix = isSelected ? chalk.redBright(icons.arrow) : " ";
         const name = isSelected ? chalk.white.bold(option.name) : chalk.dim(option.name);
         const icon = "icon" in option ? (option as PresetOption).icon : icons.complete;
-        const desc = "description" in option
-          ? chalk.dim((option as PresetOption).description)
-          : chalk.dim(option.detail);
+        const desc =
+          "description" in option
+            ? chalk.dim((option as PresetOption).description)
+            : chalk.dim(option.detail);
         const summary = "summary" in option ? (option as PresetOption).summary : option.detail;
 
         return (
           <Box key={i} flexDirection="column">
-            <Text>{"  "}{prefix} {icon} {name}  {desc}</Text>
+            <Text>
+              {"  "}
+              {prefix} {icon} {name} {desc}
+            </Text>
             {isSelected && (
               <>
-                <Text>{"      "}{chalk.dim(option.detail)}</Text>
-                <Text>{"      "}{chalk.white(summary)}</Text>
+                <Text>
+                  {"      "}
+                  {chalk.dim(option.detail)}
+                </Text>
+                <Text>
+                  {"      "}
+                  {chalk.white(summary)}
+                </Text>
               </>
             )}
           </Box>
@@ -192,7 +224,10 @@ export function SetupWizard({ repoName, onComplete, onCancel }: SetupWizardProps
       })}
 
       <Text>{""}</Text>
-      <Text>{"  "}{chalk.dim("[↑↓] navigate  [enter] select  [q] quit")}</Text>
+      <Text>
+        {"  "}
+        {chalk.dim("[↑↓] navigate  [enter] select  [q] quit")}
+      </Text>
       <Text>{boxFooter(width)}</Text>
     </Box>
   );

@@ -7,8 +7,12 @@
  * Phase 3: Cross-Module Stitching (boundary matching across modules)
  */
 
+import type {
+  DfdElement,
+  StrideThreat,
+  TrustBoundary,
+} from "../agents/tasks/threat-modeling/types.js";
 import type { DiscoveredModule, ModulePriority } from "../discovery/types.js";
-import type { DfdElement, TrustBoundary, StrideThreat } from "../agents/tasks/threat-modeling/types.js";
 import type { FileIndex, RepoContext } from "../types.js";
 
 // ── Phase 0: Static Intelligence ───────────────────────────────────────
@@ -48,12 +52,7 @@ export interface AttackSurfaceAnnotation {
   detectedFrameworks: string[];
 }
 
-export type InteractionType =
-  | "import"
-  | "rpc"
-  | "shared-db"
-  | "event"
-  | "http-client";
+export type InteractionType = "import" | "rpc" | "shared-db" | "event" | "http-client";
 
 export interface ModuleInteractionEdge {
   source: string;

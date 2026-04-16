@@ -46,14 +46,20 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
 
     runState.set(event.meta.runId, state);
 
-    writeFileSync(path.join(runDir, "run.json"), safeJsonStringify({
-      runId: event.meta.runId,
-      timestamp: event.meta.timestamp,
-      resumeRunId: event.payload.resumeRunId,
-      context: event.payload.context,
-      config: event.payload.config,
-      scanOpts: event.payload.scanOpts,
-    }, 2));
+    writeFileSync(
+      path.join(runDir, "run.json"),
+      safeJsonStringify(
+        {
+          runId: event.meta.runId,
+          timestamp: event.meta.timestamp,
+          resumeRunId: event.payload.resumeRunId,
+          context: event.payload.context,
+          config: event.payload.config,
+          scanOpts: event.payload.scanOpts,
+        },
+        2,
+      ),
+    );
   });
 
   bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", (event) => {
@@ -134,10 +140,16 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
       return;
     }
 
-    writeFileSync(path.join(state.runDir, "stats.json"), safeJsonStringify({
-      timestamp: event.meta.timestamp,
-      stats: event.payload.stats,
-    }, 2));
+    writeFileSync(
+      path.join(state.runDir, "stats.json"),
+      safeJsonStringify(
+        {
+          timestamp: event.meta.timestamp,
+          stats: event.payload.stats,
+        },
+        2,
+      ),
+    );
 
     runState.delete(event.meta.runId);
   });
@@ -160,12 +172,15 @@ function appendAuditLine(
   }
 
   const filePath = stream === "triage" ? state.triageLogPath : state.verifyLogPath;
-  appendFileSync(filePath, `${safeJsonStringify({
-    timestamp,
-    eventType,
-    fingerprint: details.fingerprint,
-    payload: details.payload,
-  })}\n`);
+  appendFileSync(
+    filePath,
+    `${safeJsonStringify({
+      timestamp,
+      eventType,
+      fingerprint: details.fingerprint,
+      payload: details.payload,
+    })}\n`,
+  );
 }
 
 function ensureDir(dirPath: string): void {

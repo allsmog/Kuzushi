@@ -1,18 +1,18 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "../src/agent-runtime/types.js";
-import type { Finding } from "../src/scanners/types.js";
-import type { TriageResult, VerificationResult } from "../src/types.js";
 import {
   buildPocHarnessPrompt,
   generatePocHarness,
-  parsePocHarnessOutput,
-  pocHarnessSystemPromptPrefix,
   POC_HARNESS_RESULT_SCHEMA,
   PocHarnessExecutionError,
+  parsePocHarnessOutput,
+  pocHarnessSystemPromptPrefix,
 } from "../src/poc-harness.js";
+import type { Finding } from "../src/scanners/types.js";
+import type { TriageResult, VerificationResult } from "../src/types.js";
 
 const tempDirs: string[] = [];
 
@@ -121,13 +121,16 @@ describe("buildPocHarnessPrompt", () => {
 
 describe("parsePocHarnessOutput", () => {
   it("parses structured object output", () => {
-    const parsed = parsePocHarnessOutput({
-      fingerprint: "poc-fp-1",
-      script_content: "console.log('PASS');",
-      language: "javascript",
-      skipped: false,
-      skip_reason: null,
-    }, "fallback");
+    const parsed = parsePocHarnessOutput(
+      {
+        fingerprint: "poc-fp-1",
+        script_content: "console.log('PASS');",
+        language: "javascript",
+        skipped: false,
+        skip_reason: null,
+      },
+      "fallback",
+    );
 
     expect(parsed.fingerprint).toBe("poc-fp-1");
     expect(parsed.scriptContent).toContain("PASS");
@@ -152,8 +155,9 @@ describe("parsePocHarnessOutput", () => {
   });
 
   it("throws a clear error for malformed JSON", () => {
-    expect(() => parsePocHarnessOutput("not-json", "fallback-fp"))
-      .toThrow("Invalid PoC harness JSON response");
+    expect(() => parsePocHarnessOutput("not-json", "fallback-fp")).toThrow(
+      "Invalid PoC harness JSON response",
+    );
   });
 });
 
@@ -161,19 +165,21 @@ describe("generatePocHarness", () => {
   it("captures total cost and passes schema/tools to runtime", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          fingerprint: "poc-fp-1",
-          script_content: null,
-          language: "typescript",
-          skipped: true,
-          skip_reason: "Cannot isolate vulnerable function from runtime dependencies.",
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "{}",
+          structuredOutput: {
+            fingerprint: "poc-fp-1",
+            script_content: null,
+            language: "typescript",
+            skipped: true,
+            skip_reason: "Cannot isolate vulnerable function from runtime dependencies.",
+          },
+          totalCostUsd: 0.0112,
         },
-        totalCostUsd: 0.0112,
-      }],
+      ],
       requests,
     );
 
@@ -192,26 +198,37 @@ describe("generatePocHarness", () => {
     expect(output.result.scriptPath).toBeNull();
     expect(output.costUsd).toBe(0.0112);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody", "GoToDefinition", "FindReferences", "TypeAtPosition"]);
+    expect(requests[0]?.options?.allowedTools).toEqual([
+      "Read",
+      "Glob",
+      "Grep",
+      "GetCallers",
+      "GetCallees",
+      "GetFunctionBody",
+      "GoToDefinition",
+      "FindReferences",
+      "TypeAtPosition",
+    ]);
     expect(requests[0]?.options?.outputFormat?.schema).toBe(POC_HARNESS_RESULT_SCHEMA);
-
   });
 
   it("uses semantic navigation tools when the runtime is pi-ai", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          fingerprint: "poc-fp-1",
-          script_content: null,
-          language: "typescript",
-          skipped: true,
-          skip_reason: "skip",
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "{}",
+          structuredOutput: {
+            fingerprint: "poc-fp-1",
+            script_content: null,
+            language: "typescript",
+            skipped: true,
+            skip_reason: "skip",
+          },
         },
-      }],
+      ],
       requests,
       "pi-ai",
     );
@@ -242,19 +259,21 @@ describe("generatePocHarness", () => {
   it("writes generated scripts and validates syntax", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          fingerprint: "poc-fp-1",
-          script_content: "console.log('PASS');\nprocess.exit(0);\n",
-          language: "javascript",
-          skipped: false,
-          skip_reason: null,
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "{}",
+          structuredOutput: {
+            fingerprint: "poc-fp-1",
+            script_content: "console.log('PASS');\nprocess.exit(0);\n",
+            language: "javascript",
+            skipped: false,
+            skip_reason: null,
+          },
+          totalCostUsd: 0.0042,
         },
-        totalCostUsd: 0.0042,
-      }],
+      ],
       requests,
     );
 
@@ -280,12 +299,14 @@ describe("generatePocHarness", () => {
   it("throws PocHarnessExecutionError with cost on parse failure", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "not-json",
-        totalCostUsd: 0.009,
-      }],
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "not-json",
+          totalCostUsd: 0.009,
+        },
+      ],
       requests,
     );
 
@@ -312,26 +333,30 @@ describe("generatePocHarness", () => {
   it("throws PocHarnessExecutionError for non-success agent result subtype", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "error_max_turns",
-        errors: ["max turns exceeded"],
-        totalCostUsd: 0.003,
-      }],
+      [
+        {
+          type: "result",
+          subtype: "error_max_turns",
+          errors: ["max turns exceeded"],
+          totalCostUsd: 0.003,
+        },
+      ],
       requests,
     );
 
     const repoRoot = makeTempRepo();
 
-    await expect(() => generatePocHarness(
-      makeFinding(),
-      makeTriageResult(),
-      makeVerificationResult(),
-      repoRoot,
-      "repo",
-      "claude-haiku-4-5-20251001",
-      { runtime },
-    )).rejects.toMatchObject({
+    await expect(() =>
+      generatePocHarness(
+        makeFinding(),
+        makeTriageResult(),
+        makeVerificationResult(),
+        repoRoot,
+        "repo",
+        "claude-haiku-4-5-20251001",
+        { runtime },
+      ),
+    ).rejects.toMatchObject({
       name: "PocHarnessExecutionError",
       costUsd: 0.003,
     });
@@ -340,18 +365,20 @@ describe("generatePocHarness", () => {
   it("fills default skip reason when agent omits it", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          fingerprint: "poc-fp-1",
-          script_content: null,
-          language: "typescript",
-          skipped: true,
-          skip_reason: null,
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "{}",
+          structuredOutput: {
+            fingerprint: "poc-fp-1",
+            script_content: null,
+            language: "typescript",
+            skipped: true,
+            skip_reason: null,
+          },
         },
-      }],
+      ],
       requests,
     );
 

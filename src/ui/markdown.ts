@@ -27,39 +27,32 @@ export function renderMarkdownInline(text: string): string {
   let result = text;
 
   // Links: [text](url) → hyperlink or plain text
-  result = result.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    (_match, linkText: string, url: string) => urlLink(url, chalk.underline(linkText)),
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, linkText: string, url: string) =>
+    urlLink(url, chalk.underline(linkText)),
   );
 
   // Inline code: `code` → highlighted
-  result = result.replace(
-    /`([^`]+)`/g,
-    (_match, code: string) => chalk.yellowBright(code),
-  );
+  result = result.replace(/`([^`]+)`/g, (_match, code: string) => chalk.yellowBright(code));
 
   // Bold: **text** → chalk bold
-  result = result.replace(
-    /\*\*([^*]+)\*\*/g,
-    (_match, bold: string) => chalk.bold(bold),
-  );
+  result = result.replace(/\*\*([^*]+)\*\*/g, (_match, bold: string) => chalk.bold(bold));
 
   // Italic: *text* → chalk italic (but not inside ** which was already handled)
-  result = result.replace(
-    /(?<!\*)\*([^*]+)\*(?!\*)/g,
-    (_match, italic: string) => chalk.italic(italic),
+  result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_match, italic: string) =>
+    chalk.italic(italic),
   );
 
   // CVE references: CVE-2024-12345 → linked to NVD
-  result = result.replace(
-    /\b(CVE-\d{4}-\d{4,})\b/g,
-    (_match, cve: string) => urlLink(`https://nvd.nist.gov/vuln/detail/${cve}`, chalk.cyan(cve)),
+  result = result.replace(/\b(CVE-\d{4}-\d{4,})\b/g, (_match, cve: string) =>
+    urlLink(`https://nvd.nist.gov/vuln/detail/${cve}`, chalk.cyan(cve)),
   );
 
   // CWE references: CWE-79 → linked to MITRE
-  result = result.replace(
-    /\b(CWE-\d+)\b/g,
-    (_match, cwe: string) => urlLink(`https://cwe.mitre.org/data/definitions/${cwe.replace("CWE-", "")}.html`, chalk.cyan(cwe)),
+  result = result.replace(/\b(CWE-\d+)\b/g, (_match, cwe: string) =>
+    urlLink(
+      `https://cwe.mitre.org/data/definitions/${cwe.replace("CWE-", "")}.html`,
+      chalk.cyan(cwe),
+    ),
   );
 
   return result;

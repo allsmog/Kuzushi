@@ -26,7 +26,10 @@ describe("HardExclusionFilter", () => {
   const filter = new HardExclusionFilter();
 
   it("keeps legitimate server-side findings untouched", () => {
-    const finding = makeFinding({ message: "SQL injection in user query", ruleId: "sql-injection" });
+    const finding = makeFinding({
+      message: "SQL injection in user query",
+      ruleId: "sql-injection",
+    });
     const { kept, hardExcluded, softSuppressed } = filter.filterFindings([finding]);
     expect(kept).toHaveLength(1);
     expect(hardExcluded).toHaveLength(0);

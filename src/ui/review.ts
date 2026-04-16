@@ -7,7 +7,7 @@
 import type Database from "better-sqlite3";
 import { getActionableFindings, updateFindingVerdict } from "../store.js";
 import type { Verdict } from "../types.js";
-import type { ActionableFinding, UIStore, UIMode } from "./state.js";
+import type { ActionableFinding, UIMode, UIStore } from "./state.js";
 
 export interface ReviewResult {
   reviewed: number;
@@ -72,20 +72,23 @@ export async function runInteractiveReview(
 
   if (store) {
     return await new Promise<ReviewResult>((resolve) => {
-      store.setReview({
-        findings,
-        onVerdict: (fingerprint: string, verdict: Verdict) => {
-          updateFindingVerdict(db, fingerprint, verdict);
-          result.reviewed++;
-          if (verdict === "tp") result.tp++;
-          else if (verdict === "fp") result.fp++;
-          else if (verdict === "by_design") result.byDesign++;
+      store.setReview(
+        {
+          findings,
+          onVerdict: (fingerprint: string, verdict: Verdict) => {
+            updateFindingVerdict(db, fingerprint, verdict);
+            result.reviewed++;
+            if (verdict === "tp") result.tp++;
+            else if (verdict === "fp") result.fp++;
+            else if (verdict === "by_design") result.byDesign++;
+          },
+          onQuit: () => {
+            store.setReview(null);
+            resolve(result);
+          },
         },
-        onQuit: () => {
-          store.setReview(null);
-          resolve(result);
-        },
-      }, returnMode);
+        returnMode,
+      );
     });
   }
 

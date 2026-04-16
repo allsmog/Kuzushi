@@ -1,27 +1,30 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { createLogger } from "../../../logger.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
-import { createLogger } from "../../../logger.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import {
-  resolveInvariantAnalysisConfig,
   INVARIANT_CHECK_SCHEMA,
   type Invariant,
   type InvariantDocument,
   type InvariantViolation,
+  resolveInvariantAnalysisConfig,
 } from "./types.js";
 
 const log = createLogger({ stage: "invariant-check" });
 
 function buildCheckPrompt(invariants: Invariant[]): string {
-  const invariantDescriptions = invariants.map((inv) =>
-    `- [${inv.id}] (${inv.kind}) ${inv.scope.filePath}:${inv.scope.startLine}: "${inv.statement}" (confidence: ${inv.confidence}, security: ${inv.securityRelevance})`
-  ).join("\n");
+  const invariantDescriptions = invariants
+    .map(
+      (inv) =>
+        `- [${inv.id}] (${inv.kind}) ${inv.scope.filePath}:${inv.scope.startLine}: "${inv.statement}" (confidence: ${inv.confidence}, security: ${inv.securityRelevance})`,
+    )
+    .join("\n");
 
   return [
     "You are an invariant violation checker.",
@@ -58,11 +61,15 @@ function parseViolations(raw: unknown, confidenceThreshold: number): InvariantVi
 
 function normalizeViolation(item: Record<string, unknown>): InvariantViolation | null {
   const invariantId = typeof item["invariantId"] === "string" ? item["invariantId"].trim() : "";
-  const invariantStatement = typeof item["invariantStatement"] === "string" ? item["invariantStatement"].trim() : "";
-  const violatingFilePath = typeof item["violatingFilePath"] === "string" ? item["violatingFilePath"].trim() : "";
-  const violationDescription = typeof item["violationDescription"] === "string" ? item["violationDescription"].trim() : "";
+  const invariantStatement =
+    typeof item["invariantStatement"] === "string" ? item["invariantStatement"].trim() : "";
+  const violatingFilePath =
+    typeof item["violatingFilePath"] === "string" ? item["violatingFilePath"].trim() : "";
+  const violationDescription =
+    typeof item["violationDescription"] === "string" ? item["violationDescription"].trim() : "";
 
-  if (!invariantId || !invariantStatement || !violatingFilePath || !violationDescription) return null;
+  if (!invariantId || !invariantStatement || !violatingFilePath || !violationDescription)
+    return null;
 
   const violatingStartLine = Math.max(1, Math.floor(Number(item["violatingStartLine"]) || 1));
   const severity = normalizeSeverity(item["severity"]);
@@ -77,7 +84,10 @@ function normalizeViolation(item: Record<string, unknown>): InvariantViolation |
     severity,
     confidence,
     cwe: typeof item["cwe"] === "string" ? item["cwe"].trim() || undefined : undefined,
-    attackScenario: typeof item["attackScenario"] === "string" ? item["attackScenario"].trim() || undefined : undefined,
+    attackScenario:
+      typeof item["attackScenario"] === "string"
+        ? item["attackScenario"].trim() || undefined
+        : undefined,
   };
 }
 
@@ -90,7 +100,8 @@ function violationToFinding(
   const cweList = violation.cwe ? [violation.cwe] : [];
   const fingerprint = computeFingerprint(repoName, filePath, violation);
 
-  const confidenceLabel = violation.confidence >= 0.8 ? "HIGH" : violation.confidence >= 0.5 ? "MEDIUM" : "LOW";
+  const confidenceLabel =
+    violation.confidence >= 0.8 ? "HIGH" : violation.confidence >= 0.5 ? "MEDIUM" : "LOW";
 
   return {
     taskId: "invariant-check",
@@ -104,19 +115,31 @@ function violationToFinding(
     scannerConfidence: confidenceLabel,
     subcategory: ["vuln"],
     likelihood: confidenceLabel,
-    impact: violation.severity === "ERROR" ? "HIGH" : violation.severity === "INFO" ? "LOW" : "MEDIUM",
+    impact:
+      violation.severity === "ERROR" ? "HIGH" : violation.severity === "INFO" ? "LOW" : "MEDIUM",
     cwe: cweList,
     score: scoreFindingMetadata({
       severity: violation.severity,
       likelihood: confidenceLabel,
-      impact: violation.severity === "ERROR" ? "HIGH" : violation.severity === "INFO" ? "LOW" : "MEDIUM",
+      impact:
+        violation.severity === "ERROR" ? "HIGH" : violation.severity === "INFO" ? "LOW" : "MEDIUM",
       subcategory: ["vuln"],
     }),
   };
 }
 
-function computeFingerprint(repoName: string, filePath: string, violation: InvariantViolation): string {
-  const source = [repoName, "invariant-analysis", violation.invariantId, filePath, String(violation.violatingStartLine)].join("|");
+function computeFingerprint(
+  repoName: string,
+  filePath: string,
+  violation: InvariantViolation,
+): string {
+  const source = [
+    repoName,
+    "invariant-analysis",
+    violation.invariantId,
+    filePath,
+    String(violation.violatingStartLine),
+  ].join("|");
   return createHash("sha256").update(source).digest("hex");
 }
 
@@ -173,7 +196,9 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
     const tag = "[invariant-check]";
     const batches = chunkArray(invariantsToCheck, cfg.checkBatchSize);
 
-    log.info(`Checking ${invariantsToCheck.length} invariants in ${batches.length} batch(es) (model=${cfg.checkModel})`);
+    log.info(
+      `Checking ${invariantsToCheck.length} invariants in ${batches.length} batch(es) (model=${cfg.checkModel})`,
+    );
 
     const allViolations: InvariantViolation[] = [];
     let totalCostUsd = 0;
@@ -218,7 +243,9 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
       const batchViolations = parseViolations(parsed, cfg.confidenceThreshold);
       totalCostUsd += batchCostUsd;
 
-      log.info(`Batch ${i + 1}/${batches.length}: resultLen=${resultText.length} structured=${structuredOutput !== undefined} preThreshold=${countPreThreshold(parsed)} postThreshold=${batchViolations.length}`);
+      log.info(
+        `Batch ${i + 1}/${batches.length}: resultLen=${resultText.length} structured=${structuredOutput !== undefined} preThreshold=${countPreThreshold(parsed)} postThreshold=${batchViolations.length}`,
+      );
 
       allViolations.push(...batchViolations);
     }
@@ -244,7 +271,9 @@ export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
         "",
         "This finding was generated by inferring an invariant from the code and finding a path that violates it.",
         "Verify both that the invariant is correct AND that the violation is reachable.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };
@@ -275,27 +304,35 @@ function asInvariantDocument(value: unknown): InvariantDocument | undefined {
         return [];
       }
 
-      return [{
-        id,
-        kind: typeof item["kind"] === "string"
-          ? item["kind"] as InvariantDocument["invariants"][number]["kind"]
-          : "data-invariant",
-        scope: {
-          filePath: typeof scope["filePath"] === "string" ? scope["filePath"] : "",
-          startLine: Math.max(1, Number(scope["startLine"]) || 1),
-          endLine: Math.max(1, Number(scope["endLine"]) || 1),
-          functionName: typeof scope["functionName"] === "string" ? scope["functionName"] : undefined,
-          className: typeof scope["className"] === "string" ? scope["className"] : undefined,
+      return [
+        {
+          id,
+          kind:
+            typeof item["kind"] === "string"
+              ? (item["kind"] as InvariantDocument["invariants"][number]["kind"])
+              : "data-invariant",
+          scope: {
+            filePath: typeof scope["filePath"] === "string" ? scope["filePath"] : "",
+            startLine: Math.max(1, Number(scope["startLine"]) || 1),
+            endLine: Math.max(1, Number(scope["endLine"]) || 1),
+            functionName:
+              typeof scope["functionName"] === "string" ? scope["functionName"] : undefined,
+            className: typeof scope["className"] === "string" ? scope["className"] : undefined,
+          },
+          statement,
+          formalExpression:
+            typeof item["formalExpression"] === "string" ? item["formalExpression"] : undefined,
+          confidence: Number.isFinite(Number(item["confidence"])) ? Number(item["confidence"]) : 0,
+          derivedFrom,
+          securityRelevance:
+            typeof item["securityRelevance"] === "string"
+              ? (item[
+                  "securityRelevance"
+                ] as InvariantDocument["invariants"][number]["securityRelevance"])
+              : "none",
+          category: typeof item["category"] === "string" ? item["category"] : undefined,
         },
-        statement,
-        formalExpression: typeof item["formalExpression"] === "string" ? item["formalExpression"] : undefined,
-        confidence: Number.isFinite(Number(item["confidence"])) ? Number(item["confidence"]) : 0,
-        derivedFrom,
-        securityRelevance: typeof item["securityRelevance"] === "string"
-          ? item["securityRelevance"] as InvariantDocument["invariants"][number]["securityRelevance"]
-          : "none",
-        category: typeof item["category"] === "string" ? item["category"] : undefined,
-      }];
+      ];
     }),
     coverage: {
       filesAnalyzed: Math.max(0, Number(coverage["filesAnalyzed"]) || 0),

@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { ScanOpts, RepoContext, FileIndex, SecurityPatternMatch } from "../../types.js";
 import { DEFAULT_IGNORED_DIRS, walkRepo as walkRepoEntries } from "../../repo-walk.js";
+import type { FileIndex, RepoContext, ScanOpts, SecurityPatternMatch } from "../../types.js";
 import { isRecord } from "../../utils.js";
 import type { AgentTask } from "../types.js";
 
@@ -11,31 +11,83 @@ const MAX_WALK_ENTRIES = 4000;
 const MAX_FILE_INDEX_ENTRIES = 500;
 
 const SOURCE_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-  ".py", ".go", ".rs", ".java", ".kt", ".rb",
-  ".php", ".cs", ".c", ".cpp", ".h", ".hpp",
-  ".swift", ".scala", ".sh", ".bash",
-  ".yml", ".yaml", ".json", ".toml", ".ini",
-  ".conf", ".cfg", ".env", ".xml", ".html",
-  ".vue", ".svelte", ".dockerfile", ".tf",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".py",
+  ".go",
+  ".rs",
+  ".java",
+  ".kt",
+  ".rb",
+  ".php",
+  ".cs",
+  ".c",
+  ".cpp",
+  ".h",
+  ".hpp",
+  ".swift",
+  ".scala",
+  ".sh",
+  ".bash",
+  ".yml",
+  ".yaml",
+  ".json",
+  ".toml",
+  ".ini",
+  ".conf",
+  ".cfg",
+  ".env",
+  ".xml",
+  ".html",
+  ".vue",
+  ".svelte",
+  ".dockerfile",
+  ".tf",
 ]);
 
 const MAX_GREP_FILE_SIZE = 100_000;
 const MAX_MATCHES_PER_DOMAIN = 50;
 
-const SECURITY_GREP_PATTERNS: Record<string, { fileFilter?: (p: string) => boolean; patterns: RegExp[] }> = {
+const SECURITY_GREP_PATTERNS: Record<
+  string,
+  { fileFilter?: (p: string) => boolean; patterns: RegExp[] }
+> = {
   "crypto-import": {
-    patterns: [/require\(['"]crypto['"]\)/, /from\s+['"]crypto['"]/, /hashlib/, /javax\.crypto/, /bcrypt/, /argon2/],
+    patterns: [
+      /require\(['"]crypto['"]\)/,
+      /from\s+['"]crypto['"]/,
+      /hashlib/,
+      /javax\.crypto/,
+      /bcrypt/,
+      /argon2/,
+    ],
   },
   "eval-exec": {
-    patterns: [/\beval\s*\(/, /\bexec\s*\(/, /\bspawn\s*\(/, /\bFunction\s*\(/, /child_process/, /subprocess/, /os\.system/],
+    patterns: [
+      /\beval\s*\(/,
+      /\bexec\s*\(/,
+      /\bspawn\s*\(/,
+      /\bFunction\s*\(/,
+      /child_process/,
+      /subprocess/,
+      /os\.system/,
+    ],
   },
   "auth-session": {
     patterns: [/\bpassport\b/, /\bjwt\b/i, /\bsession\b/, /\bmiddleware\b/],
     fileFilter: (p) => /\.(ts|js|py|go|java|rb|php)$/i.test(p),
   },
   "secret-pattern": {
-    patterns: [/AKIA[A-Z0-9]{16}/, /BEGIN\s+(RSA|EC|OPENSSH)\s+PRIVATE\s+KEY/, /password\s*[:=]/i, /api[_-]?key\s*[:=]/i],
+    patterns: [
+      /AKIA[A-Z0-9]{16}/,
+      /BEGIN\s+(RSA|EC|OPENSSH)\s+PRIVATE\s+KEY/,
+      /password\s*[:=]/i,
+      /api[_-]?key\s*[:=]/i,
+    ],
     fileFilter: (p) => /\.(env|json|yml|yaml|toml|ini|conf|cfg|ts|js|py)$/i.test(p),
   },
   "config-security": {
@@ -45,36 +97,67 @@ const SECURITY_GREP_PATTERNS: Record<string, { fileFilter?: (p: string) => boole
   "protocol-parser": {
     fileFilter: (p) => /\.(c|cpp|cc|cxx|h|hpp|hxx|rs)$/i.test(p),
     patterns: [
-      /\btcp\b/i, /\budp\b/i, /\bpacket\b/i, /\bsegment\b/i, /\bsack\b/i,
-      /\brpc\b/i, /\bnfs\b/i, /\bgss\b/i, /\bxdr\b/i,
-      /\bcodec\b/i, /\bdecode\b/i, /\bh264\b/i, /\bslice\b/i, /\bframe\b/i,
+      /\btcp\b/i,
+      /\budp\b/i,
+      /\bpacket\b/i,
+      /\bsegment\b/i,
+      /\bsack\b/i,
+      /\brpc\b/i,
+      /\bnfs\b/i,
+      /\bgss\b/i,
+      /\bxdr\b/i,
+      /\bcodec\b/i,
+      /\bdecode\b/i,
+      /\bh264\b/i,
+      /\bslice\b/i,
+      /\bframe\b/i,
       /\bparser\b/i,
     ],
   },
   "integer-boundary": {
     fileFilter: (p) => /\.(c|cpp|cc|cxx|h|hpp|hxx)$/i.test(p),
     patterns: [
-      /\bINT_MAX\b/, /\bINT_MIN\b/, /\bUINT_MAX\b/, /\bSIZE_MAX\b/,
-      /\bUINT16_MAX\b/, /\bUINT32_MAX\b/,
-      /\b0xFFFF\b/i, /\b0xFFFFFFFF\b/i,
-      /\(int\)\s*\w+/, /\(unsigned\)\s*\w+/,
+      /\bINT_MAX\b/,
+      /\bINT_MIN\b/,
+      /\bUINT_MAX\b/,
+      /\bSIZE_MAX\b/,
+      /\bUINT16_MAX\b/,
+      /\bUINT32_MAX\b/,
+      /\b0xFFFF\b/i,
+      /\b0xFFFFFFFF\b/i,
+      /\(int\)\s*\w+/,
+      /\(unsigned\)\s*\w+/,
     ],
   },
   "unsafe-memory": {
     fileFilter: (p) => /\.(c|cpp|cc|cxx|h|hpp|hxx|rs)$/i.test(p),
     patterns: [
-      /\bunsafe\s*\{/, /\bunsafe\s+fn\b/,
-      /\bmemcpy\s*\(/, /\bmemmove\s*\(/, /\bstrcpy\s*\(/, /\bsprintf\s*\(/,
-      /\bmalloc\s*\(/, /\bcalloc\s*\(/, /\brealloc\s*\(/, /\bfree\s*\(/,
-      /\bptr::write\b/, /\bstd::mem::transmute\b/,
+      /\bunsafe\s*\{/,
+      /\bunsafe\s+fn\b/,
+      /\bmemcpy\s*\(/,
+      /\bmemmove\s*\(/,
+      /\bstrcpy\s*\(/,
+      /\bsprintf\s*\(/,
+      /\bmalloc\s*\(/,
+      /\bcalloc\s*\(/,
+      /\brealloc\s*\(/,
+      /\bfree\s*\(/,
+      /\bptr::write\b/,
+      /\bstd::mem::transmute\b/,
     ],
   },
-  "hardening": {
+  hardening: {
     fileFilter: (p) => /\.(c|cpp|cc|cxx|h|hpp|hxx|rs|toml|mk|cmake)$/i.test(p),
     patterns: [
-      /\b__stack_chk_fail\b/, /\bstack[-_ ]canary\b/i, /\bFORTIFY_SOURCE\b/,
-      /\bpanic!\b/, /\bdebug_assert!\b/, /\bassert\s*\(/,
-      /\bfrom_raw_parts\b/, /\bget_unchecked\b/, /\bset_len\b/,
+      /\b__stack_chk_fail\b/,
+      /\bstack[-_ ]canary\b/i,
+      /\bFORTIFY_SOURCE\b/,
+      /\bpanic!\b/,
+      /\bdebug_assert!\b/,
+      /\bassert\s*\(/,
+      /\bfrom_raw_parts\b/,
+      /\bget_unchecked\b/,
+      /\bset_len\b/,
     ],
   },
 };
@@ -93,7 +176,9 @@ interface MutableRepoContext {
   entryPoints: Set<string>;
 }
 
-interface WalkEntry { relPath: string; }
+interface WalkEntry {
+  relPath: string;
+}
 
 interface PathSignals {
   files: WalkEntry[];
@@ -114,9 +199,7 @@ export const contextGathererTask: AgentTask<ScanOpts, ContextGathererOutput> = {
   },
 };
 
-export async function gatherContextForRoot(
-  workRoot: string,
-): Promise<ContextGathererOutput> {
+export async function gatherContextForRoot(workRoot: string): Promise<ContextGathererOutput> {
   const aggregate = createMutableRepoContext();
 
   await Promise.all([
@@ -130,12 +213,11 @@ export async function gatherContextForRoot(
   const pathSignals = await walkRepo(workRoot);
   gatherFromPathSignals(pathSignals, aggregate);
 
-  const sourceFiles = pathSignals.files
-    .filter((file) => SOURCE_EXTENSIONS.has(path.extname(file.relPath).toLowerCase()));
+  const sourceFiles = pathSignals.files.filter((file) =>
+    SOURCE_EXTENSIONS.has(path.extname(file.relPath).toLowerCase()),
+  );
 
-  const tree = sourceFiles
-    .slice(0, MAX_FILE_INDEX_ENTRIES)
-    .map((file) => ({ path: file.relPath }));
+  const tree = sourceFiles.slice(0, MAX_FILE_INDEX_ENTRIES).map((file) => ({ path: file.relPath }));
 
   const patternMatches = await grepSecurityPatterns(workRoot, sourceFiles);
 
@@ -255,7 +337,12 @@ async function gatherFromPackageJson(repoRoot: string, out: MutableRepoContext):
   maybeAdd(out.frameworks, depNames, ["express"], "Express");
   maybeAdd(out.frameworks, depNames, ["react"], "React");
   maybeAdd(out.frameworks, depNames, ["@nestjs/core"], "NestJS");
-  maybeAdd(out.frameworks, depNames, ["graphql", "@apollo/server", "apollo-server", "mercurius"], "GraphQL");
+  maybeAdd(
+    out.frameworks,
+    depNames,
+    ["graphql", "@apollo/server", "apollo-server", "mercurius"],
+    "GraphQL",
+  );
 
   maybeAdd(out.authPatterns, depNames, ["jsonwebtoken", "jose", "passport-jwt"], "JWT");
   maybeAdd(out.authPatterns, depNames, ["express-session", "iron-session"], "session-based");
@@ -402,7 +489,10 @@ async function gatherFromCargoToml(repoRoot: string, out: MutableRepoContext): P
   }
 }
 
-async function gatherFromNativeBuildSystem(repoRoot: string, out: MutableRepoContext): Promise<void> {
+async function gatherFromNativeBuildSystem(
+  repoRoot: string,
+  out: MutableRepoContext,
+): Promise<void> {
   const cmake = await readText(path.join(repoRoot, "CMakeLists.txt"));
   const makefile = await readText(path.join(repoRoot, "Makefile"));
   const configure = await readText(path.join(repoRoot, "configure.ac"));
@@ -450,7 +540,11 @@ async function gatherFromNativeBuildSystem(repoRoot: string, out: MutableRepoCon
 }
 
 function gatherFromPathSignals(signals: PathSignals, out: MutableRepoContext): void {
-  if (signals.fileSet.has(".env") || signals.fileSet.has(".env.local") || signals.fileSet.has(".env.production")) {
+  if (
+    signals.fileSet.has(".env") ||
+    signals.fileSet.has(".env.local") ||
+    signals.fileSet.has(".env.production")
+  ) {
     out.entryPoints.add(".env*");
   }
   if (signals.fileSet.has("docker-compose.yml") || signals.fileSet.has("docker-compose.yaml")) {
@@ -460,7 +554,9 @@ function gatherFromPathSignals(signals: PathSignals, out: MutableRepoContext): v
     out.entryPoints.add("Dockerfile");
   }
 
-  const hasAuthDir = [...signals.dirs].some((dir) => dir.includes("/auth") || dir.startsWith("auth"));
+  const hasAuthDir = [...signals.dirs].some(
+    (dir) => dir.includes("/auth") || dir.startsWith("auth"),
+  );
   const hasMiddlewareDir = [...signals.dirs].some(
     (dir) => dir.includes("/middleware") || dir.startsWith("middleware"),
   );
@@ -552,7 +648,12 @@ function collectDependencyKeys(target: Set<string>, raw: unknown): void {
   }
 }
 
-function maybeAdd(target: Set<string>, dependencies: Set<string>, keys: string[], label: string): void {
+function maybeAdd(
+  target: Set<string>,
+  dependencies: Set<string>,
+  keys: string[],
+  label: string,
+): void {
   if (keys.some((key) => dependencies.has(key))) {
     target.add(label);
   }

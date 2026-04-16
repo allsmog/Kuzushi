@@ -1,9 +1,9 @@
 import { writeFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
-import type { ExploitChain } from "./types.js";
 import { summarizeTaintPath } from "./findings/taint-path.js";
 import { getActionableFindings } from "./store.js";
+import type { ExploitChain } from "./types.js";
 
 interface JsonReportMeta {
   version: string;
@@ -32,20 +32,24 @@ interface JsonReportData {
 function safeJsonStringify(value: unknown, indent: number): string {
   const seen = new WeakSet<object>();
 
-  return JSON.stringify(value, (_key: string, val: unknown): unknown => {
-    if (typeof val === "bigint") {
-      return val.toString();
-    }
-
-    if (val !== null && typeof val === "object") {
-      if (seen.has(val)) {
-        return "[Circular]";
+  return JSON.stringify(
+    value,
+    (_key: string, val: unknown): unknown => {
+      if (typeof val === "bigint") {
+        return val.toString();
       }
-      seen.add(val);
-    }
 
-    return val;
-  }, indent);
+      if (val !== null && typeof val === "object") {
+        if (seen.has(val)) {
+          return "[Circular]";
+        }
+        seen.add(val);
+      }
+
+      return val;
+    },
+    indent,
+  );
 }
 
 /**

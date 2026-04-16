@@ -1,9 +1,14 @@
 import path from "node:path";
-import type { ScanOpts } from "../types.js";
 import { formatTaintPathForPrompt } from "../findings/taint-path.js";
-import type { Finding, TaskConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
+import type { ScanOpts } from "../types.js";
 import { resolveCodeQLBinary } from "./resolve-codeql.js";
-import { ensureDatabase, runCodeQL, selectFindings, detectAllCodeQLLanguages } from "./run-codeql.js";
+import {
+  detectAllCodeQLLanguages,
+  ensureDatabase,
+  runCodeQL,
+  selectFindings,
+} from "./run-codeql.js";
+import type { Finding, ScannerPlugin, TaskConfig, TriageAgentConfig } from "./types.js";
 
 export class CodeQLPlugin implements ScannerPlugin {
   readonly id = "codeql";
@@ -125,7 +130,11 @@ function resolveSuite(configuredSuite: string | undefined, language: string): st
     return `codeql/${language}-queries:codeql-suites/${language}-security-and-quality.qls`;
   }
 
-  if (configuredSuite.includes("/") || configuredSuite.includes(":") || configuredSuite.includes(".")) {
+  if (
+    configuredSuite.includes("/") ||
+    configuredSuite.includes(":") ||
+    configuredSuite.includes(".")
+  ) {
     return configuredSuite;
   }
 

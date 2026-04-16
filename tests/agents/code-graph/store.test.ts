@@ -1,22 +1,26 @@
-import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
-import { migration019 } from "../../../src/migrations/019_add_code_graph_tables.js";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
-  makeNodeId,
-  makeEdgeId,
-  makePathId,
-  upsertGraphNode,
-  upsertGraphEdge,
-  upsertGraphPath,
-  getGraphNodesForRepo,
+  getEdgesFromNode,
   getEntryNodes,
   getGraphNodeByFileAndLine,
-  getPathsToNode,
-  getEdgesFromNode,
+  getGraphNodesForRepo,
   getNodeById,
+  getPathsToNode,
   invalidateStaleNodes,
+  makeEdgeId,
+  makeNodeId,
+  makePathId,
+  upsertGraphEdge,
+  upsertGraphNode,
+  upsertGraphPath,
 } from "../../../src/agents/tasks/code-graph/store.js";
-import type { CodeGraphNode, CodeGraphEdge, CodeGraphPath } from "../../../src/agents/tasks/code-graph/types.js";
+import type {
+  CodeGraphEdge,
+  CodeGraphNode,
+  CodeGraphPath,
+} from "../../../src/agents/tasks/code-graph/types.js";
+import { migration019 } from "../../../src/migrations/019_add_code_graph_tables.js";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -106,13 +110,18 @@ describe("Code Graph Store", () => {
   describe("getEntryNodes", () => {
     it("returns only entry nodes", () => {
       upsertGraphNode(db, "test-repo", "run-1", makeNode({ nodeKind: "entry-http" }));
-      upsertGraphNode(db, "test-repo", "run-1", makeNode({
-        nodeId: makeNodeId("test-repo", "src/service.ts", 20, "doWork"),
-        filePath: "src/service.ts",
-        startLine: 20,
-        symbol: "doWork",
-        nodeKind: "service",
-      }));
+      upsertGraphNode(
+        db,
+        "test-repo",
+        "run-1",
+        makeNode({
+          nodeId: makeNodeId("test-repo", "src/service.ts", 20, "doWork"),
+          filePath: "src/service.ts",
+          startLine: 20,
+          symbol: "doWork",
+          nodeKind: "service",
+        }),
+      );
 
       const entries = getEntryNodes(db, "test-repo");
       expect(entries).toHaveLength(1);
@@ -206,9 +215,14 @@ describe("Code Graph Store", () => {
       upsertGraphNode(db, "test-repo", "run-1", n2);
 
       const edge: CodeGraphEdge = {
-        edgeId: "e1", fromNodeId: "n1", toNodeId: "n2",
-        edgeKind: "calls", dataLabel: null, ordinal: null,
-        confidence: 1.0, source: "static",
+        edgeId: "e1",
+        fromNodeId: "n1",
+        toNodeId: "n2",
+        edgeKind: "calls",
+        dataLabel: null,
+        ordinal: null,
+        confidence: 1.0,
+        source: "static",
       };
       upsertGraphEdge(db, "test-repo", "run-1", edge);
 

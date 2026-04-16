@@ -1,10 +1,10 @@
 import {
-  runStructuredAgentQuery,
   resolveDefaultReadOnlyTools,
+  runStructuredAgentQuery,
 } from "../../agent-runtime/execution.js";
 import type { Finding } from "../../scanners/types.js";
-import type { TriageResult } from "../../types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
+import type { TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask, TaskContext } from "../types.js";
 
@@ -141,8 +141,7 @@ function parseOutput(raw: unknown): ChainAnalysisOutput {
     return { chains: [], analysisNotes: "Failed to parse chain analysis output" };
   }
 
-  const analysisNotes =
-    typeof raw["analysis_notes"] === "string" ? raw["analysis_notes"] : "";
+  const analysisNotes = typeof raw["analysis_notes"] === "string" ? raw["analysis_notes"] : "";
 
   if (!Array.isArray(raw["chains"])) {
     return { chains: [], analysisNotes };
@@ -168,9 +167,7 @@ function parseOutput(raw: unknown): ChainAnalysisOutput {
 
     const severity = String(item["overall_severity"] ?? "MEDIUM").toUpperCase();
     const validSeverity =
-      severity === "CRITICAL" || severity === "HIGH" || severity === "MEDIUM"
-        ? severity
-        : "MEDIUM";
+      severity === "CRITICAL" || severity === "HIGH" || severity === "MEDIUM" ? severity : "MEDIUM";
 
     chains.push({
       id: String(item["id"] ?? `chain-${chains.length + 1}`),
@@ -203,10 +200,9 @@ export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
 
     const model =
       (isRecord(context.config.taskConfig["chain-analysis"]) &&
-        typeof context.config.taskConfig["chain-analysis"]["model"] === "string"
+      typeof context.config.taskConfig["chain-analysis"]["model"] === "string"
         ? context.config.taskConfig["chain-analysis"]["model"]
-        : undefined) ??
-      context.config.model;
+        : undefined) ?? context.config.model;
 
     const prompt = buildPrompt(input.confirmedFindings, context.repoName);
     const tag = "[chain-analysis]";

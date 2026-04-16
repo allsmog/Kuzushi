@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_IGNORED_DIRS } from "../../repo-walk.js";
-import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 import { normalizePromptPath, readFirstSnippet, readText } from "../helpers.js";
+import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 
 export class MsvsAdapter implements DiscoveryAdapter {
   readonly id = "msvs";
@@ -78,7 +78,8 @@ interface SlnProjectRef {
 function parseSlnProjectReferences(slnContent: string): SlnProjectRef[] {
   const refs: SlnProjectRef[] = [];
   // Match: Project("{GUID}") = "Name", "path\to\project.csproj", "{GUID}"
-  const projectRegex = /Project\("[^"]*"\)\s*=\s*"([^"]+)"\s*,\s*"([^"]+\.(?:csproj|vcxproj|fsproj))"/gi;
+  const projectRegex =
+    /Project\("[^"]*"\)\s*=\s*"([^"]+)"\s*,\s*"([^"]+\.(?:csproj|vcxproj|fsproj))"/gi;
   let match: RegExpExecArray | null;
   while ((match = projectRegex.exec(slnContent)) !== null) {
     refs.push({ name: match[1], path: match[2] });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { __tobAuditInternals, tobAuditTask } from "../../../src/agents/tasks/tob-audit/tob-audit.js";
+import {
+  __tobAuditInternals,
+  tobAuditTask,
+} from "../../../src/agents/tasks/tob-audit/tob-audit.js";
 
 const { buildPrompt, resolveConfig } = __tobAuditInternals;
 

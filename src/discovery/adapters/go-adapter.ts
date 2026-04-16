@@ -1,7 +1,6 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_IGNORED_DIRS } from "../../repo-walk.js";
-import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 import {
   collectManifestDirectories,
   dedupeStrings,
@@ -10,6 +9,7 @@ import {
   readFirstSnippet,
   readText,
 } from "../helpers.js";
+import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 
 export class GoAdapter implements DiscoveryAdapter {
   readonly id = "go";
@@ -30,9 +30,8 @@ export class GoAdapter implements DiscoveryAdapter {
 
       for (const pattern of goWorkPatterns) {
         // Patterns in go.work are relative to the go.work file
-        const targetRelToRepo = goWorkRelDir === "."
-          ? pattern
-          : normalizePromptPath(`${goWorkRelDir}/${pattern}`);
+        const targetRelToRepo =
+          goWorkRelDir === "." ? pattern : normalizePromptPath(`${goWorkRelDir}/${pattern}`);
         const absPath = path.resolve(repoRoot, targetRelToRepo);
         const goMod = await readText(path.join(absPath, "go.mod"));
         if (!goMod) continue;

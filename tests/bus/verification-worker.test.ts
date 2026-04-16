@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Finding } from "../../src/scanners/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
-import { createEvent, generateRunId } from "../../src/bus/helpers.js";
-import { registerVerificationWorker } from "../../src/bus/workers/verification-worker.js";
 import type {
   VerificationAgentActivityEvent,
   VerificationErrorEvent,
   VerificationResultEvent,
 } from "../../src/bus/events.js";
+import { createEvent, generateRunId } from "../../src/bus/helpers.js";
+import { registerVerificationWorker } from "../../src/bus/workers/verification-worker.js";
+import type { Finding } from "../../src/scanners/types.js";
 import type { KuzushiConfig, TriageResult, VerificationResult } from "../../src/types.js";
 
 const {
@@ -422,9 +422,7 @@ describe("verification-worker", () => {
     const config = makeConfig();
 
     verifyFindingsBatchMock.mockResolvedValue({
-      results: new Map([
-        ["fp-verify-1", makeVerificationResult()],
-      ]),
+      results: new Map([["fp-verify-1", makeVerificationResult()]]),
       costUsd: 0.02,
       missingFingerprints: ["fp-verify-2"],
       incomplete: true,

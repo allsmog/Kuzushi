@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { discoverRepoStructure, looksLikeMonorepo } from "../../src/discovery/repo-discovery.js";
 
 const tempDirs: string[] = [];
@@ -26,11 +26,19 @@ describe("discoverRepoStructure", () => {
     writeFileSync(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf-8");
     writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "root" }), "utf-8");
     mkdirSync(path.join(root, "apps", "web"), { recursive: true });
-    writeFileSync(path.join(root, "apps", "web", "package.json"), JSON.stringify({ name: "web" }), "utf-8");
+    writeFileSync(
+      path.join(root, "apps", "web", "package.json"),
+      JSON.stringify({ name: "web" }),
+      "utf-8",
+    );
 
     // Standalone Go module
     mkdirSync(path.join(root, "services", "api"), { recursive: true });
-    writeFileSync(path.join(root, "services", "api", "go.mod"), "module example.com/api\n\ngo 1.22\n", "utf-8");
+    writeFileSync(
+      path.join(root, "services", "api", "go.mod"),
+      "module example.com/api\n\ngo 1.22\n",
+      "utf-8",
+    );
 
     const result = await discoverRepoStructure(root, { maxModules: 30 });
 
@@ -59,7 +67,11 @@ describe("discoverRepoStructure", () => {
 
     for (let i = 0; i < 10; i++) {
       mkdirSync(path.join(root, "pkg", `mod-${i}`), { recursive: true });
-      writeFileSync(path.join(root, "pkg", `mod-${i}`, "package.json"), JSON.stringify({ name: `mod-${i}` }), "utf-8");
+      writeFileSync(
+        path.join(root, "pkg", `mod-${i}`, "package.json"),
+        JSON.stringify({ name: `mod-${i}` }),
+        "utf-8",
+      );
     }
 
     const result = await discoverRepoStructure(root, { maxModules: 3 });
@@ -69,10 +81,14 @@ describe("discoverRepoStructure", () => {
 
   it("skips LLM refinement when no runtime provided", async () => {
     const root = makeTempRoot();
-    writeFileSync(path.join(root, "package.json"), JSON.stringify({
-      name: "app",
-      scripts: { start: "node index.js" },
-    }), "utf-8");
+    writeFileSync(
+      path.join(root, "package.json"),
+      JSON.stringify({
+        name: "app",
+        scripts: { start: "node index.js" },
+      }),
+      "utf-8",
+    );
 
     const result = await discoverRepoStructure(root);
 
@@ -90,7 +106,11 @@ describe("looksLikeMonorepo", () => {
 
   it("detects package.json workspaces", async () => {
     const root = makeTempRoot();
-    writeFileSync(path.join(root, "package.json"), JSON.stringify({ workspaces: ["pkg/*"] }), "utf-8");
+    writeFileSync(
+      path.join(root, "package.json"),
+      JSON.stringify({ workspaces: ["pkg/*"] }),
+      "utf-8",
+    );
     expect(await looksLikeMonorepo(root)).toBe(true);
   });
 
@@ -108,7 +128,11 @@ describe("looksLikeMonorepo", () => {
 
   it("detects .sln files", async () => {
     const root = makeTempRoot();
-    writeFileSync(path.join(root, "MySolution.sln"), "Microsoft Visual Studio Solution File", "utf-8");
+    writeFileSync(
+      path.join(root, "MySolution.sln"),
+      "Microsoft Visual Studio Solution File",
+      "utf-8",
+    );
     expect(await looksLikeMonorepo(root)).toBe(true);
   });
 

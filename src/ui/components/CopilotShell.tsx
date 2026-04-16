@@ -6,13 +6,15 @@
  * transitions — when a scan runs, the app switches to "running" mode
  * and renders PipelineIndicator/StatusFooter, then switches back here.
  */
-import React, { useRef, useState } from "react";
-import { Box, Text, useInput, useApp, Static } from "ink";
+
 import chalk from "chalk";
-import { useUIState } from "../hooks.js";
-import { Spinner } from "./Spinner.js";
-import type { ShellHistoryEntry, ShellState, UIStore } from "../state.js";
+import { Box, Static, Text, useApp, useInput } from "ink";
+import type React from "react";
+import { useRef, useState } from "react";
 import { buildShellPrompt } from "../../copilot/shell.js";
+import { useUIState } from "../hooks.js";
+import type { ShellHistoryEntry, ShellState, UIStore } from "../state.js";
+import { Spinner } from "./Spinner.js";
 
 interface CopilotShellProps {
   store: UIStore;
@@ -26,95 +28,96 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const draftInputRef = useRef("");
 
-  useInput((char, key) => {
-    if (!shell) return;
+  useInput(
+    (char, key) => {
+      if (!shell) return;
 
-    if ((key.ctrl && char === "c") || (key.ctrl && char === "d")) {
+      if ((key.ctrl && char === "c") || (key.ctrl && char === "d")) {
+        if (shell.processing) {
+          shell.onAbort?.();
+          return;
+        }
+        shell.onExit?.();
+        exit();
+        return;
+      }
+
       if (shell.processing) {
-        shell.onAbort?.();
         return;
       }
-      shell.onExit?.();
-      exit();
-      return;
-    }
 
-    if (shell.processing) {
-      return;
-    }
-
-    if (key.return && input.length > 0) {
-      shell.onInput?.(input);
-      setInput("");
-      setHistoryIndex(null);
-      draftInputRef.current = "";
-      return;
-    }
-
-    if (key.backspace || key.delete) {
-      setInput((v) => v.slice(0, -1));
-      setHistoryIndex(null);
-      return;
-    }
-
-    if (key.upArrow) {
-      if (shell.commandHistory.length === 0) {
+      if (key.return && input.length > 0) {
+        shell.onInput?.(input);
+        setInput("");
+        setHistoryIndex(null);
+        draftInputRef.current = "";
         return;
       }
-      if (historyIndex === null) {
-        draftInputRef.current = input;
-        const nextIndex = shell.commandHistory.length - 1;
+
+      if (key.backspace || key.delete) {
+        setInput((v) => v.slice(0, -1));
+        setHistoryIndex(null);
+        return;
+      }
+
+      if (key.upArrow) {
+        if (shell.commandHistory.length === 0) {
+          return;
+        }
+        if (historyIndex === null) {
+          draftInputRef.current = input;
+          const nextIndex = shell.commandHistory.length - 1;
+          setHistoryIndex(nextIndex);
+          setInput(shell.commandHistory[nextIndex] ?? "");
+          return;
+        }
+        const nextIndex = Math.max(0, historyIndex - 1);
         setHistoryIndex(nextIndex);
         setInput(shell.commandHistory[nextIndex] ?? "");
         return;
       }
-      const nextIndex = Math.max(0, historyIndex - 1);
-      setHistoryIndex(nextIndex);
-      setInput(shell.commandHistory[nextIndex] ?? "");
-      return;
-    }
 
-    if (key.downArrow) {
-      if (historyIndex === null) {
+      if (key.downArrow) {
+        if (historyIndex === null) {
+          return;
+        }
+        const nextIndex = historyIndex + 1;
+        if (nextIndex >= shell.commandHistory.length) {
+          setHistoryIndex(null);
+          setInput(draftInputRef.current);
+          return;
+        }
+        setHistoryIndex(nextIndex);
+        setInput(shell.commandHistory[nextIndex] ?? "");
         return;
       }
-      const nextIndex = historyIndex + 1;
-      if (nextIndex >= shell.commandHistory.length) {
+
+      if (key.escape) {
+        setInput("");
         setHistoryIndex(null);
-        setInput(draftInputRef.current);
+        draftInputRef.current = "";
         return;
       }
-      setHistoryIndex(nextIndex);
-      setInput(shell.commandHistory[nextIndex] ?? "");
-      return;
-    }
 
-    if (key.escape) {
-      setInput("");
-      setHistoryIndex(null);
-      draftInputRef.current = "";
-      return;
-    }
-
-    if (char && !key.ctrl && !key.meta && !key.tab) {
-      if (historyIndex === null) {
-        draftInputRef.current = "";
+      if (char && !key.ctrl && !key.meta && !key.tab) {
+        if (historyIndex === null) {
+          draftInputRef.current = "";
+        }
+        setInput((v) => v + char);
+        setHistoryIndex(null);
       }
-      setInput((v) => v + char);
-      setHistoryIndex(null);
-    }
-  }, { isActive: process.stdin.isTTY === true && !!shell });
+    },
+    { isActive: process.stdin.isTTY === true && !!shell },
+  );
 
   if (!shell) return <Text>Loading...</Text>;
 
   // Split history: older entries go to Static (never re-rendered)
   const LIVE_COUNT = 8;
-  const staticHistory = shell.history.length > LIVE_COUNT
-    ? shell.history.slice(0, -LIVE_COUNT)
-    : [];
-  const liveHistory = shell.history.length > LIVE_COUNT
-    ? shell.history.slice(-LIVE_COUNT)
-    : shell.history;
+  const staticHistory =
+    shell.history.length > LIVE_COUNT ? shell.history.slice(0, -LIVE_COUNT) : [];
+  const liveHistory =
+    shell.history.length > LIVE_COUNT ? shell.history.slice(-LIVE_COUNT) : shell.history;
 
   return (
     <Box flexDirection="column">
@@ -151,7 +154,8 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         <Box marginTop={1} paddingLeft={2}>
           <Spinner />
           <Text>
-            {"  "}{chalk.dim(shell.currentTool.name)}
+            {"  "}
+            {chalk.dim(shell.currentTool.name)}
             {shell.currentTool.elapsedSeconds > 0 &&
               chalk.dim(` ${shell.currentTool.elapsedSeconds.toFixed(0)}s`)}
           </Text>
@@ -162,7 +166,10 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       {shell.processing && !shell.currentTool && (
         <Box marginTop={1} paddingLeft={2}>
           <Spinner />
-          <Text>{"  "}{chalk.dim("running...")}</Text>
+          <Text>
+            {"  "}
+            {chalk.dim("running...")}
+          </Text>
         </Box>
       )}
 
@@ -170,7 +177,9 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       {!shell.processing && (
         <Box marginTop={1}>
           <Text>
-            {chalk.bold.cyan(buildShellPrompt(shell.focusedModule))}{input}{chalk.dim("█")}
+            {chalk.bold.cyan(buildShellPrompt(shell.focusedModule))}
+            {input}
+            {chalk.dim("█")}
           </Text>
         </Box>
       )}
@@ -200,7 +209,10 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
     case "input":
       return (
         <Box marginTop={1}>
-          <Text>{chalk.bold.cyan(entry.prompt ?? buildShellPrompt(null))}{entry.text}</Text>
+          <Text>
+            {chalk.bold.cyan(entry.prompt ?? buildShellPrompt(null))}
+            {entry.text}
+          </Text>
         </Box>
       );
     case "output":

@@ -1,26 +1,30 @@
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageInvestigationModule,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
+import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord } from "../../utils.js";
-import { createLogger } from "../../logger.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { computeDetectionFingerprint, normalizeFilePath } from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt } from "./pre-read-prompt.js";
-import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime, resolveTaskAllowedTools } from "./runtime-overrides.js";
-import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
-import type { ApplicationModel } from "../../types.js";
-import { normalizeFilePath, computeDetectionFingerprint } from "./detection-task-utils.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
+import {
+  buildApplicationModelSection,
+  buildThreatScenarioEvidenceSection,
+} from "./scenario-guidance.js";
 
 const log = createLogger({ stage: "xxe-detection" });
 
@@ -34,9 +38,21 @@ const XXE_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
-          category: { type: "string", enum: ["xxe-parse", "xxe-config", "ssrf-via-dtd", "billion-laughs"] },
+          category: {
+            type: "string",
+            enum: ["xxe-parse", "xxe-config", "ssrf-via-dtd", "billion-laughs"],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -65,7 +81,14 @@ interface XxeFinding {
   inputSource?: string;
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, fileIndex?: FileIndex, preRead?: PreReadResult, appModelContext?: string, scenarioContext?: string): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -84,8 +107,11 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
-    languageTuningModule({ taskId: "xxe-detection", repoContext, frameworks: repoContext?.frameworks }) ||
-    "### xxe-parse (CWE-611)",
+    languageTuningModule({
+      taskId: "xxe-detection",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "### xxe-parse (CWE-611)",
     "XML parsers processing untrusted input without disabling external entities.",
     "Java: DocumentBuilderFactory, SAXParserFactory, XMLInputFactory without FEATURE_SECURE_PROCESSING,",
     "  DISALLOW_DOCTYPE_DECL, or EXTERNAL_GENERAL_ENTITIES = false.",
@@ -133,17 +159,28 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "xml2js in Node.js is safe by default — only flag if explicitXMLEntities is enabled.",
         "Do NOT flag XML parsing of hardcoded/internal-only XML.",
         "Do NOT flag parsers that have external entities explicitly disabled.",
-        ...languageAntiHallucinationExtras({ taskId: "xxe-detection", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "xxe-detection",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
     "",
     `Return at most ${maxFindings} findings, prioritized by severity and confidence.`,
     "Filter out any finding where your confidence would be below MEDIUM.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -154,7 +191,13 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
 
     const filePath = normalizeFilePath(repoRoot, f.filePath);
     const cweList = f.cwe ? [f.cwe] : ["CWE-611"];
-    const fingerprint = computeDetectionFingerprint([repoName, "xxe", f.category, filePath, String(f.startLine)]);
+    const fingerprint = computeDetectionFingerprint([
+      repoName,
+      "xxe",
+      f.category,
+      filePath,
+      String(f.startLine),
+    ]);
 
     const finding: Finding = {
       taskId: "xxe-detect",
@@ -202,13 +245,27 @@ export const xxeDetectionTask: AgentTask<ScanOpts, Finding[]> = {
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
     const preRead = await preReadFilesForTask("xxe-detect", fileIndex, context.repoRoot);
-    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as
+      | ApplicationModel
+      | undefined;
     const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
     const appModelContext = buildApplicationModelSection("xxe-detect", applicationModel);
-    const scenarioContext = await buildThreatScenarioEvidenceSection("xxe-detect", context.repoRoot, applicationModel, scenarioOutput);
+    const scenarioContext = await buildThreatScenarioEvidenceSection(
+      "xxe-detect",
+      context.repoRoot,
+      applicationModel,
+      scenarioOutput,
+    );
 
     const runtime = resolveTaskRuntime(context);
-    const prompt = buildPrompt(repoContext, maxFindings, fileIndex, preRead, appModelContext, scenarioContext);
+    const prompt = buildPrompt(
+      repoContext,
+      maxFindings,
+      fileIndex,
+      preRead,
+      appModelContext,
+      scenarioContext,
+    );
     let structuredOutput: unknown;
     let costUsd = 0;
 
@@ -229,11 +286,17 @@ export const xxeDetectionTask: AgentTask<ScanOpts, Finding[]> = {
       },
     })) {
       if (message.type !== "result") continue;
-      if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) costUsd = message.totalCostUsd;
+      if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd))
+        costUsd = message.totalCostUsd;
       if ("result" in message) structuredOutput = message.structuredOutput;
     }
 
-    const findings = normalizeFindings(structuredOutput, context.repoRoot, context.repoName, maxFindings);
+    const findings = normalizeFindings(
+      structuredOutput,
+      context.repoRoot,
+      context.repoName,
+      maxFindings,
+    );
     log.info(`Found ${findings.length} XXE findings (cost=$${costUsd.toFixed(4)})`);
     return attachTaskOutputMeta(findings, { costUsd });
   },
@@ -252,7 +315,9 @@ export const xxeDetectionTask: AgentTask<ScanOpts, Finding[]> = {
         "2. External entity processing is NOT disabled in the parser configuration.",
         "3. The XML input is user-controlled (HTTP body, file upload, API input).",
         "4. No safe wrapper (defusedxml, etc.) is used.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

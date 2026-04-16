@@ -1,9 +1,9 @@
-import { StrategyRegistry } from "./registry.js";
 import { CWE_STRATEGY_PROFILES } from "./cwe-strategy-map.js";
-import { createSyntacticStrategy } from "./syntactic/index.js";
 import { createDataflowStrategy } from "./dataflow/index.js";
-import { createReasoningStrategy } from "./reasoning/index.js";
 import { createExecutionStrategy } from "./execution/index.js";
+import { createReasoningStrategy } from "./reasoning/index.js";
+import { StrategyRegistry } from "./registry.js";
+import { createSyntacticStrategy } from "./syntactic/index.js";
 
 /** Instantiate all strategies from CWE profiles and return a populated registry. */
 export function createPopulatedRegistry(): StrategyRegistry {

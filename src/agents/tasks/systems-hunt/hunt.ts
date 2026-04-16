@@ -1,17 +1,19 @@
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import { createLogger } from "../../../logger.js";
 import type { Finding, TaintPathStep, TriageAgentConfig } from "../../../scanners/types.js";
+import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isPathWithinRoot, isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
+import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import {
   buildSystemsHuntArtifactDetail,
   extractSystemsHuntArtifactPath,
   writeSystemsHuntArtifact,
 } from "./artifacts.js";
+import { formatSystemsSurfacePack, matchTriggerHypothesisToFinding } from "./helpers.js";
 import type {
   RankedSystemsSurface,
   SystemsAnalysisStep,
@@ -22,20 +24,12 @@ import type {
   SystemsHuntLens,
   SystemsInvariant,
   SystemsInvariantOutput,
-  SystemsSurfacePack,
   SystemsSurfaceKind,
+  SystemsSurfacePack,
   SystemsTriggerHypothesis,
   SystemsTriggerOutput,
 } from "./types.js";
-import {
-  SYSTEMS_HUNT_LENSES,
-  resolveSystemsHuntConfig,
-} from "./types.js";
-import { resolveTaskAllowedTools } from "../runtime-overrides.js";
-import {
-  formatSystemsSurfacePack,
-  matchTriggerHypothesisToFinding,
-} from "./helpers.js";
+import { resolveSystemsHuntConfig, SYSTEMS_HUNT_LENSES } from "./types.js";
 
 const log = createLogger({ stage: "systems-hunt" });
 
@@ -195,15 +189,23 @@ export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
   dependsOn: ["systems-context-gatherer", "systems-invariant-extract", "systems-trigger-synth"],
 
   condition(upstreamOutputs) {
-    const surfaceOutput = upstreamOutputs.get("systems-context-gatherer") as SystemsContextOutput | undefined;
+    const surfaceOutput = upstreamOutputs.get("systems-context-gatherer") as
+      | SystemsContextOutput
+      | undefined;
     return (surfaceOutput?.surfaces.length ?? 0) > 0;
   },
 
   async run(_input, context): Promise<Finding[]> {
     const config = resolveSystemsHuntConfig(context);
-    const surfaceOutput = context.upstreamOutputs.get("systems-context-gatherer") as SystemsContextOutput | undefined;
-    const invariantOutput = context.upstreamOutputs.get("systems-invariant-extract") as SystemsInvariantOutput | undefined;
-    const triggerOutput = context.upstreamOutputs.get("systems-trigger-synth") as SystemsTriggerOutput | undefined;
+    const surfaceOutput = context.upstreamOutputs.get("systems-context-gatherer") as
+      | SystemsContextOutput
+      | undefined;
+    const invariantOutput = context.upstreamOutputs.get("systems-invariant-extract") as
+      | SystemsInvariantOutput
+      | undefined;
+    const triggerOutput = context.upstreamOutputs.get("systems-trigger-synth") as
+      | SystemsTriggerOutput
+      | undefined;
     const surfaces = surfaceOutput?.surfaces.slice(0, config.maxSurfaces) ?? [];
     const surfacePacks = surfaceOutput?.surfacePacks ?? [];
     const packBySurfaceId = new Map(surfacePacks.map((pack) => [pack.surfaceId, pack]));
@@ -217,33 +219,41 @@ export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
     const results: SurfaceAnalysisResult[] = [];
     for (let index = 0; index < surfaces.length; index += config.maxConcurrentSurfaces) {
       const batch = surfaces.slice(index, index + config.maxConcurrentSurfaces);
-      const batchResults = await Promise.all(batch.map((surface) =>
-        analyzeSurface(
-          surface,
-          packBySurfaceId.get(surface.id),
-          invariantOutput?.invariants ?? [],
-          triggerOutput?.triggers ?? [],
-          context,
-          config,
-          surfaceOutput,
+      const batchResults = await Promise.all(
+        batch.map((surface) =>
+          analyzeSurface(
+            surface,
+            packBySurfaceId.get(surface.id),
+            invariantOutput?.invariants ?? [],
+            triggerOutput?.triggers ?? [],
+            context,
+            config,
+            surfaceOutput,
+          ),
         ),
-      ));
+      );
       results.push(...batchResults);
     }
 
-    const merged = mergeLensFindings(surfaces, results.flatMap((result) => result.findings));
+    const merged = mergeLensFindings(
+      surfaces,
+      results.flatMap((result) => result.findings),
+    );
     let totalCostUsd = results.reduce((sum, result) => sum + result.costUsd, 0);
     const findings: Finding[] = [];
 
     for (const value of merged.values()) {
-      const relevantTriggers = (triggerOutput?.triggers ?? []).filter((trigger) => trigger.surfaceId === value.surface.id);
+      const relevantTriggers = (triggerOutput?.triggers ?? []).filter(
+        (trigger) => trigger.surfaceId === value.surface.id,
+      );
       const matchedTrigger = matchTriggerHypothesisToFinding({
         triggerHypothesisIds: [...value.triggerHypothesisIds],
         triggerSequence: [...value.triggerSequence],
         expectedPrimitive: value.memoryPrimitive,
         hypotheses: relevantTriggers,
       });
-      const coherentTrigger = matchedTrigger.matchedIds.length > 0 || value.triggerSequence.size > 0;
+      const coherentTrigger =
+        matchedTrigger.matchedIds.length > 0 || value.triggerSequence.size > 0;
       const corroboration = await corroborateFinding(
         value,
         packBySurfaceId.get(value.surface.id),
@@ -285,11 +295,15 @@ export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
         memoryPrimitive: value.memoryPrimitive,
         hardeningNotes: [...value.hardeningNotes],
         cheapVerifiable: emission.cheapVerifiable,
-        reasoning: [value.rationales.join(" | "), corroboration.rationale].filter(Boolean).join(" | "),
+        reasoning: [value.rationales.join(" | "), corroboration.rationale]
+          .filter(Boolean)
+          .join(" | "),
         analysisPath: value.analysisPath,
         guardLocations: corroboration.guardLocations,
         counterexampleNotes: corroboration.counterexampleNotes,
-        relatedFiles: packBySurfaceId.get(value.surface.id)?.relatedFiles ?? [value.surface.filePath],
+        relatedFiles: packBySurfaceId.get(value.surface.id)?.relatedFiles ?? [
+          value.surface.filePath,
+        ],
         corroborationStatus: emission.corroborationStatus,
       };
 
@@ -307,14 +321,18 @@ export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
         scannerConfidence: value.confidence,
         subcategory: ["vuln"],
         likelihood: value.confidence,
-        impact: value.severity === "ERROR" ? "HIGH" : value.severity === "WARNING" ? "MEDIUM" : "LOW",
+        impact:
+          value.severity === "ERROR" ? "HIGH" : value.severity === "WARNING" ? "MEDIUM" : "LOW",
         cwe: value.cwe,
         score: scoreFor(value.severity, value.confidence),
         taintPath: toTaintPath(value.analysisPath),
         proofState: "symbolic_only",
         engineProvenance: [
           { kind: "agentic", detail: `Systems hunt lenses: ${[...value.lenses].join(", ")}` },
-          { kind: "agentic", detail: `Systems hunt corroboration: ${emission.corroborationStatus}` },
+          {
+            kind: "agentic",
+            detail: `Systems hunt corroboration: ${emission.corroborationStatus}`,
+          },
           { kind: "agentic", detail: buildSystemsHuntArtifactDetail(relativeArtifactPath) },
         ],
       });
@@ -333,7 +351,9 @@ export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
         `You are triaging a systems-code finding in "${repoName}".`,
         "This finding came from a low-level multi-lens hunt focused on protocol state,",
         "numeric boundary reasoning, unsafe memory operations, and missing mitigations.",
-        artifactPath ? `First, Read the systems hunt artifact at ${artifactPath}.` : "First, inspect the supporting analysis path in the finding evidence.",
+        artifactPath
+          ? `First, Read the systems hunt artifact at ${artifactPath}.`
+          : "First, inspect the supporting analysis path in the finding evidence.",
         "",
         `Rule: ${finding.ruleId}`,
         `File: ${finding.filePath}:${finding.startLine}`,
@@ -346,7 +366,9 @@ export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
         "- Can attacker-controlled packet fields, slice counts, or guest-controlled sizes reach this path?",
         "- Do compiler/runtime mitigations or hardening settings materially block exploitation?",
         "- If the bug is real, what is the concrete crash/corruption primitive?",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };
@@ -367,7 +389,10 @@ async function analyzeSurface(
     "Bash",
     "Write",
   ]);
-  const canUseTool = createSystemsHuntToolGuard(context.repoRoot, path.join(config.artifactRoot, "scratch"));
+  const canUseTool = createSystemsHuntToolGuard(
+    context.repoRoot,
+    path.join(config.artifactRoot, "scratch"),
+  );
 
   const findings: LensFinding[] = [];
   let costUsd = 0;
@@ -429,22 +454,32 @@ export function buildLensPrompt(
   codeqlDbPath?: string,
 ): string {
   const lensGuidance = lensInstructions(lens, surface.kind);
-  const invariantLines = invariants.length > 0
-    ? invariants.flatMap((invariant) => [
-        `- [${invariant.id}] (${invariant.kind}) ${invariant.summary}`,
-        `  Statement: ${invariant.statement}`,
-        `  Rationale: ${invariant.rationale}`,
-        `  Cheap verifiable: ${invariant.cheapVerifiable ? "yes" : "no"}`,
-      ])
-    : ["- No explicit invariants extracted; derive them from the code before reporting anything."];
-  const triggerLines = triggers.length > 0
-    ? triggers.flatMap((trigger) => [
-        `- [${trigger.id}] Steps: ${trigger.orderedSteps.join(" -> ")}`,
-        `  Preconditions: ${trigger.statePreconditions.join("; ") || "none"}`,
-        `  Boundaries: ${Object.entries(trigger.boundaryAssignments).map(([key, value]) => `${key}=${value}`).join(", ") || "none"}`,
-        `  Primitive: ${trigger.expectedPrimitive}`,
-      ])
-    : ["- No explicit trigger hypotheses extracted; derive a coherent sequence before reporting anything."];
+  const invariantLines =
+    invariants.length > 0
+      ? invariants.flatMap((invariant) => [
+          `- [${invariant.id}] (${invariant.kind}) ${invariant.summary}`,
+          `  Statement: ${invariant.statement}`,
+          `  Rationale: ${invariant.rationale}`,
+          `  Cheap verifiable: ${invariant.cheapVerifiable ? "yes" : "no"}`,
+        ])
+      : [
+          "- No explicit invariants extracted; derive them from the code before reporting anything.",
+        ];
+  const triggerLines =
+    triggers.length > 0
+      ? triggers.flatMap((trigger) => [
+          `- [${trigger.id}] Steps: ${trigger.orderedSteps.join(" -> ")}`,
+          `  Preconditions: ${trigger.statePreconditions.join("; ") || "none"}`,
+          `  Boundaries: ${
+            Object.entries(trigger.boundaryAssignments)
+              .map(([key, value]) => `${key}=${value}`)
+              .join(", ") || "none"
+          }`,
+          `  Primitive: ${trigger.expectedPrimitive}`,
+        ])
+      : [
+          "- No explicit trigger hypotheses extracted; derive a coherent sequence before reporting anything.",
+        ];
 
   const codeqlSection = codeqlDbPath
     ? [
@@ -452,7 +487,10 @@ export function buildLensPrompt(
         `If useful, you may inspect the existing CodeQL database at ${codeqlDbPath}.`,
         "Use it to validate value-range and control-flow hypotheses; do not rely on taint tracking.",
       ]
-    : ["## Optional CodeQL assist", "No CodeQL database was discovered. Use repo reads and bounded Bash probes instead."];
+    : [
+        "## Optional CodeQL assist",
+        "No CodeQL database was discovered. Use repo reads and bounded Bash probes instead.",
+      ];
 
   return [
     `You are running the ${lens} lens of a systems-code vulnerability hunt.`,
@@ -465,7 +503,12 @@ export function buildLensPrompt(
     `Reasons: ${surface.reasons.join("; ") || "none"}`,
     `Attacker-controlled fields: ${surface.attackerControlledFields.join(", ") || "unknown"}`,
     `Hardening signals: ${surface.hardeningSignals.join(", ") || "none"}`,
-    `Evidence anchors: ${surface.evidence.slice(0, 4).map((signal) => `${signal.domain}@${signal.lineNumber}: ${signal.lineContent}`).join(" | ") || "none"}`,
+    `Evidence anchors: ${
+      surface.evidence
+        .slice(0, 4)
+        .map((signal) => `${signal.domain}@${signal.lineNumber}: ${signal.lineContent}`)
+        .join(" | ") || "none"
+    }`,
     "",
     ...(surfacePack ? formatSystemsSurfacePack(surfacePack) : []),
     "",
@@ -492,10 +535,7 @@ export function buildLensPrompt(
   ].join("\n");
 }
 
-function lensInstructions(
-  lens: SystemsHuntLens,
-  surfaceKind: SystemsSurfaceKind,
-): string {
+function lensInstructions(lens: SystemsHuntLens, surfaceKind: SystemsSurfaceKind): string {
   switch (lens) {
     case "protocol-state":
       return [
@@ -503,8 +543,12 @@ function lensInstructions(
         "- Model packet ordering, option interactions, and state transitions explicitly.",
         "- Look for paths where two or more sequential packets/options create invalid state.",
         "- Check for null or stale state pointers reached only after semantic packet interactions.",
-        surfaceKind === "rpc-handler" ? "- Pay special attention to authentication and RPC framing state across packets." : "",
-      ].filter(Boolean).join("\n");
+        surfaceKind === "rpc-handler"
+          ? "- Pay special attention to authentication and RPC framing state across packets."
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
     case "arithmetic-sentinel":
       return [
         "## Lens guidance: arithmetic and sentinel reasoning",
@@ -555,7 +599,10 @@ async function corroborateFinding(
     "Bash",
     "Write",
   ]);
-  const canUseTool = createSystemsHuntToolGuard(context.repoRoot, path.join(config.artifactRoot, "scratch"));
+  const canUseTool = createSystemsHuntToolGuard(
+    context.repoRoot,
+    path.join(config.artifactRoot, "scratch"),
+  );
   let structuredOutput: unknown;
   let costUsd = 0;
 
@@ -609,10 +656,13 @@ export function buildCorroborationPrompt(
   config: SystemsHuntConfig,
   codeqlDbPath?: string,
 ): string {
-  const triggerLines = triggers.length > 0
-    ? triggers.map((trigger) =>
-      `- [${trigger.id}] ${trigger.orderedSteps.join(" -> ")} | Preconditions: ${trigger.statePreconditions.join("; ") || "none"} | Primitive: ${trigger.expectedPrimitive}`)
-    : ["- No trigger hypotheses available."];
+  const triggerLines =
+    triggers.length > 0
+      ? triggers.map(
+          (trigger) =>
+            `- [${trigger.id}] ${trigger.orderedSteps.join(" -> ")} | Preconditions: ${trigger.statePreconditions.join("; ") || "none"} | Primitive: ${trigger.expectedPrimitive}`,
+        )
+      : ["- No trigger hypotheses available."];
 
   return [
     "You are running the counterexample/corroboration pass for a systems-code finding.",
@@ -668,7 +718,10 @@ export function parseCorroborationOutput(
   return {
     status,
     rationale: stringField(raw["rationale"]) || "No corroboration rationale provided.",
-    coherentTrigger: typeof raw["coherentTrigger"] === "boolean" ? raw["coherentTrigger"] : coherentTriggerFallback,
+    coherentTrigger:
+      typeof raw["coherentTrigger"] === "boolean"
+        ? raw["coherentTrigger"]
+        : coherentTriggerFallback,
     cheapVerifiable: raw["cheapVerifiable"] === true && status === "survived",
     guardLocations: normalizeAnalysisPath(repoRoot, raw["guardLocations"]),
     counterexampleNotes: stringArray(raw["counterexampleNotes"]),
@@ -797,7 +850,8 @@ export function mergeLensFindings(
     for (const id of finding.triggerHypothesisIds) existing.triggerHypothesisIds.add(id);
     for (const id of finding.violatedInvariantIds) existing.violatedInvariantIds.add(id);
     for (const step of finding.triggerSequence) existing.triggerSequence.add(step);
-    for (const field of finding.attackerControlledFields) existing.attackerControlledFields.add(field);
+    for (const field of finding.attackerControlledFields)
+      existing.attackerControlledFields.add(field);
     for (const note of finding.hardeningNotes) existing.hardeningNotes.add(note);
     existing.cheapVerifiable ||= finding.cheapVerifiable;
     existing.analysisPath = mergeAnalysisPaths(existing.analysisPath, finding.analysisPath);
@@ -822,12 +876,25 @@ export function createSystemsHuntToolGuard(
     if (toolName === "Write") {
       const filePath = resolvePathArg(repoRoot, args, ["file_path", "path"]);
       if (!filePath || !isPathWithinRoot(scratchRoot, filePath)) {
-        return { behavior: "deny", message: "Write is limited to the systems-hunt scratch directory" };
+        return {
+          behavior: "deny",
+          message: "Write is limited to the systems-hunt scratch directory",
+        };
       }
       return { behavior: "allow" };
     }
 
-    if (toolName === "Read" || toolName === "Glob" || toolName === "Grep" || toolName === "GetFunctionBody" || toolName === "GetCallers" || toolName === "GetCallees" || toolName === "GoToDefinition" || toolName === "FindReferences" || toolName === "TypeAtPosition") {
+    if (
+      toolName === "Read" ||
+      toolName === "Glob" ||
+      toolName === "Grep" ||
+      toolName === "GetFunctionBody" ||
+      toolName === "GetCallers" ||
+      toolName === "GetCallees" ||
+      toolName === "GoToDefinition" ||
+      toolName === "FindReferences" ||
+      toolName === "TypeAtPosition"
+    ) {
       const filePath = resolvePathArg(repoRoot, args, ["file_path", "path"]);
       if (filePath && !isPathWithinRoot(repoRoot, filePath)) {
         return { behavior: "deny", message: "Analysis tools must stay inside the repository root" };
@@ -839,7 +906,10 @@ export function createSystemsHuntToolGuard(
       const command = typeof args["command"] === "string" ? args["command"] : "";
       const timeout = Number(args["timeout"] ?? 0);
       if (!isAllowedBashCommand(command)) {
-        return { behavior: "deny", message: "Bash is limited to deterministic non-destructive analysis commands" };
+        return {
+          behavior: "deny",
+          message: "Bash is limited to deterministic non-destructive analysis commands",
+        };
       }
       if (timeout > 0 && timeout > 30_000) {
         return { behavior: "deny", message: "Bash timeout must be <= 30000 ms" };
@@ -895,7 +965,7 @@ function isAllowedBashCommand(command: string): boolean {
 function splitShellWords(command: string): string[] | null {
   const words: string[] = [];
   let current = "";
-  let quote: "\"" | "'" | null = null;
+  let quote: '"' | "'" | null = null;
   let escaping = false;
 
   for (const char of command) {
@@ -916,15 +986,15 @@ function splitShellWords(command: string): string[] | null {
       escaping = true;
       continue;
     }
-    if (quote === "\"") {
-      if (char === "\"") {
+    if (quote === '"') {
+      if (char === '"') {
         quote = null;
       } else {
         current += char;
       }
       continue;
     }
-    if (char === "'" || char === "\"") {
+    if (char === "'" || char === '"') {
       quote = char;
       continue;
     }
@@ -943,7 +1013,11 @@ function splitShellWords(command: string): string[] | null {
   return words;
 }
 
-function resolvePathArg(repoRoot: string, args: Record<string, unknown>, keys: string[]): string | undefined {
+function resolvePathArg(
+  repoRoot: string,
+  args: Record<string, unknown>,
+  keys: string[],
+): string | undefined {
   for (const key of keys) {
     const value = args[key];
     if (typeof value !== "string" || !value.trim()) continue;
@@ -966,10 +1040,15 @@ function buildEvidenceSummary(artifact: SystemsHuntArtifact): string {
     artifact.violatedInvariant ? `Invariant: ${artifact.violatedInvariant}` : "",
     triggers ? `Trigger: ${triggers}` : "",
     artifact.memoryPrimitive ? `Primitive: ${artifact.memoryPrimitive}` : "",
-  ].filter(Boolean).join(" | ");
+  ]
+    .filter(Boolean)
+    .join(" | ");
 }
 
-function scoreFor(severity: "ERROR" | "WARNING" | "INFO", confidence: "HIGH" | "MEDIUM" | "LOW"): number {
+function scoreFor(
+  severity: "ERROR" | "WARNING" | "INFO",
+  confidence: "HIGH" | "MEDIUM" | "LOW",
+): number {
   const severityScore = severity === "ERROR" ? 50 : severity === "WARNING" ? 30 : 10;
   const confidenceScore = confidence === "HIGH" ? 30 : confidence === "MEDIUM" ? 20 : 10;
   return severityScore + confidenceScore;
@@ -1001,7 +1080,16 @@ function mergeAnalysisPaths(
 
 function createSystemsFindingFingerprint(repoName: string, finding: MergedFinding): string {
   return createHash("sha256")
-    .update([repoName, "systems-hunt", finding.filePath, String(finding.startLine), finding.cwe[0] ?? "none", finding.surface.kind].join("|"))
+    .update(
+      [
+        repoName,
+        "systems-hunt",
+        finding.filePath,
+        String(finding.startLine),
+        finding.cwe[0] ?? "none",
+        finding.surface.kind,
+      ].join("|"),
+    )
     .digest("hex");
 }
 
@@ -1042,10 +1130,10 @@ function normalizeConfidence(value: unknown): "HIGH" | "MEDIUM" | "LOW" {
   return value === "HIGH" || value === "MEDIUM" || value === "LOW" ? value : "MEDIUM";
 }
 
-function normalizeCorroborationStatus(
-  value: unknown,
-): CorroborationResult["status"] {
-  return value === "survived" || value === "counterexample-found" || value === "insufficient-corroboration"
+function normalizeCorroborationStatus(value: unknown): CorroborationResult["status"] {
+  return value === "survived" ||
+    value === "counterexample-found" ||
+    value === "insufficient-corroboration"
     ? value
     : "insufficient-corroboration";
 }

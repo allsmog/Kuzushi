@@ -1,9 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { MonorepoUIHandle } from "../../ui/monorepo-render.js";
-import type { BoundaryManifest } from "../../agents/tasks/taint-analysis/cross-service/types.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
-import { buildBoundaryManifest } from "../../monorepo/boundary-manifest.js";
+import type { BoundaryManifest } from "../../agents/tasks/taint-analysis/cross-service/types.js";
 import {
   buildManualModule,
   normalizeModuleName,
@@ -11,17 +9,19 @@ import {
   resolveModuleDirectory,
 } from "../../discovery/helpers.js";
 import { discoverRepoStructure } from "../../discovery/repo-discovery.js";
-import type { DiscoveredModule, DiscoveredProduct, DiscoveryResult, ModulePriority } from "../../discovery/types.js";
-import {
-  buildDependencyGraph,
-  deriveInteractionEdgesFromDependencyGraph,
-  formatDependencyGraphSummary,
-} from "../../monorepo/dependency-graph.js";
-import { detectAttackSurfaces, formatAttackSurfaceSummary } from "../../monorepo/attack-surface.js";
+import type {
+  DiscoveredModule,
+  DiscoveredProduct,
+  DiscoveryResult,
+  ModulePriority,
+} from "../../discovery/types.js";
+import { getGlobalLogLevel } from "../../logger.js";
 import {
   __architecturalAnalysisInternals,
   buildArchitecturalThreatModel,
 } from "../../monorepo/architectural-analysis.js";
+import { detectAttackSurfaces, formatAttackSurfaceSummary } from "../../monorepo/attack-surface.js";
+import { buildBoundaryManifest } from "../../monorepo/boundary-manifest.js";
 import {
   createBudget,
   formatScanPlan,
@@ -32,6 +32,11 @@ import {
 } from "../../monorepo/budget-controller.js";
 import { buildMonorepoContextIndex } from "../../monorepo/context-index.js";
 import { traceAcrossModules } from "../../monorepo/cross-module-tracing.js";
+import {
+  buildDependencyGraph,
+  deriveInteractionEdgesFromDependencyGraph,
+  formatDependencyGraphSummary,
+} from "../../monorepo/dependency-graph.js";
 import type {
   ModuleScanPlan,
   ModuleTaskRecommendation,
@@ -40,10 +45,22 @@ import type {
   MonorepoThreatModel,
   StaticIntelligence,
 } from "../../monorepo/types.js";
-import { printMonorepoSummary, type MonorepoAggregateSummary, type MonorepoModuleResult } from "../../report-monorepo.js";
-import { defaultDbPath, getActionableFindings, getLatestResumableRun, getResumableModuleRuns, getVerdictCounts, initDb, type StoredFindingRecord } from "../../store.js";
+import {
+  type MonorepoAggregateSummary,
+  type MonorepoModuleResult,
+  printMonorepoSummary,
+} from "../../report-monorepo.js";
 import type { Finding } from "../../scanners/types.js";
-import { getGlobalLogLevel } from "../../logger.js";
+import {
+  defaultDbPath,
+  getActionableFindings,
+  getLatestResumableRun,
+  getResumableModuleRuns,
+  getVerdictCounts,
+  initDb,
+  type StoredFindingRecord,
+} from "../../store.js";
+import type { MonorepoUIHandle } from "../../ui/monorepo-render.js";
 import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js";
 import { CliUsageError } from "../errors.js";
 import type { ScanCommandOptions } from "../scan-config.js";
@@ -62,10 +79,7 @@ interface ModuleExecutionResult extends MonorepoModuleResult {
   runId?: string;
 }
 
-export async function runMonorepoScan(
-  repoPath: string,
-  opts: ScanCommandOptions,
-): Promise<void> {
+export async function runMonorepoScan(repoPath: string, opts: ScanCommandOptions): Promise<void> {
   const { root: monorepoRoot, name: monorepoName } = resolveRepo(repoPath);
   const { config, scanOpts } = prepareScanExecution(monorepoRoot, opts);
   let runtime: AgentRuntime | undefined;
@@ -89,7 +103,9 @@ export async function runMonorepoScan(
         return;
       }
       if (normalizePriorityThreshold(opts.modulePriority) !== "all") {
-        console.log("--module-priority is ignored by --list-modules because priority classification happens in Phase 1.");
+        console.log(
+          "--module-priority is ignored by --list-modules because priority classification happens in Phase 1.",
+        );
       }
       printModules(filteredModules);
       return;
@@ -113,7 +129,9 @@ export async function runMonorepoScan(
       }
 
       if (moduleRuns.length === 0) {
-        throw new CliUsageError(`no resumable module runs found for "${monorepoName}". Run without --resume to start fresh.`);
+        throw new CliUsageError(
+          `no resumable module runs found for "${monorepoName}". Run without --resume to start fresh.`,
+        );
       }
 
       // Reconstruct minimal module + plan objects from the DB records
@@ -142,7 +160,9 @@ export async function runMonorepoScan(
         return run?.status !== "complete";
       });
 
-      console.log(`\nResuming ${resumePlans.length} module(s) from previous run (${nonComplete.length} need triage)...`);
+      console.log(
+        `\nResuming ${resumePlans.length} module(s) from previous run (${nonComplete.length} need triage)...`,
+      );
 
       // Build minimal static intel + context for the fan-in/reporting phases
       const filteredModules = resumePlans.map((p) => p.module);
@@ -152,7 +172,11 @@ export async function runMonorepoScan(
         attackSurfaces: new Map(),
         interactionEdges: deriveInteractionEdgesFromDependencyGraph(dependencyGraph),
       };
-      const contextIndex = await buildMonorepoContextIndex(monorepoRoot, filteredModules, staticIntel);
+      const contextIndex = await buildMonorepoContextIndex(
+        monorepoRoot,
+        filteredModules,
+        staticIntel,
+      );
       const threatModel = buildDeterministicThreatModel(filteredModules, staticIntel, contextIndex);
 
       console.log(`\n[Phase 2] Resuming ${resumePlans.length} modules...`);
@@ -198,7 +222,11 @@ export async function runMonorepoScan(
     }
 
     // ── Normal (non-resume) path ─────────────────────────────────────
-    const { modules, products, costUsd: discoveryCostUsd } = await resolveMonorepoModules(monorepoRoot, config, opts, runtime);
+    const {
+      modules,
+      products,
+      costUsd: discoveryCostUsd,
+    } = await resolveMonorepoModules(monorepoRoot, config, opts, runtime);
     const filteredModules = applyModuleFilters(
       modules,
       opts.moduleFilter,
@@ -221,7 +249,11 @@ export async function runMonorepoScan(
       attackSurfaces,
       interactionEdges: deriveInteractionEdgesFromDependencyGraph(dependencyGraph),
     };
-    const contextIndex = await buildMonorepoContextIndex(monorepoRoot, filteredModules, staticIntel);
+    const contextIndex = await buildMonorepoContextIndex(
+      monorepoRoot,
+      filteredModules,
+      staticIntel,
+    );
 
     console.log("\nDependency graph:");
     console.log(formatDependencyGraphSummary(dependencyGraph));
@@ -247,11 +279,13 @@ export async function runMonorepoScan(
       threatModel = archResult.threatModel;
       console.log(
         `Architectural analysis: ${threatModel.threats.length} threats, ` +
-        `${threatModel.crossModuleHypotheses.length} cross-module hypotheses ($${archResult.costUsd.toFixed(4)})`,
+          `${threatModel.crossModuleHypotheses.length} cross-module hypotheses ($${archResult.costUsd.toFixed(4)})`,
       );
     } else {
       threatModel = buildDeterministicThreatModel(filteredModules, staticIntel, contextIndex);
-      console.log("\n[Phase 1] Architectural threat model disabled, using deterministic task planning.");
+      console.log(
+        "\n[Phase 1] Architectural threat model disabled, using deterministic task planning.",
+      );
     }
 
     const sortedModules = sortModulesByPriority(
@@ -437,7 +471,9 @@ async function runPlansInParallel(params: {
             if (existingRun?.status === "complete") {
               const verdictCounts = getVerdictCounts(db, repoName);
               monorepoUI?.updateModule(plan.module.path, { status: "skipped" });
-              console.log(`  [${index + 1}/${plans.length}] ${plan.module.path} :: SKIPPED (already complete)`);
+              console.log(
+                `  [${index + 1}/${plans.length}] ${plan.module.path} :: SKIPPED (already complete)`,
+              );
               return {
                 plan,
                 module: plan.module,
@@ -464,7 +500,9 @@ async function runPlansInParallel(params: {
           detail: plan.tasks.join(", ") || "scanning",
           startedAt: Date.now(),
         });
-        console.log(`  [${index + 1}/${plans.length}] ${plan.module.path}${resumeLabel} :: ${plan.tasks.join(", ") || "no explicit tasks"}`);
+        console.log(
+          `  [${index + 1}/${plans.length}] ${plan.module.path}${resumeLabel} :: ${plan.tasks.join(", ") || "no explicit tasks"}`,
+        );
 
         const moduleConfig = {
           ...config,
@@ -483,17 +521,13 @@ async function runPlansInParallel(params: {
         const moduleScanOpts = plan.module.includePaths
           ? {
               ...scanOpts,
-              scanPaths: plan.module.includePaths.map((p) =>
-                path.resolve(monorepoRoot, p),
-              ),
+              scanPaths: plan.module.includePaths.map((p) => path.resolve(monorepoRoot, p)),
             }
           : scanOpts;
 
         // When resuming, pass resume:true so each module's pipeline
         // finds its own latest resumable run and picks up from checkpoint
-        const moduleOpts = resuming
-          ? { ...opts, resume: true as const }
-          : opts;
+        const moduleOpts = resuming ? { ...opts, resume: true as const } : opts;
 
         const pipelineResult = await runPipeline({
           repoRoot: monorepoRoot,
@@ -509,10 +543,13 @@ async function runPlansInParallel(params: {
           manageCache: false,
           monorepoContext,
           seedTaskOutputs: new Map([
-            ["context-gatherer", {
-              repoContext: sharedContext.repoContext,
-              fileIndex: sharedContext.fileIndex,
-            }],
+            [
+              "context-gatherer",
+              {
+                repoContext: sharedContext.repoContext,
+                fileIndex: sharedContext.fileIndex,
+              },
+            ],
           ]),
         });
 
@@ -598,7 +635,9 @@ async function runFanIn(params: {
 
   for (const result of results) {
     const actionable = getActionableFindings(db, result.repoName);
-    const canonicalFindings = actionable.map((finding) => canonicalizeStoredFinding(result.module.path, finding));
+    const canonicalFindings = actionable.map((finding) =>
+      canonicalizeStoredFinding(result.module.path, finding),
+    );
     perModuleFindings.set(result.module.path, canonicalFindings.map(toTracingFinding));
     for (const finding of canonicalFindings) {
       dedupeMap.set(buildFindingDedupeKey(finding), toTracingFinding(finding));
@@ -677,7 +716,15 @@ export async function parseManualModules(
     const rawName = entry.slice(0, separator).trim();
     const rawPath = entry.slice(separator + 1).trim();
     const modulePath = normalizeRelativeModulePath(monorepoRoot, rawPath);
-    modules.push(await buildManualModule(monorepoRoot, rawName, modulePath, "standalone", "manual --modules flag"));
+    modules.push(
+      await buildManualModule(
+        monorepoRoot,
+        rawName,
+        modulePath,
+        "standalone",
+        "manual --modules flag",
+      ),
+    );
   }
 
   const deduped = dedupeModules(modules);
@@ -692,13 +739,21 @@ export async function normalizeConfiguredModules(
   const normalized: DiscoveredModule[] = [];
   for (const module of modules) {
     const modulePath = normalizeRelativeModulePath(monorepoRoot, module.path);
-    const manual = await buildManualModule(monorepoRoot, module.name, modulePath, module.moduleKind ?? "standalone", "config");
+    const manual = await buildManualModule(
+      monorepoRoot,
+      module.name,
+      modulePath,
+      module.moduleKind ?? "standalone",
+      "config",
+    );
     normalized.push({
       ...manual,
       description: module.description?.trim() || manual.description,
       language: module.language?.trim() || manual.language,
       buildSystem: module.buildSystem?.trim() || manual.buildSystem,
-      discoveryEvidence: module.discoveryEvidence?.length ? module.discoveryEvidence : manual.discoveryEvidence,
+      discoveryEvidence: module.discoveryEvidence?.length
+        ? module.discoveryEvidence
+        : manual.discoveryEvidence,
     });
   }
 
@@ -713,11 +768,19 @@ export function applyModuleFilters(
   excludePatterns: string[] = [],
 ): DiscoveredModule[] {
   return modules.filter((module) => {
-    if (filterPattern && !matchPattern(module.name, filterPattern) && !matchPattern(module.path, filterPattern)) {
+    if (
+      filterPattern &&
+      !matchPattern(module.name, filterPattern) &&
+      !matchPattern(module.path, filterPattern)
+    ) {
       return false;
     }
 
-    if (excludePatterns.some((pattern) => matchPattern(module.name, pattern) || matchPattern(module.path, pattern))) {
+    if (
+      excludePatterns.some(
+        (pattern) => matchPattern(module.name, pattern) || matchPattern(module.path, pattern),
+      )
+    ) {
       return false;
     }
 
@@ -731,7 +794,10 @@ export function matchPattern(value: string, pattern: string): boolean {
     return true;
   }
 
-  const escaped = trimmed.replace(/[|\\{}()[\]^$+?.]/g, "\\$&").replace(/\*/g, ".*").replace(/\\\?/g, ".");
+  const escaped = trimmed
+    .replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\\\?/g, ".");
   return new RegExp(`^${escaped}$`, "i").test(value);
 }
 
@@ -774,7 +840,9 @@ function printPriorityBreakdown(
     .map(([priority, count]) => `${priority}: ${count}`)
     .join(", ");
 
-  console.log(`\nScanning ${filteredPlans.length}/${allPlans.length} modules (${scanning}) — skipped ${skipped} below priority "${threshold}".`);
+  console.log(
+    `\nScanning ${filteredPlans.length}/${allPlans.length} modules (${scanning}) — skipped ${skipped} below priority "${threshold}".`,
+  );
   console.log("Use --module-priority all to scan everything.\n");
 }
 
@@ -858,12 +926,17 @@ function createConcurrencyLimiter(limit: number): <T>(fn: () => Promise<T>) => P
   };
 }
 
-function canonicalizeStoredFinding(modulePath: string, finding: StoredFindingRecord): StoredFindingRecord {
+function canonicalizeStoredFinding(
+  modulePath: string,
+  finding: StoredFindingRecord,
+): StoredFindingRecord {
   const normalizedModulePath = modulePath.replace(/\\/g, "/");
   const normalizedFilePath = finding.filePath.replace(/\\/g, "/");
-  const filePath = normalizedFilePath.startsWith(`${normalizedModulePath}/`) || normalizedFilePath === normalizedModulePath
-    ? normalizedFilePath
-    : path.posix.join(normalizedModulePath, normalizedFilePath);
+  const filePath =
+    normalizedFilePath.startsWith(`${normalizedModulePath}/`) ||
+    normalizedFilePath === normalizedModulePath
+      ? normalizedFilePath
+      : path.posix.join(normalizedModulePath, normalizedFilePath);
   return {
     ...finding,
     filePath,
@@ -871,12 +944,7 @@ function canonicalizeStoredFinding(modulePath: string, finding: StoredFindingRec
 }
 
 function buildFindingDedupeKey(finding: StoredFindingRecord): string {
-  return [
-    finding.ruleId,
-    finding.filePath,
-    finding.startLine,
-    finding.message,
-  ].join("::");
+  return [finding.ruleId, finding.filePath, finding.startLine, finding.message].join("::");
 }
 
 function toTracingFinding(finding: StoredFindingRecord): Finding {
@@ -889,7 +957,8 @@ function toTracingFinding(finding: StoredFindingRecord): Finding {
     severity: finding.severity as Finding["severity"],
     message: finding.message,
     evidence: finding.rationale,
-    scannerConfidence: finding.confidence >= 0.8 ? "HIGH" : finding.confidence >= 0.5 ? "MEDIUM" : "LOW",
+    scannerConfidence:
+      finding.confidence >= 0.8 ? "HIGH" : finding.confidence >= 0.5 ? "MEDIUM" : "LOW",
     subcategory: ["vuln"],
     cwe: [],
     likelihood: "MEDIUM",

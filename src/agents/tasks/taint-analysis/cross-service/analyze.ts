@@ -1,24 +1,23 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { executeAgentTask, type ExecutedTaskResult } from "../../../../bus/task-execution.js";
-import type { TaskConfig } from "../../../../scanners/types.js";
+import { type ExecutedTaskResult, executeAgentTask } from "../../../../bus/task-execution.js";
+import type { Finding, TaskConfig } from "../../../../scanners/types.js";
 import { attachTaskOutputMeta, getTaskOutputMeta } from "../../../../task-output-meta.js";
-import type { Finding } from "../../../../scanners/types.js";
 import type { ScanOpts } from "../../../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../../../utils.js";
 import type { AgentTask, TaskContext } from "../../../types.js";
-import { taintAnalysisPreflightTask } from "../preflight.js";
-import { taintAnalysisLabelTask } from "../label.js";
 import { taintAnalysisRunTask } from "../analyze.js";
+import { taintAnalysisLabelTask } from "../label.js";
+import { taintAnalysisPreflightTask } from "../preflight.js";
 import { resolveTaintAnalysisConfig } from "../types.js";
 import { detectServiceBoundaries } from "./boundary-agent.js";
 import {
-  isTaintAnalysisLanguage,
-  resolveCrossServiceConfig,
   type BoundaryManifest,
   type CrossServiceAnalysisOutput,
   type CrossServiceDiscoverOutput,
+  isTaintAnalysisLanguage,
   type PerServiceAnalysis,
+  resolveCrossServiceConfig,
   type ServiceDescriptor,
 } from "./types.js";
 
@@ -46,7 +45,9 @@ export const taintAnalysisCrossAnalyzeTask: AgentTask<ScanOpts, CrossServiceAnal
       context.upstreamOutputs.get("taint-analysis-discover"),
     );
     if (!discoverOutput) {
-      throw new Error("taint-analysis-cross-analyze requires upstream output from taint-analysis-discover");
+      throw new Error(
+        "taint-analysis-cross-analyze requires upstream output from taint-analysis-discover",
+      );
     }
 
     const services = discoverOutput.services;
@@ -131,17 +132,19 @@ function asCrossServiceDiscoverOutput(value: unknown): CrossServiceDiscoverOutpu
         return [];
       }
 
-      return [{
-        id,
-        displayName: typeof service["displayName"] === "string" ? service["displayName"] : id,
-        rootPath,
-        language,
-        framework: typeof service["framework"] === "string" ? service["framework"] : null,
-        discoveryMethod: service["discoveryMethod"] === "manifest" ? "manifest" : "auto",
-        manifestFiles: Array.isArray(service["manifestFiles"])
-          ? service["manifestFiles"].map((item) => String(item))
-          : [],
-      }];
+      return [
+        {
+          id,
+          displayName: typeof service["displayName"] === "string" ? service["displayName"] : id,
+          rootPath,
+          language,
+          framework: typeof service["framework"] === "string" ? service["framework"] : null,
+          discoveryMethod: service["discoveryMethod"] === "manifest" ? "manifest" : "auto",
+          manifestFiles: Array.isArray(service["manifestFiles"])
+            ? service["manifestFiles"].map((item) => String(item))
+            : [],
+        },
+      ];
     }),
     usedManifest: Boolean(value["usedManifest"]),
     autoDetectedPaths: Array.isArray(value["autoDetectedPaths"])
@@ -288,12 +291,7 @@ async function runTaintAnalysisForService(
     upstreamOutputs: new Map([["taint-analysis-preflight", preflightOutput]]),
   };
 
-  const label = await executeNestedTask(
-    taintAnalysisLabelTask,
-    input,
-    labelContext,
-    service.id,
-  );
+  const label = await executeNestedTask(taintAnalysisLabelTask, input, labelContext, service.id);
   const labelOutput = label.output;
 
   // Step 3: Run (produces Finding[])
@@ -302,12 +300,7 @@ async function runTaintAnalysisForService(
     upstreamOutputs: new Map([["taint-analysis-label", labelOutput]]),
   };
 
-  const run = await executeNestedTask(
-    taintAnalysisRunTask,
-    input,
-    runContext,
-    service.id,
-  );
+  const run = await executeNestedTask(taintAnalysisRunTask, input, runContext, service.id);
 
   return {
     findings: run.emittedFindings,
@@ -321,7 +314,9 @@ async function executeNestedTask<TOutput>(
   context: TaskContext,
   serviceId: string,
 ): Promise<ExecutedTaskResult & { output: TOutput }> {
-  process.stderr.write(`[taint-analysis-cross-analyze] [${serviceId}] Starting nested task ${task.id}\n`);
+  process.stderr.write(
+    `[taint-analysis-cross-analyze] [${serviceId}] Starting nested task ${task.id}\n`,
+  );
 
   try {
     const executed = await executeAgentTask(

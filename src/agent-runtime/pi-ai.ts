@@ -1,32 +1,29 @@
 import {
   complete,
   getModel,
+  type KnownProvider,
   type AssistantMessage as PiAiAssistantMessage,
   type Context as PiAiContext,
-  type KnownProvider,
-  type Tool,
   type ToolCall as PiAiToolCall,
+  type Tool,
   validateToolCall,
 } from "@mariozechner/pi-ai";
-import {
-  KuzushiError,
-  wrapError,
-} from "../errors.js";
-import type { MessageBus } from "../bus/types.js";
 import type {
-  LlmCallStartEvent,
   LlmCallCompleteEvent,
   LlmCallErrorEvent,
+  LlmCallStartEvent,
   LlmRetryEvent,
 } from "../bus/events.js";
+import type { MessageBus } from "../bus/types.js";
+import { KuzushiError, wrapError } from "../errors.js";
+import { installGlobalDispatcher } from "../http-agent.js";
+import { getLogger } from "../logger.js";
+import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeConfig } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
-import { getRateLimitRegistry } from "../scheduler/index.js";
-import { getLogger } from "../logger.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
-import { installGlobalDispatcher } from "../http-agent.js";
 
 process.env.PI_CACHE_RETENTION ??= "long";
 
@@ -117,9 +114,9 @@ async function rateLimitedComplete(
 
     // Detect rate-limit soft errors returned by pi-ai.
     if (
-      result.stopReason === "error"
-      && result.errorMessage
-      && isRateLimitError(result.errorMessage)
+      result.stopReason === "error" &&
+      result.errorMessage &&
+      isRateLimitError(result.errorMessage)
     ) {
       success = false;
     }
@@ -147,9 +144,7 @@ async function retryTransient<T>(
     } catch (error) {
       lastError = error;
       // Wrap non-KuzushiError instances so callers always get typed errors.
-      const wrapped = error instanceof KuzushiError
-        ? error
-        : wrapError(error);
+      const wrapped = error instanceof KuzushiError ? error : wrapError(error);
 
       if (!wrapped.retryable || attempt === maxRetries) {
         throw wrapped;
@@ -298,11 +293,12 @@ export class PiAiAgentRuntime implements AgentRuntime {
           }
         }
         let assistant = await retryTransient(
-          () => rateLimitedComplete(modelSpec, model, context, {
-            signal,
-            temperature: request.options.temperature,
-            maxTokens: request.options.maxOutputTokens,
-          }),
+          () =>
+            rateLimitedComplete(modelSpec, model, context, {
+              signal,
+              temperature: request.options.temperature,
+              maxTokens: request.options.maxOutputTokens,
+            }),
           signal,
           TRANSIENT_RETRY_MAX,
           TRANSIENT_RETRY_BASE_MS,
@@ -313,9 +309,9 @@ export class PiAiAgentRuntime implements AgentRuntime {
         // pi-ai's complete() never throws on API errors — it returns them as soft errors
         // (stopReason === "error"). We must retry by checking the return value.
         if (
-          assistant.stopReason === "error"
-          && assistant.errorMessage
-          && isTransientErrorMessage(assistant.errorMessage)
+          assistant.stopReason === "error" &&
+          assistant.errorMessage &&
+          isTransientErrorMessage(assistant.errorMessage)
         ) {
           let retried = false;
           for (let softRetry = 0; softRetry < TRANSIENT_RETRY_MAX; softRetry++) {
@@ -354,7 +350,10 @@ export class PiAiAgentRuntime implements AgentRuntime {
             await new Promise<void>((resolve) => {
               const timer = setTimeout(resolve, delay);
               if (signal) {
-                const onAbort = () => { clearTimeout(timer); resolve(); };
+                const onAbort = () => {
+                  clearTimeout(timer);
+                  resolve();
+                };
                 signal.addEventListener("abort", onAbort, { once: true });
               }
             });
@@ -364,7 +363,11 @@ export class PiAiAgentRuntime implements AgentRuntime {
               temperature: request.options.temperature,
               maxTokens: request.options.maxOutputTokens,
             });
-            if (assistant.stopReason !== "error" || !assistant.errorMessage || !isTransientErrorMessage(assistant.errorMessage)) {
+            if (
+              assistant.stopReason !== "error" ||
+              !assistant.errorMessage ||
+              !isTransientErrorMessage(assistant.errorMessage)
+            ) {
               retried = true;
               break;
             }
@@ -401,7 +404,9 @@ export class PiAiAgentRuntime implements AgentRuntime {
                 payload: {
                   model: request.options.model,
                   error: assistant.errorMessage ?? "pi-ai request failed",
-                  retryable: assistant.errorMessage ? isTransientErrorMessage(assistant.errorMessage) : false,
+                  retryable: assistant.errorMessage
+                    ? isTransientErrorMessage(assistant.errorMessage)
+                    : false,
                   runId: turnRunId,
                 },
               });
@@ -462,38 +467,38 @@ export class PiAiAgentRuntime implements AgentRuntime {
         // When expecting structured JSON output, accumulate the partial text
         // and signal the LLM to continue where it left off.
         if (assistant.stopReason === "length") {
-          const hasToolCalls = assistant.content.some(
-            (block) => block.type === "toolCall",
-          );
+          const hasToolCalls = assistant.content.some((block) => block.type === "toolCall");
           if (!hasToolCalls && outputFormat) {
             truncatedTextParts.push(extractText(assistant));
             // Re-send with a continuation prompt so the LLM finishes its JSON.
-            context.messages.push(
-              assistant as unknown as PiAiContext["messages"][number],
-            );
+            context.messages.push(assistant as unknown as PiAiContext["messages"][number]);
             context.messages.push({
               role: "user",
-              content: "Your response was truncated due to length. Please continue your JSON output exactly where you left off. Do not restart — just continue from the cut-off point.",
+              content:
+                "Your response was truncated due to length. Please continue your JSON output exactly where you left off. Do not restart — just continue from the cut-off point.",
               timestamp: Date.now(),
             });
             continue;
           }
         }
 
-        const toolCalls = assistant.content.filter((block): block is PiAiToolCall => (
-          block.type === "toolCall"
-        ));
+        const toolCalls = assistant.content.filter(
+          (block): block is PiAiToolCall => block.type === "toolCall",
+        );
 
         if (toolCalls.length === 0) {
           const currentText = extractText(assistant);
-          const resultText = truncatedTextParts.length > 0
-            ? truncatedTextParts.join("") + currentText
-            : currentText;
+          const resultText =
+            truncatedTextParts.length > 0 ? truncatedTextParts.join("") + currentText : currentText;
           const structuredResult = outputFormat
             ? parseStructuredOutput(resultText)
             : { structuredOutput: undefined, parseError: null };
 
-          if (outputFormat && strictStructuredOutput && structuredResult.structuredOutput === undefined) {
+          if (
+            outputFormat &&
+            strictStructuredOutput &&
+            structuredResult.structuredOutput === undefined
+          ) {
             if (invalidStructuredOutputRetriesRemaining > 0) {
               invalidStructuredOutputRetriesRemaining -= 1;
               context.messages.push({
@@ -538,7 +543,8 @@ export class PiAiAgentRuntime implements AgentRuntime {
         }
 
         for (const toolCall of toolCalls) {
-          const toolUseId = toolCall.id || `${toolCall.name}_${Date.now()}_${++generatedToolCallCounter}`;
+          const toolUseId =
+            toolCall.id || `${toolCall.name}_${Date.now()}_${++generatedToolCallCounter}`;
           const startedToolMs = Date.now();
 
           const tool = toolsByName.get(toolCall.name);
@@ -604,7 +610,8 @@ export class PiAiAgentRuntime implements AgentRuntime {
           );
 
           if (permission.behavior === "deny") {
-            const denyMessage = permission.message ?? `Permission denied for tool "${toolCall.name}"`;
+            const denyMessage =
+              permission.message ?? `Permission denied for tool "${toolCall.name}"`;
             const elapsedSecondsDeny = Math.max(0, (Date.now() - startedToolMs) / 1000);
             yield {
               type: "tool-progress" as const,
@@ -631,11 +638,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
           let isToolError = false;
           let toolResultText = "";
           try {
-            toolResultText = await executeTool(
-              toolCall.name,
-              validatedArgs,
-              request.options.cwd,
-            );
+            toolResultText = await executeTool(toolCall.name, validatedArgs, request.options.cwd);
           } catch (error) {
             isToolError = true;
             toolResultText = toErrorMessage(error);
@@ -664,7 +667,6 @@ export class PiAiAgentRuntime implements AgentRuntime {
           });
         }
       }
-
     } catch (error) {
       const aborted = signal?.aborted === true;
       const wrapped = error instanceof KuzushiError ? error : wrapError(error);
@@ -734,8 +736,8 @@ function resolveModel(modelSpec: string, baseUrlOverride?: string) {
   // This supports Ollama and other OpenAI-compatible endpoints.
   if (!baseUrlOverride) {
     throw new Error(
-      `Unable to resolve pi-ai model "${modelSpec}": model not found in registry. `
-      + "Provide agentRuntimeConfig.baseUrl (or --base-url) for custom model endpoints.",
+      `Unable to resolve pi-ai model "${modelSpec}": model not found in registry. ` +
+        "Provide agentRuntimeConfig.baseUrl (or --base-url) for custom model endpoints.",
     );
   }
 
@@ -812,9 +814,7 @@ function buildSystemPrompt(schema: Record<string, unknown> | undefined, prefix?:
   return lines.join("\n");
 }
 
-function mapAssistantContent(
-  assistant: PiAiAssistantMessage,
-): Array<Record<string, unknown>> {
+function mapAssistantContent(assistant: PiAiAssistantMessage): Array<Record<string, unknown>> {
   const content: Array<Record<string, unknown>> = [];
 
   for (const block of assistant.content) {
@@ -849,9 +849,10 @@ function mapAssistantContent(
 
 function extractText(assistant: PiAiAssistantMessage): string {
   const textBlocks = assistant.content
-    .filter((block): block is Extract<PiAiAssistantMessage["content"][number], { type: "text" }> => (
-      block.type === "text"
-    ))
+    .filter(
+      (block): block is Extract<PiAiAssistantMessage["content"][number], { type: "text" }> =>
+        block.type === "text",
+    )
     .map((block) => block.text.trim())
     .filter(Boolean);
 
@@ -906,7 +907,6 @@ function extractJsonObject(text: string): string | null {
 function extractCostUsd(message: PiAiAssistantMessage): number {
   return normalizeCostUsd(message.usage?.cost?.total);
 }
-
 
 function normalizeBudget(value: number | undefined): number | undefined {
   if (!Number.isFinite(value) || value == null || value < 0) {

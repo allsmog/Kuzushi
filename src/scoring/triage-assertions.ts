@@ -1,5 +1,5 @@
-import type { TriageAssertionConfig } from "../types.js";
 import { getLogger } from "../logger.js";
+import type { TriageAssertionConfig } from "../types.js";
 
 export type { TriageAssertionConfig };
 
@@ -8,7 +8,7 @@ const log = getLogger("triage-assertions");
 export interface AssertionResult {
   name: string;
   passed: boolean;
-  score: number;      // 0-1
+  score: number; // 0-1
   reason: string;
   weight: number;
 }
@@ -57,16 +57,19 @@ function assertRationaleHasEvidence(output: TriageOutput): AssertionResult {
   const hasCodeRef = /`[^`]+`/.test(rationale);
   const hasEvidence = (output.evidence?.length ?? 0) > 0;
 
-  const evidenceCount = [hasFilePath, hasLineNumber, hasCodeRef, hasEvidence].filter(Boolean).length;
+  const evidenceCount = [hasFilePath, hasLineNumber, hasCodeRef, hasEvidence].filter(
+    Boolean,
+  ).length;
   const score = Math.min(1, evidenceCount / 2); // 2+ indicators = full score
 
   return {
     name: "rationale-has-evidence",
     passed: score >= 0.5,
     score,
-    reason: score >= 0.5
-      ? "Rationale references specific code locations"
-      : "Rationale lacks specific file/line references",
+    reason:
+      score >= 0.5
+        ? "Rationale references specific code locations"
+        : "Rationale lacks specific file/line references",
     weight,
   };
 }
@@ -89,17 +92,19 @@ function assertVerificationStepsActionable(output: TriageOutput): AssertionResul
   }
 
   // Check each step for actionability (contains verbs, specific enough)
-  const actionVerbs = /\b(check|verify|test|inspect|review|confirm|run|examine|look|search|trace|follow|read|open)\b/i;
-  const actionableSteps = steps.filter(step => actionVerbs.test(step) && step.length > 20);
+  const actionVerbs =
+    /\b(check|verify|test|inspect|review|confirm|run|examine|look|search|trace|follow|read|open)\b/i;
+  const actionableSteps = steps.filter((step) => actionVerbs.test(step) && step.length > 20);
   const score = actionableSteps.length / steps.length;
 
   return {
     name: "verification-steps-actionable",
     passed: score >= 0.5,
     score,
-    reason: score >= 0.5
-      ? `${actionableSteps.length}/${steps.length} steps are actionable`
-      : `Only ${actionableSteps.length}/${steps.length} steps appear actionable`,
+    reason:
+      score >= 0.5
+        ? `${actionableSteps.length}/${steps.length} steps are actionable`
+        : `Only ${actionableSteps.length}/${steps.length} steps appear actionable`,
     weight,
   };
 }
@@ -112,7 +117,7 @@ function assertConfidenceMatchesEvidence(output: TriageOutput): AssertionResult 
   const weight = DEFAULT_ASSERTION_WEIGHTS.confidenceMatchesEvidence;
   const confidence = output.confidence;
   const rationale = output.rationale ?? "";
-  const evidenceCount = (output.evidence?.length ?? 0);
+  const evidenceCount = output.evidence?.length ?? 0;
 
   let score = 1.0;
   let reason = "Confidence level matches evidence strength";
@@ -204,7 +209,7 @@ function assertCweMentionsRelevant(output: TriageOutput): AssertionResult | null
     const keywords = CWE_KEYWORD_MAP[cwe];
     if (!keywords) continue; // Unknown CWE, skip
     checkedCount++;
-    const hasMatch = keywords.some(kw => rationale.includes(kw));
+    const hasMatch = keywords.some((kw) => rationale.includes(kw));
     if (hasMatch) matchedCount++;
   }
 
@@ -225,9 +230,10 @@ function assertCweMentionsRelevant(output: TriageOutput): AssertionResult | null
     name: "cwe-mentions-relevant",
     passed: score >= 0.5,
     score,
-    reason: score >= 0.5
-      ? `Rationale mentions keywords for ${matchedCount}/${checkedCount} CWEs`
-      : `Rationale missing keywords for ${checkedCount - matchedCount}/${checkedCount} CWEs`,
+    reason:
+      score >= 0.5
+        ? `Rationale mentions keywords for ${matchedCount}/${checkedCount} CWEs`
+        : `Rationale missing keywords for ${checkedCount - matchedCount}/${checkedCount} CWEs`,
     weight,
   };
 }
@@ -242,7 +248,7 @@ function assertFixPatchValid(output: TriageOutput): AssertionResult | null {
 
   if (patch === undefined || patch === null || patch.trim() === "") return null;
 
-  const hasDiffMarkers = /[+\-]|@@|diff/.test(patch);
+  const hasDiffMarkers = /[+-]|@@|diff/.test(patch);
   const hasCodeSyntax = /[;{}()=>]|\breturn\b|\bimport\b/.test(patch);
   const isValid = hasDiffMarkers || hasCodeSyntax;
 
@@ -297,7 +303,7 @@ function assertVerdictConsistency(output: TriageOutput): AssertionResult | null 
   if (!history || history.length === 0) return null;
 
   const currentVerdict = output.verdict.toLowerCase();
-  const flips = history.filter(h => h.verdict.toLowerCase() !== currentVerdict).length;
+  const flips = history.filter((h) => h.verdict.toLowerCase() !== currentVerdict).length;
   const total = history.length;
   const score = 1.0 - (flips / total) * 0.5;
 
@@ -305,9 +311,10 @@ function assertVerdictConsistency(output: TriageOutput): AssertionResult | null 
     name: "verdict-consistency",
     passed: score >= 0.5,
     score,
-    reason: flips === 0
-      ? `Verdict consistent across ${total} historical run(s)`
-      : `Verdict flipped ${flips}/${total} time(s) compared to history`,
+    reason:
+      flips === 0
+        ? `Verdict consistent across ${total} historical run(s)`
+        : `Verdict flipped ${flips}/${total} time(s) compared to history`,
     weight,
   };
 }
@@ -321,9 +328,7 @@ function assertCostEfficiency(output: TriageOutput): AssertionResult | null {
 
   if (output.costUsd === undefined || output.runMedianCostUsd === undefined) return null;
 
-  const ratio = output.runMedianCostUsd > 0
-    ? output.costUsd / output.runMedianCostUsd
-    : 0;
+  const ratio = output.runMedianCostUsd > 0 ? output.costUsd / output.runMedianCostUsd : 0;
 
   let score: number;
   let reason: string;
@@ -392,7 +397,7 @@ function assertLatencyReasonable(output: TriageOutput): AssertionResult | null {
  */
 export function runTriageAssertions(
   output: TriageOutput,
-  config?: TriageAssertionConfig
+  config?: TriageAssertionConfig,
 ): AssertionResult[] {
   if (config?.enabled === false) return [];
 
@@ -426,16 +431,16 @@ export function runTriageAssertions(
       const key = result.name.replace(/-/g, "") as string;
       // Map assertion names to config keys
       const weightMap: Record<string, keyof NonNullable<TriageAssertionConfig["weights"]>> = {
-        "rationalehasevidence": "rationaleHasEvidence",
-        "verificationstepsactionable": "verificationStepsActionable",
-        "confidencematchesevidence": "confidenceMatchesEvidence",
-        "noemptyrationale": "noEmptyRationale",
-        "cwementionsrelevant": "cweMentionsRelevant",
-        "fixpatchvalid": "fixPatchValid",
-        "severityverdictalignment": "severityVerdictAlignment",
-        "verdictconsistency": "verdictConsistency",
-        "costefficiency": "costEfficiency",
-        "latencyreasonable": "latencyReasonable",
+        rationalehasevidence: "rationaleHasEvidence",
+        verificationstepsactionable: "verificationStepsActionable",
+        confidencematchesevidence: "confidenceMatchesEvidence",
+        noemptyrationale: "noEmptyRationale",
+        cwementionsrelevant: "cweMentionsRelevant",
+        fixpatchvalid: "fixPatchValid",
+        severityverdictalignment: "severityVerdictAlignment",
+        verdictconsistency: "verdictConsistency",
+        costefficiency: "costEfficiency",
+        latencyreasonable: "latencyReasonable",
       };
       const configKey = weightMap[key];
       if (configKey && config.weights[configKey] !== undefined) {
@@ -444,11 +449,8 @@ export function runTriageAssertions(
     }
   }
 
-  const passed = results.filter(r => r.passed).length;
-  log.info(
-    { passed, total: results.length },
-    "Triage assertions completed",
-  );
+  const passed = results.filter((r) => r.passed).length;
+  log.info({ passed, total: results.length }, "Triage assertions completed");
 
   return results;
 }

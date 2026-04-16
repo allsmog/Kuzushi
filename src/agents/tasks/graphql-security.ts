@@ -1,29 +1,40 @@
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageInvestigationModule,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../security-profiles.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
+import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
-import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
-import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
+import {
+  computeDetectionFingerprint,
+  normalizeFilePath,
+  parseJson,
+} from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
+import {
+  formatFileTreeForPrompt,
+  formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
+} from "./pre-read-prompt.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
+import {
+  buildApplicationModelSection,
+  buildThreatScenarioEvidenceSection,
+} from "./scenario-guidance.js";
 import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
-import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
-import { resolveTaskAllowedTools } from "./runtime-overrides.js";
-import type { ApplicationModel } from "../../types.js";
-import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "graphql-security" });
 
@@ -37,9 +48,26 @@ const GRAPHQL_SECURITY_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
-          category: { type: "string", enum: ["introspection-enabled", "nested-query-dos", "missing-auth-resolver", "batch-attack"] },
+          category: {
+            type: "string",
+            enum: [
+              "introspection-enabled",
+              "nested-query-dos",
+              "missing-auth-resolver",
+              "batch-attack",
+            ],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -79,7 +107,16 @@ function resolveConfig(ctx: TaskContext): GraphqlSecurityConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult, threatModelContext?: string, appModelContext?: string, scenarioContext?: string): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[] = [],
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+  threatModelContext?: string,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec", "auth-session"]);
 
   const contextLines = repoContext
@@ -121,8 +158,11 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
-    languageTuningModule({ taskId: "graphql-security", repoContext, frameworks: repoContext?.frameworks }) ||
-    "### introspection-enabled (CWE-200)",
+    languageTuningModule({
+      taskId: "graphql-security",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "### introspection-enabled (CWE-200)",
     "GraphQL introspection queries enabled in production environments. Introspection exposes",
     "the entire schema including types, fields, queries, mutations, and subscriptions.",
     "Check for:",
@@ -187,17 +227,28 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Do NOT flag development-only GraphQL configurations (check NODE_ENV/environment toggles).",
         "Do NOT flag resolvers that correctly check authentication context.",
         "Confidence HIGH only if the misconfiguration or missing protection is clearly verified.",
-        ...languageAntiHallucinationExtras({ taskId: "graphql-security", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "graphql-security",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
     "",
     `Return at most ${maxFindings} findings, prioritized by severity and confidence.`,
     "Filter out any finding where your confidence would be below MEDIUM.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -234,7 +285,9 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
         cwe: cweList,
       }),
       proofState: "symbolic_only",
-      engineProvenance: [{ kind: "agentic", detail: "LLM-driven graphql-security-detect analysis" }],
+      engineProvenance: [
+        { kind: "agentic", detail: "LLM-driven graphql-security-detect analysis" },
+      ],
     };
 
     const existing = deduped.get(fingerprint);
@@ -243,13 +296,17 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 function computeFingerprint(repoName: string, filePath: string, f: GraphqlSecurityFinding): string {
-  return computeDetectionFingerprint([repoName, "graphql-security", f.category, filePath, String(f.startLine)]);
+  return computeDetectionFingerprint([
+    repoName,
+    "graphql-security",
+    f.category,
+    filePath,
+    String(f.startLine),
+  ]);
 }
 
 export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
@@ -262,7 +319,11 @@ export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
-    const preRead = await preReadFilesForTask("graphql-security-detect", fileIndex, context.repoRoot);
+    const preRead = await preReadFilesForTask(
+      "graphql-security-detect",
+      fileIndex,
+      context.repoRoot,
+    );
     const profiles = context.securityProfiles
       ? getProfilesForTask(context.securityProfiles, "graphql-security-detect")
       : [];
@@ -273,11 +334,30 @@ export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
       fileIndex,
       preRead,
     );
-    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as
+      | ApplicationModel
+      | undefined;
     const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
-    const appModelContext = buildApplicationModelSection("graphql-security-detect", applicationModel);
-    const scenarioContext = await buildThreatScenarioEvidenceSection("graphql-security-detect", context.repoRoot, applicationModel, scenarioOutput);
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext);
+    const appModelContext = buildApplicationModelSection(
+      "graphql-security-detect",
+      applicationModel,
+    );
+    const scenarioContext = await buildThreatScenarioEvidenceSection(
+      "graphql-security-detect",
+      context.repoRoot,
+      applicationModel,
+      scenarioOutput,
+    );
+    const prompt = buildPrompt(
+      repoContext,
+      maxFindings,
+      profileLines,
+      fileIndex,
+      preRead,
+      threatModelContext,
+      appModelContext,
+      scenarioContext,
+    );
     const runtime = resolveTaskRuntime(context);
 
     let structuredOutput: unknown;
@@ -342,7 +422,9 @@ export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
         "1. The GraphQL configuration or resolver actually exists at the reported location.",
         "2. The security issue is present in production (not just development mode).",
         "3. No middleware, plugins, or configuration mitigates the reported vulnerability.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

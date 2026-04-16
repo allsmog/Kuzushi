@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { __taintAnalysisPreflightInternals } from "../../../../src/agents/tasks/taint-analysis/preflight.js";
 import { DEFAULT_TAINT_ANALYSIS_TASK_CONFIG } from "../../../../src/agents/tasks/taint-analysis/types.js";
 
@@ -25,7 +25,10 @@ describe("taint-analysis-preflight internals", () => {
     const repoRoot = path.join(TMP_ROOT, "repo");
     mkdirSync(repoRoot, { recursive: true });
 
-    const workspace = __taintAnalysisPreflightInternals.resolveWorkspaceDir(repoRoot, "../outside-iris");
+    const workspace = __taintAnalysisPreflightInternals.resolveWorkspaceDir(
+      repoRoot,
+      "../outside-iris",
+    );
     expect(workspace).toBe(path.resolve(repoRoot, ".kuzushi/iris"));
   });
 
@@ -75,24 +78,28 @@ describe("taint-analysis-preflight internals", () => {
   });
 
   it("uses context-gatherer output as a soft framework hint", async () => {
-    const framework = await __taintAnalysisPreflightInternals.detectPrimaryFramework(
-      TMP_ROOT,
-      {
-        frameworks: ["Express"],
-      },
-    );
+    const framework = await __taintAnalysisPreflightInternals.detectPrimaryFramework(TMP_ROOT, {
+      frameworks: ["Express"],
+    });
 
     expect(framework).toBe("express");
   });
 
   it("detects framework heuristically when context output is absent", async () => {
-    writeFileSync(path.join(TMP_ROOT, "package.json"), JSON.stringify({
-      dependencies: {
-        express: "^4.0.0",
-      },
-    }), "utf-8");
+    writeFileSync(
+      path.join(TMP_ROOT, "package.json"),
+      JSON.stringify({
+        dependencies: {
+          express: "^4.0.0",
+        },
+      }),
+      "utf-8",
+    );
 
-    const framework = await __taintAnalysisPreflightInternals.detectPrimaryFramework(TMP_ROOT, undefined);
+    const framework = await __taintAnalysisPreflightInternals.detectPrimaryFramework(
+      TMP_ROOT,
+      undefined,
+    );
     expect(framework).toBe("express");
   });
 
@@ -104,7 +111,11 @@ describe("taint-analysis-preflight internals", () => {
     writeFileSync(path.join(refs, "python.md"), "python", "utf-8");
     writeFileSync(path.join(refs, "fastapi.md"), "fastapi", "utf-8");
 
-    const files = await __taintAnalysisPreflightInternals.resolveReferenceFiles(taintAnalysisPath, "python", "fastapi");
+    const files = await __taintAnalysisPreflightInternals.resolveReferenceFiles(
+      taintAnalysisPath,
+      "python",
+      "fastapi",
+    );
     expect(files).toEqual([
       path.join(refs, "patterns.md"),
       path.join(refs, "python.md"),
@@ -114,23 +125,31 @@ describe("taint-analysis-preflight internals", () => {
 
   it("renders generic extraction templates without leftover placeholders", async () => {
     const templatePath = path.join(TMP_ROOT, "source-template.ql.tmpl");
-    writeFileSync(templatePath, [
-      "{{QUERY_NAME}}",
-      "{{QUERY_DESCRIPTION}}",
-      "{{QUERY_ID}}",
-      "{{LANGUAGE_IMPORTS}}",
-      "{{HELPER_PREDICATES}}",
-      "{{SOURCE_CLAUSES}}",
-      "{{SELECT_NODE}}",
-      "{{SELECT_CALLABLE}}",
-      "{{SELECT_FLOW_KIND}}",
-      "{{SELECT_RECEIVER}}",
-      "{{SELECT_MODULE}}",
-      "{{SELECT_ARG_INDEX}}",
-      "{{SELECT_LINE}}",
-    ].join("\n"), "utf-8");
+    writeFileSync(
+      templatePath,
+      [
+        "{{QUERY_NAME}}",
+        "{{QUERY_DESCRIPTION}}",
+        "{{QUERY_ID}}",
+        "{{LANGUAGE_IMPORTS}}",
+        "{{HELPER_PREDICATES}}",
+        "{{SOURCE_CLAUSES}}",
+        "{{SELECT_NODE}}",
+        "{{SELECT_CALLABLE}}",
+        "{{SELECT_FLOW_KIND}}",
+        "{{SELECT_RECEIVER}}",
+        "{{SELECT_MODULE}}",
+        "{{SELECT_ARG_INDEX}}",
+        "{{SELECT_LINE}}",
+      ].join("\n"),
+      "utf-8",
+    );
 
-    const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
+    const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(
+      templatePath,
+      "python",
+      "source",
+    );
     expect(rendered).not.toContain("{{");
     expect(rendered).toContain("Taint Analysis Source candidate extraction");
     expect(rendered).toContain("import python");
@@ -140,19 +159,27 @@ describe("taint-analysis-preflight internals", () => {
     const templatePath = path.join(TMP_ROOT, "starter.ql.tmpl");
     writeFileSync(templatePath, "{{SOURCE_HANDLER_PREDICATE}}", "utf-8");
 
-    const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(templatePath, "python", "source");
+    const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(
+      templatePath,
+      "python",
+      "source",
+    );
     expect(rendered).toBeNull();
   });
 
   it("falls back without agentCtx even when body placeholders present", async () => {
     const templatePath = path.join(TMP_ROOT, "go-source.ql.tmpl");
-    writeFileSync(templatePath, [
-      "import go",
-      "{{SOURCE_HANDLER_PREDICATE}}",
-      "from {{SOURCE_NODE_BINDINGS}}",
-      "where {{SOURCE_WHERE}}",
-      "select {{SOURCE_SELECT}}",
-    ].join("\n"), "utf-8");
+    writeFileSync(
+      templatePath,
+      [
+        "import go",
+        "{{SOURCE_HANDLER_PREDICATE}}",
+        "from {{SOURCE_NODE_BINDINGS}}",
+        "where {{SOURCE_WHERE}}",
+        "select {{SOURCE_SELECT}}",
+      ].join("\n"),
+      "utf-8",
+    );
 
     // No agentCtx → extraction should be unavailable
     const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(
@@ -165,13 +192,17 @@ describe("taint-analysis-preflight internals", () => {
 
   it("records fallback diagnostics when body placeholders have no agent context", async () => {
     const templatePath = path.join(TMP_ROOT, "go-source-diag.ql.tmpl");
-    writeFileSync(templatePath, [
-      "import go",
-      "{{SOURCE_HANDLER_PREDICATE}}",
-      "from {{SOURCE_NODE_BINDINGS}}",
-      "where {{SOURCE_WHERE}}",
-      "select {{SOURCE_SELECT}}",
-    ].join("\n"), "utf-8");
+    writeFileSync(
+      templatePath,
+      [
+        "import go",
+        "{{SOURCE_HANDLER_PREDICATE}}",
+        "from {{SOURCE_NODE_BINDINGS}}",
+        "where {{SOURCE_WHERE}}",
+        "select {{SOURCE_SELECT}}",
+      ].join("\n"),
+      "utf-8",
+    );
 
     const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplateWithDiagnostic(
       templatePath,
@@ -187,13 +218,17 @@ describe("taint-analysis-preflight internals", () => {
 
   it("gracefully falls back when agent throws", async () => {
     const templatePath = path.join(TMP_ROOT, "go-source-err.ql.tmpl");
-    writeFileSync(templatePath, [
-      "import go",
-      "{{SOURCE_HANDLER_PREDICATE}}",
-      "from DataFlow::Node n",
-      "where true",
-      "select n",
-    ].join("\n"), "utf-8");
+    writeFileSync(
+      templatePath,
+      [
+        "import go",
+        "{{SOURCE_HANDLER_PREDICATE}}",
+        "from DataFlow::Node n",
+        "where true",
+        "select n",
+      ].join("\n"),
+      "utf-8",
+    );
 
     // Agent will fail (no runtime configured) and extraction should be unavailable
     const rendered = await __taintAnalysisPreflightInternals.renderExtractionTemplate(
@@ -282,11 +317,17 @@ describe("taint-analysis-preflight internals", () => {
   describe("computeExtractionDegradation", () => {
     const { computeExtractionDegradation } = __taintAnalysisPreflightInternals;
 
-    function makeDiagnostic(overrides: Partial<{
-      kind: "source" | "sink";
-      selectedQuerySource: "deterministic-template" | "agent-initial" | "agent-retry" | "unavailable";
-      fallbackReason: string | null;
-    }> = {}) {
+    function makeDiagnostic(
+      overrides: Partial<{
+        kind: "source" | "sink";
+        selectedQuerySource:
+          | "deterministic-template"
+          | "agent-initial"
+          | "agent-retry"
+          | "unavailable";
+        fallbackReason: string | null;
+      }> = {},
+    ) {
       return {
         kind: overrides.kind ?? "source",
         language: "go" as const,
@@ -297,8 +338,18 @@ describe("taint-analysis-preflight internals", () => {
         fallbackUsed: false,
         fallbackReason: overrides.fallbackReason ?? null,
         fallbackDetail: null,
-        initialAttempt: { attempted: true, generatedQuery: true, compileOk: true, compileErrorExcerpt: null },
-        retryAttempt: { attempted: false, generatedQuery: false, compileOk: null, compileErrorExcerpt: null },
+        initialAttempt: {
+          attempted: true,
+          generatedQuery: true,
+          compileOk: true,
+          compileErrorExcerpt: null,
+        },
+        retryAttempt: {
+          attempted: false,
+          generatedQuery: false,
+          compileOk: null,
+          compileErrorExcerpt: null,
+        },
       };
     }
 
@@ -314,7 +365,10 @@ describe("taint-analysis-preflight internals", () => {
 
     it("returns degraded when fallback used for sources", () => {
       const result = computeExtractionDegradation(
-        [makeDiagnostic({ kind: "source", selectedQuerySource: "unavailable" }), makeDiagnostic({ kind: "sink" })],
+        [
+          makeDiagnostic({ kind: "source", selectedQuerySource: "unavailable" }),
+          makeDiagnostic({ kind: "sink" }),
+        ],
         5,
         10,
       );
@@ -325,7 +379,11 @@ describe("taint-analysis-preflight internals", () => {
     it("returns degraded when agent returned no query", () => {
       const result = computeExtractionDegradation(
         [
-          makeDiagnostic({ kind: "source", selectedQuerySource: "unavailable", fallbackReason: "agent_returned_no_query" }),
+          makeDiagnostic({
+            kind: "source",
+            selectedQuerySource: "unavailable",
+            fallbackReason: "agent_returned_no_query",
+          }),
           makeDiagnostic({ kind: "sink" }),
         ],
         5,

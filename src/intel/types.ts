@@ -23,13 +23,13 @@ export interface IntelDocument {
 
 /** Known intel sources. */
 export type IntelSource =
-  | "nvd"          // NVD CVE database
-  | "attack"       // MITRE ATT&CK techniques
-  | "capec"        // MITRE CAPEC patterns
-  | "cwe"          // CWE weakness catalog
-  | "compliance"   // Compliance framework controls (ISO 27001, NIST, etc.)
-  | "findings"     // Past engagement findings
-  | "custom";      // User-supplied documents
+  | "nvd" // NVD CVE database
+  | "attack" // MITRE ATT&CK techniques
+  | "capec" // MITRE CAPEC patterns
+  | "cwe" // CWE weakness catalog
+  | "compliance" // Compliance framework controls (ISO 27001, NIST, etc.)
+  | "findings" // Past engagement findings
+  | "custom"; // User-supplied documents
 
 /** A search result from the intel store. */
 export interface IntelSearchResult {

@@ -1,10 +1,10 @@
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { MessageBus } from "../bus/types.js";
-import type { Finding, TriageAgentConfig } from "../scanners/types.js";
-import type { KuzushiConfig, SecurityProfile } from "../types.js";
 import type { KnowledgeRegistry } from "../knowledge/types.js";
 import type { ToolPolicy } from "../prompts/tool-policy.js";
+import type { Finding, TriageAgentConfig } from "../scanners/types.js";
+import type { KuzushiConfig, SecurityProfile } from "../types.js";
 
 /** What kind of output this task produces. */
 export type TaskOutputKind = "findings" | "threat-model" | "verdict" | "report" | "custom";

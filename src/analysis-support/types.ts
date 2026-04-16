@@ -37,26 +37,18 @@ export interface DiffSlicer {
 }
 
 export interface CallGraphAssist {
-  explainPath(args: {
-    filePath: string;
-    startLine: number;
-    maxDepth?: number;
-  }): Promise<{
+  explainPath(args: { filePath: string; startLine: number; maxDepth?: number }): Promise<{
     summary: string;
-      callChain: Array<{ filePath: string; line: number; symbol: string }>;
+    callChain: Array<{ filePath: string; line: number; symbol: string }>;
   }>;
 }
 
 export interface DynamicVerifier {
-  execute(args: {
-    cwd: string;
-    command: string[];
-    timeoutMs?: number;
-  }): Promise<{
+  execute(args: { cwd: string; command: string[]; timeoutMs?: number }): Promise<{
     exitCode: number | null;
     stdout: string;
     stderr: string;
-      timedOut: boolean;
+    timedOut: boolean;
   }>;
 }
 
@@ -92,8 +84,5 @@ export interface CodeIntelligenceProvider extends IndexProvider, SymbolLookup, D
     searchPath?: string;
     maxResults?: number;
   }): Promise<string[]>;
-  getCallees(args: {
-    functionName: string;
-    filePath: string;
-  }): Promise<string[]>;
+  getCallees(args: { functionName: string; filePath: string }): Promise<string[]>;
 }

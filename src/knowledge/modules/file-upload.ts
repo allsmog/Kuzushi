@@ -6,11 +6,31 @@ export const fileUploadModule: KnowledgeModule = {
   languages: [],
   frameworks: [],
   dangerousPatterns: [
-    { pattern: "File upload without extension/MIME validation", why: "Allows upload of executable files (PHP, JSP, ASPX)", severity: "ERROR" },
-    { pattern: "File saved to web-accessible directory with original name", why: "Uploaded shells become directly accessible", severity: "ERROR" },
-    { pattern: "Content-Type from request used without server-side validation", why: "Client controls Content-Type header, can be spoofed", severity: "WARNING" },
-    { pattern: "File path constructed from user-supplied filename", why: "Path traversal via ../../../etc/passwd in filename", severity: "ERROR" },
-    { pattern: "Image processing without size/dimension limits", why: "Pixel flood DoS or ImageTragick-style RCE", severity: "WARNING" },
+    {
+      pattern: "File upload without extension/MIME validation",
+      why: "Allows upload of executable files (PHP, JSP, ASPX)",
+      severity: "ERROR",
+    },
+    {
+      pattern: "File saved to web-accessible directory with original name",
+      why: "Uploaded shells become directly accessible",
+      severity: "ERROR",
+    },
+    {
+      pattern: "Content-Type from request used without server-side validation",
+      why: "Client controls Content-Type header, can be spoofed",
+      severity: "WARNING",
+    },
+    {
+      pattern: "File path constructed from user-supplied filename",
+      why: "Path traversal via ../../../etc/passwd in filename",
+      severity: "ERROR",
+    },
+    {
+      pattern: "Image processing without size/dimension limits",
+      why: "Pixel flood DoS or ImageTragick-style RCE",
+      severity: "WARNING",
+    },
   ],
   safePatterns: [
     { pattern: "Server-generated UUID filename", why: "User cannot control destination path" },
@@ -29,17 +49,28 @@ export const fileUploadModule: KnowledgeModule = {
     "Polyglot files (valid image AND valid PHP/script)",
   ],
   detectionKeywords: [
-    "multer", "formidable", "busboy", "express-fileupload",
-    "FileUpload", "multipart", "move_uploaded_file",
-    "saveAs", "writeFile", "createWriteStream",
-    "Content-Disposition", "originalname", "filename",
+    "multer",
+    "formidable",
+    "busboy",
+    "express-fileupload",
+    "FileUpload",
+    "multipart",
+    "move_uploaded_file",
+    "saveAs",
+    "writeFile",
+    "createWriteStream",
+    "Content-Disposition",
+    "originalname",
+    "filename",
   ],
   fixExamples: [
     {
       language: "JavaScript",
       before: "fs.writeFileSync(`uploads/${req.file.originalname}`, req.file.buffer)",
-      after: "const ext = path.extname(req.file.originalname).toLowerCase(); if (!ALLOWED_EXTS.has(ext)) throw new Error('blocked'); fs.writeFileSync(`uploads/${uuid()}${ext}`, req.file.buffer)",
-      explanation: "Use UUID filename, validate extension against allowlist, store outside web root",
+      after:
+        "const ext = path.extname(req.file.originalname).toLowerCase(); if (!ALLOWED_EXTS.has(ext)) throw new Error('blocked'); fs.writeFileSync(`uploads/${uuid()}${ext}`, req.file.buffer)",
+      explanation:
+        "Use UUID filename, validate extension against allowlist, store outside web root",
     },
   ],
   tags: ["upload", "file", "rce"],

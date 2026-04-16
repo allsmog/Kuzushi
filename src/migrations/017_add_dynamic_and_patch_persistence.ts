@@ -8,8 +8,9 @@ export const migration017: Migration = {
   name: "add_dynamic_and_patch_persistence",
   up(db) {
     const findingColumns = new Set(
-      (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>)
-        .map((column) => column.name),
+      (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map(
+        (column) => column.name,
+      ),
     );
 
     if (!findingColumns.has("finding_metadata_json")) {

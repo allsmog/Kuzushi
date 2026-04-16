@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { ModuleRegistry, parseModuleSpecifier } from "../../src/modules/registry.js";
+import { describe, expect, it } from "vitest";
 import { createCoreSastModule } from "../../src/modules/core-sast.js";
+import { ModuleRegistry, parseModuleSpecifier } from "../../src/modules/registry.js";
 import type { CopilotModule, ModuleTool, ToolResult } from "../../src/modules/types.js";
 
 function makeDummyTool(name: string, headless = true): ModuleTool {
@@ -38,12 +38,12 @@ describe("ModuleRegistry", () => {
   it("throws on duplicate registration", () => {
     const reg = new ModuleRegistry();
     reg.register(makeDummyModule("test"));
-    expect(() => reg.register(makeDummyModule("test"))).toThrow('already registered');
+    expect(() => reg.register(makeDummyModule("test"))).toThrow("already registered");
   });
 
   it("throws on unknown module get", () => {
     const reg = new ModuleRegistry();
-    expect(() => reg.get("nope")).toThrow('Unknown module');
+    expect(() => reg.get("nope")).toThrow("Unknown module");
   });
 
   it("lists registered modules", () => {
@@ -101,7 +101,9 @@ describe("ModuleRegistry", () => {
     let disposed = false;
     const mod: CopilotModule = {
       ...makeDummyModule("disposable"),
-      async dispose() { disposed = true; },
+      async dispose() {
+        disposed = true;
+      },
     };
     reg.register(mod);
     (reg as any).initialized.add("disposable");
@@ -117,7 +119,9 @@ describe("ModuleRegistry", () => {
     for (const id of ["a", "b", "c"]) {
       const mod: CopilotModule = {
         ...makeDummyModule(id),
-        async dispose() { order.push(id); },
+        async dispose() {
+          order.push(id);
+        },
       };
       reg.register(mod);
       (reg as any).initialized.add(id);
@@ -135,15 +139,24 @@ describe("parseModuleSpecifier", () => {
   });
 
   it("parses file:// prefix", () => {
-    expect(parseModuleSpecifier("file:///tmp/my-module")).toEqual({ type: "local", path: "/tmp/my-module" });
+    expect(parseModuleSpecifier("file:///tmp/my-module")).toEqual({
+      type: "local",
+      path: "/tmp/my-module",
+    });
   });
 
   it("parses package: prefix", () => {
-    expect(parseModuleSpecifier("package:@kuzushi/blackbox")).toEqual({ type: "package", name: "@kuzushi/blackbox" });
+    expect(parseModuleSpecifier("package:@kuzushi/blackbox")).toEqual({
+      type: "package",
+      name: "@kuzushi/blackbox",
+    });
   });
 
   it("parses mcp: prefix", () => {
-    expect(parseModuleSpecifier("mcp:http://localhost:3000")).toEqual({ type: "mcp", serverUrl: "http://localhost:3000" });
+    expect(parseModuleSpecifier("mcp:http://localhost:3000")).toEqual({
+      type: "mcp",
+      serverUrl: "http://localhost:3000",
+    });
   });
 
   it("treats bare strings as builtin", () => {

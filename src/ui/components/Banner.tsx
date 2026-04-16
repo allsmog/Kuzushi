@@ -2,13 +2,14 @@
  * Kuzushi startup banner — ASCII logo above the title.
  * Reads pre-generated ANSI-colored logo from assets/ascii/logo-color.txt.
  */
-import React from "react";
-import { Text, Box, Static } from "ink";
-import chalk from "chalk";
+
 import { spawn } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import chalk from "chalk";
+import { Box, Static, Text } from "ink";
+import type React from "react";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const assetsRoot = path.resolve(__dirname, "..", "..", "..", "assets");
@@ -30,7 +31,8 @@ function playStartupSound(): void {
     const pick = files[Math.floor(Math.random() * files.length)];
     const filePath = path.join(soundsDir, pick);
 
-    const cmd = process.platform === "darwin" ? "afplay" : process.platform === "linux" ? "aplay" : null;
+    const cmd =
+      process.platform === "darwin" ? "afplay" : process.platform === "linux" ? "aplay" : null;
     if (!cmd) return;
 
     const child = spawn(cmd, [filePath], { stdio: "ignore", detached: true });
@@ -67,7 +69,7 @@ export function Banner(): React.ReactElement {
               <Text>{""}</Text>
               <Text>{""}</Text>
               <Text>{""}</Text>
-              <Text>{chalk.italic.dim("\"Bismillah\"")}</Text>
+              <Text>{chalk.italic.dim('"Bismillah"')}</Text>
             </Box>
           </Box>
           <Text>{""}</Text>
@@ -78,7 +80,9 @@ export function Banner(): React.ReactElement {
           <Text>{rb("   ██║  ██╗╚██████╔╝███████╗╚██████╔╝███████║██║  ██║██║")}</Text>
           <Text>{rb("   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝")}</Text>
           <Text>{""}</Text>
-          <Text>{chalk.white("   崩し ")} {dim("— Agentic SAST Orchestration")}</Text>
+          <Text>
+            {chalk.white("   崩し ")} {dim("— Agentic SAST Orchestration")}
+          </Text>
           <Text>{""}</Text>
         </Box>
       )}

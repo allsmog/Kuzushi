@@ -10,7 +10,12 @@ export type ActionTier = "recon" | "scan" | "exploit" | "network" | "deploy" | "
 
 /** Tier risk ordering — lower index = safer. */
 export const ACTION_TIER_ORDER: ActionTier[] = [
-  "recon", "scan", "exploit", "network", "deploy", "modify",
+  "recon",
+  "scan",
+  "exploit",
+  "network",
+  "deploy",
+  "modify",
 ];
 
 /** Which tier a tool falls into — used to gate actions by autonomy level. */

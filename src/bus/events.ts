@@ -1,5 +1,9 @@
-import type { Finding, TaskId } from "../scanners/types.js";
 import type { TaskOutputKind } from "../agents/types.js";
+import type { ErrorCategory } from "../errors.js";
+import type { QualityGateResult } from "../quality-gate-types.js";
+import type { Finding, TaskId } from "../scanners/types.js";
+import type { RunMetrics } from "../scoring/run-metrics-types.js";
+import type { GeneratedRule } from "../strategies/types.js";
 import type {
   DynamicAnalysisRun,
   EnrichedRepoContext,
@@ -9,16 +13,13 @@ import type {
   PocHarnessResult,
   ScanOpts,
   TriageResult,
-  VerificationResult,
   Verdict,
+  VerificationResult,
 } from "../types.js";
-import type { QualityGateResult } from "../quality-gate-types.js";
-import type { RunMetrics } from "../scoring/run-metrics-types.js";
 import type { EventEnvelope } from "./types.js";
-import type { ErrorCategory } from "../errors.js";
-import type { GeneratedRule } from "../strategies/types.js";
 
 export type { RunContext } from "./run-context.js";
+
 import type { RunContext } from "./run-context.js";
 
 export interface PipelineStats {
@@ -291,7 +292,13 @@ export type TriageAssertionsEvent = EventEnvelope<
   {
     context: RunContext;
     fingerprint: string;
-    assertions: Array<{ name: string; passed: boolean; score: number; weight: number; reason: string }>;
+    assertions: Array<{
+      name: string;
+      passed: boolean;
+      score: number;
+      weight: number;
+      reason: string;
+    }>;
     qualityScore: number;
   }
 >;

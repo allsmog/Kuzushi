@@ -5,13 +5,13 @@
  * handling results/errors, and tracking PoC harness candidates.
  */
 
-import { normalizeCostUsd } from "../../utils.js";
 import { updateRunCost } from "../../store.js";
+import { normalizeCostUsd } from "../../utils.js";
+import type { VerificationErrorEvent, VerificationResultEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import type { RunState, OrchestratorDeps } from "./types.js";
-import type { VerificationResultEvent, VerificationErrorEvent } from "../events.js";
 import { buildThreatModelSummary } from "./triage-dispatcher.js";
+import type { OrchestratorDeps, RunState } from "./types.js";
 
 export function handleVerificationResultState(
   state: RunState,
@@ -83,10 +83,10 @@ export function isVerificationDone(state: RunState): boolean {
 
   const processed = state.verified + state.verifyErrors;
   return (
-    state.verifyTotal > 0
-    && processed >= state.verifyTotal
-    && state.verifyInFlight === 0
-    && !state.reportEmitted
+    state.verifyTotal > 0 &&
+    processed >= state.verifyTotal &&
+    state.verifyInFlight === 0 &&
+    !state.reportEmitted
   );
 }
 
@@ -104,9 +104,10 @@ export async function dispatchVerification(
   state.verifyDispatching = true;
   try {
     const concurrency = normalizeConcurrency(state.config.verifyConcurrency ?? 1);
-    const batchSize = state.config.verifyRefinementMaxIterations && state.config.verifyRefinementMaxIterations > 1
-      ? 1
-      : Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
+    const batchSize =
+      state.config.verifyRefinementMaxIterations && state.config.verifyRefinementMaxIterations > 1
+        ? 1
+        : Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
 
     while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
       await emitBudgetCheck(state, runId);
@@ -121,8 +122,8 @@ export async function dispatchVerification(
       }
 
       const batchItems: Array<{
-        finding: typeof state.verifyQueue[0]["finding"];
-        triageResult: typeof state.verifyQueue[0]["triageResult"];
+        finding: (typeof state.verifyQueue)[0]["finding"];
+        triageResult: (typeof state.verifyQueue)[0]["triageResult"];
         index: number;
         total: number;
       }> = [];

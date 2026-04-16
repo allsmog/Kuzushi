@@ -6,13 +6,15 @@
  * and cross-module hypotheses.
  */
 
-import type { AgentRuntime } from "../agent-runtime/types.js";
 import { runStructuredAgentQuery } from "../agent-runtime/execution.js";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import { __taskSelectorInternals, SELECTABLE_TASK_IDS } from "../agents/tasks/task-selector.js";
-import type { DiscoveredModule, ModulePriority } from "../discovery/types.js";
 import { normalizeTaskCapabilityIds } from "../capabilities.js";
-import { isRecord } from "../utils.js";
+import type { DiscoveredModule, ModulePriority } from "../discovery/types.js";
 import { getLogger } from "../logger.js";
+import { isRecord } from "../utils.js";
+import { formatAttackSurfaceSummary } from "./attack-surface.js";
+import { formatDependencyGraphSummary } from "./dependency-graph.js";
 import type {
   CrossModuleHypothesis,
   ModuleTaskRecommendation,
@@ -21,8 +23,6 @@ import type {
   MonorepoThreatModel,
   StaticIntelligence,
 } from "./types.js";
-import { formatDependencyGraphSummary } from "./dependency-graph.js";
-import { formatAttackSurfaceSummary } from "./attack-surface.js";
 
 const log = getLogger("monorepo-arch");
 
@@ -35,12 +35,7 @@ const MONOREPO_TASK_ALLOWLIST_SET = new Set(MONOREPO_TASK_ALLOWLIST);
 const ARCHITECTURAL_ANALYSIS_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: [
-    "dfd",
-    "threats",
-    "modulePlans",
-    "crossModuleHypotheses",
-  ],
+  required: ["dfd", "threats", "modulePlans", "crossModuleHypotheses"],
   properties: {
     dfd: {
       type: "object",
@@ -55,7 +50,10 @@ const ARCHITECTURAL_ANALYSIS_SCHEMA = {
             required: ["id", "type", "name", "description", "trustZone"],
             properties: {
               id: { type: "string" },
-              type: { type: "string", enum: ["external-entity", "process", "data-store", "data-flow"] },
+              type: {
+                type: "string",
+                enum: ["external-entity", "process", "data-store", "data-flow"],
+              },
               name: { type: "string" },
               description: { type: "string" },
               trustZone: { type: "string" },
@@ -106,7 +104,17 @@ const ARCHITECTURAL_ANALYSIS_SCHEMA = {
         properties: {
           id: { type: "string" },
           elementId: { type: "string" },
-          category: { type: "string", enum: ["spoofing", "tampering", "repudiation", "information-disclosure", "denial-of-service", "elevation-of-privilege"] },
+          category: {
+            type: "string",
+            enum: [
+              "spoofing",
+              "tampering",
+              "repudiation",
+              "information-disclosure",
+              "denial-of-service",
+              "elevation-of-privilege",
+            ],
+          },
           title: { type: "string" },
           description: { type: "string" },
           attackVector: { type: "string" },
@@ -116,7 +124,15 @@ const ARCHITECTURAL_ANALYSIS_SCHEMA = {
           existingMitigations: { type: "array", items: { type: "string" } },
           missingMitigations: { type: "array", items: { type: "string" } },
           relatedCwe: { type: "array", items: { type: "string" } },
-          affectedFiles: { type: "array", items: { type: "object", additionalProperties: false, required: ["filePath", "startLine"], properties: { filePath: { type: "string" }, startLine: { type: "integer" } } } },
+          affectedFiles: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["filePath", "startLine"],
+              properties: { filePath: { type: "string" }, startLine: { type: "integer" } },
+            },
+          },
         },
       },
     },
@@ -221,8 +237,8 @@ export async function buildArchitecturalThreatModel(
   const parsed = parseResult(result.structuredOutput, modules, staticIntel, contextIndex);
   log.info(
     `Architectural analysis complete: ${parsed.threats.length} threats, ` +
-    `${parsed.modulePlans.length} module plans, ` +
-    `${parsed.crossModuleHypotheses.length} cross-module hypotheses ($${result.costUsd.toFixed(4)})`,
+      `${parsed.modulePlans.length} module plans, ` +
+      `${parsed.crossModuleHypotheses.length} cross-module hypotheses ($${result.costUsd.toFixed(4)})`,
   );
 
   return { threatModel: parsed, costUsd: result.costUsd };
@@ -251,13 +267,17 @@ function buildPrompt(
       sections.push(`  language: ${module.language}`);
     }
     if (surface?.entryPointTypes.length) {
-      sections.push(`  attackSurface: ${surface.entryPointTypes.join(", ")} (${surface.entryPointCount} total)`);
+      sections.push(
+        `  attackSurface: ${surface.entryPointTypes.join(", ")} (${surface.entryPointCount} total)`,
+      );
     }
     if (shared) {
       sections.push(`  frameworks: ${shared.repoContext.frameworks.join(", ") || "none"}`);
       sections.push(`  authPatterns: ${shared.repoContext.authPatterns.join(", ") || "none"}`);
       sections.push(`  databases: ${shared.repoContext.ormOrDb.join(", ") || "none"}`);
-      sections.push(`  entryPoints: ${shared.repoContext.entryPoints.slice(0, 6).join(", ") || "none"}`);
+      sections.push(
+        `  entryPoints: ${shared.repoContext.entryPoints.slice(0, 6).join(", ") || "none"}`,
+      );
     }
     const dependsOn = [...(staticIntel.dependencyGraph.dependsOn.get(module.path) ?? [])];
     if (dependsOn.length > 0) {
@@ -281,8 +301,12 @@ function buildPrompt(
   sections.push("\n## Instructions\n");
   sections.push("1. Produce a module-level DFD with trust boundaries and inter-module data flows.");
   sections.push("2. Produce STRIDE threats focused on meaningful attack paths.");
-  sections.push("3. Produce a module plan for EVERY modulePath with exact recommendedTasks from the allowlist only.");
-  sections.push("4. Cross-module hypotheses must use modulePath in moduleChain and should influence the recommendedTasks of affected modules.");
+  sections.push(
+    "3. Produce a module plan for EVERY modulePath with exact recommendedTasks from the allowlist only.",
+  );
+  sections.push(
+    "4. Cross-module hypotheses must use modulePath in moduleChain and should influence the recommendedTasks of affected modules.",
+  );
   sections.push("5. Use the smallest defensible task set. Do not use depth labels or presets.");
 
   return sections.join("\n");
@@ -305,21 +329,25 @@ function parseResult(
   const dataFlows = Array.isArray(dfd["dataFlows"]) ? dfd["dataFlows"] : [];
   const threats = Array.isArray(raw["threats"]) ? raw["threats"] : [];
   const modulePlans = Array.isArray(raw["modulePlans"]) ? raw["modulePlans"] : [];
-  const hypotheses = Array.isArray(raw["crossModuleHypotheses"]) ? raw["crossModuleHypotheses"] : [];
+  const hypotheses = Array.isArray(raw["crossModuleHypotheses"])
+    ? raw["crossModuleHypotheses"]
+    : [];
 
-  const parsedHypotheses = hypotheses
-    .filter(isRecord)
-    .map((hypothesis) => ({
-      id: String(hypothesis["id"] ?? ""),
-      title: String(hypothesis["title"] ?? ""),
-      description: String(hypothesis["description"] ?? ""),
-      moduleChain: Array.isArray(hypothesis["moduleChain"])
-        ? (hypothesis["moduleChain"] as unknown[]).map(String).filter((modulePath) => modulePathSet.has(modulePath))
-        : [],
-      attackVector: String(hypothesis["attackVector"] ?? ""),
-      cweIds: Array.isArray(hypothesis["cweIds"]) ? (hypothesis["cweIds"] as unknown[]).map(String) : [],
-      severity: validateRiskLevel(hypothesis["severity"]),
-    })) as CrossModuleHypothesis[];
+  const parsedHypotheses = hypotheses.filter(isRecord).map((hypothesis) => ({
+    id: String(hypothesis["id"] ?? ""),
+    title: String(hypothesis["title"] ?? ""),
+    description: String(hypothesis["description"] ?? ""),
+    moduleChain: Array.isArray(hypothesis["moduleChain"])
+      ? (hypothesis["moduleChain"] as unknown[])
+          .map(String)
+          .filter((modulePath) => modulePathSet.has(modulePath))
+      : [],
+    attackVector: String(hypothesis["attackVector"] ?? ""),
+    cweIds: Array.isArray(hypothesis["cweIds"])
+      ? (hypothesis["cweIds"] as unknown[]).map(String)
+      : [],
+    severity: validateRiskLevel(hypothesis["severity"]),
+  })) as CrossModuleHypothesis[];
 
   const parsedPlanMap = new Map<string, ModuleTaskRecommendation>();
   for (const plan of modulePlans) {
@@ -336,7 +364,9 @@ function parseResult(
       riskLevel: validateRiskLevel(plan["riskLevel"]),
       rationale: String(plan["rationale"] ?? ""),
       recommendedTasks: normalizeRecommendedTasks(plan["recommendedTasks"]),
-      focusAreas: Array.isArray(plan["focusAreas"]) ? (plan["focusAreas"] as unknown[]).map(String) : [],
+      focusAreas: Array.isArray(plan["focusAreas"])
+        ? (plan["focusAreas"] as unknown[]).map(String)
+        : [],
     });
   }
 
@@ -353,14 +383,14 @@ function parseResult(
   return {
     dfd: {
       elements: elements as MonorepoThreatModel["dfd"]["elements"],
-      trustBoundaries: trustBoundaries
-        .filter(isRecord)
-        .map((boundary) => ({
-          ...boundary,
-          modules: Array.isArray(boundary["modules"])
-            ? (boundary["modules"] as unknown[]).map(String).filter((modulePath) => modulePathSet.has(modulePath))
-            : [],
-        })) as MonorepoThreatModel["dfd"]["trustBoundaries"],
+      trustBoundaries: trustBoundaries.filter(isRecord).map((boundary) => ({
+        ...boundary,
+        modules: Array.isArray(boundary["modules"])
+          ? (boundary["modules"] as unknown[])
+              .map(String)
+              .filter((modulePath) => modulePathSet.has(modulePath))
+          : [],
+      })) as MonorepoThreatModel["dfd"]["trustBoundaries"],
       dataFlows: dataFlows
         .filter(isRecord)
         .map((flow) => ({
@@ -376,7 +406,10 @@ function parseResult(
             ? (flow["securityConcerns"] as unknown[]).map(String)
             : [],
         }))
-        .filter((flow) => modulePathSet.has(flow.sourceModulePath) && modulePathSet.has(flow.targetModulePath)) as MonorepoDataFlow[],
+        .filter(
+          (flow) =>
+            modulePathSet.has(flow.sourceModulePath) && modulePathSet.has(flow.targetModulePath),
+        ) as MonorepoDataFlow[],
     },
     threats: threats as MonorepoThreatModel["threats"],
     modulePlans: mergedPlans,
@@ -386,8 +419,9 @@ function parseResult(
 
 function normalizeRecommendedTasks(raw: unknown): string[] {
   const taskIds = Array.isArray(raw) ? raw.map(String) : [];
-  return normalizeTaskCapabilityIds(taskIds)
-    .filter((taskId) => MONOREPO_TASK_ALLOWLIST_SET.has(taskId));
+  return normalizeTaskCapabilityIds(taskIds).filter((taskId) =>
+    MONOREPO_TASK_ALLOWLIST_SET.has(taskId),
+  );
 }
 
 function augmentPlanWithHypotheses(
@@ -410,7 +444,8 @@ function augmentPlanWithHypotheses(
 }
 
 function inferTasksFromHypothesis(hypothesis: CrossModuleHypothesis): string[] {
-  const text = `${hypothesis.title} ${hypothesis.description} ${hypothesis.attackVector}`.toLowerCase();
+  const text =
+    `${hypothesis.title} ${hypothesis.description} ${hypothesis.attackVector}`.toLowerCase();
   const inferred = new Set<string>();
 
   if (/ssrf|server-side request/.test(text)) inferred.add("ssrf-detect");
@@ -437,7 +472,9 @@ function buildFallbackThreatModel(
   return {
     dfd: { elements: [], trustBoundaries: [], dataFlows: [] },
     threats: [],
-    modulePlans: modules.map((module) => buildFallbackModulePlan(module, staticIntel, contextIndex)),
+    modulePlans: modules.map((module) =>
+      buildFallbackModulePlan(module, staticIntel, contextIndex),
+    ),
     crossModuleHypotheses: [],
   };
 }
@@ -464,8 +501,11 @@ function buildFallbackModulePlan(
   return {
     modulePath: module.path,
     riskLevel: fallbackRiskLevel(surface?.isExternalFacing === true, depNode?.inDegree ?? 0),
-    rationale: "Fallback: deterministic monorepo task selection from module context and attack surface.",
-    recommendedTasks: [...recommendedTasks].filter((taskId) => MONOREPO_TASK_ALLOWLIST_SET.has(taskId)).sort(),
+    rationale:
+      "Fallback: deterministic monorepo task selection from module context and attack surface.",
+    recommendedTasks: [...recommendedTasks]
+      .filter((taskId) => MONOREPO_TASK_ALLOWLIST_SET.has(taskId))
+      .sort(),
     focusAreas: buildFocusAreas(shared),
   };
 }

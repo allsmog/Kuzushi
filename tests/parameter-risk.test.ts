@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { getParameterRisk, extractParameterRisk } from "../src/parameter-risk.js";
+import { describe, expect, it } from "vitest";
+import { extractParameterRisk, getParameterRisk } from "../src/parameter-risk.js";
 
 describe("getParameterRisk", () => {
   it("identifies SQLi-prone parameters", () => {
@@ -27,7 +27,7 @@ describe("getParameterRisk", () => {
     const risk = getParameterRisk("password");
     expect(risk).toBeDefined();
     expect(risk!.categories).toContain("Auth-sensitive");
-    expect(risk!.boost).toBe(0.10);
+    expect(risk!.boost).toBe(0.1);
   });
 
   it("is case-insensitive", () => {
@@ -55,12 +55,12 @@ describe("extractParameterRisk", () => {
   });
 
   it("extracts from req.query.url pattern", () => {
-    const risk = extractParameterRisk('SSRF via req.query.url used in fetch call');
+    const risk = extractParameterRisk("SSRF via req.query.url used in fetch call");
     expect(risk).toBeDefined();
     expect(risk!.categories).toContain("SSRF-prone");
   });
 
-  it("extracts from req.body[\"file\"] pattern", () => {
+  it('extracts from req.body["file"] pattern', () => {
     const risk = extractParameterRisk('Path traversal via req.body["file"]');
     expect(risk).toBeDefined();
     expect(risk!.categories).toContain("Path traversal-prone");

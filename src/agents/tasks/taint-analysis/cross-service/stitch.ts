@@ -1,19 +1,27 @@
 import { createHash } from "node:crypto";
-import type { AgentRuntime, AgentResultErrorMessage, AgentResultSuccessMessage } from "../../../../agent-runtime/types.js";
+import type {
+  AgentResultErrorMessage,
+  AgentResultSuccessMessage,
+  AgentRuntime,
+} from "../../../../agent-runtime/types.js";
 import { scoreFindingMetadata } from "../../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../../scanners/types.js";
-import { attachTaskOutputMeta, getTaskOutputMeta, type TaskOutputMeta } from "../../../../task-output-meta.js";
+import {
+  attachTaskOutputMeta,
+  getTaskOutputMeta,
+  type TaskOutputMeta,
+} from "../../../../task-output-meta.js";
 import type { ScanOpts } from "../../../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../../../utils.js";
 import type { AgentTask } from "../../../types.js";
 import { resolveTaintAnalysisConfig } from "../types.js";
 import {
-  resolveCrossServiceConfig,
-  STITCH_RESPONSE_SCHEMA,
   type BoundaryManifest,
   type BoundaryPoint,
   type CrossServiceAnalysisOutput,
   type CrossServicePath,
+  resolveCrossServiceConfig,
+  STITCH_RESPONSE_SCHEMA,
   type StitchedEdge,
   type StitchLlmResponse,
   type StitchMatchMethod,
@@ -40,7 +48,9 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
       context.upstreamOutputs.get("taint-analysis-cross-analyze"),
     );
     if (!analyzeOutput) {
-      throw new Error("taint-analysis-stitch requires upstream output from taint-analysis-cross-analyze");
+      throw new Error(
+        "taint-analysis-stitch requires upstream output from taint-analysis-cross-analyze",
+      );
     }
 
     const { allBoundaries } = analyzeOutput;
@@ -95,10 +105,7 @@ export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
     if (stitchDegradation) {
       meta.degradation = stitchDegradation;
     }
-    return attachTaskOutputMeta(
-      [...intraFindings, ...crossServiceFindings],
-      meta,
-    );
+    return attachTaskOutputMeta([...intraFindings, ...crossServiceFindings], meta);
   },
   triageAgentConfig(finding, repoName): TriageAgentConfig {
     return {
@@ -144,7 +151,9 @@ function asCrossServiceAnalysisOutput(value: unknown): CrossServiceAnalysisOutpu
 
   return {
     services: value["services"].flatMap((service) => normalizePerServiceAnalysis(service)),
-    allBoundaries: value["allBoundaries"].flatMap((boundary) => normalizeBoundaryManifest(boundary)),
+    allBoundaries: value["allBoundaries"].flatMap((boundary) =>
+      normalizeBoundaryManifest(boundary),
+    ),
   };
 }
 
@@ -162,26 +171,29 @@ function normalizePerServiceAnalysis(value: unknown): CrossServiceAnalysisOutput
     return [];
   }
 
-  return [{
-    service: {
-      id,
-      displayName: typeof service["displayName"] === "string" ? service["displayName"] : id,
-      rootPath,
-      language,
-      framework: typeof service["framework"] === "string" ? service["framework"] : null,
-      discoveryMethod: service["discoveryMethod"] === "manifest" ? "manifest" : "auto",
-      manifestFiles: Array.isArray(service["manifestFiles"])
-        ? service["manifestFiles"].map((item) => String(item))
-        : [],
+  return [
+    {
+      service: {
+        id,
+        displayName: typeof service["displayName"] === "string" ? service["displayName"] : id,
+        rootPath,
+        language,
+        framework: typeof service["framework"] === "string" ? service["framework"] : null,
+        discoveryMethod: service["discoveryMethod"] === "manifest" ? "manifest" : "auto",
+        manifestFiles: Array.isArray(service["manifestFiles"])
+          ? service["manifestFiles"].map((item) => String(item))
+          : [],
+      },
+      boundary,
+      intraServiceFindings: normalizeFindingArray(value["intraServiceFindings"]),
+      taintAnalysisSkipped: Boolean(value["taintAnalysisSkipped"]),
+      taintAnalysisSkipReason:
+        typeof value["taintAnalysisSkipReason"] === "string"
+          ? value["taintAnalysisSkipReason"]
+          : undefined,
+      durationMs: Math.max(0, Number(value["durationMs"]) || 0),
     },
-    boundary,
-    intraServiceFindings: normalizeFindingArray(value["intraServiceFindings"]),
-    taintAnalysisSkipped: Boolean(value["taintAnalysisSkipped"]),
-    taintAnalysisSkipReason: typeof value["taintAnalysisSkipReason"] === "string"
-      ? value["taintAnalysisSkipReason"]
-      : undefined,
-    durationMs: Math.max(0, Number(value["durationMs"]) || 0),
-  }];
+  ];
 }
 
 function normalizeBoundaryManifest(value: unknown): BoundaryManifest[] {
@@ -195,13 +207,15 @@ function normalizeBoundaryManifest(value: unknown): BoundaryManifest[] {
     return [];
   }
 
-  return [{
-    serviceId,
-    servicePath,
-    entryPoints: normalizeBoundaryPoints(value["entryPoints"], "entry"),
-    exitPoints: normalizeBoundaryPoints(value["exitPoints"], "exit"),
-    errors: Array.isArray(value["errors"]) ? value["errors"].map((item) => String(item)) : [],
-  }];
+  return [
+    {
+      serviceId,
+      servicePath,
+      entryPoints: normalizeBoundaryPoints(value["entryPoints"], "entry"),
+      exitPoints: normalizeBoundaryPoints(value["exitPoints"], "exit"),
+      errors: Array.isArray(value["errors"]) ? value["errors"].map((item) => String(item)) : [],
+    },
+  ];
 }
 
 function normalizeBoundaryPoints(
@@ -223,25 +237,31 @@ function normalizeBoundaryPoints(
       return [];
     }
 
-    return [{
-      id: typeof point["id"] === "string" ? point["id"] : `${direction}-${index + 1}`,
-      direction,
-      protocol: typeof point["protocol"] === "string" ? point["protocol"] as BoundaryPoint["protocol"] : "unknown",
-      filePath,
-      startLine: Math.max(1, Number(point["startLine"]) || 1),
-      callable,
-      routePath: typeof point["routePath"] === "string" ? point["routePath"] : undefined,
-      httpMethod: typeof point["httpMethod"] === "string" ? point["httpMethod"] : undefined,
-      topicOrQueue: typeof point["topicOrQueue"] === "string" ? point["topicOrQueue"] : undefined,
-      grpcMethod: typeof point["grpcMethod"] === "string" ? point["grpcMethod"] : undefined,
-      dataEntity: typeof point["dataEntity"] === "string" ? point["dataEntity"] : undefined,
-      dataDescription: typeof point["dataDescription"] === "string" ? point["dataDescription"] : "data",
-      taintedParameters: Array.isArray(point["taintedParameters"])
-        ? point["taintedParameters"].map((item) => String(item))
-        : [],
-      confidence: Number.isFinite(Number(point["confidence"])) ? Number(point["confidence"]) : 0,
-      rationale: typeof point["rationale"] === "string" ? point["rationale"] : "",
-    }];
+    return [
+      {
+        id: typeof point["id"] === "string" ? point["id"] : `${direction}-${index + 1}`,
+        direction,
+        protocol:
+          typeof point["protocol"] === "string"
+            ? (point["protocol"] as BoundaryPoint["protocol"])
+            : "unknown",
+        filePath,
+        startLine: Math.max(1, Number(point["startLine"]) || 1),
+        callable,
+        routePath: typeof point["routePath"] === "string" ? point["routePath"] : undefined,
+        httpMethod: typeof point["httpMethod"] === "string" ? point["httpMethod"] : undefined,
+        topicOrQueue: typeof point["topicOrQueue"] === "string" ? point["topicOrQueue"] : undefined,
+        grpcMethod: typeof point["grpcMethod"] === "string" ? point["grpcMethod"] : undefined,
+        dataEntity: typeof point["dataEntity"] === "string" ? point["dataEntity"] : undefined,
+        dataDescription:
+          typeof point["dataDescription"] === "string" ? point["dataDescription"] : "data",
+        taintedParameters: Array.isArray(point["taintedParameters"])
+          ? point["taintedParameters"].map((item) => String(item))
+          : [],
+        confidence: Number.isFinite(Number(point["confidence"])) ? Number(point["confidence"]) : 0,
+        rationale: typeof point["rationale"] === "string" ? point["rationale"] : "",
+      },
+    ];
   });
 }
 
@@ -261,73 +281,92 @@ function normalizeFindingArray(value: unknown): Finding[] {
     const startLine = Number(finding["startLine"]);
     const severity = typeof finding["severity"] === "string" ? finding["severity"] : "";
     const message = typeof finding["message"] === "string" ? finding["message"] : "";
-    if (!fingerprint || !ruleId || !filePath || !Number.isFinite(startLine) || !severity || !message) {
+    if (
+      !fingerprint ||
+      !ruleId ||
+      !filePath ||
+      !Number.isFinite(startLine) ||
+      !severity ||
+      !message
+    ) {
       return [];
     }
 
-    return [{
-      taskId: typeof finding["scanner"] === "string" ? finding["scanner"] : "unknown",
-      fingerprint,
-      ruleId,
-      filePath,
-      startLine,
-      severity,
-      message,
-      evidence: typeof finding["evidence"] === "string" ? finding["evidence"] : null,
-      scannerConfidence: typeof finding["scannerConfidence"] === "string" ? finding["scannerConfidence"] : "MEDIUM",
-      subcategory: Array.isArray(finding["subcategory"]) ? finding["subcategory"].map((item) => String(item)) : [],
-      likelihood: typeof finding["likelihood"] === "string" ? finding["likelihood"] : "MEDIUM",
-      impact: typeof finding["impact"] === "string" ? finding["impact"] : "MEDIUM",
-      cwe: Array.isArray(finding["cwe"]) ? finding["cwe"].map((item) => String(item)) : [],
-      score: Number.isFinite(Number(finding["score"])) ? Number(finding["score"]) : 0,
-      taintPath: Array.isArray(finding["taintPath"])
-        ? finding["taintPath"].flatMap((step) => {
-          if (!isRecord(step)) return [];
-          const pathFile = typeof step["filePath"] === "string" ? step["filePath"] : "";
-          const pathLine = Number(step["line"]);
-          if (!pathFile || !Number.isFinite(pathLine)) {
-            return [];
-          }
-          return [{
-            filePath: pathFile,
-            line: pathLine,
-            message: typeof step["message"] === "string" ? step["message"] : undefined,
-            snippet: typeof step["snippet"] === "string" ? step["snippet"] : undefined,
-          }];
-        })
-        : undefined,
-      proofState: (
-        finding["proofState"] === "symbolic_only"
-        || finding["proofState"] === "execution_attempted"
-        || finding["proofState"] === "execution_confirmed"
-        || finding["proofState"] === "execution_rejected"
-        || finding["proofState"] === "inconclusive"
-      )
-        ? finding["proofState"]
-        : undefined,
-      engineProvenance: Array.isArray(finding["engineProvenance"])
-        ? finding["engineProvenance"].flatMap((entry) => {
-          if (!isRecord(entry)) return [];
-          const kind = typeof entry["kind"] === "string" ? entry["kind"] : "";
-          const detail = typeof entry["detail"] === "string" ? entry["detail"] : "";
-          if (!detail) {
-            return [];
-          }
-          if (kind !== "semgrep" && kind !== "codeql" && kind !== "taint-analysis" && kind !== "agentic" && kind !== "dynamic") {
-            return [];
-          }
-          return [{ kind, detail }];
-        })
-        : undefined,
-    }];
+    return [
+      {
+        taskId: typeof finding["scanner"] === "string" ? finding["scanner"] : "unknown",
+        fingerprint,
+        ruleId,
+        filePath,
+        startLine,
+        severity,
+        message,
+        evidence: typeof finding["evidence"] === "string" ? finding["evidence"] : null,
+        scannerConfidence:
+          typeof finding["scannerConfidence"] === "string"
+            ? finding["scannerConfidence"]
+            : "MEDIUM",
+        subcategory: Array.isArray(finding["subcategory"])
+          ? finding["subcategory"].map((item) => String(item))
+          : [],
+        likelihood: typeof finding["likelihood"] === "string" ? finding["likelihood"] : "MEDIUM",
+        impact: typeof finding["impact"] === "string" ? finding["impact"] : "MEDIUM",
+        cwe: Array.isArray(finding["cwe"]) ? finding["cwe"].map((item) => String(item)) : [],
+        score: Number.isFinite(Number(finding["score"])) ? Number(finding["score"]) : 0,
+        taintPath: Array.isArray(finding["taintPath"])
+          ? finding["taintPath"].flatMap((step) => {
+              if (!isRecord(step)) return [];
+              const pathFile = typeof step["filePath"] === "string" ? step["filePath"] : "";
+              const pathLine = Number(step["line"]);
+              if (!pathFile || !Number.isFinite(pathLine)) {
+                return [];
+              }
+              return [
+                {
+                  filePath: pathFile,
+                  line: pathLine,
+                  message: typeof step["message"] === "string" ? step["message"] : undefined,
+                  snippet: typeof step["snippet"] === "string" ? step["snippet"] : undefined,
+                },
+              ];
+            })
+          : undefined,
+        proofState:
+          finding["proofState"] === "symbolic_only" ||
+          finding["proofState"] === "execution_attempted" ||
+          finding["proofState"] === "execution_confirmed" ||
+          finding["proofState"] === "execution_rejected" ||
+          finding["proofState"] === "inconclusive"
+            ? finding["proofState"]
+            : undefined,
+        engineProvenance: Array.isArray(finding["engineProvenance"])
+          ? finding["engineProvenance"].flatMap((entry) => {
+              if (!isRecord(entry)) return [];
+              const kind = typeof entry["kind"] === "string" ? entry["kind"] : "";
+              const detail = typeof entry["detail"] === "string" ? entry["detail"] : "";
+              if (!detail) {
+                return [];
+              }
+              if (
+                kind !== "semgrep" &&
+                kind !== "codeql" &&
+                kind !== "taint-analysis" &&
+                kind !== "agentic" &&
+                kind !== "dynamic"
+              ) {
+                return [];
+              }
+              return [{ kind, detail }];
+            })
+          : undefined,
+      },
+    ];
   });
 }
 
 // ── Heuristic Matching ──────────────────────────────────────────────────
 
-export function matchBoundariesHeuristically(
-  boundaries: BoundaryManifest[],
-): StitchedEdge[] {
+export function matchBoundariesHeuristically(boundaries: BoundaryManifest[]): StitchedEdge[] {
   const edges: StitchedEdge[] = [];
   const exitPoints = collectExitPoints(boundaries);
   const entryPoints = collectEntryPoints(boundaries);
@@ -341,7 +380,11 @@ export function matchBoundariesHeuristically(
       if (match) {
         edges.push({
           source: { serviceId: exit.serviceId, boundaryPointId: exit.point.id, point: exit.point },
-          target: { serviceId: entry.serviceId, boundaryPointId: entry.point.id, point: entry.point },
+          target: {
+            serviceId: entry.serviceId,
+            boundaryPointId: entry.point.id,
+            point: entry.point,
+          },
           matchMethod: match.method,
           confidence: match.confidence,
           rationale: match.rationale,
@@ -366,10 +409,10 @@ function matchPair(
 ): MatchResult | null {
   // URL path exact match
   if (
-    exit.routePath
-    && entry.routePath
-    && normalizeRoute(exit.routePath) === normalizeRoute(entry.routePath)
-    && areHttpMethodsCompatible(exit.httpMethod, entry.httpMethod)
+    exit.routePath &&
+    entry.routePath &&
+    normalizeRoute(exit.routePath) === normalizeRoute(entry.routePath) &&
+    areHttpMethodsCompatible(exit.httpMethod, entry.httpMethod)
   ) {
     return {
       method: "url-path",
@@ -380,9 +423,9 @@ function matchPair(
 
   // URL path prefix match
   if (
-    exit.routePath
-    && entry.routePath
-    && normalizeRoute(exit.routePath).startsWith(normalizeRoute(entry.routePath))
+    exit.routePath &&
+    entry.routePath &&
+    normalizeRoute(exit.routePath).startsWith(normalizeRoute(entry.routePath))
   ) {
     return {
       method: "url-path",
@@ -393,9 +436,9 @@ function matchPair(
 
   // Topic/queue name exact match
   if (
-    exit.topicOrQueue
-    && entry.topicOrQueue
-    && exit.topicOrQueue.toLowerCase() === entry.topicOrQueue.toLowerCase()
+    exit.topicOrQueue &&
+    entry.topicOrQueue &&
+    exit.topicOrQueue.toLowerCase() === entry.topicOrQueue.toLowerCase()
   ) {
     return {
       method: "topic-name",
@@ -405,11 +448,7 @@ function matchPair(
   }
 
   // gRPC method exact match
-  if (
-    exit.grpcMethod
-    && entry.grpcMethod
-    && exit.grpcMethod === entry.grpcMethod
-  ) {
+  if (exit.grpcMethod && entry.grpcMethod && exit.grpcMethod === entry.grpcMethod) {
     return {
       method: "grpc-method",
       confidence: 0.9,
@@ -419,9 +458,9 @@ function matchPair(
 
   // Database shared-table match: write → read on same entity gets higher confidence
   if (
-    exit.dataEntity
-    && entry.dataEntity
-    && exit.dataEntity.toLowerCase() === entry.dataEntity.toLowerCase()
+    exit.dataEntity &&
+    entry.dataEntity &&
+    exit.dataEntity.toLowerCase() === entry.dataEntity.toLowerCase()
   ) {
     const isDbWriteToRead =
       exit.protocol === "database-write" && entry.protocol === "database-read";
@@ -436,10 +475,10 @@ function matchPair(
 
   // Fuzzy database entity match: normalize table names (strip schema prefix, pluralization)
   if (
-    exit.dataEntity
-    && entry.dataEntity
-    && (exit.protocol === "database-write" || exit.protocol === "database-read")
-    && (entry.protocol === "database-write" || entry.protocol === "database-read")
+    exit.dataEntity &&
+    entry.dataEntity &&
+    (exit.protocol === "database-write" || exit.protocol === "database-read") &&
+    (entry.protocol === "database-write" || entry.protocol === "database-read")
   ) {
     const normalizedExit = normalizeDbEntity(exit.dataEntity);
     const normalizedEntry = normalizeDbEntity(entry.dataEntity);
@@ -455,10 +494,7 @@ function matchPair(
   }
 
   // Service name in URL
-  if (
-    exit.routePath
-    && exit.routePath.toLowerCase().includes(entryServiceId.toLowerCase())
-  ) {
+  if (exit.routePath && exit.routePath.toLowerCase().includes(entryServiceId.toLowerCase())) {
     return {
       method: "url-path",
       confidence: 0.5,
@@ -470,10 +506,7 @@ function matchPair(
 }
 
 function normalizeRoute(route: string): string {
-  return route
-    .replace(/\/+$/, "")
-    .replace(/\/+/g, "/")
-    .toLowerCase();
+  return route.replace(/\/+$/, "").replace(/\/+/g, "/").toLowerCase();
 }
 
 function areHttpMethodsCompatible(exitMethod?: string, entryMethod?: string): boolean {
@@ -537,10 +570,7 @@ async function validateAndEnrichWithLlm(
   try {
     response = parseStitchResponse(structuredOutput ?? resultText);
   } catch (error) {
-    throw withCost(
-      new Error(`Stitch response parse failed: ${toErrorMessage(error)}`),
-      costUsd,
-    );
+    throw withCost(new Error(`Stitch response parse failed: ${toErrorMessage(error)}`), costUsd);
   }
 
   // Apply LLM validation to heuristic edges
@@ -571,8 +601,12 @@ async function validateAndEnrichWithLlm(
   // Add LLM-discovered additional edges
   const pointLookup = buildPointLookup(boundaries);
   for (const additional of response.additionalEdges) {
-    const sourcePoint = pointLookup.get(`${additional.sourceServiceId}:${additional.sourcePointId}`);
-    const targetPoint = pointLookup.get(`${additional.targetServiceId}:${additional.targetPointId}`);
+    const sourcePoint = pointLookup.get(
+      `${additional.sourceServiceId}:${additional.sourcePointId}`,
+    );
+    const targetPoint = pointLookup.get(
+      `${additional.targetServiceId}:${additional.targetPointId}`,
+    );
     if (!sourcePoint || !targetPoint) continue;
 
     validatedEdges.push({
@@ -595,10 +629,7 @@ async function validateAndEnrichWithLlm(
   return attachTaskOutputMeta(validatedEdges, { costUsd });
 }
 
-function buildStitchPrompt(
-  boundaries: BoundaryManifest[],
-  heuristicEdges: StitchedEdge[],
-): string {
+function buildStitchPrompt(boundaries: BoundaryManifest[], heuristicEdges: StitchedEdge[]): string {
   const boundaryPayload = boundaries.map((b) => ({
     serviceId: b.serviceId,
     entryPoints: b.entryPoints.map(pointSummary),
@@ -731,10 +762,7 @@ function dfs(
   const findings = sinkServices.get(currentService);
   if (findings && findings.length > 0 && edgeChain.length > 0) {
     for (const finding of findings) {
-      const pathConfidence = edgeChain.reduce(
-        (min, e) => Math.min(min, e.confidence),
-        1,
-      );
+      const pathConfidence = edgeChain.reduce((min, e) => Math.min(min, e.confidence), 1);
       paths.push({
         serviceChain: [...chain],
         edges: [...edgeChain],
@@ -775,10 +803,10 @@ function dfs(
 
 function isUserFacingEntry(point: BoundaryPoint): boolean {
   return (
-    point.protocol === "http-server"
-    || point.protocol === "grpc-server"
-    || point.protocol === "message-consume"
-    || point.protocol === "database-read"
+    point.protocol === "http-server" ||
+    point.protocol === "grpc-server" ||
+    point.protocol === "message-consume" ||
+    point.protocol === "database-read"
   );
 }
 
@@ -852,11 +880,17 @@ function inferCweFromPath(crossPath: CrossServicePath): string {
   if (sinkDesc.includes("xss") || sinkDesc.includes("cross-site scripting")) return "CWE-79";
   if (sinkDesc.includes("xxe") || sinkDesc.includes("xml external")) return "CWE-611";
   if (sinkDesc.includes("redirect")) return "CWE-601";
-  if (sinkDesc.includes("header injection") || sinkDesc.includes("response splitting")) return "CWE-113";
+  if (sinkDesc.includes("header injection") || sinkDesc.includes("response splitting"))
+    return "CWE-113";
   if (sinkDesc.includes("log injection") || sinkDesc.includes("log forging")) return "CWE-117";
   if (sinkDesc.includes("ldap")) return "CWE-90";
   if (sinkDesc.includes("ssti") || sinkDesc.includes("template injection")) return "CWE-1336";
-  if (sinkDesc.includes("code injection") || sinkDesc.includes("eval") || sinkDesc.includes("code execution")) return "CWE-94";
+  if (
+    sinkDesc.includes("code injection") ||
+    sinkDesc.includes("eval") ||
+    sinkDesc.includes("code execution")
+  )
+    return "CWE-94";
   if (sinkDesc.includes("injection")) return "CWE-78";
   return "CWE-346"; // Origin Validation Error (generic cross-service)
 }
@@ -913,7 +947,11 @@ function parseValidatedEdges(value: unknown): StitchLlmResponse["validatedEdges"
 function parseAdditionalEdges(value: unknown): StitchLlmResponse["additionalEdges"] {
   if (!Array.isArray(value)) return [];
   const validMethods = new Set<StitchMatchMethod>([
-    "url-path", "topic-name", "grpc-method", "data-entity", "llm-semantic",
+    "url-path",
+    "topic-name",
+    "grpc-method",
+    "data-entity",
+    "llm-semantic",
   ]);
   return value
     .filter((item) => isRecord(item))
@@ -924,7 +962,7 @@ function parseAdditionalEdges(value: unknown): StitchLlmResponse["additionalEdge
       targetPointId: String(item["targetPointId"] ?? ""),
       matchMethod: validMethods.has(item["matchMethod"] as StitchMatchMethod)
         ? (item["matchMethod"] as StitchMatchMethod)
-        : "llm-semantic" as StitchMatchMethod,
+        : ("llm-semantic" as StitchMatchMethod),
       confidence: clampUnit(Number(item["confidence"])),
       rationale: String(item["rationale"] ?? ""),
     }))
@@ -936,9 +974,7 @@ function parseLlmPaths(value: unknown): StitchLlmResponse["paths"] {
   return value
     .filter((item) => isRecord(item))
     .map((item) => ({
-      serviceChain: Array.isArray(item["serviceChain"])
-        ? item["serviceChain"].map(String)
-        : [],
+      serviceChain: Array.isArray(item["serviceChain"]) ? item["serviceChain"].map(String) : [],
       description: String(item["description"] ?? ""),
       cwe: String(item["cwe"] ?? ""),
       severity: String(item["severity"] ?? "WARNING"),
@@ -947,7 +983,9 @@ function parseLlmPaths(value: unknown): StitchLlmResponse["paths"] {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-function collectExitPoints(boundaries: BoundaryManifest[]): Array<{ serviceId: string; point: BoundaryPoint }> {
+function collectExitPoints(
+  boundaries: BoundaryManifest[],
+): Array<{ serviceId: string; point: BoundaryPoint }> {
   const out: Array<{ serviceId: string; point: BoundaryPoint }> = [];
   for (const boundary of boundaries) {
     for (const point of boundary.exitPoints) {
@@ -957,7 +995,9 @@ function collectExitPoints(boundaries: BoundaryManifest[]): Array<{ serviceId: s
   return out;
 }
 
-function collectEntryPoints(boundaries: BoundaryManifest[]): Array<{ serviceId: string; point: BoundaryPoint }> {
+function collectEntryPoints(
+  boundaries: BoundaryManifest[],
+): Array<{ serviceId: string; point: BoundaryPoint }> {
   const out: Array<{ serviceId: string; point: BoundaryPoint }> = [];
   for (const boundary of boundaries) {
     for (const point of boundary.entryPoints) {
@@ -1010,7 +1050,11 @@ function normalizeDbEntity(entity: string): string {
   // Simple de-pluralization (handles common cases)
   if (normalized.endsWith("ies")) {
     normalized = normalized.slice(0, -3) + "y";
-  } else if (normalized.endsWith("ses") || normalized.endsWith("xes") || normalized.endsWith("zes")) {
+  } else if (
+    normalized.endsWith("ses") ||
+    normalized.endsWith("xes") ||
+    normalized.endsWith("zes")
+  ) {
     normalized = normalized.slice(0, -2);
   } else if (normalized.endsWith("s") && !normalized.endsWith("ss")) {
     normalized = normalized.slice(0, -1);

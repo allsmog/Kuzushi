@@ -11,9 +11,9 @@ export const migration008: Migration = {
   name: "pipeline_runs_status_values",
   up(db) {
     // Check whether the table already has the expanded CHECK constraint
-    const tableSql = db.prepare(
-      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs'",
-    ).get() as { sql?: string } | undefined;
+    const tableSql = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs'")
+      .get() as { sql?: string } | undefined;
 
     if (!tableSql?.sql) {
       // Table doesn't exist — create it fresh with all status values
@@ -75,7 +75,11 @@ export const migration008: Migration = {
 
     db.exec("DROP TABLE pipeline_runs");
     db.exec("ALTER TABLE pipeline_runs_v2 RENAME TO pipeline_runs");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_pipeline_runs_repo_status ON pipeline_runs(repo, status)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started_at ON pipeline_runs(started_at DESC)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_repo_status ON pipeline_runs(repo, status)",
+    );
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started_at ON pipeline_runs(started_at DESC)",
+    );
   },
 };

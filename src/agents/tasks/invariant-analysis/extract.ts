@@ -1,28 +1,36 @@
+import { createLogger } from "../../../logger.js";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
-import type { ScanOpts, RepoContext } from "../../../types.js";
-import { createLogger } from "../../../logger.js";
+import type { RepoContext, ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import {
-  resolveInvariantAnalysisConfig,
   INVARIANT_EXTRACT_SCHEMA,
   type Invariant,
   type InvariantDocument,
   type InvariantKind,
+  resolveInvariantAnalysisConfig,
 } from "./types.js";
 
 const log = createLogger({ stage: "invariant-extract" });
 
 const VALID_KINDS = new Set<InvariantKind>([
-  "precondition", "postcondition", "class-invariant",
-  "loop-invariant", "data-invariant", "security-invariant",
+  "precondition",
+  "postcondition",
+  "class-invariant",
+  "loop-invariant",
+  "data-invariant",
+  "security-invariant",
 ]);
 
 const VALID_RELEVANCE = new Set(["high", "medium", "low", "none"]);
 
-function buildExtractionPrompt(repoContext: RepoContext | undefined, securityOnly: boolean, maxInvariants: number): string {
+function buildExtractionPrompt(
+  repoContext: RepoContext | undefined,
+  securityOnly: boolean,
+  maxInvariants: number,
+): string {
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -70,7 +78,8 @@ function parseInvariants(raw: unknown, securityOnly: boolean, maxInvariants: num
     if (!isRecord(item)) continue;
     const inv = normalizeInvariant(item);
     if (!inv) continue;
-    if (securityOnly && inv.securityRelevance !== "high" && inv.securityRelevance !== "medium") continue;
+    if (securityOnly && inv.securityRelevance !== "high" && inv.securityRelevance !== "medium")
+      continue;
     invariants.push(inv);
   }
 
@@ -79,8 +88,10 @@ function parseInvariants(raw: unknown, securityOnly: boolean, maxInvariants: num
 
 function normalizeInvariant(item: Record<string, unknown>): Invariant | null {
   const id = typeof item["id"] === "string" ? item["id"].trim() : "";
-  const kind = typeof item["kind"] === "string" && VALID_KINDS.has(item["kind"] as InvariantKind)
-    ? (item["kind"] as InvariantKind) : "security-invariant";
+  const kind =
+    typeof item["kind"] === "string" && VALID_KINDS.has(item["kind"] as InvariantKind)
+      ? (item["kind"] as InvariantKind)
+      : "security-invariant";
   const filePath = typeof item["filePath"] === "string" ? item["filePath"].trim() : "";
   const statement = typeof item["statement"] === "string" ? item["statement"].trim() : "";
   const derivedFrom = typeof item["derivedFrom"] === "string" ? item["derivedFrom"].trim() : "";
@@ -90,8 +101,10 @@ function normalizeInvariant(item: Record<string, unknown>): Invariant | null {
   const startLine = Math.max(1, Math.floor(Number(item["startLine"]) || 1));
   const endLine = Math.max(startLine, Math.floor(Number(item["endLine"]) || startLine));
   const confidence = normalizeUnitNumber(item["confidence"]);
-  const securityRelevance = typeof item["securityRelevance"] === "string" && VALID_RELEVANCE.has(item["securityRelevance"])
-    ? (item["securityRelevance"] as Invariant["securityRelevance"]) : "low";
+  const securityRelevance =
+    typeof item["securityRelevance"] === "string" && VALID_RELEVANCE.has(item["securityRelevance"])
+      ? (item["securityRelevance"] as Invariant["securityRelevance"])
+      : "low";
 
   return {
     id,
@@ -100,15 +113,23 @@ function normalizeInvariant(item: Record<string, unknown>): Invariant | null {
       filePath,
       startLine,
       endLine,
-      functionName: typeof item["functionName"] === "string" ? item["functionName"].trim() || undefined : undefined,
-      className: typeof item["className"] === "string" ? item["className"].trim() || undefined : undefined,
+      functionName:
+        typeof item["functionName"] === "string"
+          ? item["functionName"].trim() || undefined
+          : undefined,
+      className:
+        typeof item["className"] === "string" ? item["className"].trim() || undefined : undefined,
     },
     statement,
-    formalExpression: typeof item["formalExpression"] === "string" ? item["formalExpression"].trim() || undefined : undefined,
+    formalExpression:
+      typeof item["formalExpression"] === "string"
+        ? item["formalExpression"].trim() || undefined
+        : undefined,
     confidence,
     derivedFrom: derivedFrom || "code analysis",
     securityRelevance,
-    category: typeof item["category"] === "string" ? item["category"].trim() || undefined : undefined,
+    category:
+      typeof item["category"] === "string" ? item["category"].trim() || undefined : undefined,
   };
 }
 
@@ -179,7 +200,11 @@ export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
         invariants,
         coverage: {
           filesAnalyzed: new Set(invariants.map((inv) => inv.scope.filePath)).size,
-          functionsAnalyzed: new Set(invariants.filter((inv) => inv.scope.functionName).map((inv) => `${inv.scope.filePath}:${inv.scope.functionName}`)).size,
+          functionsAnalyzed: new Set(
+            invariants
+              .filter((inv) => inv.scope.functionName)
+              .map((inv) => `${inv.scope.filePath}:${inv.scope.functionName}`),
+          ).size,
           invariantsFound: invariants.length,
         },
       },

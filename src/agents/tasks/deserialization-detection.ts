@@ -2,29 +2,33 @@
 // References to deserialization APIs are DETECTION TARGETS in scanned repositories.
 // This file does NOT perform any deserialization itself.
 
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageInvestigationModule,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
+import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord } from "../../utils.js";
-import { createLogger } from "../../logger.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
+import { computeDetectionFingerprint, normalizeFilePath } from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt } from "./pre-read-prompt.js";
-import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime, resolveTaskAllowedTools } from "./runtime-overrides.js";
-import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
-import type { ApplicationModel } from "../../types.js";
-import { normalizeFilePath, computeDetectionFingerprint } from "./detection-task-utils.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
+import {
+  buildApplicationModelSection,
+  buildThreatScenarioEvidenceSection,
+} from "./scenario-guidance.js";
 
 const log = createLogger({ stage: "deserialization" });
 
@@ -38,9 +42,21 @@ const DESERIALIZATION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
-          category: { type: "string", enum: ["unsafe-deserialize", "object-injection", "gadget-chain", "yaml-load"] },
+          category: {
+            type: "string",
+            enum: ["unsafe-deserialize", "object-injection", "gadget-chain", "yaml-load"],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -69,7 +85,14 @@ interface DeserializationFinding {
   inputSource?: string;
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, fileIndex?: FileIndex, preRead?: PreReadResult, appModelContext?: string, scenarioContext?: string): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
   const contextLines = repoContext
     ? [
         "## Repository context",
@@ -90,8 +113,11 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
-    languageTuningModule({ taskId: "deserialization-detection", repoContext, frameworks: repoContext?.frameworks }) ||
-    "### unsafe-deserialize (CWE-502)",
+    languageTuningModule({
+      taskId: "deserialization-detection",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "### unsafe-deserialize (CWE-502)",
     "Deserialization of untrusted data using dangerous APIs.",
     "Python: unsafe deserialization via binary object loaders, shelve, marshal, yaml.load without SafeLoader.",
     "Java: ObjectInputStream.readObject(), XMLDecoder, XStream without security framework.",
@@ -140,17 +166,28 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "yaml.safe_load() and YAML.safe_load() are SAFE.",
         "Deserialization of hardcoded/internal data with no user input path is low risk.",
         "Do NOT flag serialization (only deserialization of untrusted data).",
-        ...languageAntiHallucinationExtras({ taskId: "deserialization-detection", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "deserialization-detection",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
     "",
     `Return at most ${maxFindings} findings, prioritized by severity and confidence.`,
     "Filter out any finding where your confidence would be below MEDIUM.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -161,7 +198,13 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
 
     const filePath = normalizeFilePath(repoRoot, f.filePath);
     const cweList = f.cwe ? [f.cwe] : ["CWE-502"];
-    const fingerprint = computeDetectionFingerprint([repoName, "deserialization", f.category, filePath, String(f.startLine)]);
+    const fingerprint = computeDetectionFingerprint([
+      repoName,
+      "deserialization",
+      f.category,
+      filePath,
+      String(f.startLine),
+    ]);
 
     const finding: Finding = {
       taskId: "deserialization-detect",
@@ -205,17 +248,43 @@ export const deserializationDetectionTask: AgentTask<ScanOpts, Finding[]> = {
 
   async run(_input, context): Promise<Finding[]> {
     const model = resolveTaskModel(context, "deserialization-detect");
-    const maxFindings = resolveTaskPositiveInt(context, "deserialization-detect", "maxFindings", 50);
+    const maxFindings = resolveTaskPositiveInt(
+      context,
+      "deserialization-detect",
+      "maxFindings",
+      50,
+    );
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
-    const preRead = await preReadFilesForTask("deserialization-detect", fileIndex, context.repoRoot);
-    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const preRead = await preReadFilesForTask(
+      "deserialization-detect",
+      fileIndex,
+      context.repoRoot,
+    );
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as
+      | ApplicationModel
+      | undefined;
     const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
-    const appModelContext = buildApplicationModelSection("deserialization-detect", applicationModel);
-    const scenarioContext = await buildThreatScenarioEvidenceSection("deserialization-detect", context.repoRoot, applicationModel, scenarioOutput);
+    const appModelContext = buildApplicationModelSection(
+      "deserialization-detect",
+      applicationModel,
+    );
+    const scenarioContext = await buildThreatScenarioEvidenceSection(
+      "deserialization-detect",
+      context.repoRoot,
+      applicationModel,
+      scenarioOutput,
+    );
 
     const runtime = resolveTaskRuntime(context);
-    const prompt = buildPrompt(repoContext, maxFindings, fileIndex, preRead, appModelContext, scenarioContext);
+    const prompt = buildPrompt(
+      repoContext,
+      maxFindings,
+      fileIndex,
+      preRead,
+      appModelContext,
+      scenarioContext,
+    );
     let structuredOutput: unknown;
     let costUsd = 0;
 
@@ -236,11 +305,17 @@ export const deserializationDetectionTask: AgentTask<ScanOpts, Finding[]> = {
       },
     })) {
       if (message.type !== "result") continue;
-      if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) costUsd = message.totalCostUsd;
+      if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd))
+        costUsd = message.totalCostUsd;
       if ("result" in message) structuredOutput = message.structuredOutput;
     }
 
-    const findings = normalizeFindings(structuredOutput, context.repoRoot, context.repoName, maxFindings);
+    const findings = normalizeFindings(
+      structuredOutput,
+      context.repoRoot,
+      context.repoName,
+      maxFindings,
+    );
     log.info(`Found ${findings.length} deserialization findings (cost=$${costUsd.toFixed(4)})`);
     return attachTaskOutputMeta(findings, { costUsd });
   },
@@ -259,7 +334,9 @@ export const deserializationDetectionTask: AgentTask<ScanOpts, Finding[]> = {
         "2. The data being deserialized is user-controlled or from untrusted source.",
         "3. A safe alternative is not being used (yaml.safe_load, JSON.parse, etc.).",
         "4. No input validation or type filtering prevents exploitation.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

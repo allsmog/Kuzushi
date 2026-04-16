@@ -1,10 +1,16 @@
-import type { MessageBus } from "../types.js";
-import type { RunContext, PatchCompleteEvent, VerificationResultEvent, PocHarnessResultEvent, TriageResultEvent } from "../events.js";
-import { createEvent } from "../helpers.js";
-import type { RunState } from "./types.js";
+import type Database from "better-sqlite3";
 import { createLogger } from "../../logger.js";
 import { getPatchResultsForFinding } from "../../store/patch-results.js";
-import type Database from "better-sqlite3";
+import type {
+  PatchCompleteEvent,
+  PocHarnessResultEvent,
+  RunContext,
+  TriageResultEvent,
+  VerificationResultEvent,
+} from "../events.js";
+import { createEvent } from "../helpers.js";
+import type { MessageBus } from "../types.js";
+import type { RunState } from "./types.js";
 
 const log = createLogger({ stage: "patch-dispatcher" });
 
@@ -57,12 +63,14 @@ export function setupPatchDispatching(
 
     if (status === "SOUND" && worktreePath) {
       const depth = state.config.patchVerifyDepth ?? "task";
-      await bus.publish(createEvent("patch-verify:requested", event.meta.runId, {
-        context: event.payload.context,
-        fingerprint,
-        worktreePath,
-        depth,
-      }));
+      await bus.publish(
+        createEvent("patch-verify:requested", event.meta.runId, {
+          context: event.payload.context,
+          fingerprint,
+          worktreePath,
+          depth,
+        }),
+      );
     } else {
       state.patchFailed++;
       drainQueue(bus, state);
@@ -116,10 +124,12 @@ function enqueuePatch(
   log.debug(`Queued patch for ${fingerprint.slice(0, 12)} (trigger=${trigger})`);
 
   // Emit queue depth
-  bus.publish(createEvent("patch:queue-depth", state.context.runId, {
-    context: state.context,
-    depth: state.patchQueue.length - state.patchCompleted,
-  }));
+  bus.publish(
+    createEvent("patch:queue-depth", state.context.runId, {
+      context: state.context,
+      depth: state.patchQueue.length - state.patchCompleted,
+    }),
+  );
 
   drainQueue(bus, state, trigger, context);
 }
@@ -132,12 +142,9 @@ function drainQueue(
 ): void {
   const concurrency = state.config.patchConcurrency ?? 2;
   const ctx = context ?? state.context;
-  const t = trigger ?? (state.config.autoPatchAfter ?? "verify") as "verify" | "poc" | "triage";
+  const t = trigger ?? ((state.config.autoPatchAfter ?? "verify") as "verify" | "poc" | "triage");
 
-  while (
-    state.patchInFlight < concurrency
-    && state.patchCursor < state.patchQueue.length
-  ) {
+  while (state.patchInFlight < concurrency && state.patchCursor < state.patchQueue.length) {
     const fingerprint = state.patchQueue[state.patchCursor];
     if (!fingerprint) break;
 
@@ -145,10 +152,12 @@ function drainQueue(
     state.patchInFlight++;
     state.patchDispatching = true;
 
-    bus.publish(createEvent("patch:requested", state.context.runId, {
-      context: ctx,
-      fingerprint,
-      trigger: t,
-    }));
+    bus.publish(
+      createEvent("patch:requested", state.context.runId, {
+        context: ctx,
+        fingerprint,
+        trigger: t,
+      }),
+    );
   }
 }

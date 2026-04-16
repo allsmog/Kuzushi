@@ -20,11 +20,13 @@
  *   │  [↑↓] navigate  [enter] select  [q] quit              │
  *   └────────────────────────────────────────────────────────┘
  */
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+
 import chalk from "chalk";
+import { Box, Text, useInput } from "ink";
+import type React from "react";
+import { useState } from "react";
+import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
 
 export type CredentialChoice =
   | { kind: "api-key"; value: string }
@@ -66,7 +68,10 @@ const CHOICES: ChoiceOption[] = [
 
 type Step = "choose" | "input";
 
-export function CredentialPrompt({ onComplete, onCancel }: CredentialPromptProps): React.ReactElement {
+export function CredentialPrompt({
+  onComplete,
+  onCancel,
+}: CredentialPromptProps): React.ReactElement {
   const [step, setStep] = useState<Step>("choose");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [chosenOption, setChosenOption] = useState<"api-key" | "oauth-token" | null>(null);
@@ -129,20 +134,31 @@ export function CredentialPrompt({ onComplete, onCancel }: CredentialPromptProps
 
   if (step === "input") {
     const label = chosenOption === "api-key" ? "API Key" : "OAuth Token";
-    const masked = inputValue.length > 0
-      ? inputValue.slice(0, 8) + "*".repeat(Math.max(0, inputValue.length - 8))
-      : "";
+    const masked =
+      inputValue.length > 0
+        ? inputValue.slice(0, 8) + "*".repeat(Math.max(0, inputValue.length - 8))
+        : "";
 
     return (
       <Box flexDirection="column">
         <Text>{""}</Text>
         <Text>{boxHeader(`Enter ${label}`, width)}</Text>
         <Text>{""}</Text>
-        <Text>{"  "}{chalk.dim(`Paste your ${label} below:`)}</Text>
+        <Text>
+          {"  "}
+          {chalk.dim(`Paste your ${label} below:`)}
+        </Text>
         <Text>{""}</Text>
-        <Text>{"  "}{chalk.redBright(icons.arrow)} {masked ? chalk.white(masked) : chalk.dim("(paste and press enter)")}</Text>
+        <Text>
+          {"  "}
+          {chalk.redBright(icons.arrow)}{" "}
+          {masked ? chalk.white(masked) : chalk.dim("(paste and press enter)")}
+        </Text>
         <Text>{""}</Text>
-        <Text>{"  "}{chalk.dim("[enter] confirm  [esc] back")}</Text>
+        <Text>
+          {"  "}
+          {chalk.dim("[enter] confirm  [esc] back")}
+        </Text>
         <Text>{boxFooter(width)}</Text>
       </Box>
     );
@@ -153,8 +169,14 @@ export function CredentialPrompt({ onComplete, onCancel }: CredentialPromptProps
       <Text>{""}</Text>
       <Text>{boxHeader("Authentication Required", width)}</Text>
       <Text>{""}</Text>
-      <Text>{"  "}{chalk.dim("No Anthropic credentials detected.")}</Text>
-      <Text>{"  "}{chalk.dim("Choose how to authenticate:")}</Text>
+      <Text>
+        {"  "}
+        {chalk.dim("No Anthropic credentials detected.")}
+      </Text>
+      <Text>
+        {"  "}
+        {chalk.dim("Choose how to authenticate:")}
+      </Text>
       <Text>{""}</Text>
 
       {CHOICES.map((option, i) => {
@@ -164,16 +186,25 @@ export function CredentialPrompt({ onComplete, onCancel }: CredentialPromptProps
 
         return (
           <Box key={i} flexDirection="column">
-            <Text>{"  "}{prefix} {icons.complete} {name}  {chalk.dim(option.description)}</Text>
+            <Text>
+              {"  "}
+              {prefix} {icons.complete} {name} {chalk.dim(option.description)}
+            </Text>
             {isSelected && (
-              <Text>{"      "}{chalk.white(option.detail)}</Text>
+              <Text>
+                {"      "}
+                {chalk.white(option.detail)}
+              </Text>
             )}
           </Box>
         );
       })}
 
       <Text>{""}</Text>
-      <Text>{"  "}{chalk.dim("[↑↓] navigate  [enter] select  [q] quit")}</Text>
+      <Text>
+        {"  "}
+        {chalk.dim("[↑↓] navigate  [enter] select  [q] quit")}
+      </Text>
       <Text>{boxFooter(width)}</Text>
     </Box>
   );

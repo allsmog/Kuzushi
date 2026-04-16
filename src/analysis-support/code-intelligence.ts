@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { executeTool } from "../agent-runtime/tools.js";
@@ -43,7 +43,9 @@ const IMPORT_SKIP_DIRS = new Set([
 
 const providerCache = new Map<string, Promise<CodeIntelligenceProvider>>();
 
-export async function getCodeIntelligenceProvider(repoRoot: string): Promise<CodeIntelligenceProvider> {
+export async function getCodeIntelligenceProvider(
+  repoRoot: string,
+): Promise<CodeIntelligenceProvider> {
   const scopeKey = await resolveRepoScopeKey(repoRoot);
   const cacheKey = `${repoRoot}\x00${scopeKey}`;
   const existing = providerCache.get(cacheKey);
@@ -56,7 +58,10 @@ export async function getCodeIntelligenceProvider(repoRoot: string): Promise<Cod
   return created;
 }
 
-async function createProvider(repoRoot: string, scopeKey: string): Promise<CodeIntelligenceProvider> {
+async function createProvider(
+  repoRoot: string,
+  scopeKey: string,
+): Promise<CodeIntelligenceProvider> {
   const fallback = await createSimpleTextIndexProvider(repoRoot);
   return new CachedCodeIntelligenceProvider(repoRoot, scopeKey, fallback);
 }
@@ -65,7 +70,9 @@ async function resolveRepoScopeKey(repoRoot: string): Promise<string> {
   try {
     const [{ stdout: headStdout }, dirtyResult] = await Promise.all([
       execFileAsync("git", ["rev-parse", "HEAD"], { cwd: repoRoot }),
-      execFileAsync("git", ["status", "--porcelain"], { cwd: repoRoot }).catch(() => ({ stdout: "" })),
+      execFileAsync("git", ["status", "--porcelain"], { cwd: repoRoot }).catch(() => ({
+        stdout: "",
+      })),
     ]);
     const head = headStdout.trim() || "unknown";
     const dirty = dirtyResult.stdout.trim().length > 0 ? ":dirty" : "";
@@ -176,10 +183,7 @@ class CachedCodeIntelligenceProvider implements CodeIntelligenceProvider {
     return created;
   }
 
-  async getCallees(args: {
-    functionName: string;
-    filePath: string;
-  }): Promise<string[]> {
+  async getCallees(args: { functionName: string; filePath: string }): Promise<string[]> {
     const key = `${args.functionName}:${args.filePath}`;
     const cached = this.calleesCache.get(key);
     if (cached) {
@@ -194,7 +198,11 @@ class CachedCodeIntelligenceProvider implements CodeIntelligenceProvider {
   }
 
   private async resolveDefinitions(position: SemanticPosition): Promise<SemanticLocation[]> {
-    const output = await executeTool("GoToDefinition", normalizeSemanticArgs(position), this.repoRoot);
+    const output = await executeTool(
+      "GoToDefinition",
+      normalizeSemanticArgs(position),
+      this.repoRoot,
+    );
     return parseSemanticLocations(output);
   }
 
@@ -202,19 +210,32 @@ class CachedCodeIntelligenceProvider implements CodeIntelligenceProvider {
     position: SemanticPosition,
     maxResults?: number,
   ): Promise<SemanticLocation[]> {
-    const output = await executeTool("FindReferences", {
-      ...normalizeSemanticArgs(position),
-      ...(maxResults ? { max_results: maxResults } : {}),
-    }, this.repoRoot);
+    const output = await executeTool(
+      "FindReferences",
+      {
+        ...normalizeSemanticArgs(position),
+        ...(maxResults ? { max_results: maxResults } : {}),
+      },
+      this.repoRoot,
+    );
     return parseSemanticLocations(output);
   }
 
-  private async resolveTypeAtPosition(position: SemanticPosition): Promise<SemanticLocation | undefined> {
-    const output = await executeTool("TypeAtPosition", normalizeSemanticArgs(position), this.repoRoot);
+  private async resolveTypeAtPosition(
+    position: SemanticPosition,
+  ): Promise<SemanticLocation | undefined> {
+    const output = await executeTool(
+      "TypeAtPosition",
+      normalizeSemanticArgs(position),
+      this.repoRoot,
+    );
     return parseTypeAtPosition(output);
   }
 
-  private async resolveNameList(toolName: "GetCallers" | "GetCallees", args: Record<string, unknown>): Promise<string[]> {
+  private async resolveNameList(
+    toolName: "GetCallers" | "GetCallees",
+    args: Record<string, unknown>,
+  ): Promise<string[]> {
     const output = await executeTool(toolName, args, this.repoRoot);
     return output
       .split(/\r?\n/u)
@@ -281,7 +302,10 @@ async function collectImportGraph(repoRoot: string): Promise<ImportGraphEdge[]> 
     } catch (err) {
       // File may have been deleted between directory walk and read, or may have
       // restrictive permissions. Skip it and continue building the import graph.
-      log.debug({ err, path: absolutePath }, "skipping unreadable file during import graph collection");
+      log.debug(
+        { err, path: absolutePath },
+        "skipping unreadable file during import graph collection",
+      );
       continue;
     }
 
@@ -327,20 +351,15 @@ async function walkImportFiles(
 function extractImportTargets(filePath: string, content: string): string[] {
   const extension = path.extname(filePath).toLowerCase();
   const targets = new Set<string>();
-  const patterns = extension === ".py"
-    ? [
-        /^\s*import\s+([A-Za-z0-9_.,\s]+)/gmu,
-        /^\s*from\s+([A-Za-z0-9_./]+)\s+import\s+/gmu,
-      ]
-    : extension === ".go"
-      ? [
-          /^\s*import\s+"([^"]+)"/gmu,
-          /^\s*"([^"]+)"\s*$/gmu,
-        ]
-      : [
-          /import\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]/gmu,
-          /require\(\s*['"]([^'"]+)['"]\s*\)/gmu,
-        ];
+  const patterns =
+    extension === ".py"
+      ? [/^\s*import\s+([A-Za-z0-9_.,\s]+)/gmu, /^\s*from\s+([A-Za-z0-9_./]+)\s+import\s+/gmu]
+      : extension === ".go"
+        ? [/^\s*import\s+"([^"]+)"/gmu, /^\s*"([^"]+)"\s*$/gmu]
+        : [
+            /import\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]/gmu,
+            /require\(\s*['"]([^'"]+)['"]\s*\)/gmu,
+          ];
 
   for (const pattern of patterns) {
     for (const match of content.matchAll(pattern)) {

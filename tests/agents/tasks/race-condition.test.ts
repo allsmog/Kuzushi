@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { raceConditionTask, __raceConditionInternals } from "../../../src/agents/tasks/race-condition.js";
-import type { KuzushiConfig } from "../../../src/types.js";
+import {
+  __raceConditionInternals,
+  raceConditionTask,
+} from "../../../src/agents/tasks/race-condition.js";
 import type { TaskContext } from "../../../src/agents/types.js";
+import type { KuzushiConfig } from "../../../src/types.js";
 
-const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint } = __raceConditionInternals;
+const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint } =
+  __raceConditionInternals;
 
 function makeContext(overrides: Record<string, unknown> = {}): TaskContext {
   return {
@@ -27,7 +31,7 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: (overrides.taskConfig as Record<string, Record<string, unknown>>) ?? {},
   };
 }
 
@@ -62,7 +66,14 @@ describe("resolveConfig", () => {
 describe("buildPrompt", () => {
   it("includes repo context when provided", () => {
     const prompt = buildPrompt(
-      { languages: ["Go"], frameworks: ["Gin"], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: ["Gin"],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       25,
     );
     expect(prompt).toContain("Go");
@@ -105,8 +116,26 @@ describe("normalizeFindings", () => {
   it("deduplicates by fingerprint", () => {
     const raw = {
       findings: [
-        { pattern: "toctou", filePath: "src/upload.go", startLine: 42, severity: "ERROR", description: "TOCTOU", cwe: "367", confidence: "HIGH", rationale: "x" },
-        { pattern: "toctou", filePath: "src/upload.go", startLine: 42, severity: "WARNING", description: "TOCTOU", cwe: "367", confidence: "MEDIUM", rationale: "y" },
+        {
+          pattern: "toctou",
+          filePath: "src/upload.go",
+          startLine: 42,
+          severity: "ERROR",
+          description: "TOCTOU",
+          cwe: "367",
+          confidence: "HIGH",
+          rationale: "x",
+        },
+        {
+          pattern: "toctou",
+          filePath: "src/upload.go",
+          startLine: 42,
+          severity: "WARNING",
+          description: "TOCTOU",
+          cwe: "367",
+          confidence: "MEDIUM",
+          rationale: "y",
+        },
       ],
     };
 
@@ -141,7 +170,16 @@ describe("normalizeFindings", () => {
 
 describe("computeFingerprint", () => {
   it("produces stable fingerprints", () => {
-    const f = { pattern: "toctou", filePath: "src/upload.go", startLine: 42, severity: "ERROR", description: "", cwe: "367", confidence: "HIGH", rationale: "" };
+    const f = {
+      pattern: "toctou",
+      filePath: "src/upload.go",
+      startLine: 42,
+      severity: "ERROR",
+      description: "",
+      cwe: "367",
+      confidence: "HIGH",
+      rationale: "",
+    };
     const fp1 = computeFingerprint("repo", "src/upload.go", f);
     const fp2 = computeFingerprint("repo", "src/upload.go", f);
     expect(fp1).toBe(fp2);

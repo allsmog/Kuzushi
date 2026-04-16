@@ -41,15 +41,44 @@ export const pythonProfile: LanguageProfile = {
   vulnClasses: {
     "command-injection": {
       sinks: [
-        { api: "os.system(cmd)", risk: "Full shell interpretation of cmd string", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "os.popen(cmd)", risk: "Shell interpretation, returns pipe", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "subprocess with shell=True", risk: "Shell interpretation when shell=True", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "subprocess with list args, shell=False", risk: "SAFE against metachar injection when passed as list", shellInvoking: false, cwes: ["CWE-78"] },
+        {
+          api: "os.system(cmd)",
+          risk: "Full shell interpretation of cmd string",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "os.popen(cmd)",
+          risk: "Shell interpretation, returns pipe",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "subprocess with shell=True",
+          risk: "Shell interpretation when shell=True",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "subprocess with list args, shell=False",
+          risk: "SAFE against metachar injection when passed as list",
+          shellInvoking: false,
+          cwes: ["CWE-78"],
+        },
       ],
       safePatterns: [
-        { api: "subprocess.run([cmd, arg1, arg2])", why: "List args with shell=False (default) prevents metachar injection" },
-        { api: "shlex.quote() wrapping user input", why: "Proper shell escaping before insertion into command string" },
-        { api: "subprocess with all hardcoded arguments", why: "No attacker-controlled data in arguments" },
+        {
+          api: "subprocess.run([cmd, arg1, arg2])",
+          why: "List args with shell=False (default) prevents metachar injection",
+        },
+        {
+          api: "shlex.quote() wrapping user input",
+          why: "Proper shell escaping before insertion into command string",
+        },
+        {
+          api: "subprocess with all hardcoded arguments",
+          why: "No attacker-controlled data in arguments",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -74,15 +103,20 @@ export const pythonProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Django management command with shell injection",
-          vulnerableCode: 'def handle(self, *args, **options):\n    db_name = options["database"]\n    subprocess.call(f"pg_dump {db_name}", shell=True)',
-          explanation: "db_name from command options flows to shell via f-string with shell=True. If db_name is user-influenced, attacker injects shell commands.",
+          vulnerableCode:
+            'def handle(self, *args, **options):\n    db_name = options["database"]\n    subprocess.call(f"pg_dump {db_name}", shell=True)',
+          explanation:
+            "db_name from command options flows to shell via f-string with shell=True. If db_name is user-influenced, attacker injects shell commands.",
         },
       ],
       frameworkGuidance: [
         {
           framework: "Django",
           defaults: ["Django ORM avoids most need for shell commands"],
-          pitfalls: ["Management commands often use subprocess for database/migration tools", "Settings values (DB name, paths) may flow to subprocess calls"],
+          pitfalls: [
+            "Management commands often use subprocess for database/migration tools",
+            "Settings values (DB name, paths) may flow to subprocess calls",
+          ],
           configChecks: ["Check DATABASES config for names flowing to shell commands"],
         },
       ],
@@ -93,15 +127,42 @@ export const pythonProfile: LanguageProfile = {
     },
     deserialization: {
       sinks: [
-        { api: "pickle.loads/load", risk: "Runs arbitrary Python code during deserialization via __reduce__", cwes: ["CWE-502"] },
-        { api: "yaml.load() without SafeLoader", risk: "YAML !!python/object tags run arbitrary code", cwes: ["CWE-502"] },
-        { api: "shelve.open()", risk: "Uses pickle internally — same code-exec risk", cwes: ["CWE-502"] },
-        { api: "marshal.loads()", risk: "Can run code via crafted bytecode objects", cwes: ["CWE-502"] },
-        { api: "dill.loads()", risk: "Extended pickle — same arbitrary code execution", cwes: ["CWE-502"] },
-        { api: "jsonpickle.decode()", risk: "Deserializes Python objects from JSON — code-exec via crafted payloads", cwes: ["CWE-502"] },
+        {
+          api: "pickle.loads/load",
+          risk: "Runs arbitrary Python code during deserialization via __reduce__",
+          cwes: ["CWE-502"],
+        },
+        {
+          api: "yaml.load() without SafeLoader",
+          risk: "YAML !!python/object tags run arbitrary code",
+          cwes: ["CWE-502"],
+        },
+        {
+          api: "shelve.open()",
+          risk: "Uses pickle internally — same code-exec risk",
+          cwes: ["CWE-502"],
+        },
+        {
+          api: "marshal.loads()",
+          risk: "Can run code via crafted bytecode objects",
+          cwes: ["CWE-502"],
+        },
+        {
+          api: "dill.loads()",
+          risk: "Extended pickle — same arbitrary code execution",
+          cwes: ["CWE-502"],
+        },
+        {
+          api: "jsonpickle.decode()",
+          risk: "Deserializes Python objects from JSON — code-exec via crafted payloads",
+          cwes: ["CWE-502"],
+        },
       ],
       safePatterns: [
-        { api: "json.loads(data)", why: "JSON parsing does NOT run code — safe for untrusted input" },
+        {
+          api: "json.loads(data)",
+          why: "JSON parsing does NOT run code — safe for untrusted input",
+        },
         { api: "yaml.safe_load(data)", why: "SafeLoader rejects dangerous YAML tags" },
         { api: "yaml.load(data, Loader=SafeLoader)", why: "Explicitly safe loader" },
       ],
@@ -132,21 +193,32 @@ export const pythonProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Flask endpoint deserializing uploaded data unsafely",
-          vulnerableCode: '@app.route("/import", methods=["POST"])\ndef import_data():\n    data = pickle.loads(request.data)\n    return process(data)',
-          explanation: "request.data is attacker-controlled. Unsafe deserialization runs arbitrary code via __reduce__ method in crafted payloads.",
+          vulnerableCode:
+            '@app.route("/import", methods=["POST"])\ndef import_data():\n    data = pickle.loads(request.data)\n    return process(data)',
+          explanation:
+            "request.data is attacker-controlled. Unsafe deserialization runs arbitrary code via __reduce__ method in crafted payloads.",
         },
       ],
       frameworkGuidance: [
         {
           framework: "Django",
           defaults: ["Django sessions use JSON serializer by default since 1.6"],
-          pitfalls: ["SESSION_SERIALIZER can be changed to PickleSerializer", "Cache backends may use pickle"],
-          configChecks: ["Check SESSION_SERIALIZER in settings.py", "Check CACHES backend configuration"],
+          pitfalls: [
+            "SESSION_SERIALIZER can be changed to PickleSerializer",
+            "Cache backends may use pickle",
+          ],
+          configChecks: [
+            "Check SESSION_SERIALIZER in settings.py",
+            "Check CACHES backend configuration",
+          ],
         },
         {
           framework: "Flask",
           defaults: ["Flask session cookies are signed and use JSON by default"],
-          pitfalls: ["Flask-Caching with certain backends may use pickle", "Custom session stores may use pickle"],
+          pitfalls: [
+            "Flask-Caching with certain backends may use pickle",
+            "Custom session stores may use pickle",
+          ],
           configChecks: ["Check CACHE_TYPE configuration"],
         },
       ],
@@ -158,21 +230,34 @@ export const pythonProfile: LanguageProfile = {
     },
     "template-injection": {
       sinks: [
-        { api: "jinja2.Template(user_str).render()", risk: "User-controlled Jinja2 template — SSTI enables RCE via __class__.__mro__ chain", cwes: ["CWE-1336"] },
-        { api: "render_template_string(user_str)", risk: "Flask helper that compiles user string as Jinja2 template", cwes: ["CWE-1336"] },
-        { api: "mako.template.Template(user_str)", risk: "Mako templates allow Python code execution", cwes: ["CWE-1336"] },
+        {
+          api: "jinja2.Template(user_str).render()",
+          risk: "User-controlled Jinja2 template — SSTI enables RCE via __class__.__mro__ chain",
+          cwes: ["CWE-1336"],
+        },
+        {
+          api: "render_template_string(user_str)",
+          risk: "Flask helper that compiles user string as Jinja2 template",
+          cwes: ["CWE-1336"],
+        },
+        {
+          api: "mako.template.Template(user_str)",
+          risk: "Mako templates allow Python code execution",
+          cwes: ["CWE-1336"],
+        },
       ],
       safePatterns: [
-        { api: "render_template('file.html', var=user_data)", why: "User data passed as variable, not as template source — Jinja2 auto-escapes" },
-        { api: "Jinja2 SandboxedEnvironment", why: "Restricts template capabilities (but can be bypassed — verify version)" },
+        {
+          api: "render_template('file.html', var=user_data)",
+          why: "User data passed as variable, not as template source — Jinja2 auto-escapes",
+        },
+        {
+          api: "Jinja2 SandboxedEnvironment",
+          why: "Restricts template capabilities (but can be bypassed — verify version)",
+        },
       ],
       investigationHints: {
-        grepPatterns: [
-          "render_template_string",
-          "Template\\(",
-          "from_string\\(",
-          "Environment\\(",
-        ],
+        grepPatterns: ["render_template_string", "Template\\(", "from_string\\(", "Environment\\("],
         fileHints: [
           "View functions that render templates",
           "Email template generation code",
@@ -187,8 +272,10 @@ export const pythonProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Flask SSTI via render_template_string",
-          vulnerableCode: '@app.route("/greet")\ndef greet():\n    name = request.args.get("name")\n    return render_template_string(f"Hello {name}!")',
-          explanation: "User-controlled name is interpolated into the template string before Jinja2 compiles it. Attacker sends {{config.items()}} to extract secrets or chain to RCE.",
+          vulnerableCode:
+            '@app.route("/greet")\ndef greet():\n    name = request.args.get("name")\n    return render_template_string(f"Hello {name}!")',
+          explanation:
+            "User-controlled name is interpolated into the template string before Jinja2 compiles it. Attacker sends {{config.items()}} to extract secrets or chain to RCE.",
         },
       ],
       antiHallucinationExtra: [
@@ -198,14 +285,36 @@ export const pythonProfile: LanguageProfile = {
     },
     ssrf: {
       sinks: [
-        { api: "requests.get/post(url)", risk: "URL from user input can target internal services", cwes: ["CWE-918"] },
-        { api: "urllib.request.urlopen(url)", risk: "No URL validation — can reach internal endpoints", cwes: ["CWE-918"] },
-        { api: "httpx.get/post(url)", risk: "Same risk as requests — user-controlled URL", cwes: ["CWE-918"] },
-        { api: "aiohttp.ClientSession.get(url)", risk: "Async HTTP client with user-controlled URL", cwes: ["CWE-918"] },
+        {
+          api: "requests.get/post(url)",
+          risk: "URL from user input can target internal services",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "urllib.request.urlopen(url)",
+          risk: "No URL validation — can reach internal endpoints",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "httpx.get/post(url)",
+          risk: "Same risk as requests — user-controlled URL",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "aiohttp.ClientSession.get(url)",
+          risk: "Async HTTP client with user-controlled URL",
+          cwes: ["CWE-918"],
+        },
       ],
       safePatterns: [
-        { api: "URL validated against allowlist of domains", why: "Only permitted domains are reachable" },
-        { api: "Requests to hardcoded URLs with user data in body/params", why: "URL is fixed, user controls only payload" },
+        {
+          api: "URL validated against allowlist of domains",
+          why: "Only permitted domains are reachable",
+        },
+        {
+          api: "Requests to hardcoded URLs with user data in body/params",
+          why: "URL is fixed, user controls only payload",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -230,8 +339,10 @@ export const pythonProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Webhook URL validation bypass",
-          vulnerableCode: '@app.route("/webhook", methods=["POST"])\ndef register_webhook():\n    url = request.json["callback_url"]\n    if not url.startswith("https://"):\n        abort(400)\n    requests.get(url)',
-          explanation: "startswith check is insufficient — attacker sends https://169.254.169.254/latest/meta-data/ to reach AWS metadata endpoint.",
+          vulnerableCode:
+            '@app.route("/webhook", methods=["POST"])\ndef register_webhook():\n    url = request.json["callback_url"]\n    if not url.startswith("https://"):\n        abort(400)\n    requests.get(url)',
+          explanation:
+            "startswith check is insufficient — attacker sends https://169.254.169.254/latest/meta-data/ to reach AWS metadata endpoint.",
         },
       ],
       antiHallucinationExtra: [
@@ -241,14 +352,32 @@ export const pythonProfile: LanguageProfile = {
     },
     "race-condition": {
       sinks: [
-        { api: "Shared mutable state without locks", risk: "Concurrent access to shared dict/list/object from multiple threads or async tasks", cwes: ["CWE-362"] },
-        { api: "TOCTOU on filesystem", risk: "Check-then-act on file existence/permissions with race window", cwes: ["CWE-367"] },
-        { api: "Django get_or_create without select_for_update", risk: "Race between check and create in concurrent requests", cwes: ["CWE-362"] },
+        {
+          api: "Shared mutable state without locks",
+          risk: "Concurrent access to shared dict/list/object from multiple threads or async tasks",
+          cwes: ["CWE-362"],
+        },
+        {
+          api: "TOCTOU on filesystem",
+          risk: "Check-then-act on file existence/permissions with race window",
+          cwes: ["CWE-367"],
+        },
+        {
+          api: "Django get_or_create without select_for_update",
+          risk: "Race between check and create in concurrent requests",
+          cwes: ["CWE-362"],
+        },
       ],
       safePatterns: [
         { api: "threading.Lock / asyncio.Lock around shared state", why: "Proper synchronization" },
-        { api: "Django select_for_update()", why: "Database-level row locking prevents concurrent modification" },
-        { api: "Atomic database operations (F() expressions, update())", why: "Single SQL statement is atomic" },
+        {
+          api: "Django select_for_update()",
+          why: "Database-level row locking prevents concurrent modification",
+        },
+        {
+          api: "Atomic database operations (F() expressions, update())",
+          why: "Single SQL statement is atomic",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -272,8 +401,10 @@ export const pythonProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Double-spend via Django balance update race",
-          vulnerableCode: 'def withdraw(request):\n    account = Account.objects.get(user=request.user)\n    if account.balance >= amount:\n        account.balance -= amount\n        account.save()',
-          explanation: "Two concurrent requests both read the same balance, both pass the check, both subtract — double withdrawal. Fix: use select_for_update() or F() expressions.",
+          vulnerableCode:
+            "def withdraw(request):\n    account = Account.objects.get(user=request.user)\n    if account.balance >= amount:\n        account.balance -= amount\n        account.save()",
+          explanation:
+            "Two concurrent requests both read the same balance, both pass the check, both subtract — double withdrawal. Fix: use select_for_update() or F() expressions.",
         },
       ],
       antiHallucinationExtra: [

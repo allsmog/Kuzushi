@@ -1,15 +1,10 @@
+import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import { TaskRegistry } from "../../src/agents/registry.js";
-import type { AgentTask } from "../../src/agents/types.js";
 import { SELECTABLE_TASK_IDS } from "../../src/agents/tasks/task-selector.js";
-import { createEvent, generateRunId } from "../../src/bus/helpers.js";
-import { registerOrchestrator } from "../../src/bus/orchestrator.js";
-import type { OrchestratorDeps } from "../../src/bus/orchestrator/types.js";
+import type { AgentTask } from "../../src/agents/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
-import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
-import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
-import { getScanPlanSummary } from "../../src/cli/commands/scan.js";
 import type {
   PipelineCompleteEvent,
   PipelineErrorEvent,
@@ -29,19 +24,24 @@ import type {
   VerificationFindingQueuedEvent,
   VerificationStartEvent,
 } from "../../src/bus/events.js";
+import { createEvent, generateRunId } from "../../src/bus/helpers.js";
+import type { OrchestratorDeps } from "../../src/bus/orchestrator/types.js";
+import { registerOrchestrator } from "../../src/bus/orchestrator.js";
+import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
+import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
+import { getScanPlanSummary } from "../../src/cli/commands/scan.js";
+import type { Finding } from "../../src/scanners/types.js";
 import {
   createRun,
   getRun,
   initDb,
   updatePocHarnessResult,
-  updateVerificationResult,
   updateRunFindings,
   updateRunStatus,
+  updateVerificationResult,
   upsertFinding,
 } from "../../src/store.js";
-import type { Finding } from "../../src/scanners/types.js";
 import type { KuzushiConfig, ScanOpts, TriageResult } from "../../src/types.js";
-import Database from "better-sqlite3";
 
 function makeDeps(db: Database.Database, taskRegistry?: TaskRegistry): OrchestratorDeps {
   return { taskRegistry: taskRegistry ?? new TaskRegistry(), db, runtime: {} as AgentRuntime };
@@ -294,12 +294,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "findings",
       dependsOn: [],
       async run() {
-        return [{
-          ...makeFinding("fp-semgrep", 70),
-          filePath: "src/db.ts",
-          startLine: 44,
-          cwe: ["CWE-89"],
-        }];
+        return [
+          {
+            ...makeFinding("fp-semgrep", 70),
+            filePath: "src/db.ts",
+            startLine: 44,
+            cwe: ["CWE-89"],
+          },
+        ];
       },
     });
     taskRegistry.register({
@@ -308,14 +310,16 @@ describe("PipelineOrchestrator", () => {
       outputKind: "findings",
       dependsOn: [],
       async run() {
-        return [{
-          ...makeFinding("fp-codeql", 90),
-          taskId: "codeql",
-          ruleId: "js/sql-injection",
-          filePath: "src/db.ts",
-          startLine: 44,
-          cwe: ["CWE-89"],
-        }];
+        return [
+          {
+            ...makeFinding("fp-codeql", 90),
+            taskId: "codeql",
+            ruleId: "js/sql-injection",
+            filePath: "src/db.ts",
+            startLine: 44,
+            cwe: ["CWE-89"],
+          },
+        ];
       },
     });
 
@@ -377,10 +381,12 @@ describe("PipelineOrchestrator", () => {
       outputKind: "findings",
       dependsOn: [],
       async run() {
-        return [{
-          ...makeFinding("fp-semgrep", 50),
-          taskId: "semgrep",
-        }];
+        return [
+          {
+            ...makeFinding("fp-semgrep", 50),
+            taskId: "semgrep",
+          },
+        ];
       },
     });
     taskRegistry.register({
@@ -389,12 +395,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "findings",
       dependsOn: [],
       async run() {
-        return [{
-          ...makeFinding("fp-agentic", 80),
-          taskId: "agentic",
-          ruleId: "agentic.sql-injection",
-          scannerConfidence: "HIGH",
-        }];
+        return [
+          {
+            ...makeFinding("fp-agentic", 80),
+            taskId: "agentic",
+            ruleId: "agentic.sql-injection",
+            scannerConfidence: "HIGH",
+          },
+        ];
       },
     });
 
@@ -663,7 +671,12 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    const verificationQueued: Array<{ finding: any; triageResult: any; index: number; total: number }> = [];
+    const verificationQueued: Array<{
+      finding: any;
+      triageResult: any;
+      index: number;
+      total: number;
+    }> = [];
     bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", (event) => {
       if (event.meta.runId === runId) {
         verificationQueued.push(event.payload);
@@ -1451,7 +1464,9 @@ describe("PipelineOrchestrator", () => {
       "fp-first",
       "fp-second",
     ]);
-    expect(persistedCheckpoint.every((finding: Finding) => typeof finding.adjustedScore === "number")).toBe(true);
+    expect(
+      persistedCheckpoint.every((finding: Finding) => typeof finding.adjustedScore === "number"),
+    ).toBe(true);
 
     await bus.close();
     db.close();
@@ -1677,7 +1692,9 @@ describe("PipelineOrchestrator", () => {
       outputKind: "findings",
       dependsOn: ["context-gatherer"],
       async run(_input, context) {
-        const seeded = context.upstreamOutputs.get("context-gatherer") as Record<string, unknown> | undefined;
+        const seeded = context.upstreamOutputs.get("context-gatherer") as
+          | Record<string, unknown>
+          | undefined;
         if (!seeded || !("repoContext" in seeded)) {
           throw new Error("missing seeded context");
         }
@@ -1733,22 +1750,25 @@ describe("PipelineOrchestrator", () => {
           tasks: [],
         },
         seedTaskOutputs: new Map([
-          ["context-gatherer", {
-            repoContext: {
-              languages: ["TypeScript"],
-              frameworks: ["Express"],
-              authPatterns: ["JWT"],
-              sanitizationLibs: [],
-              ormOrDb: [],
-              entryPoints: ["src/api.ts"],
+          [
+            "context-gatherer",
+            {
+              repoContext: {
+                languages: ["TypeScript"],
+                frameworks: ["Express"],
+                authPatterns: ["JWT"],
+                sanitizationLibs: [],
+                ormOrDb: [],
+                entryPoints: ["src/api.ts"],
+              },
+              fileIndex: {
+                tree: [{ path: "src/api.ts" }],
+                totalFiles: 1,
+                truncated: false,
+                patternMatches: {},
+              },
             },
-            fileIndex: {
-              tree: [{ path: "src/api.ts" }],
-              totalFiles: 1,
-              truncated: false,
-              patternMatches: {},
-            },
-          }],
+          ],
         ]),
       }),
     );
@@ -1802,7 +1822,9 @@ describe("PipelineOrchestrator", () => {
       dependsOn: ["context-gatherer"],
       async run() {
         return {
-          customMiddleware: [{ name: "auth", filePath: "src/middleware/auth.ts", purpose: "auth gate" }],
+          customMiddleware: [
+            { name: "auth", filePath: "src/middleware/auth.ts", purpose: "auth gate" },
+          ],
           customSanitizers: [],
           trustBoundaries: [],
           dataClassifications: [],
@@ -1845,9 +1867,7 @@ describe("PipelineOrchestrator", () => {
 
     const triageBatchQueued = await triageBatchQueuedPromise;
     expect(triageBatchQueued.payload.enrichedContext).toMatchObject({
-      customMiddleware: [
-        { name: "auth", filePath: "src/middleware/auth.ts" },
-      ],
+      customMiddleware: [{ name: "auth", filePath: "src/middleware/auth.ts" }],
       architecturalNotes: ["Background jobs process user uploads."],
     });
 
@@ -1952,7 +1972,9 @@ describe("PipelineOrchestrator", () => {
     expect(taskStarts).toContain("task-selector");
     expect(taskStarts).toContain("code-config-detect");
     expect(taskStarts).toContain("secrets-crypto-detect");
-    expect(triageBatchQueued.payload.findings.map((finding) => finding.fingerprint)).toEqual(["fp-dynamic"]);
+    expect(triageBatchQueued.payload.findings.map((finding) => finding.fingerprint)).toEqual([
+      "fp-dynamic",
+    ]);
 
     await bus.close();
     db.close();
@@ -2109,7 +2131,7 @@ describe("PipelineOrchestrator", () => {
     const db = initDb(":memory:");
 
     const taskRegistry = new TaskRegistry();
-    let upstreamFromSemgrep: unknown = undefined;
+    let upstreamFromSemgrep: unknown;
 
     const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
       id: "semgrep",
@@ -2367,7 +2389,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "custom",
       dependsOn: [],
       async run() {
-        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
       },
     };
     const failingSelectorTask: AgentTask<ScanOpts, unknown> = {
@@ -2433,7 +2462,9 @@ describe("PipelineOrchestrator", () => {
 
     // Despite task-selector failing, the fallback should enable selectable tasks
     expect(taskStarts).toContain("secrets-crypto-detect");
-    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-fallback-secrets");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain(
+      "fp-fallback-secrets",
+    );
 
     await bus.close();
     db.close();
@@ -2450,7 +2481,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "custom",
       dependsOn: [],
       async run() {
-        return { languages: ["TypeScript"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+        return {
+          languages: ["TypeScript"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
       },
     };
     const selectorTask: AgentTask<ScanOpts, unknown> = {
@@ -2633,7 +2671,9 @@ describe("PipelineOrchestrator", () => {
     db.close();
   });
 
-  it("runs all explicitly listed tasks when dynamic selection is disabled", { timeout: 15_000 }, async () => {
+  it("runs all explicitly listed tasks when dynamic selection is disabled", {
+    timeout: 15_000,
+  }, async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
@@ -2644,7 +2684,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "custom",
       dependsOn: [],
       async run() {
-        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
       },
     };
     const selectorTask: AgentTask<ScanOpts, unknown> = {
@@ -2723,13 +2770,19 @@ describe("PipelineOrchestrator", () => {
     // Both selectable tasks ran
     expect(taskStarts).toContain("secrets-crypto-detect");
     expect(taskStarts).toContain("prototype-pollution-detect");
-    const scanPlan = getScanPlanSummary({
-      ...makeConfig(),
-      enableDynamicTaskSelection: false,
-      tasks: taskList,
-    }, { ...makeScanOpts(), tasks: taskList }, taskRegistry);
+    const scanPlan = getScanPlanSummary(
+      {
+        ...makeConfig(),
+        enableDynamicTaskSelection: false,
+        tasks: taskList,
+      },
+      { ...makeScanOpts(), tasks: taskList },
+      taskRegistry,
+    );
     expect(scanPlan.dynamicSelectionActive).toBe(false);
-    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-proto-compat");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain(
+      "fp-proto-compat",
+    );
 
     await bus.close();
     db.close();
@@ -2746,7 +2799,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "custom",
       dependsOn: [],
       async run() {
-        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
       },
     };
     const selectorTask: AgentTask<ScanOpts, unknown> = {
@@ -2843,7 +2903,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "custom",
       dependsOn: [],
       async run() {
-        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
       },
     };
     const emptySelectorTask: AgentTask<ScanOpts, unknown> = {
@@ -2909,7 +2976,9 @@ describe("PipelineOrchestrator", () => {
 
     // Despite empty recommendations, fallback should enable all selectable tasks
     expect(taskStarts).toContain("secrets-crypto-detect");
-    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-empty-fallback");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain(
+      "fp-empty-fallback",
+    );
 
     await bus.close();
     db.close();
@@ -2926,7 +2995,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "custom",
       dependsOn: [],
       async run() {
-        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
       },
     };
     const selectorTask: AgentTask<ScanOpts, unknown> = {
@@ -3026,7 +3102,14 @@ describe("PipelineOrchestrator", () => {
       dependsOn: [],
       async run() {
         return {
-          repoContext: { languages: ["TypeScript"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+          repoContext: {
+            languages: ["TypeScript"],
+            frameworks: [],
+            authPatterns: [],
+            sanitizationLibs: [],
+            ormOrDb: [],
+            entryPoints: [],
+          },
           fileIndex: { tree: [], totalFiles: 0, truncated: false, patternMatches: {} },
         };
       },
@@ -3118,7 +3201,9 @@ describe("PipelineOrchestrator", () => {
     await completePromise;
 
     expect(taskStarts).toContain("threat-model-randori");
-    expect(taskStarts.indexOf("threat-model-randori")).toBeLessThan(taskStarts.indexOf("ssrf-detect"));
+    expect(taskStarts.indexOf("threat-model-randori")).toBeLessThan(
+      taskStarts.indexOf("ssrf-detect"),
+    );
     expect(ssrfUpstream?.has("threat-model-randori")).toBe(true);
 
     await bus.close();
@@ -3137,7 +3222,14 @@ describe("PipelineOrchestrator", () => {
       dependsOn: [],
       async run() {
         return {
-          repoContext: { languages: ["TypeScript"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+          repoContext: {
+            languages: ["TypeScript"],
+            frameworks: [],
+            authPatterns: [],
+            sanitizationLibs: [],
+            ormOrDb: [],
+            entryPoints: [],
+          },
           fileIndex: { tree: [], totalFiles: 0, truncated: false, patternMatches: {} },
         };
       },
@@ -3227,7 +3319,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "custom",
       dependsOn: [],
       async run() {
-        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
       },
     };
     const failingSelectorTask: AgentTask<ScanOpts, unknown> = {
@@ -3311,7 +3410,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "custom",
       dependsOn: [],
       async run() {
-        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
       },
     };
     const selectorTask: AgentTask<ScanOpts, unknown> = {
@@ -3392,7 +3498,9 @@ describe("PipelineOrchestrator", () => {
 
     // secrets-crypto-detect failed, so fallback should add other selectable tasks
     expect(taskStarts).toContain("ssrf-detect");
-    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-fallback-ssrf");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain(
+      "fp-fallback-ssrf",
+    );
 
     await bus.close();
     db.close();
@@ -3487,7 +3595,14 @@ describe("PipelineOrchestrator", () => {
       outputKind: "custom",
       dependsOn: [],
       async run() {
-        return { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] };
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
       },
     };
     const selectorTask: AgentTask<ScanOpts, unknown> = {
@@ -3605,7 +3720,11 @@ describe("PipelineOrchestrator", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    const config: KuzushiConfig = { ...makeConfig(), enableContextGathering: false, tasks: ["dependent-task"] };
+    const config: KuzushiConfig = {
+      ...makeConfig(),
+      enableContextGathering: false,
+      tasks: ["dependent-task"],
+    };
 
     // Pipeline should NOT crash — context-gatherer kept because dependent-task needs it
     const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
@@ -3718,7 +3837,7 @@ describe("PipelineOrchestrator", () => {
 
     // Verification queue should be ordered: high-score (90), mid-score (60), low-score (30)
     expect(verificationQueued.length).toBeGreaterThanOrEqual(1);
-    const queuedFingerprints = verificationQueued.map(q => q.finding.fingerprint);
+    const queuedFingerprints = verificationQueued.map((q) => q.finding.fingerprint);
     expect(queuedFingerprints[0]).toBe("fp-high-score");
     if (queuedFingerprints.length >= 2) {
       expect(queuedFingerprints[1]).toBe("fp-mid-score");
@@ -3730,5 +3849,4 @@ describe("PipelineOrchestrator", () => {
     await bus.close();
     db.close();
   });
-
 });

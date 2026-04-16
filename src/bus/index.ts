@@ -2,25 +2,25 @@ import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import { createDefaultKnowledgeRegistry } from "../knowledge/index.js";
+import { createPocExecutor } from "../poc-executor/index.js";
 import type { KuzushiConfig } from "../types.js";
 import { createBus } from "./adapters/index.js";
 import { registerOrchestrator } from "./orchestrator.js";
 import type { MessageBus } from "./types.js";
 import { registerAuditWorker } from "./workers/audit-worker.js";
+import { registerDynamicAnalysisWorker } from "./workers/dynamic-analysis-worker.js";
+import { registerGitHubWorker } from "./workers/github-worker.js";
+import { registerPatchVerifyWorker } from "./workers/patch-verify-worker.js";
+import { registerPatchWorker } from "./workers/patch-worker.js";
+import { registerPocExecutorWorker } from "./workers/poc-executor-worker.js";
+import { registerPocHarnessWorker } from "./workers/poc-harness-worker.js";
 import { registerReportWorker } from "./workers/report-worker.js";
-import { registerTaintAnalysisArtifactWorker } from "./workers/taint-analysis-artifact-worker.js";
 import { registerScanWorker } from "./workers/scan-worker.js";
 import { registerStoreWorker } from "./workers/store-worker.js";
-import { registerTriageWorker } from "./workers/triage-worker.js";
-import { registerPocHarnessWorker } from "./workers/poc-harness-worker.js";
-import { registerPocExecutorWorker } from "./workers/poc-executor-worker.js";
-import { registerVerificationWorker } from "./workers/verification-worker.js";
+import { registerTaintAnalysisArtifactWorker } from "./workers/taint-analysis-artifact-worker.js";
 import { registerTaintAnalysisRefinementWorker } from "./workers/taint-analysis-refinement-worker.js";
-import { registerDynamicAnalysisWorker } from "./workers/dynamic-analysis-worker.js";
-import { registerPatchWorker } from "./workers/patch-worker.js";
-import { registerPatchVerifyWorker } from "./workers/patch-verify-worker.js";
-import { registerGitHubWorker } from "./workers/github-worker.js";
-import { createPocExecutor } from "../poc-executor/index.js";
+import { registerTriageWorker } from "./workers/triage-worker.js";
+import { registerVerificationWorker } from "./workers/verification-worker.js";
 
 export interface RegisterWorkersDeps {
   taskRegistry: TaskRegistry;
@@ -31,13 +31,18 @@ export interface RegisterWorkersDeps {
 }
 
 export function shouldRegisterPocExecutorWorker(config: KuzushiConfig): boolean {
-  return config.pocHarness === true
-    || config.pocExecute === true
-    || (config.verify === true && (config.verifyRefinementMaxIterations ?? 1) > 1);
+  return (
+    config.pocHarness === true ||
+    config.pocExecute === true ||
+    (config.verify === true && (config.verifyRefinementMaxIterations ?? 1) > 1)
+  );
 }
 
 /** Register orchestrator + all built-in workers on a bus instance. */
-export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersDeps): Promise<void> {
+export async function registerAllWorkers(
+  bus: MessageBus,
+  deps: RegisterWorkersDeps,
+): Promise<void> {
   const { taskRegistry } = deps;
   const knowledgeRegistry = createDefaultKnowledgeRegistry();
 
@@ -131,25 +136,29 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
     });
   }
 
-  registerReportWorker(bus, {
-    db: deps.db,
-    config: deps.config,
-  }, deps.uiStore);
+  registerReportWorker(
+    bus,
+    {
+      db: deps.db,
+      config: deps.config,
+    },
+    deps.uiStore,
+  );
 }
 
-export { createBus };
-export * from "./types.js";
+export * from "./adapters/in-process.js";
 export * from "./events.js";
 export * from "./helpers.js";
 export * from "./orchestrator.js";
-export * from "./adapters/in-process.js";
-export * from "./workers/scan-worker.js";
-export * from "./workers/triage-worker.js";
-export * from "./workers/verification-worker.js";
-export * from "./workers/poc-harness-worker.js";
-export * from "./workers/store-worker.js";
+export * from "./types.js";
 export * from "./workers/audit-worker.js";
+export * from "./workers/dynamic-analysis-worker.js";
+export * from "./workers/poc-harness-worker.js";
 export * from "./workers/report-worker.js";
+export * from "./workers/scan-worker.js";
+export * from "./workers/store-worker.js";
 export * from "./workers/taint-analysis-artifact-worker.js";
 export * from "./workers/taint-analysis-refinement-worker.js";
-export * from "./workers/dynamic-analysis-worker.js";
+export * from "./workers/triage-worker.js";
+export * from "./workers/verification-worker.js";
+export { createBus };

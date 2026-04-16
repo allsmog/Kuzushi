@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AuthError, RateLimitError, TransientError } from "../src/errors.js";
 import { withRetry } from "../src/retry.js";
-import { TransientError, AuthError, RateLimitError } from "../src/errors.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -65,9 +65,7 @@ describe("withRetry", () => {
     vi.useFakeTimers();
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
 
-    const fn = vi
-      .fn<() => Promise<string>>()
-      .mockRejectedValue(new TransientError("ECONNRESET"));
+    const fn = vi.fn<() => Promise<string>>().mockRejectedValue(new TransientError("ECONNRESET"));
 
     const promise = withRetry(fn, {
       maxRetries: 3,
@@ -87,25 +85,21 @@ describe("withRetry", () => {
   });
 
   it("does not retry auth errors", async () => {
-    const fn = vi
-      .fn<() => Promise<string>>()
-      .mockRejectedValue(new AuthError("401 Unauthorized"));
+    const fn = vi.fn<() => Promise<string>>().mockRejectedValue(new AuthError("401 Unauthorized"));
 
-    await expect(
-      withRetry(fn, { maxRetries: 3, backoffMs: 50, multiplier: 2 }),
-    ).rejects.toThrow("401 Unauthorized");
+    await expect(withRetry(fn, { maxRetries: 3, backoffMs: 50, multiplier: 2 })).rejects.toThrow(
+      "401 Unauthorized",
+    );
 
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
   it("does not retry unclassified errors (classified as fatal)", async () => {
-    const fn = vi
-      .fn<() => Promise<string>>()
-      .mockRejectedValue(new Error("some unknown error"));
+    const fn = vi.fn<() => Promise<string>>().mockRejectedValue(new Error("some unknown error"));
 
-    await expect(
-      withRetry(fn, { maxRetries: 3, backoffMs: 50, multiplier: 2 }),
-    ).rejects.toThrow("some unknown error");
+    await expect(withRetry(fn, { maxRetries: 3, backoffMs: 50, multiplier: 2 })).rejects.toThrow(
+      "some unknown error",
+    );
 
     expect(fn).toHaveBeenCalledTimes(1);
   });

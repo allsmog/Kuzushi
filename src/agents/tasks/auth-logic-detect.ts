@@ -1,12 +1,15 @@
-import { runStructuredAgentQuery, resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
-import { attachTaskOutputMeta } from "../../task-output-meta.js";
+import {
+  resolveDefaultReadOnlyTools,
+  runStructuredAgentQuery,
+} from "../../agent-runtime/execution.js";
+import { getLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
+import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { resolveTaskRuntime, resolveTaskModel } from "./runtime-overrides.js";
-import { resolveThreatModelOutput } from "./threat-model-guidance.js";
-import { getLogger } from "../../logger.js";
 import { computeDetectionFingerprint } from "./detection-task-utils.js";
+import { resolveTaskModel, resolveTaskRuntime } from "./runtime-overrides.js";
+import { resolveThreatModelOutput } from "./threat-model-guidance.js";
 
 const log = getLogger("auth-logic-detect");
 
@@ -20,7 +23,15 @@ const AUTH_LOGIC_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "filePath", "startLine", "severity", "description", "attackVector", "cwe"],
+        required: [
+          "title",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "attackVector",
+          "cwe",
+        ],
         properties: {
           title: { type: "string" },
           filePath: { type: "string" },
@@ -79,7 +90,9 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
       return [];
     }
 
-    log.info(`Starting auth logic analysis (model=${model}, routes=${routes.length}, threats=${elevationThreats.length})`);
+    log.info(
+      `Starting auth logic analysis (model=${model}, routes=${routes.length}, threats=${elevationThreats.length})`,
+    );
 
     const prompt = buildAuthLogicPrompt(routes, elevationThreats, boundaries, context.repoName);
 
@@ -98,9 +111,13 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
         return [];
       }
 
-      const rawFindings = Array.isArray(structuredOutput["findings"]) ? structuredOutput["findings"] : [];
+      const rawFindings = Array.isArray(structuredOutput["findings"])
+        ? structuredOutput["findings"]
+        : [];
       const findings: Finding[] = rawFindings
-        .filter((f): f is Record<string, unknown> => isRecord(f) && typeof f["filePath"] === "string")
+        .filter(
+          (f): f is Record<string, unknown> => isRecord(f) && typeof f["filePath"] === "string",
+        )
         .map((f) => {
           const filePath = String(f["filePath"]);
           const startLine = typeof f["startLine"] === "number" ? f["startLine"] : 1;
@@ -108,8 +125,19 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
 
           return {
             taskId: "auth-logic-detect",
-            fingerprint: computeDetectionFingerprint([context.repoName, "auth-logic", filePath, String(f["title"]), String(startLine)]),
-            ruleId: "auth-logic/" + (String(f["title"] ?? "missing-authz")).toLowerCase().replace(/\s+/g, "-").slice(0, 50),
+            fingerprint: computeDetectionFingerprint([
+              context.repoName,
+              "auth-logic",
+              filePath,
+              String(f["title"]),
+              String(startLine),
+            ]),
+            ruleId:
+              "auth-logic/" +
+              String(f["title"] ?? "missing-authz")
+                .toLowerCase()
+                .replace(/\s+/g, "-")
+                .slice(0, 50),
             filePath,
             startLine,
             severity: normalizeSeverity(f["severity"]),
@@ -122,7 +150,9 @@ export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
             cwe: cweList,
             score: normalizeSeverity(f["severity"]) === "ERROR" ? 85 : 65,
             proofState: "symbolic_only",
-            engineProvenance: [{ kind: "agentic", detail: "LLM-driven auth-logic-detect analysis" }],
+            engineProvenance: [
+              { kind: "agentic", detail: "LLM-driven auth-logic-detect analysis" },
+            ],
           };
         });
 
@@ -180,8 +210,9 @@ function extractElevationThreats(strideOutput: unknown): Array<Record<string, un
   if (!isRecord(strideOutput)) return [];
   const doc = isRecord(strideOutput["document"]) ? strideOutput["document"] : strideOutput;
   const threats = Array.isArray(doc["threats"]) ? doc["threats"] : [];
-  return threats.filter((t): t is Record<string, unknown> =>
-    isRecord(t) && (t["category"] === "elevation-of-privilege" || t["category"] === "spoofing"),
+  return threats.filter(
+    (t): t is Record<string, unknown> =>
+      isRecord(t) && (t["category"] === "elevation-of-privilege" || t["category"] === "spoofing"),
   );
 }
 

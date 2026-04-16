@@ -1,34 +1,40 @@
-import type Database from "better-sqlite3";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type Database from "better-sqlite3";
 import {
   printResumeInfo,
   printScanStart,
   printSummary,
   printTriageProgress,
 } from "../../report.js";
+import { writeCsvReport } from "../../report-csv.js";
+import { writeJsonReport } from "../../report-json.js";
+import { writeJsonlReport } from "../../report-jsonl.js";
 import { generateMarkdownReport } from "../../report-markdown.js";
 import { generateSarifReport } from "../../report-sarif.js";
-import { writeJsonReport } from "../../report-json.js";
-import { writeCsvReport } from "../../report-csv.js";
-import { writeJsonlReport } from "../../report-jsonl.js";
+import { getRateLimitRegistry } from "../../scheduler/index.js";
 import type { KuzushiConfig } from "../../types.js";
+import { buildScanNotification, sendCompletionNotification } from "../../ui/notify.js";
+import { emitOutputNotice } from "../../ui/output.js";
+import type { UIStore } from "../../ui/state.js";
+import { buildSummaryData } from "../../ui/summary-data.js";
 import type {
   BudgetExceededEvent,
   BudgetWarningEvent,
-  PipelineStartEvent,
   PipelineErrorEvent,
+  PipelineStartEvent,
   PocHarnessAgentActivityEvent,
+  PocHarnessErrorEvent,
   PocHarnessResultEvent,
   PocHarnessStartEvent,
   PromptReportEvent,
   ReportRequestedEvent,
   ScanAgentActivityEvent,
   ScanCompleteEvent,
-  TaskStartEvent,
-  TaskProgressEvent,
   TaskCompleteEvent,
   TaskErrorEvent,
+  TaskProgressEvent,
+  TaskStartEvent,
   TriageAgentActivityEvent,
   TriageErrorEvent,
   TriageResultEvent,
@@ -37,15 +43,9 @@ import type {
   VerificationErrorEvent,
   VerificationResultEvent,
   VerificationStartEvent,
-  PocHarnessErrorEvent,
 } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import type { UIStore } from "../../ui/state.js";
-import { buildSummaryData } from "../../ui/summary-data.js";
-import { getRateLimitRegistry } from "../../scheduler/index.js";
-import { sendCompletionNotification, buildScanNotification } from "../../ui/notify.js";
-import { emitOutputNotice } from "../../ui/output.js";
 
 /** Task IDs classified as support/setup work (not primary detectors). */
 const SUPPORT_TASK_IDS = new Set([
@@ -90,15 +90,14 @@ export function registerReportWorker(
   bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     const scanOnly = event.payload.context.postProcessMode === "scan-only";
-    state.tasks = event.payload.scanOpts.tasks !== undefined
-      ? [...event.payload.scanOpts.tasks]
-      : [...event.payload.config.tasks];
+    state.tasks =
+      event.payload.scanOpts.tasks !== undefined
+        ? [...event.payload.scanOpts.tasks]
+        : [...event.payload.config.tasks];
 
     if (store) {
       // Build pipeline stages from config
-      const stageList: Array<{ id: string; label: string }> = [
-        { id: "scan", label: "Scan" },
-      ];
+      const stageList: Array<{ id: string; label: string }> = [{ id: "scan", label: "Scan" }];
       if (!scanOnly) {
         stageList.push({ id: "triage", label: "Triage" });
         if (event.payload.config.verify) {
@@ -130,13 +129,14 @@ export function registerReportWorker(
       // Bridge rate limit events to UIStore
       try {
         const registry = getRateLimitRegistry();
-        registry.on("concurrency:changed", (data: { model: string; from: number; to: number; reason: string }) => {
-          store.update({
-            throttle: data.to < data.from
-              ? { concurrency: data.to, reason: data.reason }
-              : null,
-          });
-        });
+        registry.on(
+          "concurrency:changed",
+          (data: { model: string; from: number; to: number; reason: string }) => {
+            store.update({
+              throttle: data.to < data.from ? { concurrency: data.to, reason: data.reason } : null,
+            });
+          },
+        );
       } catch {
         // Rate limit registry may not be configured — ignore
       }
@@ -156,7 +156,9 @@ export function registerReportWorker(
     if (store) {
       store.update({ tasks: state.tasks, phase: "scanning", mode: "running" });
       // Add scanner as a sub-task branch under the Scan stage
-      const role = SUPPORT_TASK_IDS.has(event.payload.taskId) ? "support" as const : "primary" as const;
+      const role = SUPPORT_TASK_IDS.has(event.payload.taskId)
+        ? ("support" as const)
+        : ("primary" as const);
       store.upsertSubTask("scan", {
         id: event.payload.taskId,
         label: event.payload.taskId,
@@ -170,14 +172,16 @@ export function registerReportWorker(
 
   bus.subscribe<TaskCompleteEvent>("task:complete", (event) => {
     if (store) {
-      const existing = store.getState().stages
-        .find((stage) => stage.id === "scan")
+      const existing = store
+        .getState()
+        .stages.find((stage) => stage.id === "scan")
         ?.subTasks.find((task) => task.id === event.payload.taskId);
       const findingCount = existing?.findingCount ?? 0;
       const lastFinding = existing?.lastFinding;
-      const detail = findingCount > 0
-        ? `${findingCount} finding${findingCount === 1 ? "" : "s"}${lastFinding ? ` · ${truncate(lastFinding, 60)}` : ""}`
-        : "complete";
+      const detail =
+        findingCount > 0
+          ? `${findingCount} finding${findingCount === 1 ? "" : "s"}${lastFinding ? ` · ${truncate(lastFinding, 60)}` : ""}`
+          : "complete";
       store.clearScanActivity(event.payload.taskId);
       store.upsertSubTask("scan", {
         id: event.payload.taskId,
@@ -209,8 +213,9 @@ export function registerReportWorker(
 
   bus.subscribe<TaskErrorEvent>("task:error", (event) => {
     if (store) {
-      const existing = store.getState().stages
-        .find((stage) => stage.id === "scan")
+      const existing = store
+        .getState()
+        .stages.find((stage) => stage.id === "scan")
         ?.subTasks.find((task) => task.id === event.payload.taskId);
       const prevRetries = existing?.retryCount ?? 0;
       store.clearScanActivity(event.payload.taskId);
@@ -240,7 +245,10 @@ export function registerReportWorker(
       store.update({ totalFindings: state.totalFindings });
       // Signal that scan tasks are done but post-processing (dedup, filter, rank) is happening.
       const count = event.payload.totalFindings;
-      store.updateStageDetail("scan", `${count} finding${count === 1 ? "" : "s"} · deduplicating and ranking`);
+      store.updateStageDetail(
+        "scan",
+        `${count} finding${count === 1 ? "" : "s"} · deduplicating and ranking`,
+      );
       maybeUpdateStartBanner(store, state, event.payload.context.repoName);
     } else {
       maybePrintStartBanner(state, event.payload.context.repoName);
@@ -256,16 +264,17 @@ export function registerReportWorker(
       const total = state.totalFindings ?? 0;
       const selected = event.payload.findingCount;
       const filtered = total - selected - (event.payload.skippedAlreadyTriaged ?? 0);
-      const triageDetail = filtered > 0
-        ? `${selected} of ${total} findings selected · ${filtered} filtered`
-        : `${selected} findings via ${event.payload.model}`;
+      const triageDetail =
+        filtered > 0
+          ? `${selected} of ${total} findings selected · ${filtered} filtered`
+          : `${selected} findings via ${event.payload.model}`;
       store.activateStage("triage", triageDetail);
 
       const skipped = event.payload.skippedAlreadyTriaged ?? 0;
       if (skipped > 0) {
         store.update({
           resumeDiff: {
-            previousFindingCount: (state.totalFindings ?? 0),
+            previousFindingCount: state.totalFindings ?? 0,
             previousTriagedCount: skipped,
             newFindings: event.payload.findingCount,
             skipped,
@@ -287,7 +296,9 @@ export function registerReportWorker(
     } else {
       maybePrintStartBanner(state, event.payload.context.repoName);
       if (event.payload.findingCount > 0) {
-        console.log(`  Triaging ${event.payload.findingCount} findings via ${event.payload.model}...\n`);
+        console.log(
+          `  Triaging ${event.payload.findingCount} findings via ${event.payload.model}...\n`,
+        );
       }
     }
   });
@@ -328,14 +339,19 @@ export function registerReportWorker(
       store.clearAgentActivity(finding.fingerprint);
     } else {
       const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
-      console.log(`  [${index}/${total}] TRIAGE ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`);
+      console.log(
+        `  [${index}/${total}] TRIAGE ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`,
+      );
       console.log(`    ${truncate(error, 160)}`);
     }
   });
 
   bus.subscribe<VerificationStartEvent>("verification:start", (event) => {
     if (store) {
-      store.activateStage("verify", `${event.payload.findingCount} findings via ${event.payload.model}`);
+      store.activateStage(
+        "verify",
+        `${event.payload.findingCount} findings via ${event.payload.model}`,
+      );
       store.update({
         phase: "verifying",
         model: event.payload.model,
@@ -345,7 +361,9 @@ export function registerReportWorker(
       });
     } else {
       if (event.payload.findingCount > 0) {
-        console.log(`  Verifying ${event.payload.findingCount} findings via ${event.payload.model}...\n`);
+        console.log(
+          `  Verifying ${event.payload.findingCount} findings via ${event.payload.model}...\n`,
+        );
       }
     }
   });
@@ -366,11 +384,14 @@ export function registerReportWorker(
       store.clearAgentActivity(result.fingerprint);
     } else {
       const status = result.exploitable ? "EXPLOITABLE" : "not exploitable";
-      const cost = result.verifyCostUsd && result.verifyCostUsd > 0
-        ? ` $${result.verifyCostUsd.toFixed(4)}`
-        : "";
+      const cost =
+        result.verifyCostUsd && result.verifyCostUsd > 0
+          ? ` $${result.verifyCostUsd.toFixed(4)}`
+          : "";
       const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
-      console.log(`  [${index}/${total}] ${status}${cost}${retrySuffix} ${result.fingerprint.slice(0, 12)}...`);
+      console.log(
+        `  [${index}/${total}] ${status}${cost}${retrySuffix} ${result.fingerprint.slice(0, 12)}...`,
+      );
     }
   });
 
@@ -390,14 +411,19 @@ export function registerReportWorker(
       store.clearAgentActivity(finding.fingerprint);
     } else {
       const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
-      console.log(`  [${index}/${total}] VERIFY ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`);
+      console.log(
+        `  [${index}/${total}] VERIFY ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`,
+      );
       console.log(`    ${truncate(error, 160)}`);
     }
   });
 
   bus.subscribe<PocHarnessStartEvent>("poc-harness:start", (event) => {
     if (store) {
-      store.activateStage("poc", `${event.payload.findingCount} harnesses via ${event.payload.model}`);
+      store.activateStage(
+        "poc",
+        `${event.payload.findingCount} harnesses via ${event.payload.model}`,
+      );
       store.update({
         phase: "poc",
         model: event.payload.model,
@@ -407,7 +433,9 @@ export function registerReportWorker(
       });
     } else {
       if (event.payload.findingCount > 0) {
-        console.log(`  Generating ${event.payload.findingCount} PoC harnesses via ${event.payload.model}...\n`);
+        console.log(
+          `  Generating ${event.payload.findingCount} PoC harnesses via ${event.payload.model}...\n`,
+        );
       }
     }
   });
@@ -429,10 +457,8 @@ export function registerReportWorker(
       store.clearAgentActivity(result.fingerprint);
     } else {
       const status = result.skipped ? "SKIPPED" : "GENERATED";
-      const parsed = result.skipped ? "" : (result.parsed ? " parsed" : " parse-error");
-      const cost = result.costUsd && result.costUsd > 0
-        ? ` $${result.costUsd.toFixed(4)}`
-        : "";
+      const parsed = result.skipped ? "" : result.parsed ? " parsed" : " parse-error";
+      const cost = result.costUsd && result.costUsd > 0 ? ` $${result.costUsd.toFixed(4)}` : "";
       const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
       console.log(
         `  [${index}/${total}] ${status}${parsed}${cost}${retrySuffix} ${result.fingerprint.slice(0, 12)}...`,
@@ -456,25 +482,37 @@ export function registerReportWorker(
       store.clearAgentActivity(finding.fingerprint);
     } else {
       const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
-      console.log(`  [${index}/${total}] POC ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`);
+      console.log(
+        `  [${index}/${total}] POC ERROR${retrySuffix} ${finding.fingerprint.slice(0, 12)}...`,
+      );
       console.log(`    ${truncate(error, 160)}`);
     }
   });
 
   // Agent activity — all three stages use the same pattern
-  const handleAgentActivity = (
-    event: { payload: { kind: string; index: number; total: number; toolName?: string; toolInput?: Record<string, unknown>; elapsedSeconds?: number; summary?: string; fingerprint?: string } },
-  ) => {
+  const handleAgentActivity = (event: {
+    payload: {
+      kind: string;
+      index: number;
+      total: number;
+      toolName?: string;
+      toolInput?: Record<string, unknown>;
+      elapsedSeconds?: number;
+      summary?: string;
+      fingerprint?: string;
+    };
+  }) => {
     const { kind, index, total, fingerprint } = event.payload;
 
     if (store && fingerprint) {
-      const detail = kind === "tool-start"
-        ? summarizeToolInput(event.payload.toolName, event.payload.toolInput)
-        : kind === "tool-complete"
-          ? event.payload.summary ?? undefined
-          : kind === "tool-progress"
-            ? undefined
-            : event.payload.summary ?? undefined;
+      const detail =
+        kind === "tool-start"
+          ? summarizeToolInput(event.payload.toolName, event.payload.toolInput)
+          : kind === "tool-complete"
+            ? (event.payload.summary ?? undefined)
+            : kind === "tool-progress"
+              ? undefined
+              : (event.payload.summary ?? undefined);
 
       store.addAgentActivity(fingerprint, {
         kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary",
@@ -524,13 +562,14 @@ export function registerReportWorker(
     const { kind, taskId, toolName, toolInput, elapsedSeconds, summary } = event.payload;
 
     if (store) {
-      const detail = kind === "tool-start"
-        ? summarizeToolInput(toolName, toolInput)
-        : kind === "tool-complete"
-          ? summary ?? undefined
-          : kind === "tool-progress"
-            ? undefined
-            : summary ?? undefined;
+      const detail =
+        kind === "tool-start"
+          ? summarizeToolInput(toolName, toolInput)
+          : kind === "tool-complete"
+            ? (summary ?? undefined)
+            : kind === "tool-progress"
+              ? undefined
+              : (summary ?? undefined);
 
       store.addScanActivity(taskId, {
         kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning",
@@ -563,7 +602,9 @@ export function registerReportWorker(
       return;
     }
 
-    console.log(`  ${event.payload.fatal ? "PIPELINE ERROR" : "PIPELINE WARNING"} ${truncate(event.payload.error, 140)}`);
+    console.log(
+      `  ${event.payload.fatal ? "PIPELINE ERROR" : "PIPELINE WARNING"} ${truncate(event.payload.error, 140)}`,
+    );
   });
 
   bus.subscribe<BudgetWarningEvent>("budget:warning", (event) => {
@@ -683,7 +724,9 @@ export function registerReportWorker(
         if (state.totalFindings === 0) {
           console.log("  No findings from tasks. Code looks clean.");
         } else if (scanOnly) {
-          console.log("  Scan-only run complete. Findings were saved as needs_review without triage.");
+          console.log(
+            "  Scan-only run complete. Findings were saved as needs_review without triage.",
+          );
         } else if ((state.selectedForTriage ?? 0) === 0) {
           console.log("  All findings already triaged. Nothing to do.");
         }
@@ -816,10 +859,7 @@ function notifyReportArtifact(store: UIStore | undefined, message: string, detai
   });
 }
 
-function getOrCreateRunState(
-  map: Map<string, RunReportState>,
-  runId: string,
-): RunReportState {
+function getOrCreateRunState(map: Map<string, RunReportState>, runId: string): RunReportState {
   const existing = map.get(runId);
   if (existing) {
     return existing;
@@ -848,7 +888,11 @@ function maybeUpdateStartBanner(store: UIStore, state: RunReportState, repoName:
 }
 
 function maybePrintStartBanner(state: RunReportState, repoName: string): void {
-  if (!state.resumePrinted && (state.skippedAlreadyTriaged ?? 0) > 0 && state.selectedForTriage != null) {
+  if (
+    !state.resumePrinted &&
+    (state.skippedAlreadyTriaged ?? 0) > 0 &&
+    state.selectedForTriage != null
+  ) {
     printResumeInfo(state.skippedAlreadyTriaged ?? 0, state.selectedForTriage);
     state.resumePrinted = true;
   }
@@ -946,13 +990,20 @@ function updateScanStageDetail(store: UIStore): void {
 /** Human-readable start detail for scan tasks. */
 function scanTaskStartDetail(taskId: string): string {
   switch (taskId) {
-    case "agentic": return "analyzing codebase";
-    case "semgrep": return "running rules";
-    case "codeql": return "building database";
-    case "context-gatherer": return "mapping attack surface";
-    case "context-enricher": return "enriching context";
-    case "threat-model-randori": return "modeling threats";
-    default: return "initializing";
+    case "agentic":
+      return "analyzing codebase";
+    case "semgrep":
+      return "running rules";
+    case "codeql":
+      return "building database";
+    case "context-gatherer":
+      return "mapping attack surface";
+    case "context-enricher":
+      return "enriching context";
+    case "threat-model-randori":
+      return "modeling threats";
+    default:
+      return "initializing";
   }
 }
 

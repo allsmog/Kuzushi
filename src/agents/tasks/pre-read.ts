@@ -43,7 +43,17 @@ const TASK_FILE_SPECS: Record<string, TaskFileSpec> = {
     namePatterns: [/\.graphql$/, /\.gql$/],
   },
   "supply-chain-detect": {
-    namePatterns: [/package\.json$/, /package-lock\.json$/, /go\.mod$/, /go\.sum$/, /requirements\.txt$/, /Cargo\.toml$/, /Cargo\.lock$/, /pom\.xml$/, /build\.gradle/],
+    namePatterns: [
+      /package\.json$/,
+      /package-lock\.json$/,
+      /go\.mod$/,
+      /go\.sum$/,
+      /requirements\.txt$/,
+      /Cargo\.toml$/,
+      /Cargo\.lock$/,
+      /pom\.xml$/,
+      /build\.gradle/,
+    ],
   },
   "sharp-edges-detect": {
     namePatterns: [/config\./, /\.env/, /default/, /options\./],
@@ -52,7 +62,10 @@ const TASK_FILE_SPECS: Record<string, TaskFileSpec> = {
   },
   "systems-hunt": {
     patternDomains: ["protocol-parser", "integer-boundary", "unsafe-memory", "hardening"],
-    pathFilter: (p) => /packet|segment|socket|tcp|udp|rpc|nfs|gss|codec|decode|parser|slice|frame|unsafe|ffi|guest|vmm|virt|copy|buffer/i.test(p),
+    pathFilter: (p) =>
+      /packet|segment|socket|tcp|udp|rpc|nfs|gss|codec|decode|parser|slice|frame|unsafe|ffi|guest|vmm|virt|copy|buffer/i.test(
+        p,
+      ),
   },
 };
 
@@ -133,9 +146,7 @@ export async function preReadFilesForTask(
       const content = await readFile(absPath, "utf-8");
       files.push({ path: relPath, content });
       totalBytes += Buffer.byteLength(content, "utf-8");
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
   return {

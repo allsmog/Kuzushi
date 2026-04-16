@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runConfigConfirmation, runCredentialPrompt, runSetupWizard } from "../../src/ui/setup.js";
-import { runInteractiveReview } from "../../src/ui/review.js";
-import { createUIStore } from "../../src/ui/state.js";
-import { getActionableFindings, initDb, upsertFinding } from "../../src/store.js";
 import type { Finding } from "../../src/scanners/types.js";
+import { getActionableFindings, initDb, upsertFinding } from "../../src/store.js";
 import type { TriageResult } from "../../src/types.js";
+import { runInteractiveReview } from "../../src/ui/review.js";
+import { runConfigConfirmation, runCredentialPrompt, runSetupWizard } from "../../src/ui/setup.js";
+import { createUIStore } from "../../src/ui/state.js";
 
 function makeFinding(fp: string): Finding {
   return {
@@ -43,7 +43,10 @@ describe("ui flow helpers", () => {
   });
 
   afterEach(() => {
-    Object.defineProperty(process.stdout, "isTTY", { value: originalStdoutIsTTY, configurable: true });
+    Object.defineProperty(process.stdout, "isTTY", {
+      value: originalStdoutIsTTY,
+      configurable: true,
+    });
   });
 
   it("exposes first-run wizard state through the shared store", async () => {
@@ -132,11 +135,12 @@ describe("ui flow helpers", () => {
     expect(wizard?.kind).toBe("wizard");
     expect(wizard?.repoRoot).toBe("/tmp/real-root");
 
-    wizard?.kind === "wizard" && wizard.onComplete({
-      preset: "fast",
-      model: "anthropic:claude-haiku-4-5",
-      saveLocation: "none",
-    });
+    wizard?.kind === "wizard" &&
+      wizard.onComplete({
+        preset: "fast",
+        model: "anthropic:claude-haiku-4-5",
+        saveLocation: "none",
+      });
 
     await expect(promise).resolves.toEqual({
       action: "proceed",
@@ -147,7 +151,13 @@ describe("ui flow helpers", () => {
 
   it("runs interactive review inside the main store and updates verdicts", async () => {
     const db = initDb(":memory:");
-    upsertFinding(db, makeFinding("fp-review"), makeResult("fp-review", "needs_review"), "repo", "HEAD");
+    upsertFinding(
+      db,
+      makeFinding("fp-review"),
+      makeResult("fp-review", "needs_review"),
+      "repo",
+      "HEAD",
+    );
 
     const store = createUIStore();
     const promise = runInteractiveReview(db, "repo", store);
@@ -169,13 +179,21 @@ describe("ui flow helpers", () => {
 
     expect(store.getState().review).toBeNull();
     expect(store.getState().mode).toBe("summary");
-    expect(getActionableFindings(db, "repo", { includeFalsePositives: true })[0]?.verdict).toBe("tp");
+    expect(getActionableFindings(db, "repo", { includeFalsePositives: true })[0]?.verdict).toBe(
+      "tp",
+    );
     db.close();
   });
 
   it("returns shell review sessions back to shell without clearing state", async () => {
     const db = initDb(":memory:");
-    upsertFinding(db, makeFinding("fp-shell-review"), makeResult("fp-shell-review", "needs_review"), "repo", "HEAD");
+    upsertFinding(
+      db,
+      makeFinding("fp-shell-review"),
+      makeResult("fp-shell-review", "needs_review"),
+      "repo",
+      "HEAD",
+    );
 
     const store = createUIStore();
     store.update({

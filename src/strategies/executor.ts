@@ -1,8 +1,8 @@
+import type { TaskContext } from "../agents/types.js";
 import { createLogger } from "../logger.js";
 import { toErrorMessage } from "../utils.js";
-import type { TaskContext } from "../agents/types.js";
-import type { StrategyRegistry } from "./registry.js";
 import type { CweStrategyProfile } from "./cwe-strategy-map.js";
+import type { StrategyRegistry } from "./registry.js";
 import type { MultiStrategyMode, StrategyInput, StrategyResult } from "./types.js";
 
 const log = createLogger({ stage: "multi-strategy" });
@@ -23,11 +23,16 @@ export function resolveMultiStrategyMode(config: Record<string, unknown>): Multi
 /** Resolve budget constraints from config. */
 export function resolveStrategyBudget(config: Record<string, unknown>): StrategyBudget {
   return {
-    totalUsd: typeof config["multiStrategyBudgetUsd"] === "number" ? config["multiStrategyBudgetUsd"] : 2.0,
-    perStrategyUsd: typeof config["multiStrategyPerStrategyBudgetUsd"] === "number"
-      ? config["multiStrategyPerStrategyBudgetUsd"]
-      : 0.50,
-    timeoutMs: typeof config["multiStrategyTimeoutMs"] === "number" ? config["multiStrategyTimeoutMs"] : 60_000,
+    totalUsd:
+      typeof config["multiStrategyBudgetUsd"] === "number" ? config["multiStrategyBudgetUsd"] : 2.0,
+    perStrategyUsd:
+      typeof config["multiStrategyPerStrategyBudgetUsd"] === "number"
+        ? config["multiStrategyPerStrategyBudgetUsd"]
+        : 0.5,
+    timeoutMs:
+      typeof config["multiStrategyTimeoutMs"] === "number"
+        ? config["multiStrategyTimeoutMs"]
+        : 60_000,
   };
 }
 
@@ -50,7 +55,7 @@ export async function executeStrategies(
     const promises = sortedStrategies.map(async (s) => {
       const strategy = registry.getById(s.strategyId);
       if (!strategy) return null;
-      const perBudget = budget.perStrategyUsd ?? (budget.totalUsd / sortedStrategies.length);
+      const perBudget = budget.perStrategyUsd ?? budget.totalUsd / sortedStrategies.length;
       try {
         return await withTimeout(
           strategy.run({ ...baseInput, budgetUsd: perBudget }, {}),

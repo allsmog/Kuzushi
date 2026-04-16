@@ -1,11 +1,11 @@
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { getCodeIntelligenceProvider } from "../../../src/analysis-support/index.js";
 import { gatherContextForRoot } from "../../../src/agents/tasks/context-gatherer.js";
 import { __systemsContextGathererInternals } from "../../../src/agents/tasks/systems-hunt/context.js";
 import { buildSystemsSurfacePack } from "../../../src/agents/tasks/systems-hunt/helpers.js";
+import { getCodeIntelligenceProvider } from "../../../src/analysis-support/index.js";
 
 const { rankSystemsSurfaces, inferSurfaceKind } = __systemsContextGathererInternals;
 
@@ -48,10 +48,12 @@ describe("systems-context-gatherer", () => {
   });
 
   it("infers hypervisor and unsafe surfaces from native hints", () => {
-    expect(inferSurfaceKind("src/vmm/guest_mem.rs", "unsafe { ptr::write(dst, val); }", "unsafe-memory"))
-      .toBe("hypervisor-boundary");
-    expect(inferSurfaceKind("src/codec/h264_slice.c", "slice_count++", "protocol-parser"))
-      .toBe("codec-parser");
+    expect(
+      inferSurfaceKind("src/vmm/guest_mem.rs", "unsafe { ptr::write(dst, val); }", "unsafe-memory"),
+    ).toBe("hypervisor-boundary");
+    expect(inferSurfaceKind("src/codec/h264_slice.c", "slice_count++", "protocol-parser")).toBe(
+      "codec-parser",
+    );
   });
 
   it("builds deterministic surface packs with related files and probe sites", async () => {
@@ -76,7 +78,12 @@ describe("systems-context-gatherer", () => {
       );
 
       const context = await gatherContextForRoot(repoRoot);
-      const surfaces = await rankSystemsSurfaces(context.fileIndex, context.repoContext, repoRoot, 5);
+      const surfaces = await rankSystemsSurfaces(
+        context.fileIndex,
+        context.repoContext,
+        repoRoot,
+        5,
+      );
       const provider = await getCodeIntelligenceProvider(repoRoot);
       const pack = await buildSystemsSurfacePack({
         repoRoot,
@@ -93,7 +100,9 @@ describe("systems-context-gatherer", () => {
       expect(pack.compareCastSites.length).toBeGreaterThan(0);
       expect(pack.sentinelConstants.some((entry) => entry.snippet.includes("0xFFFF"))).toBe(true);
       expect(pack.allocationCopySites.some((entry) => entry.snippet.includes("memcpy"))).toBe(true);
-      expect(pack.hardeningSites.some((entry) => entry.snippet.includes("__stack_chk_fail"))).toBe(true);
+      expect(pack.hardeningSites.some((entry) => entry.snippet.includes("__stack_chk_fail"))).toBe(
+        true,
+      );
       expect(pack.helperTemplates.map((template) => template.id)).toEqual(
         expect.arrayContaining(["signed-wraparound", "rpc-xdr-length", "hardening-presence"]),
       );

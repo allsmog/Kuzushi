@@ -21,7 +21,7 @@ describe("LLM carving module", () => {
   });
 
   it("does not export old adjustment functions", async () => {
-    const mod = await import("../../src/discovery/llm-refinement.js") as Record<string, unknown>;
+    const mod = (await import("../../src/discovery/llm-refinement.js")) as Record<string, unknown>;
     expect(mod["applyLlmAdjustments"]).toBeUndefined();
     expect(mod["refineDiscoveryWithLlm"]).toBeUndefined();
   });

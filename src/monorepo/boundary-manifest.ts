@@ -1,7 +1,11 @@
 import path from "node:path";
-import type { BoundaryManifest, BoundaryPoint, BoundaryProtocol } from "../agents/tasks/taint-analysis/cross-service/types.js";
+import type {
+  BoundaryManifest,
+  BoundaryPoint,
+  BoundaryProtocol,
+} from "../agents/tasks/taint-analysis/cross-service/types.js";
 import type { StoredFindingRecord } from "../store.js";
-import type { ModuleSharedContext, ModuleScanPlan } from "./types.js";
+import type { ModuleScanPlan, ModuleSharedContext } from "./types.js";
 
 export function buildBoundaryManifest(
   plan: ModuleScanPlan,
@@ -17,15 +21,13 @@ export function buildBoundaryManifest(
   };
 }
 
-function buildEntryPoints(
-  modulePath: string,
-  sharedContext: ModuleSharedContext,
-): BoundaryPoint[] {
+function buildEntryPoints(modulePath: string, sharedContext: ModuleSharedContext): BoundaryPoint[] {
   const fallbackFilePath = sharedContext.fileIndex.tree[0]?.path ?? "README.md";
   const protocol = resolveEntryProtocol(sharedContext.attackSurface.entryPointTypes[0]);
-  const entryStrings = sharedContext.repoContext.entryPoints.length > 0
-    ? sharedContext.repoContext.entryPoints
-    : [fallbackFilePath];
+  const entryStrings =
+    sharedContext.repoContext.entryPoints.length > 0
+      ? sharedContext.repoContext.entryPoints
+      : [fallbackFilePath];
 
   return entryStrings.slice(0, 10).map((entryPoint, index) => ({
     id: `entry-${index + 1}`,
@@ -47,7 +49,9 @@ function buildExitPoints(
   findings: StoredFindingRecord[],
 ): BoundaryPoint[] {
   const taintLikeFindings = findings
-    .filter((finding) => finding.taskId === "taint-iris" || finding.ruleId.startsWith("cross-module/"))
+    .filter(
+      (finding) => finding.taskId === "taint-iris" || finding.ruleId.startsWith("cross-module/"),
+    )
     .slice(0, 10);
 
   if (taintLikeFindings.length > 0) {
@@ -91,8 +95,8 @@ function canonicalizeModuleFilePath(modulePath: string, filePath: string): strin
   const normalizedModulePath = modulePath.replace(/\\/g, "/");
   const normalizedFilePath = filePath.replace(/\\/g, "/");
   if (
-    normalizedFilePath === normalizedModulePath
-    || normalizedFilePath.startsWith(`${normalizedModulePath}/`)
+    normalizedFilePath === normalizedModulePath ||
+    normalizedFilePath.startsWith(`${normalizedModulePath}/`)
   ) {
     return normalizedFilePath;
   }
@@ -101,12 +105,18 @@ function canonicalizeModuleFilePath(modulePath: string, filePath: string): strin
 
 function resolveEntryProtocol(entryPointType?: string): BoundaryProtocol {
   switch (entryPointType) {
-    case "http-route": return "http-server";
-    case "websocket": return "http-server";
-    case "webhook": return "http-server";
-    case "rpc-listener": return "grpc-server";
-    case "event-listener": return "message-consume";
-    default: return "unknown";
+    case "http-route":
+      return "http-server";
+    case "websocket":
+      return "http-server";
+    case "webhook":
+      return "http-server";
+    case "rpc-listener":
+      return "grpc-server";
+    case "event-listener":
+      return "message-consume";
+    default:
+      return "unknown";
   }
 }
 

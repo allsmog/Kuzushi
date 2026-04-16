@@ -13,19 +13,19 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { createLogger } from "../../../logger.js";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TaintPathStep, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import { createLogger } from "../../../logger.js";
 import type { AgentTask, TaskContext } from "../../types.js";
 import {
-  resolveTaskModel,
-  resolveTaskRuntime,
   resolveTaskAllowedTools,
+  resolveTaskModel,
   resolveTaskPositiveInt,
+  resolveTaskRuntime,
 } from "../runtime-overrides.js";
 import type { CweSelection, CweSelectOutput } from "../taint-iris/cwe-select.js";
 
@@ -43,7 +43,15 @@ const FINDING_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "cwe", "severity", "filePath", "startLine", "message", "reasoningChain"],
+        required: [
+          "title",
+          "cwe",
+          "severity",
+          "filePath",
+          "startLine",
+          "message",
+          "reasoningChain",
+        ],
         properties: {
           title: { type: "string" },
           cwe: { type: "string" },
@@ -218,7 +226,7 @@ function buildStrategySection(cweId: string): string {
         "  and v1 != v2",
         "  and v1.getType().(IntegralType).isSigned()",
         "  and v2.getType().(IntegralType).isUnsigned()",
-        "select cmp, \"Signed/unsigned comparison between \" + v1.getName() + \" and \" + v2.getName()",
+        'select cmp, "Signed/unsigned comparison between " + v1.getName() + " and " + v2.getName()',
         "```",
       ].join("\n");
 
@@ -242,7 +250,7 @@ function buildStrategySection(cweId: string): string {
         "  and not exists(GuardCondition guard |",
         "    guard.controls(access.getBasicBlock(), _) and",
         "    guard.getAChild*() = counter.getAnAccess())",
-        "select access, \"Array access indexed by unbounded loop counter \" + counter.getName()",
+        'select access, "Array access indexed by unbounded loop counter " + counter.getName()',
         "```",
       ].join("\n");
 
@@ -265,10 +273,10 @@ function buildStrategySection(cweId: string): string {
         "where buf.getFunction() = f",
         "  and buf.getType().(ArrayType).getByteSize() > 64",
         "  and not exists(FunctionCall chk |",
-        "    chk.getTarget().hasName(\"__stack_chk_fail\") and",
+        '    chk.getTarget().hasName("__stack_chk_fail") and',
         "    chk.getEnclosingFunction() = f)",
-        "select f, \"Function with \" + buf.getType().(ArrayType).getByteSize().toString()",
-        "  + \"-byte stack buffer and no stack canary\"",
+        'select f, "Function with " + buf.getType().(ArrayType).getByteSize().toString()',
+        '  + "-byte stack buffer and no stack canary"',
         "```",
       ].join("\n");
 
@@ -292,11 +300,11 @@ function buildStrategySection(cweId: string): string {
         "```",
         "import cpp",
         "from FunctionCall freeCall, VariableAccess useAfter",
-        "where freeCall.getTarget().hasName(\"free\")",
+        'where freeCall.getTarget().hasName("free")',
         "  and useAfter.getTarget() = freeCall.getArgument(0).(VariableAccess).getTarget()",
         "  and freeCall.getASuccessor+() = useAfter",
-        "select useAfter, \"Potential use-after-free: \" + useAfter.getTarget().getName()",
-        "  + \" freed at \" + freeCall.getLocation()",
+        'select useAfter, "Potential use-after-free: " + useAfter.getTarget().getName()',
+        '  + " freed at " + freeCall.getLocation()',
         "```",
       ].join("\n");
 
@@ -308,7 +316,7 @@ function buildStrategySection(cweId: string): string {
         "- Read each unsafe block and analyze:",
         "  - Raw pointer arithmetic (`*mut`, `*const`, `ptr::write`, `ptr::read`)",
         "  - `std::mem::transmute` — what types are being transmuted?",
-        "  - FFI boundary crossings (`extern \"C\"`) — are Rust types safely mapped?",
+        '  - FFI boundary crossings (`extern "C"`) — are Rust types safely mapped?',
         "  - Slice creation from raw pointers (`std::slice::from_raw_parts`) — are length invariants enforced?",
         "- Check if callers of unsafe functions uphold the documented safety invariants",
         "",
@@ -333,11 +341,11 @@ function buildStrategySection(cweId: string): string {
         "import cpp",
         "import semmle.code.cpp.dataflow.DataFlow",
         "from FunctionCall alloc, Expr sizeArg, PointerDereferenceExpr deref",
-        "where alloc.getTarget().hasName([\"malloc\", \"calloc\", \"realloc\"])",
+        'where alloc.getTarget().hasName(["malloc", "calloc", "realloc"])',
         "  and sizeArg = alloc.getArgument(0)",
         "  and deref.getOperand().(VariableAccess).getTarget() =",
         "      alloc.getEnclosingFunction().getAParameter()",
-        "select alloc, \"Allocation with potentially overflowable size\"",
+        'select alloc, "Allocation with potentially overflowable size"',
         "```",
       ].join("\n");
 
@@ -397,7 +405,9 @@ async function runCweHunt(
         resultText = message.result;
         structuredOutput = message.structuredOutput;
         const durationSec = message.durationMs ? (message.durationMs / 1000).toFixed(1) : "?";
-        log.info(`${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${costUsd.toFixed(4)}`);
+        log.info(
+          `${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${costUsd.toFixed(4)}`,
+        );
         break;
       }
     }
@@ -488,7 +498,9 @@ function parseFindings(raw: unknown, repoRoot: string, repoName: string): Findin
 
 async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
   const config = resolveConfig(context);
-  const cweOutput = context.upstreamOutputs.get("deep-semantic-cwe-select") as CweSelectOutput | undefined;
+  const cweOutput = context.upstreamOutputs.get("deep-semantic-cwe-select") as
+    | CweSelectOutput
+    | undefined;
   const cwes = (cweOutput?.cwes ?? []).slice(0, config.maxCweClasses);
 
   if (cwes.length === 0) {
@@ -545,7 +557,9 @@ export const deepSemanticHuntTask: AgentTask<ScanOpts, Finding[]> = {
   dependsOn: ["deep-semantic-cwe-select", "context-gatherer"],
 
   condition(upstreamOutputs) {
-    const cweOutput = upstreamOutputs.get("deep-semantic-cwe-select") as CweSelectOutput | undefined;
+    const cweOutput = upstreamOutputs.get("deep-semantic-cwe-select") as
+      | CweSelectOutput
+      | undefined;
     return !!cweOutput?.cwes?.length;
   },
 
@@ -569,7 +583,9 @@ export const deepSemanticHuntTask: AgentTask<ScanOpts, Finding[]> = {
         "- Verify the integer/buffer/state reasoning in the evidence chain",
         "- Confirm the code path is reachable with attacker-controlled input",
         "- Check for guards, assertions, or compiler flags that may prevent exploitation",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

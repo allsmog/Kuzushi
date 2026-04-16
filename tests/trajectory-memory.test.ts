@@ -1,18 +1,18 @@
-import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
+import { describe, expect, it } from "vitest";
+import type { AgentActivity } from "../src/agent-runtime/execution.js";
 import {
-  TrajectoryCollector,
   ensureTrajectoryTable,
   formatTrajectoriesForPrompt,
   pruneOldUnverifiedTrajectories,
   retrieveTrajectories,
   saveTrajectory,
   summarizeTrajectory,
-  updateTrajectoryCorrectness,
+  TrajectoryCollector,
   type TrajectoryRecord,
   type TrajectoryStep,
+  updateTrajectoryCorrectness,
 } from "../src/trajectory-memory.js";
-import type { AgentActivity } from "../src/agent-runtime/execution.js";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -25,10 +25,18 @@ describe("TrajectoryCollector", () => {
   it("collects tool-start/tool-complete pairs into steps", () => {
     const collector = new TrajectoryCollector();
 
-    collector.onActivity({ kind: "tool-start", toolName: "Read", toolInput: { file_path: "src/app.ts" } });
+    collector.onActivity({
+      kind: "tool-start",
+      toolName: "Read",
+      toolInput: { file_path: "src/app.ts" },
+    });
     collector.onActivity({ kind: "tool-complete", summary: "read 42 lines" });
 
-    collector.onActivity({ kind: "tool-start", toolName: "Grep", toolInput: { pattern: "sanitize" } });
+    collector.onActivity({
+      kind: "tool-start",
+      toolName: "Grep",
+      toolInput: { pattern: "sanitize" },
+    });
     collector.onActivity({ kind: "tool-complete", summary: "found 3 matches" });
 
     const steps = collector.getSteps();
@@ -54,7 +62,9 @@ describe("TrajectoryCollector", () => {
   it("wrapCallback calls both original and collector", async () => {
     const collector = new TrajectoryCollector();
     let originalCalled = false;
-    const original = async () => { originalCalled = true; };
+    const original = async () => {
+      originalCalled = true;
+    };
 
     const wrapped = collector.wrapCallback(original);
     await wrapped({ kind: "tool-start", toolName: "Read", toolInput: { file_path: "test.ts" } });
@@ -78,7 +88,11 @@ describe("TrajectoryCollector", () => {
     const collector = new TrajectoryCollector();
     const longInput = "x".repeat(300);
 
-    collector.onActivity({ kind: "tool-start", toolName: "Read", toolInput: { file_path: longInput } });
+    collector.onActivity({
+      kind: "tool-start",
+      toolName: "Read",
+      toolInput: { file_path: longInput },
+    });
     collector.onActivity({ kind: "tool-complete", summary: "done" });
 
     const steps = collector.getSteps();
@@ -244,12 +258,16 @@ describe("updateTrajectoryCorrectness", () => {
 
     updateTrajectoryCorrectness(db, "fp-1", true);
 
-    const row = db.prepare("SELECT was_correct FROM trajectories WHERE id = ?").get("t1") as { was_correct: number };
+    const row = db.prepare("SELECT was_correct FROM trajectories WHERE id = ?").get("t1") as {
+      was_correct: number;
+    };
     expect(row.was_correct).toBe(1);
 
     updateTrajectoryCorrectness(db, "fp-1", false);
 
-    const row2 = db.prepare("SELECT was_correct FROM trajectories WHERE id = ?").get("t1") as { was_correct: number };
+    const row2 = db.prepare("SELECT was_correct FROM trajectories WHERE id = ?").get("t1") as {
+      was_correct: number;
+    };
     expect(row2.was_correct).toBe(0);
 
     db.close();
@@ -323,7 +341,20 @@ describe("pruneOldUnverifiedTrajectories", () => {
     db.prepare(`
       INSERT INTO trajectories (id, rule_id, cwes_json, task_id, verdict, confidence, was_correct, steps_json, summary, repo, fingerprint, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
-    `).run("old-1", "test", "[]", "semgrep", "tp", 0.5, "[]", "old", "repo", null, oldDate, oldDate);
+    `).run(
+      "old-1",
+      "test",
+      "[]",
+      "semgrep",
+      "tp",
+      0.5,
+      "[]",
+      "old",
+      "repo",
+      null,
+      oldDate,
+      oldDate,
+    );
 
     // Insert a recent one
     saveTrajectory(db, {
@@ -342,7 +373,9 @@ describe("pruneOldUnverifiedTrajectories", () => {
     const deleted = pruneOldUnverifiedTrajectories(db, 90);
     expect(deleted).toBe(1);
 
-    const remaining = db.prepare("SELECT COUNT(*) as count FROM trajectories").get() as { count: number };
+    const remaining = db.prepare("SELECT COUNT(*) as count FROM trajectories").get() as {
+      count: number;
+    };
     expect(remaining.count).toBe(1);
     db.close();
   });
@@ -354,7 +387,20 @@ describe("pruneOldUnverifiedTrajectories", () => {
     db.prepare(`
       INSERT INTO trajectories (id, rule_id, cwes_json, task_id, verdict, confidence, was_correct, steps_json, summary, repo, fingerprint, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
-    `).run("old-verified", "test", "[]", "semgrep", "tp", 0.5, "[]", "old but verified", "repo", null, oldDate, oldDate);
+    `).run(
+      "old-verified",
+      "test",
+      "[]",
+      "semgrep",
+      "tp",
+      0.5,
+      "[]",
+      "old but verified",
+      "repo",
+      null,
+      oldDate,
+      oldDate,
+    );
 
     const deleted = pruneOldUnverifiedTrajectories(db, 90);
     expect(deleted).toBe(0);
@@ -365,9 +411,9 @@ describe("pruneOldUnverifiedTrajectories", () => {
 describe("ensureTrajectoryTable", () => {
   it("creates trajectories table", () => {
     const db = createTestDb();
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='trajectories'",
-    ).all();
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='trajectories'")
+      .all();
     expect(tables).toHaveLength(1);
     db.close();
   });
@@ -376,9 +422,9 @@ describe("ensureTrajectoryTable", () => {
     const db = createTestDb();
     ensureTrajectoryTable(db);
     ensureTrajectoryTable(db);
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='trajectories'",
-    ).all();
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='trajectories'")
+      .all();
     expect(tables).toHaveLength(1);
     db.close();
   });

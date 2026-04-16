@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import type { AgentMessage, AgentRuntime } from "../src/agent-runtime/types.js";
+import type { Finding, TriageAgentConfig } from "../src/scanners/types.js";
 import {
   buildDefaultTriageAgentConfig,
   DEFAULT_BATCH_SIZE,
@@ -11,8 +13,6 @@ import {
   triageFindingWithAgent,
   triageSystemPromptPrefix,
 } from "../src/triage.js";
-import type { Finding, TriageAgentConfig } from "../src/scanners/types.js";
-import type { AgentMessage, AgentRuntime } from "../src/agent-runtime/types.js";
 
 function makeFinding(): Finding {
   return {
@@ -118,12 +118,22 @@ describe("parseTriageResponse", () => {
   });
 
   it("clamps confidence above 1", () => {
-    const json = JSON.stringify({ verdict: "tp", confidence: 1.5, rationale: "x", verification_steps: [] });
+    const json = JSON.stringify({
+      verdict: "tp",
+      confidence: 1.5,
+      rationale: "x",
+      verification_steps: [],
+    });
     expect(parseTriageResponse(json, "x").confidence).toBe(1);
   });
 
   it("clamps confidence below 0", () => {
-    const json = JSON.stringify({ verdict: "tp", confidence: -0.5, rationale: "x", verification_steps: [] });
+    const json = JSON.stringify({
+      verdict: "tp",
+      confidence: -0.5,
+      rationale: "x",
+      verification_steps: [],
+    });
     expect(parseTriageResponse(json, "x").confidence).toBe(0);
   });
 
@@ -133,21 +143,23 @@ describe("parseTriageResponse", () => {
   });
 
   it("throws a clear error for malformed JSON", () => {
-    expect(() => parseTriageResponse("not-json", "x"))
-      .toThrow("Invalid triage JSON response");
+    expect(() => parseTriageResponse("not-json", "x")).toThrow("Invalid triage JSON response");
   });
 });
 
 describe("parseAgentOutput", () => {
   it("parses structured object output", () => {
-    const result = parseAgentOutput({
-      fingerprint: "fp-obj",
-      verdict: "tp",
-      confidence: 0.88,
-      rationale: "confirmed",
-      verification_steps: ["step"],
-      fix_patch: null,
-    }, "fallback");
+    const result = parseAgentOutput(
+      {
+        fingerprint: "fp-obj",
+        verdict: "tp",
+        confidence: 0.88,
+        rationale: "confirmed",
+        verification_steps: ["step"],
+        fix_patch: null,
+      },
+      "fallback",
+    );
 
     expect(result.fingerprint).toBe("fp-obj");
     expect(result.verdict).toBe("tp");
@@ -170,18 +182,21 @@ describe("parseAgentOutput", () => {
   });
 
   it("parses evidence_trail from structured output", () => {
-    const result = parseAgentOutput({
-      fingerprint: "fp-trail",
-      verdict: "tp",
-      confidence: 0.75,
-      rationale: "confirmed",
-      verification_steps: ["step"],
-      fix_patch: null,
-      evidence_trail: [
-        { level: "0.3", evidence: "Traced source to sink" },
-        { level: "0.75", evidence: "Verified guards absent" },
-      ],
-    }, "fallback");
+    const result = parseAgentOutput(
+      {
+        fingerprint: "fp-trail",
+        verdict: "tp",
+        confidence: 0.75,
+        rationale: "confirmed",
+        verification_steps: ["step"],
+        fix_patch: null,
+        evidence_trail: [
+          { level: "0.3", evidence: "Traced source to sink" },
+          { level: "0.75", evidence: "Verified guards absent" },
+        ],
+      },
+      "fallback",
+    );
 
     expect(result.evidenceTrail).toBeDefined();
     expect(result.evidenceTrail).toHaveLength(2);
@@ -190,29 +205,32 @@ describe("parseAgentOutput", () => {
   });
 
   it("parses extended Taint-analysis source/sink triage fields", () => {
-    const result = parseAgentOutput({
-      fingerprint: "fp-ext",
-      verdict: "fp",
-      confidence: 0.72,
-      rationale: "source is not attacker-controlled",
-      verification_steps: ["trace input origin", "inspect sink usage"],
-      fix_patch: null,
-      source: {
-        why: "Input originates from constant config",
-        is_false_positive: true,
-        evidence: "hardcoded value in config.ts",
+    const result = parseAgentOutput(
+      {
+        fingerprint: "fp-ext",
+        verdict: "fp",
+        confidence: 0.72,
+        rationale: "source is not attacker-controlled",
+        verification_steps: ["trace input origin", "inspect sink usage"],
+        fix_patch: null,
+        source: {
+          why: "Input originates from constant config",
+          is_false_positive: true,
+          evidence: "hardcoded value in config.ts",
+        },
+        sink: {
+          why: "sink requires validated tokenized args",
+          is_false_positive: false,
+          evidence: "wrapper enforces allowlist",
+        },
+        is_vulnerable: false,
+        exploit_scenario: "Not exploitable due to fixed source",
+        recommended_fix: "Tighten source pattern matching",
+        rule_refinement_hint: "constrain source to request-bound values",
+        triage_schema_version: "1.0.0",
       },
-      sink: {
-        why: "sink requires validated tokenized args",
-        is_false_positive: false,
-        evidence: "wrapper enforces allowlist",
-      },
-      is_vulnerable: false,
-      exploit_scenario: "Not exploitable due to fixed source",
-      recommended_fix: "Tighten source pattern matching",
-      rule_refinement_hint: "constrain source to request-bound values",
-      triage_schema_version: "1.0.0",
-    }, "fallback");
+      "fallback",
+    );
 
     expect(result.source?.isFalsePositive).toBe(true);
     expect(result.source?.why).toContain("constant");
@@ -310,21 +328,24 @@ describe("triageFindingWithAgent", () => {
   });
 
   it("uses semantic navigation tools for pi-ai runtime defaults", async () => {
-    const runtime = makeMockRuntime([
-      {
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          fingerprint: "test-fp",
-          verdict: "fp",
-          confidence: 0.95,
-          rationale: "hardcoded input",
-          verification_steps: ["check source"],
-          fix_patch: null,
+    const runtime = makeMockRuntime(
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "{}",
+          structuredOutput: {
+            fingerprint: "test-fp",
+            verdict: "fp",
+            confidence: 0.95,
+            rationale: "hardcoded input",
+            verification_steps: ["check source"],
+            fix_patch: null,
+          },
         },
-      },
-    ], "pi-ai");
+      ],
+      "pi-ai",
+    );
 
     await triageFindingWithAgent(
       registryWithConfig({ prompt: "custom triage" }) as any,
@@ -335,21 +356,23 @@ describe("triageFindingWithAgent", () => {
       { runtime },
     );
 
-    expect(runtime.query).toHaveBeenCalledWith(expect.objectContaining({
-      options: expect.objectContaining({
-        allowedTools: [
-          "Read",
-          "Glob",
-          "Grep",
-          "GetCallers",
-          "GetCallees",
-          "GetFunctionBody",
-          "GoToDefinition",
-          "FindReferences",
-          "TypeAtPosition",
-        ],
+    expect(runtime.query).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          allowedTools: [
+            "Read",
+            "Glob",
+            "Grep",
+            "GetCallers",
+            "GetCallees",
+            "GetFunctionBody",
+            "GoToDefinition",
+            "FindReferences",
+            "TypeAtPosition",
+          ],
+        }),
       }),
-    }));
+    );
   });
 
   it("falls back to result text parsing when structured_output is missing", async () => {
@@ -628,7 +651,9 @@ describe("triageFindingsBatch", () => {
     const findings = Array.from({ length: 5 }, (_, i) => makeFindingWithFp(`fp-${i}`));
     const runtime = makeBatchRuntime(findings);
 
-    const output = await triageFindingsBatch(findings, "/tmp", "repo", "model", undefined, { runtime });
+    const output = await triageFindingsBatch(findings, "/tmp", "repo", "model", undefined, {
+      runtime,
+    });
     expect(output.results.size).toBe(5);
     expect(runtime.query).toHaveBeenCalledTimes(1);
     for (const f of findings) {
@@ -671,7 +696,13 @@ describe("triageFindingsBatch", () => {
     const runtime: AgentRuntime = { id: "mock-chunked", query: queryFn };
 
     const output = await triageFindingsBatch(
-      findings, "/tmp", "repo", "model", undefined, { runtime }, batchSize,
+      findings,
+      "/tmp",
+      "repo",
+      "model",
+      undefined,
+      { runtime },
+      batchSize,
     );
 
     // 13 findings / 5 per chunk = 3 chunks
@@ -696,14 +727,16 @@ describe("triageFindingsBatch", () => {
         subtype: "success",
         result: "{}",
         structuredOutput: {
-          results: [{
-            fingerprint: "fp-0",
-            verdict: "tp",
-            confidence: 0.9,
-            rationale: "real",
-            verification_steps: ["check"],
-            fix_patch: null,
-          }],
+          results: [
+            {
+              fingerprint: "fp-0",
+              verdict: "tp",
+              confidence: 0.9,
+              rationale: "real",
+              verification_steps: ["check"],
+              fix_patch: null,
+            },
+          ],
         },
         durationMs: 100,
         numTurns: 1,
@@ -712,7 +745,9 @@ describe("triageFindingsBatch", () => {
     });
     const runtime: AgentRuntime = { id: "mock-partial", query: queryFn };
 
-    const output = await triageFindingsBatch(findings, "/tmp", "repo", "model", undefined, { runtime });
+    const output = await triageFindingsBatch(findings, "/tmp", "repo", "model", undefined, {
+      runtime,
+    });
     expect(output.results.size).toBe(1);
     expect(output.results.get("fp-0")?.verdict).toBe("tp");
     expect(output.results.has("fp-1")).toBe(false);
@@ -730,25 +765,25 @@ describe("triageFindingsBatch", () => {
         subtype: "success",
         result: "{}",
         structuredOutput: {
-          results: [{
-            fingerprint: finding.fingerprint,
-            verdict: "tp",
-            confidence: 0.9,
-            rationale: "confirmed",
-            verification_steps: ["trace control flow"],
-            fix_patch: null,
-            evidence_trail: [
-              { level: "0.4", evidence: "Reached listener bootstrap" },
-            ],
-            evidence_chain: [
-              {
-                step_type: "source-reachability",
-                description: "Synthetic entry-cli reaches sink candidate",
-                confidence: 0.9,
-                evidence: "call graph path",
-              },
-            ],
-          }],
+          results: [
+            {
+              fingerprint: finding.fingerprint,
+              verdict: "tp",
+              confidence: 0.9,
+              rationale: "confirmed",
+              verification_steps: ["trace control flow"],
+              fix_patch: null,
+              evidence_trail: [{ level: "0.4", evidence: "Reached listener bootstrap" }],
+              evidence_chain: [
+                {
+                  step_type: "source-reachability",
+                  description: "Synthetic entry-cli reaches sink candidate",
+                  confidence: 0.9,
+                  evidence: "call graph path",
+                },
+              ],
+            },
+          ],
         },
         durationMs: 100,
         numTurns: 1,
@@ -757,7 +792,9 @@ describe("triageFindingsBatch", () => {
     });
     const runtime: AgentRuntime = { id: "mock-batch-evidence", query: queryFn };
 
-    const output = await triageFindingsBatch([finding], "/tmp", "repo", "model", undefined, { runtime });
+    const output = await triageFindingsBatch([finding], "/tmp", "repo", "model", undefined, {
+      runtime,
+    });
     const result = output.results.get(finding.fingerprint);
 
     expect(result?.evidenceTrail).toEqual([

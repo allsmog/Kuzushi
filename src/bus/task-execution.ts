@@ -1,15 +1,15 @@
-import type { AgentTask, TaskContext } from "../agents/types.js";
-import { isHandoff } from "../agents/handoff.js";
 import type { AgentRuntime } from "../agent-runtime/types.js";
+import { isHandoff } from "../agents/handoff.js";
+import type { AgentTask, TaskContext } from "../agents/types.js";
 import type {
   CorroboratingSignal,
   EngineProvenance,
-  TaskConfig,
-  ScannerPlugin,
   Finding,
   ProofState,
+  ScannerPlugin,
   SuppressionReason,
   TaintPathStep,
+  TaskConfig,
 } from "../scanners/types.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import { isRecord, normalizeCostUsd } from "../utils.js";
@@ -122,7 +122,14 @@ function asFinding(item: Record<string, unknown>): Finding | null {
   const severity = asString(item["severity"]);
   const message = asString(item["message"]);
 
-  if (!fingerprint || !ruleId || !filePath || !Number.isFinite(startLine) || !severity || !message) {
+  if (
+    !fingerprint ||
+    !ruleId ||
+    !filePath ||
+    !Number.isFinite(startLine) ||
+    !severity ||
+    !message
+  ) {
     return null;
   }
 
@@ -289,7 +296,13 @@ function asEngineProvenance(value: unknown): EngineProvenance[] | undefined {
     if (!detail) {
       continue;
     }
-    if (kind !== "semgrep" && kind !== "codeql" && kind !== "taint-analysis" && kind !== "agentic" && kind !== "dynamic") {
+    if (
+      kind !== "semgrep" &&
+      kind !== "codeql" &&
+      kind !== "taint-analysis" &&
+      kind !== "agentic" &&
+      kind !== "dynamic"
+    ) {
       continue;
     }
     entries.push({ kind, detail });

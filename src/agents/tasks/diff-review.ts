@@ -1,16 +1,20 @@
 import { execFileSync } from "node:child_process";
+import { createLogger } from "../../logger.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../security-profiles.js";
 import { getFixedFindingsForFiles } from "../../store.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
-import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
+import {
+  computeDetectionFingerprint,
+  normalizeFilePath,
+  parseJson,
+} from "./detection-task-utils.js";
 import { resolveTaskAllowedTools } from "./runtime-overrides.js";
-import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "diff-review" });
 
@@ -24,7 +28,15 @@ const DIFF_REVIEW_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["ruleId", "filePath", "startLine", "severity", "message", "confidence", "rationale"],
+        required: [
+          "ruleId",
+          "filePath",
+          "startLine",
+          "severity",
+          "message",
+          "confidence",
+          "rationale",
+        ],
         properties: {
           ruleId: { type: "string" },
           filePath: { type: "string" },
@@ -63,7 +75,14 @@ const REGRESSION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["originalFingerprint", "ruleId", "filePath", "startLine", "message", "confidence"],
+        required: [
+          "originalFingerprint",
+          "ruleId",
+          "filePath",
+          "startLine",
+          "message",
+          "confidence",
+        ],
         properties: {
           originalFingerprint: { type: "string" },
           ruleId: { type: "string" },
@@ -94,17 +113,22 @@ interface DiffReviewConfig {
 
 function resolveConfig(ctx: TaskContext): DiffReviewConfig {
   const raw = ctx.config.taskConfig["diff-review"];
-  const model = (isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim())
-    ? raw["model"].trim()
-    : ctx.config.model;
-  const maxFindings = (isRecord(raw) && typeof raw["maxFindings"] === "number" && raw["maxFindings"] >= 1)
-    ? Math.floor(raw["maxFindings"])
-    : 30;
+  const model =
+    isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim()
+      ? raw["model"].trim()
+      : ctx.config.model;
+  const maxFindings =
+    isRecord(raw) && typeof raw["maxFindings"] === "number" && raw["maxFindings"] >= 1
+      ? Math.floor(raw["maxFindings"])
+      : 30;
   const diffBase = ctx.config.diffBase || "main";
   return { model, maxFindings, diffBase };
 }
 
-function getDiffContent(repoRoot: string, diffBase: string): { changedFiles: string[]; diff: string } {
+function getDiffContent(
+  repoRoot: string,
+  diffBase: string,
+): { changedFiles: string[]; diff: string } {
   // Verify the diff base ref exists before attempting the diff.
   // This avoids noisy errors when scanning monorepo subdirectories that
   // don't have the expected branch (e.g. "main") in scope.
@@ -162,9 +186,8 @@ function buildPrompt(
 
   // Truncate diff if very large
   const maxDiffLength = 100_000;
-  const truncatedDiff = diff.length > maxDiffLength
-    ? diff.slice(0, maxDiffLength) + "\n... [diff truncated]"
-    : diff;
+  const truncatedDiff =
+    diff.length > maxDiffLength ? diff.slice(0, maxDiffLength) + "\n... [diff truncated]" : diff;
 
   return [
     "You are a senior security engineer reviewing a code diff for security vulnerabilities.",
@@ -262,9 +285,7 @@ function normalizeFindings(
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 function confidenceToLevel(confidence: number): string {
@@ -279,12 +300,25 @@ function computeFingerprint(
   filePath: string,
   f: DiffReviewFinding,
 ): string {
-  return computeDetectionFingerprint([repoName, "diff-review", diffBase, f.ruleId, filePath, String(f.startLine)]);
+  return computeDetectionFingerprint([
+    repoName,
+    "diff-review",
+    diffBase,
+    f.ruleId,
+    filePath,
+    String(f.startLine),
+  ]);
 }
 
 function buildRegressionPrompt(
   diff: string,
-  previousFindings: Array<{ fingerprint: string; ruleId: string; filePath: string; startLine: number; message: string }>,
+  previousFindings: Array<{
+    fingerprint: string;
+    ruleId: string;
+    filePath: string;
+    startLine: number;
+    message: string;
+  }>,
 ): string {
   const findingsList = previousFindings
     .map((f, i) => `${i + 1}. [${f.ruleId}] ${f.filePath}:${f.startLine} — ${f.message}`)
@@ -320,7 +354,13 @@ function buildRegressionPrompt(
 
 async function detectRegressions(
   context: TaskContext,
-  previousFindings: Array<{ fingerprint: string; ruleId: string; filePath: string; startLine: number; message: string }>,
+  previousFindings: Array<{
+    fingerprint: string;
+    ruleId: string;
+    filePath: string;
+    startLine: number;
+    message: string;
+  }>,
   diff: string,
   model: string,
 ): Promise<Finding[]> {
@@ -353,9 +393,15 @@ async function detectRegressions(
     }
   }
 
-  const parsed = structuredOutput ?? (() => {
-    try { return JSON.parse(resultText); } catch { return { regressions: [] }; }
-  })();
+  const parsed =
+    structuredOutput ??
+    (() => {
+      try {
+        return JSON.parse(resultText);
+      } catch {
+        return { regressions: [] };
+      }
+    })();
 
   if (!isRecord(parsed) || !Array.isArray(parsed["regressions"])) return [];
 
@@ -366,7 +412,13 @@ async function detectRegressions(
     if (!r.filePath?.trim() || typeof r.confidence !== "number" || r.confidence < 0.5) continue;
 
     const filePath = normalizeFilePath(context.repoRoot, r.filePath);
-    const fingerprint = computeDetectionFingerprint([context.repoName, "regression", r.originalFingerprint, filePath, String(r.startLine)]);
+    const fingerprint = computeDetectionFingerprint([
+      context.repoName,
+      "regression",
+      r.originalFingerprint,
+      filePath,
+      String(r.startLine),
+    ]);
 
     findings.push({
       taskId: "diff-review",
@@ -429,7 +481,14 @@ export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
 
     log.info(`${changedFiles.length} changed files, starting review (model=${model})`);
 
-    const prompt = buildPrompt(repoContext, changedFiles, diff, diffBase, maxFindings, profileLines);
+    const prompt = buildPrompt(
+      repoContext,
+      changedFiles,
+      diff,
+      diffBase,
+      maxFindings,
+      profileLines,
+    );
     const runtime = context.runtime;
 
     let structuredOutput: unknown;
@@ -442,7 +501,7 @@ export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
         options: {
           cwd: context.repoRoot,
           model,
-    
+
           allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
@@ -503,7 +562,9 @@ export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
         "",
         "This finding was detected in recently changed code.",
         "Verify the vulnerability exists in the current code and is exploitable.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

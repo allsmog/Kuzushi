@@ -1,23 +1,46 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  initDb,
-  upsertFinding,
+  formatTaintPathForDisplay,
+  formatTaintPathForPrompt,
+  summarizeTaintPath,
+} from "../src/findings/taint-path.js";
+import type {
+  EngineProvenance,
+  Finding,
+  ProofState,
+  TaintPathStep,
+} from "../src/scanners/types.js";
+import {
   getActionableFindings,
+  initDb,
   updateFindingMetadata,
+  upsertFinding,
 } from "../src/store.js";
 import type { TriageResult } from "../src/types.js";
-import type { Finding, TaintPathStep, EngineProvenance, ProofState } from "../src/scanners/types.js";
-import { summarizeTaintPath, formatTaintPathForPrompt, formatTaintPathForDisplay } from "../src/findings/taint-path.js";
 
 const TMP_DIR = path.join(import.meta.dirname, ".tmp-evidence-test");
 let dbPath: string;
 
 const SAMPLE_TAINT_PATH: TaintPathStep[] = [
-  { filePath: "src/routes/api.ts", line: 42, message: "user input from req.query.url", snippet: "const url = req.query.url;" },
-  { filePath: "src/services/fetcher.ts", line: 15, message: "passed to HTTP client", snippet: "return fetch(url);" },
-  { filePath: "src/services/fetcher.ts", line: 28, message: "response consumed without validation" },
+  {
+    filePath: "src/routes/api.ts",
+    line: 42,
+    message: "user input from req.query.url",
+    snippet: "const url = req.query.url;",
+  },
+  {
+    filePath: "src/services/fetcher.ts",
+    line: 15,
+    message: "passed to HTTP client",
+    snippet: "return fetch(url);",
+  },
+  {
+    filePath: "src/services/fetcher.ts",
+    line: 28,
+    message: "response consumed without validation",
+  },
 ];
 
 const SAMPLE_PROVENANCE: EngineProvenance[] = [
@@ -80,11 +103,13 @@ describe("structured evidence round-trip", () => {
 
     // taintPath
     expect(f.taintPath).toHaveLength(3);
-    expect(f.taintPath![0]).toEqual(expect.objectContaining({
-      filePath: "src/routes/api.ts",
-      line: 42,
-      message: "user input from req.query.url",
-    }));
+    expect(f.taintPath![0]).toEqual(
+      expect.objectContaining({
+        filePath: "src/routes/api.ts",
+        line: 42,
+        message: "user input from req.query.url",
+      }),
+    );
     expect(f.taintPath![1].snippet).toBe("return fetch(url);");
 
     // proofState
@@ -92,7 +117,10 @@ describe("structured evidence round-trip", () => {
 
     // engineProvenance
     expect(f.engineProvenance).toHaveLength(2);
-    expect(f.engineProvenance![0]).toEqual({ kind: "taint-analysis", detail: "cross-function dataflow pass 3" });
+    expect(f.engineProvenance![0]).toEqual({
+      kind: "taint-analysis",
+      detail: "cross-function dataflow pass 3",
+    });
     expect(f.engineProvenance![1]).toEqual({ kind: "codeql", detail: "js/ssrf-from-request" });
 
     db.close();
@@ -119,7 +147,7 @@ describe("structured evidence round-trip", () => {
     upsertFinding(db, finding, makeResult("fp-no-evidence"), "repo", "HEAD");
 
     const loaded = getActionableFindings(db, "repo", { includeFalsePositives: true });
-    const f = loaded.find(r => r.fingerprint === "fp-no-evidence")!;
+    const f = loaded.find((r) => r.fingerprint === "fp-no-evidence")!;
     expect(f.taintPath).toBeUndefined();
     expect(f.proofState).toBeUndefined();
     expect(f.engineProvenance).toBeUndefined();
@@ -139,7 +167,7 @@ describe("structured evidence round-trip", () => {
     });
 
     const loaded = getActionableFindings(db, "repo", { includeFalsePositives: true });
-    const f = loaded.find(r => r.fingerprint === "fp-meta-rt")!;
+    const f = loaded.find((r) => r.fingerprint === "fp-meta-rt")!;
     expect(f.findingMetadata).toBeDefined();
     expect(f.findingMetadata!.latestDynamicRunId).toBe("dyn-42");
     expect(f.findingMetadata!.latestDynamicStatus).toBe("confirmed");
@@ -152,7 +180,9 @@ describe("structured evidence round-trip", () => {
 describe("taint-path rendering utilities", () => {
   it("summarizeTaintPath produces arrow-delimited summary", () => {
     const summary = summarizeTaintPath(SAMPLE_TAINT_PATH);
-    expect(summary).toBe("src/routes/api.ts:42 -> src/services/fetcher.ts:15 -> src/services/fetcher.ts:28");
+    expect(summary).toBe(
+      "src/routes/api.ts:42 -> src/services/fetcher.ts:15 -> src/services/fetcher.ts:28",
+    );
   });
 
   it("summarizeTaintPath truncates beyond maxSteps", () => {

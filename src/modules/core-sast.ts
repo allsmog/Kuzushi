@@ -11,6 +11,7 @@
  * this module just makes the same capabilities available to shell and run modes.
  */
 
+import type { KuzushiConfig } from "../types.js";
 import type {
   CopilotModule,
   ModuleContext,
@@ -18,7 +19,6 @@ import type {
   ToolExecutionContext,
   ToolResult,
 } from "./types.js";
-import type { KuzushiConfig } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Tool implementations
@@ -62,7 +62,10 @@ async function executeSastPipeline(
   const params = input as Record<string, unknown>;
   const target = (params.target as string) ?? ctx.target;
   if (!target) {
-    return { ok: false, output: `${options?.summaryLabel ?? "sast:scan"} requires a target (repo path).` };
+    return {
+      ok: false,
+      output: `${options?.summaryLabel ?? "sast:scan"} requires a target (repo path).`,
+    };
   }
 
   const { runPipeline } = await import("../cli/commands/scan.js");
@@ -74,7 +77,7 @@ async function executeSastPipeline(
   const config = mergeTaskConfig(ctx.config, options?.taskConfig);
   const scanPath = path.default.resolve(target);
   const { root: repoRoot, name: repoName } = resolveRepo(target);
-  const taskIds = options?.tasks ?? params.tasks as string[] | undefined;
+  const taskIds = options?.tasks ?? (params.tasks as string[] | undefined);
   const severityOpt = Array.isArray(params.severity)
     ? (params.severity as string[]).join(",")
     : undefined;
@@ -142,10 +145,10 @@ async function executeSastPipeline(
     const summary = result.aborted
       ? `${label} cancelled: ${repoName}`
       : result.status === "complete"
-      ? options?.postProcessMode === "scan-only"
-        ? `${label} complete: ${repoName} — ${findings} findings${cost ? ` ($${cost.toFixed(2)})` : ""}`
-        : `${label} complete: ${repoName} — ${findings} findings, ${triaged} triaged${cost ? ` ($${cost.toFixed(2)})` : ""}`
-      : `${label} finished with errors: ${repoName} — ${findings} findings`;
+        ? options?.postProcessMode === "scan-only"
+          ? `${label} complete: ${repoName} — ${findings} findings${cost ? ` ($${cost.toFixed(2)})` : ""}`
+          : `${label} complete: ${repoName} — ${findings} findings, ${triaged} triaged${cost ? ` ($${cost.toFixed(2)})` : ""}`
+        : `${label} finished with errors: ${repoName} — ${findings} findings`;
 
     return {
       ok: result.status === "complete",
@@ -156,7 +159,10 @@ async function executeSastPipeline(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("Could not resolve authentication")) {
-      return { ok: false, output: "Scan requires an API key. Set ANTHROPIC_API_KEY or use Claude Code OAuth." };
+      return {
+        ok: false,
+        output: "Scan requires an API key. Set ANTHROPIC_API_KEY or use Claude Code OAuth.",
+      };
     }
     return { ok: false, output: `Scan error: ${msg}` };
   } finally {
@@ -278,7 +284,8 @@ const codeqlTool: ModuleTool = {
 
 const agenticTool: ModuleTool = {
   name: "sast:agentic",
-  description: "Run the agentic detector set only, with scan-only post-processing and report generation.",
+  description:
+    "Run the agentic detector set only, with scan-only post-processing and report generation.",
   inputSchema: {
     type: "object",
     properties: {
@@ -295,7 +302,8 @@ const agenticTool: ModuleTool = {
 
 const threatHuntTool: ModuleTool = {
   name: "sast:threat-hunt",
-  description: "Run the threat-hunt task only, with scan-only post-processing and report generation.",
+  description:
+    "Run the threat-hunt task only, with scan-only post-processing and report generation.",
   inputSchema: {
     type: "object",
     properties: {
@@ -348,7 +356,8 @@ const threatHuntTool: ModuleTool = {
 
 const taintIrisTool: ModuleTool = {
   name: "sast:taint-iris",
-  description: "Run IRIS taint analysis only, with scan-only post-processing and report generation.",
+  description:
+    "Run IRIS taint analysis only, with scan-only post-processing and report generation.",
   inputSchema: {
     type: "object",
     properties: {
@@ -597,7 +606,7 @@ async function generateContextSnapshot(
   // Monorepo detection — branch to per-module context generation
   if (opts.discovery !== "flat") {
     const { looksLikeMonorepo } = await import("../discovery/repo-discovery.js");
-    const isMonorepo = opts.discovery === "modules" || await looksLikeMonorepo(repoRoot);
+    const isMonorepo = opts.discovery === "modules" || (await looksLikeMonorepo(repoRoot));
     if (isMonorepo) {
       return generateMonorepoSnapshot(target, ctx, opts, repoRoot, scanPath, repoName);
     }
@@ -625,7 +634,12 @@ async function generateContextSnapshot(
   };
 
   const result = await generateSingleProjectContext(
-    scanPath, repoName, repoRoot, ctx, opts, updateProgress,
+    scanPath,
+    repoName,
+    repoRoot,
+    ctx,
+    opts,
+    updateProgress,
   );
 
   clearProgress();
@@ -633,7 +647,11 @@ async function generateContextSnapshot(
   return {
     ...result,
     discovery: opts.discovery,
-    options: { enrichment: opts.enrichment, threatModel: opts.threatModel, scenarios: opts.scenarios },
+    options: {
+      enrichment: opts.enrichment,
+      threatModel: opts.threatModel,
+      scenarios: opts.scenarios,
+    },
   };
 }
 
@@ -680,7 +698,10 @@ async function generateMonorepoSnapshot(
   }
 
   // Generate context for each discovered module (concurrency 3)
-  const modules: Record<string, Omit<import("../ui/state.js").ContextSnapshot, "modules" | "discovery" | "options">> = {};
+  const modules: Record<
+    string,
+    Omit<import("../ui/state.js").ContextSnapshot, "modules" | "discovery" | "options">
+  > = {};
   const CONCURRENCY = 3;
 
   for (let i = 0; i < discoveredModules.length; i += CONCURRENCY) {
@@ -712,7 +733,11 @@ async function generateMonorepoSnapshot(
     target: scanPath,
     timestamp: Date.now(),
     discovery: opts.discovery,
-    options: { enrichment: opts.enrichment, threatModel: opts.threatModel, scenarios: opts.scenarios },
+    options: {
+      enrichment: opts.enrichment,
+      threatModel: opts.threatModel,
+      scenarios: opts.scenarios,
+    },
     modules,
   };
 }
@@ -763,25 +788,35 @@ async function generateSingleProjectContext(
   const parallelTasks: Promise<void>[] = [];
 
   if (opts.enrichment) {
-    parallelTasks.push((async () => {
-      updateProgress("context-enricher");
-      try {
-        const { contextEnricherTask } = await import("../agents/tasks/context-enricher.js");
-        enricherOutput = await contextEnricherTask.run(undefined, buildTaskContext());
-        upstreamOutputs.set("context-enricher", enricherOutput);
-      } catch { /* optional */ }
-    })());
+    parallelTasks.push(
+      (async () => {
+        updateProgress("context-enricher");
+        try {
+          const { contextEnricherTask } = await import("../agents/tasks/context-enricher.js");
+          enricherOutput = await contextEnricherTask.run(undefined, buildTaskContext());
+          upstreamOutputs.set("context-enricher", enricherOutput);
+        } catch {
+          /* optional */
+        }
+      })(),
+    );
   }
 
   if (opts.threatModel) {
-    parallelTasks.push((async () => {
-      updateProgress("threat-model-randori");
-      try {
-        const { threatModelRandoriTask } = await import("../agents/tasks/threat-modeling/randori.js");
-        threatModelOutput = await threatModelRandoriTask.run(scanOpts, buildTaskContext());
-        upstreamOutputs.set("threat-model-randori", threatModelOutput);
-      } catch { /* optional */ }
-    })());
+    parallelTasks.push(
+      (async () => {
+        updateProgress("threat-model-randori");
+        try {
+          const { threatModelRandoriTask } = await import(
+            "../agents/tasks/threat-modeling/randori.js"
+          );
+          threatModelOutput = await threatModelRandoriTask.run(scanOpts, buildTaskContext());
+          upstreamOutputs.set("threat-model-randori", threatModelOutput);
+        } catch {
+          /* optional */
+        }
+      })(),
+    );
   }
 
   await Promise.all(parallelTasks);
@@ -793,7 +828,9 @@ async function generateSingleProjectContext(
   try {
     appModel = await appModelBuildTask.run(scanOpts, buildTaskContext());
     upstreamOutputs.set("app-model-build", appModel);
-  } catch { /* optional */ }
+  } catch {
+    /* optional */
+  }
 
   // Step 4: threat-scenario-build
   let scenarioOutput: unknown;
@@ -803,7 +840,9 @@ async function generateSingleProjectContext(
       const { threatScenarioBuildTask } = await import("../agents/tasks/threat-scenario-build.js");
       scenarioOutput = await threatScenarioBuildTask.run(undefined, buildTaskContext());
       upstreamOutputs.set("threat-scenario-build", scenarioOutput);
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
   }
 
   const gatherer = gathererOutput as unknown as Record<string, unknown> | undefined;
@@ -846,8 +885,10 @@ export function formatContextSummary(
 }
 
 function formatSingleContext(
-  ctx: Pick<import("../ui/state.js").ContextSnapshot,
-    "repoContext" | "appModel" | "threatModel" | "scenarios" | "target" | "timestamp">,
+  ctx: Pick<
+    import("../ui/state.js").ContextSnapshot,
+    "repoContext" | "appModel" | "threatModel" | "scenarios" | "target" | "timestamp"
+  >,
   label: string,
 ): string {
   const sections: string[][] = [];
@@ -916,9 +957,12 @@ function formatSingleContext(
   const statLines: string[] = [];
   if (am) {
     if (am.outboundClients.length) {
-      statLines.push(`  Outbound Clients: ${am.outboundClients.map((c: { kind: string }) => c.kind).join(", ")}`);
+      statLines.push(
+        `  Outbound Clients: ${am.outboundClients.map((c: { kind: string }) => c.kind).join(", ")}`,
+      );
     }
-    if (am.serviceBoundaries.length) statLines.push(`  Service Boundaries: ${am.serviceBoundaries.length}`);
+    if (am.serviceBoundaries.length)
+      statLines.push(`  Service Boundaries: ${am.serviceBoundaries.length}`);
     if (am.dataStores.length) statLines.push(`  Data Stores: ${am.dataStores.length}`);
   }
   if (statLines.length) sections.push(statLines);
@@ -998,7 +1042,12 @@ function asRepoContext(raw: unknown): RepoContextShape | null {
 }
 
 interface AppModelShape {
-  routes: Array<{ method?: string; path?: string; middleware?: string[]; authMechanisms?: string[] }>;
+  routes: Array<{
+    method?: string;
+    path?: string;
+    middleware?: string[];
+    authMechanisms?: string[];
+  }>;
   outboundClients: Array<{ kind: string }>;
   serviceBoundaries: unknown[];
   dataStores: unknown[];
@@ -1092,11 +1141,7 @@ export function createCoreSastModule(): CopilotModule {
         "patch:generated",
         "patch:verified",
       ],
-      consumes: [
-        "pipeline:start",
-        "task:complete",
-        "stage:complete",
-      ],
+      consumes: ["pipeline:start", "task:complete", "stage:complete"],
     },
 
     async init(_config, _ctx) {

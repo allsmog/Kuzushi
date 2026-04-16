@@ -17,17 +17,11 @@ describe("parsePiAiModelSpec", () => {
   });
 
   it("throws when model delimiter is missing", () => {
-    expect(() => parsePiAiModelSpec("gpt-4o")).toThrow(
-      "Expected format: provider:modelId",
-    );
+    expect(() => parsePiAiModelSpec("gpt-4o")).toThrow("Expected format: provider:modelId");
   });
 
   it("throws when provider or model id is empty", () => {
-    expect(() => parsePiAiModelSpec(":gpt-4o")).toThrow(
-      "Expected format: provider:modelId",
-    );
-    expect(() => parsePiAiModelSpec("openai:")).toThrow(
-      "Expected format: provider:modelId",
-    );
+    expect(() => parsePiAiModelSpec(":gpt-4o")).toThrow("Expected format: provider:modelId");
+    expect(() => parsePiAiModelSpec("openai:")).toThrow("Expected format: provider:modelId");
   });
 });

@@ -30,10 +30,7 @@ function getAppliedVersions(db: Database.Database): Set<number> {
  * Detection heuristic: the `findings` table exists but the `schema_version`
  * table was just freshly created (empty).
  */
-function detectAndMarkLegacyDatabase(
-  db: Database.Database,
-  _migrations: Migration[],
-): Set<number> {
+function detectAndMarkLegacyDatabase(db: Database.Database, _migrations: Migration[]): Set<number> {
   const applied = getAppliedVersions(db);
   if (applied.size > 0) {
     // Already a migration-managed database
@@ -41,9 +38,9 @@ function detectAndMarkLegacyDatabase(
   }
 
   // Check if the findings table exists (legacy indicator)
-  const findingsTable = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'findings'",
-  ).get() as { name: string } | undefined;
+  const findingsTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'findings'")
+    .get() as { name: string } | undefined;
 
   if (!findingsTable) {
     // Brand-new database — no legacy state to account for
@@ -53,27 +50,28 @@ function detectAndMarkLegacyDatabase(
   // This is a legacy database. Figure out how far the schema has evolved
   // by inspecting what columns/tables exist, then mark matching migrations.
   const findingsColumns = new Set(
-    (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>)
-      .map((c) => c.name),
+    (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map((c) => c.name),
   );
 
-  const pipelineTable = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs'",
-  ).get() as { name: string } | undefined;
+  const pipelineTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs'")
+    .get() as { name: string } | undefined;
 
-  const calibrationTable = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'calibration_weights'",
-  ).get() as { name: string } | undefined;
+  const calibrationTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'calibration_weights'")
+    .get() as { name: string } | undefined;
 
-  const trajectoriesTable = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'trajectories'",
-  ).get() as { name: string } | undefined;
-  const dynamicAnalysisRunsTable = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'dynamic_analysis_runs'",
-  ).get() as { name: string } | undefined;
-  const patchResultsTable = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'patch_results'",
-  ).get() as { name: string } | undefined;
+  const trajectoriesTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'trajectories'")
+    .get() as { name: string } | undefined;
+  const dynamicAnalysisRunsTable = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'dynamic_analysis_runs'",
+    )
+    .get() as { name: string } | undefined;
+  const patchResultsTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'patch_results'")
+    .get() as { name: string } | undefined;
 
   const now = new Date().toISOString();
   const insertVersion = db.prepare(
@@ -123,9 +121,9 @@ function detectAndMarkLegacyDatabase(
 
   // Migration 008: pipeline_runs status constraint expansion
   if (pipelineTable) {
-    const tableSql = db.prepare(
-      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs'",
-    ).get() as { sql?: string } | undefined;
+    const tableSql = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs'")
+      .get() as { sql?: string } | undefined;
 
     if (tableSql?.sql?.includes("'verifying'") && tableSql?.sql?.includes("'poc-harnessing'")) {
       insertVersion.run(8, "pipeline_runs_status_values", now);
@@ -136,8 +134,9 @@ function detectAndMarkLegacyDatabase(
   // Migration 009: pipeline_runs context_json
   if (pipelineTable) {
     const prColumns = new Set(
-      (db.prepare("PRAGMA table_info(pipeline_runs)").all() as Array<{ name: string }>)
-        .map((c) => c.name),
+      (db.prepare("PRAGMA table_info(pipeline_runs)").all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
     );
     if (prColumns.has("context_json")) {
       insertVersion.run(9, "add_pipeline_runs_context", now);
@@ -158,13 +157,21 @@ function detectAndMarkLegacyDatabase(
   }
 
   // Migration 016: structured finding evidence columns
-  if (findingsColumns.has("taint_path_json") && findingsColumns.has("proof_state") && findingsColumns.has("engine_provenance_json")) {
+  if (
+    findingsColumns.has("taint_path_json") &&
+    findingsColumns.has("proof_state") &&
+    findingsColumns.has("engine_provenance_json")
+  ) {
     insertVersion.run(16, "add_structured_finding_evidence", now);
     applied.add(16);
   }
 
   // Migration 017: dynamic + patch persistence
-  if (findingsColumns.has("finding_metadata_json") && dynamicAnalysisRunsTable && patchResultsTable) {
+  if (
+    findingsColumns.has("finding_metadata_json") &&
+    dynamicAnalysisRunsTable &&
+    patchResultsTable
+  ) {
     insertVersion.run(17, "add_dynamic_and_patch_persistence", now);
     applied.add(17);
   }
@@ -212,9 +219,11 @@ export function runMigrations(
     const runOne = db.transaction(() => {
       migration.up(db);
 
-      db.prepare(
-        "INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
-      ).run(migration.version, migration.name, new Date().toISOString());
+      db.prepare("INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)").run(
+        migration.version,
+        migration.name,
+        new Date().toISOString(),
+      );
     });
 
     runOne();

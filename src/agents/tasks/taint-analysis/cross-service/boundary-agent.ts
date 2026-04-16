@@ -1,17 +1,17 @@
 import path from "node:path";
-import type { AgentRuntime } from "../../../../agent-runtime/types.js";
 import type {
   AgentResultErrorMessage,
   AgentResultSuccessMessage,
+  AgentRuntime,
   AgentToolDecision,
 } from "../../../../agent-runtime/types.js";
 import { attachTaskOutputMeta } from "../../../../task-output-meta.js";
 import { isRecord, toErrorMessage } from "../../../../utils.js";
 import {
   BOUNDARY_RESPONSE_SCHEMA,
+  type BoundaryDirection,
   type BoundaryManifest,
   type BoundaryPoint,
-  type BoundaryDirection,
   type BoundaryProtocol,
   type ServiceDescriptor,
 } from "./types.js";
@@ -95,10 +95,7 @@ export async function detectServiceBoundaries(
   }
 
   if (executionError && !structuredOutput && !resultText) {
-    throw withCost(
-      new Error(`Boundary detection error: ${executionError}`),
-      costUsd,
-    );
+    throw withCost(new Error(`Boundary detection error: ${executionError}`), costUsd);
   }
 
   const errors: string[] = [];
@@ -116,13 +113,16 @@ export async function detectServiceBoundaries(
     );
   }
 
-  return attachTaskOutputMeta({
-    serviceId: service.id,
-    servicePath: service.rootPath,
-    entryPoints: parsed.entryPoints,
-    exitPoints: parsed.exitPoints,
-    errors,
-  }, { costUsd });
+  return attachTaskOutputMeta(
+    {
+      serviceId: service.id,
+      servicePath: service.rootPath,
+      entryPoints: parsed.entryPoints,
+      exitPoints: parsed.exitPoints,
+      errors,
+    },
+    { costUsd },
+  );
 }
 
 // ── Prompt ───────────────────────────────────────────────────────────────
@@ -247,7 +247,9 @@ function parsePointArray(
 
   return value
     .map((item, index) => normalizePoint(item, expectedDirection, index))
-    .filter((point): point is BoundaryPoint => point !== null && point.confidence >= confidenceThreshold);
+    .filter(
+      (point): point is BoundaryPoint => point !== null && point.confidence >= confidenceThreshold,
+    );
 }
 
 function normalizePoint(
@@ -312,11 +314,16 @@ function extractJson(value: string): string {
 }
 
 const VALID_PROTOCOLS = new Set<BoundaryProtocol>([
-  "http-server", "http-client",
-  "grpc-server", "grpc-client",
-  "message-publish", "message-consume",
-  "database-write", "database-read",
-  "event-emit", "event-listen",
+  "http-server",
+  "http-client",
+  "grpc-server",
+  "grpc-client",
+  "message-publish",
+  "message-consume",
+  "database-write",
+  "database-read",
+  "event-emit",
+  "event-listen",
   "unknown",
 ]);
 

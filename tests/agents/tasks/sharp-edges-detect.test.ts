@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { sharpEdgesDetectTask, __sharpEdgesDetectInternals } from "../../../src/agents/tasks/sharp-edges-detect.js";
-import type { KuzushiConfig } from "../../../src/types.js";
+import {
+  __sharpEdgesDetectInternals,
+  sharpEdgesDetectTask,
+} from "../../../src/agents/tasks/sharp-edges-detect.js";
 import type { TaskContext } from "../../../src/agents/types.js";
+import type { KuzushiConfig } from "../../../src/types.js";
 
-const { resolveConfig, buildScoundrelPrompt, buildLazyDeveloperPrompt, buildConfusedDeveloperPrompt, normalizeFindings, computeFingerprint } = __sharpEdgesDetectInternals;
+const {
+  resolveConfig,
+  buildScoundrelPrompt,
+  buildLazyDeveloperPrompt,
+  buildConfusedDeveloperPrompt,
+  normalizeFindings,
+  computeFingerprint,
+} = __sharpEdgesDetectInternals;
 
 function makeContext(overrides: Record<string, unknown> = {}): TaskContext {
   return {
@@ -27,7 +37,7 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: (overrides.taskConfig as Record<string, Record<string, unknown>>) ?? {},
   };
 }
 
@@ -35,7 +45,11 @@ describe("sharpEdgesDetectTask", () => {
   it("has correct metadata", () => {
     expect(sharpEdgesDetectTask.id).toBe("sharp-edges-detect");
     expect(sharpEdgesDetectTask.outputKind).toBe("findings");
-    expect(sharpEdgesDetectTask.dependsOn).toEqual(["context-gatherer", "app-model-build", "threat-scenario-build"]);
+    expect(sharpEdgesDetectTask.dependsOn).toEqual([
+      "context-gatherer",
+      "app-model-build",
+      "threat-scenario-build",
+    ]);
   });
 });
 
@@ -68,7 +82,14 @@ describe("buildScoundrelPrompt", () => {
 
   it("includes repo context when provided", () => {
     const prompt = buildScoundrelPrompt(
-      { languages: ["Java"], frameworks: ["Spring"], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Java"],
+        frameworks: ["Spring"],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       25,
     );
     expect(prompt).toContain("Java");
@@ -143,8 +164,28 @@ describe("normalizeFindings", () => {
   it("deduplicates by fingerprint", () => {
     const raw = {
       findings: [
-        { category: "dangerous-defaults", filePath: "src/auth.ts", startLine: 10, severity: "ERROR", description: "d", cwe: "CWE-1188", confidence: "HIGH", rationale: "r", persona: "scoundrel" },
-        { category: "dangerous-defaults", filePath: "src/auth.ts", startLine: 10, severity: "WARNING", description: "d", cwe: "CWE-1188", confidence: "MEDIUM", rationale: "r", persona: "lazy-developer" },
+        {
+          category: "dangerous-defaults",
+          filePath: "src/auth.ts",
+          startLine: 10,
+          severity: "ERROR",
+          description: "d",
+          cwe: "CWE-1188",
+          confidence: "HIGH",
+          rationale: "r",
+          persona: "scoundrel",
+        },
+        {
+          category: "dangerous-defaults",
+          filePath: "src/auth.ts",
+          startLine: 10,
+          severity: "WARNING",
+          description: "d",
+          cwe: "CWE-1188",
+          confidence: "MEDIUM",
+          rationale: "r",
+          persona: "lazy-developer",
+        },
       ],
     };
 
@@ -189,17 +230,19 @@ describe("normalizeFindings", () => {
 
     for (const [category, expectedCwe] of categories) {
       const raw = {
-        findings: [{
-          category,
-          filePath: "src/test.ts",
-          startLine: 1,
-          severity: "WARNING",
-          description: "test",
-          cwe: expectedCwe,
-          confidence: "MEDIUM",
-          rationale: "r",
-          persona: "scoundrel",
-        }],
+        findings: [
+          {
+            category,
+            filePath: "src/test.ts",
+            startLine: 1,
+            severity: "WARNING",
+            description: "test",
+            cwe: expectedCwe,
+            confidence: "MEDIUM",
+            rationale: "r",
+            persona: "scoundrel",
+          },
+        ],
       };
       const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 50);
       expect(findings[0].cwe).toEqual([expectedCwe]);
@@ -209,7 +252,17 @@ describe("normalizeFindings", () => {
 
 describe("computeFingerprint", () => {
   it("produces stable fingerprints", () => {
-    const f = { category: "dangerous-defaults" as const, filePath: "src/auth.ts", startLine: 42, severity: "ERROR", description: "", cwe: "CWE-1188", confidence: "HIGH", rationale: "", persona: "scoundrel" as const };
+    const f = {
+      category: "dangerous-defaults" as const,
+      filePath: "src/auth.ts",
+      startLine: 42,
+      severity: "ERROR",
+      description: "",
+      cwe: "CWE-1188",
+      confidence: "HIGH",
+      rationale: "",
+      persona: "scoundrel" as const,
+    };
     const fp1 = computeFingerprint("repo", "src/auth.ts", f);
     const fp2 = computeFingerprint("repo", "src/auth.ts", f);
     expect(fp1).toBe(fp2);
@@ -217,9 +270,21 @@ describe("computeFingerprint", () => {
   });
 
   it("produces different fingerprints for different inputs", () => {
-    const f1 = { category: "dangerous-defaults" as const, filePath: "src/auth.ts", startLine: 42, severity: "ERROR", description: "", cwe: "", confidence: "", rationale: "", persona: "scoundrel" as const };
+    const f1 = {
+      category: "dangerous-defaults" as const,
+      filePath: "src/auth.ts",
+      startLine: 42,
+      severity: "ERROR",
+      description: "",
+      cwe: "",
+      confidence: "",
+      rationale: "",
+      persona: "scoundrel" as const,
+    };
     const f2 = { ...f1, startLine: 43 };
-    expect(computeFingerprint("repo", "src/auth.ts", f1)).not.toBe(computeFingerprint("repo", "src/auth.ts", f2));
+    expect(computeFingerprint("repo", "src/auth.ts", f1)).not.toBe(
+      computeFingerprint("repo", "src/auth.ts", f2),
+    );
   });
 });
 

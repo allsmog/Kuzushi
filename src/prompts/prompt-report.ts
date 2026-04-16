@@ -114,7 +114,9 @@ export function analyzePrompt(
  */
 export function formatPromptReport(report: PromptReport): string {
   const lines: string[] = [];
-  lines.push(`Prompt Report: ${report.totalEstimatedTokens} estimated tokens (${report.totalChars} chars)`);
+  lines.push(
+    `Prompt Report: ${report.totalEstimatedTokens} estimated tokens (${report.totalChars} chars)`,
+  );
   lines.push("\u2500".repeat(60));
 
   for (const section of report.sections) {

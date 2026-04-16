@@ -1,5 +1,5 @@
-import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { normalizeTaskCapabilityIds } from "../../capabilities.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import type { AgentTask, TaskContext } from "../types.js";
 
@@ -43,57 +43,105 @@ const SELECTION_RULES: SelectionRule[] = [
       "command-injection",
       "deserialization",
     ],
-    reason: "JS/TS ecosystem: prioritize dangerous APIs, SSRF, prototype pollution, templating, and package supply-chain risk",
+    reason:
+      "JS/TS ecosystem: prioritize dangerous APIs, SSRF, prototype pollution, templating, and package supply-chain risk",
   },
   {
     languages: ["Go", "golang"],
-    tasks: ["race-condition", "crypto-misuse", "supply-chain", "command-injection", "deserialization"],
-    reason: "Go: goroutine races, crypto misuse, dependency risk, and command/deserialization checks",
+    tasks: [
+      "race-condition",
+      "crypto-misuse",
+      "supply-chain",
+      "command-injection",
+      "deserialization",
+    ],
+    reason:
+      "Go: goroutine races, crypto misuse, dependency risk, and command/deserialization checks",
   },
   {
     languages: ["Python"],
-    tasks: ["dangerous-api", "secrets", "security-misconfig", "template-injection", "supply-chain", "command-injection", "deserialization", "xxe"],
-    reason: "Python: check for dangerous APIs, secrets, misconfiguration, templating, command injection, deserialization, and XXE risk",
+    tasks: [
+      "dangerous-api",
+      "secrets",
+      "security-misconfig",
+      "template-injection",
+      "supply-chain",
+      "command-injection",
+      "deserialization",
+      "xxe",
+    ],
+    reason:
+      "Python: check for dangerous APIs, secrets, misconfiguration, templating, command injection, deserialization, and XXE risk",
   },
   {
     languages: ["Java", "Kotlin"],
-    tasks: ["dangerous-api", "crypto-misuse", "secrets", "supply-chain", "command-injection", "deserialization", "xxe"],
-    reason: "JVM: check for dangerous APIs, crypto misuse, secrets, command injection, deserialization, and XXE",
+    tasks: [
+      "dangerous-api",
+      "crypto-misuse",
+      "secrets",
+      "supply-chain",
+      "command-injection",
+      "deserialization",
+      "xxe",
+    ],
+    reason:
+      "JVM: check for dangerous APIs, crypto misuse, secrets, command injection, deserialization, and XXE",
   },
   {
     languages: ["Ruby"],
-    tasks: ["dangerous-api", "secrets", "security-misconfig", "template-injection", "supply-chain", "command-injection", "deserialization", "xxe"],
-    reason: "Ruby: check for dangerous APIs, secrets, misconfiguration, templating, command injection, deserialization, and XXE",
+    tasks: [
+      "dangerous-api",
+      "secrets",
+      "security-misconfig",
+      "template-injection",
+      "supply-chain",
+      "command-injection",
+      "deserialization",
+      "xxe",
+    ],
+    reason:
+      "Ruby: check for dangerous APIs, secrets, misconfiguration, templating, command injection, deserialization, and XXE",
   },
   {
     languages: ["PHP"],
-    tasks: ["dangerous-api", "ssrf", "secrets", "template-injection", "supply-chain", "command-injection", "deserialization", "xxe"],
-    reason: "PHP: high risk for injection, SSRF, templating, command injection, deserialization, and XXE",
+    tasks: [
+      "dangerous-api",
+      "ssrf",
+      "secrets",
+      "template-injection",
+      "supply-chain",
+      "command-injection",
+      "deserialization",
+      "xxe",
+    ],
+    reason:
+      "PHP: high risk for injection, SSRF, templating, command injection, deserialization, and XXE",
   },
   {
     languages: ["C", "C++", "Rust"],
     tasks: ["systems-hunt"],
-    reason: "Native code: systems hunt for protocol parsing, numeric boundary bugs, and unsafe memory edges",
+    reason:
+      "Native code: systems hunt for protocol parsing, numeric boundary bugs, and unsafe memory edges",
   },
   {
     condition: (_ctx, fileIndex) => hasSystemsPatternSignals(fileIndex),
     tasks: ["systems-hunt"],
-    reason: "Packet/parser/unsafe/hardening signals detected — run the systems hunt even without explicit language metadata",
+    reason:
+      "Packet/parser/unsafe/hardening signals detected — run the systems hunt even without explicit language metadata",
   },
   // Note: auth-access and dangerous-api both resolve to code-config-detect,
   // which is already in ALWAYS_RECOMMENDED via security-misconfig. Dedicated
   // rules for auth patterns and ORM/DB are unnecessary until those capabilities
   // map to distinct task IDs.
   {
-    condition: (ctx) =>
-      ctx.ormOrDb.some((item) => /mongo|mongoose|dynamo|cosmos/i.test(item)),
+    condition: (ctx) => ctx.ormOrDb.some((item) => /mongo|mongoose|dynamo|cosmos/i.test(item)),
     tasks: ["nosql-injection"],
     reason: "Document or key-value database usage detected — check for NoSQL injection patterns",
   },
   {
     condition: (ctx) =>
-      ctx.frameworks.some((item) => /graphql|apollo|graphene|ariadne|mercurius/i.test(item))
-      || ctx.entryPoints.some((item) => /graphql/i.test(item)),
+      ctx.frameworks.some((item) => /graphql|apollo|graphene|ariadne|mercurius/i.test(item)) ||
+      ctx.entryPoints.some((item) => /graphql/i.test(item)),
     tasks: ["graphql-security"],
     reason: "GraphQL stack detected — run GraphQL-specific security checks",
   },
@@ -104,21 +152,30 @@ const SELECTION_RULES: SelectionRule[] = [
   },
   {
     condition: (ctx) =>
-      ctx.frameworks.some((f) => /express|fastapi|django|flask|spring|gin|echo|nest|next|rails|laravel/i.test(f))
-      || ctx.authPatterns.length > 0,
+      ctx.frameworks.some((f) =>
+        /express|fastapi|django|flask|spring|gin|echo|nest|next|rails|laravel/i.test(f),
+      ) || ctx.authPatterns.length > 0,
     tasks: ["auth-logic", "threat-hunt"],
-    reason: "Web framework or auth patterns detected — probe authorization logic and run threat-actor-driven hunting",
+    reason:
+      "Web framework or auth patterns detected — probe authorization logic and run threat-actor-driven hunting",
   },
   {
-    condition: (ctx) =>
-      ctx.frameworks.length > 0 || ctx.authPatterns.length > 0,
+    condition: (ctx) => ctx.frameworks.length > 0 || ctx.authPatterns.length > 0,
     tasks: ["sharp-edges"],
-    reason: "Framework or auth patterns detected — probe for API design footguns and dangerous defaults",
+    reason:
+      "Framework or auth patterns detected — probe for API design footguns and dangerous defaults",
   },
 ];
 
 /** Tasks always recommended regardless of context. */
-const ALWAYS_RECOMMENDED = ["secrets", "security-misconfig", "sharp-edges", "threat-model", "threat-hunt", "taint-analysis"];
+const ALWAYS_RECOMMENDED = [
+  "secrets",
+  "security-misconfig",
+  "sharp-edges",
+  "threat-model",
+  "threat-hunt",
+  "taint-analysis",
+];
 
 /**
  * The set of resolved task IDs that task-selector manages.
@@ -154,7 +211,10 @@ export const SELECTABLE_TASK_IDS: ReadonlySet<string> = new Set([
  * Deterministic task selector — no LLM, pure rule-based mapping
  * from repository context to recommended tasks.
  */
-function selectTasks(repoContext: RepoContext | undefined, fileIndex?: FileIndex): TaskSelectionResult {
+function selectTasks(
+  repoContext: RepoContext | undefined,
+  fileIndex?: FileIndex,
+): TaskSelectionResult {
   const recommended = new Set<string>(ALWAYS_RECOMMENDED);
   const reasoning: Record<string, string> = {};
 
@@ -168,9 +228,7 @@ function selectTasks(repoContext: RepoContext | undefined, fileIndex?: FileIndex
     };
   }
 
-  const repoLanguages = new Set(
-    repoContext.languages.map((l) => l.toLowerCase()),
-  );
+  const repoLanguages = new Set(repoContext.languages.map((l) => l.toLowerCase()));
 
   for (const rule of SELECTION_RULES) {
     let matches = false;
@@ -180,9 +238,7 @@ function selectTasks(repoContext: RepoContext | undefined, fileIndex?: FileIndex
     }
 
     if (!matches && rule.frameworks) {
-      const repoFrameworks = new Set(
-        repoContext.frameworks.map((f) => f.toLowerCase()),
-      );
+      const repoFrameworks = new Set(repoContext.frameworks.map((f) => f.toLowerCase()));
       matches = rule.frameworks.some((f) => repoFrameworks.has(f.toLowerCase()));
     }
 
@@ -208,9 +264,9 @@ function selectTasks(repoContext: RepoContext | undefined, fileIndex?: FileIndex
     const normalizedTasks = normalizeTaskCapabilityIds(rule.tasks);
     for (const taskId of normalizedTasks) {
       if (
-        normalizedRecommendedTasks.includes(taskId)
-        && !alwaysRecommendedIds.has(taskId)
-        && !reasoning[taskId]
+        normalizedRecommendedTasks.includes(taskId) &&
+        !alwaysRecommendedIds.has(taskId) &&
+        !reasoning[taskId]
       ) {
         reasoning[taskId] = rule.reason;
       }
@@ -232,11 +288,12 @@ function applyDefaultReasoning(
 ): void {
   for (const taskId of recommendedTasks) {
     if (!reasoning[taskId]) {
-      reasoning[taskId] = taskId === "secrets-crypto-detect"
-        ? "Always recommended: secrets and crypto detection"
-        : taskId === "code-config-detect"
-          ? "Always recommended: code and config security checks"
-          : "Recommended from repository context";
+      reasoning[taskId] =
+        taskId === "secrets-crypto-detect"
+          ? "Always recommended: secrets and crypto detection"
+          : taskId === "code-config-detect"
+            ? "Always recommended: code and config security checks"
+            : "Recommended from repository context";
     }
   }
 }
@@ -265,6 +322,7 @@ export const __taskSelectorInternals = {
 
 function hasSystemsPatternSignals(fileIndex: FileIndex | undefined): boolean {
   if (!fileIndex) return false;
-  return ["protocol-parser", "integer-boundary", "unsafe-memory", "hardening"]
-    .some((domain) => (fileIndex.patternMatches[domain]?.length ?? 0) > 0);
+  return ["protocol-parser", "integer-boundary", "unsafe-memory", "hardening"].some(
+    (domain) => (fileIndex.patternMatches[domain]?.length ?? 0) > 0,
+  );
 }

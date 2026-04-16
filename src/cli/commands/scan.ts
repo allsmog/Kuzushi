@@ -1,28 +1,30 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { createDefaultTaskRegistry } from "../../agents/index.js";
 import { configureAgentRuntime } from "../../agent-runtime/index.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
+import { createDefaultTaskRegistry } from "../../agents/index.js";
 import {
   createBus,
   createEvent,
   generateRunId,
-  registerAllWorkers,
   type PipelineCompleteEvent,
   type PipelineErrorEvent,
   type PipelineStats,
+  registerAllWorkers,
 } from "../../bus/index.js";
-import type { UIStore } from "../../ui/state.js";
+import { resolveInitialTaskPlan } from "../../bus/orchestrator/task-policy.js";
 import { inflightCache } from "../../cache.js";
 import { expandTaskSelections } from "../../capabilities.js";
-import { loadConfig } from "../../config.js";
 import {
   formatConfigValidationIssue,
   hasConfigValidationErrors,
   validateKuzushiConfig,
 } from "../../config/validation.js";
-import { getGlobalLogLevel } from "../../logger.js";
+import { loadConfig } from "../../config.js";
+import { looksLikeMonorepo } from "../../discovery/repo-discovery.js";
 import { registerShutdownHook } from "../../lifecycle.js";
+import { getGlobalLogLevel } from "../../logger.js";
+import { printQualityGateResult } from "../../report.js";
 import { configureRateLimitRegistry } from "../../scheduler/index.js";
 import {
   createRun,
@@ -33,20 +35,22 @@ import {
   initDb,
   markStaleRunsAborted,
 } from "../../store.js";
-import { looksLikeMonorepo } from "../../discovery/repo-discovery.js";
 import type { KuzushiConfig, ScanOpts } from "../../types.js";
-import { printQualityGateResult } from "../../report.js";
+import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js";
+import type { UIStore } from "../../ui/state.js";
 import { CliCommandError, CliConfigError, CliUsageError } from "../errors.js";
-import { warnPiAiBackendApiKeys, resolveActivePiAiModels, validatePiAiProviderCredentials } from "../pi-ai.js";
-import { resolveInitialTaskPlan } from "../../bus/orchestrator/task-policy.js";
+import {
+  resolveActivePiAiModels,
+  validatePiAiProviderCredentials,
+  warnPiAiBackendApiKeys,
+} from "../pi-ai.js";
 import {
   applyScanCommandConfigOverrides,
-  resolveScanSeverity,
   resolveScannerOverride,
+  resolveScanSeverity,
   type ScanCommandOptions,
 } from "../scan-config.js";
 import { isShutdownCapableRuntime, resolveRepo } from "../shared.js";
-import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js";
 
 export interface PreparedScanExecution {
   config: KuzushiConfig;
@@ -141,7 +145,9 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
       }
     } else {
       // Returning user: show config confirmation
-      const resolvedConfig = loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true });
+      const resolvedConfig = loadConfig(repoRoot, {
+        trustProjectConfig: opts.trustRepoConfig === true,
+      });
       const outcome = await runConfigConfirmation(
         uiStore,
         {
@@ -186,7 +192,9 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   if (opts.moduleFilter) {
     resetTerminalOutput();
     cleanupUI();
-    throw new CliUsageError("--module-filter can only be used when module discovery or manual modules are active.");
+    throw new CliUsageError(
+      "--module-filter can only be used when module discovery or manual modules are active.",
+    );
   }
 
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
@@ -286,12 +294,15 @@ export async function resolveMonorepoExecution(params: {
     return { useMonorepo: true, reason: "config-monorepo" };
   }
 
-  return await looksLikeMonorepo(scanPath)
+  return (await looksLikeMonorepo(scanPath))
     ? { useMonorepo: true, reason: "auto-detected" }
     : { useMonorepo: false, reason: "single-root" };
 }
 
-export function prepareScanExecution(repoRoot: string, opts: ScanCommandOptions): PreparedScanExecution {
+export function prepareScanExecution(
+  repoRoot: string,
+  opts: ScanCommandOptions,
+): PreparedScanExecution {
   const config = applyScanCommandConfigOverrides(
     loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true }),
     opts,
@@ -320,11 +331,7 @@ export function prepareScanExecution(repoRoot: string, opts: ScanCommandOptions)
 }
 
 export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts): AgentRuntime {
-  const activeModels = resolveActivePiAiModels(
-    config,
-    scanOpts.tasks ?? [],
-    config.tasks ?? [],
-  );
+  const activeModels = resolveActivePiAiModels(config, scanOpts.tasks ?? [], config.tasks ?? []);
 
   const isClaudeRuntime = (config.agentRuntimeBackend ?? "claude") === "claude";
   if (!isClaudeRuntime) {
@@ -334,14 +341,17 @@ export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts)
 
     if (missingCredentials.length > 0) {
       const details = missingCredentials.map(
-        (entry) => `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] (used by: ${entry.models.join(", ")})`,
+        (entry) =>
+          `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] (used by: ${entry.models.join(", ")})`,
       );
       if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
         details.push(
           "Tip: for Anthropic models, you can also set agentRuntimeConfig.apiKey or pass --api-key for this run.",
         );
       }
-      throw new CliConfigError("missing API credentials for selected model provider(s):", { details });
+      throw new CliConfigError("missing API credentials for selected model provider(s):", {
+        details,
+      });
     }
   }
 
@@ -368,15 +378,7 @@ export function applyPipelineCacheOptions(opts: Pick<ScanCommandOptions, "fresh"
 }
 
 export async function runPipeline(params: PipelineParams): Promise<PipelineResult> {
-  const {
-    repoRoot,
-    scanPath,
-    repoName,
-    config,
-    scanOpts,
-    opts,
-    runtime: runtimeOverride,
-  } = params;
+  const { repoRoot, scanPath, repoName, config, scanOpts, opts, runtime: runtimeOverride } = params;
   const reportMode = params.reportMode ?? "full";
   const manageCache = params.manageCache ?? true;
 
@@ -414,25 +416,59 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   } catch (error) {
     db.close();
     if (ownsRuntime && isShutdownCapableRuntime(runtime)) {
-      try { await runtime.shutdown(); } catch { /* best-effort */ }
+      try {
+        await runtime.shutdown();
+      } catch {
+        /* best-effort */
+      }
     }
     throw new CliCommandError(error instanceof Error ? error.message : String(error));
   }
 
-  shutdownHookDisposers.push(registerShutdownHook("bus-drain", async () => {
-    if (bus) {
-      try { await bus.close(); } catch { /* best-effort */ }
-    }
-  }, 1));
-  shutdownHookDisposers.push(registerShutdownHook("db-close", async () => {
-    try { db.close(); } catch { /* best-effort */ }
-  }, 2));
+  shutdownHookDisposers.push(
+    registerShutdownHook(
+      "bus-drain",
+      async () => {
+        if (bus) {
+          try {
+            await bus.close();
+          } catch {
+            /* best-effort */
+          }
+        }
+      },
+      1,
+    ),
+  );
+  shutdownHookDisposers.push(
+    registerShutdownHook(
+      "db-close",
+      async () => {
+        try {
+          db.close();
+        } catch {
+          /* best-effort */
+        }
+      },
+      2,
+    ),
+  );
   if (ownsRuntime) {
-    shutdownHookDisposers.push(registerShutdownHook("agent-runtime-shutdown", async () => {
-      if (isShutdownCapableRuntime(runtime)) {
-        try { await runtime.shutdown(); } catch { /* best-effort */ }
-      }
-    }, 3));
+    shutdownHookDisposers.push(
+      registerShutdownHook(
+        "agent-runtime-shutdown",
+        async () => {
+          if (isShutdownCapableRuntime(runtime)) {
+            try {
+              await runtime.shutdown();
+            } catch {
+              /* best-effort */
+            }
+          }
+        },
+        3,
+      ),
+    );
   }
 
   let streamingCleanup: (() => Promise<void>) | undefined;
@@ -440,11 +476,21 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     const { startStreamingServer } = await import("../../streaming.js");
     const streaming = startStreamingServer(bus, config.streamingPort ?? 0);
     streamingCleanup = streaming.close;
-    shutdownHookDisposers.push(registerShutdownHook("streaming-server", async () => {
-      if (streamingCleanup) {
-        try { await streamingCleanup(); } catch { /* best-effort */ }
-      }
-    }, 0));
+    shutdownHookDisposers.push(
+      registerShutdownHook(
+        "streaming-server",
+        async () => {
+          if (streamingCleanup) {
+            try {
+              await streamingCleanup();
+            } catch {
+              /* best-effort */
+            }
+          }
+        },
+        0,
+      ),
+    );
   }
 
   const resumeRunId = resolveResumeRunId(db, runRepoId, repoName, opts.resume, scanPath);
@@ -466,10 +512,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   };
 
   const pipelineComplete = bus
-    .waitFor<PipelineCompleteEvent>(
-      "pipeline:complete",
-      (event) => event.meta.runId === runId,
-    )
+    .waitFor<PipelineCompleteEvent>("pipeline:complete", (event) => event.meta.runId === runId)
     .then((event) => ({ kind: "complete" as const, event }));
 
   const pipelineError = bus
@@ -480,13 +523,13 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     .then((event) => ({ kind: "error" as const, event }));
   const pipelineAbort = params.signal
     ? new Promise<{ kind: "aborted" }>((resolve) => {
-      const signal = params.signal!;
-      if (signal.aborted) {
-        resolve({ kind: "aborted" });
-        return;
-      }
-      signal.addEventListener("abort", () => resolve({ kind: "aborted" }), { once: true });
-    })
+        const signal = params.signal!;
+        if (signal.aborted) {
+          resolve({ kind: "aborted" });
+          return;
+        }
+        signal.addEventListener("abort", () => resolve({ kind: "aborted" }), { once: true });
+      })
     : undefined;
 
   if (reportMode === "full" && !params.uiStore) {
@@ -587,7 +630,9 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
             });
             params.uiStore.setMode(params.returnModeOnComplete ?? "summary");
           } else {
-            console.log(`\n  Review complete: ${reviewResult.tp} tp, ${reviewResult.fp} fp, ${reviewResult.byDesign} by_design, ${reviewResult.skipped} skipped`);
+            console.log(
+              `\n  Review complete: ${reviewResult.tp} tp, ${reviewResult.fp} fp, ${reviewResult.byDesign} by_design, ${reviewResult.skipped} skipped`,
+            );
           }
         }
       } catch {
@@ -622,7 +667,11 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
             db.close();
           } finally {
             for (const dispose of shutdownHookDisposers.reverse()) {
-              try { dispose(); } catch { /* best-effort */ }
+              try {
+                dispose();
+              } catch {
+                /* best-effort */
+              }
             }
           }
         }
@@ -637,9 +686,7 @@ export function getScanPlanSummary(
   taskRegistry?: Awaited<ReturnType<typeof createDefaultTaskRegistry>>,
 ): ScanPlanSummary {
   const taskIds = scanOpts.tasks ?? config.tasks ?? ["semgrep"];
-  const taskPlan = taskRegistry
-    ? resolveInitialTaskPlan(taskRegistry, taskIds, config)
-    : undefined;
+  const taskPlan = taskRegistry ? resolveInitialTaskPlan(taskRegistry, taskIds, config) : undefined;
   const resolvedTaskIds = taskPlan
     ? taskPlan.enabledTaskIds.filter((id) => !taskIds.includes(id))
     : [];
@@ -647,9 +694,10 @@ export function getScanPlanSummary(
     taskIds,
     resolvedTaskIds,
     dynamicSelectionActive: taskPlan?.dynamicSelectionActive ?? false,
-    taskSummary: resolvedTaskIds.length === 0
-      ? "none"
-      : `${resolvedTaskIds.length} (${resolvedTaskIds.slice(0, 4).join(", ")}${resolvedTaskIds.length > 4 ? ", ..." : ""})`,
+    taskSummary:
+      resolvedTaskIds.length === 0
+        ? "none"
+        : `${resolvedTaskIds.length} (${resolvedTaskIds.slice(0, 4).join(", ")}${resolvedTaskIds.length > 4 ? ", ..." : ""})`,
   };
 }
 
@@ -683,9 +731,10 @@ function resolveResumeRunId(
 
   let resumeRunId: string | undefined;
   if (resume === true) {
-    const latest = getLatestResumableRun(db, repoId)
-      ?? getLatestResumableRun(db, repoName)
-      ?? (scanPath ? getLatestResumableRun(db, scanPath) : undefined);
+    const latest =
+      getLatestResumableRun(db, repoId) ??
+      getLatestResumableRun(db, repoName) ??
+      (scanPath ? getLatestResumableRun(db, scanPath) : undefined);
     if (!latest) {
       throw new CliUsageError(`no resumable runs found for repo "${repoId}".`);
     }

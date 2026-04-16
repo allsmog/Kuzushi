@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { ScanOpts } from "../types.js";
 import { emitDiagnostic } from "../ui/output.js";
+import { detectParameterRiskBoost, scoreFindingMetadata } from "./scoring.js";
 import type { Finding } from "./types.js";
-import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
 
 /** Raw Semgrep JSON result shape (partial). */
 export interface SemgrepResult {
@@ -48,11 +48,7 @@ export function scoreSemgrepFinding(finding: SemgrepResult): number {
 }
 
 /** Content-based fingerprint that survives line shifts. */
-export function computeFingerprint(
-  repoName: string,
-  ref: string,
-  finding: SemgrepResult,
-): string {
+export function computeFingerprint(repoName: string, ref: string, finding: SemgrepResult): string {
   const extra = finding.extra ?? {};
   let matched = (extra.lines ?? "").trim();
   if (!matched || matched === "requires login") {
@@ -155,10 +151,7 @@ export function selectFindings(
   maxFindings?: number,
 ): Finding[] {
   const results = semgrepOutput.results ?? [];
-  const scored: Array<[number, SemgrepResult]> = results.map((f) => [
-    scoreSemgrepFinding(f),
-    f,
-  ]);
+  const scored: Array<[number, SemgrepResult]> = results.map((f) => [scoreSemgrepFinding(f), f]);
   scored.sort((a, b) => b[0] - a[0]);
 
   const seen = new Map<string, [number, SemgrepResult]>();
@@ -170,9 +163,7 @@ export function selectFindings(
     }
   }
 
-  const deduped = [...seen.entries()]
-    .sort((a, b) => b[1][0] - a[1][0])
-    .slice(0, maxFindings);
+  const deduped = [...seen.entries()].sort((a, b) => b[1][0] - a[1][0]).slice(0, maxFindings);
 
   return deduped.map(([fp, [score, finding]]) => {
     const extra = finding.extra ?? {};

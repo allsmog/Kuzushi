@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { renderTemplate } from "../../src/prompts/template.js";
 import { createHash } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { renderTemplate } from "../../src/prompts/template.js";
 
 function hashString(s: string): string {
   return createHash("sha256").update(s).digest("hex");

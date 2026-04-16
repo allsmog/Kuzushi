@@ -111,7 +111,7 @@ export function falseDismissalModule(): string {
     '"The framework handles XSS" — template engines have raw output modes, JS contexts bypass HTML encoding, DOM XSS is client-side',
     '"File uploads are safe because we check the extension" — null bytes, double extensions, parser discrepancies bypass extension checks',
     '"We validate on the frontend" — client-side validation is UX, not security',
-    '"It\'s internal, auth doesn\'t matter" — internal apps get compromised via SSRF and lateral movement',
+    "\"It's internal, auth doesn't matter\" — internal apps get compromised via SSRF and lateral movement",
     '"Low severity, not worth flagging" — low-severity findings chain into critical attack paths',
     "If your FP rationale matches any of these patterns, re-investigate before concluding.",
   ].join("\n");
@@ -159,17 +159,12 @@ export function proofLevelModule(): string {
  * Knowledge injection module — formats knowledge registry query results
  * for prompt injection. Returns empty string if no results.
  */
-export function knowledgeInjectionModule(
-  formattedSections: string[],
-): string {
+export function knowledgeInjectionModule(formattedSections: string[]): string {
   if (formattedSections.length === 0) {
     return "";
   }
 
-  return [
-    "## Domain Knowledge",
-    ...formattedSections,
-  ].join("\n");
+  return ["## Domain Knowledge", ...formattedSections].join("\n");
 }
 
 /**

@@ -1,5 +1,5 @@
-import type { CorroboratingSignal, Finding } from "./types.js";
 import type { LlmRescoreResult } from "./llm-rescore.js";
+import type { CorroboratingSignal, Finding } from "./types.js";
 
 const PROOF_STATE_PRECEDENCE: Record<NonNullable<Finding["proofState"]>, number> = {
   symbolic_only: 0,
@@ -74,7 +74,8 @@ export function clusterFindings(findings: Finding[]): ClusteredFindingResult {
     clustered.push({
       ...primary,
       adjustedScore: primary.adjustedScore ?? primary.score,
-      corroboratingSignals: corroboratingSignals.length > 0 ? corroboratingSignals : primary.corroboratingSignals,
+      corroboratingSignals:
+        corroboratingSignals.length > 0 ? corroboratingSignals : primary.corroboratingSignals,
     });
   }
 
@@ -86,10 +87,7 @@ export function getRankingScore(finding: Finding): number {
   return finding.adjustedScore ?? finding.score;
 }
 
-export function selectFindingsForRescore(
-  findings: Finding[],
-  maxFindings?: number,
-): Finding[] {
+export function selectFindingsForRescore(findings: Finding[], maxFindings?: number): Finding[] {
   const sorted = [...findings].sort((a, b) => getRankingScore(b) - getRankingScore(a));
   if (maxFindings === undefined) {
     return sorted;
@@ -260,10 +258,7 @@ function buildClusterKey(finding: Finding): string {
 }
 
 function normalizePathForKey(filePath: string): string {
-  return filePath
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "")
-    .toLowerCase();
+  return filePath.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
 }
 
 function normalizeCweForKey(cwe: string[]): string[] {

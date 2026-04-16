@@ -38,7 +38,8 @@ export async function createMonorepoRenderer(
         Object.assign(mod, update);
 
         if (update.status === "complete") {
-          const verdicts = mod.tp != null ? `tp=${mod.tp} fp=${mod.fp ?? 0} nr=${mod.needsReview ?? 0}` : "";
+          const verdicts =
+            mod.tp != null ? `tp=${mod.tp} fp=${mod.fp ?? 0} nr=${mod.needsReview ?? 0}` : "";
           console.log(`  ◆ ${mod.name}  ${verdicts}`);
         } else if (update.status === "error") {
           console.log(`  ✗ ${mod.name}  ${update.detail ?? "error"}`);
@@ -66,7 +67,9 @@ export async function createMonorepoRenderer(
 
     useEffect(() => {
       rerender = () => setModules([...currentModules]);
-      return () => { rerender = undefined; };
+      return () => {
+        rerender = undefined;
+      };
     }, []);
 
     return createElement(MonorepoProgress, { modules, phaseLabel });

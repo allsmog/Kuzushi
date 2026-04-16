@@ -1,16 +1,16 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
+  type AgentRuntimeOptions,
   extractJson,
   runStructuredAgentQuery,
-  type AgentRuntimeOptions,
 } from "../agent-runtime/execution.js";
-import type { Finding } from "../scanners/types.js";
 import {
   resolveDefaultPocHarnessTools,
   resolveScriptExtension,
   validateScriptSyntax,
 } from "../poc-harness.js";
+import type { Finding } from "../scanners/types.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import {
   buildCryptoBehavioralSystemPrompt,
@@ -40,7 +40,9 @@ export const CRYPTO_BEHAVIORAL_HARNESS_SCHEMA = {
   },
 } as const;
 
-export interface GenerateCryptoBehavioralHarnessOptions extends AgentRuntimeOptions, CryptoBehavioralPromptOptions {}
+export interface GenerateCryptoBehavioralHarnessOptions
+  extends AgentRuntimeOptions,
+    CryptoBehavioralPromptOptions {}
 
 export class CryptoBehavioralHarnessExecutionError extends Error {
   readonly costUsd: number;
@@ -105,7 +107,8 @@ export async function generateCryptoBehavioralHarness(
     parsedResult.parsed = false;
     parsedResult.parseError = null;
     if (!parsedResult.skipReason || parsedResult.skipReason.trim().length === 0) {
-      parsedResult.skipReason = "Agent skipped crypto behavioral harness generation without a reason.";
+      parsedResult.skipReason =
+        "Agent skipped crypto behavioral harness generation without a reason.";
     }
 
     return {
@@ -145,12 +148,20 @@ function parseCryptoBehavioralHarnessOutput(
   testType: CryptoBehavioralTestType,
 ): CryptoBehavioralHarnessResult {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    return parseCryptoBehavioralHarnessObject(raw as Record<string, unknown>, fingerprint, testType);
+    return parseCryptoBehavioralHarnessObject(
+      raw as Record<string, unknown>,
+      fingerprint,
+      testType,
+    );
   }
 
   if (typeof raw === "string") {
     const json = extractJson(raw);
-    return parseCryptoBehavioralHarnessObject(JSON.parse(json) as Record<string, unknown>, fingerprint, testType);
+    return parseCryptoBehavioralHarnessObject(
+      JSON.parse(json) as Record<string, unknown>,
+      fingerprint,
+      testType,
+    );
   }
 
   return parseCryptoBehavioralHarnessObject({}, fingerprint, testType);
@@ -198,10 +209,7 @@ function asString(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
 }
 
-function asTestType(
-  value: unknown,
-  fallback: CryptoBehavioralTestType,
-): CryptoBehavioralTestType {
+function asTestType(value: unknown, fallback: CryptoBehavioralTestType): CryptoBehavioralTestType {
   switch (value) {
     case "timing":
     case "ecb-mode":

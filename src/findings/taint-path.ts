@@ -1,10 +1,7 @@
 import type { TaintPathStep } from "../scanners/types.js";
 
 function sanitizeSnippet(snippet: string): string {
-  return snippet
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 240);
+  return snippet.replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
 export function formatTaintPathForPrompt(
@@ -17,7 +14,9 @@ export function formatTaintPathForPrompt(
 
   const lines = ["## Full Taint Flow Path"];
   for (const [index, step] of taintPath.slice(0, maxSteps).entries()) {
-    lines.push(`Step ${index + 1}: ${step.filePath}:${step.line}${step.message ? ` - ${step.message}` : ""}`);
+    lines.push(
+      `Step ${index + 1}: ${step.filePath}:${step.line}${step.message ? ` - ${step.message}` : ""}`,
+    );
     if (step.snippet) {
       lines.push(`  Code: ${sanitizeSnippet(step.snippet)}`);
     }

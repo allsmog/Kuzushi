@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApprovalGate } from "../../../src/agents/tasks/approval-gate.js";
 import type { TaskContext } from "../../../src/agents/types.js";
 import type { MessageBus } from "../../../src/bus/types.js";

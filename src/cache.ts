@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 /** Default TTL: 14 days in milliseconds. Override via KUZUSHI_CACHE_TTL env var. */
 const DEFAULT_TTL_MS = 14 * 24 * 60 * 60 * 1000;

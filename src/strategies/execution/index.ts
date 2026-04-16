@@ -1,15 +1,18 @@
+import { resolveTaskModel, resolveTaskRuntime } from "../../agents/tasks/runtime-overrides.js";
+import { createLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import type { RepoContext } from "../../types.js";
-import { createLogger } from "../../logger.js";
 import { toErrorMessage } from "../../utils.js";
-import type { AnalysisStrategy, StrategyInput, StrategyResult, StrategyEvidence } from "../types.js";
-import { resolveTaskModel, resolveTaskRuntime } from "../../agents/tasks/runtime-overrides.js";
+import type {
+  AnalysisStrategy,
+  StrategyEvidence,
+  StrategyInput,
+  StrategyResult,
+} from "../types.js";
 
 const log = createLogger({ stage: "strategy-execution" });
 
-const SUPPORTED_CWES = new Set([
-  "CWE-89", "CWE-918", "CWE-78", "CWE-94", "CWE-22",
-]);
+const SUPPORTED_CWES = new Set(["CWE-89", "CWE-918", "CWE-78", "CWE-94", "CWE-22"]);
 
 const EXECUTION_SCHEMA = {
   type: "object",
@@ -52,9 +55,13 @@ export function createExecutionStrategy(strategyId: string, cweIds: string[]): A
       if (!input.finding) {
         // Execution strategy requires an existing finding to validate
         return {
-          strategyKind: "execution", strategyId,
-          findings: [], confidence: 0, costUsd: 0,
-          durationMs: Date.now() - startTime, evidence: [],
+          strategyKind: "execution",
+          strategyId,
+          findings: [],
+          confidence: 0,
+          costUsd: 0,
+          durationMs: Date.now() - startTime,
+          evidence: [],
         };
       }
 
@@ -84,7 +91,7 @@ export function createExecutionStrategy(strategyId: string, cweIds: string[]): A
         })) {
           if (message.type === "result" && "result" in message) {
             structuredOutput = message.structuredOutput;
-            costUsd = (message as unknown as Record<string, unknown>).totalCostUsd as number ?? 0;
+            costUsd = ((message as unknown as Record<string, unknown>).totalCostUsd as number) ?? 0;
           }
         }
 
@@ -102,9 +109,13 @@ export function createExecutionStrategy(strategyId: string, cweIds: string[]): A
       const confidence = evidence.length > 0 ? 0.85 : 0;
 
       return {
-        strategyKind: "execution", strategyId,
-        findings: [], confidence, costUsd,
-        durationMs: Date.now() - startTime, evidence,
+        strategyKind: "execution",
+        strategyId,
+        findings: [],
+        confidence,
+        costUsd,
+        durationMs: Date.now() - startTime,
+        evidence,
       };
     },
   };

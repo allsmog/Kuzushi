@@ -7,20 +7,24 @@
  *   ├─ ⋯ Grep "sanitize" (2.1s)
  *   └─ ✓ Found unsanitized user input flows to query
  */
-import React from "react";
-import { Box, Text } from "ink";
+
 import chalk from "chalk";
-import { icons } from "../icons.js";
+import { Box, Text } from "ink";
+import type React from "react";
 import { formatDuration } from "../format.js";
-import { Spinner } from "./Spinner.js";
+import { icons } from "../icons.js";
 import type { AgentActivityLine } from "../state.js";
+import { Spinner } from "./Spinner.js";
 
 interface AgentActivityProps {
   fingerprint: string;
   lines: AgentActivityLine[];
 }
 
-export function AgentActivity({ fingerprint, lines }: AgentActivityProps): React.ReactElement | null {
+export function AgentActivity({
+  fingerprint,
+  lines,
+}: AgentActivityProps): React.ReactElement | null {
   if (lines.length === 0) return null;
 
   const latest = lines[lines.length - 1]!;
@@ -39,7 +43,8 @@ export function AgentActivity({ fingerprint, lines }: AgentActivityProps): React
         const content = formatActivityLine(line);
         return (
           <Text key={i}>
-            {"    "}{chalk.dim(connector)} {content}
+            {"    "}
+            {chalk.dim(connector)} {content}
           </Text>
         );
       })}
@@ -55,7 +60,8 @@ function formatActivityLine(line: AgentActivityLine): string {
     }
     case "tool-progress": {
       const toolName = line.toolName ?? "tool";
-      const elapsed = line.elapsedSeconds != null ? ` (${formatDuration(line.elapsedSeconds * 1000)})` : "";
+      const elapsed =
+        line.elapsedSeconds != null ? ` (${formatDuration(line.elapsedSeconds * 1000)})` : "";
       return chalk.dim(`${icons.ellipsis} ${toolName}${elapsed}`);
     }
     case "tool-complete":
@@ -67,9 +73,7 @@ function formatActivityLine(line: AgentActivityLine): string {
         ? chalk.white(line.detail.slice(0, 120) + (line.detail.length > 120 ? "..." : ""))
         : "";
     case "summary":
-      return line.detail
-        ? `${chalk.dim(icons.dot)} ${chalk.dim(line.detail)}`
-        : "";
+      return line.detail ? `${chalk.dim(icons.dot)} ${chalk.dim(line.detail)}` : "";
     case "finding-preview":
       return line.detail
         ? `${chalk.redBright(icons.error)} ${chalk.white(line.detail.slice(0, 120))}`

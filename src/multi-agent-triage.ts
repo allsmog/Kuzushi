@@ -6,34 +6,35 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { cleanupBatchFiles, writeBatchFile } from "./agent-runtime/batch-files.js";
 import {
+  type AgentRuntimeOptions,
   resolveDefaultReadOnlyTools,
   runStructuredAgentQuery,
   runStructuredSessionQuery,
-  type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
-import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
 import type { AgentSession } from "./agent-runtime/types.js";
-import type { Finding, AllowedTriageTool } from "./scanners/types.js";
-import type { RepoContext, TriageResult } from "./types.js";
+import { confidenceEscalationModule, falseDismissalModule } from "./prompts/modules.js";
+import type { AllowedTriageTool, Finding } from "./scanners/types.js";
 import {
-  TRIAGE_RESULT_SCHEMA,
   parseAgentOutput,
-  TriageExecutionError,
-  triageFindingWithAgent,
-  triageSystemPromptPrefix,
+  TRIAGE_RESULT_SCHEMA,
   type TriageConfigProvider,
+  TriageExecutionError,
   type TriageOutput,
   type TriageRuntimeOptions,
+  triageFindingWithAgent,
+  triageSystemPromptPrefix,
 } from "./triage.js";
-import {
-  confidenceEscalationModule,
-  falseDismissalModule,
-} from "./prompts/modules.js";
+import type { RepoContext, TriageResult } from "./types.js";
 import { toErrorMessage } from "./utils.js";
 
 /** Specialist roles for multi-agent triage. */
-export type SpecialistRole = "source-tracer" | "sink-analyzer" | "sanitization-checker" | "config-reviewer";
+export type SpecialistRole =
+  | "source-tracer"
+  | "sink-analyzer"
+  | "sanitization-checker"
+  | "config-reviewer";
 
 /** Result from a single specialist agent. */
 export interface SpecialistReport {
@@ -60,59 +61,63 @@ const SPECIALIST_SCHEMA = {
 } as const;
 
 const SPECIALIST_PROMPTS: Record<SpecialistRole, (finding: Finding, repoName: string) => string> = {
-  "source-tracer": (finding, repoName) => [
-    `You are a source-tracing specialist investigating a security finding in ${repoName}.`,
-    "Your ONLY job: determine who controls the input that reaches the flagged code location.",
-    "",
-    "Trace ALL paths from user-controlled input (HTTP params, headers, cookies, file uploads,",
-    "environment variables, database records) to the flagged location. Report whether the input",
-    "is truly attacker-controllable and through what path it flows.",
-    "",
-    formatFindingContext(finding),
-    "",
-    "Use Read, Grep, GetCallers to trace input sources. Return your assessment as JSON.",
-  ].join("\n"),
+  "source-tracer": (finding, repoName) =>
+    [
+      `You are a source-tracing specialist investigating a security finding in ${repoName}.`,
+      "Your ONLY job: determine who controls the input that reaches the flagged code location.",
+      "",
+      "Trace ALL paths from user-controlled input (HTTP params, headers, cookies, file uploads,",
+      "environment variables, database records) to the flagged location. Report whether the input",
+      "is truly attacker-controllable and through what path it flows.",
+      "",
+      formatFindingContext(finding),
+      "",
+      "Use Read, Grep, GetCallers to trace input sources. Return your assessment as JSON.",
+    ].join("\n"),
 
-  "sink-analyzer": (finding, repoName) => [
-    `You are a sink-analysis specialist investigating a security finding in ${repoName}.`,
-    "Your ONLY job: analyze what dangerous operation the flagged sink performs.",
-    "",
-    "Determine: What does this code actually do with the data? Is it executing a command,",
-    "writing to a database, rendering to HTML, accessing the filesystem, or making a network",
-    "request? How dangerous is this specific sink in context?",
-    "",
-    formatFindingContext(finding),
-    "",
-    "Use Read, GetFunctionBody, GetCallees to understand the sink. Return your assessment as JSON.",
-  ].join("\n"),
+  "sink-analyzer": (finding, repoName) =>
+    [
+      `You are a sink-analysis specialist investigating a security finding in ${repoName}.`,
+      "Your ONLY job: analyze what dangerous operation the flagged sink performs.",
+      "",
+      "Determine: What does this code actually do with the data? Is it executing a command,",
+      "writing to a database, rendering to HTML, accessing the filesystem, or making a network",
+      "request? How dangerous is this specific sink in context?",
+      "",
+      formatFindingContext(finding),
+      "",
+      "Use Read, GetFunctionBody, GetCallees to understand the sink. Return your assessment as JSON.",
+    ].join("\n"),
 
-  "sanitization-checker": (finding, repoName) => [
-    `You are a sanitization-checking specialist investigating a security finding in ${repoName}.`,
-    "Your ONLY job: search for sanitization, validation, encoding, and guards between",
-    "the source and the sink.",
-    "",
-    "Check for: input validation middleware, sanitization functions, encoding helpers,",
-    "parameterized queries, CSP headers, CSRF tokens, rate limiters, WAF rules,",
-    "and any other defensive measures that might prevent exploitation.",
-    "",
-    formatFindingContext(finding),
-    "",
-    "Use Grep, Glob, Read to find defenses. Return your assessment as JSON.",
-  ].join("\n"),
+  "sanitization-checker": (finding, repoName) =>
+    [
+      `You are a sanitization-checking specialist investigating a security finding in ${repoName}.`,
+      "Your ONLY job: search for sanitization, validation, encoding, and guards between",
+      "the source and the sink.",
+      "",
+      "Check for: input validation middleware, sanitization functions, encoding helpers,",
+      "parameterized queries, CSP headers, CSRF tokens, rate limiters, WAF rules,",
+      "and any other defensive measures that might prevent exploitation.",
+      "",
+      formatFindingContext(finding),
+      "",
+      "Use Grep, Glob, Read to find defenses. Return your assessment as JSON.",
+    ].join("\n"),
 
-  "config-reviewer": (finding, repoName) => [
-    `You are a configuration-review specialist investigating a security finding in ${repoName}.`,
-    "Your ONLY job: check framework security settings, middleware configuration,",
-    "and deployment settings that might affect this finding.",
-    "",
-    "Check for: framework security defaults, helmet/cors middleware, ORM configuration,",
-    "template engine auto-escaping settings, security headers, content-type enforcement,",
-    "and any security-relevant configuration that could prevent or enable exploitation.",
-    "",
-    formatFindingContext(finding),
-    "",
-    "Use Grep, Glob, Read to check configs. Return your assessment as JSON.",
-  ].join("\n"),
+  "config-reviewer": (finding, repoName) =>
+    [
+      `You are a configuration-review specialist investigating a security finding in ${repoName}.`,
+      "Your ONLY job: check framework security settings, middleware configuration,",
+      "and deployment settings that might affect this finding.",
+      "",
+      "Check for: framework security defaults, helmet/cors middleware, ORM configuration,",
+      "template engine auto-escaping settings, security headers, content-type enforcement,",
+      "and any security-relevant configuration that could prevent or enable exploitation.",
+      "",
+      formatFindingContext(finding),
+      "",
+      "Use Grep, Glob, Read to check configs. Return your assessment as JSON.",
+    ].join("\n"),
 };
 
 function formatFindingContext(finding: Finding): string {
@@ -211,8 +216,8 @@ async function runSpecialist(
   const prompt = SPECIALIST_PROMPTS[role](finding, repoName);
 
   try {
-    const { structuredOutput, resultText, executionError, costUsd } =
-        await runStructuredAgentQuery({
+    const { structuredOutput, resultText, executionError, costUsd } = await runStructuredAgentQuery(
+      {
         prompt,
         cwd: repoRoot,
         model,
@@ -223,7 +228,8 @@ async function runSpecialist(
           (runtimeOptions as TriageRuntimeOptions | undefined)?.enrichedContext,
         ),
         schema: SPECIALIST_SCHEMA,
-      });
+      },
+    );
 
     if (executionError) {
       return {
@@ -272,23 +278,27 @@ function buildManagerPrompt(
   const reportSections = reports
     .filter((r) => !r.error)
     .map((r) => {
-      const accuracyNote = specialistAccuracies?.get(r.role) != null
-        ? `, historical accuracy: ${(specialistAccuracies.get(r.role)! * 100).toFixed(0)}%`
-        : "";
+      const accuracyNote =
+        specialistAccuracies?.get(r.role) != null
+          ? `, historical accuracy: ${(specialistAccuracies.get(r.role)! * 100).toFixed(0)}%`
+          : "";
       return [
         `### ${formatRoleName(r.role)} (confidence: ${r.confidence}${r.isFalsePositive ? ", says FP" : ""}${accuracyNote})`,
         `Evidence: ${r.evidence}`,
         r.findings ? `Findings: ${r.findings}` : "",
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
     });
 
   const errorReports = reports.filter((r) => r.error);
-  const errorSection = errorReports.length > 0
-    ? [
-        "### Failed Specialists",
-        ...errorReports.map((r) => `- ${formatRoleName(r.role)}: ${r.error}`),
-      ].join("\n")
-    : "";
+  const errorSection =
+    errorReports.length > 0
+      ? [
+          "### Failed Specialists",
+          ...errorReports.map((r) => `- ${formatRoleName(r.role)}: ${r.error}`),
+        ].join("\n")
+      : "";
 
   // Detect specialist disagreements
   const successfulReports = reports.filter((r) => !r.error);
@@ -296,8 +306,9 @@ function buildManagerPrompt(
   const maxConf = Math.max(...confidences, 0);
   const minConf = Math.min(...confidences, 0);
   const confidenceSpread = maxConf - minConf;
-  const hasFpDisagreement = successfulReports.some((r) => r.isFalsePositive)
-    && successfulReports.some((r) => !r.isFalsePositive);
+  const hasFpDisagreement =
+    successfulReports.some((r) => r.isFalsePositive) &&
+    successfulReports.some((r) => !r.isFalsePositive);
   const hasDisagreement = confidenceSpread > 0.3 || hasFpDisagreement;
 
   let conflictSection = "";
@@ -348,7 +359,10 @@ function buildManagerPrompt(
 }
 
 function formatRoleName(role: SpecialistRole): string {
-  return role.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  return role
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 function clampConfidence(value: unknown): number {
@@ -391,10 +405,7 @@ export async function triageFindingMultiAgent(
   // ── Session-based path: reuse subprocesses across findings ──
   if (canUseSession) {
     const runId = randomUUID();
-    const systemPrefix = triageSystemPromptPrefix(
-      repoContext,
-      runtimeOptions?.enrichedContext,
-    );
+    const systemPrefix = triageSystemPromptPrefix(repoContext, runtimeOptions?.enrichedContext);
 
     // Create one session per specialist role (4 total)
     const specialistSessions = new Map<SpecialistRole, AgentSession>();
@@ -450,7 +461,13 @@ export async function triageFindingMultiAgent(
       // If all specialists failed, fall back to single-agent triage
       if (successfulReports.length === 0) {
         const fallback = await triageFindingWithAgent(
-          registry, finding, repoRoot, repoName, managerModel, repoContext, runtimeOptions ?? {},
+          registry,
+          finding,
+          repoRoot,
+          repoName,
+          managerModel,
+          repoContext,
+          runtimeOptions ?? {},
         );
         return { result: fallback.result, costUsd: specialistCost + fallback.costUsd };
       }
@@ -469,9 +486,19 @@ export async function triageFindingMultiAgent(
       });
 
       try {
-        const managerPrompt = buildManagerPrompt(finding, repoName, reports, extraPromptContext, specialistAccuracies);
-        const { structuredOutput, resultText, executionError, costUsd: managerCost } =
-          await runStructuredSessionQuery(managerSession, managerPrompt);
+        const managerPrompt = buildManagerPrompt(
+          finding,
+          repoName,
+          reports,
+          extraPromptContext,
+          specialistAccuracies,
+        );
+        const {
+          structuredOutput,
+          resultText,
+          executionError,
+          costUsd: managerCost,
+        } = await runStructuredSessionQuery(managerSession, managerPrompt);
 
         const totalCost = specialistCost + managerCost;
 
@@ -498,9 +525,7 @@ export async function triageFindingMultiAgent(
       }
     } finally {
       // Close all specialist sessions
-      await Promise.allSettled(
-        [...specialistSessions.values()].map((s) => s.close()),
-      );
+      await Promise.allSettled([...specialistSessions.values()].map((s) => s.close()));
       cleanupBatchFiles(repoRoot, runId);
     }
   }
@@ -558,29 +583,33 @@ export async function triageFindingMultiAgent(
   }
 
   // Run manager synthesis
-  const managerPrompt = buildManagerPrompt(finding, repoName, reports, extraPromptContext, specialistAccuracies);
+  const managerPrompt = buildManagerPrompt(
+    finding,
+    repoName,
+    reports,
+    extraPromptContext,
+    specialistAccuracies,
+  );
 
-  const { structuredOutput, resultText, executionError, costUsd: managerCost } =
-    await runStructuredAgentQuery({
-      prompt: managerPrompt,
-      cwd: repoRoot,
-      model: managerModel,
-      allowedTools: resolveDefaultReadOnlyTools(runtimeOptions?.runtime),
-      runtimeOptions,
-      systemPromptPrefix: triageSystemPromptPrefix(
-        repoContext,
-        runtimeOptions?.enrichedContext,
-      ),
-      schema: TRIAGE_RESULT_SCHEMA,
-    });
+  const {
+    structuredOutput,
+    resultText,
+    executionError,
+    costUsd: managerCost,
+  } = await runStructuredAgentQuery({
+    prompt: managerPrompt,
+    cwd: repoRoot,
+    model: managerModel,
+    allowedTools: resolveDefaultReadOnlyTools(runtimeOptions?.runtime),
+    runtimeOptions,
+    systemPromptPrefix: triageSystemPromptPrefix(repoContext, runtimeOptions?.enrichedContext),
+    schema: TRIAGE_RESULT_SCHEMA,
+  });
 
   const totalCost = specialistCost + managerCost;
 
   if (executionError) {
-    throw new TriageExecutionError(
-      `multi-agent manager failed: ${executionError}`,
-      totalCost,
-    );
+    throw new TriageExecutionError(`multi-agent manager failed: ${executionError}`, totalCost);
   }
 
   let result: TriageResult;

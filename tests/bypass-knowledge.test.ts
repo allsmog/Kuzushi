@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { getBypassKnowledge, formatBypassForPrompt } from "../src/bypass-knowledge.js";
+import { describe, expect, it } from "vitest";
+import { formatBypassForPrompt, getBypassKnowledge } from "../src/bypass-knowledge.js";
 
 describe("getBypassKnowledge", () => {
   it("returns SQLi bypass techniques for CWE-89", () => {

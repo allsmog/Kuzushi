@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { Finding } from "../../src/scanners/types.js";
 import { mergeStrategyResults } from "../../src/strategies/merge.js";
 import type { StrategyResult } from "../../src/strategies/types.js";
-import type { Finding } from "../../src/scanners/types.js";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -22,7 +22,11 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
   };
 }
 
-function makeResult(kind: "syntactic" | "dataflow" | "reasoning", findings: Finding[], confidence: number = 0.8): StrategyResult {
+function makeResult(
+  kind: "syntactic" | "dataflow" | "reasoning",
+  findings: Finding[],
+  confidence: number = 0.8,
+): StrategyResult {
   return {
     strategyKind: kind,
     strategyId: `${kind}-test`,
@@ -99,11 +103,16 @@ describe("mergeStrategyResults", () => {
   it("collects generated rules from all results", () => {
     const r1: StrategyResult = {
       ...makeResult("syntactic", []),
-      generatedRules: [{
-        kind: "semgrep", vulnClass: "sqli", cweIds: ["CWE-89"],
-        ruleContent: "rules: ...", description: "test rule",
-        sourceFinding: { fingerprint: "fp-1", filePath: "a.ts", startLine: 1 },
-      }],
+      generatedRules: [
+        {
+          kind: "semgrep",
+          vulnClass: "sqli",
+          cweIds: ["CWE-89"],
+          ruleContent: "rules: ...",
+          description: "test rule",
+          sourceFinding: { fingerprint: "fp-1", filePath: "a.ts", startLine: 1 },
+        },
+      ],
     };
 
     const merged = mergeStrategyResults([r1]);

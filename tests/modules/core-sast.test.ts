@@ -12,9 +12,9 @@ const {
 } = vi.hoisted(() => ({
   runPipelineMock: vi.fn(),
   resolveRepoMock: vi.fn(() => ({ root: "/tmp/repo", name: "repo" })),
-  resolveScanSeverityMock: vi.fn((_config: unknown, opts: { severity?: string }) => (
-    opts.severity ? opts.severity.split(",") : ["ERROR"]
-  )),
+  resolveScanSeverityMock: vi.fn((_config: unknown, opts: { severity?: string }) =>
+    opts.severity ? opts.severity.split(",") : ["ERROR"],
+  ),
   configureTerminalOutputMock: vi.fn(),
   resetTerminalOutputMock: vi.fn(),
 }));
@@ -85,13 +85,15 @@ describe("createCoreSastModule tool execution", () => {
 
     const result = await tool!.execute({ target: "/tmp/repo", severity: ["critical"] }, ctx);
 
-    expect(runPipelineMock).toHaveBeenCalledWith(expect.objectContaining({
-      postProcessMode: "full",
-      scanOpts: expect.objectContaining({
-        tasks: undefined,
-        severity: ["critical"],
+    expect(runPipelineMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postProcessMode: "full",
+        scanOpts: expect.objectContaining({
+          tasks: undefined,
+          severity: ["critical"],
+        }),
       }),
-    }));
+    );
     expect(result.output).toContain("3 findings, 2 triaged");
   });
 
@@ -114,35 +116,41 @@ describe("createCoreSastModule tool execution", () => {
     const taintIrisTool = module.tools.find((entry) => entry.name === "sast:taint-iris");
 
     await semgrepTool!.execute({ target: "/tmp/repo", severity: ["high"] }, ctx);
-    expect(runPipelineMock).toHaveBeenLastCalledWith(expect.objectContaining({
-      postProcessMode: "scan-only",
-      scanOpts: expect.objectContaining({
-        tasks: ["semgrep"],
+    expect(runPipelineMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        postProcessMode: "scan-only",
+        scanOpts: expect.objectContaining({
+          tasks: ["semgrep"],
+        }),
       }),
-    }));
+    );
 
     await threatHuntTool!.execute({ target: "/tmp/repo", maxActors: 7, maxFindings: 12 }, ctx);
-    expect(runPipelineMock).toHaveBeenLastCalledWith(expect.objectContaining({
-      postProcessMode: "scan-only",
-      scanOpts: expect.objectContaining({
-        tasks: ["threat-hunt"],
-      }),
-      config: expect.objectContaining({
-        taskConfig: expect.objectContaining({
-          "threat-hunt": expect.objectContaining({
-            maxActors: 7,
-            maxFindings: 12,
+    expect(runPipelineMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        postProcessMode: "scan-only",
+        scanOpts: expect.objectContaining({
+          tasks: ["threat-hunt"],
+        }),
+        config: expect.objectContaining({
+          taskConfig: expect.objectContaining({
+            "threat-hunt": expect.objectContaining({
+              maxActors: 7,
+              maxFindings: 12,
+            }),
           }),
         }),
       }),
-    }));
+    );
 
     await taintIrisTool!.execute({ target: "/tmp/repo" }, ctx);
-    expect(runPipelineMock).toHaveBeenLastCalledWith(expect.objectContaining({
-      postProcessMode: "scan-only",
-      scanOpts: expect.objectContaining({
-        tasks: ["taint-cwe-select", "taint-iris"],
+    expect(runPipelineMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        postProcessMode: "scan-only",
+        scanOpts: expect.objectContaining({
+          tasks: ["taint-cwe-select", "taint-iris"],
+        }),
       }),
-    }));
+    );
   });
 });

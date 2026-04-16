@@ -1,13 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { TaskContext } from "../../../src/agents/types.js";
-import {
-  codeGraphBuildTask,
-  __codeGraphBuildInternals,
-} from "../../../src/agents/tasks/code-graph/build.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentRuntime } from "../../../src/agent-runtime/types.js";
+import {
+  __codeGraphBuildInternals,
+  codeGraphBuildTask,
+} from "../../../src/agents/tasks/code-graph/build.js";
+import type { TaskContext } from "../../../src/agents/types.js";
 
 vi.mock("../../../src/analysis-support/index.js", () => ({
   getCodeIntelligenceProvider: vi.fn(),
@@ -69,28 +69,39 @@ function makeContext(repoRoot: string, runtime: AgentRuntime): TaskContext {
     runtime,
     bus: { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() } as any,
     upstreamOutputs: new Map([
-      ["context-gatherer", {
-        repoContext: {
-          languages: ["Go"],
-          frameworks: [],
-          authPatterns: [],
-          sanitizationLibs: [],
-          ormOrDb: [],
-          entryPoints: ["main.go"],
+      [
+        "context-gatherer",
+        {
+          repoContext: {
+            languages: ["Go"],
+            frameworks: [],
+            authPatterns: [],
+            sanitizationLibs: [],
+            ormOrDb: [],
+            entryPoints: ["main.go"],
+          },
+          fileIndex: {
+            tree: [{ path: "main.go" }],
+            totalFiles: 1,
+            truncated: false,
+            patternMatches: {},
+          },
         },
-        fileIndex: { tree: [{ path: "main.go" }], totalFiles: 1, truncated: false, patternMatches: {} },
-      }],
+      ],
       ["context-enricher", {}],
-      ["app-model-build", {
-        version: "1",
-        routes: [],
-        outboundClients: [],
-        dataStores: [],
-        backgroundJobs: [],
-        serviceBoundaries: [],
-        relevantFiles: [],
-        notes: [],
-      }],
+      [
+        "app-model-build",
+        {
+          version: "1",
+          routes: [],
+          outboundClients: [],
+          dataStores: [],
+          backgroundJobs: [],
+          serviceBoundaries: [],
+          relevantFiles: [],
+          notes: [],
+        },
+      ],
     ]),
   };
 }
@@ -107,30 +118,28 @@ afterEach(async () => {
 
 describe("code-graph-build task", () => {
   it("classifies Go static nodes with entry, middleware, data, and external-call heuristics", () => {
-    expect(classifyStaticNodeFromContent(
-      "func handle(w http.ResponseWriter, r *http.Request) {}",
-      [],
-    )).toMatchObject({ nodeKind: "entry-http" });
+    expect(
+      classifyStaticNodeFromContent("func handle(w http.ResponseWriter, r *http.Request) {}", []),
+    ).toMatchObject({ nodeKind: "entry-http" });
 
-    expect(classifyStaticNodeFromContent(
-      "func main() {}\nflag.Parse()",
-      [],
-    )).toMatchObject({ nodeKind: "entry-cli" });
+    expect(classifyStaticNodeFromContent("func main() {}\nflag.Parse()", [])).toMatchObject({
+      nodeKind: "entry-cli",
+    });
 
-    expect(classifyStaticNodeFromContent(
-      "r.Use(authz)\nvar mw gin.HandlerFunc",
-      [],
-    )).toMatchObject({ nodeKind: "middleware" });
+    expect(classifyStaticNodeFromContent("r.Use(authz)\nvar mw gin.HandlerFunc", [])).toMatchObject(
+      { nodeKind: "middleware" },
+    );
 
-    expect(classifyStaticNodeFromContent(
-      "rows, _ := db.Query(\"SELECT 1\")\nvar conn *gorm.DB",
-      [],
-    )).toMatchObject({ nodeKind: "data-access" });
+    expect(
+      classifyStaticNodeFromContent('rows, _ := db.Query("SELECT 1")\nvar conn *gorm.DB', []),
+    ).toMatchObject({ nodeKind: "data-access" });
 
-    expect(classifyStaticNodeFromContent(
-      "cmd := exec.Command(\"sh\")\nos.Exit(1)\nnet.Dial(\"tcp\", addr)",
-      [],
-    )).toMatchObject({ nodeKind: "external-call" });
+    expect(
+      classifyStaticNodeFromContent(
+        'cmd := exec.Command("sh")\nos.Exit(1)\nnet.Dial("tcp", addr)',
+        [],
+      ),
+    ).toMatchObject({ nodeKind: "external-call" });
   });
 
   it("falls back to main() and still traces when the app model has no routes", async () => {
@@ -140,10 +149,10 @@ describe("code-graph-build task", () => {
       [
         "package main",
         "",
-        "import \"net\"",
+        'import "net"',
         "",
         "func main() {",
-        "  _, _ = net.Listen(\"tcp\", \":9000\")",
+        '  _, _ = net.Listen("tcp", ":9000")',
         "}",
         "",
       ].join("\n"),
@@ -161,12 +170,14 @@ describe("code-graph-build task", () => {
     expect(output.stats.entryPoints).toBe(2);
     expect(output.stats.tracedEntryPoints).toBe(2);
     expect(output.paths).toHaveLength(2);
-    expect(output.nodes).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        filePath: "main.go",
-        symbol: "main",
-        nodeKind: "entry-cli",
-      }),
-    ]));
+    expect(output.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "main.go",
+          symbol: "main",
+          nodeKind: "entry-cli",
+        }),
+      ]),
+    );
   });
 });

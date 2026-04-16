@@ -1,14 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  hasBodyPlaceholders,
-  computeCacheHash,
-  readCacheIfValid,
   __taintAnalysisExtractionAgentInternals,
+  computeCacheHash,
+  hasBodyPlaceholders,
+  readCacheIfValid,
 } from "../../../../src/agents/tasks/taint-analysis/extraction-agent.js";
 
-const TMP_ROOT = path.join(import.meta.dirname, "..", "..", "..", ".tmp-taint-analysis-extraction-agent");
+const TMP_ROOT = path.join(
+  import.meta.dirname,
+  "..",
+  "..",
+  "..",
+  ".tmp-taint-analysis-extraction-agent",
+);
 
 beforeEach(() => {
   rmSync(TMP_ROOT, { recursive: true, force: true });
@@ -224,14 +230,14 @@ describe("extractQueryFromResult", () => {
       "where marker = marker",
       "select",
       "  marker,",
-      "  \"source_candidate\",",
-      "  \"callable\"",
+      '  "source_candidate",',
+      '  "callable"',
     ].join("\n");
 
     const query = __taintAnalysisExtractionAgentInternals.extractQueryFromResult(text);
     expect(query).toContain("select");
-    expect(query).toContain("\"source_candidate\",");
-    expect(query).toContain("\"callable\"");
+    expect(query).toContain('"source_candidate",');
+    expect(query).toContain('"callable"');
   });
 });
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env tsx
 
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import type { BaselineMetrics, BenchmarkMetrics } from "./types.js";
 
@@ -34,7 +34,9 @@ for (const dataset of datasets) {
   const datasetDir = resolve("benchmarks", dataset);
   const repoDir = join(datasetDir, "repo");
   if (!existsSync(repoDir)) {
-    throw new Error(`Dataset repo missing for ${dataset}: ${repoDir}. Run ${datasetDir}/setup.sh first.`);
+    throw new Error(
+      `Dataset repo missing for ${dataset}: ${repoDir}. Run ${datasetDir}/setup.sh first.`,
+    );
   }
 
   const sarifPath = join(resultsDir, `${dataset}.sarif`);
@@ -42,7 +44,17 @@ for (const dataset of datasets) {
 
   execFileSync(
     "npx",
-    ["tsx", "src/cli.ts", "scan", repoDir, "--sarif", sarifPath, "--fresh", "--scanners", "semgrep,agentic"],
+    [
+      "tsx",
+      "src/cli.ts",
+      "scan",
+      repoDir,
+      "--sarif",
+      sarifPath,
+      "--fresh",
+      "--scanners",
+      "semgrep,agentic",
+    ],
     {
       stdio: "inherit",
       encoding: "utf-8",
@@ -52,7 +64,16 @@ for (const dataset of datasets) {
 
   execFileSync(
     "npx",
-    ["tsx", "benchmarks/harness.ts", "--dataset", datasetDir, "--sarif", sarifPath, "--output", metricsPath],
+    [
+      "tsx",
+      "benchmarks/harness.ts",
+      "--dataset",
+      datasetDir,
+      "--sarif",
+      sarifPath,
+      "--output",
+      metricsPath,
+    ],
     {
       stdio: "inherit",
       encoding: "utf-8",

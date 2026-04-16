@@ -16,8 +16,9 @@ export const migration024: Migration = {
   name: "rename_scanner_to_task_id",
   up(db) {
     const columns = new Set(
-      (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>)
-        .map((c) => c.name),
+      (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
     );
 
     if (columns.has("scanner") && !columns.has("task_id")) {

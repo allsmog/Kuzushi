@@ -69,15 +69,32 @@ export const DEFAULT_INVARIANT_ANALYSIS_CONFIG: InvariantAnalysisConfig = {
 
 export function resolveInvariantAnalysisConfig(config: KuzushiConfig): InvariantAnalysisConfig {
   const raw = config.taskConfig["invariant-analysis"];
-  if (!isRecord(raw)) return { ...DEFAULT_INVARIANT_ANALYSIS_CONFIG, extractionModel: config.model, checkModel: config.model };
+  if (!isRecord(raw))
+    return {
+      ...DEFAULT_INVARIANT_ANALYSIS_CONFIG,
+      extractionModel: config.model,
+      checkModel: config.model,
+    };
 
   return {
     extractionModel: normalizeString(raw["extractionModel"], config.model),
     checkModel: normalizeString(raw["checkModel"], config.model),
-    maxInvariants: normalizePositiveInt(raw["maxInvariants"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.maxInvariants),
-    securityOnly: normalizeBoolean(raw["securityOnly"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.securityOnly),
-    confidenceThreshold: normalizeUnitInterval(raw["confidenceThreshold"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.confidenceThreshold),
-    checkBatchSize: normalizePositiveInt(raw["checkBatchSize"], DEFAULT_INVARIANT_ANALYSIS_CONFIG.checkBatchSize),
+    maxInvariants: normalizePositiveInt(
+      raw["maxInvariants"],
+      DEFAULT_INVARIANT_ANALYSIS_CONFIG.maxInvariants,
+    ),
+    securityOnly: normalizeBoolean(
+      raw["securityOnly"],
+      DEFAULT_INVARIANT_ANALYSIS_CONFIG.securityOnly,
+    ),
+    confidenceThreshold: normalizeUnitInterval(
+      raw["confidenceThreshold"],
+      DEFAULT_INVARIANT_ANALYSIS_CONFIG.confidenceThreshold,
+    ),
+    checkBatchSize: normalizePositiveInt(
+      raw["checkBatchSize"],
+      DEFAULT_INVARIANT_ANALYSIS_CONFIG.checkBatchSize,
+    ),
   };
 }
 
@@ -91,10 +108,30 @@ export const INVARIANT_EXTRACT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "kind", "filePath", "startLine", "endLine", "statement", "confidence", "derivedFrom", "securityRelevance"],
+        required: [
+          "id",
+          "kind",
+          "filePath",
+          "startLine",
+          "endLine",
+          "statement",
+          "confidence",
+          "derivedFrom",
+          "securityRelevance",
+        ],
         properties: {
           id: { type: "string" },
-          kind: { type: "string", enum: ["precondition", "postcondition", "class-invariant", "loop-invariant", "data-invariant", "security-invariant"] },
+          kind: {
+            type: "string",
+            enum: [
+              "precondition",
+              "postcondition",
+              "class-invariant",
+              "loop-invariant",
+              "data-invariant",
+              "security-invariant",
+            ],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           endLine: { type: "integer", minimum: 1 },
@@ -122,7 +159,15 @@ export const INVARIANT_CHECK_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["invariantId", "invariantStatement", "violatingFilePath", "violatingStartLine", "violationDescription", "severity", "confidence"],
+        required: [
+          "invariantId",
+          "invariantStatement",
+          "violatingFilePath",
+          "violatingStartLine",
+          "violationDescription",
+          "severity",
+          "confidence",
+        ],
         properties: {
           invariantId: { type: "string" },
           invariantStatement: { type: "string" },

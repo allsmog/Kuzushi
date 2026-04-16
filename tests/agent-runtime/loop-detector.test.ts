@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { LoopDetector } from "../../src/agent-runtime/loop-detector.js";
 import { createHash } from "node:crypto";
+import { beforeEach, describe, expect, it } from "vitest";
+import { LoopDetector } from "../../src/agent-runtime/loop-detector.js";
 
 function hash(s: string): string {
   return createHash("sha256").update(s).digest("hex").slice(0, 16);

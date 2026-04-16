@@ -32,12 +32,7 @@ export const PocSandboxSchema = z.enum(["docker", "process"]);
 
 export const TriageStrategySchema = z.enum(["single", "multi-agent"]);
 
-export const DataSensitivitySchema = z.enum([
-  "public",
-  "internal",
-  "confidential",
-  "restricted",
-]);
+export const DataSensitivitySchema = z.enum(["public", "internal", "confidential", "restricted"]);
 
 export const ExploitChainSeveritySchema = z.enum(["CRITICAL", "HIGH", "MEDIUM"]);
 export const ProofStateSchema = z.enum([
@@ -53,11 +48,7 @@ export const DynamicAnalysisStatusSchema = z.enum([
   "rejected",
   "error",
 ]);
-export const DynamicCoverageModeSchema = z.enum([
-  "none",
-  "node-v8",
-  "python-coverage",
-]);
+export const DynamicCoverageModeSchema = z.enum(["none", "node-v8", "python-coverage"]);
 export const PatchStatusSchema = z.enum([
   "APPLY_FAILED",
   "BUILD_FAILED",
@@ -103,25 +94,29 @@ export const FindingSchema = z.object({
   taintPath: z.array(TaintPathStepSchema).optional(),
   proofState: ProofStateSchema.optional(),
   engineProvenance: z.array(EngineProvenanceSchema).optional(),
-  corroboratingSignals: z.array(
-    z.object({
-      taskId: z.string(),
-      fingerprint: z.string(),
-      ruleId: z.string(),
-      filePath: z.string(),
-      startLine: z.number(),
-      cwe: z.array(z.string()),
-      score: z.number(),
-    }),
-  ).optional(),
-  suppressionReasons: z.array(
-    z.object({
-      id: z.string(),
-      kind: z.enum(["hard", "soft"]),
-      description: z.string(),
-      scorePenalty: z.number().optional(),
-    }),
-  ).optional(),
+  corroboratingSignals: z
+    .array(
+      z.object({
+        taskId: z.string(),
+        fingerprint: z.string(),
+        ruleId: z.string(),
+        filePath: z.string(),
+        startLine: z.number(),
+        cwe: z.array(z.string()),
+        score: z.number(),
+      }),
+    )
+    .optional(),
+  suppressionReasons: z
+    .array(
+      z.object({
+        id: z.string(),
+        kind: z.enum(["hard", "soft"]),
+        description: z.string(),
+        scorePenalty: z.number().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export type FindingZ = z.infer<typeof FindingSchema>;
@@ -162,9 +157,7 @@ export const TriageResultSchema = z.object({
   recommendedFix: z.string().optional(),
   ruleRefinementHint: z.string().optional(),
   triageSchemaVersion: z.string().optional(),
-  evidenceTrail: z
-    .array(z.object({ level: z.string(), evidence: z.string() }))
-    .optional(),
+  evidenceTrail: z.array(z.object({ level: z.string(), evidence: z.string() })).optional(),
   triageCostUsd: z.number().optional(),
   calibratedConfidence: z.number().optional(),
   evidenceChain: z.array(EvidenceStepSchema).optional(),
@@ -212,11 +205,15 @@ export const PocHarnessResultSchema = z.object({
   pocExecVerdict: PocExecVerdictSchema.optional(),
   pocExecDurationMs: z.number().optional(),
   iterations: z.number().optional(),
-  refinementHistory: z.array(z.object({
-    attempt: z.number(),
-    error: z.string(),
-    approach: z.string(),
-  })).optional(),
+  refinementHistory: z
+    .array(
+      z.object({
+        attempt: z.number(),
+        error: z.string(),
+        approach: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 export type PocHarnessResultZ = z.infer<typeof PocHarnessResultSchema>;
@@ -308,12 +305,14 @@ export const PatchResultSchema = z.object({
   worktreePath: z.string().nullable().optional(),
   costUsd: z.number().optional(),
   validatorLog: z.string().optional(),
-  history: z.array(z.object({
-    attempt: z.number(),
-    diff: z.string(),
-    status: PatchStatusSchema,
-    output: z.string(),
-  })),
+  history: z.array(
+    z.object({
+      attempt: z.number(),
+      diff: z.string(),
+      status: PatchStatusSchema,
+      output: z.string(),
+    }),
+  ),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
@@ -471,21 +470,25 @@ export const ThreatScenarioSchema = z.object({
   relatedSymbols: z.array(z.string()),
   sourceThreatIds: z.array(z.string()),
   cwe: z.array(z.string()),
-  entryPoint: z.object({
-    kind: z.string(),
-    filePath: z.string(),
-    startLine: z.number(),
-    method: z.string().optional(),
-    path: z.string().optional(),
-    handlerSymbol: z.string().optional(),
-  }).optional(),
-  sink: z.object({
-    kind: z.string(),
-    filePath: z.string(),
-    startLine: z.number(),
-    symbol: z.string().optional(),
-    detail: z.string().optional(),
-  }).optional(),
+  entryPoint: z
+    .object({
+      kind: z.string(),
+      filePath: z.string(),
+      startLine: z.number(),
+      method: z.string().optional(),
+      path: z.string().optional(),
+      handlerSymbol: z.string().optional(),
+    })
+    .optional(),
+  sink: z
+    .object({
+      kind: z.string(),
+      filePath: z.string(),
+      startLine: z.number(),
+      symbol: z.string().optional(),
+      detail: z.string().optional(),
+    })
+    .optional(),
   evidenceAnchors: z.array(ModelEvidenceAnchorSchema),
 });
 
@@ -567,10 +570,16 @@ export const DiscoveredModuleSchema = z.object({
   description: z.string(),
   language: z.string(),
   buildSystem: z.string().optional(),
-  moduleKind: z.enum([
-    "workspace-member", "standalone", "solution-project",
-    "bazel-package", "native-root", "go-workspace-member",
-  ]).optional(),
+  moduleKind: z
+    .enum([
+      "workspace-member",
+      "standalone",
+      "solution-project",
+      "bazel-package",
+      "native-root",
+      "go-workspace-member",
+    ])
+    .optional(),
   productPath: z.string().optional(),
   discoveryEvidence: z.array(z.string()).optional(),
 });
@@ -669,58 +678,75 @@ export const KuzushiConfigSchema = z.object({
   verifyRefinementMaxIterations: z.number().optional(),
   verifyReflectionInterval: z.number().optional(),
   confidenceCalibration: z.boolean().optional(),
-  confidenceSignalWeights: z.object({
-    taskId: z.number().optional(),
-    triage: z.number().optional(),
-    verification: z.number().optional(),
-    history: z.number().optional(),
-    context: z.number().optional(),
-  }).optional(),
+  confidenceSignalWeights: z
+    .object({
+      taskId: z.number().optional(),
+      triage: z.number().optional(),
+      verification: z.number().optional(),
+      history: z.number().optional(),
+      context: z.number().optional(),
+    })
+    .optional(),
   trajectoryMemory: z.boolean().optional(),
   trajectoryMaxExemplars: z.number().optional(),
   triageStrategy: TriageStrategySchema.optional(),
   triageSpecialistMaxTurns: z.number().nullable().optional(),
-  triageAssertions: z.object({
-    enabled: z.boolean().optional(),
-    weights: z.object({
-      rationaleHasEvidence: z.number().optional(),
-      verificationStepsActionable: z.number().optional(),
-      confidenceMatchesEvidence: z.number().optional(),
-      noEmptyRationale: z.number().optional(),
-      cweMentionsRelevant: z.number().optional(),
-      fixPatchValid: z.number().optional(),
-      severityVerdictAlignment: z.number().optional(),
-      verdictConsistency: z.number().optional(),
-      costEfficiency: z.number().optional(),
-      latencyReasonable: z.number().optional(),
-    }).optional(),
-  }).optional(),
-  qualityGates: z.object({
-    failOnHighSeverityTP: z.boolean().optional(),
-    maxOpenFindings: z.number().optional(),
-    minTriageConfidence: z.number().optional(),
-    failOnExploitable: z.boolean().optional(),
-  }).optional(),
+  triageAssertions: z
+    .object({
+      enabled: z.boolean().optional(),
+      weights: z
+        .object({
+          rationaleHasEvidence: z.number().optional(),
+          verificationStepsActionable: z.number().optional(),
+          confidenceMatchesEvidence: z.number().optional(),
+          noEmptyRationale: z.number().optional(),
+          cweMentionsRelevant: z.number().optional(),
+          fixPatchValid: z.number().optional(),
+          severityVerdictAlignment: z.number().optional(),
+          verdictConsistency: z.number().optional(),
+          costEfficiency: z.number().optional(),
+          latencyReasonable: z.number().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  qualityGates: z
+    .object({
+      failOnHighSeverityTP: z.boolean().optional(),
+      maxOpenFindings: z.number().optional(),
+      minTriageConfidence: z.number().optional(),
+      failOnExploitable: z.boolean().optional(),
+    })
+    .optional(),
   jsonOutput: z.string().optional(),
   csvOutput: z.string().optional(),
   jsonlOutput: z.string().optional(),
   externalTasks: z.array(z.string()).optional(),
   enableExternalTasks: z.boolean().optional(),
-  hooks: z.object({
-    files: z.array(z.string()).optional(),
-  }).optional(),
+  hooks: z
+    .object({
+      files: z.array(z.string()).optional(),
+    })
+    .optional(),
   enableExternalHooks: z.boolean().optional(),
   triagePromptFile: z.string().optional(),
   verifyPromptFile: z.string().optional(),
-  bootstrapFiles: z.object({
-    files: z.array(z.string()).optional(),
-    maxCharsPerFile: z.number().optional(),
-    totalMaxChars: z.number().optional(),
-  }).optional(),
-  toolPolicies: z.record(z.string(), z.object({
-    allow: z.array(z.string()).optional(),
-    deny: z.array(z.string()).optional(),
-  })).optional(),
+  bootstrapFiles: z
+    .object({
+      files: z.array(z.string()).optional(),
+      maxCharsPerFile: z.number().optional(),
+      totalMaxChars: z.number().optional(),
+    })
+    .optional(),
+  toolPolicies: z
+    .record(
+      z.string(),
+      z.object({
+        allow: z.array(z.string()).optional(),
+        deny: z.array(z.string()).optional(),
+      }),
+    )
+    .optional(),
   modelFallbacks: z.record(z.string(), z.array(z.string())).optional(),
   modelFallbackCooldownMs: z.number().optional(),
   streamingEnabled: z.boolean().optional(),
@@ -823,9 +849,7 @@ export const RawTriageOutputSchema = z.object({
   recommended_fix: z.string().optional(),
   rule_refinement_hint: z.string().optional(),
   triage_schema_version: z.string().optional(),
-  evidence_trail: z
-    .array(z.object({ level: z.string(), evidence: z.string() }))
-    .optional(),
+  evidence_trail: z.array(z.object({ level: z.string(), evidence: z.string() })).optional(),
   evidence_chain: z
     .array(
       z.object({
@@ -907,12 +931,7 @@ export function formatZodErrors(issues: z.ZodIssue[]): ValidationError[] {
 /**
  * Format validation errors into a single human-readable string.
  */
-export function formatValidationErrorMessage(
-  label: string,
-  errors: ValidationError[],
-): string {
-  const details = errors
-    .map((e) => `  - ${e.path}: ${e.message}`)
-    .join("\n");
+export function formatValidationErrorMessage(label: string, errors: ValidationError[]): string {
+  const details = errors.map((e) => `  - ${e.path}: ${e.message}`).join("\n");
   return `${label} validation failed:\n${details}`;
 }

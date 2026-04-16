@@ -4,10 +4,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { CodeQLPlugin } from "../src/scanners/codeql.js";
 import {
+  type CodeQLSarifOutput,
   computeCodeQLFingerprint,
   detectCodeQLLanguageFromHeuristics,
   selectFindings,
-  type CodeQLSarifOutput,
 } from "../src/scanners/run-codeql.js";
 import type { Finding } from "../src/scanners/types.js";
 

@@ -2,10 +2,7 @@ import type { TaskConfig } from "./scanners/types.js";
 import type { KuzushiConfig } from "./types.js";
 import { isRecord } from "./utils.js";
 
-export const TAINT_ANALYSIS_TASK_IDS = [
-  "taint-cwe-select",
-  "taint-iris",
-] as const;
+export const TAINT_ANALYSIS_TASK_IDS = ["taint-cwe-select", "taint-iris"] as const;
 
 export interface CapabilityDefinition {
   publicId: string;
@@ -180,7 +177,12 @@ const CAPABILITIES: CapabilityDefinition[] = [
   {
     publicId: "systems-hunt",
     configKey: "systems-hunt",
-    taskIds: ["systems-context-gatherer", "systems-invariant-extract", "systems-trigger-synth", "systems-hunt"],
+    taskIds: [
+      "systems-context-gatherer",
+      "systems-invariant-extract",
+      "systems-trigger-synth",
+      "systems-hunt",
+    ],
     aliases: [
       "systems-context-gatherer",
       "systems-invariant-extract",
@@ -271,7 +273,11 @@ export function resolveRunnableIds(id: string): string[] {
     return [normalized];
   }
 
-  if (capability.publicId === "taint-analysis" && normalized !== "taint-analysis" && normalized.startsWith("taint-")) {
+  if (
+    capability.publicId === "taint-analysis" &&
+    normalized !== "taint-analysis" &&
+    normalized.startsWith("taint-")
+  ) {
     return [normalized];
   }
 
@@ -310,10 +316,7 @@ export function getCapabilityLookupIds(id: string): string[] {
   ]);
 }
 
-export function resolveTaskConfig(
-  config: KuzushiConfig,
-  id: string,
-): TaskConfig {
+export function resolveTaskConfig(config: KuzushiConfig, id: string): TaskConfig {
   const resolved: TaskConfig = {};
 
   for (const key of getCapabilityLookupIds(id)) {
@@ -327,10 +330,7 @@ export function resolveTaskConfig(
   return resolved;
 }
 
-export function expandTaskSelections(
-  selections: string[],
-  config: KuzushiConfig,
-): string[] {
+export function expandTaskSelections(selections: string[], config: KuzushiConfig): string[] {
   const tasks: string[] = [];
 
   for (const raw of selections) {

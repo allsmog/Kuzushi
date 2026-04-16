@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import type { Finding } from "../../../src/scanners/types.js";
-import type { TaskContext } from "../../../src/agents/types.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { callGraphAssistTask } from "../../../src/agents/tasks/call-graph-assist.js";
+import type { TaskContext } from "../../../src/agents/types.js";
+import type { Finding } from "../../../src/scanners/types.js";
 
 // Mock the code intelligence provider
 vi.mock("../../../src/analysis-support/code-intelligence.js", () => ({
@@ -9,6 +9,7 @@ vi.mock("../../../src/analysis-support/code-intelligence.js", () => ({
 }));
 
 import { getCodeIntelligenceProvider } from "../../../src/analysis-support/code-intelligence.js";
+
 const mockedGetProvider = vi.mocked(getCodeIntelligenceProvider);
 
 function makeFinding(fp: string, score: number, extras?: Partial<Finding>): Finding {
@@ -117,9 +118,7 @@ describe("callGraphAssistTask", () => {
 
     const finding = makeFinding("fp-existing", 90, {
       evidence: "Existing evidence here",
-      taintPath: [
-        { filePath: "a.ts", line: 1, message: "calls doStuff()" },
-      ],
+      taintPath: [{ filePath: "a.ts", line: 1, message: "calls doStuff()" }],
     });
 
     const result = await callGraphAssistTask.run([finding], makeContext());

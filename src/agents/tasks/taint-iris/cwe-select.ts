@@ -3,12 +3,13 @@
  * Pure classification: reads project context, outputs a CWE list.
  * No tools needed, no CodeQL — just one structured LLM call.
  */
+
+import { createLogger } from "../../../logger.js";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
-import { toErrorMessage } from "../../../utils.js";
-import { createLogger } from "../../../logger.js";
-import type { AgentTask, TaskContext } from "../../types.js";
 import type { ScanOpts } from "../../../types.js";
+import { toErrorMessage } from "../../../utils.js";
+import type { AgentTask, TaskContext } from "../../types.js";
 import { resolveTaskModel, resolveTaskRuntime } from "../runtime-overrides.js";
 
 const log = createLogger({ stage: "taint-cwe-select" });
@@ -129,7 +130,9 @@ export const taintCweSelectTask: AgentTask<ScanOpts, CweSelectOutput> = {
     }
 
     const parsed = parseOutput(structuredOutput);
-    log.info(`Selected ${parsed.cwes.length} CWE classes: ${parsed.cwes.map((c) => c.id).join(", ")}`);
+    log.info(
+      `Selected ${parsed.cwes.length} CWE classes: ${parsed.cwes.map((c) => c.id).join(", ")}`,
+    );
 
     return attachTaskOutputMeta(parsed, { costUsd });
   },

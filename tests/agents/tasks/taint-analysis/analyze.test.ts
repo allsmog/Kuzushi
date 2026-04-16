@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { __taintAnalysisRunInternals, taintAnalysisRunTask } from "../../../../src/agents/tasks/taint-analysis/analyze.js";
+import {
+  __taintAnalysisRunInternals,
+  taintAnalysisRunTask,
+} from "../../../../src/agents/tasks/taint-analysis/analyze.js";
 import { profileById } from "../../../../src/agents/tasks/taint-analysis/codeql-compat.js";
 import type { TaintAnalysisLabelsDocument } from "../../../../src/agents/tasks/taint-analysis/types.js";
 import type { Finding } from "../../../../src/scanners/types.js";
@@ -73,14 +76,17 @@ describe("taint-analysis-run internals", () => {
       return;
     }
 
-    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabels(), pythonProfile);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(
+      makeLabels(),
+      pythonProfile,
+    );
     expect(libs.sources).toContain("module MySources");
-    expect(libs.sources).toContain("passKey = \"path_traversal\"");
+    expect(libs.sources).toContain('passKey = "path_traversal"');
     expect(libs.sources).toContain("Query");
     expect(libs.sources).not.toContain("nodeHasCallable");
     expect(libs.sinks).toContain("open");
     expect(libs.sinks).not.toContain("nodeHasCallable");
-    expect(libs.sanitizers).toContain("regexpMatch(\"a^\")");
+    expect(libs.sanitizers).toContain('regexpMatch("a^")');
     expect(libs.sanitizers).not.toContain("nodeHasCallable");
   });
 
@@ -101,12 +107,16 @@ describe("taint-analysis-run internals", () => {
       return;
     }
 
-    const query = __taintAnalysisRunInternals.renderTaintQuery(template, {
-      passId: 1,
-      passKey: "path_traversal",
-      focus: "Path Traversal",
-      cwes: ["022", "023"],
-    }, pythonProfile);
+    const query = __taintAnalysisRunInternals.renderTaintQuery(
+      template,
+      {
+        passId: 1,
+        passKey: "path_traversal",
+        focus: "Path Traversal",
+        cwes: ["022", "023"],
+      },
+      pythonProfile,
+    );
 
     expect(query).toContain("Taint Analysis Pass 1 - Path Traversal");
     expect(query).toContain("py/taint-analysis/pass1-path-traversal");
@@ -125,12 +135,16 @@ describe("taint-analysis-run internals", () => {
       return;
     }
 
-    const query = __taintAnalysisRunInternals.renderTaintQuery(template, {
-      passId: 1,
-      passKey: "path_traversal",
-      focus: "Path Traversal",
-      cwes: ["022"],
-    }, goProfile);
+    const query = __taintAnalysisRunInternals.renderTaintQuery(
+      template,
+      {
+        passId: 1,
+        passKey: "path_traversal",
+        focus: "Path Traversal",
+        cwes: ["022"],
+      },
+      goProfile,
+    );
 
     expect(query).toContain("import semmle.go.dataflow.DataFlow");
     expect(query).toContain("import semmle.go.dataflow.TaintTracking");
@@ -171,7 +185,8 @@ describe("taint-analysis-run internals", () => {
     expect(libs.sources).toContain('call.getTarget().getName() = "Sprintf"');
     expect(libs.sources).toContain("call.getResult()");
     // The path_traversal pass clause uses Go-specific predicates, not regexpMatch
-    const pathTraversalClause = libs.sources.split("passKey = \"path_traversal\"")[1]?.split("or\n")[0] ?? "";
+    const pathTraversalClause =
+      libs.sources.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
     expect(pathTraversalClause).not.toContain("regexpMatch");
   });
 
@@ -193,7 +208,8 @@ describe("taint-analysis-run internals", () => {
     expect(libs.sinks).toContain('call.getTarget().getName() = "ExecContext"');
     expect(libs.sinks).toContain("call.getAnArgument()");
     // The path_traversal pass clause uses Go-specific predicates, not regexpMatch
-    const pathTraversalClause = libs.sinks.split("passKey = \"path_traversal\"")[1]?.split("or\n")[0] ?? "";
+    const pathTraversalClause =
+      libs.sinks.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
     expect(pathTraversalClause).not.toContain("regexpMatch");
   });
 
@@ -222,7 +238,10 @@ describe("taint-analysis-run internals", () => {
       return;
     }
 
-    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabels(), pythonProfile);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(
+      makeLabels(),
+      pythonProfile,
+    );
 
     // Python must use CallCfgNode (top-level), NOT DataFlow::CallNode
     expect(libs.sources).toContain("DataFlow::CallCfgNode call");
@@ -247,16 +266,18 @@ describe("taint-analysis-run internals", () => {
       return;
     }
 
-    expect(() => __taintAnalysisRunInternals.renderTaintQuery(
-      "{{QUERY_NAME}}\n{{UNHANDLED_PLACEHOLDER}}",
-      {
-        passId: 1,
-        passKey: "path_traversal",
-        focus: "Path Traversal",
-        cwes: ["022", "023"],
-      },
-      pythonProfile,
-    )).toThrow("unresolved placeholders");
+    expect(() =>
+      __taintAnalysisRunInternals.renderTaintQuery(
+        "{{QUERY_NAME}}\n{{UNHANDLED_PLACEHOLDER}}",
+        {
+          passId: 1,
+          passKey: "path_traversal",
+          focus: "Path Traversal",
+          cwes: ["022", "023"],
+        },
+        pythonProfile,
+      ),
+    ).toThrow("unresolved placeholders");
   });
 
   it("tries fallback profiles in order when compile gate fails", async () => {
@@ -308,9 +329,7 @@ describe("taint-analysis-run internals", () => {
 
     expect(tryProfile).toHaveBeenCalledTimes(1);
     expect(selected.selected).toBeNull();
-    expect(selected.attempts).toEqual([
-      { id: "go-dataflow", ok: false, error: "failed" },
-    ]);
+    expect(selected.attempts).toEqual([{ id: "go-dataflow", ok: false, error: "failed" }]);
   });
 
   it("augments findings with Taint Analysis metadata", () => {
@@ -331,12 +350,16 @@ describe("taint-analysis-run internals", () => {
       score: 1,
     };
 
-    const augmented = __taintAnalysisRunInternals.augmentFinding(base, {
-      passId: 1,
-      passKey: "path_traversal",
-      focus: "Path Traversal",
-      cwes: ["022", "023"],
-    }, makeLabels());
+    const augmented = __taintAnalysisRunInternals.augmentFinding(
+      base,
+      {
+        passId: 1,
+        passKey: "path_traversal",
+        focus: "Path Traversal",
+        cwes: ["022", "023"],
+      },
+      makeLabels(),
+    );
 
     expect(augmented.taskId).toBe("taint-analysis-run");
     expect(augmented.ruleId).toContain("taint-analysis/pass1/");
@@ -402,10 +425,11 @@ describe("taint-analysis-run internals", () => {
     if (!goProfile) return;
 
     const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
-    const pathTraversalClause = libs.sources.split("passKey = \"path_traversal\"")[1]?.split("or\n")[0] ?? "";
+    const pathTraversalClause =
+      libs.sources.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
 
     expect(libs.sources).not.toContain("<mq_handler>");
-    expect(pathTraversalClause).toContain("regexpMatch(\"a^\")");
+    expect(pathTraversalClause).toContain('regexpMatch("a^")');
   });
 
   it("Go param sources use parameter-node matching", () => {
@@ -421,7 +445,8 @@ describe("taint-analysis-run internals", () => {
     if (!goProfile) return;
 
     const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile);
-    const pathTraversalClause = libs.sources.split("passKey = \"path_traversal\"")[1]?.split("or\n")[0] ?? "";
+    const pathTraversalClause =
+      libs.sources.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
 
     expect(pathTraversalClause).toContain("exists(Method m |");
     expect(pathTraversalClause).toContain('m.getName() = "HandleRequest"');
@@ -459,7 +484,12 @@ describe("taint-analysis-run internals", () => {
 
     const hints = __taintAnalysisRunInternals.defaultRenderingHints();
     hints.variadicFormatFuncs.add("Sprintf");
-    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile, undefined, hints);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(
+      labels,
+      goProfile,
+      undefined,
+      hints,
+    );
 
     expect(libs.sinks).toContain("call.getAnArgument()");
     expect(libs.sinks).not.toContain("call.getArgument(0)");
@@ -506,10 +536,19 @@ describe("taint-analysis-run internals", () => {
     const hints = __taintAnalysisRunInternals.defaultRenderingHints();
     hints.sqlQueryTextArg0Callables.add("Raw");
     hints.sqlQueryTextArg0Callables.add("From");
-    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, goProfile, undefined, hints);
+    const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(
+      labels,
+      goProfile,
+      undefined,
+      hints,
+    );
 
-    expect(libs.sinks).toContain('hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries", "Raw")');
-    expect(libs.sinks).toContain('hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries/qm", "From")');
+    expect(libs.sinks).toContain(
+      'hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries", "Raw")',
+    );
+    expect(libs.sinks).toContain(
+      'hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries/qm", "From")',
+    );
     expect(libs.sinks).toContain("call.getArgument(0)");
   });
 
@@ -521,7 +560,9 @@ describe("taint-analysis-run internals", () => {
       "github.com/volatiletech/sqlboiler/v4/queries",
       goProfile,
     );
-    expect(nameCheck).toContain('hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries", "Raw")');
+    expect(nameCheck).toContain(
+      'hasQualifiedName("github.com/volatiletech/sqlboiler/v4/queries", "Raw")',
+    );
   });
 
   it("Java uses structured getCallee().getName() predicates", () => {
@@ -542,23 +583,31 @@ describe("taint-analysis-run internals", () => {
     expect(libs.sources).toContain("DataFlow::CallNode call");
     expect(libs.sources).toContain('call.getCallee().getName() = "getParameter"');
     expect(libs.sources).toContain("call.getResult()");
-    const javaSrcClause = libs.sources.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
+    const javaSrcClause =
+      libs.sources.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
     expect(javaSrcClause).not.toContain("regexpMatch");
     expect(libs.sinks).toContain('call.getCallee().getName() = "executeQuery"');
     expect(libs.sinks).toContain("call.getArgument(0)");
-    const javaSinkClause = libs.sinks.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
+    const javaSinkClause =
+      libs.sinks.split('passKey = "path_traversal"')[1]?.split("or\n")[0] ?? "";
     expect(javaSinkClause).not.toContain("regexpMatch");
   });
 
   it("Go qualified name matching for stdlib packages", () => {
     const goProfile = profileById("go", "go-dataflow")!;
     const nameCheck = __taintAnalysisRunInternals.buildCallableNameCheck(
-      "Unmarshal", "go", "encoding/json", goProfile,
+      "Unmarshal",
+      "go",
+      "encoding/json",
+      goProfile,
     );
     expect(nameCheck).toContain('hasQualifiedName("encoding/json", "Unmarshal")');
 
     const bareCheck = __taintAnalysisRunInternals.buildCallableNameCheck(
-      "MyFunc", "go", null, goProfile,
+      "MyFunc",
+      "go",
+      null,
+      goProfile,
     );
     expect(bareCheck).toContain('call.getTarget().getName() = "MyFunc"');
     expect(bareCheck).not.toContain("hasQualifiedName");
@@ -655,7 +704,10 @@ describe("taint-analysis-run internals", () => {
 
     it("renders implicit propagation steps when no labeled summary entries exist", () => {
       const pythonProfile = profileById("python", "python-dataflow-new")!;
-      const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabels(), pythonProfile);
+      const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(
+        makeLabels(),
+        pythonProfile,
+      );
       expect(libs.summaries).toContain("module MySummaries");
       expect(libs.summaries).toContain("isAdditionalTaintStep");
       // Implicit steps include Python-specific data structure propagation
@@ -664,13 +716,16 @@ describe("taint-analysis-run internals", () => {
 
     it("renders populated predicates with summary entries", () => {
       const pythonProfile = profileById("python", "python-dataflow-new")!;
-      const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(makeLabelsWithSummary(), pythonProfile);
+      const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(
+        makeLabelsWithSummary(),
+        pythonProfile,
+      );
       expect(libs.summaries).not.toContain("none()");
       expect(libs.summaries).toContain("module MySummaries");
       expect(libs.summaries).toContain("nodeFrom");
       expect(libs.summaries).toContain("nodeTo");
       expect(libs.summaries).toContain("json_decode");
-      expect(libs.summaries).toContain("passKey = \"path_traversal\"");
+      expect(libs.summaries).toContain('passKey = "path_traversal"');
     });
 
     it("excludes FP summaries", () => {
@@ -725,7 +780,7 @@ describe("taint-analysis-run internals", () => {
       const labels = makeLabelsWithSummary();
       const libs = __taintAnalysisRunInternals.renderTaintAnalysisLibraries(labels, pythonProfile);
       // pass 1 has summary, other passes should use regexpMatch impossible
-      expect(libs.summaries).toContain("regexpMatch(\"a^\")");
+      expect(libs.summaries).toContain('regexpMatch("a^")');
       expect(libs.summaries).toContain("json_decode");
     });
 
@@ -890,14 +945,18 @@ describe("taint-analysis-run internals", () => {
         "cached-pass2-old",
         "rerun-pass2-new",
       ]);
-      expect(merged.find((finding) => finding.fingerprint === "cached-pass2-old")?.startLine).toBe(21);
+      expect(merged.find((finding) => finding.fingerprint === "cached-pass2-old")?.startLine).toBe(
+        21,
+      );
     });
 
     it("keys baseline cache lookups on repo root even when scanPath is set", () => {
-      expect(__taintAnalysisRunInternals.resolveBaselineCacheRepoRoot({
-        repoRoot: "/tmp/repo",
-        scanPath: "/tmp/repo/subdir",
-      })).toBe("/tmp/repo");
+      expect(
+        __taintAnalysisRunInternals.resolveBaselineCacheRepoRoot({
+          repoRoot: "/tmp/repo",
+          scanPath: "/tmp/repo/subdir",
+        }),
+      ).toBe("/tmp/repo");
     });
   });
 });

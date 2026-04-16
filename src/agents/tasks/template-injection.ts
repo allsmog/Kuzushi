@@ -1,35 +1,42 @@
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageInvestigationModule,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../security-profiles.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
+import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
-import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
-import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
-import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
-import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
-import { resolveTaskAllowedTools } from "./runtime-overrides.js";
-import type { ApplicationModel } from "../../types.js";
 import {
-  normalizeFilePath,
   computeDetectionFingerprint,
   dedupAndRankFindings,
-  runLens,
   type LensResult,
+  normalizeFilePath,
+  runLens,
 } from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
+import {
+  formatFileTreeForPrompt,
+  formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
+} from "./pre-read-prompt.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
+import {
+  buildApplicationModelSection,
+  buildThreatScenarioEvidenceSection,
+} from "./scenario-guidance.js";
+import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
 
 const log = createLogger({ stage: "template-injection" });
 
@@ -43,9 +50,21 @@ const TEMPLATE_INJECTION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
-          category: { type: "string", enum: ["jinja2-ssti", "ejs-injection", "pug-injection", "handlebars-injection"] },
+          category: {
+            type: "string",
+            enum: ["jinja2-ssti", "ejs-injection", "pug-injection", "handlebars-injection"],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -85,7 +104,16 @@ function resolveConfig(ctx: TaskContext): TemplateInjectionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult, threatModelContext?: string, appModelContext?: string, scenarioContext?: string): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[] = [],
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+  threatModelContext?: string,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
 
   const contextLines = repoContext
@@ -127,8 +155,11 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
-    languageTuningModule({ taskId: "template-injection", repoContext, frameworks: repoContext?.frameworks }) ||
-    "### jinja2-ssti (CWE-1336)",
+    languageTuningModule({
+      taskId: "template-injection",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "### jinja2-ssti (CWE-1336)",
     "Jinja2/Flask Server-Side Template Injection. Dangerous patterns:",
     "- render_template_string(user_input) or Template(user_input).render()",
     "- String formatting user input into template strings before rendering",
@@ -185,17 +216,28 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Confidence HIGH only if source-to-sink is fully verified.",
         "Do NOT flag render_template() with static file names and safe context variables.",
         "Do NOT flag template rendering in test files or development-only code.",
-        ...languageAntiHallucinationExtras({ taskId: "template-injection", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "template-injection",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
     "",
     `Return at most ${maxFindings} findings, prioritized by severity and confidence.`,
     "Filter out any finding where your confidence would be below MEDIUM.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -232,7 +274,9 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
         cwe: cweList,
       }),
       proofState: "symbolic_only",
-      engineProvenance: [{ kind: "agentic", detail: "LLM-driven template-injection-detect analysis" }],
+      engineProvenance: [
+        { kind: "agentic", detail: "LLM-driven template-injection-detect analysis" },
+      ],
     };
 
     const existing = deduped.get(fingerprint);
@@ -241,13 +285,21 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
-function computeFingerprint(repoName: string, filePath: string, f: TemplateInjectionFinding): string {
-  return computeDetectionFingerprint([repoName, "template-injection", f.category, filePath, String(f.startLine)]);
+function computeFingerprint(
+  repoName: string,
+  filePath: string,
+  f: TemplateInjectionFinding,
+): string {
+  return computeDetectionFingerprint([
+    repoName,
+    "template-injection",
+    f.category,
+    filePath,
+    String(f.startLine),
+  ]);
 }
 
 export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
@@ -260,7 +312,11 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
     const { model, maxFindings } = resolveConfig(context);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
-    const preRead = await preReadFilesForTask("template-injection-detect", fileIndex, context.repoRoot);
+    const preRead = await preReadFilesForTask(
+      "template-injection-detect",
+      fileIndex,
+      context.repoRoot,
+    );
     const profiles = context.securityProfiles
       ? getProfilesForTask(context.securityProfiles, "template-injection-detect")
       : [];
@@ -271,10 +327,20 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
       fileIndex,
       preRead,
     );
-    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as
+      | ApplicationModel
+      | undefined;
     const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
-    const appModelContext = buildApplicationModelSection("template-injection-detect", applicationModel);
-    const scenarioContext = await buildThreatScenarioEvidenceSection("template-injection-detect", context.repoRoot, applicationModel, scenarioOutput);
+    const appModelContext = buildApplicationModelSection(
+      "template-injection-detect",
+      applicationModel,
+    );
+    const scenarioContext = await buildThreatScenarioEvidenceSection(
+      "template-injection-detect",
+      context.repoRoot,
+      applicationModel,
+      scenarioOutput,
+    );
 
     const tag = "[template-injection]";
 
@@ -283,15 +349,36 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
 
     const lensResults = await Promise.all([
       runTemplateLens(
-        buildTemplateConstructionLensPrompt(repoContext, perLensMax, profileLines, preRead, threatModelContext, appModelContext, scenarioContext),
-        context, model, `${tag}/construction`,
+        buildTemplateConstructionLensPrompt(
+          repoContext,
+          perLensMax,
+          profileLines,
+          preRead,
+          threatModelContext,
+          appModelContext,
+          scenarioContext,
+        ),
+        context,
+        model,
+        `${tag}/construction`,
       ).catch((error) => {
         log.error(`${tag}/construction lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
       }),
       runTemplateLens(
-        buildRendererConfigLensPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
-        context, model, `${tag}/renderer-config`,
+        buildRendererConfigLensPrompt(
+          repoContext,
+          perLensMax,
+          profileLines,
+          fileIndex,
+          preRead,
+          threatModelContext,
+          appModelContext,
+          scenarioContext,
+        ),
+        context,
+        model,
+        `${tag}/renderer-config`,
       ).catch((error) => {
         log.error(`${tag}/renderer-config lens error: ${toErrorMessage(error)}`);
         return { output: { findings: [] }, costUsd: 0 };
@@ -302,13 +389,14 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
     const allFindings: Finding[] = [];
     for (const result of lensResults) {
       totalCostUsd += result.costUsd;
-      allFindings.push(...normalizeFindings(result.output, context.repoRoot, context.repoName, perLensMax));
+      allFindings.push(
+        ...normalizeFindings(result.output, context.repoRoot, context.repoName, perLensMax),
+      );
     }
 
-    return attachTaskOutputMeta(
-      dedupAndRankFindings(allFindings, maxFindings),
-      { costUsd: totalCostUsd },
-    );
+    return attachTaskOutputMeta(dedupAndRankFindings(allFindings, maxFindings), {
+      costUsd: totalCostUsd,
+    });
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
@@ -325,7 +413,9 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
         "1. The template rendering/compilation call actually exists at the reported location.",
         "2. The template string is genuinely attacker-controlled (not just context variables).",
         "3. No sandboxing (SandboxedEnvironment) or input validation prevents exploitation.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };
@@ -366,9 +456,20 @@ function buildTemplateConstructionLensPrompt(
     "",
     `Return at most ${maxFindings} findings.`,
     "",
-    antiHallucinationModule({ extra: ["Only report where user input is part of the template source, not template data.", ...languageAntiHallucinationExtras({ taskId: "template-injection", repoContext, frameworks: repoContext?.frameworks })] }),
+    antiHallucinationModule({
+      extra: [
+        "Only report where user input is part of the template source, not template data.",
+        ...languageAntiHallucinationExtras({
+          taskId: "template-injection",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
+      ],
+    }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildRendererConfigLensPrompt(
@@ -403,9 +504,20 @@ function buildRendererConfigLensPrompt(
     "",
     `Return at most ${maxFindings} findings.`,
     "",
-    antiHallucinationModule({ extra: ["Only report where template engine config is insecure AND user input reaches it.", ...languageAntiHallucinationExtras({ taskId: "template-injection", repoContext, frameworks: repoContext?.frameworks })] }),
+    antiHallucinationModule({
+      extra: [
+        "Only report where template engine config is insecure AND user input reaches it.",
+        ...languageAntiHallucinationExtras({
+          taskId: "template-injection",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
+      ],
+    }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export const __templateInjectionInternals = {

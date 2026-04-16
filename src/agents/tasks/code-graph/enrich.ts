@@ -1,22 +1,27 @@
-import type { Finding } from "../../../scanners/types.js";
 import { createLogger } from "../../../logger.js";
-import { toErrorMessage } from "../../../utils.js";
+import type { Finding } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
+import { toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
 import { resolveTaskModel, resolveTaskRuntime } from "../runtime-overrides.js";
+import { TRACE_OUTPUT_SCHEMA } from "./prompts.js";
 import {
   getGraphNodeByFileAndLine,
-  getPathsToNode,
   getNodeById,
-  makeNodeId,
+  getPathsToNode,
   makeEdgeId,
+  makeNodeId,
   makePathId,
-  upsertGraphNode,
   upsertGraphEdge,
+  upsertGraphNode,
   upsertGraphPath,
 } from "./store.js";
-import type { CodeGraphOutput, CodeGraphPath, FindingGraphContext, CodeGraphNode } from "./types.js";
-import { TRACE_OUTPUT_SCHEMA } from "./prompts.js";
+import type {
+  CodeGraphNode,
+  CodeGraphOutput,
+  CodeGraphPath,
+  FindingGraphContext,
+} from "./types.js";
 
 const log = createLogger({ stage: "code-graph-enrich" });
 
@@ -74,7 +79,10 @@ function getGraphContextForFinding(
   // Fallback: search in-memory
   if (!targetNode) {
     for (const node of graphOutput.nodes) {
-      if (node.filePath === finding.filePath && Math.abs(node.startLine - finding.startLine) <= 10) {
+      if (
+        node.filePath === finding.filePath &&
+        Math.abs(node.startLine - finding.startLine) <= 10
+      ) {
         targetNode = node;
         break;
       }
@@ -93,9 +101,7 @@ function getGraphContextForFinding(
 
   // Fallback: search in-memory paths
   if (paths.length === 0) {
-    paths = graphOutput.paths.filter((p) =>
-      p.nodeIds.includes(targetNode!.nodeId),
-    );
+    paths = graphOutput.paths.filter((p) => p.nodeIds.includes(targetNode!.nodeId));
   }
 
   if (paths.length === 0) {
@@ -108,12 +114,15 @@ function getGraphContextForFinding(
 
   // Pick the shortest path
   const bestPath = paths.sort((a, b) => a.hopCount - b.hopCount)[0]!;
-  const entryNode = nodeMap.get(bestPath.entryNodeId) ?? (db ? getNodeById(db, bestPath.entryNodeId) : null);
+  const entryNode =
+    nodeMap.get(bestPath.entryNodeId) ?? (db ? getNodeById(db, bestPath.entryNodeId) : null);
 
   const sanitizersOnPath = bestPath.sanitizerNodeIds
     .map((id) => {
       const node = nodeMap.get(id) ?? (db ? getNodeById(db, id) : null);
-      return node ? { nodeId: id, symbol: node.symbol ?? "unknown", filePath: node.filePath } : null;
+      return node
+        ? { nodeId: id, symbol: node.symbol ?? "unknown", filePath: node.filePath }
+        : null;
     })
     .filter(Boolean) as FindingGraphContext["sanitizersOnPath"];
 
@@ -172,11 +181,16 @@ export const codeGraphEnrichTask: AgentTask<Finding[], Finding[]> = {
 
       return {
         ...finding,
-        adjustedScore: Math.max(0, (finding.adjustedScore ?? finding.score) - scorePenalty - sanitizerPenalty),
+        adjustedScore: Math.max(
+          0,
+          (finding.adjustedScore ?? finding.score) - scorePenalty - sanitizerPenalty,
+        ),
         evidence: [
           finding.evidence ?? "",
           graphContext.summary ? `Code graph: ${graphContext.summary}` : "",
-        ].filter(Boolean).join("\n"),
+        ]
+          .filter(Boolean)
+          .join("\n"),
         // Attach graph context as metadata for triage prompt injection
         graphContext,
       } as Finding & { graphContext: FindingGraphContext };
@@ -186,7 +200,9 @@ export const codeGraphEnrichTask: AgentTask<Finding[], Finding[]> = {
     const unreachable = enriched.filter((f) => f.graphContext.reachable === "false").length;
     const unknown = enriched.filter((f) => f.graphContext.reachable === "unknown").length;
 
-    log.info(`Code graph enrichment: ${reachable} reachable, ${unreachable} unreachable, ${unknown} unknown`);
+    log.info(
+      `Code graph enrichment: ${reachable} reachable, ${unreachable} unreachable, ${unknown} unknown`,
+    );
 
     return attachTaskOutputMeta(enriched, { costUsd: 0 });
   },

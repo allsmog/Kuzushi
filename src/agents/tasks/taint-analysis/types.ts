@@ -2,11 +2,30 @@ import path from "node:path";
 import { augurRoot as taintAnalysisRoot } from "@kuzushi/augur";
 import type { KuzushiConfig, RepoContext } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
-import { normalizeLanguageName, WEB_FRAMEWORKS, SQL_DB_PATTERN } from "../category-filter.js";
+import { normalizeLanguageName, SQL_DB_PATTERN, WEB_FRAMEWORKS } from "../category-filter.js";
 
 export type TaintAnalysisLanguage = "python" | "go" | "java" | "javascript" | "csharp";
 
-export type TaintAnalysisPassId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
+export type TaintAnalysisPassId =
+  | 1
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 8
+  | 9
+  | 10
+  | 11
+  | 12
+  | 13
+  | 14
+  | 15
+  | 16
+  | 17
+  | 18
+  | 19;
 
 export interface DiffScope {
   base: string;
@@ -184,8 +203,18 @@ export interface TaintAnalysisLabelOutput {
 }
 
 export const TAINT_ANALYSIS_PASSES: TaintAnalysisPassDefinition[] = [
-  { passId: 1, passKey: "path_traversal", focus: "Path Traversal", cwes: ["022", "023", "036", "073"] },
-  { passId: 2, passKey: "command_injection", focus: "Command/Argument Injection", cwes: ["077", "078", "088"] },
+  {
+    passId: 1,
+    passKey: "path_traversal",
+    focus: "Path Traversal",
+    cwes: ["022", "023", "036", "073"],
+  },
+  {
+    passId: 2,
+    passKey: "command_injection",
+    focus: "Command/Argument Injection",
+    cwes: ["077", "078", "088"],
+  },
   { passId: 3, passKey: "ssrf", focus: "SSRF", cwes: ["918", "099", "610"] },
   { passId: 4, passKey: "code_injection", focus: "Code Injection", cwes: ["094", "095"] },
   { passId: 5, passKey: "sql_injection", focus: "SQL Injection", cwes: ["089"] },
@@ -200,9 +229,19 @@ export const TAINT_ANALYSIS_PASSES: TaintAnalysisPassDefinition[] = [
   { passId: 14, passKey: "prototype_pollution", focus: "Prototype Pollution", cwes: ["1321"] },
   { passId: 15, passKey: "mass_assignment", focus: "Mass Assignment / Autobinding", cwes: ["915"] },
   { passId: 16, passKey: "file_upload", focus: "Insecure File Upload", cwes: ["434"] },
-  { passId: 17, passKey: "integer_overflow", focus: "Integer Overflow in Security-Critical Computation", cwes: ["190"] },
+  {
+    passId: 17,
+    passKey: "integer_overflow",
+    focus: "Integer Overflow in Security-Critical Computation",
+    cwes: ["190"],
+  },
   { passId: 18, passKey: "regex_injection", focus: "Regex Injection (ReDoS)", cwes: ["1333"] },
-  { passId: 19, passKey: "second_order_injection", focus: "Second-Order Injection (Stored Taint)", cwes: ["089", "079"] },
+  {
+    passId: 19,
+    passKey: "second_order_injection",
+    focus: "Second-Order Injection (Stored Taint)",
+    cwes: ["089", "079"],
+  },
 ];
 
 export const TAINT_ANALYSIS_PASS_IDS: ReadonlySet<number> = new Set(
@@ -234,7 +273,10 @@ export const PASS_RELEVANCE_MAP: PassRelevance[] = [
   { passId: 10, requiresWebFramework: true },
   { passId: 11, always: true },
   { passId: 12, languages: ["Java", "Kotlin", "Python", "PHP", "Ruby"] },
-  { passId: 13, languages: ["JavaScript", "TypeScript", "Python", "Ruby", "PHP", "Java", "Kotlin"] },
+  {
+    passId: 13,
+    languages: ["JavaScript", "TypeScript", "Python", "Ruby", "PHP", "Java", "Kotlin"],
+  },
   { passId: 14, languages: ["JavaScript", "TypeScript"] },
   { passId: 15, languages: ["JavaScript", "TypeScript", "Ruby", "Python", "Java", "Kotlin"] },
   { passId: 16, requiresWebFramework: true },
@@ -255,10 +297,10 @@ export function resolveContextAwarePasses(
   if (!repoContext) return fallbackPasses;
 
   const repoLangs = new Set(repoContext.languages.map(normalizeLanguageName));
-  const hasWebFramework = repoContext.frameworks.some(f =>
+  const hasWebFramework = repoContext.frameworks.some((f) =>
     WEB_FRAMEWORKS.has(f.toLowerCase().trim()),
   );
-  const hasSqlDb = repoContext.ormOrDb.some(db => SQL_DB_PATTERN.test(db));
+  const hasSqlDb = repoContext.ormOrDb.some((db) => SQL_DB_PATTERN.test(db));
 
   const included: TaintAnalysisPassId[] = [];
 
@@ -270,7 +312,7 @@ export function resolveContextAwarePasses(
 
     let match = false;
 
-    if (mapping.languages?.some(l => repoLangs.has(normalizeLanguageName(l)))) {
+    if (mapping.languages?.some((l) => repoLangs.has(normalizeLanguageName(l)))) {
       match = true;
     }
 
@@ -350,19 +392,31 @@ export function resolveTaintAnalysisConfig(config: KuzushiConfig): TaintAnalysis
     : { ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG };
 
   return {
-    taintAnalysisPath: normalizePath(merged["taintAnalysisPath"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.taintAnalysisPath),
+    taintAnalysisPath: normalizePath(
+      merged["taintAnalysisPath"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.taintAnalysisPath,
+    ),
     dbPath: normalizeOptionalPath(merged["dbPath"]),
     passes: normalizePasses(merged["passes"]),
     labelingModel: normalizeString(isRecord(raw) ? raw["labelingModel"] : undefined, config.model),
     extractionModel: normalizeOptionalString(isRecord(raw) ? raw["extractionModel"] : undefined),
-    labelingBatchSize: normalizePositiveInt(merged["labelingBatchSize"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.labelingBatchSize),
+    labelingBatchSize: normalizePositiveInt(
+      merged["labelingBatchSize"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.labelingBatchSize,
+    ),
     labelingConfidenceThreshold: normalizeUnitInterval(
       merged["labelingConfidenceThreshold"],
       DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.labelingConfidenceThreshold,
     ),
-    workspaceDir: normalizePath(merged["workspaceDir"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.workspaceDir),
+    workspaceDir: normalizePath(
+      merged["workspaceDir"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.workspaceDir,
+    ),
     codeqlBinary: normalizeOptionalPath(merged["codeqlBinary"]),
-    python3Binary: normalizeString(merged["python3Binary"], DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.python3Binary),
+    python3Binary: normalizeString(
+      merged["python3Binary"],
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.python3Binary,
+    ),
     threads: normalizeOptionalPositiveInt(merged["threads"]),
     ram: normalizeOptionalPositiveInt(merged["ram"]),
     maxFindings: normalizeOptionalPositiveInt(merged["maxFindings"]),
@@ -469,7 +523,11 @@ export function mapFrameworkToReference(framework: string): string | null {
   if (normalized.includes("echo")) return "echo";
   if (normalized.includes("spring")) return "spring";
   if (normalized.includes("express")) return "express";
-  if (normalized.includes("asp.net") || normalized.includes("aspnet") || normalized.includes("api controller")) {
+  if (
+    normalized.includes("asp.net") ||
+    normalized.includes("aspnet") ||
+    normalized.includes("api controller")
+  ) {
     return "aspnet";
   }
 

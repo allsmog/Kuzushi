@@ -12,8 +12,11 @@
  * - Shell mode: loads all requested modules, routes LLM tool calls interactively
  */
 
-import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
+import type { AgentRuntime } from "../agent-runtime/types.js";
+import type { TaskRegistry } from "../agents/registry.js";
+import type { MessageBus } from "../bus/types.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
+import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
 import type {
   CopilotModule,
   ModuleContext,
@@ -22,10 +25,7 @@ import type {
   ToolExecutionContext,
   ToolResult,
 } from "../modules/types.js";
-import type { AgentRuntime } from "../agent-runtime/types.js";
-import type { MessageBus } from "../bus/types.js";
 import type { KuzushiConfig } from "../types.js";
-import type { TaskRegistry } from "../agents/registry.js";
 
 // ---------------------------------------------------------------------------
 // CopilotCore options
@@ -146,9 +146,10 @@ export class CopilotCore {
     const { tool } = resolved;
 
     // Governance enforcement — check scope, budget, tier before execution
-    const inputRecord = (input && typeof input === "object" && !Array.isArray(input))
-      ? input as Record<string, unknown>
-      : {};
+    const inputRecord =
+      input && typeof input === "object" && !Array.isArray(input)
+        ? (input as Record<string, unknown>)
+        : {};
     const target = ctxOverrides?.target ?? (inputRecord.target as string | undefined);
 
     if (this.opts.enforcer) {
@@ -185,12 +186,20 @@ export class CopilotCore {
     }
     if (this.opts.auditTrail) {
       this.opts.auditTrail.record(
-        (this.opts.enforcer ?? new (await import("../governance/enforcer.js")).GovernanceEnforcer(
-          (await import("../governance/types.js")).defaultScopePolicy(),
-        )).buildAuditEntry(qualifiedName, inputRecord, { allowed: true }, {
-          costUsd: result.costUsd,
-          workspaceId: ctxOverrides?.workspaceId,
-        }),
+        (
+          this.opts.enforcer ??
+          new (await import("../governance/enforcer.js")).GovernanceEnforcer(
+            (await import("../governance/types.js")).defaultScopePolicy(),
+          )
+        ).buildAuditEntry(
+          qualifiedName,
+          inputRecord,
+          { allowed: true },
+          {
+            costUsd: result.costUsd,
+            workspaceId: ctxOverrides?.workspaceId,
+          },
+        ),
       );
     }
 
@@ -289,8 +298,9 @@ export class CopilotCore {
   }
 
   private async loadLocalModule(modulePath: string): Promise<void> {
-    const { loadManifestFromPath, checkRequirements, dynamicImportModule } =
-      await import("../modules/loader.js");
+    const { loadManifestFromPath, checkRequirements, dynamicImportModule } = await import(
+      "../modules/loader.js"
+    );
     const path = await import("node:path");
 
     const manifest = loadManifestFromPath(modulePath);
@@ -330,8 +340,7 @@ export class CopilotCore {
       packageDir = path.dirname(require.resolve(packageName + "/package.json"));
     } catch {
       throw new Error(
-        `Package "${packageName}" is not installed. ` +
-        `Install it with: pnpm add ${packageName}`,
+        `Package "${packageName}" is not installed. ` + `Install it with: pnpm add ${packageName}`,
       );
     }
 
@@ -354,12 +363,13 @@ export class CopilotCore {
     const { createMcpModule } = await import("../modules/mcp-bridge.js");
 
     // Derive a module ID from the server spec
-    const moduleId = serverSpec
-      .replace(/^(https?:\/\/|npx\s+|node\s+|python\s+)/, "")
-      .replace(/[^a-z0-9-]/gi, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 30) || "mcp";
+    const moduleId =
+      serverSpec
+        .replace(/^(https?:\/\/|npx\s+|node\s+|python\s+)/, "")
+        .replace(/[^a-z0-9-]/gi, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 30) || "mcp";
 
     const { module: mod } = await createMcpModule(serverSpec, moduleId);
     await this.registry.loadModule(mod, this.moduleCtx, {

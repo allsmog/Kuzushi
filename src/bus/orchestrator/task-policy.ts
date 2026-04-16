@@ -39,12 +39,12 @@ export function resolveInitialTaskPlan(
   const configuredTasks = config.tasks ?? [];
   const allRegisteredTasks = registry.ids();
   const useAllTasks = configuredTasks.length === 1 && configuredTasks[0] === "*";
-  const dynamicSelectionActive = config.enableDynamicTaskSelection === true
-    && registry.has("task-selector");
-  const enableContextExplicit = config.enableContextGathering !== false
-    && registry.has("context-gatherer");
-  const enableContextEnrichment = config.enableContextEnrichment === true
-    && registry.has("context-enricher");
+  const dynamicSelectionActive =
+    config.enableDynamicTaskSelection === true && registry.has("task-selector");
+  const enableContextExplicit =
+    config.enableContextGathering !== false && registry.has("context-gatherer");
+  const enableContextEnrichment =
+    config.enableContextEnrichment === true && registry.has("context-enricher");
   const baseTaskIds = useAllTasks ? allRegisteredTasks : configuredTasks;
 
   const candidateIds = injectThreatModelPolicyCandidates(registry, [
@@ -61,9 +61,9 @@ export function resolveInitialTaskPlan(
   if (config.enableContextGathering === false) {
     const othersDepend = enabledTaskIds.some(
       (id) =>
-        id !== "context-gatherer"
-        && registry.has(id)
-        && registry.get(id).dependsOn.includes("context-gatherer"),
+        id !== "context-gatherer" &&
+        registry.has(id) &&
+        registry.get(id).dependsOn.includes("context-gatherer"),
     );
 
     if (!othersDepend) {
@@ -89,8 +89,8 @@ export function injectThreatModelPolicyCandidates(
 ): string[] {
   const normalized = normalizeTaskIds(candidateIds);
   if (
-    normalized.some((id) => THREAT_AWARE_DETECTOR_TASK_IDS.has(id))
-    && registry.has(THREAT_MODEL_TASK_ID)
+    normalized.some((id) => THREAT_AWARE_DETECTOR_TASK_IDS.has(id)) &&
+    registry.has(THREAT_MODEL_TASK_ID)
   ) {
     return normalizeTaskIds([...normalized, THREAT_MODEL_TASK_ID]);
   }

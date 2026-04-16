@@ -7,11 +7,13 @@
  *   [j] Export as Jira CSV
  *   [enter] done
  */
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+
 import chalk from "chalk";
+import { Box, Text, useInput } from "ink";
+import type React from "react";
+import { useState } from "react";
+import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
 import type { ActionableFinding } from "../state.js";
 
 interface ExportActionsProps {
@@ -20,7 +22,11 @@ interface ExportActionsProps {
   onDone: () => void;
 }
 
-export function ExportActions({ findings, repoName, onDone }: ExportActionsProps): React.ReactElement {
+export function ExportActions({
+  findings,
+  repoName,
+  onDone,
+}: ExportActionsProps): React.ReactElement {
   const [status, setStatus] = useState<string | null>(null);
   const width = terminalCardWidth();
 
@@ -52,17 +58,35 @@ export function ExportActions({ findings, repoName, onDone }: ExportActionsProps
       <Text>{""}</Text>
       <Text>{boxHeader("Export", width)}</Text>
       <Text>{""}</Text>
-      <Text>{"  "}{chalk.dim(`${actionableCount} actionable findings available`)}</Text>
+      <Text>
+        {"  "}
+        {chalk.dim(`${actionableCount} actionable findings available`)}
+      </Text>
       <Text>{""}</Text>
-      <Text>{"  "}{chalk.redBright.bold("[c]")} Copy to clipboard {chalk.dim("(markdown)")}</Text>
-      <Text>{"  "}{chalk.white.bold("[g]")} GitHub issue template</Text>
-      <Text>{"  "}{chalk.blue.bold("[j]")} Jira CSV export</Text>
-      <Text>{"  "}{chalk.dim("[enter] done")}</Text>
+      <Text>
+        {"  "}
+        {chalk.redBright.bold("[c]")} Copy to clipboard {chalk.dim("(markdown)")}
+      </Text>
+      <Text>
+        {"  "}
+        {chalk.white.bold("[g]")} GitHub issue template
+      </Text>
+      <Text>
+        {"  "}
+        {chalk.blue.bold("[j]")} Jira CSV export
+      </Text>
+      <Text>
+        {"  "}
+        {chalk.dim("[enter] done")}
+      </Text>
 
       {status && (
         <>
           <Text>{""}</Text>
-          <Text>{"  "}{chalk.green(status)}</Text>
+          <Text>
+            {"  "}
+            {chalk.green(status)}
+          </Text>
         </>
       )}
 
@@ -83,7 +107,12 @@ function generateMarkdownExport(findings: ActionableFinding[], repoName: string)
 
   for (const f of actionable) {
     const severity = f.severity === "ERROR" ? "🔴" : "🟡";
-    const verdict = f.verdict === "tp" ? "TRUE POSITIVE" : f.verdict === "needs_review" ? "NEEDS REVIEW" : f.verdict.toUpperCase();
+    const verdict =
+      f.verdict === "tp"
+        ? "TRUE POSITIVE"
+        : f.verdict === "needs_review"
+          ? "NEEDS REVIEW"
+          : f.verdict.toUpperCase();
     const exploitable = f.verifyExploitable === 1 ? " **EXPLOITABLE**" : "";
 
     lines.push(`### ${severity} ${verdict} — ${f.ruleId}${exploitable}`);
@@ -138,9 +167,8 @@ function generateJiraCsv(findings: ActionableFinding[]): string {
   const actionable = findings.filter((f) => f.verdict !== "fp");
   const header = "Summary,Priority,Component,Labels,Description";
   const rows = actionable.map((f) => {
-    const priority = f.verifyExploitable === 1 ? "Critical"
-      : f.severity === "ERROR" ? "High"
-      : "Medium";
+    const priority =
+      f.verifyExploitable === 1 ? "Critical" : f.severity === "ERROR" ? "High" : "Medium";
     const summary = `[Security] ${f.ruleId} in ${f.filePath}:${f.startLine}`;
     const desc = f.rationale.replace(/"/g, '""').slice(0, 500);
     return `"${summary}","${priority}","Security","kuzushi,${f.taskId}","${desc}"`;

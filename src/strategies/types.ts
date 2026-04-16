@@ -1,5 +1,5 @@
-import type { Finding } from "../scanners/types.js";
 import type { TaskContext } from "../agents/types.js";
+import type { Finding } from "../scanners/types.js";
 import type { RepoContext } from "../types.js";
 
 /** Classification of an analysis strategy. */

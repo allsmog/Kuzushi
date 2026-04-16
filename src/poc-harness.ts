@@ -3,50 +3,47 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { cleanupBatchFiles, writeBatchFile } from "./agent-runtime/batch-files.js";
 import {
+  type AgentActivityCallback,
+  type AgentRuntimeOptions,
   extractJson,
   resolveDefaultReadOnlyTools,
   resolveRepoContextAndRuntimeOptions,
   runStructuredAgentQuery,
   runStructuredSessionQuery,
-  type AgentActivityCallback,
-  type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
-import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
 import type { AgentSession } from "./agent-runtime/types.js";
-import type { AllowedTriageTool, Finding } from "./scanners/types.js";
-import type {
-  PocHarnessResult,
-  RepoContext,
-  TriageResult,
-  VerificationResult,
-} from "./types.js";
 import { formatRepoContext } from "./repo-context.js";
+import type { AllowedTriageTool, Finding } from "./scanners/types.js";
+import { formatZodErrors, RawPocHarnessOutputSchema } from "./schemas.js";
+import type { PocHarnessResult, RepoContext, TriageResult, VerificationResult } from "./types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
-import { RawPocHarnessOutputSchema, formatZodErrors } from "./schemas.js";
 
 export function pocHarnessSystemPromptPrefix(repoContext?: RepoContext): string {
   const repoSection = formatRepoContext(repoContext);
-  const repoBlock = repoSection.length > 0
-    ? "## Repository Context\n" + repoSection.join("\n") + "\n\n"
-    : "";
-  return repoBlock + [
-    "## Harness strategy templates (pick the best matching CWE)",
-    "- SQL injection (CWE-89): call real query builder/data-access function and assert injected SQL fragment reaches DB adapter mock capture.",
-    "- Command injection (CWE-78): call real command-construction path and assert mocked exec/spawn receives attacker-controlled command.",
-    "- Path traversal (CWE-22): call real file/path handler and assert normalized path escapes intended base directory in captured filesystem access.",
-    "- XSS (CWE-79): call real render/template function and assert unescaped payload appears in output.",
-    "- Race condition (CWE-362): invoke the real concurrent code path with parallel requests and assert shared state corruption or TOCTOU violation is observable.",
-    "- Weak crypto (CWE-327/328/330): call the real crypto initialization or usage path and assert weak algorithm or insufficient entropy is used.",
-    "- Missing auth/authz (CWE-862/863): call the real endpoint handler with unauthenticated or unauthorized context and assert access is not denied.",
-    "- For other CWEs: identify the vulnerable function, call it with crafted inputs, and assert the vulnerability is observable.",
-    "",
-    "## Anti-hallucination constraints",
-    "- Do NOT simulate the vulnerable function.",
-    "- Import the REAL function from the repository.",
-    "- If the function cannot be isolated with simple mocks, set skipped=true and explain why.",
-    "- Do not invent files, exports, or APIs.",
-  ].join("\n");
+  const repoBlock =
+    repoSection.length > 0 ? "## Repository Context\n" + repoSection.join("\n") + "\n\n" : "";
+  return (
+    repoBlock +
+    [
+      "## Harness strategy templates (pick the best matching CWE)",
+      "- SQL injection (CWE-89): call real query builder/data-access function and assert injected SQL fragment reaches DB adapter mock capture.",
+      "- Command injection (CWE-78): call real command-construction path and assert mocked exec/spawn receives attacker-controlled command.",
+      "- Path traversal (CWE-22): call real file/path handler and assert normalized path escapes intended base directory in captured filesystem access.",
+      "- XSS (CWE-79): call real render/template function and assert unescaped payload appears in output.",
+      "- Race condition (CWE-362): invoke the real concurrent code path with parallel requests and assert shared state corruption or TOCTOU violation is observable.",
+      "- Weak crypto (CWE-327/328/330): call the real crypto initialization or usage path and assert weak algorithm or insufficient entropy is used.",
+      "- Missing auth/authz (CWE-862/863): call the real endpoint handler with unauthenticated or unauthorized context and assert access is not denied.",
+      "- For other CWEs: identify the vulnerable function, call it with crafted inputs, and assert the vulnerability is observable.",
+      "",
+      "## Anti-hallucination constraints",
+      "- Do NOT simulate the vulnerable function.",
+      "- Import the REAL function from the repository.",
+      "- If the function cannot be isolated with simple mocks, set skipped=true and explain why.",
+      "- Do not invent files, exports, or APIs.",
+    ].join("\n")
+  );
 }
 
 export const POC_HARNESS_RESULT_SCHEMA = {
@@ -102,12 +99,7 @@ export async function generatePocHarness(
     maybeRuntimeOptions,
   );
 
-  const prompt = buildPocHarnessPrompt(
-    finding,
-    triageResult,
-    verificationResult,
-    repoName,
-  );
+  const prompt = buildPocHarnessPrompt(finding, triageResult, verificationResult, repoName);
 
   // ── Session-based path: reuse subprocess if runtime supports sessions ──
   const runtime = runtimeOptions.runtime;
@@ -334,15 +326,17 @@ export function validateScriptSyntax(
     {
       cmd: "node",
       args: ["--check", scriptPath],
-      applies: extension === ".js" || extension === ".mjs" || extension === ".cjs"
-        || normalizedLanguage === "javascript"
-        || normalizedLanguage === "node",
+      applies:
+        extension === ".js" ||
+        extension === ".mjs" ||
+        extension === ".cjs" ||
+        normalizedLanguage === "javascript" ||
+        normalizedLanguage === "node",
     },
     {
       cmd: "npx",
       args: ["tsc", "--noEmit", "--skipLibCheck", scriptPath],
-      applies: extension === ".ts" || extension === ".tsx"
-        || normalizedLanguage === "typescript",
+      applies: extension === ".ts" || extension === ".tsx" || normalizedLanguage === "typescript",
     },
     {
       cmd: "python3",
@@ -356,7 +350,8 @@ export function validateScriptSyntax(
     {
       cmd: "sh",
       args: ["-n", scriptPath],
-      applies: extension === ".sh" || normalizedLanguage === "shell" || normalizedLanguage === "bash",
+      applies:
+        extension === ".sh" || normalizedLanguage === "shell" || normalizedLanguage === "bash",
     },
     {
       cmd: "go",
@@ -387,7 +382,10 @@ export function validateScriptSyntax(
   }
 }
 
-function parsePocHarnessObject(raw: Record<string, unknown>, fingerprint: string): PocHarnessResult {
+function parsePocHarnessObject(
+  raw: Record<string, unknown>,
+  fingerprint: string,
+): PocHarnessResult {
   const skipped = asBoolean(raw["skipped"], false);
   const scriptContent = normalizeNullableString(raw["script_content"]);
 
@@ -429,7 +427,10 @@ function buildHarnessFileName(fingerprint: string, cwes: string[], extension: st
 
 function firstCwe(cwes: string[]): string {
   for (const cwe of cwes) {
-    const normalized = cwe.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const normalized = cwe
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
     if (normalized.length > 0) {
       return normalized;
     }
@@ -485,15 +486,16 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
 }
 
 function normalizeAllowedTriageToolNames(tools: readonly string[]): AllowedTriageTool[] {
-  return tools.filter((tool): tool is AllowedTriageTool =>
-    tool === "Read"
-      || tool === "Glob"
-      || tool === "Grep"
-      || tool === "GetCallers"
-      || tool === "GetCallees"
-      || tool === "GetFunctionBody"
-      || tool === "GoToDefinition"
-      || tool === "FindReferences"
-      || tool === "TypeAtPosition",
+  return tools.filter(
+    (tool): tool is AllowedTriageTool =>
+      tool === "Read" ||
+      tool === "Glob" ||
+      tool === "Grep" ||
+      tool === "GetCallers" ||
+      tool === "GetCallees" ||
+      tool === "GetFunctionBody" ||
+      tool === "GoToDefinition" ||
+      tool === "FindReferences" ||
+      tool === "TypeAtPosition",
   );
 }

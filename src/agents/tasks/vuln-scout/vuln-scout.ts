@@ -6,6 +6,8 @@
  *
  * Runs in parallel with other detection tasks as its own independent scanner.
  */
+
+import { createLogger } from "../../../logger.js";
 import { antiHallucinationModule } from "../../../prompts/modules.js";
 import {
   FINDING_SCHEMA,
@@ -16,10 +18,13 @@ import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
-import { createLogger } from "../../../logger.js";
 import type { AgentTask, TaskContext } from "../../types.js";
-import { resolveTaskModel, resolveTaskRuntime, resolveTaskAllowedTools } from "../runtime-overrides.js";
-import { resolveTaskPositiveInt } from "../runtime-overrides.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "../runtime-overrides.js";
 import { resolveVulnScoutPlugin } from "./resolve-vuln-scout.js";
 
 const log = createLogger({ stage: "vuln-scout" });
@@ -71,7 +76,7 @@ async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
   log.info(`${tag} Starting pentest (model=${config.model})`);
 
   let resultText = "";
-  let structuredOutput: unknown = undefined;
+  let structuredOutput: unknown;
   let costUsd = 0;
   let executionError: string | null = null;
 
@@ -91,7 +96,11 @@ async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
       },
     },
   })) {
-    if (message.type === "tool-progress" || message.type === "tool-summary" || message.type === "assistant") {
+    if (
+      message.type === "tool-progress" ||
+      message.type === "tool-summary" ||
+      message.type === "assistant"
+    ) {
       continue;
     }
     if (message.type !== "result") continue;
@@ -103,19 +112,25 @@ async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
       resultText = message.result;
       structuredOutput = message.structuredOutput;
       const durationSec = message.durationMs ? (message.durationMs / 1000).toFixed(1) : "?";
-      log.info(`${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`);
+      log.info(
+        `${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`,
+      );
       break;
     }
-    executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "") || message.subtype || "unknown error";
+    executionError =
+      (Array.isArray(message.errors) ? message.errors.join("; ") : "") ||
+      message.subtype ||
+      "unknown error";
   }
 
   if (executionError) {
     throw new Error(`${tag} Failed: ${executionError}`);
   }
 
-  const parsed = structuredOutput != null || resultText
-    ? parseFindingOutput(structuredOutput ?? resultText)
-    : { findings: [] };
+  const parsed =
+    structuredOutput != null || resultText
+      ? parseFindingOutput(structuredOutput ?? resultText)
+      : { findings: [] };
   const findings = selectFindings(
     parsed,
     context.repoRoot,
@@ -151,7 +166,9 @@ export const vulnScoutTask: AgentTask<ScanOpts, Finding[]> = {
         "- Trace the complete data flow from source to sink",
         "- Check for sanitization or framework protections",
         "- Confirm the code is reachable from an external entry point",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

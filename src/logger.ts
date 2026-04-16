@@ -65,10 +65,7 @@ export function createLogger(opts: LoggerOptions): Logger {
   return buildLogger(opts.stage, {});
 }
 
-function buildLogger(
-  stage: string,
-  bindings: Record<string, unknown>,
-): Logger {
+function buildLogger(stage: string, bindings: Record<string, unknown>): Logger {
   const prefix = `[${stage}]`;
 
   function shouldLog(level: LogLevel): boolean {
@@ -78,9 +75,8 @@ function buildLogger(
   function log(level: LogLevel, first: unknown, ...rest: unknown[]) {
     if (!shouldLog(level)) return;
 
-    const bindingsStr = Object.keys(bindings).length > 0
-      ? " " + JSON.stringify(redactObject(bindings))
-      : "";
+    const bindingsStr =
+      Object.keys(bindings).length > 0 ? " " + JSON.stringify(redactObject(bindings)) : "";
 
     if (typeof first === "object" && first !== null && typeof rest[0] === "string") {
       const redacted = redactObject(first as Record<string, unknown>);

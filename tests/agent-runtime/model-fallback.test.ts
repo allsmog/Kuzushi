@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelFallbackManager } from "../../src/agent-runtime/model-fallback.js";
 
 describe("ModelFallbackManager", () => {

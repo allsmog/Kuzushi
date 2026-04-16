@@ -11,10 +11,10 @@
  */
 
 import type { AgentRuntime } from "../../agent-runtime/types.js";
+import { getLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import type { TriageResult, VerificationResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { getLogger } from "../../logger.js";
 
 const log = getLogger("cheap-verify");
 
@@ -89,7 +89,10 @@ export async function cheapVerifyCandidates(
       const batchResults = await runtime.queryBatch(batchRequests, {
         cwd: options.repoRoot,
         model,
-        outputFormat: { type: "json_schema", schema: CHEAP_VERIFY_SCHEMA as unknown as Record<string, unknown> },
+        outputFormat: {
+          type: "json_schema",
+          schema: CHEAP_VERIFY_SCHEMA as unknown as Record<string, unknown>,
+        },
         permissionMode: "dontAsk",
       });
 
@@ -108,7 +111,7 @@ export async function cheapVerifyCandidates(
   for (const candidate of candidates) {
     try {
       let resultText = "";
-      let structuredOutput: unknown = undefined;
+      let structuredOutput: unknown;
       let costUsd = 0;
 
       for await (const message of runtime.query({
@@ -135,12 +138,14 @@ export async function cheapVerifyCandidates(
       }
 
       const parsed = structuredOutput ?? tryParseJson(resultText);
-      results.push(parseCheapVerifyResult(candidate, {
-        resultText,
-        structuredOutput: parsed,
-        executionError: null,
-        costUsd,
-      }));
+      results.push(
+        parseCheapVerifyResult(candidate, {
+          resultText,
+          structuredOutput: parsed,
+          executionError: null,
+          costUsd,
+        }),
+      );
     } catch (err) {
       log.warn(`Cheap verify failed for ${candidate.finding.fingerprint}: ${toErrorMessage(err)}`);
       results.push({
@@ -185,12 +190,21 @@ function formatCheapVerifyPrompt(candidate: CheapVerifyCandidate): string {
       ? `## Verification steps\n${triageResult.verificationSteps.join("\n")}\n`
       : "",
     "Based on the above, confirm exploitability and construct a PoC payload if possible.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function parseCheapVerifyResult(
   candidate: CheapVerifyCandidate,
-  result: { resultText: string; structuredOutput: unknown; executionError: string | null; costUsd: number } | undefined,
+  result:
+    | {
+        resultText: string;
+        structuredOutput: unknown;
+        executionError: string | null;
+        costUsd: number;
+      }
+    | undefined,
 ): CheapVerifyResult {
   if (!result || result.executionError || !isRecord(result.structuredOutput)) {
     return {
@@ -199,7 +213,8 @@ function parseCheapVerifyResult(
         fingerprint: candidate.finding.fingerprint,
         exploitable: true,
         pocPayload: null,
-        pocDescription: result?.executionError ?? "Cheap verify parse failed — accepting based on triage",
+        pocDescription:
+          result?.executionError ?? "Cheap verify parse failed — accepting based on triage",
         attackVector: null,
         preconditions: [],
         confidence: candidate.triageResult.confidence,
@@ -217,12 +232,19 @@ function parseCheapVerifyResult(
     verification: {
       fingerprint: candidate.finding.fingerprint,
       exploitable: out["exploitable"] === true,
-      pocPayload: typeof out["poc_payload"] === "string" ? out["poc_payload"] as string : null,
-      pocDescription: typeof out["poc_description"] === "string" ? out["poc_description"] as string : "Cheap verification",
+      pocPayload: typeof out["poc_payload"] === "string" ? (out["poc_payload"] as string) : null,
+      pocDescription:
+        typeof out["poc_description"] === "string"
+          ? (out["poc_description"] as string)
+          : "Cheap verification",
       attackVector: null,
       preconditions: [],
-      confidence: typeof out["confidence"] === "number" ? out["confidence"] as number : candidate.triageResult.confidence,
-      proofLevel: typeof out["proof_level"] === "number" ? (out["proof_level"] as 1 | 2 | 3 | 4) : 2,
+      confidence:
+        typeof out["confidence"] === "number"
+          ? (out["confidence"] as number)
+          : candidate.triageResult.confidence,
+      proofLevel:
+        typeof out["proof_level"] === "number" ? (out["proof_level"] as 1 | 2 | 3 | 4) : 2,
       proofVerdict: out["exploitable"] === true ? "exploited" : "false_positive",
       verifyCostUsd: result.costUsd,
     },

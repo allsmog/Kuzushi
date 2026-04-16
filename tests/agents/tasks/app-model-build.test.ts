@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  appModelBuildTask,
   __appModelBuildInternals,
+  appModelBuildTask,
 } from "../../../src/agents/tasks/app-model-build.js";
 import type { RepoContext } from "../../../src/types.js";
 
@@ -28,10 +28,11 @@ describe("app-model-build task", () => {
   });
 
   it("detects Go CLI, init, listener, and gRPC entrypoints", () => {
-    const routes = collectRoutes([
-      {
-        filePath: "main.go",
-        content: `
+    const routes = collectRoutes(
+      [
+        {
+          filePath: "main.go",
+          content: `
 package main
 
 func init() {}
@@ -47,15 +48,20 @@ func main() {
   _ = srv
 }
         `.trim(),
-      },
-    ], makeRepoContext(), undefined);
+        },
+      ],
+      makeRepoContext(),
+      undefined,
+    );
 
-    expect(routes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ method: "INIT", path: "go://init", handlerSymbol: "init" }),
-      expect.objectContaining({ method: "CLI", path: "cli://runCLI", handlerSymbol: "runCLI" }),
-      expect.objectContaining({ method: "CLI", path: "cli://main", handlerSymbol: "main" }),
-      expect.objectContaining({ method: "TCP", path: "tcp://:50051", handlerSymbol: "main" }),
-      expect.objectContaining({ method: "GRPC", path: "grpc://main", handlerSymbol: "main" }),
-    ]));
+    expect(routes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ method: "INIT", path: "go://init", handlerSymbol: "init" }),
+        expect.objectContaining({ method: "CLI", path: "cli://runCLI", handlerSymbol: "runCLI" }),
+        expect.objectContaining({ method: "CLI", path: "cli://main", handlerSymbol: "main" }),
+        expect.objectContaining({ method: "TCP", path: "tcp://:50051", handlerSymbol: "main" }),
+        expect.objectContaining({ method: "GRPC", path: "grpc://main", handlerSymbol: "main" }),
+      ]),
+    );
   });
 });

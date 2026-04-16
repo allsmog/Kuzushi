@@ -1,13 +1,18 @@
-import type Database from "better-sqlite3";
 import crypto from "node:crypto";
-import type { AgentHistoryEntry } from "../../agent-runtime/types.js";
+import type Database from "better-sqlite3";
 import type { AgentActivity } from "../../agent-runtime/execution.js";
-import type { AgentRuntime } from "../../agent-runtime/types.js";
+import type { AgentHistoryEntry, AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
-import { generatePocHarness, PocHarnessExecutionError } from "../../poc-harness.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
-import { withRetry } from "../../retry.js";
+import { generatePocHarness, PocHarnessExecutionError } from "../../poc-harness.js";
 import { coerceRepoContext } from "../../repo-context.js";
+import { withRetry } from "../../retry.js";
+import type { Finding } from "../../scanners/types.js";
+import {
+  insertDynamicAnalysisRun,
+  updateFindingMetadata,
+  updateFindingProofState,
+} from "../../store.js";
 import type {
   DynamicAnalysisRun,
   DynamicAnalysisStatus,
@@ -17,13 +22,7 @@ import type {
   TriageResult,
   VerificationResult,
 } from "../../types.js";
-import type { Finding } from "../../scanners/types.js";
 import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
-import {
-  insertDynamicAnalysisRun,
-  updateFindingMetadata,
-  updateFindingProofState,
-} from "../../store.js";
 import type { DynamicAnalysisFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -71,7 +70,9 @@ export function registerDynamicAnalysisWorker(
         repoContext,
         index,
         total,
-        () => { attempts += 1; },
+        () => {
+          attempts += 1;
+        },
       );
 
       await bus.publish(
@@ -161,7 +162,11 @@ function classifyDynamicResult(
 
   // Check stdout for explicit vulnerability signals regardless of verdict
   const output = stdout.toLowerCase();
-  if (output.includes("vulnerable") || output.includes("exploited") || output.includes("injection successful")) {
+  if (
+    output.includes("vulnerable") ||
+    output.includes("exploited") ||
+    output.includes("injection successful")
+  ) {
     return "confirmed";
   }
 
@@ -207,7 +212,12 @@ async function runDynamicAnalysis(
   };
 
   const dynamicRunId = crypto.randomUUID();
-  const seedInputs = synthesizeSeedInputs(finding, triageResult, verificationResult, pocHarnessResult);
+  const seedInputs = synthesizeSeedInputs(
+    finding,
+    triageResult,
+    verificationResult,
+    pocHarnessResult,
+  );
 
   const activityCallback = async (activity: AgentActivity) => {
     await bus.publish(
@@ -225,10 +235,7 @@ async function runDynamicAnalysis(
     );
   };
 
-  const executor = await createPocExecutor(
-    config.pocSandbox ?? "docker",
-    config.pocExecTimeoutMs,
-  );
+  const executor = await createPocExecutor(config.pocSandbox ?? "docker", config.pocExecTimeoutMs);
 
   const history: AgentHistoryEntry[] = [];
   let totalCostUsd = 0;
@@ -265,42 +272,50 @@ async function runDynamicAnalysis(
       break;
     }
 
-    const generated = await withRetry(
-      async () => {
-        onAttempt();
-        return generatePocHarness(
-          finding,
-          triageResult,
-          verificationResult ?? {
-            fingerprint: finding.fingerprint,
-            exploitable: true,
-            pocPayload: null,
-            pocDescription: "",
-            attackVector: null,
-            preconditions: [],
-            confidence: 0.5,
-          },
-          repoRoot,
-          context.repoName,
-          model,
-          coerceRepoContext(repoContext),
-          {
-            runtime,
-            history,
-            activityCallback,
-          },
-        );
-      },
-      retryOptions,
-    );
+    const generated = await withRetry(async () => {
+      onAttempt();
+      return generatePocHarness(
+        finding,
+        triageResult,
+        verificationResult ?? {
+          fingerprint: finding.fingerprint,
+          exploitable: true,
+          pocPayload: null,
+          pocDescription: "",
+          attackVector: null,
+          preconditions: [],
+          confidence: 0.5,
+        },
+        repoRoot,
+        context.repoName,
+        model,
+        coerceRepoContext(repoContext),
+        {
+          runtime,
+          history,
+          activityCallback,
+        },
+      );
+    }, retryOptions);
 
     totalCostUsd += normalizeCostUsd(generated.costUsd);
     latestResult = generated.result;
 
-    if (latestResult.skipped || !latestResult.scriptPath || !latestResult.language || latestResult.parsed === false) {
+    if (
+      latestResult.skipped ||
+      !latestResult.scriptPath ||
+      !latestResult.language ||
+      latestResult.parsed === false
+    ) {
       const error = latestResult.parseError ?? latestResult.skipReason ?? "Harness not runnable";
-      history.push({ role: "assistant", content: JSON.stringify({ error, skipped: latestResult.skipped }) });
-      history.push({ role: "user", content: buildDynamicRefinementPrompt(undefined, error, coverageMode) });
+      history.push({
+        role: "assistant",
+        content: JSON.stringify({ error, skipped: latestResult.skipped }),
+      });
+      history.push({
+        role: "user",
+        content: buildDynamicRefinementPrompt(undefined, error, coverageMode),
+      });
       continue;
     }
 
@@ -320,11 +335,7 @@ async function runDynamicAnalysis(
     executionVerdict = execution.verdict;
     executionDurationMs = execution.durationMs;
 
-    latestStatus = classifyDynamicResult(
-      execution.verdict,
-      execution.exitCode,
-      execution.stdout,
-    );
+    latestStatus = classifyDynamicResult(execution.verdict, execution.exitCode, execution.stdout);
 
     // If confirmed or we're at the last iteration, stop
     if (latestStatus === "confirmed" || iteration >= maxIterations) {
@@ -337,17 +348,32 @@ async function runDynamicAnalysis(
       `exit=${execution.exitCode}`,
       execution.stdout.trim() ? `stdout=${execution.stdout.trim().slice(0, 1000)}` : undefined,
       execution.stderr.trim() ? `stderr=${execution.stderr.trim().slice(0, 1000)}` : undefined,
-    ].filter(Boolean).join(" | ");
+    ]
+      .filter(Boolean)
+      .join(" | ");
 
-    history.push({ role: "assistant", content: JSON.stringify({ scriptPath: latestResult.scriptPath, language: latestResult.language }) });
-    history.push({ role: "user", content: buildDynamicRefinementPrompt(execution, error, coverageMode) });
+    history.push({
+      role: "assistant",
+      content: JSON.stringify({
+        scriptPath: latestResult.scriptPath,
+        language: latestResult.language,
+      }),
+    });
+    history.push({
+      role: "user",
+      content: buildDynamicRefinementPrompt(execution, error, coverageMode),
+    });
   }
 
   // Compute proof value: higher for confirmed, lower for rejected
-  const proofValue = latestStatus === "confirmed" ? 10
-    : latestStatus === "interesting" ? 5
-    : latestStatus === "rejected" ? -5
-    : 0;
+  const proofValue =
+    latestStatus === "confirmed"
+      ? 10
+      : latestStatus === "interesting"
+        ? 5
+        : latestStatus === "rejected"
+          ? -5
+          : 0;
 
   const run: DynamicAnalysisRun = {
     dynamicRunId,
@@ -394,12 +420,14 @@ async function runDynamicAnalysis(
 }
 
 function buildDynamicRefinementPrompt(
-  execution: {
-    exitCode: number;
-    stdout: string;
-    stderr: string;
-    verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
-  } | undefined,
+  execution:
+    | {
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+        verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+      }
+    | undefined,
   error: string,
   coverageMode: DynamicCoverageMode,
 ): string {

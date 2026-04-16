@@ -64,9 +64,11 @@ export class RateLimitRegistry extends EventEmitter {
         enqueuedAt: Date.now(),
         timer: setTimeout(() => {
           this.removeFromQueue(state, entry);
-          reject(new Error(
-            `Rate limit queue timeout: waited ${QUEUE_TIMEOUT_MS / 1000}s for concurrency slot on model "${model}"`,
-          ));
+          reject(
+            new Error(
+              `Rate limit queue timeout: waited ${QUEUE_TIMEOUT_MS / 1000}s for concurrency slot on model "${model}"`,
+            ),
+          );
         }, QUEUE_TIMEOUT_MS),
       };
 
@@ -86,11 +88,7 @@ export class RateLimitRegistry extends EventEmitter {
    * @param success Whether the request succeeded (false on 429 / rate-limit errors).
    * @param headers Optional response headers for proactive throttling.
    */
-  release(
-    model: string,
-    success: boolean,
-    headers?: Record<string, string>,
-  ): void {
+  release(model: string, success: boolean, headers?: Record<string, string>): void {
     const state = this.providers.get(model);
     if (!state) return;
 
@@ -109,8 +107,8 @@ export class RateLimitRegistry extends EventEmitter {
       // Asymmetric recovery: after RECOVERY_THRESHOLD consecutive successes,
       // increase concurrency by 50% (capped at original max).
       if (
-        state.consecutiveSuccesses >= RECOVERY_THRESHOLD
-        && state.maxConcurrency < state.originalMaxConcurrency
+        state.consecutiveSuccesses >= RECOVERY_THRESHOLD &&
+        state.maxConcurrency < state.originalMaxConcurrency
       ) {
         const oldConcurrency = state.maxConcurrency;
         state.maxConcurrency = Math.min(
@@ -260,10 +258,7 @@ export class RateLimitRegistry extends EventEmitter {
     // Reduce concurrency proportionally to remaining quota.
     // E.g., 5% remaining -> scale to ~50% of original max.
     const scaleFactor = Math.max(0.2, fraction / PROACTIVE_THROTTLE_FRACTION);
-    const targetConcurrency = Math.max(
-      1,
-      Math.floor(state.originalMaxConcurrency * scaleFactor),
-    );
+    const targetConcurrency = Math.max(1, Math.floor(state.originalMaxConcurrency * scaleFactor));
 
     if (targetConcurrency < state.maxConcurrency) {
       const oldConcurrency = state.maxConcurrency;
@@ -279,10 +274,7 @@ export class RateLimitRegistry extends EventEmitter {
   }
 
   private drainQueue(state: ProviderState, model: string): void {
-    while (
-      state.queue.length > 0
-      && state.currentConcurrency < state.maxConcurrency
-    ) {
+    while (state.queue.length > 0 && state.currentConcurrency < state.maxConcurrency) {
       const entry = state.queue.shift()!;
       clearTimeout(entry.timer);
       const release = this.startRequest(state, model);
@@ -306,9 +298,7 @@ export class RateLimitRegistry extends EventEmitter {
  * Parse `Retry-After` header value to milliseconds.
  * Supports both seconds (integer) and HTTP-date formats.
  */
-function parseRetryAfterMs(
-  headers?: Record<string, string>,
-): number | null {
+function parseRetryAfterMs(headers?: Record<string, string>): number | null {
   if (!headers) return null;
 
   const retryAfter = headers["retry-after"] ?? headers["Retry-After"];
@@ -329,10 +319,7 @@ function parseRetryAfterMs(
   return null;
 }
 
-function parseHeaderNumber(
-  headers: Record<string, string>,
-  name: string,
-): number | null {
+function parseHeaderNumber(headers: Record<string, string>, name: string): number | null {
   // Try lowercase first, then original case.
   const raw = headers[name] ?? headers[name.toLowerCase()];
   if (!raw) return null;

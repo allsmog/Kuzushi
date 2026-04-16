@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { ThreatModelDocument } from "../../../src/agents/tasks/threat-modeling/types.js";
 import {
-  threatScenarioBuildTask,
   __threatScenarioBuildInternals,
+  threatScenarioBuildTask,
 } from "../../../src/agents/tasks/threat-scenario-build.js";
 import type { ApplicationModel, ThreatScenario } from "../../../src/types.js";
-import type { ThreatModelDocument } from "../../../src/agents/tasks/threat-modeling/types.js";
 
 const {
   buildThreatScenarios,
@@ -129,7 +129,9 @@ describe("threat-scenario-build task", () => {
     ]);
 
     const scenarios = buildThreatScenarios(appModel, stride);
-    const authScenarios = scenarios.filter((s: ThreatScenario) => s.detectorId === "auth-access-detect");
+    const authScenarios = scenarios.filter(
+      (s: ThreatScenario) => s.detectorId === "auth-access-detect",
+    );
 
     expect(authScenarios.length).toBeGreaterThanOrEqual(1);
   });

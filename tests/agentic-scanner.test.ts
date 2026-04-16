@@ -41,7 +41,9 @@ describe("parseAgenticOutput", () => {
 
   it("throws when output is unparseable non-JSON text", () => {
     expect(() =>
-      parseAgenticOutput("go\nhasAccess := checkPermission(ctx, user)\nif !hasAccess {\n  return\n}"),
+      parseAgenticOutput(
+        "go\nhasAccess := checkPermission(ctx, user)\nif !hasAccess {\n  return\n}",
+      ),
     ).toThrow(/invalid JSON output/i);
   });
 

@@ -5,17 +5,17 @@
  * with Unicode icons but no live-updating (static output only).
  */
 import chalk from "chalk";
-import { icons } from "./icons.js";
 import {
+  boxFooter,
+  boxHeader,
   colorVerdict,
   formatCost,
   formatDuration,
   miniBarChart,
-  boxHeader,
-  boxFooter,
   terminalCardWidth,
 } from "./format.js";
-import type { UIStore, Phase, ResultLine, SummaryData, AgentActivityLine } from "./state.js";
+import { icons } from "./icons.js";
+import type { AgentActivityLine, Phase, ResultLine, SummaryData, UIStore } from "./state.js";
 
 /**
  * Register a plain-text renderer that subscribes to store changes
@@ -47,22 +47,34 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
       console.log("");
       console.log(chalk.bold(`  ${icons.complete} Kuzushi — scanning ${state.repoName}`));
       console.log(`  Scanners: ${state.tasks.join(", ")}`);
-      console.log(`  ${state.totalFindings} findings, ${state.selectedForTriage} selected for AI triage`);
+      console.log(
+        `  ${state.totalFindings} findings, ${state.selectedForTriage} selected for AI triage`,
+      );
       console.log("");
 
       if (state.skippedAlreadyTriaged > 0) {
-        console.log(chalk.dim(`  Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`));
+        console.log(
+          chalk.dim(
+            `  Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`,
+          ),
+        );
       }
     }
 
     // Print stage transitions
     if (state.phase !== lastPhase) {
       if (state.phase === "triaging" && state.selectedForTriage > 0) {
-        console.log(`  ${icons.lightning} Triaging ${state.selectedForTriage} findings via ${state.model}...\n`);
+        console.log(
+          `  ${icons.lightning} Triaging ${state.selectedForTriage} findings via ${state.model}...\n`,
+        );
       } else if (state.phase === "verifying" && state.progress.total > 0) {
-        console.log(`  ${icons.shield} Verifying ${state.progress.total} findings via ${state.model}...\n`);
+        console.log(
+          `  ${icons.shield} Verifying ${state.progress.total} findings via ${state.model}...\n`,
+        );
       } else if (state.phase === "poc" && state.progress.total > 0) {
-        console.log(`  ${icons.gear} Generating ${state.progress.total} PoC harnesses via ${state.model}...\n`);
+        console.log(
+          `  ${icons.gear} Generating ${state.progress.total} PoC harnesses via ${state.model}...\n`,
+        );
       }
       lastPhase = state.phase;
     }
@@ -76,8 +88,21 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
           findingCount: task.findingCount ?? 0,
           detail: task.detail,
         };
-        if (!previous || previous.status !== current.status || previous.findingCount !== current.findingCount || previous.detail !== current.detail) {
-          printScanTaskLine(task.label, task.status, current.findingCount, task.detail, task.elapsedMs, task.lastError, task.retryCount);
+        if (
+          !previous ||
+          previous.status !== current.status ||
+          previous.findingCount !== current.findingCount ||
+          previous.detail !== current.detail
+        ) {
+          printScanTaskLine(
+            task.label,
+            task.status,
+            current.findingCount,
+            task.detail,
+            task.elapsedMs,
+            task.lastError,
+            task.retryCount,
+          );
           taskState.set(task.id, current);
         }
 
@@ -118,7 +143,8 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
 function printResultLine(result: ResultLine): void {
   const prefix = `  [${result.index}/${result.total}]`;
   const fingerprint = chalk.dim(`${result.fingerprint.slice(0, 12)}...`);
-  const retry = result.attempts && result.attempts > 1 ? chalk.dim(` (retry #${result.attempts})`) : "";
+  const retry =
+    result.attempts && result.attempts > 1 ? chalk.dim(` (retry #${result.attempts})`) : "";
 
   if (result.kind === "error") {
     const stage = result.errorStage?.toUpperCase() ?? "TRIAGE";
@@ -132,7 +158,8 @@ function printResultLine(result: ResultLine): void {
   if (result.kind === "triage" && result.verdict) {
     const verdict = colorVerdict(result.verdict);
     const conf = chalk.dim(`(${((result.confidence ?? 0) * 100).toFixed(0)}%)`);
-    const cost = result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
+    const cost =
+      result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
     console.log(`${prefix} ${verdict} ${conf}${cost}${retry} ${fingerprint}`);
     return;
   }
@@ -140,7 +167,8 @@ function printResultLine(result: ResultLine): void {
   if (result.kind === "verify") {
     const statusIcon = result.exploitable ? chalk.red(icons.error) : chalk.green(icons.success);
     const statusLabel = result.exploitable ? "EXPLOITABLE" : "not exploitable";
-    const cost = result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
+    const cost =
+      result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
     console.log(`${prefix} ${statusIcon} ${statusLabel}${cost}${retry} ${fingerprint}`);
     return;
   }
@@ -149,7 +177,8 @@ function printResultLine(result: ResultLine): void {
     const statusIcon = result.skipped ? chalk.yellow(icons.pending) : chalk.cyan(icons.gear);
     const statusLabel = result.skipped ? "SKIPPED" : "GENERATED";
     const parsed = result.skipped ? "" : result.parsed ? " parsed" : " parse-error";
-    const cost = result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
+    const cost =
+      result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
     console.log(`${prefix} ${statusIcon} ${statusLabel}${parsed}${cost}${retry} ${fingerprint}`);
   }
 }
@@ -163,7 +192,10 @@ function printScanTaskLine(
   lastError?: string,
   retryCount?: number,
 ): void {
-  const findings = findingCount > 0 ? ` ${chalk.dim(`(${findingCount} finding${findingCount === 1 ? "" : "s"})`)}` : "";
+  const findings =
+    findingCount > 0
+      ? ` ${chalk.dim(`(${findingCount} finding${findingCount === 1 ? "" : "s"})`)}`
+      : "";
   const suffix = detail ? ` ${chalk.dim(detail)}` : "";
   const elapsed = elapsedMs != null ? ` ${chalk.dim(formatDuration(elapsedMs))}` : "";
   const retryTag = retryCount && retryCount > 0 ? chalk.yellow(` (retry #${retryCount})`) : "";
@@ -174,7 +206,9 @@ function printScanTaskLine(
   }
   if (status === "error") {
     const errorDetail = lastError ? ` ${chalk.red(lastError.slice(0, 80))}` : suffix;
-    console.log(`  ${chalk.red(icons.error)} ${taskId}${errorDetail}${retryTag}  ${chalk.dim("continuing with remaining tasks")}`);
+    console.log(
+      `  ${chalk.red(icons.error)} ${taskId}${errorDetail}${retryTag}  ${chalk.dim("continuing with remaining tasks")}`,
+    );
     return;
   }
   if (status === "active") {
@@ -191,19 +225,21 @@ function printScanActivityLine(taskId: string, line: AgentActivityLine): void {
   }
 }
 
-function printNotice(level: "info" | "warning" | "error" | "success", message: string, detail?: string): void {
-  const icon = level === "success"
-    ? chalk.green(icons.success)
-    : level === "warning"
-      ? chalk.yellow(icons.warning)
-      : level === "error"
-        ? chalk.red(icons.error)
-        : chalk.blue(icons.info);
-  const body = level === "error"
-    ? chalk.red(message)
-    : level === "warning"
-      ? chalk.yellow(message)
-      : message;
+function printNotice(
+  level: "info" | "warning" | "error" | "success",
+  message: string,
+  detail?: string,
+): void {
+  const icon =
+    level === "success"
+      ? chalk.green(icons.success)
+      : level === "warning"
+        ? chalk.yellow(icons.warning)
+        : level === "error"
+          ? chalk.red(icons.error)
+          : chalk.blue(icons.info);
+  const body =
+    level === "error" ? chalk.red(message) : level === "warning" ? chalk.yellow(message) : message;
   console.log(`  ${icon} ${body}${detail ? ` ${chalk.dim(detail)}` : ""}`);
 }
 
@@ -218,7 +254,9 @@ function printPlainSummary(data: SummaryData): void {
   console.log("");
 
   if (data.failedTasks.length > 0) {
-    console.log(`  ${chalk.red("Scanners failed:")}  ${data.failedTasks.join(", ")} ${chalk.dim("(results may be incomplete)")}`);
+    console.log(
+      `  ${chalk.red("Scanners failed:")}  ${data.failedTasks.join(", ")} ${chalk.dim("(results may be incomplete)")}`,
+    );
     console.log("");
   }
 

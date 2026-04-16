@@ -3,9 +3,9 @@
  * with segment rotation (64MB max per segment, 5 segments max).
  */
 
+import type { WriteStream } from "node:fs";
 import { createWriteStream, existsSync, mkdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
-import type { WriteStream } from "node:fs";
 import type { MessageBus } from "./types.js";
 
 const MAX_SEGMENT_BYTES = 64 * 1024 * 1024; // 64MB
@@ -101,7 +101,7 @@ export function registerEventLogWriter(
 
   // Monkey-patch publish — this is intentional for non-invasive logging.
   // Store original for restoration. We set on the instance to shadow the prototype method.
-  const hadOwnPublish = Object.prototype.hasOwnProperty.call(bus, "publish");
+  const hadOwnPublish = Object.hasOwn(bus, "publish");
   (bus as unknown as Record<string, unknown>).publish = wrappedPublish;
 
   return {

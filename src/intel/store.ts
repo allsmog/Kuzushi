@@ -62,10 +62,12 @@ export class SqliteIntelStore implements IntelStore {
   ingest(doc: Omit<IntelDocument, "id" | "ingestedAt">): string {
     const id = randomUUID();
     const now = new Date().toISOString();
-    this.db.prepare(
-      `INSERT INTO intel_documents (id, source, title, content, metadata_json, ingested_at)
+    this.db
+      .prepare(
+        `INSERT INTO intel_documents (id, source, title, content, metadata_json, ingested_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, doc.source, doc.title, doc.content, JSON.stringify(doc.metadata), now);
+      )
+      .run(id, doc.source, doc.title, doc.content, JSON.stringify(doc.metadata), now);
     return id;
   }
 
@@ -127,7 +129,9 @@ export class SqliteIntelStore implements IntelStore {
   }
 
   get(id: string): IntelDocument | null {
-    const row = this.db.prepare("SELECT * FROM intel_documents WHERE id = ?").get(id) as IntelDocumentRow | undefined;
+    const row = this.db.prepare("SELECT * FROM intel_documents WHERE id = ?").get(id) as
+      | IntelDocumentRow
+      | undefined;
     return row ? rowToDocument(row) : null;
   }
 
@@ -138,10 +142,14 @@ export class SqliteIntelStore implements IntelStore {
 
   count(source?: IntelSource): number {
     if (source) {
-      const row = this.db.prepare("SELECT COUNT(*) as cnt FROM intel_documents WHERE source = ?").get(source) as { cnt: number };
+      const row = this.db
+        .prepare("SELECT COUNT(*) as cnt FROM intel_documents WHERE source = ?")
+        .get(source) as { cnt: number };
       return row.cnt;
     }
-    const row = this.db.prepare("SELECT COUNT(*) as cnt FROM intel_documents").get() as { cnt: number };
+    const row = this.db.prepare("SELECT COUNT(*) as cnt FROM intel_documents").get() as {
+      cnt: number;
+    };
     return row.cnt;
   }
 
@@ -164,7 +172,9 @@ function rowToDocument(row: IntelDocumentRow): IntelDocument {
   let metadata: Record<string, unknown> = {};
   try {
     metadata = JSON.parse(row.metadata_json);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   return {
     id: row.id,
@@ -178,10 +188,12 @@ function rowToDocument(row: IntelDocumentRow): IntelDocument {
 
 /** Sanitize a user query for FTS5 — escape special characters. */
 function sanitizeFtsQuery(query: string): string {
-  return query
-    .replace(/['"]/g, "")
-    .replace(/\b(AND|OR|NOT|NEAR)\b/gi, "")
-    .trim() || "*";
+  return (
+    query
+      .replace(/['"]/g, "")
+      .replace(/\b(AND|OR|NOT|NEAR)\b/gi, "")
+      .trim() || "*"
+  );
 }
 
 /** Extract a short snippet around the first matching term. */

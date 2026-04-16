@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { __taskSelectorInternals, SELECTABLE_TASK_IDS } from "../../../src/agents/tasks/task-selector.js";
+import { describe, expect, it } from "vitest";
+import {
+  __taskSelectorInternals,
+  SELECTABLE_TASK_IDS,
+} from "../../../src/agents/tasks/task-selector.js";
 import type { FileIndex, RepoContext } from "../../../src/types.js";
 
 const { selectTasks } = __taskSelectorInternals;
@@ -97,8 +100,22 @@ describe("selectTasks", () => {
       makeContext({ languages: [] }),
       makeFileIndex({
         patternMatches: {
-          "protocol-parser": [{ pattern: "packet", filePath: "src/net/tcp_input.c", lineNumber: 8, lineContent: "parse_packet(pkt);" }],
-          "unsafe-memory": [{ pattern: "unsafe", filePath: "src/vmm/guest_mem.rs", lineNumber: 11, lineContent: "unsafe { ... }" }],
+          "protocol-parser": [
+            {
+              pattern: "packet",
+              filePath: "src/net/tcp_input.c",
+              lineNumber: 8,
+              lineContent: "parse_packet(pkt);",
+            },
+          ],
+          "unsafe-memory": [
+            {
+              pattern: "unsafe",
+              filePath: "src/vmm/guest_mem.rs",
+              lineNumber: 11,
+              lineContent: "unsafe { ... }",
+            },
+          ],
         },
       }),
     );

@@ -12,21 +12,21 @@
  */
 
 import type { RawDiscoveryNode } from "./adapters/types.js";
-import type { DiscoveredModule, DiscoveredProduct, ProductKind } from "./types.js";
 import { compareModulePaths, rejectOverlappingModules } from "./helpers.js";
+import type { DiscoveredModule, DiscoveredProduct, ProductKind } from "./types.js";
 
 // Language specificity ranking — more specific wins during merge.
 const LANGUAGE_SPECIFICITY: Record<string, number> = {
-  "Rust": 10,
-  "Go": 10,
+  Rust: 10,
+  Go: 10,
   "C++": 9,
   "C#": 9,
   "C/C++": 8,
-  "Java": 8,
-  "Python": 7,
-  "TypeScript": 6,
-  "JavaScript": 5,
-  "unknown": 0,
+  Java: 8,
+  Python: 7,
+  TypeScript: 6,
+  JavaScript: 5,
+  unknown: 0,
 };
 
 /** Stable key for a container: path + kind. */
@@ -87,10 +87,7 @@ export function resolveDiscoveryGraph(
       }
 
       const existingContainer = containersByKey.get(existingKey)!;
-      const winner = pickBetterContainer(
-        existingContainer, container,
-        leafByPath.get(childPath),
-      );
+      const winner = pickBetterContainer(existingContainer, container, leafByPath.get(childPath));
       if (winner === container) {
         childToContainerKey.set(childPath, cKey);
       }
@@ -122,7 +119,10 @@ export function resolveDiscoveryGraph(
       if (!otherContainerAtPath) {
         const existing = leafByPath.get(container.path);
         if (existing) {
-          leafByPath.set(container.path, mergeLeaves(existing, { ...container, isContainer: false, childPaths: [] }));
+          leafByPath.set(
+            container.path,
+            mergeLeaves(existing, { ...container, isContainer: false, childPaths: [] }),
+          );
         } else {
           leafByPath.set(container.path, { ...container, isContainer: false, childPaths: [] });
         }
@@ -193,9 +193,16 @@ export function resolveDiscoveryGraph(
 
 /** Evidence strings that indicate a real, independently-buildable project. */
 const REAL_PROJECT_EVIDENCE = [
-  "go.mod", "Cargo.toml", "BUILD.bazel", "BUILD",
-  ".csproj", ".vcxproj", ".fsproj", ".sln",
-  "SConstruct", "pnpm-workspace.yaml",
+  "go.mod",
+  "Cargo.toml",
+  "BUILD.bazel",
+  "BUILD",
+  ".csproj",
+  ".vcxproj",
+  ".fsproj",
+  ".sln",
+  "SConstruct",
+  "pnpm-workspace.yaml",
 ];
 
 function hasRealBuildEvidence(node: RawDiscoveryNode): boolean {
@@ -297,7 +304,8 @@ function mergeLeaves(existing: RawDiscoveryNode, incoming: RawDiscoveryNode): Ra
     path: existing.path,
     name: incomingSpecificity > existingSpecificity ? incoming.name : existing.name,
     language: incomingSpecificity > existingSpecificity ? incoming.language : existing.language,
-    buildSystem: incomingSpecificity > existingSpecificity ? incoming.buildSystem : existing.buildSystem,
+    buildSystem:
+      incomingSpecificity > existingSpecificity ? incoming.buildSystem : existing.buildSystem,
     description: existing.description || incoming.description,
     evidence: [...new Set([...existing.evidence, ...incoming.evidence])],
     isContainer: false,
@@ -346,7 +354,7 @@ const CONTAINER_SPECIFICITY: Record<string, number> = {
   "go-workspace": 5,
   "cargo-workspace": 5,
   "bazel-workspace": 5,
-  "solution": 5,
+  solution: 5,
 };
 
 /** How well does a container kind match a child's discovery evidence? */
@@ -360,7 +368,9 @@ function evidenceMatchScore(kind: string | undefined, evidence: string[]): numbe
     case "bazel-workspace":
       return joined.includes("build") || joined.includes("bazel") ? 10 : 0;
     case "solution":
-      return joined.includes(".csproj") || joined.includes(".vcxproj") || joined.includes(".sln") ? 10 : 0;
+      return joined.includes(".csproj") || joined.includes(".vcxproj") || joined.includes(".sln")
+        ? 10
+        : 0;
     case "workspace-root":
       return joined.includes("package.json") ? 5 : 0;
     default:

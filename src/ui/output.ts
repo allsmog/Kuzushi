@@ -61,7 +61,11 @@ export function emitOutputNotice(notice: {
   console.log(line);
 }
 
-export function emitDiagnostic(source: string, message: string, level: "info" | "warning" | "error" = "info"): void {
+export function emitDiagnostic(
+  source: string,
+  message: string,
+  level: "info" | "warning" | "error" = "info",
+): void {
   const text = `[${source}] ${message}`.replace(/\n+$/u, "");
 
   if (shouldStreamDiagnostics()) {
@@ -83,8 +87,15 @@ export function emitDiagnostic(source: string, message: string, level: "info" | 
 function installStderrInterceptor(): () => void {
   const originalWrite = process.stderr.write.bind(process.stderr) as WriteFn;
 
-  process.stderr.write = ((chunk: string | Uint8Array, encoding?: BufferEncoding | ((error?: Error | null) => void), cb?: (error?: Error | null) => void) => {
-    const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString(typeof encoding === "string" ? encoding : "utf-8");
+  process.stderr.write = ((
+    chunk: string | Uint8Array,
+    encoding?: BufferEncoding | ((error?: Error | null) => void),
+    cb?: (error?: Error | null) => void,
+  ) => {
+    const text =
+      typeof chunk === "string"
+        ? chunk
+        : Buffer.from(chunk).toString(typeof encoding === "string" ? encoding : "utf-8");
     if (!shouldStreamDiagnostics() && shouldSuppressDiagnosticChunk(text)) {
       if (typeof encoding === "function") {
         encoding();

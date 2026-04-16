@@ -1,19 +1,19 @@
+import { createLogger } from "../../../logger.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
-import { createLogger } from "../../../logger.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
+import { formatSystemsSurfacePack } from "./helpers.js";
 import type {
   RankedSystemsSurface,
   SystemsContextOutput,
   SystemsInvariant,
-  SystemsInvariantOutput,
   SystemsInvariantKind,
+  SystemsInvariantOutput,
   SystemsSurfacePack,
 } from "./types.js";
 import { resolveSystemsHuntConfig } from "./types.js";
-import { formatSystemsSurfacePack } from "./helpers.js";
 
 const log = createLogger({ stage: "systems-invariant-extract" });
 
@@ -27,7 +27,15 @@ const INVARIANT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "surfaceId", "kind", "summary", "statement", "rationale", "cheapVerifiable"],
+        required: [
+          "id",
+          "surfaceId",
+          "kind",
+          "summary",
+          "statement",
+          "rationale",
+          "cheapVerifiable",
+        ],
         properties: {
           id: { type: "string" },
           surfaceId: { type: "string" },
@@ -61,13 +69,17 @@ export const systemsInvariantExtractTask: AgentTask<ScanOpts, SystemsInvariantOu
   dependsOn: ["systems-context-gatherer"],
 
   condition(upstreamOutputs) {
-    const output = upstreamOutputs.get("systems-context-gatherer") as SystemsContextOutput | undefined;
+    const output = upstreamOutputs.get("systems-context-gatherer") as
+      | SystemsContextOutput
+      | undefined;
     return (output?.surfaces.length ?? 0) > 0;
   },
 
   async run(_input, context): Promise<SystemsInvariantOutput> {
     const config = resolveSystemsHuntConfig(context);
-    const surfaceOutput = context.upstreamOutputs.get("systems-context-gatherer") as SystemsContextOutput | undefined;
+    const surfaceOutput = context.upstreamOutputs.get("systems-context-gatherer") as
+      | SystemsContextOutput
+      | undefined;
     const surfaces = surfaceOutput?.surfaces.slice(0, config.maxSurfaces) ?? [];
     const packs = surfaceOutput?.surfacePacks ?? [];
     if (surfaces.length === 0) {
@@ -125,23 +137,30 @@ export function buildInvariantPrompt(
     `Reasons: ${surface.reasons.join("; ") || "none"}`,
     `Attacker-controlled fields: ${surface.attackerControlledFields.join(", ") || "unknown"}`,
     `Hardening signals: ${surface.hardeningSignals.join(", ") || "none"}`,
-    `Evidence: ${surface.evidence.slice(0, 3).map((signal) => `${signal.domain}@${signal.lineNumber}: ${signal.lineContent}`).join(" | ") || "none"}`,
-    ...formatSystemsSurfacePack(packBySurfaceId.get(surface.id) ?? {
-      surfaceId: surface.id,
-      anchorFilePath: surface.filePath,
-      anchorStartLine: surface.startLine,
-      relatedFiles: [surface.filePath],
-      callers: [],
-      callees: [],
-      compareCastSites: [],
-      counterSites: [],
-      sentinelConstants: [],
-      allocationCopySites: [],
-      unsafeSites: [],
-      inputSites: [],
-      hardeningSites: [],
-      helperTemplates: [],
-    }),
+    `Evidence: ${
+      surface.evidence
+        .slice(0, 3)
+        .map((signal) => `${signal.domain}@${signal.lineNumber}: ${signal.lineContent}`)
+        .join(" | ") || "none"
+    }`,
+    ...formatSystemsSurfacePack(
+      packBySurfaceId.get(surface.id) ?? {
+        surfaceId: surface.id,
+        anchorFilePath: surface.filePath,
+        anchorStartLine: surface.startLine,
+        relatedFiles: [surface.filePath],
+        callers: [],
+        callees: [],
+        compareCastSites: [],
+        counterSites: [],
+        sentinelConstants: [],
+        allocationCopySites: [],
+        unsafeSites: [],
+        inputSites: [],
+        hardeningSites: [],
+        helperTemplates: [],
+      },
+    ),
     "",
   ]);
 

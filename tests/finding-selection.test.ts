@@ -168,9 +168,27 @@ describe("selectTopFindings", () => {
   it("respects maxFindings after dedupe", () => {
     const selected = selectTopFindings(
       [
-        makeFinding({ fingerprint: "fp-1", filePath: "a.ts", startLine: 1, score: 90, cwe: ["CWE-79"] }),
-        makeFinding({ fingerprint: "fp-2", filePath: "b.ts", startLine: 2, score: 85, cwe: ["CWE-79"] }),
-        makeFinding({ fingerprint: "fp-3", filePath: "c.ts", startLine: 3, score: 80, cwe: ["CWE-79"] }),
+        makeFinding({
+          fingerprint: "fp-1",
+          filePath: "a.ts",
+          startLine: 1,
+          score: 90,
+          cwe: ["CWE-79"],
+        }),
+        makeFinding({
+          fingerprint: "fp-2",
+          filePath: "b.ts",
+          startLine: 2,
+          score: 85,
+          cwe: ["CWE-79"],
+        }),
+        makeFinding({
+          fingerprint: "fp-3",
+          filePath: "c.ts",
+          startLine: 3,
+          score: 80,
+          cwe: ["CWE-79"],
+        }),
       ],
       2,
     );

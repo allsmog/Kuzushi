@@ -1,53 +1,53 @@
+import { AgenticPlugin } from "../scanners/agentic.js";
+import { CodeQLPlugin } from "../scanners/codeql.js";
+import { SemgrepPlugin } from "../scanners/semgrep.js";
+import type { Finding, ScannerPlugin, TaskConfig } from "../scanners/types.js";
+import { createPopulatedRegistry } from "../strategies/init.js";
+import { withMultiStrategy } from "../strategies/multi-strategy-task.js";
+import { getProfileForTask } from "../strategies/task-profile-map.js";
 import type { KuzushiConfig, ScanOpts } from "../types.js";
 import { TaskRegistry } from "./registry.js";
 import { loadAllExternalTasksWithManifest } from "./task-loader.js";
-import { withMultiStrategy } from "../strategies/multi-strategy-task.js";
-import { createPopulatedRegistry } from "../strategies/init.js";
-import { getProfileForTask } from "../strategies/task-profile-map.js";
-import type { AgentTask } from "./types.js";
-import type { Finding, ScannerPlugin, TaskConfig } from "../scanners/types.js";
-import { SemgrepPlugin } from "../scanners/semgrep.js";
-import { CodeQLPlugin } from "../scanners/codeql.js";
-import { AgenticPlugin } from "../scanners/agentic.js";
-import { contextGathererTask } from "./tasks/context-gatherer.js";
-import { contextEnricherTask } from "./tasks/context-enricher.js";
-import { secretsCryptoDetectTask } from "./tasks/secrets-crypto-detect.js";
-import { cryptoBehavioralTestTask } from "./tasks/crypto-behavioral-test.js";
-import { codeConfigDetectTask } from "./tasks/code-config-detect.js";
-import { raceConditionTask } from "./tasks/race-condition.js";
-import { diffReviewTask } from "./tasks/diff-review.js";
-import { invariantExtractTask } from "./tasks/invariant-analysis/extract.js";
-import { invariantCheckTask } from "./tasks/invariant-analysis/check.js";
-import { threatModelRandoriTask } from "./tasks/threat-modeling/randori.js";
-import { ssrfDetectionTask } from "./tasks/ssrf-detection.js";
-import { prototypePollutionTask } from "./tasks/prototype-pollution.js";
-import { nosqlInjectionTask } from "./tasks/nosql-injection.js";
-import { templateInjectionTask } from "./tasks/template-injection.js";
-import { supplyChainTask } from "./tasks/supply-chain.js";
-import { graphqlSecurityTask } from "./tasks/graphql-security.js";
+import { appModelBuildTask } from "./tasks/app-model-build.js";
 import { authLogicDetectTask } from "./tasks/auth-logic-detect.js";
-import { taskSelectorTask } from "./tasks/task-selector.js";
-import { reachabilityCheckTask } from "./tasks/reachability-check.js";
 import { callGraphAssistTask } from "./tasks/call-graph-assist.js";
+import { codeConfigDetectTask } from "./tasks/code-config-detect.js";
 import { codeGraphBuildTask } from "./tasks/code-graph/build.js";
 import { codeGraphEnrichTask } from "./tasks/code-graph/enrich.js";
-import { appModelBuildTask } from "./tasks/app-model-build.js";
-import { threatScenarioBuildTask } from "./tasks/threat-scenario-build.js";
 import { commandInjectionTask } from "./tasks/command-injection.js";
-import { xxeDetectionTask } from "./tasks/xxe-detection.js";
-import { deserializationDetectionTask } from "./tasks/deserialization-detection.js";
-import { threatHuntTask } from "./tasks/threat-hunt.js";
-import { sharpEdgesDetectTask } from "./tasks/sharp-edges-detect.js";
-import { tobAuditTask } from "./tasks/tob-audit/tob-audit.js";
-import { vulnScoutTask } from "./tasks/vuln-scout/vuln-scout.js";
-import { taintCweSelectTask } from "./tasks/taint-iris/cwe-select.js";
-import { taintIrisTask } from "./tasks/taint-iris/iris.js";
+import { contextEnricherTask } from "./tasks/context-enricher.js";
+import { contextGathererTask } from "./tasks/context-gatherer.js";
+import { cryptoBehavioralTestTask } from "./tasks/crypto-behavioral-test.js";
 import { deepSemanticCweSelectTask } from "./tasks/deep-semantic/cwe-select.js";
 import { deepSemanticHuntTask } from "./tasks/deep-semantic/hunt.js";
+import { deserializationDetectionTask } from "./tasks/deserialization-detection.js";
+import { diffReviewTask } from "./tasks/diff-review.js";
+import { graphqlSecurityTask } from "./tasks/graphql-security.js";
+import { invariantCheckTask } from "./tasks/invariant-analysis/check.js";
+import { invariantExtractTask } from "./tasks/invariant-analysis/extract.js";
+import { nosqlInjectionTask } from "./tasks/nosql-injection.js";
+import { prototypePollutionTask } from "./tasks/prototype-pollution.js";
+import { raceConditionTask } from "./tasks/race-condition.js";
+import { reachabilityCheckTask } from "./tasks/reachability-check.js";
+import { secretsCryptoDetectTask } from "./tasks/secrets-crypto-detect.js";
+import { sharpEdgesDetectTask } from "./tasks/sharp-edges-detect.js";
+import { ssrfDetectionTask } from "./tasks/ssrf-detection.js";
+import { supplyChainTask } from "./tasks/supply-chain.js";
 import { systemsContextGathererTask } from "./tasks/systems-hunt/context.js";
+import { systemsHuntTask } from "./tasks/systems-hunt/hunt.js";
 import { systemsInvariantExtractTask } from "./tasks/systems-hunt/invariant-extract.js";
 import { systemsTriggerSynthTask } from "./tasks/systems-hunt/trigger-synth.js";
-import { systemsHuntTask } from "./tasks/systems-hunt/hunt.js";
+import { taintCweSelectTask } from "./tasks/taint-iris/cwe-select.js";
+import { taintIrisTask } from "./tasks/taint-iris/iris.js";
+import { taskSelectorTask } from "./tasks/task-selector.js";
+import { templateInjectionTask } from "./tasks/template-injection.js";
+import { threatHuntTask } from "./tasks/threat-hunt.js";
+import { threatModelRandoriTask } from "./tasks/threat-modeling/randori.js";
+import { threatScenarioBuildTask } from "./tasks/threat-scenario-build.js";
+import { tobAuditTask } from "./tasks/tob-audit/tob-audit.js";
+import { vulnScoutTask } from "./tasks/vuln-scout/vuln-scout.js";
+import { xxeDetectionTask } from "./tasks/xxe-detection.js";
+import type { AgentTask } from "./types.js";
 
 function createNativeFindingTask(plugin: ScannerPlugin): AgentTask<ScanOpts, Finding[]> {
   let taskConfig: TaskConfig = {};
@@ -64,24 +64,18 @@ function createNativeFindingTask(plugin: ScannerPlugin): AgentTask<ScanOpts, Fin
       }
     },
     async run(input: ScanOpts, context): Promise<Finding[]> {
-      return plugin.scan(
-        context.workRoot ?? context.repoRoot,
-        input,
-        taskConfig,
-        context.runtime,
-        {
-          bus: context.bus,
-          taskId: plugin.id,
+      return plugin.scan(context.workRoot ?? context.repoRoot, input, taskConfig, context.runtime, {
+        bus: context.bus,
+        taskId: plugin.id,
+        runId: context.runId,
+        runContext: {
           runId: context.runId,
-          runContext: {
-            runId: context.runId,
-            repoRoot: context.projectRoot ?? context.repoRoot,
-            scanPath: context.scanPath,
-            repoName: context.repoName,
-            dbPath: context.dbPath ?? "",
-          },
+          repoRoot: context.projectRoot ?? context.repoRoot,
+          scanPath: context.scanPath,
+          repoName: context.repoName,
+          dbPath: context.dbPath ?? "",
         },
-      );
+      });
     },
   };
 
@@ -209,8 +203,8 @@ export async function createDefaultTaskRegistry(
       }
     } else {
       console.warn(
-        "Warning: externalTasks are configured but enableExternalTasks is not true. "
-        + "Set enableExternalTasks to true or pass --enable-external-tasks to load them.",
+        "Warning: externalTasks are configured but enableExternalTasks is not true. " +
+          "Set enableExternalTasks to true or pass --enable-external-tasks to load them.",
       );
     }
   }
@@ -220,5 +214,5 @@ export async function createDefaultTaskRegistry(
   return tasks;
 }
 
-export * from "./types.js";
 export * from "./registry.js";
+export * from "./types.js";
