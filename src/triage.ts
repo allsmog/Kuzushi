@@ -96,6 +96,7 @@ export const TRIAGE_RESULT_SCHEMA_LITE = {
       },
     },
     blindspots: { type: "array", items: { type: "string" } },
+    source_threat_ids: { type: "array", items: { type: "string" }, description: "Threat model threat IDs this finding relates to (e.g. [\"T-01\", \"T-03\"])." },
   },
 } as const;
 
@@ -601,6 +602,7 @@ function parseBatchTriageOutput(
       assumptions: parseOptionalStringArray((item as Record<string, unknown>)["assumptions"]),
       controls: parseControls((item as Record<string, unknown>)["controls"]),
       blindspots: parseOptionalStringArray((item as Record<string, unknown>)["blindspots"]),
+      sourceThreatIds: parseOptionalStringArray((item as Record<string, unknown>)["source_threat_ids"]),
     });
   }
 
@@ -650,6 +652,7 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
       assumptions: parseOptionalStringArray(raw["assumptions"]),
       controls: parseControls(raw["controls"]),
       blindspots: parseOptionalStringArray(raw["blindspots"]),
+      sourceThreatIds: parseOptionalStringArray(raw["source_threat_ids"]),
     };
   }
 
@@ -768,6 +771,7 @@ export function parseTriageResponse(
       assumptions: parseOptionalStringArray(parsed.assumptions),
       controls: parseControls(parsed.controls),
       blindspots: parseOptionalStringArray(parsed.blindspots),
+      sourceThreatIds: parseOptionalStringArray(parsed.source_threat_ids),
     };
   } catch (error) {
     throw new Error(`Invalid triage JSON response: ${toErrorMessage(error)}`);

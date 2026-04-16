@@ -102,6 +102,7 @@ export interface StoredFindingRecord {
   assumptions: string[] | undefined;
   controls: SecurityControl[] | undefined;
   blindspots: string[] | undefined;
+  sourceThreatIds: string[] | undefined;
 }
 
 const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
@@ -215,6 +216,7 @@ function upsertFindingParams(
       assumptions: triage.assumptions ?? null,
       controls: triage.controls ?? null,
       blindspots: triage.blindspots ?? null,
+      source_threat_ids: triage.sourceThreatIds ?? null,
     }),
     triage.compositeConfidence ?? null,
     null, // confidence_signals_json — populated by updateFindingCompositeConfidence if needed
@@ -405,6 +407,7 @@ function parseTriageDetails(raw: string | null): Partial<TriageResult> {
     assumptions: parseStringArrayFromDetails(record["assumptions"]),
     controls: parseControlsFromDetails(record["controls"]),
     blindspots: parseStringArrayFromDetails(record["blindspots"]),
+    sourceThreatIds: parseStringArrayFromDetails(record["source_threat_ids"]),
   };
 }
 
@@ -866,6 +869,7 @@ export function getActionableFindings(
       assumptions: detailsRecord ? parseStringArrayFromDetails(detailsRecord["assumptions"]) : undefined,
       controls: detailsRecord ? parseControlsFromDetails(detailsRecord["controls"]) : undefined,
       blindspots: detailsRecord ? parseStringArrayFromDetails(detailsRecord["blindspots"]) : undefined,
+      sourceThreatIds: detailsRecord ? parseStringArrayFromDetails(detailsRecord["source_threat_ids"]) : undefined,
     };
   });
 }

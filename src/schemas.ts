@@ -200,6 +200,7 @@ export const TriageResultSchema = z.object({
   assumptions: z.array(z.string()).optional(),
   controls: z.array(SecurityControlSchema).optional(),
   blindspots: z.array(z.string()).optional(),
+  sourceThreatIds: z.array(z.string()).optional(),
 });
 
 export type TriageResultZ = z.infer<typeof TriageResultSchema>;
@@ -903,6 +904,7 @@ export const RawTriageOutputSchema = z.object({
     )
     .optional(),
   blindspots: z.array(z.string()).optional(),
+  source_threat_ids: z.array(z.string()).optional(),
 });
 
 export type RawTriageOutput = z.infer<typeof RawTriageOutputSchema>;

@@ -231,8 +231,13 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             if (typeof tmSummary === "string" && tmSummary.length > 0) {
               extraSections.push(
                 "## Application Threat Model Context\n"
-                + "The following context was derived from automated threat modeling of this application.\n"
-                + "Use it to distinguish between DESIGN CHOICES (by_design) and actual VULNERABILITIES (tp).\n\n"
+                + "The following threat model was derived from automated analysis of this application.\n"
+                + "Use it to:\n"
+                + "1. Distinguish between DESIGN CHOICES (by_design) and actual VULNERABILITIES (tp).\n"
+                + "2. Reference specific threat IDs (e.g. [T-01]) in your attack_path narrative when a finding matches a modeled threat.\n"
+                + "3. Identify which trust boundaries are crossed and which attacker-controlled inputs are involved.\n"
+                + "4. Check existing mitigations listed below — if a mitigation covers this finding, it may be a false positive.\n"
+                + "5. Include relevant threat IDs in your source_threat_ids output field.\n\n"
                 + tmSummary,
               );
             }

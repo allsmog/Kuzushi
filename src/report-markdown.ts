@@ -244,6 +244,11 @@ export function generateMarkdownReport(
         for (const b of finding.blindspots) lines.push(`- ${b}`);
         lines.push("");
       }
+
+      if (finding.sourceThreatIds && finding.sourceThreatIds.length > 0) {
+        lines.push(`Related threat model threats: ${finding.sourceThreatIds.join(", ")}`);
+        lines.push("");
+      }
     }
   }
 

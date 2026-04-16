@@ -173,6 +173,8 @@ export interface TriageResult {
   controls?: SecurityControl[];
   /** Aspects the analysis could not verify or areas of uncertainty. */
   blindspots?: string[];
+  /** Threat model threat IDs that this finding relates to (e.g. ["T-01", "T-03"]). */
+  sourceThreatIds?: string[];
 }
 
 /**

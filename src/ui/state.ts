@@ -204,6 +204,7 @@ export interface ActionableFinding {
   assumptions?: string[];
   controls?: SecurityControl[];
   blindspots?: string[];
+  sourceThreatIds?: string[];
   verificationSteps?: string[];
 }
 

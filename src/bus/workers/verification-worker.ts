@@ -81,8 +81,12 @@ export function registerVerificationWorker(
         if (typeof tmSummary === "string" && tmSummary.length > 0) {
           extraSections.push(
             "## Application Threat Model Context\n"
-            + "The following context was derived from automated threat modeling of this application.\n"
-            + "Use it to understand the application's architecture and attack surface.\n\n"
+            + "The following threat model was derived from automated analysis of this application.\n"
+            + "Use it to:\n"
+            + "1. Understand the application's architecture, trust boundaries, and attack surface.\n"
+            + "2. Check existing mitigations — if a mitigation covers this vulnerability, exploitation may be blocked.\n"
+            + "3. Identify which attacker-controlled inputs reach the vulnerable code path.\n"
+            + "4. Reference specific threat IDs in your attack_path narrative.\n\n"
             + tmSummary,
           );
         }

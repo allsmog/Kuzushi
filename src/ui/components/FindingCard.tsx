@@ -109,6 +109,10 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     details.push(`${chalk.yellow("Blindspots:")} ${finding.blindspots.join("; ")}`);
   }
 
+  if (finding.sourceThreatIds && finding.sourceThreatIds.length > 0) {
+    details.push(`${chalk.magenta("Threats:")} ${finding.sourceThreatIds.join(", ")}`);
+  }
+
   return (
     <Box flexDirection="column">
       <Text>{"  "}{verdict} {conf}  {severity} {scanner}{verificationBadge}</Text>
