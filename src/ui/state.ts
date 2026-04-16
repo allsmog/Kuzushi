@@ -372,11 +372,22 @@ export interface ShellState {
 
 type Listener = () => void;
 
+/**
+ * Hard cap on `agentActivity` map size. Long-running shell/scan sessions can
+ * emit activity for thousands of distinct fingerprints; without a cap the map
+ * grows unboundedly and retains display strings that no longer matter.
+ */
+const MAX_AGENT_ACTIVITY_ENTRIES = 1000;
+
+/** Default TTL for stale-activity eviction (seconds). */
+const DEFAULT_AGENT_ACTIVITY_TTL_SEC = 600; // 10 minutes
+
 export class UIStore {
   private state: UIState;
   private listeners = new Set<Listener>();
   private preflightReturnMode: UIMode = "running";
   private reviewReturnMode: UIMode = "summary";
+  private agentActivityTimestamps = new Map<string, number>();
 
   constructor() {
     this.state = {
@@ -506,6 +517,16 @@ export class UIStore {
     // Keep only the latest 4 activity lines per finding to avoid clutter.
     const updated = [...lines, line].slice(-4);
     newMap.set(fingerprint, updated);
+    this.agentActivityTimestamps.delete(fingerprint);
+    this.agentActivityTimestamps.set(fingerprint, Date.now());
+
+    while (newMap.size > MAX_AGENT_ACTIVITY_ENTRIES) {
+      const oldest = newMap.keys().next();
+      if (oldest.done || oldest.value === undefined) break;
+      newMap.delete(oldest.value);
+      this.agentActivityTimestamps.delete(oldest.value);
+    }
+
     this.state = { ...this.state, agentActivity: newMap };
     this.notify();
   }
@@ -513,7 +534,41 @@ export class UIStore {
   clearAgentActivity(fingerprint: string): void {
     const newMap = new Map(this.state.agentActivity);
     newMap.delete(fingerprint);
+    this.agentActivityTimestamps.delete(fingerprint);
     this.state = { ...this.state, agentActivity: newMap };
+    this.notify();
+  }
+
+  /**
+   * Drop `agentActivity` entries older than `maxAgeSec` seconds.
+   * Called at phase boundaries or on a timer; non-destructive if nothing expired.
+   */
+  clearStaleActivity(maxAgeSec: number = DEFAULT_AGENT_ACTIVITY_TTL_SEC): void {
+    const cutoff = Date.now() - maxAgeSec * 1000;
+    let changed = false;
+    const newMap = new Map(this.state.agentActivity);
+    for (const [fingerprint, insertedAt] of this.agentActivityTimestamps) {
+      if (insertedAt < cutoff) {
+        newMap.delete(fingerprint);
+        this.agentActivityTimestamps.delete(fingerprint);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.state = { ...this.state, agentActivity: newMap };
+    this.notify();
+  }
+
+  /**
+   * Drop every `agentActivity` entry. Intended for phase boundaries (e.g. scan
+   * -> triage -> verify) where prior-phase fingerprints are no longer relevant.
+   */
+  resetAgentActivity(): void {
+    if (this.state.agentActivity.size === 0 && this.agentActivityTimestamps.size === 0) {
+      return;
+    }
+    this.agentActivityTimestamps.clear();
+    this.state = { ...this.state, agentActivity: new Map() };
     this.notify();
   }
 
