@@ -60,25 +60,36 @@ for (const stream of [process.stdout, process.stderr]) {
 // rapid "process exited with code 1" failures.
 const MAX_CONCURRENT_QUERIES = 5;
 let activeQueries = 0;
+// Slots marked as leaked — a prior caller timed out waiting, so we assume
+// its holder died. A subsequent release pays the leak marker down instead
+// of decrementing the live count, which keeps the effective capacity honest
+// even if the "dead" subprocess later recovers and releases.
+let leakedSlots = 0;
 const waitQueue: Array<() => void> = [];
 
 const SLOT_TIMEOUT_MS = 600_000; // 10 minutes max wait for a slot
 
+function effectiveActive(): number {
+  return Math.max(0, activeQueries - leakedSlots);
+}
+
 async function acquireSlot(): Promise<void> {
-  if (activeQueries < MAX_CONCURRENT_QUERIES) {
+  if (effectiveActive() < MAX_CONCURRENT_QUERIES) {
     activeQueries++;
     return;
   }
   let forcedAcquire = false;
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
-      // Remove from queue and force-acquire — a subprocess likely died without releasing.
-      // Don't increment activeQueries; the orphaned slot already holds that count.
+      // Remove from queue; treat one existing holder as leaked. The next
+      // healthy release() will pay the leak marker down, so ultimately
+      // capacity can never drift negative or permanently below MAX.
       const idx = waitQueue.indexOf(resolve);
       if (idx >= 0) waitQueue.splice(idx, 1);
       log.warn(
-        "Semaphore slot timeout — force-acquiring (likely leaked slot from dead subprocess)",
+        "Semaphore slot timeout — assuming leaked slot from dead subprocess, force-acquiring",
       );
+      leakedSlots++;
       forcedAcquire = true;
       resolve();
     }, SLOT_TIMEOUT_MS);
@@ -87,15 +98,28 @@ async function acquireSlot(): Promise<void> {
       resolve();
     });
   });
-  if (!forcedAcquire) {
-    activeQueries++;
+  activeQueries++;
+  if (forcedAcquire) {
+    // leakedSlots was incremented in the timeout handler. We own a live slot
+    // now; the leak marker remains until paid down by a subsequent release.
   }
 }
 
 function releaseSlot(): void {
-  activeQueries = Math.max(0, activeQueries - 1);
+  if (leakedSlots > 0) {
+    // Pay down the leak marker instead of touching the live count; this
+    // release "belongs" to the orphaned slot, not our caller.
+    leakedSlots--;
+  } else {
+    activeQueries = Math.max(0, activeQueries - 1);
+  }
   const next = waitQueue.shift();
   if (next) next();
+}
+
+/** Exported for tests only — observes internal semaphore state. */
+export function __getSemaphoreState(): { active: number; leaked: number; waiting: number } {
+  return { active: activeQueries, leaked: leakedSlots, waiting: waitQueue.length };
 }
 
 export class ClaudeAgentRuntime implements AgentRuntime {
@@ -196,11 +220,18 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     log.info(`Batch ${batch.id} submitted, polling for completion`);
 
     const startMs = Date.now();
-    const POLL_INTERVAL_MS = 2_000;
-    const MAX_POLL_MS = 600_000; // 10 minutes
+    // Exponential backoff: batches typically run for minutes. A fixed 2 s
+    // poll wastes ~30 retrieves per minute after the first minute; this
+    // starts at 2 s and grows to a 30 s cap.
+    const INITIAL_POLL_MS = 2_000;
+    const MAX_POLL_MS_PER_CYCLE = 30_000;
+    const BACKOFF_FACTOR = 1.5;
+    const MAX_POLL_MS = 600_000; // 10 minutes overall cap
+    let pollDelay = INITIAL_POLL_MS;
 
     while (batch.processing_status !== "ended") {
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      await new Promise((r) => setTimeout(r, pollDelay));
+      pollDelay = Math.min(MAX_POLL_MS_PER_CYCLE, Math.floor(pollDelay * BACKOFF_FACTOR));
       batch = await this.client.messages.batches.retrieve(batch.id);
       if (Date.now() - startMs > MAX_POLL_MS) {
         await this.client.messages.batches.cancel(batch.id);
@@ -748,8 +779,8 @@ class ClaudeSession implements AgentSession {
   constructor(
     private readonly baseOptions: AgentQueryOptions,
     private readonly config: AgentRuntimeConfig | undefined,
-    private readonly bus: MessageBus | null,
-    private readonly runId: string | null,
+    readonly _bus: MessageBus | null,
+    readonly _runId: string | null,
   ) {}
 
   private ensureStarted(): void {

@@ -1,5 +1,4 @@
 import type Database from "better-sqlite3";
-import type { TaskRegistry } from "../agents/registry.js";
 import { normalizeTaskIds } from "../agents/registry.js";
 import { callGraphAssistTask } from "../agents/tasks/call-graph-assist.js";
 import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
@@ -12,7 +11,7 @@ import { PipelineHookChain } from "../hooks/chain.js";
 import { loadHooksFromFile } from "../hooks/loader.js";
 import type { HookContext } from "../hooks/types.js";
 import { getLogger } from "../logger.js";
-import { loadPrecedents, type Precedents } from "../precedents.js";
+import { loadPrecedents } from "../precedents.js";
 import { evaluateQualityGates, type QualityGateResult } from "../quality-gate.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../repo-context.js";
 import { DesignDecisionClassifier } from "../scanners/design-decision-classifier.js";
@@ -27,11 +26,7 @@ import {
 } from "../scanners/normalization.js";
 import type { Finding } from "../scanners/types.js";
 import { FindingSchema, formatZodErrors } from "../schemas.js";
-import {
-  computeRunMetrics,
-  type StageCosts,
-  type StageTimestamps,
-} from "../scoring/run-metrics.js";
+import { computeRunMetrics, type StageCosts } from "../scoring/run-metrics.js";
 import {
   getActionableFindings,
   getPocHarnessedFingerprints,
@@ -43,12 +38,7 @@ import {
 } from "../store.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import type {
-  DynamicAnalysisRun,
-  EnrichedRepoContext,
-  ExploitChain,
   KuzushiConfig,
-  PocHarnessResult,
-  RepoContext,
   ScanOpts,
   TriageResult,
   Verdict,
@@ -66,7 +56,6 @@ import type {
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
   ReportCompleteEvent,
-  RunContext,
   ScanCompleteEvent,
   ScanFindingEvent,
   TaintAnalysisRefinementErrorEvent,
@@ -104,7 +93,6 @@ import type {
   DynamicAnalysisCandidate,
   OrchestratorDeps,
   PocHarnessCandidate,
-  QueuedDynamicAnalysis,
   RunState,
   VerificationCandidate,
 } from "./orchestrator/types.js";
@@ -161,7 +149,6 @@ function allSettledCollect(outcomes: Promise<TaskOutcome>[]): Promise<TaskOutcom
  */
 export class PipelineOrchestrator {
   private readonly runs = new Map<string, RunState>();
-
   private draining = false;
 
   constructor(
@@ -179,7 +166,7 @@ export class PipelineOrchestrator {
     this.draining = true;
     const deadline = Date.now() + timeoutMs;
 
-    for (const [runId, state] of this.runs) {
+    for (const [_runId, state] of this.runs) {
       // Wait for all in-flight queues to reach 0
       while (
         (state.inFlight > 0 ||
@@ -305,7 +292,7 @@ export class PipelineOrchestrator {
       }
       const fatalRunId = event.meta.runId;
       const state = this.runs.get(fatalRunId);
-      const checkpointRunId = state?.checkpointRunId ?? fatalRunId;
+      const _checkpointRunId = state?.checkpointRunId ?? fatalRunId;
       try {
         if (state) {
           await this.bus.publish(
@@ -797,7 +784,7 @@ export class PipelineOrchestrator {
       }
 
       const verificationResult = verificationByFingerprint.get(finding.fingerprint);
-      if (!verificationResult || !verificationResult.exploitable) {
+      if (!verificationResult?.exploitable) {
         continue;
       }
 
@@ -3890,7 +3877,7 @@ function coerceFinding(item: Record<string, unknown>): Finding | null {
   return result.data;
 }
 
-function asLabelCountMap(value: unknown): Record<string, number> {
+function _asLabelCountMap(value: unknown): Record<string, number> {
   if (!isRecord(value)) {
     return {};
   }
@@ -3906,7 +3893,7 @@ function asLabelCountMap(value: unknown): Record<string, number> {
   return out;
 }
 
-function asString(value: unknown): string | null {
+function _asString(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -3914,7 +3901,7 @@ function asString(value: unknown): string | null {
   return value;
 }
 
-function asNullableString(value: unknown): string | null | undefined {
+function _asNullableString(value: unknown): string | null | undefined {
   if (typeof value === "string") {
     return value;
   }
