@@ -217,6 +217,12 @@ if ! pnpm install --frozen-lockfile; then
   exit 2
 fi
 
+section "Configuring local git"
+if [[ -f "$REPO_DIR/.gitmessage" ]]; then
+  git -C "$REPO_DIR" config --local commit.template .gitmessage
+  printf "  ✓ commit.template = .gitmessage (conventional commits)\n"
+fi
+
 section "Bootstrap complete"
 printf "%sNext:%s  pnpm doctor     # re-verify env\n" "$BOLD" "$RESET"
 printf "       pnpm typecheck   # type-check all sources\n"

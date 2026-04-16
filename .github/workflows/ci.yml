@@ -47,6 +47,38 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+  # ── Lint + format check (parallel after install) ─────────────────────────
+  lint:
+    name: lint
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+  # ── Codegen drift check (parallel after install) ──────────────────────────
+  codegen-check:
+    name: codegen-check
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm codegen:check
+
   # ── Type-check (parallel after install) ───────────────────────────────────
   typecheck:
     name: typecheck
