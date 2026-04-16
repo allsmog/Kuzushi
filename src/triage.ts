@@ -28,6 +28,7 @@ import { renderTemplate } from "./prompts/template.js";
 import { TRIAGE_TEMPLATE } from "./prompts/templates/triage.js";
 import { BATCH_TRIAGE_TEMPLATE } from "./prompts/templates/triage.js";
 import { buildTriageContext, buildBatchTriageContext } from "./prompts/context.js";
+import type { CodeCitation, AttackPathAnalysis, SecurityControl } from "./types.js";
 import type { EnrichedRepoContext, RepoContext, TriageResult, Verdict } from "./types.js";
 import { getLogger } from "./logger.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
@@ -54,6 +55,47 @@ export const TRIAGE_RESULT_SCHEMA_LITE = {
     verification_steps: { type: "array", items: { type: "string" }, minItems: 1 },
     fix_patch: { type: ["string", "null"] },
     sink_function: { type: ["string", "null"], description: "The dangerous function or API that data flows into (e.g. 'eval', 'popen', 'SafeExecWithTimeout', 'SQL query'). Null if not applicable." },
+    code_citations: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["file_path", "start_line", "end_line", "snippet", "description"],
+        properties: {
+          file_path: { type: "string" },
+          start_line: { type: "integer" },
+          end_line: { type: "integer" },
+          snippet: { type: "string" },
+          description: { type: "string" },
+        },
+      },
+    },
+    attack_path: {
+      type: "object",
+      additionalProperties: false,
+      required: ["chain", "narrative", "likelihood_reasoning", "impact_reasoning"],
+      properties: {
+        chain: { type: "array", items: { type: "string" } },
+        narrative: { type: "string" },
+        likelihood_reasoning: { type: "string" },
+        impact_reasoning: { type: "string" },
+      },
+    },
+    assumptions: { type: "array", items: { type: "string" } },
+    controls: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "description"],
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          file_path: { type: "string" },
+        },
+      },
+    },
+    blindspots: { type: "array", items: { type: "string" } },
   },
 } as const;
 
@@ -122,6 +164,47 @@ export const TRIAGE_RESULT_SCHEMA = {
         },
       },
     },
+    code_citations: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["file_path", "start_line", "end_line", "snippet", "description"],
+        properties: {
+          file_path: { type: "string" },
+          start_line: { type: "integer" },
+          end_line: { type: "integer" },
+          snippet: { type: "string" },
+          description: { type: "string" },
+        },
+      },
+    },
+    attack_path: {
+      type: "object",
+      additionalProperties: false,
+      required: ["chain", "narrative", "likelihood_reasoning", "impact_reasoning"],
+      properties: {
+        chain: { type: "array", items: { type: "string" } },
+        narrative: { type: "string" },
+        likelihood_reasoning: { type: "string" },
+        impact_reasoning: { type: "string" },
+      },
+    },
+    assumptions: { type: "array", items: { type: "string" } },
+    controls: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "description"],
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          file_path: { type: "string" },
+        },
+      },
+    },
+    blindspots: { type: "array", items: { type: "string" } },
   },
 } as const;
 
@@ -513,6 +596,11 @@ function parseBatchTriageOutput(
       triageSchemaVersion: asOptionalString((item as Record<string, unknown>)["triage_schema_version"]),
       evidenceTrail: parseEvidenceTrail((item as Record<string, unknown>)["evidence_trail"]),
       evidenceChain: parseEvidenceChain((item as Record<string, unknown>)["evidence_chain"]),
+      codeCitations: parseCodeCitations((item as Record<string, unknown>)["code_citations"]),
+      attackPath: parseAttackPath((item as Record<string, unknown>)["attack_path"]),
+      assumptions: parseOptionalStringArray((item as Record<string, unknown>)["assumptions"]),
+      controls: parseControls((item as Record<string, unknown>)["controls"]),
+      blindspots: parseOptionalStringArray((item as Record<string, unknown>)["blindspots"]),
     });
   }
 
@@ -557,6 +645,11 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
       triageSchemaVersion: asOptionalString(raw["triage_schema_version"]),
       evidenceTrail: parseEvidenceTrail(raw["evidence_trail"]),
       evidenceChain: parseEvidenceChain(raw["evidence_chain"]),
+      codeCitations: parseCodeCitations(raw["code_citations"]),
+      attackPath: parseAttackPath(raw["attack_path"]),
+      assumptions: parseOptionalStringArray(raw["assumptions"]),
+      controls: parseControls(raw["controls"]),
+      blindspots: parseOptionalStringArray(raw["blindspots"]),
     };
   }
 
@@ -670,6 +763,11 @@ export function parseTriageResponse(
       triageSchemaVersion: asOptionalString(parsed.triage_schema_version),
       evidenceTrail: parseEvidenceTrail(parsed.evidence_trail),
       evidenceChain: parseEvidenceChain(parsed.evidence_chain),
+      codeCitations: parseCodeCitations(parsed.code_citations),
+      attackPath: parseAttackPath(parsed.attack_path),
+      assumptions: parseOptionalStringArray(parsed.assumptions),
+      controls: parseControls(parsed.controls),
+      blindspots: parseOptionalStringArray(parsed.blindspots),
     };
   } catch (error) {
     throw new Error(`Invalid triage JSON response: ${toErrorMessage(error)}`);
@@ -744,6 +842,66 @@ function parseEvidenceChain(value: unknown): import("./types.js").EvidenceStep[]
     }
   }
   return chain.length > 0 ? chain : undefined;
+}
+
+function parseCodeCitations(value: unknown): CodeCitation[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const citations: CodeCitation[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const filePath = typeof rec["file_path"] === "string" ? rec["file_path"].trim() : "";
+    const startLine = Number(rec["start_line"]);
+    const endLine = Number(rec["end_line"]);
+    let snippet = typeof rec["snippet"] === "string" ? rec["snippet"] : "";
+    const description = typeof rec["description"] === "string" ? rec["description"].trim() : "";
+    if (!filePath || !Number.isFinite(startLine) || !description) continue;
+    if (snippet.length > 2000) snippet = snippet.slice(0, 2000) + "\n...truncated";
+    citations.push({
+      filePath,
+      startLine,
+      endLine: Number.isFinite(endLine) ? endLine : startLine,
+      snippet,
+      description,
+    });
+  }
+  return citations.length > 0 ? citations : undefined;
+}
+
+function parseAttackPath(value: unknown): AttackPathAnalysis | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const rec = value as Record<string, unknown>;
+  const chain = Array.isArray(rec["chain"])
+    ? rec["chain"].map((s: unknown) => String(s).trim()).filter(Boolean)
+    : [];
+  const narrative = typeof rec["narrative"] === "string" ? rec["narrative"].trim() : "";
+  const likelihoodReasoning = typeof rec["likelihood_reasoning"] === "string"
+    ? rec["likelihood_reasoning"].trim() : "";
+  const impactReasoning = typeof rec["impact_reasoning"] === "string"
+    ? rec["impact_reasoning"].trim() : "";
+  if (chain.length === 0 && !narrative) return undefined;
+  return { chain, narrative, likelihoodReasoning, impactReasoning };
+}
+
+function parseControls(value: unknown): SecurityControl[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const controls: SecurityControl[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";
+    const description = typeof rec["description"] === "string" ? rec["description"].trim() : "";
+    const filePath = typeof rec["file_path"] === "string" ? rec["file_path"].trim() : undefined;
+    if (!name || !description) continue;
+    controls.push({ name, description, filePath: filePath || undefined });
+  }
+  return controls.length > 0 ? controls : undefined;
+}
+
+function parseOptionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result = value.map((s: unknown) => String(s).trim()).filter(Boolean);
+  return result.length > 0 ? result : undefined;
 }
 
 function parsePathAssessment(value: unknown): TriageResult["source"] | undefined {

@@ -104,6 +104,34 @@ export interface EvidenceStep {
   evidence: string;
 }
 
+/** A structured code citation referencing a specific code location with context. */
+export interface CodeCitation {
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  snippet: string;
+  description: string;
+}
+
+/** Structured attack-path analysis linking entry point to impact. */
+export interface AttackPathAnalysis {
+  /** Ordered chain of steps from entry to impact. */
+  chain: string[];
+  /** Narrative explanation of the attack path. */
+  narrative: string;
+  /** Reasoning for the assessed likelihood level. */
+  likelihoodReasoning: string;
+  /** Reasoning for the assessed impact level. */
+  impactReasoning: string;
+}
+
+/** An identified security control or existing defense. */
+export interface SecurityControl {
+  name: string;
+  description: string;
+  filePath?: string;
+}
+
 /** Result of AI triage for a single finding. */
 export interface TriageResult {
   fingerprint: string;
@@ -135,6 +163,16 @@ export interface TriageResult {
   compositeConfidence?: number;
   /** Per-step evidence chain for fine-grained confidence calibration. */
   evidenceChain?: EvidenceStep[];
+  /** Structured code citations with file paths, line ranges, and snippets. */
+  codeCitations?: CodeCitation[];
+  /** Attack-path analysis with chain diagram, narrative, and risk reasoning. */
+  attackPath?: AttackPathAnalysis;
+  /** Explicit assumptions underlying the triage assessment. */
+  assumptions?: string[];
+  /** Existing security controls and defenses identified during investigation. */
+  controls?: SecurityControl[];
+  /** Aspects the analysis could not verify or areas of uncertainty. */
+  blindspots?: string[];
 }
 
 /**
@@ -161,6 +199,16 @@ export interface VerificationResult {
   verifyCostUsd?: number;
   /** Composite confidence combining multiple signals (self-reported, calibrated, verification). */
   compositeConfidence?: number;
+  /** Structured code citations with file paths, line ranges, and snippets. */
+  codeCitations?: CodeCitation[];
+  /** Attack-path analysis with chain diagram, narrative, and risk reasoning. */
+  attackPath?: AttackPathAnalysis;
+  /** Explicit assumptions underlying the verification assessment. */
+  assumptions?: string[];
+  /** Existing security controls and defenses identified during verification. */
+  controls?: SecurityControl[];
+  /** Aspects the verification could not confirm or areas of uncertainty. */
+  blindspots?: string[];
 }
 
 /** Result of PoC harness generation for a verified-exploitable finding. */

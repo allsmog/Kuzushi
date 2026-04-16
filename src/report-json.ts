@@ -4,6 +4,7 @@ import type { PipelineStats } from "./bus/events.js";
 import type { ExploitChain } from "./types.js";
 import { summarizeTaintPath } from "./findings/taint-path.js";
 import { getActionableFindings } from "./store.js";
+import { loadThreatModelDocument } from "./threat-model-renderer.js";
 
 interface JsonReportMeta {
   version: string;
@@ -24,6 +25,7 @@ interface JsonReportData {
   findings: Array<Record<string, unknown>>;
   exploitChains: ExploitChain[];
   stats: Partial<PipelineStats>;
+  threatModel: unknown;
 }
 
 /**
@@ -60,6 +62,8 @@ export function writeJsonReport(
   exploitChains: ExploitChain[],
   scanMode: string,
   fingerprints?: string[],
+  repoRoot?: string,
+  runId?: string,
 ): void {
   const allFindings = getActionableFindings(db, repo, {
     includeFalsePositives: true,
@@ -109,7 +113,14 @@ export function writeJsonReport(
     pocRunStderr: f.pocRunStderr,
     pocRunVerdict: f.pocRunVerdict,
     pocRunDurationMs: f.pocRunDurationMs,
+    codeCitations: f.codeCitations,
+    attackPath: f.attackPath,
+    assumptions: f.assumptions,
+    controls: f.controls,
+    blindspots: f.blindspots,
   }));
+
+  const threatModel = repoRoot && runId ? loadThreatModelDocument(repoRoot, runId) : null;
 
   const data: JsonReportData = {
     meta: {
@@ -126,6 +137,7 @@ export function writeJsonReport(
     findings,
     exploitChains,
     stats,
+    threatModel,
   };
 
   writeFileSync(outputPath, safeJsonStringify(data, 2) + "\n", "utf-8");

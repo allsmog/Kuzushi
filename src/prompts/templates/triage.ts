@@ -52,6 +52,14 @@ Return ONLY a JSON object with:
 fingerprint, verdict(tp|fp|by_design|needs_review), confidence(0..1), rationale, verification_steps(array), fix_patch(string|null),
 evidence_trail(optional array of {level: string, evidence: string})
 
+When you have sufficient evidence, also include these optional fields for higher-fidelity analysis:
+
+- code_citations: array of {file_path, start_line, end_line, snippet, description} — cite the specific code locations you investigated, with the actual code snippet and why it matters.
+- attack_path: {chain: string[], narrative: string, likelihood_reasoning: string, impact_reasoning: string} — describe the step-by-step attack path from entry point to impact as an ordered chain (e.g. ["User input via req.query.name", "Passed unsanitized to db.query()", "SQL executed on production database"]). Include narrative explanation and explicit reasoning for your likelihood and impact assessments.
+- assumptions: string[] — list explicit assumptions underlying your assessment (e.g. "Attacker has network access to the API endpoint", "No WAF is deployed").
+- controls: array of {name, description, file_path?} — identify existing security controls and defenses you found during investigation (e.g. {name: "CSRF middleware", description: "Express CSRF middleware applied globally", file_path: "src/app.ts"}).
+- blindspots: string[] — list what your analysis could NOT verify or areas of remaining uncertainty (e.g. "Did not verify runtime WAF configuration", "Could not determine if input sanitization library is up to date").
+
 Use verdict "by_design" when the code pattern is technically accurate but is an intentional architectural decision
 for the application's purpose (e.g., missing authentication in a pentest tool, permissive TLS in a debugging proxy).
 Reserve "tp" for actual bugs and vulnerabilities that harm the application's users or operators.`;
@@ -109,7 +117,12 @@ export const BATCH_TRIAGE_FOOTER_TEMPLATE = `## Investigation instructions
 Return ONLY a JSON object with a "results" array. Each element MUST have:
 fingerprint, verdict(tp|fp|by_design|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)
 
-You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;
+You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.
+
+For findings you assess as tp or needs_review, also include these optional fields when you have sufficient evidence:
+code_citations (array of {file_path, start_line, end_line, snippet, description}),
+attack_path ({chain, narrative, likelihood_reasoning, impact_reasoning}),
+assumptions (string[]), controls (array of {name, description, file_path?}), blindspots (string[]).`;
 
 /**
  * Unified batch triage prompt template using {% for %} loop.
@@ -152,4 +165,9 @@ Fingerprint: {{ finding.fingerprint }}
 Return ONLY a JSON object with a "results" array. Each element MUST have:
 fingerprint, verdict(tp|fp|by_design|needs_review), confidence(0..1), rationale, verification_steps(array of strings), fix_patch(string|null)
 
-You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;
+You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.
+
+For findings you assess as tp or needs_review, also include these optional fields when you have sufficient evidence:
+code_citations (array of {file_path, start_line, end_line, snippet, description}),
+attack_path ({chain, narrative, likelihood_reasoning, impact_reasoning}),
+assumptions (string[]), controls (array of {name, description, file_path?}), blindspots (string[]).`;

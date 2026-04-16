@@ -7,9 +7,11 @@
 import type Database from "better-sqlite3";
 import path from "node:path";
 import type { Verdict, ExploitChain } from "../types.js";
+import type { CodeCitation, AttackPathAnalysis, SecurityControl } from "../types.js";
 import type { PipelineStats } from "../bus/events.js";
 import type { SummaryData, ActionableFinding } from "./state.js";
 import { getActionableFindings } from "../store.js";
+import { loadThreatModelDocument, renderThreatModelContext } from "../threat-model-renderer.js";
 
 export interface BuildSummaryOptions {
   stats?: Partial<PipelineStats>;
@@ -75,7 +77,21 @@ export function buildSummaryData(
       pocHarnessParseError: f.pocHarnessParseError ?? undefined,
       pocRunVerdict: f.pocRunVerdict ?? undefined,
       pocRunDurationMs: f.pocRunDurationMs ?? undefined,
+      codeCitations: f.codeCitations,
+      attackPath: f.attackPath,
+      assumptions: f.assumptions,
+      controls: f.controls,
+      blindspots: f.blindspots,
+      verificationSteps: f.verificationSteps,
     }));
+
+  let threatModelSummary: string | undefined;
+  if (options.repoRoot && options.runId) {
+    const doc = loadThreatModelDocument(options.repoRoot, options.runId);
+    if (doc) {
+      threatModelSummary = renderThreatModelContext(doc);
+    }
+  }
 
   return {
     repoName: repo,
@@ -125,6 +141,7 @@ export function buildSummaryData(
     pocOutputDir: (pocGenerated > 0 || pocSkipped > 0) && options.repoRoot
       ? path.join(options.repoRoot, ".kuzushi", "poc")
       : undefined,
+    threatModelSummary,
     exploitChains: options.exploitChains ?? [],
     actionableFindings: actionable,
   };

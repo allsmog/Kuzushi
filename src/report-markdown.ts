@@ -7,6 +7,7 @@ import type { RunMetrics } from "./scoring/run-metrics.js";
 import {
   getActionableFindings,
 } from "./store.js";
+import { loadThreatModelDocument, renderThreatModelContext } from "./threat-model-renderer.js";
 
 interface RunMetaRow {
   startedAt?: string;
@@ -19,6 +20,7 @@ export function generateMarkdownReport(
   stats: Partial<PipelineStats>,
   runId: string,
   fingerprints?: string[],
+  repoRoot?: string,
 ): string {
   const allFindings = getActionableFindings(db, repo, { includeFalsePositives: true, fingerprints });
 
@@ -85,6 +87,18 @@ export function generateMarkdownReport(
   lines.push(`| Total cost (USD) | ${(triageCostUsd + verifyCostUsd + pocHarnessCostUsd).toFixed(4)} |`);
 
   lines.push("");
+
+  // Threat model context
+  if (repoRoot) {
+    const threatModel = loadThreatModelDocument(repoRoot, runId);
+    if (threatModel) {
+      lines.push("## Threat Model Context");
+      lines.push("");
+      lines.push(renderThreatModelContext(threatModel));
+      lines.push("");
+    }
+  }
+
   lines.push("## Actionable Findings");
   lines.push("");
 
@@ -171,6 +185,63 @@ export function generateMarkdownReport(
 
       if (finding.pocHarnessParsed === 0 && finding.pocHarnessParseError) {
         lines.push(`PoC harness parse check: **Failed** (${finding.pocHarnessParseError})`);
+        lines.push("");
+      }
+
+      if (finding.codeCitations && finding.codeCitations.length > 0) {
+        lines.push("Evidence:");
+        lines.push("");
+        for (const citation of finding.codeCitations) {
+          lines.push(`#### \`${citation.filePath}:${citation.startLine}-${citation.endLine}\``);
+          lines.push("");
+          lines.push(citation.description);
+          if (citation.snippet) {
+            lines.push("");
+            lines.push("```");
+            lines.push(escapeFenceContent(citation.snippet));
+            lines.push("```");
+          }
+          lines.push("");
+        }
+      }
+
+      if (finding.attackPath) {
+        lines.push("Attack-path analysis:");
+        lines.push("");
+        if (finding.attackPath.chain.length > 0) {
+          lines.push(finding.attackPath.chain.join(" --> "));
+          lines.push("");
+        }
+        if (finding.attackPath.narrative) {
+          lines.push(finding.attackPath.narrative);
+          lines.push("");
+        }
+        if (finding.attackPath.likelihoodReasoning) {
+          lines.push(`**Likelihood**: ${finding.attackPath.likelihoodReasoning}`);
+          lines.push("");
+        }
+        if (finding.attackPath.impactReasoning) {
+          lines.push(`**Impact**: ${finding.attackPath.impactReasoning}`);
+          lines.push("");
+        }
+      }
+
+      if (finding.assumptions && finding.assumptions.length > 0) {
+        lines.push("Assumptions:");
+        for (const a of finding.assumptions) lines.push(`- ${a}`);
+        lines.push("");
+      }
+      if (finding.controls && finding.controls.length > 0) {
+        lines.push("Controls:");
+        for (const c of finding.controls) {
+          const loc = c.filePath ? ` (\`${c.filePath}\`)` : "";
+          lines.push(`- **${c.name}**${loc}: ${c.description}`);
+        }
+        lines.push("");
+      }
+      if (finding.blindspots && finding.blindspots.length > 0) {
+        lines.push("Blindspots:");
+        for (const b of finding.blindspots) lines.push(`- ${b}`);
         lines.push("");
       }
     }

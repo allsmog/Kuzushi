@@ -236,6 +236,14 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
         </>
       )}
 
+      {/* Threat model context */}
+      {data.threatModelSummary && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold>Threat Model Context</Text>
+          <Text>{data.threatModelSummary}</Text>
+        </Box>
+      )}
+
       {/* Actionable findings */}
       {data.actionableFindings.length > 0 && (
         <>

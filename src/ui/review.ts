@@ -66,6 +66,12 @@ export async function runInteractiveReview(
     pocHarnessParseError: f.pocHarnessParseError ?? undefined,
     pocRunVerdict: f.pocRunVerdict ?? undefined,
     pocRunDurationMs: f.pocRunDurationMs ?? undefined,
+    codeCitations: f.codeCitations,
+    attackPath: f.attackPath,
+    assumptions: f.assumptions,
+    controls: f.controls,
+    blindspots: f.blindspots,
+    verificationSteps: f.verificationSteps,
   }));
 
   const result: ReviewResult = { reviewed: 0, tp: 0, fp: 0, byDesign: 0, skipped: 0 };

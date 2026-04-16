@@ -8,6 +8,7 @@ import type { Verdict } from "../types.js";
 import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
 import type { ExploitChain } from "../types.js";
+import type { CodeCitation, AttackPathAnalysis, SecurityControl } from "../types.js";
 import type { WizardResult } from "./components/SetupWizard.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
@@ -160,6 +161,7 @@ export interface SummaryData {
   runMetrics?: RunMetrics;
   auditLogDir?: string;
   pocOutputDir?: string;
+  threatModelSummary?: string;
   exploitChains: ExploitChain[];
   actionableFindings: ActionableFinding[];
 }
@@ -197,6 +199,12 @@ export interface ActionableFinding {
   pocHarnessParseError?: string;
   pocRunVerdict?: string;
   pocRunDurationMs?: number;
+  codeCitations?: CodeCitation[];
+  attackPath?: AttackPathAnalysis;
+  assumptions?: string[];
+  controls?: SecurityControl[];
+  blindspots?: string[];
+  verificationSteps?: string[];
 }
 
 export interface UIState {

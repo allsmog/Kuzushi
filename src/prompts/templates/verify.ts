@@ -54,7 +54,14 @@ Return ONLY a JSON object with keys:
 fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(string),
 attack_vector(string|null), preconditions(string[]), confidence(0..1),
 proof_level(1-4, optional), proof_verdict(exploited|blocked_by_security|out_of_scope|false_positive, optional),
-bypass_attempts(string[], optional)`;
+bypass_attempts(string[], optional)
+
+When you have sufficient evidence, also include:
+- code_citations: array of {file_path, start_line, end_line, snippet, description} — cite code locations you examined with actual snippets.
+- attack_path: {chain: string[], narrative: string, likelihood_reasoning: string, impact_reasoning: string} — the exploitation chain from entry to impact with reasoning.
+- assumptions: string[] — assumptions underlying your exploitability assessment.
+- controls: array of {name, description, file_path?} — security controls you identified that affect exploitability.
+- blindspots: string[] — what your verification could not confirm.`;
 
 /**
  * Architectural / threat-model finding verification template.
@@ -99,7 +106,14 @@ Return ONLY a JSON object with keys:
 fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(string),
 attack_vector(string|null), preconditions(string[]), confidence(0..1),
 proof_level(1-4, optional), proof_verdict(exploited|blocked_by_security|out_of_scope|false_positive, optional),
-bypass_attempts(string[], optional)`;
+bypass_attempts(string[], optional)
+
+When you have sufficient evidence, also include:
+- code_citations: array of {file_path, start_line, end_line, snippet, description} — cite code locations you examined with actual snippets.
+- attack_path: {chain: string[], narrative: string, likelihood_reasoning: string, impact_reasoning: string} — the exploitation chain from entry to impact with reasoning.
+- assumptions: string[] — assumptions underlying your exploitability assessment.
+- controls: array of {name, description, file_path?} — security controls you identified that affect exploitability.
+- blindspots: string[] — what your verification could not confirm.`;
 
 /**
  * Batch verification prompt header template.
@@ -157,7 +171,12 @@ fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(str
 attack_vector(string|null), preconditions(string[]), confidence(0..1),
 proof_level(1-4, optional), proof_verdict(optional), bypass_attempts(string[], optional)
 
-You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;
+You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.
+
+For findings you assess as exploitable, also include these optional fields when you have sufficient evidence:
+code_citations (array of {file_path, start_line, end_line, snippet, description}),
+attack_path ({chain, narrative, likelihood_reasoning, impact_reasoning}),
+assumptions (string[]), controls (array of {name, description, file_path?}), blindspots (string[]).`;
 
 /**
  * Unified single-finding verification prompt template using {% if %} conditionals
@@ -211,7 +230,14 @@ Return ONLY a JSON object with keys:
 fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(string),
 attack_vector(string|null), preconditions(string[]), confidence(0..1),
 proof_level(1-4, optional), proof_verdict(exploited|blocked_by_security|out_of_scope|false_positive, optional),
-bypass_attempts(string[], optional)`;
+bypass_attempts(string[], optional)
+
+When you have sufficient evidence, also include:
+- code_citations: array of {file_path, start_line, end_line, snippet, description} — cite code locations you examined with actual snippets.
+- attack_path: {chain: string[], narrative: string, likelihood_reasoning: string, impact_reasoning: string} — the exploitation chain from entry to impact with reasoning.
+- assumptions: string[] — assumptions underlying your exploitability assessment.
+- controls: array of {name, description, file_path?} — security controls you identified that affect exploitability.
+- blindspots: string[] — what your verification could not confirm.`;
 
 /**
  * Unified batch verification prompt template using {% for %} loop.
@@ -259,4 +285,9 @@ fingerprint, exploitable(boolean), poc_payload(string|null), poc_description(str
 attack_vector(string|null), preconditions(string[]), confidence(0..1),
 proof_level(1-4, optional), proof_verdict(optional), bypass_attempts(string[], optional)
 
-You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.`;
+You must return exactly {{ findingCount }} results, one per finding, using the exact fingerprints listed above.
+
+For findings you assess as exploitable, also include these optional fields when you have sufficient evidence:
+code_citations (array of {file_path, start_line, end_line, snippet, description}),
+attack_path ({chain, narrative, likelihood_reasoning, impact_reasoning}),
+assumptions (string[]), controls (array of {name, description, file_path?}), blindspots (string[]).`;
