@@ -1,16 +1,21 @@
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import type {
-  CodeGraphNode,
   CodeGraphEdge,
+  CodeGraphEdgeKind,
+  CodeGraphNode,
+  CodeGraphNodeKind,
   CodeGraphPath,
   GraphSource,
-  CodeGraphNodeKind,
-  CodeGraphEdgeKind,
 } from "./types.js";
 
 /** Deterministic node ID: hash of repo + filePath + line + symbol. */
-export function makeNodeId(repo: string, filePath: string, startLine: number, symbol: string | null): string {
+export function makeNodeId(
+  repo: string,
+  filePath: string,
+  startLine: number,
+  symbol: string | null,
+): string {
   const source = `${repo}|${filePath}|${startLine}|${symbol ?? ""}`;
   return createHash("sha256").update(source).digest("hex").slice(0, 32);
 }
@@ -29,7 +34,12 @@ export function makePathId(entryNodeId: string, targetNodeId: string, nodeIds: s
 
 // ── Node operations ──────────────────────────────────────────────────────
 
-export function upsertGraphNode(db: Database.Database, repo: string, runId: string, node: CodeGraphNode): void {
+export function upsertGraphNode(
+  db: Database.Database,
+  repo: string,
+  runId: string,
+  node: CodeGraphNode,
+): void {
   db.prepare(`
     INSERT INTO code_graph_nodes (node_id, repo, run_id, file_path, start_line, symbol, node_kind, framework, metadata_json, confidence, source)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -42,13 +52,26 @@ export function upsertGraphNode(db: Database.Database, repo: string, runId: stri
       source = CASE WHEN code_graph_nodes.source != excluded.source THEN 'hybrid' ELSE excluded.source END,
       updated_at = datetime('now')
   `).run(
-    node.nodeId, repo, runId, node.filePath, node.startLine, node.symbol,
-    node.nodeKind, node.framework, JSON.stringify(node.metadata),
-    node.confidence, node.source,
+    node.nodeId,
+    repo,
+    runId,
+    node.filePath,
+    node.startLine,
+    node.symbol,
+    node.nodeKind,
+    node.framework,
+    JSON.stringify(node.metadata),
+    node.confidence,
+    node.source,
   );
 }
 
-export function upsertGraphEdge(db: Database.Database, repo: string, runId: string, edge: CodeGraphEdge): void {
+export function upsertGraphEdge(
+  db: Database.Database,
+  repo: string,
+  runId: string,
+  edge: CodeGraphEdge,
+): void {
   db.prepare(`
     INSERT INTO code_graph_edges (edge_id, repo, run_id, from_node_id, to_node_id, edge_kind, data_label, ordinal, confidence, source)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -57,12 +80,25 @@ export function upsertGraphEdge(db: Database.Database, repo: string, runId: stri
       confidence = MAX(code_graph_edges.confidence, excluded.confidence),
       source = CASE WHEN code_graph_edges.source != excluded.source THEN 'hybrid' ELSE excluded.source END
   `).run(
-    edge.edgeId, repo, runId, edge.fromNodeId, edge.toNodeId,
-    edge.edgeKind, edge.dataLabel, edge.ordinal, edge.confidence, edge.source,
+    edge.edgeId,
+    repo,
+    runId,
+    edge.fromNodeId,
+    edge.toNodeId,
+    edge.edgeKind,
+    edge.dataLabel,
+    edge.ordinal,
+    edge.confidence,
+    edge.source,
   );
 }
 
-export function upsertGraphPath(db: Database.Database, repo: string, runId: string, path: CodeGraphPath): void {
+export function upsertGraphPath(
+  db: Database.Database,
+  repo: string,
+  runId: string,
+  path: CodeGraphPath,
+): void {
   db.prepare(`
     INSERT INTO code_graph_paths (path_id, repo, run_id, entry_node_id, target_node_id, hop_count, path_node_ids, path_edge_ids, has_sanitizer, sanitizer_nodes, confidence)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -70,64 +106,102 @@ export function upsertGraphPath(db: Database.Database, repo: string, runId: stri
       run_id = excluded.run_id,
       confidence = MAX(code_graph_paths.confidence, excluded.confidence)
   `).run(
-    path.pathId, repo, runId, path.entryNodeId, path.targetNodeId,
-    path.hopCount, JSON.stringify(path.nodeIds), JSON.stringify(path.edgeIds),
-    path.hasSanitizer ? 1 : 0, JSON.stringify(path.sanitizerNodeIds),
+    path.pathId,
+    repo,
+    runId,
+    path.entryNodeId,
+    path.targetNodeId,
+    path.hopCount,
+    JSON.stringify(path.nodeIds),
+    JSON.stringify(path.edgeIds),
+    path.hasSanitizer ? 1 : 0,
+    JSON.stringify(path.sanitizerNodeIds),
     path.confidence,
   );
 }
 
 // ── Query operations ─────────────────────────────────────────────────────
 
+// Exact column set consumed by rowToNode — avoids pulling updated_at/created_at
+// from monorepo-scale node tables.
+const NODE_COLUMNS =
+  "node_id, file_path, start_line, symbol, node_kind, framework, metadata_json, confidence, source";
+
 export function getGraphNodesForRepo(db: Database.Database, repo: string): CodeGraphNode[] {
-  const rows = db.prepare(`SELECT * FROM code_graph_nodes WHERE repo = ?`).all(repo) as Array<Record<string, unknown>>;
+  const rows = db
+    .prepare(`SELECT ${NODE_COLUMNS} FROM code_graph_nodes WHERE repo = ?`)
+    .all(repo) as Array<Record<string, unknown>>;
   return rows.map(rowToNode);
 }
 
 export function getEntryNodes(db: Database.Database, repo: string): CodeGraphNode[] {
-  const rows = db.prepare(
-    `SELECT * FROM code_graph_nodes WHERE repo = ? AND node_kind LIKE 'entry-%'`,
-  ).all(repo) as Array<Record<string, unknown>>;
+  const rows = db
+    .prepare(
+      `SELECT ${NODE_COLUMNS} FROM code_graph_nodes WHERE repo = ? AND node_kind LIKE 'entry-%'`,
+    )
+    .all(repo) as Array<Record<string, unknown>>;
   return rows.map(rowToNode);
 }
 
 export function getGraphNodeByFileAndLine(
-  db: Database.Database, repo: string, filePath: string, startLine: number, tolerance: number = 10,
+  db: Database.Database,
+  repo: string,
+  filePath: string,
+  startLine: number,
+  tolerance: number = 10,
 ): CodeGraphNode | null {
-  const row = db.prepare(
-    `SELECT * FROM code_graph_nodes WHERE repo = ? AND file_path = ? AND ABS(start_line - ?) <= ? ORDER BY ABS(start_line - ?) ASC LIMIT 1`,
-  ).get(repo, filePath, startLine, tolerance, startLine) as Record<string, unknown> | undefined;
+  const row = db
+    .prepare(
+      `SELECT * FROM code_graph_nodes WHERE repo = ? AND file_path = ? AND ABS(start_line - ?) <= ? ORDER BY ABS(start_line - ?) ASC LIMIT 1`,
+    )
+    .get(repo, filePath, startLine, tolerance, startLine) as Record<string, unknown> | undefined;
   return row ? rowToNode(row) : null;
 }
 
-export function getPathsToNode(db: Database.Database, repo: string, targetNodeId: string): CodeGraphPath[] {
-  const rows = db.prepare(
-    `SELECT * FROM code_graph_paths WHERE repo = ? AND target_node_id = ? ORDER BY hop_count ASC`,
-  ).all(repo, targetNodeId) as Array<Record<string, unknown>>;
+// Exact column set consumed by rowToPath.
+const PATH_COLUMNS =
+  "path_id, entry_node_id, target_node_id, hop_count, path_node_ids, path_edge_ids, has_sanitizer, sanitizer_nodes, confidence";
+
+export function getPathsToNode(
+  db: Database.Database,
+  repo: string,
+  targetNodeId: string,
+): CodeGraphPath[] {
+  const rows = db
+    .prepare(
+      `SELECT ${PATH_COLUMNS} FROM code_graph_paths WHERE repo = ? AND target_node_id = ? ORDER BY hop_count ASC`,
+    )
+    .all(repo, targetNodeId) as Array<Record<string, unknown>>;
   return rows.map(rowToPath);
 }
 
 export function getEdgesFromNode(db: Database.Database, fromNodeId: string): CodeGraphEdge[] {
-  const rows = db.prepare(
-    `SELECT * FROM code_graph_edges WHERE from_node_id = ?`,
-  ).all(fromNodeId) as Array<Record<string, unknown>>;
+  const rows = db
+    .prepare(`SELECT * FROM code_graph_edges WHERE from_node_id = ?`)
+    .all(fromNodeId) as Array<Record<string, unknown>>;
   return rows.map(rowToEdge);
 }
 
 export function getEdgesToNode(db: Database.Database, toNodeId: string): CodeGraphEdge[] {
-  const rows = db.prepare(
-    `SELECT * FROM code_graph_edges WHERE to_node_id = ?`,
-  ).all(toNodeId) as Array<Record<string, unknown>>;
+  const rows = db
+    .prepare(`SELECT * FROM code_graph_edges WHERE to_node_id = ?`)
+    .all(toNodeId) as Array<Record<string, unknown>>;
   return rows.map(rowToEdge);
 }
 
 export function getNodeById(db: Database.Database, nodeId: string): CodeGraphNode | null {
-  const row = db.prepare(`SELECT * FROM code_graph_nodes WHERE node_id = ?`).get(nodeId) as Record<string, unknown> | undefined;
+  const row = db.prepare(`SELECT * FROM code_graph_nodes WHERE node_id = ?`).get(nodeId) as
+    | Record<string, unknown>
+    | undefined;
   return row ? rowToNode(row) : null;
 }
 
 /** Remove graph data for files that have been modified since last indexed. */
-export function invalidateStaleNodes(db: Database.Database, repo: string, staleFilePaths: string[]): number {
+export function invalidateStaleNodes(
+  db: Database.Database,
+  repo: string,
+  staleFilePaths: string[],
+): number {
   if (staleFilePaths.length === 0) return 0;
 
   // Process in chunks to avoid exceeding V8 argument limits on large arrays
@@ -152,9 +226,9 @@ export function invalidateStaleNodes(db: Database.Database, repo: string, staleF
       )
     `).run(repo, repo, ...chunk, repo, ...chunk);
 
-    const result = db.prepare(
-      `DELETE FROM code_graph_nodes WHERE repo = ? AND file_path IN (${placeholders})`,
-    ).run(repo, ...chunk);
+    const result = db
+      .prepare(`DELETE FROM code_graph_nodes WHERE repo = ? AND file_path IN (${placeholders})`)
+      .run(repo, ...chunk);
     totalRemoved += result.changes;
   }
 
