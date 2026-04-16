@@ -4,21 +4,43 @@ Thanks for your interest in contributing!
 
 ## Getting Started
 
-1. Fork the repo and clone your fork
-2. Install dependencies: `pnpm install`
-3. Run tests: `pnpm test`
-4. Run type checks: `pnpm typecheck`
+One command, deterministic, loud on failure:
 
-Requires Node 22+.
+```sh
+git clone <your-fork>
+cd Kuzushi
+pnpm setup          # verifies Node 22+, pins pnpm via corepack, runs pnpm install
+pnpm doctor         # re-check the environment at any time (read-only)
+pnpm test           # confirm everything works
+```
+
+Requires Node 22+. The repo has `.nvmrc` / `.tool-versions` so `nvm use`,
+`asdf install`, and `mise install` all pick up the right version
+automatically. pnpm is pinned via `packageManager` in `package.json` and
+activated by `pnpm setup` through corepack — you don't need to install
+pnpm yourself.
+
+Using VS Code / Codespaces? Open the repo and "Reopen in Container"; the
+`.devcontainer/` definition runs bootstrap + installs semgrep + python for you.
 
 ## Development
 
 ```sh
-pnpm dev -- /path/to/repo    # run in dev mode
-pnpm typecheck                # type check
-pnpm test                     # run tests
+pnpm dev -- /path/to/repo    # run the CLI in dev mode (tsx)
+pnpm typecheck                # type check src/
+pnpm check:types              # type check src + benchmarks + perf in parallel
+pnpm test                     # run unit tests
 pnpm test:coverage            # tests + coverage
-pnpm build                    # compile to dist/
+pnpm build                    # compile to dist/ (incremental, fast)
+pnpm build:clean              # wipe dist/ and rebuild from scratch
+```
+
+Benchmark corpus setup:
+
+```sh
+pnpm setup:benchmarks list
+pnpm setup:benchmarks govwa juice-shop
+pnpm setup:benchmarks all
 ```
 
 ## Submitting Changes

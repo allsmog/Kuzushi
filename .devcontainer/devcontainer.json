@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "Kuzushi",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.12",
+      "installTools": true
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "containerEnv": {
+    "COREPACK_ENABLE_STRICT": "0",
+    "KUZUSHI_DEV": "1"
+  },
+  "remoteEnv": {
+    "NODE_OPTIONS": "--enable-source-maps"
+  },
+  "postCreateCommand": "sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends jq sqlite3 && sudo corepack enable && pip install --user --no-cache-dir semgrep && bash scripts/bootstrap.sh --strict",
+  "postStartCommand": "bash scripts/doctor.sh || true",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "biomejs.biome",
+        "ms-python.python",
+        "dbaeumer.vscode-eslint"
+      ],
+      "settings": {
+        "editor.defaultFormatter": "biomejs.biome",
+        "typescript.tsdk": "node_modules/typescript/lib",
+        "typescript.enablePromptUseWorkspaceTsdk": true
+      }
+    }
+  },
+  "forwardPorts": [3100],
+  "portsAttributes": {
+    "3100": { "label": "Kuzushi SSE stream", "onAutoForward": "silent" }
+  },
+  "waitFor": "postCreateCommand",
+  "remoteUser": "node"
+}
