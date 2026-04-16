@@ -164,6 +164,33 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     }
   }
 
+  // Operator context intake — if persisted context or threat model exists, offer review
+  if (!opts.resume && process.stdout.isTTY) {
+    const { loadOperatorScanContext } = await import("../../operator-context.js");
+    const { loadPersistentThreatModel } = await import("../../threat-model-renderer.js");
+    const { runContextIntake, runThreatModelEditor } = await import("../../ui/setup.js");
+
+    const existingContext = loadOperatorScanContext(repoRoot);
+    if (existingContext) {
+      const intakeOutcome = await runContextIntake(uiStore, existingContext, repoName, repoRoot);
+      if (intakeOutcome.action === "cancel") {
+        resetTerminalOutput();
+        cleanupUI();
+        return;
+      }
+    }
+
+    const existingThreatModel = loadPersistentThreatModel(repoRoot);
+    if (existingThreatModel) {
+      const tmOutcome = await runThreatModelEditor(uiStore, existingThreatModel, repoName, repoRoot);
+      if (tmOutcome.action === "cancel") {
+        resetTerminalOutput();
+        cleanupUI();
+        return;
+      }
+    }
+  }
+
   const modeConfig = applyScanCommandConfigOverrides(
     loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true }),
     opts,

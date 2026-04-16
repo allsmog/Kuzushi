@@ -243,6 +243,14 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             }
           }
 
+          // 1C-pre2: Operator-provided context — inject operator-declared trust, scope, architecture
+          {
+            const opCtx = event.payload.operatorContext;
+            if (typeof opCtx === "string" && opCtx.length > 0) {
+              extraSections.push(opCtx);
+            }
+          }
+
           // 1C: Precedents — inject org-specific architectural facts and signal criteria
           {
             const precedents = event.payload.precedents as Precedents | undefined;

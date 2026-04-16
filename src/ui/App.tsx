@@ -25,6 +25,8 @@ import { SetupWizard } from "./components/SetupWizard.js";
 import { ConfigConfirm } from "./components/ConfigConfirm.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
 import { InteractiveReview } from "./components/InteractiveReview.js";
+import { ContextIntake } from "./components/ContextIntake.js";
+import { ThreatModelEditor } from "./components/ThreatModelEditor.js";
 import { CompactHeader } from "./components/CompactHeader.js";
 import { NoticeRail } from "./components/NoticeRail.js";
 import { CopilotShell } from "./components/CopilotShell.js";
@@ -118,6 +120,22 @@ export function App({ store }: AppProps): React.ReactElement {
       {state.mode === "preflight" && state.preflight?.kind === "credentials" && (
         <CredentialPrompt
           onComplete={state.preflight.onComplete}
+          onCancel={state.preflight.onCancel}
+        />
+      )}
+      {state.mode === "preflight" && state.preflight?.kind === "context-intake" && (
+        <ContextIntake
+          initialContext={state.preflight.initialContext}
+          onComplete={state.preflight.onComplete}
+          onSkip={state.preflight.onSkip}
+          onCancel={state.preflight.onCancel}
+        />
+      )}
+      {state.mode === "preflight" && state.preflight?.kind === "threat-editor" && (
+        <ThreatModelEditor
+          threatModel={state.preflight.threatModel}
+          onComplete={state.preflight.onComplete}
+          onSkip={state.preflight.onSkip}
           onCancel={state.preflight.onCancel}
         />
       )}

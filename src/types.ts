@@ -750,6 +750,84 @@ export interface KuzushiConfig {
   };
 }
 
+// ── Operator Scan Context (Intake UI) ──
+
+/** Trust-level annotation for external dependencies. */
+export type TrustLevel = "trusted" | "semi-trusted" | "untrusted" | "unknown";
+
+/** Sensitivity classification for data tags. */
+export type DataSensitivity = "public" | "internal" | "confidential" | "restricted";
+
+/** Review status of an individual context item during operator intake. */
+export type IntakeItemStatus = "accepted" | "edited" | "deleted" | "skipped" | "added";
+
+/** A single item in the operator context, with review tracking. */
+export interface OperatorContextItem<T = string> {
+  value: T;
+  status: IntakeItemStatus;
+  /** Original auto-generated value before operator edits. */
+  original?: T;
+  /** Free-text note from operator. */
+  note?: string;
+}
+
+/** Trust context: deployment, infrastructure, external defenses, confirmed mitigations. */
+export interface TrustContext {
+  deploymentModel: OperatorContextItem[];
+  infrastructure: OperatorContextItem[];
+  externalDefenses: OperatorContextItem[];
+  confirmedMitigations: OperatorContextItem[];
+}
+
+/** Scope prioritization: high/low value paths, sensitive data tags. */
+export interface ScopePrioritization {
+  highValuePaths: OperatorContextItem[];
+  lowValuePaths: OperatorContextItem[];
+  sensitiveDataTags: OperatorContextItem<{
+    dataType: string;
+    sensitivity: DataSensitivity;
+    locations: string[];
+  }>[];
+}
+
+/** Architecture context: entry points, external deps with trust levels, data flows. */
+export interface ArchitectureContext {
+  entryPoints: OperatorContextItem<{
+    kind: string; path: string; method?: string; description?: string;
+  }>[];
+  externalDeps: OperatorContextItem<{
+    name: string; kind: string; trustLevel: TrustLevel; description?: string;
+  }>[];
+  dataFlows: OperatorContextItem<{
+    from: string; to: string; dataClassification?: string; description?: string;
+  }>[];
+}
+
+/** Historical feedback: suppressed FP and confirmed TP fingerprints from prior runs. */
+export interface HistoricalFeedback {
+  suppressedFpFingerprints: OperatorContextItem<{
+    fingerprint: string; ruleId: string; reason?: string;
+  }>[];
+  confirmedTpFingerprints: OperatorContextItem<{
+    fingerprint: string; ruleId: string; description?: string;
+  }>[];
+}
+
+/** Operator-reviewed scan context persisted to .kuzushi/scan-context.json. */
+export interface OperatorScanContext {
+  version: string;
+  trust: TrustContext;
+  scope: ScopePrioritization;
+  architecture: ArchitectureContext;
+  historical: HistoricalFeedback;
+  /** Whether this context has been reviewed by a human. */
+  operatorReviewed: boolean;
+  /** ISO timestamp of last operator review. */
+  lastReviewedAt?: string;
+  /** ISO timestamp of auto-generation. */
+  generatedAt: string;
+}
+
 /** A persisted finding row from SQLite. */
 export interface FindingRow {
   taskId: TaskId;

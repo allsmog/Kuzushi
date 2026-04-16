@@ -256,6 +256,7 @@ export async function dispatchTriage(
           enrichedContext: state.enrichedRepoContext,
           precedents: state.precedents,
           threatModelSummary: buildThreatModelSummary(state.taskOutputs),
+          operatorContext: state.operatorContext,
           index: item.index,
           total: item.total,
         }),

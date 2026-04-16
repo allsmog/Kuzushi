@@ -4,11 +4,12 @@
  * The report-worker writes state updates via `store.update()`.
  * The Ink app subscribes via `store.subscribe()` and re-renders reactively.
  */
-import type { Verdict } from "../types.js";
+import type { Verdict, OperatorScanContext } from "../types.js";
 import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
 import type { ExploitChain } from "../types.js";
 import type { CodeCitation, AttackPathAnalysis, SecurityControl } from "../types.js";
+import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
 import type { WizardResult } from "./components/SetupWizard.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
@@ -48,6 +49,24 @@ export type PreflightState =
   | {
     kind: "credentials";
     onComplete: (choice: CredentialChoice) => void;
+    onCancel: () => void;
+  }
+  | {
+    kind: "context-intake";
+    repoName: string;
+    repoRoot: string;
+    initialContext: OperatorScanContext;
+    onComplete: (context: OperatorScanContext) => void;
+    onSkip: () => void;
+    onCancel: () => void;
+  }
+  | {
+    kind: "threat-editor";
+    repoName: string;
+    repoRoot: string;
+    threatModel: ThreatModelDocument;
+    onComplete: (updated: ThreatModelDocument) => void;
+    onSkip: () => void;
     onCancel: () => void;
   };
 
