@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { buildBoundaryManifest } from "../../monorepo/boundary-manifest.js";
 import { getActionableFindings, getTriagedFindingsForRepo } from "../../store.js";
+import { savePersistentThreatModel } from "../../threat-model-renderer.js";
+import type { ThreatModelDocument } from "../../agents/tasks/threat-modeling/types.js";
 import { isRecord } from "../../utils.js";
 import { safeJsonStringify } from "../../utils/safe-json.js";
 import type { PipelineStartEvent, ReportRequestedEvent, TaskCompleteEvent } from "../events.js";
@@ -51,6 +53,12 @@ export function registerTaintAnalysisArtifactWorker(
         safeJsonStringify(output["document"], 2),
         "utf-8",
       );
+      // Also save to persistent path for cross-run persistence
+      try {
+        savePersistentThreatModel(state.repoRoot, output["document"] as ThreatModelDocument);
+      } catch {
+        // best-effort — don't fail the pipeline
+      }
     } catch (error) {
       console.error(`[taint-analysis-artifact-worker] Failed to write threat-model.json: ${error}`);
     }

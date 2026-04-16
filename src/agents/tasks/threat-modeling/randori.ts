@@ -13,6 +13,7 @@ import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
 import { createLogger } from "../../../logger.js";
+import { loadPersistentThreatModel } from "../../../threat-model-renderer.js";
 import type { AgentTask, TaskContext } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import { resolveRandoriPluginPath } from "./resolve-randori.js";
@@ -51,8 +52,23 @@ function buildScopePrompt(maxElements: number, outputDir: string): string {
   ].join("\n");
 }
 
-function buildStridePrompt(maxThreats: number, outputDir: string): string {
+function buildStridePrompt(maxThreats: number, outputDir: string, previousModel?: ThreatModelDocument | null): string {
+  const preamble: string[] = [];
+  if (previousModel) {
+    preamble.push(
+      "The following threat model was generated in a previous scan. Use it as a starting point:",
+      "- Preserve threats that are still relevant to the current code.",
+      "- Remove threats that no longer apply (deleted code, fixed vulnerabilities).",
+      "- Add new threats for new code or changed attack surface.",
+      "- Preserve any userAnnotations, confirmedMitigations, and dismissedThreats from the previous model.",
+      "",
+      "Previous threat model:",
+      JSON.stringify(previousModel, null, 2),
+      "",
+    );
+  }
   return [
+    ...preamble,
     "You are running Stage S4 of a PASTA threat model analysis.",
     "",
     `Read the prior stage outputs from ${outputDir}/pasta-s1.json, pasta-s2.json, pasta-s3.json, and dfd.mmd.`,
@@ -92,6 +108,9 @@ export const threatModelRandoriTask: AgentTask<ScanOpts, { document: ThreatModel
     const cfg = resolveThreatModelConfig(context.config);
     const pluginPath = resolveRandoriPluginPath();
     const tag = "[threat-model-randori]";
+
+    // Load persistent threat model from a previous scan (if any) to seed S4
+    const previousModel = loadPersistentThreatModel(context.repoRoot);
 
     // Write artifacts directly into .kuzushi/runs/<runId>/randori-output/
     const artifactDir = path.join(".kuzushi", "runs", context.runId, "randori-output");
@@ -138,7 +157,7 @@ export const threatModelRandoriTask: AgentTask<ScanOpts, { document: ThreatModel
         log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
         try {
           for await (const message of context.runtime.query({
-            prompt: buildStridePrompt(cfg.maxThreats, artifactDir),
+            prompt: buildStridePrompt(cfg.maxThreats, artifactDir, previousModel),
             options: baseOpts,
           })) {
             if (message.type === "result" && typeof message.totalCostUsd === "number") {

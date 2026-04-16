@@ -20,6 +20,7 @@ import { registerDynamicAnalysisWorker } from "./workers/dynamic-analysis-worker
 import { registerPatchWorker } from "./workers/patch-worker.js";
 import { registerPatchVerifyWorker } from "./workers/patch-verify-worker.js";
 import { registerGitHubWorker } from "./workers/github-worker.js";
+import { registerBlameWorker } from "./workers/blame-worker.js";
 import { createPocExecutor } from "../poc-executor/index.js";
 
 export interface RegisterWorkersDeps {
@@ -92,6 +93,8 @@ export async function registerAllWorkers(bus: MessageBus, deps: RegisterWorkersD
     db: deps.db,
   });
 
+  registerBlameWorker(bus, { db: deps.db });
+
   registerTaintAnalysisArtifactWorker(bus, {
     db: deps.db,
   });
@@ -153,3 +156,4 @@ export * from "./workers/report-worker.js";
 export * from "./workers/taint-analysis-artifact-worker.js";
 export * from "./workers/taint-analysis-refinement-worker.js";
 export * from "./workers/dynamic-analysis-worker.js";
+export * from "./workers/blame-worker.js";

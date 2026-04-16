@@ -306,6 +306,8 @@ export interface FindingMetadata {
   patchRunIds?: string[];
   latestDynamicStatus?: DynamicAnalysisStatus;
   notes?: string[];
+  blame?: { sha: string; author: string; date: string; summary: string };
+  introducedIn?: string;
 }
 
 /** Heuristic repository metadata used to enrich triage/verification prompts. */

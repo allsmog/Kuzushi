@@ -103,6 +103,8 @@ export interface StoredFindingRecord {
   controls: SecurityControl[] | undefined;
   blindspots: string[] | undefined;
   sourceThreatIds: string[] | undefined;
+  blame?: { sha: string; author: string; date: string; summary: string };
+  introducedIn?: string;
 }
 
 const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
@@ -870,6 +872,9 @@ export function getActionableFindings(
       controls: detailsRecord ? parseControlsFromDetails(detailsRecord["controls"]) : undefined,
       blindspots: detailsRecord ? parseStringArrayFromDetails(detailsRecord["blindspots"]) : undefined,
       sourceThreatIds: detailsRecord ? parseStringArrayFromDetails(detailsRecord["source_threat_ids"]) : undefined,
+      blame: parseFindingMetadata(row.findingMetadataJson)?.blame,
+      introducedIn: parseFindingMetadata(row.findingMetadataJson)?.introducedIn
+        ?? parseFindingMetadata(row.findingMetadataJson)?.blame?.sha,
     };
   });
 }
@@ -1258,6 +1263,21 @@ function parseFindingMetadata(raw: string | null): FindingMetadata | undefined {
   if (patchRunIds.length > 0) metadata.patchRunIds = patchRunIds;
   if (latestDynamicStatus) metadata.latestDynamicStatus = latestDynamicStatus;
   if (notes.length > 0) metadata.notes = notes;
+
+  // Git blame attribution
+  const blameRaw = record["blame"];
+  if (blameRaw && typeof blameRaw === "object" && !Array.isArray(blameRaw)) {
+    const b = blameRaw as Record<string, unknown>;
+    const sha = asOptionalString(b["sha"]);
+    const author = asOptionalString(b["author"]);
+    const date = asOptionalString(b["date"]);
+    const summary = asOptionalString(b["summary"]);
+    if (sha && author) {
+      metadata.blame = { sha, author, date: date ?? "", summary: summary ?? "" };
+    }
+  }
+  const introducedIn = asOptionalString(record["introducedIn"]);
+  if (introducedIn) metadata.introducedIn = introducedIn;
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
