@@ -19,12 +19,13 @@ import type {
   CodeGraphNode,
   CodeGraphPath,
 } from "../../../src/agents/tasks/code-graph/types.js";
-import { migration019 } from "../../../src/migrations/019_add_code_graph_tables.js";
+import { migration100 } from "../../../src/migrations/100_schema_reset.js";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
   db.pragma("journal_mode = WAL");
-  migration019.up(db);
+  db.pragma("foreign_keys = ON");
+  migration100.up(db);
   return db;
 }
 
@@ -73,7 +74,7 @@ describe("Code Graph Store", () => {
   describe("upsertGraphNode", () => {
     it("inserts a new node", () => {
       const node = makeNode();
-      upsertGraphNode(db, "test-repo", "run-1", node);
+      upsertGraphNode(db, "test-repo", node);
 
       const nodes = getGraphNodesForRepo(db, "test-repo");
       expect(nodes).toHaveLength(1);
@@ -84,10 +85,10 @@ describe("Code Graph Store", () => {
 
     it("upserts with higher confidence", () => {
       const node = makeNode({ confidence: 0.5 });
-      upsertGraphNode(db, "test-repo", "run-1", node);
+      upsertGraphNode(db, "test-repo", node);
 
       const updated = makeNode({ confidence: 0.9 });
-      upsertGraphNode(db, "test-repo", "run-2", updated);
+      upsertGraphNode(db, "test-repo", updated);
 
       const nodes = getGraphNodesForRepo(db, "test-repo");
       expect(nodes).toHaveLength(1);
@@ -96,10 +97,10 @@ describe("Code Graph Store", () => {
 
     it("marks hybrid source on conflict with different source", () => {
       const staticNode = makeNode({ source: "static" });
-      upsertGraphNode(db, "test-repo", "run-1", staticNode);
+      upsertGraphNode(db, "test-repo", staticNode);
 
       const llmNode = makeNode({ source: "llm" });
-      upsertGraphNode(db, "test-repo", "run-2", llmNode);
+      upsertGraphNode(db, "test-repo", llmNode);
 
       const nodes = getGraphNodesForRepo(db, "test-repo");
       expect(nodes[0]!.source).toBe("hybrid");
@@ -108,11 +109,10 @@ describe("Code Graph Store", () => {
 
   describe("getEntryNodes", () => {
     it("returns only entry nodes", () => {
-      upsertGraphNode(db, "test-repo", "run-1", makeNode({ nodeKind: "entry-http" }));
+      upsertGraphNode(db, "test-repo", makeNode({ nodeKind: "entry-http" }));
       upsertGraphNode(
         db,
         "test-repo",
-        "run-1",
         makeNode({
           nodeId: makeNodeId("test-repo", "src/service.ts", 20, "doWork"),
           filePath: "src/service.ts",
@@ -130,7 +130,7 @@ describe("Code Graph Store", () => {
 
   describe("getGraphNodeByFileAndLine", () => {
     it("finds node by exact file and line", () => {
-      upsertGraphNode(db, "test-repo", "run-1", makeNode());
+      upsertGraphNode(db, "test-repo", makeNode());
 
       const found = getGraphNodeByFileAndLine(db, "test-repo", "src/app.ts", 10);
       expect(found).not.toBeNull();
@@ -138,14 +138,14 @@ describe("Code Graph Store", () => {
     });
 
     it("finds node within tolerance", () => {
-      upsertGraphNode(db, "test-repo", "run-1", makeNode({ startLine: 10 }));
+      upsertGraphNode(db, "test-repo", makeNode({ startLine: 10 }));
 
       const found = getGraphNodeByFileAndLine(db, "test-repo", "src/app.ts", 12, 5);
       expect(found).not.toBeNull();
     });
 
     it("returns null when out of tolerance", () => {
-      upsertGraphNode(db, "test-repo", "run-1", makeNode({ startLine: 10 }));
+      upsertGraphNode(db, "test-repo", makeNode({ startLine: 10 }));
 
       const found = getGraphNodeByFileAndLine(db, "test-repo", "src/app.ts", 25, 5);
       expect(found).toBeNull();
@@ -156,8 +156,8 @@ describe("Code Graph Store", () => {
     it("inserts and queries edges", () => {
       const n1 = makeNode({ nodeId: "node-1", filePath: "a.ts" });
       const n2 = makeNode({ nodeId: "node-2", filePath: "b.ts" });
-      upsertGraphNode(db, "test-repo", "run-1", n1);
-      upsertGraphNode(db, "test-repo", "run-1", n2);
+      upsertGraphNode(db, "test-repo", n1);
+      upsertGraphNode(db, "test-repo", n2);
 
       const edge: CodeGraphEdge = {
         edgeId: makeEdgeId("node-1", "node-2", "calls"),
@@ -169,7 +169,7 @@ describe("Code Graph Store", () => {
         confidence: 0.9,
         source: "llm",
       };
-      upsertGraphEdge(db, "test-repo", "run-1", edge);
+      upsertGraphEdge(db, "test-repo", edge);
 
       const edges = getEdgesFromNode(db, "node-1");
       expect(edges).toHaveLength(1);
@@ -182,8 +182,8 @@ describe("Code Graph Store", () => {
     it("inserts and queries paths", () => {
       const n1 = makeNode({ nodeId: "entry-1" });
       const n2 = makeNode({ nodeId: "target-1" });
-      upsertGraphNode(db, "test-repo", "run-1", n1);
-      upsertGraphNode(db, "test-repo", "run-1", n2);
+      upsertGraphNode(db, "test-repo", n1);
+      upsertGraphNode(db, "test-repo", n2);
 
       const path: CodeGraphPath = {
         pathId: makePathId("entry-1", "target-1", ["entry-1", "mid-1", "target-1"]),
@@ -196,7 +196,7 @@ describe("Code Graph Store", () => {
         sanitizerNodeIds: ["mid-1"],
         confidence: 0.8,
       };
-      upsertGraphPath(db, "test-repo", "run-1", path);
+      upsertGraphPath(db, "test-repo", path);
 
       const paths = getPathsToNode(db, "test-repo", "target-1");
       expect(paths).toHaveLength(1);
@@ -210,8 +210,8 @@ describe("Code Graph Store", () => {
     it("removes nodes and related edges/paths for stale files", () => {
       const n1 = makeNode({ nodeId: "n1", filePath: "src/old.ts" });
       const n2 = makeNode({ nodeId: "n2", filePath: "src/fresh.ts" });
-      upsertGraphNode(db, "test-repo", "run-1", n1);
-      upsertGraphNode(db, "test-repo", "run-1", n2);
+      upsertGraphNode(db, "test-repo", n1);
+      upsertGraphNode(db, "test-repo", n2);
 
       const edge: CodeGraphEdge = {
         edgeId: "e1",
@@ -223,7 +223,7 @@ describe("Code Graph Store", () => {
         confidence: 1.0,
         source: "static",
       };
-      upsertGraphEdge(db, "test-repo", "run-1", edge);
+      upsertGraphEdge(db, "test-repo", edge);
 
       const removed = invalidateStaleNodes(db, "test-repo", ["src/old.ts"]);
       expect(removed).toBe(1);

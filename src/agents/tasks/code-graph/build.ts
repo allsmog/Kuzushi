@@ -245,8 +245,8 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
         }
       }
 
-      for (const node of allNodes) upsertGraphNode(db, repo, runId, node);
-      for (const edge of allEdges) upsertGraphEdge(db, repo, runId, edge);
+      for (const node of allNodes) upsertGraphNode(db, repo, node);
+      for (const edge of allEdges) upsertGraphEdge(db, repo, edge);
     }
 
     log.info(
@@ -371,10 +371,10 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
                 source: "llm",
               };
               allEdges.push(edge);
-              if (db) upsertGraphEdge(db, repo, runId, edge);
+              if (db) upsertGraphEdge(db, repo, edge);
             }
 
-            if (db) upsertGraphNode(db, repo, runId, node);
+            if (db) upsertGraphNode(db, repo, node);
             prevNodeId = nodeId;
           }
 
@@ -484,8 +484,8 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
             prevNodeId = nodeId;
 
             if (db) {
-              upsertGraphNode(db, repo, runId, node);
-              upsertGraphEdge(db, repo, runId, edge);
+              upsertGraphNode(db, repo, node);
+              upsertGraphEdge(db, repo, edge);
             }
           }
 
@@ -504,7 +504,7 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
             confidence: minConfidence,
           };
           allPaths.push(pathObj);
-          if (db) upsertGraphPath(db, repo, runId, pathObj);
+          if (db) upsertGraphPath(db, repo, pathObj);
         }
 
         tracedEntryPoints++;

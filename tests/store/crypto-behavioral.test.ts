@@ -36,6 +36,9 @@ describe("crypto behavioral store", () => {
 
   it("round-trips crypto behavioral runs by fingerprint", () => {
     const db = initDb(":memory:");
+    // Synthetic fingerprint doesn't exist in `findings`; disable FK for this
+    // narrow round-trip test.
+    db.pragma("foreign_keys = OFF");
 
     insertCryptoBehavioralRun(db, {
       runId: "run-1",
