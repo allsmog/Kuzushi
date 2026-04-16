@@ -9,7 +9,7 @@ import { coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
-import type { AgentTask, TaskContext } from "../../types.js";
+import type { AgentTask } from "../../types.js";
 import { resolveTaskModel, resolveTaskRuntime } from "../runtime-overrides.js";
 
 const log = createLogger({ stage: "taint-cwe-select" });

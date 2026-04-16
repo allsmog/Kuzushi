@@ -9,7 +9,7 @@ export function createBus(config: KuzushiConfig): MessageBus {
       return new InProcessBus();
     default:
       throw new Error(
-        `Unknown bus backend: ${String(config.busBackend)}. ` + "Expected one of: in-process.",
+        `Unknown bus backend: ${String(config.busBackend)}. Expected one of: in-process.`,
       );
   }
 }

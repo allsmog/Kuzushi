@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -166,7 +166,7 @@ describe("cache operations", () => {
 
   it("produces different hashes for different inputs", () => {
     const hash1 = computeCacheHash(TEMPLATE, REFERENCE);
-    const hash2 = computeCacheHash(TEMPLATE + " modified", REFERENCE);
+    const hash2 = computeCacheHash(`${TEMPLATE} modified`, REFERENCE);
     expect(hash1).not.toBe(hash2);
   });
 });

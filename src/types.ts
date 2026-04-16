@@ -1,13 +1,7 @@
 import type { EvidenceAnchor } from "./agents/tasks/threat-modeling/types.js";
 import type { DiscoveredModule } from "./discovery/types.js";
 import type { QualityGateConfig } from "./quality-gate-types.js";
-import type {
-  EngineProvenance,
-  ProofState,
-  TaintPathStep,
-  TaskConfig,
-  TaskId,
-} from "./scanners/types.js";
+import type { ProofState, TaskConfig, TaskId } from "./scanners/types.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 
 export type { CryptoBehavioralRun } from "./crypto-behavioral/types.js";

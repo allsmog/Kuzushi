@@ -8,7 +8,7 @@ import type { AgentHistoryEntry, AgentSession } from "./types.js";
 
 const log = getLogger("batch-fallback");
 
-import type { AgentBatchRequest, AgentEffort, AgentRuntime } from "./types.js";
+import type { AgentEffort, AgentRuntime } from "./types.js";
 
 export const DEFAULT_READ_ONLY_TOOLS = [
   "Read",
@@ -106,7 +106,7 @@ export async function runStructuredAgentQuery(
   const cacheKey = inflightCache.generateKey(
     args.model,
     args.systemPromptPrefix ?? "",
-    args.prompt + "\x00" + extraKeyParts,
+    `${args.prompt}\x00${extraKeyParts}`,
     args.cwd,
   );
 

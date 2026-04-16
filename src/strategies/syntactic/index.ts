@@ -4,7 +4,6 @@
 
 import { createLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
-import type { RepoContext } from "../../types.js";
 import { toErrorMessage } from "../../utils.js";
 import type {
   AnalysisStrategy,

@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { StrategyRegistry } from "../../src/strategies/registry.js";
-import type {
-  AnalysisStrategy,
-  StrategyInput,
-  StrategyResult,
-} from "../../src/strategies/types.js";
+import type { AnalysisStrategy, StrategyResult } from "../../src/strategies/types.js";
 
 function makeStrategy(
   id: string,

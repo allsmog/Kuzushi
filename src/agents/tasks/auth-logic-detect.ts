@@ -6,7 +6,7 @@ import { getLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { AgentTask } from "../types.js";
 import { computeDetectionFingerprint } from "./detection-task-utils.js";
 import { resolveTaskModel, resolveTaskRuntime } from "./runtime-overrides.js";
 import { resolveThreatModelOutput } from "./threat-model-guidance.js";

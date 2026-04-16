@@ -18,10 +18,8 @@ import type { MessageBus } from "../bus/types.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
 import type {
-  CopilotModule,
   ModuleContext,
   ModuleInfo,
-  ModuleSpecifier,
   ToolExecutionContext,
   ToolResult,
 } from "../modules/types.js";
@@ -337,7 +335,7 @@ export class CopilotCore {
     let packageDir: string;
 
     try {
-      packageDir = path.dirname(require.resolve(packageName + "/package.json"));
+      packageDir = path.dirname(require.resolve(`${packageName}/package.json`));
     } catch {
       throw new Error(
         `Package "${packageName}" is not installed. ` + `Install it with: pnpm add ${packageName}`,

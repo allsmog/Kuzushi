@@ -136,8 +136,6 @@ export function formatRunOutput(result: RunResult, format: "text" | "json" | "qu
 
     case "quiet":
       return "";
-
-    case "text":
     default:
       return result.toolResult.output;
   }

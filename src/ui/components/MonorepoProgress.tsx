@@ -114,7 +114,7 @@ function ModuleLine({
   const nameWidth = Math.max(16, Math.min(26, terminalCardWidth(96, 60) - 44));
   const paddedName =
     mod.name.length > nameWidth
-      ? mod.name.slice(0, nameWidth - 1) + "…"
+      ? `${mod.name.slice(0, nameWidth - 1)}…`
       : mod.name.padEnd(nameWidth);
 
   if (mod.status === "complete") {

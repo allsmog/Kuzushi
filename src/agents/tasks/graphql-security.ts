@@ -1,7 +1,6 @@
 import { createLogger } from "../../logger.js";
 import {
   languageAntiHallucinationExtras,
-  languageInvestigationModule,
   languageTuningModule,
 } from "../../prompts/language-tuning.js";
 import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";

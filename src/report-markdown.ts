@@ -255,7 +255,7 @@ function sanitizeLanguageId(lang: string): string {
   return lang.replace(/[^a-z0-9+#.-]/gi, "").slice(0, 20) || "text";
 }
 
-function parsePreconditions(raw: string | null): string[] {
+function _parsePreconditions(raw: string | null): string[] {
   if (!raw) {
     return [];
   }

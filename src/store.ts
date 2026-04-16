@@ -556,7 +556,7 @@ export function getTotalCost(db: Database.Database, repo?: string): number {
 }
 
 /** Get total verification cost in USD from persisted findings. */
-function getTotalVerificationCost(db: Database.Database, repo?: string): number {
+function _getTotalVerificationCost(db: Database.Database, repo?: string): number {
   const query = repo
     ? "SELECT COALESCE(SUM(COALESCE(verify_cost_usd, 0)), 0) as total FROM findings WHERE repo = ?"
     : "SELECT COALESCE(SUM(COALESCE(verify_cost_usd, 0)), 0) as total FROM findings";
@@ -582,7 +582,7 @@ export function getTotalPocHarnessCost(db: Database.Database, repo?: string): nu
 }
 
 /** Get verification counts grouped by exploitability outcome. */
-function getVerificationCounts(
+function _getVerificationCounts(
   db: Database.Database,
   repo?: string,
 ): { exploitable: number; notExploitable: number } {
@@ -1204,7 +1204,7 @@ function parseDynamicAnalysisStatus(raw: string | null): DynamicAnalysisStatus |
   }
 }
 
-function parsePatchStatus(raw: string | null): PatchStatus | undefined {
+function _parsePatchStatus(raw: string | null): PatchStatus | undefined {
   switch (raw) {
     case "APPLY_FAILED":
     case "BUILD_FAILED":
@@ -1261,7 +1261,7 @@ export function updateRunCost(db: Database.Database, runId: string, costUsd: num
 }
 
 /** Persist composite confidence result on a finding row. */
-function updateFindingCompositeConfidence(
+function _updateFindingCompositeConfidence(
   db: Database.Database,
   fingerprint: string,
   compositeConfidence: number,
@@ -1617,7 +1617,7 @@ export function saveAssertionResults(
 }
 
 /** Get assertion results for a specific run. */
-function getRunAssertions(
+function _getRunAssertions(
   db: Database.Database,
   runId: string,
 ): Array<{
@@ -1650,14 +1650,14 @@ function getRunAssertions(
 }
 
 /** Update prompt hash for a pipeline run. */
-function updatePromptHash(db: Database.Database, runId: string, promptHash: string): void {
+function _updatePromptHash(db: Database.Database, runId: string, promptHash: string): void {
   db.prepare(`
     UPDATE pipeline_runs SET prompt_hash = ?, updated_at = datetime('now') WHERE run_id = ?
   `).run(promptHash, runId);
 }
 
 /** Update assertions JSON summary for a pipeline run. */
-function updateRunAssertions(db: Database.Database, runId: string, assertionsJson: string): void {
+function _updateRunAssertions(db: Database.Database, runId: string, assertionsJson: string): void {
   db.prepare(`
     UPDATE pipeline_runs SET assertions_json = ?, updated_at = datetime('now') WHERE run_id = ?
   `).run(assertionsJson, runId);

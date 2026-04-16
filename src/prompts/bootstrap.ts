@@ -70,7 +70,7 @@ export function loadBootstrapContext(repoRoot: string, config: BootstrapConfig):
     if (totalChars + content.length > maxTotal) {
       const remaining = maxTotal - totalChars;
       if (remaining > 100) {
-        content = content.slice(0, remaining) + `\n[... truncated to fit total budget]`;
+        content = `${content.slice(0, remaining)}\n[... truncated to fit total budget]`;
         sections.push(formatSection(filePath, content));
       }
       break;

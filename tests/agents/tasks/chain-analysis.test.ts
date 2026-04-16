@@ -8,7 +8,7 @@ const { buildPrompt, parseOutput } = __chainAnalysisInternals;
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
     taskId: "test",
-    fingerprint: "fp-" + Math.random().toString(36).slice(2, 8),
+    fingerprint: `fp-${Math.random().toString(36).slice(2, 8)}`,
     ruleId: "test/rule",
     filePath: "src/app.ts",
     startLine: 10,

@@ -27,7 +27,6 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    tasks: [],
     tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],

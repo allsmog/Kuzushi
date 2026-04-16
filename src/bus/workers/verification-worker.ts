@@ -2,7 +2,6 @@ import type Database from "better-sqlite3";
 import type { AgentActivity } from "../../agent-runtime/execution.js";
 import type { AgentHistoryEntry, AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
-import { formatBypassForPrompt, getBypassKnowledge } from "../../bypass-knowledge.js";
 import type { KnowledgeRegistry } from "../../knowledge/types.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
 import { generatePocHarness } from "../../poc-harness.js";

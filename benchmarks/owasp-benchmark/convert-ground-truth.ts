@@ -101,5 +101,5 @@ const dataset: GroundTruthDataset = {
 };
 
 const outputPath = join(__dirname, "ground-truth.json");
-writeFileSync(outputPath, JSON.stringify(dataset, null, 2) + "\n");
+writeFileSync(outputPath, `${JSON.stringify(dataset, null, 2)}\n`);
 console.log(`Written: ${outputPath}`);

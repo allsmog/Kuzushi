@@ -11,7 +11,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -481,7 +481,7 @@ async function main(): Promise<void> {
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
   }
-  writeFileSync(outputPath, JSON.stringify(metrics, null, 2) + "\n");
+  writeFileSync(outputPath, `${JSON.stringify(metrics, null, 2)}\n`);
   console.log(chalk.green(`\nMetrics written to: ${outputPath}`));
 }
 

@@ -95,4 +95,4 @@ if (!existsSync(outputDir)) {
   mkdirSync(outputDir, { recursive: true });
 }
 
-writeFileSync(outputPath, JSON.stringify(baseline, null, 2) + "\n");
+writeFileSync(outputPath, `${JSON.stringify(baseline, null, 2)}\n`);

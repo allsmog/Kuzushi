@@ -129,7 +129,7 @@ const DESIGN_DECISION_RULES: DesignDecisionRule[] = [
     match(finding) {
       const text = buildMatchText(finding);
       if (hasExploitIndicators(text)) return false;
-      const fullText = text + " " + finding.filePath;
+      const fullText = `${text} ${finding.filePath}`;
       return LEGACY_PATTERNS.test(text) && COMPAT_CONTEXT.test(fullText);
     },
     rationale(finding) {

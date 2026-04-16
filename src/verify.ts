@@ -1,6 +1,5 @@
 import { cleanupBatchFiles, writeBatchFile } from "./agent-runtime/batch-files.js";
 import {
-  type AgentActivityCallback,
   type AgentRuntimeOptions,
   extractJson,
   resolveDefaultReadOnlyTools,
@@ -117,12 +116,12 @@ export function verificationSystemPromptPrefix(
   const repoSection = formatRepoContext(repoContext);
   const enrichedSection = formatEnrichedRepoContext(enrichedContext);
   const repoBlock =
-    repoSection.length > 0 ? "## Repository Context\n" + repoSection.join("\n") + "\n\n" : "";
+    repoSection.length > 0 ? `## Repository Context\n${repoSection.join("\n")}\n\n` : "";
   const enrichedBlock =
     enrichedSection.length > 0
-      ? "## Enriched Repository Context\n" + enrichedSection.join("\n") + "\n\n"
+      ? `## Enriched Repository Context\n${enrichedSection.join("\n")}\n\n`
       : "";
-  const extraBlock = extraPromptContext ? "\n\n" + extraPromptContext : "";
+  const extraBlock = extraPromptContext ? `\n\n${extraPromptContext}` : "";
   const instrumentationBlock = enableInstrumentation
     ? "\n\n## Runtime Instrumentation\n" +
       "You have Write, Edit, and Bash tools available for runtime instrumentation.\n" +

@@ -53,17 +53,27 @@
     "enabled": true,
     "rules": {
       "recommended": true,
+      "complexity": {
+        "useLiteralKeys": "off"
+      },
       "style": {
         "noNonNullAssertion": "off",
         "useImportType": "error",
         "useExportType": "error",
-        "useNodejsImportProtocol": "error"
+        "useNodejsImportProtocol": "error",
+        "useTemplate": "warn"
       },
       "suspicious": {
-        "noExplicitAny": "warn"
+        "noExplicitAny": "warn",
+        "noTemplateCurlyInString": "off",
+        "noArrayIndexKey": "warn",
+        "noAssignInExpressions": "warn",
+        "noImplicitAnyLet": "warn"
       },
       "correctness": {
-        "noUnusedImports": "error"
+        "noUnusedImports": "error",
+        "noUnusedVariables": "warn",
+        "noUnusedFunctionParameters": "off"
       }
     }
   },
@@ -74,6 +84,7 @@
         "src/cli/**",
         "src/report.ts",
         "src/logger.ts",
+        "src/ui/demo.tsx",
         "scripts/**",
         "benchmarks/**",
         "perf/**",
@@ -88,7 +99,7 @@
       }
     },
     {
-      "includes": ["src/ui/**"],
+      "includes": ["src/ui/**", "!src/ui/demo.tsx"],
       "linter": {
         "rules": {
           "suspicious": {

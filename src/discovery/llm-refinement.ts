@@ -146,17 +146,17 @@ async function buildCarvingPrompt(
   // 1. Directory tree
   const entries = await walkRepo(repoRoot, { maxDepth: 4, maxEntries: 4000 });
   const tree = entries
-    .map((e) => `${"  ".repeat(e.depth)}${e.kind === "dir" ? e.relPath + "/" : e.relPath}`)
+    .map((e) => `${"  ".repeat(e.depth)}${e.kind === "dir" ? `${e.relPath}/` : e.relPath}`)
     .join("\n");
-  sections.push("## Directory Tree\n```\n" + tree + "\n```");
+  sections.push(`## Directory Tree\n\`\`\`\n${tree}\n\`\`\``);
 
   // 2. Adapter signals — summarized by adapter, not as raw node list
   const signals = buildAdapterSignalSummary(rawNodes);
-  sections.push("## Adapter Signals\n" + signals);
+  sections.push(`## Adapter Signals\n${signals}`);
 
   // 3. Internal workspace dependencies
   if (depMap?.promptSummary) {
-    sections.push("## Internal Workspace Dependencies\n" + depMap.promptSummary);
+    sections.push(`## Internal Workspace Dependencies\n${depMap.promptSummary}`);
   }
 
   // 4. Orphan subtrees
@@ -174,7 +174,7 @@ async function buildCarvingPrompt(
     .filter((p) => {
       if (claimedPaths.has(p)) return false;
       for (const claimed of claimedPaths) {
-        if (p.startsWith(claimed + "/") || claimed.startsWith(p + "/")) return false;
+        if (p.startsWith(`${claimed}/`) || claimed.startsWith(`${p}/`)) return false;
       }
       return true;
     });

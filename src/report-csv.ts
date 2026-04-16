@@ -67,7 +67,7 @@ export function writeCsvReport(
     lines.push(row.join(","));
   }
 
-  writeFileSync(outputPath, lines.join("\r\n") + "\r\n", "utf-8");
+  writeFileSync(outputPath, `${lines.join("\r\n")}\r\n`, "utf-8");
 }
 
 function getCsvValue(

@@ -126,7 +126,7 @@ export function loadShellCommandHistory(dataDir: string): string[] {
 
 export function saveShellCommandHistory(dataDir: string, history: string[]): void {
   const historyPath = shellHistoryPath(dataDir);
-  writeFileSync(historyPath, JSON.stringify(capShellHistory(history), null, 2) + "\n", "utf-8");
+  writeFileSync(historyPath, `${JSON.stringify(capShellHistory(history), null, 2)}\n`, "utf-8");
 }
 
 export function extractAssistantText(content: Array<Record<string, unknown>>): string {

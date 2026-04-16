@@ -12,7 +12,7 @@
  */
 
 import type { RawDiscoveryNode } from "./adapters/types.js";
-import { compareModulePaths, rejectOverlappingModules } from "./helpers.js";
+import { compareModulePaths } from "./helpers.js";
 import type { DiscoveredModule, DiscoveredProduct, ProductKind } from "./types.js";
 
 // Language specificity ranking — more specific wins during merge.

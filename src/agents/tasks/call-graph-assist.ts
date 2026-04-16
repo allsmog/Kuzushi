@@ -2,7 +2,7 @@ import { getCodeIntelligenceProvider } from "../../analysis-support/code-intelli
 import { createLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import { toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { AgentTask } from "../types.js";
 
 const log = createLogger({ stage: "call-graph-assist" });
 

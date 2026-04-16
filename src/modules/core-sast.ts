@@ -12,13 +12,7 @@
  */
 
 import type { KuzushiConfig } from "../types.js";
-import type {
-  CopilotModule,
-  ModuleContext,
-  ModuleTool,
-  ToolExecutionContext,
-  ToolResult,
-} from "./types.js";
+import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Tool implementations
@@ -597,7 +591,7 @@ async function generateContextSnapshot(
   opts: ContextGenOptions,
 ): Promise<import("../ui/state.js").ContextSnapshot> {
   const path = await import("node:path");
-  const crypto = await import("node:crypto");
+  const _crypto = await import("node:crypto");
   const { resolveRepo } = await import("../cli/shared.js");
 
   const scanPath = path.default.resolve(target);

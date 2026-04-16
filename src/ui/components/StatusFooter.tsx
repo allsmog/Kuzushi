@@ -32,10 +32,6 @@ export function StatusFooter({
   startedAt,
   throttle,
 }: StatusFooterProps): React.ReactElement | null {
-  // Don't show footer in idle or done states
-  if (phase === "idle" || phase === "done") return null;
-
-  // Live elapsed timer
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     if (!startedAt) return;
@@ -44,6 +40,8 @@ export function StatusFooter({
     }, 1000);
     return () => clearInterval(interval);
   }, [startedAt]);
+
+  if (phase === "idle" || phase === "done") return null;
 
   const modelShort = model.replace("anthropic:", "").replace("claude-", "").replace("-latest", "");
 

@@ -203,6 +203,6 @@ const diff = computeDiff(beforeSarif, afterSarif);
 printDiff(diff, positionals[0], positionals[1]);
 
 if (opts.json) {
-  writeFileSync(resolve(opts.json), JSON.stringify(diff, null, 2) + "\n");
+  writeFileSync(resolve(opts.json), `${JSON.stringify(diff, null, 2)}\n`);
   console.log(chalk.green(`Diff JSON written to: ${opts.json}`));
 }

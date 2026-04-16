@@ -1,7 +1,6 @@
 import { createLogger } from "../../logger.js";
 import {
   languageAntiHallucinationExtras,
-  languageInvestigationModule,
   languageTuningModule,
 } from "../../prompts/language-tuning.js";
 import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
@@ -38,10 +37,6 @@ import {
   resolveTaskPositiveInt,
   resolveTaskRuntime,
 } from "./runtime-overrides.js";
-import {
-  buildApplicationModelSection,
-  buildThreatScenarioEvidenceSection,
-} from "./scenario-guidance.js";
 import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
 
 const log = createLogger({ stage: "code-config-detect" });
@@ -116,7 +111,7 @@ type CodeConfigDetectorId =
   | "auth-access-detect"
   | "security-misconfig-detect";
 
-const CODE_CONFIG_ANALYSIS_TOOL_POLICY: ToolPolicy = {
+const _CODE_CONFIG_ANALYSIS_TOOL_POLICY: ToolPolicy = {
   allow: ["group:readonly", "group:analysis"],
 };
 

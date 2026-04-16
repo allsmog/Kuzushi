@@ -14,8 +14,8 @@ import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
-import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import { isRecord } from "../../utils.js";
+import type { AgentTask } from "../types.js";
 import { computeDetectionFingerprint, normalizeFilePath } from "./detection-task-utils.js";
 import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
 import {

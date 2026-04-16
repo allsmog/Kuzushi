@@ -8,7 +8,7 @@ import { createLogger } from "../../../logger.js";
 import { coerceFileIndex, coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts, SecurityPatternMatch } from "../../../types.js";
-import type { AgentTask, TaskContext } from "../../types.js";
+import type { AgentTask } from "../../types.js";
 import { buildSystemsSurfacePack } from "./helpers.js";
 import {
   hasSystemsSignals,

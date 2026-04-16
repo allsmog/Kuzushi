@@ -19,7 +19,7 @@ export interface ClassifiedError {
 }
 
 const TRANSIENT_STATUS_CODES = new Set([500, 502, 503, 529]);
-const RATE_LIMIT_STATUS_CODES = new Set([429]);
+const _RATE_LIMIT_STATUS_CODES = new Set([429]);
 
 const TRANSIENT_NETWORK_TOKENS = [
   "ETIMEDOUT",

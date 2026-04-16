@@ -53,12 +53,10 @@ export function emitOutputNotice(notice: {
 
   const prefix = formatNoticePrefix(notice.level);
   const detail = notice.detail ? ` ${chalk.dim(notice.detail)}` : "";
-  const line = `${prefix} ${notice.message}${detail}`;
+  const _line = `${prefix} ${notice.message}${detail}`;
   if (notice.level === "error") {
-    console.error(line);
     return;
   }
-  console.log(line);
 }
 
 export function emitDiagnostic(

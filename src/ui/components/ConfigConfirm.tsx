@@ -17,7 +17,6 @@ import chalk from "chalk";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { boxFooter, boxHeader, formatCost, terminalCardWidth } from "../format.js";
-import { icons } from "../icons.js";
 
 export interface ConfigConfirmData {
   model: string;

@@ -7,7 +7,6 @@ import type { Finding } from "../../scanners/types.js";
 import type { StageTimestamps } from "../../scoring/run-metrics.js";
 import type { GeneratedRule } from "../../strategies/types.js";
 import type {
-  DynamicAnalysisRun,
   EnrichedRepoContext,
   ExploitChain,
   KuzushiConfig,

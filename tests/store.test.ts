@@ -69,7 +69,6 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 2,
     scanMode: "sequential",
-    tasks: [],
     tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: ["node_modules"],

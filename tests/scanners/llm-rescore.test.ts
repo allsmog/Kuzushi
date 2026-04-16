@@ -18,7 +18,7 @@ vi.mock("node:fs", async () => {
 });
 
 import { runStructuredAgentQuery } from "../../src/agent-runtime/execution.js";
-import { type LlmRescoreResult, rescoreFindings } from "../../src/scanners/llm-rescore.js";
+import { rescoreFindings } from "../../src/scanners/llm-rescore.js";
 
 const mockRunQuery = vi.mocked(runStructuredAgentQuery);
 const runtime = { id: "test-runtime", query: vi.fn() } as unknown as AgentRuntime;
@@ -26,7 +26,7 @@ const runtime = { id: "test-runtime", query: vi.fn() } as unknown as AgentRuntim
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
     taskId: "test",
-    fingerprint: "fp-" + Math.random().toString(36).slice(2, 8),
+    fingerprint: `fp-${Math.random().toString(36).slice(2, 8)}`,
     ruleId: "test/rule",
     filePath: "src/app.ts",
     startLine: 3,

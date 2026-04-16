@@ -5,7 +5,6 @@ import type { CweStrategyProfile } from "./cwe-strategy-map.js";
 import { executeStrategies, resolveMultiStrategyMode } from "./executor.js";
 import { mergeStrategyResults } from "./merge.js";
 import type { StrategyRegistry } from "./registry.js";
-import type { MultiStrategyMode } from "./types.js";
 
 const log = createLogger({ stage: "multi-strategy" });
 

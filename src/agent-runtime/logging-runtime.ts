@@ -104,7 +104,7 @@ function logMessage(message: AgentMessage): void {
         .map((b) => String(b["text"] ?? ""));
       for (const text of textBlocks) {
         if (text.length > 0) {
-          const truncated = text.length > 200 ? text.slice(0, 200) + "..." : text;
+          const truncated = text.length > 200 ? `${text.slice(0, 200)}...` : text;
           log.info(`  ${truncated}`);
         }
       }

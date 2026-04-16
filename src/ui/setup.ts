@@ -154,7 +154,7 @@ function saveWizardConfig(result: WizardResult, repoRoot: string, store?: UIStor
   }
 
   const targetPath = path.join(targetDir, "config.json");
-  writeFileSync(targetPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  writeFileSync(targetPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
   store?.addNotice({
     level: "success",
     message: "Config saved",

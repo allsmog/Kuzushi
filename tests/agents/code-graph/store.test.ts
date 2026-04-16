@@ -5,7 +5,6 @@ import {
   getEntryNodes,
   getGraphNodeByFileAndLine,
   getGraphNodesForRepo,
-  getNodeById,
   getPathsToNode,
   invalidateStaleNodes,
   makeEdgeId,

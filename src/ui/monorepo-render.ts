@@ -38,14 +38,11 @@ export async function createMonorepoRenderer(
         Object.assign(mod, update);
 
         if (update.status === "complete") {
-          const verdicts =
+          const _verdicts =
             mod.tp != null ? `tp=${mod.tp} fp=${mod.fp ?? 0} nr=${mod.needsReview ?? 0}` : "";
-          console.log(`  ◆ ${mod.name}  ${verdicts}`);
         } else if (update.status === "error") {
-          console.log(`  ✗ ${mod.name}  ${update.detail ?? "error"}`);
         } else if (update.status === "scanning" || update.status === "triaging") {
-          const activity = update.activityDetail ? `  ${update.activityDetail}` : "";
-          console.log(`  ● ${mod.name}  ${update.detail ?? update.status}...${activity}`);
+          const _activity = update.activityDetail ? `  ${update.activityDetail}` : "";
         }
       },
       cleanup() {},

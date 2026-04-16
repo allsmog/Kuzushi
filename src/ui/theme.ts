@@ -28,7 +28,7 @@ export function detectThemeSync(): Theme {
   if (colorfgbg) {
     const parts = colorfgbg.split(";");
     const bg = parseInt(parts[parts.length - 1] ?? "", 10);
-    if (!isNaN(bg)) {
+    if (!Number.isNaN(bg)) {
       // ANSI color 0-6 = dark, 7+ = light (7 = white in standard palette)
       cachedTheme = bg >= 7 ? "light" : "dark";
       return cachedTheme;

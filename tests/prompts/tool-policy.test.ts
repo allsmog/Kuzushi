@@ -4,7 +4,6 @@ import {
   buildPolicyLayers,
   expandToolGroups,
   resolveToolPolicy,
-  TOOL_GROUPS,
   type ToolPolicy,
   type ToolPolicyLayer,
 } from "../../src/prompts/tool-policy.js";

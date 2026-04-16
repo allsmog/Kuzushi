@@ -27,7 +27,6 @@ import { ScanSummary } from "./components/ScanSummary.js";
 import { SetupWizard } from "./components/SetupWizard.js";
 import { StatusFooter } from "./components/StatusFooter.js";
 import { useUIState } from "./hooks.js";
-import { icons } from "./icons.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
 import type { ResultLine as ResultLineData, UIStore } from "./state.js";
 

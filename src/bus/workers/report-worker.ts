@@ -928,7 +928,7 @@ function summarizeToolInput(
   }
 
   if (name === "Grep" && pattern) {
-    const truncatedPattern = pattern.length > 40 ? pattern.slice(0, 37) + "..." : pattern;
+    const truncatedPattern = pattern.length > 40 ? `${pattern.slice(0, 37)}...` : pattern;
     return `Searching for "${truncatedPattern}"`;
   }
 
