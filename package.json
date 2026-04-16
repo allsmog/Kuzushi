@@ -27,6 +27,7 @@
     "setup": "bash scripts/bootstrap.sh",
     "doctor": "bash scripts/doctor.sh",
     "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
+    "prepare": "husky",
     "dev": "tsx src/cli.ts",
     "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc",
@@ -85,10 +86,14 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.13.4",
     "@types/react": "^18",
     "@vitest/coverage-v8": "^3.0.5",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
     "madge": "^8.0.0",
     "tsx": "^4.19.2",
     "vitest": "^3.0.5"
