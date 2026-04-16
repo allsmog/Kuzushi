@@ -1,0 +1,26 @@
+<type>(<scope>): <subject>
+# Subject line: imperative mood, <= 100 chars. No trailing period.
+#
+# types: feat, fix, chore, perf, refactor, docs, test, style, ci, build, revert, merge
+# scopes (optional): agents, bus, cli, ui, copilot, scanners, runtime, config, deps,
+#                    store, triage, report, modules, hooks, ci
+
+# --- Body ------------------------------------------------------------------
+# Leave one blank line before the body. Explain *why* the change is needed
+# and any non-obvious *what*. Wrap at ~72 chars for readability in terminals.
+
+
+
+# --- Footer ----------------------------------------------------------------
+# Blank line, then footers. Common ones:
+#   BREAKING CHANGE: <description of the break>
+#   Closes #123
+#   Refs #456
+#   Co-Authored-By: Name <email@example.com>
+
+# Activate this template once per clone:
+#   git config commit.template .gitmessage
+#
+# Bypass the commit-msg hook in emergencies:
+#   git commit --no-verify -m "..."
+# See docs/devex/05-conventions-assessment.md for the full escape-hatch list.

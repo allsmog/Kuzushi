@@ -1,0 +1,16 @@
+# Kuzushi pre-commit hook
+# Keeps hook fast (<5s target). Only formats/lints staged files.
+# Escape hatches (see docs/devex/05-conventions-assessment.md):
+#   - HUSKY=0 git commit ...       # skip all hooks
+#   - git commit --no-verify ...   # skip hooks for this commit
+#   - SKIP=<task> git commit ...   # skip a specific lint-staged task
+
+# TODO(DX-3): remove this guard once biome.json lands; then `pnpm lint-staged`
+# can run unconditionally. Until then, skip if there's no Biome config yet so
+# devs aren't blocked during the tooling transition.
+if [ ! -f biome.json ] && ! command -v biome >/dev/null 2>&1; then
+  echo "[husky] biome.json not found and 'biome' not on PATH — skipping lint-staged (DX-3 transition)."
+  exit 0
+fi
+
+pnpm lint-staged

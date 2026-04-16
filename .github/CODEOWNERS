@@ -1,0 +1,27 @@
+# Kuzushi CODEOWNERS
+#
+# GitHub uses this file to auto-request reviews. Keep entries minimal and
+# honest — we don't invent owners. Most-specific rule wins (last match).
+#
+# See docs/devex/05-conventions-assessment.md for rationale.
+
+# Default: everything belongs to the repo owner.
+*                               @allsmog
+
+# Sensitive areas — CLAUDE.md flags these as stable contracts requiring
+# explicit review before changes.
+/src/agent-runtime/             @allsmog
+/src/bus/                       @allsmog
+
+# CI / release tooling — high-blast-radius.
+/.github/workflows/             @allsmog
+/.github/CODEOWNERS             @allsmog
+
+# Dependency & package metadata — security-sensitive.
+/package.json                   @allsmog
+/pnpm-lock.yaml                 @allsmog
+
+# Dev-experience configuration — changes here affect every contributor.
+/.husky/                        @allsmog
+/commitlint.config.js           @allsmog
+/.lintstagedrc.json             @allsmog
