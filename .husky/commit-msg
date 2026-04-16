@@ -1,0 +1,6 @@
+# Kuzushi commit-msg hook
+# Validates commit message against @commitlint/config-conventional (see
+# commitlint.config.js for the allowed types). Escape hatches are documented
+# in docs/devex/05-conventions-assessment.md.
+
+pnpm exec commitlint --edit "$1"

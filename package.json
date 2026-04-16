@@ -24,6 +24,7 @@
     "kuzushi": "./dist/cli.js"
   },
   "scripts": {
+    "prepare": "husky",
     "dev": "tsx src/cli.ts",
     "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "pnpm clean:dist && tsc",
@@ -69,10 +70,14 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.13.4",
     "@types/react": "^18",
     "@vitest/coverage-v8": "^3.0.5",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
     "madge": "^8.0.0",
     "tsx": "^4.19.2",
     "vitest": "^3.0.5"
