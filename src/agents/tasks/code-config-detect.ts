@@ -170,6 +170,13 @@ const DANGEROUS_API_BLOCKS: CategoryBlock[] = [
     "### unsafe-file-ops (CWE-22, CWE-59)",
     "Path traversal / symlink attacks: fs.readFile/writeFile with user-controlled paths without path.resolve + startsWith check,",
     "open() with user input, file uploads without filename sanitization, directory listing without access control.",
+    "Additional patterns to check:",
+    "- path.resolve(baseDir, externalInput) or path.join(baseDir, externalInput) without a subsequent",
+    "  startsWith(baseDir) check — the resolved path can escape baseDir via '../' sequences.",
+    "- fs.readFile/readFileSync on paths derived from external data (config, JSON fields, tool output,",
+    "  LLM responses) without realpath validation — symlinks in the working directory can point outside.",
+    "- File paths from parsed JSON/YAML, scanner findings, or API responses used in file operations",
+    "  without boundary checks — these are injection vectors even without direct user HTTP input.",
     "",
   ] },
   { id: "insecure-defaults", lines: [
