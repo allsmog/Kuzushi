@@ -1296,6 +1296,26 @@ function handleSlashCommand(
     case "context": {
       const sub = args[0]?.toLowerCase();
 
+      // /context edit — open the operator context intake editor
+      if (sub === "edit") {
+        if (!opts.target) return { output: "No target set. Use /target <path> first." };
+        const repoRoot = path.resolve(opts.target);
+        return {
+          output: "Opening operator context editor...",
+          asyncExecute: async () => {
+            const { loadOperatorScanContext, generateDefaultContext } = await import("../operator-context.js");
+            const { runContextIntake } = await import("../ui/setup.js");
+            let operatorCtx = loadOperatorScanContext(repoRoot);
+            if (!operatorCtx) operatorCtx = generateDefaultContext();
+            const outcome = await runContextIntake(ctx.uiStore, operatorCtx, path.basename(repoRoot), repoRoot, "shell");
+            if (outcome.action === "proceed") {
+              return "Operator context saved to .kuzushi/scan-context.json";
+            }
+            return "Context intake skipped.";
+          },
+        };
+      }
+
       // /context regenerate — force re-run
       if (sub === "regenerate" || sub === "regen") {
         if (!opts.target) return { output: "No target set. Use /target <path> first." };
@@ -1316,6 +1336,50 @@ function handleSlashCommand(
       // No valid snapshot — trigger generation
       if (!opts.target) return { output: "No target set. Use /target <path> first." };
       return resolveToolExecution("sast:context", [], core, opts, ctx, shellState);
+    }
+
+    case "threats": {
+      const sub = args[0]?.toLowerCase();
+
+      // /threats edit — open the threat model editor
+      if (sub === "edit") {
+        if (!opts.target) return { output: "No target set. Use /target <path> first." };
+        const repoRoot = path.resolve(opts.target);
+        return {
+          output: "Opening threat model editor...",
+          asyncExecute: async () => {
+            const { loadPersistentThreatModel, savePersistentThreatModel } = await import("../threat-model-renderer.js");
+            const { runThreatModelEditor } = await import("../ui/setup.js");
+            const tm = loadPersistentThreatModel(repoRoot);
+            if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
+            const outcome = await runThreatModelEditor(ctx.uiStore, tm, path.basename(repoRoot), repoRoot, "shell");
+            if (outcome.action === "proceed") {
+              return "Threat model saved to .kuzushi/threat-model.json";
+            }
+            return "Threat model editing skipped.";
+          },
+        };
+      }
+
+      // /threats — show summary
+      if (!opts.target) return { output: "No target set. Use /target <path> first." };
+      return {
+        output: "Loading threat model...",
+        asyncExecute: async () => {
+          try {
+            const { loadPersistentThreatModel } = await import("../threat-model-renderer.js");
+            const repoRoot = path.resolve(opts.target!);
+            const tm = loadPersistentThreatModel(repoRoot);
+            if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
+            const dismissed = tm.dismissedThreats?.length ?? 0;
+            const total = tm.threats.length;
+            const mitigations = tm.confirmedMitigations?.length ?? 0;
+            return `Threat model: ${total} threats (${dismissed} dismissed, ${mitigations} confirmed mitigations)\nUse /threats edit to review and edit.`;
+          } catch {
+            return "Failed to load threat model.";
+          }
+        },
+      };
     }
 
     case "target": {
@@ -1699,7 +1763,10 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/set <key> <value>", "Set a tool option"],
         ["/target <path>", "Set or show the active target"],
         ["/context", "Generate or show application context map"],
+        ["/context edit", "Review/edit operator scan context"],
         ["/context regenerate", "Re-generate context for current target"],
+        ["/threats", "Show threat model summary"],
+        ["/threats edit", "Review/edit threat model interactively"],
         ["/load <specifier>", "Load an external module at runtime"],
         ["/workspace <id>", "Set or show the active workspace"],
         ["/clear", "Clear conversation history"],

@@ -92,6 +92,14 @@ export function registerVerificationWorker(
         }
       }
 
+      // Operator-provided context — inject operator-declared trust, scope, architecture
+      {
+        const opCtx = event.payload.operatorContext;
+        if (typeof opCtx === "string" && opCtx.length > 0) {
+          extraSections.push(opCtx);
+        }
+      }
+
       const extraPromptContext = extraSections.length > 0
         ? extraSections.join("\n\n")
         : undefined;
