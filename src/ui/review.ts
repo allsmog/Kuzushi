@@ -71,6 +71,7 @@ export async function runInteractiveReview(
     assumptions: f.assumptions,
     controls: f.controls,
     blindspots: f.blindspots,
+    sourceThreatIds: f.sourceThreatIds,
     verificationSteps: f.verificationSteps,
   }));
 

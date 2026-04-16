@@ -59,6 +59,7 @@ When you have sufficient evidence, also include these optional fields for higher
 - assumptions: string[] — list explicit assumptions underlying your assessment (e.g. "Attacker has network access to the API endpoint", "No WAF is deployed").
 - controls: array of {name, description, file_path?} — identify existing security controls and defenses you found during investigation (e.g. {name: "CSRF middleware", description: "Express CSRF middleware applied globally", file_path: "src/app.ts"}).
 - blindspots: string[] — list what your analysis could NOT verify or areas of remaining uncertainty (e.g. "Did not verify runtime WAF configuration", "Could not determine if input sanitization library is up to date").
+- source_threat_ids: string[] — if a threat model context is provided above, reference the threat IDs (e.g. ["T-01", "T-03"]) that this finding relates to. This links findings back to the modeled attack surface.
 
 Use verdict "by_design" when the code pattern is technically accurate but is an intentional architectural decision
 for the application's purpose (e.g., missing authentication in a pentest tool, permissive TLS in a debugging proxy).

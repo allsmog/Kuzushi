@@ -118,6 +118,7 @@ export function writeJsonReport(
     assumptions: f.assumptions,
     controls: f.controls,
     blindspots: f.blindspots,
+    sourceThreatIds: f.sourceThreatIds,
   }));
 
   const threatModel = repoRoot && runId ? loadThreatModelDocument(repoRoot, runId) : null;

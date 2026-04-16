@@ -109,6 +109,7 @@ export function generateSarifReport(
         assumptions: finding.assumptions?.length ? finding.assumptions : undefined,
         controls: finding.controls?.length ? finding.controls : undefined,
         blindspots: finding.blindspots?.length ? finding.blindspots : undefined,
+        sourceThreatIds: finding.sourceThreatIds?.length ? finding.sourceThreatIds : undefined,
       },
     };
 
