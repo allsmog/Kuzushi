@@ -7,11 +7,15 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { WizardResult } from "./components/SetupWizard.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
-import type { WizardResult } from "./components/SetupWizard.js";
 import { emitOutputNotice } from "./output.js";
-import type { UIMode, UIStore } from "./state.js";
+import type { UIStore, UIMode } from "./state.js";
+import type { OperatorScanContext } from "../types.js";
+import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
+import { saveOperatorScanContext } from "../operator-context.js";
+import { savePersistentThreatModel } from "../threat-model-renderer.js";
 
 export type SetupOutcome =
   | { action: "proceed"; preset?: string; model?: string }
@@ -29,9 +33,8 @@ export function isFirstRun(repoRoot: string): boolean {
   const globalYaml = path.join(home, ".kuzushi", "config.yaml");
   const globalYml = path.join(home, ".kuzushi", "config.yml");
 
-  return ![projectConfig, projectYaml, projectYml, globalConfig, globalYaml, globalYml].some((p) =>
-    existsSync(p),
-  );
+  return ![projectConfig, projectYaml, projectYml, globalConfig, globalYaml, globalYml]
+    .some((p) => existsSync(p));
 }
 
 /**
@@ -52,29 +55,26 @@ export async function runSetupWizard(
   }
 
   return new Promise<SetupOutcome>((resolve) => {
-    store.setPreflight(
-      {
-        kind: "wizard",
-        repoName,
-        repoRoot,
-        onComplete: (result: WizardResult) => {
-          store.setPreflight(null);
-          if (result.saveLocation && result.saveLocation !== "none") {
-            saveWizardConfig(result, repoRoot, store);
-          }
-          resolve({
-            action: "proceed",
-            preset: result.preset,
-            model: result.model,
-          });
-        },
-        onCancel: () => {
-          store.setPreflight(null);
-          resolve({ action: "cancel" });
-        },
+    store.setPreflight({
+      kind: "wizard",
+      repoName,
+      repoRoot,
+      onComplete: (result: WizardResult) => {
+        store.setPreflight(null);
+        if (result.saveLocation && result.saveLocation !== "none") {
+          saveWizardConfig(result, repoRoot, store);
+        }
+        resolve({
+          action: "proceed",
+          preset: result.preset,
+          model: result.model,
+        });
       },
-      returnMode,
-    );
+      onCancel: () => {
+        store.setPreflight(null);
+        resolve({ action: "cancel" });
+      },
+    }, returnMode);
   });
 }
 
@@ -97,27 +97,24 @@ export async function runConfigConfirmation(
   }
 
   return new Promise<SetupOutcome>((resolve) => {
-    store.setPreflight(
-      {
-        kind: "confirm",
-        repoName,
-        repoRoot,
-        config,
-        onProceed: () => {
-          store.setPreflight(null);
-          resolve({ action: "proceed" });
-        },
-        onEdit: () => {
-          store.setPreflight(null);
-          runSetupWizard(store, repoName, repoRoot, returnMode).then(resolve);
-        },
-        onQuit: () => {
-          store.setPreflight(null);
-          resolve({ action: "cancel" });
-        },
+    store.setPreflight({
+      kind: "confirm",
+      repoName,
+      repoRoot,
+      config,
+      onProceed: () => {
+        store.setPreflight(null);
+        resolve({ action: "proceed" });
       },
-      returnMode,
-    );
+      onEdit: () => {
+        store.setPreflight(null);
+        runSetupWizard(store, repoName, repoRoot, returnMode).then(resolve);
+      },
+      onQuit: () => {
+        store.setPreflight(null);
+        resolve({ action: "cancel" });
+      },
+    }, returnMode);
   });
 }
 
@@ -144,17 +141,16 @@ function saveWizardConfig(result: WizardResult, repoRoot: string, store?: UIStor
     config["severity"] = result.severity;
   }
 
-  const targetDir =
-    result.saveLocation === "project"
-      ? path.join(repoRoot, ".kuzushi")
-      : path.join(process.env["HOME"] ?? process.env["USERPROFILE"] ?? ".", ".kuzushi");
+  const targetDir = result.saveLocation === "project"
+    ? path.join(repoRoot, ".kuzushi")
+    : path.join(process.env["HOME"] ?? process.env["USERPROFILE"] ?? ".", ".kuzushi");
 
   if (!existsSync(targetDir)) {
     mkdirSync(targetDir, { recursive: true });
   }
 
   const targetPath = path.join(targetDir, "config.json");
-  writeFileSync(targetPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
+  writeFileSync(targetPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
   store?.addNotice({
     level: "success",
     message: "Config saved",
@@ -203,19 +199,116 @@ export async function runCredentialPrompt(
   }
 
   return new Promise<CredentialOutcome>((resolve) => {
-    store.setPreflight(
-      {
-        kind: "credentials",
-        onComplete: (choice: CredentialChoice) => {
-          store.setPreflight(null);
-          resolve({ action: "proceed", choice });
-        },
-        onCancel: () => {
-          store.setPreflight(null);
-          resolve({ action: "cancel" });
-        },
+    store.setPreflight({
+      kind: "credentials",
+      onComplete: (choice: CredentialChoice) => {
+        store.setPreflight(null);
+        resolve({ action: "proceed", choice });
       },
-      returnMode,
-    );
+      onCancel: () => {
+        store.setPreflight(null);
+        resolve({ action: "cancel" });
+      },
+    }, returnMode);
+  });
+}
+
+// ── Context Intake ──
+
+export type ContextIntakeOutcome =
+  | { action: "proceed"; context: OperatorScanContext }
+  | { action: "skip" }
+  | { action: "cancel" };
+
+/**
+ * Show the operator context intake editor (TTY only).
+ */
+export async function runContextIntake(
+  store: UIStore | undefined,
+  initialContext: OperatorScanContext,
+  repoName: string,
+  repoRoot: string,
+  returnMode: UIMode = "running",
+): Promise<ContextIntakeOutcome> {
+  if (!process.stdout.isTTY || !store) {
+    return { action: "skip" };
+  }
+
+  return new Promise<ContextIntakeOutcome>((resolve) => {
+    store.setPreflight({
+      kind: "context-intake",
+      repoName,
+      repoRoot,
+      initialContext,
+      onComplete: (context: OperatorScanContext) => {
+        store.setPreflight(null);
+        saveOperatorScanContext(repoRoot, context);
+        store.addNotice({
+          level: "success",
+          message: "Operator context saved",
+          detail: path.join(repoRoot, ".kuzushi", "scan-context.json"),
+          source: "intake",
+        });
+        resolve({ action: "proceed", context });
+      },
+      onSkip: () => {
+        store.setPreflight(null);
+        resolve({ action: "skip" });
+      },
+      onCancel: () => {
+        store.setPreflight(null);
+        resolve({ action: "cancel" });
+      },
+    }, returnMode);
+  });
+}
+
+// ── Threat Model Editor ──
+
+export type ThreatModelEditorOutcome =
+  | { action: "proceed"; threatModel: ThreatModelDocument }
+  | { action: "skip" }
+  | { action: "cancel" };
+
+/**
+ * Show the interactive threat model editor (TTY only).
+ */
+export async function runThreatModelEditor(
+  store: UIStore | undefined,
+  threatModel: ThreatModelDocument,
+  repoName: string,
+  repoRoot: string,
+  returnMode: UIMode = "running",
+): Promise<ThreatModelEditorOutcome> {
+  if (!process.stdout.isTTY || !store) {
+    return { action: "skip" };
+  }
+
+  return new Promise<ThreatModelEditorOutcome>((resolve) => {
+    store.setPreflight({
+      kind: "threat-editor",
+      repoName,
+      repoRoot,
+      threatModel,
+      onComplete: (updated: ThreatModelDocument) => {
+        store.setPreflight(null);
+        savePersistentThreatModel(repoRoot, updated, true);
+        store.addNotice({
+          level: "success",
+          message: "Threat model saved",
+          detail: path.join(repoRoot, ".kuzushi", "threat-model.json"),
+          source: "intake",
+        });
+        resolve({ action: "proceed", threatModel: updated });
+      },
+      onSkip: () => {
+        store.setPreflight(null);
+        resolve({ action: "skip" });
+      },
+      onCancel: () => {
+        store.setPreflight(null);
+        resolve({ action: "cancel" });
+      },
+    }, returnMode);
   });
 }

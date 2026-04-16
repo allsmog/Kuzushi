@@ -102,6 +102,34 @@ export interface EvidenceStep {
   evidence: string;
 }
 
+/** A structured code citation referencing a specific code location with context. */
+export interface CodeCitation {
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  snippet: string;
+  description: string;
+}
+
+/** Structured attack-path analysis linking entry point to impact. */
+export interface AttackPathAnalysis {
+  /** Ordered chain of steps from entry to impact. */
+  chain: string[];
+  /** Narrative explanation of the attack path. */
+  narrative: string;
+  /** Reasoning for the assessed likelihood level. */
+  likelihoodReasoning: string;
+  /** Reasoning for the assessed impact level. */
+  impactReasoning: string;
+}
+
+/** An identified security control or existing defense. */
+export interface SecurityControl {
+  name: string;
+  description: string;
+  filePath?: string;
+}
+
 /** Result of AI triage for a single finding. */
 export interface TriageResult {
   fingerprint: string;
@@ -133,6 +161,18 @@ export interface TriageResult {
   compositeConfidence?: number;
   /** Per-step evidence chain for fine-grained confidence calibration. */
   evidenceChain?: EvidenceStep[];
+  /** Structured code citations with file paths, line ranges, and snippets. */
+  codeCitations?: CodeCitation[];
+  /** Attack-path analysis with chain diagram, narrative, and risk reasoning. */
+  attackPath?: AttackPathAnalysis;
+  /** Explicit assumptions underlying the triage assessment. */
+  assumptions?: string[];
+  /** Existing security controls and defenses identified during investigation. */
+  controls?: SecurityControl[];
+  /** Aspects the analysis could not verify or areas of uncertainty. */
+  blindspots?: string[];
+  /** Threat model threat IDs that this finding relates to (e.g. ["T-01", "T-03"]). */
+  sourceThreatIds?: string[];
 }
 
 /**
@@ -159,6 +199,16 @@ export interface VerificationResult {
   verifyCostUsd?: number;
   /** Composite confidence combining multiple signals (self-reported, calibrated, verification). */
   compositeConfidence?: number;
+  /** Structured code citations with file paths, line ranges, and snippets. */
+  codeCitations?: CodeCitation[];
+  /** Attack-path analysis with chain diagram, narrative, and risk reasoning. */
+  attackPath?: AttackPathAnalysis;
+  /** Explicit assumptions underlying the verification assessment. */
+  assumptions?: string[];
+  /** Existing security controls and defenses identified during verification. */
+  controls?: SecurityControl[];
+  /** Aspects the verification could not confirm or areas of uncertainty. */
+  blindspots?: string[];
 }
 
 /** Result of PoC harness generation for a verified-exploitable finding. */
@@ -254,6 +304,8 @@ export interface FindingMetadata {
   patchRunIds?: string[];
   latestDynamicStatus?: DynamicAnalysisStatus;
   notes?: string[];
+  blame?: { sha: string; author: string; date: string; summary: string };
+  introducedIn?: string;
 }
 
 /** Heuristic repository metadata used to enrich triage/verification prompts. */
@@ -708,6 +760,84 @@ export interface KuzushiConfig {
     /** Enable architectural threat model. Default true. */
     architecturalThreatModel?: boolean;
   };
+}
+
+// ── Operator Scan Context (Intake UI) ──
+
+/** Trust-level annotation for external dependencies. */
+export type TrustLevel = "trusted" | "semi-trusted" | "untrusted" | "unknown";
+
+/** Sensitivity classification for data tags. */
+export type DataSensitivity = "public" | "internal" | "confidential" | "restricted";
+
+/** Review status of an individual context item during operator intake. */
+export type IntakeItemStatus = "accepted" | "edited" | "deleted" | "skipped" | "added";
+
+/** A single item in the operator context, with review tracking. */
+export interface OperatorContextItem<T = string> {
+  value: T;
+  status: IntakeItemStatus;
+  /** Original auto-generated value before operator edits. */
+  original?: T;
+  /** Free-text note from operator. */
+  note?: string;
+}
+
+/** Trust context: deployment, infrastructure, external defenses, confirmed mitigations. */
+export interface TrustContext {
+  deploymentModel: OperatorContextItem[];
+  infrastructure: OperatorContextItem[];
+  externalDefenses: OperatorContextItem[];
+  confirmedMitigations: OperatorContextItem[];
+}
+
+/** Scope prioritization: high/low value paths, sensitive data tags. */
+export interface ScopePrioritization {
+  highValuePaths: OperatorContextItem[];
+  lowValuePaths: OperatorContextItem[];
+  sensitiveDataTags: OperatorContextItem<{
+    dataType: string;
+    sensitivity: DataSensitivity;
+    locations: string[];
+  }>[];
+}
+
+/** Architecture context: entry points, external deps with trust levels, data flows. */
+export interface ArchitectureContext {
+  entryPoints: OperatorContextItem<{
+    kind: string; path: string; method?: string; description?: string;
+  }>[];
+  externalDeps: OperatorContextItem<{
+    name: string; kind: string; trustLevel: TrustLevel; description?: string;
+  }>[];
+  dataFlows: OperatorContextItem<{
+    from: string; to: string; dataClassification?: string; description?: string;
+  }>[];
+}
+
+/** Historical feedback: suppressed FP and confirmed TP fingerprints from prior runs. */
+export interface HistoricalFeedback {
+  suppressedFpFingerprints: OperatorContextItem<{
+    fingerprint: string; ruleId: string; reason?: string;
+  }>[];
+  confirmedTpFingerprints: OperatorContextItem<{
+    fingerprint: string; ruleId: string; description?: string;
+  }>[];
+}
+
+/** Operator-reviewed scan context persisted to .kuzushi/scan-context.json. */
+export interface OperatorScanContext {
+  version: string;
+  trust: TrustContext;
+  scope: ScopePrioritization;
+  architecture: ArchitectureContext;
+  historical: HistoricalFeedback;
+  /** Whether this context has been reviewed by a human. */
+  operatorReviewed: boolean;
+  /** ISO timestamp of last operator review. */
+  lastReviewedAt?: string;
+  /** ISO timestamp of auto-generation. */
+  generatedAt: string;
 }
 
 /** A persisted finding row from SQLite. */

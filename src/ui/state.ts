@@ -4,13 +4,15 @@
  * The report-worker writes state updates via `store.update()`.
  * The Ink app subscribes via `store.subscribe()` and re-renders reactively.
  */
-
+import type { Verdict, OperatorScanContext } from "../types.js";
 import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
-import type { ExploitChain, Verdict } from "../types.js";
+import type { ExploitChain } from "../types.js";
+import type { CodeCitation, AttackPathAnalysis, SecurityControl } from "../types.js";
+import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
+import type { WizardResult } from "./components/SetupWizard.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
-import type { WizardResult } from "./components/SetupWizard.js";
 
 export type Phase = "idle" | "scanning" | "triaging" | "verifying" | "poc" | "summary" | "done";
 export type UIMode = "preflight" | "running" | "summary" | "review" | "done" | "shell";
@@ -29,26 +31,44 @@ export interface UINotice {
 
 export type PreflightState =
   | {
-      kind: "wizard";
-      repoName: string;
-      repoRoot: string;
-      onComplete: (result: WizardResult) => void;
-      onCancel: () => void;
-    }
+    kind: "wizard";
+    repoName: string;
+    repoRoot: string;
+    onComplete: (result: WizardResult) => void;
+    onCancel: () => void;
+  }
   | {
-      kind: "confirm";
-      repoName: string;
-      repoRoot: string;
-      config: ConfigConfirmData;
-      onProceed: () => void;
-      onEdit: () => void;
-      onQuit: () => void;
-    }
+    kind: "confirm";
+    repoName: string;
+    repoRoot: string;
+    config: ConfigConfirmData;
+    onProceed: () => void;
+    onEdit: () => void;
+    onQuit: () => void;
+  }
   | {
-      kind: "credentials";
-      onComplete: (choice: CredentialChoice) => void;
-      onCancel: () => void;
-    };
+    kind: "credentials";
+    onComplete: (choice: CredentialChoice) => void;
+    onCancel: () => void;
+  }
+  | {
+    kind: "context-intake";
+    repoName: string;
+    repoRoot: string;
+    initialContext: OperatorScanContext;
+    onComplete: (context: OperatorScanContext) => void;
+    onSkip: () => void;
+    onCancel: () => void;
+  }
+  | {
+    kind: "threat-editor";
+    repoName: string;
+    repoRoot: string;
+    threatModel: ThreatModelDocument;
+    onComplete: (updated: ThreatModelDocument) => void;
+    onSkip: () => void;
+    onCancel: () => void;
+  };
 
 export interface ReviewSession {
   findings: ActionableFinding[];
@@ -108,13 +128,7 @@ export interface ResultLine {
 }
 
 export interface AgentActivityLine {
-  kind:
-    | "tool-start"
-    | "tool-progress"
-    | "tool-complete"
-    | "summary"
-    | "reasoning"
-    | "finding-preview";
+  kind: "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning" | "finding-preview";
   toolName?: string;
   detail?: string;
   elapsedSeconds?: number;
@@ -166,6 +180,7 @@ export interface SummaryData {
   runMetrics?: RunMetrics;
   auditLogDir?: string;
   pocOutputDir?: string;
+  threatModelSummary?: string;
   exploitChains: ExploitChain[];
   actionableFindings: ActionableFinding[];
 }
@@ -203,6 +218,15 @@ export interface ActionableFinding {
   pocHarnessParseError?: string;
   pocRunVerdict?: string;
   pocRunDurationMs?: number;
+  codeCitations?: CodeCitation[];
+  attackPath?: AttackPathAnalysis;
+  assumptions?: string[];
+  controls?: SecurityControl[];
+  blindspots?: string[];
+  sourceThreatIds?: string[];
+  verificationSteps?: string[];
+  blame?: { sha: string; author: string; date: string; summary: string };
+  introducedIn?: string;
 }
 
 export interface UIState {
@@ -336,28 +360,11 @@ export interface ShellState {
 
 type Listener = () => void;
 
-/**
- * Hard cap on `agentActivity` map size. Long-running shell/scan sessions can
- * emit activity for thousands of distinct fingerprints; without a cap the map
- * grows unboundedly and retains display strings that no longer matter.
- */
-const MAX_AGENT_ACTIVITY_ENTRIES = 1000;
-
-/** Default TTL for stale-activity eviction (seconds). */
-const DEFAULT_AGENT_ACTIVITY_TTL_SEC = 600; // 10 minutes
-
 export class UIStore {
   private state: UIState;
   private listeners = new Set<Listener>();
   private preflightReturnMode: UIMode = "running";
   private reviewReturnMode: UIMode = "summary";
-  /**
-   * Insertion time of each `agentActivity` map key (ms since epoch).
-   * Kept in parallel with the public `Map` so we can evict by age without
-   * storing timestamps inside the activity lines themselves (display shape
-   * is load-bearing for the UI).
-   */
-  private agentActivityTimestamps = new Map<string, number>();
 
   constructor() {
     this.state = {
@@ -407,11 +414,7 @@ export class UIStore {
     this.state = {
       ...this.state,
       preflight,
-      mode: preflight
-        ? "preflight"
-        : this.state.mode === "preflight"
-          ? this.preflightReturnMode
-          : this.state.mode,
+      mode: preflight ? "preflight" : this.state.mode === "preflight" ? this.preflightReturnMode : this.state.mode,
     };
     this.notify();
   }
@@ -423,11 +426,7 @@ export class UIStore {
     this.state = {
       ...this.state,
       review,
-      mode: review
-        ? "review"
-        : this.state.mode === "review"
-          ? this.reviewReturnMode
-          : this.state.mode,
+      mode: review ? "review" : this.state.mode === "review" ? this.reviewReturnMode : this.state.mode,
     };
     this.notify();
   }
@@ -442,16 +441,13 @@ export class UIStore {
     this.notify();
   }
 
-  addNotice(
-    notice: Omit<UINotice, "id" | "createdAt"> & { id?: string; createdAt?: number },
-  ): void {
+  addNotice(notice: Omit<UINotice, "id" | "createdAt"> & { id?: string; createdAt?: number }): void {
     const createdAt = notice.createdAt ?? Date.now();
     const id = notice.id ?? `${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
-    const duplicate = this.state.notices.find(
-      (entry) =>
-        entry.level === notice.level &&
-        entry.message === notice.message &&
-        entry.detail === notice.detail,
+    const duplicate = this.state.notices.find((entry) =>
+      entry.level === notice.level
+      && entry.message === notice.message
+      && entry.detail === notice.detail,
     );
     if (duplicate) {
       return;
@@ -477,30 +473,16 @@ export class UIStore {
     const lines = newMap.get(fingerprint) ?? [];
     const previous = lines[lines.length - 1];
     if (
-      previous &&
-      previous.kind === line.kind &&
-      previous.toolName === line.toolName &&
-      previous.detail === line.detail
+      previous
+      && previous.kind === line.kind
+      && previous.toolName === line.toolName
+      && previous.detail === line.detail
     ) {
       return;
     }
     // Keep only the latest 4 activity lines per finding to avoid clutter.
     const updated = [...lines, line].slice(-4);
     newMap.set(fingerprint, updated);
-    // Refresh insertion time so this entry floats to the tail of FIFO order.
-    // Map preserves insertion order, so we delete first to re-insert at tail.
-    this.agentActivityTimestamps.delete(fingerprint);
-    this.agentActivityTimestamps.set(fingerprint, Date.now());
-
-    // Backstop: cap total entries via FIFO eviction.
-    // Map iteration order is insertion order — the oldest-inserted key comes first.
-    while (newMap.size > MAX_AGENT_ACTIVITY_ENTRIES) {
-      const oldest = newMap.keys().next();
-      if (oldest.done || oldest.value === undefined) break;
-      newMap.delete(oldest.value);
-      this.agentActivityTimestamps.delete(oldest.value);
-    }
-
     this.state = { ...this.state, agentActivity: newMap };
     this.notify();
   }
@@ -508,46 +490,7 @@ export class UIStore {
   clearAgentActivity(fingerprint: string): void {
     const newMap = new Map(this.state.agentActivity);
     newMap.delete(fingerprint);
-    this.agentActivityTimestamps.delete(fingerprint);
     this.state = { ...this.state, agentActivity: newMap };
-    this.notify();
-  }
-
-  /**
-   * Drop `agentActivity` entries older than `maxAgeSec` seconds.
-   *
-   * Called at phase boundaries (e.g. scan -> triage -> verify) so stale
-   * activity lines don't linger across phases. Also safe to call on a timer
-   * — non-destructive if no entries are expired.
-   */
-  clearStaleActivity(maxAgeSec: number = DEFAULT_AGENT_ACTIVITY_TTL_SEC): void {
-    const cutoff = Date.now() - maxAgeSec * 1000;
-    let changed = false;
-    const newMap = new Map(this.state.agentActivity);
-    for (const [fingerprint, insertedAt] of this.agentActivityTimestamps) {
-      if (insertedAt < cutoff) {
-        newMap.delete(fingerprint);
-        this.agentActivityTimestamps.delete(fingerprint);
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    this.state = { ...this.state, agentActivity: newMap };
-    this.notify();
-  }
-
-  /**
-   * Drop every `agentActivity` entry. Intended for phase boundaries where
-   * fingerprints from the previous phase are no longer relevant (e.g. moving
-   * from triage to verify — the verify phase receives a different set of
-   * findings).
-   */
-  resetAgentActivity(): void {
-    if (this.state.agentActivity.size === 0 && this.agentActivityTimestamps.size === 0) {
-      return;
-    }
-    this.agentActivityTimestamps.clear();
-    this.state = { ...this.state, agentActivity: new Map() };
     this.notify();
   }
 
@@ -555,12 +498,7 @@ export class UIStore {
   initStages(stageIds: Array<{ id: string; label: string }>): void {
     this.state = {
       ...this.state,
-      stages: stageIds.map((s) => ({
-        id: s.id,
-        label: s.label,
-        status: "pending" as StageStatus,
-        subTasks: [],
-      })),
+      stages: stageIds.map((s) => ({ id: s.id, label: s.label, status: "pending" as StageStatus, subTasks: [] })),
     };
     this.notify();
   }
@@ -659,10 +597,10 @@ export class UIStore {
         const prev = existing[existing.length - 1];
         // Deduplicate consecutive identical lines.
         if (
-          prev &&
-          prev.kind === line.kind &&
-          prev.toolName === line.toolName &&
-          prev.detail === line.detail
+          prev
+          && prev.kind === line.kind
+          && prev.toolName === line.toolName
+          && prev.detail === line.detail
         ) {
           return { ...task, lastEventAt: now };
         }
@@ -725,12 +663,7 @@ export function createUIStore(): UIStore {
 }
 
 /** Narrative line kinds that tell the investigation story. */
-const NARRATIVE_KINDS = new Set<string>([
-  "reasoning",
-  "finding-preview",
-  "tool-complete",
-  "summary",
-]);
+const NARRATIVE_KINDS = new Set<string>(["reasoning", "finding-preview", "tool-complete", "summary"]);
 
 /**
  * Keep up to `max` lines, prioritizing narrative (reasoning, findings,

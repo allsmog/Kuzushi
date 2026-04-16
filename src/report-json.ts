@@ -1,9 +1,10 @@
 import { writeFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
+import type { ExploitChain } from "./types.js";
 import { summarizeTaintPath } from "./findings/taint-path.js";
 import { getActionableFindings } from "./store.js";
-import type { ExploitChain } from "./types.js";
+import { loadThreatModelDocument } from "./threat-model-renderer.js";
 
 interface JsonReportMeta {
   version: string;
@@ -24,6 +25,7 @@ interface JsonReportData {
   findings: Array<Record<string, unknown>>;
   exploitChains: ExploitChain[];
   stats: Partial<PipelineStats>;
+  threatModel: unknown;
 }
 
 /**
@@ -32,24 +34,20 @@ interface JsonReportData {
 function safeJsonStringify(value: unknown, indent: number): string {
   const seen = new WeakSet<object>();
 
-  return JSON.stringify(
-    value,
-    (_key: string, val: unknown): unknown => {
-      if (typeof val === "bigint") {
-        return val.toString();
-      }
+  return JSON.stringify(value, (_key: string, val: unknown): unknown => {
+    if (typeof val === "bigint") {
+      return val.toString();
+    }
 
-      if (val !== null && typeof val === "object") {
-        if (seen.has(val)) {
-          return "[Circular]";
-        }
-        seen.add(val);
+    if (val !== null && typeof val === "object") {
+      if (seen.has(val)) {
+        return "[Circular]";
       }
+      seen.add(val);
+    }
 
-      return val;
-    },
-    indent,
-  );
+    return val;
+  }, indent);
 }
 
 /**
@@ -64,6 +62,8 @@ export function writeJsonReport(
   exploitChains: ExploitChain[],
   scanMode: string,
   fingerprints?: string[],
+  repoRoot?: string,
+  runId?: string,
 ): void {
   const allFindings = getActionableFindings(db, repo, {
     includeFalsePositives: true,
@@ -113,7 +113,17 @@ export function writeJsonReport(
     pocRunStderr: f.pocRunStderr,
     pocRunVerdict: f.pocRunVerdict,
     pocRunDurationMs: f.pocRunDurationMs,
+    codeCitations: f.codeCitations,
+    attackPath: f.attackPath,
+    assumptions: f.assumptions,
+    controls: f.controls,
+    blindspots: f.blindspots,
+    sourceThreatIds: f.sourceThreatIds,
+    blame: f.blame,
+    introducedIn: f.introducedIn,
   }));
+
+  const threatModel = repoRoot && runId ? loadThreatModelDocument(repoRoot, runId) : null;
 
   const data: JsonReportData = {
     meta: {
@@ -130,7 +140,8 @@ export function writeJsonReport(
     findings,
     exploitChains,
     stats,
+    threatModel,
   };
 
-  writeFileSync(outputPath, `${safeJsonStringify(data, 2)}\n`, "utf-8");
+  writeFileSync(outputPath, safeJsonStringify(data, 2) + "\n", "utf-8");
 }

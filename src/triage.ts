@@ -1,17 +1,23 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { cleanupBatchFiles, writeBatchFile } from "./agent-runtime/batch-files.js";
 import {
-  type AgentRuntimeOptions,
   extractJson,
   resolveDefaultReadOnlyTools,
   resolveRepoContextAndRuntimeOptions,
   runStructuredAgentQuery,
   runStructuredSessionQuery,
+  type AgentActivity,
+  type AgentActivityCallback,
+  type AgentRuntimeOptions,
 } from "./agent-runtime/execution.js";
 import type { AgentSession } from "./agent-runtime/types.js";
-import { getLogger } from "./logger.js";
-import { buildBatchTriageContext, buildTriageContext } from "./prompts/context.js";
+import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
+import type {
+  AllowedTriageTool,
+  Finding,
+  TriageAgentConfig,
+} from "./scanners/types.js";
+import { formatEnrichedRepoContext, formatRepoContext } from "./repo-context.js";
 import {
   composePromptModules,
   confidenceEscalationModule,
@@ -19,12 +25,14 @@ import {
   frameworkAwarenessModule,
 } from "./prompts/modules.js";
 import { renderTemplate } from "./prompts/template.js";
-import { BATCH_TRIAGE_TEMPLATE, TRIAGE_TEMPLATE } from "./prompts/templates/triage.js";
-import { formatEnrichedRepoContext, formatRepoContext } from "./repo-context.js";
-import type { AllowedTriageTool, Finding, TriageAgentConfig } from "./scanners/types.js";
-import { formatZodErrors, RawBatchTriageOutputSchema, RawTriageOutputSchema } from "./schemas.js";
+import { TRIAGE_TEMPLATE } from "./prompts/templates/triage.js";
+import { BATCH_TRIAGE_TEMPLATE } from "./prompts/templates/triage.js";
+import { buildTriageContext, buildBatchTriageContext } from "./prompts/context.js";
+import type { CodeCitation, AttackPathAnalysis, SecurityControl } from "./types.js";
 import type { EnrichedRepoContext, RepoContext, TriageResult, Verdict } from "./types.js";
+import { getLogger } from "./logger.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
+import { RawTriageOutputSchema, RawBatchTriageOutputSchema, formatZodErrors } from "./schemas.js";
 
 export type { AgentActivity, AgentActivityCallback } from "./agent-runtime/execution.js";
 export { extractJson } from "./agent-runtime/execution.js";
@@ -38,32 +46,57 @@ export const TRIAGE_RESULT_SCHEMA_LITE = {
   required: ["fingerprint", "verdict", "confidence", "rationale", "verification_steps"],
   properties: {
     fingerprint: { type: "string" },
-    title: {
-      type: "string",
-      description:
-        "A concise, human-readable title for this finding (5-12 words). Should describe the vulnerability, not the rule. Example: 'SQL Injection in BSim Database Name Parameter'",
-    },
-    attack_narrative: {
-      type: ["string", "null"],
-      description:
-        "A 2-3 sentence Alice-and-Bob style attack scenario. Use concrete actor names (e.g. 'An attacker on the local network', 'A malicious analyst with repository access'). Describe: who the attacker is, what they do, and what they gain. Example: 'Alice, a network attacker, connects to the TraceRMI port while Bob is debugging. She injects false register values, causing Bob to conclude the binary is benign when it is actually malicious.'",
-    },
-    display_severity: {
-      type: "string",
-      enum: ["critical", "high", "medium", "low"],
-      description:
-        "The assessed security severity. critical = remote code execution, auth bypass, data destruction. high = injection, privilege escalation, sensitive data exposure. medium = information disclosure, weak crypto, missing validation. low = informational, best-practice deviation.",
-    },
+    title: { type: "string", description: "A concise, human-readable title for this finding (5-12 words). Should describe the vulnerability, not the rule. Example: 'SQL Injection in BSim Database Name Parameter'" },
+    attack_narrative: { type: ["string", "null"], description: "A 2-3 sentence Alice-and-Bob style attack scenario. Use concrete actor names (e.g. 'An attacker on the local network', 'A malicious analyst with repository access'). Describe: who the attacker is, what they do, and what they gain. Example: 'Alice, a network attacker, connects to the TraceRMI port while Bob is debugging. She injects false register values, causing Bob to conclude the binary is benign when it is actually malicious.'" },
+    display_severity: { type: "string", enum: ["critical", "high", "medium", "low"], description: "The assessed security severity. critical = remote code execution, auth bypass, data destruction. high = injection, privilege escalation, sensitive data exposure. medium = information disclosure, weak crypto, missing validation. low = informational, best-practice deviation." },
     verdict: { type: "string", enum: ["tp", "fp", "needs_review"] },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     rationale: { type: "string" },
     verification_steps: { type: "array", items: { type: "string" }, minItems: 1 },
     fix_patch: { type: ["string", "null"] },
-    sink_function: {
-      type: ["string", "null"],
-      description:
-        "The dangerous function or API that data flows into (e.g. 'eval', 'popen', 'SafeExecWithTimeout', 'SQL query'). Null if not applicable.",
+    sink_function: { type: ["string", "null"], description: "The dangerous function or API that data flows into (e.g. 'eval', 'popen', 'SafeExecWithTimeout', 'SQL query'). Null if not applicable." },
+    code_citations: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["file_path", "start_line", "end_line", "snippet", "description"],
+        properties: {
+          file_path: { type: "string" },
+          start_line: { type: "integer" },
+          end_line: { type: "integer" },
+          snippet: { type: "string" },
+          description: { type: "string" },
+        },
+      },
     },
+    attack_path: {
+      type: "object",
+      additionalProperties: false,
+      required: ["chain", "narrative", "likelihood_reasoning", "impact_reasoning"],
+      properties: {
+        chain: { type: "array", items: { type: "string" } },
+        narrative: { type: "string" },
+        likelihood_reasoning: { type: "string" },
+        impact_reasoning: { type: "string" },
+      },
+    },
+    assumptions: { type: "array", items: { type: "string" } },
+    controls: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "description"],
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          file_path: { type: "string" },
+        },
+      },
+    },
+    blindspots: { type: "array", items: { type: "string" } },
+    source_threat_ids: { type: "array", items: { type: "string" }, description: "Threat model threat IDs this finding relates to (e.g. [\"T-01\", \"T-03\"])." },
   },
 } as const;
 
@@ -121,12 +154,8 @@ export const TRIAGE_RESULT_SCHEMA = {
           step_type: {
             type: "string",
             enum: [
-              "source-reachability",
-              "sink-danger",
-              "sanitization-check",
-              "config-review",
-              "dataflow-trace",
-              "exploit-feasibility",
+              "source-reachability", "sink-danger", "sanitization-check",
+              "config-review", "dataflow-trace", "exploit-feasibility",
               "framework-protection",
             ],
           },
@@ -136,6 +165,47 @@ export const TRIAGE_RESULT_SCHEMA = {
         },
       },
     },
+    code_citations: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["file_path", "start_line", "end_line", "snippet", "description"],
+        properties: {
+          file_path: { type: "string" },
+          start_line: { type: "integer" },
+          end_line: { type: "integer" },
+          snippet: { type: "string" },
+          description: { type: "string" },
+        },
+      },
+    },
+    attack_path: {
+      type: "object",
+      additionalProperties: false,
+      required: ["chain", "narrative", "likelihood_reasoning", "impact_reasoning"],
+      properties: {
+        chain: { type: "array", items: { type: "string" } },
+        narrative: { type: "string" },
+        likelihood_reasoning: { type: "string" },
+        impact_reasoning: { type: "string" },
+      },
+    },
+    assumptions: { type: "array", items: { type: "string" } },
+    controls: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "description"],
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          file_path: { type: "string" },
+        },
+      },
+    },
+    blindspots: { type: "array", items: { type: "string" } },
   },
 } as const;
 
@@ -200,20 +270,16 @@ export function triageSystemPromptPrefix(
 ): string {
   const repoSection = formatRepoContext(repoContext);
   const enrichedSection = formatEnrichedRepoContext(enrichedContext);
-  const repoBlock =
-    repoSection.length > 0 ? `## Repository Context\n${repoSection.join("\n")}\n\n` : "";
-  const enrichedBlock =
-    enrichedSection.length > 0
-      ? `## Enriched Repository Context\n${enrichedSection.join("\n")}\n\n`
-      : "";
-  return (
-    repoBlock +
-    enrichedBlock +
-    composePromptModules(
-      frameworkAwarenessModule(repoContext),
-      confidenceEscalationModule("triage"),
-      falseDismissalModule(),
-    )
+  const repoBlock = repoSection.length > 0
+    ? "## Repository Context\n" + repoSection.join("\n") + "\n\n"
+    : "";
+  const enrichedBlock = enrichedSection.length > 0
+    ? "## Enriched Repository Context\n" + enrichedSection.join("\n") + "\n\n"
+    : "";
+  return repoBlock + enrichedBlock + composePromptModules(
+    frameworkAwarenessModule(repoContext),
+    confidenceEscalationModule("triage"),
+    falseDismissalModule(),
   );
 }
 
@@ -238,7 +304,7 @@ export async function triageFindingWithAgent(
   );
   const agentConfig = resolveAgentConfig(registry, finding, repoName, triageTemplate);
   const prompt = extraPromptContext
-    ? `${agentConfig.prompt}\n\n${extraPromptContext}`
+    ? agentConfig.prompt + "\n\n" + extraPromptContext
     : agentConfig.prompt;
   const allowedTools = normalizeAllowedTools(agentConfig.allowedTools, runtimeOptions.runtime);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
@@ -247,9 +313,7 @@ export async function triageFindingWithAgent(
     model,
     allowedTools,
     runtimeOptions,
-    systemPromptPrefix:
-      precomputedSystemPromptPrefix ??
-      triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
+    systemPromptPrefix: precomputedSystemPromptPrefix ?? triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
     schema: TRIAGE_RESULT_SCHEMA_LITE,
   });
 
@@ -261,7 +325,10 @@ export async function triageFindingWithAgent(
   try {
     parsedResult = parseAgentOutput(structuredOutput ?? resultText, finding.fingerprint);
   } catch (error) {
-    throw new TriageExecutionError(`triage output parse failed: ${toErrorMessage(error)}`, costUsd);
+    throw new TriageExecutionError(
+      `triage output parse failed: ${toErrorMessage(error)}`,
+      costUsd,
+    );
   }
 
   return {
@@ -270,8 +337,7 @@ export async function triageFindingWithAgent(
   };
 }
 
-export const BATCH_TRIAGE_FALLBACK_RATIONALE =
-  "Finding was not included in batch triage agent response.";
+export const BATCH_TRIAGE_FALLBACK_RATIONALE = "Finding was not included in batch triage agent response.";
 
 export const DEFAULT_BATCH_SIZE = 5;
 
@@ -298,15 +364,7 @@ export async function triageFindingsBatch(
   const effectiveBatchSize = Math.max(1, Math.floor(maxBatchSize));
 
   if (findings.length <= effectiveBatchSize) {
-    return triageSingleBatch(
-      findings,
-      repoRoot,
-      repoName,
-      model,
-      repoContext,
-      runtimeOptions,
-      batchTemplate,
-    );
+    return triageSingleBatch(findings, repoRoot, repoName, model, repoContext, runtimeOptions, batchTemplate);
   }
 
   const allResults = new Map<string, TriageResult>();
@@ -465,7 +523,11 @@ async function triageSingleBatch(
   };
 }
 
-function buildBatchTriagePrompt(findings: Finding[], repoName: string, template?: string): string {
+function buildBatchTriagePrompt(
+  findings: Finding[],
+  repoName: string,
+  template?: string,
+): string {
   const context = buildBatchTriageContext(findings, repoName);
   return renderTemplate(template ?? BATCH_TRIAGE_TEMPLATE, context as any);
 }
@@ -519,15 +581,11 @@ function parseBatchTriageOutput(
       fingerprint: fp,
       title: asOptionalString((item as Record<string, unknown>)["title"]),
       attackNarrative: asOptionalString((item as Record<string, unknown>)["attack_narrative"]),
-      displaySeverity: asOptionalString(
-        (item as Record<string, unknown>)["display_severity"],
-      ) as TriageResult["displaySeverity"],
+      displaySeverity: asOptionalString((item as Record<string, unknown>)["display_severity"]) as TriageResult["displaySeverity"],
       verdict: parseVerdict(asString((item as Record<string, unknown>)["verdict"], "needs_review")),
       confidence: clampConfidence((item as Record<string, unknown>)["confidence"]),
       rationale: asString((item as Record<string, unknown>)["rationale"], ""),
-      verificationSteps: normalizeVerificationSteps(
-        (item as Record<string, unknown>)["verification_steps"],
-      ),
+      verificationSteps: normalizeVerificationSteps((item as Record<string, unknown>)["verification_steps"]),
       fixPatch: normalizeFixPatch((item as Record<string, unknown>)["fix_patch"]),
       source: parsePathAssessment((item as Record<string, unknown>)["source"]),
       sink: parsePathAssessment((item as Record<string, unknown>)["sink"]),
@@ -535,14 +593,16 @@ function parseBatchTriageOutput(
       isVulnerable: asOptionalBoolean((item as Record<string, unknown>)["is_vulnerable"]),
       exploitScenario: asOptionalString((item as Record<string, unknown>)["exploit_scenario"]),
       recommendedFix: asOptionalString((item as Record<string, unknown>)["recommended_fix"]),
-      ruleRefinementHint: asOptionalString(
-        (item as Record<string, unknown>)["rule_refinement_hint"],
-      ),
-      triageSchemaVersion: asOptionalString(
-        (item as Record<string, unknown>)["triage_schema_version"],
-      ),
+      ruleRefinementHint: asOptionalString((item as Record<string, unknown>)["rule_refinement_hint"]),
+      triageSchemaVersion: asOptionalString((item as Record<string, unknown>)["triage_schema_version"]),
       evidenceTrail: parseEvidenceTrail((item as Record<string, unknown>)["evidence_trail"]),
       evidenceChain: parseEvidenceChain((item as Record<string, unknown>)["evidence_chain"]),
+      codeCitations: parseCodeCitations((item as Record<string, unknown>)["code_citations"]),
+      attackPath: parseAttackPath((item as Record<string, unknown>)["attack_path"]),
+      assumptions: parseOptionalStringArray((item as Record<string, unknown>)["assumptions"]),
+      controls: parseControls((item as Record<string, unknown>)["controls"]),
+      blindspots: parseOptionalStringArray((item as Record<string, unknown>)["blindspots"]),
+      sourceThreatIds: parseOptionalStringArray((item as Record<string, unknown>)["source_threat_ids"]),
     });
   }
 
@@ -587,6 +647,12 @@ export function parseAgentOutput(raw: unknown, fingerprint: string): TriageResul
       triageSchemaVersion: asOptionalString(raw["triage_schema_version"]),
       evidenceTrail: parseEvidenceTrail(raw["evidence_trail"]),
       evidenceChain: parseEvidenceChain(raw["evidence_chain"]),
+      codeCitations: parseCodeCitations(raw["code_citations"]),
+      attackPath: parseAttackPath(raw["attack_path"]),
+      assumptions: parseOptionalStringArray(raw["assumptions"]),
+      controls: parseControls(raw["controls"]),
+      blindspots: parseOptionalStringArray(raw["blindspots"]),
+      sourceThreatIds: parseOptionalStringArray(raw["source_threat_ids"]),
     };
   }
 
@@ -620,7 +686,7 @@ function resolveAgentConfig(
 
   try {
     const config = registry.get(finding.taskId).triageAgentConfig(finding, repoName);
-    if (!config.prompt?.trim()) {
+    if (!config.prompt || !config.prompt.trim()) {
       return buildDefaultTriageAgentConfig(finding, repoName, template);
     }
     return config;
@@ -643,35 +709,31 @@ function normalizeAllowedTools(
 }
 
 function normalizeAllowedTriageToolNames(tools: readonly string[]): AllowedTriageTool[] {
-  return tools.filter(
-    (tool): tool is AllowedTriageTool =>
-      tool === "Read" ||
-      tool === "Glob" ||
-      tool === "Grep" ||
-      tool === "GetCallers" ||
-      tool === "GetCallees" ||
-      tool === "GetFunctionBody" ||
-      tool === "GoToDefinition" ||
-      tool === "FindReferences" ||
-      tool === "TypeAtPosition",
-  );
+  return tools.filter((tool): tool is AllowedTriageTool => (
+    tool === "Read"
+    || tool === "Glob"
+    || tool === "Grep"
+    || tool === "GetCallers"
+    || tool === "GetCallees"
+    || tool === "GetFunctionBody"
+    || tool === "GoToDefinition"
+    || tool === "FindReferences"
+    || tool === "TypeAtPosition"
+  ));
 }
 
 /** Parse a verdict string, defaulting to needs_review for unknown values. */
 export function parseVerdict(v: string): Verdict {
   const normalized = v.trim().toLowerCase();
-  if (
-    normalized === "tp" ||
-    normalized === "fp" ||
-    normalized === "needs_review" ||
-    normalized === "by_design"
-  )
-    return normalized;
+  if (normalized === "tp" || normalized === "fp" || normalized === "needs_review" || normalized === "by_design") return normalized;
   return "needs_review";
 }
 
 /** Parse raw LLM text into a TriageResult. */
-export function parseTriageResponse(text: string, fingerprint: string): TriageResult {
+export function parseTriageResponse(
+  text: string,
+  fingerprint: string,
+): TriageResult {
   try {
     const jsonStr = extractJson(text);
     const parsed = JSON.parse(jsonStr);
@@ -704,6 +766,12 @@ export function parseTriageResponse(text: string, fingerprint: string): TriageRe
       triageSchemaVersion: asOptionalString(parsed.triage_schema_version),
       evidenceTrail: parseEvidenceTrail(parsed.evidence_trail),
       evidenceChain: parseEvidenceChain(parsed.evidence_chain),
+      codeCitations: parseCodeCitations(parsed.code_citations),
+      attackPath: parseAttackPath(parsed.attack_path),
+      assumptions: parseOptionalStringArray(parsed.assumptions),
+      controls: parseControls(parsed.controls),
+      blindspots: parseOptionalStringArray(parsed.blindspots),
+      sourceThreatIds: parseOptionalStringArray(parsed.source_threat_ids),
     };
   } catch (error) {
     throw new Error(`Invalid triage JSON response: ${toErrorMessage(error)}`);
@@ -712,7 +780,9 @@ export function parseTriageResponse(text: string, fingerprint: string): TriageRe
 
 function normalizeVerificationSteps(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return value.map((step) => String(step).trim()).filter(Boolean);
+  return value
+    .map((step) => String(step).trim())
+    .filter(Boolean);
 }
 
 function clampConfidence(value: unknown): number {
@@ -748,9 +818,7 @@ function asOptionalBoolean(value: unknown): boolean | undefined {
   return value;
 }
 
-function parseEvidenceTrail(
-  value: unknown,
-): Array<{ level: string; evidence: string }> | undefined {
+function parseEvidenceTrail(value: unknown): Array<{ level: string; evidence: string }> | undefined {
   if (!Array.isArray(value)) return undefined;
   const trail: Array<{ level: string; evidence: string }> = [];
   for (const item of value) {
@@ -778,6 +846,66 @@ function parseEvidenceChain(value: unknown): import("./types.js").EvidenceStep[]
     }
   }
   return chain.length > 0 ? chain : undefined;
+}
+
+function parseCodeCitations(value: unknown): CodeCitation[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const citations: CodeCitation[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const filePath = typeof rec["file_path"] === "string" ? rec["file_path"].trim() : "";
+    const startLine = Number(rec["start_line"]);
+    const endLine = Number(rec["end_line"]);
+    let snippet = typeof rec["snippet"] === "string" ? rec["snippet"] : "";
+    const description = typeof rec["description"] === "string" ? rec["description"].trim() : "";
+    if (!filePath || !Number.isFinite(startLine) || !description) continue;
+    if (snippet.length > 2000) snippet = snippet.slice(0, 2000) + "\n...truncated";
+    citations.push({
+      filePath,
+      startLine,
+      endLine: Number.isFinite(endLine) ? endLine : startLine,
+      snippet,
+      description,
+    });
+  }
+  return citations.length > 0 ? citations : undefined;
+}
+
+function parseAttackPath(value: unknown): AttackPathAnalysis | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const rec = value as Record<string, unknown>;
+  const chain = Array.isArray(rec["chain"])
+    ? rec["chain"].map((s: unknown) => String(s).trim()).filter(Boolean)
+    : [];
+  const narrative = typeof rec["narrative"] === "string" ? rec["narrative"].trim() : "";
+  const likelihoodReasoning = typeof rec["likelihood_reasoning"] === "string"
+    ? rec["likelihood_reasoning"].trim() : "";
+  const impactReasoning = typeof rec["impact_reasoning"] === "string"
+    ? rec["impact_reasoning"].trim() : "";
+  if (chain.length === 0 && !narrative) return undefined;
+  return { chain, narrative, likelihoodReasoning, impactReasoning };
+}
+
+function parseControls(value: unknown): SecurityControl[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const controls: SecurityControl[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";
+    const description = typeof rec["description"] === "string" ? rec["description"].trim() : "";
+    const filePath = typeof rec["file_path"] === "string" ? rec["file_path"].trim() : undefined;
+    if (!name || !description) continue;
+    controls.push({ name, description, filePath: filePath || undefined });
+  }
+  return controls.length > 0 ? controls : undefined;
+}
+
+function parseOptionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result = value.map((s: unknown) => String(s).trim()).filter(Boolean);
+  return result.length > 0 ? result : undefined;
 }
 
 function parsePathAssessment(value: unknown): TriageResult["source"] | undefined {

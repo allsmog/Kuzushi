@@ -227,6 +227,7 @@ export type TriageFindingQueuedEvent = EventEnvelope<
     enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
     threatModelSummary?: string;
+    operatorContext?: string;
     index: number;
     total: number;
   }
@@ -241,6 +242,7 @@ export type TriageBatchQueuedEvent = EventEnvelope<
     enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
     threatModelSummary?: string;
+    operatorContext?: string;
     total: number;
   }
 >;
@@ -343,6 +345,7 @@ export type VerificationFindingQueuedEvent = EventEnvelope<
     enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
     threatModelSummary?: string;
+    operatorContext?: string;
     index: number;
     total: number;
   }
@@ -360,6 +363,7 @@ export type VerificationBatchQueuedEvent = EventEnvelope<
     }>;
     repoContext?: unknown;
     enrichedContext?: EnrichedRepoContext["enrichment"];
+    operatorContext?: string;
   }
 >;
 

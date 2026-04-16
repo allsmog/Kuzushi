@@ -1,9 +1,19 @@
-import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
-import { formatBypassForPrompt, getBypassKnowledge } from "../../bypass-knowledge.js";
+import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { withRetry } from "../../retry.js";
+import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
+import { triageFindingWithAgent, triageFindingsBatch, triageSystemPromptPrefix, preReadForTriage, type FileContentCache } from "../../triage.js";
+import type { KuzushiConfig } from "../../types.js";
+import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
+import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
+import { runTriageAssertions, computeTriageQualityScore } from "../../scoring/triage-assertions.js";
+import { createEvent } from "../helpers.js";
+import type { MessageBus } from "../types.js";
+import { triageFindingMultiAgent } from "../../multi-agent-triage.js";
 import {
   computeCalibratedConfidence,
   extractRuleFamily,
@@ -11,41 +21,26 @@ import {
   loadCalibrationWeights,
   updateFindingCalibration,
 } from "../../confidence-calibration.js";
-import type { PipelineHookChain } from "../../hooks/chain.js";
-import type { HookContext } from "../../hooks/types.js";
-import type { KnowledgeRegistry } from "../../knowledge/types.js";
-import { triageFindingMultiAgent } from "../../multi-agent-triage.js";
+import { getBypassKnowledge, formatBypassForPrompt } from "../../bypass-knowledge.js";
 import { formatPrecedentsForPrompt, type Precedents } from "../../precedents.js";
-import { resolveTemplates } from "../../prompts/loader.js";
+import type { KnowledgeRegistry } from "../../knowledge/types.js";
 import { evidenceChainModule, knowledgeInjectionModule } from "../../prompts/modules.js";
-import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
-import { withRetry } from "../../retry.js";
-import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import {
-  computeCompositeConfidence,
   extractScannerSignal,
   extractTriageSignal,
+  computeCompositeConfidence,
+  type CompositeConfidenceResult,
 } from "../../scoring/composite-confidence.js";
-import { computeTriageQualityScore, runTriageAssertions } from "../../scoring/triage-assertions.js";
 import {
+  TrajectoryCollector,
   formatTrajectoriesForPrompt,
   retrieveTrajectories,
   saveTrajectory,
   summarizeTrajectory,
-  TrajectoryCollector,
 } from "../../trajectory-memory.js";
-import {
-  type FileContentCache,
-  preReadForTriage,
-  triageFindingsBatch,
-  triageFindingWithAgent,
-  triageSystemPromptPrefix,
-} from "../../triage.js";
-import type { KuzushiConfig } from "../../types.js";
-import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
-import type { TriageBatchQueuedEvent, TriageFindingQueuedEvent } from "../events.js";
-import { createEvent } from "../helpers.js";
-import type { MessageBus } from "../types.js";
+import type { PipelineHookChain } from "../../hooks/chain.js";
+import type { HookContext } from "../../hooks/types.js";
+import { resolveTemplates } from "../../prompts/loader.js";
 
 export interface TriageWorkerDeps {
   taskRegistry: TaskRegistry;
@@ -59,18 +54,14 @@ export interface TriageWorkerDeps {
    * Optional function that resolves the pipeline hook chain for a given run.
    * Returns undefined if no hooks are configured for this run.
    */
-  getRunHooks?: (
-    runId: string,
-  ) => { hookChain: PipelineHookChain; hookContext: HookContext } | undefined;
+  getRunHooks?: (runId: string) => { hookChain: PipelineHookChain; hookContext: HookContext } | undefined;
   /** Optional REPL state reader for interactive skip/suppress/pause. */
-  getReplState?: () =>
-    | {
-        skippedFingerprints: Set<string>;
-        suppressedRules: Set<string>;
-        focusPath: string | null;
-        paused: boolean;
-      }
-    | undefined;
+  getReplState?: () => {
+    skippedFingerprints: Set<string>;
+    suppressedRules: Set<string>;
+    focusPath: string | null;
+    paused: boolean;
+  } | undefined;
 }
 
 /**
@@ -145,9 +136,8 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
       }
 
       // Check if finding was skipped or its rule suppressed
-      const shouldSkip =
-        replState.skippedFingerprints.has(finding.fingerprint) ||
-        replState.suppressedRules.has(finding.ruleId);
+      const shouldSkip = replState.skippedFingerprints.has(finding.fingerprint)
+        || replState.suppressedRules.has(finding.ruleId);
 
       if (shouldSkip) {
         await bus.publish(
@@ -230,7 +220,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               const bypassLines = formatBypassForPrompt(bypassEntry);
               extraSections.push(
                 bypassLines.join("\n") +
-                  "\n\nBefore concluding FP, verify that these bypass techniques don't apply.",
+                "\n\nBefore concluding FP, verify that these bypass techniques don't apply.",
               );
             }
           }
@@ -240,11 +230,24 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             const tmSummary = event.payload.threatModelSummary;
             if (typeof tmSummary === "string" && tmSummary.length > 0) {
               extraSections.push(
-                "## Application Threat Model Context\n" +
-                  "The following context was derived from automated threat modeling of this application.\n" +
-                  "Use it to distinguish between DESIGN CHOICES (by_design) and actual VULNERABILITIES (tp).\n\n" +
-                  tmSummary,
+                "## Application Threat Model Context\n"
+                + "The following threat model was derived from automated analysis of this application.\n"
+                + "Use it to:\n"
+                + "1. Distinguish between DESIGN CHOICES (by_design) and actual VULNERABILITIES (tp).\n"
+                + "2. Reference specific threat IDs (e.g. [T-01]) in your attack_path narrative when a finding matches a modeled threat.\n"
+                + "3. Identify which trust boundaries are crossed and which attacker-controlled inputs are involved.\n"
+                + "4. Check existing mitigations listed below — if a mitigation covers this finding, it may be a false positive.\n"
+                + "5. Include relevant threat IDs in your source_threat_ids output field.\n\n"
+                + tmSummary,
               );
+            }
+          }
+
+          // 1C-pre2: Operator-provided context — inject operator-declared trust, scope, architecture
+          {
+            const opCtx = event.payload.operatorContext;
+            if (typeof opCtx === "string" && opCtx.length > 0) {
+              extraSections.push(opCtx);
             }
           }
 
@@ -273,31 +276,24 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             }
           }
 
-          const extraPromptContext =
-            extraSections.length > 0 ? extraSections.join("\n\n") : undefined;
+          const extraPromptContext = extraSections.length > 0
+            ? extraSections.join("\n\n")
+            : undefined;
 
           // Set up trajectory collector wrapping the activity callback
           const collector = useTrajectoryMemory ? new TrajectoryCollector() : null;
-          const baseActivityCallback = async (
-            activity: Parameters<typeof bus.publish>[0] extends never
-              ? never
-              : {
-                  kind: string;
-                  toolName?: string;
-                  toolInput?: Record<string, unknown>;
-                  summary?: string;
-                  elapsedSeconds?: number;
-                },
-          ) => {
+          const baseActivityCallback = async (activity: Parameters<typeof bus.publish>[0] extends never ? never : {
+            kind: string;
+            toolName?: string;
+            toolInput?: Record<string, unknown>;
+            summary?: string;
+            elapsedSeconds?: number;
+          }) => {
             await bus.publish(
               createEvent("triage:agent-activity", runId, {
                 context,
                 fingerprint: finding.fingerprint,
-                kind: activity.kind as
-                  | "tool-start"
-                  | "tool-progress"
-                  | "tool-complete"
-                  | "reasoning",
+                kind: activity.kind as "tool-start" | "tool-progress" | "tool-complete" | "reasoning",
                 toolName: activity.toolName,
                 toolInput: activity.toolInput,
                 summary: activity.summary,
@@ -319,19 +315,12 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           const coercedRepoContext = coerceRepoContext(repoContext);
           const coercedEnrichedContext = coerceContextEnrichment(enrichedContext);
           if (cachedSystemPromptPrefix === undefined || cachedSystemPromptKey !== runId) {
-            cachedSystemPromptPrefix = triageSystemPromptPrefix(
-              coercedRepoContext,
-              coercedEnrichedContext,
-            );
+            cachedSystemPromptPrefix = triageSystemPromptPrefix(coercedRepoContext, coercedEnrichedContext);
             cachedSystemPromptKey = runId;
           }
 
           const triageModel = resolveStageModel(deps.config, "triage");
-          const triageSpecialistModel = resolveStageModel(
-            deps.config,
-            "triage-specialist",
-            "triage",
-          );
+          const triageSpecialistModel = resolveStageModel(deps.config, "triage-specialist", "triage");
 
           if (useMultiAgent) {
             triageOutput = await triageFindingMultiAgent(
@@ -431,22 +420,18 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
 
       // Auto-escalate: high-severity needs_review with low confidence → multi-agent triage
       if (
-        !useMultiAgent &&
-        result.verdict === "needs_review" &&
-        result.confidence < 0.4 &&
-        finding.severity === "ERROR" &&
-        !escalatedFingerprints.has(finding.fingerprint)
+        !useMultiAgent
+        && result.verdict === "needs_review"
+        && result.confidence < 0.4
+        && finding.severity === "ERROR"
+        && !escalatedFingerprints.has(finding.fingerprint)
       ) {
         escalatedFingerprints.add(finding.fingerprint);
         try {
           const coercedRepoContext = coerceRepoContext(repoContext);
           const coercedEnrichedContext = coerceContextEnrichment(enrichedContext);
           const triageModel = resolveStageModel(deps.config, "triage");
-          const triageSpecialistModel = resolveStageModel(
-            deps.config,
-            "triage-specialist",
-            "triage",
-          );
+          const triageSpecialistModel = resolveStageModel(deps.config, "triage-specialist", "triage");
           const escalatedOutput = await triageFindingMultiAgent(
             triageConfigProvider,
             finding,
@@ -463,13 +448,9 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           result = escalatedOutput.result;
           result.triageCostUsd = (result.triageCostUsd ?? 0) + escalatedOutput.costUsd;
           costUsd += escalatedOutput.costUsd;
-          console.error(
-            `[triage] Auto-escalated ${finding.fingerprint} to multi-agent (was needs_review @ ${result.confidence})`,
-          );
+          console.error(`[triage] Auto-escalated ${finding.fingerprint} to multi-agent (was needs_review @ ${result.confidence})`);
         } catch (error) {
-          console.error(
-            `[triage] Multi-agent escalation failed for ${finding.fingerprint}: ${toErrorMessage(error)}`,
-          );
+          console.error(`[triage] Multi-agent escalation failed for ${finding.fingerprint}: ${toErrorMessage(error)}`);
         }
       }
 
@@ -519,7 +500,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             createEvent("triage:assertions", runId, {
               context,
               fingerprint: finding.fingerprint,
-              assertions: assertions.map((a) => ({
+              assertions: assertions.map(a => ({
                 name: a.name,
                 passed: a.passed,
                 score: a.score,
@@ -621,8 +602,9 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
       }
     } catch (error) {
       const errorCostUsd = getErrorCostUsd(error);
-      const perFindingCost =
-        findings.length > 0 && errorCostUsd != null ? errorCostUsd / findings.length : undefined;
+      const perFindingCost = findings.length > 0 && errorCostUsd != null
+        ? errorCostUsd / findings.length
+        : undefined;
 
       for (const [idx, finding] of findings.entries()) {
         await bus.publish(
@@ -641,7 +623,9 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
   });
 }
 
-function createTriageConfigProvider(taskRegistry: TaskRegistry): {
+function createTriageConfigProvider(
+  taskRegistry: TaskRegistry,
+): {
   has(id: string): boolean;
   get(id: string): { triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig };
 } {
@@ -665,8 +649,7 @@ function createTriageConfigProvider(taskRegistry: TaskRegistry): {
       }
 
       return {
-        triageAgentConfig: (finding: Finding, repoName: string) =>
-          triageAgentConfig(finding, repoName),
+        triageAgentConfig: (finding: Finding, repoName: string) => triageAgentConfig(finding, repoName),
       };
     },
   };
