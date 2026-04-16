@@ -41,7 +41,15 @@
     "typecheck:benchmarks": "tsc -p benchmarks/tsconfig.json --noEmit",
     "perf": "tsx perf/harness.ts",
     "typecheck:perf": "tsc -p perf/tsconfig.json --noEmit",
-    "check:circular": "madge --ts-config tsconfig.json --extensions ts,tsx --circular src/"
+    "check:circular": "madge --ts-config tsconfig.json --extensions ts,tsx --circular src/",
+    "codegen": "tsx scripts/codegen/index.ts",
+    "codegen:check": "tsx scripts/codegen/check.ts",
+    "typecheck:codegen": "tsc -p scripts/codegen/tsconfig.json --noEmit",
+    "lint": "biome lint .",
+    "format": "biome format .",
+    "check": "biome check .",
+    "fix": "biome check --write .",
+    "fix:unsafe": "biome check --write --unsafe ."
   },
   "files": [
     "dist",
@@ -71,6 +79,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.12",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.13.4",
     "@types/react": "^18",
