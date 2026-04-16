@@ -77,26 +77,56 @@ export class InProcessBus implements MessageBus {
     timeoutMs: number = DEFAULT_WAIT_TIMEOUT_MS,
   ): Promise<E> {
     const key = String(eventType);
+    const emitter = this.emitter;
 
     return new Promise<E>((resolve, reject) => {
+      // Forward-declare the listener + timer so `cleanup` can reference them.
+      let timer: NodeJS.Timeout | undefined;
+      let settled = false;
+
+      // Centralized settlement — guarantees `emitter.off(...)` runs exactly
+      // once regardless of which path (match, predicate-throw, timeout) fires
+      // first. A settled=true guard prevents a second predicate-match event
+      // from double-resolving the promise, and a second cleanup() call is a
+      // no-op on EventEmitter.
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        if (timer !== undefined) clearTimeout(timer);
+        emitter.off(key, onEvent);
+      };
+
       const onEvent = (event: AnyEvent) => {
+        if (settled) return;
+        let matched: boolean;
         try {
           const typedEvent = event as E;
-          if (predicate && !predicate(typedEvent)) {
-            return;
-          }
-
-          cleanup();
-          resolve(typedEvent);
+          matched = predicate ? predicate(typedEvent) : true;
+          if (!matched) return;
         } catch (error) {
+          // Predicate threw — fully detach before surfacing the error so
+          // a subsequent event doesn't re-enter this handler.
+          try {
+            cleanup();
+          } finally {
+            reject(error);
+          }
+          return;
+        }
+
+        try {
           cleanup();
-          reject(error);
+        } finally {
+          resolve(event as E);
         }
       };
 
-      const timer = setTimeout(() => {
-        cleanup();
-        reject(new Error(`Timed out waiting for event: ${key}`));
+      timer = setTimeout(() => {
+        try {
+          cleanup();
+        } finally {
+          reject(new Error(`Timed out waiting for event: ${key}`));
+        }
       }, timeoutMs);
 
       // Prevent the timeout from keeping the node process alive after bus.close().
@@ -104,12 +134,7 @@ export class InProcessBus implements MessageBus {
         timer.unref();
       }
 
-      const cleanup = () => {
-        clearTimeout(timer);
-        this.emitter.off(key, onEvent);
-      };
-
-      this.emitter.on(key, onEvent);
+      emitter.on(key, onEvent);
     });
   }
 
