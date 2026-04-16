@@ -71,6 +71,14 @@ function buildStridePrompt(maxThreats: number, outputDir: string): string {
     "Use the DFD elements and trust boundaries from S3 to identify attack surfaces.",
     "Read the actual source files referenced in the DFD to ground threats in real code.",
     "Focus on the highest-impact threats first.",
+    "",
+    "If this application is a CLI tool, build system, or security scanner that processes external",
+    "repositories or files, also model these threat scenarios:",
+    "- Repository content as attacker-controlled input (malicious file names, symlinks, configs)",
+    "- Build-time execution (autobuild, postinstall scripts, custom rules/plugins loaded from repo)",
+    "- LLM/AI prompt injection via repository content influencing tool behavior or tool invocation",
+    "- Path traversal via symlinks or relative paths in repo content escaping the project root",
+    "- Subprocess invocation with repo-derived metadata (names, paths) as unsanitized arguments",
   ].join("\n");
 }
 
