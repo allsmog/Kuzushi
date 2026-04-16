@@ -16,16 +16,16 @@
       "scripts/**",
       "*.json",
       "*.ts",
-      "!**/node_modules/**",
-      "!**/dist/**",
-      "!**/dist-benchmarks/**",
-      "!**/coverage/**",
-      "!**/.kuzushi/**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/dist-benchmarks",
+      "!**/coverage",
+      "!**/.kuzushi",
       "!**/*.generated.*",
-      "!generated/**",
-      "!benchmarks/**/repo/**",
+      "!generated",
+      "!benchmarks/**/repo",
       "!**/*.sqlite3",
-      "!assets/**"
+      "!assets"
     ]
   },
   "formatter": {
