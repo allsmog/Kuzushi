@@ -84,6 +84,8 @@ export function buildSummaryData(
       blindspots: f.blindspots,
       sourceThreatIds: f.sourceThreatIds,
       verificationSteps: f.verificationSteps,
+      blame: f.blame,
+      introducedIn: f.introducedIn,
     }));
 
   let threatModelSummary: string | undefined;

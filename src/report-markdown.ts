@@ -249,6 +249,11 @@ export function generateMarkdownReport(
         lines.push(`Related threat model threats: ${finding.sourceThreatIds.join(", ")}`);
         lines.push("");
       }
+
+      if (finding.blame) {
+        lines.push(`Introduced in: \`${finding.blame.sha}\` by ${finding.blame.author} on ${finding.blame.date} — ${finding.blame.summary}`);
+        lines.push("");
+      }
     }
   }
 

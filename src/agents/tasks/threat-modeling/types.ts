@@ -76,6 +76,16 @@ export interface ThreatModelDocument {
     bySeverity: Record<string, number>;
     byCategory: Record<StrideCategory, number>;
   };
+  /** Operator annotations keyed by threat ID. */
+  userAnnotations?: Record<string, string>;
+  /** Operator-confirmed mitigations that the scanner should trust. */
+  confirmedMitigations?: string[];
+  /** Threat IDs the operator marked as not applicable — excluded from detection. */
+  dismissedThreats?: string[];
+  /** Whether this document has been edited by an operator. */
+  userEdited?: boolean;
+  /** ISO timestamp of last human edit. */
+  lastEditedAt?: string;
 }
 
 // ── Config ──

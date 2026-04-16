@@ -113,6 +113,10 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     details.push(`${chalk.magenta("Threats:")} ${finding.sourceThreatIds.join(", ")}`);
   }
 
+  if (finding.blame) {
+    details.push(`${chalk.dim("Introduced:")} ${finding.blame.sha} by ${finding.blame.author} on ${finding.blame.date}`);
+  }
+
   return (
     <Box flexDirection="column">
       <Text>{"  "}{verdict} {conf}  {severity} {scanner}{verificationBadge}</Text>

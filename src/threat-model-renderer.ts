@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type {
   ThreatModelDocument,
@@ -8,14 +8,59 @@ import type {
   StrideCategory,
 } from "./agents/tasks/threat-modeling/types.js";
 
+const PERSISTENT_THREAT_MODEL_PATH = ".kuzushi/threat-model.json";
+
+/**
+ * Load the persistent threat model from .kuzushi/threat-model.json.
+ * Falls back to per-run threat model if persistent doesn't exist.
+ */
+export function loadPersistentThreatModel(repoRoot: string): ThreatModelDocument | null {
+  const persistentPath = path.join(repoRoot, PERSISTENT_THREAT_MODEL_PATH);
+  if (!existsSync(persistentPath)) return null;
+  try {
+    return JSON.parse(readFileSync(persistentPath, "utf-8")) as ThreatModelDocument;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save a threat model to the persistent path .kuzushi/threat-model.json.
+ * If the existing persistent model has userEdited=true, only update if force=true.
+ */
+export function savePersistentThreatModel(
+  repoRoot: string,
+  doc: ThreatModelDocument,
+  force = false,
+): boolean {
+  const persistentPath = path.join(repoRoot, PERSISTENT_THREAT_MODEL_PATH);
+  // Don't overwrite operator-edited models unless forced
+  if (!force && existsSync(persistentPath)) {
+    try {
+      const existing = JSON.parse(readFileSync(persistentPath, "utf-8")) as ThreatModelDocument;
+      if (existing.userEdited) return false;
+    } catch { /* overwrite corrupt files */ }
+  }
+  const dir = path.dirname(persistentPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(persistentPath, JSON.stringify(doc, null, 2) + "\n", "utf-8");
+  return true;
+}
+
 /**
  * Load a ThreatModelDocument from .kuzushi/runs/<runId>/threat-model.json.
- * Returns null if the file doesn't exist or is invalid.
+ * Prefers the persistent threat model if it exists.
+ * Returns null if neither file exists or is invalid.
  */
 export function loadThreatModelDocument(
   repoRoot: string,
   runId: string,
 ): ThreatModelDocument | null {
+  // Prefer persistent threat model
+  const persistent = loadPersistentThreatModel(repoRoot);
+  if (persistent) return persistent;
+
+  // Fall back to per-run
   const tmPath = path.join(
     repoRoot,
     ".kuzushi",

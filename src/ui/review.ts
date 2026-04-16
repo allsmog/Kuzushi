@@ -73,6 +73,8 @@ export async function runInteractiveReview(
     blindspots: f.blindspots,
     sourceThreatIds: f.sourceThreatIds,
     verificationSteps: f.verificationSteps,
+    blame: f.blame,
+    introducedIn: f.introducedIn,
   }));
 
   const result: ReviewResult = { reviewed: 0, tp: 0, fp: 0, byDesign: 0, skipped: 0 };

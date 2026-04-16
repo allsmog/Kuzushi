@@ -66,6 +66,10 @@ export interface Finding {
   engineProvenance?: EngineProvenance[];
   corroboratingSignals?: CorroboratingSignal[];
   suppressionReasons?: SuppressionReason[];
+  /** Git blame info for the vulnerable line. */
+  blame?: import("../git/blame.js").BlameInfo;
+  /** Short commit SHA where the vulnerability was introduced. */
+  introducedIn?: string;
 }
 
 export type AllowedTriageTool =

@@ -206,6 +206,8 @@ export interface ActionableFinding {
   blindspots?: string[];
   sourceThreatIds?: string[];
   verificationSteps?: string[];
+  blame?: { sha: string; author: string; date: string; summary: string };
+  introducedIn?: string;
 }
 
 export interface UIState {
