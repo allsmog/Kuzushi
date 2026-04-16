@@ -39,6 +39,8 @@
     "benchmark:diff": "tsx benchmarks/sarif-diff.ts",
     "benchmark:regression": "tsx benchmarks/regression-check.ts",
     "typecheck:benchmarks": "tsc -p benchmarks/tsconfig.json --noEmit",
+    "perf": "tsx perf/harness.ts",
+    "typecheck:perf": "tsc -p perf/tsconfig.json --noEmit",
     "check:circular": "madge --ts-config tsconfig.json --extensions ts,tsx --circular src/"
   },
   "files": [
