@@ -213,12 +213,14 @@ function upsertFindingParams(
       rule_refinement_hint: triage.ruleRefinementHint ?? null,
       triage_schema_version: triage.triageSchemaVersion ?? null,
       code_citations: triage.codeCitations ?? null,
-      attack_path: triage.attackPath ? {
-        chain: triage.attackPath.chain,
-        narrative: triage.attackPath.narrative,
-        likelihood_reasoning: triage.attackPath.likelihoodReasoning,
-        impact_reasoning: triage.attackPath.impactReasoning,
-      } : null,
+      attack_path: triage.attackPath
+        ? {
+            chain: triage.attackPath.chain,
+            narrative: triage.attackPath.narrative,
+            likelihood_reasoning: triage.attackPath.likelihoodReasoning,
+            impact_reasoning: triage.attackPath.impactReasoning,
+          }
+        : null,
       assumptions: triage.assumptions ?? null,
       controls: triage.controls ?? null,
       blindspots: triage.blindspots ?? null,
@@ -444,8 +446,12 @@ function parseCodeCitationsFromDetails(value: unknown): CodeCitation[] | undefin
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
     const rec = item as Record<string, unknown>;
-    const filePath = typeof rec["file_path"] === "string" ? rec["file_path"] :
-      typeof rec["filePath"] === "string" ? rec["filePath"] : "";
+    const filePath =
+      typeof rec["file_path"] === "string"
+        ? rec["file_path"]
+        : typeof rec["filePath"] === "string"
+          ? rec["filePath"]
+          : "";
     const startLine = Number(rec["start_line"] ?? rec["startLine"]);
     const endLine = Number(rec["end_line"] ?? rec["endLine"]);
     const snippet = typeof rec["snippet"] === "string" ? rec["snippet"] : "";
@@ -469,10 +475,14 @@ function parseAttackPathFromDetails(value: unknown): AttackPathAnalysis | undefi
     ? rec["chain"].map((s: unknown) => String(s).trim()).filter(Boolean)
     : [];
   const narrative = typeof rec["narrative"] === "string" ? rec["narrative"].trim() : "";
-  const likelihoodReasoning = typeof (rec["likelihood_reasoning"] ?? rec["likelihoodReasoning"]) === "string"
-    ? String(rec["likelihood_reasoning"] ?? rec["likelihoodReasoning"]).trim() : "";
-  const impactReasoning = typeof (rec["impact_reasoning"] ?? rec["impactReasoning"]) === "string"
-    ? String(rec["impact_reasoning"] ?? rec["impactReasoning"]).trim() : "";
+  const likelihoodReasoning =
+    typeof (rec["likelihood_reasoning"] ?? rec["likelihoodReasoning"]) === "string"
+      ? String(rec["likelihood_reasoning"] ?? rec["likelihoodReasoning"]).trim()
+      : "";
+  const impactReasoning =
+    typeof (rec["impact_reasoning"] ?? rec["impactReasoning"]) === "string"
+      ? String(rec["impact_reasoning"] ?? rec["impactReasoning"]).trim()
+      : "";
   if (chain.length === 0 && !narrative) return undefined;
   return { chain, narrative, likelihoodReasoning, impactReasoning };
 }
@@ -485,8 +495,10 @@ function parseControlsFromDetails(value: unknown): SecurityControl[] | undefined
     const rec = item as Record<string, unknown>;
     const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";
     const description = typeof rec["description"] === "string" ? rec["description"].trim() : "";
-    const filePath = typeof (rec["file_path"] ?? rec["filePath"]) === "string"
-      ? String(rec["file_path"] ?? rec["filePath"]).trim() : undefined;
+    const filePath =
+      typeof (rec["file_path"] ?? rec["filePath"]) === "string"
+        ? String(rec["file_path"] ?? rec["filePath"]).trim()
+        : undefined;
     if (!name || !description) continue;
     controls.push({ name, description, filePath: filePath || undefined });
   }
@@ -893,15 +905,26 @@ export function getActionableFindings(
       pocRunStderr: row.pocRunStderr,
       pocRunVerdict: row.pocRunVerdict,
       pocRunDurationMs: row.pocRunDurationMs,
-      codeCitations: detailsRecord ? parseCodeCitationsFromDetails(detailsRecord["code_citations"]) : undefined,
-      attackPath: detailsRecord ? parseAttackPathFromDetails(detailsRecord["attack_path"]) : undefined,
-      assumptions: detailsRecord ? parseStringArrayFromDetails(detailsRecord["assumptions"]) : undefined,
+      codeCitations: detailsRecord
+        ? parseCodeCitationsFromDetails(detailsRecord["code_citations"])
+        : undefined,
+      attackPath: detailsRecord
+        ? parseAttackPathFromDetails(detailsRecord["attack_path"])
+        : undefined,
+      assumptions: detailsRecord
+        ? parseStringArrayFromDetails(detailsRecord["assumptions"])
+        : undefined,
       controls: detailsRecord ? parseControlsFromDetails(detailsRecord["controls"]) : undefined,
-      blindspots: detailsRecord ? parseStringArrayFromDetails(detailsRecord["blindspots"]) : undefined,
-      sourceThreatIds: detailsRecord ? parseStringArrayFromDetails(detailsRecord["source_threat_ids"]) : undefined,
+      blindspots: detailsRecord
+        ? parseStringArrayFromDetails(detailsRecord["blindspots"])
+        : undefined,
+      sourceThreatIds: detailsRecord
+        ? parseStringArrayFromDetails(detailsRecord["source_threat_ids"])
+        : undefined,
       blame: parseFindingMetadata(row.findingMetadataJson)?.blame,
-      introducedIn: parseFindingMetadata(row.findingMetadataJson)?.introducedIn
-        ?? parseFindingMetadata(row.findingMetadataJson)?.blame?.sha,
+      introducedIn:
+        parseFindingMetadata(row.findingMetadataJson)?.introducedIn ??
+        parseFindingMetadata(row.findingMetadataJson)?.blame?.sha,
     };
   });
 }

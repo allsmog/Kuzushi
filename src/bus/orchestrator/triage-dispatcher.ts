@@ -6,12 +6,12 @@
  */
 
 import type { Finding } from "../../scanners/types.js";
+import { updateRunCost } from "../../store.js";
 import type { TriageResult } from "../../types.js";
 import { isRecord, normalizeCostUsd } from "../../utils.js";
-import { updateRunCost } from "../../store.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import type { RunState, OrchestratorDeps } from "./types.js";
+import type { OrchestratorDeps, RunState } from "./types.js";
 
 /**
  * Extract a rich threat model context from upstream task outputs
@@ -29,7 +29,8 @@ export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): stri
 
   const dfd = isRecord(raw["dfd"]) ? raw["dfd"] : undefined;
   const elements = dfd && Array.isArray(dfd["elements"]) ? dfd["elements"] : [];
-  const trustBoundaries = dfd && Array.isArray(dfd["trustBoundaries"]) ? dfd["trustBoundaries"] : [];
+  const trustBoundaries =
+    dfd && Array.isArray(dfd["trustBoundaries"]) ? dfd["trustBoundaries"] : [];
   const threats = Array.isArray(raw["threats"]) ? raw["threats"] : [];
 
   // ── 1. Trust boundaries & input classification ──
@@ -75,7 +76,10 @@ export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): stri
       if (!isRecord(t)) continue;
       const cat = String(t["category"] ?? "unknown");
       let list = byCategory.get(cat);
-      if (!list) { list = []; byCategory.set(cat, list); }
+      if (!list) {
+        list = [];
+        byCategory.set(cat, list);
+      }
       list.push(t);
     }
 
@@ -123,10 +127,22 @@ export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): stri
 
   // ── 4. Offensive tool detection ──
   const allText = JSON.stringify(raw).toLowerCase();
-  const offensivePatterns = ["pentest", "offensive", "red team", "tunneling", "pivoting", "c2", "implant", "exploitation framework", "attack tool"];
+  const offensivePatterns = [
+    "pentest",
+    "offensive",
+    "red team",
+    "tunneling",
+    "pivoting",
+    "c2",
+    "implant",
+    "exploitation framework",
+    "attack tool",
+  ];
   const isOffensiveTool = offensivePatterns.some((p) => allText.includes(p));
   if (isOffensiveTool) {
-    parts.push("Application type: OFFENSIVE SECURITY / PENTEST TOOL — findings about missing authentication, encryption, or access control may be BY DESIGN for this tool's intended use case. Focus on bugs that harm the tool's OPERATOR (crashes, data races, credential leaks) rather than design choices about target interaction.");
+    parts.push(
+      "Application type: OFFENSIVE SECURITY / PENTEST TOOL — findings about missing authentication, encryption, or access control may be BY DESIGN for this tool's intended use case. Focus on bugs that harm the tool's OPERATOR (crashes, data races, credential leaks) rather than design choices about target interaction.",
+    );
   }
 
   return parts.length > 0 ? parts.join("\n\n") : undefined;
@@ -134,13 +150,20 @@ export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): stri
 
 function formatCategory(cat: string): string {
   switch (cat) {
-    case "spoofing": return "Spoofing";
-    case "tampering": return "Tampering";
-    case "repudiation": return "Repudiation";
-    case "information-disclosure": return "Information Disclosure";
-    case "denial-of-service": return "Denial of Service";
-    case "elevation-of-privilege": return "Elevation of Privilege";
-    default: return cat;
+    case "spoofing":
+      return "Spoofing";
+    case "tampering":
+      return "Tampering";
+    case "repudiation":
+      return "Repudiation";
+    case "information-disclosure":
+      return "Information Disclosure";
+    case "denial-of-service":
+      return "Denial of Service";
+    case "elevation-of-privilege":
+      return "Elevation of Privilege";
+    default:
+      return cat;
   }
 }
 
@@ -216,10 +239,10 @@ export function handleTriageError(
 export function isTriageDone(state: RunState): boolean {
   const processed = state.triaged + state.triageErrors;
   return (
-    state.triageTotal > 0
-    && processed >= state.triageTotal
-    && state.inFlight === 0
-    && !state.reportRequested
+    state.triageTotal > 0 &&
+    processed >= state.triageTotal &&
+    state.inFlight === 0 &&
+    !state.reportRequested
   );
 }
 

@@ -1,11 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type {
-  ThreatModelDocument,
   DfdElement,
-  TrustBoundary,
-  StrideThreat,
   StrideCategory,
+  StrideThreat,
+  ThreatModelDocument,
 } from "./agents/tasks/threat-modeling/types.js";
 
 const PERSISTENT_THREAT_MODEL_PATH = ".kuzushi/threat-model.json";
@@ -39,11 +38,13 @@ export function savePersistentThreatModel(
     try {
       const existing = JSON.parse(readFileSync(persistentPath, "utf-8")) as ThreatModelDocument;
       if (existing.userEdited) return false;
-    } catch { /* overwrite corrupt files */ }
+    } catch {
+      /* overwrite corrupt files */
+    }
   }
   const dir = path.dirname(persistentPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(persistentPath, JSON.stringify(doc, null, 2) + "\n", "utf-8");
+  writeFileSync(persistentPath, `${JSON.stringify(doc, null, 2)}\n`, "utf-8");
   return true;
 }
 
@@ -61,13 +62,7 @@ export function loadThreatModelDocument(
   if (persistent) return persistent;
 
   // Fall back to per-run
-  const tmPath = path.join(
-    repoRoot,
-    ".kuzushi",
-    "runs",
-    runId,
-    "threat-model.json",
-  );
+  const tmPath = path.join(repoRoot, ".kuzushi", "runs", runId, "threat-model.json");
   if (!existsSync(tmPath)) return null;
   try {
     return JSON.parse(readFileSync(tmPath, "utf-8")) as ThreatModelDocument;
@@ -107,18 +102,10 @@ export function renderThreatModelContext(doc: ThreatModelDocument): string {
   lines.push("### 1. Overview");
   lines.push("");
 
-  const processes = doc.dfd.elements.filter(
-    (e: DfdElement) => e.type === "process",
-  );
-  const externalEntities = doc.dfd.elements.filter(
-    (e: DfdElement) => e.type === "external-entity",
-  );
-  const dataStores = doc.dfd.elements.filter(
-    (e: DfdElement) => e.type === "data-store",
-  );
-  const dataFlows = doc.dfd.elements.filter(
-    (e: DfdElement) => e.type === "data-flow",
-  );
+  const processes = doc.dfd.elements.filter((e: DfdElement) => e.type === "process");
+  const externalEntities = doc.dfd.elements.filter((e: DfdElement) => e.type === "external-entity");
+  const dataStores = doc.dfd.elements.filter((e: DfdElement) => e.type === "data-store");
+  const dataFlows = doc.dfd.elements.filter((e: DfdElement) => e.type === "data-flow");
 
   if (processes.length > 0) {
     lines.push(
@@ -131,9 +118,7 @@ export function renderThreatModelContext(doc: ThreatModelDocument): string {
     );
   }
   if (dataStores.length > 0) {
-    lines.push(
-      `Data stores: ${dataStores.map((d: DfdElement) => d.name).join(", ")}.`,
-    );
+    lines.push(`Data stores: ${dataStores.map((d: DfdElement) => d.name).join(", ")}.`);
   }
   if (dataFlows.length > 0) {
     lines.push(`Data flows: ${dataFlows.length} identified.`);
@@ -145,13 +130,9 @@ export function renderThreatModelContext(doc: ThreatModelDocument): string {
   lines.push("");
   if (doc.dfd.trustBoundaries.length > 0) {
     for (const boundary of doc.dfd.trustBoundaries) {
-      lines.push(
-        `- **${boundary.name}**: ${boundary.innerZone} \u2194 ${boundary.outerZone}`,
-      );
+      lines.push(`- **${boundary.name}**: ${boundary.innerZone} \u2194 ${boundary.outerZone}`);
       if (boundary.crossingFlows.length > 0) {
-        lines.push(
-          `  Crossing flows: ${boundary.crossingFlows.join(", ")}`,
-        );
+        lines.push(`  Crossing flows: ${boundary.crossingFlows.join(", ")}`);
       }
     }
   } else {
@@ -160,9 +141,7 @@ export function renderThreatModelContext(doc: ThreatModelDocument): string {
   lines.push("");
 
   // Trust zone assumptions from external entities
-  const zones = new Set(
-    externalEntities.map((e: DfdElement) => e.trustZone).filter(Boolean),
-  );
+  const zones = new Set(externalEntities.map((e: DfdElement) => e.trustZone).filter(Boolean));
   if (zones.size > 0) {
     lines.push("Trust zone assumptions:");
     for (const zone of zones) {
@@ -195,14 +174,10 @@ export function renderThreatModelContext(doc: ThreatModelDocument): string {
         lines.push(`- **${threat.title}** [${threat.impact}]`);
         lines.push(`  Attack vector: ${threat.attackVector}`);
         if (threat.existingMitigations.length > 0) {
-          lines.push(
-            `  Existing mitigations: ${threat.existingMitigations.join("; ")}`,
-          );
+          lines.push(`  Existing mitigations: ${threat.existingMitigations.join("; ")}`);
         }
         if (threat.missingMitigations.length > 0) {
-          lines.push(
-            `  Missing mitigations: ${threat.missingMitigations.join("; ")}`,
-          );
+          lines.push(`  Missing mitigations: ${threat.missingMitigations.join("; ")}`);
         }
         if (threat.relatedCwe.length > 0) {
           lines.push(`  CWE: ${threat.relatedCwe.join(", ")}`);
@@ -223,9 +198,7 @@ export function renderThreatModelContext(doc: ThreatModelDocument): string {
     lines.push("");
     if (Object.keys(doc.summary.bySeverity).length > 0) {
       lines.push("By severity:");
-      for (const [severity, count] of Object.entries(
-        doc.summary.bySeverity,
-      )) {
+      for (const [severity, count] of Object.entries(doc.summary.bySeverity)) {
         if (count > 0) lines.push(`- ${severity}: ${count}`);
       }
       lines.push("");
@@ -234,9 +207,7 @@ export function renderThreatModelContext(doc: ThreatModelDocument): string {
       lines.push("By STRIDE category:");
       for (const [cat, count] of Object.entries(doc.summary.byCategory)) {
         if (Number(count) > 0)
-          lines.push(
-            `- ${formatStrideCategory(cat as StrideCategory)}: ${count}`,
-          );
+          lines.push(`- ${formatStrideCategory(cat as StrideCategory)}: ${count}`);
       }
       lines.push("");
     }

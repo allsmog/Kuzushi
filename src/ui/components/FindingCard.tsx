@@ -101,7 +101,9 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
 
   if (finding.codeCitations && finding.codeCitations.length > 0) {
     for (const cite of finding.codeCitations.slice(0, 3)) {
-      details.push(`${chalk.blue("Evidence:")} ${cite.filePath}:${cite.startLine} — ${cite.description}`);
+      details.push(
+        `${chalk.blue("Evidence:")} ${cite.filePath}:${cite.startLine} — ${cite.description}`,
+      );
     }
     if (finding.codeCitations.length > 3) {
       details.push(`${chalk.dim(`  ...and ${finding.codeCitations.length - 3} more citations`)}`);
@@ -113,7 +115,7 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
   }
 
   if (finding.controls && finding.controls.length > 0) {
-    const controlNames = finding.controls.map(c => c.name).join(", ");
+    const controlNames = finding.controls.map((c) => c.name).join(", ");
     details.push(`${chalk.green("Controls:")} ${controlNames}`);
   }
 
@@ -126,7 +128,9 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
   }
 
   if (finding.blame) {
-    details.push(`${chalk.dim("Introduced:")} ${finding.blame.sha} by ${finding.blame.author} on ${finding.blame.date}`);
+    details.push(
+      `${chalk.dim("Introduced:")} ${finding.blame.sha} by ${finding.blame.author} on ${finding.blame.date}`,
+    );
   }
 
   return (

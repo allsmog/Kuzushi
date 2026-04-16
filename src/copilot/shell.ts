@@ -1293,11 +1293,19 @@ function handleSlashCommand(
         return {
           output: "Opening operator context editor...",
           asyncExecute: async () => {
-            const { loadOperatorScanContext, generateDefaultContext } = await import("../operator-context.js");
+            const { loadOperatorScanContext, generateDefaultContext } = await import(
+              "../operator-context.js"
+            );
             const { runContextIntake } = await import("../ui/setup.js");
             let operatorCtx = loadOperatorScanContext(repoRoot);
             if (!operatorCtx) operatorCtx = generateDefaultContext();
-            const outcome = await runContextIntake(ctx.uiStore, operatorCtx, path.basename(repoRoot), repoRoot, "shell");
+            const outcome = await runContextIntake(
+              ctx.uiStore,
+              operatorCtx,
+              path.basename(repoRoot),
+              repoRoot,
+              "shell",
+            );
             if (outcome.action === "proceed") {
               return "Operator context saved to .kuzushi/scan-context.json";
             }
@@ -1341,11 +1349,19 @@ function handleSlashCommand(
         return {
           output: "Opening threat model editor...",
           asyncExecute: async () => {
-            const { loadPersistentThreatModel, savePersistentThreatModel } = await import("../threat-model-renderer.js");
+            const { loadPersistentThreatModel, savePersistentThreatModel } = await import(
+              "../threat-model-renderer.js"
+            );
             const { runThreatModelEditor } = await import("../ui/setup.js");
             const tm = loadPersistentThreatModel(repoRoot);
             if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
-            const outcome = await runThreatModelEditor(ctx.uiStore, tm, path.basename(repoRoot), repoRoot, "shell");
+            const outcome = await runThreatModelEditor(
+              ctx.uiStore,
+              tm,
+              path.basename(repoRoot),
+              repoRoot,
+              "shell",
+            );
             if (outcome.action === "proceed") {
               return "Threat model saved to .kuzushi/threat-model.json";
             }

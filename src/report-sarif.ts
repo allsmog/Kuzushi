@@ -1,8 +1,6 @@
 import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
-import {
-  getActionableFindings,
-} from "./store.js";
+import { getActionableFindings } from "./store.js";
 import { loadThreatModelDocument } from "./threat-model-renderer.js";
 import { isRecord } from "./utils.js";
 
@@ -53,10 +51,13 @@ export function generateSarifReport(
   }
   const verificationCounts = { exploitable, notExploitable };
   const triageCostUsd = stats.totalCostUsd ?? 0;
-  const verifyCostUsd = stats.verifyCostUsd ?? findings.reduce((sum, f) => sum + (f.verifyCostUsd ?? 0), 0);
-  const pocHarnessCostUsd = stats.pocHarnessCostUsd ?? findings.reduce((sum, f) => sum + (f.pocHarnessCostUsd ?? 0), 0);
+  const verifyCostUsd =
+    stats.verifyCostUsd ?? findings.reduce((sum, f) => sum + (f.verifyCostUsd ?? 0), 0);
+  const pocHarnessCostUsd =
+    stats.pocHarnessCostUsd ?? findings.reduce((sum, f) => sum + (f.pocHarnessCostUsd ?? 0), 0);
 
-  const runMeta = db.prepare(`
+  const runMeta = db
+    .prepare(`
     SELECT
       started_at as startedAt,
       config_json as configJson,
@@ -64,7 +65,8 @@ export function generateSarifReport(
     FROM pipeline_runs
     WHERE run_id = ?
     LIMIT 1
-  `).get(runId) as RunMetaRow | undefined;
+  `)
+    .get(runId) as RunMetaRow | undefined;
 
   const runConfig = parseRunConfig(runMeta?.configJson);
   const checkpointMetaByFingerprint = parseCheckpointFindingMeta(runMeta?.findingsJson);
@@ -83,9 +85,7 @@ export function generateSarifReport(
       message: {
         text: messageText,
       },
-      locations: [
-        buildSarifLocation(finding.filePath, finding.startLine),
-      ],
+      locations: [buildSarifLocation(finding.filePath, finding.startLine)],
       properties: {
         verdict: finding.verdict,
         confidence: finding.confidence,
@@ -94,12 +94,10 @@ export function generateSarifReport(
         proofState: finding.proofState ?? undefined,
         engineProvenance: finding.engineProvenance?.length ? finding.engineProvenance : undefined,
         corroboratingSignalCount: finding.corroboratingSignals.length || undefined,
-        corroboratingSignals: finding.corroboratingSignals.length > 0
-          ? finding.corroboratingSignals
-          : undefined,
-        suppressionReasons: finding.suppressionReasons.length > 0
-          ? finding.suppressionReasons
-          : undefined,
+        corroboratingSignals:
+          finding.corroboratingSignals.length > 0 ? finding.corroboratingSignals : undefined,
+        suppressionReasons:
+          finding.suppressionReasons.length > 0 ? finding.suppressionReasons : undefined,
         exploitable: toExploitableFlag(finding.verifyExploitable),
         pocPayload: finding.verifyPocPayload ?? undefined,
         pocRunVerdict: finding.pocRunVerdict ?? undefined,
@@ -208,7 +206,9 @@ export function generateSarifReport(
           tasks: runConfig.tasks,
           threatModel: threatModel ?? undefined,
           summary: {
-            totalFindings: stats.totalFindings ?? verdictCounts.tp + verdictCounts.fp + verdictCounts.needs_review,
+            totalFindings:
+              stats.totalFindings ??
+              verdictCounts.tp + verdictCounts.fp + verdictCounts.needs_review,
             queuedForTriage: stats.queuedForTriage ?? 0,
             skippedAlreadyTriaged: stats.skippedAlreadyTriaged ?? 0,
             skippedLowConfidence: stats.skippedLowConfidence ?? 0,
@@ -363,7 +363,7 @@ function toSarifLevel(severity: string): SarifLevel {
 
 function buildSarifLocation(filePath: string, startLine: number): Record<string, unknown> {
   const uri = toRelativeUri(filePath);
-  const isDirectory = uri === "." || uri === "" || uri.endsWith("/");
+  const _isDirectory = uri === "." || uri === "" || uri.endsWith("/");
   const physicalLocation: Record<string, unknown> = {
     artifactLocation: { uri: uri || "." },
   };
@@ -374,9 +374,7 @@ function buildSarifLocation(filePath: string, startLine: number): Record<string,
 
 function toRelativeUri(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/");
-  return normalized
-    .replace(/^\/+/, "")
-    .replace(/^[A-Za-z]:\//, "");
+  return normalized.replace(/^\/+/, "").replace(/^[A-Za-z]:\//, "");
 }
 
 function toExploitableFlag(value: number | null): boolean | undefined {

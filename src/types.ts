@@ -805,23 +805,36 @@ export interface ScopePrioritization {
 /** Architecture context: entry points, external deps with trust levels, data flows. */
 export interface ArchitectureContext {
   entryPoints: OperatorContextItem<{
-    kind: string; path: string; method?: string; description?: string;
+    kind: string;
+    path: string;
+    method?: string;
+    description?: string;
   }>[];
   externalDeps: OperatorContextItem<{
-    name: string; kind: string; trustLevel: TrustLevel; description?: string;
+    name: string;
+    kind: string;
+    trustLevel: TrustLevel;
+    description?: string;
   }>[];
   dataFlows: OperatorContextItem<{
-    from: string; to: string; dataClassification?: string; description?: string;
+    from: string;
+    to: string;
+    dataClassification?: string;
+    description?: string;
   }>[];
 }
 
 /** Historical feedback: suppressed FP and confirmed TP fingerprints from prior runs. */
 export interface HistoricalFeedback {
   suppressedFpFingerprints: OperatorContextItem<{
-    fingerprint: string; ruleId: string; reason?: string;
+    fingerprint: string;
+    ruleId: string;
+    reason?: string;
   }>[];
   confirmedTpFingerprints: OperatorContextItem<{
-    fingerprint: string; ruleId: string; description?: string;
+    fingerprint: string;
+    ruleId: string;
+    description?: string;
   }>[];
 }
 

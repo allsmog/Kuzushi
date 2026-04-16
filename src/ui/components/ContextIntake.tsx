@@ -13,16 +13,14 @@
  *   │  [s] skip  [n] add  [A] accept all  [tab] next    │
  *   └──────────────────────────────────────────────────┘
  */
-import React, { useState, useCallback } from "react";
-import { Box, Text, useInput } from "ink";
+
 import chalk from "chalk";
+import { Box, Text, useInput } from "ink";
+import type React from "react";
+import { useCallback, useState } from "react";
+import type { IntakeItemStatus, OperatorContextItem, OperatorScanContext } from "../../types.js";
+import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
-import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
-import type {
-  OperatorScanContext,
-  OperatorContextItem,
-  IntakeItemStatus,
-} from "../../types.js";
 
 type IntakeSection = "trust" | "scope" | "architecture" | "historical";
 const SECTIONS: IntakeSection[] = ["trust", "scope", "architecture", "historical"];
@@ -51,12 +49,16 @@ interface DisplayItem {
 
 function statusIcon(status: IntakeItemStatus): string {
   switch (status) {
-    case "accepted": return chalk.green(icons.success);
-    case "edited": return chalk.yellow("\u270E"); // ✎
-    case "deleted": return chalk.red(icons.error);
-    case "added": return chalk.cyan("+");
-    case "skipped":
-    default: return chalk.dim(icons.pending);
+    case "accepted":
+      return chalk.green(icons.success);
+    case "edited":
+      return chalk.yellow("\u270E"); // ✎
+    case "deleted":
+      return chalk.red(icons.error);
+    case "added":
+      return chalk.cyan("+");
+    default:
+      return chalk.dim(icons.pending);
   }
 }
 
@@ -65,56 +67,124 @@ function getDisplayItems(ctx: OperatorScanContext, section: IntakeSection): Disp
 
   if (section === "trust") {
     for (const [i, v] of ctx.trust.deploymentModel.entries()) {
-      items.push({ label: v.value, groupLabel: i === 0 ? "Deployment" : undefined, status: v.status, path: ["trust", "deploymentModel", i] });
+      items.push({
+        label: v.value,
+        groupLabel: i === 0 ? "Deployment" : undefined,
+        status: v.status,
+        path: ["trust", "deploymentModel", i],
+      });
     }
     for (const [i, v] of ctx.trust.infrastructure.entries()) {
-      items.push({ label: v.value, groupLabel: i === 0 ? "Infrastructure" : undefined, status: v.status, path: ["trust", "infrastructure", i] });
+      items.push({
+        label: v.value,
+        groupLabel: i === 0 ? "Infrastructure" : undefined,
+        status: v.status,
+        path: ["trust", "infrastructure", i],
+      });
     }
     for (const [i, v] of ctx.trust.externalDefenses.entries()) {
-      items.push({ label: v.value, groupLabel: i === 0 ? "External Defenses" : undefined, status: v.status, path: ["trust", "externalDefenses", i] });
+      items.push({
+        label: v.value,
+        groupLabel: i === 0 ? "External Defenses" : undefined,
+        status: v.status,
+        path: ["trust", "externalDefenses", i],
+      });
     }
     for (const [i, v] of ctx.trust.confirmedMitigations.entries()) {
-      items.push({ label: v.value, groupLabel: i === 0 ? "Confirmed Mitigations" : undefined, status: v.status, path: ["trust", "confirmedMitigations", i] });
+      items.push({
+        label: v.value,
+        groupLabel: i === 0 ? "Confirmed Mitigations" : undefined,
+        status: v.status,
+        path: ["trust", "confirmedMitigations", i],
+      });
     }
   } else if (section === "scope") {
     for (const [i, v] of ctx.scope.highValuePaths.entries()) {
-      items.push({ label: v.value, groupLabel: i === 0 ? "High-Value Paths" : undefined, status: v.status, path: ["scope", "highValuePaths", i] });
+      items.push({
+        label: v.value,
+        groupLabel: i === 0 ? "High-Value Paths" : undefined,
+        status: v.status,
+        path: ["scope", "highValuePaths", i],
+      });
     }
     for (const [i, v] of ctx.scope.lowValuePaths.entries()) {
-      items.push({ label: v.value, groupLabel: i === 0 ? "Low-Value Paths" : undefined, status: v.status, path: ["scope", "lowValuePaths", i] });
+      items.push({
+        label: v.value,
+        groupLabel: i === 0 ? "Low-Value Paths" : undefined,
+        status: v.status,
+        path: ["scope", "lowValuePaths", i],
+      });
     }
     for (const [i, v] of ctx.scope.sensitiveDataTags.entries()) {
       const locs = v.value.locations.join(", ");
-      items.push({ label: `${v.value.sensitivity}/${v.value.dataType}: ${locs}`, groupLabel: i === 0 ? "Sensitive Data" : undefined, status: v.status, path: ["scope", "sensitiveDataTags", i] });
+      items.push({
+        label: `${v.value.sensitivity}/${v.value.dataType}: ${locs}`,
+        groupLabel: i === 0 ? "Sensitive Data" : undefined,
+        status: v.status,
+        path: ["scope", "sensitiveDataTags", i],
+      });
     }
   } else if (section === "architecture") {
     for (const [i, v] of ctx.architecture.entryPoints.entries()) {
       const desc = v.value.method ? `${v.value.method} ${v.value.path}` : v.value.path;
-      items.push({ label: `${desc} (${v.value.kind})`, groupLabel: i === 0 ? "Entry Points" : undefined, status: v.status, path: ["architecture", "entryPoints", i] });
+      items.push({
+        label: `${desc} (${v.value.kind})`,
+        groupLabel: i === 0 ? "Entry Points" : undefined,
+        status: v.status,
+        path: ["architecture", "entryPoints", i],
+      });
     }
     for (const [i, v] of ctx.architecture.externalDeps.entries()) {
-      items.push({ label: `${v.value.name} [${v.value.trustLevel}]`, groupLabel: i === 0 ? "External Dependencies" : undefined, status: v.status, path: ["architecture", "externalDeps", i] });
+      items.push({
+        label: `${v.value.name} [${v.value.trustLevel}]`,
+        groupLabel: i === 0 ? "External Dependencies" : undefined,
+        status: v.status,
+        path: ["architecture", "externalDeps", i],
+      });
     }
     for (const [i, v] of ctx.architecture.dataFlows.entries()) {
       const cls = v.value.dataClassification ? ` [${v.value.dataClassification}]` : "";
-      items.push({ label: `${v.value.from} ${icons.arrow} ${v.value.to}${cls}`, groupLabel: i === 0 ? "Data Flows" : undefined, status: v.status, path: ["architecture", "dataFlows", i] });
+      items.push({
+        label: `${v.value.from} ${icons.arrow} ${v.value.to}${cls}`,
+        groupLabel: i === 0 ? "Data Flows" : undefined,
+        status: v.status,
+        path: ["architecture", "dataFlows", i],
+      });
     }
   } else if (section === "historical") {
     for (const [i, v] of ctx.historical.suppressedFpFingerprints.entries()) {
       const reason = v.value.reason ? ` (${v.value.reason})` : "";
-      items.push({ label: `FP: ${v.value.ruleId}${reason}`, groupLabel: i === 0 ? "Suppressed False Positives" : undefined, status: v.status, path: ["historical", "suppressedFpFingerprints", i] });
+      items.push({
+        label: `FP: ${v.value.ruleId}${reason}`,
+        groupLabel: i === 0 ? "Suppressed False Positives" : undefined,
+        status: v.status,
+        path: ["historical", "suppressedFpFingerprints", i],
+      });
     }
     for (const [i, v] of ctx.historical.confirmedTpFingerprints.entries()) {
-      items.push({ label: `TP: ${v.value.ruleId}`, groupLabel: i === 0 ? "Confirmed True Positives" : undefined, status: v.status, path: ["historical", "confirmedTpFingerprints", i] });
+      items.push({
+        label: `TP: ${v.value.ruleId}`,
+        groupLabel: i === 0 ? "Confirmed True Positives" : undefined,
+        status: v.status,
+        path: ["historical", "confirmedTpFingerprints", i],
+      });
     }
   }
 
   return items;
 }
 
-function mutateItemStatus(ctx: OperatorScanContext, path: [string, string, number], status: IntakeItemStatus): OperatorScanContext {
+function mutateItemStatus(
+  ctx: OperatorScanContext,
+  path: [string, string, number],
+  status: IntakeItemStatus,
+): OperatorScanContext {
   const [sectionKey, arrayName, index] = path;
-  const section = { ...(ctx as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>)[sectionKey]! };
+  const section = {
+    ...(ctx as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>)[
+      sectionKey
+    ]!,
+  };
   const arr = [...section[arrayName]!];
   arr[index] = { ...arr[index]!, status };
   section[arrayName] = arr;
@@ -171,11 +241,20 @@ export function ContextIntake({
           const item = displayItems[selectedIdx];
           if (item) {
             const [sectionKey, arrayName, index] = item.path;
-            const section = { ...(context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>)[sectionKey]! };
+            const section = {
+              ...(
+                context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>
+              )[sectionKey]!,
+            };
             const arr = [...section[arrayName]!];
             const current = arr[index]!;
             if (typeof current.value === "string") {
-              arr[index] = { ...current, value: editBuffer.trim(), status: "edited", original: current.original ?? current.value };
+              arr[index] = {
+                ...current,
+                value: editBuffer.trim(),
+                status: "edited",
+                original: current.original ?? current.value,
+              };
               section[arrayName] = arr;
               setContext({ ...context, [sectionKey]: section });
             }
@@ -232,7 +311,9 @@ export function ContextIntake({
         setEditMode(true);
         // Find the raw value to seed the edit buffer
         const [sectionKey, arrayName, index] = item.path;
-        const section = (context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>)[sectionKey];
+        const section = (
+          context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>
+        )[sectionKey];
         const raw = section?.[arrayName]?.[index];
         setEditBuffer(typeof raw?.value === "string" ? raw.value : item.label);
       }
@@ -249,10 +330,21 @@ export function ContextIntake({
     return (
       <Box flexDirection="column">
         <Text>{""}</Text>
-        <Text>{boxHeader(`Scan Context: ${SECTION_LABELS[currentSection]} (${sectionIdx + 1}/${SECTIONS.length})`, width)}</Text>
+        <Text>
+          {boxHeader(
+            `Scan Context: ${SECTION_LABELS[currentSection]} (${sectionIdx + 1}/${SECTIONS.length})`,
+            width,
+          )}
+        </Text>
         <Text>{""}</Text>
-        <Text>{"  "}{chalk.dim("No items detected for this section.")}</Text>
-        <Text>{"  "}{chalk.dim("Press [tab] or [enter] to continue, [n] to add items.")}</Text>
+        <Text>
+          {"  "}
+          {chalk.dim("No items detected for this section.")}
+        </Text>
+        <Text>
+          {"  "}
+          {chalk.dim("Press [tab] or [enter] to continue, [n] to add items.")}
+        </Text>
         <Text>{""}</Text>
         <Text>{boxFooter(width)}</Text>
       </Box>
@@ -265,7 +357,12 @@ export function ContextIntake({
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
-      <Text>{boxHeader(`Scan Context: ${SECTION_LABELS[currentSection]} (${sectionIdx + 1}/${SECTIONS.length})`, width)}</Text>
+      <Text>
+        {boxHeader(
+          `Scan Context: ${SECTION_LABELS[currentSection]} (${sectionIdx + 1}/${SECTIONS.length})`,
+          width,
+        )}
+      </Text>
       <Text>{""}</Text>
 
       {displayItems.map((item, i) => {
@@ -274,16 +371,25 @@ export function ContextIntake({
         const isSelected = i === selectedIdx;
         const cursor = isSelected ? chalk.cyan("> ") : "  ";
         const icon = statusIcon(item.status);
-        const label = item.status === "deleted"
-          ? chalk.strikethrough.dim(item.label)
-          : isSelected
-            ? chalk.white(item.label)
-            : chalk.dim(item.label);
+        const label =
+          item.status === "deleted"
+            ? chalk.strikethrough.dim(item.label)
+            : isSelected
+              ? chalk.white(item.label)
+              : chalk.dim(item.label);
 
         return (
           <Box key={i} flexDirection="column">
-            {showGroup && <Text>{"  "}{chalk.bold.underline(item.groupLabel)}</Text>}
-            <Text>{cursor}{icon} {label}</Text>
+            {showGroup && (
+              <Text>
+                {"  "}
+                {chalk.bold.underline(item.groupLabel)}
+              </Text>
+            )}
+            <Text>
+              {cursor}
+              {icon} {label}
+            </Text>
           </Box>
         );
       })}
@@ -291,19 +397,26 @@ export function ContextIntake({
       {/* Inline edit mode */}
       {editMode && (
         <Box marginTop={1}>
-          <Text>{"  "}{chalk.cyan("Edit:")} {editBuffer}{chalk.cyan("\u2588")}</Text>
+          <Text>
+            {"  "}
+            {chalk.cyan("Edit:")} {editBuffer}
+            {chalk.cyan("\u2588")}
+          </Text>
         </Box>
       )}
 
       {/* Running tally */}
       {(() => {
-        const accepted = displayItems.filter((i) => i.status === "accepted" || i.status === "edited").length;
+        const accepted = displayItems.filter(
+          (i) => i.status === "accepted" || i.status === "edited",
+        ).length;
         const deleted = displayItems.filter((i) => i.status === "deleted").length;
         const pending = displayItems.filter((i) => i.status === "skipped").length;
         return (
           <Box marginTop={1}>
             <Text>
-              {"  "}{chalk.dim("Items:")}
+              {"  "}
+              {chalk.dim("Items:")}
               {accepted > 0 ? ` ${chalk.green(`${accepted} accepted`)}` : ""}
               {deleted > 0 ? ` ${chalk.red(`${deleted} deleted`)}` : ""}
               {pending > 0 ? ` ${chalk.dim(`${pending} pending`)}` : ""}
@@ -314,10 +427,14 @@ export function ContextIntake({
 
       <Text>{""}</Text>
       <Text>
-        {"  "}{chalk.dim("[" + icons.arrow.replace("→", "↑↓") + "]")} navigate  {chalk.green.bold("[a]")} accept  {chalk.yellow.bold("[e]")} edit  {chalk.red.bold("[d]")} delete
+        {"  "}
+        {chalk.dim(`[${icons.arrow.replace("→", "↑↓")}]`)} navigate {chalk.green.bold("[a]")} accept{" "}
+        {chalk.yellow.bold("[e]")} edit {chalk.red.bold("[d]")} delete
       </Text>
       <Text>
-        {"  "}{chalk.dim("[s]")} skip  {chalk.cyan.bold("[A]")} accept all  {chalk.dim("[tab]")} next  {chalk.dim("[q]")} cancel  {chalk.dim("[S]")} skip all
+        {"  "}
+        {chalk.dim("[s]")} skip {chalk.cyan.bold("[A]")} accept all {chalk.dim("[tab]")} next{" "}
+        {chalk.dim("[q]")} cancel {chalk.dim("[S]")} skip all
       </Text>
       <Text>{boxFooter(width)}</Text>
     </Box>

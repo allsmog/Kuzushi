@@ -8,16 +8,15 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { ThreatModelDocument } from "./agents/tasks/threat-modeling/types.js";
 import type {
-  OperatorScanContext,
-  OperatorContextItem,
-  RepoContext,
-  EnrichedRepoContext,
   ApplicationModel,
+  EnrichedRepoContext,
+  OperatorContextItem,
+  OperatorScanContext,
+  RepoContext,
   Verdict,
 } from "./types.js";
-import type { ThreatModelDocument } from "./agents/tasks/threat-modeling/types.js";
-import { isRecord } from "./utils.js";
 
 const PERSISTENT_CONTEXT_PATH = ".kuzushi/scan-context.json";
 const CONTEXT_VERSION = "1";
@@ -38,7 +37,7 @@ export function saveOperatorScanContext(repoRoot: string, ctx: OperatorScanConte
   const contextPath = path.join(repoRoot, PERSISTENT_CONTEXT_PATH);
   const dir = path.dirname(contextPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(contextPath, JSON.stringify(ctx, null, 2) + "\n", "utf-8");
+  writeFileSync(contextPath, `${JSON.stringify(ctx, null, 2)}\n`, "utf-8");
 }
 
 // ── Auto-generation ──
@@ -59,7 +58,9 @@ export interface GenerationSources {
   historicalFindings?: Array<{ fingerprint: string; ruleId: string; verdict: Verdict }>;
 }
 
-export function generateOperatorContextFromOutputs(sources: GenerationSources): OperatorScanContext {
+export function generateOperatorContextFromOutputs(
+  sources: GenerationSources,
+): OperatorScanContext {
   const { repoContext, enrichedContext, appModel, threatModel, historicalFindings } = sources;
 
   // ── Trust ──
@@ -98,7 +99,11 @@ export function generateOperatorContextFromOutputs(sources: GenerationSources): 
     }
   }
 
-  const sensitiveDataTags: Array<{ dataType: string; sensitivity: "public" | "internal" | "confidential" | "restricted"; locations: string[] }> = [];
+  const sensitiveDataTags: Array<{
+    dataType: string;
+    sensitivity: "public" | "internal" | "confidential" | "restricted";
+    locations: string[];
+  }> = [];
   if (enrichedContext?.enrichment?.dataClassifications) {
     for (const dc of enrichedContext.enrichment.dataClassifications) {
       sensitiveDataTags.push({
@@ -110,7 +115,8 @@ export function generateOperatorContextFromOutputs(sources: GenerationSources): 
   }
 
   // ── Architecture ──
-  const entryPoints: Array<{ kind: string; path: string; method?: string; description?: string }> = [];
+  const entryPoints: Array<{ kind: string; path: string; method?: string; description?: string }> =
+    [];
   if (appModel?.routes) {
     for (const r of appModel.routes) {
       entryPoints.push({
@@ -122,7 +128,12 @@ export function generateOperatorContextFromOutputs(sources: GenerationSources): 
     }
   }
 
-  const externalDeps: Array<{ name: string; kind: string; trustLevel: "trusted" | "semi-trusted" | "untrusted" | "unknown"; description?: string }> = [];
+  const externalDeps: Array<{
+    name: string;
+    kind: string;
+    trustLevel: "trusted" | "semi-trusted" | "untrusted" | "unknown";
+    description?: string;
+  }> = [];
   if (appModel?.outboundClients) {
     for (const c of appModel.outboundClients) {
       externalDeps.push({
@@ -134,7 +145,12 @@ export function generateOperatorContextFromOutputs(sources: GenerationSources): 
     }
   }
 
-  const dataFlows: Array<{ from: string; to: string; dataClassification?: string; description?: string }> = [];
+  const dataFlows: Array<{
+    from: string;
+    to: string;
+    dataClassification?: string;
+    description?: string;
+  }> = [];
   if (threatModel?.dfd?.elements) {
     for (const el of threatModel.dfd.elements) {
       if (el.type === "data-flow" && el.source && el.target) {
@@ -228,24 +244,64 @@ export function mergeOperatorContexts(
   return {
     ...persisted,
     trust: {
-      deploymentModel: mergeItems(persisted.trust.deploymentModel, fresh.trust.deploymentModel, strKey),
-      infrastructure: mergeItems(persisted.trust.infrastructure, fresh.trust.infrastructure, strKey),
-      externalDefenses: mergeItems(persisted.trust.externalDefenses, fresh.trust.externalDefenses, strKey),
-      confirmedMitigations: mergeItems(persisted.trust.confirmedMitigations, fresh.trust.confirmedMitigations, strKey),
+      deploymentModel: mergeItems(
+        persisted.trust.deploymentModel,
+        fresh.trust.deploymentModel,
+        strKey,
+      ),
+      infrastructure: mergeItems(
+        persisted.trust.infrastructure,
+        fresh.trust.infrastructure,
+        strKey,
+      ),
+      externalDefenses: mergeItems(
+        persisted.trust.externalDefenses,
+        fresh.trust.externalDefenses,
+        strKey,
+      ),
+      confirmedMitigations: mergeItems(
+        persisted.trust.confirmedMitigations,
+        fresh.trust.confirmedMitigations,
+        strKey,
+      ),
     },
     scope: {
-      highValuePaths: mergeItems(persisted.scope.highValuePaths, fresh.scope.highValuePaths, strKey),
+      highValuePaths: mergeItems(
+        persisted.scope.highValuePaths,
+        fresh.scope.highValuePaths,
+        strKey,
+      ),
       lowValuePaths: mergeItems(persisted.scope.lowValuePaths, fresh.scope.lowValuePaths, strKey),
-      sensitiveDataTags: mergeItems(persisted.scope.sensitiveDataTags, fresh.scope.sensitiveDataTags, objKey),
+      sensitiveDataTags: mergeItems(
+        persisted.scope.sensitiveDataTags,
+        fresh.scope.sensitiveDataTags,
+        objKey,
+      ),
     },
     architecture: {
-      entryPoints: mergeItems(persisted.architecture.entryPoints, fresh.architecture.entryPoints, objKey),
-      externalDeps: mergeItems(persisted.architecture.externalDeps, fresh.architecture.externalDeps, objKey),
+      entryPoints: mergeItems(
+        persisted.architecture.entryPoints,
+        fresh.architecture.entryPoints,
+        objKey,
+      ),
+      externalDeps: mergeItems(
+        persisted.architecture.externalDeps,
+        fresh.architecture.externalDeps,
+        objKey,
+      ),
       dataFlows: mergeItems(persisted.architecture.dataFlows, fresh.architecture.dataFlows, objKey),
     },
     historical: {
-      suppressedFpFingerprints: mergeItems(persisted.historical.suppressedFpFingerprints, fresh.historical.suppressedFpFingerprints, objKey),
-      confirmedTpFingerprints: mergeItems(persisted.historical.confirmedTpFingerprints, fresh.historical.confirmedTpFingerprints, objKey),
+      suppressedFpFingerprints: mergeItems(
+        persisted.historical.suppressedFpFingerprints,
+        fresh.historical.suppressedFpFingerprints,
+        objKey,
+      ),
+      confirmedTpFingerprints: mergeItems(
+        persisted.historical.confirmedTpFingerprints,
+        fresh.historical.confirmedTpFingerprints,
+        objKey,
+      ),
     },
   };
 }
@@ -342,7 +398,9 @@ export function formatOperatorContextForPrompt(ctx: OperatorScanContext): string
   const histLines: string[] = [];
   const fps = ctx.historical.suppressedFpFingerprints.filter(isActive);
   if (fps.length > 0) {
-    histLines.push(`**Known false positives** (${fps.length} from prior scans — give these patterns FP benefit of the doubt):`);
+    histLines.push(
+      `**Known false positives** (${fps.length} from prior scans — give these patterns FP benefit of the doubt):`,
+    );
     for (const fp of fps.slice(0, 10)) {
       const reason = fp.value.reason ? ` (${fp.value.reason})` : "";
       histLines.push(`- ${fp.value.ruleId}${reason}`);
@@ -351,7 +409,9 @@ export function formatOperatorContextForPrompt(ctx: OperatorScanContext): string
   }
   const tps = ctx.historical.confirmedTpFingerprints.filter(isActive);
   if (tps.length > 0) {
-    histLines.push(`**Confirmed true positives** (${tps.length} — patterns like these are likely real):`);
+    histLines.push(
+      `**Confirmed true positives** (${tps.length} — patterns like these are likely real):`,
+    );
     for (const tp of tps.slice(0, 10)) {
       histLines.push(`- ${tp.value.ruleId}`);
     }
