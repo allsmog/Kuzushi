@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
 import Database from "better-sqlite3";
-import { WorkspaceManager } from "../../src/workspace/manager.js";
+import { afterEach, describe, expect, it } from "vitest";
 import { migration025 } from "../../src/migrations/025_add_workspaces_table.js";
 import type { ContextSnapshot } from "../../src/ui/state.js";
+import { WorkspaceManager } from "../../src/workspace/manager.js";
 
 const tempDirs: string[] = [];
 
@@ -142,6 +142,9 @@ describe("WorkspaceManager", () => {
     const latest = mgr.loadLatestSnapshot(ws.id);
     expect(latest).not.toBeNull();
     expect(latest!.timestamp).toBe(2000);
-    expect((latest!.repoContext as Record<string, unknown>).languages).toEqual(["TypeScript", "Go"]);
+    expect((latest!.repoContext as Record<string, unknown>).languages).toEqual([
+      "TypeScript",
+      "Go",
+    ]);
   });
 });

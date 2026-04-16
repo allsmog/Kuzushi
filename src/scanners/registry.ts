@@ -1,7 +1,7 @@
-import type { KuzushiConfig, ScanOpts } from "../types.js";
 import { isKnownTaskSelectionId } from "../capabilities.js";
+import type { KuzushiConfig, ScanOpts } from "../types.js";
 import { isRecord } from "../utils.js";
-import type { Finding, TaskConfig, TaskId, ScannerPlugin } from "./types.js";
+import type { Finding, ScannerPlugin, TaskConfig, TaskId } from "./types.js";
 
 /** Registry and orchestrator for scanner plugins (throws/waza). */
 export class ScannerRegistry {
@@ -33,13 +33,13 @@ export class ScannerRegistry {
     const isExplicitOverride = opts.tasks !== undefined;
 
     if (isExplicitOverride) {
-      const normalized = [...new Set(opts.tasks!
-        .map((id) => id.trim())
-        .filter(Boolean))];
+      const normalized = [...new Set(opts.tasks!.map((id) => id.trim()).filter(Boolean))];
 
       const unknown = normalized.filter((id) => !this.has(id) && !isKnownTaskSelectionId(id));
       if (unknown.length > 0) {
-        throw new Error(`Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`);
+        throw new Error(
+          `Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`,
+        );
       }
 
       // An empty result is valid (e.g. "--tasks taint-analysis" -> no scanner plugins).
@@ -48,9 +48,7 @@ export class ScannerRegistry {
 
     const selected = config.tasks;
 
-    const normalized = selected
-      .map((id) => id.trim())
-      .filter(Boolean);
+    const normalized = selected.map((id) => id.trim()).filter(Boolean);
 
     // Default path (no explicit override): IDs must be known plugins or non-plugin aliases.
     if (normalized.length === 0) {
@@ -59,7 +57,9 @@ export class ScannerRegistry {
 
     const unknown = normalized.filter((id) => !this.has(id) && !isKnownTaskSelectionId(id));
     if (unknown.length > 0) {
-      throw new Error(`Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`);
+      throw new Error(
+        `Unknown scanner(s): ${unknown.join(", ")}. Registered: ${this.ids().join(", ")}`,
+      );
     }
 
     return [...new Set(normalized.filter((id) => this.has(id)))];
@@ -85,10 +85,7 @@ export class ScannerRegistry {
   }
 }
 
-function resolvePluginConfig(
-  allConfig: Record<string, TaskConfig>,
-  scannerId: TaskId,
-): TaskConfig {
+function resolvePluginConfig(allConfig: Record<string, TaskConfig>, scannerId: TaskId): TaskConfig {
   const cfg = allConfig[scannerId];
   if (!isRecord(cfg)) return {};
   return cfg;
@@ -104,7 +101,5 @@ function dedupeFindings(findings: Finding[], maxFindings?: number): Finding[] {
     }
   }
 
-  return [...seen.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...seen.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }

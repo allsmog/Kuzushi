@@ -97,7 +97,13 @@ export interface ScanContext {
 export interface ScannerPlugin {
   readonly id: ScannerId;
   readonly displayName: string;
-  scan(repoRoot: string, opts: import("../scan-opts.js").ScanOpts, config: ScannerConfig, runtime?: AgentRuntime, scanContext?: ScanContext): Promise<Finding[]>;
+  scan(
+    repoRoot: string,
+    opts: import("../scan-opts.js").ScanOpts,
+    config: ScannerConfig,
+    runtime?: AgentRuntime,
+    scanContext?: ScanContext,
+  ): Promise<Finding[]>;
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig;
   init?(config: ScannerConfig): Promise<void>;
 }

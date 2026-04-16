@@ -1,10 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  resolveToolPolicy,
-  expandToolGroups,
-  buildPolicyLayers,
-  TOOL_GROUPS,
   ALL_TOOLS,
+  buildPolicyLayers,
+  expandToolGroups,
+  resolveToolPolicy,
+  TOOL_GROUPS,
   type ToolPolicy,
   type ToolPolicyLayer,
 } from "../../src/prompts/tool-policy.js";
@@ -18,7 +18,9 @@ describe("expandToolGroups", () => {
 
   it("expands group:analysis", () => {
     const expanded = expandToolGroups(["group:analysis"]);
-    expect(expanded).toEqual(expect.arrayContaining(["GetCallers", "GetCallees", "GetFunctionBody"]));
+    expect(expanded).toEqual(
+      expect.arrayContaining(["GetCallers", "GetCallees", "GetFunctionBody"]),
+    );
   });
 
   it("passes through non-group names", () => {
@@ -45,17 +47,13 @@ describe("resolveToolPolicy", () => {
   });
 
   it("filters to allowed tools", () => {
-    const layers: ToolPolicyLayer[] = [
-      { name: "task", policy: { allow: ["Read", "Grep"] } },
-    ];
+    const layers: ToolPolicyLayer[] = [{ name: "task", policy: { allow: ["Read", "Grep"] } }];
     const result = resolveToolPolicy(ALL_TOOLS, layers);
     expect(result).toEqual(["Read", "Grep"]);
   });
 
   it("removes denied tools", () => {
-    const layers: ToolPolicyLayer[] = [
-      { name: "task", policy: { deny: ["Bash", "Write"] } },
-    ];
+    const layers: ToolPolicyLayer[] = [{ name: "task", policy: { deny: ["Bash", "Write"] } }];
     const result = resolveToolPolicy(ALL_TOOLS, layers);
     expect(result).not.toContain("Bash");
     expect(result).not.toContain("Write");
@@ -82,18 +80,14 @@ describe("resolveToolPolicy", () => {
   });
 
   it("supports group references in allow", () => {
-    const layers: ToolPolicyLayer[] = [
-      { name: "task", policy: { allow: ["group:readonly"] } },
-    ];
+    const layers: ToolPolicyLayer[] = [{ name: "task", policy: { allow: ["group:readonly"] } }];
     const result = resolveToolPolicy(ALL_TOOLS, layers);
     expect(result).toEqual(expect.arrayContaining(["Read", "Glob", "Grep"]));
     expect(result).not.toContain("Bash");
   });
 
   it("supports group references in deny", () => {
-    const layers: ToolPolicyLayer[] = [
-      { name: "task", policy: { deny: ["group:analysis"] } },
-    ];
+    const layers: ToolPolicyLayer[] = [{ name: "task", policy: { deny: ["group:analysis"] } }];
     const result = resolveToolPolicy(ALL_TOOLS, layers);
     expect(result).not.toContain("GetCallers");
     expect(result).not.toContain("GetCallees");
@@ -111,9 +105,7 @@ describe("resolveToolPolicy", () => {
   });
 
   it("returns empty array when all tools are denied", () => {
-    const layers: ToolPolicyLayer[] = [
-      { name: "task", policy: { deny: ["group:all"] } },
-    ];
+    const layers: ToolPolicyLayer[] = [{ name: "task", policy: { deny: ["group:all"] } }];
     const result = resolveToolPolicy(ALL_TOOLS, layers);
     expect(result).toEqual([]);
   });
@@ -136,8 +128,8 @@ describe("buildPolicyLayers", () => {
 
   it("includes config policy layers", () => {
     const configPolicies = {
-      "security": { deny: ["Bash", "Write"] },
-      "readonly": { allow: ["group:readonly"] },
+      security: { deny: ["Bash", "Write"] },
+      readonly: { allow: ["group:readonly"] },
     };
     const layers = buildPolicyLayers(undefined, configPolicies);
     expect(layers).toHaveLength(3);

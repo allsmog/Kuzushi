@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { BazelAdapter } from "../../../src/discovery/adapters/bazel-adapter.js";
 
 const tempDirs: string[] = [];
@@ -25,10 +25,18 @@ describe("BazelAdapter", () => {
     writeFileSync(path.join(root, "WORKSPACE.bazel"), "", "utf-8");
 
     mkdirSync(path.join(root, "src", "server"), { recursive: true });
-    writeFileSync(path.join(root, "src", "server", "BUILD.bazel"), 'cc_binary(\n  name = "server",\n)\n', "utf-8");
+    writeFileSync(
+      path.join(root, "src", "server", "BUILD.bazel"),
+      'cc_binary(\n  name = "server",\n)\n',
+      "utf-8",
+    );
 
     mkdirSync(path.join(root, "src", "lib"), { recursive: true });
-    writeFileSync(path.join(root, "src", "lib", "BUILD.bazel"), 'go_library(\n  name = "lib",\n)\n', "utf-8");
+    writeFileSync(
+      path.join(root, "src", "lib", "BUILD.bazel"),
+      'go_library(\n  name = "lib",\n)\n',
+      "utf-8",
+    );
 
     const nodes = await adapter.discover(root, 8);
 

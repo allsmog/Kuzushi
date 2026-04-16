@@ -1,8 +1,8 @@
-import type { Finding } from "../../../scanners/types.js";
 import { getLogger } from "../../../logger.js";
+import type { Finding } from "../../../scanners/types.js";
 import {
-  TAINT_ANALYSIS_PASS_IDS,
   type DiffScope,
+  TAINT_ANALYSIS_PASS_IDS,
   type TaintAnalysisLabelsDocument,
   type TaintAnalysisPassId,
 } from "./types.js";
@@ -101,7 +101,7 @@ export function extractPassId(ruleId: string): TaintAnalysisPassId | undefined {
   }
 
   const id = Number.parseInt(match[1], 10);
-  return TAINT_ANALYSIS_PASS_IDS.has(id) ? id as TaintAnalysisPassId : undefined;
+  return TAINT_ANALYSIS_PASS_IDS.has(id) ? (id as TaintAnalysisPassId) : undefined;
 }
 
 export function mergeBaselineTaintFindings(

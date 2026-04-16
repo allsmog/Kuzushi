@@ -1,5 +1,8 @@
+export { createCoreSastModule } from "./core-sast.js";
+export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
 export type {
   CopilotModule,
+  JSONSchema,
   ModuleCategory,
   ModuleContext,
   ModuleInfo,
@@ -7,9 +10,6 @@ export type {
   ModuleRequirements,
   ModuleSpecifier,
   ModuleTool,
-  JSONSchema,
   ToolExecutionContext,
   ToolResult,
 } from "./types.js";
-export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
-export { createCoreSastModule } from "./core-sast.js";

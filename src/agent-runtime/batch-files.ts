@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /** Sanitize a path component to prevent traversal (strip slashes, .., etc.) */

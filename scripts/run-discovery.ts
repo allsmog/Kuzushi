@@ -1,11 +1,12 @@
 #!/usr/bin/env npx tsx
+
 /**
  * Quick script to run the discovery pipeline against a repo and print results.
  * Usage: npx tsx scripts/run-discovery.ts <repo-path>
  */
 
-import { discoverRepoStructure } from "../src/discovery/repo-discovery.js";
 import { ClaudeAgentRuntime } from "../src/agent-runtime/claude.js";
+import { discoverRepoStructure } from "../src/discovery/repo-discovery.js";
 
 const repoPath = process.argv[2];
 if (!repoPath) {
@@ -24,7 +25,9 @@ const result = await discoverRepoStructure(repoPath, {
 });
 
 console.log(`\n${"=".repeat(70)}`);
-console.log(`Discovery result: ${result.modules.length} module(s), ${result.products.length} product(s)`);
+console.log(
+  `Discovery result: ${result.modules.length} module(s), ${result.products.length} product(s)`,
+);
 console.log(`Cost: $${result.costUsd.toFixed(4)}`);
 console.log(`Reasoning: ${result.reasoning}`);
 console.log(`${"=".repeat(70)}\n`);

@@ -11,21 +11,25 @@
  */
 
 import { createHash } from "node:crypto";
-import type { AgentRuntime } from "../agent-runtime/types.js";
 import { runStructuredAgentQuery } from "../agent-runtime/execution.js";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import { matchBoundariesHeuristically } from "../agents/tasks/taint-analysis/cross-service/stitch.js";
 import {
-  STITCH_RESPONSE_SCHEMA,
   type BoundaryManifest,
-  type StitchedEdge,
   type CrossServicePath,
+  STITCH_RESPONSE_SCHEMA,
+  type StitchedEdge,
   type StitchLlmResponse,
 } from "../agents/tasks/taint-analysis/cross-service/types.js";
+import { getLogger } from "../logger.js";
 import { scoreFindingMetadata } from "../scanners/scoring.js";
 import type { Finding } from "../scanners/types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
-import { getLogger } from "../logger.js";
-import type { ModuleInteractionEdge, ModuleInteractionGraph, MonorepoThreatModel } from "./types.js";
+import type {
+  ModuleInteractionEdge,
+  ModuleInteractionGraph,
+  MonorepoThreatModel,
+} from "./types.js";
 
 const log = getLogger("cross-module-trace");
 
@@ -63,7 +67,13 @@ export async function traceAcrossModules(
     log.info("Fewer than 2 module boundaries — skipping cross-module tracing");
     return {
       findings: [],
-      interactionGraph: buildInteractionGraph(boundaries, [], staticEdges, perModuleFindings, threatModel),
+      interactionGraph: buildInteractionGraph(
+        boundaries,
+        [],
+        staticEdges,
+        perModuleFindings,
+        threatModel,
+      ),
       paths: [],
       costUsd: 0,
     };
@@ -98,7 +108,13 @@ export async function traceAcrossModules(
   const findings = paths.map((p) => pathToFinding(p, options.monorepoRoot));
 
   // Step 5: Assemble interaction graph
-  const graph = buildInteractionGraph(boundaries, validatedEdges, staticEdges, perModuleFindings, threatModel);
+  const graph = buildInteractionGraph(
+    boundaries,
+    validatedEdges,
+    staticEdges,
+    perModuleFindings,
+    threatModel,
+  );
 
   return { findings, interactionGraph: graph, paths, costUsd };
 }
@@ -143,10 +159,7 @@ const STITCH_SYSTEM_PROMPT = [
   "Focus on security-relevant flows: user input, credentials, file paths, SQL fragments.",
 ].join("\n");
 
-function buildStitchPrompt(
-  boundaries: BoundaryManifest[],
-  heuristicEdges: StitchedEdge[],
-): string {
+function buildStitchPrompt(boundaries: BoundaryManifest[], heuristicEdges: StitchedEdge[]): string {
   const sections: string[] = [];
 
   sections.push("## Module Boundaries\n");
@@ -229,7 +242,9 @@ function buildCrossModulePaths(
 function pathToFinding(crossPath: CrossServicePath, monorepoRoot: string): Finding {
   const chain = crossPath.serviceChain.join(" → ");
   const fingerprint = createHash("sha256")
-    .update(`cross-module:${crossPath.ultimateSource.filePath}:${crossPath.ultimateSource.startLine}:${crossPath.ultimateSink.filePath}:${crossPath.ultimateSink.startLine}`)
+    .update(
+      `cross-module:${crossPath.ultimateSource.filePath}:${crossPath.ultimateSource.startLine}:${crossPath.ultimateSink.filePath}:${crossPath.ultimateSink.startLine}`,
+    )
     .digest("hex");
 
   const score = scoreFindingMetadata({
@@ -278,11 +293,21 @@ function buildInteractionGraph(
       (b) => b.serviceId === id && b.entryPoints.some((ep) => ep.protocol === "http-server"),
     ),
     findingCount: perModuleFindings.get(id)?.length ?? 0,
-    riskLevel: threatModel?.modulePlans.find((plan) => plan.modulePath === id)?.riskLevel ?? "medium",
+    riskLevel:
+      threatModel?.modulePlans.find((plan) => plan.modulePath === id)?.riskLevel ?? "medium",
   }));
 
   // Merge static edges + stitched edges
-  const edgeMap = new Map<string, { source: string; target: string; protocols: Set<string>; dataTypes: Set<string>; findings: string[] }>();
+  const edgeMap = new Map<
+    string,
+    {
+      source: string;
+      target: string;
+      protocols: Set<string>;
+      dataTypes: Set<string>;
+      findings: string[];
+    }
+  >();
 
   for (const edge of staticEdges) {
     const key = `${edge.source}→${edge.target}`;

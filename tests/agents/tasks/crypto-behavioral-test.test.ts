@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getTaskOutputMeta } from "../../../src/task-output-meta.js";
 import type { TaskContext } from "../../../src/agents/types.js";
+import { getTaskOutputMeta } from "../../../src/task-output-meta.js";
 import type { KuzushiConfig } from "../../../src/types.js";
 
 const { generateCryptoBehavioralHarnessMock, createPocExecutorMock } = vi.hoisted(() => ({
@@ -87,16 +87,19 @@ function makeContext(
     bus: {} as TaskContext["bus"],
     upstreamOutputs: new Map([
       ["secrets-crypto-detect", findings],
-      ["context-gatherer", {
-        repoContext: {
-          languages: ["TypeScript"],
-          frameworks: ["Express"],
-          authPatterns: [],
-          sanitizationLibs: [],
-          ormOrDb: [],
-          entryPoints: [],
+      [
+        "context-gatherer",
+        {
+          repoContext: {
+            languages: ["TypeScript"],
+            frameworks: ["Express"],
+            authPatterns: [],
+            sanitizationLibs: [],
+            ormOrDb: [],
+            entryPoints: [],
+          },
         },
-      }],
+      ],
     ]),
   };
 }
@@ -124,28 +127,65 @@ describe("cryptoBehavioralTestTask", () => {
 
     const upstream = new Map<string, unknown>([["secrets-crypto-detect", [makeFinding()]]]);
     expect(cryptoBehavioralTestTask.condition!(upstream, makeConfig())).toBe(true);
-    expect(cryptoBehavioralTestTask.condition!(
-      upstream,
-      makeConfig({ cryptoBehavioralTestEnabled: false }),
-    )).toBe(false);
+    expect(
+      cryptoBehavioralTestTask.condition!(
+        upstream,
+        makeConfig({ cryptoBehavioralTestEnabled: false }),
+      ),
+    ).toBe(false);
   });
 
   it("maps current crypto misuse categories to behavioral test types", () => {
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/timing-attack"))).toBe("timing");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/ecb-mode"))).toBe("ecb-mode");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/hash-for-auth"))).toBe("weak-hash");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/password-storage"))).toBe("weak-hash");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/insecure-prng"))).toBe("weak-prng");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/key-generation"))).toBe("weak-prng");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/key-length"))).toBe("key-length");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(
-      makeFinding("crypto-misuse/symmetric-cipher", "fp-ecb"),
-    )).toBe("edge-case");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(
-      { ...makeFinding("crypto-misuse/symmetric-cipher", "fp-ecb"), message: "AES-ECB mode confirmed" },
-    )).toBe("ecb-mode");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/tls-config"))).toBe("edge-case");
-    expect(__cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/cert-validation"))).toBe("edge-case");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(
+        makeFinding("crypto-misuse/timing-attack"),
+      ),
+    ).toBe("timing");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/ecb-mode")),
+    ).toBe("ecb-mode");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(
+        makeFinding("crypto-misuse/hash-for-auth"),
+      ),
+    ).toBe("weak-hash");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(
+        makeFinding("crypto-misuse/password-storage"),
+      ),
+    ).toBe("weak-hash");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(
+        makeFinding("crypto-misuse/insecure-prng"),
+      ),
+    ).toBe("weak-prng");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(
+        makeFinding("crypto-misuse/key-generation"),
+      ),
+    ).toBe("weak-prng");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/key-length")),
+    ).toBe("key-length");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(
+        makeFinding("crypto-misuse/symmetric-cipher", "fp-ecb"),
+      ),
+    ).toBe("edge-case");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType({
+        ...makeFinding("crypto-misuse/symmetric-cipher", "fp-ecb"),
+        message: "AES-ECB mode confirmed",
+      }),
+    ).toBe("ecb-mode");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(makeFinding("crypto-misuse/tls-config")),
+    ).toBe("edge-case");
+    expect(
+      __cryptoBehavioralTestInternals.mapFindingToTestType(
+        makeFinding("crypto-misuse/cert-validation"),
+      ),
+    ).toBe("edge-case");
   });
 
   it("escalates proof state, appends provenance, and tracks cost", async () => {
@@ -166,7 +206,8 @@ describe("cryptoBehavioralTestTask", () => {
     createPocExecutorMock.mockResolvedValue({
       execute: vi.fn().mockResolvedValue({
         exitCode: 0,
-        stdout: "CRYPTO_RESULT:{\"fingerprint\":\"fp-1\",\"testType\":\"timing\",\"verdict\":\"vulnerable\",\"summary\":\"timing leak observed\",\"timing\":{\"constantTime\":false,\"tStatistic\":4.2,\"pValue\":0.001,\"meanANs\":101,\"meanBNs\":84,\"iterations\":10000}}",
+        stdout:
+          'CRYPTO_RESULT:{"fingerprint":"fp-1","testType":"timing","verdict":"vulnerable","summary":"timing leak observed","timing":{"constantTime":false,"tStatistic":4.2,"pValue":0.001,"meanANs":101,"meanBNs":84,"iterations":10000}}',
         stderr: "",
         timedOut: false,
         durationMs: 15,
@@ -174,10 +215,7 @@ describe("cryptoBehavioralTestTask", () => {
       }),
     });
 
-    const output = await cryptoBehavioralTestTask.run(
-      undefined,
-      makeContext([makeFinding()]),
-    );
+    const output = await cryptoBehavioralTestTask.run(undefined, makeContext([makeFinding()]));
 
     expect(output).toHaveLength(1);
     expect(output[0].proofState).toBe("execution_confirmed");

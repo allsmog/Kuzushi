@@ -1,15 +1,15 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import { initDb, updateVerificationCost, upsertFinding } from "../src/store.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  printTriageProgress,
-  printSummary,
-  printScanStart,
   printResumeInfo,
+  printScanStart,
+  printSummary,
+  printTriageProgress,
 } from "../src/report.js";
-import type { TriageResult } from "../src/types.js";
 import type { Finding } from "../src/scanners/types.js";
+import { initDb, updateVerificationCost, upsertFinding } from "../src/store.js";
+import type { TriageResult } from "../src/types.js";
 
 const TMP_DIR = path.join(import.meta.dirname, ".tmp-report-test");
 
@@ -135,7 +135,13 @@ describe("printSummary", () => {
     const dbPath = path.join(TMP_DIR, `summary-verify-cost-${Date.now()}.sqlite3`);
     const db = initDb(dbPath);
 
-    upsertFinding(db, makeFinding("verify-cost-only"), makeResult("verify-cost-only", "tp"), "repo", "HEAD");
+    upsertFinding(
+      db,
+      makeFinding("verify-cost-only"),
+      makeResult("verify-cost-only", "tp"),
+      "repo",
+      "HEAD",
+    );
     updateVerificationCost(db, "verify-cost-only", 0.022);
 
     printSummary(db, "repo");
@@ -190,7 +196,13 @@ describe("printSummary", () => {
     const db = initDb(dbPath);
 
     upsertFinding(db, makeFinding("current-1"), makeResult("current-1", "tp"), "repo", "HEAD");
-    upsertFinding(db, makeFinding("current-2"), makeResult("current-2", "needs_review"), "repo", "HEAD");
+    upsertFinding(
+      db,
+      makeFinding("current-2"),
+      makeResult("current-2", "needs_review"),
+      "repo",
+      "HEAD",
+    );
     upsertFinding(db, makeFinding("stale-1"), makeResult("stale-1", "tp"), "repo", "HEAD");
 
     printSummary(db, "repo", {

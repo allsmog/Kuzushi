@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  resolveCrossServiceConfig,
   isTaintAnalysisLanguage,
+  resolveCrossServiceConfig,
 } from "../../../../../src/agents/tasks/taint-analysis/cross-service/types.js";
 import { resolveTaintAnalysisConfig } from "../../../../../src/agents/tasks/taint-analysis/types.js";
 import type { KuzushiConfig } from "../../../../../src/types.js";
@@ -54,17 +54,19 @@ describe("resolveTaintAnalysisConfig — crossService fields", () => {
   });
 
   it("applies custom cross-service config values", () => {
-    const resolved = resolveTaintAnalysisConfig(makeConfig({
-      crossService: true,
-      crossServiceBoundaryModel: "openai:gpt-4o",
-      crossServiceStitchModel: "anthropic:claude-sonnet-4-6",
-      crossServiceMaxServices: 10,
-      crossServiceConcurrency: 5,
-      crossServiceContinueOnError: false,
-      crossServiceBoundaryThreshold: 0.7,
-      crossServiceStitchThreshold: 0.8,
-      crossServiceMaxPathDepth: 3,
-    }));
+    const resolved = resolveTaintAnalysisConfig(
+      makeConfig({
+        crossService: true,
+        crossServiceBoundaryModel: "openai:gpt-4o",
+        crossServiceStitchModel: "anthropic:claude-sonnet-4-6",
+        crossServiceMaxServices: 10,
+        crossServiceConcurrency: 5,
+        crossServiceContinueOnError: false,
+        crossServiceBoundaryThreshold: 0.7,
+        crossServiceStitchThreshold: 0.8,
+        crossServiceMaxPathDepth: 3,
+      }),
+    );
 
     expect(resolved.crossService).toBe(true);
     expect(resolved.crossServiceBoundaryModel).toBe("openai:gpt-4o");
@@ -78,18 +80,22 @@ describe("resolveTaintAnalysisConfig — crossService fields", () => {
   });
 
   it("clamps crossServiceBoundaryThreshold to [0, 1]", () => {
-    const resolved = resolveTaintAnalysisConfig(makeConfig({
-      crossServiceBoundaryThreshold: 2.5,
-    }));
+    const resolved = resolveTaintAnalysisConfig(
+      makeConfig({
+        crossServiceBoundaryThreshold: 2.5,
+      }),
+    );
     // Falls back to default since 2.5 is out of [0,1]
     expect(resolved.crossServiceBoundaryThreshold).toBe(0.5);
   });
 
   it("falls back to defaults for invalid numeric cross-service values", () => {
-    const resolved = resolveTaintAnalysisConfig(makeConfig({
-      crossServiceMaxServices: -1,
-      crossServiceConcurrency: "abc",
-    }));
+    const resolved = resolveTaintAnalysisConfig(
+      makeConfig({
+        crossServiceMaxServices: -1,
+        crossServiceConcurrency: "abc",
+      }),
+    );
     expect(resolved.crossServiceMaxServices).toBe(20);
     expect(resolved.crossServiceConcurrency).toBe(3);
   });
@@ -97,10 +103,12 @@ describe("resolveTaintAnalysisConfig — crossService fields", () => {
 
 describe("resolveCrossServiceConfig", () => {
   it("derives CrossServiceConfig from TaintAnalysisTaskConfig", () => {
-    const cfg = resolveTaintAnalysisConfig(makeConfig({
-      crossService: true,
-      crossServiceBoundaryModel: "openai:gpt-4o",
-    }));
+    const cfg = resolveTaintAnalysisConfig(
+      makeConfig({
+        crossService: true,
+        crossServiceBoundaryModel: "openai:gpt-4o",
+      }),
+    );
     const crossCfg = resolveCrossServiceConfig(cfg);
 
     expect(crossCfg.enabled).toBe(true);
@@ -116,9 +124,11 @@ describe("resolveCrossServiceConfig", () => {
   });
 
   it("uses labelingModel as fallback for boundary and stitch models", () => {
-    const cfg = resolveTaintAnalysisConfig(makeConfig({
-      labelingModel: "anthropic:claude-sonnet-4-6",
-    }));
+    const cfg = resolveTaintAnalysisConfig(
+      makeConfig({
+        labelingModel: "anthropic:claude-sonnet-4-6",
+      }),
+    );
     const crossCfg = resolveCrossServiceConfig(cfg);
 
     expect(crossCfg.boundaryModel).toBe("anthropic:claude-sonnet-4-6");

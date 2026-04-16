@@ -6,29 +6,30 @@
  * Only the pipeline indicator + active finding stay in the live area
  * to minimize flicker from spinner ticks.
  */
-import React from "react";
-import { Box, Text, Static } from "ink";
+
 import chalk from "chalk";
-import { useUIState } from "./hooks.js";
-import { icons } from "./icons.js";
-import type { UIStore, ResultLine as ResultLineData } from "./state.js";
+import { Box, Static, Text } from "ink";
+import React from "react";
 import { Banner } from "./components/Banner.js";
-import { ResultLine } from "./components/ResultLine.js";
-import { ScanSummary } from "./components/ScanSummary.js";
-import { QualityGate } from "./components/QualityGate.js";
-import { PipelineIndicator } from "./components/PipelineIndicator.js";
+import { CommandInput, type CommandResult, type ReplCommand } from "./components/CommandInput.js";
+import { CompactHeader } from "./components/CompactHeader.js";
 import { ConfigBanner } from "./components/ConfigBanner.js";
-import { StatusFooter } from "./components/StatusFooter.js";
-import { ResumeDiff } from "./components/ResumeDiff.js";
-import { CommandInput, type ReplCommand, type CommandResult } from "./components/CommandInput.js";
-import { SetupWizard } from "./components/SetupWizard.js";
 import { ConfigConfirm } from "./components/ConfigConfirm.js";
+import { CopilotShell } from "./components/CopilotShell.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
 import { InteractiveReview } from "./components/InteractiveReview.js";
-import { CompactHeader } from "./components/CompactHeader.js";
 import { NoticeRail } from "./components/NoticeRail.js";
-import { CopilotShell } from "./components/CopilotShell.js";
+import { PipelineIndicator } from "./components/PipelineIndicator.js";
+import { QualityGate } from "./components/QualityGate.js";
+import { ResultLine } from "./components/ResultLine.js";
+import { ResumeDiff } from "./components/ResumeDiff.js";
+import { ScanSummary } from "./components/ScanSummary.js";
+import { SetupWizard } from "./components/SetupWizard.js";
+import { StatusFooter } from "./components/StatusFooter.js";
+import { useUIState } from "./hooks.js";
+import { icons } from "./icons.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
+import type { ResultLine as ResultLineData, UIStore } from "./state.js";
 
 interface AppProps {
   store: UIStore;
@@ -38,28 +39,28 @@ export function App({ store }: AppProps): React.ReactElement {
   const state = useUIState(store);
   const [replCtx] = React.useState(() => createReplContext(store));
 
-  const handleCommand = React.useCallback((cmd: ReplCommand): CommandResult => {
-    return handleReplCommand(replCtx, cmd);
-  }, [replCtx]);
+  const handleCommand = React.useCallback(
+    (cmd: ReplCommand): CommandResult => {
+      return handleReplCommand(replCtx, cmd);
+    },
+    [replCtx],
+  );
 
   // Results that have scrolled past the live window go to Static (no re-render).
   // Only the last few stay in the live PipelineIndicator.
   const LIVE_RESULT_COUNT = 3;
-  const staticResults = state.results.length > LIVE_RESULT_COUNT
-    ? state.results.slice(0, -LIVE_RESULT_COUNT)
-    : [];
-  const liveResults = state.results.length > LIVE_RESULT_COUNT
-    ? state.results.slice(-LIVE_RESULT_COUNT)
-    : state.results;
-  const showCompactHeader = state.mode !== "preflight" && state.mode !== "shell" && state.repoName.length > 0;
+  const staticResults =
+    state.results.length > LIVE_RESULT_COUNT ? state.results.slice(0, -LIVE_RESULT_COUNT) : [];
+  const liveResults =
+    state.results.length > LIVE_RESULT_COUNT
+      ? state.results.slice(-LIVE_RESULT_COUNT)
+      : state.results;
+  const showCompactHeader =
+    state.mode !== "preflight" && state.mode !== "shell" && state.repoName.length > 0;
 
   // Shell mode renders only the CopilotShell — no scan banner/header/pipeline chrome
   if (state.mode === "shell") {
-    return (
-      <Box flexDirection="column">
-        {state.shell && <CopilotShell store={store} />}
-      </Box>
-    );
+    return <Box flexDirection="column">{state.shell && <CopilotShell store={store} />}</Box>;
   }
 
   return (
@@ -89,13 +90,21 @@ export function App({ store }: AppProps): React.ReactElement {
       )}
 
       {/* Skipped info (plain fallback if no resume diff) */}
-      {!state.resumeDiff && state.skippedAlreadyTriaged > 0 && state.phase === "triaging" && state.mode === "running" && (
-        <Static items={["skip-info"]}>
-          {() => (
-            <Text key="skip-info">{"  "}{chalk.dim(`Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`)}</Text>
-          )}
-        </Static>
-      )}
+      {!state.resumeDiff &&
+        state.skippedAlreadyTriaged > 0 &&
+        state.phase === "triaging" &&
+        state.mode === "running" && (
+          <Static items={["skip-info"]}>
+            {() => (
+              <Text key="skip-info">
+                {"  "}
+                {chalk.dim(
+                  `Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`,
+                )}
+              </Text>
+            )}
+          </Static>
+        )}
 
       <NoticeRail notices={state.notices} />
 
@@ -139,9 +148,7 @@ export function App({ store }: AppProps): React.ReactElement {
             />
           )}
 
-          {state.qualityGate && (
-            <QualityGate result={state.qualityGate} />
-          )}
+          {state.qualityGate && <QualityGate result={state.qualityGate} />}
 
           {state.phase !== "idle" && state.phase !== "done" && state.phase !== "summary" && (
             <StatusFooter
@@ -155,7 +162,11 @@ export function App({ store }: AppProps): React.ReactElement {
           )}
 
           <CommandInput
-            active={state.phase === "triaging" || state.phase === "verifying" || state.phase === "scanning"}
+            active={
+              state.phase === "triaging" ||
+              state.phase === "verifying" ||
+              state.phase === "scanning"
+            }
             onCommand={handleCommand}
           />
         </>
@@ -175,7 +186,6 @@ export function App({ store }: AppProps): React.ReactElement {
           onQuit={state.review.onQuit}
         />
       )}
-
     </Box>
   );
 }

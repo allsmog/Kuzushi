@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { secretsCryptoDetectTask, __secretsCryptoDetectInternals } from "../../../src/agents/tasks/secrets-crypto-detect.js";
-import type { KuzushiConfig } from "../../../src/types.js";
+import {
+  __secretsCryptoDetectInternals,
+  secretsCryptoDetectTask,
+} from "../../../src/agents/tasks/secrets-crypto-detect.js";
 import type { TaskContext } from "../../../src/agents/types.js";
+import type { KuzushiConfig } from "../../../src/types.js";
 
-const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint, SECRETS_CRYPTO_RELEVANCE } = __secretsCryptoDetectInternals;
+const {
+  resolveConfig,
+  buildPrompt,
+  normalizeFindings,
+  computeFingerprint,
+  SECRETS_CRYPTO_RELEVANCE,
+} = __secretsCryptoDetectInternals;
 
 function makeContext(overrides: Record<string, unknown> = {}): TaskContext {
   return {
@@ -27,7 +36,7 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: (overrides.taskConfig as Record<string, Record<string, unknown>>) ?? {},
   };
 }
 
@@ -70,7 +79,14 @@ describe("buildPrompt", () => {
 
   it("includes repo context when provided", () => {
     const prompt = buildPrompt(
-      { languages: ["Python"], frameworks: ["Django"], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Python"],
+        frameworks: ["Django"],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
     );
     expect(prompt).toContain("Python");
@@ -85,7 +101,14 @@ describe("buildPrompt", () => {
   it("includes all categories regardless of context (all always:true)", () => {
     // Go repo context - secrets/crypto categories should not be filtered
     const goPrompt = buildPrompt(
-      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: [],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
     );
     expect(goPrompt).toContain("api-key");
@@ -188,14 +211,37 @@ describe("normalizeFindings", () => {
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 100);
     expect(findings).toHaveLength(2);
-    expect(findings.map(f => f.taskId).sort()).toEqual(["crypto-misuse-detect", "secrets-detect"]);
+    expect(findings.map((f) => f.taskId).sort()).toEqual([
+      "crypto-misuse-detect",
+      "secrets-detect",
+    ]);
   });
 
   it("deduplicates by fingerprint", () => {
     const raw = {
       findings: [
-        { detectorId: "secrets-detect", category: "api-key", filePath: "src/config.ts", startLine: 5, severity: "ERROR", description: "Key", cwe: "CWE-798", confidence: "HIGH", rationale: "r" },
-        { detectorId: "secrets-detect", category: "api-key", filePath: "src/config.ts", startLine: 5, severity: "WARNING", description: "Key", cwe: "CWE-798", confidence: "MEDIUM", rationale: "r" },
+        {
+          detectorId: "secrets-detect",
+          category: "api-key",
+          filePath: "src/config.ts",
+          startLine: 5,
+          severity: "ERROR",
+          description: "Key",
+          cwe: "CWE-798",
+          confidence: "HIGH",
+          rationale: "r",
+        },
+        {
+          detectorId: "secrets-detect",
+          category: "api-key",
+          filePath: "src/config.ts",
+          startLine: 5,
+          severity: "WARNING",
+          description: "Key",
+          cwe: "CWE-798",
+          confidence: "MEDIUM",
+          rationale: "r",
+        },
       ],
     };
 

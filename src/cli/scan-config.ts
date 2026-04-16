@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { KuzushiConfig } from "../types.js";
 import { isValidPreset, SCAN_PRESETS } from "../config/presets.js";
+import type { KuzushiConfig } from "../types.js";
 import { CliUsageError } from "./errors.js";
 import { parseCommaSeparatedList } from "./shared.js";
 
@@ -83,7 +83,9 @@ export function applyScanCommandConfigOverrides(
   // Apply preset before any other overrides so CLI flags take precedence.
   if (opts.preset) {
     if (!isValidPreset(opts.preset)) {
-      throw new CliUsageError(`Unknown preset "${opts.preset}". Valid presets: safe, fast, standard, deep, reference`);
+      throw new CliUsageError(
+        `Unknown preset "${opts.preset}". Valid presets: safe, fast, standard, deep, reference`,
+      );
     }
     const preset = SCAN_PRESETS[opts.preset];
     // Deep-merge taskConfig so presets can override individual task
@@ -105,10 +107,7 @@ export function applyScanCommandConfigOverrides(
   if (opts.verify) config.verify = true;
   if (opts.cryptoBehavioralTest) {
     config.cryptoBehavioralTestEnabled = true;
-    config.tasks = dedupeStrings([
-      ...(config.tasks ?? []),
-      "crypto-behavioral-test",
-    ]);
+    config.tasks = dedupeStrings([...(config.tasks ?? []), "crypto-behavioral-test"]);
   }
   if (opts.dynamicAnalysis) config.dynamicAnalysisEnabled = true;
   if (opts.taintDiffBase) config.taintDiffBase = opts.taintDiffBase.trim() || undefined;
@@ -134,11 +133,13 @@ export function applyScanCommandConfigOverrides(
   if (opts.autoRuleGen) config.autoRuleGeneration = true;
   if (opts.stream) config.streamingEnabled = true;
   if (opts.streamPort != null) config.streamingPort = opts.streamPort;
-  if (opts.githubPr) ((config as unknown) as Record<string, unknown>)["githubPr"] = true;
-  if (opts.githubComment) ((config as unknown) as Record<string, unknown>)["githubComment"] = true;
+  if (opts.githubPr) (config as unknown as Record<string, unknown>)["githubPr"] = true;
+  if (opts.githubComment) (config as unknown as Record<string, unknown>)["githubComment"] = true;
   if (opts.autoPatch) config.autoPatchEnabled = true;
-  if (opts.autoPatchAfter) config.autoPatchAfter = opts.autoPatchAfter as typeof config.autoPatchAfter;
-  if (opts.patchVerifyDepth) config.patchVerifyDepth = opts.patchVerifyDepth as typeof config.patchVerifyDepth;
+  if (opts.autoPatchAfter)
+    config.autoPatchAfter = opts.autoPatchAfter as typeof config.autoPatchAfter;
+  if (opts.patchVerifyDepth)
+    config.patchVerifyDepth = opts.patchVerifyDepth as typeof config.patchVerifyDepth;
   if (opts.patchConcurrency != null) config.patchConcurrency = opts.patchConcurrency;
   if (opts.pocHarness) config.pocHarness = true;
   if (opts.context === false) config.enableContextGathering = false;
@@ -172,10 +173,7 @@ export function applyScanCommandConfigOverrides(
   }
 
   if (opts.tasks) {
-    config.tasks = dedupeStrings([
-      ...(config.tasks ?? []),
-      ...parseCommaSeparatedList(opts.tasks),
-    ]);
+    config.tasks = dedupeStrings([...(config.tasks ?? []), ...parseCommaSeparatedList(opts.tasks)]);
   }
 
   if (opts.qualityGate) {
@@ -193,14 +191,34 @@ export function applyScanCommandConfigOverrides(
     };
   }
 
-  applyOptionalUnitInterval(config, "verifyMinConfidence", opts.verifyMinConfidence, "--verify-min-confidence");
+  applyOptionalUnitInterval(
+    config,
+    "verifyMinConfidence",
+    opts.verifyMinConfidence,
+    "--verify-min-confidence",
+  );
 
   if (opts.verifyGate === false) config.verifyGateEnabled = false;
 
   applyOptionalPositiveInteger(config, "verifyMaxTurns", opts.verifyMaxTurns, "--verify-max-turns");
-  applyOptionalPositiveInteger(config, "verifyConcurrency", opts.verifyConcurrency, "--verify-concurrency");
-  applyOptionalPositiveInteger(config, "dynamicMaxCandidates", opts.dynamicMaxCandidates, "--dynamic-max-candidates");
-  applyOptionalPositiveInteger(config, "dynamicMinScore", opts.dynamicMinScore, "--dynamic-min-score");
+  applyOptionalPositiveInteger(
+    config,
+    "verifyConcurrency",
+    opts.verifyConcurrency,
+    "--verify-concurrency",
+  );
+  applyOptionalPositiveInteger(
+    config,
+    "dynamicMaxCandidates",
+    opts.dynamicMaxCandidates,
+    "--dynamic-max-candidates",
+  );
+  applyOptionalPositiveInteger(
+    config,
+    "dynamicMinScore",
+    opts.dynamicMinScore,
+    "--dynamic-min-score",
+  );
   applyOptionalPositiveInteger(
     config,
     "verifyRefinementMaxIterations",
@@ -213,8 +231,18 @@ export function applyScanCommandConfigOverrides(
     opts.verifyReflectionInterval,
     "--verify-reflection-interval",
   );
-  applyOptionalPositiveInteger(config, "pocHarnessMaxTurns", opts.pocHarnessMaxTurns, "--poc-harness-max-turns");
-  applyOptionalPositiveInteger(config, "pocHarnessConcurrency", opts.pocHarnessConcurrency, "--poc-harness-concurrency");
+  applyOptionalPositiveInteger(
+    config,
+    "pocHarnessMaxTurns",
+    opts.pocHarnessMaxTurns,
+    "--poc-harness-max-turns",
+  );
+  applyOptionalPositiveInteger(
+    config,
+    "pocHarnessConcurrency",
+    opts.pocHarnessConcurrency,
+    "--poc-harness-concurrency",
+  );
   applyOptionalPositiveInteger(
     config,
     "pocRefinementMaxIterations",
@@ -227,15 +255,30 @@ export function applyScanCommandConfigOverrides(
     opts.pocReflectionInterval,
     "--poc-reflection-interval",
   );
-  applyOptionalNonNegativeInteger(config, "maxTriageRetries", opts.maxTriageRetries, "--max-triage-retries");
-  applyOptionalNonNegativeInteger(config, "maxVerifyRetries", opts.maxVerifyRetries, "--max-verify-retries");
+  applyOptionalNonNegativeInteger(
+    config,
+    "maxTriageRetries",
+    opts.maxTriageRetries,
+    "--max-triage-retries",
+  );
+  applyOptionalNonNegativeInteger(
+    config,
+    "maxVerifyRetries",
+    opts.maxVerifyRetries,
+    "--max-verify-retries",
+  );
   applyOptionalNonNegativeInteger(
     config,
     "maxPocHarnessRetries",
     opts.maxPocHarnessRetries,
     "--max-poc-harness-retries",
   );
-  applyOptionalNonNegativeInteger(config, "retryBackoffMs", opts.retryBackoffMs, "--retry-backoff-ms");
+  applyOptionalNonNegativeInteger(
+    config,
+    "retryBackoffMs",
+    opts.retryBackoffMs,
+    "--retry-backoff-ms",
+  );
 
   if (config.pocHarness && config.verify !== true) {
     throw new CliUsageError("--poc-harness requires --verify.");
@@ -249,7 +292,10 @@ export function resolveScanSeverity(
   opts: Pick<ScanCommandOptions, "severity">,
 ): string[] {
   return opts.severity
-    ? opts.severity.split(",").map((level) => level.trim().toUpperCase()).filter(Boolean)
+    ? opts.severity
+        .split(",")
+        .map((level) => level.trim().toUpperCase())
+        .filter(Boolean)
     : config.severity;
 }
 
@@ -302,11 +348,7 @@ function coercePositiveInteger(value: number, flagName: string): number {
   return Math.floor(value);
 }
 
-function coerceStringEnum(
-  value: string,
-  allowed: string[],
-  flagName: string,
-): string {
+function coerceStringEnum(value: string, allowed: string[], flagName: string): string {
   const normalized = value.trim().toLowerCase();
   if (!allowed.includes(normalized)) {
     throw new CliUsageError(`${flagName} must be one of: ${allowed.join(", ")}.`);
@@ -323,7 +365,9 @@ function coerceNonNegativeInteger(value: number, flagName: string): number {
 
 function coerceUnitInterval(value: number, flagName: string): number {
   if (!Number.isFinite(value) || value < 0 || value > 100) {
-    throw new CliUsageError(`${flagName} must be a number between 0 and 1 (or 0-100 as a percentage).`);
+    throw new CliUsageError(
+      `${flagName} must be a number between 0 and 1 (or 0-100 as a percentage).`,
+    );
   }
   if (value > 1) {
     return value / 100;
@@ -345,7 +389,10 @@ function dedupeStrings(values: Iterable<string>): string[] {
   return result;
 }
 
-function applyTaskModelOverrides(config: KuzushiConfig, rawAssignments: string[] | undefined): void {
+function applyTaskModelOverrides(
+  config: KuzushiConfig,
+  rawAssignments: string[] | undefined,
+): void {
   if (!rawAssignments || rawAssignments.length === 0) {
     return;
   }
@@ -353,13 +400,17 @@ function applyTaskModelOverrides(config: KuzushiConfig, rawAssignments: string[]
   for (const assignment of rawAssignments.flatMap((value) => parseCommaSeparatedList(value))) {
     const equalsIndex = assignment.indexOf("=");
     if (equalsIndex <= 0 || equalsIndex === assignment.length - 1) {
-      throw new CliUsageError(`--task-model must be in the form <taskId=model>; received "${assignment}".`);
+      throw new CliUsageError(
+        `--task-model must be in the form <taskId=model>; received "${assignment}".`,
+      );
     }
 
     const taskId = assignment.slice(0, equalsIndex).trim();
     const model = assignment.slice(equalsIndex + 1).trim();
     if (!taskId || !model) {
-      throw new CliUsageError(`--task-model must be in the form <taskId=model>; received "${assignment}".`);
+      throw new CliUsageError(
+        `--task-model must be in the form <taskId=model>; received "${assignment}".`,
+      );
     }
 
     config.taskConfig[taskId] = {

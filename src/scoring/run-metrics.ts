@@ -1,13 +1,13 @@
-import type { Finding } from "../scanners/types.js";
 import type { PipelineStats } from "../bus/events.js";
+import type { Finding } from "../scanners/types.js";
 
 export type {
-  DurationBreakdown,
   CostBreakdown,
-  StructuredEvidenceMetrics,
+  DurationBreakdown,
   RunMetrics,
-  StageTimestamps,
   StageCosts,
+  StageTimestamps,
+  StructuredEvidenceMetrics,
 } from "./run-metrics-types.js";
 
 import type {
@@ -117,7 +117,8 @@ export function computeRunMetrics(
   }
 
   // Cost breakdown
-  const costTotal = costs.triage + costs.verify + costs.pocHarness + costs.dynamicAnalysis + costs.variantAnalysis;
+  const costTotal =
+    costs.triage + costs.verify + costs.pocHarness + costs.dynamicAnalysis + costs.variantAnalysis;
   const costBreakdown: CostBreakdown = {
     triage: costs.triage,
     verify: costs.verify,
@@ -133,9 +134,7 @@ export function computeRunMetrics(
   const exploitable = records.filter(
     (f) => f["verifyExploitable"] === 1 || f["verifyExploitable"] === true,
   ).length;
-  const verified = records.filter(
-    (f) => f["verifyExploitable"] != null,
-  ).length;
+  const verified = records.filter((f) => f["verifyExploitable"] != null).length;
   if (verified > 0) {
     exploitabilityRate = exploitable / verified;
   }
@@ -247,11 +246,15 @@ export function formatMetricsSummary(metrics: RunMetrics): string {
   lines.push(`  Findings With Taint Path: ${metrics.structuredEvidence.findingsWithTaintPath}`);
   const proofEntries = Object.entries(metrics.structuredEvidence.proofStateCounts);
   if (proofEntries.length > 0) {
-    lines.push(`  Proof States: ${proofEntries.map(([state, count]) => `${state}=${count}`).join(", ")}`);
+    lines.push(
+      `  Proof States: ${proofEntries.map(([state, count]) => `${state}=${count}`).join(", ")}`,
+    );
   }
   const engineEntries = Object.entries(metrics.structuredEvidence.engineKindCounts);
   if (engineEntries.length > 0) {
-    lines.push(`  Engine Provenance: ${engineEntries.map(([kind, count]) => `${kind}=${count}`).join(", ")}`);
+    lines.push(
+      `  Engine Provenance: ${engineEntries.map(([kind, count]) => `${kind}=${count}`).join(", ")}`,
+    );
   }
   lines.push("");
 
@@ -274,11 +277,15 @@ export function formatMetricsSummary(metrics: RunMetrics): string {
   }
   if (metrics.verificationOutcomes) {
     const v = metrics.verificationOutcomes;
-    lines.push(`Verification: ${v.exploitable} exploitable, ${v.notExploitable} not exploitable, ${v.errors} errors`);
+    lines.push(
+      `Verification: ${v.exploitable} exploitable, ${v.notExploitable} not exploitable, ${v.errors} errors`,
+    );
   }
   if (metrics.pocOutcomes) {
     const p = metrics.pocOutcomes;
-    lines.push(`PoC Generation: ${p.generated} generated, ${p.skipped} skipped, ${p.errors} errors`);
+    lines.push(
+      `PoC Generation: ${p.generated} generated, ${p.skipped} skipped, ${p.errors} errors`,
+    );
   }
   if (metrics.corroboratedClusters || metrics.verificationOutcomes || metrics.pocOutcomes) {
     lines.push("");

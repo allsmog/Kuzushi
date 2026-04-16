@@ -53,7 +53,7 @@ export async function createMcpModule(
   if (serverSpec.startsWith("http://") || serverSpec.startsWith("https://")) {
     throw new Error(
       `HTTP/SSE MCP transport is not yet implemented. ` +
-      `Use a stdio command instead: /load mcp:npx @some/mcp-server`,
+        `Use a stdio command instead: /load mcp:npx @some/mcp-server`,
     );
   }
 
@@ -107,10 +107,13 @@ export async function createMcpModule(
  */
 class StdioMcpClient {
   private process: ReturnType<typeof spawn> | null = null;
-  private pendingRequests = new Map<string, {
-    resolve: (value: unknown) => void;
-    reject: (reason: Error) => void;
-  }>();
+  private pendingRequests = new Map<
+    string,
+    {
+      resolve: (value: unknown) => void;
+      reject: (reason: Error) => void;
+    }
+  >();
   private initialized = false;
 
   constructor(private readonly command: string) {}
@@ -164,7 +167,7 @@ class StdioMcpClient {
 
   async listTools(): Promise<McpToolDefinition[]> {
     if (!this.initialized) throw new Error("MCP client not initialized.");
-    const result = await this.sendRequest("tools/list", {}) as { tools: McpToolDefinition[] };
+    const result = (await this.sendRequest("tools/list", {})) as { tools: McpToolDefinition[] };
     return result.tools ?? [];
   }
 
@@ -200,8 +203,14 @@ class StdioMcpClient {
       }, 30000);
 
       this.pendingRequests.set(id, {
-        resolve: (value) => { clearTimeout(timeout); resolve(value); },
-        reject: (reason) => { clearTimeout(timeout); reject(reason); },
+        resolve: (value) => {
+          clearTimeout(timeout);
+          resolve(value);
+        },
+        reject: (reason) => {
+          clearTimeout(timeout);
+          reject(reason);
+        },
       });
 
       this.process.stdin.write(JSON.stringify(request) + "\n");

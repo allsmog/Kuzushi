@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { readFileContext } from "../src/context.js";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { readFileContext } from "../src/context.js";
 
 const TMP_DIR = path.join(import.meta.dirname, ".tmp-context-test");
 

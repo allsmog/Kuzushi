@@ -18,9 +18,5 @@ export interface PocExecutor {
   /** Check if the execution backend is available. */
   available(): Promise<boolean>;
   /** Execute a PoC script and capture results. */
-  execute(
-    scriptPath: string,
-    language: string,
-    repoRoot: string,
-  ): Promise<PocExecutionResult>;
+  execute(scriptPath: string, language: string, repoRoot: string): Promise<PocExecutionResult>;
 }

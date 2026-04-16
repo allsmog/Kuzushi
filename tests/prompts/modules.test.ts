@@ -1,13 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   antiHallucinationModule,
-  confidenceEscalationModule,
-  frameworkAwarenessModule,
-  falseDismissalModule,
   bypassExhaustionModule,
-  proofLevelModule,
-  knowledgeInjectionModule,
   composePromptModules,
+  confidenceEscalationModule,
+  falseDismissalModule,
+  frameworkAwarenessModule,
+  knowledgeInjectionModule,
+  proofLevelModule,
 } from "../../src/prompts/modules.js";
 import type { RepoContext } from "../../src/types.js";
 

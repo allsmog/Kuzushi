@@ -1,11 +1,11 @@
 import { rmSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { initDb } from "../../src/store.js";
 import {
   getCryptoBehavioralRunsByFingerprint,
   insertCryptoBehavioralRun,
 } from "../../src/store/crypto-behavioral.js";
+import { initDb } from "../../src/store.js";
 
 const TMP_DB_PATH = path.join(import.meta.dirname, "..", ".tmp-crypto-behavioral.sqlite3");
 
@@ -14,18 +14,22 @@ describe("crypto behavioral store", () => {
     rmSync(TMP_DB_PATH, { force: true });
 
     const first = initDb(TMP_DB_PATH);
-    const firstTables = first.prepare(`
+    const firstTables = first
+      .prepare(`
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name = 'crypto_behavioral_runs'
-    `).all();
+    `)
+      .all();
     expect(firstTables).toHaveLength(1);
     first.close();
 
     const reopened = initDb(TMP_DB_PATH);
-    const secondTables = reopened.prepare(`
+    const secondTables = reopened
+      .prepare(`
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name = 'crypto_behavioral_runs'
-    `).all();
+    `)
+      .all();
     expect(secondTables).toHaveLength(1);
     reopened.close();
   });

@@ -1,9 +1,14 @@
 import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
 import type { AgentEffort, AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
-import { ALL_TOOLS, buildPolicyLayers, resolveToolPolicy, type ToolPolicy } from "../../prompts/tool-policy.js";
-import { isRecord } from "../../utils.js";
+import {
+  ALL_TOOLS,
+  buildPolicyLayers,
+  resolveToolPolicy,
+  type ToolPolicy,
+} from "../../prompts/tool-policy.js";
 import type { KuzushiConfig } from "../../types.js";
+import { isRecord } from "../../utils.js";
 import type { TaskContext } from "../types.js";
 
 export function resolveTaskModel(
@@ -11,7 +16,12 @@ export function resolveTaskModel(
   configKey: string,
   ...fallbackConfigKeys: string[]
 ): string {
-  const configuredModel = resolveTaskStringConfig(context, configKey, "model", ...fallbackConfigKeys);
+  const configuredModel = resolveTaskStringConfig(
+    context,
+    configKey,
+    "model",
+    ...fallbackConfigKeys,
+  );
   return context.modelOverride ?? configuredModel ?? context.config.model;
 }
 
@@ -41,7 +51,9 @@ export function resolveTaskAllowedTools(
   }
 
   const layers = buildPolicyLayers(taskPolicy, context.config.toolPolicies);
-  return dedupeTools(resolveToolPolicy(availableTools.length > 0 ? availableTools : ALL_TOOLS, layers));
+  return dedupeTools(
+    resolveToolPolicy(availableTools.length > 0 ? availableTools : ALL_TOOLS, layers),
+  );
 }
 
 export function resolveTaskEffort(
@@ -50,7 +62,12 @@ export function resolveTaskEffort(
   ...fallbackConfigKeys: string[]
 ): AgentEffort | undefined {
   const configured = resolveTaskStringConfig(context, configKey, "effort", ...fallbackConfigKeys);
-  if (configured === "low" || configured === "medium" || configured === "high" || configured === "max") {
+  if (
+    configured === "low" ||
+    configured === "medium" ||
+    configured === "high" ||
+    configured === "max"
+  ) {
     return configured;
   }
   return undefined;
@@ -79,7 +96,9 @@ export function resolveStageModel(
   configKey: string,
   ...fallbackConfigKeys: string[]
 ): string {
-  return resolveStageStringConfig(config, configKey, "model", ...fallbackConfigKeys) ?? config.model;
+  return (
+    resolveStageStringConfig(config, configKey, "model", ...fallbackConfigKeys) ?? config.model
+  );
 }
 
 export function resolveStageEffort(
@@ -88,7 +107,12 @@ export function resolveStageEffort(
   ...fallbackConfigKeys: string[]
 ): AgentEffort | undefined {
   const configured = resolveStageStringConfig(config, configKey, "effort", ...fallbackConfigKeys);
-  if (configured === "low" || configured === "medium" || configured === "high" || configured === "max") {
+  if (
+    configured === "low" ||
+    configured === "medium" ||
+    configured === "high" ||
+    configured === "max"
+  ) {
     return configured;
   }
   return undefined;

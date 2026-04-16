@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TMP_HOME = path.join(import.meta.dirname, ".tmp-config-test");
 const TMP_CONFIG_DIR = path.join(TMP_HOME, ".kuzushi");
@@ -23,10 +23,9 @@ const {
   projectConfigPath,
   DEFAULTS,
 } = await import("../src/config.js");
-const {
-  hasConfigValidationErrors,
-  validateKuzushiConfig,
-} = await import("../src/config/validation.js");
+const { hasConfigValidationErrors, validateKuzushiConfig } = await import(
+  "../src/config/validation.js"
+);
 
 beforeEach(() => {
   mkdirSync(TMP_CONFIG_DIR, { recursive: true });
@@ -71,10 +70,13 @@ describe("loadConfig", () => {
   });
 
   it("injects crypto-behavioral-test into explicit tasks when the feature is enabled", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
-      tasks: ["custom-task"],
-      cryptoBehavioralTestEnabled: true,
-    }));
+    writeFileSync(
+      TMP_CONFIG_PATH,
+      JSON.stringify({
+        tasks: ["custom-task"],
+        cryptoBehavioralTestEnabled: true,
+      }),
+    );
 
     const config = loadConfig();
     expect(config.cryptoBehavioralTestEnabled).toBe(true);
@@ -82,41 +84,44 @@ describe("loadConfig", () => {
   });
 
   it("merges global config over defaults", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
-      model: "custom-model",
-      verify: true,
-      verifyMaxTurns: 25,
-      verifyConcurrency: 2,
-      verifyVerdicts: ["tp", "needs_review"],
-      verifyMinConfidence: 0.7,
-      pocHarness: true,
-      pocHarnessMaxTurns: 30,
-      pocHarnessConcurrency: 4,
-      enableContextGathering: false,
-      auditLog: true,
-      reportOutput: "/tmp/report.md",
-      sarifOutput: "/tmp/report.sarif",
-      maxTriageRetries: 4,
-      maxVerifyRetries: 5,
-      maxPocHarnessRetries: 6,
-      retryBackoffMs: 2000,
-      retryBackoffMultiplier: 3,
-      ensembleModels: ["anthropic:claude-haiku-4-5", "openai:gpt-4o"],
-      pocRefinementMaxIterations: 4,
-      pocReflectionInterval: 3,
-      verifyRefinementMaxIterations: 5,
-      verifyReflectionInterval: 4,
-      agentRuntimeConfig: {
-        apiKey: "sk-test",
-        baseUrl: "https://api.example.com/",
-      },
-      taskConfig: {
-        semgrep: { verify: false },
-        triage: { model: "triage-model" },
-        verify: { model: "verify-model" },
-        "poc-harness": { model: "poc-model" },
-      },
-    }));
+    writeFileSync(
+      TMP_CONFIG_PATH,
+      JSON.stringify({
+        model: "custom-model",
+        verify: true,
+        verifyMaxTurns: 25,
+        verifyConcurrency: 2,
+        verifyVerdicts: ["tp", "needs_review"],
+        verifyMinConfidence: 0.7,
+        pocHarness: true,
+        pocHarnessMaxTurns: 30,
+        pocHarnessConcurrency: 4,
+        enableContextGathering: false,
+        auditLog: true,
+        reportOutput: "/tmp/report.md",
+        sarifOutput: "/tmp/report.sarif",
+        maxTriageRetries: 4,
+        maxVerifyRetries: 5,
+        maxPocHarnessRetries: 6,
+        retryBackoffMs: 2000,
+        retryBackoffMultiplier: 3,
+        ensembleModels: ["anthropic:claude-haiku-4-5", "openai:gpt-4o"],
+        pocRefinementMaxIterations: 4,
+        pocReflectionInterval: 3,
+        verifyRefinementMaxIterations: 5,
+        verifyReflectionInterval: 4,
+        agentRuntimeConfig: {
+          apiKey: "sk-test",
+          baseUrl: "https://api.example.com/",
+        },
+        taskConfig: {
+          semgrep: { verify: false },
+          triage: { model: "triage-model" },
+          verify: { model: "verify-model" },
+          "poc-harness": { model: "poc-model" },
+        },
+      }),
+    );
     const config = loadConfig();
     expect(config.model).toBe("custom-model");
     expect(config.taskConfig.triage?.model).toBe("triage-model");
@@ -153,7 +158,10 @@ describe("loadConfig", () => {
 
   it("applies project-level override when repoRoot is provided", () => {
     writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "global-model", tasks: ["semgrep"] }));
-    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({ model: "project-model", tasks: ["agentic"] }));
+    writeFileSync(
+      TMP_PROJECT_CONFIG_PATH,
+      JSON.stringify({ model: "project-model", tasks: ["agentic"] }),
+    );
 
     const config = loadConfig(TMP_REPO);
     expect(config.model).toBe("project-model");
@@ -161,16 +169,22 @@ describe("loadConfig", () => {
   });
 
   it("merges agentRuntimeConfig shallowly across config layers", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
-      agentRuntimeConfig: {
-        apiKey: "global-key",
-      },
-    }));
-    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
-      agentRuntimeConfig: {
-        baseUrl: "https://api.example.com/",
-      },
-    }));
+    writeFileSync(
+      TMP_CONFIG_PATH,
+      JSON.stringify({
+        agentRuntimeConfig: {
+          apiKey: "global-key",
+        },
+      }),
+    );
+    writeFileSync(
+      TMP_PROJECT_CONFIG_PATH,
+      JSON.stringify({
+        agentRuntimeConfig: {
+          baseUrl: "https://api.example.com/",
+        },
+      }),
+    );
 
     const config = loadConfig(TMP_REPO, { trustProjectConfig: true });
     expect(config.agentRuntimeConfig).toEqual({
@@ -180,25 +194,31 @@ describe("loadConfig", () => {
   });
 
   it("strips unsafe repo-local config by default", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
-      agentRuntimeConfig: {
-        apiKey: "global-key",
-      },
-    }));
-    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
-      model: "project-model",
-      agentRuntimeConfig: {
-        baseUrl: "https://evil.example/",
-      },
-      taskConfig: {
-        semgrep: {
-          binary: "/tmp/evil-semgrep",
+    writeFileSync(
+      TMP_CONFIG_PATH,
+      JSON.stringify({
+        agentRuntimeConfig: {
+          apiKey: "global-key",
         },
-        "code-graph": {
-          maxEntryPoints: 5,
+      }),
+    );
+    writeFileSync(
+      TMP_PROJECT_CONFIG_PATH,
+      JSON.stringify({
+        model: "project-model",
+        agentRuntimeConfig: {
+          baseUrl: "https://evil.example/",
         },
-      },
-    }));
+        taskConfig: {
+          semgrep: {
+            binary: "/tmp/evil-semgrep",
+          },
+          "code-graph": {
+            maxEntryPoints: 5,
+          },
+        },
+      }),
+    );
 
     const config = loadConfig(TMP_REPO);
     expect(config.model).toBe("project-model");
@@ -211,11 +231,14 @@ describe("loadConfig", () => {
   });
 
   it("loads unsafe repo-local config when trustProjectConfig is enabled", () => {
-    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
-      agentRuntimeConfig: {
-        baseUrl: "https://trusted.example/",
-      },
-    }));
+    writeFileSync(
+      TMP_PROJECT_CONFIG_PATH,
+      JSON.stringify({
+        agentRuntimeConfig: {
+          baseUrl: "https://trusted.example/",
+        },
+      }),
+    );
 
     const config = loadConfig(TMP_REPO, { trustProjectConfig: true });
     expect(config.agentRuntimeConfig).toEqual({
@@ -227,9 +250,12 @@ describe("loadConfig", () => {
     const escapedDir = path.join(TMP_REPO, ".kuzushi-evil");
     mkdirSync(escapedDir, { recursive: true });
     writeFileSync(path.join(escapedDir, "escape.json"), JSON.stringify("escaped-model"));
-    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
-      model: "file://../.kuzushi-evil/escape.json",
-    }));
+    writeFileSync(
+      TMP_PROJECT_CONFIG_PATH,
+      JSON.stringify({
+        model: "file://../.kuzushi-evil/escape.json",
+      }),
+    );
 
     const config = loadConfig(TMP_REPO, { trustProjectConfig: true });
     expect(config.model).toBe(DEFAULTS.model);
@@ -276,7 +302,10 @@ describe("getConfigValue", () => {
   });
 
   it("returns nested taskConfig values", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ taskConfig: { semgrep: { binary: "opengrep" } } }));
+    writeFileSync(
+      TMP_CONFIG_PATH,
+      JSON.stringify({ taskConfig: { semgrep: { binary: "opengrep" } } }),
+    );
     expect(getConfigValue("taskConfig.semgrep.binary")).toBe("opengrep");
   });
 
@@ -358,7 +387,10 @@ describe("setConfigValue", () => {
     setConfigValue("verifyRefinementMaxIterations", "5");
     setConfigValue("verifyReflectionInterval", "2");
 
-    expect(getConfigValue("ensembleModels")).toEqual(["anthropic:claude-haiku-4-5", "openai:gpt-4o"]);
+    expect(getConfigValue("ensembleModels")).toEqual([
+      "anthropic:claude-haiku-4-5",
+      "openai:gpt-4o",
+    ]);
     expect(getConfigValue("pocRefinementMaxIterations")).toBe(4);
     expect(getConfigValue("pocReflectionInterval")).toBe(3);
     expect(getConfigValue("verifyRefinementMaxIterations")).toBe(5);
@@ -383,13 +415,12 @@ describe("setConfigValue", () => {
   it("sets agentRuntimeBackend", () => {
     setConfigValue("agentRuntimeBackend", "pi-ai");
     expect(getConfigValue("agentRuntimeBackend")).toBe("pi-ai");
-
   });
 
   it("sets agentRuntimeConfig as an object", () => {
     setConfigValue(
       "agentRuntimeConfig",
-      "{\"apiKey\":\"sk-test\",\"baseUrl\":\"https://api.example.com/\"}",
+      '{"apiKey":"sk-test","baseUrl":"https://api.example.com/"}',
     );
     expect(getConfigValue("agentRuntimeConfig")).toEqual({
       apiKey: "sk-test",
@@ -420,11 +451,14 @@ describe("setConfigValue", () => {
   });
 
   it("preserves repo-local layering when writing project config", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
-      model: "global-model",
-      verify: true,
-      verifyMaxTurns: 25,
-    }));
+    writeFileSync(
+      TMP_CONFIG_PATH,
+      JSON.stringify({
+        model: "global-model",
+        verify: true,
+        verifyMaxTurns: 25,
+      }),
+    );
 
     setConfigValue("scanMode", "concurrent", TMP_REPO);
 
@@ -443,22 +477,23 @@ describe("setConfigValue", () => {
     expect(() => setConfigValue("bogus", "val")).toThrow("Unknown config key");
   });
 
-  it("throws on invalid numeric values", () => {
-  });
+  it("throws on invalid numeric values", () => {});
 
   it("throws on invalid verify values", () => {
     expect(() => setConfigValue("verify", "maybe")).toThrow("verify must be true or false");
-    expect(() => setConfigValue("verifyMaxTurns", "0")).toThrow("verifyMaxTurns must be a positive number");
-    expect(() => setConfigValue("verifyConcurrency", "0")).toThrow("verifyConcurrency must be a positive number");
+    expect(() => setConfigValue("verifyMaxTurns", "0")).toThrow(
+      "verifyMaxTurns must be a positive number",
+    );
+    expect(() => setConfigValue("verifyConcurrency", "0")).toThrow(
+      "verifyConcurrency must be a positive number",
+    );
     expect(() => setConfigValue("verifyVerdicts", "foo")).toThrow(
       "verifyVerdicts must contain only: tp, fp, needs_review",
     );
     expect(() => setConfigValue("verifyMinConfidence", "101")).toThrow(
       "verifyMinConfidence must be a number between 0 and 1 (or 0-100 as a percentage)",
     );
-    expect(() => setConfigValue("pocHarness", "maybe")).toThrow(
-      "pocHarness must be true or false",
-    );
+    expect(() => setConfigValue("pocHarness", "maybe")).toThrow("pocHarness must be true or false");
     expect(() => setConfigValue("pocHarnessMaxTurns", "0")).toThrow(
       "pocHarnessMaxTurns must be a positive number",
     );
@@ -471,9 +506,7 @@ describe("setConfigValue", () => {
     expect(() => setConfigValue("enableContextGathering", "maybe")).toThrow(
       "enableContextGathering must be true or false",
     );
-    expect(() => setConfigValue("auditLog", "maybe")).toThrow(
-      "auditLog must be true or false",
-    );
+    expect(() => setConfigValue("auditLog", "maybe")).toThrow("auditLog must be true or false");
     expect(() => setConfigValue("maxTriageRetries", "-1")).toThrow(
       "maxTriageRetries must be a non-negative number",
     );
@@ -621,14 +654,20 @@ describe("unsetConfigValue", () => {
   });
 
   it("restores inherited values when removing a project override", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({
-      model: "global-model",
-      verify: true,
-    }));
-    writeFileSync(TMP_PROJECT_CONFIG_PATH, JSON.stringify({
-      model: "project-model",
-      scanMode: "concurrent",
-    }));
+    writeFileSync(
+      TMP_CONFIG_PATH,
+      JSON.stringify({
+        model: "global-model",
+        verify: true,
+      }),
+    );
+    writeFileSync(
+      TMP_PROJECT_CONFIG_PATH,
+      JSON.stringify({
+        model: "project-model",
+        scanMode: "concurrent",
+      }),
+    );
 
     unsetConfigValue("model", TMP_REPO);
 
@@ -680,20 +719,22 @@ describe("validateKuzushiConfig", () => {
       },
     });
 
-    expect(issues).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        severity: "error",
-        path: "pocHarness",
-      }),
-      expect.objectContaining({
-        severity: "error",
-        path: "dynamicAnalysisEnabled",
-      }),
-      expect.objectContaining({
-        severity: "warning",
-        path: "qualityGates.failOnExploitable",
-      }),
-    ]));
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: "error",
+          path: "pocHarness",
+        }),
+        expect.objectContaining({
+          severity: "error",
+          path: "dynamicAnalysisEnabled",
+        }),
+        expect.objectContaining({
+          severity: "warning",
+          path: "qualityGates.failOnExploitable",
+        }),
+      ]),
+    );
   });
 
   it("warns when external tasks are configured but disabled", () => {
@@ -715,15 +756,21 @@ describe("validateKuzushiConfig", () => {
 
 describe("prototype pollution prevention", () => {
   it("rejects __proto__ in dotted path for set", () => {
-    expect(() => setConfigValue("__proto__.polluted", "true")).toThrow("Invalid config key segment");
+    expect(() => setConfigValue("__proto__.polluted", "true")).toThrow(
+      "Invalid config key segment",
+    );
   });
 
   it("rejects constructor in dotted path for set", () => {
-    expect(() => setConfigValue("constructor.prototype.polluted", "true")).toThrow("Invalid config key segment");
+    expect(() => setConfigValue("constructor.prototype.polluted", "true")).toThrow(
+      "Invalid config key segment",
+    );
   });
 
   it("rejects prototype in dotted path for set", () => {
-    expect(() => setConfigValue("taskConfig.prototype.x", "true")).toThrow("Invalid config key segment");
+    expect(() => setConfigValue("taskConfig.prototype.x", "true")).toThrow(
+      "Invalid config key segment",
+    );
   });
 
   it("rejects __proto__ in dotted path for unset", () => {

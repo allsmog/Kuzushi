@@ -1,9 +1,10 @@
+import { createLogger } from "../../../logger.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
-import { createLogger } from "../../../logger.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
+import { formatSystemsSurfacePack } from "./helpers.js";
 import type {
   RankedSystemsSurface,
   SystemsContextOutput,
@@ -14,7 +15,6 @@ import type {
   SystemsTriggerOutput,
 } from "./types.js";
 import { resolveSystemsHuntConfig } from "./types.js";
-import { formatSystemsSurfacePack } from "./helpers.js";
 
 const log = createLogger({ stage: "systems-trigger-synth" });
 
@@ -65,14 +65,20 @@ export const systemsTriggerSynthTask: AgentTask<ScanOpts, SystemsTriggerOutput> 
   dependsOn: ["systems-invariant-extract"],
 
   condition(upstreamOutputs) {
-    const output = upstreamOutputs.get("systems-context-gatherer") as SystemsContextOutput | undefined;
+    const output = upstreamOutputs.get("systems-context-gatherer") as
+      | SystemsContextOutput
+      | undefined;
     return (output?.surfaces.length ?? 0) > 0;
   },
 
   async run(_input, context): Promise<SystemsTriggerOutput> {
     const config = resolveSystemsHuntConfig(context);
-    const surfaceOutput = context.upstreamOutputs.get("systems-context-gatherer") as SystemsContextOutput | undefined;
-    const invariantOutput = context.upstreamOutputs.get("systems-invariant-extract") as SystemsInvariantOutput | undefined;
+    const surfaceOutput = context.upstreamOutputs.get("systems-context-gatherer") as
+      | SystemsContextOutput
+      | undefined;
+    const invariantOutput = context.upstreamOutputs.get("systems-invariant-extract") as
+      | SystemsInvariantOutput
+      | undefined;
     const surfaces = surfaceOutput?.surfaces.slice(0, config.maxSurfaces) ?? [];
     const packs = surfaceOutput?.surfacePacks ?? [];
     if (surfaces.length === 0) {
@@ -179,7 +185,8 @@ export function parseTriggers(raw: unknown): SystemsTriggerHypothesis[] {
     const attackerControlledFields = stringArray(item["attackerControlledFields"]);
     const expectedPrimitive = stringField(item["expectedPrimitive"]);
     const rationale = stringField(item["rationale"]);
-    if (!id || !surfaceId || orderedSteps.length === 0 || !expectedPrimitive || !rationale) continue;
+    if (!id || !surfaceId || orderedSteps.length === 0 || !expectedPrimitive || !rationale)
+      continue;
     out.push({
       id,
       surfaceId,

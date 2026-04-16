@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { InMemoryKnowledgeRegistry } from "../../src/knowledge/registry.js";
+import { describe, expect, it } from "vitest";
 import { createDefaultKnowledgeRegistry } from "../../src/knowledge/index.js";
+import { InMemoryKnowledgeRegistry } from "../../src/knowledge/registry.js";
 import type { KnowledgeModule } from "../../src/knowledge/types.js";
 
 function makeModule(overrides: Partial<KnowledgeModule> = {}): KnowledgeModule {

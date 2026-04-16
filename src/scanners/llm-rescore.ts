@@ -1,11 +1,15 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { cleanupBatchFiles, writeBatchFile } from "../agent-runtime/batch-files.js";
+import {
+  runStructuredAgentQuery,
+  runStructuredBatchQuery,
+  runStructuredSessionQuery,
+} from "../agent-runtime/execution.js";
 import type { AgentRuntime, AgentSession } from "../agent-runtime/types.js";
-import { runStructuredAgentQuery, runStructuredSessionQuery, runStructuredBatchQuery } from "../agent-runtime/execution.js";
-import { writeBatchFile, cleanupBatchFiles } from "../agent-runtime/batch-files.js";
 import { emitDiagnostic } from "../ui/output.js";
-import type { Finding } from "./types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
+import type { Finding } from "./types.js";
 
 export interface LlmRescoreResult {
   fingerprint: string;
@@ -86,7 +90,10 @@ export async function rescoreFindings(
 
   // ── Priority 1: Batch API path (50% cost reduction) ──
   if (runtime.queryBatch) {
-    emitDiagnostic("llm-rescore", `Using Batch API for ${batches.length} batch(es) (50% cost reduction)`);
+    emitDiagnostic(
+      "llm-rescore",
+      `Using Batch API for ${batches.length} batch(es) (50% cost reduction)`,
+    );
 
     // Collect all batch prompts upfront
     const batchRequests: Array<{ id: string; prompt: string; systemPrompt?: string }> = [];
@@ -138,40 +145,50 @@ export async function rescoreFindings(
 
       if (!result || result.executionError || !isRecord(result.structuredOutput)) {
         // On error, keep all findings (don't filter)
-        allResults.push(...batch.map((f) => ({
-          fingerprint: f.fingerprint,
-          score: threshold,
-          reason: result?.executionError ?? "Failed to parse batch rescore output",
-          keep: true,
-        })));
+        allResults.push(
+          ...batch.map((f) => ({
+            fingerprint: f.fingerprint,
+            score: threshold,
+            reason: result?.executionError ?? "Failed to parse batch rescore output",
+            keep: true,
+          })),
+        );
         continue;
       }
 
-      const scores = Array.isArray(result.structuredOutput["scores"]) ? result.structuredOutput["scores"] : [];
+      const scores = Array.isArray(result.structuredOutput["scores"])
+        ? result.structuredOutput["scores"]
+        : [];
       const scoreMap = new Map<string, { score: number; reason: string }>();
       for (const entry of scores) {
         if (isRecord(entry) && typeof entry["fingerprint"] === "string") {
           scoreMap.set(entry["fingerprint"] as string, {
-            score: typeof entry["score"] === "number"
-              ? Math.max(1, Math.min(10, Math.floor(entry["score"] as number)))
-              : threshold,
-            reason: typeof entry["reason"] === "string" ? entry["reason"] as string : "",
+            score:
+              typeof entry["score"] === "number"
+                ? Math.max(1, Math.min(10, Math.floor(entry["score"] as number)))
+                : threshold,
+            reason: typeof entry["reason"] === "string" ? (entry["reason"] as string) : "",
           });
         }
       }
 
-      allResults.push(...batch.map((f) => {
-        const entry = scoreMap.get(f.fingerprint);
-        const score = entry?.score ?? threshold;
-        return {
-          fingerprint: f.fingerprint,
-          score,
-          reason: entry?.reason ?? "No rescore result returned",
-          keep: score >= threshold,
-        };
-      }));
+      allResults.push(
+        ...batch.map((f) => {
+          const entry = scoreMap.get(f.fingerprint);
+          const score = entry?.score ?? threshold;
+          return {
+            fingerprint: f.fingerprint,
+            score,
+            reason: entry?.reason ?? "No rescore result returned",
+            keep: score >= threshold,
+          };
+        }),
+      );
 
-      emitDiagnostic("llm-rescore", `Batch ${batchIdx + 1}/${batches.length}: rescored ${batch.length} findings`);
+      emitDiagnostic(
+        "llm-rescore",
+        `Batch ${batchIdx + 1}/${batches.length}: rescored ${batch.length} findings`,
+      );
     }
 
     return allResults;
@@ -197,7 +214,10 @@ export async function rescoreFindings(
   try {
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       const batch = batches[batchIdx];
-      emitDiagnostic("llm-rescore", `Batch ${batchIdx + 1}/${batches.length}: rescoring ${batch.length} findings...`);
+      emitDiagnostic(
+        "llm-rescore",
+        `Batch ${batchIdx + 1}/${batches.length}: rescoring ${batch.length} findings...`,
+      );
 
       const batchResults = session
         ? await rescoreBatchSession(
@@ -209,14 +229,7 @@ export async function rescoreFindings(
             runId,
             batchIdx,
           )
-        : await rescoreBatch(
-            batch,
-            fileContents,
-            model,
-            options.repoRoot,
-            threshold,
-            runtime,
-          );
+        : await rescoreBatch(batch, fileContents, model, options.repoRoot, threshold, runtime);
       allResults.push(...batchResults);
     }
   } finally {
@@ -290,10 +303,11 @@ async function rescoreBatchSession(
     for (const entry of scores) {
       if (isRecord(entry) && typeof entry["fingerprint"] === "string") {
         scoreMap.set(entry["fingerprint"] as string, {
-          score: typeof entry["score"] === "number"
-            ? Math.max(1, Math.min(10, Math.floor(entry["score"] as number)))
-            : threshold,
-          reason: typeof entry["reason"] === "string" ? entry["reason"] as string : "",
+          score:
+            typeof entry["score"] === "number"
+              ? Math.max(1, Math.min(10, Math.floor(entry["score"] as number)))
+              : threshold,
+          reason: typeof entry["reason"] === "string" ? (entry["reason"] as string) : "",
         });
       }
     }
@@ -387,10 +401,11 @@ async function rescoreBatch(
     for (const entry of scores) {
       if (isRecord(entry) && typeof entry["fingerprint"] === "string") {
         scoreMap.set(entry["fingerprint"] as string, {
-          score: typeof entry["score"] === "number"
-            ? Math.max(1, Math.min(10, Math.floor(entry["score"] as number)))
-            : threshold,
-          reason: typeof entry["reason"] === "string" ? entry["reason"] as string : "",
+          score:
+            typeof entry["score"] === "number"
+              ? Math.max(1, Math.min(10, Math.floor(entry["score"] as number)))
+              : threshold,
+          reason: typeof entry["reason"] === "string" ? (entry["reason"] as string) : "",
         });
       }
     }

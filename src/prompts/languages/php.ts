@@ -39,10 +39,26 @@ export const phpProfile: LanguageProfile = {
   vulnClasses: {
     "type-juggling": {
       sinks: [
-        { api: "== loose comparison", risk: "PHP loose comparison: '0e123' == '0e456' evaluates true (scientific notation to 0)", cwes: ["CWE-697"] },
-        { api: "strcmp() with non-string input", risk: "strcmp(array, string) returns NULL which == 0 in loose comparison", cwes: ["CWE-697"] },
-        { api: "switch/case (loose comparison)", risk: "PHP switch uses loose comparison by default", cwes: ["CWE-697"] },
-        { api: "in_array without strict flag", risk: "in_array('0', ['password']) is true due to loose comparison", cwes: ["CWE-697"] },
+        {
+          api: "== loose comparison",
+          risk: "PHP loose comparison: '0e123' == '0e456' evaluates true (scientific notation to 0)",
+          cwes: ["CWE-697"],
+        },
+        {
+          api: "strcmp() with non-string input",
+          risk: "strcmp(array, string) returns NULL which == 0 in loose comparison",
+          cwes: ["CWE-697"],
+        },
+        {
+          api: "switch/case (loose comparison)",
+          risk: "PHP switch uses loose comparison by default",
+          cwes: ["CWE-697"],
+        },
+        {
+          api: "in_array without strict flag",
+          risk: "in_array('0', ['password']) is true due to loose comparison",
+          cwes: ["CWE-697"],
+        },
       ],
       safePatterns: [
         { api: "=== strict comparison", why: "Compares type AND value — no type juggling" },
@@ -73,8 +89,10 @@ export const phpProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Magic hash authentication bypass",
-          vulnerableCode: '$hash = md5($user_password);\nif ($hash == $stored_hash) {\n    authenticate($user);\n}',
-          explanation: "If $stored_hash is '0e123...' (starts with 0e, rest is digits), PHP interprets it as 0 in scientific notation. Attacker finds a password whose MD5 also starts with '0e' followed by digits — both equal 0.",
+          vulnerableCode:
+            "$hash = md5($user_password);\nif ($hash == $stored_hash) {\n    authenticate($user);\n}",
+          explanation:
+            "If $stored_hash is '0e123...' (starts with 0e, rest is digits), PHP interprets it as 0 in scientific notation. Attacker finds a password whose MD5 also starts with '0e' followed by digits — both equal 0.",
         },
       ],
       antiHallucinationExtra: [
@@ -84,12 +102,23 @@ export const phpProfile: LanguageProfile = {
     },
     deserialization: {
       sinks: [
-        { api: "unserialize($user_input)", risk: "Triggers magic methods (__wakeup, __destruct) enabling RCE via POP chains", cwes: ["CWE-502"] },
-        { api: "unserialize with allowed_classes=true (default)", risk: "All classes allowed — POP gadgets available", cwes: ["CWE-502"] },
+        {
+          api: "unserialize($user_input)",
+          risk: "Triggers magic methods (__wakeup, __destruct) enabling RCE via POP chains",
+          cwes: ["CWE-502"],
+        },
+        {
+          api: "unserialize with allowed_classes=true (default)",
+          risk: "All classes allowed — POP gadgets available",
+          cwes: ["CWE-502"],
+        },
       ],
       safePatterns: [
         { api: "json_decode($data)", why: "JSON parsing does not trigger code" },
-        { api: "unserialize($data, ['allowed_classes' => false])", why: "Blocks POP chains — converts objects to __PHP_Incomplete_Class" },
+        {
+          api: "unserialize($data, ['allowed_classes' => false])",
+          why: "Blocks POP chains — converts objects to __PHP_Incomplete_Class",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -99,11 +128,7 @@ export const phpProfile: LanguageProfile = {
           "__wakeup",
           "__destruct",
         ],
-        fileHints: [
-          "Session handling code",
-          "Cache implementations",
-          "Cookie processing",
-        ],
+        fileHints: ["Session handling code", "Cache implementations", "Cookie processing"],
         instructions: [
           "Check if unserialize processes data from cookies, database, or HTTP input",
           "Look for classes with __wakeup or __destruct methods — POP gadget candidates",
@@ -114,7 +139,8 @@ export const phpProfile: LanguageProfile = {
         {
           scenario: "Cookie-based deserialization attack",
           vulnerableCode: '$prefs = unserialize(base64_decode($_COOKIE["user_prefs"]));',
-          explanation: "User controls cookie value. unserialize instantiates arbitrary classes and triggers __wakeup/__destruct. If a gadget chain exists, attacker achieves RCE.",
+          explanation:
+            "User controls cookie value. unserialize instantiates arbitrary classes and triggers __wakeup/__destruct. If a gadget chain exists, attacker achieves RCE.",
         },
       ],
       antiHallucinationExtra: [
@@ -123,15 +149,46 @@ export const phpProfile: LanguageProfile = {
     },
     "command-injection": {
       sinks: [
-        { api: "system($cmd)", risk: "Shell interpretation of command string", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "passthru($cmd)", risk: "Shell interpretation with raw output", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "shell_exec($cmd) / backtick operator", risk: "Shell interpretation", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "popen($cmd, $mode)", risk: "Shell interpretation", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "proc_open($cmd, ...)", risk: "Shell interpretation if cmd is string", shellInvoking: true, cwes: ["CWE-78"] },
+        {
+          api: "system($cmd)",
+          risk: "Shell interpretation of command string",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "passthru($cmd)",
+          risk: "Shell interpretation with raw output",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "shell_exec($cmd) / backtick operator",
+          risk: "Shell interpretation",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "popen($cmd, $mode)",
+          risk: "Shell interpretation",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "proc_open($cmd, ...)",
+          risk: "Shell interpretation if cmd is string",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
       ],
       safePatterns: [
-        { api: "escapeshellarg() wrapping each argument", why: "Escapes shell metacharacters in arguments" },
-        { api: "proc_open with array command (PHP 7.4+)", why: "Array form bypasses shell interpretation" },
+        {
+          api: "escapeshellarg() wrapping each argument",
+          why: "Escapes shell metacharacters in arguments",
+        },
+        {
+          api: "proc_open with array command (PHP 7.4+)",
+          why: "Array form bypasses shell interpretation",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -142,11 +199,7 @@ export const phpProfile: LanguageProfile = {
           "proc_open\\(",
           "escapeshellarg",
         ],
-        fileHints: [
-          "Image/file processing handlers",
-          "Admin/utility scripts",
-          "Cron job handlers",
-        ],
+        fileHints: ["Image/file processing handlers", "Admin/utility scripts", "Cron job handlers"],
         instructions: [
           "PHP has many shell functions — check all of them (system, passthru, shell_exec, popen, proc_open, backticks)",
           "Look for string concatenation with $_GET/$_POST values into command strings",
@@ -156,8 +209,10 @@ export const phpProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Image conversion with user-controlled filename",
-          vulnerableCode: '$file = $_POST["filename"];\nsystem("convert " . $file . " output.png");',
-          explanation: "$_POST['filename'] is user-controlled. Attacker sends 'img.png; cat /etc/passwd' — shell interprets semicolon.",
+          vulnerableCode:
+            '$file = $_POST["filename"];\nsystem("convert " . $file . " output.png");',
+          explanation:
+            "$_POST['filename'] is user-controlled. Attacker sends 'img.png; cat /etc/passwd' — shell interprets semicolon.",
         },
       ],
       antiHallucinationExtra: [
@@ -167,13 +222,28 @@ export const phpProfile: LanguageProfile = {
     },
     ssrf: {
       sinks: [
-        { api: "file_get_contents($url)", risk: "Fetches URL — can reach internal services and use file:// protocol", cwes: ["CWE-918"] },
-        { api: "curl with user-controlled CURLOPT_URL", risk: "User-controlled URL in cURL request", cwes: ["CWE-918"] },
-        { api: "fopen($url)", risk: "PHP fopen supports URL wrappers when allow_url_fopen is enabled", cwes: ["CWE-918"] },
+        {
+          api: "file_get_contents($url)",
+          risk: "Fetches URL — can reach internal services and use file:// protocol",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "curl with user-controlled CURLOPT_URL",
+          risk: "User-controlled URL in cURL request",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "fopen($url)",
+          risk: "PHP fopen supports URL wrappers when allow_url_fopen is enabled",
+          cwes: ["CWE-918"],
+        },
       ],
       safePatterns: [
         { api: "URL validated against domain allowlist", why: "Restricts reachable hosts" },
-        { api: "CURLOPT_PROTOCOLS set to CURLPROTO_HTTPS only", why: "Blocks file:// and other dangerous protocols" },
+        {
+          api: "CURLOPT_PROTOCOLS set to CURLPROTO_HTTPS only",
+          why: "Blocks file:// and other dangerous protocols",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -192,8 +262,10 @@ export const phpProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "URL preview with SSRF",
-          vulnerableCode: '$url = $_GET["url"];\n$content = file_get_contents($url);\necho extractTitle($content);',
-          explanation: "User-controlled URL to file_get_contents. Attacker sends url=file:///etc/passwd for local file read or url=http://169.254.169.254/ for cloud metadata.",
+          vulnerableCode:
+            '$url = $_GET["url"];\n$content = file_get_contents($url);\necho extractTitle($content);',
+          explanation:
+            "User-controlled URL to file_get_contents. Attacker sends url=file:///etc/passwd for local file read or url=http://169.254.169.254/ for cloud metadata.",
         },
       ],
       antiHallucinationExtra: [
@@ -202,22 +274,32 @@ export const phpProfile: LanguageProfile = {
     },
     "include-injection": {
       sinks: [
-        { api: "include($user_path)", risk: "Runs PHP code from attacker-controlled file path", cwes: ["CWE-98"] },
-        { api: "require($user_path)", risk: "Same as include — runs PHP from controlled path", cwes: ["CWE-98"] },
-        { api: "include_once/require_once($user_path)", risk: "Same risk — path is still attacker-controlled", cwes: ["CWE-98"] },
+        {
+          api: "include($user_path)",
+          risk: "Runs PHP code from attacker-controlled file path",
+          cwes: ["CWE-98"],
+        },
+        {
+          api: "require($user_path)",
+          risk: "Same as include — runs PHP from controlled path",
+          cwes: ["CWE-98"],
+        },
+        {
+          api: "include_once/require_once($user_path)",
+          risk: "Same risk — path is still attacker-controlled",
+          cwes: ["CWE-98"],
+        },
       ],
       safePatterns: [
         { api: "include with hardcoded path", why: "Path is constant — no user control" },
-        { api: "Allowlist mapping user input to fixed paths", why: "User selects from safe options" },
+        {
+          api: "Allowlist mapping user input to fixed paths",
+          why: "User selects from safe options",
+        },
         { api: "basename() + directory prefix", why: "Strips directory traversal" },
       ],
       investigationHints: {
-        grepPatterns: [
-          "include\\s*\\(",
-          "require\\s*\\(",
-          "include_once",
-          "require_once",
-        ],
+        grepPatterns: ["include\\s*\\(", "require\\s*\\(", "include_once", "require_once"],
         fileHints: ["Routing/dispatcher code", "Template loaders", "Plugin systems"],
         instructions: [
           "Check if include/require paths contain user input",
@@ -229,7 +311,8 @@ export const phpProfile: LanguageProfile = {
         {
           scenario: "Local file inclusion via page parameter",
           vulnerableCode: '$page = $_GET["page"];\ninclude("templates/" . $page . ".php");',
-          explanation: "Attacker sends page=../../config to read sensitive files. With allow_url_include, attacker can include remote PHP code.",
+          explanation:
+            "Attacker sends page=../../config to read sensitive files. With allow_url_include, attacker can include remote PHP code.",
         },
       ],
       antiHallucinationExtra: [
@@ -238,15 +321,34 @@ export const phpProfile: LanguageProfile = {
     },
     sqli: {
       sinks: [
-        { api: "mysql_query with string concat", risk: "Direct SQL concatenation — classic injection", cwes: ["CWE-89"] },
-        { api: "mysqli_query with string interpolation", risk: "User input in SQL string", cwes: ["CWE-89"] },
-        { api: "PDO::query with concat", risk: "PDO query without prepared statements", cwes: ["CWE-89"] },
-        { api: "DB::raw($user_input) in Laravel", risk: "Raw SQL expression with user input", cwes: ["CWE-89"] },
+        {
+          api: "mysql_query with string concat",
+          risk: "Direct SQL concatenation — classic injection",
+          cwes: ["CWE-89"],
+        },
+        {
+          api: "mysqli_query with string interpolation",
+          risk: "User input in SQL string",
+          cwes: ["CWE-89"],
+        },
+        {
+          api: "PDO::query with concat",
+          risk: "PDO query without prepared statements",
+          cwes: ["CWE-89"],
+        },
+        {
+          api: "DB::raw($user_input) in Laravel",
+          risk: "Raw SQL expression with user input",
+          cwes: ["CWE-89"],
+        },
       ],
       safePatterns: [
         { api: "PDO prepared statements with placeholders", why: "Parameterized query — safe" },
         { api: "mysqli_prepare + bind_param", why: "Parameterized query" },
-        { api: "Laravel Eloquent parameter binding", why: "Model::where('field', $val) is parameterized" },
+        {
+          api: "Laravel Eloquent parameter binding",
+          why: "Model::where('field', $val) is parameterized",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -266,8 +368,10 @@ export const phpProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Search with SQL injection",
-          vulnerableCode: '$search = $_GET["q"];\n$result = $db->query("SELECT * FROM products WHERE name LIKE \'%" . $search . "%\'");',
-          explanation: "User-controlled $search concatenated into SQL. Attacker sends q=' UNION SELECT password FROM users -- to extract data.",
+          vulnerableCode:
+            '$search = $_GET["q"];\n$result = $db->query("SELECT * FROM products WHERE name LIKE \'%" . $search . "%\'");',
+          explanation:
+            "User-controlled $search concatenated into SQL. Attacker sends q=' UNION SELECT password FROM users -- to extract data.",
         },
       ],
       antiHallucinationExtra: [

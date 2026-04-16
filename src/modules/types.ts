@@ -9,8 +9,8 @@
  * They work identically across all three execution modes (pipeline, shell, run).
  */
 
-import type { AgentTask } from "../agents/types.js";
 import type { AgentRuntime } from "../agent-runtime/types.js";
+import type { AgentTask } from "../agents/types.js";
 import type { MessageBus } from "../bus/types.js";
 import type { KnowledgeModule } from "../knowledge/types.js";
 import type { KuzushiConfig } from "../types.js";

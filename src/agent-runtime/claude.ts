@@ -1,7 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
 import {
-  query as claudeQuery,
   type Options as ClaudeOptions,
+  query as claudeQuery,
   type SDKAssistantMessage,
   type SDKMessage,
   type SDKResultMessage,
@@ -9,15 +8,13 @@ import {
   type SDKToolUseSummaryMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentRuntimeConfig } from "../types.js";
+import Anthropic from "@anthropic-ai/sdk";
+import type { LlmCallCompleteEvent, LlmCallErrorEvent, LlmCallStartEvent } from "../bus/events.js";
 import type { MessageBus } from "../bus/types.js";
-import type {
-  LlmCallStartEvent,
-  LlmCallCompleteEvent,
-  LlmCallErrorEvent,
-} from "../bus/events.js";
-import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { getLogger } from "../logger.js";
+import type { AgentRuntimeConfig } from "../types.js";
+import { normalizeCostUsd, toErrorMessage } from "../utils.js";
+import type { AgentQueryExecutionResult } from "./execution.js";
 import type {
   AgentBatchRequest,
   AgentMessage,
@@ -26,7 +23,6 @@ import type {
   AgentRuntime,
   AgentSession,
 } from "./types.js";
-import type { AgentQueryExecutionResult } from "./execution.js";
 
 const log = getLogger("claude-runtime");
 
@@ -80,7 +76,9 @@ async function acquireSlot(): Promise<void> {
       // Don't increment activeQueries; the orphaned slot already holds that count.
       const idx = waitQueue.indexOf(resolve);
       if (idx >= 0) waitQueue.splice(idx, 1);
-      log.warn("Semaphore slot timeout — force-acquiring (likely leaked slot from dead subprocess)");
+      log.warn(
+        "Semaphore slot timeout — force-acquiring (likely leaked slot from dead subprocess)",
+      );
       forcedAcquire = true;
       resolve();
     }, SLOT_TIMEOUT_MS);
@@ -140,7 +138,8 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     const isHaiku = model.includes("haiku");
 
     // Minimum cacheable tokens by model (below this, cache_control silently wastes the write premium)
-    const minCacheTokens = isHaiku || model.includes("opus") || model.includes("orchid") ? 4096 : 2048;
+    const minCacheTokens =
+      isHaiku || model.includes("opus") || model.includes("orchid") ? 4096 : 2048;
 
     const batchRequests = requests.map((req) => {
       const systemBlocks: Anthropic.TextBlockParam[] = [];
@@ -168,7 +167,8 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         outputConfig.effort = baseOptions.effort;
       }
 
-      const thinkingDisabled = baseOptions.thinkingDisabled || isHaiku || baseOptions.effort === "low";
+      const thinkingDisabled =
+        baseOptions.thinkingDisabled || isHaiku || baseOptions.effort === "low";
 
       const params: Anthropic.MessageCreateParamsNonStreaming = {
         model,
@@ -185,9 +185,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         stream: false,
         service_tier: "standard_only",
         ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
-        ...(thinkingDisabled
-          ? { thinking: { type: "disabled" as const } }
-          : {}),
+        ...(thinkingDisabled ? { thinking: { type: "disabled" as const } } : {}),
       };
 
       return { custom_id: req.id, params };
@@ -211,7 +209,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     }
 
     const durationMs = Date.now() - startMs;
-    log.info(`Batch ${batch.id} completed in ${durationMs}ms — succeeded: ${batch.request_counts.succeeded}, errored: ${batch.request_counts.errored}`);
+    log.info(
+      `Batch ${batch.id} completed in ${durationMs}ms — succeeded: ${batch.request_counts.succeeded}, errored: ${batch.request_counts.errored}`,
+    );
 
     // Stream results
     const results = new Map<string, AgentQueryExecutionResult>();
@@ -226,9 +226,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     for await (const item of decoder) {
       if (item.result.type === "succeeded") {
         const msg = item.result.message;
-        const textBlock = msg.content.find(
-          (b): b is Anthropic.TextBlock => b.type === "text",
-        );
+        const textBlock = msg.content.find((b): b is Anthropic.TextBlock => b.type === "text");
         const usage = msg.usage;
         const inputCost = (usage.input_tokens / 1_000_000) * inputRate;
         const outputCost = (usage.output_tokens / 1_000_000) * outputRate;
@@ -242,9 +240,8 @@ export class ClaudeAgentRuntime implements AgentRuntime {
           costUsd: normalizeCostUsd(inputCost + outputCost - cacheSavings),
         });
       } else {
-        const errorMsg = item.result.type === "errored"
-          ? JSON.stringify(item.result.error)
-          : item.result.type;
+        const errorMsg =
+          item.result.type === "errored" ? JSON.stringify(item.result.error) : item.result.type;
         results.set(item.custom_id, {
           resultText: "",
           structuredOutput: undefined,
@@ -279,7 +276,8 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
     // Only apply cache_control when system prompt meets minimum token threshold.
     // Below the minimum, caching silently fails and we waste the 1.25x write premium.
-    const minCacheTokens = isHaiku || model.includes("opus") || model.includes("orchid") ? 4096 : 2048;
+    const minCacheTokens =
+      isHaiku || model.includes("opus") || model.includes("orchid") ? 4096 : 2048;
     const systemBlocks: Anthropic.TextBlockParam[] = [];
     if (request.options.systemPromptPrefix) {
       const estimatedTokens = Math.ceil(request.options.systemPromptPrefix.length / 4);
@@ -300,7 +298,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
           meta: { id: crypto.randomUUID(), timestamp: new Date().toISOString(), runId: turnRunId },
           payload: { model, promptLength: request.prompt.length, runId: turnRunId },
         });
-      } catch { /* non-fatal */ }
+      } catch {
+        /* non-fatal */
+      }
     }
 
     try {
@@ -321,9 +321,8 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
       // Thinking: disable for classification, use adaptive+omitted for analysis
       // display: "omitted" skips streaming thinking tokens (faster time-to-first-text)
-      const shouldDisableThinking = request.options.thinkingDisabled
-        || isHaiku
-        || request.options.effort === "low";
+      const shouldDisableThinking =
+        request.options.thinkingDisabled || isHaiku || request.options.effort === "low";
 
       // Use streaming + finalMessage() to avoid HTTP timeouts on large outputs
       const stream = this.client.messages.stream({
@@ -384,10 +383,22 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         try {
           await this.bus.publish<LlmCallCompleteEvent>({
             type: "llm:call-complete",
-            meta: { id: crypto.randomUUID(), timestamp: new Date().toISOString(), runId: turnRunId },
-            payload: { model, durationMs, tokensUsed: response.usage.input_tokens + response.usage.output_tokens, costUsd: totalCostUsd, runId: turnRunId },
+            meta: {
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              runId: turnRunId,
+            },
+            payload: {
+              model,
+              durationMs,
+              tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+              costUsd: totalCostUsd,
+              runId: turnRunId,
+            },
           });
-        } catch { /* non-fatal */ }
+        } catch {
+          /* non-fatal */
+        }
       }
 
       yield {
@@ -401,19 +412,27 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       };
     } catch (error) {
       const durationMs = Date.now() - startedAtMs;
-      const retryable = error instanceof Anthropic.RateLimitError
-        || error instanceof Anthropic.InternalServerError;
+      const retryable =
+        error instanceof Anthropic.RateLimitError || error instanceof Anthropic.InternalServerError;
 
-      log.error(`Direct API query failed (${durationMs}ms, retryable=${retryable}): ${toErrorMessage(error)}`);
+      log.error(
+        `Direct API query failed (${durationMs}ms, retryable=${retryable}): ${toErrorMessage(error)}`,
+      );
 
       if (this.bus) {
         try {
           await this.bus.publish<LlmCallErrorEvent>({
             type: "llm:call-error",
-            meta: { id: crypto.randomUUID(), timestamp: new Date().toISOString(), runId: turnRunId },
+            meta: {
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              runId: turnRunId,
+            },
             payload: { model, error: toErrorMessage(error), retryable, runId: turnRunId },
           });
-        } catch { /* non-fatal */ }
+        } catch {
+          /* non-fatal */
+        }
       }
 
       yield {
@@ -431,9 +450,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     // Fast path: tool-less calls go directly to Anthropic API — no subprocess.
     // Only when an API key is available — OAuth mode must use subprocess path.
     if (
-      !request.options.allowedTools?.length
-      && !request.options.disallowedTools?.length
-      && this.config?.apiKey
+      !request.options.allowedTools?.length &&
+      !request.options.disallowedTools?.length &&
+      this.config?.apiKey
     ) {
       yield* this.queryDirect(request);
       return;
@@ -703,10 +722,14 @@ class MessageQueue implements AsyncIterable<SDKUserMessage>, AsyncIterator<SDKUs
     if (this.isDone) {
       return Promise.resolve({ done: true, value: undefined });
     }
-    return new Promise((resolve) => { this.resolve = resolve; });
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+    });
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> { return this; }
+  [Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
+    return this;
+  }
 }
 
 /**
@@ -820,7 +843,8 @@ class ClaudeSession implements AgentSession {
 
   async *query(prompt: string): AsyncIterable<AgentMessage> {
     if (this.closed) throw new Error("Session is closed");
-    if (this.queryInFlight) throw new Error("Session query already in flight — concurrent access is not supported");
+    if (this.queryInFlight)
+      throw new Error("Session query already in flight — concurrent access is not supported");
 
     this.queryInFlight = true;
     try {

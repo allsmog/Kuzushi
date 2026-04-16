@@ -113,9 +113,8 @@ export function buildTracePrompt(params: {
   middlewareList: string[];
 }): string {
   const frameworkGuidance = getFrameworkGuidance(params.frameworks);
-  const middlewareStr = params.middlewareList.length > 0
-    ? params.middlewareList.join(" -> ")
-    : "none detected";
+  const middlewareStr =
+    params.middlewareList.length > 0 ? params.middlewareList.join(" -> ") : "none detected";
 
   return [
     "You are a code path tracer. Given the entry point below, trace the complete execution path",
@@ -170,9 +169,10 @@ export function buildDiscoveryPrompt(params: {
 }): string {
   const frameworkGuidance = getFrameworkGuidance(params.frameworks);
   const fileListStr = params.fileList.slice(0, 100).join("\n");
-  const truncatedNote = params.fileList.length > 100
-    ? `\n... and ${params.fileList.length - 100} more files (use Glob to explore)`
-    : "";
+  const truncatedNote =
+    params.fileList.length > 100
+      ? `\n... and ${params.fileList.length - 100} more files (use Glob to explore)`
+      : "";
 
   const sections: string[] = [
     "You are a code path tracer performing DISCOVERY MODE. No HTTP routes were pre-identified for this project.",
@@ -259,17 +259,37 @@ export const TRACE_OUTPUT_SCHEMA = {
           nodeKind: {
             type: "string",
             enum: [
-              "entry-http", "entry-cli", "entry-event", "entry-cron", "entry-background",
-              "middleware", "controller", "service", "data-access", "external-call",
-              "sanitizer", "validator", "transformer", "unknown",
+              "entry-http",
+              "entry-cli",
+              "entry-event",
+              "entry-cron",
+              "entry-background",
+              "middleware",
+              "controller",
+              "service",
+              "data-access",
+              "external-call",
+              "sanitizer",
+              "validator",
+              "transformer",
+              "unknown",
             ],
           },
           edgeKind: {
             type: "string",
             enum: [
-              "calls", "imports", "middleware-chain", "callback", "promise-chain",
-              "event-emit", "event-listen", "di-inject", "dynamic-dispatch",
-              "data-flow", "config-read", "serialization",
+              "calls",
+              "imports",
+              "middleware-chain",
+              "callback",
+              "promise-chain",
+              "event-emit",
+              "event-listen",
+              "di-inject",
+              "dynamic-dispatch",
+              "data-flow",
+              "config-read",
+              "serialization",
             ],
           },
           dataLabel: { type: "string" },

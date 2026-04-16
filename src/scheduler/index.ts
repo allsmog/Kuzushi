@@ -36,9 +36,7 @@ export function getRateLimitRegistry(): RateLimitRegistry {
  * Typically called once during startup after loading `KuzushiConfig`,
  * using `triageConcurrency` or `verifyConcurrency` as the default.
  */
-export function configureRateLimitRegistry(
-  defaultMaxConcurrency?: number,
-): RateLimitRegistry {
+export function configureRateLimitRegistry(defaultMaxConcurrency?: number): RateLimitRegistry {
   if (singleton) {
     singleton.destroy();
   }

@@ -67,10 +67,7 @@ export class GovernanceEnforcer {
    * Check whether a tool execution is allowed under the current scope policy.
    * Returns an enforcement result with reason if denied.
    */
-  checkExecution(
-    toolName: string,
-    target?: string,
-  ): EnforcementResult {
+  checkExecution(toolName: string, target?: string): EnforcementResult {
     // Check target scope
     if (target) {
       const targetResult = this.checkTarget(target);
@@ -95,7 +92,10 @@ export class GovernanceEnforcer {
     if (this.scope.deniedTargets.length > 0) {
       for (const pattern of this.scope.deniedTargets) {
         if (matchesTarget(target, pattern)) {
-          return { allowed: false, reason: `Target "${target}" is explicitly denied by scope policy.` };
+          return {
+            allowed: false,
+            reason: `Target "${target}" is explicitly denied by scope policy.`,
+          };
         }
       }
     }

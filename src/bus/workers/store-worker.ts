@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
+import { extractRuleFamily, updateCalibrationWeights } from "../../confidence-calibration.js";
 import {
   FindingUpsertQueue,
+  type PipelineRunStatus,
   saveAssertionResults,
   updatePocHarnessCost,
   updatePocHarnessResult,
@@ -12,8 +14,9 @@ import {
   updateVerificationCost,
   updateVerificationResult,
   upsertFinding,
-  type PipelineRunStatus,
 } from "../../store.js";
+import { updateTrajectoryCorrectness } from "../../trajectory-memory.js";
+import type { KuzushiConfig } from "../../types.js";
 import type {
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
@@ -30,12 +33,6 @@ import type {
 } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import { updateTrajectoryCorrectness } from "../../trajectory-memory.js";
-import {
-  extractRuleFamily,
-  updateCalibrationWeights,
-} from "../../confidence-calibration.js";
-import type { KuzushiConfig } from "../../types.js";
 
 export interface StoreWorkerDeps {
   db: Database.Database;
@@ -62,12 +59,7 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
       result.triageCostUsd = costUsd;
     }
 
-    upsertQueue.enqueue(
-      finding,
-      result,
-      context.repoName,
-      deps.ref ?? "HEAD",
-    );
+    upsertQueue.enqueue(finding, result, context.repoName, deps.ref ?? "HEAD");
 
     await bus.publish(
       createEvent("store:upserted", event.meta.runId, {
@@ -115,12 +107,7 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
       try {
         const wasCorrect = (triageResult.verdict === "tp") === result.exploitable;
         const ruleFamily = extractRuleFamily(finding.ruleId);
-        updateCalibrationWeights(
-          deps.db,
-          triageResult.evidenceChain,
-          ruleFamily,
-          wasCorrect,
-        );
+        updateCalibrationWeights(deps.db, triageResult.evidenceChain, ruleFamily, wasCorrect);
       } catch {
         // Non-fatal
       }
@@ -144,13 +131,7 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
     // Flush any pending batched upserts so the row exists before the UPDATE.
     upsertQueue.flush();
     // Ensure the row exists even if persistence ordering is delayed.
-    upsertFinding(
-      deps.db,
-      finding,
-      triageResult,
-      context.repoName,
-      deps.ref ?? "HEAD",
-    );
+    upsertFinding(deps.db, finding, triageResult, context.repoName, deps.ref ?? "HEAD");
     updateVerificationCost(deps.db, finding.fingerprint, costUsd);
   });
 
@@ -182,36 +163,55 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
     // Flush any pending batched upserts so the row exists before the UPDATE.
     upsertQueue.flush();
     // Ensure the row exists even if persistence ordering is delayed.
-    upsertFinding(
-      deps.db,
-      finding,
-      triageResult,
-      context.repoName,
-      deps.ref ?? "HEAD",
-    );
+    upsertFinding(deps.db, finding, triageResult, context.repoName, deps.ref ?? "HEAD");
     updatePocHarnessCost(deps.db, finding.fingerprint, costUsd);
   });
 
   // ── Run lifecycle persistence (best-effort — DB failures must not kill the pipeline) ──
 
   bus.subscribe<RunStatusEvent>("run:status", (event) => {
-    try { updateRunStatus(deps.db, event.meta.runId, event.payload.status as PipelineRunStatus, event.payload.extra); } catch { /* best-effort */ }
+    try {
+      updateRunStatus(
+        deps.db,
+        event.meta.runId,
+        event.payload.status as PipelineRunStatus,
+        event.payload.extra,
+      );
+    } catch {
+      /* best-effort */
+    }
   });
 
   bus.subscribe<RunCostEvent>("run:cost", (event) => {
-    try { updateRunCost(deps.db, event.meta.runId, event.payload.costUsd); } catch { /* best-effort */ }
+    try {
+      updateRunCost(deps.db, event.meta.runId, event.payload.costUsd);
+    } catch {
+      /* best-effort */
+    }
   });
 
   bus.subscribe<RunFindingsCheckpointEvent>("run:findings-checkpoint", (event) => {
-    try { updateRunFindings(deps.db, event.meta.runId, event.payload.findings); } catch { /* best-effort */ }
+    try {
+      updateRunFindings(deps.db, event.meta.runId, event.payload.findings);
+    } catch {
+      /* best-effort */
+    }
   });
 
   bus.subscribe<RunContextCheckpointEvent>("run:context-checkpoint", (event) => {
-    try { updateRunContext(deps.db, event.meta.runId, event.payload.repoContext); } catch { /* best-effort */ }
+    try {
+      updateRunContext(deps.db, event.meta.runId, event.payload.repoContext);
+    } catch {
+      /* best-effort */
+    }
   });
 
   bus.subscribe<RunMetricsEvent>("run:metrics", (event) => {
-    try { updateRunMetrics(deps.db, event.meta.runId, event.payload.metrics); } catch { /* best-effort */ }
+    try {
+      updateRunMetrics(deps.db, event.meta.runId, event.payload.metrics);
+    } catch {
+      /* best-effort */
+    }
   });
 
   return { flush: () => upsertQueue.flush() };

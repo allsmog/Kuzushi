@@ -1,26 +1,26 @@
 import { randomUUID } from "node:crypto";
-import { coerceRepoContext } from "../../repo-context.js";
-import { createLogger } from "../../logger.js";
-import { createPocExecutor } from "../../poc-executor/index.js";
-import type { Finding, ProofState } from "../../scanners/types.js";
-import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import {
-  generateCryptoBehavioralHarness,
-  type GenerateCryptoBehavioralHarnessOptions,
   CryptoBehavioralHarnessExecutionError,
+  type GenerateCryptoBehavioralHarnessOptions,
+  generateCryptoBehavioralHarness,
 } from "../../crypto-behavioral/harness-generator.js";
 import {
   classifyVerdict,
-  parseCryptoBehavioralResult,
   type ParsedCryptoBehavioralResult,
+  parseCryptoBehavioralResult,
 } from "../../crypto-behavioral/result-parser.js";
 import type {
   CryptoBehavioralRun,
   CryptoBehavioralTestType,
   CryptoBehavioralVerdict,
 } from "../../crypto-behavioral/types.js";
+import { createLogger } from "../../logger.js";
+import { createPocExecutor } from "../../poc-executor/index.js";
+import { coerceRepoContext } from "../../repo-context.js";
+import type { Finding, ProofState } from "../../scanners/types.js";
 import { insertCryptoBehavioralRun } from "../../store/crypto-behavioral.js";
+import { attachTaskOutputMeta } from "../../task-output-meta.js";
+import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { AgentTask, TaskContext } from "../types.js";
 import { resolveTaskModel, resolveTaskPositiveInt } from "./runtime-overrides.js";
 
@@ -116,7 +116,11 @@ export const cryptoBehavioralTestTask: AgentTask<unknown, Finding[]> = {
 
         if (generated.result.skipped) {
           verdict = "inconclusive";
-        } else if (!generated.result.scriptPath || !generated.result.language || generated.result.parsed === false) {
+        } else if (
+          !generated.result.scriptPath ||
+          !generated.result.language ||
+          generated.result.parsed === false
+        ) {
           verdict = "error";
         } else {
           const execution = await executor.execute(
@@ -136,11 +140,10 @@ export const cryptoBehavioralTestTask: AgentTask<unknown, Finding[]> = {
             metadata["resultParseError"] = toErrorMessage(error);
           }
 
-          verdict = classifyVerdict(
-            testType,
-            parsedResult,
-            { exitCode: execution.exitCode, verdict: execution.verdict },
-          );
+          verdict = classifyVerdict(testType, parsedResult, {
+            exitCode: execution.exitCode,
+            verdict: execution.verdict,
+          });
         }
       } catch (error) {
         if (error instanceof CryptoBehavioralHarnessExecutionError) {
@@ -216,11 +219,12 @@ function getCryptoMisuseFindings(value: unknown): Finding[] {
     return [];
   }
 
-  return value.filter((item): item is Finding =>
-    Boolean(item)
-    && typeof item === "object"
-    && typeof (item as Finding).ruleId === "string"
-    && (item as Finding).ruleId.startsWith("crypto-misuse/"),
+  return value.filter(
+    (item): item is Finding =>
+      Boolean(item) &&
+      typeof item === "object" &&
+      typeof (item as Finding).ruleId === "string" &&
+      (item as Finding).ruleId.startsWith("crypto-misuse/"),
   );
 }
 
@@ -260,15 +264,19 @@ function enrichFinding(
   detailFallback: string | undefined,
 ): Finding {
   const nextProofState = proofStateForVerdict(verdict);
-  const detail = buildProvenanceDetail(testType, verdict, parsed, executionExitCode, executionVerdict, detailFallback);
+  const detail = buildProvenanceDetail(
+    testType,
+    verdict,
+    parsed,
+    executionExitCode,
+    executionVerdict,
+    detailFallback,
+  );
 
   return {
     ...finding,
     proofState: mergeProofState(finding.proofState, nextProofState),
-    engineProvenance: appendEngineProvenance(
-      finding.engineProvenance,
-      { kind: "dynamic", detail },
-    ),
+    engineProvenance: appendEngineProvenance(finding.engineProvenance, { kind: "dynamic", detail }),
   };
 }
 
@@ -284,17 +292,12 @@ function proofStateForVerdict(verdict: CryptoBehavioralVerdict): ProofState {
   }
 }
 
-function mergeProofState(
-  existing: ProofState | undefined,
-  next: ProofState,
-): ProofState {
+function mergeProofState(existing: ProofState | undefined, next: ProofState): ProofState {
   if (!existing) {
     return next;
   }
 
-  return PROOF_STATE_PRECEDENCE[next] > PROOF_STATE_PRECEDENCE[existing]
-    ? next
-    : existing;
+  return PROOF_STATE_PRECEDENCE[next] > PROOF_STATE_PRECEDENCE[existing] ? next : existing;
 }
 
 function appendEngineProvenance(
@@ -316,10 +319,7 @@ function buildProvenanceDetail(
   executionVerdict: CryptoBehavioralRun["executionVerdict"],
   detailFallback: string | undefined,
 ): string {
-  const parts = [
-    `crypto-behavioral/${testType}`,
-    `verdict=${verdict}`,
-  ];
+  const parts = [`crypto-behavioral/${testType}`, `verdict=${verdict}`];
 
   if (parsed?.timing) {
     parts.push(
@@ -361,15 +361,11 @@ function buildProvenanceDetail(
 }
 
 function formatNumber(value: number | null | undefined): string {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value.toFixed(4)
-    : "n/a";
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(4) : "n/a";
 }
 
 function formatInteger(value: number | null | undefined): string {
-  return typeof value === "number" && Number.isFinite(value)
-    ? String(Math.floor(value))
-    : "n/a";
+  return typeof value === "number" && Number.isFinite(value) ? String(Math.floor(value)) : "n/a";
 }
 
 function sanitizeDetail(value: string): string {

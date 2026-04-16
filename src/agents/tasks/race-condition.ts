@@ -1,26 +1,36 @@
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageInvestigationModule,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../security-profiles.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
-import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
-import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { resolveTaskAllowedTools, resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
+import {
+  computeDetectionFingerprint,
+  normalizeFilePath,
+  parseJson,
+} from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
+import {
+  formatFileTreeForPrompt,
+  formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
+} from "./pre-read-prompt.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
 import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
-import { normalizeFilePath, computeDetectionFingerprint, parseJson } from "./detection-task-utils.js";
 
 const log = createLogger({ stage: "race-condition" });
 
@@ -34,9 +44,27 @@ const RACE_CONDITION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["pattern", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "pattern",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
-          pattern: { type: "string", enum: ["toctou", "double-spend", "unprotected-shared-state", "rate-limit-bypass", "file-race"] },
+          pattern: {
+            type: "string",
+            enum: [
+              "toctou",
+              "double-spend",
+              "unprotected-shared-state",
+              "rate-limit-bypass",
+              "file-race",
+            ],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -76,7 +104,14 @@ function resolveConfig(ctx: TaskContext): RaceConditionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult, threatModelContext?: string): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[] = [],
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+  threatModelContext?: string,
+): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
 
   const contextLines = repoContext
@@ -107,8 +142,11 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     "",
     "## Patterns to detect",
     "",
-    languageTuningModule({ taskId: "race-condition", repoContext, frameworks: repoContext?.frameworks }) ||
-    "### toctou (CWE-367)",
+    languageTuningModule({
+      taskId: "race-condition",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "### toctou (CWE-367)",
     "Time-of-check to time-of-use: checking a condition then acting on it without atomicity.",
     "Examples: file existence check then open, permission check then action, balance check then debit.",
     "",
@@ -151,14 +189,25 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Only report issues where concurrent access is plausible and has security impact.",
         "Verify that the code is actually executed concurrently before reporting.",
         "Confidence HIGH only if race is clearly exploitable.",
-        ...languageAntiHallucinationExtras({ taskId: "race-condition", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "race-condition",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -204,13 +253,17 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 function computeFingerprint(repoName: string, filePath: string, f: RaceConditionFinding): string {
-  return computeDetectionFingerprint([repoName, "race-condition", f.pattern, filePath, String(f.startLine)]);
+  return computeDetectionFingerprint([
+    repoName,
+    "race-condition",
+    f.pattern,
+    filePath,
+    String(f.startLine),
+  ]);
 }
 
 export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
@@ -234,7 +287,14 @@ export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
       fileIndex,
       preRead,
     );
-    const prompt = buildPrompt(repoContext, maxFindings, profileLines, fileIndex, preRead, threatModelContext);
+    const prompt = buildPrompt(
+      repoContext,
+      maxFindings,
+      profileLines,
+      fileIndex,
+      preRead,
+      threatModelContext,
+    );
     const runtime = resolveTaskRuntime(context);
 
     let structuredOutput: unknown;
@@ -299,7 +359,9 @@ export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
         "1. Is the code actually executed concurrently?",
         "2. Is the shared resource truly unprotected?",
         "3. Does the race have security impact (not just a functional bug)?",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

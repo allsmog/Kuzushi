@@ -3,7 +3,6 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import { DEFAULT_IGNORED_DIRS } from "../../repo-walk.js";
-import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 import {
   collectManifestDirectories,
   dedupeStrings,
@@ -14,6 +13,7 @@ import {
   readJson,
   readText,
 } from "../helpers.js";
+import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 
 export class NodeAdapter implements DiscoveryAdapter {
   readonly id = "node";
@@ -43,9 +43,7 @@ export class NodeAdapter implements DiscoveryAdapter {
         if (wsRelPath !== "." && !candidate.startsWith(`${wsRelPath}/`)) continue;
 
         // Strip workspace prefix to match against workspace-relative patterns
-        const relToWs = wsRelPath === "."
-          ? candidate
-          : candidate.slice(wsRelPath.length + 1);
+        const relToWs = wsRelPath === "." ? candidate : candidate.slice(wsRelPath.length + 1);
 
         if (matchesAnyPattern(relToWs, wsRoot.patterns)) {
           childPaths.push(candidate);
@@ -104,9 +102,9 @@ export class NodeAdapter implements DiscoveryAdapter {
 // ── Workspace root discovery ──────────────────────────────────────────
 
 interface NodeWorkspaceRoot {
-  relPath: string;     // repo-relative path to the workspace root dir
+  relPath: string; // repo-relative path to the workspace root dir
   name: string;
-  patterns: string[];  // workspace glob patterns
+  patterns: string[]; // workspace glob patterns
   evidence: string[];
 }
 
@@ -209,9 +207,9 @@ async function readNodeWorkspacePatterns(dir: string): Promise<string[]> {
       }
     }
   } else if (
-    workspaces
-    && typeof workspaces === "object"
-    && Array.isArray((workspaces as { packages?: unknown }).packages)
+    workspaces &&
+    typeof workspaces === "object" &&
+    Array.isArray((workspaces as { packages?: unknown }).packages)
   ) {
     for (const entry of (workspaces as { packages: unknown[] }).packages) {
       if (typeof entry === "string" && entry.trim()) {
@@ -247,7 +245,7 @@ async function detectNodeLanguage(
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
 async function buildStandaloneNode(
@@ -260,7 +258,8 @@ async function buildStandaloneNode(
 
   const hasMain = typeof pkg["main"] === "string";
   const hasBin = pkg["bin"] !== undefined;
-  const hasStart = typeof (pkg["scripts"] as Record<string, unknown> | undefined)?.["start"] === "string";
+  const hasStart =
+    typeof (pkg["scripts"] as Record<string, unknown> | undefined)?.["start"] === "string";
   if (!hasMain && !hasBin && !hasStart) return null;
 
   const name = typeof pkg["name"] === "string" ? pkg["name"] : path.basename(relPath);

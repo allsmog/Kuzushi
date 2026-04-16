@@ -1,24 +1,32 @@
-import type Database from "better-sqlite3";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
-import type { TaskContext } from "../../agents/types.js";
 import { taintAnalysisRunTask } from "../../agents/tasks/taint-analysis/analyze.js";
 import { buildTaintModelDocument } from "../../agents/tasks/taint-analysis/label.js";
 import type { TiPriorDocument } from "../../agents/tasks/taint-analysis/ti-prior.js";
-import { TAINT_ANALYSIS_PASS_IDS, resolveTaintAnalysisConfig } from "../../agents/tasks/taint-analysis/types.js";
-import type { TaintAnalysisLabelOutput, TaintAnalysisLabelsDocument, TaintAnalysisPassEntry, TaintAnalysisPassId } from "../../agents/tasks/taint-analysis/types.js";
-import type { ScanOpts, TriageResult, KuzushiConfig, RepoContext } from "../../types.js";
-import type { Finding } from "../../scanners/types.js";
+import type {
+  TaintAnalysisLabelOutput,
+  TaintAnalysisLabelsDocument,
+  TaintAnalysisPassEntry,
+  TaintAnalysisPassId,
+} from "../../agents/tasks/taint-analysis/types.js";
+import {
+  resolveTaintAnalysisConfig,
+  TAINT_ANALYSIS_PASS_IDS,
+} from "../../agents/tasks/taint-analysis/types.js";
+import type { TaskContext } from "../../agents/types.js";
 import { coerceRepoContext } from "../../repo-context.js";
-import { triageFindingsBatch } from "../../triage.js";
+import type { Finding } from "../../scanners/types.js";
 import {
   deleteFindingsByFingerprints,
   getTriagedFindingsForRepo,
   upsertFinding,
 } from "../../store.js";
+import { triageFindingsBatch } from "../../triage.js";
+import type { KuzushiConfig, RepoContext, ScanOpts, TriageResult } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TaintAnalysisRefinementStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
@@ -43,147 +51,179 @@ export function registerTaintAnalysisRefinementWorker(
   bus: MessageBus,
   deps: TaintAnalysisRefinementWorkerDeps,
 ): void {
-  bus.subscribe<TaintAnalysisRefinementStartEvent>("taint-analysis:refinement-start", async (event) => {
-    const { context, findings, iteration } = event.payload;
-    const labelOutput = asLabelOutput(event.payload.labelOutput);
-    if (!labelOutput) {
-      await bus.publish(
-        createEvent("taint-analysis:refinement-error", event.meta.runId, {
-          context,
-          iteration,
-          error: "Taint analysis label output unavailable; cannot refine.",
-        }),
-      );
-      return;
-    }
-
-    try {
-      const currentTaintAnalysisFingerprints = new Set(
-        findings
-          .filter((item) => item.taskId === "taint-analysis-run")
-          .map((item) => item.fingerprint),
-      );
-      const signalsByPass = collectSignalsByPass(
-        deps.db,
-        context.repoName,
-        currentTaintAnalysisFingerprints,
-      );
-      const allHints: string[] = [];
-      for (const [passId, signal] of signalsByPass.entries()) {
-        if (signal.hints.length > 0) {
-          process.stderr.write(
-            `[taint-analysis-refinement] Pass ${passId}: ${signal.hints.length} hint(s): ${signal.hints.join("; ")}\n`,
-          );
-          allHints.push(...signal.hints);
-        }
-      }
-      const affectedPasses = resolveAffectedPasses(signalsByPass);
-      if (affectedPasses.length === 0) {
+  bus.subscribe<TaintAnalysisRefinementStartEvent>(
+    "taint-analysis:refinement-start",
+    async (event) => {
+      const { context, findings, iteration } = event.payload;
+      const labelOutput = asLabelOutput(event.payload.labelOutput);
+      if (!labelOutput) {
         await bus.publish(
-          createEvent("taint-analysis:refinement-result", event.meta.runId, {
+          createEvent("taint-analysis:refinement-error", event.meta.runId, {
             context,
             iteration,
-            affectedPasses: [],
-            updatedFindings: findings.filter((item) => item.taskId === "taint-analysis-run"),
-            deltaFindings: [],
-            deltaTriaged: 0,
-            deltaErrors: 0,
-            triageCostUsd: 0,
+            error: "Taint analysis label output unavailable; cannot refine.",
           }),
         );
         return;
       }
 
-      const taintCfg = resolveTaintAnalysisConfig(deps.config);
-      const confidenceCap = taintCfg.refinementConfidenceCap ?? 0.3;
-      const refinedLabels = applyDeterministicPatch(labelOutput.labels, signalsByPass, confidenceCap);
-      const patchPath = path.join(labelOutput.workspaceDir, "labels", `refinement.patch.iter${iteration}.json`);
-      await writeFile(
-        patchPath,
-        JSON.stringify({
-          version: "1.0.0",
-          iteration,
-          affectedPasses,
-          signalsByPass: Object.fromEntries([...signalsByPass.entries()]),
-        }, null, 2),
-        "utf-8",
-      );
-      if (allHints.length > 0) {
-        const hintsPath = path.join(labelOutput.workspaceDir, "labels", `refinement_hints.iter${iteration}.json`);
-        await writeFile(hintsPath, JSON.stringify(allHints, null, 2), "utf-8");
-      }
-      await writeFile(labelOutput.labelsPath, JSON.stringify(refinedLabels, null, 2), "utf-8");
-      const tiPrior = await loadTiPriorDocument(labelOutput.tiPriorJsonPath);
-      const taintModel = buildTaintModelDocument(refinedLabels, tiPrior);
-      await writeFile(labelOutput.taintModelPath, JSON.stringify(taintModel, null, 2), "utf-8");
+      try {
+        const currentTaintAnalysisFingerprints = new Set(
+          findings
+            .filter((item) => item.taskId === "taint-analysis-run")
+            .map((item) => item.fingerprint),
+        );
+        const signalsByPass = collectSignalsByPass(
+          deps.db,
+          context.repoName,
+          currentTaintAnalysisFingerprints,
+        );
+        const allHints: string[] = [];
+        for (const [passId, signal] of signalsByPass.entries()) {
+          if (signal.hints.length > 0) {
+            process.stderr.write(
+              `[taint-analysis-refinement] Pass ${passId}: ${signal.hints.length} hint(s): ${signal.hints.join("; ")}\n`,
+            );
+            allHints.push(...signal.hints);
+          }
+        }
+        const affectedPasses = resolveAffectedPasses(signalsByPass);
+        if (affectedPasses.length === 0) {
+          await bus.publish(
+            createEvent("taint-analysis:refinement-result", event.meta.runId, {
+              context,
+              iteration,
+              affectedPasses: [],
+              updatedFindings: findings.filter((item) => item.taskId === "taint-analysis-run"),
+              deltaFindings: [],
+              deltaTriaged: 0,
+              deltaErrors: 0,
+              triageCostUsd: 0,
+            }),
+          );
+          return;
+        }
 
-      const refinedPasses = labelOutput.passes.filter((passId) => affectedPasses.includes(passId));
-      const refinedLabelOutput: TaintAnalysisLabelOutput = {
-        ...labelOutput,
-        passes: refinedPasses as TaintAnalysisLabelOutput["passes"],
-        labels: refinedLabels,
-      };
+        const taintCfg = resolveTaintAnalysisConfig(deps.config);
+        const confidenceCap = taintCfg.refinementConfidenceCap ?? 0.3;
+        const refinedLabels = applyDeterministicPatch(
+          labelOutput.labels,
+          signalsByPass,
+          confidenceCap,
+        );
+        const patchPath = path.join(
+          labelOutput.workspaceDir,
+          "labels",
+          `refinement.patch.iter${iteration}.json`,
+        );
+        await writeFile(
+          patchPath,
+          JSON.stringify(
+            {
+              version: "1.0.0",
+              iteration,
+              affectedPasses,
+              signalsByPass: Object.fromEntries([...signalsByPass.entries()]),
+            },
+            null,
+            2,
+          ),
+          "utf-8",
+        );
+        if (allHints.length > 0) {
+          const hintsPath = path.join(
+            labelOutput.workspaceDir,
+            "labels",
+            `refinement_hints.iter${iteration}.json`,
+          );
+          await writeFile(hintsPath, JSON.stringify(allHints, null, 2), "utf-8");
+        }
+        await writeFile(labelOutput.labelsPath, JSON.stringify(refinedLabels, null, 2), "utf-8");
+        const tiPrior = await loadTiPriorDocument(labelOutput.tiPriorJsonPath);
+        const taintModel = buildTaintModelDocument(refinedLabels, tiPrior);
+        await writeFile(labelOutput.taintModelPath, JSON.stringify(taintModel, null, 2), "utf-8");
 
-      const taskContext: TaskContext = {
-        runId: event.meta.runId,
-        projectRoot: context.repoRoot,
-        workRoot: context.scanPath ?? context.repoRoot,
-        repoRoot: context.scanPath ?? context.repoRoot,
-        scanPath: context.scanPath,
-        repoName: context.repoName,
-        config: deps.config,
-        runtime: deps.runtime,
-        bus,
-        upstreamOutputs: new Map([["taint-analysis-label", refinedLabelOutput]]),
-      };
+        const refinedPasses = labelOutput.passes.filter((passId) =>
+          affectedPasses.includes(passId),
+        );
+        const refinedLabelOutput: TaintAnalysisLabelOutput = {
+          ...labelOutput,
+          passes: refinedPasses as TaintAnalysisLabelOutput["passes"],
+          labels: refinedLabels,
+        };
 
-      const refinedPassFindings = await taintAnalysisRunTask.run(defaultScanOpts(deps.config), taskContext);
-      const previousTaintAnalysis = findings.filter((item) => item.taskId === "taint-analysis-run");
-      const affectedPassSet = new Set<number>(affectedPasses);
-      const previousAffected = previousTaintAnalysis.filter((item) => affectedPassSet.has(extractPassId(item.ruleId) ?? -1));
-      const previousAffectedFp = new Set(previousAffected.map((item) => item.fingerprint));
-      const updatedTaintAnalysis = [
-        ...previousTaintAnalysis.filter((item) => !affectedPassSet.has(extractPassId(item.ruleId) ?? -1)),
-        ...refinedPassFindings,
-      ];
+        const taskContext: TaskContext = {
+          runId: event.meta.runId,
+          projectRoot: context.repoRoot,
+          workRoot: context.scanPath ?? context.repoRoot,
+          repoRoot: context.scanPath ?? context.repoRoot,
+          scanPath: context.scanPath,
+          repoName: context.repoName,
+          config: deps.config,
+          runtime: deps.runtime,
+          bus,
+          upstreamOutputs: new Map([["taint-analysis-label", refinedLabelOutput]]),
+        };
 
-      const deltaFindings = refinedPassFindings.filter((item) => !previousAffectedFp.has(item.fingerprint));
-      const refinedFpSet = new Set(refinedPassFindings.map((item) => item.fingerprint));
-      const removedFingerprints = previousAffected
-        .filter((item) => !refinedFpSet.has(item.fingerprint))
-        .map((item) => item.fingerprint);
-      if (removedFingerprints.length > 0) {
-        deleteFindingsByFingerprints(deps.db, context.repoName, removedFingerprints);
-      }
-      const triage = await triageDeltaFindings({
-        deps,
-        deltaFindings,
-        context,
-        repoContext: coerceRepoContext(event.payload.repoContext),
-      });
+        const refinedPassFindings = await taintAnalysisRunTask.run(
+          defaultScanOpts(deps.config),
+          taskContext,
+        );
+        const previousTaintAnalysis = findings.filter(
+          (item) => item.taskId === "taint-analysis-run",
+        );
+        const affectedPassSet = new Set<number>(affectedPasses);
+        const previousAffected = previousTaintAnalysis.filter((item) =>
+          affectedPassSet.has(extractPassId(item.ruleId) ?? -1),
+        );
+        const previousAffectedFp = new Set(previousAffected.map((item) => item.fingerprint));
+        const updatedTaintAnalysis = [
+          ...previousTaintAnalysis.filter(
+            (item) => !affectedPassSet.has(extractPassId(item.ruleId) ?? -1),
+          ),
+          ...refinedPassFindings,
+        ];
 
-      await bus.publish(
-        createEvent("taint-analysis:refinement-result", event.meta.runId, {
-          context,
-          iteration,
-          affectedPasses,
-          updatedFindings: updatedTaintAnalysis,
+        const deltaFindings = refinedPassFindings.filter(
+          (item) => !previousAffectedFp.has(item.fingerprint),
+        );
+        const refinedFpSet = new Set(refinedPassFindings.map((item) => item.fingerprint));
+        const removedFingerprints = previousAffected
+          .filter((item) => !refinedFpSet.has(item.fingerprint))
+          .map((item) => item.fingerprint);
+        if (removedFingerprints.length > 0) {
+          deleteFindingsByFingerprints(deps.db, context.repoName, removedFingerprints);
+        }
+        const triage = await triageDeltaFindings({
+          deps,
           deltaFindings,
-          deltaTriaged: triage.triaged,
-          deltaErrors: triage.errors,
-          triageCostUsd: triage.costUsd,
-        }),
-      );
-    } catch (error) {
-      await bus.publish(
-        createEvent("taint-analysis:refinement-error", event.meta.runId, {
           context,
-          iteration,
-          error: toErrorMessage(error),
-        }),
-      );
-    }
-  });
+          repoContext: coerceRepoContext(event.payload.repoContext),
+        });
+
+        await bus.publish(
+          createEvent("taint-analysis:refinement-result", event.meta.runId, {
+            context,
+            iteration,
+            affectedPasses,
+            updatedFindings: updatedTaintAnalysis,
+            deltaFindings,
+            deltaTriaged: triage.triaged,
+            deltaErrors: triage.errors,
+            triageCostUsd: triage.costUsd,
+          }),
+        );
+      } catch (error) {
+        await bus.publish(
+          createEvent("taint-analysis:refinement-error", event.meta.runId, {
+            context,
+            iteration,
+            error: toErrorMessage(error),
+          }),
+        );
+      }
+    },
+  );
 }
 
 function collectSignalsByPass(
@@ -210,9 +250,10 @@ function collectSignalsByPass(
     const details = row.triageDetails ?? {};
     const source = isRecord(details["source"]) ? details["source"] : undefined;
     const sink = isRecord(details["sink"]) ? details["sink"] : undefined;
-    const hint = typeof details["rule_refinement_hint"] === "string"
-      ? details["rule_refinement_hint"].trim()
-      : "";
+    const hint =
+      typeof details["rule_refinement_hint"] === "string"
+        ? details["rule_refinement_hint"].trim()
+        : "";
     const signal = byPass.get(passId) ?? {
       sourceFalsePositive: false,
       sinkFalsePositive: false,
@@ -239,7 +280,9 @@ function collectSignalsByPass(
   return byPass;
 }
 
-function resolveAffectedPasses(signalsByPass: Map<number, RefinementSignals>): TaintAnalysisPassId[] {
+function resolveAffectedPasses(
+  signalsByPass: Map<number, RefinementSignals>,
+): TaintAnalysisPassId[] {
   const out: TaintAnalysisPassId[] = [];
   for (const [passId, signal] of signalsByPass.entries()) {
     if (!isPassId(passId)) {
@@ -322,7 +365,8 @@ async function triageDeltaFindings(args: {
         errors += 1;
         continue;
       }
-      result.triageCostUsd = args.deltaFindings.length > 0 ? normalizeCostUsd(costUsd / args.deltaFindings.length) : 0;
+      result.triageCostUsd =
+        args.deltaFindings.length > 0 ? normalizeCostUsd(costUsd / args.deltaFindings.length) : 0;
       upsertFinding(args.deps.db, finding, result, args.context.repoName, "HEAD");
       triaged += 1;
     }
@@ -330,8 +374,12 @@ async function triageDeltaFindings(args: {
     if (errors > 0) {
       const unresolved = args.deltaFindings
         .map((finding) => finding.fingerprint)
-        .filter((fingerprint) => !results.has(fingerprint) || unresolvedFingerprints.has(fingerprint));
-      throw new Error(`Refinement delta triage incomplete; unresolved findings: ${unresolved.join(", ")}`);
+        .filter(
+          (fingerprint) => !results.has(fingerprint) || unresolvedFingerprints.has(fingerprint),
+        );
+      throw new Error(
+        `Refinement delta triage incomplete; unresolved findings: ${unresolved.join(", ")}`,
+      );
     }
 
     return {
@@ -343,7 +391,6 @@ async function triageDeltaFindings(args: {
     throw new Error("Refinement delta triage failed; findings left unresolved.");
   }
 }
-
 
 function isPassId(value: number): value is TaintAnalysisPassId {
   return TAINT_ANALYSIS_PASS_IDS.has(value);
@@ -363,13 +410,13 @@ function asLabelOutput(value: unknown): TaintAnalysisLabelOutput | null {
     return null;
   }
   if (
-    !isRecord(value["labels"])
-    || typeof value["workspaceDir"] !== "string"
-    || typeof value["labelsPath"] !== "string"
-    || typeof value["dbPath"] !== "string"
-    || typeof value["taintModelPath"] !== "string"
-    || !Array.isArray(value["passes"])
-    || !Array.isArray((value["labels"] as Record<string, unknown>)["passes"])
+    !isRecord(value["labels"]) ||
+    typeof value["workspaceDir"] !== "string" ||
+    typeof value["labelsPath"] !== "string" ||
+    typeof value["dbPath"] !== "string" ||
+    typeof value["taintModelPath"] !== "string" ||
+    !Array.isArray(value["passes"]) ||
+    !Array.isArray((value["labels"] as Record<string, unknown>)["passes"])
   ) {
     return null;
   }

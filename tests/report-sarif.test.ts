@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { generateSarifReport } from "../src/report-sarif.js";
+import type { Finding } from "../src/scanners/types.js";
 import {
   createRun,
   getActionableFindings,
@@ -8,8 +10,6 @@ import {
   updateVerificationResult,
   upsertFinding,
 } from "../src/store.js";
-import { generateSarifReport } from "../src/report-sarif.js";
-import type { Finding } from "../src/scanners/types.js";
 import type { KuzushiConfig, ScanOpts, TriageResult, VerificationResult } from "../src/types.js";
 
 function makeConfig(): KuzushiConfig {
@@ -127,11 +127,22 @@ describe("generateSarifReport", () => {
       $schema: string;
       version: string;
       runs: Array<{
-        tool: { driver: { name: string; rules: Array<{ id: string; defaultConfiguration: { level: string }; properties?: { tags?: string[] } }> } };
+        tool: {
+          driver: {
+            name: string;
+            rules: Array<{
+              id: string;
+              defaultConfiguration: { level: string };
+              properties?: { tags?: string[] };
+            }>;
+          };
+        };
         results: Array<{
           ruleId: string;
           message: { text: string };
-          locations: Array<{ physicalLocation: { artifactLocation: { uri: string }; region: { startLine: number } } }>;
+          locations: Array<{
+            physicalLocation: { artifactLocation: { uri: string }; region: { startLine: number } };
+          }>;
           properties: { exploitable?: boolean };
         }>;
       }>;
@@ -175,8 +186,8 @@ describe("generateSarifReport", () => {
       "repo",
       {
         totalFindings: 1,
-        totalCostUsd: 0.50,
-        verifyCostUsd: 0.10,
+        totalCostUsd: 0.5,
+        verifyCostUsd: 0.1,
         pocHarnessCostUsd: 0.05,
         pocHarnessGenerated: 1,
         pocHarnessSkipped: 0,
@@ -185,11 +196,13 @@ describe("generateSarifReport", () => {
       runId,
     );
 
-    const parsed = JSON.parse(sarif) as { runs: Array<{ properties: { summary: Record<string, unknown> } }> };
+    const parsed = JSON.parse(sarif) as {
+      runs: Array<{ properties: { summary: Record<string, unknown> } }>;
+    };
     const summary = parsed.runs[0].properties.summary;
     expect(summary.pocHarnessCostUsd).toBe(0.05);
     expect(summary.pocHarnessGenerated).toBe(1);
-    expect(summary.totalCostUsd).toBeGreaterThan(0.50);
+    expect(summary.totalCostUsd).toBeGreaterThan(0.5);
 
     db.close();
   });
@@ -267,7 +280,10 @@ describe("generateSarifReport", () => {
     const parsed = JSON.parse(generateSarifReport(db, "repo", {}, runId)) as {
       runs: Array<{
         tool: { driver: { rules: Array<{ id: string; defaultConfiguration: { level: string } }> } };
-        results: Array<{ ruleId: string; suppressions?: Array<{ kind: string; justification?: string }> }>;
+        results: Array<{
+          ruleId: string;
+          suppressions?: Array<{ kind: string; justification?: string }>;
+        }>;
       }>;
     };
 

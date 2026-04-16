@@ -32,21 +32,36 @@ export const goProfile: LanguageProfile = {
   },
   generalAntiHallucination: [
     "Go database/sql with ? placeholders uses parameterized queries — SAFE against SQL injection",
-    "GORM .Where(\"field = ?\", val) is parameterized — only flag raw SQL string concatenation",
+    'GORM .Where("field = ?", val) is parameterized — only flag raw SQL string concatenation',
     "Go html/template auto-escapes by default — only flag text/template with HTML output",
   ],
   vulnClasses: {
     "race-condition": {
       sinks: [
-        { api: "Shared map/slice accessed from multiple goroutines", risk: "Go maps are NOT concurrent-safe — concurrent read+write causes panic or corruption", cwes: ["CWE-362"] },
-        { api: "Global variable modified in goroutine", risk: "Package-level var accessed without sync", cwes: ["CWE-362"] },
-        { api: "Read-modify-write without mutex", risk: "counter++ across goroutines is not atomic", cwes: ["CWE-362"] },
+        {
+          api: "Shared map/slice accessed from multiple goroutines",
+          risk: "Go maps are NOT concurrent-safe — concurrent read+write causes panic or corruption",
+          cwes: ["CWE-362"],
+        },
+        {
+          api: "Global variable modified in goroutine",
+          risk: "Package-level var accessed without sync",
+          cwes: ["CWE-362"],
+        },
+        {
+          api: "Read-modify-write without mutex",
+          risk: "counter++ across goroutines is not atomic",
+          cwes: ["CWE-362"],
+        },
       ],
       safePatterns: [
         { api: "sync.Mutex / sync.RWMutex around shared state", why: "Proper locking" },
         { api: "sync.Map for concurrent map access", why: "Concurrent-safe map implementation" },
         { api: "atomic.AddInt64 / atomic.Load*", why: "Lock-free atomic operations" },
-        { api: "Channel-based communication", why: "Share memory by communicating, don't communicate by sharing memory" },
+        {
+          api: "Channel-based communication",
+          why: "Share memory by communicating, don't communicate by sharing memory",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -72,8 +87,10 @@ export const goProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Concurrent map write in HTTP handler",
-          vulnerableCode: 'var cache = make(map[string]string)\n\nfunc handler(w http.ResponseWriter, r *http.Request) {\n    key := r.FormValue("key")\n    cache[key] = r.FormValue("value") // concurrent write\n}',
-          explanation: "HTTP handlers run in separate goroutines. Concurrent writes to the unsynchronized map cause a runtime panic (fatal error: concurrent map writes) or silent data corruption.",
+          vulnerableCode:
+            'var cache = make(map[string]string)\n\nfunc handler(w http.ResponseWriter, r *http.Request) {\n    key := r.FormValue("key")\n    cache[key] = r.FormValue("value") // concurrent write\n}',
+          explanation:
+            "HTTP handlers run in separate goroutines. Concurrent writes to the unsynchronized map cause a runtime panic (fatal error: concurrent map writes) or silent data corruption.",
         },
       ],
       antiHallucinationExtra: [
@@ -84,17 +101,38 @@ export const goProfile: LanguageProfile = {
     },
     "command-injection": {
       sinks: [
-        { api: 'exec.Command("sh", "-c", userStr)', risk: "Shell interpretation of user-controlled string", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: 'exec.Command("bash", "-c", userStr)', risk: "Shell interpretation via bash", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "exec.Command(userBinary, args...)", risk: "User controls which binary is executed", shellInvoking: false, cwes: ["CWE-78"] },
+        {
+          api: 'exec.Command("sh", "-c", userStr)',
+          risk: "Shell interpretation of user-controlled string",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: 'exec.Command("bash", "-c", userStr)',
+          risk: "Shell interpretation via bash",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "exec.Command(userBinary, args...)",
+          risk: "User controls which binary is executed",
+          shellInvoking: false,
+          cwes: ["CWE-78"],
+        },
       ],
       safePatterns: [
-        { api: 'exec.Command("fixed-binary", userArg)', why: "Binary is fixed, user controls only arguments — no shell interpretation" },
-        { api: "exec.CommandContext with fixed binary", why: "Context adds timeout but same safety as Command" },
+        {
+          api: 'exec.Command("fixed-binary", userArg)',
+          why: "Binary is fixed, user controls only arguments — no shell interpretation",
+        },
+        {
+          api: "exec.CommandContext with fixed binary",
+          why: "Context adds timeout but same safety as Command",
+        },
       ],
       investigationHints: {
         grepPatterns: [
-          'exec\\.Command\\(',
+          "exec\\.Command\\(",
           "exec\\.CommandContext\\(",
           '"sh".*"-c"',
           '"bash".*"-c"',
@@ -113,8 +151,10 @@ export const goProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Git clone with user-controlled URL via shell",
-          vulnerableCode: 'func cloneRepo(url string) error {\n    cmd := exec.Command("sh", "-c", "git clone "+url)\n    return cmd.Run()\n}',
-          explanation: 'url is user-controlled and concatenated into a shell command via "sh -c". Attacker sends "; rm -rf /" as URL. Fix: use exec.Command("git", "clone", url) without shell.',
+          vulnerableCode:
+            'func cloneRepo(url string) error {\n    cmd := exec.Command("sh", "-c", "git clone "+url)\n    return cmd.Run()\n}',
+          explanation:
+            'url is user-controlled and concatenated into a shell command via "sh -c". Attacker sends "; rm -rf /" as URL. Fix: use exec.Command("git", "clone", url) without shell.',
         },
       ],
       antiHallucinationExtra: [
@@ -124,13 +164,31 @@ export const goProfile: LanguageProfile = {
     },
     ssrf: {
       sinks: [
-        { api: "http.Get(url) / http.Post(url, ...)", risk: "User-controlled URL can target internal services", cwes: ["CWE-918"] },
-        { api: "http.NewRequest + client.Do", risk: "URL from user input in request construction", cwes: ["CWE-918"] },
-        { api: "resty.New().R().Get(url)", risk: "Resty client with user-controlled URL", cwes: ["CWE-918"] },
+        {
+          api: "http.Get(url) / http.Post(url, ...)",
+          risk: "User-controlled URL can target internal services",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "http.NewRequest + client.Do",
+          risk: "URL from user input in request construction",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "resty.New().R().Get(url)",
+          risk: "Resty client with user-controlled URL",
+          cwes: ["CWE-918"],
+        },
       ],
       safePatterns: [
-        { api: "URL validated against allowlist before request", why: "Only permitted hosts reachable" },
-        { api: "Hardcoded base URL with user-controlled path/params", why: "User cannot change the target host" },
+        {
+          api: "URL validated against allowlist before request",
+          why: "Only permitted hosts reachable",
+        },
+        {
+          api: "Hardcoded base URL with user-controlled path/params",
+          why: "User cannot change the target host",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -155,8 +213,10 @@ export const goProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Proxy endpoint with open redirect",
-          vulnerableCode: 'func proxyHandler(w http.ResponseWriter, r *http.Request) {\n    target := r.URL.Query().Get("url")\n    resp, _ := http.Get(target)\n    io.Copy(w, resp.Body)\n}',
-          explanation: "User-controlled URL is fetched server-side. Attacker sends url=http://169.254.169.254/latest/meta-data/ to access cloud metadata.",
+          vulnerableCode:
+            'func proxyHandler(w http.ResponseWriter, r *http.Request) {\n    target := r.URL.Query().Get("url")\n    resp, _ := http.Get(target)\n    io.Copy(w, resp.Body)\n}',
+          explanation:
+            "User-controlled URL is fetched server-side. Attacker sends url=http://169.254.169.254/latest/meta-data/ to access cloud metadata.",
         },
       ],
       antiHallucinationExtra: [
@@ -166,19 +226,33 @@ export const goProfile: LanguageProfile = {
     },
     "template-injection": {
       sinks: [
-        { api: "text/template with user-controlled template string", risk: "Go templates can call methods — user controls which methods via {{.Method}}", cwes: ["CWE-1336"] },
-        { api: "html/template with user-controlled template string", risk: "Same as text/template but with HTML escaping — methods still callable", cwes: ["CWE-1336"] },
+        {
+          api: "text/template with user-controlled template string",
+          risk: "Go templates can call methods — user controls which methods via {{.Method}}",
+          cwes: ["CWE-1336"],
+        },
+        {
+          api: "html/template with user-controlled template string",
+          risk: "Same as text/template but with HTML escaping — methods still callable",
+          cwes: ["CWE-1336"],
+        },
       ],
       safePatterns: [
-        { api: "Template files with user data as variables", why: "User controls data, not template structure" },
-        { api: "html/template with hardcoded template string", why: "Template is constant, only data varies" },
+        {
+          api: "Template files with user data as variables",
+          why: "User controls data, not template structure",
+        },
+        {
+          api: "html/template with hardcoded template string",
+          why: "Template is constant, only data varies",
+        },
       ],
       investigationHints: {
         grepPatterns: [
-          'template\\.New\\(',
-          'template\\.Must\\(',
-          '\\.Parse\\(',
-          'template\\.ParseFiles\\(',
+          "template\\.New\\(",
+          "template\\.Must\\(",
+          "\\.Parse\\(",
+          "template\\.ParseFiles\\(",
         ],
         fileHints: [
           "Template rendering in HTTP handlers",
@@ -193,8 +267,10 @@ export const goProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "User-controlled Go template string",
-          vulnerableCode: 'func render(w http.ResponseWriter, r *http.Request) {\n    tpl := r.FormValue("template")\n    t, _ := template.New("").Parse(tpl)\n    t.Execute(w, data)\n}',
-          explanation: "User controls the template string. Attacker sends {{.SensitiveField}} to extract data or chains method calls for further access.",
+          vulnerableCode:
+            'func render(w http.ResponseWriter, r *http.Request) {\n    tpl := r.FormValue("template")\n    t, _ := template.New("").Parse(tpl)\n    t.Execute(w, data)\n}',
+          explanation:
+            "User controls the template string. Attacker sends {{.SensitiveField}} to extract data or chains method calls for further access.",
         },
       ],
       antiHallucinationExtra: [
@@ -204,11 +280,27 @@ export const goProfile: LanguageProfile = {
     },
     "crypto-misuse": {
       sinks: [
-        { api: "crypto/md5 or crypto/sha1 for passwords", risk: "Weak hash — fast to brute force", cwes: ["CWE-328"] },
+        {
+          api: "crypto/md5 or crypto/sha1 for passwords",
+          risk: "Weak hash — fast to brute force",
+          cwes: ["CWE-328"],
+        },
         { api: "crypto/des", risk: "DES is broken — 56-bit key length", cwes: ["CWE-327"] },
-        { api: "math/rand for security-sensitive values", risk: "Predictable PRNG — not cryptographically secure", cwes: ["CWE-338"] },
-        { api: "Hardcoded keys/secrets in source", risk: "Secrets in code are extractable", cwes: ["CWE-798"] },
-        { api: "crypto/aes in ECB mode", risk: "ECB reveals patterns in plaintext", cwes: ["CWE-327"] },
+        {
+          api: "math/rand for security-sensitive values",
+          risk: "Predictable PRNG — not cryptographically secure",
+          cwes: ["CWE-338"],
+        },
+        {
+          api: "Hardcoded keys/secrets in source",
+          risk: "Secrets in code are extractable",
+          cwes: ["CWE-798"],
+        },
+        {
+          api: "crypto/aes in ECB mode",
+          risk: "ECB reveals patterns in plaintext",
+          cwes: ["CWE-327"],
+        },
       ],
       safePatterns: [
         { api: "crypto/rand for random bytes", why: "Cryptographically secure RNG" },
@@ -241,8 +333,10 @@ export const goProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Math/rand for session token generation",
-          vulnerableCode: 'import "math/rand"\n\nfunc generateToken() string {\n    b := make([]byte, 32)\n    for i := range b {\n        b[i] = byte(rand.Intn(256))\n    }\n    return hex.EncodeToString(b)\n}',
-          explanation: "math/rand is a predictable PRNG. If an attacker knows or guesses the seed (often time-based), they can predict all future tokens. Use crypto/rand.Read instead.",
+          vulnerableCode:
+            'import "math/rand"\n\nfunc generateToken() string {\n    b := make([]byte, 32)\n    for i := range b {\n        b[i] = byte(rand.Intn(256))\n    }\n    return hex.EncodeToString(b)\n}',
+          explanation:
+            "math/rand is a predictable PRNG. If an attacker knows or guesses the seed (often time-based), they can predict all future tokens. Use crypto/rand.Read instead.",
         },
       ],
       antiHallucinationExtra: [

@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { computeRunMetrics, formatMetricsSummary } from "../../src/scoring/run-metrics.js";
-import type { StageTimestamps, StageCosts } from "../../src/scoring/run-metrics.js";
+import { describe, expect, it } from "vitest";
 import type { Finding } from "../../src/scanners/types.js";
+import type { StageCosts, StageTimestamps } from "../../src/scoring/run-metrics.js";
+import { computeRunMetrics, formatMetricsSummary } from "../../src/scoring/run-metrics.js";
 
 function makeTimestamps(): StageTimestamps {
   return {
@@ -26,7 +26,13 @@ function makeCosts(): StageCosts {
   };
 }
 
-function makeFinding(overrides: Partial<Finding> & { verdict?: string; confidence?: number; verifyExploitable?: boolean | number } = {}): Finding {
+function makeFinding(
+  overrides: Partial<Finding> & {
+    verdict?: string;
+    confidence?: number;
+    verifyExploitable?: boolean | number;
+  } = {},
+): Finding {
   return {
     taskId: "agentic",
     fingerprint: `fp-${Math.random().toString(36).slice(2, 8)}`,

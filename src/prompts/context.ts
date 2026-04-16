@@ -129,7 +129,7 @@ export function buildBatchTriageContext(
   return {
     repoName,
     findingCount: findings.length,
-    findings: findings.map(f => ({
+    findings: findings.map((f) => ({
       taskId: f.taskId,
       ruleId: f.ruleId,
       filePath: f.filePath,

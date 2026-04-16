@@ -1,7 +1,13 @@
 import { toErrorMessage } from "../utils.js";
 
 /** Error categories for classification. */
-export type ErrorCategory = "transient" | "rate_limit" | "auth" | "billing" | "context_overflow" | "unknown";
+export type ErrorCategory =
+  | "transient"
+  | "rate_limit"
+  | "auth"
+  | "billing"
+  | "context_overflow"
+  | "unknown";
 
 /** Classified error with category and metadata. */
 export interface ClassifiedError {
@@ -39,12 +45,7 @@ const AUTH_TOKENS = [
   "403",
 ];
 
-const BILLING_TOKENS = [
-  "billing_error",
-  "insufficient_quota",
-  "payment_required",
-  "402",
-];
+const BILLING_TOKENS = ["billing_error", "insufficient_quota", "payment_required", "402"];
 
 const CONTEXT_OVERFLOW_TOKENS = [
   "context_length_exceeded",

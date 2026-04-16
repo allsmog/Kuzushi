@@ -7,8 +7,9 @@
  *
  * Falls back to plain text in unsupported terminals.
  */
-import { pathToFileURL } from "node:url";
+
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const OSC8_START = "\x1b]8;;";
 const OSC8_END = "\x07"; // BEL terminator — more widely supported than ST (\x1b\\)
@@ -37,9 +38,9 @@ export function supportsHyperlinks(): boolean {
   const supported = [
     "iTerm.app",
     "WezTerm",
-    "vscode",        // VS Code integrated terminal
+    "vscode", // VS Code integrated terminal
     "Hyper",
-    "mintty",        // Git Bash / MSYS2
+    "mintty", // Git Bash / MSYS2
   ];
 
   // Windows Terminal sets WT_SESSION

@@ -13,10 +13,7 @@ export class TurnWatchdog {
   private readonly abortController: AbortController;
   private fired = false;
 
-  constructor(
-    abortController: AbortController,
-    timeoutMs: number = DEFAULT_TIMEOUT_MS,
-  ) {
+  constructor(abortController: AbortController, timeoutMs: number = DEFAULT_TIMEOUT_MS) {
     this.abortController = abortController;
     this.timeoutMs = timeoutMs;
   }

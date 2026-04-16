@@ -8,12 +8,13 @@
  *
  * Only activates when the repo contains C, C++, Rust, or Go.
  */
+
+import { createLogger } from "../../../logger.js";
 import { coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
-import { toErrorMessage } from "../../../utils.js";
-import { createLogger } from "../../../logger.js";
-import type { AgentTask, TaskContext } from "../../types.js";
 import type { ScanOpts } from "../../../types.js";
+import { toErrorMessage } from "../../../utils.js";
+import type { AgentTask, TaskContext } from "../../types.js";
 import { resolveTaskModel, resolveTaskRuntime } from "../runtime-overrides.js";
 import type { CweSelection, CweSelectOutput } from "../taint-iris/cwe-select.js";
 import { DEEP_SEMANTIC_CWE_MENU, isDeepSemanticLanguage } from "./types.js";
@@ -124,7 +125,9 @@ export const deepSemanticCweSelectTask: AgentTask<ScanOpts, CweSelectOutput> = {
     }
 
     const parsed = parseOutput(structuredOutput);
-    log.info(`Selected ${parsed.cwes.length} CWE classes: ${parsed.cwes.map((c) => c.id).join(", ")}`);
+    log.info(
+      `Selected ${parsed.cwes.length} CWE classes: ${parsed.cwes.map((c) => c.id).join(", ")}`,
+    );
 
     return attachTaskOutputMeta(parsed, { costUsd });
   },
@@ -137,11 +140,13 @@ function parseOutput(raw: unknown): CweSelectOutput {
   return {
     cwes: cwes
       .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null)
-      .map((c): CweSelection => ({
-        id: String(c["id"] ?? "").trim(),
-        name: String(c["name"] ?? "").trim(),
-        reason: String(c["reason"] ?? "").trim(),
-      }))
+      .map(
+        (c): CweSelection => ({
+          id: String(c["id"] ?? "").trim(),
+          name: String(c["name"] ?? "").trim(),
+          reason: String(c["reason"] ?? "").trim(),
+        }),
+      )
       .filter((c) => c.id && c.name),
   };
 }

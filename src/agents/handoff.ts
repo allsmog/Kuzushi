@@ -94,10 +94,7 @@ export function getUpstreamHandoff<T>(
  * Collect and format insights from upstream handoffs for prompt injection.
  * Only collects from tasks that used the handoff protocol.
  */
-export function formatUpstreamInsights(
-  upstream: Map<string, unknown>,
-  depIds: string[],
-): string[] {
+export function formatUpstreamInsights(upstream: Map<string, unknown>, depIds: string[]): string[] {
   const lines: string[] = [];
 
   for (const depId of depIds) {

@@ -4,8 +4,10 @@
  * Fast at start, slows down near the target, like a slot machine settling.
  * Used for the finding count reveal after scan completes.
  */
-import React, { useState, useEffect } from "react";
+
 import { Text } from "ink";
+import type React from "react";
+import { useEffect, useState } from "react";
 
 interface AnimatedCounterProps {
   /** Target number to count up to. */
@@ -44,7 +46,7 @@ export function AnimatedCounter({
       const progress = Math.min(1, elapsed / durationMs);
 
       // Ease-out cubic: fast start, slow finish
-      const eased = 1 - Math.pow(1 - progress, 3);
+      const eased = 1 - (1 - progress) ** 3;
       const value = Math.round(eased * target);
 
       setCurrent(value);
@@ -61,5 +63,11 @@ export function AnimatedCounter({
   const formatted = current.toLocaleString();
   const display = color ? color(formatted) : formatted;
 
-  return <Text>{prefix}{display}{suffix}</Text>;
+  return (
+    <Text>
+      {prefix}
+      {display}
+      {suffix}
+    </Text>
+  );
 }

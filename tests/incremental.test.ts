@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { allMigrations, runMigrations } from "../src/migrations/index.js";
+import { describe, expect, it } from "vitest";
+import type { ImportGraphEdge } from "../src/analysis-support/types.js";
 import {
   buildReverseDependencyMap,
   expandWithDependents,
   getLastSuccessfulHeadRef,
 } from "../src/incremental.js";
-import type { ImportGraphEdge } from "../src/analysis-support/types.js";
+import { allMigrations, runMigrations } from "../src/migrations/index.js";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");

@@ -1,21 +1,21 @@
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, mkdirSync, copyFileSync } from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import path from "node:path";
 import type Database from "better-sqlite3";
-import type { AgentRuntime, AgentSession } from "./agent-runtime/types.js";
-import { DockerPocExecutor } from "./poc-executor/docker.js";
+import { cleanupBatchFiles, writeBatchFile } from "./agent-runtime/batch-files.js";
 import {
   resolveDefaultReadOnlyTools,
   runStructuredAgentQuery,
   runStructuredSessionQuery,
 } from "./agent-runtime/execution.js";
-import { writeBatchFile, cleanupBatchFiles } from "./agent-runtime/batch-files.js";
+import type { AgentRuntime, AgentSession } from "./agent-runtime/types.js";
+import { DockerPocExecutor } from "./poc-executor/docker.js";
 import {
   getStoredFinding,
   insertPatchResult,
-  updateFindingMetadata,
   type StoredFindingRecord,
+  updateFindingMetadata,
 } from "./store.js";
 import type { PatchResult, PatchStatus } from "./types.js";
 import { normalizeCostUsd, toErrorMessage } from "./utils.js";
@@ -76,15 +76,10 @@ interface PatchValidationPlan {
  * Validate that the finding is eligible for patch synthesis.
  * Requires: finding exists, has triage data, and has confirmed exploitability.
  */
-function validatePatchEligibility(
-  db: Database.Database,
-  fingerprint: string,
-): StoredFindingRecord {
+function validatePatchEligibility(db: Database.Database, fingerprint: string): StoredFindingRecord {
   const finding = getStoredFinding(db, fingerprint);
   if (!finding) {
-    throw new PatchExecutionError(
-      `Finding "${fingerprint}" not found in database.`,
-    );
+    throw new PatchExecutionError(`Finding "${fingerprint}" not found in database.`);
   }
 
   if (finding.verdict == null) {
@@ -93,8 +88,7 @@ function validatePatchEligibility(
     );
   }
 
-  const hasPocPass =
-    finding.pocHarnessPath != null && finding.pocRunVerdict === "PASS";
+  const hasPocPass = finding.pocHarnessPath != null && finding.pocRunVerdict === "PASS";
   const hasExecutionConfirmed = finding.proofState === "execution_confirmed";
 
   if (!hasPocPass && !hasExecutionConfirmed) {
@@ -121,9 +115,7 @@ export function createDisposableWorktree(repoRoot: string): {
       timeout: EXEC_TIMEOUT_MS,
     });
   } catch {
-    throw new PatchExecutionError(
-      `"${repoRoot}" is not inside a git repository.`,
-    );
+    throw new PatchExecutionError(`"${repoRoot}" is not inside a git repository.`);
   }
 
   const worktreeBase = path.join(repoRoot, ".kuzushi", "worktrees");
@@ -233,8 +225,8 @@ function buildPatchSynthesisPrompt(
     "",
     "## Output",
     "Return ONLY a JSON object with keys:",
-    '  diff (string): the unified diff content',
-    '  explanation (string): brief explanation of what the patch does and why',
+    "  diff (string): the unified diff content",
+    "  explanation (string): brief explanation of what the patch does and why",
   ].join("\n");
 }
 
@@ -253,23 +245,19 @@ async function synthesizePatch(
 
   const allowedTools = resolveDefaultReadOnlyTools(runtime);
 
-  const { resultText, structuredOutput, executionError, costUsd } =
-    await runStructuredAgentQuery({
-      prompt,
-      cwd: repoRoot,
-      model,
-      allowedTools,
-      runtimeOptions: { runtime },
-      systemPromptPrefix:
-        "You are a security patch generator. Read the vulnerable code, then produce a minimal unified diff that fixes the vulnerability.",
-      schema: PATCH_SYNTHESIS_SCHEMA,
-    });
+  const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
+    prompt,
+    cwd: repoRoot,
+    model,
+    allowedTools,
+    runtimeOptions: { runtime },
+    systemPromptPrefix:
+      "You are a security patch generator. Read the vulnerable code, then produce a minimal unified diff that fixes the vulnerability.",
+    schema: PATCH_SYNTHESIS_SCHEMA,
+  });
 
   if (executionError) {
-    throw new PatchExecutionError(
-      `Patch synthesis agent failed: ${executionError}`,
-      costUsd,
-    );
+    throw new PatchExecutionError(`Patch synthesis agent failed: ${executionError}`, costUsd);
   }
 
   let parsed: { diff: string; explanation: string };
@@ -324,14 +312,13 @@ async function synthesizePatchViaSession(
     `Iteration context has been written to ${batchFile} — use Read to load it if needed.`,
   ].join("\n");
 
-  const { resultText, structuredOutput, executionError, costUsd } =
-    await runStructuredSessionQuery(session, prompt);
+  const { resultText, structuredOutput, executionError, costUsd } = await runStructuredSessionQuery(
+    session,
+    prompt,
+  );
 
   if (executionError) {
-    throw new PatchExecutionError(
-      `Patch synthesis agent failed: ${executionError}`,
-      costUsd,
-    );
+    throw new PatchExecutionError(`Patch synthesis agent failed: ${executionError}`, costUsd);
   }
 
   let parsed: { diff: string; explanation: string };
@@ -355,8 +342,7 @@ function parsePatchOutput(raw: unknown): { diff: string; explanation: string } {
   if (raw != null && typeof raw === "object" && !Array.isArray(raw)) {
     const record = raw as Record<string, unknown>;
     const diff = typeof record["diff"] === "string" ? record["diff"] : "";
-    const explanation =
-      typeof record["explanation"] === "string" ? record["explanation"] : "";
+    const explanation = typeof record["explanation"] === "string" ? record["explanation"] : "";
 
     if (!diff || diff.trim().length === 0) {
       throw new Error("Empty diff in patch synthesis output.");
@@ -429,7 +415,8 @@ async function validatePatch(
     return { status: "APPLY_FAILED", output: logs.join("\n") };
   }
 
-  const requiresSandbox = buildCmd != null || testCmd != null || (pocArtifactPath != null && existsSync(pocArtifactPath));
+  const requiresSandbox =
+    buildCmd != null || testCmd != null || (pocArtifactPath != null && existsSync(pocArtifactPath));
   const pocExecutor = new DockerPocExecutor(EXEC_TIMEOUT_MS);
   if (requiresSandbox && !(await pocExecutor.available())) {
     logs.push("sandbox: UNAVAILABLE — Docker is required for patch validation");
@@ -468,7 +455,9 @@ async function validatePatch(
       } else if (ext === ".sh") {
         language = "shell";
       } else if (ext === ".ts") {
-        logs.push("PoC re-run: UNSUPPORTED — TypeScript harnesses are not sandbox-runnable without transpilation");
+        logs.push(
+          "PoC re-run: UNSUPPORTED — TypeScript harnesses are not sandbox-runnable without transpilation",
+        );
         return { status: "UNKNOWN", output: logs.join("\n") };
       } else {
         language = "javascript";
@@ -505,31 +494,35 @@ async function validatePatch(
   return { status: "SOUND", output: logs.join("\n") };
 }
 
-function runCommandInDocker(
-  worktreePath: string,
-  image: string,
-  command: string,
-): string {
-  return execFileSync("docker", [
-    "run",
-    "--rm",
-    "--network=none",
-    `--memory=${PATCH_VALIDATE_MEMORY}`,
-    `--cpus=${PATCH_VALIDATE_CPUS}`,
-    "--read-only",
-    "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-    "-e", "HOME=/tmp",
-    "-v", `${worktreePath}:/repo:rw`,
-    "-w", "/repo",
-    image,
-    "sh",
-    "-lc",
-    command,
-  ], {
-    stdio: "pipe",
-    timeout: EXEC_TIMEOUT_MS,
-    encoding: "utf-8",
-  });
+function runCommandInDocker(worktreePath: string, image: string, command: string): string {
+  return execFileSync(
+    "docker",
+    [
+      "run",
+      "--rm",
+      "--network=none",
+      `--memory=${PATCH_VALIDATE_MEMORY}`,
+      `--cpus=${PATCH_VALIDATE_CPUS}`,
+      "--read-only",
+      "--tmpfs",
+      "/tmp:rw,noexec,nosuid,size=256m",
+      "-e",
+      "HOME=/tmp",
+      "-v",
+      `${worktreePath}:/repo:rw`,
+      "-w",
+      "/repo",
+      image,
+      "sh",
+      "-lc",
+      command,
+    ],
+    {
+      stdio: "pipe",
+      timeout: EXEC_TIMEOUT_MS,
+      encoding: "utf-8",
+    },
+  );
 }
 
 function extractCommandError(error: unknown): string {
@@ -677,7 +670,9 @@ export async function runPatchPipeline(
     testCommand: testCmd,
     worktreePath: keepWorktree ? worktreePath : null,
     costUsd: normalizeCostUsd(totalCostUsd),
-    validatorLog: history.map((h) => `[Attempt ${h.attempt}] ${h.status}: ${h.output}`).join("\n\n"),
+    validatorLog: history
+      .map((h) => `[Attempt ${h.attempt}] ${h.status}: ${h.output}`)
+      .join("\n\n"),
     history,
   };
 

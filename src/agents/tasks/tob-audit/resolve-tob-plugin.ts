@@ -1,6 +1,6 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { existsSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 
@@ -35,8 +35,8 @@ export function resolveTobPlugins(): Array<{ type: "local"; path: string }> {
 
   if (!existsSync(pluginsDir)) {
     throw new Error(
-      `@kuzushi/tob-skills is installed but missing plugins/ directory at ${repoRoot}. `
-      + "Try reinstalling: pnpm install",
+      `@kuzushi/tob-skills is installed but missing plugins/ directory at ${repoRoot}. ` +
+        "Try reinstalling: pnpm install",
     );
   }
 
@@ -51,8 +51,8 @@ export function resolveTobPlugins(): Array<{ type: "local"; path: string }> {
 
   if (plugins.length === 0) {
     throw new Error(
-      `@kuzushi/tob-skills has no valid security plugins in ${pluginsDir}. `
-      + "Try reinstalling: pnpm install",
+      `@kuzushi/tob-skills has no valid security plugins in ${pluginsDir}. ` +
+        "Try reinstalling: pnpm install",
     );
   }
 

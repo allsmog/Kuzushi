@@ -1,10 +1,6 @@
-import { describe, it, expect } from "vitest";
-import {
-  renderTemplate,
-  validateTemplate,
-  processBlocks,
-} from "../../src/prompts/template.js";
+import { describe, expect, it } from "vitest";
 import type { TemplateContext } from "../../src/prompts/template.js";
+import { processBlocks, renderTemplate, validateTemplate } from "../../src/prompts/template.js";
 
 // ---------------------------------------------------------------------------
 // 1. Conditionals
@@ -240,9 +236,7 @@ describe("edge cases", () => {
     for (let i = 0; i < 12; i++) {
       tpl += "{% endif %}";
     }
-    expect(() => processBlocks(tpl, { ok: true })).toThrow(
-      /nesting depth exceeded/,
-    );
+    expect(() => processBlocks(tpl, { ok: true })).toThrow(/nesting depth exceeded/);
   });
 
   it("passes through unmatched if tag as-is", () => {
@@ -271,8 +265,7 @@ describe("edge cases", () => {
   });
 
   it("handles multiple sequential for blocks", () => {
-    const tpl =
-      "{% for x in xs %}{{ x }}{% endfor %}-{% for y in ys %}{{ y }}{% endfor %}";
+    const tpl = "{% for x in xs %}{{ x }}{% endfor %}-{% for y in ys %}{{ y }}{% endfor %}";
     expect(renderTemplate(tpl, { xs: [1, 2], ys: [3, 4] })).toBe("12-34");
   });
 
@@ -301,9 +294,7 @@ describe("existing features (regression)", () => {
   });
 
   it("join filter", () => {
-    expect(renderTemplate('{{ items | join(", ") }}', { items: ["a", "b", "c"] })).toBe(
-      "a, b, c",
-    );
+    expect(renderTemplate('{{ items | join(", ") }}', { items: ["a", "b", "c"] })).toBe("a, b, c");
   });
 
   it("upper filter", () => {

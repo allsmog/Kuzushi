@@ -1,6 +1,6 @@
-import type { AgentTask, TaskOutputKind } from "./types.js";
-import type { TaskManifest } from "./task-manifest.js";
 import { normalizeTaskCapabilityIds } from "../capabilities.js";
+import type { TaskManifest } from "./task-manifest.js";
+import type { AgentTask, TaskOutputKind } from "./types.js";
 
 /** Summary info returned by TaskRegistry.list(). */
 export interface TaskInfo {
@@ -62,7 +62,7 @@ export class TaskRegistry {
     for (const task of this.tasks.values()) {
       for (const dep of task.dependsOn) {
         if (!this.tasks.has(dep)) {
-          throw new Error(`Task \"${task.id}\" depends on unknown task \"${dep}\"`);
+          throw new Error(`Task "${task.id}" depends on unknown task "${dep}"`);
         }
       }
     }
@@ -97,7 +97,7 @@ export class TaskRegistry {
         }
 
         if (!enabledSet.has(dep)) {
-          throw new Error(`Task \"${id}\" depends on \"${dep}\" but it is not enabled`);
+          throw new Error(`Task "${id}" depends on "${dep}" but it is not enabled`);
         }
 
         indegree.set(id, (indegree.get(id) ?? 0) + 1);
@@ -140,7 +140,9 @@ export function normalizeTaskIds(ids: string[]): string[] {
 }
 
 function dedupePreservingRegisteredIds(registry: TaskRegistry, ids: string[]): string[] {
-  const expanded = ids.flatMap((id) => (registry.has(id) ? [id] : normalizeTaskCapabilityIds([id])));
+  const expanded = ids.flatMap((id) =>
+    registry.has(id) ? [id] : normalizeTaskCapabilityIds([id]),
+  );
   const result: string[] = [];
   const seen = new Set<string>();
   for (const id of expanded) {

@@ -10,10 +10,7 @@ export interface TaskOutputMeta {
 
 const TASK_OUTPUT_META = Symbol.for("kuzushi.task-output-meta");
 
-export function attachTaskOutputMeta<T>(
-  output: T,
-  meta: TaskOutputMeta,
-): T {
+export function attachTaskOutputMeta<T>(output: T, meta: TaskOutputMeta): T {
   if (output == null || (typeof output !== "object" && typeof output !== "function")) {
     return output;
   }

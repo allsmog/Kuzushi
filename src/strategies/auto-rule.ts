@@ -1,18 +1,28 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
-import type { Finding } from "../scanners/types.js";
+import { resolveTaskModel, resolveTaskRuntime } from "../agents/tasks/runtime-overrides.js";
 import type { TaskContext } from "../agents/types.js";
 import { createLogger } from "../logger.js";
+import type { Finding } from "../scanners/types.js";
 import { toErrorMessage } from "../utils.js";
-import { resolveTaskModel, resolveTaskRuntime } from "../agents/tasks/runtime-overrides.js";
 import type { GeneratedRule, StrategyEvidence } from "./types.js";
 
 const log = createLogger({ stage: "auto-rule" });
 
 const LANG_EXT_MAP: Record<string, string> = {
-  ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript",
-  ".py": "python", ".go": "go", ".java": "java", ".rb": "ruby",
-  ".php": "php", ".cs": "csharp", ".rs": "rust", ".c": "c", ".cpp": "cpp",
+  ".ts": "typescript",
+  ".tsx": "typescript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".py": "python",
+  ".go": "go",
+  ".java": "java",
+  ".rb": "ruby",
+  ".php": "php",
+  ".cs": "csharp",
+  ".rs": "rust",
+  ".c": "c",
+  ".cpp": "cpp",
 };
 
 const RULE_GENERATION_SCHEMA = {
@@ -54,9 +64,14 @@ export async function generateRule(
   const cwd = context.scanPath ?? context.repoRoot;
   const language = detectLanguage(finding.filePath);
 
-  const evidenceStr = evidence && evidence.length > 0
-    ? ["## Evidence from analysis", ...evidence.map((e) => `- [${e.kind}] ${e.description}`), ""].join("\n")
-    : "";
+  const evidenceStr =
+    evidence && evidence.length > 0
+      ? [
+          "## Evidence from analysis",
+          ...evidence.map((e) => `- [${e.kind}] ${e.description}`),
+          "",
+        ].join("\n")
+      : "";
 
   const prompt = [
     "You are a Semgrep rule engineer. A vulnerability was confirmed through verification.",
@@ -87,8 +102,8 @@ export async function generateRule(
     "   metadata:",
     "     category: security",
     "     confidence: HIGH",
-    `     cwe: [\"CWE-XXX\"]  # Use actual CWE IDs`,
-    "     subcategory: [\"vuln\"]",
+    `     cwe: ["CWE-XXX"]  # Use actual CWE IDs`,
+    '     subcategory: ["vuln"]',
     "   ```",
     "",
     `   **Rule ID format:** \`kuzushi.custom.<descriptive-name>\``,
@@ -103,7 +118,9 @@ export async function generateRule(
     "6. The rule should catch the FAMILY of this vulnerability, not just this exact instance",
     "7. Avoid overly broad rules — prefer precision over recall",
     "8. Return the COMPLETE valid Semgrep YAML including the `rules:` top-level key",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   try {
     let structuredOutput: unknown;
@@ -183,16 +200,15 @@ export async function validateRule(
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 30_000);
 
-    const proc = spawn(semgrepBin, [
-      "--config", ruleFilePath,
-      "--json",
-      "--no-git-ignore",
-      resolvedTarget,
-    ], {
-      cwd: repoRoot,
-      stdio: ["ignore", "pipe", "ignore"],
-      signal: ac.signal,
-    });
+    const proc = spawn(
+      semgrepBin,
+      ["--config", ruleFilePath, "--json", "--no-git-ignore", resolvedTarget],
+      {
+        cwd: repoRoot,
+        stdio: ["ignore", "pipe", "ignore"],
+        signal: ac.signal,
+      },
+    );
 
     const chunks: Buffer[] = [];
     proc.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));

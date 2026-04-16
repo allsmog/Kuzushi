@@ -1,17 +1,12 @@
 import { describe, expect, it } from "vitest";
-import {
-  __systemsTriggerSynthInternals,
-} from "../../../src/agents/tasks/systems-hunt/trigger-synth.js";
+import { __systemsTriggerSynthInternals } from "../../../src/agents/tasks/systems-hunt/trigger-synth.js";
 import type {
   RankedSystemsSurface,
   SystemsInvariant,
   SystemsSurfacePack,
 } from "../../../src/agents/tasks/systems-hunt/types.js";
 
-const {
-  buildTriggerPrompt,
-  parseTriggers,
-} = __systemsTriggerSynthInternals;
+const { buildTriggerPrompt, parseTriggers } = __systemsTriggerSynthInternals;
 
 function makeSurface(overrides: Partial<RankedSystemsSurface> = {}): RankedSystemsSurface {
   return {
@@ -46,16 +41,32 @@ function makePack(): SystemsSurfacePack {
     relatedFiles: ["src/net/tcp_input.c"],
     callers: [],
     callees: [],
-    compareCastSites: [{ filePath: "src/net/tcp_input.c", line: 42, snippet: "if (seq < (int)ack && ack == 0xFFFF)" }],
+    compareCastSites: [
+      {
+        filePath: "src/net/tcp_input.c",
+        line: 42,
+        snippet: "if (seq < (int)ack && ack == 0xFFFF)",
+      },
+    ],
     counterSites: [{ filePath: "src/net/tcp_input.c", line: 42, snippet: "len" }],
     sentinelConstants: [{ filePath: "src/net/tcp_input.c", line: 42, snippet: "0xFFFF" }],
-    allocationCopySites: [{ filePath: "src/net/tcp_input.c", line: 42, snippet: "memcpy(dst, pkt, len)" }],
+    allocationCopySites: [
+      { filePath: "src/net/tcp_input.c", line: 42, snippet: "memcpy(dst, pkt, len)" },
+    ],
     unsafeSites: [],
     inputSites: [{ filePath: "src/net/tcp_input.c", line: 41, snippet: "tcp option parsing" }],
     hardeningSites: [{ filePath: "src/net/tcp_input.c", line: 80, snippet: "__stack_chk_fail();" }],
     helperTemplates: [
-      { id: "signed-wraparound", title: "Signed/unsigned compare and wraparound", rationale: "Inspect wraparound sites." },
-      { id: "hardening-presence", title: "Hardening and mitigation presence", rationale: "Inspect hardening." },
+      {
+        id: "signed-wraparound",
+        title: "Signed/unsigned compare and wraparound",
+        rationale: "Inspect wraparound sites.",
+      },
+      {
+        id: "hardening-presence",
+        title: "Hardening and mitigation presence",
+        rationale: "Inspect hardening.",
+      },
     ],
   };
 }
@@ -65,17 +76,19 @@ describe("systems-trigger-synth", () => {
     const prompt = buildTriggerPrompt(
       [makeSurface()],
       [makePack()],
-      [{
-        id: "inv-1",
-        surfaceId: "surface-1",
-        kind: "packet-ordering",
-        summary: "SACK state must be initialized before option processing",
-        statement: "option parsing requires state != NULL",
-        rationale: "later dereference assumes initialized state",
-        evidence: ["src/net/tcp_input.c:42"],
-        attackerControlledFields: ["seq", "ack"],
-        cheapVerifiable: false,
-      } satisfies SystemsInvariant],
+      [
+        {
+          id: "inv-1",
+          surfaceId: "surface-1",
+          kind: "packet-ordering",
+          summary: "SACK state must be initialized before option processing",
+          statement: "option parsing requires state != NULL",
+          rationale: "later dereference assumes initialized state",
+          evidence: ["src/net/tcp_input.c:42"],
+          attackerControlledFields: ["seq", "ack"],
+          cheapVerifiable: false,
+        } satisfies SystemsInvariant,
+      ],
       3,
     );
 

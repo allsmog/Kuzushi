@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GovernanceEnforcer } from "../../src/governance/enforcer.js";
-import { defaultScopePolicy } from "../../src/governance/types.js";
 import type { ScopePolicy } from "../../src/governance/types.js";
+import { defaultScopePolicy } from "../../src/governance/types.js";
 
 function createEnforcer(overrides: Partial<ScopePolicy> = {}): GovernanceEnforcer {
   return new GovernanceEnforcer({ ...defaultScopePolicy(), ...overrides });

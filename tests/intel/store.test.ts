@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
 import Database from "better-sqlite3";
+import { afterEach, describe, expect, it } from "vitest";
 import { createIntelTables, SqliteIntelStore } from "../../src/intel/store.js";
 
 const tempDirs: string[] = [];
@@ -29,7 +29,8 @@ describe("SqliteIntelStore", () => {
     const id = store.ingest({
       source: "nvd",
       title: "CVE-2024-1234",
-      content: "A critical SQL injection vulnerability in the login endpoint allows remote code execution.",
+      content:
+        "A critical SQL injection vulnerability in the login endpoint allows remote code execution.",
       metadata: { severity: "critical", cwe: "CWE-89" },
     });
 
@@ -46,7 +47,8 @@ describe("SqliteIntelStore", () => {
     store.ingest({
       source: "nvd",
       title: "CVE-2024-1234",
-      content: "SQL injection in login endpoint allows remote code execution via crafted username parameter.",
+      content:
+        "SQL injection in login endpoint allows remote code execution via crafted username parameter.",
       metadata: { severity: "critical" },
     });
 
@@ -60,7 +62,8 @@ describe("SqliteIntelStore", () => {
     store.ingest({
       source: "attack",
       title: "T1190 Exploit Public-Facing Application",
-      content: "Adversaries may exploit vulnerabilities in internet-facing applications to gain access.",
+      content:
+        "Adversaries may exploit vulnerabilities in internet-facing applications to gain access.",
       metadata: { tactic: "initial-access" },
     });
 

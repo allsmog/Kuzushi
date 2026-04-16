@@ -137,7 +137,8 @@ describe("buildVerificationPrompt", () => {
   });
 
   it("verificationSystemPromptPrefix appends extraPromptContext when provided", () => {
-    const extra = "## CWE-89 Knowledge\nSQL injection in parameterized queries requires unescaped interpolation.";
+    const extra =
+      "## CWE-89 Knowledge\nSQL injection in parameterized queries requires unescaped interpolation.";
     const prefix = verificationSystemPromptPrefix(undefined, undefined, extra);
 
     expect(prefix).toContain(extra);
@@ -156,15 +157,18 @@ describe("buildVerificationPrompt", () => {
 
 describe("parseVerificationOutput", () => {
   it("parses structured object output", () => {
-    const parsed = parseVerificationOutput({
-      fingerprint: "verify-fp",
-      exploitable: true,
-      poc_payload: "' OR 1=1 --",
-      poc_description: "Inject payload into login form.",
-      attack_vector: "HTTP body",
-      preconditions: ["Attacker can reach login endpoint"],
-      confidence: 0.87,
-    }, "fallback");
+    const parsed = parseVerificationOutput(
+      {
+        fingerprint: "verify-fp",
+        exploitable: true,
+        poc_payload: "' OR 1=1 --",
+        poc_description: "Inject payload into login form.",
+        attack_vector: "HTTP body",
+        preconditions: ["Attacker can reach login endpoint"],
+        confidence: 0.87,
+      },
+      "fallback",
+    );
 
     expect(parsed.fingerprint).toBe("verify-fp");
     expect(parsed.exploitable).toBe(true);
@@ -194,23 +198,27 @@ describe("parseVerificationOutput", () => {
   });
 
   it("throws for malformed JSON instead of synthesizing a conservative result", () => {
-    expect(() => parseVerificationOutput("not-json", "fallback-fp"))
-      .toThrow("Invalid verification JSON response");
+    expect(() => parseVerificationOutput("not-json", "fallback-fp")).toThrow(
+      "Invalid verification JSON response",
+    );
   });
 
   it("parses proof_level and proof_verdict from output", () => {
-    const parsed = parseVerificationOutput({
-      fingerprint: "verify-fp",
-      exploitable: true,
-      poc_payload: "payload",
-      poc_description: "desc",
-      attack_vector: "network",
-      preconditions: [],
-      confidence: 0.9,
-      proof_level: 3,
-      proof_verdict: "exploited",
-      bypass_attempts: ["Direct injection", "Encoding bypass"],
-    }, "fallback");
+    const parsed = parseVerificationOutput(
+      {
+        fingerprint: "verify-fp",
+        exploitable: true,
+        poc_payload: "payload",
+        poc_description: "desc",
+        attack_vector: "network",
+        preconditions: [],
+        confidence: 0.9,
+        proof_level: 3,
+        proof_verdict: "exploited",
+        bypass_attempts: ["Direct injection", "Encoding bypass"],
+      },
+      "fallback",
+    );
 
     expect(parsed.proofLevel).toBe(3);
     expect(parsed.proofVerdict).toBe("exploited");
@@ -218,15 +226,18 @@ describe("parseVerificationOutput", () => {
   });
 
   it("handles missing proof fields gracefully", () => {
-    const parsed = parseVerificationOutput({
-      fingerprint: "verify-fp",
-      exploitable: false,
-      poc_payload: null,
-      poc_description: "not exploitable",
-      attack_vector: null,
-      preconditions: [],
-      confidence: 0.3,
-    }, "fallback");
+    const parsed = parseVerificationOutput(
+      {
+        fingerprint: "verify-fp",
+        exploitable: false,
+        poc_payload: null,
+        poc_description: "not exploitable",
+        attack_vector: null,
+        preconditions: [],
+        confidence: 0.3,
+      },
+      "fallback",
+    );
 
     expect(parsed.proofLevel).toBeUndefined();
     expect(parsed.proofVerdict).toBeUndefined();
@@ -234,17 +245,20 @@ describe("parseVerificationOutput", () => {
   });
 
   it("normalizes invalid proof_verdict to undefined", () => {
-    const parsed = parseVerificationOutput({
-      fingerprint: "verify-fp",
-      exploitable: false,
-      poc_payload: null,
-      poc_description: "desc",
-      attack_vector: null,
-      preconditions: [],
-      confidence: 0.5,
-      proof_level: 5,
-      proof_verdict: "invalid_verdict",
-    }, "fallback");
+    const parsed = parseVerificationOutput(
+      {
+        fingerprint: "verify-fp",
+        exploitable: false,
+        poc_payload: null,
+        poc_description: "desc",
+        attack_vector: null,
+        preconditions: [],
+        confidence: 0.5,
+        proof_level: 5,
+        proof_verdict: "invalid_verdict",
+      },
+      "fallback",
+    );
 
     expect(parsed.proofLevel).toBeUndefined(); // 5 is out of range
     expect(parsed.proofVerdict).toBeUndefined();
@@ -255,21 +269,23 @@ describe("verifyFindingWithAgent", () => {
   it("captures total cost and passes schema/tools to runtime", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          fingerprint: "verify-fp",
-          exploitable: true,
-          poc_payload: "' OR 1=1 --",
-          poc_description: "Inject payload in username",
-          attack_vector: "Form input",
-          preconditions: ["Reachable endpoint"],
-          confidence: 0.9,
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "{}",
+          structuredOutput: {
+            fingerprint: "verify-fp",
+            exploitable: true,
+            poc_payload: "' OR 1=1 --",
+            poc_description: "Inject payload in username",
+            attack_vector: "Form input",
+            preconditions: ["Reachable endpoint"],
+            confidence: 0.9,
+          },
+          totalCostUsd: 0.0142,
         },
-        totalCostUsd: 0.0142,
-      }],
+      ],
       requests,
     );
 
@@ -285,28 +301,39 @@ describe("verifyFindingWithAgent", () => {
     expect(output.result.exploitable).toBe(true);
     expect(output.costUsd).toBe(0.0142);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.options?.allowedTools).toEqual(["Read", "Glob", "Grep", "GetCallers", "GetCallees", "GetFunctionBody", "GoToDefinition", "FindReferences", "TypeAtPosition"]);
+    expect(requests[0]?.options?.allowedTools).toEqual([
+      "Read",
+      "Glob",
+      "Grep",
+      "GetCallers",
+      "GetCallees",
+      "GetFunctionBody",
+      "GoToDefinition",
+      "FindReferences",
+      "TypeAtPosition",
+    ]);
     expect(requests[0]?.options?.outputFormat?.schema).toBe(VERIFICATION_RESULT_SCHEMA);
-
   });
 
   it("uses semantic navigation tools when the runtime is pi-ai", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          fingerprint: "verify-fp",
-          exploitable: true,
-          poc_payload: "payload",
-          poc_description: "desc",
-          attack_vector: "network",
-          preconditions: [],
-          confidence: 0.9,
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "{}",
+          structuredOutput: {
+            fingerprint: "verify-fp",
+            exploitable: true,
+            poc_payload: "payload",
+            poc_description: "desc",
+            attack_vector: "network",
+            preconditions: [],
+            confidence: 0.9,
+          },
         },
-      }],
+      ],
       requests,
       "pi-ai",
     );
@@ -336,12 +363,14 @@ describe("verifyFindingWithAgent", () => {
   it("throws VerificationExecutionError with cost on parse failure", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "not-json",
-        totalCostUsd: 0.009,
-      }],
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "not-json",
+          totalCostUsd: 0.009,
+        },
+      ],
       requests,
     );
 
@@ -366,25 +395,29 @@ describe("verifyFindingsBatch", () => {
   it("reports missing findings without synthesizing not-exploitable results", async () => {
     const requests: AgentQueryRequest[] = [];
     const runtime = makeRuntime(
-      [{
-        type: "result",
-        subtype: "success",
-        result: "{}",
-        structuredOutput: {
-          results: [{
-            fingerprint: "verify-fp",
-            exploitable: true,
-            poc_payload: "payload",
-            poc_description: "desc",
-            attack_vector: "query",
-            preconditions: [],
-            confidence: 0.9,
-          }],
+      [
+        {
+          type: "result",
+          subtype: "success",
+          result: "{}",
+          structuredOutput: {
+            results: [
+              {
+                fingerprint: "verify-fp",
+                exploitable: true,
+                poc_payload: "payload",
+                poc_description: "desc",
+                attack_vector: "query",
+                preconditions: [],
+                confidence: 0.9,
+              },
+            ],
+          },
+          durationMs: 100,
+          numTurns: 1,
+          totalCostUsd: 0.02,
         },
-        durationMs: 100,
-        numTurns: 1,
-        totalCostUsd: 0.02,
-      }],
+      ],
       requests,
       "mock-batch-runtime",
     );

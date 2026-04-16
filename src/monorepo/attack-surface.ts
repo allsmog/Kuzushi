@@ -8,15 +8,29 @@
  * Pure regex over source files — zero LLM cost.
  */
 
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { DiscoveredModule } from "../discovery/types.js";
 import type { AttackSurfaceAnnotation, EntryPointType } from "./types.js";
 
 const SKIP_DIRS = new Set([
-  "node_modules", "vendor", ".git", "dist", "build", "target",
-  ".next", ".kuzushi", "coverage", "__pycache__", ".venv", "venv",
-  "__tests__", "test", "tests", "spec", "fixtures",
+  "node_modules",
+  "vendor",
+  ".git",
+  "dist",
+  "build",
+  "target",
+  ".next",
+  ".kuzushi",
+  "coverage",
+  "__pycache__",
+  ".venv",
+  "venv",
+  "__tests__",
+  "test",
+  "tests",
+  "spec",
+  "fixtures",
 ]);
 
 const MAX_WALK_DEPTH = 4;
@@ -83,12 +97,12 @@ const MANIFEST_FRAMEWORK_CHECKS: Array<{
   {
     file: "package.json",
     patterns: [
-      { pattern: "\"express\"", framework: "express", language: "javascript" },
-      { pattern: "\"@nestjs/core\"", framework: "nestjs", language: "javascript" },
-      { pattern: "\"fastify\"", framework: "fastify", language: "javascript" },
-      { pattern: "\"next\"", framework: "next", language: "javascript" },
-      { pattern: "\"@hapi/hapi\"", framework: "hapi", language: "javascript" },
-      { pattern: "\"koa\"", framework: "koa", language: "javascript" },
+      { pattern: '"express"', framework: "express", language: "javascript" },
+      { pattern: '"@nestjs/core"', framework: "nestjs", language: "javascript" },
+      { pattern: '"fastify"', framework: "fastify", language: "javascript" },
+      { pattern: '"next"', framework: "next", language: "javascript" },
+      { pattern: '"@hapi/hapi"', framework: "hapi", language: "javascript" },
+      { pattern: '"koa"', framework: "koa", language: "javascript" },
     ],
   },
   {
@@ -109,9 +123,7 @@ const MANIFEST_FRAMEWORK_CHECKS: Array<{
   },
   {
     file: "pom.xml",
-    patterns: [
-      { pattern: "spring", framework: "spring", language: "java" },
-    ],
+    patterns: [{ pattern: "spring", framework: "spring", language: "java" }],
   },
 ];
 
@@ -138,9 +150,7 @@ export async function detectAttackSurfaces(
   return results;
 }
 
-async function detectModuleAttackSurface(
-  moduleDir: string,
-): Promise<AttackSurfaceAnnotation> {
+async function detectModuleAttackSurface(moduleDir: string): Promise<AttackSurfaceAnnotation> {
   const entryPointCounts = new Map<EntryPointType, number>();
   const detectedFrameworks: FrameworkDetection[] = [];
 
@@ -172,10 +182,7 @@ async function detectModuleAttackSurface(
       for (const ep of ENTRY_POINT_PATTERNS) {
         const matches = content.match(new RegExp(ep.pattern.source, "gim"));
         if (matches) {
-          entryPointCounts.set(
-            ep.type,
-            (entryPointCounts.get(ep.type) ?? 0) + matches.length,
-          );
+          entryPointCounts.set(ep.type, (entryPointCounts.get(ep.type) ?? 0) + matches.length);
         }
       }
     } catch {
@@ -201,7 +208,12 @@ function mergeAttackSurfaceAnnotations(
   annotations: AttackSurfaceAnnotation[],
 ): AttackSurfaceAnnotation {
   if (annotations.length === 0) {
-    return { isExternalFacing: false, entryPointTypes: [], entryPointCount: 0, detectedFrameworks: [] };
+    return {
+      isExternalFacing: false,
+      entryPointTypes: [],
+      entryPointCount: 0,
+      detectedFrameworks: [],
+    };
   }
   if (annotations.length === 1) return annotations[0];
 
@@ -228,9 +240,20 @@ function mergeAttackSurfaceAnnotations(
 // ── File Walking ───────────────────────────────────────────────────────
 
 const SOURCE_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-  ".py", ".go", ".rs", ".java", ".kt", ".cs",
-  ".rb", ".php",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".py",
+  ".go",
+  ".rs",
+  ".java",
+  ".kt",
+  ".cs",
+  ".rb",
+  ".php",
 ]);
 
 async function collectSourceFiles(
@@ -276,23 +299,21 @@ async function collectSourceFiles(
 /**
  * Format a summary of attack surfaces for logging.
  */
-export function formatAttackSurfaceSummary(
-  surfaces: Map<string, AttackSurfaceAnnotation>,
-): string {
+export function formatAttackSurfaceSummary(surfaces: Map<string, AttackSurfaceAnnotation>): string {
   const lines: string[] = [];
-  const sorted = [...surfaces.entries()]
-    .sort(([, a], [, b]) => {
-      if (a.isExternalFacing !== b.isExternalFacing) return a.isExternalFacing ? -1 : 1;
-      return b.entryPointCount - a.entryPointCount;
-    });
+  const sorted = [...surfaces.entries()].sort(([, a], [, b]) => {
+    if (a.isExternalFacing !== b.isExternalFacing) return a.isExternalFacing ? -1 : 1;
+    return b.entryPointCount - a.entryPointCount;
+  });
 
   for (const [name, surface] of sorted.slice(0, 15)) {
     const tag = surface.isExternalFacing ? "EXTERNAL" : "internal";
-    const frameworks = surface.detectedFrameworks.length > 0
-      ? ` (${surface.detectedFrameworks.join(", ")})`
-      : "";
+    const frameworks =
+      surface.detectedFrameworks.length > 0 ? ` (${surface.detectedFrameworks.join(", ")})` : "";
     const types = surface.entryPointTypes.join(", ") || "none";
-    lines.push(`  [${tag}] ${name}: ${surface.entryPointCount} entry points (${types})${frameworks}`);
+    lines.push(
+      `  [${tag}] ${name}: ${surface.entryPointCount} entry points (${types})${frameworks}`,
+    );
   }
   return lines.join("\n");
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { invariantExtractTask, __invariantExtractInternals } from "../../../../src/agents/tasks/invariant-analysis/extract.js";
+import {
+  __invariantExtractInternals,
+  invariantExtractTask,
+} from "../../../../src/agents/tasks/invariant-analysis/extract.js";
 
 const { buildExtractionPrompt, parseInvariants, normalizeInvariant } = __invariantExtractInternals;
 
@@ -14,7 +17,14 @@ describe("invariantExtractTask", () => {
 describe("buildExtractionPrompt", () => {
   it("includes repo context when provided", () => {
     const prompt = buildExtractionPrompt(
-      { languages: ["Python"], frameworks: ["Django"], authPatterns: ["JWT"], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Python"],
+        frameworks: ["Django"],
+        authPatterns: ["JWT"],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       true,
       200,
     );
@@ -62,9 +72,39 @@ describe("parseInvariants", () => {
   it("filters non-security invariants when securityOnly", () => {
     const raw = {
       invariants: [
-        { id: "inv-1", kind: "security-invariant", filePath: "a.ts", startLine: 1, endLine: 1, statement: "Auth required", confidence: 0.9, derivedFrom: "x", securityRelevance: "high" },
-        { id: "inv-2", kind: "data-invariant", filePath: "b.ts", startLine: 1, endLine: 1, statement: "Array not empty", confidence: 0.9, derivedFrom: "x", securityRelevance: "none" },
-        { id: "inv-3", kind: "precondition", filePath: "c.ts", startLine: 1, endLine: 1, statement: "Low relevance", confidence: 0.8, derivedFrom: "x", securityRelevance: "low" },
+        {
+          id: "inv-1",
+          kind: "security-invariant",
+          filePath: "a.ts",
+          startLine: 1,
+          endLine: 1,
+          statement: "Auth required",
+          confidence: 0.9,
+          derivedFrom: "x",
+          securityRelevance: "high",
+        },
+        {
+          id: "inv-2",
+          kind: "data-invariant",
+          filePath: "b.ts",
+          startLine: 1,
+          endLine: 1,
+          statement: "Array not empty",
+          confidence: 0.9,
+          derivedFrom: "x",
+          securityRelevance: "none",
+        },
+        {
+          id: "inv-3",
+          kind: "precondition",
+          filePath: "c.ts",
+          startLine: 1,
+          endLine: 1,
+          statement: "Low relevance",
+          confidence: 0.8,
+          derivedFrom: "x",
+          securityRelevance: "low",
+        },
       ],
     };
 

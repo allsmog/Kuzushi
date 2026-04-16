@@ -2,8 +2,8 @@ import type { FindingRow, Verdict } from "./types.js";
 
 export type {
   QualityGateConfig,
-  QualityGateViolation,
   QualityGateResult,
+  QualityGateViolation,
 } from "./quality-gate-types.js";
 
 import type {
@@ -26,10 +26,7 @@ const TP_VERDICTS = new Set<Verdict>(["tp"]);
  */
 export function evaluateQualityGates(
   findings: ReadonlyArray<
-    Pick<
-      FindingRow,
-      "fingerprint" | "verdict" | "confidence" | "severity" | "verifyExploitable"
-    >
+    Pick<FindingRow, "fingerprint" | "verdict" | "confidence" | "severity" | "verifyExploitable">
   >,
   config: QualityGateConfig,
 ): QualityGateResult {
@@ -38,9 +35,7 @@ export function evaluateQualityGates(
   // Gate 1: failOnHighSeverityTP — any high/critical true positive = fail
   if (config.failOnHighSeverityTP) {
     const offending = findings.filter(
-      (f) =>
-        TP_VERDICTS.has(f.verdict) &&
-        HIGH_SEVERITIES.has(f.severity.toUpperCase()),
+      (f) => TP_VERDICTS.has(f.verdict) && HIGH_SEVERITIES.has(f.severity.toUpperCase()),
     );
     if (offending.length > 0) {
       violations.push({
@@ -66,9 +61,7 @@ export function evaluateQualityGates(
   // Gate 3: minTriageConfidence — findings with confidence below threshold = fail
   if (config.minTriageConfidence != null) {
     const lowConfidence = findings.filter(
-      (f) =>
-        f.verdict !== "fp" &&
-        f.confidence < config.minTriageConfidence!,
+      (f) => f.verdict !== "fp" && f.confidence < config.minTriageConfidence!,
     );
     if (lowConfidence.length > 0) {
       violations.push({
@@ -81,9 +74,7 @@ export function evaluateQualityGates(
 
   // Gate 4: failOnExploitable — confirmed exploitable finding = fail
   if (config.failOnExploitable) {
-    const exploitable = findings.filter(
-      (f) => f.verifyExploitable === 1,
-    );
+    const exploitable = findings.filter((f) => f.verifyExploitable === 1);
     if (exploitable.length > 0) {
       violations.push({
         rule: "failOnExploitable",

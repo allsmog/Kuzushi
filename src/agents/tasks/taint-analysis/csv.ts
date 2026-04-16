@@ -1,7 +1,5 @@
 export function parseCsvRecords(content: string): string[][] {
-  const normalized = content.startsWith("\uFEFF")
-    ? content.slice(1)
-    : content;
+  const normalized = content.startsWith("\uFEFF") ? content.slice(1) : content;
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
@@ -11,10 +9,10 @@ export function parseCsvRecords(content: string): string[][] {
     const char = normalized[idx];
 
     if (inQuotes) {
-      if (char === "\"") {
+      if (char === '"') {
         const next = normalized[idx + 1];
-        if (next === "\"") {
-          cell += "\"";
+        if (next === '"') {
+          cell += '"';
           idx += 1;
         } else {
           inQuotes = false;
@@ -25,7 +23,7 @@ export function parseCsvRecords(content: string): string[][] {
       continue;
     }
 
-    if (char === "\"") {
+    if (char === '"') {
       inQuotes = true;
       continue;
     }
@@ -70,7 +68,9 @@ export function isCsvRecordBlank(record: string[]): boolean {
   return record.every((value) => value.trim().length === 0);
 }
 
-export function normalizeCandidateMarker(value: string | undefined): "source_candidate" | "sink_candidate" | null {
+export function normalizeCandidateMarker(
+  value: string | undefined,
+): "source_candidate" | "sink_candidate" | null {
   const marker = value?.trim().toLowerCase();
   if (marker === "source_candidate" || marker === "sink_candidate") {
     return marker;
@@ -78,7 +78,10 @@ export function normalizeCandidateMarker(value: string | undefined): "source_can
   return null;
 }
 
-export function countCandidateCsvRecords(content: string, expectedKind: "source_candidate" | "sink_candidate"): number {
+export function countCandidateCsvRecords(
+  content: string,
+  expectedKind: "source_candidate" | "sink_candidate",
+): number {
   const rows = parseCsvRecords(content);
   let count = 0;
 
@@ -102,7 +105,7 @@ export function toCsvRow(cells: string[]): string {
       if (!/[",\r\n]/.test(value)) {
         return value;
       }
-      return `"${value.replaceAll("\"", "\"\"")}"`;
+      return `"${value.replaceAll('"', '""')}"`;
     })
     .join(",");
 }

@@ -3,10 +3,7 @@ import type { KuzushiConfig } from "../types.js";
 
 export const BUS_BACKENDS = new Set<string>(["in-process"]);
 
-export const AGENT_RUNTIME_BACKENDS = new Set<string>([
-  "claude",
-  "pi-ai",
-]);
+export const AGENT_RUNTIME_BACKENDS = new Set<string>(["claude", "pi-ai"]);
 
 const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() || taintAnalysisRoot;
 
@@ -43,8 +40,14 @@ export const DEFAULTS: KuzushiConfig = {
   tasks: ["semgrep"],
   severity: ["ERROR", "WARNING"],
   excludePatterns: [
-    "test", "tests", "spec", "vendor",
-    "node_modules", "__tests__", "*.min.js", "*.min.css",
+    "test",
+    "tests",
+    "spec",
+    "vendor",
+    "node_modules",
+    "__tests__",
+    "*.min.js",
+    "*.min.css",
   ],
   llmRescoreEnabled: true,
   fpFilterEnabled: true,
@@ -67,7 +70,7 @@ export const DEFAULTS: KuzushiConfig = {
   codeGraphEnabled: false,
   multiStrategyMode: "off",
   multiStrategyBudgetUsd: 2.0,
-  multiStrategyPerStrategyBudgetUsd: 0.50,
+  multiStrategyPerStrategyBudgetUsd: 0.5,
   multiStrategyTimeoutMs: 60_000,
   multiStrategyAutoRuleGeneration: false,
   multiStrategyRescanWithRules: false,

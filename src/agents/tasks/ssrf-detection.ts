@@ -1,35 +1,42 @@
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageInvestigationModule,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../security-profiles.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
+import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
-import { getProfilesForTask, formatProfilesForPrompt } from "../../security-profiles.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
-import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime } from "./runtime-overrides.js";
-import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
-import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
-import { resolveTaskAllowedTools } from "./runtime-overrides.js";
-import type { ApplicationModel } from "../../types.js";
 import {
-  normalizeFilePath,
   computeDetectionFingerprint,
   dedupAndRankFindings,
-  runLens,
   type LensResult,
+  normalizeFilePath,
+  runLens,
 } from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
+import {
+  formatFileTreeForPrompt,
+  formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
+} from "./pre-read-prompt.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
+import {
+  buildApplicationModelSection,
+  buildThreatScenarioEvidenceSection,
+} from "./scenario-guidance.js";
+import { buildThreatModelLeadsSection, resolveThreatModelOutput } from "./threat-model-guidance.js";
 
 const log = createLogger({ stage: "ssrf-detect" });
 
@@ -43,9 +50,29 @@ const SSRF_DETECTION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
-          category: { type: "string", enum: ["url-from-user-input", "missing-allowlist", "redirect-following", "internal-service-url", "cloud-metadata", "scheme-confusion", "websocket-ssrf"] },
+          category: {
+            type: "string",
+            enum: [
+              "url-from-user-input",
+              "missing-allowlist",
+              "redirect-following",
+              "internal-service-url",
+              "cloud-metadata",
+              "scheme-confusion",
+              "websocket-ssrf",
+            ],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -85,7 +112,16 @@ function resolveConfig(ctx: TaskContext): SsrfDetectionConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, profileLines: string[] = [], fileIndex?: FileIndex, preRead?: PreReadResult, threatModelContext?: string, appModelContext?: string, scenarioContext?: string): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  profileLines: string[] = [],
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+  threatModelContext?: string,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
 
   const contextLines = repoContext
@@ -112,8 +148,11 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to check",
     "",
-    languageTuningModule({ taskId: "ssrf-detection", repoContext, frameworks: repoContext?.frameworks }) ||
-    "### url-from-user-input (CWE-918)",
+    languageTuningModule({
+      taskId: "ssrf-detection",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) || "### url-from-user-input (CWE-918)",
     "User-controlled URLs passed to HTTP client functions without validation.",
     "Sink functions: fetch, axios, http.get, urllib, HttpClient, requests.get, http.request.",
     "Check if URL/host/path components come from request parameters, headers, or body.",
@@ -183,14 +222,25 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         "Only report SSRF where you can verify user input reaches an HTTP request sink.",
         "Do NOT report internal-only HTTP calls with hardcoded URLs.",
         "Do NOT report HTTP calls in test files or development scripts.",
-        ...languageAntiHallucinationExtras({ taskId: "ssrf-detection", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "ssrf-detection",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -236,13 +286,17 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 function computeFingerprint(repoName: string, filePath: string, f: SsrfDetectionFinding): string {
-  return computeDetectionFingerprint([repoName, "ssrf-detect", f.category, filePath, String(f.startLine)]);
+  return computeDetectionFingerprint([
+    repoName,
+    "ssrf-detect",
+    f.category,
+    filePath,
+    String(f.startLine),
+  ]);
 }
 
 export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
@@ -266,10 +320,17 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
       fileIndex,
       preRead,
     );
-    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as
+      | ApplicationModel
+      | undefined;
     const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
     const appModelContext = buildApplicationModelSection("ssrf-detect", applicationModel);
-    const scenarioContext = await buildThreatScenarioEvidenceSection("ssrf-detect", context.repoRoot, applicationModel, scenarioOutput);
+    const scenarioContext = await buildThreatScenarioEvidenceSection(
+      "ssrf-detect",
+      context.repoRoot,
+      applicationModel,
+      scenarioOutput,
+    );
 
     const tag = "[ssrf-detect]";
 
@@ -279,7 +340,15 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
     // Run lenses in parallel: local sink review + cross-function dataflow
     const lensPromises: Array<Promise<LensResult>> = [
       runSsrfLens(
-        buildLocalSinkPrompt(repoContext, perLensMax, profileLines, preRead, threatModelContext, appModelContext, scenarioContext),
+        buildLocalSinkPrompt(
+          repoContext,
+          perLensMax,
+          profileLines,
+          preRead,
+          threatModelContext,
+          appModelContext,
+          scenarioContext,
+        ),
         context,
         model,
         `${tag}/local-sink`,
@@ -288,7 +357,16 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
         return { output: { findings: [] }, costUsd: 0 };
       }),
       runSsrfLens(
-        buildCrossFunctionPrompt(repoContext, perLensMax, profileLines, fileIndex, preRead, threatModelContext, appModelContext, scenarioContext),
+        buildCrossFunctionPrompt(
+          repoContext,
+          perLensMax,
+          profileLines,
+          fileIndex,
+          preRead,
+          threatModelContext,
+          appModelContext,
+          scenarioContext,
+        ),
         context,
         model,
         `${tag}/cross-function`,
@@ -305,13 +383,14 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
     const allFindings: Finding[] = [];
     for (const result of lensResults) {
       totalCostUsd += result.costUsd;
-      allFindings.push(...normalizeFindings(result.output, context.repoRoot, context.repoName, perLensMax));
+      allFindings.push(
+        ...normalizeFindings(result.output, context.repoRoot, context.repoName, perLensMax),
+      );
     }
 
-    return attachTaskOutputMeta(
-      dedupAndRankFindings(allFindings, maxFindings),
-      { costUsd: totalCostUsd },
-    );
+    return attachTaskOutputMeta(dedupAndRankFindings(allFindings, maxFindings), {
+      costUsd: totalCostUsd,
+    });
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
@@ -329,7 +408,9 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
         "- Are there allowlists or validation in place?",
         "- Can the HTTP client reach internal services?",
         "- Are redirects followed that could bypass validation?",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };
@@ -372,11 +453,17 @@ function buildLocalSinkPrompt(
       extra: [
         "Only report SSRF where user input reaches an HTTP request sink in the provided files.",
         "Do NOT report internal-only HTTP calls with hardcoded URLs.",
-        ...languageAntiHallucinationExtras({ taskId: "ssrf-detection", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "ssrf-detection",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildCrossFunctionPrompt(
@@ -415,11 +502,17 @@ function buildCrossFunctionPrompt(
       extra: [
         "Only report SSRF where you can verify user input crosses at least one function boundary to reach an HTTP sink.",
         "Do NOT report single-file, obvious cases — focus on non-trivial data flows.",
-        ...languageAntiHallucinationExtras({ taskId: "ssrf-detection", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "ssrf-detection",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export const __ssrfDetectionInternals = {

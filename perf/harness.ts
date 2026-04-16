@@ -13,8 +13,8 @@
  */
 
 import { writeFileSync } from "node:fs";
-import { parseArgs } from "node:util";
 import { performance } from "node:perf_hooks";
+import { parseArgs } from "node:util";
 
 import { benchDedup } from "./bench-dedup.js";
 import { benchRegistry } from "./bench-registry.js";
@@ -101,8 +101,7 @@ function printTable(results: BenchResult[]): void {
   const widths = cols.map((c) => Math.max(c.header.length, ...results.map((r) => c.get(r).length)));
 
   const sep = widths.map((w) => "-".repeat(w + 2)).join("+");
-  const fmt = (cells: string[]) =>
-    cells.map((cell, i) => ` ${cell.padEnd(widths[i])} `).join("|");
+  const fmt = (cells: string[]) => cells.map((cell, i) => ` ${cell.padEnd(widths[i])} `).join("|");
 
   console.log(sep);
   console.log(fmt(cols.map((c) => c.header)));
@@ -130,7 +129,10 @@ Available cases: dedup, registry, store`);
   }
 
   const enabled = new Set(
-    (values.cases ?? "dedup,registry,store").split(",").map((s) => s.trim()).filter(Boolean),
+    (values.cases ?? "dedup,registry,store")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
   );
 
   const benches: BenchCase[] = [];

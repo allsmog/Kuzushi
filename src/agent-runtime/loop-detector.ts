@@ -56,10 +56,10 @@ export class LoopDetector {
     }
 
     return (
-      this.detectExactRepeat()
-      ?? this.detectPingPong()
-      ?? this.detectExpandingLoop()
-      ?? this.detectNoProgress()
+      this.detectExactRepeat() ??
+      this.detectPingPong() ??
+      this.detectExpandingLoop() ??
+      this.detectNoProgress()
     );
   }
 
@@ -105,8 +105,10 @@ export class LoopDetector {
       const cur = this.window[i];
       const prev = this.window[i - 1];
       if (
-        cur.tool === b.tool && cur.argsHash === b.argsHash
-        && prev.tool === a.tool && prev.argsHash === a.argsHash
+        cur.tool === b.tool &&
+        cur.argsHash === b.argsHash &&
+        prev.tool === a.tool &&
+        prev.argsHash === a.argsHash
       ) {
         cycles++;
       } else {

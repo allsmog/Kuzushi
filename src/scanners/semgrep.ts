@@ -1,9 +1,9 @@
 import path from "node:path";
+import { loadCustomRulesDir } from "../strategies/rule-persistence.js";
 import type { ScanOpts } from "../types.js";
-import type { Finding, TaskConfig, ScannerPlugin, TriageAgentConfig } from "./types.js";
 import { resolveSemgrepBinary } from "./resolve-semgrep.js";
 import { runSemgrep, selectFindings } from "./run-semgrep.js";
-import { loadCustomRulesDir } from "../strategies/rule-persistence.js";
+import type { Finding, ScannerPlugin, TaskConfig, TriageAgentConfig } from "./types.js";
 
 export class SemgrepPlugin implements ScannerPlugin {
   readonly id = "semgrep";

@@ -99,10 +99,7 @@ export function expandToolGroups(tools: string[]): string[] {
  * @param layers - Policy layers in priority order (lowest first)
  * @returns The resolved set of allowed tool names
  */
-export function resolveToolPolicy(
-  availableTools: string[],
-  layers: ToolPolicyLayer[],
-): string[] {
+export function resolveToolPolicy(availableTools: string[], layers: ToolPolicyLayer[]): string[] {
   let allowed = new Set(availableTools);
   const globalDeny = new Set<string>();
 

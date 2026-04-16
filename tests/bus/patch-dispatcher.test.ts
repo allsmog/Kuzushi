@@ -1,6 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { RunState } from "../../src/bus/orchestrator/types.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunContext } from "../../src/bus/events.js";
+import type { RunState } from "../../src/bus/orchestrator/types.js";
 
 // Minimal RunContext for testing
 function makeRunContext(): RunContext {
@@ -13,11 +13,22 @@ function makeRunContext(): RunContext {
 }
 
 // Minimal patch-related RunState fields
-function makePatchState(): Pick<RunState,
-  "autoPatchEnabled" | "patchCandidates" | "patchQueue" | "patchInFlight" |
-  "patchCompleted" | "patchVerified" | "patchFailed" | "patchCostUsd" |
-  "patchErrors" | "patchDispatching" | "patchStarted" | "budgetExceeded" |
-  "config" | "context"
+function makePatchState(): Pick<
+  RunState,
+  | "autoPatchEnabled"
+  | "patchCandidates"
+  | "patchQueue"
+  | "patchInFlight"
+  | "patchCompleted"
+  | "patchVerified"
+  | "patchFailed"
+  | "patchCostUsd"
+  | "patchErrors"
+  | "patchDispatching"
+  | "patchStarted"
+  | "budgetExceeded"
+  | "config"
+  | "context"
 > {
   return {
     autoPatchEnabled: true,

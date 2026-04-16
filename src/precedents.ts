@@ -41,8 +41,7 @@ export function formatPrecedentsForPrompt(precedents: Precedents | undefined): s
   if (!precedents) return [];
 
   const hasContent =
-    precedents.architecturalPrecedents.length > 0 ||
-    precedents.signalCriteria.length > 0;
+    precedents.architecturalPrecedents.length > 0 || precedents.signalCriteria.length > 0;
 
   if (!hasContent) return [];
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPocExecutor } from "../../src/poc-executor/index.js";
 import { DockerPocExecutor } from "../../src/poc-executor/docker.js";
+import { createPocExecutor } from "../../src/poc-executor/index.js";
 import { ProcessPocExecutor } from "../../src/poc-executor/process.js";
 
 describe("createPocExecutor", () => {

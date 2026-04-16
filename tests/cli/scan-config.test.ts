@@ -1,8 +1,11 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULTS } from "../../src/config.js";
 import { CliUsageError } from "../../src/cli/errors.js";
-import { applyScanCommandConfigOverrides, type ScanCommandOptions } from "../../src/cli/scan-config.js";
+import {
+  applyScanCommandConfigOverrides,
+  type ScanCommandOptions,
+} from "../../src/cli/scan-config.js";
+import { DEFAULTS } from "../../src/config.js";
 
 function makeOptions(overrides: Partial<ScanCommandOptions> = {}): ScanCommandOptions {
   return {
@@ -25,14 +28,17 @@ describe("applyScanCommandConfigOverrides", () => {
   it("applies validated numeric and path overrides", () => {
     const config = structuredClone(DEFAULTS);
 
-    applyScanCommandConfigOverrides(config, makeOptions({
-      verify: true,
-      verifyMaxTurns: 9,
-      verifyConcurrency: 4,
-      verifyMinConfidence: 0.7,
-      output: "report.md",
-      json: "report.json",
-    }));
+    applyScanCommandConfigOverrides(
+      config,
+      makeOptions({
+        verify: true,
+        verifyMaxTurns: 9,
+        verifyConcurrency: 4,
+        verifyMinConfidence: 0.7,
+        output: "report.md",
+        json: "report.json",
+      }),
+    );
 
     expect(config.verify).toBe(true);
     expect(config.verifyMaxTurns).toBe(9);
@@ -45,12 +51,15 @@ describe("applyScanCommandConfigOverrides", () => {
   it("merges enabled tasks and runtime overrides", () => {
     const config = structuredClone(DEFAULTS);
 
-    applyScanCommandConfigOverrides(config, makeOptions({
-      tasks: "custom-a, custom-b",
-      apiKey: "  sk-test  ",
-      baseUrl: " https://proxy.example/ ",
-      qualityGate: true,
-    }));
+    applyScanCommandConfigOverrides(
+      config,
+      makeOptions({
+        tasks: "custom-a, custom-b",
+        apiKey: "  sk-test  ",
+        baseUrl: " https://proxy.example/ ",
+        qualityGate: true,
+      }),
+    );
 
     expect(config.tasks).toEqual([...DEFAULTS.tasks, "custom-a", "custom-b"]);
     expect(config.agentRuntimeConfig).toEqual({
@@ -67,9 +76,12 @@ describe("applyScanCommandConfigOverrides", () => {
     const config = structuredClone(DEFAULTS);
     config.tasks = ["custom-task"];
 
-    applyScanCommandConfigOverrides(config, makeOptions({
-      cryptoBehavioralTest: true,
-    }));
+    applyScanCommandConfigOverrides(
+      config,
+      makeOptions({
+        cryptoBehavioralTest: true,
+      }),
+    );
 
     expect(config.cryptoBehavioralTestEnabled).toBe(true);
     expect(config.tasks).toContain("custom-task");
@@ -79,14 +91,17 @@ describe("applyScanCommandConfigOverrides", () => {
   it("applies dynamic analysis and taint-diff overrides", () => {
     const config = structuredClone(DEFAULTS);
 
-    applyScanCommandConfigOverrides(config, makeOptions({
-      verify: true,
-      dynamicAnalysis: true,
-      dynamicMaxCandidates: 10,
-      dynamicMinScore: 8,
-      taintDiffBase: "main",
-      taintDiffMode: "baseline",
-    }));
+    applyScanCommandConfigOverrides(
+      config,
+      makeOptions({
+        verify: true,
+        dynamicAnalysis: true,
+        dynamicMaxCandidates: 10,
+        dynamicMinScore: 8,
+        taintDiffBase: "main",
+        taintDiffMode: "baseline",
+      }),
+    );
 
     expect(config.verify).toBe(true);
     expect(config.dynamicAnalysisEnabled).toBe(true);
@@ -99,43 +114,68 @@ describe("applyScanCommandConfigOverrides", () => {
   it("rejects invalid unit interval values", () => {
     const config = structuredClone(DEFAULTS);
 
-    expect(() => applyScanCommandConfigOverrides(config, makeOptions({
-      verifyMinConfidence: 101,
-    }))).toThrowError(new CliUsageError("--verify-min-confidence must be a number between 0 and 1 (or 0-100 as a percentage)."));
+    expect(() =>
+      applyScanCommandConfigOverrides(
+        config,
+        makeOptions({
+          verifyMinConfidence: 101,
+        }),
+      ),
+    ).toThrowError(
+      new CliUsageError(
+        "--verify-min-confidence must be a number between 0 and 1 (or 0-100 as a percentage).",
+      ),
+    );
   });
 
   it("normalizes percentage-style verify-min-confidence (90 -> 0.9)", () => {
     const config = structuredClone(DEFAULTS);
-    applyScanCommandConfigOverrides(config, makeOptions({
-      verify: true,
-      verifyMinConfidence: 90,
-    }));
+    applyScanCommandConfigOverrides(
+      config,
+      makeOptions({
+        verify: true,
+        verifyMinConfidence: 90,
+      }),
+    );
     expect(config.verifyMinConfidence).toBe(0.9);
   });
 
   it("accepts standard unit interval verify-min-confidence", () => {
     const config = structuredClone(DEFAULTS);
-    applyScanCommandConfigOverrides(config, makeOptions({
-      verify: true,
-      verifyMinConfidence: 0.7,
-    }));
+    applyScanCommandConfigOverrides(
+      config,
+      makeOptions({
+        verify: true,
+        verifyMinConfidence: 0.7,
+      }),
+    );
     expect(config.verifyMinConfidence).toBe(0.7);
   });
 
   it("rejects poc harness without verification", () => {
     const config = structuredClone(DEFAULTS);
 
-    expect(() => applyScanCommandConfigOverrides(config, makeOptions({
-      pocHarness: true,
-    }))).toThrowError(new CliUsageError("--poc-harness requires --verify."));
+    expect(() =>
+      applyScanCommandConfigOverrides(
+        config,
+        makeOptions({
+          pocHarness: true,
+        }),
+      ),
+    ).toThrowError(new CliUsageError("--poc-harness requires --verify."));
   });
 
   it("rejects invalid taint diff modes", () => {
     const config = structuredClone(DEFAULTS);
 
-    expect(() => applyScanCommandConfigOverrides(config, makeOptions({
-      taintDiffMode: "bogus",
-    }))).toThrowError(new CliUsageError("--taint-diff-mode must be one of: delta, baseline."));
+    expect(() =>
+      applyScanCommandConfigOverrides(
+        config,
+        makeOptions({
+          taintDiffMode: "bogus",
+        }),
+      ),
+    ).toThrowError(new CliUsageError("--taint-diff-mode must be one of: delta, baseline."));
   });
 
   it("applies reference preset with deep-merged taskConfig", () => {
@@ -166,10 +206,13 @@ describe("applyScanCommandConfigOverrides", () => {
   it("reference preset does not override global model or tasks", () => {
     const config = structuredClone(DEFAULTS);
 
-    applyScanCommandConfigOverrides(config, makeOptions({
-      preset: "reference",
-      model: "anthropic:claude-opus-4-6",
-    }));
+    applyScanCommandConfigOverrides(
+      config,
+      makeOptions({
+        preset: "reference",
+        model: "anthropic:claude-opus-4-6",
+      }),
+    );
 
     // CLI --model sets the global model; preset doesn't fight it
     expect(config.model).toBe("anthropic:claude-opus-4-6");
@@ -232,10 +275,13 @@ describe("applyScanCommandConfigOverrides", () => {
   it("promotes tasks-only presets to explicit when CLI flags explicitly enable tasks", () => {
     const config = structuredClone(DEFAULTS);
 
-    applyScanCommandConfigOverrides(config, makeOptions({
-      preset: "fast",
-      tasks: "custom-detector",
-    }));
+    applyScanCommandConfigOverrides(
+      config,
+      makeOptions({
+        preset: "fast",
+        tasks: "custom-detector",
+      }),
+    );
 
     expect(config.tasks).toEqual(["semgrep", "custom-detector"]);
   });
@@ -243,8 +289,13 @@ describe("applyScanCommandConfigOverrides", () => {
   it("rejects unknown preset names", () => {
     const config = structuredClone(DEFAULTS);
 
-    expect(() => applyScanCommandConfigOverrides(config, makeOptions({
-      preset: "bogus",
-    }))).toThrowError(CliUsageError);
+    expect(() =>
+      applyScanCommandConfigOverrides(
+        config,
+        makeOptions({
+          preset: "bogus",
+        }),
+      ),
+    ).toThrowError(CliUsageError);
   });
 });

@@ -1,16 +1,16 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import type { MessageBus } from "./bus/types.js";
 import type {
-  TriageResultEvent,
-  VerificationResultEvent,
-  PocHarnessResultEvent,
-  PipelineCompleteEvent,
-  PipelineErrorEvent,
-  ScanCompleteEvent,
-  TriageCompleteEvent,
   PatchCompleteEvent,
   PatchVerifyCompleteEvent,
+  PipelineCompleteEvent,
+  PipelineErrorEvent,
+  PocHarnessResultEvent,
+  ScanCompleteEvent,
+  TriageCompleteEvent,
+  TriageResultEvent,
+  VerificationResultEvent,
 } from "./bus/events.js";
+import type { MessageBus } from "./bus/types.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger({ stage: "streaming" });
@@ -47,7 +47,7 @@ export function startStreamingServer(
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
+        Connection: "keep-alive",
       });
 
       // Send initial connection event
@@ -200,13 +200,14 @@ export function startStreamingServer(
     get port() {
       return actualPort();
     },
-    close: () => new Promise<void>((resolve) => {
-      for (const client of clients) {
-        client.end();
-      }
-      clients.clear();
-      server.close(() => resolve());
-    }),
+    close: () =>
+      new Promise<void>((resolve) => {
+        for (const client of clients) {
+          client.end();
+        }
+        clients.clear();
+        server.close(() => resolve());
+      }),
   };
 }
 

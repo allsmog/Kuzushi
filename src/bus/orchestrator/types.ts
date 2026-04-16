@@ -1,7 +1,11 @@
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
+import type { PipelineHookChain } from "../../hooks/chain.js";
+import type { Precedents } from "../../precedents.js";
 import type { Finding } from "../../scanners/types.js";
+import type { StageTimestamps } from "../../scoring/run-metrics.js";
+import type { GeneratedRule } from "../../strategies/types.js";
 import type {
   DynamicAnalysisRun,
   EnrichedRepoContext,
@@ -11,13 +15,9 @@ import type {
   RepoContext,
   ScanOpts,
   TriageResult,
-  VerificationResult,
   Verdict,
+  VerificationResult,
 } from "../../types.js";
-import type { GeneratedRule } from "../../strategies/types.js";
-import type { StageTimestamps } from "../../scoring/run-metrics.js";
-import type { PipelineHookChain } from "../../hooks/chain.js";
-import type { Precedents } from "../../precedents.js";
 import type { RunContext } from "../events.js";
 
 export interface QueuedFinding {
@@ -139,7 +139,12 @@ export interface RunState {
   budgetWarningEmitted: boolean;
   stageTimestamps: StageTimestamps;
   hookChain?: PipelineHookChain;
-  deadLetterFindings: Array<{ fingerprint: string; error: string; attempts: number; lastAttempt: string }>;
+  deadLetterFindings: Array<{
+    fingerprint: string;
+    error: string;
+    attempts: number;
+    lastAttempt: string;
+  }>;
   triageAttempts: Map<string, number>;
   verifyAttempts: Map<string, number>;
   dynamicAnalysisEnabled: boolean;

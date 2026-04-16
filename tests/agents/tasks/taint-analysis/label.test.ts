@@ -1,14 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { __taintAnalysisLabelInternals } from "../../../../src/agents/tasks/taint-analysis/label.js";
-import { TAINT_ANALYSIS_PASSES } from "../../../../src/agents/tasks/taint-analysis/types.js";
+import type { TiPriorDocument } from "../../../../src/agents/tasks/taint-analysis/ti-prior.js";
 import type {
   TaintAnalysisCandidate,
   TaintAnalysisLabelsDocument,
   TaintAnalysisPassEntry,
 } from "../../../../src/agents/tasks/taint-analysis/types.js";
-import type { TiPriorDocument } from "../../../../src/agents/tasks/taint-analysis/ti-prior.js";
+import { TAINT_ANALYSIS_PASSES } from "../../../../src/agents/tasks/taint-analysis/types.js";
 
 const TMP_DIR = path.join(import.meta.dirname, "..", "..", "..", ".tmp-taint-analysis-label");
 
@@ -162,7 +162,10 @@ describe("taint-analysis-label internals", () => {
       "utf-8",
     );
 
-    const candidates = await __taintAnalysisLabelInternals.parseCsvCandidates(csvPath, "source_candidate");
+    const candidates = await __taintAnalysisLabelInternals.parseCsvCandidates(
+      csvPath,
+      "source_candidate",
+    );
     expect(candidates).toHaveLength(2);
     expect(candidates[0].candidateKind).toBe("source_candidate");
     expect(candidates[0].callable).toBe("Query");
@@ -181,13 +184,16 @@ describe("taint-analysis-label internals", () => {
       csvPath,
       [
         "col0,col1,col2,col3,col4,col5,col6,col7",
-        "\"request.body\",source_candidate,Query,flow_kind=arg,receiver=req,module=backend/api.py,arg_index=0,line=123",
-        "\"request.params\",source_candidate,Read,flow_kind=result,receiver=req,module=backend/api.py,arg_index=-1,line=77",
+        '"request.body",source_candidate,Query,flow_kind=arg,receiver=req,module=backend/api.py,arg_index=0,line=123',
+        '"request.params",source_candidate,Read,flow_kind=result,receiver=req,module=backend/api.py,arg_index=-1,line=77',
       ].join("\n"),
       "utf-8",
     );
 
-    const candidates = await __taintAnalysisLabelInternals.parseCsvCandidates(csvPath, "source_candidate");
+    const candidates = await __taintAnalysisLabelInternals.parseCsvCandidates(
+      csvPath,
+      "source_candidate",
+    );
     expect(candidates).toHaveLength(2);
     expect(candidates[0]).toMatchObject({
       callable: "Query",
@@ -211,16 +217,19 @@ describe("taint-analysis-label internals", () => {
       csvPath,
       [
         "col0,col1,col2,col3,col4,col5,col6,col7",
-        "\"first line",
-        "second line, with \"\"quotes\"\"\",source_candidate,Raw,flow_kind=arg,receiver=queries,module=service/db.go,arg_index=0,line=321",
-        "\"single line\",sink_candidate,From,flow_kind=argument,receiver=qm,module=service/db.go,arg_index=0,line=55",
+        '"first line',
+        'second line, with ""quotes""",source_candidate,Raw,flow_kind=arg,receiver=queries,module=service/db.go,arg_index=0,line=321',
+        '"single line",sink_candidate,From,flow_kind=argument,receiver=qm,module=service/db.go,arg_index=0,line=55',
       ].join("\n"),
       "utf-8",
     );
 
-    const candidates = await __taintAnalysisLabelInternals.parseCsvCandidates(csvPath, "source_candidate");
+    const candidates = await __taintAnalysisLabelInternals.parseCsvCandidates(
+      csvPath,
+      "source_candidate",
+    );
     expect(candidates).toHaveLength(2);
-    expect(candidates[0]?.snippet).toBe("first line\nsecond line, with \"quotes\"");
+    expect(candidates[0]?.snippet).toBe('first line\nsecond line, with "quotes"');
     expect(candidates[0]?.flowKind).toBe("argument");
     expect(candidates[0]?.locationLine).toBe(321);
     expect(candidates[1]?.candidateKind).toBe("sink_candidate");
@@ -233,19 +242,32 @@ describe("taint-analysis-label internals", () => {
       csvPath,
       [
         "col0,col1,col2,col3,col4,col5,col6,col7",
-        "\"alpha\",source_candidate,Raw,flow_kind=argument,receiver=queries,module=a.go,arg_index=0,line=10",
-        "\"beta\",source_candidate,From,flow_kind=arg,receiver=qm,module=b.go,arg_index=0,line=11",
-        "\"gamma\",sink_candidate,ExecContext,flow_kind=argument,receiver=sql.DB,module=c.go,arg_index=1,line=22",
+        '"alpha",source_candidate,Raw,flow_kind=argument,receiver=queries,module=a.go,arg_index=0,line=10',
+        '"beta",source_candidate,From,flow_kind=arg,receiver=qm,module=b.go,arg_index=0,line=11',
+        '"gamma",sink_candidate,ExecContext,flow_kind=argument,receiver=sql.DB,module=c.go,arg_index=1,line=22',
       ].join("\n"),
       "utf-8",
     );
 
-    const candidates = await __taintAnalysisLabelInternals.parseCsvCandidates(csvPath, "source_candidate");
+    const candidates = await __taintAnalysisLabelInternals.parseCsvCandidates(
+      csvPath,
+      "source_candidate",
+    );
     const content = readFileSync(csvPath, "utf-8");
-    const sourceRows = __taintAnalysisLabelInternals.countCandidateCsvRecords(content, "source_candidate");
-    const sinkRows = __taintAnalysisLabelInternals.countCandidateCsvRecords(content, "sink_candidate");
-    const parsedSourceRows = candidates.filter((candidate) => candidate.candidateKind === "source_candidate").length;
-    const parsedSinkRows = candidates.filter((candidate) => candidate.candidateKind === "sink_candidate").length;
+    const sourceRows = __taintAnalysisLabelInternals.countCandidateCsvRecords(
+      content,
+      "source_candidate",
+    );
+    const sinkRows = __taintAnalysisLabelInternals.countCandidateCsvRecords(
+      content,
+      "sink_candidate",
+    );
+    const parsedSourceRows = candidates.filter(
+      (candidate) => candidate.candidateKind === "source_candidate",
+    ).length;
+    const parsedSinkRows = candidates.filter(
+      (candidate) => candidate.candidateKind === "sink_candidate",
+    ).length;
 
     expect(sourceRows).toBe(parsedSourceRows);
     expect(sinkRows).toBe(parsedSinkRows);
@@ -448,7 +470,8 @@ describe("taint-analysis-label internals", () => {
       }),
     ];
     const entries = candidates.map((candidate) => makeEntryFromCandidate(candidate));
-    const candidateFingerprint = __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
+    const candidateFingerprint =
+      __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
     const checkpointPath = path.join(TMP_DIR, "pass1.v2.json");
 
     await __taintAnalysisLabelInternals.writePassCheckpointV2(
@@ -481,7 +504,8 @@ describe("taint-analysis-label internals", () => {
       makeCandidate({ id: "sink-1", candidateKind: "sink_candidate", callable: "ExecContext" }),
     ];
     const entries = candidates.map((candidate) => makeEntryFromCandidate(candidate));
-    const candidateFingerprint = __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
+    const candidateFingerprint =
+      __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
     const checkpointPath = path.join(TMP_DIR, "fingerprint-mismatch.v2.json");
 
     await __taintAnalysisLabelInternals.writePassCheckpointV2(
@@ -511,7 +535,8 @@ describe("taint-analysis-label internals", () => {
       makeCandidate({ id: "sink-1", candidateKind: "sink_candidate", callable: "ExecContext" }),
     ];
     const entries = candidates.map((candidate) => makeEntryFromCandidate(candidate));
-    const candidateFingerprint = __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
+    const candidateFingerprint =
+      __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
     const passMismatchPath = path.join(TMP_DIR, "pass-mismatch.v2.json");
     const languageMismatchPath = path.join(TMP_DIR, "lang-mismatch.v2.json");
 
@@ -560,7 +585,8 @@ describe("taint-analysis-label internals", () => {
       makeCandidate({ id: "sink-1", candidateKind: "sink_candidate", callable: "ExecContext" }),
     ];
     const entries = candidates.map((candidate) => makeEntryFromCandidate(candidate));
-    const candidateFingerprint = __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
+    const candidateFingerprint =
+      __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
     const checkpointPath = path.join(TMP_DIR, "parser-version-mismatch.v2.json");
 
     await __taintAnalysisLabelInternals.writePassCheckpointV2(
@@ -608,7 +634,8 @@ describe("taint-analysis-label internals", () => {
         rationale: "Legacy sink label.",
       }),
     ];
-    const candidateFingerprint = __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
+    const candidateFingerprint =
+      __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
     const checkpointPath = path.join(TMP_DIR, "legacy-match.json");
     writeFileSync(checkpointPath, JSON.stringify(legacyEntries, null, 2), "utf-8");
 
@@ -702,7 +729,8 @@ describe("taint-analysis-label internals", () => {
       }),
     ];
     const entries: TaintAnalysisPassEntry[] = [makeEntryFromCandidate(candidates[0])];
-    const candidateFingerprint = __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
+    const candidateFingerprint =
+      __taintAnalysisLabelInternals.computeCandidatesFingerprint(candidates);
     const checkpointPath = path.join(TMP_DIR, "roundtrip.v2.json");
 
     await __taintAnalysisLabelInternals.writePassCheckpointV2(
@@ -739,7 +767,12 @@ describe("taint-analysis-label internals", () => {
   it("reclassifies Go format/log sink callables via deny-list", () => {
     const entries: TaintAnalysisPassEntry[] = [
       makePassEntry({ id: "sink-1", role: "sink", callable: "fmt.Sprintf", classification: "tp" }),
-      makePassEntry({ id: "sink-2", role: "sink", callable: "Errorf", classification: "candidate" }),
+      makePassEntry({
+        id: "sink-2",
+        role: "sink",
+        callable: "Errorf",
+        classification: "candidate",
+      }),
     ];
 
     const updated = __taintAnalysisLabelInternals.applySinkDenyList(entries, "go");
@@ -753,7 +786,12 @@ describe("taint-analysis-label internals", () => {
   it("preserves legitimate Go sinks not present in deny-list", () => {
     const entries: TaintAnalysisPassEntry[] = [
       makePassEntry({ id: "sink-1", role: "sink", callable: "ExecContext", classification: "tp" }),
-      makePassEntry({ id: "sink-2", role: "sink", callable: "QueryRow", classification: "candidate" }),
+      makePassEntry({
+        id: "sink-2",
+        role: "sink",
+        callable: "QueryRow",
+        classification: "candidate",
+      }),
     ];
 
     const updated = __taintAnalysisLabelInternals.applySinkDenyList(entries, "go");
@@ -785,7 +823,9 @@ describe("taint-analysis-label internals", () => {
 
     const updated = __taintAnalysisLabelInternals.applySinkDenyList(entries, "go");
     expect(updated[0]?.rationale).toContain("Looks like formatter call.");
-    expect(updated[0]?.rationale).toContain("[Overridden: Sprintf is a formatting/logging function, not a security-sensitive sink.]");
+    expect(updated[0]?.rationale).toContain(
+      "[Overridden: Sprintf is a formatting/logging function, not a security-sensitive sink.]",
+    );
   });
 
   it("reclassifies Python formatting/logging callables via deny-list", () => {

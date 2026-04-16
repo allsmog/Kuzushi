@@ -1,34 +1,34 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Finding } from "../src/scanners/types.js";
 import {
   createRun,
   deleteFindingsByFingerprints,
   deleteFindingsForRepo,
-  getPocHarnessCounts,
+  getActionableFindings,
+  getLatestCompletedRunFindings,
   getLatestResumableRun,
+  getPocHarnessCounts,
   getRun,
   getStoredTriageResults,
   getTotalCost,
   getTotalPocHarnessCost,
-  initDb,
   getTriagedFingerprints,
   getVerdictCounts,
-  getActionableFindings,
-  getLatestCompletedRunFindings,
-  updateFindingProofState,
+  initDb,
   updateFindingMetadata,
+  updateFindingProofState,
   updatePocHarnessResult,
-  updateRunCost,
   updateRunContext,
+  updateRunCost,
   updateRunFindings,
   updateRunStatus,
   upsertFinding,
 } from "../src/store.js";
-import type { KuzushiConfig, ScanOpts, TriageResult } from "../src/types.js";
-import type { Finding } from "../src/scanners/types.js";
 import { BATCH_TRIAGE_FALLBACK_RATIONALE } from "../src/triage.js";
+import type { KuzushiConfig, ScanOpts, TriageResult } from "../src/types.js";
 
 const TMP_DIR = path.join(import.meta.dirname, ".tmp-store-test");
 let dbPath: string;
@@ -98,9 +98,9 @@ afterEach(() => {
 describe("initDb", () => {
   it("creates database with findings table", () => {
     const db = initDb(dbPath);
-    const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table'")
-      .all() as Array<{ name: string }>;
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{
+      name: string;
+    }>;
     expect(tables.map((t) => t.name)).toContain("findings");
     db.close();
   });
@@ -117,7 +117,8 @@ describe("initDb", () => {
     // findings schema that is missing the triage_cost_usd column.
     const legacyDb = new Database(dbPath);
     legacyDb.pragma("journal_mode = WAL");
-    legacyDb.prepare(`
+    legacyDb
+      .prepare(`
       CREATE TABLE findings (
         fingerprint        TEXT PRIMARY KEY,
         scanner            TEXT NOT NULL DEFAULT 'semgrep',
@@ -136,11 +137,14 @@ describe("initDb", () => {
         created_at         TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
       )
-    `).run();
+    `)
+      .run();
     legacyDb.close();
 
     const migrated = initDb(dbPath);
-    const columns = migrated.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
+    const columns = migrated.prepare("PRAGMA table_info(findings)").all() as Array<{
+      name: string;
+    }>;
     expect(columns.some((column) => column.name === "triage_cost_usd")).toBe(true);
     migrated.close();
   });
@@ -150,7 +154,8 @@ describe("initDb", () => {
     // findings schema that has verification columns but no poc harness columns.
     const legacyDb = new Database(dbPath);
     legacyDb.pragma("journal_mode = WAL");
-    legacyDb.prepare(`
+    legacyDb
+      .prepare(`
       CREATE TABLE findings (
         fingerprint        TEXT PRIMARY KEY,
         scanner            TEXT NOT NULL DEFAULT 'semgrep',
@@ -177,11 +182,14 @@ describe("initDb", () => {
         created_at         TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
       )
-    `).run();
+    `)
+      .run();
     legacyDb.close();
 
     const migrated = initDb(dbPath);
-    const columns = migrated.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>;
+    const columns = migrated.prepare("PRAGMA table_info(findings)").all() as Array<{
+      name: string;
+    }>;
     expect(columns.some((column) => column.name === "poc_harness_path")).toBe(true);
     expect(columns.some((column) => column.name === "poc_harness_skipped")).toBe(true);
     expect(columns.some((column) => column.name === "poc_harness_cost_usd")).toBe(true);
@@ -444,7 +452,8 @@ describe("PoC harness persistence", () => {
     expect(counts.skipped).toBe(1);
     expect(getTotalPocHarnessCost(db, "repo")).toBeCloseTo(0.09, 8);
 
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(`
       SELECT
         poc_harness_path as pocHarnessPath,
         poc_harness_language as pocHarnessLanguage,
@@ -452,7 +461,8 @@ describe("PoC harness persistence", () => {
         poc_harness_skipped as pocHarnessSkipped
       FROM findings
       WHERE fingerprint = 'poc-a'
-    `).get() as {
+    `)
+      .get() as {
       pocHarnessPath: string | null;
       pocHarnessLanguage: string | null;
       pocHarnessParsed: number | null;
@@ -494,7 +504,13 @@ describe("getActionableFindings", () => {
     upsertFinding(db, makeFinding("current-1"), makeResult("current-1", "tp"), "repo", "HEAD");
     upsertFinding(db, makeFinding("current-2"), makeResult("current-2", "fp"), "repo", "HEAD");
     upsertFinding(db, makeFinding("stale-1"), makeResult("stale-1", "tp"), "repo", "HEAD");
-    upsertFinding(db, makeFinding("stale-2"), makeResult("stale-2", "needs_review"), "repo", "HEAD");
+    upsertFinding(
+      db,
+      makeFinding("stale-2"),
+      makeResult("stale-2", "needs_review"),
+      "repo",
+      "HEAD",
+    );
 
     const filtered = getActionableFindings(db, "repo", {
       includeFalsePositives: true,
@@ -614,7 +630,9 @@ describe("pipeline_runs", () => {
         entryPoints: ["src/pages/api/*"],
       },
       enrichment: {
-        customMiddleware: [{ name: "auth", filePath: "src/middleware/auth.ts", purpose: "auth gate" }],
+        customMiddleware: [
+          { name: "auth", filePath: "src/middleware/auth.ts", purpose: "auth gate" },
+        ],
         customSanitizers: [],
         trustBoundaries: [],
         dataClassifications: [],
@@ -623,8 +641,8 @@ describe("pipeline_runs", () => {
     });
 
     const run = getRun(db, runId);
-    expect(run?.contextJson).toContain("\"base\"");
-    expect(run?.contextJson).toContain("\"enrichment\"");
+    expect(run?.contextJson).toContain('"base"');
+    expect(run?.contextJson).toContain('"enrichment"');
     expect(run?.contextJson).toContain("Jobs handle uploaded files.");
     db.close();
   });
@@ -650,16 +668,20 @@ describe("pipeline_runs", () => {
 
     createRun(db, "run-started-first", "repo-abs", makeConfig(), makeScanOpts());
     updateRunFindings(db, "run-started-first", [makeFinding("fp-completed-last")]);
-    db.prepare("UPDATE pipeline_runs SET started_at = ? WHERE run_id = ?")
-      .run("2026-01-01T00:00:00.000Z", "run-started-first");
+    db.prepare("UPDATE pipeline_runs SET started_at = ? WHERE run_id = ?").run(
+      "2026-01-01T00:00:00.000Z",
+      "run-started-first",
+    );
     updateRunStatus(db, "run-started-first", "complete", {
       completedAt: "2026-01-01T00:20:00.000Z",
     });
 
     createRun(db, "run-started-last", "repo-abs", makeConfig(), makeScanOpts());
     updateRunFindings(db, "run-started-last", [makeFinding("fp-completed-earlier")]);
-    db.prepare("UPDATE pipeline_runs SET started_at = ? WHERE run_id = ?")
-      .run("2026-01-01T00:10:00.000Z", "run-started-last");
+    db.prepare("UPDATE pipeline_runs SET started_at = ? WHERE run_id = ?").run(
+      "2026-01-01T00:10:00.000Z",
+      "run-started-last",
+    );
     updateRunStatus(db, "run-started-last", "complete", {
       completedAt: "2026-01-01T00:15:00.000Z",
     });
@@ -686,7 +708,13 @@ describe("updateFindingProofState", () => {
 
   it("allows stronger evidence to replace weaker states", () => {
     const db = initDb(dbPath);
-    upsertFinding(db, makeFinding("fp-proof-upgrade"), makeResult("fp-proof-upgrade", "tp"), "repo", "HEAD");
+    upsertFinding(
+      db,
+      makeFinding("fp-proof-upgrade"),
+      makeResult("fp-proof-upgrade", "tp"),
+      "repo",
+      "HEAD",
+    );
 
     updateFindingProofState(db, "fp-proof-upgrade", "inconclusive");
     updateFindingProofState(db, "fp-proof-upgrade", "execution_attempted");
@@ -742,7 +770,7 @@ describe("updateFindingMetadata", () => {
     });
 
     const findings = getActionableFindings(db, "repo", { includeFalsePositives: true });
-    const match = findings.find(f => f.fingerprint === "fp-meta");
+    const match = findings.find((f) => f.fingerprint === "fp-meta");
     expect(match).toBeDefined();
     expect(match!.findingMetadata).toBeDefined();
     expect(match!.findingMetadata!.latestDynamicRunId).toBe("dyn-001");
@@ -769,7 +797,7 @@ describe("updateFindingMetadata", () => {
     });
 
     const findings = getActionableFindings(db, "repo", { includeFalsePositives: true });
-    const match = findings.find(f => f.fingerprint === "fp-merge");
+    const match = findings.find((f) => f.fingerprint === "fp-merge");
     expect(match!.findingMetadata!.latestDynamicRunId).toBe("dyn-001");
     expect(match!.findingMetadata!.latestPatchRunId).toBe("patch-001");
     expect(match!.findingMetadata!.dynamicRunIds).toEqual(["dyn-001", "dyn-002"]);

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULTS } from "../../src/config/defaults.js";
-import { applyScanCommandConfigOverrides, type ScanCommandOptions } from "../../src/cli/scan-config.js";
 import { resolveActivePiAiModels } from "../../src/cli/pi-ai.js";
+import {
+  applyScanCommandConfigOverrides,
+  type ScanCommandOptions,
+} from "../../src/cli/scan-config.js";
+import { DEFAULTS } from "../../src/config/defaults.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
 function makeConfig(): KuzushiConfig {
@@ -44,12 +47,15 @@ describe("task-only scan config", () => {
   it("applies per-task model overrides via --task-model", () => {
     const config = makeConfig();
 
-    applyScanCommandConfigOverrides(config, makeOptions({
-      taskModels: [
-        "systems-hunt=anthropic:claude-sonnet-4-6",
-        "threat-hunt=anthropic:claude-opus-4-1",
-      ],
-    }));
+    applyScanCommandConfigOverrides(
+      config,
+      makeOptions({
+        taskModels: [
+          "systems-hunt=anthropic:claude-sonnet-4-6",
+          "threat-hunt=anthropic:claude-opus-4-1",
+        ],
+      }),
+    );
 
     expect(config.taskConfig["systems-hunt"]?.model).toBe("anthropic:claude-sonnet-4-6");
     expect(config.taskConfig["threat-hunt"]?.model).toBe("anthropic:claude-opus-4-1");
@@ -63,11 +69,13 @@ describe("task-only scan config", () => {
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "reference" }));
 
     expect(config.tasks).toEqual(["semgrep", "systems-hunt"]);
-    expect(config.taskConfig["systems-hunt"]).toEqual(expect.objectContaining({
-      maxSurfaces: 12,
-      model: "anthropic:claude-orchid-preview",
-      maxConcurrentSurfaces: 3,
-    }));
+    expect(config.taskConfig["systems-hunt"]).toEqual(
+      expect.objectContaining({
+        maxSurfaces: 12,
+        model: "anthropic:claude-orchid-preview",
+        maxConcurrentSurfaces: 3,
+      }),
+    );
   });
 
   it("discovers stage-task models through reserved taskConfig ids", () => {
@@ -86,11 +94,13 @@ describe("task-only scan config", () => {
       ["semgrep", "systems-hunt"],
     );
 
-    expect(models).toEqual(expect.arrayContaining([
-      "anthropic:claude-sonnet-4-6",
-      "anthropic:claude-opus-4-1",
-      "openai:gpt-5",
-      "google:gemini-2.5-pro",
-    ]));
+    expect(models).toEqual(
+      expect.arrayContaining([
+        "anthropic:claude-sonnet-4-6",
+        "anthropic:claude-opus-4-1",
+        "openai:gpt-5",
+        "google:gemini-2.5-pro",
+      ]),
+    );
   });
 });

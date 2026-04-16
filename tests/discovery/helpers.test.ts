@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   buildManualModule,
   normalizeModuleName,
@@ -55,16 +55,44 @@ describe("resolveModuleDirectory", () => {
 describe("rejectOverlappingModules", () => {
   it("throws for nested module paths", () => {
     const modules: DiscoveredModule[] = [
-      { name: "parent", path: "platform", description: "", language: "Go", moduleKind: "standalone", discoveryEvidence: [] },
-      { name: "child", path: "platform/gateway", description: "", language: "Go", moduleKind: "standalone", discoveryEvidence: [] },
+      {
+        name: "parent",
+        path: "platform",
+        description: "",
+        language: "Go",
+        moduleKind: "standalone",
+        discoveryEvidence: [],
+      },
+      {
+        name: "child",
+        path: "platform/gateway",
+        description: "",
+        language: "Go",
+        moduleKind: "standalone",
+        discoveryEvidence: [],
+      },
     ];
     expect(() => rejectOverlappingModules(modules)).toThrow(/overlapping module roots/);
   });
 
   it("accepts non-overlapping paths", () => {
     const modules: DiscoveredModule[] = [
-      { name: "api", path: "services/api", description: "", language: "Go", moduleKind: "standalone", discoveryEvidence: [] },
-      { name: "web", path: "apps/web", description: "", language: "TypeScript", moduleKind: "standalone", discoveryEvidence: [] },
+      {
+        name: "api",
+        path: "services/api",
+        description: "",
+        language: "Go",
+        moduleKind: "standalone",
+        discoveryEvidence: [],
+      },
+      {
+        name: "web",
+        path: "apps/web",
+        description: "",
+        language: "TypeScript",
+        moduleKind: "standalone",
+        discoveryEvidence: [],
+      },
     ];
     expect(() => rejectOverlappingModules(modules)).not.toThrow();
   });
@@ -75,10 +103,14 @@ describe("buildManualModule", () => {
     const root = makeTempRoot();
     const moduleDir = path.join(root, "services", "api");
     mkdirSync(moduleDir, { recursive: true });
-    writeFileSync(path.join(moduleDir, "package.json"), JSON.stringify({
-      name: "api",
-      dependencies: { typescript: "^5.0.0" },
-    }), "utf-8");
+    writeFileSync(
+      path.join(moduleDir, "package.json"),
+      JSON.stringify({
+        name: "api",
+        dependencies: { typescript: "^5.0.0" },
+      }),
+      "utf-8",
+    );
     writeFileSync(path.join(moduleDir, "README.md"), "API service module", "utf-8");
 
     const module = await buildManualModule(root, "API", "services/api");

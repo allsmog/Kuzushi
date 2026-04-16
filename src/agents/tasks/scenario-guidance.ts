@@ -1,5 +1,4 @@
 import { getCodeIntelligenceProvider } from "../../analysis-support/index.js";
-import { isRecord } from "../../utils.js";
 import type {
   ApplicationModel,
   ApplicationOutboundClient,
@@ -7,10 +6,9 @@ import type {
   ThreatScenario,
   ThreatScenarioDetectorId,
 } from "../../types.js";
+import { isRecord } from "../../utils.js";
 
-export type ScenarioAwareDetectorTaskId =
-  | ThreatScenarioDetectorId
-  | "supply-chain-detect";
+export type ScenarioAwareDetectorTaskId = ThreatScenarioDetectorId | "supply-chain-detect";
 
 interface ThreatScenarioOutputLike {
   scenarios: ThreatScenario[];
@@ -31,9 +29,13 @@ export function buildApplicationModelSection(
   if (routes.length > 0) {
     lines.push("Routes:");
     for (const route of routes) {
-      lines.push(`- ${route.method} ${route.path} -> ${route.handlerSymbol ?? route.filePath} (${route.filePath}:${route.startLine})`);
+      lines.push(
+        `- ${route.method} ${route.path} -> ${route.handlerSymbol ?? route.filePath} (${route.filePath}:${route.startLine})`,
+      );
       if (route.middleware.length > 0 || route.authMechanisms.length > 0) {
-        lines.push(`  Guards: ${[...route.middleware, ...route.authMechanisms].slice(0, 5).join(", ")}`);
+        lines.push(
+          `  Guards: ${[...route.middleware, ...route.authMechanisms].slice(0, 5).join(", ")}`,
+        );
       }
     }
   }
@@ -84,15 +86,25 @@ export async function buildThreatScenarioEvidenceSection(
       lines.push(`  Expected guard: ${scenario.expectedGuard}`);
     }
     if (scenario.entryPoint) {
-      const snippet = await intelligence.getSnippet(scenario.entryPoint.filePath, scenario.entryPoint.startLine);
-      lines.push(`  Entry point: ${scenario.entryPoint.filePath}:${scenario.entryPoint.startLine}${scenario.entryPoint.method ? ` (${scenario.entryPoint.method} ${scenario.entryPoint.path ?? ""})` : ""}`);
+      const snippet = await intelligence.getSnippet(
+        scenario.entryPoint.filePath,
+        scenario.entryPoint.startLine,
+      );
+      lines.push(
+        `  Entry point: ${scenario.entryPoint.filePath}:${scenario.entryPoint.startLine}${scenario.entryPoint.method ? ` (${scenario.entryPoint.method} ${scenario.entryPoint.path ?? ""})` : ""}`,
+      );
       if (snippet) {
         lines.push(`  Entry snippet: ${snippet}`);
       }
     }
     if (scenario.sink) {
-      const snippet = await intelligence.getSnippet(scenario.sink.filePath, scenario.sink.startLine);
-      lines.push(`  Sink: ${scenario.sink.kind} at ${scenario.sink.filePath}:${scenario.sink.startLine}${scenario.sink.symbol ? ` [${scenario.sink.symbol}]` : ""}`);
+      const snippet = await intelligence.getSnippet(
+        scenario.sink.filePath,
+        scenario.sink.startLine,
+      );
+      lines.push(
+        `  Sink: ${scenario.sink.kind} at ${scenario.sink.filePath}:${scenario.sink.startLine}${scenario.sink.symbol ? ` [${scenario.sink.symbol}]` : ""}`,
+      );
       if (snippet) {
         lines.push(`  Sink snippet: ${snippet}`);
       }
@@ -108,7 +120,10 @@ export async function buildThreatScenarioEvidenceSection(
     }
     if (scenario.evidenceAnchors.length > 0) {
       lines.push(
-        `  Anchors: ${scenario.evidenceAnchors.slice(0, 3).map((anchor) => `${anchor.filePath}:${anchor.startLine} (${anchor.description})`).join("; ")}`,
+        `  Anchors: ${scenario.evidenceAnchors
+          .slice(0, 3)
+          .map((anchor) => `${anchor.filePath}:${anchor.startLine} (${anchor.description})`)
+          .join("; ")}`,
       );
     }
   }
@@ -129,10 +144,11 @@ function selectScenarios(
   scenarios: ThreatScenario[],
 ): ThreatScenario[] {
   if (taskId === "code-config-detect") {
-    return scenarios.filter((scenario) =>
-      scenario.detectorId === "dangerous-api-detect"
-      || scenario.detectorId === "auth-access-detect"
-      || scenario.detectorId === "security-misconfig-detect",
+    return scenarios.filter(
+      (scenario) =>
+        scenario.detectorId === "dangerous-api-detect" ||
+        scenario.detectorId === "auth-access-detect" ||
+        scenario.detectorId === "security-misconfig-detect",
     );
   }
 
@@ -147,7 +163,9 @@ function selectRoutes(
     return routes.filter((route) => route.method !== "GET" || route.authMechanisms.length > 0);
   }
   if (taskId === "graphql-security-detect") {
-    return routes.filter((route) => /graphql/i.test(route.path) || /graphql|resolver/i.test(route.filePath));
+    return routes.filter(
+      (route) => /graphql/i.test(route.path) || /graphql|resolver/i.test(route.filePath),
+    );
   }
   if (taskId === "auth-access-detect" || taskId === "code-config-detect") {
     return routes.filter((route) => route.authMechanisms.length > 0 || route.middleware.length > 0);

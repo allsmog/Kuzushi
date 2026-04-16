@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "vitest";
@@ -41,7 +41,7 @@ describeSmoke("taint-analysis-run CodeQL smoke", () => {
         "name: smoke/taint-analysis-run",
         "version: 0.0.1",
         "dependencies:",
-        "  codeql/go-all: \"*\"",
+        '  codeql/go-all: "*"',
         "",
       ].join("\n"),
       "utf-8",
@@ -65,14 +65,22 @@ describeSmoke("taint-analysis-run CodeQL smoke", () => {
     writeFileSync(path.join(tmpDir, "libraries", "MySanitizers.qll"), libs.sanitizers, "utf-8");
     writeFileSync(path.join(tmpDir, "libraries", "MySummaries.qll"), libs.summaries, "utf-8");
 
-    const taintTemplatePath = path.join(DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.taintAnalysisPath, "assets", "taint_query.ql.tmpl");
+    const taintTemplatePath = path.join(
+      DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.taintAnalysisPath,
+      "assets",
+      "taint_query.ql.tmpl",
+    );
     const taintTemplate = readFileSync(taintTemplatePath, "utf-8");
     const pass1 = TAINT_ANALYSIS_PASSES.find((pass) => pass.passId === 1);
     if (!pass1) {
       throw new Error("missing Taint Analysis pass definition for pass 1");
     }
 
-    const queryText = __taintAnalysisRunInternals.renderTaintQuery(taintTemplate, pass1, selectedProfile);
+    const queryText = __taintAnalysisRunInternals.renderTaintQuery(
+      taintTemplate,
+      pass1,
+      selectedProfile,
+    );
     const queryPath = path.join(tmpDir, "queries", "Pass1_PathTraversal.ql");
     writeFileSync(queryPath, queryText, "utf-8");
 

@@ -1,13 +1,13 @@
-import type Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type Database from "better-sqlite3";
 import { buildBoundaryManifest } from "../../monorepo/boundary-manifest.js";
+import type { MonorepoSharedContext } from "../../monorepo/types.js";
 import { getActionableFindings, getTriagedFindingsForRepo } from "../../store.js";
-import { isRecord } from "../../utils.js";
 import { safeJsonStringify } from "../../utils/safe-json.js";
+import { isRecord } from "../../utils.js";
 import type { PipelineStartEvent, ReportRequestedEvent, TaskCompleteEvent } from "../events.js";
 import type { MessageBus } from "../types.js";
-import type { MonorepoSharedContext } from "../../monorepo/types.js";
 
 export interface TaintAnalysisArtifactWorkerDeps {
   db: Database.Database;
@@ -95,19 +95,25 @@ export function registerTaintAnalysisArtifactWorker(
       if (existsSync(tmPath)) {
         try {
           threatModel = JSON.parse(readFileSync(tmPath, "utf-8"));
-        } catch { /* best-effort */ }
+        } catch {
+          /* best-effort */
+        }
       }
 
       writeFileSync(
         path.join(runDir, "findings.triaged.json"),
-        JSON.stringify({
-          version: "1.0.0",
-          generatedAt: new Date().toISOString(),
-          runId: event.meta.runId,
-          repo: event.payload.context.repoName,
-          findings,
-          ...(threatModel ? { threatModel } : {}),
-        }, null, 2),
+        JSON.stringify(
+          {
+            version: "1.0.0",
+            generatedAt: new Date().toISOString(),
+            runId: event.meta.runId,
+            repo: event.payload.context.repoName,
+            findings,
+            ...(threatModel ? { threatModel } : {}),
+          },
+          null,
+          2,
+        ),
         "utf-8",
       );
 
@@ -118,11 +124,7 @@ export function registerTaintAnalysisArtifactWorker(
           state.monorepoContext.sharedContext,
           actionable,
         );
-        writeFileSync(
-          path.join(runDir, "boundary.json"),
-          safeJsonStringify(boundary, 2),
-          "utf-8",
-        );
+        writeFileSync(path.join(runDir, "boundary.json"), safeJsonStringify(boundary, 2), "utf-8");
       }
     } catch (error) {
       console.error(`[taint-analysis-artifact-worker] Failed to write artifact: ${error}`);

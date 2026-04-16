@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_IGNORED_DIRS } from "../../repo-walk.js";
-import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 import { normalizePromptPath, readFirstSnippet, readText } from "../helpers.js";
+import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 
 const SKIP_DIRS = new Set([
   "test",
@@ -31,9 +31,7 @@ const PRODUCTION_RULE_PATTERNS = [
   /\bgenrule\s*\(/,
 ];
 
-const TEST_ONLY_PATTERNS = [
-  /\b(?:cc_test|go_test|java_test|py_test|rust_test|sh_test)\s*\(/,
-];
+const TEST_ONLY_PATTERNS = [/\b(?:cc_test|go_test|java_test|py_test|rust_test|sh_test)\s*\(/];
 
 /**
  * When a subtree has more than this many BUILD packages, collapse them

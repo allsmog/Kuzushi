@@ -11,7 +11,7 @@ const { triageFindingWithAgentMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/agent-runtime/execution.js", async (importOriginal) => {
-  const original = await importOriginal() as Record<string, unknown>;
+  const original = (await importOriginal()) as Record<string, unknown>;
   return {
     ...original,
     runStructuredAgentQuery: runStructuredAgentQueryMock,
@@ -19,7 +19,7 @@ vi.mock("../src/agent-runtime/execution.js", async (importOriginal) => {
 });
 
 vi.mock("../src/triage.js", async (importOriginal) => {
-  const original = await importOriginal() as Record<string, unknown>;
+  const original = (await importOriginal()) as Record<string, unknown>;
   return {
     ...original,
     triageFindingWithAgent: triageFindingWithAgentMock,
@@ -48,13 +48,15 @@ function makeFinding(): Finding {
   };
 }
 
-function makeSpecialistResult(overrides: Partial<{
-  role: string;
-  findings: string;
-  is_false_positive: boolean;
-  evidence: string;
-  confidence: number;
-}> = {}) {
+function makeSpecialistResult(
+  overrides: Partial<{
+    role: string;
+    findings: string;
+    is_false_positive: boolean;
+    evidence: string;
+    confidence: number;
+  }> = {},
+) {
   return {
     resultText: "",
     structuredOutput: {
@@ -69,7 +71,10 @@ function makeSpecialistResult(overrides: Partial<{
   };
 }
 
-function makeManagerResult(verdict: string = "tp", confidence: number = 0.85): {
+function makeManagerResult(
+  verdict: string = "tp",
+  confidence: number = 0.85,
+): {
   resultText: string;
   structuredOutput: Record<string, unknown>;
   executionError: null;
@@ -92,7 +97,9 @@ function makeManagerResult(verdict: string = "tp", confidence: number = 0.85): {
 
 const mockTriageConfigProvider = {
   has: () => false,
-  get: () => { throw new Error("not found"); },
+  get: () => {
+    throw new Error("not found");
+  },
 };
 
 afterEach(() => {
@@ -106,7 +113,9 @@ describe("triageFindingMultiAgent", () => {
     runStructuredAgentQueryMock
       .mockResolvedValueOnce(makeSpecialistResult({ role: "source-tracer" }))
       .mockResolvedValueOnce(makeSpecialistResult({ role: "sink-analyzer" }))
-      .mockResolvedValueOnce(makeSpecialistResult({ role: "sanitization-checker", is_false_positive: false }))
+      .mockResolvedValueOnce(
+        makeSpecialistResult({ role: "sanitization-checker", is_false_positive: false }),
+      )
       .mockResolvedValueOnce(makeSpecialistResult({ role: "config-reviewer" }))
       .mockResolvedValueOnce(makeManagerResult("tp", 0.85));
 
@@ -131,10 +140,30 @@ describe("triageFindingMultiAgent", () => {
   it("falls back to single-agent when all specialists fail", async () => {
     // All 4 specialists fail
     runStructuredAgentQueryMock
-      .mockResolvedValueOnce({ resultText: "", structuredOutput: null, executionError: "rate limit", costUsd: 0.001 })
-      .mockResolvedValueOnce({ resultText: "", structuredOutput: null, executionError: "rate limit", costUsd: 0.001 })
-      .mockResolvedValueOnce({ resultText: "", structuredOutput: null, executionError: "rate limit", costUsd: 0.001 })
-      .mockResolvedValueOnce({ resultText: "", structuredOutput: null, executionError: "rate limit", costUsd: 0.001 });
+      .mockResolvedValueOnce({
+        resultText: "",
+        structuredOutput: null,
+        executionError: "rate limit",
+        costUsd: 0.001,
+      })
+      .mockResolvedValueOnce({
+        resultText: "",
+        structuredOutput: null,
+        executionError: "rate limit",
+        costUsd: 0.001,
+      })
+      .mockResolvedValueOnce({
+        resultText: "",
+        structuredOutput: null,
+        executionError: "rate limit",
+        costUsd: 0.001,
+      })
+      .mockResolvedValueOnce({
+        resultText: "",
+        structuredOutput: null,
+        executionError: "rate limit",
+        costUsd: 0.001,
+      });
 
     triageFindingWithAgentMock.mockResolvedValue({
       result: {
@@ -169,9 +198,19 @@ describe("triageFindingMultiAgent", () => {
     // 2 specialists succeed, 2 fail
     runStructuredAgentQueryMock
       .mockResolvedValueOnce(makeSpecialistResult({ role: "source-tracer" }))
-      .mockResolvedValueOnce({ resultText: "", structuredOutput: null, executionError: "timeout", costUsd: 0.001 })
+      .mockResolvedValueOnce({
+        resultText: "",
+        structuredOutput: null,
+        executionError: "timeout",
+        costUsd: 0.001,
+      })
       .mockResolvedValueOnce(makeSpecialistResult({ role: "sanitization-checker" }))
-      .mockResolvedValueOnce({ resultText: "", structuredOutput: null, executionError: "timeout", costUsd: 0.001 })
+      .mockResolvedValueOnce({
+        resultText: "",
+        structuredOutput: null,
+        executionError: "timeout",
+        costUsd: 0.001,
+      })
       .mockResolvedValueOnce(makeManagerResult("tp", 0.7));
 
     const result = await triageFindingMultiAgent(

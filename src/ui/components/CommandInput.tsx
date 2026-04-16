@@ -12,9 +12,11 @@
  *   /export               — open export menu
  *   /help or ?            — show available commands
  */
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+
 import chalk from "chalk";
+import { Box, Text, useInput } from "ink";
+import type React from "react";
+import { useState } from "react";
 import { icons } from "../icons.js";
 
 export interface ReplCommand {
@@ -55,61 +57,64 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
   // Guard: stdin must support raw mode for useInput to work
   const canUseInput = active && process.stdin.isTTY === true;
 
-  useInput((char, key) => {
-    if (!expanded && char === "/") {
-      setExpanded(true);
-      setInput("/");
-      return;
-    }
-
-    if (!expanded && char === "?") {
-      setExpanded(true);
-      setShowHelp(true);
-      setLastResult({ message: "", type: "info" });
-      return;
-    }
-
-    if (!expanded) {
-      return;
-    }
-
-    if (key.return && input.length > 0) {
-      const cmd = parseCommand(input);
-      if (cmd) {
-        if (cmd.name === "help") {
-          setShowHelp((v) => !v);
-          setLastResult({ message: "", type: "info" });
-        } else {
-          const result = onCommand(cmd);
-          setLastResult(result ?? { message: `${cmd.name}: ok`, type: "success" });
-          setShowHelp(false);
-        }
-      } else {
-        setLastResult({ message: `Unknown command: ${input}`, type: "error" });
+  useInput(
+    (char, key) => {
+      if (!expanded && char === "/") {
+        setExpanded(true);
+        setInput("/");
+        return;
       }
-      setInput("");
-      setExpanded(false);
-      return;
-    }
 
-    if (key.backspace || key.delete) {
-      setInput((v) => v.slice(0, -1));
-      return;
-    }
+      if (!expanded && char === "?") {
+        setExpanded(true);
+        setShowHelp(true);
+        setLastResult({ message: "", type: "info" });
+        return;
+      }
 
-    if (key.escape) {
-      setInput("");
-      setLastResult(null);
-      setShowHelp(false);
-      setExpanded(false);
-      return;
-    }
+      if (!expanded) {
+        return;
+      }
 
-    // Only accept printable characters
-    if (char && !key.ctrl && !key.meta && char.length === 1) {
-      setInput((v) => v + char);
-    }
-  }, { isActive: canUseInput });
+      if (key.return && input.length > 0) {
+        const cmd = parseCommand(input);
+        if (cmd) {
+          if (cmd.name === "help") {
+            setShowHelp((v) => !v);
+            setLastResult({ message: "", type: "info" });
+          } else {
+            const result = onCommand(cmd);
+            setLastResult(result ?? { message: `${cmd.name}: ok`, type: "success" });
+            setShowHelp(false);
+          }
+        } else {
+          setLastResult({ message: `Unknown command: ${input}`, type: "error" });
+        }
+        setInput("");
+        setExpanded(false);
+        return;
+      }
+
+      if (key.backspace || key.delete) {
+        setInput((v) => v.slice(0, -1));
+        return;
+      }
+
+      if (key.escape) {
+        setInput("");
+        setLastResult(null);
+        setShowHelp(false);
+        setExpanded(false);
+        return;
+      }
+
+      // Only accept printable characters
+      if (char && !key.ctrl && !key.meta && char.length === 1) {
+        setInput((v) => v + char);
+      }
+    },
+    { isActive: canUseInput },
+  );
 
   if (!active || !process.stdin.isTTY) return null;
 
@@ -118,10 +123,16 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
       {/* Help overlay */}
       {showHelp && (
         <Box flexDirection="column" marginBottom={1}>
-          <Text>{"  "}{chalk.dim("Available commands:")}</Text>
+          <Text>
+            {"  "}
+            {chalk.dim("Available commands:")}
+          </Text>
           {COMMANDS.map((cmd) => (
             <Text key={cmd.name}>
-              {"    "}{chalk.redBright(cmd.name)} {chalk.dim(cmd.args)}{"  "}{chalk.dim(cmd.desc)}
+              {"    "}
+              {chalk.redBright(cmd.name)} {chalk.dim(cmd.args)}
+              {"  "}
+              {chalk.dim(cmd.desc)}
             </Text>
           ))}
           <Text>{""}</Text>
@@ -132,17 +143,23 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
       {lastResult && lastResult.message && (
         <Text>
           {"  "}
-          {lastResult.type === "success" ? chalk.green(icons.success) :
-           lastResult.type === "error" ? chalk.red(icons.error) :
-           chalk.dim(icons.dot)}
-          {" "}{lastResult.type === "error" ? chalk.red(lastResult.message) : chalk.dim(lastResult.message)}
+          {lastResult.type === "success"
+            ? chalk.green(icons.success)
+            : lastResult.type === "error"
+              ? chalk.red(icons.error)
+              : chalk.dim(icons.dot)}{" "}
+          {lastResult.type === "error"
+            ? chalk.red(lastResult.message)
+            : chalk.dim(lastResult.message)}
         </Text>
       )}
 
       {/* Input line */}
       {expanded && (
         <Text>
-          {"  "}{chalk.dim(icons.arrow)} {input}{chalk.redBright("█")}
+          {"  "}
+          {chalk.dim(icons.arrow)} {input}
+          {chalk.redBright("█")}
           {input.length === 0 && chalk.dim(" type / for commands, ? for help")}
         </Text>
       )}

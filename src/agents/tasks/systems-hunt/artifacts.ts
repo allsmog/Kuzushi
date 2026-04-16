@@ -5,10 +5,7 @@ import type { SystemsHuntArtifact } from "./types.js";
 
 export const SYSTEMS_HUNT_ARTIFACT_PREFIX = "Systems hunt artifact:";
 
-export function buildSystemsHuntArtifactPath(
-  artifactRoot: string,
-  fingerprint: string,
-): string {
+export function buildSystemsHuntArtifactPath(artifactRoot: string, fingerprint: string): string {
   return path.join(artifactRoot, `${fingerprint}.json`);
 }
 
@@ -48,4 +45,3 @@ export function extractSystemsHuntArtifactPath(finding: Finding): string | undef
 export function buildSystemsHuntArtifactDetail(artifactPath: string): string {
   return `${SYSTEMS_HUNT_ARTIFACT_PREFIX} ${artifactPath}`;
 }
-

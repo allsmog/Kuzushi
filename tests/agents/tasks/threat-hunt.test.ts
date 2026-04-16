@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { __threatHuntInternals, threatHuntTask } from "../../../src/agents/tasks/threat-hunt.js";
-import type { ThreatModelDocument, DfdElement } from "../../../src/agents/tasks/threat-modeling/types.js";
+import type {
+  DfdElement,
+  ThreatModelDocument,
+} from "../../../src/agents/tasks/threat-modeling/types.js";
 
 const { extractActors, buildPrompt, resolveConfig } = __threatHuntInternals;
 
@@ -73,9 +76,7 @@ describe("threat-hunt", () => {
       const upstream = new Map<string, unknown>();
       upstream.set(
         "threat-model-randori",
-        makeThreatModelOutput([
-          makeDfdElement({ id: "p1", type: "process", name: "API" }),
-        ]),
+        makeThreatModelOutput([makeDfdElement({ id: "p1", type: "process", name: "API" })]),
       );
       expect(extractActors(upstream)).toEqual([]);
     });
@@ -112,7 +113,9 @@ describe("threat-hunt", () => {
   });
 
   describe("resolveConfig", () => {
-    function makeCtx(taskConfig: Record<string, unknown> = {}): Parameters<typeof resolveConfig>[0] {
+    function makeCtx(
+      taskConfig: Record<string, unknown> = {},
+    ): Parameters<typeof resolveConfig>[0] {
       return {
         runId: "test",
         repoRoot: "/tmp/repo",

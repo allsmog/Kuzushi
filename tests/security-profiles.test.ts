@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
 import * as fs from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -10,9 +10,9 @@ vi.mock("node:fs", async () => {
 });
 
 import {
-  loadSecurityProfiles,
-  getProfilesForTask,
   formatProfilesForPrompt,
+  getProfilesForTask,
+  loadSecurityProfiles,
   type SecurityProfile,
 } from "../src/security-profiles.js";
 

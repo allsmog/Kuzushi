@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  resolveInvariantAnalysisConfig,
   DEFAULT_INVARIANT_ANALYSIS_CONFIG,
+  resolveInvariantAnalysisConfig,
 } from "../../../../src/agents/tasks/invariant-analysis/types.js";
 import type { KuzushiConfig } from "../../../../src/types.js";
 

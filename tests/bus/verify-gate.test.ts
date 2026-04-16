@@ -1,15 +1,15 @@
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { AgentRuntime } from "../../src/agent-runtime/types.js";
+import { buildSystemsHuntArtifactDetail } from "../../src/agents/tasks/systems-hunt/artifacts.js";
 import {
   gateVerificationCandidates,
   type VerifyGateCandidate,
 } from "../../src/bus/orchestrator/verify-gate.js";
 import type { Finding } from "../../src/scanners/types.js";
 import type { TriageResult } from "../../src/types.js";
-import type { AgentRuntime } from "../../src/agent-runtime/types.js";
-import { buildSystemsHuntArtifactDetail } from "../../src/agents/tasks/systems-hunt/artifacts.js";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -65,10 +65,10 @@ describe("gateVerificationCandidates", () => {
       createSession: vi.fn(),
     } as unknown as AgentRuntime;
 
-    const results = await gateVerificationCandidates(
-      [makeCandidate()],
-      { runtime, repoRoot: "/tmp" },
-    );
+    const results = await gateVerificationCandidates([makeCandidate()], {
+      runtime,
+      repoRoot: "/tmp",
+    });
 
     expect(results).toHaveLength(1);
     expect(results[0].decision).toBe("verify");
@@ -80,18 +80,21 @@ describe("gateVerificationCandidates", () => {
       id: "test",
       queryBatch: vi.fn().mockResolvedValue(
         new Map([
-          ["gate-batch0", {
-            resultText: "",
-            structuredOutput: {
-              decisions: [
-                { fingerprint: "fp-001", decision: "auto_accept", reason: "Clear XSS" },
-                { fingerprint: "fp-002", decision: "skip", reason: "Informational only" },
-                { fingerprint: "fp-003", decision: "verify", reason: "Needs investigation" },
-              ],
+          [
+            "gate-batch0",
+            {
+              resultText: "",
+              structuredOutput: {
+                decisions: [
+                  { fingerprint: "fp-001", decision: "auto_accept", reason: "Clear XSS" },
+                  { fingerprint: "fp-002", decision: "skip", reason: "Informational only" },
+                  { fingerprint: "fp-003", decision: "verify", reason: "Needs investigation" },
+                ],
+              },
+              executionError: null,
+              costUsd: 0.001,
             },
-            executionError: null,
-            costUsd: 0.001,
-          }],
+          ],
         ]),
       ),
     } as unknown as AgentRuntime;
@@ -128,26 +131,26 @@ describe("gateVerificationCandidates", () => {
       id: "test",
       queryBatch: vi.fn().mockResolvedValue(
         new Map([
-          ["gate-batch0", {
-            resultText: "",
-            structuredOutput: {
-              decisions: [
-                { fingerprint: "fp-001", decision: "skip", reason: "Low quality" },
-                // fp-002 missing from response
-              ],
+          [
+            "gate-batch0",
+            {
+              resultText: "",
+              structuredOutput: {
+                decisions: [
+                  { fingerprint: "fp-001", decision: "skip", reason: "Low quality" },
+                  // fp-002 missing from response
+                ],
+              },
+              executionError: null,
+              costUsd: 0.001,
             },
-            executionError: null,
-            costUsd: 0.001,
-          }],
+          ],
         ]),
       ),
     } as unknown as AgentRuntime;
 
     const results = await gateVerificationCandidates(
-      [
-        makeCandidate({ fingerprint: "fp-001" }),
-        makeCandidate({ fingerprint: "fp-002" }),
-      ],
+      [makeCandidate({ fingerprint: "fp-001" }), makeCandidate({ fingerprint: "fp-002" })],
       { runtime, repoRoot: "/tmp" },
     );
 
@@ -161,20 +164,23 @@ describe("gateVerificationCandidates", () => {
       id: "test",
       queryBatch: vi.fn().mockResolvedValue(
         new Map([
-          ["gate-batch0", {
-            resultText: "",
-            structuredOutput: undefined,
-            executionError: "API error",
-            costUsd: 0,
-          }],
+          [
+            "gate-batch0",
+            {
+              resultText: "",
+              structuredOutput: undefined,
+              executionError: "API error",
+              costUsd: 0,
+            },
+          ],
         ]),
       ),
     } as unknown as AgentRuntime;
 
-    const results = await gateVerificationCandidates(
-      [makeCandidate({ fingerprint: "fp-001" })],
-      { runtime, repoRoot: "/tmp" },
-    );
+    const results = await gateVerificationCandidates([makeCandidate({ fingerprint: "fp-001" })], {
+      runtime,
+      repoRoot: "/tmp",
+    });
 
     expect(results).toHaveLength(1);
     expect(results[0].decision).toBe("verify");
@@ -186,24 +192,25 @@ describe("gateVerificationCandidates", () => {
       id: "test",
       queryBatch: vi.fn().mockResolvedValue(
         new Map([
-          ["gate-batch0", {
-            resultText: "",
-            structuredOutput: {
-              decisions: [
-                { fingerprint: "fp-001", decision: "invalid_value", reason: "Bad" },
-              ],
+          [
+            "gate-batch0",
+            {
+              resultText: "",
+              structuredOutput: {
+                decisions: [{ fingerprint: "fp-001", decision: "invalid_value", reason: "Bad" }],
+              },
+              executionError: null,
+              costUsd: 0.001,
             },
-            executionError: null,
-            costUsd: 0.001,
-          }],
+          ],
         ]),
       ),
     } as unknown as AgentRuntime;
 
-    const results = await gateVerificationCandidates(
-      [makeCandidate({ fingerprint: "fp-001" })],
-      { runtime, repoRoot: "/tmp" },
-    );
+    const results = await gateVerificationCandidates([makeCandidate({ fingerprint: "fp-001" })], {
+      runtime,
+      repoRoot: "/tmp",
+    });
 
     expect(results[0].decision).toBe("verify");
   });
@@ -231,12 +238,22 @@ describe("gateVerificationCandidates", () => {
           makeCandidate({
             fingerprint: "fp-001",
             taskId: "systems-hunt",
-            engineProvenance: [{ kind: "agentic", detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-001.json") }],
+            engineProvenance: [
+              {
+                kind: "agentic",
+                detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-001.json"),
+              },
+            ],
           }),
           makeCandidate({
             fingerprint: "fp-002",
             taskId: "systems-hunt",
-            engineProvenance: [{ kind: "agentic", detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-002.json") }],
+            engineProvenance: [
+              {
+                kind: "agentic",
+                detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-002.json"),
+              },
+            ],
           }),
         ],
         { runtime, repoRoot },

@@ -67,7 +67,7 @@ export function withRetry<TInput = unknown, TOutput = unknown>(
         } catch (err) {
           lastError = err instanceof Error ? err : new Error(String(err));
           if (attempt < maxRetries) {
-            const delay = backoffMs * Math.pow(2, attempt);
+            const delay = backoffMs * 2 ** attempt;
             log.warn(
               { taskId: task.id, attempt: attempt + 1, maxRetries, delay },
               "Task failed, retrying",

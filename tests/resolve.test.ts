@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TMP_HOME = path.join(import.meta.dirname, ".tmp-resolve-test");
 const TMP_BIN = path.join(TMP_HOME, ".kuzushi", "bin");

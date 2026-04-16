@@ -31,10 +31,7 @@ type CryptoBehavioralRunRow = {
   updated_at: string;
 };
 
-export function insertCryptoBehavioralRun(
-  db: Database.Database,
-  run: CryptoBehavioralRun,
-): void {
+export function insertCryptoBehavioralRun(db: Database.Database, run: CryptoBehavioralRun): void {
   db.prepare(`
     INSERT OR REPLACE INTO crypto_behavioral_runs (
       run_id, pipeline_run_id, fingerprint, repo, test_type, verdict,
@@ -77,11 +74,13 @@ export function getCryptoBehavioralRunsByFingerprint(
   db: Database.Database,
   fingerprint: string,
 ): CryptoBehavioralRun[] {
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT * FROM crypto_behavioral_runs
     WHERE fingerprint = ?
     ORDER BY created_at DESC
-  `).all(fingerprint) as CryptoBehavioralRunRow[];
+  `)
+    .all(fingerprint) as CryptoBehavioralRunRow[];
 
   return rows.map(rowToCryptoBehavioralRun);
 }

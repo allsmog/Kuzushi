@@ -29,14 +29,13 @@ export function coerceRepoContext(value: unknown): RepoContext | undefined {
     entryPoints: asStringArray(value["entryPoints"]),
   };
 
-  const hasAnyValue = (
-    repoContext.languages.length > 0
-    || repoContext.frameworks.length > 0
-    || repoContext.authPatterns.length > 0
-    || repoContext.sanitizationLibs.length > 0
-    || repoContext.ormOrDb.length > 0
-    || repoContext.entryPoints.length > 0
-  );
+  const hasAnyValue =
+    repoContext.languages.length > 0 ||
+    repoContext.frameworks.length > 0 ||
+    repoContext.authPatterns.length > 0 ||
+    repoContext.sanitizationLibs.length > 0 ||
+    repoContext.ormOrDb.length > 0 ||
+    repoContext.entryPoints.length > 0;
 
   return hasAnyValue ? repoContext : undefined;
 }
@@ -52,9 +51,8 @@ export function coerceContextEnrichment(
     return undefined;
   }
 
-  const candidate = "enrichment" in value && isRecord(value["enrichment"])
-    ? value["enrichment"]
-    : value;
+  const candidate =
+    "enrichment" in value && isRecord(value["enrichment"]) ? value["enrichment"] : value;
 
   if (!isRecord(candidate)) {
     return undefined;
@@ -130,7 +128,9 @@ export function formatRepoContext(repoContext: RepoContext | undefined): string[
   return lines;
 }
 
-export function formatEnrichedRepoContext(enrichment: EnrichedRepoContext["enrichment"] | undefined): string[] {
+export function formatEnrichedRepoContext(
+  enrichment: EnrichedRepoContext["enrichment"] | undefined,
+): string[] {
   if (!enrichment) return [];
 
   const lines: string[] = [];
@@ -138,14 +138,18 @@ export function formatEnrichedRepoContext(enrichment: EnrichedRepoContext["enric
   if (enrichment.customMiddleware.length > 0) {
     lines.push("Custom middleware:");
     for (const mw of enrichment.customMiddleware) {
-      lines.push(`  - ${mw.name} (${mw.filePath}): ${mw.purpose}${mw.appliesTo ? ` [applies to: ${mw.appliesTo}]` : ""}`);
+      lines.push(
+        `  - ${mw.name} (${mw.filePath}): ${mw.purpose}${mw.appliesTo ? ` [applies to: ${mw.appliesTo}]` : ""}`,
+      );
     }
   }
 
   if (enrichment.customSanitizers.length > 0) {
     lines.push("Custom sanitizers:");
     for (const san of enrichment.customSanitizers) {
-      lines.push(`  - ${san.name} (${san.filePath}): ${san.sanitizationType}${san.usedBy ? ` [used by: ${san.usedBy}]` : ""}`);
+      lines.push(
+        `  - ${san.name} (${san.filePath}): ${san.sanitizationType}${san.usedBy ? ` [used by: ${san.usedBy}]` : ""}`,
+      );
     }
   }
 
@@ -178,15 +182,10 @@ function asStringArray(value: unknown): string[] {
     return [];
   }
 
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
+  return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
 }
 
-function asObjectArray<T>(
-  value: unknown,
-  map: (item: Record<string, unknown>) => T | null,
-): T[] {
+function asObjectArray<T>(value: unknown, map: (item: Record<string, unknown>) => T | null): T[] {
   if (!Array.isArray(value)) {
     return [];
   }

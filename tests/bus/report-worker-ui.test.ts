@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerReportWorker } from "../../src/bus/workers/report-worker.js";

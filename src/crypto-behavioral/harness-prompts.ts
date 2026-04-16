@@ -1,7 +1,7 @@
 import path from "node:path";
+import { formatRepoContext } from "../repo-context.js";
 import type { Finding } from "../scanners/types.js";
 import type { RepoContext } from "../types.js";
-import { formatRepoContext } from "../repo-context.js";
 import type { CryptoBehavioralTestType } from "./types.js";
 
 export interface CryptoBehavioralPromptOptions {
@@ -42,30 +42,32 @@ export function resolveCryptoHarnessLanguage(
 
 export function buildCryptoBehavioralSystemPrompt(repoContext?: RepoContext): string {
   const repoSection = formatRepoContext(repoContext);
-  const repoBlock = repoSection.length > 0
-    ? "## Repository Context\n" + repoSection.join("\n") + "\n\n"
-    : "";
+  const repoBlock =
+    repoSection.length > 0 ? "## Repository Context\n" + repoSection.join("\n") + "\n\n" : "";
 
-  return repoBlock + [
-    "You generate runnable crypto behavioral harnesses that import and execute REAL repository code.",
-    "",
-    "## Anti-hallucination constraints",
-    "- Do NOT simulate the vulnerable function.",
-    "- Import the REAL comparison, encryption, hashing, key-generation, or TLS code path from the repository.",
-    "- Do not invent files, exports, algorithms, configuration objects, or helper APIs.",
-    "- If the target cannot be isolated with lightweight local setup, set skipped=true and explain why.",
-    "- Prefer the smallest runnable harness that confirms or rejects the behavior.",
-    "",
-    "## Harness contract",
-    "- The script must print exactly one line starting with CRYPTO_RESULT: followed by a JSON object.",
-    "- The JSON must include fingerprint, testType, verdict, and summary.",
-    "- Add type-specific fields when relevant: timing, observedBehavior, expectedBehavior, algorithmConfirmed, keyLengthBits.",
-    "- Exit code 0 means vulnerable confirmed, 1 means secure confirmed, 2 means inconclusive, 3 means harness error.",
-    "",
-    "## Structured output requirements",
-    "Return ONLY a JSON object with keys:",
-    "fingerprint, test_type, script_content(string|null), language(string|null), skipped(boolean), skip_reason(string|null)",
-  ].join("\n");
+  return (
+    repoBlock +
+    [
+      "You generate runnable crypto behavioral harnesses that import and execute REAL repository code.",
+      "",
+      "## Anti-hallucination constraints",
+      "- Do NOT simulate the vulnerable function.",
+      "- Import the REAL comparison, encryption, hashing, key-generation, or TLS code path from the repository.",
+      "- Do not invent files, exports, algorithms, configuration objects, or helper APIs.",
+      "- If the target cannot be isolated with lightweight local setup, set skipped=true and explain why.",
+      "- Prefer the smallest runnable harness that confirms or rejects the behavior.",
+      "",
+      "## Harness contract",
+      "- The script must print exactly one line starting with CRYPTO_RESULT: followed by a JSON object.",
+      "- The JSON must include fingerprint, testType, verdict, and summary.",
+      "- Add type-specific fields when relevant: timing, observedBehavior, expectedBehavior, algorithmConfirmed, keyLengthBits.",
+      "- Exit code 0 means vulnerable confirmed, 1 means secure confirmed, 2 means inconclusive, 3 means harness error.",
+      "",
+      "## Structured output requirements",
+      "Return ONLY a JSON object with keys:",
+      "fingerprint, test_type, script_content(string|null), language(string|null), skipped(boolean), skip_reason(string|null)",
+    ].join("\n")
+  );
 }
 
 export function buildTimingHarnessPrompt(
@@ -76,21 +78,15 @@ export function buildTimingHarnessPrompt(
   const language = resolveCryptoHarnessLanguage(finding, options.repoContext);
   const iterations = Math.max(1, Math.floor(options.timingIterations ?? 10_000));
 
-  return buildBehavioralHarnessPrompt(
-    finding,
-    repoRoot,
-    "timing",
-    language,
-    [
-      "Generate a Dudect-style timing harness.",
-      "- Import the real comparison or token validation path.",
-      "- Build two input classes: one that shares a correct prefix with the expected secret, and one clearly wrong input.",
-      `- Run ${iterations} interleaved iterations.`,
-      "- Measure each iteration and compute Welch's t-test inside the script.",
-      "- Mark the target as vulnerable when timing differences are statistically significant and constantTime is false.",
-      "- Include timing.constantTime, timing.tStatistic, timing.pValue, timing.meanANs, timing.meanBNs, and timing.iterations in CRYPTO_RESULT.",
-    ],
-  );
+  return buildBehavioralHarnessPrompt(finding, repoRoot, "timing", language, [
+    "Generate a Dudect-style timing harness.",
+    "- Import the real comparison or token validation path.",
+    "- Build two input classes: one that shares a correct prefix with the expected secret, and one clearly wrong input.",
+    `- Run ${iterations} interleaved iterations.`,
+    "- Measure each iteration and compute Welch's t-test inside the script.",
+    "- Mark the target as vulnerable when timing differences are statistically significant and constantTime is false.",
+    "- Include timing.constantTime, timing.tStatistic, timing.pValue, timing.meanANs, timing.meanBNs, and timing.iterations in CRYPTO_RESULT.",
+  ]);
 }
 
 export function buildEcbModeHarnessPrompt(
@@ -100,20 +96,14 @@ export function buildEcbModeHarnessPrompt(
 ): string {
   const language = resolveCryptoHarnessLanguage(finding, options.repoContext);
 
-  return buildBehavioralHarnessPrompt(
-    finding,
-    repoRoot,
-    "ecb-mode",
-    language,
-    [
-      "Generate an ECB detection harness.",
-      "- Import the real encryption path.",
-      "- Encrypt plaintext containing two identical 16-byte blocks.",
-      "- Compare ciphertext blocks and report vulnerable only when identical plaintext blocks produce identical ciphertext blocks.",
-      "- Include observedBehavior and expectedBehavior in CRYPTO_RESULT.",
-      "- When the runtime confirms a different mode, include algorithmConfirmed and return secure or inconclusive accordingly.",
-    ],
-  );
+  return buildBehavioralHarnessPrompt(finding, repoRoot, "ecb-mode", language, [
+    "Generate an ECB detection harness.",
+    "- Import the real encryption path.",
+    "- Encrypt plaintext containing two identical 16-byte blocks.",
+    "- Compare ciphertext blocks and report vulnerable only when identical plaintext blocks produce identical ciphertext blocks.",
+    "- Include observedBehavior and expectedBehavior in CRYPTO_RESULT.",
+    "- When the runtime confirms a different mode, include algorithmConfirmed and return secure or inconclusive accordingly.",
+  ]);
 }
 
 export function buildWeakHashHarnessPrompt(
@@ -123,20 +113,14 @@ export function buildWeakHashHarnessPrompt(
 ): string {
   const language = resolveCryptoHarnessLanguage(finding, options.repoContext);
 
-  return buildBehavioralHarnessPrompt(
-    finding,
-    repoRoot,
-    "weak-hash",
-    language,
-    [
-      "Generate a weak-hash confirmation harness.",
-      "- Import the real hashing or password-storage path.",
-      "- Confirm the algorithm at runtime when possible.",
-      "- If the code uses MD5, SHA1, or another fast/legacy hash for authentication, password storage, or token security, report vulnerable.",
-      "- Include algorithmConfirmed and, when useful, observedBehavior describing the produced digest length or algorithm name.",
-      "- Treat non-security-critical hashing as secure only when the harness can prove the callsite is not used for auth, password storage, or token validation.",
-    ],
-  );
+  return buildBehavioralHarnessPrompt(finding, repoRoot, "weak-hash", language, [
+    "Generate a weak-hash confirmation harness.",
+    "- Import the real hashing or password-storage path.",
+    "- Confirm the algorithm at runtime when possible.",
+    "- If the code uses MD5, SHA1, or another fast/legacy hash for authentication, password storage, or token security, report vulnerable.",
+    "- Include algorithmConfirmed and, when useful, observedBehavior describing the produced digest length or algorithm name.",
+    "- Treat non-security-critical hashing as secure only when the harness can prove the callsite is not used for auth, password storage, or token validation.",
+  ]);
 }
 
 export function buildWeakPrngHarnessPrompt(
@@ -146,20 +130,14 @@ export function buildWeakPrngHarnessPrompt(
 ): string {
   const language = resolveCryptoHarnessLanguage(finding, options.repoContext);
 
-  return buildBehavioralHarnessPrompt(
-    finding,
-    repoRoot,
-    "weak-prng",
-    language,
-    [
-      "Generate a weak-PRNG confirmation harness.",
-      "- Import the real token, nonce, key-generation, or random-value path.",
-      "- Collect multiple outputs from the real code path.",
-      "- Detect repeated values, obvious patterns, or use of non-cryptographic randomness such as Math.random equivalents.",
-      "- Include observedBehavior and algorithmConfirmed when the runtime reveals the random source.",
-      "- Prefer runtime confirmation of the actual PRNG source over theoretical claims.",
-    ],
-  );
+  return buildBehavioralHarnessPrompt(finding, repoRoot, "weak-prng", language, [
+    "Generate a weak-PRNG confirmation harness.",
+    "- Import the real token, nonce, key-generation, or random-value path.",
+    "- Collect multiple outputs from the real code path.",
+    "- Detect repeated values, obvious patterns, or use of non-cryptographic randomness such as Math.random equivalents.",
+    "- Include observedBehavior and algorithmConfirmed when the runtime reveals the random source.",
+    "- Prefer runtime confirmation of the actual PRNG source over theoretical claims.",
+  ]);
 }
 
 export function buildKeyLengthHarnessPrompt(
@@ -169,19 +147,13 @@ export function buildKeyLengthHarnessPrompt(
 ): string {
   const language = resolveCryptoHarnessLanguage(finding, options.repoContext);
 
-  return buildBehavioralHarnessPrompt(
-    finding,
-    repoRoot,
-    "key-length",
-    language,
-    [
-      "Generate a key-length confirmation harness.",
-      "- Import the real key creation or crypto initialization path.",
-      "- Extract the actual runtime key size in bits.",
-      "- Report vulnerable when RSA/DSA keys are below 2048 bits or when the runtime confirms another policy-violating weak key size.",
-      "- Include algorithmConfirmed and keyLengthBits in CRYPTO_RESULT.",
-    ],
-  );
+  return buildBehavioralHarnessPrompt(finding, repoRoot, "key-length", language, [
+    "Generate a key-length confirmation harness.",
+    "- Import the real key creation or crypto initialization path.",
+    "- Extract the actual runtime key size in bits.",
+    "- Report vulnerable when RSA/DSA keys are below 2048 bits or when the runtime confirms another policy-violating weak key size.",
+    "- Include algorithmConfirmed and keyLengthBits in CRYPTO_RESULT.",
+  ]);
 }
 
 export function buildEdgeCaseHarnessPrompt(
@@ -191,19 +163,13 @@ export function buildEdgeCaseHarnessPrompt(
 ): string {
   const language = resolveCryptoHarnessLanguage(finding, options.repoContext);
 
-  return buildBehavioralHarnessPrompt(
-    finding,
-    repoRoot,
-    "edge-case",
-    language,
-    [
-      "Generate an edge-case behavioral harness.",
-      "- Import the real crypto or TLS configuration path.",
-      "- Exercise local negative cases relevant to the finding: self-signed certs, hostname mismatch, expired certs, null bytes, zero-length inputs, invalid ASN.1, or boundary values.",
-      "- Report vulnerable only when the real code accepts data or connections that should be rejected.",
-      "- Include observedBehavior and expectedBehavior in CRYPTO_RESULT.",
-    ],
-  );
+  return buildBehavioralHarnessPrompt(finding, repoRoot, "edge-case", language, [
+    "Generate an edge-case behavioral harness.",
+    "- Import the real crypto or TLS configuration path.",
+    "- Exercise local negative cases relevant to the finding: self-signed certs, hostname mismatch, expired certs, null bytes, zero-length inputs, invalid ASN.1, or boundary values.",
+    "- Report vulnerable only when the real code accepts data or connections that should be rejected.",
+    "- Include observedBehavior and expectedBehavior in CRYPTO_RESULT.",
+  ]);
 }
 
 export function buildPromptForTestType(
@@ -271,9 +237,7 @@ function buildBehavioralHarnessPrompt(
   ].join("\n");
 }
 
-function buildLanguageRequirements(
-  language: "javascript" | "python" | "go",
-): string[] {
+function buildLanguageRequirements(language: "javascript" | "python" | "go"): string[] {
   if (language === "python") {
     return [
       "- Emit Python only. The script must run with python3.",

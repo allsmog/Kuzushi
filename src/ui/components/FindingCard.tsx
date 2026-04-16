@@ -10,15 +10,16 @@
  *     ├─ PoC: ' OR 1=1 --
  *     └─ Taint: input → req.body.name → query() (3 hops)
  */
-import React from "react";
-import { Box, Text } from "ink";
+
 import chalk from "chalk";
-import { icons } from "../icons.js";
-import { colorVerdict, badge, severityLabel } from "../format.js";
+import { Box, Text } from "ink";
+import type React from "react";
+import { badge, colorVerdict, severityLabel } from "../format.js";
 import { fileLink } from "../hyperlink.js";
+import { icons } from "../icons.js";
 import { renderMarkdownInline } from "../markdown.js";
-import { CodePreview } from "./CodePreview.js";
 import type { ActionableFinding } from "../state.js";
+import { CodePreview } from "./CodePreview.js";
 
 interface FindingCardProps {
   finding: ActionableFinding;
@@ -29,20 +30,24 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
   const conf = chalk.dim(`(${(finding.confidence * 100).toFixed(0)}%)`);
   const severity = severityLabel(finding.severity);
   const scanner = chalk.dim(`[${finding.taskId}]`);
-  const verificationBadge = finding.verifyExploitable === 1
-    ? ` ${badge("EXPLOITABLE", "red")}`
-    : finding.verifyExploitable === 0
-      ? ` ${badge("NOT EXPLOITABLE", "green")}`
-      : "";
-  const location = chalk.cyan(fileLink(finding.filePath, `${finding.filePath}:${finding.startLine}`, finding.startLine));
+  const verificationBadge =
+    finding.verifyExploitable === 1
+      ? ` ${badge("EXPLOITABLE", "red")}`
+      : finding.verifyExploitable === 0
+        ? ` ${badge("NOT EXPLOITABLE", "green")}`
+        : "";
+  const location = chalk.cyan(
+    fileLink(finding.filePath, `${finding.filePath}:${finding.startLine}`, finding.startLine),
+  );
 
   // Collect detail tree items
   const details: string[] = [];
 
   if (finding.verifyExploitable === 1 && finding.verifyPocPayload) {
-    const payload = finding.verifyPocPayload.length > 80
-      ? `${finding.verifyPocPayload.slice(0, 77)}...`
-      : finding.verifyPocPayload;
+    const payload =
+      finding.verifyPocPayload.length > 80
+        ? `${finding.verifyPocPayload.slice(0, 77)}...`
+        : finding.verifyPocPayload;
     details.push(`${chalk.magenta("PoC:")} ${payload}`);
   }
   if (finding.verifyAttackVector) {
@@ -59,50 +64,78 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
   if (finding.pocHarnessPath) {
     details.push(`${chalk.blue("PoC Harness:")} ${fileLink(finding.pocHarnessPath)}`);
   } else if (finding.pocHarnessSkipped === 1) {
-    details.push(`${chalk.yellow("PoC Harness:")} skipped (${finding.pocHarnessSkipReason ?? "no reason"})`);
+    details.push(
+      `${chalk.yellow("PoC Harness:")} skipped (${finding.pocHarnessSkipReason ?? "no reason"})`,
+    );
   }
   if (finding.pocHarnessParsed === 0 && finding.pocHarnessParseError) {
     details.push(`${chalk.red("PoC Parse Error:")} ${finding.pocHarnessParseError}`);
   }
   if (typeof finding.pocRunVerdict === "string" && finding.pocRunVerdict) {
-    const verdictColor = finding.pocRunVerdict === "PASS" ? chalk.green.bold
-      : finding.pocRunVerdict === "FAIL" ? chalk.red.bold
-      : finding.pocRunVerdict === "TIMEOUT" ? chalk.yellow.bold
-      : chalk.red;
-    const durationStr = typeof finding.pocRunDurationMs === "number"
-      ? chalk.dim(` (${(finding.pocRunDurationMs / 1000).toFixed(1)}s)`)
-      : "";
+    const verdictColor =
+      finding.pocRunVerdict === "PASS"
+        ? chalk.green.bold
+        : finding.pocRunVerdict === "FAIL"
+          ? chalk.red.bold
+          : finding.pocRunVerdict === "TIMEOUT"
+            ? chalk.yellow.bold
+            : chalk.red;
+    const durationStr =
+      typeof finding.pocRunDurationMs === "number"
+        ? chalk.dim(` (${(finding.pocRunDurationMs / 1000).toFixed(1)}s)`)
+        : "";
     details.push(`${verdictColor(`PoC Execution: ${finding.pocRunVerdict}`)}${durationStr}`);
   }
 
   return (
     <Box flexDirection="column">
-      <Text>{"  "}{verdict} {conf}  {severity} {scanner}{verificationBadge}</Text>
-      <Text>{"    "}{location}</Text>
+      <Text>
+        {"  "}
+        {verdict} {conf} {severity} {scanner}
+        {verificationBadge}
+      </Text>
+      <Text>
+        {"    "}
+        {location}
+      </Text>
       <CodePreview filePath={finding.filePath} line={finding.startLine} context={2} />
-      <Text>{"    "}{chalk.dim(finding.ruleId)}</Text>
-      <Text>{"    "}{renderMarkdownInline(finding.rationale.slice(0, 120))}{finding.rationale.length > 120 ? "..." : ""}</Text>
-      {details.length > 0 && details.map((detail, i) => {
-        const isLast = i === details.length - 1 && finding.corroboratingSignals.length === 0;
-        const connector = isLast ? icons.treeLast : icons.treeMiddle;
-        return (
-          <Text key={i}>{"    "}{chalk.dim(connector)} {detail}</Text>
-        );
-      })}
+      <Text>
+        {"    "}
+        {chalk.dim(finding.ruleId)}
+      </Text>
+      <Text>
+        {"    "}
+        {renderMarkdownInline(finding.rationale.slice(0, 120))}
+        {finding.rationale.length > 120 ? "..." : ""}
+      </Text>
+      {details.length > 0 &&
+        details.map((detail, i) => {
+          const isLast = i === details.length - 1 && finding.corroboratingSignals.length === 0;
+          const connector = isLast ? icons.treeLast : icons.treeMiddle;
+          return (
+            <Text key={i}>
+              {"    "}
+              {chalk.dim(connector)} {detail}
+            </Text>
+          );
+        })}
 
       {/* Corroboration cluster tree */}
       {finding.corroboratingSignals.length > 0 && (
         <CorroborationTree signals={finding.corroboratingSignals} isLastDetail={true} />
       )}
 
-      <Text>{" "}</Text>
+      <Text> </Text>
     </Box>
   );
 }
 
 type CorroborationSignal = ActionableFinding["corroboratingSignals"][number];
 
-function CorroborationTree({ signals, isLastDetail }: {
+function CorroborationTree({
+  signals,
+  isLastDetail,
+}: {
   signals: CorroborationSignal[];
   isLastDetail: boolean;
 }): React.ReactElement {
@@ -112,17 +145,31 @@ function CorroborationTree({ signals, isLastDetail }: {
 
   return (
     <Box flexDirection="column">
-      <Text>{"    "}{chalk.dim(connector)} {chalk.dim("Corroborated by")} {chalk.white(`${signals.length}`)} {chalk.dim(`scanner${signals.length > 1 ? "s" : ""}:`)} {chalk.dim(uniqueTasks.join(", "))}</Text>
+      <Text>
+        {"    "}
+        {chalk.dim(connector)} {chalk.dim("Corroborated by")} {chalk.white(`${signals.length}`)}{" "}
+        {chalk.dim(`scanner${signals.length > 1 ? "s" : ""}:`)} {chalk.dim(uniqueTasks.join(", "))}
+      </Text>
       {signals.map((signal, i) => {
         const sigConnector = i === signals.length - 1 ? icons.treeLast : icons.treeMiddle;
         const cwes = signal.cwe && signal.cwe.length > 0 ? signal.cwe.join(",") : "";
         const score = signal.score != null ? chalk.dim(`score=${signal.score}`) : "";
-        const loc = signal.filePath && signal.startLine
-          ? chalk.cyan(fileLink(signal.filePath, `${signal.filePath}:${signal.startLine}`, signal.startLine))
-          : "";
+        const loc =
+          signal.filePath && signal.startLine
+            ? chalk.cyan(
+                fileLink(
+                  signal.filePath,
+                  `${signal.filePath}:${signal.startLine}`,
+                  signal.startLine,
+                ),
+              )
+            : "";
         const parts = [chalk.white(signal.taskId), cwes, score, loc].filter(Boolean);
         return (
-          <Text key={i}>{"    "}{continuation}  {chalk.dim(sigConnector)} {parts.join("  ")}</Text>
+          <Text key={i}>
+            {"    "}
+            {continuation} {chalk.dim(sigConnector)} {parts.join("  ")}
+          </Text>
         );
       })}
     </Box>

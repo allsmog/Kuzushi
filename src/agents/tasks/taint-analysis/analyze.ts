@@ -1,46 +1,45 @@
-import { execFile, type ExecFileException } from "node:child_process";
+import { type ExecFileException, execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { AgentRuntime } from "../../../agent-runtime/types.js";
-import { getLogger } from "../../../logger.js";
-import { formatTaintPathForPrompt } from "../../../findings/taint-path.js";
-import { scoreFindingMetadata } from "../../../scanners/scoring.js";
-import { selectFindings, type CodeQLSarifOutput } from "../../../scanners/run-codeql.js";
-import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
-import type { ScanOpts } from "../../../types.js";
-import { getLatestCompletedRunFindings } from "../../../store.js";
-import { isRecord, toErrorMessage } from "../../../utils.js";
-import { resolveDefaultReadOnlyTools, runStructuredAgentQuery } from "../../../agent-runtime/execution.js";
-import type { AgentTask } from "../../types.js";
-import { groundCallableTargets, groundNamedHints } from "./grounding.js";
 import {
+  resolveDefaultReadOnlyTools,
+  runStructuredAgentQuery,
+} from "../../../agent-runtime/execution.js";
+import type { AgentRuntime } from "../../../agent-runtime/types.js";
+import { formatTaintPathForPrompt } from "../../../findings/taint-path.js";
+import { getLogger } from "../../../logger.js";
+import { type CodeQLSarifOutput, selectFindings } from "../../../scanners/run-codeql.js";
+import { scoreFindingMetadata } from "../../../scanners/scoring.js";
+import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
+import { getLatestCompletedRunFindings } from "../../../store.js";
+import type { ScanOpts } from "../../../types.js";
+import { isRecord, toErrorMessage } from "../../../utils.js";
+import type { AgentTask } from "../../types.js";
+import {
+  type CodeqlProfile,
   candidateProfiles,
   formatProfileDiagnostics,
   libraryImportsForProfile,
   profileById,
   queryImportsForProfile,
-  type CodeqlProfile,
 } from "./codeql-compat.js";
+import { extractPassId, mergeBaselineTaintFindings, narrowDiffScope } from "./diff-scope.js";
+import { groundCallableTargets, groundNamedHints } from "./grounding.js";
 import {
+  type ExtractionDegradation,
+  resolveTaintAnalysisConfig,
   TAINT_ANALYSIS_PASS_IDS,
   TAINT_ANALYSIS_PASSES,
-  resolveTaintAnalysisConfig,
-  type ExtractionDegradation,
   type TaintAnalysisLabelOutput,
   type TaintAnalysisLabelsDocument,
   type TaintAnalysisLanguage,
-  type TaintAnalysisPassEntry,
   type TaintAnalysisPassDefinition,
+  type TaintAnalysisPassEntry,
   type TaintAnalysisPassId,
   type TaintAnalysisPreflightOutput,
 } from "./types.js";
-import {
-  extractPassId,
-  mergeBaselineTaintFindings,
-  narrowDiffScope,
-} from "./diff-scope.js";
 
 const execFileAsync = promisify(execFile);
 const log = getLogger("taint-analysis-run");
@@ -62,7 +61,10 @@ const SUMMARY_SUPPLEMENT_SCHEMA = {
         required: ["callable", "flowKind", "receiverHint", "argIndex", "rationale"],
         properties: {
           callable: { type: "string" },
-          flowKind: { type: "string", enum: ["param", "argument", "return", "receiver", "field", "unknown"] },
+          flowKind: {
+            type: "string",
+            enum: ["param", "argument", "return", "receiver", "field", "unknown"],
+          },
           receiverHint: { type: ["string", "null"] },
           argIndex: { type: ["integer", "null"] },
           rationale: { type: "string" },
@@ -99,7 +101,9 @@ async function discoverSummarySupplements(
       labelSummaryLines.push(`Sources (${sources.length}):`);
       for (const s of sources.slice(0, 15)) {
         const mod = s.signature.module ?? s.signature.type ?? "";
-        labelSummaryLines.push(`  - ${mod ? mod + "." : ""}${s.signature.callable} [${s.signature.flow_kind}]`);
+        labelSummaryLines.push(
+          `  - ${mod ? mod + "." : ""}${s.signature.callable} [${s.signature.flow_kind}]`,
+        );
       }
       if (sources.length > 15) {
         labelSummaryLines.push(`  ... and ${sources.length - 15} more`);
@@ -109,7 +113,9 @@ async function discoverSummarySupplements(
       labelSummaryLines.push(`Sinks (${sinks.length}):`);
       for (const s of sinks.slice(0, 15)) {
         const mod = s.signature.module ?? s.signature.type ?? "";
-        labelSummaryLines.push(`  - ${mod ? mod + "." : ""}${s.signature.callable} [${s.signature.flow_kind}]`);
+        labelSummaryLines.push(
+          `  - ${mod ? mod + "." : ""}${s.signature.callable} [${s.signature.flow_kind}]`,
+        );
       }
       if (sinks.length > 15) {
         labelSummaryLines.push(`  ... and ${sinks.length - 15} more`);
@@ -117,11 +123,12 @@ async function discoverSummarySupplements(
     }
   }
 
-  const degradationNote = extractionDegradation.status !== "ok"
-    ? `\n\nNOTE: Extraction was degraded (${extractionDegradation.reasons.join(", ")}). ` +
-      `This means CodeQL's type resolution may be incomplete — taint flow gaps are more likely. ` +
-      `Pay extra attention to utility wrappers, format functions, and type converters that bridge data flow.`
-    : "";
+  const degradationNote =
+    extractionDegradation.status !== "ok"
+      ? `\n\nNOTE: Extraction was degraded (${extractionDegradation.reasons.join(", ")}). ` +
+        `This means CodeQL's type resolution may be incomplete — taint flow gaps are more likely. ` +
+        `Pay extra attention to utility wrappers, format functions, and type converters that bridge data flow.`
+      : "";
 
   const prompt = `You are a security-focused code analysis agent. Your job is to identify **intermediate functions** in this ${language} codebase${framework ? ` (${framework} framework)` : ""} that propagate taint but are NOT already labeled as sources or sinks.
 
@@ -197,9 +204,12 @@ For each supplement provide:
     const validFlowKinds = new Set(["param", "argument", "return", "receiver", "field", "unknown"]);
     supplements.push({
       callable,
-      flowKind: validFlowKinds.has(flowKind) ? flowKind as CallableInfo["flowKind"] : "unknown",
+      flowKind: validFlowKinds.has(flowKind) ? (flowKind as CallableInfo["flowKind"]) : "unknown",
       receiverHint: typeof item["receiverHint"] === "string" ? item["receiverHint"] : null,
-      argIndex: typeof item["argIndex"] === "number" && Number.isInteger(item["argIndex"]) ? item["argIndex"] : null,
+      argIndex:
+        typeof item["argIndex"] === "number" && Number.isInteger(item["argIndex"])
+          ? item["argIndex"]
+          : null,
     });
   }
 
@@ -261,9 +271,15 @@ async function discoverRenderingHints(
 ): Promise<{ hints: RenderingHints; costUsd: number }> {
   const { language, framework, repoRoot, model, runtime, labeledCallables } = args;
 
-  const callableContext = labeledCallables.length > 0
-    ? `\n\nLabeled callables in the codebase (for context):\n${labeledCallables.slice(0, 50).map((c) => `  - ${c}`).join("\n")}${labeledCallables.length > 50 ? `\n  ... and ${labeledCallables.length - 50} more` : ""}`
-    : "";
+  const callableContext =
+    labeledCallables.length > 0
+      ? `\n\nLabeled callables in the codebase (for context):\n${labeledCallables
+          .slice(0, 50)
+          .map((c) => `  - ${c}`)
+          .join(
+            "\n",
+          )}${labeledCallables.length > 50 ? `\n  ... and ${labeledCallables.length - 50} more` : ""}`
+      : "";
 
   const prompt = `You are a code analysis agent. Analyze this ${language} codebase${framework ? ` (${framework} framework)` : ""} and identify rendering hints for CodeQL taint analysis query generation.
 ${callableContext}
@@ -318,7 +334,8 @@ Return:
     }
     if (Array.isArray(parsed.sqlQueryTextArg0Callables)) {
       for (const item of parsed.sqlQueryTextArg0Callables) {
-        if (typeof item === "string" && item.trim()) hints.sqlQueryTextArg0Callables.add(item.trim());
+        if (typeof item === "string" && item.trim())
+          hints.sqlQueryTextArg0Callables.add(item.trim());
       }
     }
     if (Array.isArray(parsed.stdlibPackages)) {
@@ -362,11 +379,15 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
       throw new Error("taint-analysis-run requires upstream output from taint-analysis-label");
     }
 
-    const labels = labelOutput.labels ?? await loadLabelsFromDisk(labelOutput.labelsPath);
+    const labels = labelOutput.labels ?? (await loadLabelsFromDisk(labelOutput.labelsPath));
     process.stderr.write(`[taint-analysis-run] Loaded labels: ${labels.passes.length} passes\n`);
     enforceLabelArtifactCompatibility(labels);
     const resultsDir = path.join(labelOutput.workspaceDir, "results");
-    const compatRecordPath = path.join(labelOutput.workspaceDir, "exploration", "codeql_compat.json");
+    const compatRecordPath = path.join(
+      labelOutput.workspaceDir,
+      "exploration",
+      "codeql_compat.json",
+    );
 
     // --- Diff-aware pass narrowing ---
     let diffScope = narrowDiffScope(labelOutput.diffScope, labels);
@@ -385,8 +406,7 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
         cachedBaselineFindings = getLatestCompletedRunFindings(
           context.db,
           resolveBaselineCacheRepoRoot(context),
-        )
-          .filter((finding) => finding.taskId === "taint-analysis-run");
+        ).filter((finding) => finding.taskId === "taint-analysis-run");
         if (cachedBaselineFindings.length === 0) {
           diffScope = {
             ...diffScope,
@@ -406,15 +426,21 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
       );
       await writeFile(
         path.join(resultsDir, "diff_scope_narrowed.json"),
-        JSON.stringify({
-          generatedAt: new Date().toISOString(),
-          ...diffScope,
-        }, null, 2),
+        JSON.stringify(
+          {
+            generatedAt: new Date().toISOString(),
+            ...diffScope,
+          },
+          null,
+          2,
+        ),
         "utf-8",
       );
     }
 
-    const enabledPasses = TAINT_ANALYSIS_PASSES.filter((passDef) => labelOutput.passes.includes(passDef.passId));
+    const enabledPasses = TAINT_ANALYSIS_PASSES.filter((passDef) =>
+      labelOutput.passes.includes(passDef.passId),
+    );
     if (enabledPasses.length === 0) {
       process.stderr.write(`[taint-analysis-run] No enabled passes, skipping\n`);
       return [];
@@ -424,18 +450,27 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
     if (!hasUsableRoleForPasses(labels, enabledPasses, "source")) {
       await writeFile(
         path.join(resultsDir, "skip_reason.json"),
-        JSON.stringify({
-          reason: "no_sources",
-          detail: "Skipping taint analysis run because no non-fp source labels were available for enabled passes.",
-          enabledPasses: enabledPasses.map((pass) => pass.passId),
-          generatedAt: new Date().toISOString(),
-        }, null, 2),
+        JSON.stringify(
+          {
+            reason: "no_sources",
+            detail:
+              "Skipping taint analysis run because no non-fp source labels were available for enabled passes.",
+            enabledPasses: enabledPasses.map((pass) => pass.passId),
+            generatedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
         "utf-8",
       );
       return [];
     }
 
-    const taintTemplatePath = path.join(labelOutput.taintAnalysisPath, "assets", "taint_query.ql.tmpl");
+    const taintTemplatePath = path.join(
+      labelOutput.taintAnalysisPath,
+      "assets",
+      "taint_query.ql.tmpl",
+    );
     const taintTemplate = await readFile(taintTemplatePath, "utf-8");
 
     let agenticSupplements: CallableInfo[] = [];
@@ -453,38 +488,46 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
         const groundedSupplements = cfg.groundingEnabled
           ? await groundCallableTargets(context.repoRoot, supplementResult.supplements)
           : supplementResult.supplements.map((supplement) => ({
-            item: supplement,
-            grounding: {
-              status: "weak" as const,
-              reasons: ["grounding_disabled"],
-              matchCount: 0,
-              evidence: [],
-            },
-          }));
+              item: supplement,
+              grounding: {
+                status: "weak" as const,
+                reasons: ["grounding_disabled"],
+                matchCount: 0,
+                evidence: [],
+              },
+            }));
         agenticSupplements = groundedSupplements
           .filter((supplement) => supplement.grounding.status !== "invalid")
           .map((supplement) => supplement.item);
-        process.stderr.write(`[taint-analysis-run] Discovered ${agenticSupplements.length} summary supplement(s)\n`);
+        process.stderr.write(
+          `[taint-analysis-run] Discovered ${agenticSupplements.length} summary supplement(s)\n`,
+        );
         await writeFile(
           path.join(resultsDir, "summary_supplements.json"),
-          JSON.stringify({
-            generatedAt: new Date().toISOString(),
-            language: labelOutput.language,
-            framework: labelOutput.framework,
-            costUsd: supplementResult.costUsd,
-            supplements: agenticSupplements,
-            droppedSupplements: groundedSupplements
-              .filter((supplement) => supplement.grounding.status === "invalid")
-              .map((supplement) => supplement.item),
-            grounding: groundedSupplements.map((supplement) => ({
-              ...supplement.item,
-              grounding: supplement.grounding,
-            })),
-          }, null, 2),
+          JSON.stringify(
+            {
+              generatedAt: new Date().toISOString(),
+              language: labelOutput.language,
+              framework: labelOutput.framework,
+              costUsd: supplementResult.costUsd,
+              supplements: agenticSupplements,
+              droppedSupplements: groundedSupplements
+                .filter((supplement) => supplement.grounding.status === "invalid")
+                .map((supplement) => supplement.item),
+              grounding: groundedSupplements.map((supplement) => ({
+                ...supplement.item,
+                grounding: supplement.grounding,
+              })),
+            },
+            null,
+            2,
+          ),
           "utf-8",
         );
       } catch (error) {
-        process.stderr.write(`[taint-analysis-run] Summary supplement discovery failed (non-fatal): ${toErrorMessage(error)}\n`);
+        process.stderr.write(
+          `[taint-analysis-run] Summary supplement discovery failed (non-fatal): ${toErrorMessage(error)}\n`,
+        );
       }
     }
 
@@ -496,7 +539,9 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
           for (const entry of pass.entries) {
             if (entry.classification !== "fp" && entry.signature.callable.trim()) {
               const mod = entry.signature.module ?? entry.signature.type ?? "";
-              labeledCallables.push(mod ? `${mod}.${entry.signature.callable}` : entry.signature.callable);
+              labeledCallables.push(
+                mod ? `${mod}.${entry.signature.callable}` : entry.signature.callable,
+              );
             }
           }
         }
@@ -533,12 +578,16 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
           };
           await writeFile(
             path.join(resultsDir, "rendering_hints_grounding.json"),
-            JSON.stringify({
-              generatedAt: new Date().toISOString(),
-              variadicFormatFuncs: groundedVariadic,
-              sqlQueryTextArg0Callables: groundedSqlArg0,
-              stdlibPackages: groundedStdlib,
-            }, null, 2),
+            JSON.stringify(
+              {
+                generatedAt: new Date().toISOString(),
+                variadicFormatFuncs: groundedVariadic,
+                sqlQueryTextArg0Callables: groundedSqlArg0,
+                stdlibPackages: groundedStdlib,
+              },
+              null,
+              2,
+            ),
             "utf-8",
           );
         } else {
@@ -549,27 +598,34 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
         );
         await writeFile(
           path.join(resultsDir, "rendering_hints.json"),
-          JSON.stringify({
-            generatedAt: new Date().toISOString(),
-            language: labelOutput.language,
-            framework: labelOutput.framework,
-            costUsd: hintsResult.costUsd,
-            variadicFormatFuncs: [...renderingHints.variadicFormatFuncs],
-            sqlQueryTextArg0Callables: [...renderingHints.sqlQueryTextArg0Callables],
-            stdlibPackages: [...renderingHints.stdlibPackages],
-          }, null, 2),
+          JSON.stringify(
+            {
+              generatedAt: new Date().toISOString(),
+              language: labelOutput.language,
+              framework: labelOutput.framework,
+              costUsd: hintsResult.costUsd,
+              variadicFormatFuncs: [...renderingHints.variadicFormatFuncs],
+              sqlQueryTextArg0Callables: [...renderingHints.sqlQueryTextArg0Callables],
+              stdlibPackages: [...renderingHints.stdlibPackages],
+            },
+            null,
+            2,
+          ),
           "utf-8",
         );
       } catch (error) {
-        process.stderr.write(`[taint-analysis-run] Rendering hints discovery failed (non-fatal): ${toErrorMessage(error)}\n`);
+        process.stderr.write(
+          `[taint-analysis-run] Rendering hints discovery failed (non-fatal): ${toErrorMessage(error)}\n`,
+        );
       }
     }
 
-    process.stderr.write(`[taint-analysis-run] Rendering artifacts and compile-gating queries...\n`);
+    process.stderr.write(
+      `[taint-analysis-run] Rendering artifacts and compile-gating queries...\n`,
+    );
     const requestedProfile = cfg.codeqlApiProfile ?? "auto";
-    const fallbackEnabled = requestedProfile === "auto"
-      ? (cfg.codeqlProfileFallbacks ?? true)
-      : false;
+    const fallbackEnabled =
+      requestedProfile === "auto" ? (cfg.codeqlProfileFallbacks ?? true) : false;
     const profileSelection = await selectProfileWithCompileGate({
       language: labelOutput.language,
       initialProfileId: labelOutput.codeqlApiProfileId,
@@ -597,33 +653,41 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
     });
 
     if (!profileSelection.selected || !profileSelection.passQueries) {
-      throw new Error(formatProfileDiagnostics({
-        language: labelOutput.language,
-        codeqlVersion: labelOutput.codeqlVersion,
-        requestedProfile,
-        selectedProfileId: labelOutput.codeqlApiProfileId,
-        fallbackEnabled,
-        compatRecordPath,
-        tried: profileSelection.attempts,
-      }));
+      throw new Error(
+        formatProfileDiagnostics({
+          language: labelOutput.language,
+          codeqlVersion: labelOutput.codeqlVersion,
+          requestedProfile,
+          selectedProfileId: labelOutput.codeqlApiProfileId,
+          fallbackEnabled,
+          compatRecordPath,
+          tried: profileSelection.attempts,
+        }),
+      );
     }
 
     const selectedProfile = profileSelection.selected;
     const passQueries = profileSelection.passQueries;
-    process.stderr.write(`[taint-analysis-run] Profile selected: ${selectedProfile.id}, ${passQueries.length} queries to run\n`);
+    process.stderr.write(
+      `[taint-analysis-run] Profile selected: ${selectedProfile.id}, ${passQueries.length} queries to run\n`,
+    );
     await writeFile(
       path.join(resultsDir, "profile_used.json"),
-      JSON.stringify({
-        language: labelOutput.language,
-        codeqlVersion: labelOutput.codeqlVersion,
-        requestedProfile,
-        preflightProfileId: labelOutput.codeqlApiProfileId,
-        selectedProfileId: selectedProfile.id,
-        dataFlowImport: selectedProfile.dataFlowImport,
-        taintTrackingImport: selectedProfile.taintTrackingImport,
-        fallbackEnabled,
-        triedProfiles: profileSelection.attempts,
-      }, null, 2),
+      JSON.stringify(
+        {
+          language: labelOutput.language,
+          codeqlVersion: labelOutput.codeqlVersion,
+          requestedProfile,
+          preflightProfileId: labelOutput.codeqlApiProfileId,
+          selectedProfileId: selectedProfile.id,
+          dataFlowImport: selectedProfile.dataFlowImport,
+          taintTrackingImport: selectedProfile.taintTrackingImport,
+          fallbackEnabled,
+          triedProfiles: profileSelection.attempts,
+        },
+        null,
+        2,
+      ),
       "utf-8",
     );
 
@@ -632,7 +696,11 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
       const passQuery = passQueries[qi];
 
       // Skip passes unaffected by the diff when narrowing is active
-      if (diffScope && !diffScope.fellBackToFull && !diffScope.affectedPassIds.includes(passQuery.passId)) {
+      if (
+        diffScope &&
+        !diffScope.fellBackToFull &&
+        !diffScope.affectedPassIds.includes(passQuery.passId)
+      ) {
         process.stderr.write(
           `[taint-analysis-run] Skipping query ${qi + 1}/${passQueries.length} (pass ${passQuery.passId}) — not affected by diff\n`,
         );
@@ -640,23 +708,30 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
         continue;
       }
 
-      process.stderr.write(`[taint-analysis-run] Running query ${qi + 1}/${passQueries.length} (pass ${passQuery.passId})...\n`);
+      process.stderr.write(
+        `[taint-analysis-run] Running query ${qi + 1}/${passQueries.length} (pass ${passQuery.passId})...\n`,
+      );
       await runCommand(
         labelOutput.codeqlBinary,
-        withResources([
-          "database",
-          "analyze",
-          labelOutput.dbPath,
-          passQuery.queryPath,
-          "--format=sarifv2.1.0",
-          `--output=${passQuery.resultPath}`,
-        ], cfg),
+        withResources(
+          [
+            "database",
+            "analyze",
+            labelOutput.dbPath,
+            passQuery.queryPath,
+            "--format=sarifv2.1.0",
+            `--output=${passQuery.resultPath}`,
+          ],
+          cfg,
+        ),
         labelOutput.workspaceDir,
       );
       process.stderr.write(`[taint-analysis-run] Query ${qi + 1}/${passQueries.length} complete\n`);
     }
     if (skippedByDiff > 0) {
-      process.stderr.write(`[taint-analysis-run] Diff-aware analysis skipped ${skippedByDiff}/${passQueries.length} passes\n`);
+      process.stderr.write(
+        `[taint-analysis-run] Diff-aware analysis skipped ${skippedByDiff}/${passQueries.length} passes\n`,
+      );
     }
 
     // iris_report.md is a supplemental human-readable summary; SARIF-derived findings are the source of truth.
@@ -683,11 +758,15 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
     const rawFindings = await collectRawFindings(resultsDir, labels);
     await writeFile(
       path.join(resultsDir, "findings.raw.json"),
-      JSON.stringify({
-        version: "1.0.0",
-        generatedAt: new Date().toISOString(),
-        findings: rawFindings,
-      }, null, 2),
+      JSON.stringify(
+        {
+          version: "1.0.0",
+          generatedAt: new Date().toISOString(),
+          findings: rawFindings,
+        },
+        null,
+        2,
+      ),
       "utf-8",
     );
 
@@ -729,7 +808,9 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
     }
 
     const capped = cfg.maxFindings ? findings.slice(0, cfg.maxFindings) : findings;
-    process.stderr.write(`[taint-analysis-run] Complete: ${rawFindings.length} raw findings, ${capped.length} deduplicated findings\n`);
+    process.stderr.write(
+      `[taint-analysis-run] Complete: ${rawFindings.length} raw findings, ${capped.length} deduplicated findings\n`,
+    );
     return capped;
   },
   triageAgentConfig(finding, repoName): TriageAgentConfig {
@@ -773,7 +854,10 @@ export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
   },
 };
 
-function withResources(args: string[], cfg: ReturnType<typeof resolveTaintAnalysisConfig>): string[] {
+function withResources(
+  args: string[],
+  cfg: ReturnType<typeof resolveTaintAnalysisConfig>,
+): string[] {
   const out = [...args];
   if (cfg.threads && cfg.threads > 0) {
     out.push(`--threads=${cfg.threads}`);
@@ -844,7 +928,9 @@ function emitSinkCoverageDiagnostics(
       continue;
     }
     const sinksBeforeFiltering = pass.entries.filter((entry) => entry.role === "sink").length;
-    const sinksAfterFiltering = pass.entries.filter((entry) => entry.role === "sink" && entry.classification !== "fp").length;
+    const sinksAfterFiltering = pass.entries.filter(
+      (entry) => entry.role === "sink" && entry.classification !== "fp",
+    ).length;
     const uniqueCallables = new Set(
       pass.entries
         .filter((entry) => entry.role === "sink" && entry.classification !== "fp")
@@ -913,10 +999,17 @@ function renderTaintAnalysisLibraries(
     for (const passKey of [...summaryByPass.keys()]) {
       const existing = summaryByPass.get(passKey)!;
       const existingKeys = new Set(
-        existing.map((c) => buildCallableVariantKey(c.callable, c.receiverHint, c.flowKind, c.argIndex)),
+        existing.map((c) =>
+          buildCallableVariantKey(c.callable, c.receiverHint, c.flowKind, c.argIndex),
+        ),
       );
       for (const supplement of agenticSupplements) {
-        const key = buildCallableVariantKey(supplement.callable, supplement.receiverHint, supplement.flowKind, supplement.argIndex);
+        const key = buildCallableVariantKey(
+          supplement.callable,
+          supplement.receiverHint,
+          supplement.flowKind,
+          supplement.argIndex,
+        );
         if (!existingKeys.has(key)) {
           existing.push(supplement);
           existingKeys.add(key);
@@ -929,7 +1022,12 @@ function renderTaintAnalysisLibraries(
         const supplements: CallableInfo[] = [];
         const seen = new Set<string>();
         for (const supplement of agenticSupplements) {
-          const key = buildCallableVariantKey(supplement.callable, supplement.receiverHint, supplement.flowKind, supplement.argIndex);
+          const key = buildCallableVariantKey(
+            supplement.callable,
+            supplement.receiverHint,
+            supplement.flowKind,
+            supplement.argIndex,
+          );
           if (!seen.has(key)) {
             supplements.push(supplement);
             seen.add(key);
@@ -963,7 +1061,7 @@ function renderMatcherLibrary(
   const passClauses = TAINT_ANALYSIS_PASSES.map((passDef) => {
     const callables = byPass.get(passDef.passKey) ?? [];
     if (callables.length === 0) {
-      return `    passKey = \"${passDef.passKey}\" and ${nodeParamName}.toString().regexpMatch(\"a^\")`;
+      return `    passKey = "${passDef.passKey}" and ${nodeParamName}.toString().regexpMatch("a^")`;
     }
 
     const callableChecks = callables
@@ -971,7 +1069,7 @@ function renderMatcherLibrary(
       .join("\n      or ");
 
     return [
-      `    passKey = \"${passDef.passKey}\" and`,
+      `    passKey = "${passDef.passKey}" and`,
       "    (",
       `      ${callableChecks}`,
       "    )",
@@ -994,7 +1092,10 @@ function renderMatcherLibrary(
   ].join("\n");
 }
 
-function groupCallables(labels: TaintAnalysisLabelsDocument, role: TaintAnalysisPassEntry["role"]): Map<string, CallableInfo[]> {
+function groupCallables(
+  labels: TaintAnalysisLabelsDocument,
+  role: TaintAnalysisPassEntry["role"],
+): Map<string, CallableInfo[]> {
   const out = new Map<string, CallableInfo[]>();
 
   for (const pass of labels.passes) {
@@ -1110,7 +1211,10 @@ function renderTaintQuery(
     .replaceAll("import {{SUMMARY_MODULE}}", "import libraries.MySummaries")
     .replaceAll("{{QUERY_NAME}}", `Taint Analysis Pass ${passDef.passId} - ${passDef.focus}`)
     .replaceAll("{{QUERY_DESCRIPTION}}", `Detect tainted dataflow for ${passDef.focus}.`)
-    .replaceAll("{{QUERY_ID}}", `${queryIdPrefix}/taint-analysis/pass${passDef.passId}-${passDef.passKey.replaceAll("_", "-")}`)
+    .replaceAll(
+      "{{QUERY_ID}}",
+      `${queryIdPrefix}/taint-analysis/pass${passDef.passId}-${passDef.passKey.replaceAll("_", "-")}`,
+    )
     .replaceAll("{{PRECISION}}", "medium")
     .replaceAll("{{CWE_PRIMARY}}", String(Number.parseInt(passDef.cwes[0] ?? "0", 10)))
     .replaceAll("{{EXTRA_TAGS}}", extraTags)
@@ -1154,7 +1258,12 @@ async function renderArtifactsForProfile(args: {
   agenticSupplements?: CallableInfo[];
   renderingHints?: RenderingHints;
 }): Promise<PassQueryArtifact[]> {
-  const libraries = renderTaintAnalysisLibraries(args.labels, args.profile, args.agenticSupplements, args.renderingHints);
+  const libraries = renderTaintAnalysisLibraries(
+    args.labels,
+    args.profile,
+    args.agenticSupplements,
+    args.renderingHints,
+  );
   const librariesDir = path.join(args.workspaceDir, "libraries");
   await writeFile(path.join(librariesDir, "MySources.qll"), libraries.sources, "utf-8");
   await writeFile(path.join(librariesDir, "MySinks.qll"), libraries.sinks, "utf-8");
@@ -1213,7 +1322,9 @@ async function selectProfileWithCompileGate(args: {
 }> {
   const initialProfile = profileById(args.language, args.initialProfileId);
   if (!initialProfile) {
-    const validIds = candidateProfiles(args.language).map((profile) => profile.id).join(", ");
+    const validIds = candidateProfiles(args.language)
+      .map((profile) => profile.id)
+      .join(", ");
     throw new Error(
       `Unknown CodeQL API profile '${args.initialProfileId}' for ${args.language}. Valid profiles: ${validIds}`,
     );
@@ -1396,9 +1507,7 @@ function augmentFinding(
     message: passDef
       ? `[Taint Analysis ${passDef.focus}] ${finding.message}`
       : `[Taint Analysis] ${finding.message}`,
-    evidence: finding.evidence
-      ? `${finding.evidence} | ${passEvidence}`
-      : passEvidence,
+    evidence: finding.evidence ? `${finding.evidence} | ${passEvidence}` : passEvidence,
     cwe: passDef ? passDef.cwes.map((cwe) => `CWE-${Number.parseInt(cwe, 10)}`) : finding.cwe,
     proofState: finding.proofState ?? "symbolic_only",
     engineProvenance: [
@@ -1441,10 +1550,7 @@ function languageQueryIdPrefix(language: TaintAnalysisPreflightOutput["language"
 }
 
 function queryFilename(passId: number, focus: string): string {
-  const focusSlug = focus
-    .replaceAll("/", "")
-    .replaceAll(/\s+/g, "")
-    .replaceAll("-", "");
+  const focusSlug = focus.replaceAll("/", "").replaceAll(/\s+/g, "").replaceAll("-", "");
   return `Pass${passId}_${focusSlug}.ql`;
 }
 
@@ -1462,9 +1568,7 @@ function buildCallableNameCheck(
   profile: CodeqlProfile,
   hints?: RenderingHints,
 ): string {
-  const effectiveCallable = language === "go"
-    ? callableBasename(callable)
-    : callable;
+  const effectiveCallable = language === "go" ? callableBasename(callable) : callable;
   const escaped = escapeQllString(effectiveCallable);
 
   // If the profile provides a custom callee name pattern, use it.
@@ -1558,7 +1662,13 @@ function buildNodeCallableCheck(
   hints?: RenderingHints,
 ): string {
   const language = profile.language;
-  const nameCheck = buildCallableNameCheck(info.callable, language, info.receiverHint, profile, hints);
+  const nameCheck = buildCallableNameCheck(
+    info.callable,
+    language,
+    info.receiverHint,
+    profile,
+    hints,
+  );
 
   const getArg = profile.getArgumentMethod ?? "getArgument";
   const getAnyArg = profile.getAnArgumentExpr ?? "call.getAnArgument()";
@@ -1584,16 +1694,12 @@ function buildNodeCallableCheck(
   }
 
   if (role === "sink") {
-    const callableName = language === "go"
-      ? callableBasename(info.callable)
-      : info.callable;
+    const callableName = language === "go" ? callableBasename(info.callable) : info.callable;
     let argExpr: string;
     if (info.argIndex != null) {
-      const isVariadicFormat = info.argIndex === 0
-        && (hints?.variadicFormatFuncs.has(callableName) ?? false);
-      argExpr = isVariadicFormat
-        ? getAnyArg
-        : callGetArg(info.argIndex);
+      const isVariadicFormat =
+        info.argIndex === 0 && (hints?.variadicFormatFuncs.has(callableName) ?? false);
+      argExpr = isVariadicFormat ? getAnyArg : callGetArg(info.argIndex);
     } else if (language === "go" && (hints?.sqlQueryTextArg0Callables.has(callableName) ?? false)) {
       argExpr = callGetArg(0);
     } else {
@@ -1603,9 +1709,7 @@ function buildNodeCallableCheck(
   }
 
   // Sanitizer: match either return value or argument
-  const argExpr = info.argIndex != null
-    ? callGetArg(info.argIndex)
-    : getAnyArg;
+  const argExpr = info.argIndex != null ? callGetArg(info.argIndex) : getAnyArg;
   return wrapCallExists(
     nameCheck,
     `(${nodeParamName} = ${resultExpr} or ${nodeParamName} = ${argExpr})`,
@@ -1613,8 +1717,18 @@ function buildNodeCallableCheck(
   );
 }
 
-function buildSummaryTaintStep(info: CallableInfo, profile: CodeqlProfile, hints?: RenderingHints): string {
-  const nameCheck = buildCallableNameCheck(info.callable, profile.language, info.receiverHint, profile, hints);
+function buildSummaryTaintStep(
+  info: CallableInfo,
+  profile: CodeqlProfile,
+  hints?: RenderingHints,
+): string {
+  const nameCheck = buildCallableNameCheck(
+    info.callable,
+    profile.language,
+    info.receiverHint,
+    profile,
+    hints,
+  );
   const callType = profile.callNodeType ?? "DataFlow::CallNode";
   const getArg = profile.getArgumentMethod ?? "getArgument";
   const resultExpr = profile.callResultExpr ?? "call.getResult()";
@@ -1644,7 +1758,8 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
   // CodeQL requires every disjunction branch to bind output parameters, so we bind
   // passKey via set membership over all known pass keys instead of the reflexive
   // `passKey = passKey` (which CodeQL treats as unbound).
-  const passKeyBinding = "(" + TAINT_ANALYSIS_PASSES.map((p) => `passKey = "${p.passKey}"`).join(" or ") + ")";
+  const passKeyBinding =
+    "(" + TAINT_ANALYSIS_PASSES.map((p) => `passKey = "${p.passKey}"`).join(" or ") + ")";
   const clauses: string[] = [];
 
   switch (language) {
@@ -1861,31 +1976,27 @@ function asLabelOutput(value: unknown): TaintAnalysisLabelOutput | null {
     return null;
   }
 
-  const labelsPath = typeof value["labelsPath"] === "string"
-    ? value["labelsPath"]
-    : "";
+  const labelsPath = typeof value["labelsPath"] === "string" ? value["labelsPath"] : "";
 
-  const workspaceDir = typeof value["workspaceDir"] === "string"
-    ? value["workspaceDir"]
-    : "";
+  const workspaceDir = typeof value["workspaceDir"] === "string" ? value["workspaceDir"] : "";
 
-  const codeqlBinary = typeof value["codeqlBinary"] === "string"
-    ? value["codeqlBinary"]
-    : "";
+  const codeqlBinary = typeof value["codeqlBinary"] === "string" ? value["codeqlBinary"] : "";
 
-  const dbPath = typeof value["dbPath"] === "string"
-    ? value["dbPath"]
-    : "";
+  const dbPath = typeof value["dbPath"] === "string" ? value["dbPath"] : "";
 
-  const codeqlVersion = typeof value["codeqlVersion"] === "string"
-    ? value["codeqlVersion"]
-    : "";
+  const codeqlVersion = typeof value["codeqlVersion"] === "string" ? value["codeqlVersion"] : "";
 
-  const codeqlApiProfileId = typeof value["codeqlApiProfileId"] === "string"
-    ? value["codeqlApiProfileId"]
-    : "";
+  const codeqlApiProfileId =
+    typeof value["codeqlApiProfileId"] === "string" ? value["codeqlApiProfileId"] : "";
 
-  if (!labelsPath || !workspaceDir || !codeqlBinary || !dbPath || !codeqlVersion || !codeqlApiProfileId) {
+  if (
+    !labelsPath ||
+    !workspaceDir ||
+    !codeqlBinary ||
+    !dbPath ||
+    !codeqlVersion ||
+    !codeqlApiProfileId
+  ) {
     return null;
   }
 

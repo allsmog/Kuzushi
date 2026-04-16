@@ -1,5 +1,5 @@
-import type { Finding } from "./types.js";
 import type { TriageResult, Verdict } from "../types.js";
+import type { Finding } from "./types.js";
 
 export type DesignDecisionCategory =
   | "security-toggle"
@@ -50,20 +50,17 @@ const CONFIG_CONTEXT =
 const ENV_VAR_TOGGLES =
   /\b(NODE_TLS_REJECT_UNAUTHORIZED|GIT_SSL_NO_VERIFY|PYTHONHTTPSVERIFY|REQUESTS_CA_BUNDLE|JAVA_TOOL_OPTIONS|SSL_CERT_FILE|CURL_CA_BUNDLE|NODE_EXTRA_CA_CERTS|PIP_TRUSTED_HOST|npm_config_strict_ssl|GONOSUMCHECK)\b/;
 
-const RFC_PATTERNS =
-  /\b(RFC.?7591|dynamic.client.registration|client_registration_endpoint)\b/i;
+const RFC_PATTERNS = /\b(RFC.?7591|dynamic.client.registration|client_registration_endpoint)\b/i;
 
 const LEGACY_PATTERNS =
   /\b(backward.?compat|legacy.protocol|deprecated.auth|fallback.mode|compat.?mode|legacy.support)\b/i;
 
-const COMPAT_CONTEXT =
-  /\b(compat|legacy|fallback|deprecated|migration)\b/i;
+const COMPAT_CONTEXT = /\b(compat|legacy|fallback|deprecated|migration)\b/i;
 
 const RELAXATION_PARAMS =
   /\b(rejectUnauthorized|verify_ssl|CURLOPT_SSL_VERIFYPEER|ssl_verify|tls_verify|check_hostname|verify_certs|insecure_skip_tls_verify)\b/i;
 
-const CONFIGURABLE_CONTEXT =
-  /\b(process\.env|getenv|os\.environ|config\.|options\.|settings\.)\b/i;
+const CONFIGURABLE_CONTEXT = /\b(process\.env|getenv|os\.environ|config\.|options\.|settings\.)\b/i;
 
 // ── Rules ───────────────────────────────────────────────────────────────────
 

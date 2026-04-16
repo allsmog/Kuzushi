@@ -1,10 +1,10 @@
-import { createLogger } from "../logger.js";
 import type { AgentTask, TaskContext } from "../agents/types.js";
-import type { StrategyRegistry } from "./registry.js";
+import { createLogger } from "../logger.js";
+import type { Finding } from "../scanners/types.js";
 import type { CweStrategyProfile } from "./cwe-strategy-map.js";
 import { executeStrategies, resolveMultiStrategyMode } from "./executor.js";
 import { mergeStrategyResults } from "./merge.js";
-import type { Finding } from "../scanners/types.js";
+import type { StrategyRegistry } from "./registry.js";
 import type { MultiStrategyMode } from "./types.js";
 
 const log = createLogger({ stage: "multi-strategy" });
@@ -42,17 +42,11 @@ export function withMultiStrategy<TInput, TOutput>(
       const primaryResult = await wrappedTask.run(input, context);
 
       // Run multi-strategy analysis in parallel
-      const strategyResults = await executeStrategies(
-        profile,
+      const strategyResults = await executeStrategies(profile, context, registry, mode, {
+        repoRoot: context.repoRoot,
+        repoName: context.repoName,
         context,
-        registry,
-        mode,
-        {
-          repoRoot: context.repoRoot,
-          repoName: context.repoName,
-          context,
-        },
-      );
+      });
 
       if (strategyResults.length === 0) {
         return primaryResult;

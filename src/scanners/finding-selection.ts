@@ -1,5 +1,5 @@
-import type { Finding } from "./types.js";
 import { capFindingsForTriage, clusterFindings } from "./normalization.js";
+import type { Finding } from "./types.js";
 
 /**
  * Legacy helper retained for callers/tests that still import finding-selection.

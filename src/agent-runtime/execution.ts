@@ -1,16 +1,13 @@
+import type { LlmCallCompleteEvent, LlmCallErrorEvent, LlmCallStartEvent } from "../bus/events.js";
 import type { MessageBus } from "../bus/types.js";
-import type { AgentHistoryEntry, AgentSession } from "./types.js";
-import type {
-  LlmCallStartEvent,
-  LlmCallCompleteEvent,
-  LlmCallErrorEvent,
-} from "../bus/events.js";
-import type { RepoContext } from "../types.js";
 import { inflightCache } from "../cache.js";
-import { isRecord, toErrorMessage } from "../utils.js";
 import { getLogger } from "../logger.js";
+import type { RepoContext } from "../types.js";
+import { isRecord, toErrorMessage } from "../utils.js";
+import type { AgentHistoryEntry, AgentSession } from "./types.js";
 
 const log = getLogger("batch-fallback");
+
 import type { AgentBatchRequest, AgentEffort, AgentRuntime } from "./types.js";
 
 export const DEFAULT_READ_ONLY_TOOLS = [
@@ -28,9 +25,7 @@ export const SEMANTIC_NAVIGATION_TOOLS = [
   "TypeAtPosition",
 ] as const;
 
-export function resolveDefaultReadOnlyTools(
-  _runtime?: Pick<AgentRuntime, "id">,
-): string[] {
+export function resolveDefaultReadOnlyTools(_runtime?: Pick<AgentRuntime, "id">): string[] {
   return [...DEFAULT_READ_ONLY_TOOLS, ...SEMANTIC_NAVIGATION_TOOLS];
 }
 
@@ -42,9 +37,7 @@ export interface AgentActivity {
   elapsedSeconds?: number;
 }
 
-export type AgentActivityCallback = (
-  activity: AgentActivity,
-) => Promise<void> | void;
+export type AgentActivityCallback = (activity: AgentActivity) => Promise<void> | void;
 
 export interface AgentRuntimeOptions {
   runtime?: AgentRuntime;
@@ -141,7 +134,7 @@ async function executeStructuredAgentQuery(
   const bus = args.runtimeOptions?.bus;
   const runId = args.runtimeOptions?.runId ?? "";
   let resultText = "";
-  let structuredOutput: unknown = undefined;
+  let structuredOutput: unknown;
   let executionError: string | null = null;
   let costUsd = 0;
   const startedAtMs = Date.now();
@@ -233,9 +226,10 @@ async function executeStructuredAgentQuery(
         continue;
       }
 
-      executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "")
-        || message.subtype
-        || "unknown error";
+      executionError =
+        (Array.isArray(message.errors) ? message.errors.join("; ") : "") ||
+        message.subtype ||
+        "unknown error";
     }
 
     // Emit llm:call-complete on success or non-throwing error
@@ -332,7 +326,7 @@ export async function runStructuredSessionQuery(
   prompt: string,
 ): Promise<AgentQueryExecutionResult> {
   let resultText = "";
-  let structuredOutput: unknown = undefined;
+  let structuredOutput: unknown;
   let executionError: string | null = null;
   let costUsd = 0;
 
@@ -347,9 +341,10 @@ export async function runStructuredSessionQuery(
       resultText = message.result;
       structuredOutput = message.structuredOutput;
     } else {
-      executionError = (Array.isArray(message.errors) ? message.errors.join("; ") : "")
-        || message.subtype
-        || "unknown error";
+      executionError =
+        (Array.isArray(message.errors) ? message.errors.join("; ") : "") ||
+        message.subtype ||
+        "unknown error";
     }
   }
 
@@ -446,15 +441,15 @@ function looksLikeRuntimeOptions<T extends AgentRuntimeOptions>(
 ): value is T {
   const runtimeOptions = value as T;
   return (
-    "runtime" in runtimeOptions
-    || "abortController" in runtimeOptions
-    || "maxBudgetUsd" in runtimeOptions
-    || "temperature" in runtimeOptions
-    || "maxOutputTokens" in runtimeOptions
-    || "history" in runtimeOptions
-    || "activityCallback" in runtimeOptions
-    || "bus" in runtimeOptions
-    || "runId" in runtimeOptions
+    "runtime" in runtimeOptions ||
+    "abortController" in runtimeOptions ||
+    "maxBudgetUsd" in runtimeOptions ||
+    "temperature" in runtimeOptions ||
+    "maxOutputTokens" in runtimeOptions ||
+    "history" in runtimeOptions ||
+    "activityCallback" in runtimeOptions ||
+    "bus" in runtimeOptions ||
+    "runId" in runtimeOptions
   );
 }
 

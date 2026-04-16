@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type {
@@ -68,7 +68,10 @@ export class SimpleTextIndexProvider implements IndexProvider, SymbolLookup, Dif
     return new SimpleTextIndexProvider(repoRoot, files);
   }
 
-  async searchText(query: string, options: { maxResults?: number } = {}): Promise<IndexedTextMatch[]> {
+  async searchText(
+    query: string,
+    options: { maxResults?: number } = {},
+  ): Promise<IndexedTextMatch[]> {
     const needle = query.trim();
     if (!needle) {
       return [];
@@ -120,8 +123,8 @@ export class SimpleTextIndexProvider implements IndexProvider, SymbolLookup, Dif
     const matches: SymbolLookupMatch[] = [];
 
     for (const file of this.files) {
-      const fileReceiverMatched = receiverTokens.length > 0
-        && receiverTokens.some((token) => file.content.includes(token));
+      const fileReceiverMatched =
+        receiverTokens.length > 0 && receiverTokens.some((token) => file.content.includes(token));
 
       for (let index = 0; index < file.lines.length; index += 1) {
         const line = file.lines[index];
@@ -129,8 +132,8 @@ export class SimpleTextIndexProvider implements IndexProvider, SymbolLookup, Dif
           continue;
         }
 
-        const receiverMatched = fileReceiverMatched
-          || receiverTokens.some((token) => line.includes(token));
+        const receiverMatched =
+          fileReceiverMatched || receiverTokens.some((token) => line.includes(token));
         const arityHint = estimateArityHint(line, baseSymbol);
         const confidence = estimateMatchConfidence(line, baseSymbol, receiverMatched);
         matches.push({
@@ -208,12 +211,20 @@ function splitReceiverTokens(receiverHint: string | null | undefined): string[] 
     .filter((token) => token.length >= 2);
 }
 
-function estimateMatchConfidence(line: string, baseSymbol: string, receiverMatched: boolean): number {
+function estimateMatchConfidence(
+  line: string,
+  baseSymbol: string,
+  receiverMatched: boolean,
+): number {
   let score = 0.45;
   if (line.includes(`${baseSymbol}(`) || line.includes(`.${baseSymbol}(`)) {
     score += 0.3;
   }
-  if (line.includes(`function ${baseSymbol}`) || line.includes(`def ${baseSymbol}`) || line.includes(`func ${baseSymbol}`)) {
+  if (
+    line.includes(`function ${baseSymbol}`) ||
+    line.includes(`def ${baseSymbol}`) ||
+    line.includes(`func ${baseSymbol}`)
+  ) {
     score += 0.15;
   }
   if (receiverMatched) {
@@ -295,7 +306,9 @@ async function walkDirectory(
   }
 }
 
-export async function createSimpleTextIndexProvider(repoRoot: string): Promise<SimpleTextIndexProvider> {
+export async function createSimpleTextIndexProvider(
+  repoRoot: string,
+): Promise<SimpleTextIndexProvider> {
   return SimpleTextIndexProvider.create(repoRoot);
 }
 

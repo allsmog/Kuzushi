@@ -1,5 +1,5 @@
-import { coerceRepoContext } from "../../repo-context.js";
 import { languageGeneralHintsModule } from "../../prompts/language-tuning.js";
+import { coerceRepoContext } from "../../repo-context.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { EnrichedRepoContext, RepoContext } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
@@ -9,7 +9,13 @@ import { resolveTaskAllowedTools, resolveTaskModel } from "./runtime-overrides.j
 const ENRICHED_CONTEXT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["customMiddleware", "customSanitizers", "trustBoundaries", "dataClassifications", "architecturalNotes"],
+  required: [
+    "customMiddleware",
+    "customSanitizers",
+    "trustBoundaries",
+    "dataClassifications",
+    "architecturalNotes",
+  ],
   properties: {
     customMiddleware: {
       type: "array",
@@ -60,7 +66,10 @@ const ENRICHED_CONTEXT_SCHEMA = {
         required: ["dataType", "sensitivity"],
         properties: {
           dataType: { type: "string" },
-          sensitivity: { type: "string", enum: ["public", "internal", "confidential", "restricted"] },
+          sensitivity: {
+            type: "string",
+            enum: ["public", "internal", "confidential", "restricted"],
+          },
           locations: { type: "array", items: { type: "string" } },
         },
       },

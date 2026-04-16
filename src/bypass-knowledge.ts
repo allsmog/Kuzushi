@@ -104,36 +104,33 @@ const BYPASS_MAP: Record<string, BypassEntry> = {
 
 // Map common rule ID patterns to CWE numbers for lookup
 const RULE_TO_CWE: Record<string, string> = {
-  "sqli": "89",
+  sqli: "89",
   "sql-injection": "89",
-  "sql_injection": "89",
-  "xss": "79",
+  sql_injection: "89",
+  xss: "79",
   "cross-site-scripting": "79",
   "command-injection": "78",
   "os-command": "78",
   "cmd-injection": "78",
-  "ssrf": "918",
+  ssrf: "918",
   "server-side-request": "918",
   "file-upload": "434",
   "unrestricted-upload": "434",
   "path-traversal": "22",
   "directory-traversal": "22",
-  "lfi": "22",
+  lfi: "22",
   "auth-bypass": "287",
-  "authentication": "287",
+  authentication: "287",
   "missing-auth": "862",
   "broken-access": "862",
-  "idor": "862",
+  idor: "862",
 };
 
 /**
  * Look up bypass techniques for a finding based on its CWE list and/or rule ID.
  * Returns the most relevant bypass entry, or undefined if no match.
  */
-export function getBypassKnowledge(
-  cwe: string[],
-  ruleId: string,
-): BypassEntry | undefined {
+export function getBypassKnowledge(cwe: string[], ruleId: string): BypassEntry | undefined {
   // Try CWE numbers first (most precise)
   for (const cweId of cwe) {
     const normalized = cweId.replace(/^CWE-/i, "").trim();

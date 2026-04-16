@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { diffReviewTask, __diffReviewInternals } from "../../../src/agents/tasks/diff-review.js";
-import type { KuzushiConfig } from "../../../src/types.js";
+import { __diffReviewInternals, diffReviewTask } from "../../../src/agents/tasks/diff-review.js";
 import type { TaskContext } from "../../../src/agents/types.js";
+import type { KuzushiConfig } from "../../../src/types.js";
 
 const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint } = __diffReviewInternals;
 
@@ -140,8 +140,24 @@ describe("normalizeFindings", () => {
   it("maps confidence to levels correctly", () => {
     const raw = {
       findings: [
-        { ruleId: "a", filePath: "src/a.ts", startLine: 1, severity: "ERROR", message: "a", confidence: 0.95, rationale: "r" },
-        { ruleId: "b", filePath: "src/b.ts", startLine: 1, severity: "ERROR", message: "b", confidence: 0.75, rationale: "r" },
+        {
+          ruleId: "a",
+          filePath: "src/a.ts",
+          startLine: 1,
+          severity: "ERROR",
+          message: "a",
+          confidence: 0.95,
+          rationale: "r",
+        },
+        {
+          ruleId: "b",
+          filePath: "src/b.ts",
+          startLine: 1,
+          severity: "ERROR",
+          message: "b",
+          confidence: 0.75,
+          rationale: "r",
+        },
       ],
     };
 
@@ -157,14 +173,30 @@ describe("normalizeFindings", () => {
 
 describe("computeFingerprint", () => {
   it("produces stable fingerprints", () => {
-    const f = { ruleId: "xss", filePath: "src/a.ts", startLine: 1, severity: "ERROR", message: "", confidence: 0.9, rationale: "" };
+    const f = {
+      ruleId: "xss",
+      filePath: "src/a.ts",
+      startLine: 1,
+      severity: "ERROR",
+      message: "",
+      confidence: 0.9,
+      rationale: "",
+    };
     const fp1 = computeFingerprint("repo", "main", "src/a.ts", f);
     const fp2 = computeFingerprint("repo", "main", "src/a.ts", f);
     expect(fp1).toBe(fp2);
   });
 
   it("differs by diffBase", () => {
-    const f = { ruleId: "xss", filePath: "src/a.ts", startLine: 1, severity: "ERROR", message: "", confidence: 0.9, rationale: "" };
+    const f = {
+      ruleId: "xss",
+      filePath: "src/a.ts",
+      startLine: 1,
+      severity: "ERROR",
+      message: "",
+      confidence: 0.9,
+      rationale: "",
+    };
     const fp1 = computeFingerprint("repo", "main", "src/a.ts", f);
     const fp2 = computeFingerprint("repo", "develop", "src/a.ts", f);
     expect(fp1).not.toBe(fp2);

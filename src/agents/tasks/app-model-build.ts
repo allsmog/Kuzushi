@@ -55,20 +55,34 @@ export const appModelBuildTask: AgentTask<ScanOpts, ApplicationModel> = {
     const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
     const intelligence = await getCodeIntelligenceProvider(context.repoRoot);
     const importGraph = await intelligence.getImportGraph();
-    const candidateFiles = await loadCandidateFiles(context.repoRoot, repoContext, enrichment, fileIndex);
+    const candidateFiles = await loadCandidateFiles(
+      context.repoRoot,
+      repoContext,
+      enrichment,
+      fileIndex,
+    );
 
     const routes = collectRoutes(candidateFiles, repoContext, enrichment);
     const outboundClients = collectOutboundClients(candidateFiles);
     const dataStores = collectDataStores(candidateFiles, repoContext);
     const backgroundJobs = collectBackgroundJobs(candidateFiles);
-    const serviceBoundaries = collectServiceBoundaries(routes, outboundClients, dataStores, enrichment);
-    const relevantFiles = [...new Set([
-      ...routes.map((route) => route.filePath),
-      ...outboundClients.map((client) => client.filePath),
-      ...dataStores.map((store) => store.filePath),
-      ...backgroundJobs.map((job) => job.filePath),
-      ...serviceBoundaries.flatMap((boundary) => boundary.evidenceAnchors.map((anchor) => anchor.filePath)),
-    ])].slice(0, 60);
+    const serviceBoundaries = collectServiceBoundaries(
+      routes,
+      outboundClients,
+      dataStores,
+      enrichment,
+    );
+    const relevantFiles = [
+      ...new Set([
+        ...routes.map((route) => route.filePath),
+        ...outboundClients.map((client) => client.filePath),
+        ...dataStores.map((store) => store.filePath),
+        ...backgroundJobs.map((job) => job.filePath),
+        ...serviceBoundaries.flatMap((boundary) =>
+          boundary.evidenceAnchors.map((anchor) => anchor.filePath),
+        ),
+      ]),
+    ].slice(0, 60);
     const notes = collectNotes(repoContext, enrichment, importGraph, candidateFiles);
 
     const model: ApplicationModel = {
@@ -132,18 +146,20 @@ async function loadCandidateFiles(
       }
       const content = await readFile(absolutePath, "utf-8");
       loaded.push({ filePath, content });
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
   return loaded;
 }
 
 function isApplicationModelCandidate(filePath: string): boolean {
-  return /(^|\/)(api|routes?|route|controllers?|handlers?|middleware|auth|guards?|resolvers?|graphql|clients?|services?|jobs?|workers?|queues?|models?|schemas?|repositories?|consumers?|producers?)(\/|\.|$)/i.test(filePath)
-    || /route\.(ts|tsx|js|jsx)$/i.test(filePath)
-    || /\.(graphql|gql)$/i.test(filePath);
+  return (
+    /(^|\/)(api|routes?|route|controllers?|handlers?|middleware|auth|guards?|resolvers?|graphql|clients?|services?|jobs?|workers?|queues?|models?|schemas?|repositories?|consumers?|producers?)(\/|\.|$)/i.test(
+      filePath,
+    ) ||
+    /route\.(ts|tsx|js|jsx)$/i.test(filePath) ||
+    /\.(graphql|gql)$/i.test(filePath)
+  );
 }
 
 function collectRoutes(
@@ -165,21 +181,32 @@ function collectRoutes(
       if (goFunction) {
         currentGoFunction = goFunction;
       }
-      const match = line.match(/\b(?:app|router)\.(get|post|put|patch|delete|all)\(\s*["'`]([^"'`]+)["'`]/i)
-        ?? line.match(/@(Get|Post|Put|Patch|Delete)\(\s*["'`]?(.*?)["'`]?\s*\)/)
-        ?? line.match(/@(app|router)\.(get|post|put|patch|delete)\(\s*["'`]([^"'`]+)["'`]/i)
-        ?? line.match(/\b\w+\.(GET|POST|PUT|PATCH|DELETE)\(\s*"([^"]+)"/)
-        ?? line.match(/export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/);
+      const match =
+        line.match(/\b(?:app|router)\.(get|post|put|patch|delete|all)\(\s*["'`]([^"'`]+)["'`]/i) ??
+        line.match(/@(Get|Post|Put|Patch|Delete)\(\s*["'`]?(.*?)["'`]?\s*\)/) ??
+        line.match(/@(app|router)\.(get|post|put|patch|delete)\(\s*["'`]([^"'`]+)["'`]/i) ??
+        line.match(/\b\w+\.(GET|POST|PUT|PATCH|DELETE)\(\s*"([^"]+)"/) ??
+        line.match(/export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/);
       if (match) {
         const method = String(match[1] ?? "GET").toUpperCase();
-        const rawPath = match[2] && method !== "GET" && method !== "POST" && method !== "PUT" && method !== "PATCH" && method !== "DELETE"
-          ? String(match[3] ?? "/")
-          : String(match[2] ?? routePathFromFilePath(file.filePath));
-        const routePath = normalizeRoutePath(controllerBasePath, rawPath || routePathFromFilePath(file.filePath));
-        const handlerSymbol = extractHandlerSymbol(line)
-          ?? routeHandlerFromExport(lines, index)
-          ?? currentGoFunction?.name
-          ?? path.basename(file.filePath);
+        const rawPath =
+          match[2] &&
+          method !== "GET" &&
+          method !== "POST" &&
+          method !== "PUT" &&
+          method !== "PATCH" &&
+          method !== "DELETE"
+            ? String(match[3] ?? "/")
+            : String(match[2] ?? routePathFromFilePath(file.filePath));
+        const routePath = normalizeRoutePath(
+          controllerBasePath,
+          rawPath || routePathFromFilePath(file.filePath),
+        );
+        const handlerSymbol =
+          extractHandlerSymbol(line) ??
+          routeHandlerFromExport(lines, index) ??
+          currentGoFunction?.name ??
+          path.basename(file.filePath);
         const middleware = extractMiddlewareHints(file.content, line, enrichment);
         const authMechanisms = extractAuthMechanisms(file.content, middleware, repoContext);
         const framework = detectRouteFramework(file.filePath, file.content);
@@ -207,7 +234,12 @@ function collectRoutes(
         continue;
       }
 
-      const id = [synthetic.method, synthetic.path, file.filePath, String(synthetic.startLine)].join("|");
+      const id = [
+        synthetic.method,
+        synthetic.path,
+        file.filePath,
+        String(synthetic.startLine),
+      ].join("|");
       if (seen.has(id)) {
         continue;
       }
@@ -219,7 +251,8 @@ function collectRoutes(
         filePath: file.filePath,
         startLine: synthetic.startLine,
         framework: synthetic.framework ?? detectRouteFramework(file.filePath, file.content),
-        handlerSymbol: synthetic.handlerSymbol ?? currentGoFunction?.name ?? path.basename(file.filePath),
+        handlerSymbol:
+          synthetic.handlerSymbol ?? currentGoFunction?.name ?? path.basename(file.filePath),
         middleware: [],
         authMechanisms: extractAuthMechanisms(file.content, [], repoContext),
       });
@@ -277,11 +310,17 @@ function collectDataStores(
     const lines = file.content.split(/\r?\n/u);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index] ?? "";
-      if (!/\b(prisma|sequelize|typeorm|mongoose|knex|redis|mongo|sql|query|collection|repository|model)\b/i.test(line)) {
+      if (
+        !/\b(prisma|sequelize|typeorm|mongoose|knex|redis|mongo|sql|query|collection|repository|model)\b/i.test(
+          line,
+        )
+      ) {
         continue;
       }
-      const kind = kinds.find((value) => new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(line))
-        ?? inferDataStoreKind(file.filePath, line);
+      const kind =
+        kinds.find((value) =>
+          new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(line),
+        ) ?? inferDataStoreKind(file.filePath, line);
       results.push({
         id: `${kind}|${file.filePath}|${index + 1}`,
         kind,
@@ -301,7 +340,11 @@ function collectBackgroundJobs(files: CandidateFile[]): ApplicationBackgroundJob
     const lines = file.content.split(/\r?\n/u);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index] ?? "";
-      if (!/\b(queue|job|worker|consumer|producer|cron|schedule|bull|celery|sidekiq|agenda)\b/i.test(line)) {
+      if (
+        !/\b(queue|job|worker|consumer|producer|cron|schedule|bull|celery|sidekiq|agenda)\b/i.test(
+          line,
+        )
+      ) {
         continue;
       }
       results.push({
@@ -447,9 +490,11 @@ function extractGoFunctionContext(line: string, startLine: number): GoFunctionCo
 }
 
 function extractHandlerSymbol(line: string): string | undefined {
-  return line.match(/,\s*([A-Za-z0-9_$.]+)\s*\)?\s*$/)?.[1]
-    ?? line.match(/function\s+([A-Za-z0-9_]+)/)?.[1]
-    ?? undefined;
+  return (
+    line.match(/,\s*([A-Za-z0-9_$.]+)\s*\)?\s*$/)?.[1] ??
+    line.match(/function\s+([A-Za-z0-9_]+)/)?.[1] ??
+    undefined
+  );
 }
 
 function detectSyntheticEntryRoute(
@@ -511,10 +556,12 @@ function detectSyntheticEntryRoute(
     };
   }
 
-  if (/\bflag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)\s*\(/.test(line)
-    || /\bcobra\.Command\b/.test(line)
-    || /\b(?:cli\.App|kong\.Parse)\s*\(/.test(line)
-    || /\b[A-Za-z_][A-Za-z0-9_]*\.(?:Execute|ExecuteContext)\s*\(/.test(line)) {
+  if (
+    /\bflag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)\s*\(/.test(line) ||
+    /\bcobra\.Command\b/.test(line) ||
+    /\b(?:cli\.App|kong\.Parse)\s*\(/.test(line) ||
+    /\b[A-Za-z_][A-Za-z0-9_]*\.(?:Execute|ExecuteContext)\s*\(/.test(line)
+  ) {
     return {
       method: "CLI",
       path: `cli://${currentGoFunction?.name ?? "flags"}`,
@@ -533,8 +580,22 @@ function extractMiddlewareHints(
   enrichment: EnrichedRepoContext["enrichment"] | undefined,
 ): string[] {
   const hints = new Set<string>();
-  for (const token of ["auth", "session", "passport", "jwt", "guard", "acl", "rbac", "permission", "csrf", "rateLimit"]) {
-    if (new RegExp(`\\b${token}\\b`, "i").test(routeLine) || new RegExp(`\\b${token}\\b`, "i").test(content)) {
+  for (const token of [
+    "auth",
+    "session",
+    "passport",
+    "jwt",
+    "guard",
+    "acl",
+    "rbac",
+    "permission",
+    "csrf",
+    "rateLimit",
+  ]) {
+    if (
+      new RegExp(`\\b${token}\\b`, "i").test(routeLine) ||
+      new RegExp(`\\b${token}\\b`, "i").test(content)
+    ) {
       hints.add(token);
     }
   }
@@ -579,11 +640,17 @@ function detectRouteFramework(filePath: string, content: string): string | undef
   if (/\bgrpc\.NewServer\s*\(/.test(content)) {
     return "gRPC";
   }
-  if (/\b(?:flag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)|cobra\.Command|cli\.App|kong\.Parse)\b/.test(content)
-    || /\b[A-Za-z_][A-Za-z0-9_]*\.(?:Execute|ExecuteContext)\s*\(/.test(content)) {
+  if (
+    /\b(?:flag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)|cobra\.Command|cli\.App|kong\.Parse)\b/.test(
+      content,
+    ) ||
+    /\b[A-Za-z_][A-Za-z0-9_]*\.(?:Execute|ExecuteContext)\s*\(/.test(content)
+  ) {
     return "CLI";
   }
-  if (/\b(?:http\.ListenAndServe|http\.HandleFunc|http\.ResponseWriter|http\.Request)\b/.test(content)) {
+  if (
+    /\b(?:http\.ListenAndServe|http\.HandleFunc|http\.ResponseWriter|http\.Request)\b/.test(content)
+  ) {
     return "net/http";
   }
   if (/\b\w+\.(GET|POST|PUT|PATCH|DELETE)\(/.test(content)) {
@@ -628,8 +695,10 @@ function inferDataStoreKind(filePath: string, line: string): string {
 }
 
 function extractStoreName(line: string): string | undefined {
-  return line.match(/\b(?:model|collection|table|repository|client)\s*[:=]?\s*([A-Za-z0-9_]+)/i)?.[1]
-    ?? line.match(/\b([A-Za-z0-9_]+)(?:Repository|Model|Client)\b/)?.[1];
+  return (
+    line.match(/\b(?:model|collection|table|repository|client)\s*[:=]?\s*([A-Za-z0-9_]+)/i)?.[1] ??
+    line.match(/\b([A-Za-z0-9_]+)(?:Repository|Model|Client)\b/)?.[1]
+  );
 }
 
 function anchor(filePath: string, startLine: number, description: string): ModelEvidenceAnchor {

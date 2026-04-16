@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { GoAdapter } from "../../../src/discovery/adapters/go-adapter.js";
 
 const tempDirs: string[] = [];
@@ -22,13 +22,25 @@ afterEach(() => {
 describe("GoAdapter", () => {
   it("discovers go.work members", async () => {
     const root = makeTempRoot();
-    writeFileSync(path.join(root, "go.work"), "go 1.22\n\nuse (\n\tservices/api\n\tservices/web\n)\n", "utf-8");
+    writeFileSync(
+      path.join(root, "go.work"),
+      "go 1.22\n\nuse (\n\tservices/api\n\tservices/web\n)\n",
+      "utf-8",
+    );
 
     mkdirSync(path.join(root, "services", "api"), { recursive: true });
-    writeFileSync(path.join(root, "services", "api", "go.mod"), "module example.com/api\n\ngo 1.22\n", "utf-8");
+    writeFileSync(
+      path.join(root, "services", "api", "go.mod"),
+      "module example.com/api\n\ngo 1.22\n",
+      "utf-8",
+    );
 
     mkdirSync(path.join(root, "services", "web"), { recursive: true });
-    writeFileSync(path.join(root, "services", "web", "go.mod"), "module example.com/web\n\ngo 1.22\n", "utf-8");
+    writeFileSync(
+      path.join(root, "services", "web", "go.mod"),
+      "module example.com/web\n\ngo 1.22\n",
+      "utf-8",
+    );
 
     const nodes = await adapter.discover(root, 8);
 
@@ -46,7 +58,11 @@ describe("GoAdapter", () => {
   it("discovers standalone go.mod without go.work", async () => {
     const root = makeTempRoot();
     mkdirSync(path.join(root, "cmd", "tool"), { recursive: true });
-    writeFileSync(path.join(root, "cmd", "tool", "go.mod"), "module example.com/tool\n\ngo 1.22\n", "utf-8");
+    writeFileSync(
+      path.join(root, "cmd", "tool", "go.mod"),
+      "module example.com/tool\n\ngo 1.22\n",
+      "utf-8",
+    );
 
     const nodes = await adapter.discover(root, 8);
 
@@ -58,7 +74,11 @@ describe("GoAdapter", () => {
 
   it("extracts module name from go.mod", async () => {
     const root = makeTempRoot();
-    writeFileSync(path.join(root, "go.mod"), "module github.com/org/myproject\n\ngo 1.22\n", "utf-8");
+    writeFileSync(
+      path.join(root, "go.mod"),
+      "module github.com/org/myproject\n\ngo 1.22\n",
+      "utf-8",
+    );
 
     const nodes = await adapter.discover(root, 8);
 

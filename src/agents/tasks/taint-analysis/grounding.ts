@@ -51,9 +51,10 @@ export async function groundCallableTargets<T extends CallableGroundingTarget>(
 
     const strongMatches = matches.filter((match) => match.confidence >= 0.75);
     const receiverMatched = !item.receiverHint || matches.some((match) => match.receiverMatched);
-    const argIndexPlausible = argIndex == null
-      ? true
-      : matches.some((match) => match.arityHint == null || match.arityHint > argIndex);
+    const argIndexPlausible =
+      argIndex == null
+        ? true
+        : matches.some((match) => match.arityHint == null || match.arityHint > argIndex);
 
     let status: GroundingStatus;
     const reasons: string[] = [];
@@ -68,7 +69,11 @@ export async function groundCallableTargets<T extends CallableGroundingTarget>(
       reasons.push("callable_matched_with_receiver_context");
     } else {
       status = "weak";
-      reasons.push(receiverMatched ? "callable_matched_without_strong_callsite" : "callable_matched_without_receiver_context");
+      reasons.push(
+        receiverMatched
+          ? "callable_matched_without_strong_callsite"
+          : "callable_matched_without_receiver_context",
+      );
     }
 
     grounded.push({

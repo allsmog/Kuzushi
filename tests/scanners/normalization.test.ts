@@ -94,7 +94,9 @@ describe("normalization pipeline", () => {
       fingerprint: "fp-1",
       score: 70,
       proofState: "execution_confirmed",
-      engineProvenance: [{ kind: "dynamic", detail: "crypto-behavioral/timing verdict=vulnerable" }],
+      engineProvenance: [
+        { kind: "dynamic", detail: "crypto-behavioral/timing verdict=vulnerable" },
+      ],
     });
 
     const clustered = clusterFindings([original, enriched]);

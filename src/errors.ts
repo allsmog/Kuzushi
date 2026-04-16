@@ -9,13 +9,7 @@
 // Category
 // ---------------------------------------------------------------------------
 
-export type ErrorCategory =
-  | "transient"
-  | "rate_limit"
-  | "validation"
-  | "auth"
-  | "budget"
-  | "fatal";
+export type ErrorCategory = "transient" | "rate_limit" | "validation" | "auth" | "budget" | "fatal";
 
 const RETRYABLE_CATEGORIES: ReadonlySet<ErrorCategory> = new Set<ErrorCategory>([
   "transient",

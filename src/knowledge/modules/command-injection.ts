@@ -1,7 +1,9 @@
 import type { KnowledgeModule } from "../types.js";
 
 // Detection keyword references to dangerous APIs — not executed.
-function api(...parts: string[]): string { return parts.join(""); }
+function api(...parts: string[]): string {
+  return parts.join("");
+}
 
 const EXEC_FN = api("ex", "ec");
 const EXEC_SYNC = api("ex", "ecSync");
@@ -15,14 +17,36 @@ export const commandInjectionModule: KnowledgeModule = {
   languages: [],
   frameworks: [],
   dangerousPatterns: [
-    { pattern: `Shell command with user input via ${EXEC_FN}/${SYS_FN}`, why: "Direct OS command injection", severity: "ERROR" },
-    { pattern: "Template strings in shell commands", why: "Interpolated values can include shell metacharacters", severity: "ERROR" },
-    { pattern: "Child process with shell: true and user input", why: "Shell interpretation enables command chaining", severity: "ERROR" },
-    { pattern: `subprocess with shell=True`, why: "Shell interpretation of user-controlled strings", severity: "ERROR" },
+    {
+      pattern: `Shell command with user input via ${EXEC_FN}/${SYS_FN}`,
+      why: "Direct OS command injection",
+      severity: "ERROR",
+    },
+    {
+      pattern: "Template strings in shell commands",
+      why: "Interpolated values can include shell metacharacters",
+      severity: "ERROR",
+    },
+    {
+      pattern: "Child process with shell: true and user input",
+      why: "Shell interpretation enables command chaining",
+      severity: "ERROR",
+    },
+    {
+      pattern: `subprocess with shell=True`,
+      why: "Shell interpretation of user-controlled strings",
+      severity: "ERROR",
+    },
   ],
   safePatterns: [
-    { pattern: "execFile() with argument array", why: "No shell interpretation, arguments are passed directly" },
-    { pattern: "subprocess.run() with shell=False and list args", why: "Arguments passed directly, no shell" },
+    {
+      pattern: "execFile() with argument array",
+      why: "No shell interpretation, arguments are passed directly",
+    },
+    {
+      pattern: "subprocess.run() with shell=False and list args",
+      why: "Arguments passed directly, no shell",
+    },
     { pattern: "Input validation with allowlist", why: "Only permitted values reach the command" },
   ],
   bypassTechniques: [
@@ -34,9 +58,16 @@ export const commandInjectionModule: KnowledgeModule = {
     "Environment variable abuse ($PATH manipulation)",
   ],
   detectionKeywords: [
-    EXEC_FN, EXEC_SYNC, "spawn", SYS_FN, "popen",
-    CHILD_PROC, "subprocess", SHELL_EXEC,
-    "Runtime.getRuntime", "ProcessBuilder",
+    EXEC_FN,
+    EXEC_SYNC,
+    "spawn",
+    SYS_FN,
+    "popen",
+    CHILD_PROC,
+    "subprocess",
+    SHELL_EXEC,
+    "Runtime.getRuntime",
+    "ProcessBuilder",
   ],
   fixExamples: [
     {

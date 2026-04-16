@@ -7,11 +7,11 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { WizardResult } from "./components/SetupWizard.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
+import type { WizardResult } from "./components/SetupWizard.js";
 import { emitOutputNotice } from "./output.js";
-import type { UIStore, UIMode } from "./state.js";
+import type { UIMode, UIStore } from "./state.js";
 
 export type SetupOutcome =
   | { action: "proceed"; preset?: string; model?: string }
@@ -29,8 +29,9 @@ export function isFirstRun(repoRoot: string): boolean {
   const globalYaml = path.join(home, ".kuzushi", "config.yaml");
   const globalYml = path.join(home, ".kuzushi", "config.yml");
 
-  return ![projectConfig, projectYaml, projectYml, globalConfig, globalYaml, globalYml]
-    .some((p) => existsSync(p));
+  return ![projectConfig, projectYaml, projectYml, globalConfig, globalYaml, globalYml].some((p) =>
+    existsSync(p),
+  );
 }
 
 /**
@@ -51,26 +52,29 @@ export async function runSetupWizard(
   }
 
   return new Promise<SetupOutcome>((resolve) => {
-    store.setPreflight({
-      kind: "wizard",
-      repoName,
-      repoRoot,
-      onComplete: (result: WizardResult) => {
-        store.setPreflight(null);
-        if (result.saveLocation && result.saveLocation !== "none") {
-          saveWizardConfig(result, repoRoot, store);
-        }
-        resolve({
-          action: "proceed",
-          preset: result.preset,
-          model: result.model,
-        });
+    store.setPreflight(
+      {
+        kind: "wizard",
+        repoName,
+        repoRoot,
+        onComplete: (result: WizardResult) => {
+          store.setPreflight(null);
+          if (result.saveLocation && result.saveLocation !== "none") {
+            saveWizardConfig(result, repoRoot, store);
+          }
+          resolve({
+            action: "proceed",
+            preset: result.preset,
+            model: result.model,
+          });
+        },
+        onCancel: () => {
+          store.setPreflight(null);
+          resolve({ action: "cancel" });
+        },
       },
-      onCancel: () => {
-        store.setPreflight(null);
-        resolve({ action: "cancel" });
-      },
-    }, returnMode);
+      returnMode,
+    );
   });
 }
 
@@ -93,24 +97,27 @@ export async function runConfigConfirmation(
   }
 
   return new Promise<SetupOutcome>((resolve) => {
-    store.setPreflight({
-      kind: "confirm",
-      repoName,
-      repoRoot,
-      config,
-      onProceed: () => {
-        store.setPreflight(null);
-        resolve({ action: "proceed" });
+    store.setPreflight(
+      {
+        kind: "confirm",
+        repoName,
+        repoRoot,
+        config,
+        onProceed: () => {
+          store.setPreflight(null);
+          resolve({ action: "proceed" });
+        },
+        onEdit: () => {
+          store.setPreflight(null);
+          runSetupWizard(store, repoName, repoRoot, returnMode).then(resolve);
+        },
+        onQuit: () => {
+          store.setPreflight(null);
+          resolve({ action: "cancel" });
+        },
       },
-      onEdit: () => {
-        store.setPreflight(null);
-        runSetupWizard(store, repoName, repoRoot, returnMode).then(resolve);
-      },
-      onQuit: () => {
-        store.setPreflight(null);
-        resolve({ action: "cancel" });
-      },
-    }, returnMode);
+      returnMode,
+    );
   });
 }
 
@@ -137,9 +144,10 @@ function saveWizardConfig(result: WizardResult, repoRoot: string, store?: UIStor
     config["severity"] = result.severity;
   }
 
-  const targetDir = result.saveLocation === "project"
-    ? path.join(repoRoot, ".kuzushi")
-    : path.join(process.env["HOME"] ?? process.env["USERPROFILE"] ?? ".", ".kuzushi");
+  const targetDir =
+    result.saveLocation === "project"
+      ? path.join(repoRoot, ".kuzushi")
+      : path.join(process.env["HOME"] ?? process.env["USERPROFILE"] ?? ".", ".kuzushi");
 
   if (!existsSync(targetDir)) {
     mkdirSync(targetDir, { recursive: true });
@@ -195,16 +203,19 @@ export async function runCredentialPrompt(
   }
 
   return new Promise<CredentialOutcome>((resolve) => {
-    store.setPreflight({
-      kind: "credentials",
-      onComplete: (choice: CredentialChoice) => {
-        store.setPreflight(null);
-        resolve({ action: "proceed", choice });
+    store.setPreflight(
+      {
+        kind: "credentials",
+        onComplete: (choice: CredentialChoice) => {
+          store.setPreflight(null);
+          resolve({ action: "proceed", choice });
+        },
+        onCancel: () => {
+          store.setPreflight(null);
+          resolve({ action: "cancel" });
+        },
       },
-      onCancel: () => {
-        store.setPreflight(null);
-        resolve({ action: "cancel" });
-      },
-    }, returnMode);
+      returnMode,
+    );
   });
 }

@@ -2,7 +2,7 @@
  * Reads Randori PASTA plugin output artifacts from randori-output/.
  * The plugin writes JSON stage files during execution; we read them after completion.
  */
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 export interface RandoriArtifacts {
@@ -12,7 +12,10 @@ export interface RandoriArtifacts {
   s4Threats: Record<string, unknown> | null;
 }
 
-export function readRandoriArtifacts(repoRoot: string, relativeOutputDir?: string): RandoriArtifacts {
+export function readRandoriArtifacts(
+  repoRoot: string,
+  relativeOutputDir?: string,
+): RandoriArtifacts {
   const outputDir = path.join(repoRoot, relativeOutputDir ?? "randori-output");
   return {
     state: readJson(path.join(outputDir, "randori-state.json")),
@@ -31,7 +34,9 @@ export function readRandoriArtifacts(repoRoot: string, relativeOutputDir?: strin
  * - S3: { trust_boundaries[], entry_points[], dfd_diagram: "dfd.mmd" }  (no dfd.elements!)
  * - S4: { threats[] }  (not threat_scenarios!)
  */
-export function mergeRandoriStageOutputs(artifacts: RandoriArtifacts): Record<string, unknown> | null {
+export function mergeRandoriStageOutputs(
+  artifacts: RandoriArtifacts,
+): Record<string, unknown> | null {
   // Build the DFD from S2+S3 regardless of whether S4 exists.
   // Previously this returned null when S4 was missing, which discarded
   // the entire DFD and left threat-hunt with no external entities.
@@ -193,7 +198,9 @@ function str(v: unknown): string {
 
 function asArray(v: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(v)) return [];
-  return v.filter((item) => typeof item === "object" && item !== null) as Array<Record<string, unknown>>;
+  return v.filter((item) => typeof item === "object" && item !== null) as Array<
+    Record<string, unknown>
+  >;
 }
 
 function readJson(filePath: string): Record<string, unknown> | null {
@@ -201,9 +208,10 @@ function readJson(filePath: string): Record<string, unknown> | null {
   try {
     const raw = readFileSync(filePath, "utf-8");
     const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
 }
-

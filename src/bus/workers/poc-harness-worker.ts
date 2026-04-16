@@ -1,14 +1,12 @@
-import type { AgentHistoryEntry } from "../../agent-runtime/types.js";
 import type { AgentActivity } from "../../agent-runtime/execution.js";
-import type { AgentRuntime } from "../../agent-runtime/types.js";
+import type { AgentHistoryEntry, AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
-import { generatePocHarness, PocHarnessExecutionError } from "../../poc-harness.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
-import { withRetry } from "../../retry.js";
+import { generatePocHarness, PocHarnessExecutionError } from "../../poc-harness.js";
 import { coerceRepoContext } from "../../repo-context.js";
+import { withRetry } from "../../retry.js";
 import type { KuzushiConfig, PocHarnessResult } from "../../types.js";
-import { normalizeCostUsd } from "../../utils.js";
-import { toErrorMessage } from "../../utils.js";
+import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { PocHarnessFindingQueuedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
@@ -21,12 +19,10 @@ export interface PocHarnessWorkerDeps {
 /**
  * PoC harness worker: generates runnable exploit harnesses against verified exploitable findings.
  */
-export function registerPocHarnessWorker(
-  bus: MessageBus,
-  deps: PocHarnessWorkerDeps,
-): void {
+export function registerPocHarnessWorker(bus: MessageBus, deps: PocHarnessWorkerDeps): void {
   bus.subscribe<PocHarnessFindingQueuedEvent>("poc-harness:finding-queued", async (event) => {
-    const { context, finding, triageResult, verificationResult, repoContext, index, total } = event.payload;
+    const { context, finding, triageResult, verificationResult, repoContext, index, total } =
+      event.payload;
     const runId = event.meta.runId;
     let attempts = 0;
 
@@ -122,33 +118,31 @@ async function generateHarnessWithRefinement(
 
   const history: AgentHistoryEntry[] = [];
   const refinementHistory: NonNullable<PocHarnessResult["refinementHistory"]> = [];
-  const executor = config.pocExecute === true
-    ? await createPocExecutor(config.pocSandbox ?? "docker", config.pocExecTimeoutMs)
-    : undefined;
+  const executor =
+    config.pocExecute === true
+      ? await createPocExecutor(config.pocSandbox ?? "docker", config.pocExecTimeoutMs)
+      : undefined;
   let totalCostUsd = 0;
   let latestResult: PocHarnessResult | undefined;
 
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
-    const generated = await withRetry(
-      async () => {
-        onAttempt();
-        return generatePocHarness(
-          finding,
-          triageResult,
-          verificationResult,
-          repoRoot,
-          context.repoName,
-          model,
-          coerceRepoContext(repoContext),
-          {
-            runtime,
-            history,
-            activityCallback,
-          },
-        );
-      },
-      retryOptions,
-    );
+    const generated = await withRetry(async () => {
+      onAttempt();
+      return generatePocHarness(
+        finding,
+        triageResult,
+        verificationResult,
+        repoRoot,
+        context.repoName,
+        model,
+        coerceRepoContext(repoContext),
+        {
+          runtime,
+          history,
+          activityCallback,
+        },
+      );
+    }, retryOptions);
 
     totalCostUsd += normalizeCostUsd(generated.costUsd);
     latestResult = {
@@ -202,7 +196,12 @@ async function generateHarnessWithRefinement(
       return { result: latestResult, costUsd: totalCostUsd };
     }
 
-    const error = describeExecutionFailure(execution.exitCode, execution.stdout, execution.stderr, execution.verdict);
+    const error = describeExecutionFailure(
+      execution.exitCode,
+      execution.stdout,
+      execution.stderr,
+      execution.verdict,
+    );
     refinementHistory.push({
       attempt: iteration,
       error,
@@ -223,7 +222,10 @@ async function generateHarnessWithRefinement(
   }
 
   if (!latestResult) {
-    throw new PocHarnessExecutionError("poc harness generation did not produce a result", totalCostUsd);
+    throw new PocHarnessExecutionError(
+      "poc harness generation did not produce a result",
+      totalCostUsd,
+    );
   }
 
   latestResult.costUsd = totalCostUsd;
@@ -247,12 +249,14 @@ function describeHarnessApproach(result: PocHarnessResult): string {
 }
 
 function buildPocFailurePrompt(
-  execution: {
-    exitCode: number;
-    stdout: string;
-    stderr: string;
-    verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
-  } | undefined,
+  execution:
+    | {
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+        verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+      }
+    | undefined,
   error: string,
 ): string {
   return [
@@ -290,5 +294,7 @@ function describeExecutionFailure(
     `exit=${exitCode}`,
     stdout.trim() ? `stdout=${stdout.trim()}` : undefined,
     stderr.trim() ? `stderr=${stderr.trim()}` : undefined,
-  ].filter(Boolean).join(" | ");
+  ]
+    .filter(Boolean)
+    .join(" | ");
 }

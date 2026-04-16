@@ -45,17 +45,49 @@ export const jstsProfile: LanguageProfile = {
   vulnClasses: {
     "prototype-pollution": {
       sinks: [
-        { api: "lodash.merge(target, userObj)", risk: "Deep merge copies __proto__ or constructor.prototype properties from attacker-controlled object", cwes: ["CWE-1321"] },
-        { api: "lodash.defaultsDeep(target, userObj)", risk: "Recursive default assignment traverses __proto__ chain from untrusted input", cwes: ["CWE-1321"] },
-        { api: "_.extend(target, userObj) / $.extend(true, target, userObj)", risk: "Deep extend copies prototype-polluting keys from user objects", cwes: ["CWE-1321"] },
-        { api: "Object.assign(target, userObj) with nested user objects", risk: "Shallow copy can still overwrite properties if target is Object.prototype via crafted key path", cwes: ["CWE-1321"] },
-        { api: "Custom recursive merge/deepMerge functions", risk: "Hand-rolled deep merge without __proto__/constructor filtering", cwes: ["CWE-1321"] },
+        {
+          api: "lodash.merge(target, userObj)",
+          risk: "Deep merge copies __proto__ or constructor.prototype properties from attacker-controlled object",
+          cwes: ["CWE-1321"],
+        },
+        {
+          api: "lodash.defaultsDeep(target, userObj)",
+          risk: "Recursive default assignment traverses __proto__ chain from untrusted input",
+          cwes: ["CWE-1321"],
+        },
+        {
+          api: "_.extend(target, userObj) / $.extend(true, target, userObj)",
+          risk: "Deep extend copies prototype-polluting keys from user objects",
+          cwes: ["CWE-1321"],
+        },
+        {
+          api: "Object.assign(target, userObj) with nested user objects",
+          risk: "Shallow copy can still overwrite properties if target is Object.prototype via crafted key path",
+          cwes: ["CWE-1321"],
+        },
+        {
+          api: "Custom recursive merge/deepMerge functions",
+          risk: "Hand-rolled deep merge without __proto__/constructor filtering",
+          cwes: ["CWE-1321"],
+        },
       ],
       safePatterns: [
-        { api: "Object.assign({}, userObj)", why: "Shallow copy into a new empty object — does not pollute existing prototypes" },
-        { api: "structuredClone(userObj)", why: "Structured clone strips prototype chain — safe deep copy" },
-        { api: "JSON.parse(JSON.stringify(obj))", why: "Round-trip strips __proto__ keys and prototype references" },
-        { api: "Map/Set instead of plain objects for dynamic keys", why: "Map does not have a prototype chain vulnerable to pollution" },
+        {
+          api: "Object.assign({}, userObj)",
+          why: "Shallow copy into a new empty object — does not pollute existing prototypes",
+        },
+        {
+          api: "structuredClone(userObj)",
+          why: "Structured clone strips prototype chain — safe deep copy",
+        },
+        {
+          api: "JSON.parse(JSON.stringify(obj))",
+          why: "Round-trip strips __proto__ keys and prototype references",
+        },
+        {
+          api: "Map/Set instead of plain objects for dynamic keys",
+          why: "Map does not have a prototype chain vulnerable to pollution",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -84,15 +116,20 @@ export const jstsProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Lodash merge with user-controlled request body",
-          vulnerableCode: 'const _ = require("lodash");\napp.post("/settings", (req, res) => {\n  const defaults = { theme: "light", lang: "en" };\n  const settings = _.merge(defaults, req.body);\n  res.json(settings);\n});',
-          explanation: 'req.body is attacker-controlled. Sending {"__proto__": {"isAdmin": true}} pollutes Object.prototype so every object in the process inherits isAdmin=true.',
+          vulnerableCode:
+            'const _ = require("lodash");\napp.post("/settings", (req, res) => {\n  const defaults = { theme: "light", lang: "en" };\n  const settings = _.merge(defaults, req.body);\n  res.json(settings);\n});',
+          explanation:
+            'req.body is attacker-controlled. Sending {"__proto__": {"isAdmin": true}} pollutes Object.prototype so every object in the process inherits isAdmin=true.',
         },
       ],
       frameworkGuidance: [
         {
           framework: "Express",
           defaults: ["Express does not provide built-in protection against prototype pollution"],
-          pitfalls: ["Body parsers (express.json()) pass parsed JSON directly — __proto__ keys are preserved", "Middleware that merges req.body into config objects"],
+          pitfalls: [
+            "Body parsers (express.json()) pass parsed JSON directly — __proto__ keys are preserved",
+            "Middleware that merges req.body into config objects",
+          ],
           configChecks: ["Check if body parser has a reviver that strips __proto__ keys"],
         },
       ],
@@ -104,17 +141,56 @@ export const jstsProfile: LanguageProfile = {
     },
     "command-injection": {
       sinks: [
-        { api: "child_process.exec(cmd)", risk: "Passes cmd to /bin/sh — full shell interpretation of user-controlled strings", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "child_process.execSync(cmd)", risk: "Synchronous shell execution — same risk as exec", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "child_process.spawn(cmd, { shell: true })", risk: "spawn with shell option enables shell interpretation", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "eval(userStr)", risk: "Executes arbitrary JavaScript code from string", shellInvoking: false, cwes: ["CWE-94"] },
-        { api: "new Function(userStr)", risk: "Compiles and executes arbitrary JavaScript from string", shellInvoking: false, cwes: ["CWE-94"] },
-        { api: "vm.runInNewContext(userStr)", risk: "Executes code in a V8 context — sandbox escapes are well-documented", shellInvoking: false, cwes: ["CWE-94"] },
+        {
+          api: "child_process.exec(cmd)",
+          risk: "Passes cmd to /bin/sh — full shell interpretation of user-controlled strings",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "child_process.execSync(cmd)",
+          risk: "Synchronous shell execution — same risk as exec",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "child_process.spawn(cmd, { shell: true })",
+          risk: "spawn with shell option enables shell interpretation",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "eval(userStr)",
+          risk: "Executes arbitrary JavaScript code from string",
+          shellInvoking: false,
+          cwes: ["CWE-94"],
+        },
+        {
+          api: "new Function(userStr)",
+          risk: "Compiles and executes arbitrary JavaScript from string",
+          shellInvoking: false,
+          cwes: ["CWE-94"],
+        },
+        {
+          api: "vm.runInNewContext(userStr)",
+          risk: "Executes code in a V8 context — sandbox escapes are well-documented",
+          shellInvoking: false,
+          cwes: ["CWE-94"],
+        },
       ],
       safePatterns: [
-        { api: "child_process.execFile(bin, [arg1, arg2])", why: "No shell invocation — arguments are passed directly to the binary" },
-        { api: "child_process.spawn(bin, [arg1, arg2])", why: "Without shell option, no shell metacharacter interpretation" },
-        { api: "All hardcoded arguments to exec/spawn", why: "No attacker-controlled data in command or arguments" },
+        {
+          api: "child_process.execFile(bin, [arg1, arg2])",
+          why: "No shell invocation — arguments are passed directly to the binary",
+        },
+        {
+          api: "child_process.spawn(bin, [arg1, arg2])",
+          why: "Without shell option, no shell metacharacter interpretation",
+        },
+        {
+          api: "All hardcoded arguments to exec/spawn",
+          why: "No attacker-controlled data in command or arguments",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -142,15 +218,22 @@ export const jstsProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Express route using exec with template literal from user input",
-          vulnerableCode: 'const { exec } = require("child_process");\napp.get("/convert", (req, res) => {\n  const filename = req.query.file;\n  exec(`convert ${filename} output.png`, (err, stdout) => {\n    res.send(stdout);\n  });\n});',
-          explanation: "filename comes from req.query.file (attacker-controlled). Sending 'img.png; cat /etc/passwd' executes the injected command via shell interpretation.",
+          vulnerableCode:
+            'const { exec } = require("child_process");\napp.get("/convert", (req, res) => {\n  const filename = req.query.file;\n  exec(`convert ${filename} output.png`, (err, stdout) => {\n    res.send(stdout);\n  });\n});',
+          explanation:
+            "filename comes from req.query.file (attacker-controlled). Sending 'img.png; cat /etc/passwd' executes the injected command via shell interpretation.",
         },
       ],
       frameworkGuidance: [
         {
           framework: "Express",
-          defaults: ["Express does not invoke shell commands — but route handlers often do for file processing"],
-          pitfalls: ["Routes that call exec/execSync with user-controlled query params or body fields", "Middleware that shells out to system tools for request processing"],
+          defaults: [
+            "Express does not invoke shell commands — but route handlers often do for file processing",
+          ],
+          pitfalls: [
+            "Routes that call exec/execSync with user-controlled query params or body fields",
+            "Middleware that shells out to system tools for request processing",
+          ],
           configChecks: ["Check for helmet or other security middleware that might limit exposure"],
         },
       ],
@@ -162,16 +245,45 @@ export const jstsProfile: LanguageProfile = {
     },
     ssrf: {
       sinks: [
-        { api: "fetch(url)", risk: "Native fetch with user-controlled URL can target internal services", cwes: ["CWE-918"] },
-        { api: "axios.get(url) / axios(url)", risk: "HTTP client with user-controlled URL — follows redirects by default", cwes: ["CWE-918"] },
-        { api: "http.request(url)", risk: "Node.js built-in HTTP client with no URL validation", cwes: ["CWE-918"] },
-        { api: "got(url)", risk: "HTTP client with user-controlled URL — follows redirects by default", cwes: ["CWE-918"] },
-        { api: "node-fetch(url)", risk: "Polyfill fetch with user-controlled URL", cwes: ["CWE-918"] },
+        {
+          api: "fetch(url)",
+          risk: "Native fetch with user-controlled URL can target internal services",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "axios.get(url) / axios(url)",
+          risk: "HTTP client with user-controlled URL — follows redirects by default",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "http.request(url)",
+          risk: "Node.js built-in HTTP client with no URL validation",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "got(url)",
+          risk: "HTTP client with user-controlled URL — follows redirects by default",
+          cwes: ["CWE-918"],
+        },
+        {
+          api: "node-fetch(url)",
+          risk: "Polyfill fetch with user-controlled URL",
+          cwes: ["CWE-918"],
+        },
       ],
       safePatterns: [
-        { api: "Hardcoded URLs with user data in body/params only", why: "URL is fixed — user controls only payload, not destination" },
-        { api: "URL validated against allowlist of domains/IPs", why: "Only permitted destinations are reachable" },
-        { api: "Outbound proxy with internal network blocking", why: "Network-level control prevents access to internal services" },
+        {
+          api: "Hardcoded URLs with user data in body/params only",
+          why: "URL is fixed — user controls only payload, not destination",
+        },
+        {
+          api: "URL validated against allowlist of domains/IPs",
+          why: "Only permitted destinations are reachable",
+        },
+        {
+          api: "Outbound proxy with internal network blocking",
+          why: "Network-level control prevents access to internal services",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -201,21 +313,32 @@ export const jstsProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Proxy endpoint passing user-supplied URL to fetch",
-          vulnerableCode: 'app.get("/proxy", async (req, res) => {\n  const url = req.query.url;\n  const response = await fetch(url);\n  const data = await response.text();\n  res.send(data);\n});',
-          explanation: "url is entirely attacker-controlled from req.query.url. Attacker sends http://169.254.169.254/latest/meta-data/iam/security-credentials/ to steal cloud credentials.",
+          vulnerableCode:
+            'app.get("/proxy", async (req, res) => {\n  const url = req.query.url;\n  const response = await fetch(url);\n  const data = await response.text();\n  res.send(data);\n});',
+          explanation:
+            "url is entirely attacker-controlled from req.query.url. Attacker sends http://169.254.169.254/latest/meta-data/iam/security-credentials/ to steal cloud credentials.",
         },
       ],
       frameworkGuidance: [
         {
           framework: "Next.js",
           defaults: ["Next.js API routes and Server Actions can make server-side HTTP requests"],
-          pitfalls: ["getServerSideProps that fetch user-supplied URLs", "API routes acting as proxy endpoints", "Image optimization (next/image) with unvalidated remote patterns"],
-          configChecks: ["Check next.config.js images.remotePatterns for overly broad domain patterns"],
+          pitfalls: [
+            "getServerSideProps that fetch user-supplied URLs",
+            "API routes acting as proxy endpoints",
+            "Image optimization (next/image) with unvalidated remote patterns",
+          ],
+          configChecks: [
+            "Check next.config.js images.remotePatterns for overly broad domain patterns",
+          ],
         },
         {
           framework: "Express",
           defaults: ["Express does not make outbound HTTP requests by default"],
-          pitfalls: ["Proxy middleware (http-proxy-middleware) with user-controlled target", "Routes that fetch URLs from request parameters"],
+          pitfalls: [
+            "Proxy middleware (http-proxy-middleware) with user-controlled target",
+            "Routes that fetch URLs from request parameters",
+          ],
           configChecks: ["Check proxy middleware configuration for target URL validation"],
         },
       ],
@@ -227,18 +350,54 @@ export const jstsProfile: LanguageProfile = {
     },
     xss: {
       sinks: [
-        { api: "dangerouslySetInnerHTML={{ __html: userStr }}", risk: "React escape hatch — injects raw HTML without escaping", cwes: ["CWE-79"] },
-        { api: "element.innerHTML = userStr", risk: "Sets raw HTML content from user-controlled string", cwes: ["CWE-79"] },
-        { api: "document.write(userStr)", risk: "Writes raw HTML to document from user-controlled string", cwes: ["CWE-79"] },
-        { api: "v-html directive (Vue)", risk: "Vue directive that renders raw HTML without escaping", cwes: ["CWE-79"] },
-        { api: "jQuery .html(userStr)", risk: "Sets inner HTML of element from user-controlled string", cwes: ["CWE-79"] },
-        { api: "res.send(userStr) without Content-Type", risk: "Express sends user string as HTML by default if no Content-Type set", cwes: ["CWE-79"] },
+        {
+          api: "dangerouslySetInnerHTML={{ __html: userStr }}",
+          risk: "React escape hatch — injects raw HTML without escaping",
+          cwes: ["CWE-79"],
+        },
+        {
+          api: "element.innerHTML = userStr",
+          risk: "Sets raw HTML content from user-controlled string",
+          cwes: ["CWE-79"],
+        },
+        {
+          api: "document.write(userStr)",
+          risk: "Writes raw HTML to document from user-controlled string",
+          cwes: ["CWE-79"],
+        },
+        {
+          api: "v-html directive (Vue)",
+          risk: "Vue directive that renders raw HTML without escaping",
+          cwes: ["CWE-79"],
+        },
+        {
+          api: "jQuery .html(userStr)",
+          risk: "Sets inner HTML of element from user-controlled string",
+          cwes: ["CWE-79"],
+        },
+        {
+          api: "res.send(userStr) without Content-Type",
+          risk: "Express sends user string as HTML by default if no Content-Type set",
+          cwes: ["CWE-79"],
+        },
       ],
       safePatterns: [
-        { api: "React JSX interpolation {variable}", why: "React auto-escapes interpolated values — prevents XSS" },
-        { api: "element.textContent = userStr", why: "textContent sets text, not HTML — no parsing or execution" },
-        { api: "DOMPurify.sanitize(html)", why: "Sanitizes HTML by removing dangerous tags and attributes" },
-        { api: "Vue {{ variable }} interpolation", why: "Vue auto-escapes template interpolations" },
+        {
+          api: "React JSX interpolation {variable}",
+          why: "React auto-escapes interpolated values — prevents XSS",
+        },
+        {
+          api: "element.textContent = userStr",
+          why: "textContent sets text, not HTML — no parsing or execution",
+        },
+        {
+          api: "DOMPurify.sanitize(html)",
+          why: "Sanitizes HTML by removing dangerous tags and attributes",
+        },
+        {
+          api: "Vue {{ variable }} interpolation",
+          why: "Vue auto-escapes template interpolations",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -265,28 +424,45 @@ export const jstsProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "React component rendering user content with dangerouslySetInnerHTML",
-          vulnerableCode: 'function Comment({ body }) {\n  return <div dangerouslySetInnerHTML={{ __html: body }} />;\n}',
-          explanation: "body comes from user-submitted comment. Attacker submits '<img src=x onerror=alert(document.cookie)>' which executes in other users' browsers.",
+          vulnerableCode:
+            "function Comment({ body }) {\n  return <div dangerouslySetInnerHTML={{ __html: body }} />;\n}",
+          explanation:
+            "body comes from user-submitted comment. Attacker submits '<img src=x onerror=alert(document.cookie)>' which executes in other users' browsers.",
         },
       ],
       frameworkGuidance: [
         {
           framework: "React",
           defaults: ["JSX interpolation {var} auto-escapes all values — XSS-safe by default"],
-          pitfalls: ["dangerouslySetInnerHTML bypasses auto-escaping", "Creating elements from user-controlled HTML strings", "Server-side rendering with unsanitized HTML injection"],
+          pitfalls: [
+            "dangerouslySetInnerHTML bypasses auto-escaping",
+            "Creating elements from user-controlled HTML strings",
+            "Server-side rendering with unsanitized HTML injection",
+          ],
           configChecks: ["Search for all dangerouslySetInnerHTML usages and verify sanitization"],
         },
         {
           framework: "Next.js",
           defaults: ["Inherits React's auto-escaping for JSX interpolation"],
-          pitfalls: ["API routes returning HTML with user input via res.send()", "Server Components rendering unsanitized user HTML", "Middleware that modifies response HTML"],
+          pitfalls: [
+            "API routes returning HTML with user input via res.send()",
+            "Server Components rendering unsanitized user HTML",
+            "Middleware that modifies response HTML",
+          ],
           configChecks: ["Check Content-Security-Policy headers in next.config.js or middleware"],
         },
         {
           framework: "Express",
           defaults: ["Express does not auto-escape — template engines handle escaping"],
-          pitfalls: ["res.send(userInput) returns HTML content type by default", "EJS <%- unescaped %> output", "Pug !{unescaped} output"],
-          configChecks: ["Check template engine configuration for auto-escape settings", "Check helmet CSP headers"],
+          pitfalls: [
+            "res.send(userInput) returns HTML content type by default",
+            "EJS <%- unescaped %> output",
+            "Pug !{unescaped} output",
+          ],
+          configChecks: [
+            "Check template engine configuration for auto-escape settings",
+            "Check helmet CSP headers",
+          ],
         },
       ],
       antiHallucinationExtra: [
@@ -297,18 +473,55 @@ export const jstsProfile: LanguageProfile = {
     },
     "template-injection": {
       sinks: [
-        { api: "eval() with template literal containing user data", risk: "Template literal evaluated as code — arbitrary code execution", cwes: ["CWE-94"] },
-        { api: "ejs.render(userStr)", risk: "User-controlled EJS template string enables server-side code execution", cwes: ["CWE-1336"] },
-        { api: "ejs.compile(userStr)", risk: "Compiles user-controlled string as EJS template", cwes: ["CWE-1336"] },
-        { api: "pug.compile(userStr)", risk: "Compiles user-controlled Pug template — code execution via unbuffered code", cwes: ["CWE-1336"] },
-        { api: "pug.render(userStr)", risk: "Renders user-controlled Pug template string", cwes: ["CWE-1336"] },
-        { api: "nunjucks.renderString(userStr)", risk: "Renders user-controlled Nunjucks template — RCE via template constructs", cwes: ["CWE-1336"] },
-        { api: "Handlebars.compile(userStr)", risk: "User-controlled Handlebars template — prototype-access gadgets", cwes: ["CWE-1336"] },
+        {
+          api: "eval() with template literal containing user data",
+          risk: "Template literal evaluated as code — arbitrary code execution",
+          cwes: ["CWE-94"],
+        },
+        {
+          api: "ejs.render(userStr)",
+          risk: "User-controlled EJS template string enables server-side code execution",
+          cwes: ["CWE-1336"],
+        },
+        {
+          api: "ejs.compile(userStr)",
+          risk: "Compiles user-controlled string as EJS template",
+          cwes: ["CWE-1336"],
+        },
+        {
+          api: "pug.compile(userStr)",
+          risk: "Compiles user-controlled Pug template — code execution via unbuffered code",
+          cwes: ["CWE-1336"],
+        },
+        {
+          api: "pug.render(userStr)",
+          risk: "Renders user-controlled Pug template string",
+          cwes: ["CWE-1336"],
+        },
+        {
+          api: "nunjucks.renderString(userStr)",
+          risk: "Renders user-controlled Nunjucks template — RCE via template constructs",
+          cwes: ["CWE-1336"],
+        },
+        {
+          api: "Handlebars.compile(userStr)",
+          risk: "User-controlled Handlebars template — prototype-access gadgets",
+          cwes: ["CWE-1336"],
+        },
       ],
       safePatterns: [
-        { api: "ejs.render(templateFile, { data: userData })", why: "Template from file, user data passed as variables — not as template source" },
-        { api: "res.render('template', { user: userData })", why: "Express render with file template and user data as context variables" },
-        { api: "Template files with user-supplied variables only", why: "User controls data, not the template structure" },
+        {
+          api: "ejs.render(templateFile, { data: userData })",
+          why: "Template from file, user data passed as variables — not as template source",
+        },
+        {
+          api: "res.render('template', { user: userData })",
+          why: "Express render with file template and user data as context variables",
+        },
+        {
+          api: "Template files with user-supplied variables only",
+          why: "User controls data, not the template structure",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -336,16 +549,24 @@ export const jstsProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "EJS render with user-controlled template string",
-          vulnerableCode: 'app.post("/preview", (req, res) => {\n  const template = req.body.template;\n  const html = ejs.render(template, { user: req.user });\n  res.send(html);\n});',
-          explanation: "template comes from req.body (attacker-controlled). Attacker sends '<%= process.mainModule.require(\"child_process\").execSync(\"id\") %>' to achieve RCE.",
+          vulnerableCode:
+            'app.post("/preview", (req, res) => {\n  const template = req.body.template;\n  const html = ejs.render(template, { user: req.user });\n  res.send(html);\n});',
+          explanation:
+            'template comes from req.body (attacker-controlled). Attacker sends \'<%= process.mainModule.require("child_process").execSync("id") %>\' to achieve RCE.',
         },
       ],
       frameworkGuidance: [
         {
           framework: "Express",
           defaults: ["Express res.render() uses file-based templates by default"],
-          pitfalls: ["Manually calling ejs.render/pug.render with user-supplied strings bypasses file-based safety", "Template engines configured with user-controlled template directories"],
-          configChecks: ["Check view engine configuration in app.set('view engine')", "Verify template directory is not user-writable"],
+          pitfalls: [
+            "Manually calling ejs.render/pug.render with user-supplied strings bypasses file-based safety",
+            "Template engines configured with user-controlled template directories",
+          ],
+          configChecks: [
+            "Check view engine configuration in app.set('view engine')",
+            "Verify template directory is not user-writable",
+          ],
         },
       ],
       antiHallucinationExtra: [
@@ -356,16 +577,45 @@ export const jstsProfile: LanguageProfile = {
     },
     "auth-bypass": {
       sinks: [
-        { api: "Express route without auth middleware", risk: "Route handler accessible without authentication check", cwes: ["CWE-306"] },
-        { api: "JWT.verify with algorithms: ['none']", risk: "Algorithm confusion allows forged tokens with 'none' algorithm", cwes: ["CWE-287"] },
-        { api: "JWT.verify without specifying algorithms", risk: "May accept unexpected algorithms including 'none' or HMAC with RSA public key", cwes: ["CWE-287"] },
-        { api: "Weak session secret", risk: "Predictable or hardcoded session secret enables session forgery", cwes: ["CWE-798"] },
-        { api: "Missing CSRF protection on state-changing routes", risk: "Cross-site requests can perform actions as authenticated user", cwes: ["CWE-352"] },
+        {
+          api: "Express route without auth middleware",
+          risk: "Route handler accessible without authentication check",
+          cwes: ["CWE-306"],
+        },
+        {
+          api: "JWT.verify with algorithms: ['none']",
+          risk: "Algorithm confusion allows forged tokens with 'none' algorithm",
+          cwes: ["CWE-287"],
+        },
+        {
+          api: "JWT.verify without specifying algorithms",
+          risk: "May accept unexpected algorithms including 'none' or HMAC with RSA public key",
+          cwes: ["CWE-287"],
+        },
+        {
+          api: "Weak session secret",
+          risk: "Predictable or hardcoded session secret enables session forgery",
+          cwes: ["CWE-798"],
+        },
+        {
+          api: "Missing CSRF protection on state-changing routes",
+          risk: "Cross-site requests can perform actions as authenticated user",
+          cwes: ["CWE-352"],
+        },
       ],
       safePatterns: [
-        { api: "JWT.verify(token, secret, { algorithms: ['HS256'] })", why: "Explicit algorithm list prevents algorithm confusion attacks" },
-        { api: "Auth middleware applied via app.use() before all protected routes", why: "Centralized auth enforcement" },
-        { api: "Next.js middleware.ts with route matcher for auth", why: "Middleware intercepts requests before route handlers" },
+        {
+          api: "JWT.verify(token, secret, { algorithms: ['HS256'] })",
+          why: "Explicit algorithm list prevents algorithm confusion attacks",
+        },
+        {
+          api: "Auth middleware applied via app.use() before all protected routes",
+          why: "Centralized auth enforcement",
+        },
+        {
+          api: "Next.js middleware.ts with route matcher for auth",
+          why: "Middleware intercepts requests before route handlers",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -395,22 +645,38 @@ export const jstsProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Express route missing auth middleware",
-          vulnerableCode: 'app.use("/api", authMiddleware);\n// ... many lines later ...\napp.get("/internal/admin/users", (req, res) => {\n  res.json(getAllUsers());\n});',
-          explanation: "The /internal/admin/users route is defined outside the /api path prefix where authMiddleware is applied. It is publicly accessible without authentication.",
+          vulnerableCode:
+            'app.use("/api", authMiddleware);\n// ... many lines later ...\napp.get("/internal/admin/users", (req, res) => {\n  res.json(getAllUsers());\n});',
+          explanation:
+            "The /internal/admin/users route is defined outside the /api path prefix where authMiddleware is applied. It is publicly accessible without authentication.",
         },
       ],
       frameworkGuidance: [
         {
           framework: "Express",
           defaults: ["Express has no built-in authentication — all auth is via middleware"],
-          pitfalls: ["Auth middleware applied to /api does not protect routes outside that prefix", "Route ordering matters — routes defined before middleware bypass it", "Router-level middleware does not apply to routes on different routers"],
-          configChecks: ["Verify auth middleware is applied to all sensitive route groups", "Check session configuration for secure cookie flags (httpOnly, secure, sameSite)"],
+          pitfalls: [
+            "Auth middleware applied to /api does not protect routes outside that prefix",
+            "Route ordering matters — routes defined before middleware bypass it",
+            "Router-level middleware does not apply to routes on different routers",
+          ],
+          configChecks: [
+            "Verify auth middleware is applied to all sensitive route groups",
+            "Check session configuration for secure cookie flags (httpOnly, secure, sameSite)",
+          ],
         },
         {
           framework: "Next.js",
           defaults: ["Next.js middleware.ts can protect routes at the edge before they execute"],
-          pitfalls: ["middleware.ts matcher config may not cover all protected routes", "API routes can be accessed directly, bypassing page-level auth checks", "Server Actions may lack their own auth verification"],
-          configChecks: ["Check middleware.ts matcher for route coverage gaps", "Verify API routes independently check authentication"],
+          pitfalls: [
+            "middleware.ts matcher config may not cover all protected routes",
+            "API routes can be accessed directly, bypassing page-level auth checks",
+            "Server Actions may lack their own auth verification",
+          ],
+          configChecks: [
+            "Check middleware.ts matcher for route coverage gaps",
+            "Verify API routes independently check authentication",
+          ],
         },
       ],
       antiHallucinationExtra: [

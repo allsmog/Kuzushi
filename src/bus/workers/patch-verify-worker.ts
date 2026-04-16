@@ -1,16 +1,16 @@
+import { execFileSync } from "node:child_process";
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { TaskContext } from "../../agents/types.js";
 import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
-import type { MessageBus } from "../types.js";
+import { getPatchResultsForFinding, updatePatchResultStatus } from "../../store/patch-results.js";
+import type { KuzushiConfig, ScanOpts } from "../../types.js";
+import { toErrorMessage } from "../../utils.js";
 import type { PatchVerifyRequestedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import { executeAgentTask } from "../task-execution.js";
-import { toErrorMessage } from "../../utils.js";
-import { updatePatchResultStatus, getPatchResultsForFinding } from "../../store/patch-results.js";
-import type { KuzushiConfig, ScanOpts } from "../../types.js";
-import { execFileSync } from "node:child_process";
+import type { MessageBus } from "../types.js";
 
 export interface PatchVerifyWorkerDeps {
   bus: MessageBus;
@@ -46,24 +46,32 @@ export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
       const patchResults = getPatchResultsForFinding(db, fingerprint);
       const latestPatch = patchResults[0];
       if (latestPatch) {
-        updatePatchResultStatus(db, latestPatch.patchRunId, verified ? "VERIFIED" : "STILL_VULNERABLE");
+        updatePatchResultStatus(
+          db,
+          latestPatch.patchRunId,
+          verified ? "VERIFIED" : "STILL_VULNERABLE",
+        );
       }
 
-      await bus.publish(createEvent("patch-verify:complete", runId, {
-        context,
-        fingerprint,
-        verified,
-        depth,
-        details: verified
-          ? "Finding no longer detected after patch applied"
-          : "Finding still present after patch applied",
-      }));
+      await bus.publish(
+        createEvent("patch-verify:complete", runId, {
+          context,
+          fingerprint,
+          verified,
+          depth,
+          details: verified
+            ? "Finding no longer detected after patch applied"
+            : "Finding still present after patch applied",
+        }),
+      );
     } catch (error) {
-      await bus.publish(createEvent("patch-verify:error", runId, {
-        context,
-        fingerprint,
-        error: toErrorMessage(error),
-      }));
+      await bus.publish(
+        createEvent("patch-verify:error", runId, {
+          context,
+          fingerprint,
+          error: toErrorMessage(error),
+        }),
+      );
     } finally {
       cleanupWorktree(worktreePath, context.repoRoot);
     }

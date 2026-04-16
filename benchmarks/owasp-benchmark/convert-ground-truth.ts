@@ -9,8 +9,8 @@
  * (run setup.sh first).
  */
 
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GroundTruthDataset, GroundTruthEntry } from "../types.js";
 

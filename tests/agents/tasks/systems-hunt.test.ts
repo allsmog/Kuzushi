@@ -1,18 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
-  __systemsHuntInternals,
-} from "../../../src/agents/tasks/systems-hunt/hunt.js";
-import {
   buildSystemsHuntArtifactDetail,
   buildSystemsHuntArtifactPath,
   extractSystemsHuntArtifactPath,
 } from "../../../src/agents/tasks/systems-hunt/artifacts.js";
-import type { Finding } from "../../../src/scanners/types.js";
+import { __systemsHuntInternals } from "../../../src/agents/tasks/systems-hunt/hunt.js";
 import type {
   RankedSystemsSurface,
   SystemsHuntConfig,
   SystemsInvariant,
 } from "../../../src/agents/tasks/systems-hunt/types.js";
+import type { Finding } from "../../../src/scanners/types.js";
 
 const {
   buildLensPrompt,
@@ -73,17 +71,19 @@ describe("systems-hunt", () => {
     const prompt = buildLensPrompt(
       makeSurface(),
       undefined,
-      [{
-        id: "inv-1",
-        surfaceId: "surface-1",
-        kind: "unsafe-precondition",
-        summary: "guest_len must be validated before entering unsafe",
-        statement: "guest_len <= mapped region length",
-        rationale: "from_raw_parts trusts caller-provided length",
-        evidence: ["src/vmm/guest_mem.rs:88"],
-        attackerControlledFields: ["guest_len"],
-        cheapVerifiable: true,
-      } satisfies SystemsInvariant],
+      [
+        {
+          id: "inv-1",
+          surfaceId: "surface-1",
+          kind: "unsafe-precondition",
+          summary: "guest_len must be validated before entering unsafe",
+          statement: "guest_len <= mapped region length",
+          rationale: "from_raw_parts trusts caller-provided length",
+          evidence: ["src/vmm/guest_mem.rs:88"],
+          attackerControlledFields: ["guest_len"],
+          cheapVerifiable: true,
+        } satisfies SystemsInvariant,
+      ],
       [],
       "buffer-unsafe",
       makeConfig(),
@@ -96,52 +96,60 @@ describe("systems-hunt", () => {
   });
 
   it("parses and merges lens outputs by location and cwe", () => {
-    const protocolFindings = parseLensOutput("protocol-state", {
-      findings: [
-        {
-          title: "Guest length reaches unsafe slice constructor",
-          cwe: "CWE-787",
-          severity: "ERROR",
-          confidence: "HIGH",
-          filePath: "src/vmm/guest_mem.rs",
-          startLine: 88,
-          message: "Unchecked guest_len can overrun host slice bounds",
-          rationale: "Protocol state allows guest_len before region validation",
-          triggerHypothesisIds: ["trig-1"],
-          violatedInvariantIds: ["inv-1"],
-          violatedInvariant: "guest_len must be validated before entering unsafe",
-          triggerSequence: ["Map guest memory", "Send oversized descriptor"],
-          attackerControlledFields: ["guest_len"],
-          memoryPrimitive: "out-of-bounds write",
-          hardeningNotes: ["No guard before from_raw_parts"],
-          cheapVerifiable: true,
-          analysisPath: [{ filePath: "src/vmm/guest_mem.rs", line: 88, role: "unsafe-enter" }],
-        },
-      ],
-    }, "/tmp/repo");
-    const arithmeticFindings = parseLensOutput("arithmetic-sentinel", {
-      findings: [
-        {
-          title: "Guest length reaches unsafe slice constructor",
-          cwe: "CWE-787",
-          severity: "ERROR",
-          confidence: "MEDIUM",
-          filePath: "src/vmm/guest_mem.rs",
-          startLine: 88,
-          message: "Unchecked guest_len can overrun host slice bounds",
-          rationale: "guest_len truncation can bypass caller assumptions",
-          triggerHypothesisIds: ["trig-1"],
-          violatedInvariantIds: ["inv-1"],
-          violatedInvariant: "guest_len must be validated before entering unsafe",
-          triggerSequence: ["Map guest memory", "Use large guest_len"],
-          attackerControlledFields: ["guest_len"],
-          memoryPrimitive: "out-of-bounds write",
-          hardeningNotes: ["No saturating cast"],
-          cheapVerifiable: false,
-          analysisPath: [{ filePath: "src/vmm/guest_mem.rs", line: 90, role: "length-cast" }],
-        },
-      ],
-    }, "/tmp/repo");
+    const protocolFindings = parseLensOutput(
+      "protocol-state",
+      {
+        findings: [
+          {
+            title: "Guest length reaches unsafe slice constructor",
+            cwe: "CWE-787",
+            severity: "ERROR",
+            confidence: "HIGH",
+            filePath: "src/vmm/guest_mem.rs",
+            startLine: 88,
+            message: "Unchecked guest_len can overrun host slice bounds",
+            rationale: "Protocol state allows guest_len before region validation",
+            triggerHypothesisIds: ["trig-1"],
+            violatedInvariantIds: ["inv-1"],
+            violatedInvariant: "guest_len must be validated before entering unsafe",
+            triggerSequence: ["Map guest memory", "Send oversized descriptor"],
+            attackerControlledFields: ["guest_len"],
+            memoryPrimitive: "out-of-bounds write",
+            hardeningNotes: ["No guard before from_raw_parts"],
+            cheapVerifiable: true,
+            analysisPath: [{ filePath: "src/vmm/guest_mem.rs", line: 88, role: "unsafe-enter" }],
+          },
+        ],
+      },
+      "/tmp/repo",
+    );
+    const arithmeticFindings = parseLensOutput(
+      "arithmetic-sentinel",
+      {
+        findings: [
+          {
+            title: "Guest length reaches unsafe slice constructor",
+            cwe: "CWE-787",
+            severity: "ERROR",
+            confidence: "MEDIUM",
+            filePath: "src/vmm/guest_mem.rs",
+            startLine: 88,
+            message: "Unchecked guest_len can overrun host slice bounds",
+            rationale: "guest_len truncation can bypass caller assumptions",
+            triggerHypothesisIds: ["trig-1"],
+            violatedInvariantIds: ["inv-1"],
+            violatedInvariant: "guest_len must be validated before entering unsafe",
+            triggerSequence: ["Map guest memory", "Use large guest_len"],
+            attackerControlledFields: ["guest_len"],
+            memoryPrimitive: "out-of-bounds write",
+            hardeningNotes: ["No saturating cast"],
+            cheapVerifiable: false,
+            analysisPath: [{ filePath: "src/vmm/guest_mem.rs", line: 90, role: "length-cast" }],
+          },
+        ],
+      },
+      "/tmp/repo",
+    );
 
     const merged = mergeLensFindings([makeSurface()], [...protocolFindings, ...arithmeticFindings]);
     const [finding] = [...merged.values()];
@@ -149,18 +157,28 @@ describe("systems-hunt", () => {
     expect(finding.cheapVerifiable).toBe(true);
     expect(finding.triggerHypothesisIds).toEqual(new Set(["trig-1"]));
     expect([...finding.triggerSequence]).toEqual(
-      expect.arrayContaining(["Map guest memory", "Send oversized descriptor", "Use large guest_len"]),
+      expect.arrayContaining([
+        "Map guest memory",
+        "Send oversized descriptor",
+        "Use large guest_len",
+      ]),
     );
   });
 
   it("guards Bash and Write usage to deterministic analysis only", () => {
-    const guard = createSystemsHuntToolGuard("/tmp/repo", "/tmp/repo/.kuzushi/systems-hunt/scratch");
+    const guard = createSystemsHuntToolGuard(
+      "/tmp/repo",
+      "/tmp/repo/.kuzushi/systems-hunt/scratch",
+    );
 
-    expect(guard("Write", { file_path: "/tmp/repo/.kuzushi/systems-hunt/scratch/note.txt" }))
-      .toEqual({ behavior: "allow" });
+    expect(
+      guard("Write", { file_path: "/tmp/repo/.kuzushi/systems-hunt/scratch/note.txt" }),
+    ).toEqual({ behavior: "allow" });
     expect(guard("Write", { file_path: "/tmp/repo/src/main.c" }).behavior).toBe("deny");
     expect(guard("Bash", { command: "rg -n packet src" })).toEqual({ behavior: "allow" });
-    expect(guard("Bash", { command: "rg -n packet src && rm -rf /tmp/repo" }).behavior).toBe("deny");
+    expect(guard("Bash", { command: "rg -n packet src && rm -rf /tmp/repo" }).behavior).toBe(
+      "deny",
+    );
   });
 
   it("uses stable artifact naming and provenance details", () => {
@@ -179,7 +197,12 @@ describe("systems-hunt", () => {
       impact: "HIGH",
       cwe: ["CWE-787"],
       score: 9,
-      engineProvenance: [{ kind: "agentic", detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-001.json") }],
+      engineProvenance: [
+        {
+          kind: "agentic",
+          detail: buildSystemsHuntArtifactDetail(".kuzushi/systems-hunt/fp-001.json"),
+        },
+      ],
     };
 
     expect(artifactPath).toBe("/tmp/repo/.kuzushi/systems-hunt/fp-001.json");
@@ -187,37 +210,46 @@ describe("systems-hunt", () => {
   });
 
   it("parses corroboration output and applies emission gating", () => {
-    const corroboration = parseCorroborationOutput({
-      status: "insufficient-corroboration",
-      rationale: "No local guard found, but direct confirmation is still broad.",
-      coherentTrigger: true,
-      cheapVerifiable: false,
-      guardLocations: [],
-      counterexampleNotes: ["No state reset found before unsafe entry"],
-    }, "/tmp/repo", false, 0.25);
+    const corroboration = parseCorroborationOutput(
+      {
+        status: "insufficient-corroboration",
+        rationale: "No local guard found, but direct confirmation is still broad.",
+        coherentTrigger: true,
+        cheapVerifiable: false,
+        guardLocations: [],
+        counterexampleNotes: ["No state reset found before unsafe entry"],
+      },
+      "/tmp/repo",
+      false,
+      0.25,
+    );
 
     expect(corroboration.status).toBe("insufficient-corroboration");
     expect(corroboration.coherentTrigger).toBe(true);
     expect(corroboration.costUsd).toBe(0.25);
-    expect(resolveEmissionDecision({
-      lensCount: 2,
-      minLensAgreement: 2,
-      coherentTrigger: true,
-      corroboration,
-    })).toEqual({
+    expect(
+      resolveEmissionDecision({
+        lensCount: 2,
+        minLensAgreement: 2,
+        coherentTrigger: true,
+        corroboration,
+      }),
+    ).toEqual({
       emit: true,
       corroborationStatus: "lens-agreement-only",
       cheapVerifiable: false,
     });
-    expect(resolveEmissionDecision({
-      lensCount: 1,
-      minLensAgreement: 2,
-      coherentTrigger: true,
-      corroboration: {
-        ...corroboration,
-        status: "counterexample-found",
-      },
-    })).toEqual({
+    expect(
+      resolveEmissionDecision({
+        lensCount: 1,
+        minLensAgreement: 2,
+        coherentTrigger: true,
+        corroboration: {
+          ...corroboration,
+          status: "counterexample-found",
+        },
+      }),
+    ).toEqual({
       emit: false,
       cheapVerifiable: false,
     });
@@ -256,25 +288,39 @@ describe("systems-hunt", () => {
         callers: [],
         callees: [],
         compareCastSites: [],
-        counterSites: [{ filePath: "src/vmm/guest_mem.rs", line: 90, snippet: "guest_len as usize" }],
+        counterSites: [
+          { filePath: "src/vmm/guest_mem.rs", line: 90, snippet: "guest_len as usize" },
+        ],
         sentinelConstants: [],
         allocationCopySites: [],
-        unsafeSites: [{ filePath: "src/vmm/guest_mem.rs", line: 88, snippet: "from_raw_parts(ptr, guest_len)" }],
-        inputSites: [{ filePath: "src/vmm/dispatch.rs", line: 22, snippet: "descriptor.guest_len" }],
+        unsafeSites: [
+          { filePath: "src/vmm/guest_mem.rs", line: 88, snippet: "from_raw_parts(ptr, guest_len)" },
+        ],
+        inputSites: [
+          { filePath: "src/vmm/dispatch.rs", line: 22, snippet: "descriptor.guest_len" },
+        ],
         hardeningSites: [],
-        helperTemplates: [{ id: "rust-unsafe-len", title: "Rust unsafe len/pointer misuse", rationale: "Inspect unsafe length assumptions." }],
+        helperTemplates: [
+          {
+            id: "rust-unsafe-len",
+            title: "Rust unsafe len/pointer misuse",
+            rationale: "Inspect unsafe length assumptions.",
+          },
+        ],
       },
-      [{
-        id: "trig-1",
-        surfaceId: "surface-1",
-        orderedSteps: ["Map guest memory", "Provide oversized descriptor"],
-        boundaryAssignments: { guest_len: "0xffff" },
-        statePreconditions: ["descriptor accepted before validation"],
-        attackerControlledFields: ["guest_len"],
-        expectedPrimitive: "out-of-bounds write",
-        cheapVerifiable: true,
-        rationale: "Large descriptor length reaches unsafe slice constructor",
-      }],
+      [
+        {
+          id: "trig-1",
+          surfaceId: "surface-1",
+          orderedSteps: ["Map guest memory", "Provide oversized descriptor"],
+          boundaryAssignments: { guest_len: "0xffff" },
+          statePreconditions: ["descriptor accepted before validation"],
+          attackerControlledFields: ["guest_len"],
+          expectedPrimitive: "out-of-bounds write",
+          cheapVerifiable: true,
+          rationale: "Large descriptor length reaches unsafe slice constructor",
+        },
+      ],
       makeConfig(),
       "/tmp/repo/.kuzushi/codeql-db",
     );

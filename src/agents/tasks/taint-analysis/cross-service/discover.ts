@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import type { ScanOpts } from "../../../../types.js";
 import { isRecord } from "../../../../utils.js";
 import type { AgentTask } from "../../../types.js";
 import { resolveTaintAnalysisConfig } from "../types.js";
-import type { ScanOpts } from "../../../../types.js";
 import {
-  resolveCrossServiceConfig,
   type CrossServiceDiscoverOutput,
+  resolveCrossServiceConfig,
   type ServiceDescriptor,
   type ServiceManifest,
   type ServiceManifestEntry,
@@ -43,11 +43,17 @@ const FRAMEWORK_PATTERNS: FrameworkPattern[] = [
     detect: (content) => {
       const lower = content.toLowerCase();
       const results: { language: string; framework: string | null }[] = [];
-      if (lower.includes("\"express\"")) results.push({ language: "javascript", framework: "express" });
-      if (lower.includes("\"@nestjs/core\"")) results.push({ language: "javascript", framework: "nestjs" });
-      if (lower.includes("\"fastify\"")) results.push({ language: "javascript", framework: "fastify" });
-      if (lower.includes("\"next\"")) results.push({ language: "javascript", framework: "next" });
-      if (results.length === 0 && (lower.includes("\"dependencies\"") || lower.includes("\"devdependencies\""))) {
+      if (lower.includes('"express"'))
+        results.push({ language: "javascript", framework: "express" });
+      if (lower.includes('"@nestjs/core"'))
+        results.push({ language: "javascript", framework: "nestjs" });
+      if (lower.includes('"fastify"'))
+        results.push({ language: "javascript", framework: "fastify" });
+      if (lower.includes('"next"')) results.push({ language: "javascript", framework: "next" });
+      if (
+        results.length === 0 &&
+        (lower.includes('"dependencies"') || lower.includes('"devdependencies"'))
+      ) {
         results.push({ language: "javascript", framework: null });
       }
       return results;
@@ -58,8 +64,10 @@ const FRAMEWORK_PATTERNS: FrameworkPattern[] = [
     detect: (content) => {
       const lower = content.toLowerCase();
       const results: { language: string; framework: string | null }[] = [];
-      if (lower.includes("github.com/gin-gonic/gin")) results.push({ language: "go", framework: "gin" });
-      else if (lower.includes("github.com/labstack/echo")) results.push({ language: "go", framework: "echo" });
+      if (lower.includes("github.com/gin-gonic/gin"))
+        results.push({ language: "go", framework: "gin" });
+      else if (lower.includes("github.com/labstack/echo"))
+        results.push({ language: "go", framework: "echo" });
       else results.push({ language: "go", framework: null });
       return results;
     },
@@ -139,11 +147,7 @@ export const taintAnalysisDiscoverTask: AgentTask<ScanOpts, CrossServiceDiscover
 
     // Auto-detect services
     const detectedPaths: string[] = [];
-    const services = await autoDetectServices(
-      projectRoot,
-      crossCfg.maxServices,
-      detectedPaths,
-    );
+    const services = await autoDetectServices(projectRoot, crossCfg.maxServices, detectedPaths);
 
     return {
       services,
@@ -159,7 +163,9 @@ async function loadManifest(manifestPath: string): Promise<ServiceManifest> {
   const raw = await readFile(manifestPath, "utf-8");
   const parsed = JSON.parse(raw);
   if (!isRecord(parsed) || !Array.isArray(parsed["services"])) {
-    throw new Error(`Invalid services manifest at ${manifestPath}: must contain a "services" array`);
+    throw new Error(
+      `Invalid services manifest at ${manifestPath}: must contain a "services" array`,
+    );
   }
 
   const version = typeof parsed["version"] === "string" ? parsed["version"] : "1.0.0";
@@ -168,14 +174,16 @@ async function loadManifest(manifestPath: string): Promise<ServiceManifest> {
     if (!isRecord(entry)) continue;
     const id = typeof entry["id"] === "string" ? entry["id"].trim() : "";
     const rootPath = typeof entry["rootPath"] === "string" ? entry["rootPath"].trim() : "";
-    const language = typeof entry["language"] === "string" ? entry["language"].trim().toLowerCase() : "";
+    const language =
+      typeof entry["language"] === "string" ? entry["language"].trim().toLowerCase() : "";
     if (!id || !rootPath || !language) continue;
     services.push({
       id,
       displayName: typeof entry["displayName"] === "string" ? entry["displayName"].trim() : id,
       rootPath,
       language,
-      framework: typeof entry["framework"] === "string" ? entry["framework"].trim() || undefined : undefined,
+      framework:
+        typeof entry["framework"] === "string" ? entry["framework"].trim() || undefined : undefined,
     });
   }
 
@@ -262,9 +270,7 @@ async function detectServiceInDir(
     if (detections.length === 0) continue;
 
     const primary = detections[0];
-    const id = relDir
-      ? relDir.replace(/\//g, "-").replace(/^-+|-+$/g, "")
-      : path.basename(absDir);
+    const id = relDir ? relDir.replace(/\//g, "-").replace(/^-+|-+$/g, "") : path.basename(absDir);
     const displayName = humanize(id);
 
     const manifestFiles = [pattern.file];
@@ -307,9 +313,8 @@ async function detectServiceInDir(
       const content = await readText(path.join(absDir, entry));
       if (content) {
         const lower = content.toLowerCase();
-        const framework = lower.includes("aspnetcore") || lower.includes("webapplication")
-          ? "aspnet"
-          : null;
+        const framework =
+          lower.includes("aspnetcore") || lower.includes("webapplication") ? "aspnet" : null;
         const id = relDir
           ? relDir.replace(/\//g, "-").replace(/^-+|-+$/g, "")
           : path.basename(absDir);
@@ -346,10 +351,12 @@ function isWithinRepoRoot(repoRoot: string, rootPath: string): boolean {
 }
 
 function humanize(id: string): string {
-  return id
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim() || id;
+  return (
+    id
+      .replace(/[-_]/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim() || id
+  );
 }
 
 export const __discoverInternals = {

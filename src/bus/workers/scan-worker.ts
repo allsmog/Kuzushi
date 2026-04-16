@@ -1,17 +1,17 @@
+import type Database from "better-sqlite3";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { AgentTask, TaskContext } from "../../agents/types.js";
-import type { AgentRuntime } from "../../agent-runtime/types.js";
+import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
 import type { KnowledgeRegistry } from "../../knowledge/types.js";
-import type Database from "better-sqlite3";
 import type { Finding, TaskConfig } from "../../scanners/types.js";
+import { loadSecurityProfiles } from "../../security-profiles.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { KuzushiConfig } from "../../types.js";
-import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
-import { loadSecurityProfiles } from "../../security-profiles.js";
 import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
-import { executeAgentTask } from "../task-execution.js";
 import type { TaskStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
+import { executeAgentTask } from "../task-execution.js";
 import type { MessageBus } from "../types.js";
 
 export interface ScanWorkerDeps {
@@ -82,7 +82,13 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
         db: deps.db,
       };
 
-      const executed = await executeTaskWithOptionalEnsemble(task, input, taskContext, taskConfig, deps.config);
+      const executed = await executeTaskWithOptionalEnsemble(
+        task,
+        input,
+        taskContext,
+        taskConfig,
+        deps.config,
+      );
       const { output, emittedFindings, durationMs, costUsd } = executed;
 
       for (const finding of emittedFindings) {
@@ -136,9 +142,9 @@ async function executeTaskWithOptionalEnsemble(
 ) {
   const ensembleModels = normalizeEnsembleModels(config.ensembleModels);
   if (
-    ensembleModels.length <= 1
-    || task.outputKind !== "findings"
-    || !ENSEMBLE_ELIGIBLE_TASK_IDS.has(task.id)
+    ensembleModels.length <= 1 ||
+    task.outputKind !== "findings" ||
+    !ENSEMBLE_ELIGIBLE_TASK_IDS.has(task.id)
   ) {
     return executeAgentTask(task, input, taskContext, taskConfig);
   }
@@ -147,10 +153,15 @@ async function executeTaskWithOptionalEnsemble(
   const laneResults = await Promise.all(
     ensembleModels.map(async (model) => {
       try {
-        const result = await executeAgentTask(task, input, {
-          ...taskContext,
-          modelOverride: model,
-        }, taskConfig);
+        const result = await executeAgentTask(
+          task,
+          input,
+          {
+            ...taskContext,
+            modelOverride: model,
+          },
+          taskConfig,
+        );
         return { kind: "success" as const, model, result };
       } catch (error) {
         return { kind: "error" as const, model, error };
@@ -158,14 +169,22 @@ async function executeTaskWithOptionalEnsemble(
     }),
   );
 
-  const successes = laneResults.filter((lane): lane is Extract<typeof laneResults[number], { kind: "success" }> => lane.kind === "success");
+  const successes = laneResults.filter(
+    (lane): lane is Extract<(typeof laneResults)[number], { kind: "success" }> =>
+      lane.kind === "success",
+  );
   if (successes.length === 0) {
-    const firstError = laneResults.find((lane): lane is Extract<typeof laneResults[number], { kind: "error" }> => lane.kind === "error");
+    const firstError = laneResults.find(
+      (lane): lane is Extract<(typeof laneResults)[number], { kind: "error" }> =>
+        lane.kind === "error",
+    );
     throw firstError?.error ?? new Error(`All ensemble runs failed for task "${task.id}"`);
   }
 
   const mergedFindings = mergeEnsembleFindings(
-    successes.flatMap((lane) => lane.result.emittedFindings.map((finding) => ({ finding, model: lane.model }))),
+    successes.flatMap((lane) =>
+      lane.result.emittedFindings.map((finding) => ({ finding, model: lane.model })),
+    ),
   );
   const costUsd = successes.reduce((sum, lane) => sum + normalizeCostUsd(lane.result.costUsd), 0);
   const output = attachTaskOutputMeta(mergedFindings, { costUsd });
@@ -196,9 +215,7 @@ function normalizeEnsembleModels(value: KuzushiConfig["ensembleModels"]): string
   return [...unique];
 }
 
-function mergeEnsembleFindings(
-  findings: Array<{ finding: Finding; model: string }>,
-): Finding[] {
+function mergeEnsembleFindings(findings: Array<{ finding: Finding; model: string }>): Finding[] {
   const groups = new Map<string, Array<{ finding: Finding; model: string }>>();
   for (const entry of findings) {
     const key = buildEnsembleKey(entry.finding);
@@ -232,8 +249,12 @@ function mergeEnsembleFindings(
     merged.push({
       ...primary,
       adjustedScore,
-      scannerConfidence: boostScannerConfidence(primary.scannerConfidence, corroboratingModels.size),
-      corroboratingSignals: corroboratingSignals.length > 0 ? corroboratingSignals : primary.corroboratingSignals,
+      scannerConfidence: boostScannerConfidence(
+        primary.scannerConfidence,
+        corroboratingModels.size,
+      ),
+      corroboratingSignals:
+        corroboratingSignals.length > 0 ? corroboratingSignals : primary.corroboratingSignals,
     });
   }
 
@@ -242,7 +263,9 @@ function mergeEnsembleFindings(
 }
 
 function buildEnsembleKey(finding: Finding): string {
-  const normalizedCwe = [...new Set(finding.cwe.map((entry) => entry.trim().toUpperCase()).filter(Boolean))]
+  const normalizedCwe = [
+    ...new Set(finding.cwe.map((entry) => entry.trim().toUpperCase()).filter(Boolean)),
+  ]
     .sort((left, right) => left.localeCompare(right))
     .join(",");
   return [
@@ -256,10 +279,7 @@ function getFindingScore(finding: Finding): number {
   return finding.adjustedScore ?? finding.score;
 }
 
-function boostScannerConfidence(
-  confidence: string,
-  corroboratingModels: number,
-): string {
+function boostScannerConfidence(confidence: string, corroboratingModels: number): string {
   if (corroboratingModels <= 1) {
     return confidence;
   }

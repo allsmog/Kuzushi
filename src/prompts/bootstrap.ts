@@ -35,10 +35,7 @@ const DEFAULT_TOTAL_MAX_CHARS = 100_000;
  * @param config - Bootstrap configuration
  * @returns Composed bootstrap context string, or empty string if no files loaded
  */
-export function loadBootstrapContext(
-  repoRoot: string,
-  config: BootstrapConfig,
-): string {
+export function loadBootstrapContext(repoRoot: string, config: BootstrapConfig): string {
   if (!config.files || config.files.length === 0) {
     return "";
   }
@@ -64,7 +61,9 @@ export function loadBootstrapContext(
 
     // Trim to per-file budget
     if (content.length > maxPerFile) {
-      content = content.slice(0, maxPerFile) + `\n[... truncated, ${content.length - maxPerFile} chars omitted]`;
+      content =
+        content.slice(0, maxPerFile) +
+        `\n[... truncated, ${content.length - maxPerFile} chars omitted]`;
     }
 
     // Check total budget
@@ -95,10 +94,5 @@ export function loadBootstrapContext(
 }
 
 function formatSection(filePath: string, content: string): string {
-  return [
-    `### ${filePath}`,
-    "",
-    content,
-    "",
-  ].join("\n");
+  return [`### ${filePath}`, "", content, ""].join("\n");
 }

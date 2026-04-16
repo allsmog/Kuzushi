@@ -1,10 +1,13 @@
-import { describe, expect, it, afterEach } from "vitest";
 import http from "node:http";
-import { startStreamingServer } from "../src/streaming.js";
+import { afterEach, describe, expect, it } from "vitest";
 import type { MessageBus } from "../src/bus/types.js";
+import { startStreamingServer } from "../src/streaming.js";
 
 /** Minimal mock bus for testing. */
-function createMockBus(): MessageBus & { handlers: Map<string, Function[]>; emit: (type: string, event: any) => Promise<void> } {
+function createMockBus(): MessageBus & {
+  handlers: Map<string, Function[]>;
+  emit: (type: string, event: any) => Promise<void>;
+} {
   const handlers = new Map<string, Function[]>();
 
   return {
@@ -18,7 +21,9 @@ function createMockBus(): MessageBus & { handlers: Map<string, Function[]>; emit
       handlers.get(eventType)!.push(handler);
     },
     unsubscribe() {},
-    async waitFor() { return {} as any; },
+    async waitFor() {
+      return {} as any;
+    },
     async close() {},
     async emit(type: string, event: any) {
       const fns = handlers.get(type) ?? [];
@@ -97,11 +102,15 @@ describe("Streaming Server", () => {
 
     // Health check
     const health = await new Promise<string>((resolve, reject) => {
-      http.get(`http://localhost:${port}/health`, (res) => {
-        let data = "";
-        res.on("data", (chunk) => { data += chunk; });
-        res.on("end", () => resolve(data));
-      }).on("error", reject);
+      http
+        .get(`http://localhost:${port}/health`, (res) => {
+          let data = "";
+          res.on("data", (chunk) => {
+            data += chunk;
+          });
+          res.on("end", () => resolve(data));
+        })
+        .on("error", reject);
     });
 
     const parsed = JSON.parse(health);
@@ -122,26 +131,28 @@ describe("Streaming Server", () => {
     await new Promise((r) => setTimeout(r, 200));
 
     // Emit a triage result event
-    await bus.publish(makeEvent("triage:result", {
-      context: { runId: "run-1", repoRoot: "/tmp", repoName: "test", dbPath: "/tmp/db" },
-      finding: {
-        fingerprint: "fp-123",
-        filePath: "src/app.ts",
-        startLine: 10,
-        ruleId: "rule-1",
-        severity: "ERROR",
-        message: "SQL injection",
-        cwe: ["CWE-89"],
-      },
-      result: {
-        verdict: "tp",
-        confidence: 0.92,
-        rationale: "Unsanitized input",
-        triageCostUsd: 0.003,
-      },
-      index: 1,
-      total: 5,
-    }));
+    await bus.publish(
+      makeEvent("triage:result", {
+        context: { runId: "run-1", repoRoot: "/tmp", repoName: "test", dbPath: "/tmp/db" },
+        finding: {
+          fingerprint: "fp-123",
+          filePath: "src/app.ts",
+          startLine: 10,
+          ruleId: "rule-1",
+          severity: "ERROR",
+          message: "SQL injection",
+          cwe: ["CWE-89"],
+        },
+        result: {
+          verdict: "tp",
+          confidence: 0.92,
+          rationale: "Unsanitized input",
+          triageCostUsd: 0.003,
+        },
+        index: 1,
+        total: 5,
+      }),
+    );
 
     const events = await eventsPromise;
 
@@ -167,9 +178,11 @@ describe("Streaming Server", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     const status = await new Promise<number>((resolve, reject) => {
-      http.get(`http://localhost:${streaming.port}/unknown`, (res) => {
-        resolve(res.statusCode ?? 0);
-      }).on("error", reject);
+      http
+        .get(`http://localhost:${streaming.port}/unknown`, (res) => {
+          resolve(res.statusCode ?? 0);
+        })
+        .on("error", reject);
     });
 
     expect(status).toBe(404);

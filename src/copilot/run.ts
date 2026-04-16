@@ -13,11 +13,11 @@
  *   2 — usage error (bad arguments, unknown module/tool)
  */
 
-import { CopilotCore } from "./core.js";
-import type { ToolResult, ToolExecutionContext } from "../modules/types.js";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { MessageBus } from "../bus/types.js";
+import type { ToolExecutionContext, ToolResult } from "../modules/types.js";
 import type { KuzushiConfig } from "../types.js";
+import { CopilotCore } from "./core.js";
 
 export interface RunOptions {
   /** Fully-qualified tool name: "module:action" */
@@ -150,9 +150,7 @@ function formatAvailableTools(core: CopilotCore): string {
   const tools = core.registry.allTools({ headlessOnly: true });
   if (tools.length === 0) return "  (no tools available)";
 
-  return tools
-    .map(({ tool }) => `  ${tool.name} — ${tool.description.split(".")[0]}`)
-    .join("\n");
+  return tools.map(({ tool }) => `  ${tool.name} — ${tool.description.split(".")[0]}`).join("\n");
 }
 
 /**

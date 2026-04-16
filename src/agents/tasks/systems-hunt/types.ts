@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { FileIndex, KuzushiConfig } from "../../../types.js";
 import { resolveTaskConfig } from "../../../capabilities.js";
-import type { TaskContext } from "../../types.js";
+import type { FileIndex, KuzushiConfig } from "../../../types.js";
 import { isPathWithinRoot } from "../../../utils.js";
+import type { TaskContext } from "../../types.js";
 
 export const SYSTEMS_PATTERN_DOMAINS = [
   "protocol-parser",
@@ -207,12 +207,16 @@ export interface SystemsHuntConfig {
 
 export function isSystemsLanguage(language: string): boolean {
   const normalized = language.trim().toLowerCase();
-  return normalized === "c" || normalized === "c++" || normalized === "cpp" || normalized === "rust";
+  return (
+    normalized === "c" || normalized === "c++" || normalized === "cpp" || normalized === "rust"
+  );
 }
 
 export function hasSystemsSignals(fileIndex: FileIndex | undefined): boolean {
   if (!fileIndex) return false;
-  return SYSTEMS_PATTERN_DOMAINS.some((domain) => (fileIndex.patternMatches[domain]?.length ?? 0) > 0);
+  return SYSTEMS_PATTERN_DOMAINS.some(
+    (domain) => (fileIndex.patternMatches[domain]?.length ?? 0) > 0,
+  );
 }
 
 export function resolveSystemsHuntConfig(
@@ -220,19 +224,27 @@ export function resolveSystemsHuntConfig(
 ): SystemsHuntConfig {
   const raw = resolveTaskConfig(context.config as KuzushiConfig, "systems-hunt");
   const configuredModel = asNonEmptyString(raw["model"]);
-  const artifactRootRelative = normalizeArtifactDir(asNonEmptyString(raw["artifactDir"]) || ".kuzushi/systems-hunt");
+  const artifactRootRelative = normalizeArtifactDir(
+    asNonEmptyString(raw["artifactDir"]) || ".kuzushi/systems-hunt",
+  );
   const artifactRoot = path.resolve(context.repoRoot, artifactRootRelative);
 
   if (!isPathWithinRoot(context.repoRoot, artifactRoot)) {
-    throw new Error(`systems-hunt artifactDir must stay inside the repository root: ${artifactRootRelative}`);
+    throw new Error(
+      `systems-hunt artifactDir must stay inside the repository root: ${artifactRootRelative}`,
+    );
   }
 
   const DEFAULT_MODEL = "anthropic:claude-opus-4-6";
   const resolvedModel = context.modelOverride ?? configuredModel ?? DEFAULT_MODEL;
   const configuredEffort = asNonEmptyString(raw["effort"]);
-  const effort = (configuredEffort === "low" || configuredEffort === "medium" || configuredEffort === "high" || configuredEffort === "max")
-    ? configuredEffort as import("../../../agent-runtime/types.js").AgentEffort
-    : "max" as const;
+  const effort =
+    configuredEffort === "low" ||
+    configuredEffort === "medium" ||
+    configuredEffort === "high" ||
+    configuredEffort === "max"
+      ? (configuredEffort as import("../../../agent-runtime/types.js").AgentEffort)
+      : ("max" as const);
 
   return {
     model: resolvedModel,
@@ -244,7 +256,10 @@ export function resolveSystemsHuntConfig(
     maxTriggerHypothesesPerSurface: asPositiveInt(raw["maxTriggerHypothesesPerSurface"], 3),
     maxConcurrentSurfaces: asPositiveInt(raw["maxConcurrentSurfaces"], 2),
     maxTurnsPerSurface: asPositiveInt(raw["maxTurnsPerSurface"], 16),
-    minLensAgreement: Math.min(SYSTEMS_HUNT_LENSES.length, asPositiveInt(raw["minLensAgreement"], 2)),
+    minLensAgreement: Math.min(
+      SYSTEMS_HUNT_LENSES.length,
+      asPositiveInt(raw["minLensAgreement"], 2),
+    ),
     maxCorroborationTurns: asPositiveInt(raw["maxCorroborationTurns"], 8),
     artifactRoot,
     artifactRootRelative,

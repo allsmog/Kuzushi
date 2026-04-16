@@ -1,12 +1,12 @@
-import type Database from "better-sqlite3";
 import path from "node:path";
+import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
-import type { MessageBus } from "../types.js";
-import type { PatchRequestedEvent } from "../events.js";
-import { createEvent } from "../helpers.js";
-import { toErrorMessage } from "../../utils.js";
 import { runPatchPipeline } from "../../patch.js";
 import type { KuzushiConfig } from "../../types.js";
+import { toErrorMessage } from "../../utils.js";
+import type { PatchRequestedEvent } from "../events.js";
+import { createEvent } from "../helpers.js";
+import type { MessageBus } from "../types.js";
 
 export interface PatchWorkerDeps {
   bus: MessageBus;
@@ -45,21 +45,25 @@ export function registerPatchWorker(deps: PatchWorkerDeps): void {
 
       const patchResult = result.patchResult;
 
-      await bus.publish(createEvent("patch:complete", runId, {
-        context,
-        fingerprint,
-        status: patchResult.status,
-        worktreePath: patchResult.worktreePath ?? null,
-        costUsd: result.costUsd,
-        iterations: patchResult.iterations,
-      }));
+      await bus.publish(
+        createEvent("patch:complete", runId, {
+          context,
+          fingerprint,
+          status: patchResult.status,
+          worktreePath: patchResult.worktreePath ?? null,
+          costUsd: result.costUsd,
+          iterations: patchResult.iterations,
+        }),
+      );
     } catch (error) {
-      await bus.publish(createEvent("patch:error", runId, {
-        context,
-        fingerprint,
-        error: toErrorMessage(error),
-        attempt: 1,
-      }));
+      await bus.publish(
+        createEvent("patch:error", runId, {
+          context,
+          fingerprint,
+          error: toErrorMessage(error),
+          attempt: 1,
+        }),
+      );
     }
   });
 }

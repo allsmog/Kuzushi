@@ -1,7 +1,6 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_IGNORED_DIRS } from "../../repo-walk.js";
-import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 import {
   collectManifestDirectories,
   dedupeStrings,
@@ -12,6 +11,7 @@ import {
   readFirstSnippet,
   readText,
 } from "../helpers.js";
+import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 
 export class RustAdapter implements DiscoveryAdapter {
   readonly id = "rust";
@@ -66,7 +66,9 @@ export class RustAdapter implements DiscoveryAdapter {
       if (childPaths.length > 0) {
         nodes.push({
           path: wsRelDir,
-          name: parseCrateNameFromToml(cargoContent) ?? (wsRelDir === "." ? "rust-workspace" : path.basename(wsRelDir)),
+          name:
+            parseCrateNameFromToml(cargoContent) ??
+            (wsRelDir === "." ? "rust-workspace" : path.basename(wsRelDir)),
           language: "Rust",
           buildSystem: "Cargo.toml",
           description: "",
@@ -109,10 +111,7 @@ export class RustAdapter implements DiscoveryAdapter {
 
 // ── Cargo workspace discovery ─────────────────────────────────────────
 
-async function findCargoWorkspaceRoots(
-  repoRoot: string,
-  maxDepth: number,
-): Promise<string[]> {
+async function findCargoWorkspaceRoots(repoRoot: string, maxDepth: number): Promise<string[]> {
   const results: string[] = [];
   await walkForCargoWorkspace(repoRoot, repoRoot, 0, maxDepth, results);
   return results.sort();
@@ -142,7 +141,13 @@ async function walkForCargoWorkspace(
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     if (entry.name.startsWith(".") || DEFAULT_IGNORED_DIRS.has(entry.name)) continue;
-    await walkForCargoWorkspace(repoRoot, path.join(currentDir, entry.name), depth + 1, maxDepth, results);
+    await walkForCargoWorkspace(
+      repoRoot,
+      path.join(currentDir, entry.name),
+      depth + 1,
+      maxDepth,
+      results,
+    );
   }
 }
 

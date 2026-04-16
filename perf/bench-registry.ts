@@ -1,6 +1,6 @@
-import type { BenchCase } from "./harness.js";
 import { TaskRegistry } from "../src/agents/registry.js";
 import { makeTaskRegistrySnapshot } from "./fixtures.js";
+import type { BenchCase } from "./harness.js";
 
 export function benchRegistry(): BenchCase[] {
   const cases: BenchCase[] = [];

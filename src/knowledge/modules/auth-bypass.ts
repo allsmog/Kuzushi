@@ -6,18 +6,51 @@ export const authBypassModule: KnowledgeModule = {
   languages: [],
   frameworks: [],
   dangerousPatterns: [
-    { pattern: "Missing auth middleware on sensitive routes", why: "Endpoints accessible without authentication", severity: "ERROR" },
-    { pattern: "Client-side only auth checks", why: "Server must enforce auth independently", severity: "ERROR" },
-    { pattern: "Predictable/sequential resource IDs", why: "IDOR enables unauthorized access to other users' data", severity: "ERROR" },
-    { pattern: "Role check in frontend only", why: "API must enforce authorization server-side", severity: "ERROR" },
-    { pattern: "JWT with no signature verification", why: "Tokens can be forged without secret", severity: "ERROR" },
-    { pattern: "Session tokens in URL parameters", why: "Leaks via Referer header and server logs", severity: "WARNING" },
+    {
+      pattern: "Missing auth middleware on sensitive routes",
+      why: "Endpoints accessible without authentication",
+      severity: "ERROR",
+    },
+    {
+      pattern: "Client-side only auth checks",
+      why: "Server must enforce auth independently",
+      severity: "ERROR",
+    },
+    {
+      pattern: "Predictable/sequential resource IDs",
+      why: "IDOR enables unauthorized access to other users' data",
+      severity: "ERROR",
+    },
+    {
+      pattern: "Role check in frontend only",
+      why: "API must enforce authorization server-side",
+      severity: "ERROR",
+    },
+    {
+      pattern: "JWT with no signature verification",
+      why: "Tokens can be forged without secret",
+      severity: "ERROR",
+    },
+    {
+      pattern: "Session tokens in URL parameters",
+      why: "Leaks via Referer header and server logs",
+      severity: "WARNING",
+    },
   ],
   safePatterns: [
-    { pattern: "Middleware-based auth on all routes", why: "Centralized enforcement, hard to bypass" },
+    {
+      pattern: "Middleware-based auth on all routes",
+      why: "Centralized enforcement, hard to bypass",
+    },
     { pattern: "UUID v4 for resource identifiers", why: "Unguessable, prevents enumeration" },
-    { pattern: "RBAC with server-side role verification", why: "Authorization enforced at API layer" },
-    { pattern: "JWT with RS256 and key rotation", why: "Asymmetric signing prevents secret extraction" },
+    {
+      pattern: "RBAC with server-side role verification",
+      why: "Authorization enforced at API layer",
+    },
+    {
+      pattern: "JWT with RS256 and key rotation",
+      why: "Asymmetric signing prevents secret extraction",
+    },
   ],
   bypassTechniques: [
     "IDOR via sequential/predictable ID enumeration",
@@ -32,9 +65,20 @@ export const authBypassModule: KnowledgeModule = {
     "Mass assignment / object injection to set privileged fields",
   ],
   detectionKeywords: [
-    "authenticate", "authorize", "isAdmin", "role", "permission",
-    "jwt", "token", "session", "passport", "auth", "middleware",
-    "requireAuth", "checkPermission", "isAuthenticated",
+    "authenticate",
+    "authorize",
+    "isAdmin",
+    "role",
+    "permission",
+    "jwt",
+    "token",
+    "session",
+    "passport",
+    "auth",
+    "middleware",
+    "requireAuth",
+    "checkPermission",
+    "isAuthenticated",
   ],
   fixExamples: [
     {

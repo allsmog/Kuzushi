@@ -10,7 +10,7 @@ export const rustProfile: LanguageProfile = {
   generalHints: {
     grepPatterns: [
       "unsafe\\s*\\{",
-      "extern\\s+\"C\"",
+      'extern\\s+"C"',
       "\\.unwrap\\(",
       "panic!\\(",
       "#\\[no_mangle\\]",
@@ -37,14 +37,36 @@ export const rustProfile: LanguageProfile = {
   vulnClasses: {
     "unsafe-blocks": {
       sinks: [
-        { api: "unsafe { ptr::read/write }", risk: "Manual pointer operations bypass borrow checker — UB if pointer is invalid", cwes: ["CWE-787", "CWE-416"] },
-        { api: "unsafe { slice::from_raw_parts }", risk: "Creating slice from raw pointer — UB if length is wrong or ptr is invalid", cwes: ["CWE-120"] },
-        { api: "unsafe { transmute }", risk: "Reinterprets bits as different type — UB if invariants violated", cwes: ["CWE-843"] },
-        { api: "unsafe impl Send/Sync", risk: "Manual Send/Sync impl can enable data races if invariants are wrong", cwes: ["CWE-362"] },
+        {
+          api: "unsafe { ptr::read/write }",
+          risk: "Manual pointer operations bypass borrow checker — UB if pointer is invalid",
+          cwes: ["CWE-787", "CWE-416"],
+        },
+        {
+          api: "unsafe { slice::from_raw_parts }",
+          risk: "Creating slice from raw pointer — UB if length is wrong or ptr is invalid",
+          cwes: ["CWE-120"],
+        },
+        {
+          api: "unsafe { transmute }",
+          risk: "Reinterprets bits as different type — UB if invariants violated",
+          cwes: ["CWE-843"],
+        },
+        {
+          api: "unsafe impl Send/Sync",
+          risk: "Manual Send/Sync impl can enable data races if invariants are wrong",
+          cwes: ["CWE-362"],
+        },
       ],
       safePatterns: [
-        { api: "unsafe in well-audited FFI wrapper with validation", why: "FFI requires unsafe but wrapper validates inputs" },
-        { api: "unsafe for performance with documented invariants", why: "Acceptable if invariants are proven and tested" },
+        {
+          api: "unsafe in well-audited FFI wrapper with validation",
+          why: "FFI requires unsafe but wrapper validates inputs",
+        },
+        {
+          api: "unsafe for performance with documented invariants",
+          why: "Acceptable if invariants are proven and tested",
+        },
       ],
       investigationHints: {
         grepPatterns: [
@@ -70,8 +92,10 @@ export const rustProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "Unsafe slice creation with attacker-controlled length",
-          vulnerableCode: 'fn parse_packet(data: &[u8]) -> &[u32] {\n    let len = u32::from_be_bytes(data[0..4].try_into().unwrap()) as usize;\n    unsafe { std::slice::from_raw_parts(data[4..].as_ptr() as *const u32, len) }\n}',
-          explanation: "len comes from the packet (attacker-controlled). If len exceeds the actual data size, from_raw_parts creates an out-of-bounds slice — reading arbitrary memory.",
+          vulnerableCode:
+            "fn parse_packet(data: &[u8]) -> &[u32] {\n    let len = u32::from_be_bytes(data[0..4].try_into().unwrap()) as usize;\n    unsafe { std::slice::from_raw_parts(data[4..].as_ptr() as *const u32, len) }\n}",
+          explanation:
+            "len comes from the packet (attacker-controlled). If len exceeds the actual data size, from_raw_parts creates an out-of-bounds slice — reading arbitrary memory.",
         },
       ],
       antiHallucinationExtra: [
@@ -81,17 +105,32 @@ export const rustProfile: LanguageProfile = {
     },
     "ffi-boundary": {
       sinks: [
-        { api: "extern \"C\" fn receiving *const/*mut", risk: "C code may pass invalid pointers — Rust code must validate before deref", cwes: ["CWE-476", "CWE-787"] },
-        { api: "CString::from_raw(ptr)", risk: "Takes ownership of C-allocated string — double free if C also frees it", cwes: ["CWE-415"] },
-        { api: "Box::from_raw(ptr)", risk: "Takes ownership — UB if ptr was not from Box::into_raw", cwes: ["CWE-416"] },
+        {
+          api: 'extern "C" fn receiving *const/*mut',
+          risk: "C code may pass invalid pointers — Rust code must validate before deref",
+          cwes: ["CWE-476", "CWE-787"],
+        },
+        {
+          api: "CString::from_raw(ptr)",
+          risk: "Takes ownership of C-allocated string — double free if C also frees it",
+          cwes: ["CWE-415"],
+        },
+        {
+          api: "Box::from_raw(ptr)",
+          risk: "Takes ownership — UB if ptr was not from Box::into_raw",
+          cwes: ["CWE-416"],
+        },
       ],
       safePatterns: [
-        { api: "CStr::from_ptr(ptr) for borrowed access", why: "Borrows without taking ownership — C retains ownership" },
+        {
+          api: "CStr::from_ptr(ptr) for borrowed access",
+          why: "Borrows without taking ownership — C retains ownership",
+        },
         { api: "Null check before deref", why: "Prevents null pointer dereference from C callers" },
       ],
       investigationHints: {
         grepPatterns: [
-          "extern\\s+\"C\"",
+          'extern\\s+"C"',
           "#\\[no_mangle\\]",
           "CString",
           "CStr",
@@ -112,8 +151,10 @@ export const rustProfile: LanguageProfile = {
       fewShots: [
         {
           scenario: "FFI callback with null pointer dereference",
-          vulnerableCode: '#[no_mangle]\npub extern "C" fn process_buffer(ptr: *const u8, len: usize) -> i32 {\n    let data = unsafe { std::slice::from_raw_parts(ptr, len) };\n    // ...\n}',
-          explanation: "C caller may pass null ptr. from_raw_parts with null pointer is immediate UB. Must check ptr.is_null() before creating the slice.",
+          vulnerableCode:
+            '#[no_mangle]\npub extern "C" fn process_buffer(ptr: *const u8, len: usize) -> i32 {\n    let data = unsafe { std::slice::from_raw_parts(ptr, len) };\n    // ...\n}',
+          explanation:
+            "C caller may pass null ptr. from_raw_parts with null pointer is immediate UB. Must check ptr.is_null() before creating the slice.",
         },
       ],
       antiHallucinationExtra: [
@@ -122,29 +163,44 @@ export const rustProfile: LanguageProfile = {
     },
     "command-injection": {
       sinks: [
-        { api: "std::process::Command::new(\"sh\").arg(\"-c\").arg(user_str)", risk: "Shell interpretation of user-controlled string", shellInvoking: true, cwes: ["CWE-78"] },
-        { api: "std::process::Command::new(user_binary)", risk: "User controls which binary is executed", shellInvoking: false, cwes: ["CWE-78"] },
+        {
+          api: 'std::process::Command::new("sh").arg("-c").arg(user_str)',
+          risk: "Shell interpretation of user-controlled string",
+          shellInvoking: true,
+          cwes: ["CWE-78"],
+        },
+        {
+          api: "std::process::Command::new(user_binary)",
+          risk: "User controls which binary is executed",
+          shellInvoking: false,
+          cwes: ["CWE-78"],
+        },
       ],
       safePatterns: [
-        { api: "Command::new(\"fixed-binary\").arg(user_arg)", why: "Fixed binary with user args — no shell involved" },
+        {
+          api: 'Command::new("fixed-binary").arg(user_arg)',
+          why: "Fixed binary with user args — no shell involved",
+        },
       ],
       investigationHints: {
         grepPatterns: ["Command::new\\(", "\\.arg\\(", "\\.args\\("],
         fileHints: ["Process spawning utilities", "Build/CI helpers"],
         instructions: [
-          "Check if Command::new uses \"sh\" or \"bash\" with \"-c\" — this enables shell interpretation",
-          "Command::new(\"fixed\").arg(user_input) is safe against shell injection (no shell involved)",
+          'Check if Command::new uses "sh" or "bash" with "-c" — this enables shell interpretation',
+          'Command::new("fixed").arg(user_input) is safe against shell injection (no shell involved)',
         ],
       },
       fewShots: [
         {
           scenario: "Shell command with user-controlled argument",
-          vulnerableCode: 'let output = Command::new("sh")\n    .arg("-c")\n    .arg(format!("ffmpeg -i {} output.mp4", user_filename))\n    .output()?;',
-          explanation: "user_filename is interpolated into a shell command string. Attacker sends 'input.mp4; rm -rf /' — shell interprets the semicolon.",
+          vulnerableCode:
+            'let output = Command::new("sh")\n    .arg("-c")\n    .arg(format!("ffmpeg -i {} output.mp4", user_filename))\n    .output()?;',
+          explanation:
+            "user_filename is interpolated into a shell command string. Attacker sends 'input.mp4; rm -rf /' — shell interprets the semicolon.",
         },
       ],
       antiHallucinationExtra: [
-        "Command::new(\"binary\").arg(user_input) without shell is NOT vulnerable to shell metachar injection",
+        'Command::new("binary").arg(user_input) without shell is NOT vulnerable to shell metachar injection',
       ],
     },
   },

@@ -1,6 +1,6 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { existsSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 
@@ -21,8 +21,8 @@ export function resolveVulnScoutPlugin(): { type: "local"; path: string } {
 
   if (!existsSync(manifest)) {
     throw new Error(
-      `@kuzushi/vuln-scout is installed but missing whitebox-pentest/.claude-plugin/plugin.json at ${repoRoot}. `
-      + "Try reinstalling: pnpm install",
+      `@kuzushi/vuln-scout is installed but missing whitebox-pentest/.claude-plugin/plugin.json at ${repoRoot}. ` +
+        "Try reinstalling: pnpm install",
     );
   }
 

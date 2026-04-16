@@ -32,10 +32,12 @@ export async function resolveCodeQLBinary(): Promise<string> {
     return cached;
   }
 
-  throw new Error([
-    "CodeQL CLI not found. Install it:",
-    "  gh extension install github/gh-codeql && gh codeql install-stub",
-    "  Or download from:",
-    "  https://github.com/github/codeql-cli-binaries/releases",
-  ].join("\n"));
+  throw new Error(
+    [
+      "CodeQL CLI not found. Install it:",
+      "  gh extension install github/gh-codeql && gh codeql install-stub",
+      "  Or download from:",
+      "  https://github.com/github/codeql-cli-binaries/releases",
+    ].join("\n"),
+  );
 }

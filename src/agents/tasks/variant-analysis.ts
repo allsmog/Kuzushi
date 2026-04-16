@@ -1,13 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import type { AgentRuntime, AgentSession } from "../../agent-runtime/types.js";
+import { cleanupBatchFiles, writeBatchFile } from "../../agent-runtime/batch-files.js";
 import { runStructuredSessionQuery } from "../../agent-runtime/execution.js";
-import { writeBatchFile, cleanupBatchFiles } from "../../agent-runtime/batch-files.js";
+import type { AgentRuntime, AgentSession } from "../../agent-runtime/types.js";
+import { createLogger } from "../../logger.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, TriageResult } from "../../types.js";
-import { createLogger } from "../../logger.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 
 const log = createLogger({ stage: "variant-analysis" });
@@ -159,9 +159,7 @@ function normalizeVariants(
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 function computeFingerprint(
@@ -170,7 +168,9 @@ function computeFingerprint(
   v: VariantFinding,
   originalRuleId: string,
 ): string {
-  const source = [repoName, "variant-analysis", originalRuleId, filePath, String(v.startLine)].join("|");
+  const source = [repoName, "variant-analysis", originalRuleId, filePath, String(v.startLine)].join(
+    "|",
+  );
   return createHash("sha256").update(source).digest("hex");
 }
 
@@ -202,7 +202,9 @@ export async function analyzeVariants(
   let costUsd = 0;
 
   const tag = "[variant-analysis]";
-  log.info(`Searching for variants of ${finding.ruleId} in ${finding.filePath}:${finding.startLine}`);
+  log.info(
+    `Searching for variants of ${finding.ruleId} in ${finding.filePath}:${finding.startLine}`,
+  );
 
   const canUseSession = runtime.createSession != null;
 
@@ -318,7 +320,9 @@ export function buildVariantTriageConfig(finding: Finding, repoName: string): Tr
       "",
       "Verify that this variant follows the same vulnerability pattern as the original.",
       "Check if the same missing guard/sanitization applies at this location.",
-    ].filter(Boolean).join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
   };
 }
 
@@ -342,21 +346,23 @@ const BATCH_VARIANT_SCHEMA = {
   },
 } as const;
 
-function buildBatchPrompt(
-  items: Array<{ finding: Finding; triageResult: TriageResult }>,
-): string {
-  const findingDescriptions = items.map((item, idx) => [
-    `### Finding ${idx + 1} (fingerprint: ${item.finding.fingerprint})`,
-    `Scanner: ${item.finding.taskId}`,
-    `Rule: ${item.finding.ruleId}`,
-    `File: ${item.finding.filePath}:${item.finding.startLine}`,
-    `Severity: ${item.finding.severity}`,
-    `Message: ${item.finding.message}`,
-    `CWE: ${item.finding.cwe.join(", ") || "none"}`,
-    `Evidence: ${item.finding.evidence || "none"}`,
-    `Triage verdict: ${item.triageResult.verdict}`,
-    `Triage rationale: ${item.triageResult.rationale}`,
-  ].join("\n")).join("\n\n");
+function buildBatchPrompt(items: Array<{ finding: Finding; triageResult: TriageResult }>): string {
+  const findingDescriptions = items
+    .map((item, idx) =>
+      [
+        `### Finding ${idx + 1} (fingerprint: ${item.finding.fingerprint})`,
+        `Scanner: ${item.finding.taskId}`,
+        `Rule: ${item.finding.ruleId}`,
+        `File: ${item.finding.filePath}:${item.finding.startLine}`,
+        `Severity: ${item.finding.severity}`,
+        `Message: ${item.finding.message}`,
+        `CWE: ${item.finding.cwe.join(", ") || "none"}`,
+        `Evidence: ${item.finding.evidence || "none"}`,
+        `Triage verdict: ${item.triageResult.verdict}`,
+        `Triage rationale: ${item.triageResult.rationale}`,
+      ].join("\n"),
+    )
+    .join("\n\n");
 
   return [
     "You are a senior security researcher performing variant analysis.",

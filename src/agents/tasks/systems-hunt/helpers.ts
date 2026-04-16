@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { FileIndex } from "../../../types.js";
 import type { CodeIntelligenceProvider } from "../../../analysis-support/types.js";
+import type { FileIndex } from "../../../types.js";
 import type {
   RankedSystemsSurface,
   SystemsCodeLocation,
@@ -69,73 +69,79 @@ const TEMPLATE_SPECS: readonly TemplateSpec[] = [
   {
     id: "signed-wraparound",
     title: "Signed/unsigned compare and wraparound",
-    rationale: "Find mixed-width comparisons, casts, and arithmetic that can wrap before bounds or state checks.",
+    rationale:
+      "Find mixed-width comparisons, casts, and arithmetic that can wrap before bounds or state checks.",
     queryText: [
       "/* CodeQL template: signed-wraparound */",
       "import cpp",
       "from Expr a, Expr b",
-      "where a.getType().toString().matches(\"%int%\") and b.getType().toString().matches(\"%unsigned%\")",
-      "select a, \"Inspect mixed signed/unsigned compare or cast near control/data boundary.\"",
+      'where a.getType().toString().matches("%int%") and b.getType().toString().matches("%unsigned%")',
+      'select a, "Inspect mixed signed/unsigned compare or cast near control/data boundary."',
     ].join("\n"),
   },
   {
     id: "counter-allocation-flow",
     title: "Counter to index/allocation flow",
-    rationale: "Trace counters and lengths that drive allocation sizes, indexing, loop exits, or sentinel checks.",
+    rationale:
+      "Trace counters and lengths that drive allocation sizes, indexing, loop exits, or sentinel checks.",
     queryText: [
       "/* CodeQL template: counter-allocation-flow */",
       "import cpp",
       "from FunctionCall alloc, Expr sizeArg",
-      "where alloc.getTarget().hasName([\"malloc\", \"calloc\", \"realloc\"]) and sizeArg = alloc.getArgument(0)",
-      "select sizeArg, \"Inspect counter-derived allocation or index sizing.\"",
+      'where alloc.getTarget().hasName(["malloc", "calloc", "realloc"]) and sizeArg = alloc.getArgument(0)',
+      'select sizeArg, "Inspect counter-derived allocation or index sizing."',
     ].join("\n"),
   },
   {
     id: "stack-length-copy",
     title: "Stack/heap copy length from input",
-    rationale: "Look for copy operations where attacker-controlled length can exceed local buffer or object capacity.",
+    rationale:
+      "Look for copy operations where attacker-controlled length can exceed local buffer or object capacity.",
     queryText: [
       "/* CodeQL template: stack-length-copy */",
       "import cpp",
       "from FunctionCall copy",
-      "where copy.getTarget().hasName([\"memcpy\", \"memmove\", \"strcpy\", \"strncpy\"])",
-      "select copy, \"Inspect copy length against stack/heap destination bounds.\"",
+      'where copy.getTarget().hasName(["memcpy", "memmove", "strcpy", "strncpy"])',
+      'select copy, "Inspect copy length against stack/heap destination bounds."',
     ].join("\n"),
   },
   {
     id: "rpc-xdr-length",
     title: "RPC/XDR framing lengths",
-    rationale: "Inspect RPC or XDR handlers where sequential message state and framing lengths control parsing or copies.",
+    rationale:
+      "Inspect RPC or XDR handlers where sequential message state and framing lengths control parsing or copies.",
     queryText: [
       "/* CodeQL template: rpc-xdr-length */",
       "import cpp",
       "from Function f",
-      "where f.getName().regexpMatch(\".*(rpc|xdr|gss|nfs).*\")",
-      "select f, \"Inspect framing length and auth state transitions.\"",
+      'where f.getName().regexpMatch(".*(rpc|xdr|gss|nfs).*")',
+      'select f, "Inspect framing length and auth state transitions."',
     ].join("\n"),
   },
   {
     id: "rust-unsafe-len",
     title: "Rust unsafe len/pointer misuse",
-    rationale: "Inspect unsafe blocks that use raw pointers, slice constructors, unchecked indexing, or set_len without guards.",
+    rationale:
+      "Inspect unsafe blocks that use raw pointers, slice constructors, unchecked indexing, or set_len without guards.",
     queryText: [
       "/* CodeQL template: rust-unsafe-len */",
       "import rust",
       "from Expr e",
-      "where e.toString().regexpMatch(\".*(from_raw_parts|get_unchecked|set_len|ptr::).*\" )",
-      "select e, \"Inspect unsafe length or pointer assumptions.\"",
+      'where e.toString().regexpMatch(".*(from_raw_parts|get_unchecked|set_len|ptr::).*" )',
+      'select e, "Inspect unsafe length or pointer assumptions."',
     ].join("\n"),
   },
   {
     id: "hardening-presence",
     title: "Hardening and mitigation presence",
-    rationale: "Check whether canaries, fortify, panic/assert guards, or isolation assumptions materially change exploitability.",
+    rationale:
+      "Check whether canaries, fortify, panic/assert guards, or isolation assumptions materially change exploitability.",
     queryText: [
       "/* CodeQL template: hardening-presence */",
       "import cpp",
       "from MacroInvocation m",
-      "where m.getMacroName().regexpMatch(\".*(FORTIFY|STACK_CHK|ASSERT).*\" )",
-      "select m, \"Inspect whether hardening is present or missing near the sink.\"",
+      'where m.getMacroName().regexpMatch(".*(FORTIFY|STACK_CHK|ASSERT).*" )',
+      'select m, "Inspect whether hardening is present or missing near the sink."',
     ].join("\n"),
   },
 ] as const;
@@ -160,10 +166,15 @@ export async function buildSystemsSurfacePack(args: {
   } = args;
   const anchorSymbol = await inferAnchorSymbol(repoRoot, surface.filePath, surface.startLine);
   const callers = anchorSymbol
-    ? (await collectCallerLocations(provider, anchorSymbol, surfacePackDepth)).slice(0, surfacePackDepth)
+    ? (await collectCallerLocations(provider, anchorSymbol, surfacePackDepth)).slice(
+        0,
+        surfacePackDepth,
+      )
     : [];
   const callees = anchorSymbol
-    ? (await collectCalleeLocations(provider, anchorSymbol, surface.filePath, surfacePackDepth)).slice(0, surfacePackDepth)
+    ? (
+        await collectCalleeLocations(provider, anchorSymbol, surface.filePath, surfacePackDepth)
+      ).slice(0, surfacePackDepth)
     : [];
   const relatedFiles = dedupeStrings([
     surface.filePath,
@@ -207,12 +218,36 @@ export async function buildSystemsSurfacePack(args: {
     "unsafe memory primitive",
   );
   const inputSites = dedupeLocations([
-    ...await collectPatternLocations(repoRoot, relatedFiles, INPUT_PATTERNS, surfacePackDepth, "network/guest-controlled input"),
-    ...collectDomainLocations(fileIndex, relatedFiles, ["protocol-parser"], "file-index input signal", surfacePackDepth),
+    ...(await collectPatternLocations(
+      repoRoot,
+      relatedFiles,
+      INPUT_PATTERNS,
+      surfacePackDepth,
+      "network/guest-controlled input",
+    )),
+    ...collectDomainLocations(
+      fileIndex,
+      relatedFiles,
+      ["protocol-parser"],
+      "file-index input signal",
+      surfacePackDepth,
+    ),
   ]).slice(0, surfacePackDepth);
   const hardeningSites = dedupeLocations([
-    ...await collectPatternLocations(repoRoot, relatedFiles, HARDENING_PATTERNS, surfacePackDepth, "hardening or guard"),
-    ...collectDomainLocations(fileIndex, relatedFiles, ["hardening"], "file-index hardening signal", surfacePackDepth),
+    ...(await collectPatternLocations(
+      repoRoot,
+      relatedFiles,
+      HARDENING_PATTERNS,
+      surfacePackDepth,
+      "hardening or guard",
+    )),
+    ...collectDomainLocations(
+      fileIndex,
+      relatedFiles,
+      ["hardening"],
+      "file-index hardening signal",
+      surfacePackDepth,
+    ),
   ]).slice(0, surfacePackDepth);
 
   return {
@@ -271,13 +306,13 @@ export function matchTriggerHypothesisToFinding(args: {
   stateMachine: string[];
   cheapVerifiable: boolean;
 } {
-  const matched = args.hypotheses.filter((hypothesis) =>
-    args.triggerHypothesisIds.includes(hypothesis.id)
-    || (
-      args.triggerSequence.length > 0
-      && hypothesis.orderedSteps.some((step) => args.triggerSequence.includes(step))
-      && (args.expectedPrimitive === "unknown" || hypothesis.expectedPrimitive === args.expectedPrimitive)
-    ),
+  const matched = args.hypotheses.filter(
+    (hypothesis) =>
+      args.triggerHypothesisIds.includes(hypothesis.id) ||
+      (args.triggerSequence.length > 0 &&
+        hypothesis.orderedSteps.some((step) => args.triggerSequence.includes(step)) &&
+        (args.expectedPrimitive === "unknown" ||
+          hypothesis.expectedPrimitive === args.expectedPrimitive)),
   );
 
   const boundaryAssignments: Record<string, string> = {};
@@ -321,18 +356,20 @@ function selectHelperTemplates(
   if (surface.kind === "buffer-operation" || surface.kind === "rpc-handler") {
     selectedIds.add("stack-length-copy");
   }
-  if (surface.kind === "unsafe-region" || surface.kind === "hypervisor-boundary" || surface.domains.includes("unsafe-memory")) {
+  if (
+    surface.kind === "unsafe-region" ||
+    surface.kind === "hypervisor-boundary" ||
+    surface.domains.includes("unsafe-memory")
+  ) {
     selectedIds.add("rust-unsafe-len");
   }
 
-  return TEMPLATE_SPECS
-    .filter((template) => selectedIds.has(template.id))
-    .map((template) => ({
-      id: template.id,
-      title: template.title,
-      rationale: template.rationale,
-      queryText: includeQueryText ? template.queryText : undefined,
-    }));
+  return TEMPLATE_SPECS.filter((template) => selectedIds.has(template.id)).map((template) => ({
+    id: template.id,
+    title: template.title,
+    rationale: template.rationale,
+    queryText: includeQueryText ? template.queryText : undefined,
+  }));
 }
 
 async function collectCallerLocations(
@@ -345,11 +382,12 @@ async function collectCallerLocations(
       functionName,
       maxResults: Math.max(limit * 2, limit),
     });
-    return dedupeLocations(raw
-      .map(parseCallSite)
-      .filter((entry): entry is SystemsCodeLocation => Boolean(entry))
-      .map((entry) => ({ ...entry, reason: "caller of anchor symbol", symbol: functionName })))
-      .slice(0, limit);
+    return dedupeLocations(
+      raw
+        .map(parseCallSite)
+        .filter((entry): entry is SystemsCodeLocation => Boolean(entry))
+        .map((entry) => ({ ...entry, reason: "caller of anchor symbol", symbol: functionName })),
+    ).slice(0, limit);
   } catch {
     return [];
   }
@@ -449,9 +487,12 @@ async function inferAnchorSymbol(
   for (let index = startIndex; index >= windowStart; index -= 1) {
     const line = lines[index]?.trim() ?? "";
     if (!line || /^(if|for|while|switch|return)\b/.test(line)) continue;
-    const match = line.match(/(?:^|[\s:*&])([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const)?\s*(?:\{|$)/)
-      ?? line.match(/^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)\s*[<(]/)
-      ?? line.match(/^\s*(?:static\s+)?(?:inline\s+)?(?:[\w:<>~*&]+\s+)+([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:\{|$)/);
+    const match =
+      line.match(/(?:^|[\s:*&])([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const)?\s*(?:\{|$)/) ??
+      line.match(/^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)\s*[<(]/) ??
+      line.match(
+        /^\s*(?:static\s+)?(?:inline\s+)?(?:[\w:<>~*&]+\s+)+([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:\{|$)/,
+      );
     const symbol = match?.[1]?.trim();
     if (symbol && !["if", "for", "while", "switch"].includes(symbol)) {
       return symbol;
@@ -488,9 +529,7 @@ function formatLocations(locations: SystemsCodeLocation[]): string {
 
 function formatTemplates(templates: SystemsHelperTemplate[]): string {
   if (templates.length === 0) return "none";
-  return templates
-    .map((template) => `${template.id}: ${template.title}`)
-    .join(" | ");
+  return templates.map((template) => `${template.id}: ${template.title}`).join(" | ");
 }
 
 function dedupeLocations(locations: SystemsCodeLocation[]): SystemsCodeLocation[] {

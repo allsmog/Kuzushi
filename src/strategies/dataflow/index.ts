@@ -1,15 +1,27 @@
+import { resolveTaskModel, resolveTaskRuntime } from "../../agents/tasks/runtime-overrides.js";
+import { createLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import type { RepoContext } from "../../types.js";
-import { createLogger } from "../../logger.js";
 import { toErrorMessage } from "../../utils.js";
-import type { AnalysisStrategy, StrategyInput, StrategyResult, StrategyEvidence } from "../types.js";
-import { resolveTaskModel, resolveTaskRuntime } from "../../agents/tasks/runtime-overrides.js";
+import type {
+  AnalysisStrategy,
+  StrategyEvidence,
+  StrategyInput,
+  StrategyResult,
+} from "../types.js";
 
 const log = createLogger({ stage: "strategy-dataflow" });
 
 const SUPPORTED_CWES = new Set([
-  "CWE-89", "CWE-79", "CWE-918", "CWE-78", "CWE-94", "CWE-22", "CWE-502",
-  "CWE-943", "CWE-1336",
+  "CWE-89",
+  "CWE-79",
+  "CWE-918",
+  "CWE-78",
+  "CWE-94",
+  "CWE-22",
+  "CWE-502",
+  "CWE-943",
+  "CWE-1336",
 ]);
 
 const DATAFLOW_SCHEMA = {
@@ -83,7 +95,7 @@ export function createDataflowStrategy(strategyId: string, cweIds: string[]): An
         })) {
           if (message.type === "result" && "result" in message) {
             structuredOutput = message.structuredOutput;
-            costUsd = (message as unknown as Record<string, unknown>).totalCostUsd as number ?? 0;
+            costUsd = ((message as unknown as Record<string, unknown>).totalCostUsd as number) ?? 0;
           }
         }
 
@@ -102,14 +114,16 @@ export function createDataflowStrategy(strategyId: string, cweIds: string[]): An
         log.warn(`Dataflow strategy failed: ${toErrorMessage(error)}`);
       }
 
-      const confidence = evidence.length > 0
-        ? Math.min(0.9, 0.5 + evidence.length * 0.15)
-        : 0;
+      const confidence = evidence.length > 0 ? Math.min(0.9, 0.5 + evidence.length * 0.15) : 0;
 
       return {
-        strategyKind: "dataflow", strategyId,
-        findings: [], confidence, costUsd,
-        durationMs: Date.now() - startTime, evidence,
+        strategyKind: "dataflow",
+        strategyId,
+        findings: [],
+        confidence,
+        costUsd,
+        durationMs: Date.now() - startTime,
+        evidence,
       };
     },
   };

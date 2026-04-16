@@ -1,7 +1,7 @@
 import { execFile as execFileCb } from "node:child_process";
 import path from "node:path";
-import type { PocExecutionResult, PocExecutor } from "./types.js";
 import { getLogger } from "../logger.js";
+import type { PocExecutionResult, PocExecutor } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const log = getLogger("poc-executor");
@@ -51,40 +51,45 @@ export class ProcessPocExecutor implements PocExecutor {
     const startedAt = Date.now();
 
     return new Promise<PocExecutionResult>((resolve) => {
-      execFileCb(bin, args, {
-        timeout: this.timeoutMs,
-        maxBuffer: 1024 * 1024,
-      }, (error, stdout, stderr) => {
-        const durationMs = Date.now() - startedAt;
-        const timedOut = error !== null && "killed" in error && error.killed === true;
+      execFileCb(
+        bin,
+        args,
+        {
+          timeout: this.timeoutMs,
+          maxBuffer: 1024 * 1024,
+        },
+        (error, stdout, stderr) => {
+          const durationMs = Date.now() - startedAt;
+          const timedOut = error !== null && "killed" in error && error.killed === true;
 
-        if (timedOut) {
+          if (timedOut) {
+            resolve({
+              exitCode: -1,
+              stdout: String(stdout ?? ""),
+              stderr: String(stderr ?? ""),
+              timedOut: true,
+              durationMs,
+              verdict: "TIMEOUT",
+            });
+            return;
+          }
+
+          let exitCode = 0;
+          if (error) {
+            const errWithCode = error as { code?: unknown };
+            exitCode = typeof errWithCode.code === "number" ? errWithCode.code : 1;
+          }
+
           resolve({
-            exitCode: -1,
+            exitCode,
             stdout: String(stdout ?? ""),
             stderr: String(stderr ?? ""),
-            timedOut: true,
+            timedOut: false,
             durationMs,
-            verdict: "TIMEOUT",
+            verdict: exitCode === 0 ? "PASS" : "FAIL",
           });
-          return;
-        }
-
-        let exitCode = 0;
-        if (error) {
-          const errWithCode = error as { code?: unknown };
-          exitCode = typeof errWithCode.code === "number" ? errWithCode.code : 1;
-        }
-
-        resolve({
-          exitCode,
-          stdout: String(stdout ?? ""),
-          stderr: String(stderr ?? ""),
-          timedOut: false,
-          durationMs,
-          verdict: exitCode === 0 ? "PASS" : "FAIL",
-        });
-      });
+        },
+      );
     });
   }
 }

@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { GeneratedRule } from "./types.js";
 import { createLogger } from "../logger.js";
+import type { GeneratedRule } from "./types.js";
 
 const log = createLogger({ stage: "rule-persistence" });
 

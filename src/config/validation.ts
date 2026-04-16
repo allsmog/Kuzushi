@@ -1,5 +1,5 @@
-import type { KuzushiConfig } from "../types.js";
 import path from "node:path";
+import type { KuzushiConfig } from "../types.js";
 import { AGENT_RUNTIME_BACKENDS } from "./defaults.js";
 
 export type ConfigValidationSeverity = "error" | "warning";
@@ -14,7 +14,10 @@ export interface ConfigValidationIssue {
 export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIssue[] {
   const issues: ConfigValidationIssue[] = [];
 
-  if (config.agentRuntimeBackend != null && !AGENT_RUNTIME_BACKENDS.has(String(config.agentRuntimeBackend))) {
+  if (
+    config.agentRuntimeBackend != null &&
+    !AGENT_RUNTIME_BACKENDS.has(String(config.agentRuntimeBackend))
+  ) {
     issues.push({
       severity: "error",
       path: "agentRuntimeBackend",
@@ -28,7 +31,7 @@ export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIs
       severity: "error",
       path: "busBackend",
       message: `Unsupported bus backend "${String(config.busBackend)}".`,
-      hint: "Use \"in-process\" until a distributed MessageBus adapter is implemented.",
+      hint: 'Use "in-process" until a distributed MessageBus adapter is implemented.',
     });
   }
 
@@ -54,7 +57,8 @@ export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIs
     issues.push({
       severity: "warning",
       path: "externalTasks",
-      message: "externalTasks are configured but enableExternalTasks is false, so they will not load.",
+      message:
+        "externalTasks are configured but enableExternalTasks is false, so they will not load.",
       hint: "Set enableExternalTasks=true to activate the configured external tasks.",
     });
   }
@@ -63,12 +67,16 @@ export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIs
     issues.push({
       severity: "warning",
       path: "qualityGates.failOnExploitable",
-      message: "failOnExploitable is enabled while verification is disabled, so exploitable findings will never be confirmed.",
+      message:
+        "failOnExploitable is enabled while verification is disabled, so exploitable findings will never be confirmed.",
       hint: "Enable verify=true if you want failOnExploitable to have effect.",
     });
   }
 
-  if (config.monorepo?.maxModules != null && (!Number.isFinite(config.monorepo.maxModules) || config.monorepo.maxModules < 1)) {
+  if (
+    config.monorepo?.maxModules != null &&
+    (!Number.isFinite(config.monorepo.maxModules) || config.monorepo.maxModules < 1)
+  ) {
     issues.push({
       severity: "error",
       path: "monorepo.maxModules",
@@ -86,11 +94,15 @@ export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIs
     }
   }
 
-  if (config.monorepo?.mode != null && config.monorepo.mode !== "auto" && config.monorepo.mode !== "off") {
+  if (
+    config.monorepo?.mode != null &&
+    config.monorepo.mode !== "auto" &&
+    config.monorepo.mode !== "off"
+  ) {
     issues.push({
       severity: "error",
       path: "monorepo.mode",
-      message: "monorepo.mode must be either \"auto\" or \"off\".",
+      message: 'monorepo.mode must be either "auto" or "off".',
     });
   }
 

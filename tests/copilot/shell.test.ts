@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import type { CopilotCore } from "../../src/copilot/core.js";
+import type { ShellOptions } from "../../src/copilot/shell.js";
 import {
   __shellInternals,
   buildShellPrompt,
@@ -11,10 +12,9 @@ import {
   loadShellCommandHistory,
   saveShellCommandHistory,
 } from "../../src/copilot/shell.js";
-import type { ShellOptions } from "../../src/copilot/shell.js";
+import { createCoreSastModule } from "../../src/modules/core-sast.js";
 import type { KuzushiConfig } from "../../src/types.js";
 import type { ShellState } from "../../src/ui/state.js";
-import { createCoreSastModule } from "../../src/modules/core-sast.js";
 
 const tempDirs: string[] = [];
 
@@ -112,7 +112,13 @@ describe("local shell commands", () => {
     const shellState = createShellState(module.tools.map((tool) => tool.name));
     const ctx = { focusedModule: null };
 
-    const workspaceResult = __shellInternals.handleLocalCommand("/workspace acme-pentest", core, opts, ctx, shellState);
+    const workspaceResult = __shellInternals.handleLocalCommand(
+      "/workspace acme-pentest",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(workspaceResult).toEqual({ output: "Workspace set to: acme-pentest" });
     expect(opts.workspace).toBe("acme-pentest");
 
@@ -127,7 +133,9 @@ describe("local shell commands", () => {
     const backResult = __shellInternals.handleLocalCommand("/back", core, opts, ctx, shellState);
     expect(backResult).toEqual({ setFocus: null, output: "Returned to top level." });
 
-    expect(__shellInternals.handleLocalCommand("help", core, opts, ctx, shellState)).toBeUndefined();
+    expect(
+      __shellInternals.handleLocalCommand("help", core, opts, ctx, shellState),
+    ).toBeUndefined();
   });
 
   it("renders options tables and stores per-tool settings", () => {
@@ -136,21 +144,43 @@ describe("local shell commands", () => {
     let shellState = createShellState(module.tools.map((tool) => tool.name));
     const ctx = { focusedModule: "sast" };
 
-    const optionsResult = __shellInternals.handleLocalCommand("/options threat-hunt", core, opts, ctx, shellState);
+    const optionsResult = __shellInternals.handleLocalCommand(
+      "/options threat-hunt",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(optionsResult?.output).toContain("sast:threat-hunt options");
     expect(optionsResult?.output).toContain("maxActors");
     expect(optionsResult?.output).toContain("5");
 
-    shellState = optionsResult?.shellStateUpdater ? optionsResult.shellStateUpdater(shellState) : shellState;
+    shellState = optionsResult?.shellStateUpdater
+      ? optionsResult.shellStateUpdater(shellState)
+      : shellState;
     expect(shellState.lastUsedTool).toBe("sast:threat-hunt");
 
-    const setResult = __shellInternals.handleLocalCommand("/set maxActors 7", core, opts, ctx, shellState);
+    const setResult = __shellInternals.handleLocalCommand(
+      "/set maxActors 7",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(setResult?.output).toBe("Set sast:threat-hunt.maxActors = 7");
 
-    shellState = setResult?.shellStateUpdater ? setResult.shellStateUpdater(shellState) : shellState;
+    shellState = setResult?.shellStateUpdater
+      ? setResult.shellStateUpdater(shellState)
+      : shellState;
     expect(shellState.moduleOptions["sast:threat-hunt"]).toEqual({ maxActors: 7 });
 
-    const optionsAgain = __shellInternals.handleLocalCommand("/options", core, opts, ctx, shellState);
+    const optionsAgain = __shellInternals.handleLocalCommand(
+      "/options",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(optionsAgain?.output).toContain("* 7");
   });
 
@@ -161,9 +191,17 @@ describe("local shell commands", () => {
     const ctx = { focusedModule: "sast" };
 
     const unknown = __shellInternals.handleLocalCommand("/foo", core, opts, ctx, shellState);
-    expect(unknown).toEqual({ output: "Unknown command: /foo. Type /help for available commands." });
+    expect(unknown).toEqual({
+      output: "Unknown command: /foo. Type /help for available commands.",
+    });
 
-    const setResult = __shellInternals.handleLocalCommand("/set maxActors 7", core, opts, ctx, shellState);
+    const setResult = __shellInternals.handleLocalCommand(
+      "/set maxActors 7",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(setResult).toEqual({ output: "No active tool selected. Use /options <tool> first." });
   });
 
@@ -177,7 +215,13 @@ describe("local shell commands", () => {
     };
     const ctx = { focusedModule: null };
 
-    const historyResult = __shellInternals.handleLocalCommand("/history", core, opts, ctx, shellState);
+    const historyResult = __shellInternals.handleLocalCommand(
+      "/history",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(historyResult?.output).toContain("/use sast");
     expect(historyResult?.output).toContain("scan .");
 
@@ -186,7 +230,9 @@ describe("local shell commands", () => {
     expect(clearResult?.resetSession).toBe(true);
     expect(clearResult?.output).toBe("Conversation cleared.");
 
-    expect(__shellInternals.handleLocalCommand("quit", core, opts, ctx, shellState)).toEqual({ exit: true });
+    expect(__shellInternals.handleLocalCommand("quit", core, opts, ctx, shellState)).toEqual({
+      exit: true,
+    });
   });
 
   it("resolves direct tool execution and merges stored options", async () => {
@@ -210,16 +256,34 @@ describe("local shell commands", () => {
       },
     };
 
-    const qualified = __shellInternals.handleLocalCommand("sast:semgrep .", core, opts, { focusedModule: null }, shellState);
+    const qualified = __shellInternals.handleLocalCommand(
+      "sast:semgrep .",
+      core,
+      opts,
+      { focusedModule: null },
+      shellState,
+    );
     expect(qualified?.executedToolName).toBe("sast:semgrep");
 
-    const global = __shellInternals.handleLocalCommand("semgrep .", core, opts, { focusedModule: null }, shellState);
+    const global = __shellInternals.handleLocalCommand(
+      "semgrep .",
+      core,
+      opts,
+      { focusedModule: null },
+      shellState,
+    );
     expect(global?.executedToolName).toBe("sast:semgrep");
 
     const focused = __shellInternals.handleLocalCommand("scan .", core, opts, ctx, shellState);
     expect(focused?.executedToolName).toBe("sast:scan");
 
-    const threatHunt = __shellInternals.handleLocalCommand("threat-hunt /repo maxActors=7", core, opts, ctx, shellState);
+    const threatHunt = __shellInternals.handleLocalCommand(
+      "threat-hunt /repo maxActors=7",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(threatHunt?.executedToolName).toBe("sast:threat-hunt");
     expect(threatHunt?.asyncExecute).toBeTypeOf("function");
 
@@ -323,7 +387,13 @@ describe("context system", () => {
     };
     const ctx = { focusedModule: null };
 
-    const result = __shellInternals.handleLocalCommand("/context regenerate", core, opts, ctx, shellState);
+    const result = __shellInternals.handleLocalCommand(
+      "/context regenerate",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(result?.executedToolName).toBe("sast:context");
     expect(result?.asyncExecute).toBeTypeOf("function");
   });
@@ -334,7 +404,13 @@ describe("context system", () => {
     const ctx = { focusedModule: "sast" };
     const shellState = createShellState(module.tools.map((t) => t.name));
 
-    const result = __shellInternals.handleLocalCommand("threat-hunt .", core, opts, ctx, shellState);
+    const result = __shellInternals.handleLocalCommand(
+      "threat-hunt .",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(result?.output).toContain("Context required");
     expect(result?.executedToolName).toBeUndefined();
   });
@@ -348,7 +424,13 @@ describe("context system", () => {
       contextSnapshot: mockSnapshot,
     };
 
-    const result = __shellInternals.handleLocalCommand("threat-hunt .", core, opts, ctx, shellState);
+    const result = __shellInternals.handleLocalCommand(
+      "threat-hunt .",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(result?.executedToolName).toBe("sast:threat-hunt");
   });
 
@@ -358,7 +440,13 @@ describe("context system", () => {
     const ctx = { focusedModule: null };
     const shellState = createShellState(module.tools.map((t) => t.name));
 
-    const result = __shellInternals.handleLocalCommand("sast:semgrep .", core, opts, ctx, shellState);
+    const result = __shellInternals.handleLocalCommand(
+      "sast:semgrep .",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(result?.executedToolName).toBe("sast:semgrep");
   });
 
@@ -390,7 +478,13 @@ describe("context system", () => {
     };
     const ctx = { focusedModule: null };
 
-    const result = __shellInternals.handleLocalCommand("/target /same", core, opts, ctx, shellState);
+    const result = __shellInternals.handleLocalCommand(
+      "/target /same",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(result?.output).toBe("Target set to: /same");
     expect(result?.shellStateUpdater).toBeUndefined();
   });
@@ -405,8 +499,12 @@ describe("assistant streaming", () => {
     ]);
 
     expect(streamedText).toBe("Investigating the repo");
-    expect(__shellInternals.finalizeAssistantText(streamedText, "fallback result")).toBe("Investigating the repo");
-    expect(__shellInternals.finalizeAssistantText(undefined, "fallback result")).toBe("fallback result");
+    expect(__shellInternals.finalizeAssistantText(streamedText, "fallback result")).toBe(
+      "Investigating the repo",
+    );
+    expect(__shellInternals.finalizeAssistantText(undefined, "fallback result")).toBe(
+      "fallback result",
+    );
   });
 });
 

@@ -3,9 +3,10 @@
  *
  * Renders:   ⚡ Triaging 142 findings via claude-opus...
  */
-import React from "react";
-import { Text } from "ink";
+
 import chalk from "chalk";
+import { Text } from "ink";
+import type React from "react";
 import { icons } from "../icons.js";
 import type { Phase } from "../state.js";
 
@@ -33,6 +34,9 @@ export function StageHeader({ phase, label }: StageHeaderProps): React.ReactElem
   const colorFn = STAGE_COLORS[phase] ?? chalk.white;
 
   return (
-    <Text>{"  "}{colorFn(`${icon} ${label}`)}</Text>
+    <Text>
+      {"  "}
+      {colorFn(`${icon} ${label}`)}
+    </Text>
   );
 }

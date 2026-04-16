@@ -14,11 +14,7 @@ import { execSync } from "node:child_process";
  * @param message - Notification body
  * @param sound - Play a sound (default: true)
  */
-export function sendCompletionNotification(
-  title: string,
-  message: string,
-  sound = true,
-): void {
+export function sendCompletionNotification(title: string, message: string, sound = true): void {
   // Terminal bell — works in all terminals
   if (sound) {
     process.stdout.write("\x07");
@@ -32,10 +28,10 @@ export function sendCompletionNotification(
       // macOS: osascript notification
       const escapedTitle = title.replace(/"/g, '\\"');
       const escapedMsg = message.replace(/"/g, '\\"');
-      execSync(
-        `osascript -e 'display notification "${escapedMsg}" with title "${escapedTitle}"'`,
-        { stdio: "ignore", timeout: 3000 },
-      );
+      execSync(`osascript -e 'display notification "${escapedMsg}" with title "${escapedTitle}"'`, {
+        stdio: "ignore",
+        timeout: 3000,
+      });
     } else if (platform === "linux") {
       // Linux: notify-send (freedesktop)
       const escapedTitle = title.replace(/'/g, "'\\''");
@@ -64,9 +60,10 @@ export function buildScanNotification(stats: {
   const tp = stats.tp ?? 0;
   const repoName = stats.repoName ?? "repo";
 
-  const title = tp > 0
-    ? `Kuzushi: ${tp} finding${tp > 1 ? "s" : ""} in ${repoName}`
-    : `Kuzushi: scan complete — ${repoName}`;
+  const title =
+    tp > 0
+      ? `Kuzushi: ${tp} finding${tp > 1 ? "s" : ""} in ${repoName}`
+      : `Kuzushi: scan complete — ${repoName}`;
 
   const parts: string[] = [];
   if (tp > 0) parts.push(`${tp} true positive${tp > 1 ? "s" : ""}`);

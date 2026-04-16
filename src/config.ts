@@ -1,43 +1,39 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, lstatSync, realpathSync } from "node:fs";
-import path from "node:path";
-import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
-import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
-import type { QualityGateConfig } from "./quality-gate-types.js";
-import type { TaskConfig } from "./scanners/types.js";
-import { isRecord } from "./utils.js";
-import { normalizeTaskConfigAliases } from "./capabilities.js";
-import { getLogger } from "./logger.js";
-import { KuzushiConfigSchema } from "./schemas.js";
 import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
+import path from "node:path";
+import { normalizeTaskConfigAliases } from "./capabilities.js";
+import { AGENT_RUNTIME_BACKENDS, BUS_BACKENDS, DEFAULTS } from "./config/defaults.js";
+import { CONFIG_DIR, CONFIG_PATH, configPath, projectConfigPath } from "./config/paths.js";
+import {
+  type ConfigFormat,
   detectConfigFormat,
   parseConfigFile,
-  serializeConfig,
   resolveFileReferences,
-  type ConfigFormat,
+  serializeConfig,
 } from "./config-io.js";
-import {
-  DEFAULTS,
-  BUS_BACKENDS,
-  AGENT_RUNTIME_BACKENDS,
-} from "./config/defaults.js";
-import {
-  CONFIG_DIR,
-  CONFIG_PATH,
-  configPath,
-  projectConfigPath,
-} from "./config/paths.js";
-import { isPathWithinRoot } from "./utils.js";
+import { getLogger } from "./logger.js";
+import type { QualityGateConfig } from "./quality-gate-types.js";
+import type { TaskConfig } from "./scanners/types.js";
+import { KuzushiConfigSchema } from "./schemas.js";
+import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
+import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
+import { isPathWithinRoot, isRecord } from "./utils.js";
+
 type ConfigLayer = Record<string, unknown>;
 type WritableConfigLayer = Partial<KuzushiConfig> & ConfigLayer;
 const log = getLogger("config");
 
-export { DEFAULTS, configPath, projectConfigPath };
+export { configPath, DEFAULTS, projectConfigPath };
 
 /** Derived from KuzushiConfigSchema so that adding a new config key to the
  *  interface automatically makes it valid here — no manual list to maintain. */
-const VALID_TOP_LEVEL_KEYS = new Set<string>(
-  Object.keys(KuzushiConfigSchema.shape),
-);
+const VALID_TOP_LEVEL_KEYS = new Set<string>(Object.keys(KuzushiConfigSchema.shape));
 
 const UNSAFE_PROJECT_CONFIG_KEYS = new Set<string>([
   "agentRuntimeBackend",
@@ -94,10 +90,7 @@ export function loadConfig(repoRoot?: string, options?: LoadConfigOptions): Kuzu
 
 /** Save config. If repoRoot is provided, writes project config. */
 export function saveConfig(config: KuzushiConfig, repoRoot?: string): void {
-  writeConfigFile(
-    repoRoot ? projectConfigPath(repoRoot) : CONFIG_PATH,
-    normalizeConfig(config),
-  );
+  writeConfigFile(repoRoot ? projectConfigPath(repoRoot) : CONFIG_PATH, normalizeConfig(config));
 }
 
 function saveConfigLayer(config: ConfigLayer, repoRoot?: string): void {
@@ -143,7 +136,9 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
   }
 
   if (!VALID_TOP_LEVEL_KEYS.has(key)) {
-    throw new Error(`Unknown config key: ${key}. Valid keys: ${[...VALID_TOP_LEVEL_KEYS].join(", ")}`);
+    throw new Error(
+      `Unknown config key: ${key}. Valid keys: ${[...VALID_TOP_LEVEL_KEYS].join(", ")}`,
+    );
   }
 
   if (key === "tasks") {
@@ -231,7 +226,9 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
   if (key === "verifyMinConfidence") {
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0 || n > 100) {
-      throw new Error("verifyMinConfidence must be a number between 0 and 1 (or 0-100 as a percentage)");
+      throw new Error(
+        "verifyMinConfidence must be a number between 0 and 1 (or 0-100 as a percentage)",
+      );
     }
     config.verifyMinConfidence = n > 1 ? n / 100 : n;
     saveUpdatedConfigLayer(config, repoRoot);
@@ -678,7 +675,9 @@ export function unsetConfigValue(key: string, repoRoot?: string): void {
   }
 
   if (!VALID_TOP_LEVEL_KEYS.has(key)) {
-    throw new Error(`Unknown config key: ${key}. Valid keys: ${[...VALID_TOP_LEVEL_KEYS].join(", ")}`);
+    throw new Error(
+      `Unknown config key: ${key}. Valid keys: ${[...VALID_TOP_LEVEL_KEYS].join(", ")}`,
+    );
   }
 
   delete config[key];
@@ -691,12 +690,14 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   const excludePatterns = normalizeStringArray(config.excludePatterns);
   const busBackend = normalizeBusBackend(config.busBackend);
   const triageBatchSize = normalizePositiveInt(config.triageBatchSize, DEFAULTS.triageBatchSize);
-  const triageConcurrency = normalizePositiveInt(config.triageConcurrency, DEFAULTS.triageConcurrency);
+  const triageConcurrency = normalizePositiveInt(
+    config.triageConcurrency,
+    DEFAULTS.triageConcurrency,
+  );
 
   const verify = normalizeBoolean(config.verify, DEFAULTS.verify ?? false);
-  const verifyMaxTurns = config.verifyMaxTurns == null
-    ? undefined
-    : normalizePositiveInt(config.verifyMaxTurns, 15);
+  const verifyMaxTurns =
+    config.verifyMaxTurns == null ? undefined : normalizePositiveInt(config.verifyMaxTurns, 15);
   const verifyConcurrency = normalizePositiveInt(
     config.verifyConcurrency,
     DEFAULTS.verifyConcurrency ?? 1,
@@ -706,17 +707,17 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     DEFAULTS.verifyBatchSize ?? 5,
   );
   const verifyVerdictsRaw = normalizeVerdictArray(config.verifyVerdicts);
-  const verifyVerdicts = verifyVerdictsRaw.length > 0
-    ? verifyVerdictsRaw
-    : [...(DEFAULTS.verifyVerdicts ?? ["tp"])];
+  const verifyVerdicts =
+    verifyVerdictsRaw.length > 0 ? verifyVerdictsRaw : [...(DEFAULTS.verifyVerdicts ?? ["tp"])];
   const verifyMinConfidence = normalizeUnitInterval(
     config.verifyMinConfidence,
     DEFAULTS.verifyMinConfidence ?? 0,
   );
   const pocHarness = normalizeBoolean(config.pocHarness, DEFAULTS.pocHarness ?? false);
-  const pocHarnessMaxTurns = config.pocHarnessMaxTurns == null
-    ? undefined
-    : normalizePositiveInt(config.pocHarnessMaxTurns, 20);
+  const pocHarnessMaxTurns =
+    config.pocHarnessMaxTurns == null
+      ? undefined
+      : normalizePositiveInt(config.pocHarnessMaxTurns, 20);
   const pocHarnessConcurrency = normalizePositiveInt(
     config.pocHarnessConcurrency,
     DEFAULTS.pocHarnessConcurrency ?? 1,
@@ -789,14 +790,18 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     DEFAULTS.cryptoBehavioralPerFindingBudgetUsd ?? 1,
   );
   const externalTasks = normalizeStringArray(config.externalTasks);
-  const enableExternalTasks = normalizeBoolean(config.enableExternalTasks, DEFAULTS.enableExternalTasks ?? false);
+  const enableExternalTasks = normalizeBoolean(
+    config.enableExternalTasks,
+    DEFAULTS.enableExternalTasks ?? false,
+  );
   const monorepo = normalizeMonorepoConfig(config.monorepo);
 
   const skipTriageForHighConfidenceAgentic = normalizeBoolean(
     config.skipTriageForHighConfidenceAgentic,
     DEFAULTS.skipTriageForHighConfidenceAgentic ?? false,
   );
-  const normalizedTasks = tasks.length > 0 ? dedupeStringsPreserveOrder(tasks) : [...DEFAULTS.tasks];
+  const normalizedTasks =
+    tasks.length > 0 ? dedupeStringsPreserveOrder(tasks) : [...DEFAULTS.tasks];
   if (cryptoBehavioralTestEnabled) {
     normalizedTasks.push("crypto-behavioral-test");
   }
@@ -1019,7 +1024,10 @@ function readConfigFile(configFilePath: string, allowedRoots: string[] = []): Wr
       const stats = lstatSync(resolvedPath);
       if (stats.isSymbolicLink()) {
         const realPath = realpathSync(resolvedPath);
-        if (allowedRoots.length > 0 && !allowedRoots.some((root) => isPathWithinRoot(root, realPath))) {
+        if (
+          allowedRoots.length > 0 &&
+          !allowedRoots.some((root) => isPathWithinRoot(root, realPath))
+        ) {
           log.warn(`Config symlink ${resolvedPath} points outside allowed directories, skipping`);
           return {};
         }
@@ -1069,12 +1077,12 @@ function sanitizeProjectConfigLayer(
   const sanitized = stripUnsafeProjectConfigValue(cloneLayerValue(layer), [], stripped);
   if (stripped.length > 0) {
     log.warn(
-      `Ignoring unsafe repo-local config keys from ${projectConfigPath(repoRoot)}: ${stripped.join(", ")}. `
-      + "Pass --trust-repo-config to opt in.",
+      `Ignoring unsafe repo-local config keys from ${projectConfigPath(repoRoot)}: ${stripped.join(", ")}. ` +
+        "Pass --trust-repo-config to opt in.",
     );
   }
 
-  return isRecord(sanitized) ? sanitized as WritableConfigLayer : {};
+  return isRecord(sanitized) ? (sanitized as WritableConfigLayer) : {};
 }
 
 function stripUnsafeProjectConfigValue(
@@ -1113,9 +1121,11 @@ function shouldStripProjectConfigPath(pathParts: string[]): boolean {
     return true;
   }
 
-  return pathParts[0] === "taskConfig"
-    && pathParts.length >= 3
-    && UNSAFE_PROJECT_TASK_CONFIG_KEYS.has(pathParts[pathParts.length - 1]);
+  return (
+    pathParts[0] === "taskConfig" &&
+    pathParts.length >= 3 &&
+    UNSAFE_PROJECT_TASK_CONFIG_KEYS.has(pathParts[pathParts.length - 1])
+  );
 }
 
 function sanitizeConfigLayer(value: unknown): unknown {
@@ -1124,9 +1134,7 @@ function sanitizeConfigLayer(value: unknown): unknown {
   }
 
   if (Array.isArray(value)) {
-    return value
-      .map((item) => sanitizeConfigLayer(item))
-      .filter((item) => item !== undefined);
+    return value.map((item) => sanitizeConfigLayer(item)).filter((item) => item !== undefined);
   }
 
   if (isRecord(value)) {
@@ -1180,7 +1188,10 @@ function coerceTaskConfigMap(value: unknown): Record<string, TaskConfig> {
 function coerceStringArray(raw: string): string[] {
   const parsed = raw.trim().startsWith("[")
     ? parseFlexibleValue(raw)
-    : raw.split(",").map((part) => part.trim()).filter(Boolean);
+    : raw
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
 
   if (!Array.isArray(parsed)) {
     throw new Error("Expected an array value");
@@ -1197,7 +1208,10 @@ function coerceStringArray(raw: string): string[] {
 function coerceVerdictArray(raw: string): Verdict[] {
   const parsed = raw.trim().startsWith("[")
     ? parseFlexibleValue(raw)
-    : raw.split(",").map((part) => part.trim()).filter(Boolean);
+    : raw
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
 
   if (!Array.isArray(parsed)) {
     throw new Error("Expected an array value");
@@ -1257,9 +1271,7 @@ function normalizeBusBackend(value: unknown): KuzushiConfig["busBackend"] {
     return value as KuzushiConfig["busBackend"];
   }
 
-  throw new Error(
-    `Invalid busBackend "${value}". Valid values: ${[...BUS_BACKENDS].join(", ")}`,
-  );
+  throw new Error(`Invalid busBackend "${value}". Valid values: ${[...BUS_BACKENDS].join(", ")}`);
 }
 
 function normalizeScanMode(value: unknown): KuzushiConfig["scanMode"] {
@@ -1279,8 +1291,8 @@ function normalizeAgentRuntimeBackend(value: unknown): KuzushiConfig["agentRunti
   }
 
   throw new Error(
-    `Invalid agentRuntimeBackend "${value}". `
-    + `Valid values: ${[...AGENT_RUNTIME_BACKENDS].join(", ")}`,
+    `Invalid agentRuntimeBackend "${value}". ` +
+      `Valid values: ${[...AGENT_RUNTIME_BACKENDS].join(", ")}`,
   );
 }
 
@@ -1341,63 +1353,64 @@ function normalizeMonorepoConfig(value: unknown): KuzushiConfig["monorepo"] {
 
   const modules = Array.isArray(value["modules"])
     ? value["modules"]
-      .filter((entry): entry is Record<string, unknown> => isRecord(entry))
-      .map((entry) => {
-        const name = normalizeOptionalString(entry["name"]);
-        const modulePath = normalizeOptionalString(entry["path"]);
-        if (!name || !modulePath) {
-          return null;
-        }
+        .filter((entry): entry is Record<string, unknown> => isRecord(entry))
+        .map((entry) => {
+          const name = normalizeOptionalString(entry["name"]);
+          const modulePath = normalizeOptionalString(entry["path"]);
+          if (!name || !modulePath) {
+            return null;
+          }
 
-        return {
-          name,
-          path: modulePath,
-          description: normalizeOptionalString(entry["description"]) ?? "",
-          language: normalizeOptionalString(entry["language"]) ?? "unknown",
-          buildSystem: normalizeOptionalString(entry["buildSystem"]),
-          moduleKind: (normalizeOptionalString(entry["moduleKind"]) as import("./discovery/types.js").ModuleKind | undefined) ?? "standalone",
-          productPath: normalizeOptionalString(entry["productPath"]),
-          discoveryEvidence: Array.isArray(entry["discoveryEvidence"])
-            ? entry["discoveryEvidence"].filter((e): e is string => typeof e === "string")
-            : ["config"],
-        };
-      })
-      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+          return {
+            name,
+            path: modulePath,
+            description: normalizeOptionalString(entry["description"]) ?? "",
+            language: normalizeOptionalString(entry["language"]) ?? "unknown",
+            buildSystem: normalizeOptionalString(entry["buildSystem"]),
+            moduleKind:
+              (normalizeOptionalString(entry["moduleKind"]) as
+                | import("./discovery/types.js").ModuleKind
+                | undefined) ?? "standalone",
+            productPath: normalizeOptionalString(entry["productPath"]),
+            discoveryEvidence: Array.isArray(entry["discoveryEvidence"])
+              ? entry["discoveryEvidence"].filter((e): e is string => typeof e === "string")
+              : ["config"],
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
     : undefined;
 
   const excludeModules = normalizeStringArray(value["excludeModules"]);
   const discoveryModel = normalizeOptionalString(value["discoveryModel"]);
   const rawMaxModules = Number(value["maxModules"]);
-  const maxModules = Number.isFinite(rawMaxModules) && rawMaxModules > 0
-    ? Math.floor(rawMaxModules)
-    : undefined;
+  const maxModules =
+    Number.isFinite(rawMaxModules) && rawMaxModules > 0 ? Math.floor(rawMaxModules) : undefined;
   const rawBudgetUsd = Number(value["budgetUsd"]);
-  const budgetUsd = Number.isFinite(rawBudgetUsd) && rawBudgetUsd >= 0
-    ? rawBudgetUsd
-    : undefined;
+  const budgetUsd = Number.isFinite(rawBudgetUsd) && rawBudgetUsd >= 0 ? rawBudgetUsd : undefined;
   const rawCrossModuleReserve = Number(value["crossModuleReserve"]);
-  const crossModuleReserve = Number.isFinite(rawCrossModuleReserve)
-    && rawCrossModuleReserve >= 0
-    && rawCrossModuleReserve <= 1
-    ? rawCrossModuleReserve
-    : undefined;
-  const crossModuleTracing = typeof value["crossModuleTracing"] === "boolean"
-    ? value["crossModuleTracing"]
-    : undefined;
-  const architecturalThreatModel = typeof value["architecturalThreatModel"] === "boolean"
-    ? value["architecturalThreatModel"]
-    : undefined;
+  const crossModuleReserve =
+    Number.isFinite(rawCrossModuleReserve) &&
+    rawCrossModuleReserve >= 0 &&
+    rawCrossModuleReserve <= 1
+      ? rawCrossModuleReserve
+      : undefined;
+  const crossModuleTracing =
+    typeof value["crossModuleTracing"] === "boolean" ? value["crossModuleTracing"] : undefined;
+  const architecturalThreatModel =
+    typeof value["architecturalThreatModel"] === "boolean"
+      ? value["architecturalThreatModel"]
+      : undefined;
 
   if (
-    !mode
-    && !modules
-    && excludeModules.length === 0
-    && !discoveryModel
-    && maxModules == null
-    && budgetUsd == null
-    && crossModuleReserve == null
-    && crossModuleTracing == null
-    && architecturalThreatModel == null
+    !mode &&
+    !modules &&
+    excludeModules.length === 0 &&
+    !discoveryModel &&
+    maxModules == null &&
+    budgetUsd == null &&
+    crossModuleReserve == null &&
+    crossModuleTracing == null &&
+    architecturalThreatModel == null
   ) {
     return undefined;
   }
@@ -1415,7 +1428,13 @@ function normalizeMonorepoConfig(value: unknown): KuzushiConfig["monorepo"] {
   };
 }
 
-const VALID_SIGNAL_WEIGHT_KEYS = new Set<string>(["scanner", "triage", "verification", "history", "context"]);
+const VALID_SIGNAL_WEIGHT_KEYS = new Set<string>([
+  "scanner",
+  "triage",
+  "verification",
+  "history",
+  "context",
+]);
 
 function normalizeConfidenceSignalWeights(value: unknown): ConfidenceSignalWeights | undefined {
   if (!isRecord(value)) {

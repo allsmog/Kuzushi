@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
+import type { StoreUpsertedEvent } from "../../src/bus/events.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
-import { getVerdictCounts, initDb } from "../../src/store.js";
 import type { Finding } from "../../src/scanners/types.js";
+import { getVerdictCounts, initDb } from "../../src/store.js";
 import type { TriageResult } from "../../src/types.js";
-import type { StoreUpsertedEvent } from "../../src/bus/events.js";
 
 function makeFinding(fp: string): Finding {
   return {
@@ -76,9 +76,9 @@ describe("store-worker", () => {
     const counts = getVerdictCounts(db, "repo");
     expect(counts.tp).toBe(1);
 
-    const row = db.prepare(
-      "SELECT triage_cost_usd as triageCostUsd FROM findings WHERE fingerprint = ?",
-    ).get("fp-1") as { triageCostUsd: number };
+    const row = db
+      .prepare("SELECT triage_cost_usd as triageCostUsd FROM findings WHERE fingerprint = ?")
+      .get("fp-1") as { triageCostUsd: number };
     expect(row.triageCostUsd).toBeCloseTo(0.055, 8);
 
     await bus.close();
@@ -124,9 +124,9 @@ describe("store-worker", () => {
       }),
     );
 
-    const row = db.prepare(
-      "SELECT verify_cost_usd as verifyCostUsd FROM findings WHERE fingerprint = ?",
-    ).get("fp-verify-error") as { verifyCostUsd: number | null };
+    const row = db
+      .prepare("SELECT verify_cost_usd as verifyCostUsd FROM findings WHERE fingerprint = ?")
+      .get("fp-verify-error") as { verifyCostUsd: number | null };
     expect(row.verifyCostUsd).toBeCloseTo(0.031, 8);
 
     await bus.close();
@@ -211,14 +211,16 @@ describe("store-worker", () => {
       }),
     );
 
-    const row = db.prepare(`
+    const row = db
+      .prepare(`
       SELECT
         poc_harness_path as pocHarnessPath,
         poc_harness_parsed as pocHarnessParsed,
         poc_harness_cost_usd as pocHarnessCostUsd
       FROM findings
       WHERE fingerprint = ?
-    `).get("fp-poc-store") as {
+    `)
+      .get("fp-poc-store") as {
       pocHarnessPath: string | null;
       pocHarnessParsed: number | null;
       pocHarnessCostUsd: number | null;

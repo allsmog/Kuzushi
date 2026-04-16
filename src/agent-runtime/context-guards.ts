@@ -74,9 +74,10 @@ export function checkContextBudget(
   }
 
   const warningThreshold = options.maxContextTokens * 0.1;
-  const warning = remainingBudget < warningThreshold
-    ? `Context budget low: ~${remainingBudget} tokens remaining (${Math.round((remainingBudget / options.maxContextTokens) * 100)}%)`
-    : undefined;
+  const warning =
+    remainingBudget < warningThreshold
+      ? `Context budget low: ~${remainingBudget} tokens remaining (${Math.round((remainingBudget / options.maxContextTokens) * 100)}%)`
+      : undefined;
 
   return {
     ok: true,
@@ -92,10 +93,7 @@ export function checkContextBudget(
  * Truncation preserves the beginning of the content and appends
  * a marker indicating how much was removed.
  */
-export function truncateToolResult(
-  result: string,
-  maxChars?: number,
-): string {
+export function truncateToolResult(result: string, maxChars?: number): string {
   const limit = maxChars ?? 100_000;
   if (result.length <= limit) {
     return result;
@@ -113,10 +111,7 @@ export function truncateToolResult(
  * targets a specific token budget, which is useful when you need to
  * fit content into a known remaining context window.
  */
-export function truncateToTokenBudget(
-  content: string,
-  maxTokens: number,
-): string {
+export function truncateToTokenBudget(content: string, maxTokens: number): string {
   const maxChars = estimateChars(maxTokens);
   return truncateToolResult(content, maxChars);
 }

@@ -1,29 +1,35 @@
-import type { AgentHistoryEntry } from "../../agent-runtime/types.js";
-import type { AgentActivity } from "../../agent-runtime/execution.js";
-import type { AgentRuntime } from "../../agent-runtime/types.js";
-import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
-import { generatePocHarness } from "../../poc-harness.js";
-import { createPocExecutor } from "../../poc-executor/index.js";
-import { verifyFindingWithAgent, verifyFindingsBatch, VerificationExecutionError, resolveDefaultVerificationTools, verificationSystemPromptPrefix, VERIFICATION_RESULT_SCHEMA } from "../../verify.js";
-import { withRetry } from "../../retry.js";
-import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
-import type { KuzushiConfig, VerificationResult } from "../../types.js";
-import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
-import type { VerificationBatchQueuedEvent, VerificationFindingQueuedEvent } from "../events.js";
-import { createEvent } from "../helpers.js";
-import type { MessageBus } from "../types.js";
-import { resolveTemplates } from "../../prompts/loader.js";
 import type Database from "better-sqlite3";
+import type { AgentActivity } from "../../agent-runtime/execution.js";
+import type { AgentHistoryEntry, AgentRuntime } from "../../agent-runtime/types.js";
+import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
+import { formatBypassForPrompt, getBypassKnowledge } from "../../bypass-knowledge.js";
 import type { KnowledgeRegistry } from "../../knowledge/types.js";
-import { knowledgeInjectionModule } from "../../prompts/modules.js";
-import { getBypassKnowledge, formatBypassForPrompt } from "../../bypass-knowledge.js";
+import { createPocExecutor } from "../../poc-executor/index.js";
+import { generatePocHarness } from "../../poc-harness.js";
 import { formatPrecedentsForPrompt, type Precedents } from "../../precedents.js";
+import { resolveTemplates } from "../../prompts/loader.js";
+import { knowledgeInjectionModule } from "../../prompts/modules.js";
+import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.js";
+import { withRetry } from "../../retry.js";
 import {
+  computeCompositeConfidence,
   extractScannerSignal,
   extractTriageSignal,
   extractVerificationSignal,
-  computeCompositeConfidence,
 } from "../../scoring/composite-confidence.js";
+import type { KuzushiConfig, VerificationResult } from "../../types.js";
+import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
+import {
+  resolveDefaultVerificationTools,
+  VERIFICATION_RESULT_SCHEMA,
+  VerificationExecutionError,
+  verificationSystemPromptPrefix,
+  verifyFindingsBatch,
+  verifyFindingWithAgent,
+} from "../../verify.js";
+import type { VerificationBatchQueuedEvent, VerificationFindingQueuedEvent } from "../events.js";
+import { createEvent } from "../helpers.js";
+import type { MessageBus } from "../types.js";
 
 export interface VerificationWorkerDeps {
   config: KuzushiConfig;
@@ -37,14 +43,12 @@ export interface VerificationWorkerDeps {
 /**
  * Verification worker: validates exploitability with concrete source-to-sink analysis.
  */
-export function registerVerificationWorker(
-  bus: MessageBus,
-  deps: VerificationWorkerDeps,
-): void {
+export function registerVerificationWorker(bus: MessageBus, deps: VerificationWorkerDeps): void {
   const resolvedTemplates = resolveTemplates(deps.config);
 
   bus.subscribe<VerificationFindingQueuedEvent>("verification:finding-queued", async (event) => {
-    const { context, finding, triageResult, repoContext, enrichedContext, index, total } = event.payload;
+    const { context, finding, triageResult, repoContext, enrichedContext, index, total } =
+      event.payload;
     const runId = event.meta.runId;
     let attempts = 0;
 
@@ -80,17 +84,15 @@ export function registerVerificationWorker(
         const tmSummary = event.payload.threatModelSummary;
         if (typeof tmSummary === "string" && tmSummary.length > 0) {
           extraSections.push(
-            "## Application Threat Model Context\n"
-            + "The following context was derived from automated threat modeling of this application.\n"
-            + "Use it to understand the application's architecture and attack surface.\n\n"
-            + tmSummary,
+            "## Application Threat Model Context\n" +
+              "The following context was derived from automated threat modeling of this application.\n" +
+              "Use it to understand the application's architecture and attack surface.\n\n" +
+              tmSummary,
           );
         }
       }
 
-      const extraPromptContext = extraSections.length > 0
-        ? extraSections.join("\n\n")
-        : undefined;
+      const extraPromptContext = extraSections.length > 0 ? extraSections.join("\n\n") : undefined;
 
       const { result, costUsd } = await verifyWithRefinement(
         deps.config,
@@ -117,7 +119,11 @@ export function registerVerificationWorker(
         const scannerSignal = extractScannerSignal(finding);
         const triageSignal = extractTriageSignal(triageResult.confidence);
         const verificationSignal = extractVerificationSignal(result.exploitable);
-        const composite = computeCompositeConfidence([scannerSignal, triageSignal, verificationSignal]);
+        const composite = computeCompositeConfidence([
+          scannerSignal,
+          triageSignal,
+          verificationSignal,
+        ]);
         result.compositeConfidence = composite.composite;
       }
 
@@ -219,9 +225,8 @@ export function registerVerificationWorker(
       }
     } catch (error) {
       const costUsd = error instanceof VerificationExecutionError ? error.costUsd : undefined;
-      const perFindingCost = costUsd != null && items.length > 0
-        ? costUsd / items.length
-        : undefined;
+      const perFindingCost =
+        costUsd != null && items.length > 0 ? costUsd / items.length : undefined;
 
       for (const item of items) {
         await bus.publish(
@@ -287,33 +292,39 @@ async function verifyWithRefinement(
   const probeHistory: AgentHistoryEntry[] = [];
   const repoContextValue = coerceRepoContext(repoContext);
   const enrichedContextValue = coerceContextEnrichment(enrichedContext);
-  const executor = maxIterations > 1
-    ? await createPocExecutor(config.pocSandbox ?? "process", config.pocExecTimeoutMs)
-    : undefined;
+  const executor =
+    maxIterations > 1
+      ? await createPocExecutor(config.pocSandbox ?? "process", config.pocExecTimeoutMs)
+      : undefined;
 
   // Create a session to reuse one subprocess across all refinement iterations
-  const session = maxIterations > 1 && runtime?.createSession
-    ? runtime.createSession({
-        cwd: repoRoot,
-        model: verifyModel,
-        allowedTools: resolveDefaultVerificationTools(runtime, true),
-        permissionMode: "dontAsk",
-        outputFormat: {
-          type: "json_schema",
-          schema: VERIFICATION_RESULT_SCHEMA as unknown as Record<string, unknown>,
-          strict: true,
-        },
-        systemPromptPrefix: verificationSystemPromptPrefix(repoContextValue, enrichedContextValue, extraPromptContext, true),
-      })
-    : undefined;
+  const session =
+    maxIterations > 1 && runtime?.createSession
+      ? runtime.createSession({
+          cwd: repoRoot,
+          model: verifyModel,
+          allowedTools: resolveDefaultVerificationTools(runtime, true),
+          permissionMode: "dontAsk",
+          outputFormat: {
+            type: "json_schema",
+            schema: VERIFICATION_RESULT_SCHEMA as unknown as Record<string, unknown>,
+            strict: true,
+          },
+          systemPromptPrefix: verificationSystemPromptPrefix(
+            repoContextValue,
+            enrichedContextValue,
+            extraPromptContext,
+            true,
+          ),
+        })
+      : undefined;
 
   let totalCostUsd = 0;
   let latestResult: VerificationResult | undefined;
 
   try {
-  for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
-    const verified = await withRetry(
-      async () => {
+    for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+      const verified = await withRetry(async () => {
         onAttempt();
         return verifyFindingWithAgent(
           finding,
@@ -333,73 +344,68 @@ async function verifyWithRefinement(
           },
           verifyTemplate,
         );
-      },
-      retryOptions,
-    );
+      }, retryOptions);
 
-    totalCostUsd += normalizeCostUsd(verified.costUsd);
-    latestResult = verified.result;
-    const currentResult = latestResult;
-    if (isConclusiveVerification(currentResult) || !executor || iteration >= maxIterations) {
-      return { result: currentResult, costUsd: totalCostUsd };
+      totalCostUsd += normalizeCostUsd(verified.costUsd);
+      latestResult = verified.result;
+      const currentResult = latestResult;
+      if (isConclusiveVerification(currentResult) || !executor || iteration >= maxIterations) {
+        return { result: currentResult, costUsd: totalCostUsd };
+      }
+
+      verificationHistory.push({
+        role: "assistant",
+        content: summarizeVerificationResult(currentResult),
+      });
+
+      const probe = await withRetry(
+        async () =>
+          generatePocHarness(
+            finding,
+            triageResult,
+            currentResult,
+            repoRoot,
+            context.repoName,
+            pocModel,
+            repoContextValue,
+            {
+              runtime,
+              history: probeHistory,
+            },
+          ),
+        retryOptions,
+      );
+
+      totalCostUsd += normalizeCostUsd(probe.costUsd);
+      probeHistory.push({
+        role: "assistant",
+        content: JSON.stringify({
+          fingerprint: probe.result.fingerprint,
+          language: probe.result.language,
+          skipped: probe.result.skipped,
+          skip_reason: probe.result.skipReason,
+          parse_error: probe.result.parseError,
+          script_content: probe.result.scriptContent,
+        }),
+      });
+
+      const feedback = await buildVerificationFeedback(executor, context.repoRoot, probe.result);
+
+      verificationHistory.push({ role: "user", content: feedback });
+      probeHistory.push({ role: "user", content: feedback });
+
+      if (iteration % reflectionInterval === 0) {
+        const reflection = buildVerificationReflectionPrompt(iteration);
+        verificationHistory.push({ role: "user", content: reflection });
+        probeHistory.push({ role: "user", content: reflection });
+      }
     }
 
-    verificationHistory.push({
-      role: "assistant",
-      content: summarizeVerificationResult(currentResult),
-    });
-
-    const probe = await withRetry(
-      async () => generatePocHarness(
-        finding,
-        triageResult,
-        currentResult,
-        repoRoot,
-        context.repoName,
-        pocModel,
-        repoContextValue,
-        {
-          runtime,
-          history: probeHistory,
-        },
-      ),
-      retryOptions,
-    );
-
-    totalCostUsd += normalizeCostUsd(probe.costUsd);
-    probeHistory.push({
-      role: "assistant",
-      content: JSON.stringify({
-        fingerprint: probe.result.fingerprint,
-        language: probe.result.language,
-        skipped: probe.result.skipped,
-        skip_reason: probe.result.skipReason,
-        parse_error: probe.result.parseError,
-        script_content: probe.result.scriptContent,
-      }),
-    });
-
-    const feedback = await buildVerificationFeedback(
-      executor,
-      context.repoRoot,
-      probe.result,
-    );
-
-    verificationHistory.push({ role: "user", content: feedback });
-    probeHistory.push({ role: "user", content: feedback });
-
-    if (iteration % reflectionInterval === 0) {
-      const reflection = buildVerificationReflectionPrompt(iteration);
-      verificationHistory.push({ role: "user", content: reflection });
-      probeHistory.push({ role: "user", content: reflection });
+    if (!latestResult) {
+      throw new VerificationExecutionError("verification did not produce a result", totalCostUsd);
     }
-  }
 
-  if (!latestResult) {
-    throw new VerificationExecutionError("verification did not produce a result", totalCostUsd);
-  }
-
-  return { result: latestResult, costUsd: totalCostUsd };
+    return { result: latestResult, costUsd: totalCostUsd };
   } finally {
     await session?.close();
   }

@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+
 /**
  * Benchmark evaluation harness for Kuzushi.
  *
@@ -8,21 +9,22 @@
  *   tsx benchmarks/harness.ts --dataset benchmarks/owasp-benchmark --run --config '{"model":"anthropic:claude-sonnet-4-6"}'
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { resolve, join, basename, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
 import chalk from "chalk";
 import type {
+  BenchmarkMetrics,
+  CweMetrics,
   GroundTruthDataset,
   GroundTruthEntry,
   MatchResult,
-  BenchmarkMetrics,
-  CweMetrics,
   SarifLog,
   SarifResult,
 } from "./types.js";
@@ -69,7 +71,9 @@ function loadGroundTruth(datasetDir: string): GroundTruthDataset {
   const gtPath = join(datasetDir, "ground-truth.json");
   if (!existsSync(gtPath)) {
     console.error(chalk.red(`Ground truth not found: ${gtPath}`));
-    console.error("Run the dataset's convert script first (e.g. tsx benchmarks/owasp-benchmark/convert-ground-truth.ts)");
+    console.error(
+      "Run the dataset's convert script first (e.g. tsx benchmarks/owasp-benchmark/convert-ground-truth.ts)",
+    );
     process.exit(1);
   }
   return JSON.parse(readFileSync(gtPath, "utf-8")) as GroundTruthDataset;
@@ -82,16 +86,13 @@ function loadSarif(sarifPath: string): SarifLog {
   return JSON.parse(raw) as SarifLog;
 }
 
-function runKuzushiScan(repoDir: string, sarifOutputPath: string, configOverrides?: string): { durationMs: number } {
+function runKuzushiScan(
+  repoDir: string,
+  sarifOutputPath: string,
+  configOverrides?: string,
+): { durationMs: number } {
   const cliPath = resolve(__dirname, "../src/cli.ts");
-  const cmdArgs = [
-    cliPath,
-    "scan",
-    repoDir,
-    "--sarif",
-    sarifOutputPath,
-    "--fresh",
-  ];
+  const cmdArgs = [cliPath, "scan", repoDir, "--sarif", sarifOutputPath, "--fresh"];
 
   if (configOverrides) {
     try {
@@ -249,9 +250,8 @@ function matchFindings(
 
       // Check CWE overlap
       const candidateCwes = extractCwe(candidate, ruleTagMap);
-      const cweMatch = candidateCwes.length === 0 || candidateCwes.some(
-        (c) => normalizeCweId(c) === gtCweNum,
-      );
+      const cweMatch =
+        candidateCwes.length === 0 || candidateCwes.some((c) => normalizeCweId(c) === gtCweNum);
       if (!cweMatch && candidateCwes.length > 0) continue;
 
       if (lineDistance < bestDistance) {
@@ -324,7 +324,19 @@ function computeMetrics(
     perCwe[cwe] = { tp: b.tp, fp: b.fp, fn: b.fn, tn: b.tn, precision: p, recall: r, f1: f };
   }
 
-  return { dataset: datasetName, tp, fp, fn, tn, precision, recall, f1, perCwe, costUsd, durationMs };
+  return {
+    dataset: datasetName,
+    tp,
+    fp,
+    fn,
+    tn,
+    precision,
+    recall,
+    f1,
+    perCwe,
+    costUsd,
+    durationMs,
+  };
 }
 
 // ── Terminal output ──
@@ -450,9 +462,10 @@ async function main(): Promise<void> {
 
   // Extract cost from SARIF properties
   const summaryProps = run.properties?.["summary"] as Record<string, unknown> | undefined;
-  const costUsd = typeof summaryProps?.["totalCostUsd"] === "number"
-    ? summaryProps["totalCostUsd"] as number
-    : 0;
+  const costUsd =
+    typeof summaryProps?.["totalCostUsd"] === "number"
+      ? (summaryProps["totalCostUsd"] as number)
+      : 0;
 
   console.log(`  SARIF results: ${run.results.length}`);
 

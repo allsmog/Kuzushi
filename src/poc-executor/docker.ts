@@ -1,4 +1,4 @@
-import { execFileSync, execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, execFileSync } from "node:child_process";
 import path from "node:path";
 import type { PocExecutionResult, PocExecutor } from "./types.js";
 
@@ -74,10 +74,14 @@ export class DockerPocExecutor implements PocExecutor {
       `--memory=${DEFAULT_MEMORY}`,
       `--cpus=${DEFAULT_CPUS}`,
       "--read-only",
-      "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-      "-v", `${scriptDir}:/poc:ro`,
-      "-v", `${path.resolve(repoRoot)}:/repo:ro`,
-      "-w", "/poc",
+      "--tmpfs",
+      "/tmp:rw,noexec,nosuid,size=64m",
+      "-v",
+      `${scriptDir}:/poc:ro`,
+      "-v",
+      `${path.resolve(repoRoot)}:/repo:ro`,
+      "-w",
+      "/poc",
       image,
       ...cmd,
       scriptName,
@@ -90,45 +94,54 @@ export class DockerPocExecutor implements PocExecutor {
     const startedAt = Date.now();
 
     return new Promise<PocExecutionResult>((resolve) => {
-      const child = execFileCb("docker", args, {
-        timeout: this.timeoutMs,
-        maxBuffer: 1024 * 1024,
-      }, (error, stdout, stderr) => {
-        const durationMs = Date.now() - startedAt;
-        const timedOut = error !== null && "killed" in error && error.killed === true;
+      const child = execFileCb(
+        "docker",
+        args,
+        {
+          timeout: this.timeoutMs,
+          maxBuffer: 1024 * 1024,
+        },
+        (error, stdout, stderr) => {
+          const durationMs = Date.now() - startedAt;
+          const timedOut = error !== null && "killed" in error && error.killed === true;
 
-        if (timedOut) {
+          if (timedOut) {
+            resolve({
+              exitCode: -1,
+              stdout: String(stdout ?? ""),
+              stderr: String(stderr ?? ""),
+              timedOut: true,
+              durationMs,
+              verdict: "TIMEOUT",
+            });
+            return;
+          }
+
+          let exitCode = 0;
+          if (error) {
+            const errObj = error as Record<string, unknown>;
+            const code = errObj["code"];
+            exitCode = typeof code === "number" ? code : 1;
+          }
+
           resolve({
-            exitCode: -1,
+            exitCode,
             stdout: String(stdout ?? ""),
             stderr: String(stderr ?? ""),
-            timedOut: true,
+            timedOut: false,
             durationMs,
-            verdict: "TIMEOUT",
+            verdict: exitCode === 0 ? "PASS" : "FAIL",
           });
-          return;
-        }
-
-        let exitCode = 0;
-        if (error) {
-          const errObj = error as Record<string, unknown>;
-          const code = errObj["code"];
-          exitCode = typeof code === "number" ? code : 1;
-        }
-
-        resolve({
-          exitCode,
-          stdout: String(stdout ?? ""),
-          stderr: String(stderr ?? ""),
-          timedOut: false,
-          durationMs,
-          verdict: exitCode === 0 ? "PASS" : "FAIL",
-        });
-      });
+        },
+      );
 
       // Safety: kill child if still running after timeout + buffer
       setTimeout(() => {
-        try { child.kill("SIGKILL"); } catch { /* already exited */ }
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* already exited */
+        }
       }, this.timeoutMs + 5000);
     });
   }

@@ -9,19 +9,15 @@
 
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { AgentRuntime } from "../agent-runtime/types.js";
 import { runStructuredAgentQuery } from "../agent-runtime/execution.js";
-import { walkRepo } from "../repo-walk.js";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import { getLogger } from "../logger.js";
+import { walkRepo } from "../repo-walk.js";
 import { isRecord } from "../utils.js";
-import type { DiscoveredModule, DiscoveredProduct } from "./types.js";
 import type { RawDiscoveryNode } from "./adapters/types.js";
+import { compareModulePaths, normalizeModuleName, normalizePromptPath } from "./helpers.js";
+import type { DiscoveredModule, DiscoveredProduct } from "./types.js";
 import type { WorkspaceDependencyMap } from "./workspace-clustering.js";
-import {
-  compareModulePaths,
-  normalizeModuleName,
-  normalizePromptPath,
-} from "./helpers.js";
 
 const log = getLogger("discovery-llm");
 
@@ -185,8 +181,8 @@ async function buildCarvingPrompt(
 
   if (orphans.length > 0) {
     sections.push(
-      "## Orphan Subtrees (not claimed by any build system)\n"
-      + orphans.map((p) => `- ${p}/`).join("\n"),
+      "## Orphan Subtrees (not claimed by any build system)\n" +
+        orphans.map((p) => `- ${p}/`).join("\n"),
     );
   }
 
@@ -208,7 +204,9 @@ function buildAdapterSignalSummary(rawNodes: RawDiscoveryNode[]): string {
   const nodeContainers = containers.filter((c) => c.containerKind === "workspace-root");
   if (nodeContainers.length > 0) {
     for (const ws of nodeContainers) {
-      lines.push(`**Node workspace** at \`${ws.path}\`: ${ws.childPaths.length} package(s) [${ws.evidence.join(", ")}]`);
+      lines.push(
+        `**Node workspace** at \`${ws.path}\`: ${ws.childPaths.length} package(s) [${ws.evidence.join(", ")}]`,
+      );
       if (ws.childPaths.length <= 10) {
         for (const child of ws.childPaths) {
           lines.push(`  - ${child}`);
@@ -223,16 +221,23 @@ function buildAdapterSignalSummary(rawNodes: RawDiscoveryNode[]): string {
   }
 
   // Standalone Node apps
-  const nodeStandalone = leaves.filter((n) => n.buildSystem === "package.json" && !containers.some((c) => c.childPaths.includes(n.path)));
+  const nodeStandalone = leaves.filter(
+    (n) =>
+      n.buildSystem === "package.json" && !containers.some((c) => c.childPaths.includes(n.path)),
+  );
   if (nodeStandalone.length > 0) {
-    lines.push(`**Standalone Node apps**: ${nodeStandalone.map((n) => `\`${n.path}\``).join(", ")}`);
+    lines.push(
+      `**Standalone Node apps**: ${nodeStandalone.map((n) => `\`${n.path}\``).join(", ")}`,
+    );
   }
 
   // Go workspaces
   const goContainers = containers.filter((c) => c.containerKind === "go-workspace");
   if (goContainers.length > 0) {
     for (const ws of goContainers) {
-      lines.push(`**Go workspace** at \`${ws.path}\`: ${ws.childPaths.length} module(s) [${ws.evidence.join(", ")}]`);
+      lines.push(
+        `**Go workspace** at \`${ws.path}\`: ${ws.childPaths.length} module(s) [${ws.evidence.join(", ")}]`,
+      );
       for (const child of ws.childPaths) {
         lines.push(`  - ${child}`);
       }
@@ -240,7 +245,9 @@ function buildAdapterSignalSummary(rawNodes: RawDiscoveryNode[]): string {
   }
 
   // Standalone Go modules
-  const goStandalone = leaves.filter((n) => n.buildSystem === "go.mod" && !containers.some((c) => c.childPaths.includes(n.path)));
+  const goStandalone = leaves.filter(
+    (n) => n.buildSystem === "go.mod" && !containers.some((c) => c.childPaths.includes(n.path)),
+  );
   if (goStandalone.length > 0) {
     lines.push(`**Standalone Go modules** (${goStandalone.length}):`);
     for (const m of goStandalone) {
@@ -264,7 +271,9 @@ function buildAdapterSignalSummary(rawNodes: RawDiscoveryNode[]): string {
         .filter((n) => sln.childPaths.includes(n.path))
         .map((n) => n.language);
       const langSummary = [...new Set(projectLangs)].join("/");
-      lines.push(`**Visual Studio solution** at \`${sln.path}\`: ${sln.childPaths.length} project(s) (${langSummary}) [${sln.evidence.join(", ")}]`);
+      lines.push(
+        `**Visual Studio solution** at \`${sln.path}\`: ${sln.childPaths.length} project(s) (${langSummary}) [${sln.evidence.join(", ")}]`,
+      );
       for (const child of sln.childPaths) {
         lines.push(`  - ${child}`);
       }
@@ -276,7 +285,9 @@ function buildAdapterSignalSummary(rawNodes: RawDiscoveryNode[]): string {
   if (bazelContainers.length > 0) {
     for (const ws of bazelContainers) {
       const bazelLeaves = leaves.filter((n) => ws.childPaths.includes(n.path));
-      lines.push(`**Bazel workspace** at \`${ws.path}\`: ${ws.childPaths.length} package(s) [${ws.evidence.join(", ")}]`);
+      lines.push(
+        `**Bazel workspace** at \`${ws.path}\`: ${ws.childPaths.length} package(s) [${ws.evidence.join(", ")}]`,
+      );
       for (const pkg of bazelLeaves) {
         lines.push(`  - \`${pkg.path}\` (${pkg.language})`);
       }

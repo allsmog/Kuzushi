@@ -14,10 +14,7 @@ import {
   buildWorkspaceDependencyMap,
   clusterWorkspaceMembers,
 } from "../../src/discovery/workspace-clustering.js";
-import {
-  readPackageName,
-  parsePackageJsonDeps,
-} from "../../src/monorepo/dependency-graph.js";
+import { parsePackageJsonDeps, readPackageName } from "../../src/monorepo/dependency-graph.js";
 
 function makeNode(overrides: Partial<RawDiscoveryNode> & { path: string }): RawDiscoveryNode {
   return {
@@ -76,7 +73,9 @@ describe("buildWorkspaceDependencyMap", () => {
 
     const result = await buildWorkspaceDependencyMap("/repo", [container, ...leaves]);
 
-    expect(result.internalDeps.get("packages/cli")).toEqual(new Set(["packages/core", "packages/utils"]));
+    expect(result.internalDeps.get("packages/cli")).toEqual(
+      new Set(["packages/core", "packages/utils"]),
+    );
     expect(result.internalDeps.get("packages/core")).toEqual(new Set(["packages/utils"]));
     expect(result.internalDeps.get("packages/utils")).toEqual(new Set());
     expect(result.packageNameToPath.get("@app/cli")).toBe("packages/cli");
@@ -141,8 +140,10 @@ describe("clusterWorkspaceMembers", () => {
     };
 
     const container = makeContainer(".", [
-      "packages/backend/api", "packages/backend/db",
-      "packages/frontend/ui", "packages/frontend/design",
+      "packages/backend/api",
+      "packages/backend/db",
+      "packages/frontend/ui",
+      "packages/frontend/design",
     ]);
     const nodes = [
       container,
@@ -166,20 +167,13 @@ describe("clusterWorkspaceMembers", () => {
 
   it("keeps isolated packages as standalone modules", () => {
     const depMap = {
-      internalDeps: new Map<string, Set<string>>([
-        ["packages/standalone-tool", new Set()],
-      ]),
-      packageNameToPath: new Map([
-        ["@app/tool", "packages/standalone-tool"],
-      ]),
+      internalDeps: new Map<string, Set<string>>([["packages/standalone-tool", new Set()]]),
+      packageNameToPath: new Map([["@app/tool", "packages/standalone-tool"]]),
       promptSummary: "",
     };
 
     const container = makeContainer(".", ["packages/standalone-tool"]);
-    const nodes = [
-      container,
-      makeNode({ path: "packages/standalone-tool", name: "tool" }),
-    ];
+    const nodes = [container, makeNode({ path: "packages/standalone-tool", name: "tool" })];
     const products = [makeProduct(".", ["packages/standalone-tool"])];
 
     const modules = clusterWorkspaceMembers(depMap, nodes, products);
@@ -209,7 +203,13 @@ describe("clusterWorkspaceMembers", () => {
       promptSummary: "",
     };
 
-    const children = ["packages/cli", "packages/core", "packages/eslint-config", "packages/testing/e2e", "packages/vitest-config"];
+    const children = [
+      "packages/cli",
+      "packages/core",
+      "packages/eslint-config",
+      "packages/testing/e2e",
+      "packages/vitest-config",
+    ];
     const container = makeContainer(".", children);
     const nodes = [
       container,
@@ -234,9 +234,7 @@ describe("clusterWorkspaceMembers", () => {
 
   it("includes standalone nodes not in any workspace", () => {
     const depMap = {
-      internalDeps: new Map<string, Set<string>>([
-        ["packages/cli", new Set()],
-      ]),
+      internalDeps: new Map<string, Set<string>>([["packages/cli", new Set()]]),
       packageNameToPath: new Map([["@app/cli", "packages/cli"]]),
       promptSummary: "",
     };
@@ -246,7 +244,13 @@ describe("clusterWorkspaceMembers", () => {
       container,
       makeNode({ path: "packages/cli", name: "cli" }),
       // Standalone Go module not in any workspace
-      makeNode({ path: "services/api", name: "api", language: "Go", buildSystem: "go.mod", evidence: ["go.mod"] }),
+      makeNode({
+        path: "services/api",
+        name: "api",
+        language: "Go",
+        buildSystem: "go.mod",
+        evidence: ["go.mod"],
+      }),
     ];
     const products = [makeProduct(".", ["packages/cli"])];
 

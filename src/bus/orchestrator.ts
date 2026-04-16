@@ -1,13 +1,20 @@
 import type Database from "better-sqlite3";
-import { normalizeTaskIds } from "../agents/registry.js";
 import type { TaskRegistry } from "../agents/registry.js";
-import type { TaskContext as AgentTaskContext } from "../agents/types.js";
+import { normalizeTaskIds } from "../agents/registry.js";
+import { callGraphAssistTask } from "../agents/tasks/call-graph-assist.js";
 import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
 import { reachabilityCheckTask } from "../agents/tasks/reachability-check.js";
-import { callGraphAssistTask } from "../agents/tasks/call-graph-assist.js";
 import { resolveStageModel } from "../agents/tasks/runtime-overrides.js";
 import { SELECTABLE_TASK_IDS } from "../agents/tasks/task-selector.js";
-import type { Finding } from "../scanners/types.js";
+import type { TaskContext as AgentTaskContext } from "../agents/types.js";
+import { normalizeTaskCapabilityIds, resolveCapabilityConfigKey } from "../capabilities.js";
+import { PipelineHookChain } from "../hooks/chain.js";
+import { loadHooksFromFile } from "../hooks/loader.js";
+import type { HookContext } from "../hooks/types.js";
+import { getLogger } from "../logger.js";
+import { loadPrecedents, type Precedents } from "../precedents.js";
+import { evaluateQualityGates, type QualityGateResult } from "../quality-gate.js";
+import { coerceContextEnrichment, coerceRepoContext } from "../repo-context.js";
 import { DesignDecisionClassifier } from "../scanners/design-decision-classifier.js";
 import { HardExclusionFilter } from "../scanners/fp-filter.js";
 import { rescoreFindings } from "../scanners/llm-rescore.js";
@@ -18,21 +25,23 @@ import {
   getRankingScore,
   selectFindingsForRescore,
 } from "../scanners/normalization.js";
+import type { Finding } from "../scanners/types.js";
+import { FindingSchema, formatZodErrors } from "../schemas.js";
 import {
   computeRunMetrics,
-  type StageTimestamps,
   type StageCosts,
+  type StageTimestamps,
 } from "../scoring/run-metrics.js";
-import { resolveCapabilityConfigKey, normalizeTaskCapabilityIds } from "../capabilities.js";
 import {
   getActionableFindings,
   getPocHarnessedFingerprints,
+  getRun,
   getStoredTriageResults,
   getStoredVerificationResults,
-  getRun,
   getTriagedFingerprints,
   getVerifiedFingerprints,
 } from "../store.js";
+import { getTaskOutputMeta } from "../task-output-meta.js";
 import type {
   DynamicAnalysisRun,
   EnrichedRepoContext,
@@ -42,33 +51,26 @@ import type {
   RepoContext,
   ScanOpts,
   TriageResult,
-  VerificationResult,
   Verdict,
+  VerificationResult,
 } from "../types.js";
-import { evaluateQualityGates, type QualityGateResult } from "../quality-gate.js";
-import { coerceContextEnrichment, coerceRepoContext } from "../repo-context.js";
-import { loadPrecedents, type Precedents } from "../precedents.js";
-import { getTaskOutputMeta } from "../task-output-meta.js";
-import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { safeJsonParse } from "../utils/safe-json.js";
-import { FindingSchema, formatZodErrors } from "../schemas.js";
-import { getLogger } from "../logger.js";
-import { runVariantAnalysis } from "./workers/variant-analysis-worker.js";
+import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type {
   BusHandlerErrorEvent,
   DynamicAnalysisErrorEvent,
   DynamicAnalysisResultEvent,
-  PipelineStats,
   PipelineErrorEvent,
   PipelineStartEvent,
-  TaintAnalysisRefinementErrorEvent,
-  TaintAnalysisRefinementResultEvent,
+  PipelineStats,
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
   ReportCompleteEvent,
   RunContext,
   ScanCompleteEvent,
   ScanFindingEvent,
+  TaintAnalysisRefinementErrorEvent,
+  TaintAnalysisRefinementResultEvent,
   TaskCompleteEvent,
   TaskErrorEvent,
   TriageErrorEvent,
@@ -77,17 +79,7 @@ import type {
   VerificationResultEvent,
 } from "./events.js";
 import { createEvent } from "./helpers.js";
-import type { MessageBus } from "./types.js";
-import { executeAgentTask } from "./task-execution.js";
-import { PipelineHookChain } from "../hooks/chain.js";
-import type { HookContext } from "../hooks/types.js";
-import { loadHooksFromFile } from "../hooks/loader.js";
-import {
-  collectTransitiveDeps,
-  injectThreatModelPolicyCandidates,
-  resolveInitialTaskPlan,
-  resolveOrderWithPolicyEdges,
-} from "./orchestrator/task-policy.js";
+import { cheapVerifyCandidates } from "./orchestrator/cheap-verify.js";
 import {
   dispatchPocHarness as dispatchPocHarnessQueue,
   handlePocHarnessErrorState,
@@ -96,12 +88,26 @@ import {
   publishPocQueueDepth,
 } from "./orchestrator/poc-dispatcher.js";
 import {
+  collectTransitiveDeps,
+  injectThreatModelPolicyCandidates,
+  resolveInitialTaskPlan,
+  resolveOrderWithPolicyEdges,
+} from "./orchestrator/task-policy.js";
+import {
   dispatchTriage as dispatchTriageQueue,
   handleTriageError as handleTriageErrorState,
   handleTriageResult as handleTriageResultState,
   isTriageDone as isTriageQueueDone,
   publishTriageQueueDepth,
 } from "./orchestrator/triage-dispatcher.js";
+import type {
+  DynamicAnalysisCandidate,
+  OrchestratorDeps,
+  PocHarnessCandidate,
+  QueuedDynamicAnalysis,
+  RunState,
+  VerificationCandidate,
+} from "./orchestrator/types.js";
 import {
   dispatchVerification as dispatchVerificationQueue,
   handleVerificationErrorState,
@@ -115,24 +121,18 @@ import {
   registerVerifiedPattern,
   type VerifyGateResult,
 } from "./orchestrator/verify-gate.js";
-import { cheapVerifyCandidates } from "./orchestrator/cheap-verify.js";
-import type {
-  DynamicAnalysisCandidate,
-  OrchestratorDeps,
-  PocHarnessCandidate,
-  QueuedDynamicAnalysis,
-  RunState,
-  VerificationCandidate,
-} from "./orchestrator/types.js";
+import { executeAgentTask } from "./task-execution.js";
+import type { MessageBus } from "./types.js";
+import { runVariantAnalysis } from "./workers/variant-analysis-worker.js";
 
 /** Scanners whose findings come from static analysis tools, not LLM assessment. */
 const NON_LLM_SCANNERS = new Set(["semgrep", "codeql"]);
 
 function isHighConfidenceAgenticFinding(finding: Finding): boolean {
   return (
-    !NON_LLM_SCANNERS.has(finding.taskId)
-    && finding.scannerConfidence === "HIGH"
-    && finding.score >= 8
+    !NON_LLM_SCANNERS.has(finding.taskId) &&
+    finding.scannerConfidence === "HIGH" &&
+    finding.score >= 8
   );
 }
 
@@ -182,15 +182,23 @@ export class PipelineOrchestrator {
     for (const [runId, state] of this.runs) {
       // Wait for all in-flight queues to reach 0
       while (
-        (state.inFlight > 0 || state.verifyInFlight > 0 || state.pocHarnessInFlight > 0 || state.dynamicInFlight > 0)
-        && Date.now() < deadline
+        (state.inFlight > 0 ||
+          state.verifyInFlight > 0 ||
+          state.pocHarnessInFlight > 0 ||
+          state.dynamicInFlight > 0) &&
+        Date.now() < deadline
       ) {
         await new Promise((r) => setTimeout(r, 100));
       }
 
       // Persist interrupted state
       try {
-        await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "error" }));
+        await this.bus.publish(
+          createEvent("run:status", state.checkpointRunId, {
+            context: state.context,
+            status: "error",
+          }),
+        );
       } catch {
         // Best-effort persistence during shutdown.
       }
@@ -211,7 +219,9 @@ export class PipelineOrchestrator {
    * Retrieve the pipeline hook chain and context for a given run.
    * Used by the triage worker to apply beforeTriage/afterTriage hooks.
    */
-  getRunHooks(runId: string): { hookChain: PipelineHookChain; hookContext: HookContext } | undefined {
+  getRunHooks(
+    runId: string,
+  ): { hookChain: PipelineHookChain; hookContext: HookContext } | undefined {
     const state = this.runs.get(runId);
     if (!state?.hookChain) {
       return undefined;
@@ -271,13 +281,19 @@ export class PipelineOrchestrator {
       await this.handleReportComplete(event);
     });
 
-    this.bus.subscribe<TaintAnalysisRefinementResultEvent>("taint-analysis:refinement-result", async (event) => {
-      await this.handleTaintAnalysisRefinementResult(event);
-    });
+    this.bus.subscribe<TaintAnalysisRefinementResultEvent>(
+      "taint-analysis:refinement-result",
+      async (event) => {
+        await this.handleTaintAnalysisRefinementResult(event);
+      },
+    );
 
-    this.bus.subscribe<TaintAnalysisRefinementErrorEvent>("taint-analysis:refinement-error", async (event) => {
-      await this.handleTaintAnalysisRefinementError(event);
-    });
+    this.bus.subscribe<TaintAnalysisRefinementErrorEvent>(
+      "taint-analysis:refinement-error",
+      async (event) => {
+        await this.handleTaintAnalysisRefinementError(event);
+      },
+    );
 
     this.bus.subscribe<BusHandlerErrorEvent>("bus:handler-error", async (event) => {
       await this.handleBusHandlerError(event);
@@ -292,7 +308,9 @@ export class PipelineOrchestrator {
       const checkpointRunId = state?.checkpointRunId ?? fatalRunId;
       try {
         if (state) {
-          await this.bus.publish(createEvent("run:status", fatalRunId, { context: state.context, status: "error" }));
+          await this.bus.publish(
+            createEvent("run:status", fatalRunId, { context: state.context, status: "error" }),
+          );
         }
       } catch {
         // Best-effort status persistence for fatal run failures.
@@ -302,7 +320,9 @@ export class PipelineOrchestrator {
         try {
           const { cleanupBatchFiles } = await import("../agent-runtime/batch-files.js");
           cleanupBatchFiles(state.context.repoRoot, event.meta.runId);
-        } catch { /* best-effort */ }
+        } catch {
+          /* best-effort */
+        }
       }
       this.runs.delete(event.meta.runId);
     });
@@ -310,13 +330,7 @@ export class PipelineOrchestrator {
 
   private async handlePipelineStart(event: PipelineStartEvent): Promise<void> {
     const runId = event.meta.runId;
-    const {
-      context,
-      config,
-      scanOpts,
-      resumeRunId,
-      seedTaskOutputs,
-    } = event.payload;
+    const { context, config, scanOpts, resumeRunId, seedTaskOutputs } = event.payload;
 
     const tasks = normalizeTaskIds(scanOpts.tasks ?? config.tasks ?? ["semgrep"]);
 
@@ -498,7 +512,7 @@ export class PipelineOrchestrator {
     runId: string,
     resumeRunId: string,
   ): Promise<void> {
-    let run = undefined;
+    let run;
     try {
       run = getRun(this.deps.db, resumeRunId);
     } catch (error) {
@@ -917,13 +931,21 @@ export class PipelineOrchestrator {
       // Retry failed tasks up to 5 times before giving up
       const MAX_TASK_RETRIES = 5;
       let retryableFailures = failures;
-      for (let retryAttempt = 1; retryAttempt <= MAX_TASK_RETRIES && retryableFailures.length > 0; retryAttempt++) {
+      for (
+        let retryAttempt = 1;
+        retryAttempt <= MAX_TASK_RETRIES && retryableFailures.length > 0;
+        retryAttempt++
+      ) {
         const retryIds = retryableFailures
           .map((f) => f.event.payload.taskId)
-          .filter((id) => id !== "task-selector" && (taskRetryCount.get(id) ?? 0) < MAX_TASK_RETRIES);
+          .filter(
+            (id) => id !== "task-selector" && (taskRetryCount.get(id) ?? 0) < MAX_TASK_RETRIES,
+          );
         if (retryIds.length === 0) break;
 
-        log.info(`Retry attempt ${retryAttempt}/${MAX_TASK_RETRIES} for ${retryIds.length} task(s): ${retryIds.join(", ")}`);
+        log.info(
+          `Retry attempt ${retryAttempt}/${MAX_TASK_RETRIES} for ${retryIds.length} task(s): ${retryIds.join(", ")}`,
+        );
         for (const id of retryIds) taskRetryCount.set(id, (taskRetryCount.get(id) ?? 0) + 1);
 
         const retryOutcomes = retryIds.map((taskId) => this.waitForTaskOutcome(runId, taskId));
@@ -1001,8 +1023,15 @@ export class PipelineOrchestrator {
           if (normalizedCost > 0) {
             state.totalCostUsd += normalizedCost;
             try {
-              await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: normalizedCost }));
-            } catch { /* best-effort cost persistence */ }
+              await this.bus.publish(
+                createEvent("run:cost", state.checkpointRunId, {
+                  context: state.context,
+                  costUsd: normalizedCost,
+                }),
+              );
+            } catch {
+              /* best-effort cost persistence */
+            }
             // Fire budget events after each task so budget:warning/exceeded are
             // emitted promptly, not just at end-of-stage.
             await this.emitBudgetCheck(state, runId);
@@ -1024,22 +1053,25 @@ export class PipelineOrchestrator {
       // Dynamic task selection: check if any completed task produced a TaskSelectionResult
       // (duck-type check: has recommendedTasks array). If so, merge and re-resolve.
       if (state.config.enableDynamicTaskSelection) {
-        const dynamicTasks = this.extractDynamicTasks(state, completedTaskIds, dynamicTasksProcessed);
+        const dynamicTasks = this.extractDynamicTasks(
+          state,
+          completedTaskIds,
+          dynamicTasksProcessed,
+        );
         if (dynamicTasks.length > 0) {
           // Resolve capability IDs (e.g. "taint-analysis") to task IDs (e.g. "taint-cwe-select", "taint-iris")
           const resolved = normalizeTaskCapabilityIds(dynamicTasks);
           const newTaskIds = resolved.filter(
-            (id) =>
-              !enabledTaskIds.includes(id)
-              && this.deps.taskRegistry!.has(id),
+            (id) => !enabledTaskIds.includes(id) && this.deps.taskRegistry!.has(id),
           );
 
           if (newTaskIds.length > 0) {
             log.info(`Dynamic task selection added: ${newTaskIds.join(", ")}`);
             const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
               ...enabledTaskIds,
-              ...collectTransitiveDeps(this.deps.taskRegistry, newTaskIds)
-                .filter((id) => !enabledTaskIds.includes(id)),
+              ...collectTransitiveDeps(this.deps.taskRegistry, newTaskIds).filter(
+                (id) => !enabledTaskIds.includes(id),
+              ),
             ]);
 
             // Re-resolve remaining stages — only commit enabledTaskIds on success
@@ -1047,13 +1079,10 @@ export class PipelineOrchestrator {
               const fullStages = resolveOrderWithPolicyEdges(this.deps.taskRegistry, candidateIds);
               enabledTaskIds = candidateIds;
               // Replace remaining stages — skip stages already completed
-              const remaining = fullStages.filter((stage) =>
-                stage.some((id) => !completedTaskIds.has(id)),
-              ).map((stage) => stage.filter((id) => !completedTaskIds.has(id)));
-              stages = [
-                ...stages.slice(0, stageIndex + 1),
-                ...remaining,
-              ];
+              const remaining = fullStages
+                .filter((stage) => stage.some((id) => !completedTaskIds.has(id)))
+                .map((stage) => stage.filter((id) => !completedTaskIds.has(id)));
+              stages = [...stages.slice(0, stageIndex + 1), ...remaining];
             } catch (error) {
               log.warn(`Dynamic DAG re-resolution failed: ${toErrorMessage(error)}`);
             }
@@ -1067,29 +1096,32 @@ export class PipelineOrchestrator {
       if (dynamicSelectionActive && !taskSelectorFallbackApplied) {
         const selectorSettled = completedTaskIds.has("task-selector");
         const hasSelectableTasks = enabledTaskIds.some(
-          id => SELECTABLE_TASK_IDS.has(id) && !state.failedTasks.includes(id),
+          (id) => SELECTABLE_TASK_IDS.has(id) && !state.failedTasks.includes(id),
         );
 
         if (selectorSettled && !hasSelectableTasks) {
           const selectorFailed = state.failedTasks.includes("task-selector");
           const reason = selectorFailed ? "failed" : "recommended no selectable tasks";
           const fallbackIds = [...SELECTABLE_TASK_IDS].filter(
-            id => !enabledTaskIds.includes(id) && this.deps.taskRegistry!.has(id),
+            (id) => !enabledTaskIds.includes(id) && this.deps.taskRegistry!.has(id),
           );
           if (fallbackIds.length > 0) {
-            log.warn(`task-selector ${reason} — falling back to all selectable tasks: ${fallbackIds.join(", ")}`);
+            log.warn(
+              `task-selector ${reason} — falling back to all selectable tasks: ${fallbackIds.join(", ")}`,
+            );
             const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
               ...enabledTaskIds,
-              ...collectTransitiveDeps(this.deps.taskRegistry, fallbackIds)
-                .filter(id => !enabledTaskIds.includes(id)),
+              ...collectTransitiveDeps(this.deps.taskRegistry, fallbackIds).filter(
+                (id) => !enabledTaskIds.includes(id),
+              ),
             ]);
             try {
               const fullStages = resolveOrderWithPolicyEdges(this.deps.taskRegistry, candidateIds);
               enabledTaskIds = candidateIds;
               taskSelectorFallbackApplied = true;
               const remaining = fullStages
-                .filter(stage => stage.some(id => !completedTaskIds.has(id)))
-                .map(stage => stage.filter(id => !completedTaskIds.has(id)));
+                .filter((stage) => stage.some((id) => !completedTaskIds.has(id)))
+                .map((stage) => stage.filter((id) => !completedTaskIds.has(id)));
               stages = [...stages.slice(0, stageIndex + 1), ...remaining];
             } catch (error) {
               log.warn(`Fallback DAG re-resolution failed: ${toErrorMessage(error)}`);
@@ -1128,10 +1160,12 @@ export class PipelineOrchestrator {
 
     if (state.repoContext || state.enrichedRepoContext) {
       try {
-        await this.bus.publish(createEvent("run:context-checkpoint", state.checkpointRunId, {
-          context: state.context,
-          repoContext: { base: state.repoContext, enrichment: state.enrichedRepoContext },
-        }));
+        await this.bus.publish(
+          createEvent("run:context-checkpoint", state.checkpointRunId, {
+            context: state.context,
+            repoContext: { base: state.repoContext, enrichment: state.enrichedRepoContext },
+          }),
+        );
       } catch {
         // Context checkpoint persistence is best-effort.
       }
@@ -1155,15 +1189,21 @@ export class PipelineOrchestrator {
 
     const { upsertFinding } = await import("../store.js");
     for (const finding of findings) {
-      upsertFinding(this.deps.db, finding, {
-        fingerprint: finding.fingerprint,
-        verdict: "needs_review",
-        confidence: 0.5,
-        rationale: "Captured in scan-only mode — pending triage",
-        verificationSteps: [],
-        fixPatch: null,
-        triageCostUsd: 0,
-      }, state.context.repoName, "HEAD");
+      upsertFinding(
+        this.deps.db,
+        finding,
+        {
+          fingerprint: finding.fingerprint,
+          verdict: "needs_review",
+          confidence: 0.5,
+          rationale: "Captured in scan-only mode — pending triage",
+          verificationSteps: [],
+          fixPatch: null,
+          triageCostUsd: 0,
+        },
+        state.context.repoName,
+        "HEAD",
+      );
     }
   }
 
@@ -1200,10 +1240,7 @@ export class PipelineOrchestrator {
     for (const taskId of completedTaskIds) {
       if (processedTaskIds.has(taskId)) continue;
       const output = state.taskOutputs.get(taskId);
-      if (
-        isRecord(output)
-        && Array.isArray(output["recommendedTasks"])
-      ) {
+      if (isRecord(output) && Array.isArray(output["recommendedTasks"])) {
         processedTaskIds.add(taskId);
         const recommended = output["recommendedTasks"] as unknown[];
         for (const t of recommended) {
@@ -1221,15 +1258,19 @@ export class PipelineOrchestrator {
   }
 
   private waitForTaskOutcome(runId: string, taskId: string): Promise<TaskOutcome> {
-    const complete = this.bus.waitFor<TaskCompleteEvent>(
-      "task:complete",
-      (event) => event.meta.runId === runId && event.payload.taskId === taskId,
-    ).then((event) => ({ kind: "complete" as const, event }));
+    const complete = this.bus
+      .waitFor<TaskCompleteEvent>(
+        "task:complete",
+        (event) => event.meta.runId === runId && event.payload.taskId === taskId,
+      )
+      .then((event) => ({ kind: "complete" as const, event }));
 
-    const error = this.bus.waitFor<TaskErrorEvent>(
-      "task:error",
-      (event) => event.meta.runId === runId && event.payload.taskId === taskId,
-    ).then((event) => ({ kind: "error" as const, event }));
+    const error = this.bus
+      .waitFor<TaskErrorEvent>(
+        "task:error",
+        (event) => event.meta.runId === runId && event.payload.taskId === taskId,
+      )
+      .then((event) => ({ kind: "error" as const, event }));
 
     return Promise.race([complete, error]);
   }
@@ -1268,9 +1309,19 @@ export class PipelineOrchestrator {
 
     try {
       if (!state.resuming && !scanOnly) {
-        await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "triaging" }));
+        await this.bus.publish(
+          createEvent("run:status", state.checkpointRunId, {
+            context: state.context,
+            status: "triaging",
+          }),
+        );
       }
-      await this.bus.publish(createEvent("run:findings-checkpoint", state.checkpointRunId, { context: state.context, findings: state.scanFindings }));
+      await this.bus.publish(
+        createEvent("run:findings-checkpoint", state.checkpointRunId, {
+          context: state.context,
+          findings: state.scanFindings,
+        }),
+      );
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -1333,8 +1384,9 @@ export class PipelineOrchestrator {
         runtime: this.deps.runtime,
       });
       const applied = applyRescoreResults(rescoreWindow, rescoreResults);
-      filteredFindings = [...applied.findings, ...untouched]
-        .sort((a, b) => getRankingScore(b) - getRankingScore(a));
+      filteredFindings = [...applied.findings, ...untouched].sort(
+        (a, b) => getRankingScore(b) - getRankingScore(a),
+      );
       state.skippedByLlmRescore = applied.skippedByLlmRescore;
       if (state.skippedByLlmRescore > 0) {
         log.info(`[llm-rescore] Excluded ${state.skippedByLlmRescore} findings`);
@@ -1370,7 +1422,12 @@ export class PipelineOrchestrator {
         if (reachCostUsd > 0) {
           state.totalCostUsd += reachCostUsd;
           try {
-            await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: reachCostUsd }));
+            await this.bus.publish(
+              createEvent("run:cost", state.checkpointRunId, {
+                context: state.context,
+                costUsd: reachCostUsd,
+              }),
+            );
           } catch {
             // Best-effort cost persistence.
           }
@@ -1407,7 +1464,12 @@ export class PipelineOrchestrator {
         if (cgCostUsd > 0) {
           state.totalCostUsd += cgCostUsd;
           try {
-            await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: cgCostUsd }));
+            await this.bus.publish(
+              createEvent("run:cost", state.checkpointRunId, {
+                context: state.context,
+                costUsd: cgCostUsd,
+              }),
+            );
           } catch {
             // Best-effort cost persistence.
           }
@@ -1457,7 +1519,9 @@ export class PipelineOrchestrator {
       pendingAboveThreshold = pendingFindings.filter((f) => getRankingScore(f) >= minScore);
       state.skippedByScoreFilter = pendingFindings.length - pendingAboveThreshold.length;
       if (state.skippedByScoreFilter > 0) {
-        log.info(`[score-gate] Dropped ${state.skippedByScoreFilter} findings below score ${minScore}`);
+        log.info(
+          `[score-gate] Dropped ${state.skippedByScoreFilter} findings below score ${minScore}`,
+        );
       }
     }
 
@@ -1471,12 +1535,17 @@ export class PipelineOrchestrator {
         "skipTriageForHighConfidenceAgentic no longer skips triage; prioritizing matching findings instead.",
       );
       const prioritized = triageCandidates.filter(isHighConfidenceAgenticFinding);
-      const remaining = triageCandidates.filter((finding) => !isHighConfidenceAgenticFinding(finding));
+      const remaining = triageCandidates.filter(
+        (finding) => !isHighConfidenceAgenticFinding(finding),
+      );
       triageCandidates = [...prioritized, ...remaining];
     }
 
     // Auto-classify design-decision findings before LLM triage.
-    let autoClassifiedResults: Array<{ finding: Finding; result: import("../types.js").TriageResult }> = [];
+    let autoClassifiedResults: Array<{
+      finding: Finding;
+      result: import("../types.js").TriageResult;
+    }> = [];
     if (state.config.designDecisionClassifier !== false) {
       const classifier = new DesignDecisionClassifier();
       const classification = classifier.classify(triageCandidates);
@@ -1484,7 +1553,9 @@ export class PipelineOrchestrator {
       triageCandidates = classification.remaining;
       state.autoClassifiedByDesign = autoClassifiedResults.length;
       if (autoClassifiedResults.length > 0) {
-        log.info(`[design-decision] Auto-classified ${autoClassifiedResults.length} findings as by_design`);
+        log.info(
+          `[design-decision] Auto-classified ${autoClassifiedResults.length} findings as by_design`,
+        );
       }
     }
 
@@ -1587,20 +1658,20 @@ export class PipelineOrchestrator {
     // When the verification gate is enabled, skip pipelining so all candidates go through
     // the gate in a single batch after triage completes (the gate needs the full picture).
     if (
-      state.config.verifyGateEnabled !== true
-      && state.verifyCandidates.length > 0
-      && state.verifyCandidates[state.verifyCandidates.length - 1].finding.fingerprint
-        === event.payload.finding.fingerprint
+      state.config.verifyGateEnabled !== true &&
+      state.verifyCandidates.length > 0 &&
+      state.verifyCandidates[state.verifyCandidates.length - 1].finding.fingerprint ===
+        event.payload.finding.fingerprint
     ) {
       await this.pipelineVerifyCandidate(state, runId, event.payload.finding, event.payload.result);
     }
 
     // Auto-rule generation: fire-and-forget for TP findings with strategy evidence
     if (
-      state.config.multiStrategyAutoRuleGeneration
-      && event.payload.result.verdict !== "fp"
-      && hasMultiStrategyEvidence(event.payload.finding)
-      && !state.generatingRuleFingerprints?.has(event.payload.finding.fingerprint)
+      state.config.multiStrategyAutoRuleGeneration &&
+      event.payload.result.verdict !== "fp" &&
+      hasMultiStrategyEvidence(event.payload.finding) &&
+      !state.generatingRuleFingerprints?.has(event.payload.finding.fingerprint)
     ) {
       if (!state.generatingRuleFingerprints) state.generatingRuleFingerprints = new Set();
       state.generatingRuleFingerprints.add(event.payload.finding.fingerprint);
@@ -1655,11 +1726,13 @@ export class PipelineOrchestrator {
     }
 
     try {
-      await this.bus.publish(createEvent("run:status", state.checkpointRunId, {
-        context: state.context,
-        status: "complete",
-        extra: { completedAt: event.meta.timestamp },
-      }));
+      await this.bus.publish(
+        createEvent("run:status", state.checkpointRunId, {
+          context: state.context,
+          status: "complete",
+          extra: { completedAt: event.meta.timestamp },
+        }),
+      );
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -1692,7 +1765,12 @@ export class PipelineOrchestrator {
 
     // Persist metrics to database
     try {
-      await this.bus.publish(createEvent("run:metrics", state.checkpointRunId, { context: state.context, metrics: finalMetrics }));
+      await this.bus.publish(
+        createEvent("run:metrics", state.checkpointRunId, {
+          context: state.context,
+          metrics: finalMetrics,
+        }),
+      );
     } catch {
       // Metrics persistence is best-effort.
     }
@@ -1705,8 +1783,10 @@ export class PipelineOrchestrator {
       skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
       skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
       skippedByScoreFilter: state.skippedByScoreFilter > 0 ? state.skippedByScoreFilter : undefined,
-      autoClassifiedByDesign: state.autoClassifiedByDesign > 0 ? state.autoClassifiedByDesign : undefined,
-      softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
+      autoClassifiedByDesign:
+        state.autoClassifiedByDesign > 0 ? state.autoClassifiedByDesign : undefined,
+      softSuppressedFindings:
+        state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
       skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
       corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
       triaged: state.triaged,
@@ -1720,12 +1800,14 @@ export class PipelineOrchestrator {
       pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : undefined,
       pocHarnessCostUsd: state.pocHarnessEnabled ? state.pocHarnessCostUsd : undefined,
       variantFindings: state.variantFindings > 0 ? state.variantFindings : undefined,
-      variantAnalysisCostUsd: state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
+      variantAnalysisCostUsd:
+        state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
       chainCount: state.exploitChains.length > 0 ? state.exploitChains.length : undefined,
       chainAnalysisCostUsd: state.chainAnalysisCostUsd > 0 ? state.chainAnalysisCostUsd : undefined,
       budgetExceeded: state.budgetExceeded || undefined,
       failedTasks: state.failedTasks.length > 0 ? [...state.failedTasks] : undefined,
-      deadLetterCount: state.deadLetterFindings.length > 0 ? state.deadLetterFindings.length : undefined,
+      deadLetterCount:
+        state.deadLetterFindings.length > 0 ? state.deadLetterFindings.length : undefined,
       qualityGateResult,
       runMetrics: finalMetrics,
       startedAt: state.startedAt,
@@ -1772,7 +1854,9 @@ export class PipelineOrchestrator {
     this.runs.delete(runId);
   }
 
-  private async handleTaintAnalysisRefinementResult(event: TaintAnalysisRefinementResultEvent): Promise<void> {
+  private async handleTaintAnalysisRefinementResult(
+    event: TaintAnalysisRefinementResultEvent,
+  ): Promise<void> {
     const runId = event.meta.runId;
     const state = this.runs.get(runId);
     if (!state) {
@@ -1782,9 +1866,12 @@ export class PipelineOrchestrator {
     state.refinementInFlight = false;
     state.refinementIteration = Math.max(state.refinementIteration, event.payload.iteration);
 
-    const nonTaintAnalysis = state.scanFindings.filter((finding) => finding.taskId !== "taint-analysis-run");
-    state.scanFindings = [...nonTaintAnalysis, ...event.payload.updatedFindings]
-      .sort((a, b) => b.score - a.score);
+    const nonTaintAnalysis = state.scanFindings.filter(
+      (finding) => finding.taskId !== "taint-analysis-run",
+    );
+    state.scanFindings = [...nonTaintAnalysis, ...event.payload.updatedFindings].sort(
+      (a, b) => b.score - a.score,
+    );
     state.totalFindings = state.scanFindings.length;
     state.triaged += event.payload.deltaTriaged;
     state.triageErrors += event.payload.deltaErrors;
@@ -1792,16 +1879,26 @@ export class PipelineOrchestrator {
     state.totalCostUsd += normalizeCostUsd(event.payload.triageCostUsd);
 
     try {
-      await this.bus.publish(createEvent("run:findings-checkpoint", state.checkpointRunId, { context: state.context, findings: state.scanFindings }));
-      await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: event.payload.triageCostUsd }));
+      await this.bus.publish(
+        createEvent("run:findings-checkpoint", state.checkpointRunId, {
+          context: state.context,
+          findings: state.scanFindings,
+        }),
+      );
+      await this.bus.publish(
+        createEvent("run:cost", state.checkpointRunId, {
+          context: state.context,
+          costUsd: event.payload.triageCostUsd,
+        }),
+      );
     } catch {
       // Checkpoint persistence is best-effort for refinement deltas.
     }
 
     if (
-      state.refinementIteration < state.refinementIterations
-      && event.payload.deltaFindings.length > 0
-      && this.shouldRunTaintAnalysisRefinement(state)
+      state.refinementIteration < state.refinementIterations &&
+      event.payload.deltaFindings.length > 0 &&
+      this.shouldRunTaintAnalysisRefinement(state)
     ) {
       await this.startTaintAnalysisRefinement(state, runId);
       return;
@@ -1810,7 +1907,9 @@ export class PipelineOrchestrator {
     await this.requestPostTriageFlow(state, runId);
   }
 
-  private async handleTaintAnalysisRefinementError(event: TaintAnalysisRefinementErrorEvent): Promise<void> {
+  private async handleTaintAnalysisRefinementError(
+    event: TaintAnalysisRefinementErrorEvent,
+  ): Promise<void> {
     const state = this.runs.get(event.meta.runId);
     if (!state) {
       return;
@@ -1939,15 +2038,17 @@ export class PipelineOrchestrator {
 
     if (ruleValid) {
       state.generatedRules.push(rule);
-      await this.bus.publish(createEvent("auto-rule:generated", runId, {
-        context: state.context,
-        rule,
-        sourceFinding: {
-          fingerprint: finding.fingerprint,
-          filePath: finding.filePath,
-          startLine: finding.startLine,
-        },
-      }));
+      await this.bus.publish(
+        createEvent("auto-rule:generated", runId, {
+          context: state.context,
+          rule,
+          sourceFinding: {
+            fingerprint: finding.fingerprint,
+            filePath: finding.filePath,
+            startLine: finding.startLine,
+          },
+        }),
+      );
 
       // Generalize the rule for broader sweep when variant rule sweep is enabled
       if (state.config.variantRuleSweepEnabled) {
@@ -1968,7 +2069,10 @@ export class PipelineOrchestrator {
           const generalized = await generateGeneralizedRule(rule, finding, taskContext);
           if (generalized) {
             // Use distinct vulnClass to avoid filename collision with the original rule
-            const genWithSuffix = { ...generalized, vulnClass: `${generalized.vulnClass}-generalized` };
+            const genWithSuffix = {
+              ...generalized,
+              vulnClass: `${generalized.vulnClass}-generalized`,
+            };
             const genPath = persistRule(state.context.repoRoot, genWithSuffix);
             if (genPath) {
               const genValid = await validateRule(
@@ -2063,7 +2167,12 @@ export class PipelineOrchestrator {
           if (chainMeta?.costUsd) {
             state.chainAnalysisCostUsd = chainMeta.costUsd;
             state.totalCostUsd += chainMeta.costUsd;
-            await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: chainMeta.costUsd }));
+            await this.bus.publish(
+              createEvent("run:cost", state.checkpointRunId, {
+                context: state.context,
+                costUsd: chainMeta.costUsd,
+              }),
+            );
           }
         } catch (error) {
           log.warn(`Chain analysis error: ${toErrorMessage(error)}`);
@@ -2081,7 +2190,9 @@ export class PipelineOrchestrator {
     state.reportRequested = true;
 
     if (state.verifyEnabled) {
-      log.info(`verification enabled — ${state.verifyCandidates.length} candidates, starting verification`);
+      log.info(
+        `verification enabled — ${state.verifyCandidates.length} candidates, starting verification`,
+      );
       await this.startVerification(state, runId);
       return;
     }
@@ -2101,7 +2212,9 @@ export class PipelineOrchestrator {
     state.reportEmitted = true;
   }
 
-  private collectConfirmedTPs(state: RunState): Array<{ finding: Finding; triageResult: TriageResult }> {
+  private collectConfirmedTPs(
+    state: RunState,
+  ): Array<{ finding: Finding; triageResult: TriageResult }> {
     const fingerprints = state.scanFindings.map((f) => f.fingerprint);
     const triageResults = getStoredTriageResults(this.deps.db, fingerprints);
     const confirmed: Array<{ finding: Finding; triageResult: TriageResult }> = [];
@@ -2166,15 +2279,28 @@ export class PipelineOrchestrator {
     );
 
     try {
-      const result = await runVariantAnalysis(confirmedTPs, state.context, {
-        ...state.config,
-        variantAnalysisMaxFindings: Math.min(state.config.variantAnalysisMaxFindings ?? 5, 5),
-      }, this.deps.runtime);
-      const normalizedVariants = await this.normalizeFindingsForVariantAnalysis(state, result.findings);
+      const result = await runVariantAnalysis(
+        confirmedTPs,
+        state.context,
+        {
+          ...state.config,
+          variantAnalysisMaxFindings: Math.min(state.config.variantAnalysisMaxFindings ?? 5, 5),
+        },
+        this.deps.runtime,
+      );
+      const normalizedVariants = await this.normalizeFindingsForVariantAnalysis(
+        state,
+        result.findings,
+      );
       state.variantFindings = normalizedVariants.length;
       state.variantAnalysisCostUsd = result.costUsd;
       state.totalCostUsd += result.costUsd;
-      await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd: result.costUsd }));
+      await this.bus.publish(
+        createEvent("run:cost", state.checkpointRunId, {
+          context: state.context,
+          costUsd: result.costUsd,
+        }),
+      );
     } catch (error) {
       log.warn(`Variant analysis error: ${toErrorMessage(error)}`);
     }
@@ -2209,7 +2335,9 @@ export class PipelineOrchestrator {
       return;
     }
 
-    log.info(`[rule-sweep] Scanning with ${state.generatedRules.length} custom rules from ${customDir}`);
+    log.info(
+      `[rule-sweep] Scanning with ${state.generatedRules.length} custom rules from ${customDir}`,
+    );
 
     try {
       const { runSemgrep } = await import("../scanners/run-semgrep.js");
@@ -2228,19 +2356,22 @@ export class PipelineOrchestrator {
 
       // Convert Semgrep results through the standard finding normalization pipeline
       const sweepFindings = selectFindings(
-        { findings: sweepOutput.results.map((r) => ({
-          ruleId: r.check_id,
-          filePath: r.path,
-          startLine: r.start.line,
-          severity: r.extra?.severity ?? "WARNING",
-          message: r.extra?.message ?? "Custom rule match",
-          confidence: r.extra?.metadata?.confidence ?? "MEDIUM",
-          subcategory: r.extra?.metadata?.subcategory ?? ["vuln"],
-          likelihood: r.extra?.metadata?.likelihood ?? "MEDIUM",
-          impact: r.extra?.metadata?.impact ?? "MEDIUM",
-          cwe: r.extra?.metadata?.cwe ?? [],
-          evidence: r.extra?.lines ?? "",
-        })), costUsd: 0 },
+        {
+          findings: sweepOutput.results.map((r) => ({
+            ruleId: r.check_id,
+            filePath: r.path,
+            startLine: r.start.line,
+            severity: r.extra?.severity ?? "WARNING",
+            message: r.extra?.message ?? "Custom rule match",
+            confidence: r.extra?.metadata?.confidence ?? "MEDIUM",
+            subcategory: r.extra?.metadata?.subcategory ?? ["vuln"],
+            likelihood: r.extra?.metadata?.likelihood ?? "MEDIUM",
+            impact: r.extra?.metadata?.impact ?? "MEDIUM",
+            cwe: r.extra?.metadata?.cwe ?? [],
+            evidence: r.extra?.lines ?? "",
+          })),
+          costUsd: 0,
+        },
         state.context.repoRoot,
         state.context.repoName,
         "HEAD",
@@ -2253,9 +2384,12 @@ export class PipelineOrchestrator {
       // fingerprint schemes and a sweep finding at the same location as an
       // existing finding is a duplicate.
       const existingFps = new Set(state.scanFindings.map((f) => f.fingerprint));
-      const existingLocations = new Set(state.scanFindings.map((f) => `${f.filePath}:${f.startLine}`));
+      const existingLocations = new Set(
+        state.scanFindings.map((f) => `${f.filePath}:${f.startLine}`),
+      );
       const newFindings = sweepFindings.filter(
-        (f) => !existingFps.has(f.fingerprint) && !existingLocations.has(`${f.filePath}:${f.startLine}`),
+        (f) =>
+          !existingFps.has(f.fingerprint) && !existingLocations.has(`${f.filePath}:${f.startLine}`),
       );
 
       if (newFindings.length > 0) {
@@ -2268,15 +2402,21 @@ export class PipelineOrchestrator {
         if (this.deps.db) {
           const { upsertFinding } = await import("../store.js");
           for (const f of newFindings) {
-            upsertFinding(this.deps.db, f, {
-              fingerprint: f.fingerprint,
-              verdict: "needs_review" as const,
-              confidence: 0.5,
-              rationale: "Discovered by rule sweep — pending triage",
-              verificationSteps: [],
-              fixPatch: null,
-              triageCostUsd: 0,
-            }, state.context.repoName, "HEAD");
+            upsertFinding(
+              this.deps.db,
+              f,
+              {
+                fingerprint: f.fingerprint,
+                verdict: "needs_review" as const,
+                confidence: 0.5,
+                rationale: "Discovered by rule sweep — pending triage",
+                verificationSteps: [],
+                fixPatch: null,
+                triageCostUsd: 0,
+              },
+              state.context.repoName,
+              "HEAD",
+            );
           }
         }
       }
@@ -2307,15 +2447,19 @@ export class PipelineOrchestrator {
     if (state.config.llmRescoreEnabled) {
       const rescoreWindow = selectFindingsForRescore(normalized, state.scanOpts.maxFindings);
       const rescoredFingerprints = new Set(rescoreWindow.map((finding) => finding.fingerprint));
-      const untouched = normalized.filter((finding) => !rescoredFingerprints.has(finding.fingerprint));
+      const untouched = normalized.filter(
+        (finding) => !rescoredFingerprints.has(finding.fingerprint),
+      );
       const rescoreResults = await rescoreFindings(rescoreWindow, {
         model: resolveStageModel(state.config, "llm-rescore"),
         threshold: state.config.llmRescoreThreshold,
         repoRoot: state.context.scanPath ?? state.context.repoRoot,
         runtime: this.deps.runtime,
       });
-      normalized = [...applyRescoreResults(rescoreWindow, rescoreResults).findings, ...untouched]
-        .sort((a, b) => getRankingScore(b) - getRankingScore(a));
+      normalized = [
+        ...applyRescoreResults(rescoreWindow, rescoreResults).findings,
+        ...untouched,
+      ].sort((a, b) => getRankingScore(b) - getRankingScore(a));
     }
 
     return normalized;
@@ -2382,8 +2526,8 @@ export class PipelineOrchestrator {
       return false;
     }
     // Support both old pipeline (taint-analysis-label/run) and new IRIS pipeline (taint-cwe-select/iris)
-    const hasLabelContext = state.taskOutputs.has("taint-analysis-label")
-      || state.taskOutputs.has("taint-cwe-select");
+    const hasLabelContext =
+      state.taskOutputs.has("taint-analysis-label") || state.taskOutputs.has("taint-cwe-select");
     if (!hasLabelContext) {
       return false;
     }
@@ -2408,7 +2552,9 @@ export class PipelineOrchestrator {
         iteration: nextIteration,
         totalIterations: state.refinementIterations,
         findings: [...state.scanFindings],
-        labelOutput: state.taskOutputs.get("taint-analysis-label") ?? state.taskOutputs.get("taint-cwe-select"),
+        labelOutput:
+          state.taskOutputs.get("taint-analysis-label") ??
+          state.taskOutputs.get("taint-cwe-select"),
         repoContext: state.repoContext,
         refinementDeltaOnly: state.refinementDeltaOnly,
       }),
@@ -2451,7 +2597,12 @@ export class PipelineOrchestrator {
     if (state.verifyTotal === 1) {
       state.stageTimestamps.verifyStart = new Date().toISOString();
       try {
-        await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "verifying" }));
+        await this.bus.publish(
+          createEvent("run:status", state.checkpointRunId, {
+            context: state.context,
+            status: "verifying",
+          }),
+        );
       } catch {
         // Status persistence is best-effort.
       }
@@ -2481,8 +2632,10 @@ export class PipelineOrchestrator {
       log.info(`Running verification gate on ${candidates.length} candidate(s)`);
 
       // Step 1: Pattern dedup — auto-accept findings matching verified sink patterns
-      const { remaining: afterDedup, autoAccepted: dedupAccepted } =
-        deduplicateByPattern(candidates, state);
+      const { remaining: afterDedup, autoAccepted: dedupAccepted } = deduplicateByPattern(
+        candidates,
+        state,
+      );
 
       for (const result of dedupAccepted) {
         state.verifyGateAutoAccepted += 1;
@@ -2491,20 +2644,19 @@ export class PipelineOrchestrator {
       }
 
       if (dedupAccepted.length > 0) {
-        log.info(`Pattern dedup: ${dedupAccepted.length} auto-accepted, ${afterDedup.length} remaining`);
+        log.info(
+          `Pattern dedup: ${dedupAccepted.length} auto-accepted, ${afterDedup.length} remaining`,
+        );
       }
 
       if (afterDedup.length === 0) return [];
 
       // Step 2: LLM gate
-      const gateResults = await gateVerificationCandidates(
-        afterDedup,
-        {
-          model: resolveStageModel(state.config, "verify-gate", "verify"),
-          runtime: this.deps.runtime,
-          repoRoot: state.context.scanPath ?? state.context.repoRoot,
-        },
-      );
+      const gateResults = await gateVerificationCandidates(afterDedup, {
+        model: resolveStageModel(state.config, "verify-gate", "verify"),
+        runtime: this.deps.runtime,
+        repoRoot: state.context.scanPath ?? state.context.repoRoot,
+      });
 
       const gateMap = new Map<string, VerifyGateResult>();
       for (const gr of gateResults) gateMap.set(gr.fingerprint, gr);
@@ -2529,7 +2681,9 @@ export class PipelineOrchestrator {
       for (const candidate of accepted) {
         const gate = gateMap.get(candidate.finding.fingerprint);
         await this.emitSyntheticVerification(
-          state, runId, candidate,
+          state,
+          runId,
+          candidate,
           gate?.reason ?? "Auto-accepted by verification gate",
         );
       }
@@ -2537,14 +2691,11 @@ export class PipelineOrchestrator {
       // Step 3: Cheap single-turn verification for borderline cases
       if (toCheapVerify.length > 0) {
         log.info(`Running cheap verification on ${toCheapVerify.length} candidate(s)`);
-        const cheapResults = await cheapVerifyCandidates(
-          toCheapVerify,
-          {
-            model: resolveStageModel(state.config, "verify", "triage"),
-            runtime: this.deps.runtime,
-            repoRoot: state.context.scanPath ?? state.context.repoRoot,
-          },
-        );
+        const cheapResults = await cheapVerifyCandidates(toCheapVerify, {
+          model: resolveStageModel(state.config, "verify", "triage"),
+          runtime: this.deps.runtime,
+          repoRoot: state.context.scanPath ?? state.context.repoRoot,
+        });
 
         for (const cr of cheapResults) {
           const candidate = toCheapVerify.find((c) => c.finding.fingerprint === cr.fingerprint)!;
@@ -2566,14 +2717,16 @@ export class PipelineOrchestrator {
 
       const skipped = afterDedup.length - toVerify.length - accepted.length - toCheapVerify.length;
       log.info(
-        `Verification gate: ${toVerify.length} full-verify, ${toCheapVerify.length} cheap-verify, `
-        + `${accepted.length} auto-accepted, ${skipped} skipped`
-        + (dedupAccepted.length > 0 ? ` (+ ${dedupAccepted.length} pattern-deduped)` : ""),
+        `Verification gate: ${toVerify.length} full-verify, ${toCheapVerify.length} cheap-verify, ` +
+          `${accepted.length} auto-accepted, ${skipped} skipped` +
+          (dedupAccepted.length > 0 ? ` (+ ${dedupAccepted.length} pattern-deduped)` : ""),
       );
 
       return toVerify;
     } catch (error) {
-      log.warn(`Verification gate failed, proceeding with all candidates: ${toErrorMessage(error)}`);
+      log.warn(
+        `Verification gate failed, proceeding with all candidates: ${toErrorMessage(error)}`,
+      );
       return candidates;
     }
   }
@@ -2656,7 +2809,12 @@ export class PipelineOrchestrator {
 
     if (!state.resumingVerification) {
       try {
-        await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "verifying" }));
+        await this.bus.publish(
+          createEvent("run:status", state.checkpointRunId, {
+            context: state.context,
+            status: "verifying",
+          }),
+        );
       } catch (error) {
         await this.bus.publish(
           createEvent("pipeline:error", runId, {
@@ -2719,16 +2877,17 @@ export class PipelineOrchestrator {
 
     // Auto-rule generation: fire-and-forget for verified exploitable findings.
     // Skip auth/logic CWEs that can't be pattern-matched by Semgrep.
-    const ruleGenConfidence = event.payload.result.compositeConfidence ?? event.payload.result.confidence;
+    const ruleGenConfidence =
+      event.payload.result.compositeConfidence ?? event.payload.result.confidence;
     const findingCwes = event.payload.finding.cwe ?? [];
     const isAuthLogicCwe = findingCwes.some((c) => SKIP_RULE_GEN_CWES.has(c.replace(/^CWE-/, "")));
     if (
-      state.config.autoRuleGeneration
-      && event.payload.result.exploitable
-      && typeof ruleGenConfidence === "number"
-      && ruleGenConfidence >= 0.7
-      && !isAuthLogicCwe
-      && !state.generatingRuleFingerprints?.has(event.payload.finding.fingerprint)
+      state.config.autoRuleGeneration &&
+      event.payload.result.exploitable &&
+      typeof ruleGenConfidence === "number" &&
+      ruleGenConfidence >= 0.7 &&
+      !isAuthLogicCwe &&
+      !state.generatingRuleFingerprints?.has(event.payload.finding.fingerprint)
     ) {
       if (!state.generatingRuleFingerprints) state.generatingRuleFingerprints = new Set();
       state.generatingRuleFingerprints.add(event.payload.finding.fingerprint);
@@ -2844,7 +3003,12 @@ export class PipelineOrchestrator {
     state.pocHarnessCursor = 0;
 
     try {
-      await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "poc-harnessing" }));
+      await this.bus.publish(
+        createEvent("run:status", state.checkpointRunId, {
+          context: state.context,
+          status: "poc-harnessing",
+        }),
+      );
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -2888,11 +3052,11 @@ export class PipelineOrchestrator {
 
     // Queue PoC execution if enabled and harness was successfully generated
     if (
-      state.config.pocExecute
-      && !event.payload.result.skipped
-      && event.payload.result.parsed
-      && event.payload.result.scriptPath
-      && event.payload.result.language
+      state.config.pocExecute &&
+      !event.payload.result.skipped &&
+      event.payload.result.parsed &&
+      event.payload.result.scriptPath &&
+      event.payload.result.language
     ) {
       await this.bus.publish(
         createEvent("poc-execution:queued", runId, {
@@ -3010,8 +3174,14 @@ export class PipelineOrchestrator {
   private selectDynamicAnalysisCandidates(state: RunState): DynamicAnalysisCandidate[] {
     const maxCandidates = state.config.dynamicMaxCandidates ?? 20;
     const minScore = state.config.dynamicMinScore ?? 7;
-    const triageResults = getStoredTriageResults(this.deps.db, state.scanFindings.map((f) => f.fingerprint));
-    const verificationResults = getStoredVerificationResults(this.deps.db, state.scanFindings.map((f) => f.fingerprint));
+    const triageResults = getStoredTriageResults(
+      this.deps.db,
+      state.scanFindings.map((f) => f.fingerprint),
+    );
+    const verificationResults = getStoredVerificationResults(
+      this.deps.db,
+      state.scanFindings.map((f) => f.fingerprint),
+    );
 
     const candidates: DynamicAnalysisCandidate[] = [];
 
@@ -3037,10 +3207,10 @@ export class PipelineOrchestrator {
 
       // Priority 1: Inconclusive/low-confidence verified findings with taintPath
       if (
-        verificationResult
-        && (!verificationResult.exploitable || (verificationResult.confidence ?? 0) < 0.6)
-        && finding.taintPath
-        && finding.taintPath.length > 0
+        verificationResult &&
+        (!verificationResult.exploitable || (verificationResult.confidence ?? 0) < 0.6) &&
+        finding.taintPath &&
+        finding.taintPath.length > 0
       ) {
         candidates.push({ finding, triageResult, verificationResult, score, proofValue });
         continue;
@@ -3048,10 +3218,10 @@ export class PipelineOrchestrator {
 
       // Priority 2: Strong taint-analysis findings
       if (
-        (finding.taskId === "taint-iris" || finding.taskId === "taint-analysis-run")
-        && score >= minScore
-        && finding.taintPath
-        && finding.taintPath.length > 0
+        (finding.taskId === "taint-iris" || finding.taskId === "taint-analysis-run") &&
+        score >= minScore &&
+        finding.taintPath &&
+        finding.taintPath.length > 0
       ) {
         candidates.push({ finding, triageResult, verificationResult, score, proofValue });
         continue;
@@ -3059,9 +3229,9 @@ export class PipelineOrchestrator {
 
       // Priority 3: Corroborated CodeQL or agentic findings
       if (
-        (finding.taskId === "codeql" || finding.taskId === "agentic")
-        && finding.corroboratingSignals
-        && finding.corroboratingSignals.length >= 1
+        (finding.taskId === "codeql" || finding.taskId === "agentic") &&
+        finding.corroboratingSignals &&
+        finding.corroboratingSignals.length >= 1
       ) {
         candidates.push({ finding, triageResult, verificationResult, score, proofValue });
         continue;
@@ -3069,19 +3239,16 @@ export class PipelineOrchestrator {
 
       // Priority 4: Semgrep only if corroborated or critical
       if (
-        finding.taskId === "semgrep"
-        && (
-          (finding.corroboratingSignals && finding.corroboratingSignals.length >= 1)
-          || finding.severity === "ERROR"
-        )
+        finding.taskId === "semgrep" &&
+        ((finding.corroboratingSignals && finding.corroboratingSignals.length >= 1) ||
+          finding.severity === "ERROR")
       ) {
         candidates.push({ finding, triageResult, verificationResult, score, proofValue });
-        continue;
       }
     }
 
     // Sort by (score + proofValue) descending, cap at maxCandidates
-    candidates.sort((a, b) => (b.score + b.proofValue) - (a.score + a.proofValue));
+    candidates.sort((a, b) => b.score + b.proofValue - (a.score + a.proofValue));
     return candidates.slice(0, maxCandidates);
   }
 
@@ -3099,7 +3266,12 @@ export class PipelineOrchestrator {
     state.dynamicCursor = 0;
 
     try {
-      await this.bus.publish(createEvent("run:status", state.checkpointRunId, { context: state.context, status: "dynamic-analyzing" }));
+      await this.bus.publish(
+        createEvent("run:status", state.checkpointRunId, {
+          context: state.context,
+          status: "dynamic-analyzing",
+        }),
+      );
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -3134,7 +3306,9 @@ export class PipelineOrchestrator {
     const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.dynamicCostUsd += costUsd;
     state.totalCostUsd += costUsd;
-    await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd }));
+    await this.bus.publish(
+      createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd }),
+    );
 
     const status = event.payload.result.status;
     if (status === "confirmed") state.dynamicConfirmed += 1;
@@ -3160,7 +3334,9 @@ export class PipelineOrchestrator {
     const costUsd = normalizeCostUsd(event.payload.costUsd);
     state.dynamicCostUsd += costUsd;
     state.totalCostUsd += costUsd;
-    await this.bus.publish(createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd }));
+    await this.bus.publish(
+      createEvent("run:cost", state.checkpointRunId, { context: state.context, costUsd }),
+    );
 
     await this.publishDynamicAnalysisQueueDepth(state, runId);
 
@@ -3180,8 +3356,8 @@ export class PipelineOrchestrator {
       const concurrency = normalizeConcurrency(1);
 
       while (
-        state.dynamicInFlight < concurrency
-        && state.dynamicCursor < state.dynamicQueue.length
+        state.dynamicInFlight < concurrency &&
+        state.dynamicCursor < state.dynamicQueue.length
       ) {
         await this.emitBudgetCheck(state, runId);
         if (this.isBudgetExceeded(state)) {
@@ -3213,12 +3389,16 @@ export class PipelineOrchestrator {
   }
 
   private isDynamicAnalysisDone(state: RunState): boolean {
-    const processed = state.dynamicConfirmed + state.dynamicInteresting + state.dynamicRejected + state.dynamicErrors;
+    const processed =
+      state.dynamicConfirmed +
+      state.dynamicInteresting +
+      state.dynamicRejected +
+      state.dynamicErrors;
     return (
-      state.dynamicTotal > 0
-      && processed >= state.dynamicTotal
-      && state.dynamicInFlight === 0
-      && !state.reportEmitted
+      state.dynamicTotal > 0 &&
+      processed >= state.dynamicTotal &&
+      state.dynamicInFlight === 0 &&
+      !state.reportEmitted
     );
   }
 
@@ -3259,7 +3439,11 @@ export class PipelineOrchestrator {
 
   private async publishDynamicAnalysisQueueDepth(state: RunState, runId: string): Promise<void> {
     const queued = Math.max(0, state.dynamicQueue.length - state.dynamicCursor);
-    const processed = state.dynamicConfirmed + state.dynamicInteresting + state.dynamicRejected + state.dynamicErrors;
+    const processed =
+      state.dynamicConfirmed +
+      state.dynamicInteresting +
+      state.dynamicRejected +
+      state.dynamicErrors;
 
     await this.bus.publish(
       createEvent("dynamic:queue-depth", runId, {
@@ -3355,20 +3539,25 @@ function deduplicateByLocation(findings: Finding[]): Finding[] {
       // Attach detector as corroborating signal on threat-model finding
       tm.corroboratingSignals = [...(tm.corroboratingSignals ?? []), detectorSignal];
       // Attach threat-model as corroborating signal on detector finding
-      detector.corroboratingSignals = [...(detector.corroboratingSignals ?? []), {
-        taskId: tm.taskId,
-        fingerprint: tm.fingerprint,
-        ruleId: tm.ruleId,
-        filePath: tm.filePath,
-        startLine: tm.startLine,
-        cwe: tm.cwe,
-        score: tm.score ?? 0,
-      }];
+      detector.corroboratingSignals = [
+        ...(detector.corroboratingSignals ?? []),
+        {
+          taskId: tm.taskId,
+          fingerprint: tm.fingerprint,
+          ruleId: tm.ruleId,
+          filePath: tm.filePath,
+          startLine: tm.startLine,
+          cwe: tm.cwe,
+          score: tm.score ?? 0,
+        },
+      ];
     }
   }
 
   if (deduped.length < findings.length) {
-    log.info(`[location-dedup] Merged ${findings.length} findings into ${deduped.length} (${findings.length - deduped.length} duplicates absorbed as corroborating signals)`);
+    log.info(
+      `[location-dedup] Merged ${findings.length} findings into ${deduped.length} (${findings.length - deduped.length} duplicates absorbed as corroborating signals)`,
+    );
   }
 
   return deduped;
@@ -3385,23 +3574,22 @@ export function registerOrchestrator(
   return new PipelineOrchestrator(bus, deps);
 }
 
-function buildReportStats(
-  db: Database.Database,
-  state: RunState,
-): Partial<PipelineStats> {
+function buildReportStats(db: Database.Database, state: RunState): Partial<PipelineStats> {
   let extractionDegradation: PipelineStats["extractionDegradation"];
   let tiPriorDegraded: boolean | undefined;
   const preflightOutput = state.taskOutputs.get("taint-analysis-preflight");
   if (isRecord(preflightOutput)) {
     if (
-      isRecord(preflightOutput["extractionDegradation"])
-      && typeof preflightOutput["extractionDegradation"]["status"] === "string"
-      && preflightOutput["extractionDegradation"]["status"] !== "ok"
+      isRecord(preflightOutput["extractionDegradation"]) &&
+      typeof preflightOutput["extractionDegradation"]["status"] === "string" &&
+      preflightOutput["extractionDegradation"]["status"] !== "ok"
     ) {
       const deg = preflightOutput["extractionDegradation"];
       extractionDegradation = {
         status: deg["status"] as string,
-        reasons: Array.isArray(deg["reasons"]) ? (deg["reasons"] as unknown[]).filter((r): r is string => typeof r === "string") : [],
+        reasons: Array.isArray(deg["reasons"])
+          ? (deg["reasons"] as unknown[]).filter((r): r is string => typeof r === "string")
+          : [],
       };
     }
     if (preflightOutput["tiPriorDegraded"] === true) {
@@ -3433,7 +3621,8 @@ function buildReportStats(
     skippedLowConfidence: state.verifyEnabled ? state.skippedLowConfidence : undefined,
     skippedByFpFilter: state.skippedByFpFilter > 0 ? state.skippedByFpFilter : undefined,
     skippedByScoreFilter: state.skippedByScoreFilter > 0 ? state.skippedByScoreFilter : undefined,
-    softSuppressedFindings: state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
+    softSuppressedFindings:
+      state.softSuppressedFindings > 0 ? state.softSuppressedFindings : undefined,
     skippedByLlmRescore: state.skippedByLlmRescore > 0 ? state.skippedByLlmRescore : undefined,
     corroboratedClusters: state.corroboratedClusters > 0 ? state.corroboratedClusters : undefined,
     triaged: state.triaged,
@@ -3442,7 +3631,8 @@ function buildReportStats(
     verified: state.verifyEnabled ? state.verified : undefined,
     verifyErrors: state.verifyEnabled ? state.verifyErrors : undefined,
     verifyCostUsd: state.verifyEnabled ? state.verifyCostUsd : undefined,
-    verifyGateAutoAccepted: state.verifyGateAutoAccepted > 0 ? state.verifyGateAutoAccepted : undefined,
+    verifyGateAutoAccepted:
+      state.verifyGateAutoAccepted > 0 ? state.verifyGateAutoAccepted : undefined,
     verifyGateSkipped: state.verifyGateSkipped > 0 ? state.verifyGateSkipped : undefined,
     verifyGateCostUsd: state.verifyGateCostUsd > 0 ? state.verifyGateCostUsd : undefined,
     pocHarnessGenerated: state.pocHarnessEnabled ? state.pocHarnessGenerated : undefined,
@@ -3455,7 +3645,8 @@ function buildReportStats(
     dynamicErrors: state.dynamicAnalysisEnabled ? state.dynamicErrors : undefined,
     dynamicCostUsd: state.dynamicAnalysisEnabled ? state.dynamicCostUsd : undefined,
     variantFindings: state.variantFindings > 0 ? state.variantFindings : undefined,
-    variantAnalysisCostUsd: state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
+    variantAnalysisCostUsd:
+      state.variantAnalysisCostUsd > 0 ? state.variantAnalysisCostUsd : undefined,
     ruleSweepFindings: state.ruleSweepFindings > 0 ? state.ruleSweepFindings : undefined,
     chainCount: state.exploitChains.length > 0 ? state.exploitChains.length : undefined,
     chainAnalysisCostUsd: state.chainAnalysisCostUsd > 0 ? state.chainAnalysisCostUsd : undefined,
@@ -3470,11 +3661,14 @@ function buildReportStats(
   };
 }
 
-function buildRunMetrics(
-  db: Database.Database,
-  state: RunState,
-) {
-  const triageCost = state.totalCostUsd - state.verifyCostUsd - state.pocHarnessCostUsd - state.dynamicCostUsd - state.variantAnalysisCostUsd - state.chainAnalysisCostUsd;
+function buildRunMetrics(db: Database.Database, state: RunState) {
+  const triageCost =
+    state.totalCostUsd -
+    state.verifyCostUsd -
+    state.pocHarnessCostUsd -
+    state.dynamicCostUsd -
+    state.variantAnalysisCostUsd -
+    state.chainAnalysisCostUsd;
   const costs: StageCosts = {
     triage: Math.max(0, triageCost),
     verify: state.verifyCostUsd,
@@ -3494,19 +3688,14 @@ function buildRunMetrics(
     log.warn(`Falling back to in-memory findings for run metrics: ${toErrorMessage(error)}`);
   }
 
-  return computeRunMetrics(
-    findings,
-    state.stageTimestamps,
-    costs,
-    {
-      corroboratedClusters: state.corroboratedClusters,
-      verified: state.verifyEnabled ? state.verified : 0,
-      verifyErrors: state.verifyEnabled ? state.verifyErrors : 0,
-      pocHarnessGenerated: state.pocHarnessEnabled ? state.pocHarnessGenerated : 0,
-      pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : 0,
-      pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : 0,
-    },
-  );
+  return computeRunMetrics(findings, state.stageTimestamps, costs, {
+    corroboratedClusters: state.corroboratedClusters,
+    verified: state.verifyEnabled ? state.verified : 0,
+    verifyErrors: state.verifyEnabled ? state.verifyErrors : 0,
+    pocHarnessGenerated: state.pocHarnessEnabled ? state.pocHarnessGenerated : 0,
+    pocHarnessSkipped: state.pocHarnessEnabled ? state.pocHarnessSkipped : 0,
+    pocHarnessErrors: state.pocHarnessEnabled ? state.pocHarnessErrors : 0,
+  });
 }
 
 function resolveTaintAnalysisConfig(config: KuzushiConfig): Record<string, unknown> {
@@ -3538,7 +3727,10 @@ function resolveTaintAnalysisRefinementIterations(config: KuzushiConfig): number
 
 function resolveTaintAnalysisRefinementModel(config: KuzushiConfig): string {
   const taintAnalysis = resolveTaintAnalysisConfig(config);
-  if (typeof taintAnalysis["refinementModel"] === "string" && taintAnalysis["refinementModel"].trim()) {
+  if (
+    typeof taintAnalysis["refinementModel"] === "string" &&
+    taintAnalysis["refinementModel"].trim()
+  ) {
     return taintAnalysis["refinementModel"].trim();
   }
   return resolveStageModel(config, "triage");

@@ -16,38 +16,54 @@ const DEFAULT_MAX_LENGTH = 50_000;
  */
 const HOMOGLYPH_MAP: ReadonlyMap<string, string> = new Map([
   // Fullwidth angle brackets
-  ["\uFF1C", "<"], ["\uFF1E", ">"],
+  ["\uFF1C", "<"],
+  ["\uFF1E", ">"],
   // Small form variants
-  ["\uFE64", "<"], ["\uFE65", ">"],
+  ["\uFE64", "<"],
+  ["\uFE65", ">"],
   // Mathematical angle brackets
-  ["\u27E8", "<"], ["\u27E9", ">"],
+  ["\u27E8", "<"],
+  ["\u27E9", ">"],
   // Single angle quotation marks
-  ["\u2039", "<"], ["\u203A", ">"],
+  ["\u2039", "<"],
+  ["\u203A", ">"],
   // Double angle quotation marks
-  ["\u00AB", "<<"], ["\u00BB", ">>"],
+  ["\u00AB", "<<"],
+  ["\u00BB", ">>"],
   // CJK angle brackets
-  ["\u3008", "<"], ["\u3009", ">"],
-  ["\u300A", "<<"], ["\u300B", ">>"],
+  ["\u3008", "<"],
+  ["\u3009", ">"],
+  ["\u300A", "<<"],
+  ["\u300B", ">>"],
   // Halfwidth CJK angle brackets
-  ["\uFF62", "["], ["\uFF63", "]"],
+  ["\uFF62", "["],
+  ["\uFF63", "]"],
   // Fullwidth brackets
-  ["\uFF5B", "{"], ["\uFF5D", "}"],
-  ["\uFF3B", "["], ["\uFF3D", "]"],
-  ["\uFF08", "("], ["\uFF09", ")"],
+  ["\uFF5B", "{"],
+  ["\uFF5D", "}"],
+  ["\uFF3B", "["],
+  ["\uFF3D", "]"],
+  ["\uFF08", "("],
+  ["\uFF09", ")"],
   // Fullwidth colon and semicolons
-  ["\uFF1A", ":"], ["\uFF1B", ";"],
+  ["\uFF1A", ":"],
+  ["\uFF1B", ";"],
   // Fullwidth slash
-  ["\uFF0F", "/"], ["\uFF3C", "\\"],
+  ["\uFF0F", "/"],
+  ["\uFF3C", "\\"],
   // Other confusables used in injection
-  ["\u2018", "'"], ["\u2019", "'"],
-  ["\u201C", '"'], ["\u201D", '"'],
+  ["\u2018", "'"],
+  ["\u2019", "'"],
+  ["\u201C", '"'],
+  ["\u201D", '"'],
 ]);
 
 /**
  * Regex matching invisible/zero-width characters and bidirectional control marks.
  * These can be used to hide malicious content in prompts.
  */
-const INVISIBLE_CHARS_RE = /[\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u2060\u2061\u2062\u2063\u2064\uFEFF\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E]/g;
+const INVISIBLE_CHARS_RE =
+  /[\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u2060\u2061\u2062\u2063\u2064\uFEFF\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E]/g;
 
 /**
  * Sanitize untrusted content for safe injection into LLM prompts.
@@ -57,10 +73,7 @@ const INVISIBLE_CHARS_RE = /[\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u2060\u2
  * 3. Enforce maximum length
  * 4. Wrap in randomized boundary markers that signal untrusted content
  */
-export function sanitizeForPrompt(
-  content: string,
-  maxLength: number = DEFAULT_MAX_LENGTH,
-): string {
+export function sanitizeForPrompt(content: string, maxLength: number = DEFAULT_MAX_LENGTH): string {
   if (!content) return "";
 
   let sanitized = content;

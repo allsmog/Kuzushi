@@ -4,11 +4,11 @@
  * Stores raw finding JSON per file for fast retrieval.
  */
 
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { Finding } from "./scanners/types.js";
-import { safeJsonStringify, safeJsonParse } from "./utils/safe-json.js";
+import { safeJsonParse, safeJsonStringify } from "./utils/safe-json.js";
 
 /**
  * Ensure the scanner_cache table exists.
@@ -63,10 +63,12 @@ export function getCachedFindings(
   blobHash: string,
   filePath: string,
 ): Finding[] | undefined {
-  const row = db.prepare(`
+  const row = db
+    .prepare(`
     SELECT findings_json FROM scanner_cache
     WHERE task_id = ? AND config_hash = ? AND blob_hash = ? AND file_path = ?
-  `).get(taskId, configHash, blobHash, filePath) as { findings_json: string } | undefined;
+  `)
+    .get(taskId, configHash, blobHash, filePath) as { findings_json: string } | undefined;
 
   if (!row) return undefined;
 
@@ -154,10 +156,12 @@ export function persistScanResults(
  * Prune stale cache entries older than the given number of days.
  */
 export function pruneScannerCache(db: Database.Database, maxAgeDays: number = 30): number {
-  const result = db.prepare(`
+  const result = db
+    .prepare(`
     DELETE FROM scanner_cache
     WHERE created_at < datetime('now', ?)
-  `).run(`-${maxAgeDays} days`);
+  `)
+    .run(`-${maxAgeDays} days`);
 
   return result.changes;
 }

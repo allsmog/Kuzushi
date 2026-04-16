@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { generateMarkdownReport } from "../src/report-markdown.js";
+import type { Finding } from "../src/scanners/types.js";
 import {
   createRun,
   initDb,
@@ -6,8 +8,6 @@ import {
   updateVerificationResult,
   upsertFinding,
 } from "../src/store.js";
-import { generateMarkdownReport } from "../src/report-markdown.js";
-import type { Finding } from "../src/scanners/types.js";
 import type { KuzushiConfig, ScanOpts, TriageResult, VerificationResult } from "../src/types.js";
 
 function makeConfig(): KuzushiConfig {

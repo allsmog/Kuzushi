@@ -1,12 +1,12 @@
 import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
+import { analyzeVariants, analyzeVariantsBatch } from "../../agents/tasks/variant-analysis.js";
 import type { Finding } from "../../scanners/types.js";
 import type { KuzushiConfig, RepoContext, TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { analyzeVariants, analyzeVariantsBatch } from "../../agents/tasks/variant-analysis.js";
+import type { RunContext, TriageCompleteEvent, VariantAnalysisCompleteEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import type { RunContext, TriageCompleteEvent, VariantAnalysisCompleteEvent } from "../events.js";
 
 export interface VariantAnalysisWorkerDeps {
   bus: MessageBus;
@@ -87,10 +87,14 @@ export async function runVariantAnalysis(
           allFindings.push(...result.findings);
           totalCost += result.costUsd;
           if (result.findings.length > 0) {
-            console.error(`${tag} Found ${result.findings.length} variants in batch for family "${family}"`);
+            console.error(
+              `${tag} Found ${result.findings.length} variants in batch for family "${family}"`,
+            );
           }
         } catch (error) {
-          console.error(`${tag} Batch error for family "${family}": ${toErrorMessage(error)}, falling back to per-finding`);
+          console.error(
+            `${tag} Batch error for family "${family}": ${toErrorMessage(error)}, falling back to per-finding`,
+          );
           // Fallback: process individually
           for (const item of batch) {
             try {
@@ -106,7 +110,9 @@ export async function runVariantAnalysis(
               allFindings.push(...result.findings);
               totalCost += result.costUsd;
             } catch (innerError) {
-              console.error(`${tag} Error analyzing variants for ${item.finding.fingerprint}: ${toErrorMessage(innerError)}`);
+              console.error(
+                `${tag} Error analyzing variants for ${item.finding.fingerprint}: ${toErrorMessage(innerError)}`,
+              );
             }
           }
         }
@@ -129,11 +135,15 @@ export async function runVariantAnalysis(
           console.error(`${tag} Found ${result.findings.length} variants of ${finding.ruleId}`);
         }
       } catch (error) {
-        console.error(`${tag} Error analyzing variants for ${finding.fingerprint}: ${toErrorMessage(error)}`);
+        console.error(
+          `${tag} Error analyzing variants for ${finding.fingerprint}: ${toErrorMessage(error)}`,
+        );
       }
     }
   }
 
-  console.error(`${tag} Complete: ${allFindings.length} total variants found ($${totalCost.toFixed(4)})`);
+  console.error(
+    `${tag} Complete: ${allFindings.length} total variants found ($${totalCost.toFixed(4)})`,
+  );
   return { findings: allFindings, costUsd: totalCost };
 }

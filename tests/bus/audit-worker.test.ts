@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerAuditWorker } from "../../src/bus/workers/audit-worker.js";

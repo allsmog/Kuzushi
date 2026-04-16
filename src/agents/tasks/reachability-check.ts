@@ -1,6 +1,6 @@
+import { createLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import { toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
 import type { AgentTask, TaskContext } from "../types.js";
 import { resolveTaskModel, resolveTaskRuntime } from "./runtime-overrides.js";
 
@@ -37,13 +37,15 @@ export interface ReachabilityResult {
 
 function buildPrompt(findings: Finding[]): string {
   const findingList = findings
-    .map((f, i) => [
-      `### Finding ${i + 1}`,
-      `Fingerprint: ${f.fingerprint}`,
-      `File: ${f.filePath}:${f.startLine}`,
-      `Rule: ${f.ruleId}`,
-      `Message: ${f.message}`,
-    ].join("\n"))
+    .map((f, i) =>
+      [
+        `### Finding ${i + 1}`,
+        `Fingerprint: ${f.fingerprint}`,
+        `File: ${f.filePath}:${f.startLine}`,
+        `Rule: ${f.ruleId}`,
+        `Message: ${f.message}`,
+      ].join("\n"),
+    )
     .join("\n\n");
 
   return [
@@ -92,7 +94,8 @@ function parseResults(raw: unknown, findings: Finding[]): Map<string, Reachabili
       if (!item || typeof item !== "object") continue;
       const fp = String(item.fingerprint ?? "");
       if (!fp || !fingerprintSet.has(fp)) continue;
-      const reachable = item.reachable === "false" ? "false" : item.reachable === "true" ? "true" : "unknown";
+      const reachable =
+        item.reachable === "false" ? "false" : item.reachable === "true" ? "true" : "unknown";
       results.set(fp, {
         fingerprint: fp,
         reachable,

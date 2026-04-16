@@ -1,4 +1,4 @@
-import { execFile, type ExecFileException } from "node:child_process";
+import { type ExecFileException, execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { access, mkdir, readdir } from "node:fs/promises";
@@ -7,7 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { emitDiagnostic } from "../ui/output.js";
 import { isRecord, toErrorMessage } from "../utils.js";
-import { scoreFindingMetadata, detectParameterRiskBoost } from "./scoring.js";
+import { detectParameterRiskBoost, scoreFindingMetadata } from "./scoring.js";
 import type { Finding, TaintPathStep } from "./types.js";
 
 /**
@@ -147,10 +147,11 @@ export async function ensureDatabase(
       throw new Error(`Configured CodeQL database path is not valid: ${resolvedDbPath}`);
     }
 
-    const resolvedLanguage = normalizeLanguage(config.language)
-      ?? (await detectLanguageFromDatabase(codeqlBin, resolvedDbPath))
-      ?? (await detectCodeQLLanguageFromHeuristics(repoRoot))
-      ?? "javascript";
+    const resolvedLanguage =
+      normalizeLanguage(config.language) ??
+      (await detectLanguageFromDatabase(codeqlBin, resolvedDbPath)) ??
+      (await detectCodeQLLanguageFromHeuristics(repoRoot)) ??
+      "javascript";
 
     return {
       dbPath: resolvedDbPath,
@@ -158,7 +159,8 @@ export async function ensureDatabase(
     };
   }
 
-  const language = normalizeLanguage(config.language) ?? await detectCodeQLLanguage(repoRoot, codeqlBin);
+  const language =
+    normalizeLanguage(config.language) ?? (await detectCodeQLLanguage(repoRoot, codeqlBin));
   const dbPath = path.join(repoRoot, ".kuzushi", "codeql-db");
 
   // If another caller is already creating this database, wait for it.
@@ -174,9 +176,8 @@ export async function ensureDatabase(
 
   // Serialize creation through the same operation queue used by runCodeQL
   // to prevent creation from overlapping with analysis operations.
-  const creationPromise = enqueueDbOperation(
-    dbPath,
-    () => createCodeQLDatabase(repoRoot, codeqlBin, dbPath, language),
+  const creationPromise = enqueueDbOperation(dbPath, () =>
+    createCodeQLDatabase(repoRoot, codeqlBin, dbPath, language),
   );
   dbCreationLocks.set(dbPath, creationPromise);
 
@@ -323,11 +324,10 @@ export function selectFindings(
       const taintPath = extractCodeFlowPath(result);
       const evidence = renderCodeFlowEvidence(taintPath);
 
-      const message = (
-        asOptionalString(result.message?.text)
-        || asOptionalString(rule?.shortDescription?.text)
-        || ruleId
-      );
+      const message =
+        asOptionalString(result.message?.text) ||
+        asOptionalString(rule?.shortDescription?.text) ||
+        ruleId;
 
       const tags = normalizeTags(rule?.properties?.tags);
       const severity = mapSeverity(rule?.properties?.problem?.severity, result.level);
@@ -369,12 +369,15 @@ export function selectFindings(
         score,
         taintPath,
         proofState: "symbolic_only",
-        engineProvenance: [{
-          kind: "codeql",
-          detail: taintPath && taintPath.length > 0
-            ? "CodeQL finding with structured code-flow path evidence"
-            : "CodeQL finding",
-        }],
+        engineProvenance: [
+          {
+            kind: "codeql",
+            detail:
+              taintPath && taintPath.length > 0
+                ? "CodeQL finding with structured code-flow path evidence"
+                : "CodeQL finding",
+          },
+        ],
       };
 
       const existing = deduped.get(fingerprint);
@@ -384,9 +387,7 @@ export function selectFindings(
     }
   }
 
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 /** Stable fingerprint for CodeQL findings. */
@@ -408,22 +409,27 @@ export function computeCodeQLFingerprint(
 }
 
 /** Detect all CodeQL languages present in a polyglot repo. */
-export async function detectAllCodeQLLanguages(repoRoot: string, codeqlBin: string): Promise<string[]> {
+export async function detectAllCodeQLLanguages(
+  repoRoot: string,
+  codeqlBin: string,
+): Promise<string[]> {
   const languages: string[] = [];
 
   const markers: Array<{ check: () => Promise<boolean>; lang: string }> = [
     { check: () => pathExists(path.join(repoRoot, "package.json")), lang: "javascript" },
     { check: () => pathExists(path.join(repoRoot, "go.mod")), lang: "go" },
-    { check: async () =>
-      await pathExists(path.join(repoRoot, "pom.xml"))
-      || await pathExists(path.join(repoRoot, "build.gradle"))
-      || await pathExists(path.join(repoRoot, "build.gradle.kts")),
+    {
+      check: async () =>
+        (await pathExists(path.join(repoRoot, "pom.xml"))) ||
+        (await pathExists(path.join(repoRoot, "build.gradle"))) ||
+        (await pathExists(path.join(repoRoot, "build.gradle.kts"))),
       lang: "java",
     },
-    { check: async () =>
-      await pathExists(path.join(repoRoot, "requirements.txt"))
-      || await pathExists(path.join(repoRoot, "pyproject.toml"))
-      || await pathExists(path.join(repoRoot, "setup.py")),
+    {
+      check: async () =>
+        (await pathExists(path.join(repoRoot, "requirements.txt"))) ||
+        (await pathExists(path.join(repoRoot, "pyproject.toml"))) ||
+        (await pathExists(path.join(repoRoot, "setup.py"))),
       lang: "python",
     },
     { check: () => pathExists(path.join(repoRoot, "Cargo.toml")), lang: "rust" },
@@ -438,7 +444,10 @@ export async function detectAllCodeQLLanguages(repoRoot: string, codeqlBin: stri
 
   // Check top-level files for additional signals
   const topLevel = await safeReadDir(repoRoot);
-  if (topLevel.some((n) => n.endsWith(".sln") || n.endsWith(".csproj")) && !languages.includes("csharp")) {
+  if (
+    topLevel.some((n) => n.endsWith(".sln") || n.endsWith(".csproj")) &&
+    !languages.includes("csharp")
+  ) {
     languages.push("csharp");
   }
 
@@ -481,19 +490,19 @@ export async function detectCodeQLLanguageFromHeuristics(
   }
 
   if (
-    await pathExists(path.join(repoRoot, "pom.xml"))
-    || await pathExists(path.join(repoRoot, "build.gradle"))
-    || await pathExists(path.join(repoRoot, "build.gradle.kts"))
-    || await pathExists(path.join(repoRoot, "gradlew"))
-    || await pathExists(path.join(repoRoot, "mvnw"))
+    (await pathExists(path.join(repoRoot, "pom.xml"))) ||
+    (await pathExists(path.join(repoRoot, "build.gradle"))) ||
+    (await pathExists(path.join(repoRoot, "build.gradle.kts"))) ||
+    (await pathExists(path.join(repoRoot, "gradlew"))) ||
+    (await pathExists(path.join(repoRoot, "mvnw")))
   ) {
     return "java";
   }
 
   if (
-    await pathExists(path.join(repoRoot, "requirements.txt"))
-    || await pathExists(path.join(repoRoot, "pyproject.toml"))
-    || await pathExists(path.join(repoRoot, "setup.py"))
+    (await pathExists(path.join(repoRoot, "requirements.txt"))) ||
+    (await pathExists(path.join(repoRoot, "pyproject.toml"))) ||
+    (await pathExists(path.join(repoRoot, "setup.py")))
   ) {
     return "python";
   }
@@ -651,19 +660,20 @@ function extractCodeFlowPath(result: CodeQLSarifResult): TaintPathStep[] | undef
 
         const filePath = normalizeArtifactUri(uri);
         const line = asPositiveInt(location.location?.physicalLocation?.region?.startLine) ?? 1;
-        const message = asOptionalString(location.location?.message?.text)
-          ?? asOptionalString(location.message?.text)
-          ?? undefined;
-        const snippet = asOptionalString(location.location?.physicalLocation?.region?.snippet?.text)
-          ?? undefined;
+        const message =
+          asOptionalString(location.location?.message?.text) ??
+          asOptionalString(location.message?.text) ??
+          undefined;
+        const snippet =
+          asOptionalString(location.location?.physicalLocation?.region?.snippet?.text) ?? undefined;
 
         const previous = steps[steps.length - 1];
         if (
-          previous
-          && previous.filePath === filePath
-          && previous.line === line
-          && previous.message === message
-          && previous.snippet === snippet
+          previous &&
+          previous.filePath === filePath &&
+          previous.line === line &&
+          previous.message === message &&
+          previous.snippet === snippet
         ) {
           continue;
         }
@@ -790,9 +800,7 @@ function normalizeTags(tags: string[] | undefined): string[] {
     return [];
   }
 
-  return tags
-    .map((tag) => String(tag).trim())
-    .filter(Boolean);
+  return tags.map((tag) => String(tag).trim()).filter(Boolean);
 }
 
 function extractCwe(tags: string[]): string[] {
@@ -864,7 +872,11 @@ async function resolveGoDependencies(repoRoot: string): Promise<void> {
     });
     emitDiagnostic("codeql", `Pre-fetched Go modules from ${goModDir}`);
   } catch (error) {
-    emitDiagnostic("codeql", `go mod download failed (non-fatal): ${toErrorMessage(error)}`, "warning");
+    emitDiagnostic(
+      "codeql",
+      `go mod download failed (non-fatal): ${toErrorMessage(error)}`,
+      "warning",
+    );
   }
 }
 

@@ -5,12 +5,7 @@ export type ScanPreset = "safe" | "fast" | "standard" | "deep" | "reference";
 export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
   // Recommended for first-time users: tight cost and turn caps, no expensive optional tasks.
   safe: {
-    tasks: [
-      "context-gatherer",
-      "context-enricher",
-      "secrets-crypto-detect",
-      "code-config-detect",
-    ],
+    tasks: ["context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect"],
     enableDynamicTaskSelection: false,
     triageMaxFindings: 20,
     triageSpecialistMaxTurns: 5,
@@ -83,5 +78,11 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
 };
 
 export function isValidPreset(value: string): value is ScanPreset {
-  return value === "safe" || value === "fast" || value === "standard" || value === "deep" || value === "reference";
+  return (
+    value === "safe" ||
+    value === "fast" ||
+    value === "standard" ||
+    value === "deep" ||
+    value === "reference"
+  );
 }

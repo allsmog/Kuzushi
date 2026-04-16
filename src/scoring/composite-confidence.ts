@@ -49,8 +49,7 @@ export function extractScannerSignal(finding: Finding): ConfidenceSignal {
     error: 0.8,
     warning: 0.5,
   };
-  const score =
-    severityMap[(finding.severity ?? "medium").toLowerCase()] ?? 0.5;
+  const score = severityMap[(finding.severity ?? "medium").toLowerCase()] ?? 0.5;
   return {
     name: "scanner",
     score,
@@ -62,9 +61,7 @@ export function extractScannerSignal(finding: Finding): ConfidenceSignal {
 /**
  * Extract confidence signal from triage LLM response.
  */
-export function extractTriageSignal(
-  triageConfidence: number,
-): ConfidenceSignal {
+export function extractTriageSignal(triageConfidence: number): ConfidenceSignal {
   return {
     name: "triage",
     score: Math.max(0, Math.min(1, triageConfidence)),
@@ -76,11 +73,8 @@ export function extractTriageSignal(
 /**
  * Extract confidence signal from verification/exploitability result.
  */
-export function extractVerificationSignal(
-  isExploitable: boolean | undefined,
-): ConfidenceSignal {
-  const score =
-    isExploitable === true ? 1.0 : isExploitable === false ? 0.2 : 0.5;
+export function extractVerificationSignal(isExploitable: boolean | undefined): ConfidenceSignal {
+  const score = isExploitable === true ? 1.0 : isExploitable === false ? 0.2 : 0.5;
   return { name: "verification", score, weight: 0, source: "verification" };
 }
 
@@ -88,9 +82,7 @@ export function extractVerificationSignal(
  * Extract confidence signal from finding history (trajectory memory).
  * Recurring findings that were previously confirmed as TP get higher scores.
  */
-function extractHistorySignal(
-  previousVerdicts: string[],
-): ConfidenceSignal {
+function extractHistorySignal(previousVerdicts: string[]): ConfidenceSignal {
   if (previousVerdicts.length === 0) {
     return { name: "history", score: 0.5, weight: 0, source: "history" };
   }
@@ -129,15 +121,13 @@ export function computeCompositeConfidence(
   // Apply weights to signals
   const weightedSignals = signals.map((signal) => ({
     ...signal,
-    weight:
-      resolvedWeights[signal.name as keyof ConfidenceSignalWeights] ?? 1.0,
+    weight: resolvedWeights[signal.name as keyof ConfidenceSignalWeights] ?? 1.0,
   }));
 
   const totalWeight = weightedSignals.reduce((sum, s) => sum + s.weight, 0);
   const composite =
     totalWeight > 0
-      ? weightedSignals.reduce((sum, s) => sum + s.score * s.weight, 0) /
-        totalWeight
+      ? weightedSignals.reduce((sum, s) => sum + s.score * s.weight, 0) / totalWeight
       : 0;
 
   return {

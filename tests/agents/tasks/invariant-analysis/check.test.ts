@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { invariantCheckTask, __invariantCheckInternals } from "../../../../src/agents/tasks/invariant-analysis/check.js";
+import {
+  __invariantCheckInternals,
+  invariantCheckTask,
+} from "../../../../src/agents/tasks/invariant-analysis/check.js";
 
-const { buildCheckPrompt, parseViolations, normalizeViolation, violationToFinding, computeFingerprint } = __invariantCheckInternals;
+const {
+  buildCheckPrompt,
+  parseViolations,
+  normalizeViolation,
+  violationToFinding,
+  computeFingerprint,
+} = __invariantCheckInternals;
 
 describe("invariantCheckTask", () => {
   it("has correct metadata", () => {
@@ -60,8 +69,24 @@ describe("parseViolations", () => {
   it("filters low-confidence violations", () => {
     const raw = {
       violations: [
-        { invariantId: "inv-1", invariantStatement: "x", violatingFilePath: "a.ts", violatingStartLine: 1, violationDescription: "y", severity: "WARNING", confidence: 0.3 },
-        { invariantId: "inv-2", invariantStatement: "x", violatingFilePath: "b.ts", violatingStartLine: 1, violationDescription: "y", severity: "WARNING", confidence: 0.8 },
+        {
+          invariantId: "inv-1",
+          invariantStatement: "x",
+          violatingFilePath: "a.ts",
+          violatingStartLine: 1,
+          violationDescription: "y",
+          severity: "WARNING",
+          confidence: 0.3,
+        },
+        {
+          invariantId: "inv-2",
+          invariantStatement: "x",
+          violatingFilePath: "b.ts",
+          violatingStartLine: 1,
+          violationDescription: "y",
+          severity: "WARNING",
+          confidence: 0.8,
+        },
       ],
     };
 
@@ -83,15 +108,17 @@ describe("normalizeViolation", () => {
   });
 
   it("returns null for empty invariantStatement", () => {
-    expect(normalizeViolation({
-      invariantId: "inv-1",
-      invariantStatement: "",
-      violatingFilePath: "a.ts",
-      violatingStartLine: 1,
-      violationDescription: "desc",
-      severity: "ERROR",
-      confidence: 0.9,
-    })).toBeNull();
+    expect(
+      normalizeViolation({
+        invariantId: "inv-1",
+        invariantStatement: "",
+        violatingFilePath: "a.ts",
+        violatingStartLine: 1,
+        violationDescription: "desc",
+        severity: "ERROR",
+        confidence: 0.9,
+      }),
+    ).toBeNull();
   });
 
   it("normalizes valid violation", () => {
@@ -170,7 +197,15 @@ describe("violationToFinding", () => {
 
 describe("computeFingerprint", () => {
   it("produces stable fingerprints", () => {
-    const v = { invariantId: "inv-1", invariantStatement: "", violatingFilePath: "a.ts", violatingStartLine: 10, violationDescription: "", severity: "ERROR" as const, confidence: 0.9 };
+    const v = {
+      invariantId: "inv-1",
+      invariantStatement: "",
+      violatingFilePath: "a.ts",
+      violatingStartLine: 10,
+      violationDescription: "",
+      severity: "ERROR" as const,
+      confidence: 0.9,
+    };
     const fp1 = computeFingerprint("repo", "a.ts", v);
     const fp2 = computeFingerprint("repo", "a.ts", v);
     expect(fp1).toBe(fp2);

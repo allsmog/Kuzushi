@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "vitest";
 import {
-  validateManifest,
   checkRequirements,
   loadManifestFromPath,
+  validateManifest,
   validateModuleExport,
 } from "../../src/modules/loader.js";
 
@@ -42,9 +42,15 @@ describe("validateManifest", () => {
   it("rejects manifests missing required fields", () => {
     expect(() => validateManifest({})).toThrow("missing or invalid 'id'");
     expect(() => validateManifest({ id: "test" })).toThrow("missing or invalid 'displayName'");
-    expect(() => validateManifest({
-      id: "test", displayName: "T", version: "1.0", entry: "./x.js", category: "invalid",
-    })).toThrow("invalid 'category'");
+    expect(() =>
+      validateManifest({
+        id: "test",
+        displayName: "T",
+        version: "1.0",
+        entry: "./x.js",
+        category: "invalid",
+      }),
+    ).toThrow("invalid 'category'");
   });
 
   it("rejects non-object input", () => {
@@ -57,13 +63,16 @@ describe("validateManifest", () => {
 describe("loadManifestFromPath", () => {
   it("loads a valid manifest from disk", () => {
     const dir = createTempDir();
-    writeFileSync(path.join(dir, "module.manifest.json"), JSON.stringify({
-      id: "test-mod",
-      displayName: "Test Module",
-      version: "0.1.0",
-      entry: "./index.js",
-      category: "intel",
-    }));
+    writeFileSync(
+      path.join(dir, "module.manifest.json"),
+      JSON.stringify({
+        id: "test-mod",
+        displayName: "Test Module",
+        version: "0.1.0",
+        entry: "./index.js",
+        category: "intel",
+      }),
+    );
 
     const manifest = loadManifestFromPath(dir);
     expect(manifest.id).toBe("test-mod");
@@ -105,7 +114,13 @@ describe("validateModuleExport", () => {
       version: "1.0.0",
       description: "A test module",
       tools: [
-        { name: "test:scan", description: "Scan", inputSchema: {}, headless: true, execute: () => {} },
+        {
+          name: "test:scan",
+          description: "Scan",
+          inputSchema: {},
+          headless: true,
+          execute: () => {},
+        },
       ],
     };
     expect(() => validateModuleExport(mod)).not.toThrow();
@@ -113,8 +128,9 @@ describe("validateModuleExport", () => {
 
   it("rejects modules missing required fields", () => {
     expect(() => validateModuleExport({})).toThrow("missing 'id'");
-    expect(() => validateModuleExport({ id: "x", displayName: "X", category: "y", version: "1", tools: [{}] }))
-      .toThrow("missing 'name'");
+    expect(() =>
+      validateModuleExport({ id: "x", displayName: "X", category: "y", version: "1", tools: [{}] }),
+    ).toThrow("missing 'name'");
   });
 
   it("rejects non-object exports", () => {

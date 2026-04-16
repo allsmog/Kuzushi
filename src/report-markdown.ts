@@ -4,9 +4,7 @@ import type Database from "better-sqlite3";
 import type { PipelineStats } from "./bus/events.js";
 import { formatTaintPathForDisplay, summarizeTaintPath } from "./findings/taint-path.js";
 import type { RunMetrics } from "./scoring/run-metrics.js";
-import {
-  getActionableFindings,
-} from "./store.js";
+import { getActionableFindings } from "./store.js";
 
 interface RunMetaRow {
   startedAt?: string;
@@ -20,7 +18,10 @@ export function generateMarkdownReport(
   runId: string,
   fingerprints?: string[],
 ): string {
-  const allFindings = getActionableFindings(db, repo, { includeFalsePositives: true, fingerprints });
+  const allFindings = getActionableFindings(db, repo, {
+    includeFalsePositives: true,
+    fingerprints,
+  });
 
   const verdictCounts = { tp: 0, fp: 0, needs_review: 0, by_design: 0 };
   let exploitable = 0;
@@ -41,18 +42,22 @@ export function generateMarkdownReport(
   const verificationCounts = { exploitable, notExploitable };
   const pocHarnessCounts = { generated: pocGenerated, skipped: pocSkipped };
   const triageCostUsd = stats.totalCostUsd ?? 0;
-  const verifyCostUsd = stats.verifyCostUsd ?? allFindings.reduce((sum, f) => sum + (f.verifyCostUsd ?? 0), 0);
-  const pocHarnessCostUsd = stats.pocHarnessCostUsd ?? allFindings.reduce((sum, f) => sum + (f.pocHarnessCostUsd ?? 0), 0);
+  const verifyCostUsd =
+    stats.verifyCostUsd ?? allFindings.reduce((sum, f) => sum + (f.verifyCostUsd ?? 0), 0);
+  const pocHarnessCostUsd =
+    stats.pocHarnessCostUsd ?? allFindings.reduce((sum, f) => sum + (f.pocHarnessCostUsd ?? 0), 0);
   const actionable = allFindings.filter((f) => f.verdict !== "fp");
 
-  const runMeta = db.prepare(`
+  const runMeta = db
+    .prepare(`
     SELECT
       started_at as startedAt,
       config_json as configJson
     FROM pipeline_runs
     WHERE run_id = ?
     LIMIT 1
-  `).get(runId) as RunMetaRow | undefined;
+  `)
+    .get(runId) as RunMetaRow | undefined;
 
   const { model, tasks } = parseRunConfig(runMeta?.configJson);
 
@@ -65,7 +70,9 @@ export function generateMarkdownReport(
   lines.push("");
   lines.push("| Metric | Value |");
   lines.push("| --- | ---: |");
-  lines.push(`| Total findings | ${stats.totalFindings ?? verdictCounts.tp + verdictCounts.fp + verdictCounts.needs_review} |`);
+  lines.push(
+    `| Total findings | ${stats.totalFindings ?? verdictCounts.tp + verdictCounts.fp + verdictCounts.needs_review} |`,
+  );
   lines.push(`| Queued for triage | ${stats.queuedForTriage ?? 0} |`);
   lines.push(`| Skipped (already triaged) | ${stats.skippedAlreadyTriaged ?? 0} |`);
   lines.push(`| Skipped (low confidence) | ${stats.skippedLowConfidence ?? 0} |`);
@@ -82,7 +89,9 @@ export function generateMarkdownReport(
   lines.push(`| Triage cost (USD) | ${triageCostUsd.toFixed(4)} |`);
   lines.push(`| Verification cost (USD) | ${verifyCostUsd.toFixed(4)} |`);
   lines.push(`| PoC harness cost (USD) | ${pocHarnessCostUsd.toFixed(4)} |`);
-  lines.push(`| Total cost (USD) | ${(triageCostUsd + verifyCostUsd + pocHarnessCostUsd).toFixed(4)} |`);
+  lines.push(
+    `| Total cost (USD) | ${(triageCostUsd + verifyCostUsd + pocHarnessCostUsd).toFixed(4)} |`,
+  );
 
   lines.push("");
   lines.push("## Actionable Findings");
@@ -158,14 +167,18 @@ export function generateMarkdownReport(
       if (finding.pocHarnessPath) {
         lines.push(`PoC harness path: \`${finding.pocHarnessPath}\``);
       } else if (finding.pocHarnessSkipped === 1) {
-        lines.push(`PoC harness: **Skipped** (${finding.pocHarnessSkipReason ?? "no reason provided"})`);
+        lines.push(
+          `PoC harness: **Skipped** (${finding.pocHarnessSkipReason ?? "no reason provided"})`,
+        );
       } else {
         lines.push("PoC harness: **Not generated**");
       }
       lines.push("");
 
       if (finding.pocRunVerdict) {
-        lines.push(`PoC execution: **${finding.pocRunVerdict}**${formatPocDuration(finding.pocRunDurationMs)}`);
+        lines.push(
+          `PoC execution: **${finding.pocRunVerdict}**${formatPocDuration(finding.pocRunDurationMs)}`,
+        );
         lines.push("");
       }
 
@@ -239,7 +252,7 @@ function escapeFenceContent(s: string): string {
 
 /** Restrict language identifier to safe characters only. */
 function sanitizeLanguageId(lang: string): string {
-  return lang.replace(/[^a-z0-9+#.\-]/gi, "").slice(0, 20) || "text";
+  return lang.replace(/[^a-z0-9+#.-]/gi, "").slice(0, 20) || "text";
 }
 
 function parsePreconditions(raw: string | null): string[] {
@@ -253,9 +266,7 @@ function parsePreconditions(raw: string | null): string[] {
       return [];
     }
 
-    return parsed
-      .map((item) => String(item).trim())
-      .filter(Boolean);
+    return parsed.map((item) => String(item).trim()).filter(Boolean);
   } catch {
     // Graceful degradation: preconditions JSON from the DB may be malformed.
     // Return empty list so the markdown report renders without this section.
@@ -354,11 +365,15 @@ function appendMetricsSection(lines: string[], metrics: RunMetrics): void {
   lines.push(`- Findings With Taint Path: ${metrics.structuredEvidence.findingsWithTaintPath}`);
   const proofEntries = Object.entries(metrics.structuredEvidence.proofStateCounts);
   if (proofEntries.length > 0) {
-    lines.push(`- Proof States: ${proofEntries.map(([state, count]) => `${state}=${count}`).join(", ")}`);
+    lines.push(
+      `- Proof States: ${proofEntries.map(([state, count]) => `${state}=${count}`).join(", ")}`,
+    );
   }
   const engineEntries = Object.entries(metrics.structuredEvidence.engineKindCounts);
   if (engineEntries.length > 0) {
-    lines.push(`- Engine Provenance: ${engineEntries.map(([kind, count]) => `${kind}=${count}`).join(", ")}`);
+    lines.push(
+      `- Engine Provenance: ${engineEntries.map(([kind, count]) => `${kind}=${count}`).join(", ")}`,
+    );
   }
   lines.push("");
 
@@ -395,12 +410,8 @@ function formatProofStateLabel(proofState: string): string {
   return proofState.replace(/_/g, " ");
 }
 
-function formatEngineProvenance(
-  engineProvenance: Array<{ kind: string; detail: string }>,
-): string {
-  return engineProvenance
-    .map((entry) => `\`${entry.kind}\` (${entry.detail})`)
-    .join(", ");
+function formatEngineProvenance(engineProvenance: Array<{ kind: string; detail: string }>): string {
+  return engineProvenance.map((entry) => `\`${entry.kind}\` (${entry.detail})`).join(", ");
 }
 
 function formatPocDuration(durationMs: number | null | undefined): string {

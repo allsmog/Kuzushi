@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  CodeqlProfileDetectionError,
   __taintAnalysisCodeqlCompatInternals,
+  CodeqlProfileDetectionError,
   candidateProfiles,
   detectWorkingProfile,
   formatProfileDiagnostics,
@@ -33,13 +33,15 @@ describe("taint-analysis-codeql-compat", () => {
   });
 
   it("fails manual override validation for unknown profile ids", async () => {
-    await expect(detectWorkingProfile({
-      language: "go",
-      codeqlBinary: "codeql",
-      workspaceDir: "/tmp/workspace",
-      codeqlApiProfile: "go-nonexistent",
-      validate: async () => undefined,
-    })).rejects.toThrow("Valid profiles");
+    await expect(
+      detectWorkingProfile({
+        language: "go",
+        codeqlBinary: "codeql",
+        workspaceDir: "/tmp/workspace",
+        codeqlApiProfile: "go-nonexistent",
+        validate: async () => undefined,
+      }),
+    ).rejects.toThrow("Valid profiles");
   });
 
   it("manual override validates only the requested profile", async () => {
@@ -91,15 +93,17 @@ describe("taint-analysis-codeql-compat", () => {
   });
 
   it("returns tried profile diagnostics on detection failure", async () => {
-    await expect(detectWorkingProfile({
-      language: "go",
-      codeqlBinary: "codeql",
-      workspaceDir: "/tmp/workspace",
-      codeqlApiProfile: "auto",
-      validate: async (profile) => {
-        throw new Error(`${profile.id} failed`);
-      },
-    })).rejects.toMatchObject({
+    await expect(
+      detectWorkingProfile({
+        language: "go",
+        codeqlBinary: "codeql",
+        workspaceDir: "/tmp/workspace",
+        codeqlApiProfile: "auto",
+        validate: async (profile) => {
+          throw new Error(`${profile.id} failed`);
+        },
+      }),
+    ).rejects.toMatchObject({
       name: "CodeqlProfileDetectionError",
     });
 

@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULTS } from "../../src/config.js";
+import { afterEach, describe, expect, it } from "vitest";
 import { prepareScanExecution, resolveMonorepoExecution } from "../../src/cli/commands/scan.js";
 import type { ScanCommandOptions } from "../../src/cli/scan-config.js";
+import { DEFAULTS } from "../../src/config.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
 const tempDirs: string[] = [];
@@ -50,7 +50,11 @@ describe("resolveMonorepoExecution", () => {
     const root = makeTempRoot();
     mkdirSync(path.join(root, "apps", "web"), { recursive: true });
     mkdirSync(path.join(root, "services", "api"), { recursive: true });
-    writeFileSync(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n  - services/*\n", "utf-8");
+    writeFileSync(
+      path.join(root, "pnpm-workspace.yaml"),
+      "packages:\n  - apps/*\n  - services/*\n",
+      "utf-8",
+    );
 
     const decision = await resolveMonorepoExecution({
       repoRoot: root,
@@ -69,7 +73,11 @@ describe("resolveMonorepoExecution", () => {
     const root = makeTempRoot();
     mkdirSync(path.join(root, "apps", "web"), { recursive: true });
     mkdirSync(path.join(root, "services", "api"), { recursive: true });
-    writeFileSync(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n  - services/*\n", "utf-8");
+    writeFileSync(
+      path.join(root, "pnpm-workspace.yaml"),
+      "packages:\n  - apps/*\n  - services/*\n",
+      "utf-8",
+    );
 
     const decision = await resolveMonorepoExecution({
       repoRoot: root,
@@ -168,10 +176,13 @@ describe("resolveMonorepoExecution", () => {
     const root = makeTempRoot();
     writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "repo" }), "utf-8");
 
-    const { config, scanOpts } = prepareScanExecution(root, makeOptions({
-      preset: "fast",
-      tasks: "secrets",
-    }));
+    const { config, scanOpts } = prepareScanExecution(
+      root,
+      makeOptions({
+        preset: "fast",
+        tasks: "secrets",
+      }),
+    );
 
     expect(config.tasks).toContain("secrets-crypto-detect");
     expect(scanOpts.tasks).toContain("secrets");

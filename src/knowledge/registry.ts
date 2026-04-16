@@ -1,8 +1,4 @@
-import type {
-  KnowledgeModule,
-  KnowledgeQuery,
-  KnowledgeRegistry,
-} from "./types.js";
+import type { KnowledgeModule, KnowledgeQuery, KnowledgeRegistry } from "./types.js";
 
 /**
  * In-memory knowledge registry with CWE/tag/language indexes for fast lookup.
@@ -111,10 +107,7 @@ export class InMemoryKnowledgeRegistry implements KnowledgeRegistry {
     return this.modules.get(id);
   }
 
-  formatForPrompt(
-    modules: KnowledgeModule[],
-    section?: string,
-  ): string[] {
+  formatForPrompt(modules: KnowledgeModule[], section?: string): string[] {
     if (modules.length === 0) return [];
 
     const lines: string[] = [];

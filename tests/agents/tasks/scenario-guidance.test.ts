@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildApplicationModelSection,
   __scenarioGuidanceInternals,
+  buildApplicationModelSection,
 } from "../../../src/agents/tasks/scenario-guidance.js";
-import type { ApplicationModel, ApplicationRoute, ApplicationOutboundClient } from "../../../src/types.js";
+import type {
+  ApplicationModel,
+  ApplicationOutboundClient,
+  ApplicationRoute,
+} from "../../../src/types.js";
 
 const { selectRoutes, selectOutboundClients, selectScenarios } = __scenarioGuidanceInternals;
 
@@ -86,20 +90,14 @@ describe("scenario-guidance", () => {
 
   describe("selectOutboundClients", () => {
     it("filters SSRF to exclude graphql-client", () => {
-      const clients = [
-        makeClient({ kind: "http-client" }),
-        makeClient({ kind: "graphql-client" }),
-      ];
+      const clients = [makeClient({ kind: "http-client" }), makeClient({ kind: "graphql-client" })];
       const selected = selectOutboundClients("ssrf-detect", clients);
       expect(selected).toHaveLength(1);
       expect(selected[0].kind).toBe("http-client");
     });
 
     it("filters GraphQL detector to graphql-client only", () => {
-      const clients = [
-        makeClient({ kind: "http-client" }),
-        makeClient({ kind: "graphql-client" }),
-      ];
+      const clients = [makeClient({ kind: "http-client" }), makeClient({ kind: "graphql-client" })];
       const selected = selectOutboundClients("graphql-security-detect", clients);
       expect(selected).toHaveLength(1);
       expect(selected[0].kind).toBe("graphql-client");
@@ -131,7 +129,11 @@ describe("scenario-guidance", () => {
       const selected = selectScenarios("code-config-detect", scenarios);
       expect(selected).toHaveLength(3);
       expect(selected.map((s: any) => s.detectorId)).toEqual(
-        expect.arrayContaining(["auth-access-detect", "dangerous-api-detect", "security-misconfig-detect"]),
+        expect.arrayContaining([
+          "auth-access-detect",
+          "dangerous-api-detect",
+          "security-misconfig-detect",
+        ]),
       );
     });
   });

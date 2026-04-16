@@ -8,9 +8,9 @@ export const migration023: Migration = {
   version: 23,
   name: "expand_pipeline_status_constraint",
   up(db) {
-    const tableSql = db.prepare(
-      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs'",
-    ).get() as { sql?: string } | undefined;
+    const tableSql = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs'")
+      .get() as { sql?: string } | undefined;
 
     if (!tableSql?.sql) {
       return;
@@ -48,9 +48,21 @@ export const migration023: Migration = {
 
     // Copy only columns that exist in the source table
     const v3Columns = [
-      "run_id", "repo", "started_at", "status", "config_json", "scan_opts_json",
-      "findings_json", "context_json", "total_cost_usd", "completed_at", "updated_at",
-      "metrics_json", "assertions_json", "prompt_hash", "head_ref",
+      "run_id",
+      "repo",
+      "started_at",
+      "status",
+      "config_json",
+      "scan_opts_json",
+      "findings_json",
+      "context_json",
+      "total_cost_usd",
+      "completed_at",
+      "updated_at",
+      "metrics_json",
+      "assertions_json",
+      "prompt_hash",
+      "head_ref",
     ];
     const existingCols = v3Columns.filter((c) => colNames.includes(c));
 
@@ -62,7 +74,11 @@ export const migration023: Migration = {
 
     db.exec("DROP TABLE pipeline_runs");
     db.exec("ALTER TABLE pipeline_runs_v3 RENAME TO pipeline_runs");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_pipeline_runs_repo_status ON pipeline_runs(repo, status)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started_at ON pipeline_runs(started_at DESC)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_repo_status ON pipeline_runs(repo, status)",
+    );
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started_at ON pipeline_runs(started_at DESC)",
+    );
   },
 };

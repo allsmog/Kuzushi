@@ -26,6 +26,8 @@ describe("logger", () => {
   });
 
   it("redacts API-like secrets from log strings", () => {
-    expect(redactString("token sk-ant-abcdefghijklmnopqrstuvwxyz0123456789")).toContain("sk-ant...6789");
+    expect(redactString("token sk-ant-abcdefghijklmnopqrstuvwxyz0123456789")).toContain(
+      "sk-ant...6789",
+    );
   });
 });

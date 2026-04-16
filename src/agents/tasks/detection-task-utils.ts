@@ -8,10 +8,10 @@
 
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { toErrorMessage } from "../../utils.js";
 import type { Finding } from "../../scanners/types.js";
+import { toErrorMessage } from "../../utils.js";
 import type { TaskContext } from "../types.js";
-import { resolveTaskRuntime, resolveTaskAllowedTools } from "./runtime-overrides.js";
+import { resolveTaskAllowedTools, resolveTaskRuntime } from "./runtime-overrides.js";
 
 // ── File-path normalisation ────────────────────────────────────────
 
@@ -59,10 +59,7 @@ export function parseJson(text: string, tag: string): unknown {
  * Deduplicate findings by fingerprint (keeping the highest score),
  * sort descending by score, and limit to `maxFindings`.
  */
-export function dedupAndRankFindings(
-  findings: Finding[],
-  maxFindings: number,
-): Finding[] {
+export function dedupAndRankFindings(findings: Finding[], maxFindings: number): Finding[] {
   const deduped = new Map<string, Finding>();
   for (const f of findings) {
     const existing = deduped.get(f.fingerprint);
@@ -70,9 +67,7 @@ export function dedupAndRankFindings(
       deduped.set(f.fingerprint, f);
     }
   }
-  return [...deduped.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxFindings);
+  return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
 // ── Lens runner ────────────────────────────────────────────────────
@@ -122,10 +117,7 @@ export async function runLens(
     },
   })) {
     if (message.type !== "result") continue;
-    if (
-      typeof message.totalCostUsd === "number" &&
-      Number.isFinite(message.totalCostUsd)
-    ) {
+    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
       costUsd = message.totalCostUsd;
     }
     if ("result" in message) {

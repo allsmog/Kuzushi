@@ -6,8 +6,8 @@
  */
 
 import type { RepoContext } from "../types.js";
-import type { VulnClassContent, LanguageFewShot, FrameworkGuidance } from "./languages/types.js";
 import { getLanguageProfiles } from "./languages/index.js";
+import type { FrameworkGuidance, LanguageFewShot, VulnClassContent } from "./languages/types.js";
 
 // ---------------------------------------------------------------------------
 // Task ID -> canonical vuln class mapping
@@ -74,11 +74,7 @@ export function languageTuningModule(opts: LanguageTuningOpts): string {
       sections.push("**Dangerous sinks:**");
       for (const s of content.sinks) {
         const shell =
-          s.shellInvoking === true
-            ? " [SHELL]"
-            : s.shellInvoking === false
-              ? " [NO-SHELL]"
-              : "";
+          s.shellInvoking === true ? " [SHELL]" : s.shellInvoking === false ? " [NO-SHELL]" : "";
         sections.push(`- \`${s.api}\`${shell}: ${s.risk}`);
       }
       sections.push("");
@@ -94,10 +90,7 @@ export function languageTuningModule(opts: LanguageTuningOpts): string {
     }
 
     // Framework guidance (filtered to detected frameworks)
-    const fwSections = formatFrameworkGuidance(
-      content.frameworkGuidance,
-      opts.frameworks,
-    );
+    const fwSections = formatFrameworkGuidance(content.frameworkGuidance, opts.frameworks);
     if (fwSections) {
       sections.push(fwSections);
     }
@@ -153,9 +146,7 @@ export function languageInvestigationModule(opts: LanguageTuningOpts): string {
 
     lines.push(`### ${profile.languageId}\n`);
     if (hints.grepPatterns.length > 0) {
-      lines.push(
-        `Grep for: ${hints.grepPatterns.map((p) => `\`${p}\``).join(", ")}`,
-      );
+      lines.push(`Grep for: ${hints.grepPatterns.map((p) => `\`${p}\``).join(", ")}`);
     }
     if (hints.fileHints.length > 0) {
       lines.push(`Check files: ${hints.fileHints.join(", ")}`);
@@ -172,9 +163,7 @@ export function languageInvestigationModule(opts: LanguageTuningOpts): string {
 /**
  * Get combined anti-hallucination constraints from language profiles.
  */
-export function languageAntiHallucinationExtras(
-  opts: LanguageTuningOpts,
-): string[] {
+export function languageAntiHallucinationExtras(opts: LanguageTuningOpts): string[] {
   const entries = resolveEntries(opts);
   const extras: string[] = [];
 
@@ -204,9 +193,7 @@ export function languageAntiHallucinationExtras(
 /**
  * Get language-specific general search hints (for context-enricher).
  */
-export function languageGeneralHintsModule(
-  repoContext: RepoContext | undefined,
-): string {
+export function languageGeneralHintsModule(repoContext: RepoContext | undefined): string {
   if (!repoContext?.languages.length) return "";
 
   const profiles = getLanguageProfiles(repoContext.languages);
@@ -265,9 +252,7 @@ function formatFrameworkGuidance(
   if (!guidance?.length || !detectedFrameworks?.length) return "";
 
   const relevant = guidance.filter((fg) =>
-    detectedFrameworks.some((f) =>
-      f.toLowerCase().includes(fg.framework.toLowerCase()),
-    ),
+    detectedFrameworks.some((f) => f.toLowerCase().includes(fg.framework.toLowerCase())),
   );
   if (relevant.length === 0) return "";
 

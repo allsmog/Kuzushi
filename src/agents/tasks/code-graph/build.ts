@@ -2,37 +2,51 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getCodeIntelligenceProvider } from "../../../analysis-support/index.js";
 import { createLogger } from "../../../logger.js";
-import { coerceRepoContext, coerceContextEnrichment } from "../../../repo-context.js";
+import { coerceContextEnrichment, coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ApplicationModel, ApplicationRoute, ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
-import { resolveTaskModel, resolveTaskRuntime, resolveTaskPositiveInt } from "../runtime-overrides.js";
-import { buildTracePrompt, buildDiscoveryPrompt, TRACE_OUTPUT_SCHEMA } from "./prompts.js";
 import {
-  makeNodeId,
-  makeEdgeId,
-  makePathId,
-  upsertGraphNode,
-  upsertGraphEdge,
-  upsertGraphPath,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "../runtime-overrides.js";
+import { buildDiscoveryPrompt, buildTracePrompt, TRACE_OUTPUT_SCHEMA } from "./prompts.js";
+import {
   getGraphNodesForRepo,
   invalidateStaleNodes,
+  makeEdgeId,
+  makeNodeId,
+  makePathId,
+  upsertGraphEdge,
+  upsertGraphNode,
+  upsertGraphPath,
 } from "./store.js";
 import type {
-  CodeGraphNode,
   CodeGraphEdge,
-  CodeGraphPath,
-  CodeGraphOutput,
-  CodeGraphNodeKind,
   CodeGraphEdgeKind,
+  CodeGraphNode,
+  CodeGraphNodeKind,
+  CodeGraphOutput,
+  CodeGraphPath,
 } from "./types.js";
 
 const log = createLogger({ stage: "code-graph-build" });
 
 const DEFAULT_MAX_ENTRY_POINTS = 50;
 const DEFAULT_MAX_TURNS_PER_TRACE = 10;
-const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "ALL", "HTTP"]);
+const HTTP_METHODS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+  "ALL",
+  "HTTP",
+]);
 const EVENT_ENTRY_METHODS = new Set(["GRPC", "TCP", "UDP", "UNIX"]);
 
 interface TraceHop {
@@ -78,7 +92,8 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
     const appModel = coerceApplicationModel(context.upstreamOutputs.get("app-model-build"));
 
     const graphConfig = (context.config.taskConfig["code-graph"] ?? {}) as Record<string, unknown>;
-    const rawMaxEntryPoints = typeof graphConfig["maxEntryPoints"] === "number" ? graphConfig["maxEntryPoints"] : null;
+    const rawMaxEntryPoints =
+      typeof graphConfig["maxEntryPoints"] === "number" ? graphConfig["maxEntryPoints"] : null;
     const maxEntryPoints = rawMaxEntryPoints != null ? rawMaxEntryPoints : DEFAULT_MAX_ENTRY_POINTS;
     const model = resolveTaskModel(context, "code-graph");
     const warmStart = (graphConfig as Record<string, unknown>)["warmStart"] !== false;
@@ -98,13 +113,20 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
     const intelligence = await getCodeIntelligenceProvider(workingRoot);
     const importGraph = await intelligence.getImportGraph();
     const appModelRoutes: ApplicationRoute[] = appModel?.routes ?? [];
-    const entryRoutes = appModelRoutes.length > 0
-      ? appModelRoutes
-      : await detectFallbackEntryRoutes(workingRoot, repoContext, importGraph);
-    const staticNodeDescriptors = await buildStaticNodeDescriptors(workingRoot, importGraph, entryRoutes);
+    const entryRoutes =
+      appModelRoutes.length > 0
+        ? appModelRoutes
+        : await detectFallbackEntryRoutes(workingRoot, repoContext, importGraph);
+    const staticNodeDescriptors = await buildStaticNodeDescriptors(
+      workingRoot,
+      importGraph,
+      entryRoutes,
+    );
 
     if (appModelRoutes.length === 0 && entryRoutes.length > 0) {
-      log.info(`No application routes found; using ${entryRoutes.length} synthetic fallback entry point(s)`);
+      log.info(
+        `No application routes found; using ${entryRoutes.length} synthetic fallback entry point(s)`,
+      );
     }
 
     // Create nodes from import graph edges (deduplicate by nodeId)
@@ -112,30 +134,56 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
     for (const edge of importGraph) {
       const fromId = makeNodeId(repo, edge.fromFilePath, 1, null);
       const toId = makeNodeId(repo, edge.toPath, 1, null);
-      const fromDescriptor = staticNodeDescriptors.get(edge.fromFilePath) ?? { nodeKind: "unknown", framework: null };
-      const toDescriptor = staticNodeDescriptors.get(edge.toPath) ?? { nodeKind: "unknown", framework: null };
+      const fromDescriptor = staticNodeDescriptors.get(edge.fromFilePath) ?? {
+        nodeKind: "unknown",
+        framework: null,
+      };
+      const toDescriptor = staticNodeDescriptors.get(edge.toPath) ?? {
+        nodeKind: "unknown",
+        framework: null,
+      };
 
       if (!seenNodeIds.has(fromId)) {
         seenNodeIds.add(fromId);
         allNodes.push({
-          nodeId: fromId, filePath: edge.fromFilePath, startLine: 1, symbol: null,
-          nodeKind: fromDescriptor.nodeKind, framework: fromDescriptor.framework, metadata: {}, confidence: 1.0, source: "static",
+          nodeId: fromId,
+          filePath: edge.fromFilePath,
+          startLine: 1,
+          symbol: null,
+          nodeKind: fromDescriptor.nodeKind,
+          framework: fromDescriptor.framework,
+          metadata: {},
+          confidence: 1.0,
+          source: "static",
         });
         staticNodeCount++;
       }
       if (!seenNodeIds.has(toId)) {
         seenNodeIds.add(toId);
         allNodes.push({
-          nodeId: toId, filePath: edge.toPath, startLine: 1, symbol: null,
-          nodeKind: toDescriptor.nodeKind, framework: toDescriptor.framework, metadata: {}, confidence: 1.0, source: "static",
+          nodeId: toId,
+          filePath: edge.toPath,
+          startLine: 1,
+          symbol: null,
+          nodeKind: toDescriptor.nodeKind,
+          framework: toDescriptor.framework,
+          metadata: {},
+          confidence: 1.0,
+          source: "static",
         });
         staticNodeCount++;
       }
 
       const edgeId = makeEdgeId(fromId, toId, "imports");
       allEdges.push({
-        edgeId, fromNodeId: fromId, toNodeId: toId,
-        edgeKind: "imports", dataLabel: null, ordinal: null, confidence: 1.0, source: "static",
+        edgeId,
+        fromNodeId: fromId,
+        toNodeId: toId,
+        edgeKind: "imports",
+        dataLabel: null,
+        ordinal: null,
+        confidence: 1.0,
+        source: "static",
       });
     }
 
@@ -144,11 +192,15 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
       const nodeId = makeNodeId(repo, route.filePath, route.startLine, route.handlerSymbol ?? null);
       const nodeKind = inferRouteNodeKind(route);
       const entryNode: CodeGraphNode = {
-        nodeId, filePath: route.filePath, startLine: route.startLine,
-        symbol: route.handlerSymbol ?? null, nodeKind,
+        nodeId,
+        filePath: route.filePath,
+        startLine: route.startLine,
+        symbol: route.handlerSymbol ?? null,
+        nodeKind,
         framework: route.framework ?? repoContext?.frameworks[0] ?? null,
         metadata: { method: route.method, path: route.path, middleware: route.middleware },
-        confidence: 1.0, source: "static",
+        confidence: 1.0,
+        source: "static",
       };
       allNodes.push(entryNode);
       staticNodeCount++;
@@ -159,18 +211,30 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
       for (const mw of enrichment.customMiddleware) {
         const nodeId = makeNodeId(repo, mw.filePath, 1, mw.name);
         allNodes.push({
-          nodeId, filePath: mw.filePath, startLine: 1, symbol: mw.name,
-          nodeKind: "middleware", framework: null,
-          metadata: { purpose: mw.purpose }, confidence: 0.9, source: "static",
+          nodeId,
+          filePath: mw.filePath,
+          startLine: 1,
+          symbol: mw.name,
+          nodeKind: "middleware",
+          framework: null,
+          metadata: { purpose: mw.purpose },
+          confidence: 0.9,
+          source: "static",
         });
         staticNodeCount++;
       }
       for (const san of enrichment.customSanitizers) {
         const nodeId = makeNodeId(repo, san.filePath, 1, san.name);
         allNodes.push({
-          nodeId, filePath: san.filePath, startLine: 1, symbol: san.name,
-          nodeKind: "sanitizer", framework: null,
-          metadata: { sanitizationType: san.sanitizationType }, confidence: 0.9, source: "static",
+          nodeId,
+          filePath: san.filePath,
+          startLine: 1,
+          symbol: san.name,
+          nodeKind: "sanitizer",
+          framework: null,
+          metadata: { sanitizationType: san.sanitizationType },
+          confidence: 0.9,
+          source: "static",
         });
         staticNodeCount++;
       }
@@ -190,7 +254,9 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
       for (const edge of allEdges) upsertGraphEdge(db, repo, runId, edge);
     }
 
-    log.info(`Phase A complete: ${staticNodeCount} nodes, ${allEdges.length} edges from static analysis`);
+    log.info(
+      `Phase A complete: ${staticNodeCount} nodes, ${allEdges.length} edges from static analysis`,
+    );
 
     // ── Phase B: LLM gap-filling ────────────────────────────────────────
 
@@ -207,7 +273,10 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
       // Collect project file paths (excluding external deps) for the LLM
       const projectFiles = new Set<string>();
       for (const edge of importGraph) {
-        if (!edge.fromFilePath.includes("node_modules") && !edge.fromFilePath.startsWith("github.com/")) {
+        if (
+          !edge.fromFilePath.includes("node_modules") &&
+          !edge.fromFilePath.startsWith("github.com/")
+        ) {
           projectFiles.add(edge.fromFilePath);
         }
         if (!edge.toPath.includes("node_modules") && !edge.toPath.startsWith("github.com/")) {
@@ -222,14 +291,19 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
         try {
           const tmDoc = threatModelRaw as Record<string, unknown>;
           const threats = Array.isArray(tmDoc["threats"]) ? tmDoc["threats"] : [];
-          const topThreats = threats.slice(0, 5).map((t: unknown) => {
-            const tr = t as Record<string, unknown>;
-            return `- ${String(tr["title"] ?? "")} [${String(tr["category"] ?? "")}]`;
-          }).filter(Boolean);
+          const topThreats = threats
+            .slice(0, 5)
+            .map((t: unknown) => {
+              const tr = t as Record<string, unknown>;
+              return `- ${String(tr["title"] ?? "")} [${String(tr["category"] ?? "")}]`;
+            })
+            .filter(Boolean);
           if (topThreats.length > 0) {
             threatModelSummary = `Top threats identified:\n${topThreats.join("\n")}`;
           }
-        } catch { /* non-fatal */ }
+        } catch {
+          /* non-fatal */
+        }
       }
 
       const discoveryPrompt = buildDiscoveryPrompt({
@@ -263,7 +337,7 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
         })) {
           if (message.type === "result" && "result" in message) {
             structuredOutput = message.structuredOutput;
-            costUsd = (message as unknown as Record<string, unknown>).totalCostUsd as number ?? 0;
+            costUsd = ((message as unknown as Record<string, unknown>).totalCostUsd as number) ?? 0;
           }
         }
 
@@ -276,11 +350,15 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
           for (const hop of hops) {
             const nodeId = makeNodeId(repo, hop.filePath, hop.startLine, hop.symbol);
             const node: CodeGraphNode = {
-              nodeId, filePath: hop.filePath, startLine: hop.startLine,
-              symbol: hop.symbol, nodeKind: hop.nodeKind,
+              nodeId,
+              filePath: hop.filePath,
+              startLine: hop.startLine,
+              symbol: hop.symbol,
+              nodeKind: hop.nodeKind,
               framework: frameworks[0] ?? null,
               metadata: hop.dataLabel ? { dataLabel: hop.dataLabel } : {},
-              confidence: hop.confidence, source: "llm",
+              confidence: hop.confidence,
+              source: "llm",
             };
             allNodes.push(node);
             llmNodeCount++;
@@ -288,9 +366,14 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
             if (prevNodeId) {
               const edgeId = makeEdgeId(prevNodeId, nodeId, hop.edgeKind);
               const edge: CodeGraphEdge = {
-                edgeId, fromNodeId: prevNodeId, toNodeId: nodeId,
-                edgeKind: hop.edgeKind, dataLabel: hop.dataLabel ?? null,
-                ordinal: null, confidence: hop.confidence, source: "llm",
+                edgeId,
+                fromNodeId: prevNodeId,
+                toNodeId: nodeId,
+                edgeKind: hop.edgeKind,
+                dataLabel: hop.dataLabel ?? null,
+                ordinal: null,
+                confidence: hop.confidence,
+                source: "llm",
               };
               allEdges.push(edge);
               if (db) upsertGraphEdge(db, repo, runId, edge);
@@ -309,7 +392,9 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
       }
     } else {
       // Standard mode: trace pre-identified entry points
-      log.info(`Phase B: Tracing ${routesToTrace.length}/${entryRoutes.length} entry points via LLM`);
+      log.info(
+        `Phase B: Tracing ${routesToTrace.length}/${entryRoutes.length} entry points via LLM`,
+      );
     }
 
     for (const route of routesToTrace) {
@@ -344,7 +429,7 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
         })) {
           if (message.type === "result" && "result" in message) {
             structuredOutput = message.structuredOutput;
-            costUsd = (message as unknown as Record<string, unknown>).totalCostUsd as number ?? 0;
+            costUsd = ((message as unknown as Record<string, unknown>).totalCostUsd as number) ?? 0;
           }
         }
 
@@ -353,7 +438,12 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
         // Parse trace hops and create nodes/edges
         const hops = parseTraceHops(structuredOutput);
         if (hops.length > 0) {
-          const entryNodeId = makeNodeId(repo, route.filePath, route.startLine, route.handlerSymbol ?? null);
+          const entryNodeId = makeNodeId(
+            repo,
+            route.filePath,
+            route.startLine,
+            route.handlerSymbol ?? null,
+          );
           const pathNodeIds: string[] = [entryNodeId];
           const pathEdgeIds: string[] = [];
           let prevNodeId = entryNodeId;
@@ -363,11 +453,15 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
           for (const hop of hops) {
             const nodeId = makeNodeId(repo, hop.filePath, hop.startLine, hop.symbol);
             const node: CodeGraphNode = {
-              nodeId, filePath: hop.filePath, startLine: hop.startLine,
-              symbol: hop.symbol, nodeKind: hop.nodeKind,
+              nodeId,
+              filePath: hop.filePath,
+              startLine: hop.startLine,
+              symbol: hop.symbol,
+              nodeKind: hop.nodeKind,
               framework: frameworks[0] ?? null,
               metadata: hop.dataLabel ? { dataLabel: hop.dataLabel } : {},
-              confidence: hop.confidence, source: "llm",
+              confidence: hop.confidence,
+              source: "llm",
             };
             allNodes.push(node);
             llmNodeCount++;
@@ -379,9 +473,14 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
 
             const edgeId = makeEdgeId(prevNodeId, nodeId, hop.edgeKind);
             const edge: CodeGraphEdge = {
-              edgeId, fromNodeId: prevNodeId, toNodeId: nodeId,
-              edgeKind: hop.edgeKind, dataLabel: hop.dataLabel ?? null,
-              ordinal: pathNodeIds.length, confidence: hop.confidence, source: "llm",
+              edgeId,
+              fromNodeId: prevNodeId,
+              toNodeId: nodeId,
+              edgeKind: hop.edgeKind,
+              dataLabel: hop.dataLabel ?? null,
+              ordinal: pathNodeIds.length,
+              confidence: hop.confidence,
+              source: "llm",
             };
             allEdges.push(edge);
 
@@ -400,16 +499,23 @@ export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
           const minConfidence = Math.min(...hops.map((h) => h.confidence));
           const pathObj: CodeGraphPath = {
             pathId: makePathId(entryNodeId, lastNodeId, pathNodeIds),
-            entryNodeId, targetNodeId: lastNodeId,
-            hopCount: hops.length, nodeIds: pathNodeIds, edgeIds: pathEdgeIds,
-            hasSanitizer, sanitizerNodeIds, confidence: minConfidence,
+            entryNodeId,
+            targetNodeId: lastNodeId,
+            hopCount: hops.length,
+            nodeIds: pathNodeIds,
+            edgeIds: pathEdgeIds,
+            hasSanitizer,
+            sanitizerNodeIds,
+            confidence: minConfidence,
           };
           allPaths.push(pathObj);
           if (db) upsertGraphPath(db, repo, runId, pathObj);
         }
 
         tracedEntryPoints++;
-        log.debug(`Traced ${route.method} ${route.path}: ${hops.length} hops, $${costUsd.toFixed(4)}`);
+        log.debug(
+          `Traced ${route.method} ${route.path}: ${hops.length} hops, $${costUsd.toFixed(4)}`,
+        );
       } catch (error) {
         log.warn(`Failed to trace ${route.method} ${route.path}: ${toErrorMessage(error)}`);
       }
@@ -465,7 +571,12 @@ function inferRouteNodeKind(route: ApplicationRoute): CodeGraphNodeKind {
   const method = route.method.toUpperCase();
   const routePath = route.path.toLowerCase();
 
-  if (HTTP_METHODS.has(method) || routePath.startsWith("/") || routePath.startsWith("http://") || routePath.startsWith("https://")) {
+  if (
+    HTTP_METHODS.has(method) ||
+    routePath.startsWith("/") ||
+    routePath.startsWith("http://") ||
+    routePath.startsWith("https://")
+  ) {
     return "entry-http";
   }
   if (method === "CLI" || routePath.startsWith("cli://")) {
@@ -474,7 +585,11 @@ function inferRouteNodeKind(route: ApplicationRoute): CodeGraphNodeKind {
   if (method === "INIT" || routePath.startsWith("go://init")) {
     return "entry-background";
   }
-  if (EVENT_ENTRY_METHODS.has(method) || routePath.startsWith("grpc://") || routePath.startsWith("tcp://")) {
+  if (
+    EVENT_ENTRY_METHODS.has(method) ||
+    routePath.startsWith("grpc://") ||
+    routePath.startsWith("tcp://")
+  ) {
     return "entry-event";
   }
   if (method === "CRON") {
@@ -505,7 +620,10 @@ async function buildStaticNodeDescriptors(
   const descriptors = await Promise.all(
     [...filePaths].map(async (filePath) => {
       const content = await safeReadRepoFile(repoRoot, filePath);
-      return [filePath, classifyStaticNodeFromContent(content, entryRoutesByFile.get(filePath) ?? [])] as const;
+      return [
+        filePath,
+        classifyStaticNodeFromContent(content, entryRoutesByFile.get(filePath) ?? []),
+      ] as const;
     }),
   );
 
@@ -517,9 +635,10 @@ function classifyStaticNodeFromContent(
   entryRoutes: ApplicationRoute[],
 ): StaticNodeDescriptor {
   if (entryRoutes.length > 0) {
-    const preferredRoute = [...entryRoutes].sort((left, right) => (
-      rankNodeKind(inferRouteNodeKind(left)) - rankNodeKind(inferRouteNodeKind(right))
-    ))[0];
+    const preferredRoute = [...entryRoutes].sort(
+      (left, right) =>
+        rankNodeKind(inferRouteNodeKind(left)) - rankNodeKind(inferRouteNodeKind(right)),
+    )[0];
 
     return {
       nodeKind: inferRouteNodeKind(preferredRoute),
@@ -531,14 +650,20 @@ function classifyStaticNodeFromContent(
     return { nodeKind: "unknown", framework: null };
   }
 
-  if (/func(?:\s+\([^)]*\))?\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*http\.ResponseWriter[^)]*\*?http\.Request/m.test(content)) {
+  if (
+    /func(?:\s+\([^)]*\))?\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*http\.ResponseWriter[^)]*\*?http\.Request/m.test(
+      content,
+    )
+  ) {
     return { nodeKind: "entry-http", framework: "net/http" };
   }
-  if (/^\s*func\s+main\s*\(/m.test(content)
-    || /\bflag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)\s*\(/.test(content)
-    || /\bcobra\.Command\b/.test(content)
-    || /\b[A-Za-z_][A-Za-z0-9_]*\.(?:Execute|ExecuteContext)\s*\(/.test(content)
-    || /\bkong\.Parse\s*\(/.test(content)) {
+  if (
+    /^\s*func\s+main\s*\(/m.test(content) ||
+    /\bflag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)\s*\(/.test(content) ||
+    /\bcobra\.Command\b/.test(content) ||
+    /\b[A-Za-z_][A-Za-z0-9_]*\.(?:Execute|ExecuteContext)\s*\(/.test(content) ||
+    /\bkong\.Parse\s*\(/.test(content)
+  ) {
     return { nodeKind: "entry-cli", framework: "CLI" };
   }
   if (/^\s*func\s+init\s*\(/m.test(content)) {
@@ -582,7 +707,11 @@ function inferStaticFramework(content: string | null): string | null {
   if (/\bhttp\.(?:HandleFunc|ListenAndServe)|http\.ResponseWriter|http\.Request\b/.test(content)) {
     return "net/http";
   }
-  if (/\b(?:flag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)|cobra\.Command|kong\.Parse)\b/.test(content)) {
+  if (
+    /\b(?:flag\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|Var|Parse)|cobra\.Command|kong\.Parse)\b/.test(
+      content,
+    )
+  ) {
     return "CLI";
   }
   return null;
@@ -664,25 +793,40 @@ async function detectFallbackEntryRoutes(
       if (/\bnet\.Listen(?:TCP|UDP|Unix)?\s*\(/.test(line)) {
         results.push({
           id: `TCP|tcp://listener|${filePath}|${i + 1}`,
-          method: "TCP", path: "tcp://listener", filePath,
-          startLine: i + 1, framework: "Go net",
-          handlerSymbol: undefined, middleware: [], authMechanisms: [],
+          method: "TCP",
+          path: "tcp://listener",
+          filePath,
+          startLine: i + 1,
+          framework: "Go net",
+          handlerSymbol: undefined,
+          middleware: [],
+          authMechanisms: [],
         });
       }
       if (/\bgrpc\.NewServer\s*\(/.test(line)) {
         results.push({
           id: `GRPC|grpc://server|${filePath}|${i + 1}`,
-          method: "GRPC", path: "grpc://server", filePath,
-          startLine: i + 1, framework: "gRPC",
-          handlerSymbol: undefined, middleware: [], authMechanisms: [],
+          method: "GRPC",
+          path: "grpc://server",
+          filePath,
+          startLine: i + 1,
+          framework: "gRPC",
+          handlerSymbol: undefined,
+          middleware: [],
+          authMechanisms: [],
         });
       }
       if (/\bhttp\.ListenAndServe\s*\(/.test(line)) {
         results.push({
           id: `HTTP|http://server|${filePath}|${i + 1}`,
-          method: "HTTP", path: "http://server", filePath,
-          startLine: i + 1, framework: "net/http",
-          handlerSymbol: undefined, middleware: [], authMechanisms: [],
+          method: "HTTP",
+          path: "http://server",
+          filePath,
+          startLine: i + 1,
+          framework: "net/http",
+          handlerSymbol: undefined,
+          middleware: [],
+          authMechanisms: [],
         });
       }
     }

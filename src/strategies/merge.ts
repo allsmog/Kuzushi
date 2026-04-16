@@ -1,5 +1,5 @@
-import type { Finding, CorroboratingSignal } from "../scanners/types.js";
-import type { StrategyEvidence, StrategyResult, GeneratedRule } from "./types.js";
+import type { CorroboratingSignal, Finding } from "../scanners/types.js";
+import type { GeneratedRule, StrategyEvidence, StrategyResult } from "./types.js";
 
 export interface MergedStrategyResult {
   findings: Finding[];
@@ -17,17 +17,25 @@ interface TaggedFinding {
 }
 
 /** Group findings by location (same file + line within tolerance). */
-function groupByLocation(tagged: TaggedFinding[], tolerance: number = 5): Map<string, TaggedFinding[]> {
+function groupByLocation(
+  tagged: TaggedFinding[],
+  tolerance: number = 5,
+): Map<string, TaggedFinding[]> {
   const groups = new Map<string, TaggedFinding[]>();
-  const sorted = [...tagged].sort((a, b) =>
-    a.finding.filePath.localeCompare(b.finding.filePath) || a.finding.startLine - b.finding.startLine,
+  const sorted = [...tagged].sort(
+    (a, b) =>
+      a.finding.filePath.localeCompare(b.finding.filePath) ||
+      a.finding.startLine - b.finding.startLine,
   );
 
   for (const item of sorted) {
     let matched = false;
     for (const [key, group] of groups) {
       const ref = group[0]!.finding;
-      if (ref.filePath === item.finding.filePath && Math.abs(ref.startLine - item.finding.startLine) <= tolerance) {
+      if (
+        ref.filePath === item.finding.filePath &&
+        Math.abs(ref.startLine - item.finding.startLine) <= tolerance
+      ) {
         group.push(item);
         matched = true;
         break;
@@ -45,7 +53,8 @@ function groupByLocation(tagged: TaggedFinding[], tolerance: number = 5): Map<st
 /** Select the best finding from a group (highest score). */
 function selectBestFinding(group: TaggedFinding[]): TaggedFinding {
   return group.reduce((best, current) =>
-    (current.finding.adjustedScore ?? current.finding.score) > (best.finding.adjustedScore ?? best.finding.score)
+    (current.finding.adjustedScore ?? current.finding.score) >
+    (best.finding.adjustedScore ?? best.finding.score)
       ? current
       : best,
   );
@@ -96,7 +105,11 @@ export function mergeStrategyResults(results: StrategyResult[]): MergedStrategyR
       [...strategiesThatRan].filter((s) => !strategiesThatFound.has(s)),
     );
 
-    if (strategiesThatFound.size > 0 && strategiesThatMissed.size > 0 && strategiesThatRan.size >= 3) {
+    if (
+      strategiesThatFound.size > 0 &&
+      strategiesThatMissed.size > 0 &&
+      strategiesThatRan.size >= 3
+    ) {
       if (strategiesThatFound.size >= strategiesThatMissed.size) {
         overallAgreement = "majority";
       } else {
@@ -122,11 +135,11 @@ export function mergeStrategyResults(results: StrategyResult[]): MergedStrategyR
 
     merged.push({
       ...best.finding,
-      adjustedScore: Math.min(100, (best.finding.adjustedScore ?? best.finding.score) + confidenceBoost * 100),
-      corroboratingSignals: [
-        ...(best.finding.corroboratingSignals ?? []),
-        ...corroboratingSignals,
-      ],
+      adjustedScore: Math.min(
+        100,
+        (best.finding.adjustedScore ?? best.finding.score) + confidenceBoost * 100,
+      ),
+      corroboratingSignals: [...(best.finding.corroboratingSignals ?? []), ...corroboratingSignals],
       engineProvenance: [
         ...(best.finding.engineProvenance ?? []),
         ...group.map((g) => ({

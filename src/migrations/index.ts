@@ -1,5 +1,5 @@
-export type { Migration } from "./types.js";
 export { runMigrations } from "./runner.js";
+export type { Migration } from "./types.js";
 
 import { migration001 } from "./001_initial_schema.js";
 import { migration002 } from "./002_add_scanner_column.js";

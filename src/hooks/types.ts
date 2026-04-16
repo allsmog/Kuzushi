@@ -21,8 +21,13 @@ export interface PipelineHooks {
     ctx: HookContext,
     finding: Finding,
     result: { verdict: string; confidence: number; rationale: string },
-  ): Promise<{ verdict: string; confidence: number; rationale: string }> | { verdict: string; confidence: number; rationale: string };
+  ):
+    | Promise<{ verdict: string; confidence: number; rationale: string }>
+    | { verdict: string; confidence: number; rationale: string };
 
   /** Called after entire pipeline completes. */
-  afterAll?(ctx: HookContext, summary: { findings: Finding[]; stats: Record<string, unknown> }): Promise<void> | void;
+  afterAll?(
+    ctx: HookContext,
+    summary: { findings: Finding[]; stats: Record<string, unknown> },
+  ): Promise<void> | void;
 }

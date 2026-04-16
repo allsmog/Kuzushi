@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { codeConfigDetectTask, __codeConfigDetectInternals } from "../../../src/agents/tasks/code-config-detect.js";
-import type { KuzushiConfig } from "../../../src/types.js";
+import {
+  __codeConfigDetectInternals,
+  codeConfigDetectTask,
+} from "../../../src/agents/tasks/code-config-detect.js";
 import type { TaskContext } from "../../../src/agents/types.js";
+import type { KuzushiConfig } from "../../../src/types.js";
 
-const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint, CODE_CONFIG_RELEVANCE } = __codeConfigDetectInternals;
+const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint, CODE_CONFIG_RELEVANCE } =
+  __codeConfigDetectInternals;
 
 function makeContext(overrides: Record<string, unknown> = {}): TaskContext {
   return {
@@ -27,7 +31,7 @@ function makeConfig(overrides: Record<string, unknown> = {}): KuzushiConfig {
     tasks: ["semgrep"],
     severity: ["ERROR"],
     excludePatterns: [],
-    taskConfig: overrides.taskConfig as Record<string, Record<string, unknown>> ?? {},
+    taskConfig: (overrides.taskConfig as Record<string, Record<string, unknown>>) ?? {},
   };
 }
 
@@ -68,8 +72,17 @@ describe("buildPrompt", () => {
   });
 
   it("includes all three detection sections when auth-access-detect is in scope", () => {
-    const prompt = buildPrompt(undefined, 50, [], undefined, undefined, undefined, undefined, undefined,
-      ["dangerous-api-detect", "auth-access-detect", "security-misconfig-detect"]);
+    const prompt = buildPrompt(
+      undefined,
+      50,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      ["dangerous-api-detect", "auth-access-detect", "security-misconfig-detect"],
+    );
     expect(prompt).toContain("Part 1: Dangerous API Detection");
     expect(prompt).toContain("Part 2: Auth/Access Control Detection");
     expect(prompt).toContain("Part 3: Security Misconfiguration Detection");
@@ -91,7 +104,14 @@ describe("buildPrompt", () => {
 
   it("includes framework guidance when context provided", () => {
     const prompt = buildPrompt(
-      { languages: ["TypeScript"], frameworks: ["Express"], authPatterns: [], sanitizationLibs: ["helmet"], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["TypeScript"],
+        frameworks: ["Express"],
+        authPatterns: [],
+        sanitizationLibs: ["helmet"],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       25,
     );
     expect(prompt).toContain("Express");
@@ -121,7 +141,14 @@ describe("buildPrompt", () => {
 
   it("excludes prototype-pollution for Go repos", () => {
     const prompt = buildPrompt(
-      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: [],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
     );
     expect(prompt).not.toContain("prototype-pollution");
@@ -130,7 +157,14 @@ describe("buildPrompt", () => {
 
   it("includes prototype-pollution for JS/TS repos", () => {
     const prompt = buildPrompt(
-      { languages: ["TypeScript"], frameworks: ["Express"], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["TypeScript"],
+        frameworks: ["Express"],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
     );
     expect(prompt).toContain("prototype-pollution");
@@ -138,7 +172,14 @@ describe("buildPrompt", () => {
 
   it("excludes auth-gated categories when no auth patterns", () => {
     const prompt = buildPrompt(
-      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: [],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
     );
     expect(prompt).not.toContain("jwt-claim-manipulation");
@@ -150,9 +191,21 @@ describe("buildPrompt", () => {
 
   it("includes auth-gated categories when auth-access-detect is explicitly in scope", () => {
     const prompt = buildPrompt(
-      { languages: ["Go"], frameworks: [], authPatterns: ["JWT"], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: [],
+        authPatterns: ["JWT"],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
-      [], undefined, undefined, undefined, undefined, undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
       ["dangerous-api-detect", "auth-access-detect", "security-misconfig-detect"],
     );
     expect(prompt).toContain("jwt-claim-manipulation");
@@ -168,7 +221,14 @@ describe("buildPrompt", () => {
       patternMatches: {},
     };
     const prompt = buildPrompt(
-      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: [],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
       [],
       fileIndex,
@@ -184,7 +244,14 @@ describe("buildPrompt", () => {
       patternMatches: {},
     };
     const prompt = buildPrompt(
-      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: [],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
       [],
       fileIndex,
@@ -200,7 +267,14 @@ describe("buildPrompt", () => {
       patternMatches: {},
     };
     const prompt = buildPrompt(
-      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: [],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
       [],
       fileIndex,
@@ -210,7 +284,14 @@ describe("buildPrompt", () => {
 
   it("includes nosql-injection when MongoDB in ormOrDb", () => {
     const prompt = buildPrompt(
-      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: ["mongoose"], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: [],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: ["mongoose"],
+        entryPoints: [],
+      },
       50,
     );
     expect(prompt).toContain("nosql-injection");
@@ -218,7 +299,14 @@ describe("buildPrompt", () => {
 
   it("shows category scope header when filtering is active", () => {
     const prompt = buildPrompt(
-      { languages: ["Go"], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] },
+      {
+        languages: ["Go"],
+        frameworks: [],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
       50,
     );
     expect(prompt).toContain("Category scope");
@@ -305,22 +393,76 @@ describe("normalizeFindings", () => {
   it("handles mixed findings from all three detectors", () => {
     const raw = {
       findings: [
-        { detectorId: "dangerous-api-detect", category: "unsafe-eval", filePath: "src/a.ts", startLine: 1, severity: "ERROR", description: "eval", cwe: "94", confidence: "HIGH", rationale: "r" },
-        { detectorId: "auth-access-detect", category: "idor", filePath: "src/b.ts", startLine: 2, severity: "WARNING", description: "idor", cwe: "639", confidence: "MEDIUM", rationale: "r" },
-        { detectorId: "security-misconfig-detect", category: "insecure-cors", filePath: "src/c.ts", startLine: 3, severity: "WARNING", description: "cors", cwe: "942", confidence: "HIGH", rationale: "r" },
+        {
+          detectorId: "dangerous-api-detect",
+          category: "unsafe-eval",
+          filePath: "src/a.ts",
+          startLine: 1,
+          severity: "ERROR",
+          description: "eval",
+          cwe: "94",
+          confidence: "HIGH",
+          rationale: "r",
+        },
+        {
+          detectorId: "auth-access-detect",
+          category: "idor",
+          filePath: "src/b.ts",
+          startLine: 2,
+          severity: "WARNING",
+          description: "idor",
+          cwe: "639",
+          confidence: "MEDIUM",
+          rationale: "r",
+        },
+        {
+          detectorId: "security-misconfig-detect",
+          category: "insecure-cors",
+          filePath: "src/c.ts",
+          startLine: 3,
+          severity: "WARNING",
+          description: "cors",
+          cwe: "942",
+          confidence: "HIGH",
+          rationale: "r",
+        },
       ],
     };
 
     const findings = normalizeFindings(raw, "/tmp/repo", "test-repo", 50);
     expect(findings).toHaveLength(3);
-    expect(findings.map(f => f.taskId).sort()).toEqual(["auth-access-detect", "dangerous-api-detect", "security-misconfig-detect"]);
+    expect(findings.map((f) => f.taskId).sort()).toEqual([
+      "auth-access-detect",
+      "dangerous-api-detect",
+      "security-misconfig-detect",
+    ]);
   });
 
   it("deduplicates by fingerprint", () => {
     const raw = {
       findings: [
-        { detectorId: "dangerous-api-detect", category: "unsafe-subprocess", filePath: "src/a.ts", startLine: 1, severity: "ERROR", description: "cmd injection", cwe: "78", confidence: "HIGH", rationale: "r" },
-        { detectorId: "dangerous-api-detect", category: "unsafe-subprocess", filePath: "src/a.ts", startLine: 1, severity: "WARNING", description: "cmd injection", cwe: "78", confidence: "MEDIUM", rationale: "r" },
+        {
+          detectorId: "dangerous-api-detect",
+          category: "unsafe-subprocess",
+          filePath: "src/a.ts",
+          startLine: 1,
+          severity: "ERROR",
+          description: "cmd injection",
+          cwe: "78",
+          confidence: "HIGH",
+          rationale: "r",
+        },
+        {
+          detectorId: "dangerous-api-detect",
+          category: "unsafe-subprocess",
+          filePath: "src/a.ts",
+          startLine: 1,
+          severity: "WARNING",
+          description: "cmd injection",
+          cwe: "78",
+          confidence: "MEDIUM",
+          rationale: "r",
+        },
       ],
     };
 

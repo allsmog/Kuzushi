@@ -2,29 +2,37 @@
 // The patterns match dangerous coding practices in scanned repositories.
 // References to exec(), system(), etc. are DETECTION TARGETS, not code this file runs.
 
+import { createLogger } from "../../logger.js";
 import {
-  antiHallucinationModule,
-  frameworkAwarenessModule,
-} from "../../prompts/modules.js";
-import {
-  languageTuningModule,
-  languageInvestigationModule,
   languageAntiHallucinationExtras,
+  languageInvestigationModule,
+  languageTuningModule,
 } from "../../prompts/language-tuning.js";
-import { coerceRepoContext, coerceFileIndex } from "../../repo-context.js";
+import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
+import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
+import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import { createLogger } from "../../logger.js";
 import type { AgentTask, TaskContext } from "../types.js";
-import { preReadFilesForTask, type PreReadResult } from "./pre-read.js";
-import { formatFileTreeForPrompt, formatPreReadForPrompt, formatPatternMatchesForPrompt } from "./pre-read-prompt.js";
-import { resolveTaskModel, resolveTaskPositiveInt, resolveTaskRuntime, resolveTaskAllowedTools } from "./runtime-overrides.js";
-import { buildApplicationModelSection, buildThreatScenarioEvidenceSection } from "./scenario-guidance.js";
-import type { ApplicationModel } from "../../types.js";
-import { normalizeFilePath, computeDetectionFingerprint } from "./detection-task-utils.js";
+import { computeDetectionFingerprint, normalizeFilePath } from "./detection-task-utils.js";
+import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
+import {
+  formatFileTreeForPrompt,
+  formatPatternMatchesForPrompt,
+  formatPreReadForPrompt,
+} from "./pre-read-prompt.js";
+import {
+  resolveTaskAllowedTools,
+  resolveTaskModel,
+  resolveTaskPositiveInt,
+  resolveTaskRuntime,
+} from "./runtime-overrides.js";
+import {
+  buildApplicationModelSection,
+  buildThreatScenarioEvidenceSection,
+} from "./scenario-guidance.js";
 
 const log = createLogger({ stage: "command-injection" });
 
@@ -38,9 +46,26 @@ const COMMAND_INJECTION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "filePath", "startLine", "severity", "description", "cwe", "confidence", "rationale"],
+        required: [
+          "category",
+          "filePath",
+          "startLine",
+          "severity",
+          "description",
+          "cwe",
+          "confidence",
+          "rationale",
+        ],
         properties: {
-          category: { type: "string", enum: ["shell-execution", "argument-injection", "indirect-command", "env-var-injection"] },
+          category: {
+            type: "string",
+            enum: [
+              "shell-execution",
+              "argument-injection",
+              "indirect-command",
+              "env-var-injection",
+            ],
+          },
           filePath: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["ERROR", "WARNING", "INFO"] },
@@ -69,7 +94,14 @@ interface CommandInjectionFinding {
   inputSource?: string;
 }
 
-function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, fileIndex?: FileIndex, preRead?: PreReadResult, appModelContext?: string, scenarioContext?: string): string {
+function buildPrompt(
+  repoContext: RepoContext | undefined,
+  maxFindings: number,
+  fileIndex?: FileIndex,
+  preRead?: PreReadResult,
+  appModelContext?: string,
+  scenarioContext?: string,
+): string {
   const patternMatchText = formatPatternMatchesForPrompt(fileIndex, ["eval-exec"]);
   const contextLines = repoContext
     ? [
@@ -90,13 +122,17 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
     ...(scenarioContext ? [scenarioContext, ""] : []),
     "## Categories to detect",
     "",
-    languageTuningModule({ taskId: "command-injection", repoContext, frameworks: repoContext?.frameworks }) ||
-    [
-      "### shell-execution (CWE-78)",
-      "Direct shell command execution with user input via shell-invoking APIs.",
-      "Key: execFile/spawn WITHOUT shell option are SAFE against metacharacter injection.",
-      "Only flag when user-controlled input reaches a shell-interpreting function.",
-    ].join("\n"),
+    languageTuningModule({
+      taskId: "command-injection",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }) ||
+      [
+        "### shell-execution (CWE-78)",
+        "Direct shell command execution with user input via shell-invoking APIs.",
+        "Key: execFile/spawn WITHOUT shell option are SAFE against metacharacter injection.",
+        "Only flag when user-controlled input reaches a shell-interpreting function.",
+      ].join("\n"),
     "",
     "### argument-injection (CWE-88)",
     "User input passed as arguments to commands can inject flags/options.",
@@ -128,24 +164,39 @@ function buildPrompt(repoContext: RepoContext | undefined, maxFindings: number, 
         ]),
     "4. Verify no input validation/sanitization (allowlists, shell-quote, escapeShellArg).",
     "5. Distinguish shell-invoking from non-shell APIs — this is critical.",
-    languageInvestigationModule({ taskId: "command-injection", repoContext, frameworks: repoContext?.frameworks }),
+    languageInvestigationModule({
+      taskId: "command-injection",
+      repoContext,
+      frameworks: repoContext?.frameworks,
+    }),
     "",
     antiHallucinationModule({
       extra: [
         "execFile/spawn WITHOUT shell:true do NOT allow shell metacharacter injection.",
         "Do NOT flag commands with hardcoded strings and no user input.",
         "Do NOT flag uses of shell-quote, escapeshellarg, or equivalent sanitization.",
-        ...languageAntiHallucinationExtras({ taskId: "command-injection", repoContext, frameworks: repoContext?.frameworks }),
+        ...languageAntiHallucinationExtras({
+          taskId: "command-injection",
+          repoContext,
+          frameworks: repoContext?.frameworks,
+        }),
       ],
     }),
     frameworkAwarenessModule(repoContext),
     "",
     `Return at most ${maxFindings} findings, prioritized by severity and confidence.`,
     "Filter out any finding where your confidence would be below MEDIUM.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, maxFindings: number): Finding[] {
+function normalizeFindings(
+  raw: unknown,
+  repoRoot: string,
+  repoName: string,
+  maxFindings: number,
+): Finding[] {
   if (!isRecord(raw) || !Array.isArray(raw["findings"])) return [];
 
   const deduped = new Map<string, Finding>();
@@ -156,7 +207,13 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
 
     const filePath = normalizeFilePath(repoRoot, f.filePath);
     const cweList = f.cwe ? [f.cwe] : ["CWE-78"];
-    const fingerprint = computeDetectionFingerprint([repoName, "command-injection", f.category, filePath, String(f.startLine)]);
+    const fingerprint = computeDetectionFingerprint([
+      repoName,
+      "command-injection",
+      f.category,
+      filePath,
+      String(f.startLine),
+    ]);
     const sinkInfo = f.sinkFunction ? ` [${f.sinkFunction}]` : "";
 
     const finding: Finding = {
@@ -181,7 +238,9 @@ function normalizeFindings(raw: unknown, repoRoot: string, repoName: string, max
         cwe: cweList,
       }),
       proofState: "symbolic_only",
-      engineProvenance: [{ kind: "agentic", detail: "LLM-driven command-injection-detect analysis" }],
+      engineProvenance: [
+        { kind: "agentic", detail: "LLM-driven command-injection-detect analysis" },
+      ],
     };
 
     const existing = deduped.get(fingerprint);
@@ -201,17 +260,43 @@ export const commandInjectionTask: AgentTask<ScanOpts, Finding[]> = {
 
   async run(_input, context): Promise<Finding[]> {
     const model = resolveTaskModel(context, "command-injection-detect");
-    const maxFindings = resolveTaskPositiveInt(context, "command-injection-detect", "maxFindings", 50);
+    const maxFindings = resolveTaskPositiveInt(
+      context,
+      "command-injection-detect",
+      "maxFindings",
+      50,
+    );
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
-    const preRead = await preReadFilesForTask("command-injection-detect", fileIndex, context.repoRoot);
-    const applicationModel = context.upstreamOutputs.get("app-model-build") as ApplicationModel | undefined;
+    const preRead = await preReadFilesForTask(
+      "command-injection-detect",
+      fileIndex,
+      context.repoRoot,
+    );
+    const applicationModel = context.upstreamOutputs.get("app-model-build") as
+      | ApplicationModel
+      | undefined;
     const scenarioOutput = context.upstreamOutputs.get("threat-scenario-build");
-    const appModelContext = buildApplicationModelSection("command-injection-detect", applicationModel);
-    const scenarioContext = await buildThreatScenarioEvidenceSection("command-injection-detect", context.repoRoot, applicationModel, scenarioOutput);
+    const appModelContext = buildApplicationModelSection(
+      "command-injection-detect",
+      applicationModel,
+    );
+    const scenarioContext = await buildThreatScenarioEvidenceSection(
+      "command-injection-detect",
+      context.repoRoot,
+      applicationModel,
+      scenarioOutput,
+    );
 
     const runtime = resolveTaskRuntime(context);
-    const prompt = buildPrompt(repoContext, maxFindings, fileIndex, preRead, appModelContext, scenarioContext);
+    const prompt = buildPrompt(
+      repoContext,
+      maxFindings,
+      fileIndex,
+      preRead,
+      appModelContext,
+      scenarioContext,
+    );
     let structuredOutput: unknown;
     let costUsd = 0;
 
@@ -232,11 +317,17 @@ export const commandInjectionTask: AgentTask<ScanOpts, Finding[]> = {
       },
     })) {
       if (message.type !== "result") continue;
-      if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) costUsd = message.totalCostUsd;
+      if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd))
+        costUsd = message.totalCostUsd;
       if ("result" in message) structuredOutput = message.structuredOutput;
     }
 
-    const findings = normalizeFindings(structuredOutput, context.repoRoot, context.repoName, maxFindings);
+    const findings = normalizeFindings(
+      structuredOutput,
+      context.repoRoot,
+      context.repoName,
+      maxFindings,
+    );
     log.info(`Found ${findings.length} command injection findings (cost=$${costUsd.toFixed(4)})`);
     return attachTaskOutputMeta(findings, { costUsd });
   },
@@ -255,7 +346,9 @@ export const commandInjectionTask: AgentTask<ScanOpts, Finding[]> = {
         "2. Distinguish shell-invoking APIs from safe alternatives (execFile vs exec).",
         "3. User input actually reaches the command string or arguments.",
         "4. No sanitization (shell-quote, escapeShellArg, allowlist) prevents exploitation.",
-      ].filter(Boolean).join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 };

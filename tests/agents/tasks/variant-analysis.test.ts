@@ -159,14 +159,28 @@ describe("normalizeVariants", () => {
 
 describe("computeFingerprint", () => {
   it("produces stable fingerprints", () => {
-    const v = { filePath: "src/a.ts", startLine: 1, severity: "ERROR", message: "", confidence: "HIGH", rationale: "" };
+    const v = {
+      filePath: "src/a.ts",
+      startLine: 1,
+      severity: "ERROR",
+      message: "",
+      confidence: "HIGH",
+      rationale: "",
+    };
     const fp1 = computeFingerprint("repo", "src/a.ts", v, "sql-injection");
     const fp2 = computeFingerprint("repo", "src/a.ts", v, "sql-injection");
     expect(fp1).toBe(fp2);
   });
 
   it("differs by original ruleId", () => {
-    const v = { filePath: "src/a.ts", startLine: 1, severity: "ERROR", message: "", confidence: "HIGH", rationale: "" };
+    const v = {
+      filePath: "src/a.ts",
+      startLine: 1,
+      severity: "ERROR",
+      message: "",
+      confidence: "HIGH",
+      rationale: "",
+    };
     const fp1 = computeFingerprint("repo", "src/a.ts", v, "sql-injection");
     const fp2 = computeFingerprint("repo", "src/a.ts", v, "xss");
     expect(fp1).not.toBe(fp2);

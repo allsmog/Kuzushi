@@ -1,8 +1,11 @@
 import path from "node:path";
-import { gatherContextForRoot, type ContextGathererOutput } from "../agents/tasks/context-gatherer.js";
+import {
+  type ContextGathererOutput,
+  gatherContextForRoot,
+} from "../agents/tasks/context-gatherer.js";
 import type { DiscoveredModule } from "../discovery/types.js";
 import type { FileIndex, SecurityPatternMatch } from "../types.js";
-import type { MonorepoContextIndex, ModuleSharedContext, StaticIntelligence } from "./types.js";
+import type { ModuleSharedContext, MonorepoContextIndex, StaticIntelligence } from "./types.js";
 
 const DEFAULT_CONTEXT_CONCURRENCY = 4;
 
@@ -37,9 +40,8 @@ export async function buildMonorepoContextIndex(
   };
 
   await Promise.all(
-    Array.from(
-      { length: Math.min(DEFAULT_CONTEXT_CONCURRENCY, Math.max(1, modules.length)) },
-      () => worker(),
+    Array.from({ length: Math.min(DEFAULT_CONTEXT_CONCURRENCY, Math.max(1, modules.length)) }, () =>
+      worker(),
     ),
   );
 
@@ -63,9 +65,24 @@ async function gatherAcrossIncludePaths(
 }
 
 function mergeGatheredContexts(results: ContextGathererOutput[]): ContextGathererOutput {
-  const emptyFileIndex: FileIndex = { tree: [], totalFiles: 0, truncated: false, patternMatches: {} };
+  const emptyFileIndex: FileIndex = {
+    tree: [],
+    totalFiles: 0,
+    truncated: false,
+    patternMatches: {},
+  };
   if (results.length === 0) {
-    return { repoContext: { languages: [], frameworks: [], authPatterns: [], sanitizationLibs: [], ormOrDb: [], entryPoints: [] }, fileIndex: emptyFileIndex };
+    return {
+      repoContext: {
+        languages: [],
+        frameworks: [],
+        authPatterns: [],
+        sanitizationLibs: [],
+        ormOrDb: [],
+        entryPoints: [],
+      },
+      fileIndex: emptyFileIndex,
+    };
   }
   if (results.length === 1) return results[0];
 

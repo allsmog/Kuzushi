@@ -11,11 +11,11 @@
  *   tsx benchmarks/regression-check.ts --results metrics.json --precision-threshold 0.02
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import chalk from "chalk";
-import type { BenchmarkMetrics, BaselineMetrics, CweMetrics } from "./types.js";
+import type { BaselineMetrics, BenchmarkMetrics, CweMetrics } from "./types.js";
 
 // ── CLI argument parsing ──
 
@@ -52,7 +52,11 @@ ${chalk.yellow("Options:")}
 }
 
 if (!args.results) {
-  console.error(chalk.red("Error: --results is required. Provide one or more comma-separated metric file paths."));
+  console.error(
+    chalk.red(
+      "Error: --results is required. Provide one or more comma-separated metric file paths.",
+    ),
+  );
   process.exit(1);
 }
 
@@ -124,15 +128,13 @@ function compareDataset(
   const precisionDelta = roundDelta(current.precision - baseline.precision);
   const recallDelta = roundDelta(current.recall - baseline.recall);
   const f1Delta = roundDelta(current.f1 - baseline.f1);
-  const costDeltaRatio = baseline.costUsd > 0
-    ? roundDelta((current.costUsd - baseline.costUsd) / baseline.costUsd)
-    : 0;
+  const costDeltaRatio =
+    baseline.costUsd > 0 ? roundDelta((current.costUsd - baseline.costUsd) / baseline.costUsd) : 0;
 
   const precisionFail = precisionDelta < -PRECISION_THRESHOLD;
   const recallFail = recallDelta < -RECALL_THRESHOLD;
-  const costFail = baseline.costUsd > 0
-    && costDeltaRatio > COST_THRESHOLD
-    && current.tp <= baseline.tp;
+  const costFail =
+    baseline.costUsd > 0 && costDeltaRatio > COST_THRESHOLD && current.tp <= baseline.tp;
 
   // Per-CWE warnings: flag any CWE where precision or recall dropped by more
   // than double the aggregate thresholds (significant per-CWE regression).
@@ -149,13 +151,13 @@ function compareDataset(
     if (cwePrecDelta < -(PRECISION_THRESHOLD * cweThresholdMultiplier)) {
       cweWarnings.push(
         `${cwe}: precision dropped ${formatDelta(cwePrecDelta)} ` +
-        `(${formatPct(baselineCwe.precision)} -> ${formatPct(currentCwe.precision)})`,
+          `(${formatPct(baselineCwe.precision)} -> ${formatPct(currentCwe.precision)})`,
       );
     }
     if (cweRecDelta < -(RECALL_THRESHOLD * cweThresholdMultiplier)) {
       cweWarnings.push(
         `${cwe}: recall dropped ${formatDelta(cweRecDelta)} ` +
-        `(${formatPct(baselineCwe.recall)} -> ${formatPct(currentCwe.recall)})`,
+          `(${formatPct(baselineCwe.recall)} -> ${formatPct(currentCwe.recall)})`,
       );
     }
   }
@@ -221,13 +223,26 @@ function printComparisonTable(results: RegressionResult[]): void {
   console.log(chalk.bold.underline("Regression Check Results"));
   console.log();
 
-  const headers = ["Dataset", "Precision (before)", "Precision (after)", "Prec Delta", "Recall (before)", "Recall (after)", "Rec Delta", "Cost Delta", "F1 Delta", "Status"];
+  const headers = [
+    "Dataset",
+    "Precision (before)",
+    "Precision (after)",
+    "Prec Delta",
+    "Recall (before)",
+    "Recall (after)",
+    "Rec Delta",
+    "Cost Delta",
+    "F1 Delta",
+    "Status",
+  ];
   const rows: string[][] = [];
 
   for (const r of results) {
     const precBefore = r.before ? formatPct(r.before.precision) : chalk.dim("n/a");
     const precAfter = formatPct(r.after.precision);
-    const precDelta = r.before ? colorDelta(r.precisionDelta, PRECISION_THRESHOLD) : chalk.dim("new");
+    const precDelta = r.before
+      ? colorDelta(r.precisionDelta, PRECISION_THRESHOLD)
+      : chalk.dim("new");
 
     const recBefore = r.before ? formatPct(r.before.recall) : chalk.dim("n/a");
     const recAfter = formatPct(r.after.recall);
@@ -251,7 +266,18 @@ function printComparisonTable(results: RegressionResult[]): void {
       status = chalk.red(`FAIL (${reasons.join(", ")})`);
     }
 
-    rows.push([r.dataset, precBefore, precAfter, precDelta, recBefore, recAfter, recDelta, costDelta, f1Delta, status]);
+    rows.push([
+      r.dataset,
+      precBefore,
+      precAfter,
+      precDelta,
+      recBefore,
+      recAfter,
+      recDelta,
+      costDelta,
+      f1Delta,
+      status,
+    ]);
   }
 
   printTable(headers, rows);
@@ -306,7 +332,9 @@ function main(): void {
   console.log(`  Results: ${resultPaths.join(", ")}`);
   console.log(`  Precision threshold: ${formatPct(PRECISION_THRESHOLD)} drop`);
   console.log(`  Recall threshold: ${formatPct(RECALL_THRESHOLD)} drop`);
-  console.log(`  Cost threshold: ${(COST_THRESHOLD * 100).toFixed(1)}% increase unless TP count improves`);
+  console.log(
+    `  Cost threshold: ${(COST_THRESHOLD * 100).toFixed(1)}% increase unless TP count improves`,
+  );
 
   const baseline = loadBaseline(baselinePath);
   const metricsFiles = resultPaths.map(loadMetrics);
@@ -334,7 +362,7 @@ function main(): void {
         console.log(
           chalk.red(
             `  ${f.dataset}: precision dropped ${formatDelta(f.precisionDelta)} ` +
-            `(threshold: ${formatPct(PRECISION_THRESHOLD)})`,
+              `(threshold: ${formatPct(PRECISION_THRESHOLD)})`,
           ),
         );
       }
@@ -342,7 +370,7 @@ function main(): void {
         console.log(
           chalk.red(
             `  ${f.dataset}: recall dropped ${formatDelta(f.recallDelta)} ` +
-            `(threshold: ${formatPct(RECALL_THRESHOLD)})`,
+              `(threshold: ${formatPct(RECALL_THRESHOLD)})`,
           ),
         );
       }
@@ -350,7 +378,7 @@ function main(): void {
         console.log(
           chalk.red(
             `  ${f.dataset}: cost increased ${formatCostDelta(f.costDeltaRatio)} ` +
-            `without TP improvement (threshold: ${(COST_THRESHOLD * 100).toFixed(1)}%)`,
+              `without TP improvement (threshold: ${(COST_THRESHOLD * 100).toFixed(1)}%)`,
           ),
         );
       }
@@ -362,7 +390,9 @@ function main(): void {
 
   if (totalWarnings > 0) {
     console.log(
-      chalk.yellow(`${totalWarnings} per-CWE warning(s) detected, but aggregate thresholds passed.`),
+      chalk.yellow(
+        `${totalWarnings} per-CWE warning(s) detected, but aggregate thresholds passed.`,
+      ),
     );
   }
 

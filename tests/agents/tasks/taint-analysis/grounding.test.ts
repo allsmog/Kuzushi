@@ -1,8 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { groundCallableTargets, groundNamedHints } from "../../../../src/agents/tasks/taint-analysis/grounding.js";
+import {
+  groundCallableTargets,
+  groundNamedHints,
+} from "../../../../src/agents/tasks/taint-analysis/grounding.js";
 
 const tempDirs: string[] = [];
 
@@ -33,11 +36,13 @@ describe("taint-analysis grounding", () => {
       ].join("\n"),
     });
 
-    const [grounded] = await groundCallableTargets(repoRoot, [{
-      callable: "query",
-      receiverHint: "db",
-      argIndex: 1,
-    }]);
+    const [grounded] = await groundCallableTargets(repoRoot, [
+      {
+        callable: "query",
+        receiverHint: "db",
+        argIndex: 1,
+      },
+    ]);
 
     expect(grounded.grounding.status).toBe("verified");
     expect(grounded.grounding.matchCount).toBeGreaterThan(0);
@@ -49,11 +54,13 @@ describe("taint-analysis grounding", () => {
       "src/app.ts": "console.log('hello');\n",
     });
 
-    const [grounded] = await groundCallableTargets(repoRoot, [{
-      callable: "definitelyMissingSink",
-      receiverHint: "db",
-      argIndex: 0,
-    }]);
+    const [grounded] = await groundCallableTargets(repoRoot, [
+      {
+        callable: "definitelyMissingSink",
+        receiverHint: "db",
+        argIndex: 0,
+      },
+    ]);
 
     expect(grounded.grounding.status).toBe("invalid");
     expect(grounded.grounding.reasons).toContain("callable_not_found_in_repo");
@@ -61,7 +68,7 @@ describe("taint-analysis grounding", () => {
 
   it("grounds named hints from repo text", async () => {
     const repoRoot = createRepo({
-      "src/sql.ts": "builder.Raw(\"select 1\")\n",
+      "src/sql.ts": 'builder.Raw("select 1")\n',
     });
 
     const [present, missing] = await groundNamedHints(repoRoot, ["Raw", "Sprintf"]);

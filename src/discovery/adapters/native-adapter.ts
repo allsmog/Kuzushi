@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_IGNORED_DIRS } from "../../repo-walk.js";
-import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 import { normalizePromptPath, readFirstSnippet } from "../helpers.js";
+import type { DiscoveryAdapter, RawDiscoveryNode } from "./types.js";
 
 export class NativeAdapter implements DiscoveryAdapter {
   readonly id = "native";
@@ -52,9 +52,7 @@ async function walkForSConstruct(
   if (depth > maxDepth) return;
 
   if (existsSync(path.join(currentDir, "SConstruct"))) {
-    results.push(normalizePromptPath(
-      path.relative(repoRoot, path.join(currentDir, "SConstruct")),
-    ));
+    results.push(normalizePromptPath(path.relative(repoRoot, path.join(currentDir, "SConstruct"))));
   }
 
   if (depth >= maxDepth) return;
@@ -69,6 +67,12 @@ async function walkForSConstruct(
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     if (entry.name.startsWith(".") || DEFAULT_IGNORED_DIRS.has(entry.name)) continue;
-    await walkForSConstruct(repoRoot, path.join(currentDir, entry.name), depth + 1, maxDepth, results);
+    await walkForSConstruct(
+      repoRoot,
+      path.join(currentDir, entry.name),
+      depth + 1,
+      maxDepth,
+      results,
+    );
   }
 }

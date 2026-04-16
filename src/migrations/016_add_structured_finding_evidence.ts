@@ -8,8 +8,9 @@ export const migration016: Migration = {
   name: "add_structured_finding_evidence",
   up(db) {
     const columns = new Set(
-      (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>)
-        .map((column) => column.name),
+      (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map(
+        (column) => column.name,
+      ),
     );
 
     if (!columns.has("taint_path_json")) {

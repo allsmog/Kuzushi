@@ -1,7 +1,7 @@
-import { ScannerRegistry } from "./registry.js";
-import { SemgrepPlugin } from "./semgrep.js";
 import { AgenticPlugin } from "./agentic.js";
 import { CodeQLPlugin } from "./codeql.js";
+import { ScannerRegistry } from "./registry.js";
+import { SemgrepPlugin } from "./semgrep.js";
 
 export function createDefaultRegistry(): ScannerRegistry {
   const registry = new ScannerRegistry();
@@ -11,5 +11,5 @@ export function createDefaultRegistry(): ScannerRegistry {
   return registry;
 }
 
-export * from "./types.js";
 export * from "./registry.js";
+export * from "./types.js";

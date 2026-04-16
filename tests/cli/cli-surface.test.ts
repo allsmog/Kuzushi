@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "..", "..");
 const tsxBin = path.join(repoRoot, "node_modules", ".bin", "tsx");
@@ -20,10 +20,13 @@ function makeTempRepo(): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), "kuzushi-cli-"));
   tempDirs.push(dir);
   mkdirSync(path.join(dir, ".kuzushi"), { recursive: true });
-  writeFileSync(path.join(dir, "package.json"), JSON.stringify({
-    name: "tmp-repo",
-    private: true,
-  }));
+  writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({
+      name: "tmp-repo",
+      private: true,
+    }),
+  );
   return dir;
 }
 
@@ -58,7 +61,13 @@ describe("CLI surface", () => {
 
   it("rejects --module-filter for single-root scans", () => {
     const repoDir = makeTempRepo();
-    const result = runCli(["scan", repoDir, "--no-module-discovery", "--module-filter", "platform*"]);
+    const result = runCli([
+      "scan",
+      repoDir,
+      "--no-module-discovery",
+      "--module-filter",
+      "platform*",
+    ]);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("--module-filter");
   }, 40000);

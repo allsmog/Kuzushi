@@ -2,7 +2,7 @@
  * React hooks for subscribing to the UIStore.
  */
 import { useSyncExternalStore } from "react";
-import type { UIStore, UIState, Phase } from "./state.js";
+import type { Phase, UIState, UIStore } from "./state.js";
 
 /**
  * Subscribe to the full UIState — triggers re-render on any store change.

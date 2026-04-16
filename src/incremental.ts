@@ -11,9 +11,11 @@ const EXEC_TIMEOUT_MS = 30_000;
  * Get the HEAD ref from the last successful pipeline run for this repo.
  */
 export function getLastSuccessfulHeadRef(db: Database.Database, repo: string): string | null {
-  const row = db.prepare(
-    `SELECT head_ref FROM pipeline_runs WHERE repo = ? AND status = 'complete' AND head_ref IS NOT NULL ORDER BY completed_at DESC LIMIT 1`,
-  ).get(repo) as { head_ref: string } | undefined;
+  const row = db
+    .prepare(
+      `SELECT head_ref FROM pipeline_runs WHERE repo = ? AND status = 'complete' AND head_ref IS NOT NULL ORDER BY completed_at DESC LIMIT 1`,
+    )
+    .get(repo) as { head_ref: string } | undefined;
   return row?.head_ref ?? null;
 }
 
@@ -28,9 +30,7 @@ export function storeHeadRef(db: Database.Database, runId: string, repoRoot: str
       timeout: EXEC_TIMEOUT_MS,
     }).trim();
 
-    db.prepare(
-      `UPDATE pipeline_runs SET head_ref = ? WHERE run_id = ?`,
-    ).run(headRef, runId);
+    db.prepare(`UPDATE pipeline_runs SET head_ref = ? WHERE run_id = ?`).run(headRef, runId);
   } catch {
     log.warn("Failed to store HEAD ref for incremental scanning");
   }
@@ -57,11 +57,11 @@ function getCurrentHeadRef(repoRoot: string): string | null {
  */
 function computeChangedFiles(repoRoot: string, baseRef: string): string[] {
   try {
-    const output = execFileSync(
-      "git",
-      ["diff", "--name-only", `${baseRef}..HEAD`],
-      { cwd: repoRoot, encoding: "utf-8", timeout: EXEC_TIMEOUT_MS },
-    );
+    const output = execFileSync("git", ["diff", "--name-only", `${baseRef}..HEAD`], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      timeout: EXEC_TIMEOUT_MS,
+    });
     return output
       .split("\n")
       .map((line) => line.trim())
@@ -115,7 +115,9 @@ export function expandWithDependents(
   }
 
   if (depExpandedCount > 0) {
-    log.info(`Dependency propagation: ${changedFiles.length} changed → ${expandedSet.size} total (${depExpandedCount} importers added)`);
+    log.info(
+      `Dependency propagation: ${changedFiles.length} changed → ${expandedSet.size} total (${depExpandedCount} importers added)`,
+    );
   }
 
   return { expanded: [...expandedSet], depExpandedCount };

@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  parseTaskManifest,
-  loadTaskManifest,
   checkRequirements,
   fingerprintTaskCode,
+  loadTaskManifest,
+  parseTaskManifest,
   type TaskManifest,
 } from "../../src/agents/task-manifest.js";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
 
 const VALID_MANIFEST = {
   id: "test-scanner",
@@ -101,10 +101,7 @@ describe("loadTaskManifest", () => {
   });
 
   it("loads and validates a manifest file", () => {
-    writeFileSync(
-      path.join(tmpDir, "task.manifest.json"),
-      JSON.stringify(VALID_MANIFEST),
-    );
+    writeFileSync(path.join(tmpDir, "task.manifest.json"), JSON.stringify(VALID_MANIFEST));
     const result = loadTaskManifest(tmpDir);
     expect(result).toBeDefined();
     expect(result!.valid).toBe(true);
@@ -112,10 +109,7 @@ describe("loadTaskManifest", () => {
   });
 
   it("reports validation errors for invalid manifest file", () => {
-    writeFileSync(
-      path.join(tmpDir, "task.manifest.json"),
-      JSON.stringify({ id: 123 }),
-    );
+    writeFileSync(path.join(tmpDir, "task.manifest.json"), JSON.stringify({ id: 123 }));
     const result = loadTaskManifest(tmpDir);
     expect(result).toBeDefined();
     expect(result!.valid).toBe(false);

@@ -1,16 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { createWriteStream, chmodSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { pipeline } from "node:stream/promises";
-import { get } from "node:https";
-import path from "node:path";
-import os from "node:os";
+import { chmodSync, createWriteStream, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
+import { get } from "node:https";
+import os from "node:os";
+import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { getHttpsAgent } from "../http-agent.js";
 import { emitOutputNotice } from "../ui/output.js";
 
 const BIN_DIR = path.join(os.homedir(), ".kuzushi", "bin");
-const GITHUB_RELEASE_URL =
-  "https://api.github.com/repos/opengrep/opengrep/releases/latest";
+const GITHUB_RELEASE_URL = "https://api.github.com/repos/opengrep/opengrep/releases/latest";
 const MAX_REDIRECTS = 10;
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -42,35 +41,39 @@ function which(name: string): string | null {
 /** Follow redirects and return the final response. */
 function httpsGet(url: string, redirectCount: number = 0): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
-    const req = get(url, { agent: getHttpsAgent(), headers: { "User-Agent": "kuzushi/0.1" } }, (res) => {
-      if (
-        res.statusCode
-        && res.statusCode >= 300
-        && res.statusCode < 400
-        && typeof res.headers.location === "string"
-      ) {
-        if (redirectCount >= MAX_REDIRECTS) {
+    const req = get(
+      url,
+      { agent: getHttpsAgent(), headers: { "User-Agent": "kuzushi/0.1" } },
+      (res) => {
+        if (
+          res.statusCode &&
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          typeof res.headers.location === "string"
+        ) {
+          if (redirectCount >= MAX_REDIRECTS) {
+            res.resume();
+            reject(new Error(`Too many redirects while fetching ${url}`));
+            return;
+          }
+
+          const redirectUrl = new URL(res.headers.location, url).toString();
+          if (!redirectUrl.startsWith("https://")) {
+            res.resume();
+            reject(new Error(`Refusing to follow non-HTTPS redirect: ${redirectUrl}`));
+            return;
+          }
           res.resume();
-          reject(new Error(`Too many redirects while fetching ${url}`));
+          httpsGet(redirectUrl, redirectCount + 1).then(resolve, reject);
           return;
         }
 
-        const redirectUrl = new URL(res.headers.location, url).toString();
-        if (!redirectUrl.startsWith("https://")) {
-          res.resume();
-          reject(new Error(`Refusing to follow non-HTTPS redirect: ${redirectUrl}`));
-          return;
-        }
-        res.resume();
-        httpsGet(redirectUrl, redirectCount + 1).then(resolve, reject);
-        return;
-      }
-
-      res.setTimeout(REQUEST_TIMEOUT_MS, () => {
-        res.destroy(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${url}`));
-      });
-      resolve(res);
-    });
+        res.setTimeout(REQUEST_TIMEOUT_MS, () => {
+          res.destroy(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${url}`));
+        });
+        resolve(res);
+      },
+    );
 
     req.setTimeout(REQUEST_TIMEOUT_MS, () => {
       req.destroy(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${url}`));
@@ -87,9 +90,7 @@ async function getLatestReleaseDownloadUrl(assetName: string): Promise<string> {
   for await (const chunk of res) chunks.push(chunk as Buffer);
   const body = JSON.parse(Buffer.concat(chunks).toString());
 
-  const asset = body.assets?.find(
-    (a: { name: string }) => a.name === assetName,
-  );
+  const asset = body.assets?.find((a: { name: string }) => a.name === assetName);
   if (!asset) {
     throw new Error(
       `Could not find asset "${assetName}" in latest opengrep release (${body.tag_name}).`,

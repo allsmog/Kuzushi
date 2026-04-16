@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { executeTool } from "../../src/agent-runtime/tools.js";
 
 const tempDirs: string[] = [];
@@ -13,20 +13,12 @@ function makeTempWorkspace(): string {
   mkdirSync(path.join(dir, "scripts"), { recursive: true });
   writeFileSync(
     path.join(dir, "src", "app.ts"),
-    [
-      "export function a() {",
-      "  // TODO: sanitize input",
-      "  return 1;",
-      "}",
-    ].join("\n"),
+    ["export function a() {", "  // TODO: sanitize input", "  return 1;", "}"].join("\n"),
     "utf8",
   );
   writeFileSync(
     path.join(dir, "scripts", "util.ts"),
-    [
-      "export const util = true;",
-      "// TODO: tighten validation",
-    ].join("\n"),
+    ["export const util = true;", "// TODO: tighten validation"].join("\n"),
     "utf8",
   );
   writeFileSync(path.join(dir, "README.md"), "hello", "utf8");
@@ -42,11 +34,15 @@ afterEach(() => {
 describe("agent-runtime tools", () => {
   it("Read returns line-numbered slices", async () => {
     const cwd = makeTempWorkspace();
-    const output = await executeTool("Read", {
-      path: "src/app.ts",
-      offset: 1,
-      limit: 2,
-    }, cwd);
+    const output = await executeTool(
+      "Read",
+      {
+        path: "src/app.ts",
+        offset: 1,
+        limit: 2,
+      },
+      cwd,
+    );
 
     expect(output).toContain("2 |   // TODO: sanitize input");
     expect(output).toContain("3 |   return 1;");
@@ -55,10 +51,14 @@ describe("agent-runtime tools", () => {
 
   it("Glob matches files from the selected root", async () => {
     const cwd = makeTempWorkspace();
-    const output = await executeTool("Glob", {
-      pattern: "**/*.ts",
-      path: "src",
-    }, cwd);
+    const output = await executeTool(
+      "Glob",
+      {
+        pattern: "**/*.ts",
+        path: "src",
+      },
+      cwd,
+    );
 
     expect(output).toContain("src/app.ts");
     expect(output).not.toContain("scripts/util.ts");
@@ -66,10 +66,14 @@ describe("agent-runtime tools", () => {
 
   it("Grep returns file:line:content matches", async () => {
     const cwd = makeTempWorkspace();
-    const output = await executeTool("Grep", {
-      pattern: "TODO",
-      glob: "**/*.ts",
-    }, cwd);
+    const output = await executeTool(
+      "Grep",
+      {
+        pattern: "TODO",
+        glob: "**/*.ts",
+      },
+      cwd,
+    );
 
     expect(output).toContain("src/app.ts:2:  // TODO: sanitize input");
     expect(output).toContain("scripts/util.ts:2:// TODO: tighten validation");
@@ -77,22 +81,32 @@ describe("agent-runtime tools", () => {
 
   it("throws for unsupported tool names", async () => {
     const cwd = makeTempWorkspace();
-    await expect(executeTool("Unknown", {}, cwd)).rejects.toThrow(
-      "Unsupported tool",
-    );
+    await expect(executeTool("Unknown", {}, cwd)).rejects.toThrow("Unsupported tool");
   });
 
   it("rejects paths that escape the workspace root", async () => {
     const cwd = makeTempWorkspace();
     const outsidePath = path.resolve(cwd, "..", "outside.txt");
 
-    await expect(executeTool("Read", {
-      path: outsidePath,
-    }, cwd)).rejects.toThrow("Path escapes repository root");
+    await expect(
+      executeTool(
+        "Read",
+        {
+          path: outsidePath,
+        },
+        cwd,
+      ),
+    ).rejects.toThrow("Path escapes repository root");
 
-    await expect(executeTool("Read", {
-      path: "../outside.txt",
-    }, cwd)).rejects.toThrow("Path escapes repository root");
+    await expect(
+      executeTool(
+        "Read",
+        {
+          path: "../outside.txt",
+        },
+        cwd,
+      ),
+    ).rejects.toThrow("Path escapes repository root");
   });
 });
 
@@ -205,25 +219,25 @@ function makeSemanticWorkspace(): string {
 
   writeFileSync(
     path.join(dir, "tsconfig.json"),
-    JSON.stringify({
-      compilerOptions: {
-        target: "ES2020",
-        module: "ESNext",
-        moduleResolution: "Node",
-        strict: true,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2020",
+          module: "ESNext",
+          moduleResolution: "Node",
+          strict: true,
+        },
+        include: ["src/**/*.ts"],
       },
-      include: ["src/**/*.ts"],
-    }, null, 2),
+      null,
+      2,
+    ),
     "utf8",
   );
 
   writeFileSync(
     path.join(dir, "src", "dep.ts"),
-    [
-      "export function greet(name: string): string {",
-      "  return `hi ${name}`;",
-      "}",
-    ].join("\n"),
+    ["export function greet(name: string): string {", "  return `hi ${name}`;", "}"].join("\n"),
     "utf8",
   );
 
@@ -243,10 +257,7 @@ function makeSemanticWorkspace(): string {
 
   writeFileSync(
     path.join(dir, "src", "worker.py"),
-    [
-      "def greet(name):",
-      "    return f'hi {name}'",
-    ].join("\n"),
+    ["def greet(name):", "    return f'hi {name}'"].join("\n"),
     "utf8",
   );
 
@@ -256,10 +267,14 @@ function makeSemanticWorkspace(): string {
 describe("GetFunctionBody", () => {
   it("finds JS/TS function declarations", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetFunctionBody", {
-      name: "handleRequest",
-      file_path: "src/handler.ts",
-    }, cwd);
+    const output = await executeTool(
+      "GetFunctionBody",
+      {
+        name: "handleRequest",
+        file_path: "src/handler.ts",
+      },
+      cwd,
+    );
 
     expect(output).toContain("src/handler.ts:4");
     expect(output).toContain("export function handleRequest");
@@ -269,10 +284,14 @@ describe("GetFunctionBody", () => {
 
   it("finds Python def declarations", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetFunctionBody", {
-      name: "process_input",
-      file_path: "src/app.py",
-    }, cwd);
+    const output = await executeTool(
+      "GetFunctionBody",
+      {
+        name: "process_input",
+        file_path: "src/app.py",
+      },
+      cwd,
+    );
 
     expect(output).toContain("src/app.py:1");
     expect(output).toContain("def process_input");
@@ -281,10 +300,14 @@ describe("GetFunctionBody", () => {
 
   it("finds Go func declarations", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetFunctionBody", {
-      name: "HandleHTTP",
-      file_path: "src/main.go",
-    }, cwd);
+    const output = await executeTool(
+      "GetFunctionBody",
+      {
+        name: "HandleHTTP",
+        file_path: "src/main.go",
+      },
+      cwd,
+    );
 
     expect(output).toContain("src/main.go:3");
     expect(output).toContain("func HandleHTTP");
@@ -293,9 +316,13 @@ describe("GetFunctionBody", () => {
 
   it("searches the entire repo when file_path is omitted", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetFunctionBody", {
-      name: "sanitize",
-    }, cwd);
+    const output = await executeTool(
+      "GetFunctionBody",
+      {
+        name: "sanitize",
+      },
+      cwd,
+    );
 
     expect(output).toContain("lib/sanitize.ts");
     expect(output).toContain("function sanitize");
@@ -303,29 +330,43 @@ describe("GetFunctionBody", () => {
 
   it("returns not found for nonexistent function", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetFunctionBody", {
-      name: "doesNotExist",
-      file_path: "src/handler.ts",
-    }, cwd);
+    const output = await executeTool(
+      "GetFunctionBody",
+      {
+        name: "doesNotExist",
+        file_path: "src/handler.ts",
+      },
+      cwd,
+    );
 
     expect(output).toContain("not found");
   });
 
   it("throws for missing file", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    await expect(executeTool("GetFunctionBody", {
-      name: "foo",
-      file_path: "nonexistent.ts",
-    }, cwd)).rejects.toThrow("file not found");
+    await expect(
+      executeTool(
+        "GetFunctionBody",
+        {
+          name: "foo",
+          file_path: "nonexistent.ts",
+        },
+        cwd,
+      ),
+    ).rejects.toThrow("file not found");
   });
 
   it("finds Go receiver method declarations", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetFunctionBody", {
-      name: "ServeHTTP",
-      file_path: "src/main.go",
-      language: "go",
-    }, cwd);
+    const output = await executeTool(
+      "GetFunctionBody",
+      {
+        name: "ServeHTTP",
+        file_path: "src/main.go",
+        language: "go",
+      },
+      cwd,
+    );
 
     expect(output).toContain("src/main.go");
     expect(output).toContain("ServeHTTP");
@@ -333,11 +374,15 @@ describe("GetFunctionBody", () => {
 
   it("finds Python class declarations", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetFunctionBody", {
-      name: "UserService",
-      file_path: "src/app.py",
-      language: "py",
-    }, cwd);
+    const output = await executeTool(
+      "GetFunctionBody",
+      {
+        name: "UserService",
+        file_path: "src/app.py",
+        language: "py",
+      },
+      cwd,
+    );
 
     expect(output).toContain("class UserService");
   });
@@ -346,9 +391,13 @@ describe("GetFunctionBody", () => {
 describe("GetCallers", () => {
   it("finds call sites across the codebase", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallers", {
-      name: "handleRequest",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallers",
+      {
+        name: "handleRequest",
+      },
+      cwd,
+    );
 
     expect(output).toContain("src/routes.ts");
     expect(output).toContain("handleRequest");
@@ -358,9 +407,13 @@ describe("GetCallers", () => {
 
   it("finds call sites for sanitize", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallers", {
-      name: "sanitize",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallers",
+      {
+        name: "sanitize",
+      },
+      cwd,
+    );
 
     expect(output).toContain("src/handler.ts");
     expect(output).toContain("sanitize(req.body)");
@@ -368,10 +421,14 @@ describe("GetCallers", () => {
 
   it("respects max_results", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallers", {
-      name: "sanitize",
-      max_results: 1,
-    }, cwd);
+    const output = await executeTool(
+      "GetCallers",
+      {
+        name: "sanitize",
+        max_results: 1,
+      },
+      cwd,
+    );
 
     const lines = output.split("\n").filter(Boolean);
     // At most 1 result line + possible truncation message
@@ -380,19 +437,27 @@ describe("GetCallers", () => {
 
   it("scopes search to a directory", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallers", {
-      name: "handleRequest",
-      path: "lib",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallers",
+      {
+        name: "handleRequest",
+        path: "lib",
+      },
+      cwd,
+    );
 
     expect(output).toContain("No callers found");
   });
 
   it("returns no callers for unused function", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallers", {
-      name: "formatResponse",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallers",
+      {
+        name: "formatResponse",
+      },
+      cwd,
+    );
 
     // formatResponse is called inside handleRequest
     expect(output).toContain("src/handler.ts");
@@ -402,10 +467,14 @@ describe("GetCallers", () => {
 describe("GetCallees", () => {
   it("extracts function calls from a function body", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallees", {
-      name: "handleRequest",
-      file_path: "src/handler.ts",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallees",
+      {
+        name: "handleRequest",
+        file_path: "src/handler.ts",
+      },
+      cwd,
+    );
 
     expect(output).toContain("sanitize");
     expect(output).toContain("formatResponse");
@@ -413,20 +482,28 @@ describe("GetCallees", () => {
 
   it("extracts method calls", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallees", {
-      name: "handleRequest",
-      file_path: "src/handler.ts",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallees",
+      {
+        name: "handleRequest",
+        file_path: "src/handler.ts",
+      },
+      cwd,
+    );
 
     expect(output).toContain("query");
   });
 
   it("filters out language keywords", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallees", {
-      name: "handleRequest",
-      file_path: "src/handler.ts",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallees",
+      {
+        name: "handleRequest",
+        file_path: "src/handler.ts",
+      },
+      cwd,
+    );
 
     expect(output).not.toContain("return");
     expect(output).not.toContain("import");
@@ -434,10 +511,14 @@ describe("GetCallees", () => {
 
   it("deduplicates callees", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallees", {
-      name: "handleRequest",
-      file_path: "src/handler.ts",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallees",
+      {
+        name: "handleRequest",
+        file_path: "src/handler.ts",
+      },
+      cwd,
+    );
 
     const callees = output.split("\n").filter(Boolean);
     const unique = new Set(callees);
@@ -446,27 +527,41 @@ describe("GetCallees", () => {
 
   it("returns not found for nonexistent function", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallees", {
-      name: "doesNotExist",
-      file_path: "src/handler.ts",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallees",
+      {
+        name: "doesNotExist",
+        file_path: "src/handler.ts",
+      },
+      cwd,
+    );
 
     expect(output).toContain("not found");
   });
 
   it("requires file_path", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    await expect(executeTool("GetCallees", {
-      name: "handleRequest",
-    }, cwd)).rejects.toThrow("requires a file_path");
+    await expect(
+      executeTool(
+        "GetCallees",
+        {
+          name: "handleRequest",
+        },
+        cwd,
+      ),
+    ).rejects.toThrow("requires a file_path");
   });
 
   it("extracts callees from Python function", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallees", {
-      name: "process_input",
-      file_path: "src/app.py",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallees",
+      {
+        name: "process_input",
+        file_path: "src/app.py",
+      },
+      cwd,
+    );
 
     expect(output).toContain("sanitize_input");
     expect(output).toContain("run_query");
@@ -474,10 +569,14 @@ describe("GetCallees", () => {
 
   it("returns no callees for a function with no calls", async () => {
     const cwd = makeCrossProceduralWorkspace();
-    const output = await executeTool("GetCallees", {
-      name: "sanitize",
-      file_path: "lib/sanitize.ts",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallees",
+      {
+        name: "sanitize",
+        file_path: "lib/sanitize.ts",
+      },
+      cwd,
+    );
 
     // sanitize only calls .replace() which is a method call
     expect(output).toContain("replace");
@@ -487,10 +586,14 @@ describe("GetCallees", () => {
     const cwd = makeCrossProceduralWorkspace();
     // handleRequest ends before formatResponse starts.
     // formatResponse calls JSON.stringify — that should NOT appear in handleRequest's callees
-    const output = await executeTool("GetCallees", {
-      name: "handleRequest",
-      file_path: "src/handler.ts",
-    }, cwd);
+    const output = await executeTool(
+      "GetCallees",
+      {
+        name: "handleRequest",
+        file_path: "src/handler.ts",
+      },
+      cwd,
+    );
 
     expect(output).not.toContain("stringify");
   });
@@ -512,10 +615,14 @@ describe("GetCallees", () => {
       ].join("\n"),
       "utf8",
     );
-    const output = await executeTool("GetCallees", {
-      name: "factorial",
-      file_path: "recurse.ts",
-    }, dir);
+    const output = await executeTool(
+      "GetCallees",
+      {
+        name: "factorial",
+        file_path: "recurse.ts",
+      },
+      dir,
+    );
 
     // factorial calls itself recursively — self-call should be excluded
     // but the output should list callees as individual lines, not contain "factorial" as a callee line
@@ -540,16 +647,16 @@ describe("Cross-procedural tools - regression tests", () => {
     );
     writeFileSync(
       path.join(dir, "work.ts"),
-      [
-        "export function doWork(n: number) {",
-        "  return n * 2;",
-        "}",
-      ].join("\n"),
+      ["export function doWork(n: number) {", "  return n * 2;", "}"].join("\n"),
       "utf8",
     );
-    const output = await executeTool("GetCallers", {
-      name: "doWork",
-    }, dir);
+    const output = await executeTool(
+      "GetCallers",
+      {
+        name: "doWork",
+      },
+      dir,
+    );
 
     // The line-start call "doWork(42);" must appear as a caller, not be filtered as a definition
     expect(output).toContain("caller.ts");
@@ -559,20 +666,38 @@ describe("Cross-procedural tools - regression tests", () => {
   it("GetFunctionBody and GetCallers reject paths escaping the workspace", async () => {
     const cwd = makeCrossProceduralWorkspace();
 
-    await expect(executeTool("GetFunctionBody", {
-      name: "foo",
-      file_path: "../outside.ts",
-    }, cwd)).rejects.toThrow("Path escapes repository root");
+    await expect(
+      executeTool(
+        "GetFunctionBody",
+        {
+          name: "foo",
+          file_path: "../outside.ts",
+        },
+        cwd,
+      ),
+    ).rejects.toThrow("Path escapes repository root");
 
-    await expect(executeTool("GetCallers", {
-      name: "foo",
-      path: "../outside",
-    }, cwd)).rejects.toThrow("Path escapes repository root");
+    await expect(
+      executeTool(
+        "GetCallers",
+        {
+          name: "foo",
+          path: "../outside",
+        },
+        cwd,
+      ),
+    ).rejects.toThrow("Path escapes repository root");
 
-    await expect(executeTool("GetCallees", {
-      name: "foo",
-      file_path: "../outside.ts",
-    }, cwd)).rejects.toThrow("Path escapes repository root");
+    await expect(
+      executeTool(
+        "GetCallees",
+        {
+          name: "foo",
+          file_path: "../outside.ts",
+        },
+        cwd,
+      ),
+    ).rejects.toThrow("Path escapes repository root");
   });
 
   it("handles function names with regex special characters ($apply)", async () => {
@@ -590,21 +715,33 @@ describe("Cross-procedural tools - regression tests", () => {
       "utf8",
     );
 
-    const body = await executeTool("GetFunctionBody", {
-      name: "$apply",
-      file_path: "special.ts",
-    }, dir);
+    const body = await executeTool(
+      "GetFunctionBody",
+      {
+        name: "$apply",
+        file_path: "special.ts",
+      },
+      dir,
+    );
     expect(body).toContain("function $apply");
 
-    const callers = await executeTool("GetCallers", {
-      name: "$apply",
-    }, dir);
+    const callers = await executeTool(
+      "GetCallers",
+      {
+        name: "$apply",
+      },
+      dir,
+    );
     expect(callers).toContain("$apply(myScope)");
 
-    const callees = await executeTool("GetCallees", {
-      name: "$apply",
-      file_path: "special.ts",
-    }, dir);
+    const callees = await executeTool(
+      "GetCallees",
+      {
+        name: "$apply",
+        file_path: "special.ts",
+      },
+      dir,
+    );
     expect(callees).toContain("evalScope");
   });
 
@@ -613,16 +750,24 @@ describe("Cross-procedural tools - regression tests", () => {
     tempDirs.push(dir);
     writeFileSync(path.join(dir, "empty.ts"), "", "utf8");
 
-    const body = await executeTool("GetFunctionBody", {
-      name: "foo",
-      file_path: "empty.ts",
-    }, dir);
+    const body = await executeTool(
+      "GetFunctionBody",
+      {
+        name: "foo",
+        file_path: "empty.ts",
+      },
+      dir,
+    );
     expect(body).toContain("not found");
 
-    const callees = await executeTool("GetCallees", {
-      name: "foo",
-      file_path: "empty.ts",
-    }, dir);
+    const callees = await executeTool(
+      "GetCallees",
+      {
+        name: "foo",
+        file_path: "empty.ts",
+      },
+      dir,
+    );
     expect(callees).toContain("not found");
   });
 });
@@ -630,11 +775,15 @@ describe("Cross-procedural tools - regression tests", () => {
 describe("Semantic navigation tools", () => {
   it("GoToDefinition resolves cross-file TypeScript imports", async () => {
     const cwd = makeSemanticWorkspace();
-    const output = await executeTool("GoToDefinition", {
-      file_path: "src/main.ts",
-      line: 4,
-      column: 18,
-    }, cwd);
+    const output = await executeTool(
+      "GoToDefinition",
+      {
+        file_path: "src/main.ts",
+        line: 4,
+        column: 18,
+      },
+      cwd,
+    );
 
     expect(output).toContain("Symbol: greet");
     expect(output).toContain("src/dep.ts:1:17:export function greet(name: string): string {");
@@ -642,11 +791,15 @@ describe("Semantic navigation tools", () => {
 
   it("FindReferences returns symbol references, not pure text matches", async () => {
     const cwd = makeSemanticWorkspace();
-    const output = await executeTool("FindReferences", {
-      file_path: "src/main.ts",
-      line: 4,
-      column: 17,
-    }, cwd);
+    const output = await executeTool(
+      "FindReferences",
+      {
+        file_path: "src/main.ts",
+        line: 4,
+        column: 17,
+      },
+      cwd,
+    );
 
     expect(output).toContain("src/main.ts:1:10:import { greet } from './dep';");
     expect(output).toContain("src/main.ts:4:17:const message = greet(userId);");
@@ -656,11 +809,15 @@ describe("Semantic navigation tools", () => {
 
   it("TypeAtPosition returns the inferred type for a local variable", async () => {
     const cwd = makeSemanticWorkspace();
-    const output = await executeTool("TypeAtPosition", {
-      file_path: "src/main.ts",
-      line: 4,
-      column: 7,
-    }, cwd);
+    const output = await executeTool(
+      "TypeAtPosition",
+      {
+        file_path: "src/main.ts",
+        line: 4,
+        column: 7,
+      },
+      cwd,
+    );
 
     expect(output).toContain("Symbol: message");
     expect(output).toContain("Kind: const");
@@ -671,23 +828,35 @@ describe("Semantic navigation tools", () => {
 
   it("returns a stable message for unsupported file types", async () => {
     const cwd = makeSemanticWorkspace();
-    const output = await executeTool("TypeAtPosition", {
-      file_path: "src/worker.py",
-      line: 1,
-      column: 5,
-    }, cwd);
+    const output = await executeTool(
+      "TypeAtPosition",
+      {
+        file_path: "src/worker.py",
+        line: 1,
+        column: 5,
+      },
+      cwd,
+    );
 
-    expect(output).toContain("Semantic navigation is only supported for TypeScript/JavaScript files");
+    expect(output).toContain(
+      "Semantic navigation is only supported for TypeScript/JavaScript files",
+    );
     expect(output).toContain("src/worker.py");
   });
 
   it("rejects workspace escapes for semantic navigation tools", async () => {
     const cwd = makeSemanticWorkspace();
 
-    await expect(executeTool("GoToDefinition", {
-      file_path: "../outside.ts",
-      line: 1,
-      column: 1,
-    }, cwd)).rejects.toThrow("Path escapes repository root");
+    await expect(
+      executeTool(
+        "GoToDefinition",
+        {
+          file_path: "../outside.ts",
+          line: 1,
+          column: 1,
+        },
+        cwd,
+      ),
+    ).rejects.toThrow("Path escapes repository root");
   });
 });

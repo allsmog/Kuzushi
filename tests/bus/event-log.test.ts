@@ -1,19 +1,26 @@
-import { describe, it, expect } from "vitest";
-import { mkdirSync, existsSync, rmSync, readFileSync } from "node:fs";
-import path from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
-import { registerEventLogWriter } from "../../src/bus/event-log.js";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
+import { registerEventLogWriter } from "../../src/bus/event-log.js";
 
 function makeTmpDir(): string {
-  const dir = path.join(os.tmpdir(), `kuzushi-evlog-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const dir = path.join(
+    os.tmpdir(),
+    `kuzushi-evlog-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  );
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 async function cleanup(dir: string): Promise<void> {
   await new Promise((r) => setTimeout(r, 50));
-  try { rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* ok */
+  }
 }
 
 describe("EventLogWriter", () => {

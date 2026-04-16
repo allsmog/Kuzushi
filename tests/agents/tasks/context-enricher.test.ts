@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { contextEnricherTask, __contextEnricherInternals } from "../../../src/agents/tasks/context-enricher.js";
-import type { KuzushiConfig } from "../../../src/types.js";
+import {
+  __contextEnricherInternals,
+  contextEnricherTask,
+} from "../../../src/agents/tasks/context-enricher.js";
 import type { TaskContext } from "../../../src/agents/types.js";
+import type { KuzushiConfig } from "../../../src/types.js";
 
 const { resolveConfig, buildPrompt, normalizeOutput } = __contextEnricherInternals;
 
@@ -86,10 +89,18 @@ describe("normalizeOutput", () => {
         { name: "authMiddleware", filePath: "src/middleware/auth.ts", purpose: "JWT validation" },
       ],
       customSanitizers: [
-        { name: "sanitizeInput", filePath: "src/utils/sanitize.ts", sanitizationType: "XSS prevention" },
+        {
+          name: "sanitizeInput",
+          filePath: "src/utils/sanitize.ts",
+          sanitizationType: "XSS prevention",
+        },
       ],
       trustBoundaries: [
-        { name: "API Gateway", description: "External requests enter here", entryPoints: ["src/routes/api.ts"] },
+        {
+          name: "API Gateway",
+          description: "External requests enter here",
+          entryPoints: ["src/routes/api.ts"],
+        },
       ],
       dataClassifications: [
         { dataType: "User PII", sensitivity: "confidential", locations: ["src/models/user.ts"] },
@@ -127,9 +138,7 @@ describe("normalizeOutput", () => {
       customMiddleware: [],
       customSanitizers: [],
       trustBoundaries: [],
-      dataClassifications: [
-        { dataType: "test", sensitivity: "invalid-level", locations: [] },
-      ],
+      dataClassifications: [{ dataType: "test", sensitivity: "invalid-level", locations: [] }],
       architecturalNotes: [],
     };
 

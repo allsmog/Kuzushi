@@ -1,3 +1,3 @@
-export type { PipelineHooks, HookContext } from "./types.js";
-export { loadHooksFromFile } from "./loader.js";
 export { PipelineHookChain } from "./chain.js";
+export { loadHooksFromFile } from "./loader.js";
+export type { HookContext, PipelineHooks } from "./types.js";

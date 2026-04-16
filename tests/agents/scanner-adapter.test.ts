@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { adaptScannerPlugin } from "../../src/agents/scanner-adapter.js";
-import type { ScannerPlugin, Finding, TaskConfig, TriageAgentConfig } from "../../src/scanners/types.js";
-import type { ScanOpts, KuzushiConfig } from "../../src/types.js";
 import type { MessageBus } from "../../src/bus/types.js";
+import type {
+  Finding,
+  ScannerPlugin,
+  TaskConfig,
+  TriageAgentConfig,
+} from "../../src/scanners/types.js";
+import type { KuzushiConfig, ScanOpts } from "../../src/types.js";
 
 class FakeScannerPlugin implements ScannerPlugin {
   readonly id = "semgrep";

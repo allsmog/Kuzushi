@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { RustAdapter } from "../../../src/discovery/adapters/rust-adapter.js";
 
 const tempDirs: string[] = [];
@@ -22,16 +22,25 @@ afterEach(() => {
 describe("RustAdapter", () => {
   it("discovers Cargo workspace members", async () => {
     const root = makeTempRoot();
-    writeFileSync(path.join(root, "Cargo.toml"), [
-      "[workspace]",
-      'members = ["crates/core", "crates/cli"]',
-    ].join("\n"), "utf-8");
+    writeFileSync(
+      path.join(root, "Cargo.toml"),
+      ["[workspace]", 'members = ["crates/core", "crates/cli"]'].join("\n"),
+      "utf-8",
+    );
 
     mkdirSync(path.join(root, "crates", "core"), { recursive: true });
-    writeFileSync(path.join(root, "crates", "core", "Cargo.toml"), '[package]\nname = "mycore"\n', "utf-8");
+    writeFileSync(
+      path.join(root, "crates", "core", "Cargo.toml"),
+      '[package]\nname = "mycore"\n',
+      "utf-8",
+    );
 
     mkdirSync(path.join(root, "crates", "cli"), { recursive: true });
-    writeFileSync(path.join(root, "crates", "cli", "Cargo.toml"), '[package]\nname = "mycli"\n', "utf-8");
+    writeFileSync(
+      path.join(root, "crates", "cli", "Cargo.toml"),
+      '[package]\nname = "mycli"\n',
+      "utf-8",
+    );
 
     const nodes = await adapter.discover(root, 8);
 
@@ -48,7 +57,11 @@ describe("RustAdapter", () => {
 
   it("discovers standalone crate", async () => {
     const root = makeTempRoot();
-    writeFileSync(path.join(root, "Cargo.toml"), '[package]\nname = "solo"\nversion = "0.1.0"\n', "utf-8");
+    writeFileSync(
+      path.join(root, "Cargo.toml"),
+      '[package]\nname = "solo"\nversion = "0.1.0"\n',
+      "utf-8",
+    );
 
     const nodes = await adapter.discover(root, 8);
 

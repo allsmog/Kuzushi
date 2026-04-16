@@ -23,10 +23,7 @@ export function loadSecurityProfiles(repoRoot: string): SecurityProfile[] {
  * Filter profiles to those applicable to a given task ID.
  * Profiles with no `appliesTo` apply to all tasks (wildcard).
  */
-export function getProfilesForTask(
-  profiles: SecurityProfile[],
-  taskId: string,
-): SecurityProfile[] {
+export function getProfilesForTask(profiles: SecurityProfile[], taskId: string): SecurityProfile[] {
   return profiles.filter(
     (p) =>
       !p.appliesTo ||

@@ -35,11 +35,13 @@ interface UndiciModule {
     keepAliveTimeout?: number;
     pipelining?: number;
   }) => UndiciDispatcher;
-  ProxyAgent: (new (opts?: {
-    uri?: string;
-    connections?: number;
-    keepAliveTimeout?: number;
-  }) => UndiciDispatcher) | undefined;
+  ProxyAgent:
+    | (new (opts?: {
+        uri?: string;
+        connections?: number;
+        keepAliveTimeout?: number;
+      }) => UndiciDispatcher)
+    | undefined;
   setGlobalDispatcher(dispatcher: UndiciDispatcher): void;
   getGlobalDispatcher(): UndiciDispatcher;
 }
@@ -50,7 +52,12 @@ interface UndiciModule {
 
 /** Resolve proxy URL from env vars, checking both upper and lowercase variants. */
 function resolveProxyUrl(): string | undefined {
-  return process.env["HTTPS_PROXY"] ?? process.env["https_proxy"] ?? process.env["HTTP_PROXY"] ?? process.env["http_proxy"];
+  return (
+    process.env["HTTPS_PROXY"] ??
+    process.env["https_proxy"] ??
+    process.env["HTTP_PROXY"] ??
+    process.env["http_proxy"]
+  );
 }
 
 function resolveMaxSockets(): number {
@@ -196,7 +203,9 @@ function createProxyAgent(proxyUrl: string): https.Agent {
     });
   } catch {
     // Package not resolvable — warn and fall back to direct connection.
-    console.warn("[kuzushi] HTTPS_PROXY is set but https-proxy-agent could not be loaded. Falling back to direct connection.");
+    console.warn(
+      "[kuzushi] HTTPS_PROXY is set but https-proxy-agent could not be loaded. Falling back to direct connection.",
+    );
     return new https.Agent({
       keepAlive: true,
       maxSockets: resolveMaxSockets(),

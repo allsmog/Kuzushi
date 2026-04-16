@@ -15,14 +15,16 @@
  *   │                                                      │
  *   └────────────────────────────────────────────────────┘
  */
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+
 import chalk from "chalk";
-import { icons } from "../icons.js";
-import { boxHeader, boxFooter, terminalCardWidth } from "../format.js";
-import { FindingCard } from "./FindingCard.js";
-import type { ActionableFinding } from "../state.js";
+import { Box, Text, useInput } from "ink";
+import type React from "react";
+import { useState } from "react";
 import type { Verdict } from "../../types.js";
+import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { icons } from "../icons.js";
+import type { ActionableFinding } from "../state.js";
+import { FindingCard } from "./FindingCard.js";
 
 interface InteractiveReviewProps {
   findings: ActionableFinding[];
@@ -84,8 +86,15 @@ export function InteractiveReview({
     return (
       <Box flexDirection="column">
         <Text>{""}</Text>
-        <Text>{"  "}{chalk.green.bold(`${icons.success} Review complete`)}</Text>
-        <Text>{"  "}{chalk.dim("tp:")} {tally.tp}  {chalk.dim("fp:")} {tally.fp}  {chalk.dim("by_design:")} {tally.by_design}  {chalk.dim("skipped:")} {tally.skipped}</Text>
+        <Text>
+          {"  "}
+          {chalk.green.bold(`${icons.success} Review complete`)}
+        </Text>
+        <Text>
+          {"  "}
+          {chalk.dim("tp:")} {tally.tp} {chalk.dim("fp:")} {tally.fp} {chalk.dim("by_design:")}{" "}
+          {tally.by_design} {chalk.dim("skipped:")} {tally.skipped}
+        </Text>
         <Text>{""}</Text>
       </Box>
     );
@@ -100,9 +109,10 @@ export function InteractiveReview({
       <FindingCard finding={finding} />
 
       {/* Running tally */}
-      {(tally.tp + tally.fp + tally.by_design + tally.skipped) > 0 && (
+      {tally.tp + tally.fp + tally.by_design + tally.skipped > 0 && (
         <Text>
-          {"  "}{chalk.dim("So far:")}
+          {"  "}
+          {chalk.dim("So far:")}
           {tally.tp > 0 ? ` ${chalk.red(`tp=${tally.tp}`)}` : ""}
           {tally.fp > 0 ? ` ${chalk.green(`fp=${tally.fp}`)}` : ""}
           {tally.by_design > 0 ? ` ${chalk.blue(`by_design=${tally.by_design}`)}` : ""}
@@ -113,10 +123,13 @@ export function InteractiveReview({
 
       {/* Key bindings */}
       <Text>
-        {"  "}{chalk.redBright.bold("[t]")} true positive  {chalk.green.bold("[f]")} false positive  {chalk.dim("[s]")} skip
+        {"  "}
+        {chalk.redBright.bold("[t]")} true positive {chalk.green.bold("[f]")} false positive{" "}
+        {chalk.dim("[s]")} skip
       </Text>
       <Text>
-        {"  "}{chalk.blue.bold("[b]")} by design      {chalk.dim("[q]")} quit review
+        {"  "}
+        {chalk.blue.bold("[b]")} by design {chalk.dim("[q]")} quit review
       </Text>
 
       <Text>{boxFooter(width)}</Text>

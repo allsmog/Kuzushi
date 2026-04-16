@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { loadConfig } from "../src/config.js";
 import * as path from "node:path";
+import { describe, expect, it } from "vitest";
+import { loadConfig } from "../src/config.js";
 
 describe("config security", () => {
   it("loadConfig returns defaults for non-existent repo", () => {

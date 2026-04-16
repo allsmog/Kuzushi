@@ -6,17 +6,9 @@ export type CryptoBehavioralTestType =
   | "key-length"
   | "edge-case";
 
-export type CryptoBehavioralVerdict =
-  | "vulnerable"
-  | "secure"
-  | "inconclusive"
-  | "error";
+export type CryptoBehavioralVerdict = "vulnerable" | "secure" | "inconclusive" | "error";
 
-export type CryptoBehavioralExecutionVerdict =
-  | "PASS"
-  | "FAIL"
-  | "ERROR"
-  | "TIMEOUT";
+export type CryptoBehavioralExecutionVerdict = "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
 
 export interface TimingAnalysisResult {
   constantTime: boolean;

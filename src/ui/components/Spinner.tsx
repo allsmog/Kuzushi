@@ -2,9 +2,11 @@
  * Animated braille-dot spinner component.
  * Cycles through frames for a smooth loading animation.
  */
-import React, { useState, useEffect } from "react";
-import { Text } from "ink";
+
 import chalk from "chalk";
+import { Text } from "ink";
+import type React from "react";
+import { useEffect, useState } from "react";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const FRAME_INTERVAL = 80; // ms per frame

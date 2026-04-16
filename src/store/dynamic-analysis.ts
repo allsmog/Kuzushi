@@ -28,10 +28,7 @@ type DynamicAnalysisRunRow = {
   updated_at: string;
 };
 
-export function insertDynamicAnalysisRun(
-  db: Database.Database,
-  run: DynamicAnalysisRun,
-): void {
+export function insertDynamicAnalysisRun(db: Database.Database, run: DynamicAnalysisRun): void {
   db.prepare(`
     INSERT OR REPLACE INTO dynamic_analysis_runs (
       dynamic_run_id, pipeline_run_id, fingerprint, repo, status,
@@ -71,9 +68,11 @@ export function getDynamicAnalysisRun(
   db: Database.Database,
   dynamicRunId: string,
 ): DynamicAnalysisRun | undefined {
-  const row = db.prepare(`
+  const row = db
+    .prepare(`
     SELECT * FROM dynamic_analysis_runs WHERE dynamic_run_id = ?
-  `).get(dynamicRunId) as DynamicAnalysisRunRow | undefined;
+  `)
+    .get(dynamicRunId) as DynamicAnalysisRunRow | undefined;
 
   return row ? rowToDynamicAnalysisRun(row) : undefined;
 }
@@ -82,11 +81,13 @@ export function getDynamicRunsForFinding(
   db: Database.Database,
   fingerprint: string,
 ): DynamicAnalysisRun[] {
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT * FROM dynamic_analysis_runs
     WHERE fingerprint = ?
     ORDER BY created_at DESC
-  `).all(fingerprint) as DynamicAnalysisRunRow[];
+  `)
+    .all(fingerprint) as DynamicAnalysisRunRow[];
 
   return rows.map(rowToDynamicAnalysisRun);
 }
@@ -111,7 +112,8 @@ function rowToDynamicAnalysisRun(row: DynamicAnalysisRunRow): DynamicAnalysisRun
     executionExitCode: row.execution_exit_code,
     executionStdout: row.execution_stdout ?? undefined,
     executionStderr: row.execution_stderr ?? undefined,
-    executionVerdict: (row.execution_verdict as DynamicAnalysisRun["executionVerdict"]) ?? undefined,
+    executionVerdict:
+      (row.execution_verdict as DynamicAnalysisRun["executionVerdict"]) ?? undefined,
     executionDurationMs: row.execution_duration_ms,
     iterations: row.iterations,
     costUsd: row.cost_usd ?? undefined,

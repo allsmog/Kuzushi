@@ -8,9 +8,10 @@
  *     │▸ 42 │    WHERE name = '${name}'`;
  *     │  43 │  const result = await db.query(query);
  */
-import React from "react";
-import { Box, Text } from "ink";
+
 import chalk from "chalk";
+import { Box, Text } from "ink";
+import type React from "react";
 
 interface CodePreviewProps {
   /** Absolute or relative file path. */
@@ -37,16 +38,15 @@ export function CodePreview({
       {lines.map(({ lineNumber, text, isTarget }) => {
         const num = String(lineNumber).padStart(4);
         const marker = isTarget ? chalk.redBright("▸") : " ";
-        const lineContent = isTarget
-          ? chalk.white(text)
-          : chalk.dim(text);
-        const lineNum = isTarget
-          ? chalk.redBright(num)
-          : chalk.dim(num);
+        const lineContent = isTarget ? chalk.white(text) : chalk.dim(text);
+        const lineNum = isTarget ? chalk.redBright(num) : chalk.dim(num);
 
         return (
           <Text key={lineNumber}>
-            {"      "}{chalk.dim("│")}{marker}{lineNum} {chalk.dim("│")} {lineContent}
+            {"      "}
+            {chalk.dim("│")}
+            {marker}
+            {lineNum} {chalk.dim("│")} {lineContent}
           </Text>
         );
       })}

@@ -1,14 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Finding } from "../../src/scanners/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
-import { createEvent, generateRunId } from "../../src/bus/helpers.js";
-import { registerPocHarnessWorker } from "../../src/bus/workers/poc-harness-worker.js";
 import type {
   PocHarnessAgentActivityEvent,
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
 } from "../../src/bus/events.js";
-import type { KuzushiConfig, PocHarnessResult, TriageResult, VerificationResult } from "../../src/types.js";
+import { createEvent, generateRunId } from "../../src/bus/helpers.js";
+import { registerPocHarnessWorker } from "../../src/bus/workers/poc-harness-worker.js";
+import type { Finding } from "../../src/scanners/types.js";
+import type {
+  KuzushiConfig,
+  PocHarnessResult,
+  TriageResult,
+  VerificationResult,
+} from "../../src/types.js";
 
 const {
   generatePocHarnessMock,
@@ -283,12 +288,10 @@ describe("poc-harness-worker", () => {
       retryBackoffMs: 0,
     });
 
-    generatePocHarnessMock
-      .mockRejectedValueOnce(new Error("rate limited"))
-      .mockResolvedValueOnce({
-        result: makePocHarnessResult(),
-        costUsd: 0.008,
-      });
+    generatePocHarnessMock.mockRejectedValueOnce(new Error("rate limited")).mockResolvedValueOnce({
+      result: makePocHarnessResult(),
+      costUsd: 0.008,
+    });
 
     registerPocHarnessWorker(bus, { config });
 

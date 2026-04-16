@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { configureAgentRuntime } from "../../src/agent-runtime/index.js";
-import type { AgentRuntime } from "../../src/agent-runtime/types.js";
-import type { KuzushiConfig } from "../../src/types.js";
 import {
   DEFAULT_READ_ONLY_TOOLS,
   resolveDefaultReadOnlyTools,
   SEMANTIC_NAVIGATION_TOOLS,
 } from "../../src/agent-runtime/execution.js";
+import { configureAgentRuntime } from "../../src/agent-runtime/index.js";
+import type { AgentRuntime } from "../../src/agent-runtime/types.js";
+import type { KuzushiConfig } from "../../src/types.js";
 
 function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   return {
@@ -25,19 +25,25 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
 
 describe("agent runtime", () => {
   it("configures pi-ai backend (default)", () => {
-    const runtime = configureAgentRuntime(makeConfig({
-      agentRuntimeBackend: "pi-ai",
-    }));
+    const runtime = configureAgentRuntime(
+      makeConfig({
+        agentRuntimeBackend: "pi-ai",
+      }),
+    );
     expect(runtime.id).toBe("pi-ai");
   });
 
   it("creates independent runtime instances without global mutation", () => {
-    const first = configureAgentRuntime(makeConfig({
-      agentRuntimeBackend: "pi-ai",
-    }));
-    const second = configureAgentRuntime(makeConfig({
-      agentRuntimeBackend: "pi-ai",
-    }));
+    const first = configureAgentRuntime(
+      makeConfig({
+        agentRuntimeBackend: "pi-ai",
+      }),
+    );
+    const second = configureAgentRuntime(
+      makeConfig({
+        agentRuntimeBackend: "pi-ai",
+      }),
+    );
 
     expect(first.id).toBe("pi-ai");
     expect(second.id).toBe("pi-ai");

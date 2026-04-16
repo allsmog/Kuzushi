@@ -1,6 +1,6 @@
-import React from "react";
-import { Box, Text } from "ink";
 import chalk from "chalk";
+import { Box, Text } from "ink";
+import type React from "react";
 import { icons } from "../icons.js";
 import type { UINotice } from "../state.js";
 
@@ -17,7 +17,8 @@ export function NoticeRail({ notices }: NoticeRailProps): React.ReactElement | n
     <Box flexDirection="column" marginBottom={1}>
       {notices.map((notice) => (
         <Text key={notice.id}>
-          {"  "}{formatIcon(notice.level)} {formatMessage(notice)}
+          {"  "}
+          {formatIcon(notice.level)} {formatMessage(notice)}
         </Text>
       ))}
     </Box>
@@ -38,13 +39,14 @@ function formatIcon(level: UINotice["level"]): string {
 }
 
 function formatMessage(notice: UINotice): string {
-  const message = notice.level === "error"
-    ? chalk.red(notice.message)
-    : notice.level === "warning"
-      ? chalk.yellow(notice.message)
-      : notice.level === "success"
-        ? chalk.green(notice.message)
-        : chalk.white(notice.message);
+  const message =
+    notice.level === "error"
+      ? chalk.red(notice.message)
+      : notice.level === "warning"
+        ? chalk.yellow(notice.message)
+        : notice.level === "success"
+          ? chalk.green(notice.message)
+          : chalk.white(notice.message);
 
   const detail = notice.detail ? ` ${chalk.dim(notice.detail)}` : "";
   return `${message}${detail}`;

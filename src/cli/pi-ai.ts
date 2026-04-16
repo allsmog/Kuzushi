@@ -41,15 +41,16 @@ function maybeWarnPiAiApiKeyForModel(
     return;
   }
 
-  const hasAny = envVars.some((name) => Boolean(process.env[name]))
-    || (provider === "anthropic" && Boolean(options.anthropicApiKey));
+  const hasAny =
+    envVars.some((name) => Boolean(process.env[name])) ||
+    (provider === "anthropic" && Boolean(options.anthropicApiKey));
   if (hasAny) {
     return;
   }
 
   console.warn(
-    `Warning: model "${model}" uses provider "${provider}", `
-    + `but none of [${envVars.join(", ")}] are set.`,
+    `Warning: model "${model}" uses provider "${provider}", ` +
+      `but none of [${envVars.join(", ")}] are set.`,
   );
 }
 
@@ -179,8 +180,9 @@ export function validatePiAiProviderCredentials(
       continue;
     }
 
-    const hasAny = envVars.some((name) => Boolean(process.env[name]))
-      || (provider === "anthropic" && Boolean(options.anthropicApiKey));
+    const hasAny =
+      envVars.some((name) => Boolean(process.env[name])) ||
+      (provider === "anthropic" && Boolean(options.anthropicApiKey));
     if (hasAny) {
       continue;
     }

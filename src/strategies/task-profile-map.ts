@@ -1,4 +1,4 @@
-import { type CweStrategyProfile, CWE_STRATEGY_PROFILES } from "./cwe-strategy-map.js";
+import { CWE_STRATEGY_PROFILES, type CweStrategyProfile } from "./cwe-strategy-map.js";
 
 /** Maps detection task IDs to their primary CWE IDs for strategy profile lookup. */
 const TASK_CWE_MAP: Record<string, string[]> = {
@@ -21,9 +21,7 @@ export function getProfileForTask(taskId: string): CweStrategyProfile | undefine
   if (!cweIds) return undefined;
 
   const cweSet = new Set(cweIds);
-  return CWE_STRATEGY_PROFILES.find((profile) =>
-    profile.cweIds.some((cwe) => cweSet.has(cwe)),
-  );
+  return CWE_STRATEGY_PROFILES.find((profile) => profile.cweIds.some((cwe) => cweSet.has(cwe)));
 }
 
 /** All task IDs eligible for multi-strategy wrapping. */

@@ -10,18 +10,18 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { getLogger } from "../logger.js";
-import type { DiscoveryOptions, DiscoveryResult } from "./types.js";
-import type { RawDiscoveryNode } from "./adapters/types.js";
-import { NodeAdapter } from "./adapters/node-adapter.js";
-import { GoAdapter } from "./adapters/go-adapter.js";
-import { RustAdapter } from "./adapters/rust-adapter.js";
-import { MsvsAdapter } from "./adapters/msvs-adapter.js";
 import { BazelAdapter } from "./adapters/bazel-adapter.js";
+import { GoAdapter } from "./adapters/go-adapter.js";
+import { MsvsAdapter } from "./adapters/msvs-adapter.js";
 import { NativeAdapter } from "./adapters/native-adapter.js";
+import { NodeAdapter } from "./adapters/node-adapter.js";
+import { RustAdapter } from "./adapters/rust-adapter.js";
+import type { RawDiscoveryNode } from "./adapters/types.js";
 import { resolveDiscoveryGraph } from "./graph.js";
-import { carveModulesWithLlm } from "./llm-refinement.js";
-import { buildWorkspaceDependencyMap, clusterWorkspaceMembers } from "./workspace-clustering.js";
 import { readJson, readText } from "./helpers.js";
+import { carveModulesWithLlm } from "./llm-refinement.js";
+import type { DiscoveryOptions, DiscoveryResult } from "./types.js";
+import { buildWorkspaceDependencyMap, clusterWorkspaceMembers } from "./workspace-clustering.js";
 
 const log = getLogger("discovery");
 

@@ -6,11 +6,11 @@
  *   tsx benchmarks/sarif-diff.ts <before.sarif> <after.sarif> [--json <output.json>]
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import chalk from "chalk";
-import type { SarifLog, SarifResult, SarifDiffEntry } from "./types.js";
+import type { SarifDiffEntry, SarifLog, SarifResult } from "./types.js";
 
 const { values: opts, positionals } = parseArgs({
   options: {
@@ -137,7 +137,7 @@ function computeDiff(before: SarifLog, after: SarifLog): SarifDiffEntry[] {
 
   return entries.sort((a, b) => {
     const kindOrder = { removed: 0, changed: 1, added: 2 };
-    return (kindOrder[a.kind] - kindOrder[b.kind]) || a.fingerprint.localeCompare(b.fingerprint);
+    return kindOrder[a.kind] - kindOrder[b.kind] || a.fingerprint.localeCompare(b.fingerprint);
   });
 }
 
@@ -153,7 +153,9 @@ function printDiff(entries: SarifDiffEntry[], beforePath: string, afterPath: str
   console.log(`  Before: ${beforePath}`);
   console.log(`  After:  ${afterPath}`);
   console.log();
-  console.log(`  ${chalk.green(`+${added.length} added`)}  ${chalk.red(`-${removed.length} removed`)}  ${chalk.yellow(`~${changed.length} changed`)}`);
+  console.log(
+    `  ${chalk.green(`+${added.length} added`)}  ${chalk.red(`-${removed.length} removed`)}  ${chalk.yellow(`~${changed.length} changed`)}`,
+  );
 
   if (removed.length > 0) {
     console.log();
@@ -179,8 +181,8 @@ function printDiff(entries: SarifDiffEntry[], beforePath: string, afterPath: str
       const a = entry.details?.after;
       console.log(
         chalk.yellow(`  ~ ${entry.ruleId} @ ${entry.file}:${entry.line}`) +
-        `  verdict: ${b?.verdict ?? "?"} -> ${a?.verdict ?? "?"}` +
-        `  confidence: ${b?.confidence?.toFixed(2) ?? "?"} -> ${a?.confidence?.toFixed(2) ?? "?"}`,
+          `  verdict: ${b?.verdict ?? "?"} -> ${a?.verdict ?? "?"}` +
+          `  confidence: ${b?.confidence?.toFixed(2) ?? "?"} -> ${a?.confidence?.toFixed(2) ?? "?"}`,
       );
     }
   }

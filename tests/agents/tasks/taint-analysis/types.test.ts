@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
   resolveTaintAnalysisConfig,
   TAINT_ANALYSIS_PASSES,
-  DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
 } from "../../../../src/agents/tasks/taint-analysis/types.js";
 import type { KuzushiConfig } from "../../../../src/types.js";
 
@@ -27,7 +27,9 @@ describe("resolveTaintAnalysisConfig", () => {
   it('returns defaults when taskConfig["taint-analysis"] is not configured', () => {
     const resolved = resolveTaintAnalysisConfig(makeConfig());
 
-    expect(resolved.passes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+    expect(resolved.passes).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+    ]);
     expect(resolved.labelingBatchSize).toBe(20);
     expect(resolved.labelingConfidenceThreshold).toBe(0.55);
     expect(resolved.workspaceDir).toBe(".kuzushi/iris");
@@ -159,6 +161,8 @@ describe("TAINT_ANALYSIS_PASSES", () => {
 
 describe("DEFAULT_TAINT_ANALYSIS_TASK_CONFIG", () => {
   it("includes all 19 pass ids in defaults", () => {
-    expect(DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.passes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+    expect(DEFAULT_TAINT_ANALYSIS_TASK_CONFIG.passes).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+    ]);
   });
 });

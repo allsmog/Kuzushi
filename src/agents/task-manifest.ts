@@ -5,10 +5,10 @@
  * to declare metadata, version, requirements, and configuration schema.
  */
 
-import { z } from "zod";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { z } from "zod";
 
 /** Output kinds must match TaskOutputKind from agents/types.ts. */
 const TaskOutputKindSchema = z.enum(["findings", "threat-model", "verdict", "report", "custom"]);
@@ -28,11 +28,13 @@ export const TaskManifestSchema = z.object({
   description: z.string(),
   outputKind: TaskOutputKindSchema,
   dependsOn: z.array(z.string()).default([]),
-  requires: z.object({
-    env: z.array(z.string()).optional(),
-    bins: z.array(z.string()).optional(),
-    nodeVersion: z.string().optional(),
-  }).optional(),
+  requires: z
+    .object({
+      env: z.array(z.string()).optional(),
+      bins: z.array(z.string()).optional(),
+      nodeVersion: z.string().optional(),
+    })
+    .optional(),
   config: z.record(z.string(), ManifestConfigEntrySchema).optional(),
   author: z.string().optional(),
   license: z.string().optional(),
@@ -106,7 +108,9 @@ export function loadTaskManifest(taskDir: string): ManifestValidationResult | un
  * Given a path like `/path/to/my-task.ts`, looks for
  * `/path/to/task.manifest.json`.
  */
-export function loadManifestForTaskFile(taskFilePath: string): ManifestValidationResult | undefined {
+export function loadManifestForTaskFile(
+  taskFilePath: string,
+): ManifestValidationResult | undefined {
   const dir = path.dirname(taskFilePath);
   return loadTaskManifest(dir);
 }
@@ -148,9 +152,7 @@ export function checkRequirements(manifest: TaskManifest): RequirementsCheckResu
     }
   }
 
-  const satisfied = missing.env.length === 0
-    && missing.bins.length === 0
-    && !missing.nodeVersion;
+  const satisfied = missing.env.length === 0 && missing.bins.length === 0 && !missing.nodeVersion;
 
   return { satisfied, missing };
 }

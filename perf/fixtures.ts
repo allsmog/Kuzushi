@@ -1,5 +1,5 @@
-import type { Finding, TaskId } from "../src/scanners/types.js";
 import type { AgentTask, TaskContext, TaskOutputKind } from "../src/agents/types.js";
+import type { Finding, TaskId } from "../src/scanners/types.js";
 import type { TriageResult } from "../src/types.js";
 
 /**
@@ -17,18 +17,34 @@ export function prng(seed: number): () => number {
 }
 
 const CWE_POOL = [
-  ["CWE-79"], ["CWE-89"], ["CWE-22"], ["CWE-78"], ["CWE-502"],
-  ["CWE-798"], ["CWE-918"], ["CWE-611"], ["CWE-352"], ["CWE-287"],
+  ["CWE-79"],
+  ["CWE-89"],
+  ["CWE-22"],
+  ["CWE-78"],
+  ["CWE-502"],
+  ["CWE-798"],
+  ["CWE-918"],
+  ["CWE-611"],
+  ["CWE-352"],
+  ["CWE-287"],
   // Overlap pairs — common causes of cluster merges
-  ["CWE-79", "CWE-80"], ["CWE-89", "CWE-564"], ["CWE-78", "CWE-77"],
+  ["CWE-79", "CWE-80"],
+  ["CWE-89", "CWE-564"],
+  ["CWE-78", "CWE-77"],
   // Empty CWE — forced singleton path
   [],
 ];
 
 const RULE_IDS = [
-  "semgrep.xss", "semgrep.sqli", "semgrep.path-traversal", "semgrep.cmd-inject",
-  "codeql.deserialization", "codeql.hardcoded-secret", "codeql.ssrf",
-  "agentic.auth-bypass", "agentic.race-condition",
+  "semgrep.xss",
+  "semgrep.sqli",
+  "semgrep.path-traversal",
+  "semgrep.cmd-inject",
+  "codeql.deserialization",
+  "codeql.hardcoded-secret",
+  "codeql.ssrf",
+  "agentic.auth-bypass",
+  "agentic.race-condition",
 ];
 
 const SEVERITIES = ["low", "medium", "high", "critical"];
@@ -67,7 +83,10 @@ export function makeFindings(count: number, seed = 42): Finding[] {
 }
 
 /** Build a 100-task DAG with realistic fan-in/fan-out. */
-export function makeTaskRegistrySnapshot(count: number, seed = 7): {
+export function makeTaskRegistrySnapshot(
+  count: number,
+  seed = 7,
+): {
   ids: string[];
   tasks: AgentTask[];
 } {

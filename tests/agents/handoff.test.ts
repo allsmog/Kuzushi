@@ -1,10 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   createHandoff,
-  isHandoff,
-  getUpstreamOutput,
-  getUpstreamHandoff,
   formatUpstreamInsights,
+  getUpstreamHandoff,
+  getUpstreamOutput,
+  isHandoff,
 } from "../../src/agents/handoff.js";
 
 describe("createHandoff", () => {
@@ -107,7 +107,10 @@ describe("formatUpstreamInsights", () => {
     const h2 = createHandoff("t2", null, {
       insights: ["PostgreSQL in use"],
     });
-    const upstream = new Map<string, unknown>([["t1", h1], ["t2", h2]]);
+    const upstream = new Map<string, unknown>([
+      ["t1", h1],
+      ["t2", h2],
+    ]);
     const result = formatUpstreamInsights(upstream, ["t1", "t2"]);
     expect(result).toContain("### Insights from t1");
     expect(result).toContain("- Express detected");

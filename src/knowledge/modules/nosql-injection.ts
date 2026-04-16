@@ -6,16 +6,41 @@ export const nosqlInjectionModule: KnowledgeModule = {
   languages: [],
   frameworks: [],
   dangerousPatterns: [
-    { pattern: "User object passed directly to MongoDB find/findOne", why: "Allows operator injection ({$ne: null}, {$gt: ''})", severity: "ERROR" },
-    { pattern: "$where clause with user-controlled string", why: "Arbitrary JavaScript execution on MongoDB server", severity: "ERROR" },
-    { pattern: "$regex with unescaped user input", why: "ReDoS and data extraction via regex patterns", severity: "WARNING" },
-    { pattern: "Aggregation pipeline with user-controlled stages", why: "Operator injection in $match, $lookup, $group", severity: "ERROR" },
+    {
+      pattern: "User object passed directly to MongoDB find/findOne",
+      why: "Allows operator injection ({$ne: null}, {$gt: ''})",
+      severity: "ERROR",
+    },
+    {
+      pattern: "$where clause with user-controlled string",
+      why: "Arbitrary JavaScript execution on MongoDB server",
+      severity: "ERROR",
+    },
+    {
+      pattern: "$regex with unescaped user input",
+      why: "ReDoS and data extraction via regex patterns",
+      severity: "WARNING",
+    },
+    {
+      pattern: "Aggregation pipeline with user-controlled stages",
+      why: "Operator injection in $match, $lookup, $group",
+      severity: "ERROR",
+    },
   ],
   safePatterns: [
     { pattern: "express-mongo-sanitize middleware", why: "Strips $ and . from request parameters" },
-    { pattern: "Mongoose schema with strict: true", why: "Rejects unknown fields, limits operator injection surface" },
-    { pattern: "Class-validator DTO validation", why: "Validates and transforms input before query construction" },
-    { pattern: "Explicit field extraction from request", why: "Only expected fields reach the query" },
+    {
+      pattern: "Mongoose schema with strict: true",
+      why: "Rejects unknown fields, limits operator injection surface",
+    },
+    {
+      pattern: "Class-validator DTO validation",
+      why: "Validates and transforms input before query construction",
+    },
+    {
+      pattern: "Explicit field extraction from request",
+      why: "Only expected fields reach the query",
+    },
   ],
   bypassTechniques: [
     "Nested object injection: req.body.username = {$ne: null} to match any user",
@@ -25,9 +50,20 @@ export const nosqlInjectionModule: KnowledgeModule = {
     "Bypassing express-mongo-sanitize via JSON body (Content-Type: application/json)",
   ],
   detectionKeywords: [
-    "find(", "findOne(", "findById(", "updateOne(", "deleteMany(",
-    "$where", "$regex", "$ne", "$gt", "$lt", "$in",
-    "aggregate(", "collection.", "Model.find",
+    "find(",
+    "findOne(",
+    "findById(",
+    "updateOne(",
+    "deleteMany(",
+    "$where",
+    "$regex",
+    "$ne",
+    "$gt",
+    "$lt",
+    "$in",
+    "aggregate(",
+    "collection.",
+    "Model.find",
   ],
   fixExamples: [
     {

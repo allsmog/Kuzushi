@@ -5,9 +5,11 @@
  *
  * Inspired by CC's StatusLine but adapted for Kuzushi's scan context.
  */
-import React, { useState, useEffect } from "react";
-import { Box, Text } from "ink";
+
 import chalk from "chalk";
+import { Box, Text } from "ink";
+import type React from "react";
+import { useEffect, useState } from "react";
 import { formatCost, formatDuration } from "../format.js";
 import type { Phase } from "../state.js";
 
@@ -43,10 +45,7 @@ export function StatusFooter({
     return () => clearInterval(interval);
   }, [startedAt]);
 
-  const modelShort = model
-    .replace("anthropic:", "")
-    .replace("claude-", "")
-    .replace("-latest", "");
+  const modelShort = model.replace("anthropic:", "").replace("claude-", "").replace("-latest", "");
 
   const phaseLabel = {
     scanning: "scanning",
@@ -58,17 +57,14 @@ export function StatusFooter({
     done: "",
   }[phase];
 
-  const progressStr = progress.total > 0
-    ? `${progress.current}/${progress.total} ${phaseLabel}`
-    : phaseLabel;
+  const progressStr =
+    progress.total > 0 ? `${progress.current}/${progress.total} ${phaseLabel}` : phaseLabel;
 
   const costStr = runningCostUsd > 0 ? formatCost(runningCostUsd) : "$0.00";
 
   const elapsedStr = elapsed > 0 ? formatDuration(elapsed) : "0s";
 
-  const throttleStr = throttle
-    ? chalk.yellow(` │ ⚠ throttled`)
-    : "";
+  const throttleStr = throttle ? chalk.yellow(` │ ⚠ throttled`) : "";
 
   const termWidth = process.stdout.columns ?? 80;
   const divider = chalk.dim("─".repeat(Math.min(termWidth, 80)));
@@ -78,9 +74,12 @@ export function StatusFooter({
       <Text>{divider}</Text>
       <Text>
         {chalk.redBright.bold(modelShort)}
-        {SEP}{costStr}
-        {SEP}{progressStr}
-        {SEP}{elapsedStr}
+        {SEP}
+        {costStr}
+        {SEP}
+        {progressStr}
+        {SEP}
+        {elapsedStr}
         {throttleStr}
       </Text>
     </Box>

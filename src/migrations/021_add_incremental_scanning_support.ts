@@ -5,8 +5,9 @@ export const migration021: Migration = {
   name: "add_incremental_scanning_support",
   up(db) {
     const columns = new Set(
-      (db.prepare("PRAGMA table_info(pipeline_runs)").all() as Array<{ name: string }>)
-        .map((c) => c.name),
+      (db.prepare("PRAGMA table_info(pipeline_runs)").all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
     );
     if (!columns.has("head_ref")) {
       db.exec("ALTER TABLE pipeline_runs ADD COLUMN head_ref TEXT");

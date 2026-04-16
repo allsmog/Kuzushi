@@ -5,9 +5,7 @@ export type AgentPermissionMode =
   | "plan"
   | "dontAsk";
 
-export type AgentToolDecision =
-  | { behavior: "allow" }
-  | { behavior: "deny"; message?: string };
+export type AgentToolDecision = { behavior: "allow" } | { behavior: "deny"; message?: string };
 
 export interface AgentHistoryEntry {
   role: "user" | "assistant";
@@ -132,5 +130,15 @@ export interface AgentRuntime {
   queryBatch?(
     requests: AgentBatchRequest[],
     baseOptions: AgentQueryOptions,
-  ): Promise<Map<string, { resultText: string; structuredOutput: unknown; executionError: string | null; costUsd: number }>>;
+  ): Promise<
+    Map<
+      string,
+      {
+        resultText: string;
+        structuredOutput: unknown;
+        executionError: string | null;
+        costUsd: number;
+      }
+    >
+  >;
 }

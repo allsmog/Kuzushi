@@ -6,12 +6,12 @@
  */
 
 import type { Finding } from "../../scanners/types.js";
+import { updateRunCost } from "../../store.js";
 import type { TriageResult } from "../../types.js";
 import { isRecord, normalizeCostUsd } from "../../utils.js";
-import { updateRunCost } from "../../store.js";
 import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
-import type { RunState, OrchestratorDeps } from "./types.js";
+import type { OrchestratorDeps, RunState } from "./types.js";
 
 /**
  * Extract a concise threat model summary from upstream task outputs
@@ -29,7 +29,7 @@ export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): stri
     const elements = Array.isArray(dfd["elements"]) ? dfd["elements"] : [];
     const externalEntities = elements
       .filter((e: unknown) => isRecord(e) && e["type"] === "external-entity")
-      .map((e: unknown) => isRecord(e) ? String(e["name"] ?? "") : "")
+      .map((e: unknown) => (isRecord(e) ? String(e["name"] ?? "") : ""))
       .filter(Boolean);
     if (externalEntities.length > 0) {
       parts.push(`External actors: ${externalEntities.join(", ")}`);
@@ -37,7 +37,7 @@ export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): stri
 
     const trustBoundaries = Array.isArray(dfd["trustBoundaries"]) ? dfd["trustBoundaries"] : [];
     const boundaryNames = trustBoundaries
-      .map((b: unknown) => isRecord(b) ? String(b["name"] ?? "") : "")
+      .map((b: unknown) => (isRecord(b) ? String(b["name"] ?? "") : ""))
       .filter(Boolean);
     if (boundaryNames.length > 0) {
       parts.push(`Trust boundaries: ${boundaryNames.join(", ")}`);
@@ -58,20 +58,35 @@ export function buildThreatModelSummary(taskOutputs: Map<string, unknown>): stri
 
   // Extract top threats for context
   const threats = Array.isArray(raw["threats"]) ? raw["threats"] : [];
-  const topThreats = threats.slice(0, 5).map((t: unknown) => {
-    if (!isRecord(t)) return "";
-    return `- ${String(t["title"] ?? "")} [${String(t["category"] ?? "")}]`;
-  }).filter(Boolean);
+  const topThreats = threats
+    .slice(0, 5)
+    .map((t: unknown) => {
+      if (!isRecord(t)) return "";
+      return `- ${String(t["title"] ?? "")} [${String(t["category"] ?? "")}]`;
+    })
+    .filter(Boolean);
   if (topThreats.length > 0) {
     parts.push(`Top threats:\n${topThreats.join("\n")}`);
   }
 
   // Detect offensive/pentest tool patterns from threat actors and descriptions
   const allText = JSON.stringify(raw).toLowerCase();
-  const offensivePatterns = ["pentest", "offensive", "red team", "tunneling", "pivoting", "c2", "implant", "exploitation framework", "attack tool"];
+  const offensivePatterns = [
+    "pentest",
+    "offensive",
+    "red team",
+    "tunneling",
+    "pivoting",
+    "c2",
+    "implant",
+    "exploitation framework",
+    "attack tool",
+  ];
   const isOffensiveTool = offensivePatterns.some((p) => allText.includes(p));
   if (isOffensiveTool) {
-    parts.push("Application type: OFFENSIVE SECURITY / PENTEST TOOL — findings about missing authentication, encryption, or access control may be BY DESIGN for this tool's intended use case. Focus on bugs that harm the tool's OPERATOR (crashes, data races, credential leaks) rather than design choices about target interaction.");
+    parts.push(
+      "Application type: OFFENSIVE SECURITY / PENTEST TOOL — findings about missing authentication, encryption, or access control may be BY DESIGN for this tool's intended use case. Focus on bugs that harm the tool's OPERATOR (crashes, data races, credential leaks) rather than design choices about target interaction.",
+    );
   }
 
   return parts.length > 0 ? parts.join("\n\n") : undefined;
@@ -149,10 +164,10 @@ export function handleTriageError(
 export function isTriageDone(state: RunState): boolean {
   const processed = state.triaged + state.triageErrors;
   return (
-    state.triageTotal > 0
-    && processed >= state.triageTotal
-    && state.inFlight === 0
-    && !state.reportRequested
+    state.triageTotal > 0 &&
+    processed >= state.triageTotal &&
+    state.inFlight === 0 &&
+    !state.reportRequested
   );
 }
 

@@ -14,18 +14,26 @@ interface ExclusionRule {
   match: (finding: Finding) => boolean;
 }
 
-const DOS_PATTERNS = /\b(dos|denial.of.service|resource.exhaustion|amplification.attack|billion.laughs|xml.bomb)\b/i;
+const DOS_PATTERNS =
+  /\b(dos|denial.of.service|resource.exhaustion|amplification.attack|billion.laughs|xml.bomb)\b/i;
 const RATE_LIMIT_PATTERNS = /(rate.limit|throttl|service.overload|brute.?force|account.lockout)/i;
-const RESOURCE_LEAK_PATTERNS = /\b(resource.leak|memory.leak|file.descriptor.leak|connection.leak|handle.leak|unclosed)\b/i;
+const RESOURCE_LEAK_PATTERNS =
+  /\b(resource.leak|memory.leak|file.descriptor.leak|connection.leak|handle.leak|unclosed)\b/i;
 const OPEN_REDIRECT_PATTERNS = /\b(open.redirect|url.redirect|unvalidated.redirect)\b/i;
 const AUTH_REDIRECT_CONTEXT = /\b(oauth|redirect_uri|login|saml|callback|sso|oidc|auth)\b/i;
-const MEMORY_SAFETY_PATTERNS = /\b(buffer.overflow|use.after.free|double.free|heap.overflow|stack.overflow|out.of.bounds|null.pointer.deref)\b/i;
+const MEMORY_SAFETY_PATTERNS =
+  /\b(buffer.overflow|use.after.free|double.free|heap.overflow|stack.overflow|out.of.bounds|null.pointer.deref)\b/i;
 const REGEX_INJECTION_PATTERNS = /\b(regex.injection|redos|regular.expression.denial)\b/i;
-const NON_C_LANGUAGES = /\.(ts|tsx|js|jsx|py|rb|java|kt|go|rs|cs|php|swift|scala|dart|lua|pl|r|ex|exs|clj|erl|hs|ml|fs|jl)$/i;
-const TEST_PATH_PATTERNS = /(?:^|[/\\])(?:test|tests|spec|specs|__tests__|__mocks__|__fixtures__|fixtures|mocks|e2e|cypress|playwright|vitest|jest)[/\\]/i;
-const DOC_PATH_PATTERNS = /(?:^|[/\\])(?:docs?|documentation|README|CHANGELOG|CONTRIBUTING|wiki)[/\\]|\.(?:md|mdx|rst|txt|adoc)$/i;
-const CLIENT_SIDE_PATTERNS = /(?:^|[/\\])(?:public|static|assets|dist|build|out|client|frontend|www)[/\\]/i;
-const GENERATED_VENDORED_PATTERNS = /(?:^|[/\\])(?:dist|build|\.next|\.nuxt|vendor|third_party|\.generated|node_modules)[/\\]|\.bundle\.js$/i;
+const NON_C_LANGUAGES =
+  /\.(ts|tsx|js|jsx|py|rb|java|kt|go|rs|cs|php|swift|scala|dart|lua|pl|r|ex|exs|clj|erl|hs|ml|fs|jl)$/i;
+const TEST_PATH_PATTERNS =
+  /(?:^|[/\\])(?:test|tests|spec|specs|__tests__|__mocks__|__fixtures__|fixtures|mocks|e2e|cypress|playwright|vitest|jest)[/\\]/i;
+const DOC_PATH_PATTERNS =
+  /(?:^|[/\\])(?:docs?|documentation|README|CHANGELOG|CONTRIBUTING|wiki)[/\\]|\.(?:md|mdx|rst|txt|adoc)$/i;
+const CLIENT_SIDE_PATTERNS =
+  /(?:^|[/\\])(?:public|static|assets|dist|build|out|client|frontend|www)[/\\]/i;
+const GENERATED_VENDORED_PATTERNS =
+  /(?:^|[/\\])(?:dist|build|\.next|\.nuxt|vendor|third_party|\.generated|node_modules)[/\\]|\.bundle\.js$/i;
 
 const EXCLUSION_RULES: ExclusionRule[] = [
   {
@@ -52,24 +60,25 @@ const EXCLUSION_RULES: ExclusionRule[] = [
     kind: "soft",
     scorePenalty: 15,
     match: (f) =>
-      (OPEN_REDIRECT_PATTERNS.test(f.message) || OPEN_REDIRECT_PATTERNS.test(f.ruleId))
-      && !AUTH_REDIRECT_CONTEXT.test(f.message)
-      && !AUTH_REDIRECT_CONTEXT.test(f.filePath)
-      && !AUTH_REDIRECT_CONTEXT.test(f.evidence ?? ""),
+      (OPEN_REDIRECT_PATTERNS.test(f.message) || OPEN_REDIRECT_PATTERNS.test(f.ruleId)) &&
+      !AUTH_REDIRECT_CONTEXT.test(f.message) &&
+      !AUTH_REDIRECT_CONTEXT.test(f.filePath) &&
+      !AUTH_REDIRECT_CONTEXT.test(f.evidence ?? ""),
   },
   {
     id: "memory-safety-non-native",
     description: "Memory safety findings in non-C/C++ code",
     kind: "hard",
     match: (f) =>
-      (MEMORY_SAFETY_PATTERNS.test(f.message) || MEMORY_SAFETY_PATTERNS.test(f.ruleId))
-      && NON_C_LANGUAGES.test(f.filePath),
+      (MEMORY_SAFETY_PATTERNS.test(f.message) || MEMORY_SAFETY_PATTERNS.test(f.ruleId)) &&
+      NON_C_LANGUAGES.test(f.filePath),
   },
   {
     id: "regex-injection",
     description: "Regex injection / ReDoS findings",
     kind: "hard",
-    match: (f) => REGEX_INJECTION_PATTERNS.test(f.message) || REGEX_INJECTION_PATTERNS.test(f.ruleId),
+    match: (f) =>
+      REGEX_INJECTION_PATTERNS.test(f.message) || REGEX_INJECTION_PATTERNS.test(f.ruleId),
   },
   {
     id: "ssrf-client-side",
@@ -77,8 +86,8 @@ const EXCLUSION_RULES: ExclusionRule[] = [
     kind: "soft",
     scorePenalty: 15,
     match: (f) =>
-      (/\bssrf\b/i.test(f.message) || /\bssrf\b/i.test(f.ruleId))
-      && (CLIENT_SIDE_PATTERNS.test(f.filePath) || /\.html?$/i.test(f.filePath)),
+      (/\bssrf\b/i.test(f.message) || /\bssrf\b/i.test(f.ruleId)) &&
+      (CLIENT_SIDE_PATTERNS.test(f.filePath) || /\.html?$/i.test(f.filePath)),
   },
   {
     id: "doc-files",
@@ -190,7 +199,10 @@ function applySuppressionMetadata(finding: Finding, rules: ExclusionRule[]): Fin
     })),
   ];
 
-  const totalPenalty = rules.reduce((sum, rule) => sum + (rule.kind === "soft" ? rule.scorePenalty ?? 0 : 0), 0);
+  const totalPenalty = rules.reduce(
+    (sum, rule) => sum + (rule.kind === "soft" ? (rule.scorePenalty ?? 0) : 0),
+    0,
+  );
   return {
     ...base,
     adjustedScore: Math.max(0, (base.adjustedScore ?? base.score) - totalPenalty),

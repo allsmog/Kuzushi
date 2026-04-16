@@ -40,11 +40,7 @@ describe("TaskRegistry", () => {
       "reporter",
     ]);
 
-    expect(order).toEqual([
-      ["scanner-a", "scanner-b", "analyzer"],
-      ["verifier"],
-      ["reporter"],
-    ]);
+    expect(order).toEqual([["scanner-a", "scanner-b", "analyzer"], ["verifier"], ["reporter"]]);
   });
 
   it("throws on dependency cycles", () => {
@@ -53,8 +49,7 @@ describe("TaskRegistry", () => {
     registry.register(task("b", ["a"]));
     registry.register(task("c", ["b"]));
 
-    expect(() => registry.resolveOrder(["a", "b", "c"]))
-      .toThrow("Task dependency cycle detected");
+    expect(() => registry.resolveOrder(["a", "b", "c"])).toThrow("Task dependency cycle detected");
   });
 
   it("throws when enabled set misses required dependencies", () => {
@@ -62,8 +57,7 @@ describe("TaskRegistry", () => {
     registry.register(task("semgrep"));
     registry.register(task("fp-verification", ["semgrep"]));
 
-    expect(() => registry.resolveOrder(["fp-verification"]))
-      .toThrow("but it is not enabled");
+    expect(() => registry.resolveOrder(["fp-verification"])).toThrow("but it is not enabled");
   });
 
   it("throws when dependsOn references unknown task", () => {
@@ -78,7 +72,6 @@ describe("TaskRegistry", () => {
     registry.register(task("valid"));
     registry.register(task("broken", ["missing-dep"]));
 
-    expect(() => registry.resolveOrder(["unknown-task"]))
-      .toThrow("Unknown enabled task");
+    expect(() => registry.resolveOrder(["unknown-task"])).toThrow("Unknown enabled task");
   });
 });

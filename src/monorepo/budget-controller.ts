@@ -40,9 +40,12 @@ const PRIORITY_NUMERIC: Record<ModulePriority, number> = {
   low: 3,
 };
 
-export function createBudget(config: { monorepo?: { budgetUsd?: number; crossModuleReserve?: number }; costBudgetUsd?: number }): MonorepoBudget {
+export function createBudget(config: {
+  monorepo?: { budgetUsd?: number; crossModuleReserve?: number };
+  costBudgetUsd?: number;
+}): MonorepoBudget {
   const total = config.monorepo?.budgetUsd ?? config.costBudgetUsd ?? Infinity;
-  const reserveRatio = config.monorepo?.crossModuleReserve ?? 0.10;
+  const reserveRatio = config.monorepo?.crossModuleReserve ?? 0.1;
   const reserved = Number.isFinite(total) ? total * reserveRatio : 0;
 
   return {
@@ -69,7 +72,9 @@ export function sortModulesByPriority(
   attackSurfaces: Map<string, AttackSurfaceAnnotation>,
   recommendations: ModuleTaskRecommendation[] = [],
 ): DiscoveredModule[] {
-  const riskByPath = new Map(recommendations.map((recommendation) => [recommendation.modulePath, recommendation.riskLevel]));
+  const riskByPath = new Map(
+    recommendations.map((recommendation) => [recommendation.modulePath, recommendation.riskLevel]),
+  );
 
   return [...modules].sort((left, right) => {
     const leftScore = computePriorityScore(left, depGraph, attackSurfaces, riskByPath);
@@ -143,9 +148,9 @@ export function recordModuleCost(budget: MonorepoBudget, costUsd: number): void 
 }
 
 export function estimateModuleTaskCost(taskIds: string[]): number {
-  return BASE_MODULE_SCAN_COST + taskIds.reduce(
-    (sum, taskId) => sum + (TASK_COST_ESTIMATE[taskId] ?? 0.4),
-    0,
+  return (
+    BASE_MODULE_SCAN_COST +
+    taskIds.reduce((sum, taskId) => sum + (TASK_COST_ESTIMATE[taskId] ?? 0.4), 0)
   );
 }
 
@@ -156,13 +161,15 @@ export function formatScanPlan(plans: ModuleScanPlan[], budget: MonorepoBudget):
     ? `$${budget.totalBudgetUsd.toFixed(2)}`
     : "unlimited";
 
-  lines.push(`Scan plan (${plans.length} modules, est. $${totalEstimated.toFixed(2)} / ${budgetStr} budget):`);
+  lines.push(
+    `Scan plan (${plans.length} modules, est. $${totalEstimated.toFixed(2)} / ${budgetStr} budget):`,
+  );
   for (const plan of plans) {
     const risk = plan.riskLevel.toUpperCase().padEnd(8);
-    const tasks = plan.tasks.length > 0
-      ? plan.tasks.join(", ")
-      : "no explicit tasks";
-    lines.push(`  [${risk}] ${plan.module.path} (~$${plan.estimatedCostUsd.toFixed(2)}) :: ${tasks}`);
+    const tasks = plan.tasks.length > 0 ? plan.tasks.join(", ") : "no explicit tasks";
+    lines.push(
+      `  [${risk}] ${plan.module.path} (~$${plan.estimatedCostUsd.toFixed(2)}) :: ${tasks}`,
+    );
   }
   return lines.join("\n");
 }

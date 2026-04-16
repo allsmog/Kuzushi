@@ -1,15 +1,19 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { __discoverInternals } from "../../../../../src/agents/tasks/taint-analysis/cross-service/discover.js";
 
-const { loadManifest, autoDetectServices, detectServiceInDir, manifestEntryToDescriptor } = __discoverInternals;
+const { loadManifest, autoDetectServices, detectServiceInDir, manifestEntryToDescriptor } =
+  __discoverInternals;
 
 let tempDir: string;
 
 function setupTempDir(): string {
-  const dir = path.join(os.tmpdir(), `kuzushi-discover-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const dir = path.join(
+    os.tmpdir(),
+    `kuzushi-discover-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  );
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -128,13 +132,16 @@ describe("autoDetectServices", () => {
   it("detects a Go Gin service", async () => {
     const svcDir = path.join(tempDir, "services", "gateway");
     mkdirSync(svcDir, { recursive: true });
-    writeText(path.join(svcDir, "go.mod"), `
+    writeText(
+      path.join(svcDir, "go.mod"),
+      `
 module github.com/example/gateway
 
 go 1.21
 
 require github.com/gin-gonic/gin v1.9.1
-`);
+`,
+    );
 
     const detected: string[] = [];
     const services = await autoDetectServices(tempDir, 20, detected);
@@ -160,7 +167,9 @@ require github.com/gin-gonic/gin v1.9.1
   it("detects a Java Spring service", async () => {
     const svcDir = path.join(tempDir, "services", "orders");
     mkdirSync(svcDir, { recursive: true });
-    writeText(path.join(svcDir, "pom.xml"), `
+    writeText(
+      path.join(svcDir, "pom.xml"),
+      `
 <project>
   <dependencies>
     <dependency>
@@ -169,7 +178,8 @@ require github.com/gin-gonic/gin v1.9.1
     </dependency>
   </dependencies>
 </project>
-`);
+`,
+    );
 
     const detected: string[] = [];
     const services = await autoDetectServices(tempDir, 20, detected);
@@ -242,10 +252,13 @@ require github.com/gin-gonic/gin v1.9.1
   it("detects a Python service via pyproject.toml", async () => {
     const svcDir = path.join(tempDir, "services", "api");
     mkdirSync(svcDir, { recursive: true });
-    writeText(path.join(svcDir, "pyproject.toml"), `
+    writeText(
+      path.join(svcDir, "pyproject.toml"),
+      `
 [project]
 dependencies = ["fastapi>=0.104.0", "uvicorn"]
-`);
+`,
+    );
 
     const detected: string[] = [];
     const services = await autoDetectServices(tempDir, 20, detected);
@@ -258,11 +271,14 @@ dependencies = ["fastapi>=0.104.0", "uvicorn"]
   it("detects a Java service via build.gradle.kts", async () => {
     const svcDir = path.join(tempDir, "services", "payments");
     mkdirSync(svcDir, { recursive: true });
-    writeText(path.join(svcDir, "build.gradle.kts"), `
+    writeText(
+      path.join(svcDir, "build.gradle.kts"),
+      `
 plugins {
     id("org.springframework.boot") version "3.2.0"
 }
-`);
+`,
+    );
 
     const detected: string[] = [];
     const services = await autoDetectServices(tempDir, 20, detected);
@@ -275,13 +291,16 @@ plugins {
   it("detects a C# ASP.NET service via .csproj", async () => {
     const svcDir = path.join(tempDir, "services", "web");
     mkdirSync(svcDir, { recursive: true });
-    writeText(path.join(svcDir, "MyApp.csproj"), `
+    writeText(
+      path.join(svcDir, "MyApp.csproj"),
+      `
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
   </ItemGroup>
 </Project>
-`);
+`,
+    );
 
     const detected: string[] = [];
     const services = await autoDetectServices(tempDir, 20, detected);
@@ -341,8 +360,14 @@ describe("detectServiceInDir", () => {
   it("does not let a stray .csproj override a Go detection", async () => {
     const dir = path.join(tempDir, "mixed");
     mkdirSync(dir, { recursive: true });
-    writeText(path.join(dir, "go.mod"), "module example.com/mixed\ngo 1.21\nrequire github.com/gin-gonic/gin v1.9.1\n");
-    writeText(path.join(dir, "Tool.csproj"), "<Project><ItemGroup><PackageReference Include=\"Microsoft.AspNetCore.OpenApi\" /></ItemGroup></Project>");
+    writeText(
+      path.join(dir, "go.mod"),
+      "module example.com/mixed\ngo 1.21\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    );
+    writeText(
+      path.join(dir, "Tool.csproj"),
+      '<Project><ItemGroup><PackageReference Include="Microsoft.AspNetCore.OpenApi" /></ItemGroup></Project>',
+    );
 
     const result = await detectServiceInDir(dir, "mixed", ["go.mod", "Tool.csproj"]);
     expect(result).not.toBeNull();

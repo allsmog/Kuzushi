@@ -19,10 +19,7 @@ type PatchResultRow = {
   updated_at: string;
 };
 
-export function insertPatchResult(
-  db: Database.Database,
-  result: PatchResult,
-): void {
+export function insertPatchResult(db: Database.Database, result: PatchResult): void {
   db.prepare(`
     INSERT INTO patch_results (
       patch_run_id, fingerprint, repo, diff, status,
@@ -45,13 +42,12 @@ export function insertPatchResult(
   );
 }
 
-export function getPatchResult(
-  db: Database.Database,
-  patchRunId: string,
-): PatchResult | undefined {
-  const row = db.prepare(`
+export function getPatchResult(db: Database.Database, patchRunId: string): PatchResult | undefined {
+  const row = db
+    .prepare(`
     SELECT * FROM patch_results WHERE patch_run_id = ?
-  `).get(patchRunId) as PatchResultRow | undefined;
+  `)
+    .get(patchRunId) as PatchResultRow | undefined;
 
   return row ? rowToPatchResult(row) : undefined;
 }
@@ -60,11 +56,13 @@ export function getPatchResultsForFinding(
   db: Database.Database,
   fingerprint: string,
 ): PatchResult[] {
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT * FROM patch_results
     WHERE fingerprint = ?
     ORDER BY created_at DESC
-  `).all(fingerprint) as PatchResultRow[];
+  `)
+    .all(fingerprint) as PatchResultRow[];
 
   return rows.map(rowToPatchResult);
 }
