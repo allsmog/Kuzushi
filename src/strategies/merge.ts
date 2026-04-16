@@ -30,7 +30,7 @@ function groupByLocation(
 
   for (const item of sorted) {
     let matched = false;
-    for (const [key, group] of groups) {
+    for (const [_key, group] of groups) {
       const ref = group[0]!.finding;
       if (
         ref.filePath === item.finding.filePath &&

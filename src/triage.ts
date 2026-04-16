@@ -2,8 +2,6 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { cleanupBatchFiles, writeBatchFile } from "./agent-runtime/batch-files.js";
 import {
-  type AgentActivity,
-  type AgentActivityCallback,
   type AgentRuntimeOptions,
   extractJson,
   resolveDefaultReadOnlyTools,
@@ -203,10 +201,10 @@ export function triageSystemPromptPrefix(
   const repoSection = formatRepoContext(repoContext);
   const enrichedSection = formatEnrichedRepoContext(enrichedContext);
   const repoBlock =
-    repoSection.length > 0 ? "## Repository Context\n" + repoSection.join("\n") + "\n\n" : "";
+    repoSection.length > 0 ? `## Repository Context\n${repoSection.join("\n")}\n\n` : "";
   const enrichedBlock =
     enrichedSection.length > 0
-      ? "## Enriched Repository Context\n" + enrichedSection.join("\n") + "\n\n"
+      ? `## Enriched Repository Context\n${enrichedSection.join("\n")}\n\n`
       : "";
   return (
     repoBlock +
@@ -240,7 +238,7 @@ export async function triageFindingWithAgent(
   );
   const agentConfig = resolveAgentConfig(registry, finding, repoName, triageTemplate);
   const prompt = extraPromptContext
-    ? agentConfig.prompt + "\n\n" + extraPromptContext
+    ? `${agentConfig.prompt}\n\n${extraPromptContext}`
     : agentConfig.prompt;
   const allowedTools = normalizeAllowedTools(agentConfig.allowedTools, runtimeOptions.runtime);
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
@@ -622,7 +620,7 @@ function resolveAgentConfig(
 
   try {
     const config = registry.get(finding.taskId).triageAgentConfig(finding, repoName);
-    if (!config.prompt || !config.prompt.trim()) {
+    if (!config.prompt?.trim()) {
       return buildDefaultTriageAgentConfig(finding, repoName, template);
     }
     return config;

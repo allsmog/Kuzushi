@@ -146,7 +146,7 @@ export class LoopDetector {
         return typeof val === "number" ? val : NaN;
       });
 
-      if (values.every((v) => !isNaN(v))) {
+      if (values.every((v) => !Number.isNaN(v))) {
         let increasing = true;
         for (let i = 1; i < values.length; i++) {
           if (values[i] <= values[i - 1]) {

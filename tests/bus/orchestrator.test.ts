@@ -2,7 +2,6 @@ import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import { TaskRegistry } from "../../src/agents/registry.js";
-import { SELECTABLE_TASK_IDS } from "../../src/agents/tasks/task-selector.js";
 import type { AgentTask } from "../../src/agents/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import type {
@@ -12,11 +11,9 @@ import type {
   PocHarnessStartEvent,
   ReportRequestedEvent,
   StageCompleteEvent,
-  TaskCompleteEvent,
   TaskStartEvent,
   TriageBatchQueuedEvent,
   TriageCompleteEvent,
-  TriageFindingQueuedEvent,
   TriageQueueDepthEvent,
   TriageStartEvent,
   VerificationBatchQueuedEvent,

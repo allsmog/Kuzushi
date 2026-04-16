@@ -4,36 +4,40 @@ import type { Finding } from "./types.js";
  * Normalize a CWE identifier to a canonical form (e.g. "CWE-89").
  * Returns empty string for unparseable values.
  */
+const CWE_PATTERN = /CWE-(\d+)/;
 function normalizeCwe(cwe: string): string {
-  const match = cwe.toUpperCase().match(/CWE-(\d+)/);
+  const match = cwe.toUpperCase().match(CWE_PATTERN);
   return match ? `CWE-${Number.parseInt(match[1], 10)}` : "";
 }
 
 /**
- * Compute the set of normalized CWE identifiers for a finding.
- * Returns an empty set when the finding has no CWEs or all are unparseable.
+ * Compute the list of normalized CWE identifiers for a finding, deduplicated.
+ * Returns an empty array when the finding has no CWEs or all are unparseable.
  */
-function getCweSet(finding: Finding): Set<string> {
-  if (!finding.cwe || !Array.isArray(finding.cwe)) {
-    return new Set();
+function getCweList(finding: Finding): string[] {
+  if (!finding.cwe || !Array.isArray(finding.cwe) || finding.cwe.length === 0) {
+    return [];
   }
-  const normalized = finding.cwe.map(normalizeCwe).filter(Boolean);
-  return new Set(normalized);
-}
-
-/**
- * Check whether two CWE sets share at least one identifier.
- */
-function cweSetsOverlap(a: Set<string>, b: Set<string>): boolean {
-  if (a.size === 0 || b.size === 0) {
-    return false;
-  }
-  for (const cwe of a) {
-    if (b.has(cwe)) {
-      return true;
+  let normalized: string[] | undefined;
+  let seen: Set<string> | undefined;
+  for (const raw of finding.cwe) {
+    const canonical = normalizeCwe(raw);
+    if (!canonical) continue;
+    if (!normalized) {
+      normalized = [canonical];
+      continue;
+    }
+    if (!seen) {
+      // Lazy allocate the Set only when we have >1 CWE on this finding.
+      if (normalized[0] === canonical) continue;
+      seen = new Set(normalized);
+    }
+    if (!seen.has(canonical)) {
+      seen.add(canonical);
+      normalized.push(canonical);
     }
   }
-  return false;
+  return normalized ?? [];
 }
 
 /**
@@ -48,6 +52,11 @@ function cweSetsOverlap(a: Set<string>, b: Set<string>): boolean {
  * Findings without any CWE information are treated as having a unique implicit
  * CWE (they can only deduplicate against each other by exact CWE-less match,
  * which means they never overlap with CWE-bearing findings).
+ *
+ * Implementation: union-find keyed by normalized CWE id. Each CWE-bearing
+ * finding unions itself with the representative of every CWE it carries;
+ * CWE-less findings stay singleton. O(N · α(N) · avgCwesPerFinding) per
+ * location group.
  */
 export function deduplicateFindings(findings: Finding[]): Finding[] {
   if (findings.length === 0) {
@@ -74,69 +83,80 @@ export function deduplicateFindings(findings: Finding[]): Finding[] {
       continue;
     }
 
-    // Within each location group, cluster findings by CWE overlap.
-    // Each cluster is a set of findings that transitively share at least one CWE.
-    // We use a union-find-like approach: iterate findings and merge into existing
-    // clusters when overlap is detected.
-    const clusters: Array<{ findings: Finding[]; cwes: Set<string> }> = [];
+    // Union-find over finding indices within this location group.
+    // Each CWE-bearing finding unions with the first finding it sees that
+    // shares any CWE. CWE-less findings are always their own root.
+    const n = group.length;
+    const parent = new Int32Array(n);
+    for (let i = 0; i < n; i++) parent[i] = i;
 
-    for (const finding of group) {
-      const findingCwes = getCweSet(finding);
-
-      if (findingCwes.size === 0) {
-        // Findings without CWE info cannot overlap with anything — keep as singleton.
-        clusters.push({ findings: [finding], cwes: new Set() });
-        continue;
+    const find = (x: number): number => {
+      // Iterative path compression.
+      let root = x;
+      while (parent[root] !== root) root = parent[root];
+      let cursor = x;
+      while (parent[cursor] !== root) {
+        const next = parent[cursor];
+        parent[cursor] = root;
+        cursor = next;
       }
+      return root;
+    };
+    const union = (a: number, b: number): void => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra === rb) return;
+      // Keep the lower index as root to preserve first-seen semantics for
+      // the cluster-representative walk below.
+      if (ra < rb) parent[rb] = ra;
+      else parent[ra] = rb;
+    };
 
-      // Find all existing clusters this finding overlaps with.
-      const overlappingIndices: number[] = [];
-      for (let i = 0; i < clusters.length; i++) {
-        if (clusters[i].cwes.size > 0 && cweSetsOverlap(findingCwes, clusters[i].cwes)) {
-          overlappingIndices.push(i);
-        }
-      }
+    // cweOwner: CWE id → first finding index that carried it.
+    const cweOwner = new Map<string, number>();
+    // Cache normalized CWE lists so we only compute once per finding.
+    const cweLists: string[][] = new Array(n);
 
-      if (overlappingIndices.length === 0) {
-        // No overlap — start a new cluster.
-        clusters.push({ findings: [finding], cwes: new Set(findingCwes) });
-      } else {
-        // Merge into the first overlapping cluster and absorb any other
-        // overlapping clusters into it (transitive merge).
-        const primaryIdx = overlappingIndices[0];
-        const primary = clusters[primaryIdx];
-        primary.findings.push(finding);
-        for (const cwe of findingCwes) {
-          primary.cwes.add(cwe);
-        }
-
-        // Merge additional overlapping clusters into primary (reverse order for safe splicing).
-        for (let j = overlappingIndices.length - 1; j >= 1; j--) {
-          const mergeIdx = overlappingIndices[j];
-          const merged = clusters[mergeIdx];
-          for (const f of merged.findings) {
-            primary.findings.push(f);
-          }
-          for (const cwe of merged.cwes) {
-            primary.cwes.add(cwe);
-          }
-          clusters.splice(mergeIdx, 1);
+    for (let i = 0; i < n; i++) {
+      const cwes = getCweList(group[i]);
+      cweLists[i] = cwes;
+      if (cwes.length === 0) continue;
+      for (const cwe of cwes) {
+        const owner = cweOwner.get(cwe);
+        if (owner === undefined) {
+          cweOwner.set(cwe, i);
+        } else {
+          union(i, owner);
         }
       }
     }
 
-    // From each cluster, keep only the highest-scored finding.
-    for (const cluster of clusters) {
-      let best = cluster.findings[0];
-      for (let i = 1; i < cluster.findings.length; i++) {
-        const candidate = cluster.findings[i];
-        const candidateScore = candidate.score ?? 0;
-        const bestScore = best.score ?? 0;
-        if (candidateScore > bestScore) {
-          best = candidate;
-        }
+    // Collect best finding per cluster root. Order-stable within a group so
+    // ties prefer the first-seen finding.
+    const bestByRoot = new Map<number, Finding>();
+    const rootOrder: number[] = [];
+
+    for (let i = 0; i < n; i++) {
+      // CWE-less findings are never union()'d (no CWE to key off), so their
+      // parent stays `i` and they naturally form singleton clusters —
+      // matching the original implementation's behavior.
+      const root = find(i);
+      const current = bestByRoot.get(root);
+      if (!current) {
+        bestByRoot.set(root, group[i]);
+        rootOrder.push(root);
+        continue;
       }
-      result.push(best);
+      const currentScore = current.score ?? 0;
+      const candidateScore = group[i].score ?? 0;
+      if (candidateScore > currentScore) {
+        bestByRoot.set(root, group[i]);
+      }
+    }
+
+    for (const root of rootOrder) {
+      const best = bestByRoot.get(root);
+      if (best) result.push(best);
     }
   }
 

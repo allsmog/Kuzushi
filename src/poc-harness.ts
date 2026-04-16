@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { cleanupBatchFiles, writeBatchFile } from "./agent-runtime/batch-files.js";
 import {
-  type AgentActivityCallback,
   type AgentRuntimeOptions,
   extractJson,
   resolveDefaultReadOnlyTools,
@@ -13,7 +12,6 @@ import {
   runStructuredAgentQuery,
   runStructuredSessionQuery,
 } from "./agent-runtime/execution.js";
-import type { AgentSession } from "./agent-runtime/types.js";
 import { formatRepoContext } from "./repo-context.js";
 import type { AllowedTriageTool, Finding } from "./scanners/types.js";
 import { formatZodErrors, RawPocHarnessOutputSchema } from "./schemas.js";
@@ -23,7 +21,7 @@ import { isRecord, normalizeCostUsd, toErrorMessage } from "./utils.js";
 export function pocHarnessSystemPromptPrefix(repoContext?: RepoContext): string {
   const repoSection = formatRepoContext(repoContext);
   const repoBlock =
-    repoSection.length > 0 ? "## Repository Context\n" + repoSection.join("\n") + "\n\n" : "";
+    repoSection.length > 0 ? `## Repository Context\n${repoSection.join("\n")}\n\n` : "";
   return (
     repoBlock +
     [

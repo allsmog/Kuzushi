@@ -87,7 +87,7 @@ function summarizeToolInput(input: Record<string, unknown>): Record<string, unkn
   const summary: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     if (typeof value === "string" && value.length > 200) {
-      summary[key] = value.slice(0, 200) + "...";
+      summary[key] = `${value.slice(0, 200)}...`;
     } else {
       summary[key] = value;
     }

@@ -182,8 +182,8 @@ function buildStepBox(description: string, role: string): StepBox {
   }
 
   // Truncate if still too long
-  if (line1.length > w) line1 = line1.slice(0, w - 1) + "…";
-  if (line2.length > w) line2 = line2.slice(0, w - 1) + "…";
+  if (line1.length > w) line1 = `${line1.slice(0, w - 1)}…`;
+  if (line2.length > w) line2 = `${line2.slice(0, w - 1)}…`;
 
   const roleText = `(${role})`;
   const padRole = roleText.length > w ? roleText.slice(0, w) : roleText;

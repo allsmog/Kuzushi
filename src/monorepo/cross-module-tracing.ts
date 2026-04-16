@@ -19,12 +19,11 @@ import {
   type CrossServicePath,
   STITCH_RESPONSE_SCHEMA,
   type StitchedEdge,
-  type StitchLlmResponse,
 } from "../agents/tasks/taint-analysis/cross-service/types.js";
 import { getLogger } from "../logger.js";
 import { scoreFindingMetadata } from "../scanners/scoring.js";
 import type { Finding } from "../scanners/types.js";
-import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { isRecord, toErrorMessage } from "../utils.js";
 import type {
   ModuleInteractionEdge,
   ModuleInteractionGraph,

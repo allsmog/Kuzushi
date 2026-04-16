@@ -6,7 +6,6 @@ import {
   buildVerificationPrompt,
   parseVerificationOutput,
   VERIFICATION_RESULT_SCHEMA,
-  VerificationExecutionError,
   verificationSystemPromptPrefix,
   verifyFindingsBatch,
   verifyFindingWithAgent,

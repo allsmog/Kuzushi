@@ -1,4 +1,4 @@
-import type { AgentTask, TaskContext, TaskOutputKind } from "../src/agents/types.js";
+import type { AgentTask, TaskOutputKind } from "../src/agents/types.js";
 import type { Finding, TaskId } from "../src/scanners/types.js";
 import type { TriageResult } from "../src/types.js";
 

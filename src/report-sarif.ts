@@ -350,7 +350,7 @@ function toSarifLevel(severity: string): SarifLevel {
 
 function buildSarifLocation(filePath: string, startLine: number): Record<string, unknown> {
   const uri = toRelativeUri(filePath);
-  const isDirectory = uri === "." || uri === "" || uri.endsWith("/");
+  const _isDirectory = uri === "." || uri === "" || uri.endsWith("/");
   const physicalLocation: Record<string, unknown> = {
     artifactLocation: { uri: uri || "." },
   };

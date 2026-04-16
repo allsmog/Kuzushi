@@ -22,7 +22,6 @@ import { coerceContextEnrichment, coerceRepoContext } from "../../repo-context.j
 import { withRetry } from "../../retry.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import {
-  type CompositeConfidenceResult,
   computeCompositeConfidence,
   extractScannerSignal,
   extractTriageSignal,

@@ -19,7 +19,7 @@ vi.mock("node:child_process", async () => {
     execFileSync: vi.fn((cmd: string, args: string[]) => {
       if (cmd === "which" && args?.[0]) {
         const result = whichResults[args[0]];
-        if (result) return result + "\n";
+        if (result) return `${result}\n`;
         throw new Error(`not found: ${args[0]}`);
       }
       throw new Error(`unexpected call: ${cmd} ${args}`);

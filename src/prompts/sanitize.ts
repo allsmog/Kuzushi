@@ -63,6 +63,7 @@ const HOMOGLYPH_MAP: ReadonlyMap<string, string> = new Map([
  * These can be used to hide malicious content in prompts.
  */
 const INVISIBLE_CHARS_RE =
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: intentionally matches individual invisible/joiner codepoints one-at-a-time for sanitization
   /[\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u2060\u2061\u2062\u2063\u2064\uFEFF\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E]/g;
 
 /**
@@ -88,7 +89,7 @@ export function sanitizeForPrompt(content: string, maxLength: number = DEFAULT_M
 
   // Step 3: Enforce max length
   if (sanitized.length > maxLength) {
-    sanitized = sanitized.slice(0, maxLength) + "\n[... truncated]";
+    sanitized = `${sanitized.slice(0, maxLength)}\n[... truncated]`;
   }
 
   // Step 4: Wrap in boundary markers

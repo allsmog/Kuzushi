@@ -6,7 +6,6 @@ import type {
   PipelineErrorEvent,
   PocHarnessResultEvent,
   ScanCompleteEvent,
-  TriageCompleteEvent,
   TriageResultEvent,
   VerificationResultEvent,
 } from "./bus/events.js";

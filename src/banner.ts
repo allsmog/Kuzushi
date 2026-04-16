@@ -43,9 +43,9 @@ export function printBanner(): void {
     console.log("");
     for (let i = 0; i < logoLines.length; i++) {
       if (i === quoteRow) {
-        process.stdout.write(logoLines[i] + "  " + dim(chalk.italic('"Bismillah"')) + "\n");
+        process.stdout.write(`${logoLines[i]}  ${dim(chalk.italic('"Bismillah"'))}\n`);
       } else {
-        process.stdout.write(logoLines[i] + "\n");
+        process.stdout.write(`${logoLines[i]}\n`);
       }
     }
   } catch {

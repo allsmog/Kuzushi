@@ -213,13 +213,13 @@ class StdioMcpClient {
         },
       });
 
-      this.process.stdin.write(JSON.stringify(request) + "\n");
+      this.process.stdin.write(`${JSON.stringify(request)}\n`);
     });
   }
 
   private sendNotification(method: string, params: Record<string, unknown>): void {
     if (!this.process?.stdin?.writable) return;
     const notification = { jsonrpc: "2.0", method, params };
-    this.process.stdin.write(JSON.stringify(notification) + "\n");
+    this.process.stdin.write(`${JSON.stringify(notification)}\n`);
   }
 }

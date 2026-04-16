@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Finding } from "../src/scanners/types.js";
-import type { TriageResult } from "../src/types.js";
 
 const { runStructuredAgentQueryMock } = vi.hoisted(() => ({
   runStructuredAgentQueryMock: vi.fn(),

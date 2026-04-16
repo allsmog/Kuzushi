@@ -220,7 +220,7 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
  * Returns padded string (no border characters).
  */
 function centerPad(text: string, width: number): string {
-  // Strip ANSI to get visible length
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ESC (\x1b) is required to strip ANSI sequences
   const visible = text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
   const padding = Math.max(0, width - visible.length);
   const left = Math.floor(padding / 2);

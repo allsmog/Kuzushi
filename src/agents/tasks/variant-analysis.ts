@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { cleanupBatchFiles, writeBatchFile } from "../../agent-runtime/batch-files.js";
 import { runStructuredSessionQuery } from "../../agent-runtime/execution.js";
-import type { AgentRuntime, AgentSession } from "../../agent-runtime/types.js";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { createLogger } from "../../logger.js";
 import { scoreFindingMetadata } from "../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../scanners/types.js";

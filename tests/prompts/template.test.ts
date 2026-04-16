@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { TemplateContext } from "../../src/prompts/template.js";
 import { processBlocks, renderTemplate, validateTemplate } from "../../src/prompts/template.js";
 
 // ---------------------------------------------------------------------------

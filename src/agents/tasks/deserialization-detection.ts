@@ -5,7 +5,6 @@
 import { createLogger } from "../../logger.js";
 import {
   languageAntiHallucinationExtras,
-  languageInvestigationModule,
   languageTuningModule,
 } from "../../prompts/language-tuning.js";
 import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
@@ -15,7 +14,7 @@ import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { AgentTask } from "../types.js";
 import { computeDetectionFingerprint, normalizeFilePath } from "./detection-task-utils.js";
 import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
 import { formatFileTreeForPrompt, formatPreReadForPrompt } from "./pre-read-prompt.js";

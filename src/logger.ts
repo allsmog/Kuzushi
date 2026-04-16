@@ -76,7 +76,7 @@ function buildLogger(stage: string, bindings: Record<string, unknown>): Logger {
     if (!shouldLog(level)) return;
 
     const bindingsStr =
-      Object.keys(bindings).length > 0 ? " " + JSON.stringify(redactObject(bindings)) : "";
+      Object.keys(bindings).length > 0 ? ` ${JSON.stringify(redactObject(bindings))}` : "";
 
     if (typeof first === "object" && first !== null && typeof rest[0] === "string") {
       const redacted = redactObject(first as Record<string, unknown>);
@@ -114,7 +114,7 @@ export function redactString(str: string): string {
   for (const pattern of API_KEY_PATTERNS) {
     result = result.replace(pattern, (match) => {
       if (match.length <= 10) return match;
-      return match.slice(0, 6) + "..." + match.slice(-4);
+      return `${match.slice(0, 6)}...${match.slice(-4)}`;
     });
   }
   return result;

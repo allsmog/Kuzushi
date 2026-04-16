@@ -1,21 +1,8 @@
 import { createLogger } from "../../../logger.js";
 import type { Finding } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
-import { toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
-import { resolveTaskModel, resolveTaskRuntime } from "../runtime-overrides.js";
-import { TRACE_OUTPUT_SCHEMA } from "./prompts.js";
-import {
-  getGraphNodeByFileAndLine,
-  getNodeById,
-  getPathsToNode,
-  makeEdgeId,
-  makeNodeId,
-  makePathId,
-  upsertGraphEdge,
-  upsertGraphNode,
-  upsertGraphPath,
-} from "./store.js";
+import { getGraphNodeByFileAndLine, getNodeById, getPathsToNode } from "./store.js";
 import type {
   CodeGraphNode,
   CodeGraphOutput,

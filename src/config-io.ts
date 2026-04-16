@@ -18,7 +18,7 @@ export function parseConfigFile(content: string, format: ConfigFormat): unknown 
 
 export function serializeConfig(value: unknown, format: ConfigFormat): string {
   if (format === "yaml") return stringifyYaml(value, { indent: 2 });
-  return JSON.stringify(value, null, 2) + "\n";
+  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 export function discoverConfigFile(

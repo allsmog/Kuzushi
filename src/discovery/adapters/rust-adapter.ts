@@ -88,7 +88,7 @@ export class RustAdapter implements DiscoveryAdapter {
 
       const absPath = path.resolve(repoRoot, dir);
       const cargo = await readText(path.join(absPath, "Cargo.toml"));
-      if (!cargo || !cargo.includes("[package]")) continue;
+      if (!cargo?.includes("[package]")) continue;
 
       const name = parseCrateNameFromToml(cargo) ?? path.basename(dir);
       const readme = await readFirstSnippet(absPath);
@@ -127,7 +127,7 @@ async function walkForCargoWorkspace(
   if (depth > maxDepth) return;
 
   const cargo = await readText(path.join(currentDir, "Cargo.toml"));
-  if (cargo && cargo.includes("[workspace]")) {
+  if (cargo?.includes("[workspace]")) {
     results.push(normalizePromptPath(path.relative(repoRoot, currentDir)));
   }
 

@@ -22,8 +22,14 @@ export function benchStore(): BenchCase[] {
   const count = 500;
   const findings = makeFindings(count);
   const triages = makeTriageResults(count);
-  const variants: Array<{ label: string; makeQueue: (db: Database.Database) => FindingUpsertQueue }> = [
-    { label: "threshold=1 (worst case, per-finding commit)", makeQueue: (db) => new FindingUpsertQueue(db, 1) },
+  const variants: Array<{
+    label: string;
+    makeQueue: (db: Database.Database) => FindingUpsertQueue;
+  }> = [
+    {
+      label: "threshold=1 (worst case, per-finding commit)",
+      makeQueue: (db) => new FindingUpsertQueue(db, 1),
+    },
     { label: "default (batched)", makeQueue: (db) => new FindingUpsertQueue(db) },
     { label: "threshold=100", makeQueue: (db) => new FindingUpsertQueue(db, 100) },
   ];

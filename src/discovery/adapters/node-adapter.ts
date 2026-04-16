@@ -31,7 +31,7 @@ export class NodeAdapter implements DiscoveryAdapter {
     const claimedPaths = new Set<string>();
 
     for (const wsRoot of workspaceRoots) {
-      const wsAbsPath = path.resolve(repoRoot, wsRoot.relPath);
+      const _wsAbsPath = path.resolve(repoRoot, wsRoot.relPath);
       const wsRelPath = wsRoot.relPath;
 
       // Resolve patterns relative to the workspace root

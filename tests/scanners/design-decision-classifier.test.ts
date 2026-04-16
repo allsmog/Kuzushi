@@ -5,7 +5,7 @@ import type { Finding } from "../../src/scanners/types.js";
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
     taskId: "semgrep",
-    fingerprint: "test-fp-" + Math.random().toString(36).slice(2, 8),
+    fingerprint: `test-fp-${Math.random().toString(36).slice(2, 8)}`,
     ruleId: "test/rule",
     filePath: "src/config.ts",
     startLine: 10,

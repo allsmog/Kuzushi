@@ -15,7 +15,7 @@ import {
 } from "./agent-runtime/execution.js";
 import type { AgentSession } from "./agent-runtime/types.js";
 import { confidenceEscalationModule, falseDismissalModule } from "./prompts/modules.js";
-import type { AllowedTriageTool, Finding } from "./scanners/types.js";
+import type { Finding } from "./scanners/types.js";
 import {
   parseAgentOutput,
   TRIAGE_RESULT_SCHEMA,

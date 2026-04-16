@@ -34,7 +34,7 @@ interface CommandInputProps {
   /** Whether the input is active (accepts typing). */
   active: boolean;
   /** Callback when a command is submitted. */
-  onCommand: (cmd: ReplCommand) => CommandResult | void;
+  onCommand: (cmd: ReplCommand) => CommandResult | undefined;
 }
 
 const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
@@ -140,7 +140,7 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
       )}
 
       {/* Last command result */}
-      {lastResult && lastResult.message && (
+      {lastResult?.message && (
         <Text>
           {"  "}
           {lastResult.type === "success"

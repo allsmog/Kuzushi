@@ -1,7 +1,6 @@
 import { createLogger } from "../../logger.js";
 import {
   languageAntiHallucinationExtras,
-  languageInvestigationModule,
   languageTuningModule,
 } from "../../prompts/language-tuning.js";
 import { antiHallucinationModule, frameworkAwarenessModule } from "../../prompts/modules.js";
@@ -26,12 +25,7 @@ import {
   formatPatternMatchesForPrompt,
   formatPreReadForPrompt,
 } from "./pre-read-prompt.js";
-import {
-  resolveTaskAllowedTools,
-  resolveTaskModel,
-  resolveTaskPositiveInt,
-  resolveTaskRuntime,
-} from "./runtime-overrides.js";
+import { resolveTaskModel, resolveTaskPositiveInt } from "./runtime-overrides.js";
 import {
   buildApplicationModelSection,
   buildThreatScenarioEvidenceSection,

@@ -132,5 +132,5 @@ export function writeJsonReport(
     stats,
   };
 
-  writeFileSync(outputPath, safeJsonStringify(data, 2) + "\n", "utf-8");
+  writeFileSync(outputPath, `${safeJsonStringify(data, 2)}\n`, "utf-8");
 }

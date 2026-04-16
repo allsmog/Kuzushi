@@ -89,7 +89,7 @@ export function registerEventLogWriter(
       payload: redactSecrets((event as Record<string, unknown>).payload),
     };
 
-    const line = JSON.stringify(record) + "\n";
+    const line = `${JSON.stringify(record)}\n`;
     const lineBytes = Buffer.byteLength(line, "utf-8");
 
     currentStream?.write(line);
@@ -141,6 +141,6 @@ const API_KEY_PATTERN = /\b(sk-[a-zA-Z0-9_-]{10,})\b/g;
 function redactString(str: string): string {
   return str.replace(API_KEY_PATTERN, (match) => {
     if (match.length <= 10) return match;
-    return match.slice(0, 6) + "..." + match.slice(-4);
+    return `${match.slice(0, 6)}...${match.slice(-4)}`;
   });
 }

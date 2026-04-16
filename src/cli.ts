@@ -254,13 +254,13 @@ program
 // ── compare-runs ──────────────────────────────────────────────────────────
 
 function fmt(n: number | undefined): string {
-  return n != null ? (n * 100).toFixed(1) + "%" : "n/a";
+  return n != null ? `${(n * 100).toFixed(1)}%` : "n/a";
 }
 
 function delta(a: number | undefined, b: number | undefined): string {
   if (a == null || b == null) return "n/a";
   const d = (b - a) * 100;
-  return (d >= 0 ? "+" : "") + d.toFixed(1) + "pp";
+  return `${(d >= 0 ? "+" : "") + d.toFixed(1)}pp`;
 }
 
 program

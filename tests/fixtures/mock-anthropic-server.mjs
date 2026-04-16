@@ -49,7 +49,7 @@ server.listen(0, "127.0.0.1", () => {
   const { port } = server.address();
   const baseUrl = `http://127.0.0.1:${port}`;
   // Print the base URL so the caller can capture it.
-  process.stdout.write(baseUrl + "\n");
+  process.stdout.write(`${baseUrl}\n`);
 });
 
 // Shut down cleanly when the parent process exits.

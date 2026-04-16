@@ -494,7 +494,7 @@ function matchPair(
   }
 
   // Service name in URL
-  if (exit.routePath && exit.routePath.toLowerCase().includes(entryServiceId.toLowerCase())) {
+  if (exit.routePath?.toLowerCase().includes(entryServiceId.toLowerCase())) {
     return {
       method: "url-path",
       confidence: 0.5,
@@ -1049,7 +1049,7 @@ function normalizeDbEntity(entity: string): string {
   }
   // Simple de-pluralization (handles common cases)
   if (normalized.endsWith("ies")) {
-    normalized = normalized.slice(0, -3) + "y";
+    normalized = `${normalized.slice(0, -3)}y`;
   } else if (
     normalized.endsWith("ses") ||
     normalized.endsWith("xes") ||

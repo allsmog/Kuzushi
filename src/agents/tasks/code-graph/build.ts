@@ -7,15 +7,10 @@ import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ApplicationModel, ApplicationRoute, ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
-import {
-  resolveTaskModel,
-  resolveTaskPositiveInt,
-  resolveTaskRuntime,
-} from "../runtime-overrides.js";
+import { resolveTaskModel, resolveTaskRuntime } from "../runtime-overrides.js";
 import { buildDiscoveryPrompt, buildTracePrompt, TRACE_OUTPUT_SCHEMA } from "./prompts.js";
 import {
   getGraphNodesForRepo,
-  invalidateStaleNodes,
   makeEdgeId,
   makeNodeId,
   makePathId,
@@ -35,7 +30,7 @@ import type {
 const log = createLogger({ stage: "code-graph-build" });
 
 const DEFAULT_MAX_ENTRY_POINTS = 50;
-const DEFAULT_MAX_TURNS_PER_TRACE = 10;
+const _DEFAULT_MAX_TURNS_PER_TRACE = 10;
 const HTTP_METHODS = new Set([
   "GET",
   "POST",

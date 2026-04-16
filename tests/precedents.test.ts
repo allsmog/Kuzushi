@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // We need to test the parsing logic. Let's mock fs.readFileSync.
 vi.mock("node:fs", async () => {

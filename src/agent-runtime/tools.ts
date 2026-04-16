@@ -273,7 +273,7 @@ function executeRead(args: Record<string, unknown>, cwd: string): string {
 
   const absolutePath = resolvePath(cwd, inputPath);
   const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
-  if (!fileStats || !fileStats.isFile()) {
+  if (!fileStats?.isFile()) {
     throw new Error(`Read path is not a file: ${inputPath}`);
   }
 
@@ -325,7 +325,7 @@ function executeGlob(args: Record<string, unknown>, cwd: string): string {
   const searchRootInput = getString(args, ["path"]) ?? ".";
   const searchRoot = resolvePath(cwd, searchRootInput);
   const searchRootStats = statSync(searchRoot, { throwIfNoEntry: false });
-  if (!searchRootStats || !searchRootStats.isDirectory()) {
+  if (!searchRootStats?.isDirectory()) {
     throw new Error(`Glob path is not a directory: ${searchRootInput}`);
   }
 
@@ -357,7 +357,7 @@ function executeGrep(args: Record<string, unknown>, cwd: string): string {
   const searchRootInput = getString(args, ["path"]) ?? ".";
   const searchRoot = resolvePath(cwd, searchRootInput);
   const searchRootStats = statSync(searchRoot, { throwIfNoEntry: false });
-  if (!searchRootStats || !searchRootStats.isDirectory()) {
+  if (!searchRootStats?.isDirectory()) {
     throw new Error(`Grep path is not a directory: ${searchRootInput}`);
   }
 
@@ -386,7 +386,7 @@ function executeGrep(args: Record<string, unknown>, cwd: string): string {
   for (const file of files) {
     const absolutePath = path.resolve(searchRoot, file);
     const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
-    if (!fileStats || !fileStats.isFile()) {
+    if (!fileStats?.isFile()) {
       continue;
     }
 
@@ -523,7 +523,7 @@ class TsServerSession {
   private nextSeq = 1;
   private closed = false;
 
-  constructor(private readonly cwd: string) {
+  constructor(readonly cwd: string) {
     this.child = spawn(process.execPath, [TSSERVER_PATH], {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
@@ -1206,7 +1206,7 @@ function executeGetFunctionBody(args: Record<string, unknown>, cwd: string): str
   if (filePath) {
     const absolutePath = resolvePath(cwd, filePath);
     const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
-    if (!fileStats || !fileStats.isFile()) {
+    if (!fileStats?.isFile()) {
       throw new Error(`GetFunctionBody file not found: ${filePath}`);
     }
     filesToSearch.push(absolutePath);
@@ -1222,7 +1222,7 @@ function executeGetFunctionBody(args: Record<string, unknown>, cwd: string): str
       }
       const absolutePath = path.resolve(cwd, file);
       const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
-      if (fileStats && fileStats.isFile()) {
+      if (fileStats?.isFile()) {
         filesToSearch.push(absolutePath);
       }
     }
@@ -1275,7 +1275,7 @@ function executeGetCallers(args: Record<string, unknown>, cwd: string): string {
   const searchPath = getString(args, ["path"]) ?? ".";
   const searchRoot = resolvePath(cwd, searchPath);
   const searchRootStats = statSync(searchRoot, { throwIfNoEntry: false });
-  if (!searchRootStats || !searchRootStats.isDirectory()) {
+  if (!searchRootStats?.isDirectory()) {
     throw new Error(`GetCallers path is not a directory: ${searchPath}`);
   }
 
@@ -1298,7 +1298,7 @@ function executeGetCallers(args: Record<string, unknown>, cwd: string): string {
       continue;
     }
     const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
-    if (!fileStats || !fileStats.isFile()) {
+    if (!fileStats?.isFile()) {
       continue;
     }
 
@@ -1357,7 +1357,7 @@ function executeGetCallees(args: Record<string, unknown>, cwd: string): string {
 
   const absolutePath = resolvePath(cwd, filePath);
   const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
-  if (!fileStats || !fileStats.isFile()) {
+  if (!fileStats?.isFile()) {
     throw new Error(`GetCallees file not found: ${filePath}`);
   }
 
@@ -1447,7 +1447,7 @@ function resolveSemanticPosition(
 
   const absolutePath = resolvePath(cwd, filePath);
   const fileStats = statSync(absolutePath, { throwIfNoEntry: false });
-  if (!fileStats || !fileStats.isFile()) {
+  if (!fileStats?.isFile()) {
     throw new Error(`${toolName} file not found: ${filePath}`);
   }
 

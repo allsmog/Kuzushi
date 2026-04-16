@@ -43,7 +43,7 @@ export function resolveCryptoHarnessLanguage(
 export function buildCryptoBehavioralSystemPrompt(repoContext?: RepoContext): string {
   const repoSection = formatRepoContext(repoContext);
   const repoBlock =
-    repoSection.length > 0 ? "## Repository Context\n" + repoSection.join("\n") + "\n\n" : "";
+    repoSection.length > 0 ? `## Repository Context\n${repoSection.join("\n")}\n\n` : "";
 
   return (
     repoBlock +

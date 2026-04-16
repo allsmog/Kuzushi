@@ -2,10 +2,9 @@ import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
 import { analyzeVariants, analyzeVariantsBatch } from "../../agents/tasks/variant-analysis.js";
 import type { Finding } from "../../scanners/types.js";
-import type { KuzushiConfig, RepoContext, TriageResult } from "../../types.js";
-import { isRecord, toErrorMessage } from "../../utils.js";
-import type { RunContext, TriageCompleteEvent, VariantAnalysisCompleteEvent } from "../events.js";
-import { createEvent } from "../helpers.js";
+import type { KuzushiConfig, TriageResult } from "../../types.js";
+import { toErrorMessage } from "../../utils.js";
+import type { RunContext, TriageCompleteEvent } from "../events.js";
 import type { MessageBus } from "../types.js";
 
 export interface VariantAnalysisWorkerDeps {
@@ -24,10 +23,10 @@ export function registerVariantAnalysisWorker(deps: VariantAnalysisWorkerDeps): 
   if (!config.variantAnalysis) return;
 
   bus.subscribe<TriageCompleteEvent>("triage:complete", async (event) => {
-    const context = event.payload.context;
-    const runId = event.meta.runId;
-    const model = resolveStageModel(config, "variant-analysis");
-    const maxFindings = config.variantAnalysisMaxFindings ?? 10;
+    const _context = event.payload.context;
+    const _runId = event.meta.runId;
+    const _model = resolveStageModel(config, "variant-analysis");
+    const _maxFindings = config.variantAnalysisMaxFindings ?? 10;
 
     // We need triage results and scan findings from the event context
     // The orchestrator will emit variant-analysis:start with the confirmed TPs

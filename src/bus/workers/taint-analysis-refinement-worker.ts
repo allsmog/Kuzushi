@@ -26,7 +26,7 @@ import {
   upsertFinding,
 } from "../../store.js";
 import { triageFindingsBatch } from "../../triage.js";
-import type { KuzushiConfig, RepoContext, ScanOpts, TriageResult } from "../../types.js";
+import type { KuzushiConfig, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TaintAnalysisRefinementStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";

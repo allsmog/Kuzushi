@@ -39,7 +39,6 @@ import {
 } from "../../monorepo/dependency-graph.js";
 import type {
   ModuleScanPlan,
-  ModuleTaskRecommendation,
   MonorepoContextIndex,
   MonorepoSharedContext,
   MonorepoThreatModel,

@@ -83,5 +83,5 @@ export function writeJsonlReport(
     );
   }
 
-  writeFileSync(outputPath, lines.join("\n") + "\n", "utf-8");
+  writeFileSync(outputPath, `${lines.join("\n")}\n`, "utf-8");
 }

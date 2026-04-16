@@ -25,7 +25,7 @@ export function setupPatchDispatching(
   db: Database.Database,
 ): void {
   const trigger = state.config.autoPatchAfter ?? "verify";
-  const concurrency = state.config.patchConcurrency ?? 2;
+  const _concurrency = state.config.patchConcurrency ?? 2;
 
   // Subscribe to the appropriate trigger
   if (trigger === "verify") {

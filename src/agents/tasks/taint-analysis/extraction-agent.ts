@@ -317,7 +317,7 @@ async function buildExtractionPrompt(opts: PromptBuildOptions): Promise<string> 
     lines.push(
       `## Working Python ${kind} example (for reference)`,
       "This Python template is fully functional. Use it as a structural guide for how to write predicates,",
-      "but adapt the language-specific APIs for " + language + ".",
+      `but adapt the language-specific APIs for ${language}.`,
       "```ql",
       pythonExample,
       "```",

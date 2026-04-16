@@ -21,7 +21,7 @@ import type { Finding, ProofState } from "../../scanners/types.js";
 import { insertCryptoBehavioralRun } from "../../store/crypto-behavioral.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { AgentTask } from "../types.js";
 import { resolveTaskModel, resolveTaskPositiveInt } from "./runtime-overrides.js";
 
 const log = createLogger({ stage: "crypto-behavioral-test" });

@@ -295,7 +295,7 @@ function printComparisonTable(results: RegressionResult[]): void {
 }
 
 function stripAnsi(str: string): number {
-  // eslint-disable-next-line no-control-regex
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ESC (\x1b) is required to strip ANSI color codes
   return str.replace(/\x1b\[[0-9;]*m/g, "").length;
 }
 
@@ -414,7 +414,7 @@ function main(): void {
       mkdirSync(baselineDir, { recursive: true });
     }
 
-    writeFileSync(baselinePath, JSON.stringify(newBaseline, null, 2) + "\n");
+    writeFileSync(baselinePath, `${JSON.stringify(newBaseline, null, 2)}\n`);
     console.log(chalk.green(`Baseline updated: ${baselinePath}`));
   }
 

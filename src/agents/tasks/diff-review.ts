@@ -187,7 +187,7 @@ function buildPrompt(
   // Truncate diff if very large
   const maxDiffLength = 100_000;
   const truncatedDiff =
-    diff.length > maxDiffLength ? diff.slice(0, maxDiffLength) + "\n... [diff truncated]" : diff;
+    diff.length > maxDiffLength ? `${diff.slice(0, maxDiffLength)}\n... [diff truncated]` : diff;
 
   return [
     "You are a senior security engineer reviewing a code diff for security vulnerabilities.",
@@ -332,7 +332,7 @@ function buildRegressionPrompt(
     "",
     "## Current diff:",
     "```diff",
-    diff.length > 50_000 ? diff.slice(0, 50_000) + "\n... [truncated]" : diff,
+    diff.length > 50_000 ? `${diff.slice(0, 50_000)}\n... [truncated]` : diff,
     "```",
     "",
     "## Task",

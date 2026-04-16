@@ -82,7 +82,7 @@ export function extractVerificationSignal(isExploitable: boolean | undefined): C
  * Extract confidence signal from finding history (trajectory memory).
  * Recurring findings that were previously confirmed as TP get higher scores.
  */
-function extractHistorySignal(previousVerdicts: string[]): ConfidenceSignal {
+function _extractHistorySignal(previousVerdicts: string[]): ConfidenceSignal {
   if (previousVerdicts.length === 0) {
     return { name: "history", score: 0.5, weight: 0, source: "history" };
   }
@@ -94,7 +94,7 @@ function extractHistorySignal(previousVerdicts: string[]): ConfidenceSignal {
 /**
  * Extract confidence signal from data sensitivity context.
  */
-function extractContextSignal(
+function _extractContextSignal(
   hasAuthContext: boolean,
   hasSensitiveData: boolean,
 ): ConfidenceSignal {

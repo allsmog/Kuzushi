@@ -1,7 +1,7 @@
 import { normalizeTaskCapabilityIds } from "../../capabilities.js";
 import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { AgentTask } from "../types.js";
 
 /**
  * Result of dynamic task selection based on repo context.

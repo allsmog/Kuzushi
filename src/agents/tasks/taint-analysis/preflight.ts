@@ -648,8 +648,8 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
             return parsed.length > 0 && !existingKeys.has(parsed[0].join("\u001F"));
           });
           if (newRows.length > 0) {
-            const suffix = newRows.join("\n") + "\n";
-            await writeFile(sourcesCsvPath, existing.trimEnd() + "\n" + suffix, "utf-8");
+            const suffix = `${newRows.join("\n")}\n`;
+            await writeFile(sourcesCsvPath, `${existing.trimEnd()}\n${suffix}`, "utf-8");
           }
         }
 
@@ -665,8 +665,8 @@ export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPrefli
             return parsed.length > 0 && !existingKeys.has(parsed[0].join("\u001F"));
           });
           if (newRows.length > 0) {
-            const suffix = newRows.join("\n") + "\n";
-            await writeFile(sinksCsvPath, existing.trimEnd() + "\n" + suffix, "utf-8");
+            const suffix = `${newRows.join("\n")}\n`;
+            await writeFile(sinksCsvPath, `${existing.trimEnd()}\n${suffix}`, "utf-8");
           }
         }
 
@@ -1418,7 +1418,7 @@ function isGrpcOrProtoFramework(framework: string): boolean {
   );
 }
 
-function escapeQllString(value: string): string {
+function _escapeQllString(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
@@ -1440,7 +1440,7 @@ interface MergeCandidateCsvResult {
   mergedRows: number;
 }
 
-async function mergeCandidateCsvFiles(
+async function _mergeCandidateCsvFiles(
   primaryPath: string,
   supplementPath: string,
   candidateKind: "source_candidate" | "sink_candidate",

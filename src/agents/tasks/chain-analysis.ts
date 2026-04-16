@@ -6,7 +6,7 @@ import type { Finding } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { AgentTask } from "../types.js";
 
 export interface ChainInput {
   confirmedFindings: Array<{ finding: Finding; triageResult: TriageResult }>;

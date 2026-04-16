@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { RunContext } from "../../src/bus/events.js";
 import type { RunState } from "../../src/bus/orchestrator/types.js";
 

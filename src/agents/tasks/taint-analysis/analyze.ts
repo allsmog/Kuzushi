@@ -102,7 +102,7 @@ async function discoverSummarySupplements(
       for (const s of sources.slice(0, 15)) {
         const mod = s.signature.module ?? s.signature.type ?? "";
         labelSummaryLines.push(
-          `  - ${mod ? mod + "." : ""}${s.signature.callable} [${s.signature.flow_kind}]`,
+          `  - ${mod ? `${mod}.` : ""}${s.signature.callable} [${s.signature.flow_kind}]`,
         );
       }
       if (sources.length > 15) {
@@ -114,7 +114,7 @@ async function discoverSummarySupplements(
       for (const s of sinks.slice(0, 15)) {
         const mod = s.signature.module ?? s.signature.type ?? "";
         labelSummaryLines.push(
-          `  - ${mod ? mod + "." : ""}${s.signature.callable} [${s.signature.flow_kind}]`,
+          `  - ${mod ? `${mod}.` : ""}${s.signature.callable} [${s.signature.flow_kind}]`,
         );
       }
       if (sinks.length > 15) {
@@ -1758,8 +1758,7 @@ function renderImplicitPropagationSteps(language: TaintAnalysisLanguage): string
   // CodeQL requires every disjunction branch to bind output parameters, so we bind
   // passKey via set membership over all known pass keys instead of the reflexive
   // `passKey = passKey` (which CodeQL treats as unbound).
-  const passKeyBinding =
-    "(" + TAINT_ANALYSIS_PASSES.map((p) => `passKey = "${p.passKey}"`).join(" or ") + ")";
+  const passKeyBinding = `(${TAINT_ANALYSIS_PASSES.map((p) => `passKey = "${p.passKey}"`).join(" or ")})`;
   const clauses: string[] = [];
 
   switch (language) {

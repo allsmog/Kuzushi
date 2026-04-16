@@ -286,7 +286,7 @@ export function printSummary(
       console.log(`  ${sevColor(chain.overallSeverity)} ${chalk.bold(chain.name)}`);
       for (const step of chain.steps) {
         console.log(
-          `    ${chalk.dim(step.role + ":")} ${step.description} ${chalk.dim(`[${step.findingFingerprint.slice(0, 8)}]`)}`,
+          `    ${chalk.dim(`${step.role}:`)} ${step.description} ${chalk.dim(`[${step.findingFingerprint.slice(0, 8)}]`)}`,
         );
       }
       if (chain.preconditions.length > 0) {

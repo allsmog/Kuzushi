@@ -26,7 +26,7 @@ export class AuditTrail {
 
   /** Append an audit entry to the log. */
   record(entry: AuditEntry): void {
-    const line = JSON.stringify(entry) + "\n";
+    const line = `${JSON.stringify(entry)}\n`;
     appendFileSync(this.logPath, line, "utf-8");
   }
 
