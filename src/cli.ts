@@ -66,11 +66,20 @@ program
   .name("kuzushi")
   .description("Kuzushi — security-native AI operating environment")
   .option("--verbose", "Show debug-level diagnostics", false)
+  .option(
+    "--debug",
+    "Expand progressive-disclosure sections and show raw stack traces",
+    false,
+  )
   .version((createRequire(import.meta.url)("../package.json") as { version: string }).version);
 
 program.hook("preAction", (_thisCommand, actionCommand) => {
-  if (actionCommand.optsWithGlobals().verbose) {
+  const opts = actionCommand.optsWithGlobals();
+  if (opts.verbose) {
     setGlobalLogLevel("debug");
+  }
+  if (opts.debug) {
+    process.env.KUZUSHI_DEBUG = "1";
   }
 });
 
