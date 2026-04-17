@@ -34,7 +34,7 @@ export function AgentActivity({
     <Box flexDirection="column">
       <Box>
         <Text>{prefix} </Text>
-        <Spinner color="yellow" />
+        <Spinner color="warn" />
         <Text> {chalk.dim(fingerprint.slice(0, 12))}...</Text>
       </Box>
       {lines.map((line, i) => {

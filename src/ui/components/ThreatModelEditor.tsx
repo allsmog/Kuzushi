@@ -23,8 +23,9 @@ import type {
   StrideThreat,
   ThreatModelDocument,
 } from "../../agents/tasks/threat-modeling/types.js";
-import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { badge, boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
+import { dangerStrong, info, muted, warnStrong } from "../tokens.js";
 
 interface ThreatModelEditorProps {
   threatModel: ThreatModelDocument;
@@ -51,15 +52,15 @@ function getThreatStatus(threat: StrideThreat, doc: ThreatModelDocument): Threat
 function impactBadge(impact: string): string {
   switch (impact) {
     case "critical":
-      return chalk.bgRed.white.bold(` ${impact.toUpperCase()} `);
+      return badge(impact, "red");
     case "high":
-      return chalk.red.bold(impact.toUpperCase());
+      return dangerStrong(impact.toUpperCase());
     case "medium":
-      return chalk.yellow(impact.toUpperCase());
+      return warnStrong(impact.toUpperCase());
     case "low":
-      return chalk.dim(impact.toUpperCase());
+      return info(impact.toUpperCase());
     default:
-      return chalk.dim(impact);
+      return muted(impact);
   }
 }
 

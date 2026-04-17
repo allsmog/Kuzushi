@@ -22,6 +22,7 @@ import React from "react";
 import type { ExploitChain } from "../../types.js";
 import { terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
+import { danger, dangerStrong, warn } from "../tokens.js";
 
 interface AttackChainDiagramProps {
   chain: ExploitChain;
@@ -33,19 +34,15 @@ const ARROW = " ───→ ";
 
 export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.ReactElement {
   const availableWidth = Math.max(38, terminalCardWidth(96, 60) - 6);
-  const sevColor =
+  // Single severity → (headline, border) token mapping — avoids the two
+  // near-duplicate ternaries we had before. Border stays one shade below
+  // the headline so the title pops against its frame.
+  const { sevColor, borderColor } =
     chain.overallSeverity === "CRITICAL"
-      ? chalk.red.bold
+      ? { sevColor: dangerStrong, borderColor: danger }
       : chain.overallSeverity === "HIGH"
-        ? chalk.red
-        : chalk.yellow;
-
-  const borderColor =
-    chain.overallSeverity === "CRITICAL"
-      ? chalk.red
-      : chain.overallSeverity === "HIGH"
-        ? chalk.red
-        : chalk.yellow;
+        ? { sevColor: danger, borderColor: danger }
+        : { sevColor: warn, borderColor: warn };
 
   // Build step boxes
   const steps = chain.steps.map((step) => buildStepBox(step.description, step.role));

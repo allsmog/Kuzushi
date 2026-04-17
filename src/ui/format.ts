@@ -5,15 +5,15 @@
 import chalk from "chalk";
 import type { Verdict } from "../types.js";
 import { icons } from "./icons.js";
-import { getTheme } from "./theme.js";
+import { tokens } from "./tokens.js";
 
 /**
  * Returns a chalk function appropriate for "secondary" text based on theme.
- * Dark terminals: chalk.dim works great.
- * Light terminals: chalk.dim can be invisible, so use chalk.gray instead.
+ * Delegates to `tokens.muted` — kept for backwards compatibility with older
+ * call sites. New code should prefer `tokens.muted` directly.
  */
 export function secondary(text: string): string {
-  return getTheme() === "light" ? chalk.gray(text) : chalk.dim(text);
+  return tokens.muted(text);
 }
 
 // Partial block characters from thin to full (8 steps)
@@ -27,17 +27,25 @@ const EMPTY_BLOCK = "\u2591"; // ░
  * @param current - Current progress count
  * @param total - Total count
  * @param width - Bar width in characters (default 20)
+ * @param color - Optional fill color token (defaults to `tokens.accent`).
+ *   Pass `tokens.danger` for truly alarming progress; neutral progress
+ *   (e.g. triage) should stay on the default accent.
  * @returns Formatted progress bar string with count
  */
-export function progressBar(current: number, total: number, width = 20): string {
+export function progressBar(
+  current: number,
+  total: number,
+  width = 20,
+  color: (text: string) => string = tokens.accent,
+): string {
   if (total <= 0) return `${EMPTY_BLOCK.repeat(width)} 0/0`;
   const ratio = Math.min(current / total, 1);
   const filledFull = Math.floor(ratio * width);
   const partialIndex = Math.floor((ratio * width - filledFull) * 8);
   const emptyCount = width - filledFull - (partialIndex > 0 ? 1 : 0);
 
-  const filled = chalk.redBright(FULL_BLOCK.repeat(filledFull));
-  const partial = partialIndex > 0 ? chalk.redBright(PARTIAL_BLOCKS[partialIndex]!) : "";
+  const filled = color(FULL_BLOCK.repeat(filledFull));
+  const partial = partialIndex > 0 ? color(PARTIAL_BLOCKS[partialIndex]!) : "";
   const empty = chalk.dim(EMPTY_BLOCK.repeat(Math.max(0, emptyCount)));
 
   return `${filled}${partial}${empty} ${current}/${total}`;
@@ -105,18 +113,18 @@ export function severityLabel(level: string): string {
   const upper = level.toUpperCase();
   switch (upper) {
     case "CRITICAL":
-      return chalk.red.bold(`${icons.error} ${upper}`);
+      return tokens.dangerStrong(`${icons.error} ${upper}`);
     case "ERROR":
     case "HIGH":
-      return chalk.red(`${icons.error} ${upper}`);
+      return tokens.danger(`${icons.error} ${upper}`);
     case "WARNING":
     case "MEDIUM":
-      return chalk.yellow(`${icons.warning} ${upper}`);
+      return tokens.warn(`${icons.warning} ${upper}`);
     case "INFO":
     case "LOW":
-      return chalk.blue(`${icons.info} ${upper}`);
+      return tokens.info(`${icons.info} ${upper}`);
     default:
-      return chalk.dim(upper);
+      return tokens.muted(upper);
   }
 }
 
@@ -126,13 +134,50 @@ export function severityLabel(level: string): string {
 export function verdictIcon(verdict: Verdict): string {
   switch (verdict) {
     case "tp":
-      return chalk.red(icons.error);
+      return tokens.danger(icons.error);
     case "fp":
-      return chalk.green(icons.success);
+      return tokens.success(icons.success);
     case "needs_review":
-      return chalk.yellow(icons.warning);
+      return tokens.warn(icons.warning);
     case "by_design":
-      return chalk.blue(icons.info);
+      return tokens.info(icons.info);
+  }
+}
+
+/** Status values shared across pipeline stages, scanner sub-tasks, and result rows. */
+export type StatusKind = "pending" | "active" | "done" | "error";
+
+/** Caller context for `statusBadge` — reserved for future divergence, but today
+ *  all three callers share the same glyph/color mapping. */
+export type StatusBadgeKind = "stage" | "task" | "result";
+
+/**
+ * Canonical status → glyph + color mapping. Single source of truth for
+ * `PipelineIndicator`, `ResultLine`, and `MonorepoProgress` — previously each
+ * had its own ad-hoc status→icon/color ternary.
+ *
+ * Semantic choices (preserved from the scattered prior implementation):
+ *   - pending → hollow circle, muted (not-yet-started)
+ *   - active  → filled circle, `dangerStrong` for the attention-getting
+ *               "currently scanning" alarmist vibe used throughout the scan
+ *               pipeline today. (Spinner call-sites use `accent` for the
+ *               animated frame; this is for the *static* glyph variant.)
+ *   - done    → diamond, muted (retired to history)
+ *   - error   → cross, `danger`
+ */
+export function statusBadge(
+  _kind: StatusBadgeKind,
+  status: StatusKind,
+): { icon: string; color: (text: string) => string } {
+  switch (status) {
+    case "pending":
+      return { icon: icons.pending, color: tokens.muted };
+    case "active":
+      return { icon: icons.active, color: tokens.dangerStrong };
+    case "done":
+      return { icon: icons.complete, color: tokens.muted };
+    case "error":
+      return { icon: icons.error, color: tokens.danger };
   }
 }
 
@@ -142,13 +187,13 @@ export function verdictIcon(verdict: Verdict): string {
 export function colorVerdict(verdict: Verdict): string {
   switch (verdict) {
     case "tp":
-      return chalk.red.bold(`${icons.error} TRUE POSITIVE`);
+      return tokens.dangerStrong(`${icons.error} TRUE POSITIVE`);
     case "fp":
-      return chalk.green(`${icons.success} false positive`);
+      return tokens.success(`${icons.success} false positive`);
     case "needs_review":
-      return chalk.yellow(`${icons.warning} needs review`);
+      return tokens.warn(`${icons.warning} needs review`);
     case "by_design":
-      return chalk.blue(`${icons.info} BY DESIGN`);
+      return tokens.info(`${icons.info} BY DESIGN`);
   }
 }
 

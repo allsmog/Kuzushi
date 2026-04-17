@@ -4,11 +4,11 @@
  * Shows resolved configuration before the pipeline begins so the user
  * knows what settings are in effect. Rendered once via <Static>.
  *
- *   ┌─ Config ────────────────────────────────────────────┐
+ *   ╭─ Config ────────────────────────────────────────────╮
  *   │  Model: claude-opus       Severity: ERROR, WARNING  │
  *   │  Tasks: semgrep, codeql   Concurrency: 5            │
  *   │  Backend: pi-ai           Budget: $5.00             │
- *   └────────────────────────────────────────────────────┘
+ *   ╰────────────────────────────────────────────────────╯
  */
 
 import chalk from "chalk";

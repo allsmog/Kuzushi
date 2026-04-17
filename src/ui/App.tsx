@@ -190,10 +190,14 @@ export function App({ store }: AppProps): React.ReactElement {
       )}
 
       {state.mode === "summary" && state.summary && (
-        <>
-          <ScanSummary data={state.summary} />
-          {state.qualityGate && <QualityGate result={state.qualityGate} />}
-        </>
+        <Static items={["scan-summary"]}>
+          {() => (
+            <React.Fragment key="scan-summary">
+              <ScanSummary data={state.summary!} />
+              {state.qualityGate && <QualityGate result={state.qualityGate} />}
+            </React.Fragment>
+          )}
+        </Static>
       )}
 
       {state.mode === "review" && state.review && (

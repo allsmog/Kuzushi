@@ -1,3 +1,7 @@
+/**
+ * Non-Ink fallback report printer for non-TTY / CI environments.
+ * Prints directly to stdout via console.log; never runs when the Ink app is active.
+ */
 import path from "node:path";
 import type Database from "better-sqlite3";
 import chalk from "chalk";

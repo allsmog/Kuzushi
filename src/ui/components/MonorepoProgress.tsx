@@ -14,8 +14,9 @@
 import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
-import { formatCost, formatDuration, terminalCardWidth } from "../format.js";
+import { formatCost, formatDuration, statusBadge, terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
+import { tokens } from "../tokens.js";
 import { Spinner } from "./Spinner.js";
 
 export type ModuleStatus =
@@ -69,7 +70,7 @@ export function MonorepoProgress({
       {/* Phase header */}
       <Box>
         <Text>{"  "}</Text>
-        <Spinner color="red" />
+        <Spinner color="accent" />
         <Text>
           {" "}
           {chalk.redBright.bold((phaseLabel ?? "Scanning").padEnd(14))}{" "}
@@ -142,10 +143,11 @@ function ModuleLine({
   }
 
   if (mod.status === "error") {
+    const { icon, color } = statusBadge("result", "error");
     return (
       <Text>
-        {chalk.dim(connector)} {chalk.red(icons.error)} {chalk.red(paddedName)}{" "}
-        {chalk.red(mod.detail ?? "error")}
+        {chalk.dim(connector)} {color(icon)} {tokens.danger(paddedName)}{" "}
+        {tokens.danger(mod.detail ?? "error")}
       </Text>
     );
   }
@@ -164,7 +166,7 @@ function ModuleLine({
   return (
     <Box>
       <Text>{chalk.dim(connector)} </Text>
-      <Spinner color="yellow" />
+      <Spinner color="accent" />
       <Text>
         {" "}
         {chalk.white(paddedName)} {chalk.dim(statusLabel)}
