@@ -141,6 +141,8 @@ describe("triage-worker", () => {
       "mocked-system-prompt-prefix",
       // Evidence-enforcement attempt cap passed by the worker (default 1).
       expect.any(Number),
+      // Escalation model (resolves to triage model when no override is set).
+      expect.any(String),
     );
 
     await bus.close();
@@ -202,6 +204,8 @@ describe("triage-worker", () => {
       "mocked-system-prompt-prefix",
       // Evidence-enforcement attempt cap passed by the worker (default 1).
       expect.any(Number),
+      // Escalation model (resolves to triage model when no override is set).
+      expect.any(String),
     );
 
     await bus.close();

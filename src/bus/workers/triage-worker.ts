@@ -239,7 +239,20 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           // 1C-pre: Threat model context — inject application-level context for verdict decisions
           {
             const tmSummary = event.payload.threatModelSummary;
+            const knownIds = event.payload.knownThreatIds ?? [];
             if (typeof tmSummary === "string" && tmSummary.length > 0) {
+              // Emit a structured, machine-parseable preamble so the agent can
+              // (a) see the exact threat IDs to cross-link in source_threat_ids
+              // and (b) distinguish them from prose IDs elsewhere in context.
+              const idManifest =
+                knownIds.length > 0
+                  ? [
+                      "### Known threat IDs",
+                      "Only IDs from this list are valid in `source_threat_ids[]`; other IDs will be discarded.",
+                      ...knownIds.map((id) => `- ${id}`),
+                      "",
+                    ].join("\n")
+                  : "";
               extraSections.push(
                 "## Application Threat Model Context\n" +
                   "The following threat model was derived from automated analysis of this application.\n" +
@@ -249,6 +262,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
                   "3. Identify which trust boundaries are crossed and which attacker-controlled inputs are involved.\n" +
                   "4. Check existing mitigations listed below — if a mitigation covers this finding, it may be a false positive.\n" +
                   "5. Include relevant threat IDs in your source_threat_ids output field.\n\n" +
+                  idManifest +
                   tmSummary,
               );
             }
@@ -365,6 +379,10 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             );
           } else {
             const enforceEvidence = deps.config.enforceTriageEvidence !== false;
+            // Resolve an optional escalation model for the enforcement retry.
+            // Falls back to the triage model when no `triage-escalation`
+            // taskConfig is provided.
+            const escalationModel = resolveStageModel(deps.config, "triage-escalation", "triage");
             triageOutput = await triageFindingWithEvidenceEnforcement(
               triageConfigProvider,
               finding,
@@ -381,6 +399,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               resolvedTemplates.triage,
               cachedSystemPromptPrefix,
               enforceEvidence ? 1 : 0,
+              escalationModel,
             );
           }
 
@@ -476,6 +495,30 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           console.error(
             `[triage] Multi-agent escalation failed for ${finding.fingerprint}: ${toErrorMessage(error)}`,
           );
+        }
+      }
+
+      // Filter source_threat_ids against the known threat model so
+      // hallucinated IDs (e.g. the agent inventing "T-99" when only T-01..T-05
+      // exist) don't land in persisted output or cross-references.
+      {
+        const knownIds = event.payload.knownThreatIds ?? [];
+        const referenced = result.sourceThreatIds ?? [];
+        if (knownIds.length > 0 && referenced.length > 0) {
+          const knownSet = new Set(knownIds);
+          const filtered = referenced.filter((id) => knownSet.has(id));
+          const dropped = referenced.filter((id) => !knownSet.has(id));
+          if (dropped.length > 0) {
+            console.error(
+              `[triage] dropped ${dropped.length} hallucinated threat ID(s) for ${finding.fingerprint}: ${dropped.join(", ")}`,
+            );
+          }
+          result.sourceThreatIds = filtered;
+        } else if (knownIds.length === 0 && referenced.length > 0) {
+          // No threat model loaded — the agent still returned IDs, which must
+          // be hallucinations. Drop them silently; the prompt already told the
+          // agent not to invent IDs.
+          result.sourceThreatIds = [];
         }
       }
 

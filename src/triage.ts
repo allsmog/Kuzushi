@@ -496,6 +496,9 @@ function downgradeForInsufficientEvidence(result: TriageResult, reasons: string[
  * gaps recorded in blindspots[]. Costs from both calls are summed.
  *
  * Pass `maxEnforcementAttempts: 0` to get the original single-shot behaviour.
+ * Pass `escalationModel` to use a stronger (and typically more expensive)
+ * model for the re-invocation only — leaves the common case on the cheaper
+ * triage model.
  */
 export async function triageFindingWithEvidenceEnforcement(
   registry: TriageConfigProvider,
@@ -509,6 +512,7 @@ export async function triageFindingWithEvidenceEnforcement(
   triageTemplate?: string,
   precomputedSystemPromptPrefix?: string,
   maxEnforcementAttempts: number = 1,
+  escalationModel?: string,
 ): Promise<TriageOutput> {
   const first = await triageFindingWithAgent(
     registry,
@@ -528,8 +532,10 @@ export async function triageFindingWithEvidenceEnforcement(
   const firstValidation = validateTriageEvidence(first.result, repoRoot);
   if (firstValidation.ok) return first;
 
+  const retryModel = escalationModel && escalationModel !== model ? escalationModel : model;
+  const modelNote = retryModel === model ? "" : ` (escalating to model=${retryModel})`;
   log.info(
-    `Evidence enforcement: re-invoking triage for ${finding.fingerprint} (${firstValidation.reasons.length} reason(s))`,
+    `Evidence enforcement: re-invoking triage for ${finding.fingerprint} (${firstValidation.reasons.length} reason(s))${modelNote}`,
   );
 
   const reinforcement = buildEvidenceReinforcementPrompt(firstValidation.reasons);
@@ -544,7 +550,7 @@ export async function triageFindingWithEvidenceEnforcement(
       finding,
       repoRoot,
       repoName,
-      model,
+      retryModel,
       repoContextOrRuntimeOptions,
       maybeRuntimeOptions,
       combinedContext,

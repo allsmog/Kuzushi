@@ -425,6 +425,70 @@ describe("triageFindingWithEvidenceEnforcement", () => {
     expect(runtime.query).toHaveBeenCalledTimes(1);
   });
 
+  it("uses escalationModel for the retry only", async () => {
+    const repoRoot = makeRepoRoot();
+    const runtime = makeMockRuntime([
+      {
+        fingerprint: "fp-enforce",
+        verdict: "tp",
+        confidence: 0.9,
+        rationale: "weak",
+        verification_steps: [],
+        fix_patch: null,
+      },
+      {
+        fingerprint: "fp-enforce",
+        verdict: "tp",
+        confidence: 0.85,
+        rationale: "stronger",
+        verification_steps: ["s1"],
+        fix_patch: null,
+        code_citations: [
+          {
+            file_path: "src/app.ts",
+            start_line: 1,
+            end_line: 1,
+            snippet: "x",
+            description: "d",
+          },
+          {
+            file_path: "src/util.ts",
+            start_line: 1,
+            end_line: 1,
+            snippet: "y",
+            description: "d",
+          },
+        ],
+        attack_path: {
+          chain: ["entry", "sink"],
+          narrative: "n",
+          likelihood_reasoning: "l",
+          impact_reasoning: "i",
+        },
+      },
+    ]);
+
+    await triageFindingWithEvidenceEnforcement(
+      registryWithConfig({ prompt: "p" }) as never,
+      makeFinding(),
+      repoRoot,
+      "repo",
+      "anthropic:claude-sonnet-4-6",
+      { runtime },
+      {},
+      undefined,
+      undefined,
+      undefined,
+      1,
+      "anthropic:claude-opus-4-7",
+    );
+
+    const calls = (runtime.query as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0].options.model).toBe("anthropic:claude-sonnet-4-6");
+    expect(calls[1][0].options.model).toBe("anthropic:claude-opus-4-7");
+  });
+
   it("respects maxEnforcementAttempts=0 (disabled)", async () => {
     const repoRoot = makeRepoRoot();
     const runtime = makeMockRuntime([
