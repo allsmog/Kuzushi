@@ -178,7 +178,7 @@ describe("applyScanCommandConfigOverrides", () => {
     ).toThrowError(new CliUsageError("--taint-diff-mode must be one of: delta, baseline."));
   });
 
-  it("applies reference preset with deep-merged taskConfig", () => {
+  it("applies reference preset as a strict superset of deep with PoC + frontier model", () => {
     const config = structuredClone(DEFAULTS);
     const originalSemgrep = { ...config.taskConfig.semgrep };
     const originalThreatHunt = { ...config.taskConfig["threat-hunt"] };
@@ -199,11 +199,27 @@ describe("applyScanCommandConfigOverrides", () => {
     // Top-level preset fields are applied
     expect(config.verify).toBe(true);
     expect(config.pocHarness).toBe(true);
-    // Scanners are NOT overridden — user's configured tasks are preserved
-    expect(config.tasks).toEqual(DEFAULTS.tasks);
+    // Reference is a strict superset of deep — its task list now includes
+    // the full deep task DAG so users get what the README advertises
+    // ("deep + PoC + threat-informed hunting + frontier model") even when
+    // they pass only `--preset reference` against a fresh config.
+    expect(config.tasks).toEqual([
+      "context-gatherer",
+      "context-enricher",
+      "secrets-crypto-detect",
+      "code-config-detect",
+      "taint-cwe-select",
+      "taint-iris",
+      "threat-model-randori",
+      "threat-hunt",
+      "systems-context-gatherer",
+      "systems-invariant-extract",
+      "systems-trigger-synth",
+      "systems-hunt",
+    ]);
   });
 
-  it("reference preset does not override global model or tasks", () => {
+  it("reference preset honors --model override and still applies the deep task list", () => {
     const config = structuredClone(DEFAULTS);
 
     applyScanCommandConfigOverrides(
@@ -216,8 +232,10 @@ describe("applyScanCommandConfigOverrides", () => {
 
     // CLI --model sets the global model; preset doesn't fight it
     expect(config.model).toBe("anthropic:claude-opus-4-6");
-    // Scanners stay at user defaults
-    expect(config.tasks).toEqual(DEFAULTS.tasks);
+    // Reference now sets the task list (deep-equivalent), so it should
+    // include systems-hunt regardless of the user's prior config.
+    expect(config.tasks).toContain("systems-hunt");
+    expect(config.tasks).toContain("threat-model-randori");
     // Only systems-hunt gets Orchid from taskConfig deep-merge
     expect(config.taskConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
     expect(config.taskConfig["threat-hunt"].model).toBe(DEFAULTS.taskConfig["threat-hunt"].model);

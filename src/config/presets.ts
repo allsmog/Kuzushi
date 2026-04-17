@@ -2,6 +2,21 @@ import type { KuzushiConfig } from "../types.js";
 
 export type ScanPreset = "safe" | "fast" | "standard" | "deep" | "reference";
 
+const DEEP_TASKS = [
+  "context-gatherer",
+  "context-enricher",
+  "secrets-crypto-detect",
+  "code-config-detect",
+  "taint-cwe-select",
+  "taint-iris",
+  "threat-model-randori",
+  "threat-hunt",
+  "systems-context-gatherer",
+  "systems-invariant-extract",
+  "systems-trigger-synth",
+  "systems-hunt",
+];
+
 export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
   // Recommended for first-time users: tight cost and turn caps, no expensive optional tasks.
   safe: {
@@ -32,29 +47,21 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     enableDynamicTaskSelection: false,
   },
   deep: {
-    tasks: [
-      "context-gatherer",
-      "context-enricher",
-      "secrets-crypto-detect",
-      "code-config-detect",
-      "taint-cwe-select",
-      "taint-iris",
-      "threat-model-randori",
-      "threat-hunt",
-      "systems-context-gatherer",
-      "systems-invariant-extract",
-      "systems-trigger-synth",
-      "systems-hunt",
-    ],
+    tasks: [...DEEP_TASKS],
     verify: true,
     variantAnalysis: true,
     taskConfig: {
       "threat-hunt": { maxActors: 8, runsPerActor: 2 },
     },
   },
+  // Reference = deep + PoC harness + threat-informed hunting + frontier model
+  // for systems-hunt. The previous version skipped `tasks`, which meant that
+  // `--preset reference` against a fresh config silently ran with the default
+  // task list (`["semgrep"]`) and only the *bonus* features got applied.
+  // Now reference is a strict superset of deep so the README description
+  // ("deep + PoC + threat-informed hunting + frontier model") is accurate.
   reference: {
-    // Inherits the user's configured task list — does not override it.
-    // Orchid is used surgically for systems-hunt only (see taskConfig below).
+    tasks: [...DEEP_TASKS],
     verify: true,
     pocHarness: true,
     codeGraphEnabled: true,

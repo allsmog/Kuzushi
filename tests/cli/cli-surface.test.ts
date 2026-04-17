@@ -13,6 +13,11 @@ function runCli(args: string[]) {
   return spawnSync(tsxBin, [cliPath, ...args], {
     cwd: repoRoot,
     encoding: "utf8",
+    // Provide a placeholder credential so the non-TTY credential hook in
+    // src/cli.ts doesn't short-circuit before the flag-validation paths
+    // we're actually exercising here. Tests that genuinely care about
+    // the credential hook should override this.
+    env: { ...process.env, ANTHROPIC_API_KEY: "sk-ant-test-placeholder" },
   });
 }
 
