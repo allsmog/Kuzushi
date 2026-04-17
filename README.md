@@ -167,6 +167,21 @@ These are dependencies consumed by the built-in wrappers above, not directly loa
 
 `blackbox`, `pwn`, `pentest`, `honeypot`, `yokai`, `revgraph` — referenced in the long-term vision but not currently implemented as loadable modules. See [VISION.md](VISION.md) for direction.
 
+### Authoring your own module
+
+```sh
+kuzushi create-module my-module --template offense   # scaffolds manifest + starter tool + vitest
+```
+
+The scaffolder emits `module.manifest.json`, a TypeScript starter tool, and a vitest skeleton. Import types and test helpers from the SDK subpaths:
+
+```ts
+import type { CopilotModule, ModuleTool, ToolResult } from "kuzushi/modules"
+import { createMockToolContext, createMockBus, noopRuntime } from "kuzushi/testing"
+```
+
+Load a local build with `--load file:///abs/path/to/my-module`, or a published package with `--load package:@scope/name`. MCP servers can be bridged with `--load mcp:<spec>` (stdio or HTTP Streamable). See [CLAUDE.md](CLAUDE.md) for the full module authoring guide.
+
 ## The SAST Pipeline
 
 The built-in `sast` module runs a 40+ task DAG pipeline:
@@ -212,7 +227,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npx kuzushi scan . --sarif results.sarif --quality-gate --fail-on-tp
+      - run: npx kuzushi scan . --sarif results.sarif --junit results.xml --quality-gate --fail-on-tp
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       - uses: github/codeql-action/upload-sarif@v3
@@ -220,6 +235,8 @@ jobs:
         with:
           sarif_file: results.sarif
 ```
+
+Exit codes: `0` clean, `1` findings (or task failures), `2` usage/config/auth, `3` unexpected crash. See `.github/workflows/kuzushi-reference.yml` for a reference workflow with SARIF upload, JUnit publish, and PR sticky comment.
 
 ### Quality Gates
 
@@ -320,8 +337,18 @@ kuzushi scan <repo> --output report.md
 kuzushi scan <repo> --sarif results.sarif
 kuzushi scan <repo> --json results.json
 kuzushi scan <repo> --csv results.csv
+kuzushi scan <repo> --junit results.xml
 kuzushi scan <repo> --stream
 kuzushi scan <repo> --audit-log
+```
+
+### Run History
+
+```
+kuzushi runs list                          # 50 most recent runs
+kuzushi runs list --status interrupted     # only resumable runs
+kuzushi runs show <runId> --costs          # details + cost breakdown
+kuzushi runs show <runId> --json           # JSON output for tooling
 ```
 
 ### Run Mode
