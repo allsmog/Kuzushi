@@ -48,6 +48,53 @@ function buildScopePrompt(maxElements: number, outputDir: string): string {
   ].join("\n");
 }
 
+function buildNarrativePrompt(outputDir: string): string {
+  return [
+    "You are synthesising the narrative layer of a PASTA threat model.",
+    "",
+    `Read the prior stage outputs from ${outputDir}/pasta-s1.json, pasta-s2.json, pasta-s3.json,`,
+    `and pasta-s4.json. Inspect the actual source files they reference to ground every claim.`,
+    "",
+    `Write ${outputDir}/pasta-narrative.json with this exact shape (snake_case):`,
+    "{",
+    '  "overview": "<1-3 paragraphs describing what the application does at runtime,',
+    '                 where it runs, what it exposes, and the primary trust context>",',
+    '  "input_categories": {',
+    '    "attacker_controlled": ["<item with file:line citation>", ...],',
+    '    "operator_controlled": ["<item>", ...],',
+    '    "developer_controlled": ["<item>", ...],',
+    '    "external_services": ["<item>", ...],',
+    '    "sandbox_boundary": ["<item>", ...],',
+    '    "assumptions": ["<item>", ...]',
+    "  },",
+    '  "attacker_stories": [',
+    "    {",
+    '      "title": "<short, action-oriented title>",',
+    '      "narrative": "<2-4 sentences: who the attacker is, what they do, what they gain>",',
+    '      "mitigation": "<how it is mitigated today or what SHOULD mitigate it>",',
+    '      "threat_ids": ["<StrideThreat.id from pasta-s4.json, if linked>"]',
+    "    },",
+    "    ... (3-6 stories)",
+    "  ],",
+    '  "criticality_buckets": {',
+    '    "critical": ["<1-3 concrete examples of critical-severity issues for THIS app>"],',
+    '    "high":     ["<1-3 concrete examples>"],',
+    '    "medium":   ["<1-3 concrete examples>"],',
+    '    "low":      ["<1-3 concrete examples>"]',
+    "  },",
+    '  "out_of_scope": ["<class of issue that does not apply to this app, with reason>", ...]',
+    "}",
+    "",
+    "Hard requirements:",
+    "- Every `input_categories` item MUST cite a file path (ideally file:line).",
+    "- `attacker_stories` MUST reference concrete attackers and concrete outcomes (no hand-waving).",
+    "- Criticality examples MUST match THIS application's surface (not generic web-app examples",
+    "  unless the app is a web app).",
+    "- `out_of_scope` MUST state WHY each class does not apply.",
+    "- Return ONLY the JSON object — no prose before or after.",
+  ].join("\n");
+}
+
 function buildStridePrompt(
   maxThreats: number,
   outputDir: string,
@@ -175,7 +222,31 @@ export const threatModelRandoriTask: AgentTask<
       }
     }
 
-    // Read all artifacts (from both phases)
+    // ── Phase 3: narrative synthesis (Overview / InputCategories / AttackerStories / Criticality / OutOfScope) ──
+    // Depends on S1-S4 output; skip if none were produced.
+    if (hasS4) {
+      const postS4 = readRandoriArtifacts(context.repoRoot, artifactDir);
+      const haveStageOutputs = postS4.s2Scope || postS4.s3Decomposition || postS4.s4Threats;
+      if (haveStageOutputs) {
+        log.info(`${tag} Phase 3: synthesising narrative layer`);
+        try {
+          for await (const message of context.runtime.query({
+            prompt: buildNarrativePrompt(artifactDir),
+            options: baseOpts,
+          })) {
+            if (message.type === "result" && typeof message.totalCostUsd === "number") {
+              costUsd += message.totalCostUsd;
+            }
+          }
+        } catch (error) {
+          log.warn(`${tag} Phase 3 (narrative) error: ${toErrorMessage(error)}`);
+        }
+      } else {
+        log.warn(`${tag} Skipping narrative synthesis — no stage artifacts`);
+      }
+    }
+
+    // Read all artifacts (from all phases)
     const artifacts = readRandoriArtifacts(context.repoRoot, artifactDir);
     const merged = mergeRandoriStageOutputs(artifacts);
 
