@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { allMigrations, runMigrations } from "./migrations/index.js";
+import { ensureScannerCacheSchema } from "./scanner-cache.js";
 import type {
   CorroboratingSignal,
   EngineProvenance,
@@ -184,6 +185,19 @@ export function initDb(dbPath: string, opts?: InitDbOpts): Database.Database {
   }
 
   runMigrations(db, allMigrations);
+
+  // The scanner cache lives outside the main migrations so tasks can opt
+  // into file-level result memoisation without the main schema needing to
+  // know about them. Idempotent — `CREATE TABLE IF NOT EXISTS`.
+  try {
+    ensureScannerCacheSchema(db);
+  } catch (err) {
+    // Non-fatal: scans can run without the cache. Log and continue.
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[store] failed to ensure scanner_cache schema: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   // Force a WAL checkpoint so the main DB file is fully written before the
   // scan starts.  This prevents data loss if the process crashes before
