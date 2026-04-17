@@ -12,9 +12,10 @@
 import chalk from "chalk";
 import { Text } from "ink";
 import type React from "react";
-import { colorVerdict, formatCost } from "../format.js";
+import { colorVerdict, formatCost, statusBadge } from "../format.js";
 import { icons } from "../icons.js";
 import type { ResultLine as ResultLineData } from "../state.js";
+import { accent, danger, success, warn } from "../tokens.js";
 
 interface ResultLineProps {
   data: ResultLineData;
@@ -27,9 +28,10 @@ export function ResultLine({ data }: ResultLineProps): React.ReactElement {
 
   if (data.kind === "error") {
     const stage = data.errorStage?.toUpperCase() ?? "TRIAGE";
+    const { icon, color } = statusBadge("result", "error");
     return (
       <Text>
-        {prefix} {chalk.red(`${icons.error} ${stage} ERROR`)}
+        {prefix} {color(`${icon} ${stage} ERROR`)}
         {retry} {fingerprint}
         {data.errorMessage ? `\n    ${chalk.dim(data.errorMessage.slice(0, 160))}` : ""}
       </Text>
@@ -50,7 +52,7 @@ export function ResultLine({ data }: ResultLineProps): React.ReactElement {
   }
 
   if (data.kind === "verify") {
-    const statusIcon = data.exploitable ? chalk.red(icons.error) : chalk.green(icons.success);
+    const statusIcon = data.exploitable ? danger(icons.error) : success(icons.success);
     const statusLabel = data.exploitable ? "EXPLOITABLE" : "not exploitable";
     const cost = data.costUsd && data.costUsd > 0 ? ` ${chalk.dim(formatCost(data.costUsd))}` : "";
     return (
@@ -63,7 +65,9 @@ export function ResultLine({ data }: ResultLineProps): React.ReactElement {
   }
 
   if (data.kind === "poc") {
-    const statusIcon = data.skipped ? chalk.yellow(icons.pending) : chalk.cyan(icons.gear);
+    // SKIPPED keeps its "warn" signal (previous chalk.yellow);
+    // GENERATED uses the brand accent (previous chalk.cyan).
+    const statusIcon = data.skipped ? warn(icons.pending) : accent(icons.gear);
     const statusLabel = data.skipped ? "SKIPPED" : "GENERATED";
     const parsed = data.skipped ? "" : data.parsed ? " parsed" : " parse-error";
     const cost = data.costUsd && data.costUsd > 0 ? ` ${chalk.dim(formatCost(data.costUsd))}` : "";

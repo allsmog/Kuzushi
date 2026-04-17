@@ -4,17 +4,17 @@
  * Adapts to results:
  *
  * Clean repo:
- *   ┌──────────────────────────────────────────────────────┐
+ *   ╭──────────────────────────────────────────────────────╮
  *   │                                                      │
  *   │              ✦  ALL CLEAR  ✦                         │
  *   │                                                      │
  *   │    0 true positives across 200 findings              │
  *   │    42 triaged  ·  $1.23  ·  4m 12s                   │
  *   │                                                      │
- *   └──────────────────────────────────────────────────────┘
+ *   ╰──────────────────────────────────────────────────────╯
  *
  * Findings found:
- *   ┌──────────────────────────────────────────────────────┐
+ *   ╭──────────────────────────────────────────────────────╮
  *   │                                                      │
  *   │           ⚠  ACTION REQUIRED  ⚠                      │
  *   │                                                      │
@@ -23,7 +23,7 @@
  *   │                                                      │
  *   │    42 triaged  ·  $2.47  ·  8m 30s                   │
  *   │                                                      │
- *   └──────────────────────────────────────────────────────┘
+ *   ╰──────────────────────────────────────────────────────╯
  */
 
 import chalk from "chalk";
@@ -44,10 +44,10 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   const hasChains = data.exploitChains.length > 0;
 
   const borderChar = isClean ? chalk.green("─") : chalk.red("─");
-  const cornerTL = isClean ? chalk.green("┌") : chalk.red("┌");
-  const cornerTR = isClean ? chalk.green("┐") : chalk.red("┐");
-  const cornerBL = isClean ? chalk.green("└") : chalk.red("└");
-  const cornerBR = isClean ? chalk.green("┘") : chalk.red("┘");
+  const cornerTL = isClean ? chalk.green("╭") : chalk.red("╭");
+  const cornerTR = isClean ? chalk.green("╮") : chalk.red("╮");
+  const cornerBL = isClean ? chalk.green("╰") : chalk.red("╰");
+  const cornerBR = isClean ? chalk.green("╯") : chalk.red("╯");
   const side = isClean ? chalk.green("│") : chalk.red("│");
 
   const topBorder = `${cornerTL}${borderChar.repeat(innerWidth)}${cornerTR}`;

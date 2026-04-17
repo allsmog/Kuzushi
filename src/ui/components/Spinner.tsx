@@ -3,20 +3,31 @@
  * Cycles through frames for a smooth loading animation.
  */
 
-import chalk from "chalk";
 import { Text } from "ink";
 import type React from "react";
 import { useEffect, useState } from "react";
+import { tokens } from "../tokens.js";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const FRAME_INTERVAL = 80; // ms per frame
 
+/** Semantic spinner colors — map onto the shared token palette. */
+export type SpinnerColor = "accent" | "success" | "warn" | "danger" | "muted";
+
 interface SpinnerProps {
   label?: string;
-  color?: "green" | "yellow" | "cyan" | "magenta" | "red";
+  color?: SpinnerColor;
 }
 
-export function Spinner({ label, color = "cyan" }: SpinnerProps): React.ReactElement {
+const COLOR_MAP: Record<SpinnerColor, (text: string) => string> = {
+  accent: tokens.accent,
+  success: tokens.success,
+  warn: tokens.warn,
+  danger: tokens.danger,
+  muted: tokens.muted,
+};
+
+export function Spinner({ label, color = "accent" }: SpinnerProps): React.ReactElement {
   const [frameIndex, setFrameIndex] = useState(0);
 
   useEffect(() => {
@@ -27,7 +38,7 @@ export function Spinner({ label, color = "cyan" }: SpinnerProps): React.ReactEle
   }, []);
 
   const frame = FRAMES[frameIndex]!;
-  const colorFn = chalk[color] ?? chalk.cyan;
+  const colorFn = COLOR_MAP[color] ?? tokens.accent;
   const coloredFrame = colorFn(frame);
 
   return (

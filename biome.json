@@ -85,6 +85,7 @@
         "src/report.ts",
         "src/logger.ts",
         "src/ui/demo.tsx",
+        "src/ui/plain-renderer.ts",
         "scripts/**",
         "benchmarks/**",
         "perf/**",
@@ -99,7 +100,7 @@
       }
     },
     {
-      "includes": ["src/ui/**", "!src/ui/demo.tsx"],
+      "includes": ["src/ui/**", "!src/ui/demo.tsx", "!src/ui/plain-renderer.ts"],
       "linter": {
         "rules": {
           "suspicious": {

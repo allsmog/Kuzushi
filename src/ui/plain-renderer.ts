@@ -27,7 +27,10 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
   let lastNoticeCount = 0;
   let bannerPrinted = false;
   let startBannerPrinted = false;
+  let summaryPrinted = false;
+  let lastQualityGate: unknown;
   const taskState = new Map<string, { status: string; findingCount: number; detail?: string }>();
+  const completedStages = new Set<string>();
   const scanActivityPrinted = new Map<string, number>();
 
   const unsubscribe = store.subscribe(() => {
@@ -44,16 +47,36 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
       startBannerPrinted = true;
 
       if (state.skippedAlreadyTriaged > 0) {
+        console.log(
+          chalk.dim(
+            `  Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`,
+          ),
+        );
       }
     }
 
     // Print stage transitions
     if (state.phase !== lastPhase) {
       if (state.phase === "triaging" && state.selectedForTriage > 0) {
+        console.log(chalk.bold(`  Triaging ${state.selectedForTriage} findings...`));
       } else if (state.phase === "verifying" && state.progress.total > 0) {
+        console.log(chalk.bold(`  Verifying ${state.progress.total} findings...`));
       } else if (state.phase === "poc" && state.progress.total > 0) {
+        console.log(
+          chalk.bold(`  Generating PoC harnesses for ${state.progress.total} findings...`),
+        );
       }
       lastPhase = state.phase;
+    }
+
+    // Print stage completions once
+    for (const stage of state.stages) {
+      if (stage.status === "done" && !completedStages.has(stage.id)) {
+        completedStages.add(stage.id);
+        const elapsed =
+          stage.elapsedMs != null ? ` ${chalk.dim(formatDuration(stage.elapsedMs))}` : "";
+        console.log(`  ${chalk.green(icons.success)} ${stage.label}${elapsed}`);
+      }
     }
 
     const scanStage = state.stages.find((stage) => stage.id === "scan");
@@ -108,9 +131,16 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
     }
     lastNoticeCount = state.notices.length;
 
-    // Print summary
-    if (state.phase === "summary" && state.summary) {
+    // Print summary once when it first becomes available
+    if (state.phase === "summary" && state.summary && !summaryPrinted) {
+      summaryPrinted = true;
       printPlainSummary(state.summary);
+    }
+
+    // Print quality gate result once
+    if (state.qualityGate && state.qualityGate !== lastQualityGate) {
+      lastQualityGate = state.qualityGate;
+      printQualityGate(state.qualityGate);
     }
   });
 
@@ -118,40 +148,45 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
 }
 
 function printResultLine(result: ResultLine): void {
-  const _prefix = `  [${result.index}/${result.total}]`;
-  const _fingerprint = chalk.dim(`${result.fingerprint.slice(0, 12)}...`);
-  const _retry =
+  const prefix = `  [${result.index}/${result.total}]`;
+  const fingerprint = chalk.dim(`${result.fingerprint.slice(0, 12)}...`);
+  const retry =
     result.attempts && result.attempts > 1 ? chalk.dim(` (retry #${result.attempts})`) : "";
 
   if (result.kind === "error") {
-    const _stage = result.errorStage?.toUpperCase() ?? "TRIAGE";
-    if (result.errorMessage) {
-    }
+    const stage = result.errorStage?.toUpperCase() ?? "TRIAGE";
+    const msg = result.errorMessage ? `: ${result.errorMessage.slice(0, 120)}` : "";
+    console.log(`${prefix} ${chalk.red(`${stage} ERROR`)}${msg} ${fingerprint}${retry}`);
     return;
   }
 
   if (result.kind === "triage" && result.verdict) {
-    const _verdict = colorVerdict(result.verdict);
-    const _conf = chalk.dim(`(${((result.confidence ?? 0) * 100).toFixed(0)}%)`);
-    const _cost =
+    const verdict = colorVerdict(result.verdict);
+    const conf = chalk.dim(`(${((result.confidence ?? 0) * 100).toFixed(0)}%)`);
+    const cost =
       result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
+    console.log(`${prefix} ${verdict} ${conf}${cost} ${fingerprint}${retry}`);
     return;
   }
 
   if (result.kind === "verify") {
-    const _statusIcon = result.exploitable ? chalk.red(icons.error) : chalk.green(icons.success);
-    const _statusLabel = result.exploitable ? "EXPLOITABLE" : "not exploitable";
-    const _cost =
+    const statusIcon = result.exploitable ? chalk.red(icons.error) : chalk.green(icons.success);
+    const statusLabel = result.exploitable
+      ? chalk.red.bold("EXPLOITABLE")
+      : chalk.green("not exploitable");
+    const cost =
       result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
+    console.log(`${prefix} ${statusIcon} ${statusLabel}${cost} ${fingerprint}${retry}`);
     return;
   }
 
   if (result.kind === "poc") {
-    const _statusIcon = result.skipped ? chalk.yellow(icons.pending) : chalk.cyan(icons.gear);
-    const _statusLabel = result.skipped ? "SKIPPED" : "GENERATED";
-    const _parsed = result.skipped ? "" : result.parsed ? " parsed" : " parse-error";
-    const _cost =
+    const statusIcon = result.skipped ? chalk.yellow(icons.pending) : chalk.cyan(icons.gear);
+    const statusLabel = result.skipped ? chalk.yellow("SKIPPED") : chalk.cyan("GENERATED");
+    const parsed = result.skipped ? "" : result.parsed ? " parsed" : " parse-error";
+    const cost =
       result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
+    console.log(`${prefix} ${statusIcon} ${statusLabel}${parsed}${cost} ${fingerprint}${retry}`);
   }
 }
 
@@ -164,29 +199,33 @@ function printScanTaskLine(
   lastError?: string,
   retryCount?: number,
 ): void {
-  const _findings =
+  const findings =
     findingCount > 0
       ? ` ${chalk.dim(`(${findingCount} finding${findingCount === 1 ? "" : "s"})`)}`
       : "";
   const suffix = detail ? ` ${chalk.dim(detail)}` : "";
-  const _elapsed = elapsedMs != null ? ` ${chalk.dim(formatDuration(elapsedMs))}` : "";
-  const _retryTag = retryCount && retryCount > 0 ? chalk.yellow(` (retry #${retryCount})`) : "";
+  const elapsed = elapsedMs != null ? ` ${chalk.dim(formatDuration(elapsedMs))}` : "";
+  const retryTag = retryCount && retryCount > 0 ? chalk.yellow(` (retry #${retryCount})`) : "";
 
   if (status === "done") {
+    console.log(`  ${chalk.green(icons.success)} ${taskId}${findings}${elapsed}${retryTag}`);
     return;
   }
   if (status === "error") {
-    const _errorDetail = lastError ? ` ${chalk.red(lastError.slice(0, 80))}` : suffix;
+    const errorDetail = lastError ? ` ${chalk.red(lastError.slice(0, 80))}` : suffix;
+    console.log(`  ${chalk.red(icons.error)} ${taskId}${errorDetail}${elapsed}${retryTag}`);
     return;
   }
-  if (status === "active") {
-  }
+  // active / pending — do not spam console every tick; only emit on terminal statuses.
 }
 
 function printScanActivityLine(taskId: string, line: AgentActivityLine): void {
-  if (line.kind === "tool-start") {
-    const _detail = line.detail ?? line.toolName ?? "tool";
-  } else if (line.kind === "tool-complete" && line.detail) {
+  if (line.kind === "tool-complete" && line.detail) {
+    console.log(`    ${chalk.dim(`[${taskId}]`)} ${chalk.dim(line.detail)}`);
+  } else if (line.kind === "finding-preview" && line.detail) {
+    console.log(`    ${chalk.dim(`[${taskId}]`)} ${line.detail}`);
+  } else if (line.kind === "reasoning" && line.detail) {
+    console.log(`    ${chalk.dim(`[${taskId}]`)} ${chalk.italic(line.detail)}`);
   }
 }
 
@@ -195,7 +234,7 @@ function printNotice(
   message: string,
   detail?: string,
 ): void {
-  const _icon =
+  const icon =
     level === "success"
       ? chalk.green(icons.success)
       : level === "warning"
@@ -203,27 +242,69 @@ function printNotice(
         : level === "error"
           ? chalk.red(icons.error)
           : chalk.blue(icons.info);
-  const _body =
+  const body =
     level === "error" ? chalk.red(message) : level === "warning" ? chalk.yellow(message) : message;
+  const detailSuffix = detail ? ` ${chalk.dim(detail)}` : "";
+  console.log(`  ${icon} ${body}${detailSuffix}`);
+}
+
+function printQualityGate(result: {
+  passed: boolean;
+  violations?: Array<{ rule: string; message: string }>;
+}): void {
+  console.log("");
+  if (result.passed) {
+    console.log(`  ${chalk.green.bold("Quality Gates: PASSED")}`);
+    return;
+  }
+  console.log(`  ${chalk.red.bold("Quality Gates: FAILED")}`);
+  for (const violation of result.violations ?? []) {
+    console.log(`    ${chalk.red("x")} ${chalk.bold(violation.rule)}: ${violation.message}`);
+  }
 }
 
 function printPlainSummary(data: SummaryData): void {
-  // Delegate to the existing console.log approach with enhanced formatting
   const { verdictCounts: counts } = data;
   const total = counts.tp + counts.fp + counts.needs_review;
-  const _width = terminalCardWidth(96, 60);
+  const width = terminalCardWidth(96, 60);
+
+  console.log("");
+  console.log(chalk.bold("─".repeat(width)));
+  console.log(chalk.bold("  Kuzushi Scan Results"));
+  console.log(chalk.bold("─".repeat(width)));
 
   if (data.failedTasks.length > 0) {
+    console.log(
+      `  ${chalk.red("Scanners failed:")} ${data.failedTasks.join(", ")} ${chalk.dim("(results may be incomplete)")}`,
+    );
   }
 
+  console.log(`  ${chalk.dim("Total triaged:")}    ${total}`);
+  console.log(`  ${chalk.red.bold("True positives:")}   ${counts.tp}`);
+  console.log(`  ${chalk.green("False positives:")}  ${counts.fp}`);
+  console.log(`  ${chalk.yellow("Needs review:")}     ${counts.needs_review}`);
+
   if (total > 0) {
-    for (const _line of miniBarChart([
+    for (const line of miniBarChart([
       { label: "tp", value: counts.tp, color: chalk.red },
       { label: "fp", value: counts.fp, color: chalk.green },
       { label: "needs_review", value: counts.needs_review, color: chalk.yellow },
     ])) {
+      console.log(`  ${line}`);
     }
   }
-  if (data.verificationCostUsd > 0) {
+
+  if (data.exploitable > 0 || data.notExploitable > 0) {
+    console.log(`  ${chalk.red.bold("Exploitable:")}     ${data.exploitable}`);
+    console.log(`  ${chalk.green("Not exploitable:")} ${data.notExploitable}`);
   }
+
+  console.log(`  ${chalk.dim("Triage cost:")}     ${formatCost(data.triageCostUsd)}`);
+  if (data.verificationCostUsd > 0) {
+    console.log(`  ${chalk.dim("Verification cost:")} ${formatCost(data.verificationCostUsd)}`);
+  }
+  if (data.pocHarnessCostUsd > 0) {
+    console.log(`  ${chalk.dim("PoC harness cost:")} ${formatCost(data.pocHarnessCostUsd)}`);
+  }
+  console.log(chalk.bold("─".repeat(width)));
 }

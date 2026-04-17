@@ -11,7 +11,6 @@
  *     └─ Taint: input → req.body.name → query() (3 hops)
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
 import { badge, colorVerdict, severityLabel } from "../format.js";
@@ -19,6 +18,17 @@ import { fileLink } from "../hyperlink.js";
 import { icons } from "../icons.js";
 import { renderMarkdownInline } from "../markdown.js";
 import type { ActionableFinding } from "../state.js";
+import {
+  accent,
+  danger,
+  dangerStrong,
+  label,
+  muted,
+  strong,
+  successStrong,
+  warn,
+  warnStrong,
+} from "../tokens.js";
 import { CodePreview } from "./CodePreview.js";
 
 interface FindingCardProps {
@@ -27,20 +37,24 @@ interface FindingCardProps {
 
 export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
   const verdict = colorVerdict(finding.verdict);
-  const conf = chalk.dim(`(${(finding.confidence * 100).toFixed(0)}%)`);
+  const conf = muted(`(${(finding.confidence * 100).toFixed(0)}%)`);
   const severity = severityLabel(finding.severity);
-  const scanner = chalk.dim(`[${finding.taskId}]`);
+  const scanner = muted(`[${finding.taskId}]`);
   const verificationBadge =
     finding.verifyExploitable === 1
       ? ` ${badge("EXPLOITABLE", "red")}`
       : finding.verifyExploitable === 0
         ? ` ${badge("NOT EXPLOITABLE", "green")}`
         : "";
-  const location = chalk.cyan(
+  const location = accent(
     fileLink(finding.filePath, `${finding.filePath}:${finding.startLine}`, finding.startLine),
   );
 
-  // Collect detail tree items
+  // Collect detail tree items. Descriptive rows use a uniform
+  // "**Key:** value" pattern (bold label, plain value) so the tree scans as
+  // one visual rhythm. Rows where color carries a status signal (PoC parse
+  // errors, PoC execution verdicts, skipped harnesses) keep their semantic
+  // tokens so they stand out against the descriptive baseline.
   const details: string[] = [];
 
   if (finding.verifyExploitable === 1 && finding.verifyPocPayload) {
@@ -48,88 +62,91 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
       finding.verifyPocPayload.length > 80
         ? `${finding.verifyPocPayload.slice(0, 77)}...`
         : finding.verifyPocPayload;
-    details.push(`${chalk.magenta("PoC:")} ${payload}`);
+    details.push(`${label("PoC:")} ${payload}`);
   }
   if (finding.verifyAttackVector) {
-    details.push(`${chalk.cyan("Vector:")} ${finding.verifyAttackVector}`);
+    details.push(`${label("Vector:")} ${finding.verifyAttackVector}`);
   }
   if (finding.proofState) {
-    details.push(`${chalk.magenta("Proof State:")} ${finding.proofState.replace(/_/g, " ")}`);
+    details.push(`${label("Proof State:")} ${finding.proofState.replace(/_/g, " ")}`);
   }
   if (finding.engineProvenance && finding.engineProvenance.length > 0) {
     const prov = finding.engineProvenance.map((e) => `${e.kind}:${e.detail}`).join(", ");
-    details.push(`${chalk.dim("Engine:")} ${prov}`);
+    details.push(`${label("Engine:")} ${prov}`);
   }
   // Corroboration is handled separately as a nested tree (below)
   if (finding.pocHarnessPath) {
-    details.push(`${chalk.blue("PoC Harness:")} ${fileLink(finding.pocHarnessPath)}`);
+    details.push(`${label("PoC Harness:")} ${fileLink(finding.pocHarnessPath)}`);
   } else if (finding.pocHarnessSkipped === 1) {
+    // Status-signaling: yellow label carries the "skipped" meaning.
     details.push(
-      `${chalk.yellow("PoC Harness:")} skipped (${finding.pocHarnessSkipReason ?? "no reason"})`,
+      `${warn("PoC Harness:")} skipped (${finding.pocHarnessSkipReason ?? "no reason"})`,
     );
   }
   if (finding.pocHarnessParsed === 0 && finding.pocHarnessParseError) {
-    details.push(`${chalk.red("PoC Parse Error:")} ${finding.pocHarnessParseError}`);
+    // Status-signaling: red label for parse failure.
+    details.push(`${danger("PoC Parse Error:")} ${finding.pocHarnessParseError}`);
   }
   if (typeof finding.pocRunVerdict === "string" && finding.pocRunVerdict) {
+    // Status-signaling: the entire row is colored by execution verdict.
     const verdictColor =
       finding.pocRunVerdict === "PASS"
-        ? chalk.green.bold
+        ? successStrong
         : finding.pocRunVerdict === "FAIL"
-          ? chalk.red.bold
+          ? dangerStrong
           : finding.pocRunVerdict === "TIMEOUT"
-            ? chalk.yellow.bold
-            : chalk.red;
+            ? warnStrong
+            : danger;
     const durationStr =
       typeof finding.pocRunDurationMs === "number"
-        ? chalk.dim(` (${(finding.pocRunDurationMs / 1000).toFixed(1)}s)`)
+        ? muted(` (${(finding.pocRunDurationMs / 1000).toFixed(1)}s)`)
         : "";
     details.push(`${verdictColor(`PoC Execution: ${finding.pocRunVerdict}`)}${durationStr}`);
   }
 
   if (finding.attackPath) {
     if (finding.attackPath.chain.length > 0) {
-      details.push(`${chalk.cyan("Path:")} ${finding.attackPath.chain.join(" → ")}`);
+      details.push(`${label("Path:")} ${finding.attackPath.chain.join(" → ")}`);
     }
     if (finding.attackPath.likelihoodReasoning) {
-      details.push(`${chalk.dim("Likelihood:")} ${finding.attackPath.likelihoodReasoning}`);
+      details.push(`${label("Likelihood:")} ${finding.attackPath.likelihoodReasoning}`);
     }
     if (finding.attackPath.impactReasoning) {
-      details.push(`${chalk.dim("Impact:")} ${finding.attackPath.impactReasoning}`);
+      details.push(`${label("Impact:")} ${finding.attackPath.impactReasoning}`);
     }
   }
 
   if (finding.codeCitations && finding.codeCitations.length > 0) {
     for (const cite of finding.codeCitations.slice(0, 3)) {
       details.push(
-        `${chalk.blue("Evidence:")} ${cite.filePath}:${cite.startLine} — ${cite.description}`,
+        `${label("Evidence:")} ${cite.filePath}:${cite.startLine} — ${cite.description}`,
       );
     }
     if (finding.codeCitations.length > 3) {
-      details.push(`${chalk.dim(`  ...and ${finding.codeCitations.length - 3} more citations`)}`);
+      details.push(`${muted(`  ...and ${finding.codeCitations.length - 3} more citations`)}`);
     }
   }
 
   if (finding.assumptions && finding.assumptions.length > 0) {
-    details.push(`${chalk.yellow("Assumptions:")} ${finding.assumptions.join("; ")}`);
+    details.push(`${label("Assumptions:")} ${finding.assumptions.join("; ")}`);
   }
 
   if (finding.controls && finding.controls.length > 0) {
     const controlNames = finding.controls.map((c) => c.name).join(", ");
-    details.push(`${chalk.green("Controls:")} ${controlNames}`);
+    details.push(`${label("Controls:")} ${controlNames}`);
   }
 
   if (finding.blindspots && finding.blindspots.length > 0) {
-    details.push(`${chalk.yellow("Blindspots:")} ${finding.blindspots.join("; ")}`);
+    details.push(`${label("Blindspots:")} ${finding.blindspots.join("; ")}`);
   }
 
   if (finding.sourceThreatIds && finding.sourceThreatIds.length > 0) {
-    details.push(`${chalk.magenta("Threats:")} ${finding.sourceThreatIds.join(", ")}`);
+    details.push(`${label("Threats:")} ${finding.sourceThreatIds.join(", ")}`);
   }
 
   if (finding.blame) {
     details.push(
-      `${chalk.dim("Introduced:")} ${finding.blame.sha} by ${finding.blame.author} on ${finding.blame.date}`,
+      `${label("Introduced:")} ${finding.blame.sha} by ${finding.blame.author} on ${finding.blame.date}`,
     );
   }
 
@@ -145,9 +162,9 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
         {location}
       </Text>
       <CodePreview filePath={finding.filePath} line={finding.startLine} context={2} />
-      <Text>
+      <Text dimColor>
         {"    "}
-        {chalk.dim(finding.ruleId)}
+        {finding.ruleId}
       </Text>
       <Text>
         {"    "}
@@ -161,7 +178,7 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
           return (
             <Text key={i}>
               {"    "}
-              {chalk.dim(connector)} {detail}
+              {muted(connector)} {detail}
             </Text>
           );
         })}
@@ -187,22 +204,22 @@ function CorroborationTree({
 }): React.ReactElement {
   const uniqueTasks = [...new Set(signals.map((s) => s.taskId))];
   const connector = isLastDetail ? icons.treeLast : icons.treeMiddle;
-  const continuation = isLastDetail ? " " : chalk.dim(icons.treePipe);
+  const continuation = isLastDetail ? " " : muted(icons.treePipe);
 
   return (
     <Box flexDirection="column">
       <Text>
         {"    "}
-        {chalk.dim(connector)} {chalk.dim("Corroborated by")} {chalk.white(`${signals.length}`)}{" "}
-        {chalk.dim(`scanner${signals.length > 1 ? "s" : ""}:`)} {chalk.dim(uniqueTasks.join(", "))}
+        {muted(connector)} {muted("Corroborated by")} {strong(`${signals.length}`)}{" "}
+        {muted(`scanner${signals.length > 1 ? "s" : ""}:`)} {muted(uniqueTasks.join(", "))}
       </Text>
       {signals.map((signal, i) => {
         const sigConnector = i === signals.length - 1 ? icons.treeLast : icons.treeMiddle;
         const cwes = signal.cwe && signal.cwe.length > 0 ? signal.cwe.join(",") : "";
-        const score = signal.score != null ? chalk.dim(`score=${signal.score}`) : "";
+        const score = signal.score != null ? muted(`score=${signal.score}`) : "";
         const loc =
           signal.filePath && signal.startLine
-            ? chalk.cyan(
+            ? accent(
                 fileLink(
                   signal.filePath,
                   `${signal.filePath}:${signal.startLine}`,
@@ -210,11 +227,11 @@ function CorroborationTree({
                 ),
               )
             : "";
-        const parts = [chalk.white(signal.taskId), cwes, score, loc].filter(Boolean);
+        const parts = [strong(signal.taskId), cwes, score, loc].filter(Boolean);
         return (
           <Text key={i}>
             {"    "}
-            {continuation} {chalk.dim(sigConnector)} {parts.join("  ")}
+            {continuation} {muted(sigConnector)} {parts.join("  ")}
           </Text>
         );
       })}

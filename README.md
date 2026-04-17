@@ -31,11 +31,11 @@ kuzushi shell --load blackbox,honeypot   # pre-load specific modules
 ```
 
 ```
-┌─────────────────────────────────────────────────────────────┐
+╭─────────────────────────────────────────────────────────────╮
 │  kuzushi shell                      workspace: acme-api     │
 │  modules: sast, randori, blackbox, honeypot, shinsa         │
 │  target: ./acme-api  (Node.js + Express + PostgreSQL)       │
-└─────────────────────────────────────────────────────────────┘
+╰─────────────────────────────────────────────────────────────╯
 
 kuzushi> modules
 kuzushi> use sast

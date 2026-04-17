@@ -22,9 +22,11 @@
 import chalk from "chalk";
 import { Box, Text } from "ink";
 import React from "react";
-import { colorVerdict, formatCost, formatDuration, progressBar } from "../format.js";
+import { colorVerdict, formatCost, formatDuration, progressBar, statusBadge } from "../format.js";
+import { useHeartbeat } from "../hooks.js";
 import { icons } from "../icons.js";
 import type { AgentActivityLine, PipelineStage, ResultLine, SubTask } from "../state.js";
+import { tokens } from "../tokens.js";
 import { Spinner } from "./Spinner.js";
 
 interface PipelineIndicatorProps {
@@ -43,6 +45,20 @@ interface PipelineIndicatorProps {
 const MAX_VISIBLE_RESULTS = 5;
 /** Seconds without a visible scan event before showing a heartbeat. */
 const HEARTBEAT_STALE_SECONDS = 15;
+
+// Column widths used by StageHeaderLine to keep detail/elapsed visually
+// stable across status transitions. ANSI color codes don't count toward
+// visible width, so we `padEnd` the RAW strings BEFORE coloring. When a
+// field is always-absent for a given row type we skip reservation rather
+// than inject blank spaces that would eat real estate.
+const STAGE_DETAIL_WIDTH = 12;
+const STAGE_ELAPSED_WIDTH = 8;
+// Same rationale for scanner sub-task rows. Count and detail only get
+// padded when at least one row in the set would ever render them — see
+// `SubTaskBranches` for the per-list reservation check.
+const SUBTASK_COUNT_WIDTH = 10;
+const SUBTASK_DETAIL_WIDTH = 22;
+const SUBTASK_ELAPSED_WIDTH = 8;
 
 export function PipelineIndicator({
   stages,
@@ -128,20 +144,26 @@ function StageHeaderLine({
   const paddedLabel = stage.label.padEnd(labelWidth);
 
   if (stage.status === "done") {
-    const elapsed = stage.elapsedMs != null ? chalk.dim(formatDuration(stage.elapsedMs)) : "";
-    const detail = stage.detail ? chalk.dim(stage.detail) : "";
+    // padEnd on RAW strings before coloring — ANSI escape codes don't count
+    // toward visible width, so the column reserves a real cell count.
+    const detailRaw = stage.detail ?? "";
+    const elapsedRaw = stage.elapsedMs != null ? formatDuration(stage.elapsedMs) : "";
+    const detail = chalk.dim(detailRaw.padEnd(STAGE_DETAIL_WIDTH));
+    const elapsed = chalk.dim(elapsedRaw.padEnd(STAGE_ELAPSED_WIDTH));
+    const { icon } = statusBadge("stage", "done");
     return (
       <Text>
         {"  "}
-        {chalk.dim(`${icons.complete} ${paddedLabel}`)}
-        {detail ? `  ${detail}` : ""}
-        {elapsed ? `  ${elapsed}` : ""}
+        {chalk.dim(`${icon} ${paddedLabel}`)} {detail} {elapsed}
       </Text>
     );
   }
 
   if (stage.status === "active") {
-    const detail = stage.detail ?? "";
+    const detailRaw = stage.detail ?? "";
+    const detail = detailRaw
+      ? `  ${chalk.white(detailRaw.padEnd(STAGE_DETAIL_WIDTH))}`
+      : `  ${" ".repeat(STAGE_DETAIL_WIDTH)}`;
     const cost =
       runningCostUsd && runningCostUsd > 0 ? `  ${chalk.dim(formatCost(runningCostUsd))}` : "";
     const throttleLabel = throttle
@@ -151,17 +173,19 @@ function StageHeaderLine({
       progress && progress.total > 0
         ? `  ${progressBar(progress.current, progress.total, 12)}`
         : "";
-    const elapsed = stage.startedAt
-      ? `  ${chalk.dim(formatDuration(Date.now() - stage.startedAt))}`
-      : "";
+    const elapsedRaw = stage.startedAt ? formatDuration(Date.now() - stage.startedAt) : "";
+    const elapsed = elapsedRaw ? `  ${chalk.dim(elapsedRaw.padEnd(STAGE_ELAPSED_WIDTH))}` : "";
+    // Active stages use the brand accent for the spinner frame. The static
+    // filled-circle glyph still carries `dangerStrong` via `statusBadge` when
+    // rendered non-animated (e.g. in tests or plain-renderer).
     return (
       <Box>
         <Text>{"  "}</Text>
-        <Spinner color="red" />
+        <Spinner color="accent" />
         <Text>
           {" "}
           {chalk.redBright.bold(paddedLabel)}
-          {detail ? `  ${chalk.white(detail)}` : ""}
+          {detail}
           {cost}
           {throttleLabel}
           {bar}
@@ -172,19 +196,21 @@ function StageHeaderLine({
   }
 
   if (stage.status === "error") {
+    const { icon } = statusBadge("stage", "error");
     return (
       <Text>
         {"  "}
-        {chalk.red(`${icons.error} ${paddedLabel}`)}
-        {stage.detail ? `  ${chalk.red(stage.detail)}` : ""}
+        {tokens.danger(`${icon} ${paddedLabel}`)}
+        {stage.detail ? `  ${tokens.danger(stage.detail)}` : ""}
       </Text>
     );
   }
 
+  const { icon } = statusBadge("stage", "pending");
   return (
     <Text>
       {"  "}
-      {chalk.dim(`${icons.pending} ${paddedLabel}`)}
+      {chalk.dim(`${icon} ${paddedLabel}`)}
     </Text>
   );
 }
@@ -207,116 +233,148 @@ function SubTaskBranches({
     return aWeight - bWeight;
   });
 
+  // Per-list reservation decisions. Only reserve a column if at least one
+  // task in the set ever renders that field — otherwise we'd inject empty
+  // columns that eat horizontal real estate for lists that don't need them.
+  const anyCount = sorted.some((t) => (t.findingCount ?? 0) > 0);
+  const anyDetail = sorted.some((t) => !!t.detail);
+  const anyElapsed = sorted.some(
+    (t) => t.elapsedMs != null || (t.status === "active" && t.startedAt != null),
+  );
+
   return (
     <Box flexDirection="column">
-      {sorted.map((task, i) => {
-        const isLast = i === sorted.length - 1;
-        const connector = isLast ? icons.treeLast : icons.treeMiddle;
-        const statusIcon =
-          task.status === "done"
-            ? chalk.dim(icons.complete)
-            : task.status === "error"
-              ? chalk.red(icons.error)
-              : task.status === "active"
-                ? chalk.redBright(icons.active)
-                : chalk.dim(icons.pending);
-        const elapsed =
-          task.elapsedMs != null
-            ? `  ${chalk.dim(formatDuration(task.elapsedMs))}`
-            : task.status === "active" && task.startedAt
-              ? `  ${chalk.dim(formatDuration(Date.now() - task.startedAt))}`
-              : "";
-        const count =
-          task.findingCount && task.findingCount > 0
-            ? `  ${chalk.white(`${task.findingCount} finding${task.findingCount === 1 ? "" : "s"}`)}`
-            : "";
-        const detail = task.detail
-          ? `  ${chalk.dim(task.detail.length > 72 ? `${task.detail.slice(0, 69)}...` : task.detail)}`
-          : "";
-        const labelColor = task.status === "active" ? chalk.white : chalk.dim;
-        const roleTag = task.role === "support" ? chalk.dim(" [setup]") : "";
-        const retryTag =
-          task.retryCount && task.retryCount > 0
-            ? chalk.yellow(` (retry #${task.retryCount})`)
-            : "";
+      {sorted.map((task, i) => (
+        <SubTaskRow
+          key={task.id}
+          task={task}
+          isLast={i === sorted.length - 1}
+          pipe={pipe}
+          anyCount={anyCount}
+          anyDetail={anyDetail}
+          anyElapsed={anyElapsed}
+        />
+      ))}
+    </Box>
+  );
+}
 
-        const hasActivity = task.activityLines && task.activityLines.length > 0;
-        // Heartbeat: show "still analyzing..." when active but quiet for > 15s
-        const now = Date.now();
-        const isStale =
-          task.status === "active" &&
-          task.startedAt &&
-          (!task.lastEventAt || now - task.lastEventAt > HEARTBEAT_STALE_SECONDS * 1000);
+function SubTaskRow({
+  task,
+  isLast,
+  pipe,
+  anyCount,
+  anyDetail,
+  anyElapsed,
+}: {
+  task: SubTask;
+  isLast: boolean;
+  pipe: string;
+  anyCount: boolean;
+  anyDetail: boolean;
+  anyElapsed: boolean;
+}): React.ReactElement {
+  const connector = isLast ? icons.treeLast : icons.treeMiddle;
+  const { icon: badgeIcon, color: badgeColor } = statusBadge("task", task.status);
+  const statusIcon = badgeColor(badgeIcon);
 
-        return (
-          <Box key={task.id} flexDirection="column">
-            {/* Task header row */}
-            {task.status === "active" ? (
-              <Box>
-                <Text>
-                  {"  "}
-                  {pipe} {chalk.dim(connector)}{" "}
-                </Text>
-                <Spinner color="red" />
-                <Text>
-                  {" "}
-                  {chalk.white(task.label)}
-                  {roleTag}
-                  {count}
-                  {detail}
-                  {elapsed}
-                  {retryTag}
-                </Text>
-              </Box>
-            ) : task.status === "error" ? (
-              <Text>
-                {"  "}
-                {pipe} {chalk.dim(connector)} {statusIcon} {chalk.red(task.label)}
-                {task.lastError ? `  ${chalk.red(task.lastError.slice(0, 72))}` : detail}
-                {retryTag}
-                {chalk.dim("  continuing with remaining tasks")}
-              </Text>
-            ) : (
-              <Text>
-                {"  "}
-                {pipe} {chalk.dim(connector)} {statusIcon} {labelColor(task.label)}
-                {roleTag}
-                {count}
-                {detail}
-                {elapsed}
-              </Text>
-            )}
+  // Extracted hook owns the 5s tick + stale detection.
+  const { isStale, elapsedMs: heartbeatElapsed } = useHeartbeat(task, HEARTBEAT_STALE_SECONDS);
 
-            {/* Activity lines nested under active scan tasks */}
-            {task.status === "active" && hasActivity && (
-              <Box flexDirection="column">
-                {task.activityLines!.map((line, li) => {
-                  const toolIsLast = li === task.activityLines!.length - 1;
-                  const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
-                  const branchPipe = isLast ? " " : chalk.dim(icons.treePipe);
-                  return (
-                    <Text key={li}>
-                      {"  "}
-                      {pipe} {"  "}
-                      {branchPipe} {chalk.dim(toolConnector)} {formatToolLine(line)}
-                    </Text>
-                  );
-                })}
-              </Box>
-            )}
+  // Raw field values (pre-color). padEnd runs on raw strings so ANSI escapes
+  // don't throw off visible width.
+  const elapsedRaw =
+    task.elapsedMs != null
+      ? formatDuration(task.elapsedMs)
+      : task.status === "active" && task.startedAt
+        ? formatDuration(heartbeatElapsed)
+        : "";
+  const countRaw =
+    task.findingCount && task.findingCount > 0
+      ? `${task.findingCount} finding${task.findingCount === 1 ? "" : "s"}`
+      : "";
+  const detailRaw = task.detail
+    ? task.detail.length > 72
+      ? `${task.detail.slice(0, 69)}...`
+      : task.detail
+    : "";
 
-            {/* Heartbeat when quiet */}
-            {task.status === "active" && !hasActivity && isStale && (
-              <Text>
+  const count = anyCount ? `  ${chalk.white(countRaw.padEnd(SUBTASK_COUNT_WIDTH))}` : "";
+  const detail = anyDetail ? `  ${chalk.dim(detailRaw.padEnd(SUBTASK_DETAIL_WIDTH))}` : "";
+  const elapsed = anyElapsed ? `  ${chalk.dim(elapsedRaw.padEnd(SUBTASK_ELAPSED_WIDTH))}` : "";
+
+  const labelColor = task.status === "active" ? chalk.white : chalk.dim;
+  const roleTag = task.role === "support" ? chalk.dim(" [setup]") : "";
+  const retryTag =
+    task.retryCount && task.retryCount > 0 ? chalk.yellow(` (retry #${task.retryCount})`) : "";
+  const hasActivity = task.activityLines && task.activityLines.length > 0;
+
+  return (
+    <Box flexDirection="column">
+      {/* Task header row */}
+      {task.status === "active" ? (
+        <Box>
+          <Text>
+            {"  "}
+            {pipe} {chalk.dim(connector)}{" "}
+          </Text>
+          <Spinner color="accent" />
+          <Text>
+            {" "}
+            {chalk.white(task.label)}
+            {roleTag}
+            {count}
+            {detail}
+            {elapsed}
+            {retryTag}
+          </Text>
+        </Box>
+      ) : task.status === "error" ? (
+        <Text>
+          {"  "}
+          {pipe} {chalk.dim(connector)} {statusIcon} {tokens.danger(task.label)}
+          {task.lastError ? `  ${tokens.danger(task.lastError.slice(0, 72))}` : detail}
+          {retryTag}
+          {chalk.dim("  continuing with remaining tasks")}
+        </Text>
+      ) : (
+        <Text>
+          {"  "}
+          {pipe} {chalk.dim(connector)} {statusIcon} {labelColor(task.label)}
+          {roleTag}
+          {count}
+          {detail}
+          {elapsed}
+        </Text>
+      )}
+
+      {/* Activity lines nested under active scan tasks */}
+      {task.status === "active" && hasActivity && (
+        <Box flexDirection="column">
+          {task.activityLines!.map((line, li) => {
+            const toolIsLast = li === task.activityLines!.length - 1;
+            const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
+            const branchPipe = isLast ? " " : chalk.dim(icons.treePipe);
+            return (
+              <Text key={li}>
                 {"  "}
                 {pipe} {"  "}
-                {isLast ? " " : chalk.dim(icons.treePipe)} {chalk.dim(icons.treeLast)}{" "}
-                {chalk.dim.italic(`still analyzing... ${formatDuration(now - task.startedAt!)}`)}
+                {branchPipe} {chalk.dim(toolConnector)} {formatToolLine(line)}
               </Text>
-            )}
-          </Box>
-        );
-      })}
+            );
+          })}
+        </Box>
+      )}
+
+      {/* Heartbeat when quiet */}
+      {task.status === "active" && !hasActivity && isStale && task.startedAt && (
+        <Text>
+          {"  "}
+          {pipe} {"  "}
+          {isLast ? " " : chalk.dim(icons.treePipe)} {chalk.dim(icons.treeLast)}{" "}
+          {chalk.dim.italic(`still analyzing... ${formatDuration(heartbeatElapsed)}`)}
+        </Text>
+      )}
     </Box>
   );
 }
@@ -371,7 +429,7 @@ function ResultBranches({
                 {"  "}
                 {pipe} {chalk.dim(connector)}{" "}
               </Text>
-              <Spinner color="yellow" />
+              <Spinner color="warn" />
               <Text>
                 {" "}
                 {chalk.white(prefix)} {chalk.dim(fp.slice(0, 12))}...
