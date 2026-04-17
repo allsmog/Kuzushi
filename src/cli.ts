@@ -11,7 +11,7 @@ process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
   process.exitCode = 1;
 });
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { Command } from "commander";
@@ -31,7 +31,7 @@ import {
 import { cleanup as cleanupHttpAgents } from "./http-agent.js";
 import { initiateShutdown, registerShutdownHook } from "./lifecycle.js";
 import { setGlobalLogLevel } from "./logger.js";
-import { defaultDbPath, getRun, initDb } from "./store.js";
+import { defaultDbPath, getRun, initDb, listRuns } from "./store.js";
 
 function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
   let storesApiKey = key === "agentRuntimeConfig.apiKey";
@@ -90,6 +90,17 @@ program
   .option("--scope <path>", "Load rules of engagement from YAML file")
   .option("--model <model>", "Default model for AI operations")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi                                           # start the shell with default modules
+  $ kuzushi shell --target ./acme-api                 # pre-set the scan target
+  $ kuzushi shell --load randori,vuln-scout,tob      # pre-load extra built-in modules
+  $ kuzushi shell --workspace acme-pentest            # resume a named workspace
+  $ kuzushi shell --model anthropic:claude-opus-4-7   # override the default model
+`,
+  )
   .action(
     wrapCliAction(
       async (opts: {
@@ -222,6 +233,7 @@ program
   .option("--json <path>", "Write JSON report to this path")
   .option("--csv <path>", "Write CSV report to this path")
   .option("--jsonl <path>", "Write JSONL report to this path")
+  .option("--junit <path>", "Write JUnit XML report to this path (CI test-result aggregation)")
   .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
@@ -254,6 +266,25 @@ program
   .option("--no-cache", "Disable inflight request deduplication and LLM result caching")
   .option("--resume [runId]", "Resume a previous run (optionally by run id)")
   .option("--db <path>", "SQLite database path (default: <repo>/.kuzushi/findings.sqlite3)")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi scan ./repo                                                 # default pipeline
+  $ kuzushi scan ./repo --preset deep --verify --auto-patch            # full triage + verify + patch
+  $ kuzushi scan ./repo --sarif report.sarif --junit report.xml         # CI-friendly reports
+  $ kuzushi scan ./repo --quality-gate --fail-on-tp                     # fail build on high/critical TPs
+  $ kuzushi scan ./repo --tasks semgrep,codeql --severity ERROR         # only two tasks, errors only
+  $ kuzushi scan ./repo --task-model triage=openai:gpt-4o               # override a single stage's model
+  $ kuzushi scan ./repo --resume                                        # resume the most recent run
+
+Exit codes:
+  0   Clean (no findings above threshold)
+  1   Findings present, or scan produced failures
+  2   Usage / config / auth error
+  3   Unexpected crash (use --debug for a stack trace)
+`,
+  )
   .action(wrapCliAction(runScanCommand));
 
 // ── compare-runs ──────────────────────────────────────────────────────────
@@ -272,6 +303,14 @@ program
   .command("compare-runs <id1> <id2>")
   .description("Compare metrics and assertions between two pipeline runs")
   .option("-r, --repo <path>", "Repository path", ".")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi compare-runs 2026-04-15-abc 2026-04-17-xyz    # diff two runs
+  $ kuzushi compare-runs last-main last-pr -r ./repo      # scoped to a specific repo
+`,
+  )
   .action(
     wrapCliAction(async (id1: string, id2: string, options: { repo: string }) => {
       const { root } = resolveRepo(options.repo);
@@ -354,7 +393,22 @@ program
 
 // ── config get/set/unset ──────────────────────────────────────────────────
 
-const configCmd = program.command("config").description("Manage Kuzushi configuration");
+const configCmd = program
+  .command("config")
+  .description("Manage Kuzushi configuration")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi config get                                  # show the full effective config
+  $ kuzushi config get model                            # get a single key
+  $ kuzushi config set model anthropic:claude-opus-4-7  # set a key (warns on plaintext credentials)
+  $ kuzushi config unset model                          # reset a key to default
+  $ kuzushi config path                                 # print the config file path
+  $ kuzushi config validate --repo ./repo               # preflight: schema + env + binaries
+  $ kuzushi config explain model                        # describe a key's shape + default
+`,
+  );
 
 configCmd
   .command("get")
@@ -408,40 +462,275 @@ configCmd
 
 configCmd
   .command("validate")
-  .description("Validate the effective Kuzushi configuration")
+  .description("Validate schema + preflight (env vars, scanner binaries, data dir)")
   .option("-r, --repo <path>", "Repository path for project-level config overlay", ".")
   .option("--trust-repo-config", "Trust unsafe repo-local config keys during validation", false)
+  .option("--no-preflight", "Skip runtime preflight (credentials, binaries, data dir)")
   .action(
-    wrapCliAction((opts: { repo: string; trustRepoConfig?: boolean }) => {
-      const { root } = resolveRepo(opts.repo);
-      const config = loadConfig(root, { trustProjectConfig: opts.trustRepoConfig === true });
-      const issues = validateKuzushiConfig(config);
-      const warnings = issues.filter((issue) => issue.severity === "warning");
-      const errors = issues.filter((issue) => issue.severity === "error");
+    wrapCliAction(
+      async (opts: { repo: string; trustRepoConfig?: boolean; preflight?: boolean }) => {
+        const { root } = resolveRepo(opts.repo);
+        const config = loadConfig(root, { trustProjectConfig: opts.trustRepoConfig === true });
 
-      if (warnings.length === 0 && errors.length === 0) {
-        console.log(`Configuration is valid for ${root}`);
+        const schemaIssues = validateKuzushiConfig(config);
+        const { runPreflight, formatPreflightCheck } = await import("./cli/preflight.js");
+        const preflight = opts.preflight === false ? null : runPreflight(config, root);
+
+        if (preflight) {
+          console.log("Preflight:");
+          for (const check of preflight.checks) {
+            console.log(`  ${formatPreflightCheck(check)}`);
+          }
+          console.log();
+        }
+
+        const allIssues = [...schemaIssues, ...(preflight?.issues ?? [])];
+        const warnings = allIssues.filter((issue) => issue.severity === "warning");
+        const errors = allIssues.filter((issue) => issue.severity === "error");
+
+        if (warnings.length === 0 && errors.length === 0) {
+          console.log(`Configuration is valid for ${root}`);
+          return;
+        }
+
+        if (warnings.length > 0) {
+          console.log("Warnings:");
+          for (const issue of warnings) {
+            console.log(`  - ${formatConfigValidationIssue(issue)}`);
+          }
+        }
+
+        if (errors.length > 0) {
+          throw new CliUsageError("Configuration errors:", {
+            details: errors.map((issue) => `  - ${formatConfigValidationIssue(issue)}`),
+          });
+        }
+      },
+    ),
+  );
+
+configCmd
+  .command("explain")
+  .description("Describe a config key's shape, default, and purpose")
+  .argument("[key]", "Config key (omit to list all known keys)")
+  .action(
+    wrapCliAction(async (key?: string) => {
+      const { CONFIG_KEY_DOCS, explainConfigKey, listConfigKeys } = await import(
+        "./config/docs.js"
+      );
+      if (!key) {
+        for (const entry of listConfigKeys()) {
+          const defaultPart = entry.default !== undefined ? ` (default: ${entry.default})` : "";
+          console.log(`  ${entry.key.padEnd(32)} ${entry.type}${defaultPart}`);
+          console.log(`      ${entry.summary}`);
+        }
+        console.log(`\n${CONFIG_KEY_DOCS.length} keys documented. Use \`config explain <key>\`.`);
         return;
       }
+      const doc = explainConfigKey(key);
+      if (!doc) {
+        throw new CliUsageError(`Unknown config key: ${key}`);
+      }
+      console.log(`${doc.key}`);
+      console.log(`  Type:     ${doc.type}`);
+      if (doc.default !== undefined) console.log(`  Default:  ${doc.default}`);
+      if (doc.values) console.log(`  Values:   ${doc.values.join(", ")}`);
+      if (doc.envVar) console.log(`  Env var:  ${doc.envVar}`);
+      console.log(`  Summary:  ${doc.summary}`);
+      if (doc.details) {
+        console.log("");
+        console.log(doc.details);
+      }
+    }),
+  );
 
-      if (warnings.length > 0) {
-        console.log("Warnings:");
-        for (const issue of warnings) {
-          console.log(`  - ${formatConfigValidationIssue(issue)}`);
-        }
+// ── init (bootstrap .kuzushi/) ─────────────────────────────────────────────
+
+program
+  .command("init")
+  .description(
+    "Initialise a Kuzushi workspace: create .kuzushi/, write sensible defaults, print next steps",
+  )
+  .option("-r, --repo <path>", "Repository path (defaults to cwd)", ".")
+  .option("--force", "Overwrite an existing .kuzushi/config.json", false)
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi init                     # scaffold .kuzushi/ in the current directory
+  $ kuzushi init -r ./acme-api       # scaffold in a specific repo root
+  $ kuzushi init --force             # overwrite an existing config
+`,
+  )
+  .action(
+    wrapCliAction((opts: { repo: string; force?: boolean }) => {
+      const { root } = resolveRepo(opts.repo);
+      const dataDir = path.join(root, ".kuzushi");
+      if (!existsSync(dataDir)) {
+        mkdirSync(dataDir, { recursive: true });
+      }
+      const configFile = path.join(dataDir, "config.json");
+      if (existsSync(configFile) && !opts.force) {
+        throw new CliUsageError(
+          `${configFile} already exists. Use --force to overwrite, or edit in place.`,
+        );
       }
 
-      if (errors.length > 0) {
-        throw new CliUsageError("Errors:", {
-          details: errors.map((issue) => `  - ${formatConfigValidationIssue(issue)}`),
-        });
+      const starter = {
+        model: "anthropic:claude-sonnet-4-6",
+        agentRuntimeBackend: "claude-code",
+        busBackend: "in-process",
+        triageBatchSize: 5,
+        triageConcurrency: 2,
+        scanMode: "parallel",
+        tasks: ["semgrep", "triage"],
+        severity: ["ERROR", "WARNING"],
+        excludePatterns: ["test", "tests", "node_modules", "dist", "build", ".next"],
+        verify: false,
+        qualityGates: { failOnExploitable: false },
+      };
+      writeFileSync(configFile, `${JSON.stringify(starter, null, 2)}\n`, "utf-8");
+
+      const envExample = path.join(root, ".env.example");
+      if (!existsSync(envExample)) {
+        writeFileSync(
+          envExample,
+          [
+            "# Kuzushi agent-runtime credentials. At minimum set ANTHROPIC_API_KEY.",
+            "ANTHROPIC_API_KEY=",
+            "",
+            "# Optional overrides:",
+            "# OPENAI_API_KEY=",
+            "# GOOGLE_API_KEY=",
+            "# KUZUSHI_LOG_LEVEL=info         # debug|info|warn|error",
+            "# KUZUSHI_LOG_FORMAT=text        # text|json",
+            "",
+          ].join("\n"),
+          "utf-8",
+        );
+      }
+
+      console.log(`Initialised ${dataDir}.`);
+      console.log("");
+      console.log("Next steps:");
+      console.log(`  1. Set ANTHROPIC_API_KEY (copy ${envExample} to .env and fill it in).`);
+      console.log("  2. Run `kuzushi doctor` to check your environment.");
+      console.log("  3. Run `kuzushi config validate -r .` to confirm everything is wired.");
+      console.log("  4. Run `kuzushi scan .` for your first scan.");
+    }),
+  );
+
+// ── create-module (scaffold a third-party CopilotModule) ──────────────────
+
+program
+  .command("create-module")
+  .description("Scaffold a new CopilotModule project (starter tool + manifest + vitest setup)")
+  .argument("<id>", "Module ID (lowercase, dash-separated)")
+  .option("--template <name>", "Starter template: offense, defense, or intel", "offense")
+  .option("-d, --dir <path>", "Parent directory to create the module in (defaults to cwd)", ".")
+  .option("--force", "Overwrite an existing target directory", false)
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi create-module my-scanner --template offense
+  $ kuzushi create-module honey-net --template defense --dir ./modules
+  $ kuzushi create-module attck-lookup --template intel --force
+`,
+  )
+  .action(
+    wrapCliAction(async (id: string, opts: { template: string; dir: string; force?: boolean }) => {
+      const { createModule, isValidTemplate } = await import("./cli/create-module.js");
+      if (!isValidTemplate(opts.template)) {
+        throw new CliUsageError(
+          `Unknown --template "${opts.template}". Valid: offense, defense, intel.`,
+        );
+      }
+      const result = createModule({
+        id,
+        template: opts.template,
+        targetDir: path.resolve(opts.dir),
+        force: opts.force === true,
+      });
+      console.log(`Scaffolded ${result.moduleDir}:`);
+      for (const file of result.files) console.log(`  ${file}`);
+      console.log("");
+      console.log("Next steps:");
+      console.log(`  $ cd ${path.relative(process.cwd(), result.moduleDir) || "."}`);
+      console.log("  $ pnpm install && pnpm build && pnpm test");
+      console.log(`  $ kuzushi run ${id}:<tool> --load file://$(pwd)`);
+    }),
+  );
+
+// ── doctor (runtime preflight summary) ────────────────────────────────────
+
+program
+  .command("doctor")
+  .description(
+    "Run runtime preflight: Node, git, credentials, scanner binaries, data-dir permissions",
+  )
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--strict", "Exit non-zero on warnings", false)
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi doctor                        # print preflight status, exit 0 unless errors
+  $ kuzushi doctor --strict               # also fail on warnings (useful in CI)
+  $ kuzushi doctor -r ./acme-api          # preflight against a specific repo
+`,
+  )
+  .action(
+    wrapCliAction(async (opts: { repo: string; strict?: boolean }) => {
+      const { root } = resolveRepo(opts.repo);
+      const config = loadConfig(root, { trustProjectConfig: false });
+      const { runPreflight, formatPreflightCheck, whichSync } = await import("./cli/preflight.js");
+      const report = runPreflight(config, root);
+
+      console.log(`Kuzushi doctor  (repo: ${root})\n`);
+
+      // Also surface Node version + git for completeness
+      const nodeRaw = process.version;
+      const nodeMajor = parseInt(nodeRaw.replace(/^v/, "").split(".")[0] ?? "0", 10);
+      const nodeOk = nodeMajor >= 22;
+      console.log(
+        `  ${nodeOk ? "[ok]     " : "[MISSING]"} node: ${nodeRaw}${nodeOk ? "" : " (need >= 22)"}`,
+      );
+      const gitPath = whichSync("git");
+      console.log(`  ${gitPath ? "[ok]     " : "[MISSING]"} git: ${gitPath ?? "not on PATH"}`);
+
+      for (const check of report.checks) {
+        console.log(`  ${formatPreflightCheck(check)}`);
+      }
+
+      const errors = report.issues.filter((i) => i.severity === "error");
+      const warnings = report.issues.filter((i) => i.severity === "warning");
+      console.log(`\n${errors.length} error(s), ${warnings.length} warning(s).`);
+
+      if (!nodeOk || !gitPath || errors.length > 0) {
+        throw new CliUsageError("doctor: one or more required checks failed.");
+      }
+      if (opts.strict && warnings.length > 0) {
+        throw new CliUsageError("doctor: warnings present and --strict was set.");
       }
     }),
   );
 
 // ── task list/info/validate ────────────────────────────────────────────────
 
-const taskCmd = program.command("task").description("Manage and inspect pipeline tasks");
+const taskCmd = program
+  .command("task")
+  .description("Manage and inspect pipeline tasks")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi task list                                 # all registered tasks + DAG stages
+  $ kuzushi task list --filter findings               # only finding-producing tasks
+  $ kuzushi task info sast:verify                     # deep info for one task
+  $ kuzushi task validate ./my-external-task.ts       # validate a 3rd-party task file
+`,
+  );
 
 taskCmd
   .command("list")
@@ -620,6 +909,15 @@ program
   .description("Synthesize and validate a security patch for a specific finding")
   .argument("<repo>", "Path to the repository")
   .requiredOption("--fingerprint <fp>", "Finding fingerprint to patch")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi patch ./repo --fingerprint abc123def                     # default 3 iterations
+  $ kuzushi patch ./repo --fingerprint abc123def --max-iterations 5  # more retry budget
+  $ kuzushi patch ./repo --fingerprint abc123def --build-cmd "npm run build" --test-cmd "npm test"
+`,
+  )
   .option("--build-cmd <cmd>", "Override build command for validation")
   .option("--test-cmd <cmd>", "Override test command for validation")
   .option("--max-iterations <n>", "Maximum patch synthesis iterations", parseInt, 3)
@@ -736,6 +1034,18 @@ program
   .option("--load <modules>", "Additional modules to load (comma-separated)")
   .option("--model <model>", "Model override for AI operations")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi run sast:scan ./repo --json                                    # JSON output
+  $ kuzushi run sast:triage fingerprint=abc123 --quiet                     # just the exit code
+  $ kuzushi run tob:skills --json                                          # list resolvable ToB skills
+  $ kuzushi run randori:pasta --target ./repo --input '{"stages":["s1","s2"]}'
+  $ kuzushi run variant:hunt fingerprint=abc123 --load variant-hunter      # load extra module
+  $ kuzushi run vuln-scout:audit --target ./repo --load vuln-scout --json  # headless pentest
+`,
+  )
   .action(
     wrapCliAction(
       async (
@@ -830,11 +1140,129 @@ program
     ),
   );
 
+// ── runs (inspect previous pipeline runs) ─────────────────────────────────
+
+const runsCmd = program
+  .command("runs")
+  .description("List and inspect previous scan pipeline runs")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi runs list -r ./repo                        # 50 most recent runs
+  $ kuzushi runs list --status interrupted --limit 10  # only resumable runs
+  $ kuzushi runs show 2026-04-15-abc -r ./repo         # details for one run
+  $ kuzushi runs show 2026-04-15-abc --costs           # include cost breakdown
+`,
+  );
+
+runsCmd
+  .command("list")
+  .description("List persisted pipeline runs, most recent first")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--status <status>", "Filter by status (complete|interrupted|failed|running)")
+  .option("--limit <n>", "Max runs to list", (v) => parseInt(v, 10), 50)
+  .action(
+    wrapCliAction((opts: { repo: string; status?: string; limit: number }) => {
+      const { root } = resolveRepo(opts.repo);
+      const dbPath = defaultDbPath(root);
+      if (!existsSync(dbPath)) {
+        console.log(`No runs database at ${dbPath}. Run \`kuzushi scan ${opts.repo}\` first.`);
+        return;
+      }
+      const db = initDb(dbPath);
+      try {
+        const runs = listRuns(db, {
+          repo: undefined,
+          status: opts.status,
+          limit: opts.limit,
+        });
+        if (runs.length === 0) {
+          console.log("No runs found.");
+          return;
+        }
+        console.log(`Runs in ${dbPath}:\n`);
+        for (const run of runs) {
+          const started = run.startedAt ?? "?";
+          const cost =
+            typeof run.totalCostUsd === "number" ? `$${run.totalCostUsd.toFixed(4)}` : "n/a";
+          console.log(
+            `  ${run.runId.padEnd(40)} ${(run.status ?? "?").padEnd(12)} ${started.padEnd(24)} cost=${cost}`,
+          );
+        }
+        console.log(`\n${runs.length} run(s).`);
+      } finally {
+        db.close();
+      }
+    }),
+  );
+
+runsCmd
+  .command("show")
+  .description("Show details for a specific run")
+  .argument("<runId>", "Run ID")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--costs", "Include cost breakdown from metrics", false)
+  .option("--json", "Output as JSON", false)
+  .action(
+    wrapCliAction((runId: string, opts: { repo: string; costs?: boolean; json?: boolean }) => {
+      const { root } = resolveRepo(opts.repo);
+      const dbPath = defaultDbPath(root);
+      if (!existsSync(dbPath)) {
+        throw new CliUsageError(`No runs database at ${dbPath}.`);
+      }
+      const db = initDb(dbPath);
+      try {
+        const run = getRun(db, runId);
+        if (!run) {
+          throw new CliUsageError(`Run not found: ${runId}`);
+        }
+        if (opts.json) {
+          console.log(JSON.stringify(run, null, 2));
+          return;
+        }
+        console.log(`Run: ${run.runId}`);
+        console.log(`  Repo:        ${run.repo}`);
+        console.log(`  Status:      ${run.status ?? "?"}`);
+        console.log(`  Started:     ${run.startedAt ?? "?"}`);
+        if (run.completedAt) console.log(`  Completed:   ${run.completedAt}`);
+        console.log(
+          `  Total cost:  ${typeof run.totalCostUsd === "number" ? `$${run.totalCostUsd.toFixed(4)}` : "n/a"}`,
+        );
+        if (run.promptHash) console.log(`  Prompt hash: ${run.promptHash}`);
+        if (opts.costs && run.metricsJson) {
+          const metrics = JSON.parse(run.metricsJson) as {
+            costBreakdown?: Record<string, number | undefined>;
+          };
+          if (metrics.costBreakdown) {
+            console.log("\n  Cost breakdown:");
+            for (const [stage, value] of Object.entries(metrics.costBreakdown)) {
+              if (typeof value === "number")
+                console.log(`    ${stage.padEnd(20)} $${value.toFixed(4)}`);
+            }
+          }
+        }
+      } finally {
+        db.close();
+      }
+    }),
+  );
+
 // ── intel (security intelligence management) ──────────────────────────────
 
 const intelCmd = program
   .command("intel")
-  .description("Manage the security intelligence store (CVEs, ATT&CK, CAPEC, custom docs)");
+  .description("Manage the security intelligence store (CVEs, ATT&CK, CAPEC, custom docs)")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi intel search "SSRF metadata"             # semantic search across the store
+  $ kuzushi intel search "RCE" --source nvd --limit 5
+  $ kuzushi intel add ./notes/cve-2025-12345.md --source custom
+  $ kuzushi intel stats                              # counts by source
+`,
+  );
 
 intelCmd
   .command("search")

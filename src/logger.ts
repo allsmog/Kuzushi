@@ -21,7 +21,10 @@ const LEVEL_ORDER: Record<LogLevel, number> = {
   error: 3,
 };
 
+export type LogFormat = "text" | "json";
+
 let globalLogLevel: LogLevel = resolveInitialLogLevel();
+let globalLogFormat: LogFormat = resolveInitialLogFormat();
 
 export interface Logger {
   debug(msg: string, ...args: unknown[]): void;
@@ -49,6 +52,16 @@ export function getGlobalLogLevel(): LogLevel {
   return globalLogLevel;
 }
 
+/** Set the global log format. Useful for CI/JSON ingestion pipelines. */
+export function setGlobalLogFormat(format: LogFormat): void {
+  globalLogFormat = format;
+}
+
+/** Get the current global log format. */
+export function getGlobalLogFormat(): LogFormat {
+  return globalLogFormat;
+}
+
 const loggerCache = new Map<string, Logger>();
 
 /** Get or create a cached logger by stage name. */
@@ -74,6 +87,38 @@ function buildLogger(stage: string, bindings: Record<string, unknown>): Logger {
 
   function log(level: LogLevel, first: unknown, ...rest: unknown[]) {
     if (!shouldLog(level)) return;
+
+    if (globalLogFormat === "json") {
+      const entry: Record<string, unknown> = {
+        time: new Date().toISOString(),
+        level,
+        stage,
+      };
+      if (Object.keys(bindings).length > 0) {
+        Object.assign(entry, redactObject(bindings));
+      }
+      if (typeof first === "object" && first !== null && typeof rest[0] === "string") {
+        Object.assign(entry, redactObject(first as Record<string, unknown>));
+        entry.msg = redactString(rest[0]);
+      } else {
+        entry.msg = typeof first === "string" ? redactString(first) : String(first);
+        if (rest.length > 0) {
+          entry.extra = rest.map((r) =>
+            typeof r === "string"
+              ? redactString(r)
+              : typeof r === "object" && r !== null
+                ? redactObject(r as Record<string, unknown>)
+                : r,
+          );
+        }
+      }
+      try {
+        console.error(JSON.stringify(entry));
+      } catch {
+        console.error(`${prefix} [${level}] <unserializable log entry>`);
+      }
+      return;
+    }
 
     const bindingsStr =
       Object.keys(bindings).length > 0 ? ` ${JSON.stringify(redactObject(bindings))}` : "";
@@ -141,4 +186,9 @@ function resolveInitialLogLevel(): LogLevel {
     return env as LogLevel;
   }
   return "warn";
+}
+
+function resolveInitialLogFormat(): LogFormat {
+  const env = process.env["KUZUSHI_LOG_FORMAT"]?.toLowerCase();
+  return env === "json" ? "json" : "text";
 }

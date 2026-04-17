@@ -1977,6 +1977,51 @@ export function getResumableModuleRuns(
   return [...byRepo.values()];
 }
 
+/** List persisted pipeline runs, most recent first. */
+export function listRuns(
+  db: Database.Database,
+  options: { repo?: string; status?: string; limit?: number } = {},
+): PipelineRunRecord[] {
+  const filters: string[] = [];
+  const params: unknown[] = [];
+  if (options.repo) {
+    filters.push("repo = ?");
+    params.push(options.repo);
+  }
+  if (options.status) {
+    filters.push("status = ?");
+    params.push(options.status);
+  }
+  const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
+  const limit = options.limit && options.limit > 0 ? Math.floor(options.limit) : 50;
+
+  const rows = db
+    .prepare(`
+    SELECT
+      run_id as runId,
+      repo,
+      started_at as startedAt,
+      status,
+      config_json as configJson,
+      scan_opts_json as scanOptsJson,
+      findings_json as findingsJson,
+      context_json as contextJson,
+      total_cost_usd as totalCostUsd,
+      completed_at as completedAt,
+      updated_at as updatedAt,
+      metrics_json as metricsJson,
+      assertions_json as assertionsJson,
+      prompt_hash as promptHash
+    FROM pipeline_runs
+    ${where}
+    ORDER BY COALESCE(completed_at, started_at) DESC, started_at DESC, rowid DESC
+    LIMIT ?
+  `)
+    .all(...params, limit) as PipelineRunRecord[];
+
+  return rows;
+}
+
 /** Get persisted run checkpoint by run id. */
 export function getRun(db: Database.Database, runId: string): PipelineRunRecord | undefined {
   const row = db

@@ -49,15 +49,10 @@ export async function createMcpModule(
   serverSpec: string,
   moduleId: string,
 ): Promise<{ module: CopilotModule; dispose: () => void }> {
-  // For now, only support stdio transport
-  if (serverSpec.startsWith("http://") || serverSpec.startsWith("https://")) {
-    throw new Error(
-      `HTTP/SSE MCP transport is not yet implemented. ` +
-        `Use a stdio command instead: /load mcp:npx @some/mcp-server`,
-    );
-  }
-
-  const client = new StdioMcpClient(serverSpec);
+  const client: McpClient =
+    serverSpec.startsWith("http://") || serverSpec.startsWith("https://")
+      ? new HttpMcpClient(serverSpec)
+      : new StdioMcpClient(serverSpec);
   await client.initialize();
 
   const mcpTools = await client.listTools();
@@ -102,10 +97,163 @@ export async function createMcpModule(
   };
 }
 
+/** Shared shape implemented by both transports. */
+interface McpClient {
+  initialize(): Promise<void>;
+  listTools(): Promise<McpToolDefinition[]>;
+  callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult>;
+  close(): void;
+}
+
+/**
+ * HTTP MCP client (Streamable HTTP transport per MCP spec 2025-03-26).
+ *
+ * Sends JSON-RPC requests as POST bodies. The server chooses response
+ * encoding based on the Accept header — this client accepts both
+ * `application/json` (single response) and `text/event-stream` (streamed
+ * responses / server notifications). The final matching response by `id`
+ * is returned; SSE framing is parsed inline.
+ *
+ * Session tracking: if the server returns `Mcp-Session-Id` during
+ * initialize, it is echoed on every subsequent request.
+ */
+class HttpMcpClient implements McpClient {
+  private sessionId: string | null = null;
+  private initialized = false;
+  private closed = false;
+
+  constructor(private readonly url: string) {}
+
+  async initialize(): Promise<void> {
+    const result = await this.sendRequest("initialize", {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "kuzushi", version: "0.16.0" },
+    });
+    // MCP initialize response: { protocolVersion, capabilities, serverInfo }
+    if (!result || typeof result !== "object") {
+      throw new Error("MCP server did not return a valid initialize response.");
+    }
+    // Fire-and-forget the initialized notification.
+    await this.sendNotification("notifications/initialized", {});
+    this.initialized = true;
+  }
+
+  async listTools(): Promise<McpToolDefinition[]> {
+    if (!this.initialized) throw new Error("MCP client not initialized.");
+    const result = (await this.sendRequest("tools/list", {})) as { tools?: McpToolDefinition[] };
+    return result.tools ?? [];
+  }
+
+  async callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
+    if (!this.initialized) throw new Error("MCP client not initialized.");
+    return this.sendRequest("tools/call", { name, arguments: args }) as Promise<McpToolResult>;
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  private async sendRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (this.closed) throw new Error("MCP client is closed.");
+    const id = randomUUID();
+    const body: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    };
+    if (this.sessionId) headers["Mcp-Session-Id"] = this.sessionId;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let response: Response;
+    try {
+      response = await fetch(this.url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) {
+      throw new Error(`MCP HTTP ${method} failed: HTTP ${response.status}`);
+    }
+
+    const returnedSession = response.headers.get("Mcp-Session-Id");
+    if (returnedSession) this.sessionId = returnedSession;
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      const json = (await response.json()) as JsonRpcResponse;
+      return parseJsonRpcResponse(json, id, method);
+    }
+    if (contentType.includes("text/event-stream")) {
+      const text = await response.text();
+      const matching = findMatchingSseResponse(text, id);
+      if (!matching) {
+        throw new Error(`MCP HTTP ${method}: no matching response for id ${id}`);
+      }
+      return parseJsonRpcResponse(matching, id, method);
+    }
+    throw new Error(`MCP HTTP ${method}: unexpected Content-Type "${contentType}"`);
+  }
+
+  private async sendNotification(method: string, params: Record<string, unknown>): Promise<void> {
+    if (this.closed) return;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.sessionId) headers["Mcp-Session-Id"] = this.sessionId;
+    try {
+      await fetch(this.url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ jsonrpc: "2.0", method, params }),
+      });
+    } catch {
+      // notifications are best-effort
+    }
+  }
+}
+
+function parseJsonRpcResponse(msg: JsonRpcResponse, expectedId: string, method: string): unknown {
+  if (msg.id !== expectedId) {
+    throw new Error(`MCP HTTP ${method}: response id mismatch (${msg.id} !== ${expectedId})`);
+  }
+  if (msg.error) {
+    throw new Error(msg.error.message);
+  }
+  return msg.result;
+}
+
+/**
+ * Scan an SSE body for a `data:` frame whose parsed JSON-RPC response matches
+ * the requested id. Returns null if nothing matches. Tolerates interleaved
+ * notifications and comments.
+ */
+function findMatchingSseResponse(body: string, expectedId: string): JsonRpcResponse | null {
+  for (const frame of body.split(/\n\n+/)) {
+    const dataLines = frame
+      .split("\n")
+      .filter((l) => l.startsWith("data:"))
+      .map((l) => l.slice(5).trim());
+    if (dataLines.length === 0) continue;
+    const joined = dataLines.join("\n");
+    try {
+      const msg = JSON.parse(joined) as JsonRpcResponse;
+      if (msg.id === expectedId) return msg;
+    } catch {
+      // skip unparsable frame
+    }
+  }
+  return null;
+}
+
 /**
  * Minimal stdio MCP client — spawns a subprocess and communicates via JSON-RPC.
  */
-class StdioMcpClient {
+class StdioMcpClient implements McpClient {
   private process: ReturnType<typeof spawn> | null = null;
   private pendingRequests = new Map<
     string,
