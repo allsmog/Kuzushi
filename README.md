@@ -240,7 +240,7 @@ kuzushi scan <repo> --preset reference   # + PoC + threat-informed hunting + fro
 
 **Resumable runs** — checkpoints to SQLite. `--resume` picks up where you left off.
 
-**Interactive terminal UI** — React+Ink-powered live display with pipeline progress tree, spinners, trophy screen for confirmed exploits. REPL during scans (pause, skip, inspect). First-run setup wizard. Falls back to plain text in non-TTY.
+**Interactive terminal UI** — React+Ink-powered live display with pipeline progress tree, spinners, trophy screen for confirmed exploits. REPL during scans (pause, skip, inspect). First-run setup wizard. Falls back to plain text in non-TTY. Built on a unified primitive library (`src/ui/primitives/`: `SelectList`, `TextInput`, `ConfirmDialog`, `Table`, `Breadcrumb`, `KeybindFooter`, `ExpandableSection`, `Divider`, `MultilineText`) with shared hooks (`src/ui/hooks/`: `useBoundedIndex`, `useFocusTrap`, `useTerminalSize`, `useCursorVisibility`, `useExpanded`, `useKeybindings`) for consistent focus, keyboard navigation, and resize handling.
 
 **Incremental scanning** — skips re-triage for unchanged findings. Dependency-aware invalidation via import graph.
 
@@ -399,6 +399,25 @@ kuzushi config set tasks semgrep,codeql
 ## Architecture
 
 See [VISION.md](VISION.md) for the full architecture vision, module system design, workspace/knowledge graph, intel layer, governance model, and implementation roadmap.
+
+### Terminal UI layer
+
+The Ink React frontend lives in `src/ui/`:
+
+| Path | Role |
+| --- | --- |
+| `src/ui/App.tsx` | Root Ink component; dispatches on `UIState.mode` (`preflight`, `running`, `summary`, `review`, `done`, `shell`). |
+| `src/ui/state.ts` | `UIStore` — observer-pattern state + `useSyncExternalStore` binding. |
+| `src/ui/render.ts` | Entry point; TTY detection and Ink mount / plain fallback. |
+| `src/ui/plain-renderer.ts` | Non-TTY subscriber that prints delta-based updates. |
+| `src/ui/tokens.ts` | Semantic color/typography tokens + `SPACING` / `COLUMN_WIDTHS` constants. |
+| `src/ui/format.ts` | Terminal formatting utilities — progress bars, cost/duration, column padding, ANSI-aware truncation (`truncateEnd`, `truncateMiddle`, `padCell`, `visibleWidth`). |
+| `src/ui/error-format.ts` | Ink-free error classification (`classifyError`, `formatError`, `suggestNextStep`) consumed by `ErrorCard`. |
+| `src/ui/primitives/` | Reusable building blocks: `SelectList`, `TextInput`, `ConfirmDialog`, `Table`, `Breadcrumb`, `KeybindFooter`, `ExpandableSection`, `Divider`, `MultilineText`. |
+| `src/ui/hooks/` | Behavioral hooks: `useBoundedIndex`, `useFocusTrap`, `useTerminalSize` (SIGWINCH-aware), `useCursorVisibility`, `useExpanded`, `useKeybindings`. |
+| `src/ui/components/` | Feature components (pipeline, findings, setup wizard, copilot shell) composed from the primitives above. |
+
+Styling discipline: components import from `tokens` (never `chalk` directly) and lay out with Ink `<Box>` flexbox properties (`flexDirection`, `justifyContent`, `gap`, `padding`, `margin`) rather than string-padding tricks.
 
 ## License
 

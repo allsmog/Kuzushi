@@ -86,3 +86,28 @@ export const label = tokens.label;
 export const value = tokens.value;
 export const metadata = tokens.metadata;
 export { hint, muted, subtle };
+
+/**
+ * Shared vertical/horizontal spacing scale. Use with Ink `<Box>` `marginTop`,
+ * `marginBottom`, `paddingLeft`, etc. so every component pulls from one scale
+ * instead of scattering magic numbers.
+ */
+export const SPACING = {
+  xs: 0,
+  sm: 1,
+  md: 2,
+  lg: 3,
+  xl: 4,
+} as const;
+
+/**
+ * Canonical column widths for tabular layouts. Reserved slots for
+ * status icons, pipeline stage detail strings, elapsed times, and cost
+ * badges. Additional widths should be added here rather than inlined.
+ */
+export const COLUMN_WIDTHS = {
+  stageDetail: 12,
+  stageElapsed: 8,
+  statusIcon: 2,
+  costBadge: 10,
+} as const;
