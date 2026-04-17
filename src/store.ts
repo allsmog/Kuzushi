@@ -105,6 +105,12 @@ export interface StoredFindingRecord {
   controls: SecurityControl[] | undefined;
   blindspots: string[] | undefined;
   sourceThreatIds: string[] | undefined;
+  /** Human-readable finding title from triage (e.g. "Copilot shell enables Bash tool"). */
+  title: string | undefined;
+  /** Triage-assessed display severity ("critical" | "high" | "medium" | "low"). */
+  displaySeverity: "critical" | "high" | "medium" | "low" | undefined;
+  /** 2-3 sentence Alice-and-Bob attack scenario from triage. */
+  attackNarrative: string | undefined;
   blame?: { sha: string; author: string; date: string; summary: string };
   introducedIn?: string;
 }
@@ -1088,6 +1094,18 @@ export function getActionableFindings(
         : undefined,
       sourceThreatIds: detailsRecord
         ? parseStringArrayFromDetails(detailsRecord["source_threat_ids"])
+        : undefined,
+      title: detailsRecord ? asOptionalString(detailsRecord["title"]) : undefined,
+      displaySeverity: detailsRecord
+        ? (asOptionalString(detailsRecord["display_severity"]) as
+            | "critical"
+            | "high"
+            | "medium"
+            | "low"
+            | undefined)
+        : undefined,
+      attackNarrative: detailsRecord
+        ? asOptionalString(detailsRecord["attack_narrative"])
         : undefined,
       blame: parseFindingMetadata(row.findingMetadataJson)?.blame,
       introducedIn:

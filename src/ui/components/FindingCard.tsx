@@ -41,8 +41,14 @@ interface FindingCardProps {
 export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
   const verdict = colorVerdict(finding.verdict);
   const conf = muted(`(${(finding.confidence * 100).toFixed(0)}%)`);
-  const severity = severityLabel(finding.severity);
+  // Prefer the triage-assessed display severity when present — it reflects
+  // the human-judged impact, not the raw scanner tier.
+  const severity = severityLabel(finding.displaySeverity ?? finding.severity);
   const scanner = muted(`[${finding.taskId}]`);
+  const titleLine = finding.title?.trim();
+  // Text fallback chain used in the summary snippet: attackNarrative if the
+  // agent provided one, otherwise the terser rationale.
+  const summaryText = (finding.attackNarrative ?? finding.rationale) || "";
   const verificationBadge =
     finding.verifyExploitable === 1
       ? ` ${badge("EXPLOITABLE", "red")}`
@@ -153,7 +159,10 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     );
   }
 
-  const hasDetails = details.length > 0 || finding.corroboratingSignals.length > 0;
+  const hasValidation =
+    finding.verificationSteps !== undefined && finding.verificationSteps.length > 0;
+  const hasDetails =
+    details.length > 0 || finding.corroboratingSignals.length > 0 || hasValidation;
 
   const summary = (
     <Box flexDirection="column">
@@ -161,6 +170,11 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
         {verdict} {conf} {severity} {scanner}
         {verificationBadge}
       </Text>
+      {titleLine && (
+        <Box paddingLeft={2}>
+          <Text>{strong(titleLine)}</Text>
+        </Box>
+      )}
       <Box paddingLeft={2}>
         <Text>{location}</Text>
       </Box>
@@ -170,8 +184,8 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
       </Box>
       <Box paddingLeft={2}>
         <Text>
-          {renderMarkdownInline(finding.rationale.slice(0, 120))}
-          {finding.rationale.length > 120 ? "\u2026" : ""}
+          {renderMarkdownInline(summaryText.slice(0, 160))}
+          {summaryText.length > 160 ? "\u2026" : ""}
         </Text>
       </Box>
     </Box>
@@ -186,13 +200,35 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     );
   }
 
+  const expandableHintCount =
+    details.length +
+    (finding.corroboratingSignals.length > 0 ? 1 : 0) +
+    (hasValidation ? 1 : 0);
+
   return (
     <Box flexDirection="column" paddingLeft={2}>
       <ExpandableSection
         summary={summary}
         defaultExpanded={DEBUG_ON}
-        hint={`(press space for ${details.length + (finding.corroboratingSignals.length > 0 ? 1 : 0)} detail rows)`}
+        hint={`(press space for ${expandableHintCount} detail rows)`}
       >
+        {hasValidation && (
+          <Box flexDirection="column">
+            <Text>{label("Validation:")}</Text>
+            {finding.verificationSteps!.slice(0, 4).map((step, i) => (
+              <Text key={`vstep-${i}`}>
+                {"  "}
+                {muted(`${i + 1}.`)} {step}
+              </Text>
+            ))}
+            {finding.verificationSteps!.length > 4 && (
+              <Text>
+                {"  "}
+                {muted(`...and ${finding.verificationSteps!.length - 4} more`)}
+              </Text>
+            )}
+          </Box>
+        )}
         {details.map((detail, i) => {
           const isLast = i === details.length - 1 && finding.corroboratingSignals.length === 0;
           const connector = isLast ? icons.treeLast : icons.treeMiddle;

@@ -115,12 +115,19 @@ export function generateMarkdownReport(
     lines.push("No actionable findings.");
   } else {
     for (const finding of actionable) {
-      lines.push(`### ${finding.ruleId} (${finding.verdict.toUpperCase()})`);
+      const heading = finding.title?.trim() || finding.ruleId;
+      const severityLabel = (finding.displaySeverity ?? finding.severity).toUpperCase();
+      lines.push(`### ${heading} (${finding.verdict.toUpperCase()})`);
       lines.push("");
-      lines.push(`- File: \`${finding.filePath}:${finding.startLine}\``);
-      lines.push(`- Scanner: \`${finding.taskId}\``);
-      lines.push(`- Severity: \`${finding.severity}\``);
+      lines.push(`- Severity: **${severityLabel}**`);
+      lines.push(`- Scanner: \`${finding.taskId}\` · Rule: \`${finding.ruleId}\``);
+      lines.push(`- Location: \`${finding.filePath}:${finding.startLine}\``);
       lines.push(`- Confidence: ${(finding.confidence * 100).toFixed(0)}%`);
+      if (finding.blame) {
+        lines.push(
+          `- Commit: \`${finding.blame.sha}\` ${finding.blame.date} by ${finding.blame.author}`,
+        );
+      }
       if (finding.proofState) {
         lines.push(`- Proof state: \`${formatProofStateLabel(finding.proofState)}\``);
       }
@@ -131,10 +138,30 @@ export function generateMarkdownReport(
         lines.push(`- Taint path summary: \`${summarizeTaintPath(finding.taintPath) ?? ""}\``);
       }
       lines.push("");
-      lines.push("Triage rationale:");
+      lines.push("**Summary.**");
       lines.push("");
-      lines.push(finding.rationale || "No rationale provided.");
+      lines.push(finding.attackNarrative?.trim() || finding.rationale || "No summary provided.");
       lines.push("");
+
+      if (finding.verificationSteps && finding.verificationSteps.length > 0) {
+        lines.push("**Validation.**");
+        lines.push("");
+        finding.verificationSteps.forEach((step, idx) => {
+          lines.push(`${idx + 1}. ${step}`);
+        });
+        lines.push("");
+      }
+
+      if (
+        finding.attackNarrative &&
+        finding.rationale &&
+        finding.attackNarrative.trim() !== finding.rationale.trim()
+      ) {
+        lines.push("Triage rationale:");
+        lines.push("");
+        lines.push(finding.rationale);
+        lines.push("");
+      }
 
       const taintPathLines = formatTaintPathForDisplay(finding.taintPath);
       if (taintPathLines.length > 0) {
@@ -202,7 +229,7 @@ export function generateMarkdownReport(
       }
 
       if (finding.codeCitations && finding.codeCitations.length > 0) {
-        lines.push("Evidence:");
+        lines.push("**Validation artifact.**");
         lines.push("");
         for (const citation of finding.codeCitations) {
           lines.push(`#### \`${citation.filePath}:${citation.startLine}-${citation.endLine}\``);
@@ -219,7 +246,7 @@ export function generateMarkdownReport(
       }
 
       if (finding.attackPath) {
-        lines.push("Attack-path analysis:");
+        lines.push("**Attack-path analysis.**");
         lines.push("");
         if (finding.attackPath.chain.length > 0) {
           lines.push(finding.attackPath.chain.join(" --> "));
@@ -230,11 +257,11 @@ export function generateMarkdownReport(
           lines.push("");
         }
         if (finding.attackPath.likelihoodReasoning) {
-          lines.push(`**Likelihood**: ${finding.attackPath.likelihoodReasoning}`);
+          lines.push(`**Likelihood.** ${finding.attackPath.likelihoodReasoning}`);
           lines.push("");
         }
         if (finding.attackPath.impactReasoning) {
-          lines.push(`**Impact**: ${finding.attackPath.impactReasoning}`);
+          lines.push(`**Impact.** ${finding.attackPath.impactReasoning}`);
           lines.push("");
         }
       }

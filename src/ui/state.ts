@@ -237,6 +237,12 @@ export interface ActionableFinding {
   blindspots?: string[];
   sourceThreatIds?: string[];
   verificationSteps?: string[];
+  /** Human-readable finding title from triage (e.g. "Copilot shell enables Bash tool"). */
+  title?: string;
+  /** Triage-assessed display severity ("critical" | "high" | "medium" | "low"). */
+  displaySeverity?: "critical" | "high" | "medium" | "low";
+  /** 2-3 sentence Alice-and-Bob attack scenario from triage. */
+  attackNarrative?: string;
   blame?: { sha: string; author: string; date: string; summary: string };
   introducedIn?: string;
 }
