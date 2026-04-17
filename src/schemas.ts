@@ -596,6 +596,7 @@ export type ScanOptsZ = z.infer<typeof ScanOptsSchema>;
 
 export const AgentRuntimeConfigSchema = z.object({
   apiKey: z.string().optional(),
+  apiKeyFile: z.string().optional(),
   baseUrl: z.string().optional(),
 });
 

@@ -1464,14 +1464,16 @@ function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undef
   }
 
   const apiKey = normalizeOptionalString(value["apiKey"]);
+  const apiKeyFile = normalizeOptionalString(value["apiKeyFile"]);
   const baseUrl = normalizeOptionalString(value["baseUrl"]);
 
-  if (!apiKey && !baseUrl) {
+  if (!apiKey && !apiKeyFile && !baseUrl) {
     return undefined;
   }
 
   const normalized: AgentRuntimeConfig = {};
   if (apiKey) normalized.apiKey = apiKey;
+  if (apiKeyFile) normalized.apiKeyFile = apiKeyFile;
   if (baseUrl) normalized.baseUrl = baseUrl;
   return normalized;
 }

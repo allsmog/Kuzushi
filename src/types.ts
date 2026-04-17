@@ -54,6 +54,15 @@ export type AgentRuntimeBackend = "claude" | "pi-ai";
 export interface AgentRuntimeConfig {
   /** API key for the LLM provider. Overrides ANTHROPIC_API_KEY when set. */
   apiKey?: string;
+  /**
+   * Path to a file whose contents hold the API key. When set and `apiKey`
+   * is not, the key is read from this path at runtime. Intended for
+   * secret-manager mount points (Docker secrets, Kubernetes secrets,
+   * cloud-provider secret mounts) so the key is never written into
+   * `~/.kuzushi/config.json` in plaintext. The file should be owner-only
+   * (`0600`); Kuzushi warns otherwise.
+   */
+  apiKeyFile?: string;
   /** Base URL for the LLM API endpoint. Overrides ANTHROPIC_BASE_URL when set. */
   baseUrl?: string;
 }
