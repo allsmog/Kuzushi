@@ -1,7 +1,7 @@
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
+import { tokens } from "../tokens.js";
 
 interface CompactHeaderProps {
   repoName: string;
@@ -18,20 +18,20 @@ export function CompactHeader({
 }: CompactHeaderProps): React.ReactElement {
   const findingsLabel =
     totalFindings != null && selectedForTriage != null
-      ? `${totalFindings} found · ${selectedForTriage} selected`
+      ? `${totalFindings} found \u00B7 ${selectedForTriage} selected`
       : null;
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
       <Text>
-        {"  "}
-        {chalk.redBright.bold("Kuzushi")} {chalk.dim("·")} {chalk.white(repoName)}
-        {findingsLabel ? `${chalk.dim(" · ")}${chalk.white(findingsLabel)}` : ""}
+        {tokens.dangerStrong("Kuzushi")} {tokens.subtle("\u00B7")} {tokens.strong(repoName)}
+        {findingsLabel
+          ? `${tokens.subtle(" \u00B7 ")}${tokens.strong(findingsLabel)}`
+          : ""}
       </Text>
       {tasks.length > 0 && (
         <Text>
-          {"  "}
-          {chalk.dim(icons.treeLast)} {chalk.dim(tasks.join(", "))}
+          {tokens.muted(icons.treeLast)} {tokens.muted(tasks.join(", "))}
         </Text>
       )}
     </Box>
