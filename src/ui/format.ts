@@ -284,8 +284,8 @@ export function terminalCardWidth(maxWidth = 88, minWidth = 56): number {
 // ─── Column / path width utilities ────────────────────────────────────────
 // Added as part of the Wave 1 responsive-geometry pass (S4).
 
-const ANSI_RE =
-  /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ESC/CSI bytes are intrinsic to ANSI escape detection
+const ANSI_RE = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
 
 /** Horizontal alignment for `padCell`. */
 export type Align = "left" | "right" | "center";
@@ -313,11 +313,7 @@ export function truncateEnd(s: string, maxWidth: number, ellipsis = "\u2026"): s
  * `"src/ui/components/CopilotShell.tsx"` at width 22 becomes
  * `"src…/CopilotShell.tsx"`. For non-path strings, truncates in the middle.
  */
-export function truncateMiddle(
-  s: string,
-  maxWidth: number,
-  ellipsis = "\u2026",
-): string {
+export function truncateMiddle(s: string, maxWidth: number, ellipsis = "\u2026"): string {
   const plain = s.replace(ANSI_RE, "");
   if (plain.length <= maxWidth) return s;
   if (maxWidth <= ellipsis.length) return ellipsis.slice(0, Math.max(0, maxWidth));
