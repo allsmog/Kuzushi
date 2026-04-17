@@ -1,0 +1,95 @@
+# Reference GitHub Actions workflow for running Kuzushi in CI.
+#
+# Copy this file to your own repository under .github/workflows/kuzushi.yml
+# and tune it for your project. This template demonstrates the three
+# CI-integration shapes users typically need:
+#
+#   1. Upload SARIF to GitHub Advanced Security (Code Scanning)
+#   2. Comment a finding summary on the pull request
+#   3. Upload JUnit XML so findings land in the "Checks" / test panel
+#
+# The workflow is NOT wired into Kuzushi's own CI — it is pure documentation.
+# Filename is `-reference.yml` so Kuzushi's meta-CI never tries to run it.
+
+name: Kuzushi Security Scan (reference)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  checks: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Install Kuzushi via your package manager of choice.
+      - run: npm install -g kuzushi
+
+      # Optional: install scanner binaries the pipeline needs.
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      # Run the scan. Exit codes:
+      #   0 clean, 1 findings present, 2 config/usage error, 3 crash.
+      # We allow non-zero so subsequent steps (uploads, PR comment) still run.
+      - name: Run Kuzushi scan
+        id: kuzushi
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          kuzushi scan . \
+            --preset standard \
+            --verify \
+            --sarif kuzushi.sarif \
+            --junit kuzushi.junit.xml \
+            --output kuzushi-report.md \
+            --quality-gate \
+            --fail-on-tp
+
+      # 1. Upload SARIF to GitHub Code Scanning (Advanced Security).
+      - name: Upload SARIF
+        if: always() && hashFiles('kuzushi.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: kuzushi.sarif
+          category: kuzushi
+
+      # 2. Post a sticky PR comment with the finding summary.
+      - name: Post PR comment
+        if: github.event_name == 'pull_request' && hashFiles('kuzushi-report.md') != ''
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: kuzushi-scan
+          path: kuzushi-report.md
+
+      # 3. Upload JUnit so findings render in the Checks tab.
+      - name: Publish JUnit report
+        if: always() && hashFiles('kuzushi.junit.xml') != ''
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: kuzushi.junit.xml
+          check_name: "Kuzushi findings"
+          include_passed: false
+
+      # Fail the job with Kuzushi's own exit code so branch-protection
+      # rules that "require the kuzushi check to pass" behave correctly.
+      - name: Propagate Kuzushi exit code
+        if: steps.kuzushi.outcome == 'failure'
+        run: exit 1

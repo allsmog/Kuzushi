@@ -56,6 +56,7 @@ export interface ScanCommandOptions {
   json?: string;
   csv?: string;
   jsonl?: string;
+  junit?: string;
   agentRuntime?: string;
   apiKey?: string;
   baseUrl?: string;
@@ -149,6 +150,7 @@ export function applyScanCommandConfigOverrides(
   if (opts.json) config.jsonOutput = path.resolve(opts.json);
   if (opts.csv) config.csvOutput = path.resolve(opts.csv);
   if (opts.jsonl) config.jsonlOutput = path.resolve(opts.jsonl);
+  if (opts.junit) config.junitOutput = path.resolve(opts.junit);
   if (opts.agentRuntime) {
     config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
   }

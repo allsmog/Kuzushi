@@ -543,6 +543,8 @@ export interface KuzushiConfig {
   csvOutput?: string;
   /** Optional JSONL report output path. */
   jsonlOutput?: string;
+  /** Optional JUnit XML report output path (for CI test-result aggregation). */
+  junitOutput?: string;
   /** Retry count for triage worker transient failures. */
   maxTriageRetries?: number;
   /**

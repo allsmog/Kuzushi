@@ -10,6 +10,7 @@ import {
 import { writeCsvReport } from "../../report-csv.js";
 import { writeJsonReport } from "../../report-json.js";
 import { writeJsonlReport } from "../../report-jsonl.js";
+import { generateJunitReport } from "../../report-junit.js";
 import { generateMarkdownReport } from "../../report-markdown.js";
 import { generateSarifReport } from "../../report-sarif.js";
 import { getRateLimitRegistry } from "../../scheduler/index.js";
@@ -794,6 +795,22 @@ function writeFileReports(
     );
     writeFileSync(deps.config.sarifOutput, sarif, "utf-8");
     notifyReportArtifact(store, "SARIF report written", deps.config.sarifOutput);
+  }
+
+  if (deps.config.junitOutput) {
+    const outputDir = path.dirname(deps.config.junitOutput);
+    if (!existsSync(outputDir)) {
+      mkdirSync(outputDir, { recursive: true });
+    }
+    const junit = generateJunitReport(deps.db, {
+      repo: event.payload.context.repoName,
+      stats: event.payload.stats ?? {},
+      runId: event.meta.runId,
+      repoRoot: event.payload.context.repoRoot,
+      fingerprints: event.payload.fingerprints,
+    });
+    writeFileSync(deps.config.junitOutput, junit, "utf-8");
+    notifyReportArtifact(store, "JUnit report written", deps.config.junitOutput);
   }
 
   if (deps.config.jsonOutput) {
