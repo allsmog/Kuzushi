@@ -10,16 +10,12 @@
 
 import { createLogger } from "../../../logger.js";
 import { antiHallucinationModule } from "../../../prompts/modules.js";
-import {
-  FINDING_SCHEMA,
-  parseFindingOutput,
-  selectFindings,
-} from "../../../scanners/normalize-findings.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
 import type { AgentTask, TaskContext } from "../../types.js";
+import { runPluginFindingScanner } from "../plugin-finding-scanner.js";
 import {
   resolveTaskAllowedTools,
   resolveTaskModel,
@@ -41,7 +37,7 @@ function resolveConfig(ctx: TaskContext): TobAuditConfig {
   return { model, maxFindings };
 }
 
-function buildPrompt(): string {
+export function buildTobAuditPrompt(): string {
   return [
     "You are a senior security auditor with access to specialized security analysis skills.",
     "Audit this codebase for vulnerabilities using the security analysis skills available to you.",
@@ -59,6 +55,9 @@ function buildPrompt(): string {
   ].join("\n");
 }
 
+// Backwards-compat alias for internal tests/callers.
+const buildPrompt = buildTobAuditPrompt;
+
 async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
   const config = resolveConfig(context);
   const tag = "[tob-audit]";
@@ -71,77 +70,30 @@ async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
     return attachTaskOutputMeta([], { costUsd: 0 });
   }
 
-  const runtime = resolveTaskRuntime(context);
-  const prompt = buildPrompt();
-
   log.info(`${tag} Starting audit (model=${config.model}, plugins=${plugins.length})`);
 
-  let resultText = "";
-  let structuredOutput: unknown;
-  let costUsd = 0;
-  let executionError: string | null = null;
+  const result = await runPluginFindingScanner({
+    runtime: resolveTaskRuntime(context),
+    repoRoot: context.repoRoot,
+    repoName: context.repoName,
+    ref: "HEAD",
+    scannerId: "tob-audit",
+    model: config.model,
+    allowedTools: resolveTaskAllowedTools(context),
+    plugins,
+    prompt: buildTobAuditPrompt(),
+    maxFindings: config.maxFindings,
+    logTag: tag,
+  });
 
-  for await (const message of runtime.query({
-    prompt,
-    options: {
-      cwd: context.repoRoot,
-      model: config.model,
-      allowedTools: resolveTaskAllowedTools(context),
-      permissionMode: "dontAsk",
-      plugins,
-      outputFormat: {
-        type: "json_schema",
-        schema: FINDING_SCHEMA,
-        strict: true,
-        retryInvalidStructuredOutput: 2,
-      },
-    },
-  })) {
-    if (
-      message.type === "tool-progress" ||
-      message.type === "tool-summary" ||
-      message.type === "assistant"
-    ) {
-      continue;
-    }
-    if (message.type !== "result") continue;
-
-    if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
-      costUsd = message.totalCostUsd;
-    }
-    if ("result" in message) {
-      resultText = message.result;
-      structuredOutput = message.structuredOutput;
-      const durationSec = message.durationMs ? (message.durationMs / 1000).toFixed(1) : "?";
-      log.info(
-        `${tag} Complete in ${durationSec}s — ${message.numTurns} turns, $${message.totalCostUsd?.toFixed(4) ?? "?"}`,
-      );
-      break;
-    }
-    executionError =
-      (Array.isArray(message.errors) ? message.errors.join("; ") : "") ||
-      message.subtype ||
-      "unknown error";
+  if (result.durationMs !== undefined && result.numTurns !== undefined) {
+    const durationSec = (result.durationMs / 1000).toFixed(1);
+    log.info(
+      `${tag} Complete in ${durationSec}s — ${result.numTurns} turns, $${result.costUsd.toFixed(4)}`,
+    );
   }
 
-  if (executionError) {
-    throw new Error(`${tag} Failed: ${executionError}`);
-  }
-
-  const parsed =
-    structuredOutput != null || resultText
-      ? parseFindingOutput(structuredOutput ?? resultText)
-      : { findings: [] };
-  const findings = selectFindings(
-    parsed,
-    context.repoRoot,
-    context.repoName,
-    "HEAD",
-    "tob-audit",
-    config.maxFindings,
-  );
-
-  return attachTaskOutputMeta(findings, { costUsd });
+  return attachTaskOutputMeta(result.findings, { costUsd: result.costUsd });
 }
 
 export const tobAuditTask: AgentTask<ScanOpts, Finding[]> = {

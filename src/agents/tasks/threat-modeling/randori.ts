@@ -5,221 +5,23 @@
  *
  * Sole threat model provider — powered by the @kuzushi/randori-plugin dependency.
  */
-import { createHash } from "node:crypto";
 import path from "node:path";
 import { createLogger } from "../../../logger.js";
-import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import { loadPersistentThreatModel } from "../../../threat-model-renderer.js";
 import type { ScanOpts } from "../../../types.js";
-import { toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
-import { convertRandoriToThreatModel } from "./randori-adapter.js";
-import { mergeRandoriStageOutputs, readRandoriArtifacts } from "./randori-artifacts.js";
+import { runRandoriPasta } from "./randori-runner.js";
 import { resolveRandoriPluginPath } from "./resolve-randori.js";
-import { resolveThreatModelConfig, type StrideThreat, type ThreatModelDocument } from "./types.js";
+import { resolveThreatModelConfig, type ThreatModelDocument } from "./types.js";
+
+// Re-export so existing tests (and external callers) that import
+// assessNarrativeArtifact from this module keep working.
+export { assessNarrativeArtifact } from "./randori-runner.js";
 
 const log = createLogger({ stage: "threat-model-randori" });
-
-const IMPACT_TO_SEVERITY: Record<string, string> = {
-  critical: "ERROR",
-  high: "ERROR",
-  medium: "WARNING",
-  low: "INFO",
-};
-
-function buildScopePrompt(maxElements: number, outputDir: string): string {
-  return [
-    "You are running a PASTA threat model analysis on the current repository.",
-    "",
-    "Run stages: s1, s2, s3",
-    "",
-    `Write the output JSON to the ${outputDir}/ directory:`,
-    "- Stage S1: Write pasta-s1.json (business objectives and security requirements)",
-    "- Stage S2: Write pasta-s2.json (technical scope — components, actors, data flows)",
-    "- Stage S3: Write pasta-s3.json (DFD, trust boundaries, entry points) and dfd.mmd",
-    "",
-    `Include up to ${maxElements} DFD elements in the technical scope.`,
-    "",
-    "Explore the codebase thoroughly using Glob, Grep, and Read.",
-    "Ground every DFD element in actual code, not theoretical architecture.",
-  ].join("\n");
-}
-
-function buildNarrativePrompt(outputDir: string): string {
-  return [
-    "You are synthesising the narrative layer of a PASTA threat model.",
-    "",
-    `Read the prior stage outputs from ${outputDir}/pasta-s1.json, pasta-s2.json, pasta-s3.json,`,
-    `and pasta-s4.json. Inspect the actual source files they reference to ground every claim.`,
-    "",
-    `Write ${outputDir}/pasta-narrative.json with this exact shape (snake_case):`,
-    "{",
-    '  "overview": "<1-3 paragraphs describing what the application does at runtime,',
-    '                 where it runs, what it exposes, and the primary trust context>",',
-    '  "input_categories": {',
-    '    "attacker_controlled": ["<item with file:line citation>", ...],',
-    '    "operator_controlled": ["<item>", ...],',
-    '    "developer_controlled": ["<item>", ...],',
-    '    "external_services": ["<item>", ...],',
-    '    "sandbox_boundary": ["<item>", ...],',
-    '    "assumptions": ["<item>", ...]',
-    "  },",
-    '  "attacker_stories": [',
-    "    {",
-    '      "title": "<short, action-oriented title>",',
-    '      "narrative": "<2-4 sentences: who the attacker is, what they do, what they gain>",',
-    '      "mitigation": "<how it is mitigated today or what SHOULD mitigate it>",',
-    '      "threat_ids": ["<StrideThreat.id from pasta-s4.json, if linked>"]',
-    "    },",
-    "    ... (3-6 stories)",
-    "  ],",
-    '  "criticality_buckets": {',
-    '    "critical": ["<1-3 concrete examples of critical-severity issues for THIS app>"],',
-    '    "high":     ["<1-3 concrete examples>"],',
-    '    "medium":   ["<1-3 concrete examples>"],',
-    '    "low":      ["<1-3 concrete examples>"]',
-    "  },",
-    '  "out_of_scope": ["<class of issue that does not apply to this app, with reason>", ...]',
-    "}",
-    "",
-    "Hard requirements:",
-    "- Every `input_categories` item MUST cite a file path (ideally file:line).",
-    "- `attacker_stories` MUST reference concrete attackers and concrete outcomes (no hand-waving).",
-    "- Criticality examples MUST match THIS application's surface (not generic web-app examples",
-    "  unless the app is a web app).",
-    "- `out_of_scope` MUST state WHY each class does not apply.",
-    "- Return ONLY the JSON object — no prose before or after.",
-  ].join("\n");
-}
-
-/**
- * Assess an already-written pasta-narrative.json and return a list of
- * human-readable reasons it falls short of the schema's hard requirements.
- * An empty array means the artifact is acceptable. Used to decide whether
- * Phase 3 needs a retry pass.
- */
-export function assessNarrativeArtifact(narrative: unknown): string[] {
-  const reasons: string[] = [];
-  if (!narrative || typeof narrative !== "object" || Array.isArray(narrative)) {
-    reasons.push("pasta-narrative.json is missing or is not a JSON object");
-    return reasons;
-  }
-  const record = narrative as Record<string, unknown>;
-
-  const overview = record["overview"];
-  if (typeof overview !== "string" || overview.trim().length < 40) {
-    reasons.push('"overview" must be a substantive paragraph (got empty or too short)');
-  }
-
-  const inputCategories = record["input_categories"] ?? record["inputCategories"];
-  if (!inputCategories || typeof inputCategories !== "object" || Array.isArray(inputCategories)) {
-    reasons.push('"input_categories" must be an object with attacker/operator/developer lists');
-  } else {
-    const cats = inputCategories as Record<string, unknown>;
-    const required = ["attacker_controlled", "operator_controlled", "developer_controlled"];
-    const empty = required.filter((key) => {
-      const arr = cats[key] ?? cats[toCamel(key)];
-      return !Array.isArray(arr) || arr.length === 0;
-    });
-    if (empty.length > 0) {
-      reasons.push(
-        `"input_categories" is missing entries for: ${empty.join(", ")} (each must list at least one item)`,
-      );
-    }
-  }
-
-  const stories = record["attacker_stories"] ?? record["attackerStories"];
-  if (!Array.isArray(stories) || stories.length < 1) {
-    reasons.push('"attacker_stories" must contain 3-6 concrete attacker scenarios (got none)');
-  }
-
-  const outOfScope = record["out_of_scope"] ?? record["outOfScope"];
-  if (!Array.isArray(outOfScope) || outOfScope.length === 0) {
-    reasons.push(
-      '"out_of_scope" must list at least one class of issue that does not apply to this app',
-    );
-  }
-
-  return reasons;
-}
-
-function toCamel(snake: string): string {
-  return snake.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-}
-
-/**
- * Build a retry prompt for Phase 3 narrative synthesis that lists the exact
- * shortcomings from the prior attempt and demands a corrected artifact.
- */
-function buildNarrativeRetryPrompt(outputDir: string, reasons: string[]): string {
-  return [
-    `Your previous attempt to write ${outputDir}/pasta-narrative.json does not meet the schema requirements:`,
-    ...reasons.map((r) => `- ${r}`),
-    "",
-    "Re-read the S1-S4 artifacts and the source files they reference, then rewrite",
-    `${outputDir}/pasta-narrative.json with the full schema populated. Hard requirements:`,
-    "- overview: 1-3 paragraphs grounded in actual runtime behaviour.",
-    "- input_categories: every category that applies MUST list at least one item with file:line.",
-    "- attacker_stories: 3-6 concrete scenarios with titles, narratives, mitigations.",
-    "- criticality_buckets: examples specific to THIS application, not generic.",
-    "- out_of_scope: list classes that do not apply, with the reason each does not apply.",
-    "",
-    "Return ONLY by writing the JSON file — no prose output.",
-  ].join("\n");
-}
-
-function buildStridePrompt(
-  maxThreats: number,
-  outputDir: string,
-  previousModel?: ThreatModelDocument | null,
-): string {
-  const preamble: string[] = [];
-  if (previousModel) {
-    preamble.push(
-      "The following threat model was generated in a previous scan. Use it as a starting point:",
-      "- Preserve threats that are still relevant to the current code.",
-      "- Remove threats that no longer apply (deleted code, fixed vulnerabilities).",
-      "- Add new threats for new code or changed attack surface.",
-      "- Preserve any userAnnotations, confirmedMitigations, and dismissedThreats from the previous model.",
-      "",
-      "Previous threat model:",
-      JSON.stringify(previousModel, null, 2),
-      "",
-    );
-  }
-  return [
-    ...preamble,
-    "You are running Stage S4 of a PASTA threat model analysis.",
-    "",
-    `Read the prior stage outputs from ${outputDir}/pasta-s1.json, pasta-s2.json, pasta-s3.json, and dfd.mmd.`,
-    "These describe the application's business context, technical scope, and data flow diagram.",
-    "",
-    `Write ${outputDir}/pasta-s4.json with STRIDE threat scenarios grounded in code evidence.`,
-    "",
-    "CRITICAL requirements for S4 threat scenarios:",
-    "- Every threat MUST have evidence_anchors with file_path, start_line, description",
-    "- Use STRIDE categories: spoofing, tampering, repudiation, information-disclosure, denial-of-service, elevation-of-privilege",
-    "- Include probability (0-1) and impact (critical/high/medium/low)",
-    "- Map to MITRE ATT&CK technique IDs where applicable",
-    "- Include OWASP category mapping (e.g., A01, A03)",
-    `- Identify up to ${maxThreats} distinct threat scenarios across all STRIDE categories`,
-    "",
-    "Use the DFD elements and trust boundaries from S3 to identify attack surfaces.",
-    "Read the actual source files referenced in the DFD to ground threats in real code.",
-    "Focus on the highest-impact threats first.",
-    "",
-    "If this application is a CLI tool, build system, or security scanner that processes external",
-    "repositories or files, also model these threat scenarios:",
-    "- Repository content as attacker-controlled input (malicious file names, symlinks, configs)",
-    "- Build-time execution (autobuild, postinstall scripts, custom rules/plugins loaded from repo)",
-    "- LLM/AI prompt injection via repository content influencing tool behavior or tool invocation",
-    "- Path traversal via symlinks or relative paths in repo content escaping the project root",
-    "- Subprocess invocation with repo-derived metadata (names, paths) as unsanitized arguments",
-  ].join("\n");
-}
 
 export const threatModelRandoriTask: AgentTask<
   ScanOpts,
@@ -233,157 +35,35 @@ export const threatModelRandoriTask: AgentTask<
   async run(_input, context): Promise<{ document: ThreatModelDocument; findings: Finding[] }> {
     const cfg = resolveThreatModelConfig(context.config);
     const pluginPath = resolveRandoriPluginPath();
-    const tag = "[threat-model-randori]";
 
-    // Load persistent threat model from a previous scan (if any) to seed S4
     const previousModel = loadPersistentThreatModel(context.repoRoot);
-
-    // Write artifacts directly into .kuzushi/runs/<runId>/randori-output/
     const artifactDir = path.join(".kuzushi", "runs", context.runId, "randori-output");
 
     log.info(
       `Starting Randori PASTA analysis (stages=${cfg.randoriStages.join(",")}, model=${cfg.model})`,
     );
 
-    const allowedTools = [...resolveTaskAllowedTools(context), "Write"];
-    const baseOpts = {
-      cwd: context.repoRoot,
+    const result = await runRandoriPasta({
+      runtime: context.runtime,
+      repoRoot: context.repoRoot,
+      repoName: context.repoName,
+      pluginPath,
       model: cfg.model,
-      allowedTools,
-      permissionMode: "dontAsk" as const,
-      plugins: [{ type: "local" as const, path: pluginPath }],
-    };
-    let costUsd = 0;
+      allowedTools: [...resolveTaskAllowedTools(context), "Write"],
+      stages: cfg.randoriStages,
+      artifactDir,
+      maxElements: cfg.maxElements,
+      maxThreats: cfg.maxThreats,
+      emitFindings: cfg.emitFindings,
+      findingThreshold: cfg.findingThreshold,
+      previousModel,
+      logTag: "[threat-model-randori]",
+    });
 
-    // ── Phase 1: S1-S3 (scope, tech decomposition, DFD) ──
-    const hasS4 = cfg.randoriStages.includes("s4");
-    const scopeStages = hasS4 ? cfg.randoriStages.filter((s) => s !== "s4") : cfg.randoriStages;
-
-    if (scopeStages.length > 0) {
-      log.info(`${tag} Phase 1: running stages ${scopeStages.join(",")}`);
-      try {
-        for await (const message of context.runtime.query({
-          prompt: buildScopePrompt(cfg.maxElements, artifactDir),
-          options: baseOpts,
-        })) {
-          if (message.type === "result" && typeof message.totalCostUsd === "number") {
-            costUsd += message.totalCostUsd;
-          }
-        }
-      } catch (error) {
-        log.warn(`${tag} Phase 1 error: ${toErrorMessage(error)}`);
-      }
-    }
-
-    // ── Phase 2: S4 (STRIDE threat scenarios with evidence) ──
-    if (hasS4) {
-      // Only run S4 if S3 produced artifacts to build on
-      const scopeArtifacts = readRandoriArtifacts(context.repoRoot, artifactDir);
-      if (Object.keys(scopeArtifacts).length > 0) {
-        log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
-        try {
-          for await (const message of context.runtime.query({
-            prompt: buildStridePrompt(cfg.maxThreats, artifactDir, previousModel),
-            options: baseOpts,
-          })) {
-            if (message.type === "result" && typeof message.totalCostUsd === "number") {
-              costUsd += message.totalCostUsd;
-            }
-          }
-        } catch (error) {
-          log.warn(`${tag} Phase 2 (S4) error: ${toErrorMessage(error)}`);
-        }
-      } else {
-        log.warn(`${tag} Skipping S4 — no scope artifacts from S1-S3`);
-      }
-    }
-
-    // ── Phase 3: narrative synthesis (Overview / InputCategories / AttackerStories / Criticality / OutOfScope) ──
-    // Depends on S1-S4 output; skip if none were produced.
-    if (hasS4) {
-      const postS4 = readRandoriArtifacts(context.repoRoot, artifactDir);
-      const haveStageOutputs = postS4.s2Scope || postS4.s3Decomposition || postS4.s4Threats;
-      if (haveStageOutputs) {
-        log.info(`${tag} Phase 3: synthesising narrative layer`);
-        try {
-          for await (const message of context.runtime.query({
-            prompt: buildNarrativePrompt(artifactDir),
-            options: baseOpts,
-          })) {
-            if (message.type === "result" && typeof message.totalCostUsd === "number") {
-              costUsd += message.totalCostUsd;
-            }
-          }
-        } catch (error) {
-          log.warn(`${tag} Phase 3 (narrative) error: ${toErrorMessage(error)}`);
-        }
-
-        // Validate the artifact. If it's missing or falls short, re-invoke
-        // once with a reinforcement prompt that names the specific gaps — the
-        // one-shot path silently fell back to an empty narrative when the
-        // agent drifted off-schema.
-        const narrativeAfter = readRandoriArtifacts(context.repoRoot, artifactDir).narrative;
-        const narrativeIssues = assessNarrativeArtifact(narrativeAfter);
-        if (narrativeIssues.length > 0) {
-          log.warn(
-            `${tag} Phase 3 narrative incomplete (${narrativeIssues.length} issue(s)); retrying once`,
-          );
-          try {
-            for await (const message of context.runtime.query({
-              prompt: buildNarrativeRetryPrompt(artifactDir, narrativeIssues),
-              options: baseOpts,
-            })) {
-              if (message.type === "result" && typeof message.totalCostUsd === "number") {
-                costUsd += message.totalCostUsd;
-              }
-            }
-          } catch (error) {
-            log.warn(`${tag} Phase 3 retry error: ${toErrorMessage(error)}`);
-          }
-        }
-      } else {
-        log.warn(`${tag} Skipping narrative synthesis — no stage artifacts`);
-      }
-    }
-
-    // Read all artifacts (from all phases)
-    const artifacts = readRandoriArtifacts(context.repoRoot, artifactDir);
-    const merged = mergeRandoriStageOutputs(artifacts);
-
-    if (!merged) {
-      log.warn("Randori produced no usable artifacts — falling back to empty threat model");
-      const empty: ThreatModelDocument = {
-        version: "1.0",
-        dfd: { elements: [], trustBoundaries: [] },
-        threats: [],
-        summary: {
-          total: 0,
-          bySeverity: {},
-          byCategory: {} as ThreatModelDocument["summary"]["byCategory"],
-        },
-      };
-      return attachTaskOutputMeta({ document: empty, findings: [] }, { costUsd });
-    }
-
-    const document = convertRandoriToThreatModel(merged);
-    if (!document) {
-      throw new Error(`${tag} Failed to convert Randori output to ThreatModelDocument`);
-    }
-
-    log.info(
-      `Converted ${document.threats.length} Randori threats, ${document.dfd.elements.length} DFD elements`,
+    return attachTaskOutputMeta(
+      { document: result.document, findings: result.findings },
+      { costUsd: result.costUsd },
     );
-
-    const findings = cfg.emitFindings
-      ? threatsToFindings(
-          document.threats,
-          context.repoRoot,
-          context.repoName,
-          cfg.findingThreshold,
-        )
-      : [];
-
-    return attachTaskOutputMeta({ document, findings }, { costUsd });
   },
 
   triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig {
@@ -415,101 +95,3 @@ export const threatModelRandoriTask: AgentTask<
     };
   },
 };
-
-// ── Finding conversion (mirrors stride.ts) ──
-
-function threatsToFindings(
-  threats: StrideThreat[],
-  repoRoot: string,
-  repoName: string,
-  threshold: string,
-): Finding[] {
-  const thresholdSet = new Set<string>();
-  if (threshold === "low") thresholdSet.add("low").add("medium").add("high").add("critical");
-  else if (threshold === "medium") thresholdSet.add("medium").add("high").add("critical");
-  else if (threshold === "high") thresholdSet.add("high").add("critical");
-  else thresholdSet.add("critical");
-
-  const deduped = new Map<string, Finding>();
-  let syntheticIndex = 0;
-  for (const threat of threats) {
-    if (!thresholdSet.has(threat.impact)) continue;
-    syntheticIndex += 1;
-
-    const primary =
-      threat.affectedFiles.length > 0
-        ? {
-            filePath: normalizeFilePath(repoRoot, threat.affectedFiles[0].filePath),
-            startLine: threat.affectedFiles[0].startLine,
-          }
-        : { filePath: ".", startLine: syntheticIndex };
-    const severity = IMPACT_TO_SEVERITY[threat.impact] || "WARNING";
-    const cweList = threat.relatedCwe;
-    const cweSegment = cweList.length > 0 ? `/${cweList[0]}` : "";
-    const fingerprint = computeFingerprint(repoName, threat);
-
-    const finding: Finding = {
-      taskId: "threat-model-randori",
-      fingerprint,
-      ruleId: `threat-model/${threat.category}${cweSegment}`,
-      filePath: primary.filePath,
-      startLine: primary.startLine,
-      severity,
-      message: `[STRIDE/${threat.category}] ${threat.title}: ${threat.description}`,
-      evidence: [
-        `Attack vector: ${threat.attackVector}`,
-        threat.missingMitigations.length > 0
-          ? `Missing mitigations: ${threat.missingMitigations.join(", ")}`
-          : "",
-        ...(threat.evidenceAnchors ?? []).map(
-          (a) => `Evidence: ${a.filePath}:${a.startLine} — ${a.description}`,
-        ),
-      ]
-        .filter(Boolean)
-        .join(". "),
-      scannerConfidence:
-        threat.likelihood === "high" ? "HIGH" : threat.likelihood === "medium" ? "MEDIUM" : "LOW",
-      subcategory: ["vuln"],
-      likelihood: threat.likelihood.toUpperCase(),
-      impact: threat.impact === "critical" || threat.impact === "high" ? "HIGH" : "MEDIUM",
-      cwe: cweList,
-      score: scoreFindingMetadata({
-        severity,
-        likelihood: threat.likelihood.toUpperCase(),
-        impact: threat.impact === "critical" || threat.impact === "high" ? "HIGH" : "MEDIUM",
-        subcategory: ["vuln"],
-      }),
-    };
-
-    const existing = deduped.get(fingerprint);
-    if (!existing || finding.score > existing.score) {
-      deduped.set(fingerprint, finding);
-    }
-  }
-
-  return [...deduped.values()];
-}
-
-function computeFingerprint(repoName: string, threat: StrideThreat): string {
-  const cwes = [...threat.relatedCwe].sort().join(",");
-  const files = threat.affectedFiles
-    .map((f) => `${f.filePath}:${f.startLine}`)
-    .sort()
-    .join(",");
-  const source = [
-    repoName,
-    "threat-model-randori",
-    threat.category,
-    cwes,
-    files,
-    threat.title,
-  ].join("|");
-  return createHash("sha256").update(source).digest("hex");
-}
-
-function normalizeFilePath(repoRoot: string, filePath: string): string {
-  if (!path.isAbsolute(filePath)) return filePath;
-  const relative = path.relative(repoRoot, filePath);
-  if (relative.startsWith("..")) return filePath;
-  return relative || filePath;
-}

@@ -46,29 +46,48 @@ Direct module tool invocation. Non-interactive, scriptable, unix-composable. The
 
 ```bash
 kuzushi run sast:scan ./repo --json > findings.json
-kuzushi run randori:threats ./repo --json | kuzushi run shinsa:map --findings -
+kuzushi run randori:pasta --json | jq '.data.document.threats'
 ```
 
 ## Module Library
 
-Kuzushi's capabilities come from pluggable modules. Each module exposes tools (for interactive/headless use) and optionally pipeline tasks (for DAG execution).
+Kuzushi's capabilities come from `CopilotModule`s that expose tools (for interactive/headless use) and optionally pipeline tasks (for DAG execution). Three buckets — today's catalog versus the aspirational roadmap:
+
+### Shipping today — built-in `CopilotModule`s
 
 | Module | Category | What It Does |
-|--------|----------|-------------|
-| **sast** (built-in) | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch synthesis |
-| **randori** | intel | 7-stage PASTA threat modeling with ATT&CK/CAPEC/NVD intel, probabilistic risk scoring, attack trees |
-| **vuln-scout** | offense | Whitebox SAST with 15 Joern CPG verification scripts, 8 autonomous agents |
-| **augur** | offense | Neuro-symbolic SAST (IRIS/ICLR 2025 style LLM-driven CodeQL taint analysis) |
+|--------|----------|--------------|
+| **sast** | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch synthesis |
+| **randori** | intel | PASTA threat modeling (S1–S4 + narrative) via the `@kuzushi/randori-plugin` Claude Code plugin, returning a normalized `ThreatModelDocument` |
+| **vuln-scout** | offense | Whitebox pentest via the `@kuzushi/vuln-scout` plugin — agentic SAST + taint analysis returning normalized Findings |
+| **tob** | offense | Security audit via `@kuzushi/tob-skills` — fp-check, sharp-edges, insecure-defaults, static-analysis, variant-analysis, and more |
+| **variant-hunter** | offense | Lifts confirmed findings into portable signatures and hunts for variants across the repo (including vendored deps) |
+| **n-day-diff-hunter** | offense | CVE-diff-based n-day hunting and variant search |
+
+### Shipping today — external `CopilotModule` package
+
+| Package | Module ID | What It Does |
+|---------|-----------|--------------|
+| `@kuzushi/augur` | **augur** | Neuro-symbolic SAST (IRIS/ICLR 2025 style LLM-driven CodeQL taint analysis). Load via `--load package:@kuzushi/augur`. |
+
+### Roadmap — not yet shipped
+
+These are the North Star modules — design intent exists, implementations do not (yet). Treat the entries below as the direction this vision is pointing toward, not current capability:
+
+| Module | Category | Intended scope |
+|--------|----------|----------------|
 | **blackbox** | offense | Black/grey-box pentesting: nmap, gobuster, nikto, hydra, privilege escalation |
 | **pwn** | offense | Binary exploitation: checksec, GDB, ROP chains, heap exploitation, SROP |
 | **pentest** | offense | MCP server wrapping metasploit, nmap, hydra, john (loaded natively via MCP) |
-| **honeypot** | defense | Autonomous honeypot orchestration: 14 service types, 6 honeytokens, 100+ decoys, Falco |
+| **honeypot** | defense | Autonomous honeypot orchestration: service types, honeytokens, decoys, Falco |
 | **yokai** | defense | Supply chain tripwires: dependency confusion, typosquatting, registry canaries |
-| **prompt-armor** | offense | LLM red teaming: 80+ attack plugins, 25+ mutation strategies, 5 agents |
+| **prompt-armor** | offense | LLM red teaming: attack plugins, mutation strategies, orchestrating agents |
 | **shinsa** | governance | Multi-framework compliance: ISO 27001, NIST 800-53, SOC 2, PCI DSS |
 | **revgraph** | intel | Binary reverse engineering: Ghidra + Neo4j, NL2Cypher queries, function embeddings |
 
 ## What a Session Looks Like
+
+_Aspirational example — the `blackbox`, `honeypot`, and `shinsa` transcript below references roadmap modules. Today, the actual session surface covers `sast`, `randori`, `vuln-scout`, `tob`, `variant-hunter`, `n-day-diff-hunter`, and the `augur` package._
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

@@ -12,10 +12,15 @@
  * - Shell mode: loads all requested modules, routes LLM tool calls interactively
  */
 
+import { type Dirent, existsSync, readdirSync } from "node:fs";
+import nodePath from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { MessageBus } from "../bus/types.js";
+import { createCoreRandoriModule } from "../modules/core-randori.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
+import { createCoreTobModule } from "../modules/core-tob.js";
+import { createCoreVulnScoutModule } from "../modules/core-vuln-scout.js";
 import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
 import type {
@@ -305,6 +310,27 @@ export class CopilotCore {
         });
         break;
       }
+      case "randori": {
+        const randori = createCoreRandoriModule();
+        await this.registry.loadModule(randori, this.moduleCtx, {
+          taskRegistry: this.taskRegistry,
+        });
+        break;
+      }
+      case "vuln-scout": {
+        const vulnScout = createCoreVulnScoutModule();
+        await this.registry.loadModule(vulnScout, this.moduleCtx, {
+          taskRegistry: this.taskRegistry,
+        });
+        break;
+      }
+      case "tob": {
+        const tob = createCoreTobModule();
+        await this.registry.loadModule(tob, this.moduleCtx, {
+          taskRegistry: this.taskRegistry,
+        });
+        break;
+      }
       // Future built-in modules go here as they're ported
       default:
         throw new Error(`Unknown built-in module: "${id}"`);
@@ -365,6 +391,18 @@ export class CopilotCore {
       return;
     }
 
+    // If the package is a Claude Code plugin (has .claude-plugin/plugin.json
+    // at the root or inside any immediate subdirectory), redirect the user
+    // to the appropriate builtin CopilotModule wrapper. Loading it via
+    // package: would fail opaquely with "module.id is undefined".
+    const claudePluginHint = detectClaudeCodePlugin(packageDir);
+    if (claudePluginHint) {
+      throw new Error(
+        `Package "${packageName}" is a Claude Code plugin (${claudePluginHint}), not a CopilotModule. ` +
+          builtinHintFor(packageName),
+      );
+    }
+
     // Otherwise try direct import as CopilotModule
     const { dynamicImportModule } = await import("../modules/loader.js");
     const mod = await dynamicImportModule(require.resolve(packageName));
@@ -390,4 +428,79 @@ export class CopilotCore {
       taskRegistry: this.taskRegistry,
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Package-shape detection helpers (exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * If `packageDir` looks like a Claude Code plugin, return a short description
+ * of where the plugin manifest was found. Otherwise return null.
+ *
+ * Claude Code plugins are detected by the presence of `.claude-plugin/plugin.json`
+ * at the root or inside any immediate subdirectory (e.g. `whitebox-pentest/` for
+ * @kuzushi/vuln-scout, `plugins/<name>/` for @kuzushi/tob-skills).
+ */
+export function detectClaudeCodePlugin(packageDir: string): string | null {
+  const rootMarker = nodePath.join(packageDir, ".claude-plugin", "plugin.json");
+  if (existsSync(rootMarker)) return ".claude-plugin/plugin.json";
+
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(packageDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+      continue;
+    }
+    const nestedMarker = nodePath.join(packageDir, entry.name, ".claude-plugin", "plugin.json");
+    if (existsSync(nestedMarker)) return `${entry.name}/.claude-plugin/plugin.json`;
+
+    // One more level deep — tob-skills nests plugins under plugins/<name>/.
+    if (entry.name === "plugins") {
+      let inner: Dirent[];
+      try {
+        inner = readdirSync(nodePath.join(packageDir, entry.name), { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const sub of inner) {
+        if (!sub.isDirectory()) continue;
+        const marker = nodePath.join(
+          packageDir,
+          entry.name,
+          sub.name,
+          ".claude-plugin",
+          "plugin.json",
+        );
+        if (existsSync(marker)) return `plugins/${sub.name}/.claude-plugin/plugin.json`;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Map known Claude-Code-plugin package names to the builtin CopilotModule
+ * that wraps them. Returns a user-facing hint about which builtin to load.
+ */
+export function builtinHintFor(packageName: string): string {
+  const map: Record<string, string> = {
+    "@kuzushi/randori-plugin": "randori",
+    "@kuzushi/vuln-scout": "vuln-scout",
+    "@kuzushi/tob-skills": "tob",
+  };
+  const builtinId = map[packageName];
+  if (builtinId) {
+    return (
+      `Use \`--load builtin:${builtinId}\` (or \`--load ${builtinId}\`) instead — ` +
+      `the ${builtinId} built-in module exposes ${builtinId}:* tools that drive this plugin.`
+    );
+  }
+  return "Claude Code plugins cannot be loaded as CopilotModules directly.";
 }

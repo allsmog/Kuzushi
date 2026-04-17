@@ -24,16 +24,16 @@ kuzushi
 Just type `kuzushi`. The interactive copilot shell starts with your loaded modules, available tools, and any active workspace. Talk naturally or use structured commands.
 
 ```
-kuzushi shell                            # default — just `kuzushi` works
-kuzushi shell --workspace acme-pentest   # resume an engagement
-kuzushi shell --target ./repo            # set initial target
-kuzushi shell --load blackbox,honeypot   # pre-load specific modules
+kuzushi shell                                  # default — just `kuzushi` works
+kuzushi shell --workspace acme-pentest         # resume an engagement
+kuzushi shell --target ./repo                  # set initial target
+kuzushi shell --load randori,vuln-scout,tob    # pre-load specific built-in modules
 ```
 
 ```
 ╭─────────────────────────────────────────────────────────────╮
 │  kuzushi shell                      workspace: acme-api     │
-│  modules: sast, randori, blackbox, honeypot, shinsa         │
+│  modules: sast, randori, vuln-scout, tob, variant-hunter    │
 │  target: ./acme-api  (Node.js + Express + PostgreSQL)       │
 ╰─────────────────────────────────────────────────────────────╯
 
@@ -128,24 +128,40 @@ Prefer a containerised environment? Open the repo in VS Code / Codespaces and
 
 ## Module System
 
-Kuzushi's capabilities come from pluggable modules. Each module exposes tools (for shell and run modes) and optionally pipeline tasks (for scan mode DAG execution).
+Kuzushi's capabilities come from `CopilotModule`s that expose tools (for shell and run modes) and optionally pipeline tasks (for scan mode DAG execution), plus a set of Claude Code plugins that are wrapped by built-in modules. Three buckets:
 
-| Module | Category | What It Does |
-|--------|----------|-------------|
-| **sast** (built-in) | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch |
-| **randori** | intel | 7-stage PASTA threat modeling with ATT&CK/CAPEC/NVD intel, attack trees, probabilistic risk |
-| **vuln-scout** | offense | Whitebox SAST with 15 Joern CPG verification scripts, 8 autonomous agents |
-| **augur** | offense | Neuro-symbolic SAST (IRIS/ICLR 2025 LLM-driven CodeQL taint analysis) |
-| **blackbox** | offense | Black/grey-box pentesting: nmap, gobuster, nikto, hydra, privilege escalation |
-| **pwn** | offense | Binary exploitation: checksec, GDB, ROP chains, heap exploitation, SROP |
-| **pentest** | offense | MCP server wrapping metasploit, nmap, hydra, john |
-| **honeypot** | defense | Autonomous honeypot orchestration: 14 service types, 6 honeytokens, Falco |
-| **yokai** | defense | Supply chain tripwires: dependency confusion, typosquatting, registry canaries |
-| **prompt-armor** | offense | LLM red teaming: 80+ attack plugins, 25+ mutation strategies |
-| **shinsa** | governance | Multi-framework compliance: ISO 27001, NIST 800-53, SOC 2, PCI DSS |
-| **revgraph** | intel | Binary reverse engineering: Ghidra + Neo4j, NL2Cypher, function embeddings |
+### Built-in `CopilotModule`s (always available)
 
-Modules are loaded via the shell (`use <module>`) or at startup (`--load blackbox,honeypot`).
+| Module | Category | What It Does | Key Tools |
+|--------|----------|--------------|-----------|
+| **sast** | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch | `sast:scan`, `sast:semgrep`, `sast:codeql`, `sast:triage`, `sast:verify`, `sast:patch`, `sast:findings`, `sast:context`, `sast:threat-hunt`, `sast:taint-iris` |
+| **randori** | intel | PASTA threat modeling via the `@kuzushi/randori-plugin` — S1–S4 stages plus narrative synthesis, returning a `ThreatModelDocument` | `randori:pasta`, `randori:threat-model` |
+| **vuln-scout** | offense | Whitebox pentest via the `@kuzushi/vuln-scout` plugin — agentic SAST + taint analysis returning normalized Findings | `vuln-scout:audit` |
+| **tob** | offense | Trail of Bits skills audit via `@kuzushi/tob-skills` — fp-check, sharp-edges, insecure-defaults, static-analysis, variant-analysis, and more | `tob:audit`, `tob:skills` |
+| **variant-hunter** | offense | Lifts confirmed findings into portable signatures and hunts for variants across the repo (including vendored deps) | `variant:lift-pattern`, `variant:hunt` |
+| **n-day-diff-hunter** | offense | CVE-diff-based n-day hunting and variant search against a target | `ndiff:fetch-cve`, `ndiff:search-patch-shape`, `ndiff:hunt-variants` |
+
+Load with the shell or at startup: `kuzushi shell --load randori,vuln-scout,tob,variant-hunter,n-day-diff-hunter` (the bare id works — `builtin:` prefix is optional).
+
+### External `CopilotModule` packages
+
+| Package | Module ID | Usage |
+|---------|-----------|-------|
+| `@kuzushi/augur` | `augur` | Neuro-symbolic SAST (IRIS/ICLR 2025 LLM-driven CodeQL taint analysis). Load with `--load package:@kuzushi/augur`. |
+
+### Referenced Claude Code plugins
+
+These are dependencies consumed by the built-in wrappers above, not directly loadable as `CopilotModule`s. Attempting `--load package:@kuzushi/randori-plugin` (etc.) prints a pointer to the corresponding built-in module.
+
+| Package | Wrapped by | Notes |
+|---------|------------|-------|
+| `@kuzushi/randori-plugin` | built-in `randori` | PASTA threat-modeling plugin (commands, agents, skills, hooks). |
+| `@kuzushi/vuln-scout` | built-in `vuln-scout` | Whitebox pentest skill pack under `whitebox-pentest/`. |
+| `@kuzushi/tob-skills` | built-in `tob` | Fork of trailofbits/skills — security-relevant plugins under `plugins/`. |
+
+### Roadmap (not yet shipped)
+
+`blackbox`, `pwn`, `pentest`, `honeypot`, `yokai`, `prompt-armor`, `shinsa`, `revgraph` — referenced in the long-term vision but not currently implemented as loadable modules. See [VISION.md](VISION.md) for direction.
 
 ## The SAST Pipeline
 
