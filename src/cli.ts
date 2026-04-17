@@ -81,7 +81,90 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
   if (opts.debug) {
     process.env.KUZUSHI_DEBUG = "1";
   }
+  ensureLlmCredentialsForCommand(actionCommand);
 });
+
+/**
+ * Subcommand names that *require* an LLM provider credential to make any
+ * progress. The interactive shell, scans, runs, and the patch command all
+ * spawn agents; config/intel/task management commands do not.
+ *
+ * The default subcommand is the interactive shell (`isDefault: true`); when
+ * the binary is invoked with no args, commander reports the empty string as
+ * the action command name.
+ */
+const COMMANDS_REQUIRING_LLM_CREDENTIALS = new Set<string>(["", "shell", "scan", "run", "patch"]);
+
+/** Names of commander commands that should always be allowed even without creds. */
+const COMMANDS_ALWAYS_ALLOWED = new Set<string>([
+  "config",
+  "task",
+  "intel",
+  "list-tasks",
+  "compare-runs",
+]);
+
+function ensureLlmCredentialsForCommand(actionCommand: Command): void {
+  const cmdName = actionCommand.name();
+  if (!COMMANDS_REQUIRING_LLM_CREDENTIALS.has(cmdName)) return;
+  if (COMMANDS_ALWAYS_ALLOWED.has(cmdName)) return;
+
+  const opts = actionCommand.optsWithGlobals() as {
+    apiKey?: string;
+    model?: string;
+    dryRun?: boolean;
+    listTasks?: boolean;
+  };
+  // Dry runs and `--list-tasks` enumerate config/tasks without spawning agents.
+  if (opts.dryRun || opts.listTasks) return;
+
+  // An explicit --api-key on the command line satisfies the check.
+  if (opts.apiKey) return;
+
+  // Non-Anthropic models bring their own credential story (OPENAI_API_KEY,
+  // GEMINI_API_KEY, ollama, etc.); we don't gate those here because the
+  // config-resolved model may differ from the CLI override and validating
+  // every provider's env var here would duplicate runtime checks.
+  if (opts.model && !opts.model.startsWith("anthropic:")) return;
+
+  // We only check the *configured* runtime credentials at the env-var layer.
+  // The TTY interactive flow in scan.ts (runCredentialPrompt) handles the
+  // happy path; this hook is the last line of defence for non-TTY callers
+  // (CI, scripts, devcontainers) that would otherwise crash deep inside the
+  // Claude subprocess setup with an opaque error.
+  const hasEnvCreds = Boolean(
+    process.env["ANTHROPIC_API_KEY"] || process.env["ANTHROPIC_OAUTH_TOKEN"],
+  );
+  if (hasEnvCreds) return;
+
+  // Allow TTY users to fall through — scan.ts will run the interactive
+  // credential prompt. We only hard-fail in non-TTY contexts.
+  if (process.stdout.isTTY && process.stdin.isTTY) return;
+
+  // Last check: a config-stored API key counts. Loading config can throw on
+  // malformed JSON; if it does, the underlying command will surface a better
+  // error than this hook can.
+  try {
+    const cfg = loadConfig();
+    if (cfg.agentRuntimeConfig?.apiKey) return;
+  } catch {
+    // Fall through to the failure path below.
+  }
+
+  throw new CliUsageError(
+    [
+      "No LLM credentials detected and the terminal is non-interactive.",
+      "",
+      "Set one of the following before invoking kuzushi:",
+      "  • export ANTHROPIC_API_KEY=sk-ant-...        (recommended for CI/CD)",
+      "  • export ANTHROPIC_OAUTH_TOKEN=...           (Claude Code OAuth)",
+      "  • kuzushi config set agentRuntimeConfig.apiKey sk-ant-...",
+      "  • kuzushi <command> --api-key sk-ant-...     (one-off)",
+      "",
+      "To run without an LLM provider, use a local model (e.g. `--model ollama:<name>`).",
+    ].join("\n"),
+  );
+}
 
 // ── shell (default command) ──────────────────────────────────────────────
 
