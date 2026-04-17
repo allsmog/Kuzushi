@@ -12,8 +12,11 @@ Kuzushi combines offensive security, defensive operations, and compliance govern
 
 Find the vulnerability. Prove it's exploitable. Deploy a honeypot to detect it. Check if it violates PCI DSS. Generate the patch. One tool, one conversation.
 
+> **Prerequisites:** Node 22+ and an LLM provider credential (Anthropic API key or Claude Code OAuth login). Findings, code snippets, and file context are sent to the configured LLM provider for triage. Use `--model ollama:<name>` for fully local execution.
+
 ```sh
 npm install -g kuzushi
+export ANTHROPIC_API_KEY=sk-ant-...    # or run `claude login` for OAuth
 kuzushi
 ```
 
@@ -27,13 +30,15 @@ Just type `kuzushi`. The interactive copilot shell starts with your loaded modul
 kuzushi shell                            # default — just `kuzushi` works
 kuzushi shell --workspace acme-pentest   # resume an engagement
 kuzushi shell --target ./repo            # set initial target
-kuzushi shell --load blackbox,honeypot   # pre-load specific modules
+kuzushi shell --load mcp:npx <pkg>       # pre-load an external MCP server
 ```
+
+> Today the only built-in module is `sast`. Other modules from the [Module System](#module-system) table are loaded as external npm packages or MCP servers when published.
 
 ```
 ╭─────────────────────────────────────────────────────────────╮
 │  kuzushi shell                      workspace: acme-api     │
-│  modules: sast, randori, blackbox, honeypot, shinsa         │
+│  modules: sast                                              │
 │  target: ./acme-api  (Node.js + Express + PostgreSQL)       │
 ╰─────────────────────────────────────────────────────────────╯
 
@@ -91,7 +96,7 @@ kuzushi scan /path/to/repo --model openai:gpt-4o
 kuzushi scan /path/to/repo --model google:gemini-2.0-flash
 ```
 
-Kuzushi auto-downloads Opengrep if you don't have a scanner installed. Zero dependencies to manage.
+Kuzushi auto-downloads Opengrep on first scan if no Semgrep-compatible binary is on `PATH`. CodeQL is **not** auto-downloaded — see the "CodeQL Setup" section below if you want to enable `--tasks codeql`.
 
 ## Quick Start (Contributors)
 
@@ -130,22 +135,24 @@ Prefer a containerised environment? Open the repo in VS Code / Codespaces and
 
 Kuzushi's capabilities come from pluggable modules. Each module exposes tools (for shell and run modes) and optionally pipeline tasks (for scan mode DAG execution).
 
-| Module | Category | What It Does |
-|--------|----------|-------------|
-| **sast** (built-in) | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch |
-| **randori** | intel | 7-stage PASTA threat modeling with ATT&CK/CAPEC/NVD intel, attack trees, probabilistic risk |
-| **vuln-scout** | offense | Whitebox SAST with 15 Joern CPG verification scripts, 8 autonomous agents |
-| **augur** | offense | Neuro-symbolic SAST (IRIS/ICLR 2025 LLM-driven CodeQL taint analysis) |
-| **blackbox** | offense | Black/grey-box pentesting: nmap, gobuster, nikto, hydra, privilege escalation |
-| **pwn** | offense | Binary exploitation: checksec, GDB, ROP chains, heap exploitation, SROP |
-| **pentest** | offense | MCP server wrapping metasploit, nmap, hydra, john |
-| **honeypot** | defense | Autonomous honeypot orchestration: 14 service types, 6 honeytokens, Falco |
-| **yokai** | defense | Supply chain tripwires: dependency confusion, typosquatting, registry canaries |
-| **prompt-armor** | offense | LLM red teaming: 80+ attack plugins, 25+ mutation strategies |
-| **shinsa** | governance | Multi-framework compliance: ISO 27001, NIST 800-53, SOC 2, PCI DSS |
-| **revgraph** | intel | Binary reverse engineering: Ghidra + Neo4j, NL2Cypher, function embeddings |
+Today, **only the `sast` module is shipped as built-in**. The remaining modules listed below are part of the planned architecture ([VISION.md](VISION.md), Phase 7) and are loaded via external npm packages or MCP servers when those wrappers are published. Loading an unimplemented module via `--load <name>` will raise `Unknown built-in module`.
 
-Modules are loaded via the shell (`use <module>`) or at startup (`--load blackbox,honeypot`).
+| Module | Status | Category | What It Does |
+|--------|--------|----------|-------------|
+| **sast** | shipped (built-in) | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch |
+| **randori** | partial — plugin wrapper | intel | PASTA threat modeling via `@kuzushi/randori-plugin` subprocess. Threat leads injected into detector prompts |
+| **vuln-scout** | planned | offense | Whitebox SAST with 15 Joern CPG verification scripts, 8 autonomous agents |
+| **augur** | planned | offense | Neuro-symbolic SAST (IRIS/ICLR 2025 hybrid LLM + CodeQL taint analysis) |
+| **blackbox** | planned | offense | Black/grey-box pentesting: nmap, gobuster, nikto, hydra, privilege escalation |
+| **pwn** | planned | offense | Binary exploitation: checksec, GDB, ROP chains, heap exploitation, SROP |
+| **pentest** | planned | offense | MCP server wrapping metasploit, nmap, hydra, john |
+| **honeypot** | planned | defense | Autonomous honeypot orchestration: 14 service types, 6 honeytokens, Falco |
+| **yokai** | planned | defense | Supply chain tripwires: dependency confusion, typosquatting, registry canaries |
+| **prompt-armor** | planned | offense | LLM red teaming: 80+ attack plugins, 25+ mutation strategies |
+| **shinsa** | planned | governance | Multi-framework compliance: ISO 27001, NIST 800-53, SOC 2, PCI DSS |
+| **revgraph** | planned | intel | Binary reverse engineering: Ghidra + Neo4j, NL2Cypher, function embeddings |
+
+Modules are loaded via the shell (`use <module>`) or at startup (`--load <name>,<name>`). External MCP servers can be loaded with `--load mcp:npx <pkg>` (stdio transport only — HTTP/SSE is not yet implemented).
 
 ## The SAST Pipeline
 
@@ -222,17 +229,17 @@ kuzushi scan <repo> --preset reference   # + PoC + threat-informed hunting + fro
 
 **Vendor-agnostic LLM runtime** — Anthropic, OpenAI, Google, Groq, Mistral, and 15+ providers. Swap models at runtime with `--model provider:modelId`. Runs airgapped with Ollama.
 
-**Exploit verification** — constructs concrete PoC payloads (SQL injection strings, XSS vectors, etc.) that prove exploitability, not just theoretical possibility.
+**Exploit verification** — constructs PoC payloads (SQL injection strings, XSS vectors, etc.) and runs them inside a generated test harness with mocked sinks. PoCs assert that attacker-controlled input reaches the dangerous call; they do not execute live exploits against your application unless `--dynamic-analysis` is also passed (Docker sandbox required).
 
-**IRIS-style taint analysis** — LLM-driven CodeQL taint analysis (ICLR 2025). LLM selects CWE classes, writes CodeQL queries dynamically, labels candidates, generates TaintTracking configs, iteratively refines on failure.
+**IRIS-style taint analysis** — hybrid LLM + CodeQL taint analysis (ICLR 2025). For languages with body placeholders, an LLM selects CWE classes and fills query templates; for languages with hardcoded predicates (e.g., Python), template-only execution is used. Generates TaintTracking configs and iteratively refines on failure.
 
 **Randori PASTA threat modeling** — 4-stage PASTA analysis (objectives, scope, DFD, STRIDE threats) via Claude Code plugin. Threat leads injected into all detector prompts. ATT&CK, CAPEC, OWASP mapping.
 
 **Systems-level deep semantic hunt** — finds bugs that survive decades of review: integer overflow, sentinel collisions, signed/unsigned comparison, buffer overflows, use-after-free in protocol state machines, unsafe Rust blocks. LLM writes CodeQL queries using range analysis, not TaintTracking.
 
-**Multi-strategy analysis** — 2-4 analytical approaches per vulnerability class with confidence boosting when strategies agree. Auto-generates Semgrep rules from confirmed findings.
+**Multi-strategy analysis** *(opt-in via `--multi-strategy` / `multiStrategyMode: "adaptive" | "full"`; default `"off"`)* — 2-4 analytical approaches per vulnerability class with confidence boosting when strategies agree. Auto-generates Semgrep rules from confirmed findings.
 
-**Auto-patch with closed-loop verification** — generates patches in disposable worktrees, validates, re-runs the scanner to confirm the vulnerability is gone.
+**Auto-patch with closed-loop verification** *(experimental; requires `--auto-patch` and is off by default)* — generates patches in disposable worktrees and re-verifies via the patch dispatcher. Worktree lifecycle and re-scan loop semantics are still maturing — review patches before applying.
 
 **Crypto behavioral testing** — generates and executes behavioral test harnesses in Docker for crypto misuse: timing side-channels, ECB mode, weak hashes, weak PRNGs.
 
@@ -242,9 +249,9 @@ kuzushi scan <repo> --preset reference   # + PoC + threat-informed hunting + fro
 
 **Interactive terminal UI** — React+Ink-powered live display with pipeline progress tree, spinners, trophy screen for confirmed exploits. REPL during scans (pause, skip, inspect). First-run setup wizard. Falls back to plain text in non-TTY. Built on a unified primitive library (`src/ui/primitives/`: `SelectList`, `TextInput`, `ConfirmDialog`, `Table`, `Breadcrumb`, `KeybindFooter`, `ExpandableSection`, `Divider`, `MultilineText`) with shared hooks (`src/ui/hooks/`: `useBoundedIndex`, `useFocusTrap`, `useTerminalSize`, `useCursorVisibility`, `useExpanded`, `useKeybindings`) for consistent focus, keyboard navigation, and resize handling.
 
-**Incremental scanning** — skips re-triage for unchanged findings. Dependency-aware invalidation via import graph.
+**Incremental scanning** — skips re-triage for findings whose fingerprints already have a stored verdict from a prior run. Scanner re-execution and dependency-graph-aware invalidation are partially implemented (see `src/scanners/scanner-cache.ts`); they are wired in for some scanners but not all. Pass `--fresh` to force a full re-scan and re-triage.
 
-**Audit logging** — JSONL audit trail of every agent decision.
+**Audit logging** — JSONL audit trail of every agent decision (`--audit-log` writes to `.kuzushi/runs/<runId>/`).
 
 <details>
 <summary><strong>All Scan Commands</strong></summary>
@@ -342,16 +349,21 @@ kuzushi config path
 | `taskConfig` | `{ semgrep: {...}, triage: {...}, ... }` | Per-task config blocks keyed by task ID or stage ID |
 | `severity` | `["ERROR","WARNING"]` | Semgrep severity filter |
 | `excludePatterns` | `["test","tests","node_modules",...]` | Directories/globs to skip |
-| `triageConcurrency` | `5` | Parallel LLM triage calls |
+| `triageConcurrency` | `5` | Parallel LLM triage calls. Tune lower for tight provider rate-limit budgets. |
 | `scanMode` | `"concurrent"` | Task execution mode |
 | `verify` | `false` | Enable proof-of-exploitability verification |
-| `pocHarness` | `false` | Enable PoC harness generation |
-| `cryptoBehavioralTestEnabled` | `false` | Enable crypto behavioral testing |
+| `pocHarness` | `false` | Enable PoC harness generation (test-harness with mocked sinks) |
+| `pocExecute` | `false` | Execute generated PoC harnesses (subprocess; pair with `pocSandbox`) |
+| `pocSandbox` | `"process"` | Sandbox kind for PoC execution (`process` or `docker`). `docker` recommended. |
+| `dynamicAnalysisEnabled` | `false` | Run PoC harnesses dynamically in a Docker sandbox |
+| `cryptoBehavioralTestEnabled` | `false` | Enable crypto behavioral testing (Docker harness) |
 | `codeGraphEnabled` | `true` | Enable LLM code graph |
 | `multiStrategyMode` | `"off"` | Multi-strategy analysis (`off`, `adaptive`, `full`) |
 | `autoPatchEnabled` | `false` | Enable auto-patch generation |
-| `incrementalCache` | `true` | Enable incremental scanning |
+| `variantAnalysis` | `false` | After confirmed TPs, search for similar patterns |
+| `incrementalCache` | `true` | Reuse stored triage verdicts for unchanged finding fingerprints |
 | `auditLog` | `false` | Write JSONL audit files |
+| `costBudgetUsd` | unset | Hard cap on per-run LLM spend; the run aborts when exceeded |
 
 **Stage model overrides** via `taskConfig`:
 
@@ -368,8 +380,22 @@ Global config: `~/.kuzushi/config.json`. Project overrides: `<repo>/.kuzushi/con
 | Variable | Required | Description |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | When using `anthropic:*` models | Anthropic API key |
+| `ANTHROPIC_OAUTH_TOKEN` | Alternative to API key | Claude Code OAuth token (set via `claude login`) |
 | `OPENAI_API_KEY` | When using `openai:*` models | OpenAI API key |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | When using `google:*` models | Google API key |
+
+> **Storing credentials in `~/.kuzushi/config.json` is supported but stores keys in plaintext.** Prefer environment variables or a secret manager. Kuzushi will warn on first plaintext store.
+
+### Data Sent to LLM Providers
+
+When you run a scan with a remote provider (default: `anthropic:claude-sonnet-4-6`), Kuzushi sends the following to the configured LLM API:
+
+- Vulnerability finding metadata (rule id, severity, file path, line numbers).
+- Source code snippets surrounding each finding (typically the enclosing function plus a few hundred lines of context).
+- Files read by the agent during triage/verification via the `Read`, `Glob`, and `Grep` tools (any file under the scan root).
+- Operator-supplied scan context (`.kuzushi/scan-context.json`) and threat models (`.kuzushi/threat-model.json`) when present.
+
+To avoid sending source to a remote provider, run with a local model: `kuzushi scan <repo> --model ollama:<model>`.
 
 </details>
 

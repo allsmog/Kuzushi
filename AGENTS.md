@@ -290,3 +290,24 @@ export default module;
 ```
 
 Use this as a skeleton, then add runtime/bus/config integration through `ToolExecutionContext` as needed.
+
+---
+
+## Security & Secrets
+
+- Never commit API keys or `ANTHROPIC_API_KEY` values.
+- Do not commit findings DB files (`<repo>/.kuzushi/findings.sqlite3`).
+- The `.kuzushi/` directory, the SQLite DB, and per-run batch files are
+  created with restrictive permissions (`0700` / `0600`). Do not relax
+  them.
+- Subprocesses spawned via `ClaudeSession`/pi-ai inherit a **filtered**
+  environment via `buildSubprocessEnv()` in `src/agent-runtime/env.ts`.
+  Add new safe env vars to that allowlist rather than spreading
+  `process.env` directly.
+- For CI/CD, prefer `agentRuntimeConfig.apiKeyFile` (path to a file at
+  `0600`) over writing the literal key into `~/.kuzushi/config.json`.
+  See `src/credentials.ts#resolveAgentRuntimeConfig`.
+- Code-execution features (`--dynamic-analysis`, `pocExecute`) require
+  an explicit opt-in (`--yes` / `KUZUSHI_YES_RUN_GENERATED_CODE=1`) in
+  non-TTY contexts. See `ensureCodeExecutionOptIn` in
+  `src/cli/commands/scan.ts`.
