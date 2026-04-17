@@ -128,7 +128,7 @@ class HttpMcpClient implements McpClient {
     const result = await this.sendRequest("initialize", {
       protocolVersion: "2025-03-26",
       capabilities: {},
-      clientInfo: { name: "kuzushi", version: "0.16.0" },
+      clientInfo: { name: "kuzushi", version: "0.17.0" },
     });
     // MCP initialize response: { protocolVersion, capabilities, serverInfo }
     if (!result || typeof result !== "object") {

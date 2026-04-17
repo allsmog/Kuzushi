@@ -116,7 +116,7 @@ function packageJsonFor(id: string): string {
           vitest: "^3.0.0",
         },
         peerDependencies: {
-          kuzushi: ">=0.16.0",
+          kuzushi: ">=0.17.0",
         },
       },
       null,
