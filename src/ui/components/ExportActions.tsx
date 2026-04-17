@@ -8,13 +8,15 @@
  *   [enter] done
  */
 
-import chalk from "chalk";
+import { execSync } from "node:child_process";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 import type { ActionableFinding } from "../state.js";
+import { tokens } from "../tokens.js";
 
 interface ExportActionsProps {
   findings: ActionableFinding[];
@@ -32,12 +34,18 @@ export function ExportActions({
 
   const actionableCount = findings.filter((f) => f.verdict !== "fp").length;
 
+  useRegisterKeybindings([
+    { keys: "c", label: "Copy markdown" },
+    { keys: "g", label: "GitHub template" },
+    { keys: "j", label: "Jira CSV" },
+    { keys: "Enter", label: "Done", secondary: true },
+  ]);
+
   useInput((input, key) => {
     if (key.return || key.escape) {
       onDone();
       return;
     }
-
     if (input === "c") {
       const markdown = generateMarkdownExport(findings, repoName);
       copyToClipboard(markdown);
@@ -58,36 +66,26 @@ export function ExportActions({
       <Text>{""}</Text>
       <Text>{boxHeader("Export", width)}</Text>
       <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.dim(`${actionableCount} actionable findings available`)}
-      </Text>
+      <Box paddingLeft={2}>
+        <Text>{tokens.muted(`${actionableCount} actionable findings available`)}</Text>
+      </Box>
       <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.redBright.bold("[c]")} Copy to clipboard {chalk.dim("(markdown)")}
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.white.bold("[g]")} GitHub issue template
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.blue.bold("[j]")} Jira CSV export
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.dim("[enter] done")}
-      </Text>
+      <Box flexDirection="column" paddingLeft={2}>
+        <Text>
+          {tokens.dangerStrong("[c]")} Copy to clipboard {tokens.muted("(markdown)")}
+        </Text>
+        <Text>
+          {tokens.strong("[g]")} GitHub issue template
+        </Text>
+        <Text>
+          {tokens.info("[j]")} Jira CSV export
+        </Text>
+      </Box>
 
       {status && (
-        <>
-          <Text>{""}</Text>
-          <Text>
-            {"  "}
-            {chalk.green(status)}
-          </Text>
-        </>
+        <Box paddingLeft={2} marginTop={1}>
+          <Text>{tokens.success(status)}</Text>
+        </Box>
       )}
 
       <Text>{""}</Text>
@@ -106,7 +104,7 @@ function generateMarkdownExport(findings: ActionableFinding[], repoName: string)
   ];
 
   for (const f of actionable) {
-    const severity = f.severity === "ERROR" ? "🔴" : "🟡";
+    const severity = f.severity === "ERROR" ? "\uD83D\uDD34" : "\uD83D\uDFE1";
     const verdict =
       f.verdict === "tp"
         ? "TRUE POSITIVE"
@@ -149,8 +147,8 @@ function generateGitHubIssueTemplate(findings: ActionableFinding[], repoName: st
   ];
 
   for (const f of actionable) {
-    const badge = f.verifyExploitable === 1 ? " ⚠️ EXPLOITABLE" : "";
-    lines.push(`- [ ] **${f.ruleId}** at \`${f.filePath}:${f.startLine}\`${badge}`);
+    const flag = f.verifyExploitable === 1 ? " \u26A0 EXPLOITABLE" : "";
+    lines.push(`- [ ] **${f.ruleId}** at \`${f.filePath}:${f.startLine}\`${flag}`);
     lines.push(`  ${f.rationale.slice(0, 120)}`);
   }
 
@@ -179,13 +177,10 @@ function generateJiraCsv(findings: ActionableFinding[]): string {
 
 function copyToClipboard(text: string): void {
   try {
-    const { execSync } = require("node:child_process") as typeof import("node:child_process");
     const platform = process.platform;
-
     if (platform === "darwin") {
       execSync("pbcopy", { input: text });
     } else if (platform === "linux") {
-      // Try xclip first, then xsel, then wl-copy (Wayland)
       try {
         execSync("xclip -selection clipboard", { input: text });
       } catch {

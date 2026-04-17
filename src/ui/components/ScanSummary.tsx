@@ -73,14 +73,15 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
 
   return (
     <Box flexDirection="column">
-      {/* Trophy / completion screen */}
+      {/* Trophy screen flushes left — handles its own ASCII box framing. */}
       <TrophyScreen data={data} />
 
       <Text>{""}</Text>
       <Text>{boxHeader(`${icons.complete} Scan Results`, width)}</Text>
       <Text>{""}</Text>
 
-      <Box paddingLeft={2}>
+      {/* Indented body — every row below lands at column 2 via paddingLeft. */}
+      <Box flexDirection="column" paddingLeft={2}>
         <Table<VerdictRow>
           columns={[
             { key: "label", width: 14, align: "left" },
@@ -99,13 +100,11 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           maxWidth={width - 2}
           gap={2}
         />
-      </Box>
 
       {/* Failed tasks warning */}
       {data.failedTasks.length > 0 && (
         <Text>
-          {"  "}
-          {tokens.danger("Scanners failed:")} {data.failedTasks.join(", ")}{" "}
+            {tokens.danger("Scanners failed:")} {data.failedTasks.join(", ")}{" "}
           {tokens.muted("(results may be incomplete)")}
         </Text>
       )}
@@ -113,8 +112,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {/* Degradation warnings */}
       {data.extractionDegradation && data.extractionDegradation.status !== "ok" && (
         <Text>
-          {"  "}
-          {(data.extractionDegradation.status === "failed" ? tokens.danger : tokens.warn)(
+            {(data.extractionDegradation.status === "failed" ? tokens.danger : tokens.warn)(
             "Extraction:",
           )}{" "}
           {data.extractionDegradation.status} [{data.extractionDegradation.reasons.join(", ")}]
@@ -122,91 +120,80 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       )}
       {data.stitchDegradation && (
         <Text>
-          {"  "}
-          {tokens.warn("Stitch:")} degraded [{data.stitchDegradation.reason}]
+            {tokens.warn("Stitch:")} degraded [{data.stitchDegradation.reason}]
         </Text>
       )}
       {data.tiPriorDegraded && (
         <Text>
-          {"  "}
-          {tokens.warn("TI Prior:")} degraded
+            {tokens.warn("TI Prior:")} degraded
         </Text>
       )}
 
-      {/* Verdict counts — aligned via Table primitive */}
-      <Box paddingLeft={2}>
-        <Table<VerdictRow>
-          columns={[
-            { key: "label", width: 26, align: "left" },
-            { key: "value", width: 8, align: "right" },
-          ]}
-          rows={[
-            { label: tokens.muted("Total triaged"), value: String(total) },
-            {
-              label: tokens.dangerStrong(`${icons.error} True positives`),
-              value: String(counts.tp),
-            },
-            {
-              label: tokens.success(`${icons.success} False positives`),
-              value: String(counts.fp),
-            },
-            {
-              label: tokens.warn(`${icons.warning} Needs review`),
-              value: String(counts.needs_review),
-            },
-          ]}
-          showHeader={false}
-          divider={false}
-          maxWidth={width - 2}
-          gap={2}
-        />
-      </Box>
+      {/* Verdict counts — aligned via Table primitive (already inside the
+          paddingLeft=2 wrapper above, no extra padding needed here). */}
+      <Table<VerdictRow>
+        columns={[
+          { key: "label", width: 26, align: "left" },
+          { key: "value", width: 8, align: "right" },
+        ]}
+        rows={[
+          { label: tokens.muted("Total triaged"), value: String(total) },
+          {
+            label: tokens.dangerStrong(`${icons.error} True positives`),
+            value: String(counts.tp),
+          },
+          {
+            label: tokens.success(`${icons.success} False positives`),
+            value: String(counts.fp),
+          },
+          {
+            label: tokens.warn(`${icons.warning} Needs review`),
+            value: String(counts.needs_review),
+          },
+        ]}
+        showHeader={false}
+        divider={false}
+        maxWidth={width - 2}
+        gap={2}
+      />
 
       {data.triageErrors > 0 && (
         <Text>
-          {"  "}
-          {tokens.danger("Triage errors:")} {data.triageErrors}
+            {tokens.danger("Triage errors:")} {data.triageErrors}
         </Text>
       )}
       {data.skippedLowConfidence > 0 && (
         <Text>
-          {"  "}
-          {tokens.muted("Skipped (low confidence):")} {data.skippedLowConfidence}
+            {tokens.muted("Skipped (low confidence):")} {data.skippedLowConfidence}
         </Text>
       )}
       {data.skippedByFpFilter > 0 && (
         <Text>
-          {"  "}
-          {tokens.muted("Skipped (hard exclusions):")} {data.skippedByFpFilter}
+            {tokens.muted("Skipped (hard exclusions):")} {data.skippedByFpFilter}
         </Text>
       )}
       {data.softSuppressedFindings > 0 && (
         <Text>
-          {"  "}
-          {tokens.muted("Soft-suppressed findings:")} {data.softSuppressedFindings}
+            {tokens.muted("Soft-suppressed findings:")} {data.softSuppressedFindings}
         </Text>
       )}
       {data.skippedByLlmRescore > 0 && (
         <Text>
-          {"  "}
-          {tokens.muted("Skipped (LLM rescore):")} {data.skippedByLlmRescore}
+            {tokens.muted("Skipped (LLM rescore):")} {data.skippedByLlmRescore}
         </Text>
       )}
       {data.corroboratedClusters > 0 && (
         <Text>
-          {"  "}
-          {tokens.muted("Corroborated clusters:")} {data.corroboratedClusters}
+            {tokens.muted("Corroborated clusters:")} {data.corroboratedClusters}
         </Text>
       )}
       {(data.verifyGateAutoAccepted > 0 || data.verifyGateSkipped > 0) && (
         <>
           <Text>
-            {"  "}
-            {tokens.muted("Gate auto-accepted:")} {data.verifyGateAutoAccepted}
+                {tokens.muted("Gate auto-accepted:")} {data.verifyGateAutoAccepted}
           </Text>
           <Text>
-            {"  "}
-            {tokens.muted("Gate skipped:")} {data.verifyGateSkipped}
+                {tokens.muted("Gate skipped:")} {data.verifyGateSkipped}
           </Text>
         </>
       )}
@@ -221,8 +208,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
             { label: "needs_review", value: counts.needs_review, color: tokens.warn },
           ]).map((line, i) => (
             <Text key={i}>
-              {"  "}
-              {line}
+                    {line}
             </Text>
           ))}
         </>
@@ -234,21 +220,17 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>{boxDivider(width)}</Text>
           <Text>
-            {"  "}
-            {tokens.label("Verification")}
+                {tokens.label("Verification")}
           </Text>
           <Text>
-            {"  "}
-            {tokens.dangerStrong(`${icons.error} Exploitable:`)} {data.exploitable}
+                {tokens.dangerStrong(`${icons.error} Exploitable:`)} {data.exploitable}
           </Text>
           <Text>
-            {"  "}
-            {tokens.success(`${icons.success} Not exploitable:`)} {data.notExploitable}
+                {tokens.success(`${icons.success} Not exploitable:`)} {data.notExploitable}
           </Text>
           {data.verifyErrors > 0 && (
             <Text>
-              {"  "}
-              {tokens.danger("Verification errors:")} {data.verifyErrors}
+                    {tokens.danger("Verification errors:")} {data.verifyErrors}
             </Text>
           )}
         </>
@@ -260,27 +242,22 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>{boxDivider(width)}</Text>
           <Text>
-            {"  "}
-            {tokens.label("PoC Harnesses")}
+                {tokens.label("PoC Harnesses")}
           </Text>
           <Text>
-            {"  "}
-            {tokens.accent(`${icons.gear} Generated:`)} {data.pocGenerated}
+                {tokens.accent(`${icons.gear} Generated:`)} {data.pocGenerated}
           </Text>
           <Text>
-            {"  "}
-            {tokens.warn(`${icons.pending} Skipped:`)} {data.pocSkipped}
+                {tokens.warn(`${icons.pending} Skipped:`)} {data.pocSkipped}
           </Text>
           {data.pocHarnessErrors > 0 && (
             <Text>
-              {"  "}
-              {tokens.danger("Errors:")} {data.pocHarnessErrors}
+                    {tokens.danger("Errors:")} {data.pocHarnessErrors}
             </Text>
           )}
           {data.pocOutputDir && (
             <Text>
-              {"  "}
-              {tokens.muted("Output dir:")} {data.pocOutputDir}
+                    {tokens.muted("Output dir:")} {data.pocOutputDir}
             </Text>
           )}
         </>
@@ -291,8 +268,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
         <>
           <Text>{""}</Text>
           <Text>
-            {"  "}
-            {tokens.accent("Variant findings:")} {data.variantFindings}
+                {tokens.accent("Variant findings:")} {data.variantFindings}
           </Text>
         </>
       )}
@@ -303,8 +279,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>{boxDivider(width)}</Text>
           <Text>
-            {"  "}
-            {tokens.label("Dynamic Analysis")}
+                {tokens.label("Dynamic Analysis")}
           </Text>
           <Text>
             {"    "}
@@ -338,8 +313,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
         <>
           <Text>{""}</Text>
           <Text>
-            {"  "}
-            {tokens.muted("Incremental:")} {tokens.success(`${data.incrementalCachedFiles} cached`)},{" "}
+                {tokens.muted("Incremental:")} {tokens.success(`${data.incrementalCachedFiles} cached`)},{" "}
             {data.incrementalRescannedFiles} rescanned
             {data.incrementalDepExpandedFiles > 0
               ? `, ${data.incrementalDepExpandedFiles} dependency-expanded`
@@ -354,8 +328,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>{boxDivider(width)}</Text>
           <Text>
-            {"  "}
-            {tokens.label("Patch Synthesis")}
+                {tokens.label("Patch Synthesis")}
           </Text>
           <Text>
             {"    "}
@@ -392,8 +365,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>{boxDivider(width)}</Text>
           <Text>
-            {"  "}
-            {tokens.label("Exploitation Chains")}
+                {tokens.label("Exploitation Chains")}
           </Text>
           <Text>{""}</Text>
           {data.exploitChains.map((chain, ci) => (
@@ -419,8 +391,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>{boxDivider(width)}</Text>
           <Text>
-            {"  "}
-            {tokens.label("Actionable Findings")}
+                {tokens.label("Actionable Findings")}
           </Text>
           <Text>{""}</Text>
           {data.actionableFindings.map((f, i) => (
@@ -432,8 +403,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
         <>
           <Text>{""}</Text>
           <Text>
-            {"  "}
-            {tokens.successStrong(
+                {tokens.successStrong(
               `${icons.success} All findings triaged as false positives. Code looks clean.`,
             )}
           </Text>
@@ -444,45 +414,40 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       <Text>{""}</Text>
       <Text>{boxDivider(width)}</Text>
       <Text>
-        {"  "}
         {tokens.muted("Triage cost:")} {formatCost(data.triageCostUsd)}
       </Text>
       {hasVerificationData && (
         <Text>
-          {"  "}
-          {tokens.muted("Verification cost:")} {formatCost(data.verificationCostUsd)}
+            {tokens.muted("Verification cost:")} {formatCost(data.verificationCostUsd)}
         </Text>
       )}
       {hasPocData && (
         <Text>
-          {"  "}
-          {tokens.muted("PoC harness cost:")} {formatCost(data.pocHarnessCostUsd)}
+            {tokens.muted("PoC harness cost:")} {formatCost(data.pocHarnessCostUsd)}
         </Text>
       )}
       {data.variantAnalysisCostUsd > 0 && (
         <Text>
-          {"  "}
-          {tokens.muted("Variant analysis cost:")} {formatCost(data.variantAnalysisCostUsd)}
+            {tokens.muted("Variant analysis cost:")} {formatCost(data.variantAnalysisCostUsd)}
         </Text>
       )}
       {data.budgetExceeded && (
         <>
           <Text>{""}</Text>
           <Text>
-            {"  "}
-            {tokens.warnStrong("Budget exceeded:")} pipeline stopped early to stay within cost limit
+                {tokens.warnStrong("Budget exceeded:")} pipeline stopped early to stay within cost limit
           </Text>
         </>
       )}
       {data.auditLogDir && (
         <Text>
-          {"  "}
-          {tokens.muted("Audit log:")} {data.auditLogDir}/
+            {tokens.muted("Audit log:")} {data.auditLogDir}/
         </Text>
       )}
 
       {/* Run metrics */}
       {data.runMetrics && <RunMetricsSummary metrics={data.runMetrics} />}
+      </Box>
 
       <Text>{boxFooter(width)}</Text>
     </Box>
@@ -501,7 +466,6 @@ function RunMetricsSummary({
       <Text>{""}</Text>
       <Text>{boxDivider(terminalCardWidth(96, 60))}</Text>
       <Text>
-        {"  "}
         {tokens.label("Run Metrics")}
       </Text>
       <Text>{""}</Text>
@@ -512,18 +476,15 @@ function RunMetricsSummary({
             const pct = ((count / verdictTotal) * 100).toFixed(1);
             return (
               <Text key={verdict}>
-                {"  "}
-                {tokens.muted(`${verdict}:`)} {count} ({pct}%)
+                        {tokens.muted(`${verdict}:`)} {count} ({pct}%)
               </Text>
             );
           })}
           <Text>
-            {"  "}
-            {tokens.muted("TP Rate:")} {(metrics.tpRate * 100).toFixed(1)}%
+                {tokens.muted("TP Rate:")} {(metrics.tpRate * 100).toFixed(1)}%
           </Text>
           <Text>
-            {"  "}
-            {tokens.muted("FP Rate:")} {(metrics.fpRate * 100).toFixed(1)}%
+                {tokens.muted("FP Rate:")} {(metrics.fpRate * 100).toFixed(1)}%
           </Text>
           <Text>{""}</Text>
         </>
@@ -531,8 +492,7 @@ function RunMetricsSummary({
 
       {Object.keys(metrics.severityCounts).length > 0 && (
         <Text>
-          {"  "}
-          {tokens.muted("Severity:")}{" "}
+            {tokens.muted("Severity:")}{" "}
           {Object.entries(metrics.severityCounts)
             .map(([s, c]) => `${s}=${c}`)
             .join(", ")}
@@ -540,8 +500,7 @@ function RunMetricsSummary({
       )}
       {Object.keys(metrics.taskYield).length > 0 && (
         <Text>
-          {"  "}
-          {tokens.muted("Task yield:")}{" "}
+            {tokens.muted("Task yield:")}{" "}
           {Object.entries(metrics.taskYield)
             .map(([s, c]) => `${s}=${c}`)
             .join(", ")}
@@ -549,25 +508,21 @@ function RunMetricsSummary({
       )}
       {metrics.averageConfidence > 0 && (
         <Text>
-          {"  "}
-          {tokens.muted("Avg confidence:")} {(metrics.averageConfidence * 100).toFixed(1)}%
+            {tokens.muted("Avg confidence:")} {(metrics.averageConfidence * 100).toFixed(1)}%
         </Text>
       )}
       {metrics.exploitabilityRate != null && (
         <Text>
-          {"  "}
-          {tokens.muted("Exploitability rate:")} {(metrics.exploitabilityRate * 100).toFixed(1)}%
+            {tokens.muted("Exploitability rate:")} {(metrics.exploitabilityRate * 100).toFixed(1)}%
         </Text>
       )}
       <Text>
-        {"  "}
         {tokens.muted("Structured evidence:")} taint-path=
         {metrics.structuredEvidence.findingsWithTaintPath}
       </Text>
 
       <Text>{""}</Text>
       <Text>
-        {"  "}
         {tokens.muted("Duration:")} scan={formatDuration(metrics.durationBreakdown.scan)} triage=
         {formatDuration(metrics.durationBreakdown.triage)}
         {metrics.durationBreakdown.verify != null
@@ -579,7 +534,6 @@ function RunMetricsSummary({
         total={formatDuration(metrics.durationBreakdown.total)}
       </Text>
       <Text>
-        {"  "}
         {tokens.muted("Cost:")} triage={formatCost(metrics.costBreakdown.triage)} verify=
         {formatCost(metrics.costBreakdown.verify)} poc=
         {formatCost(metrics.costBreakdown.pocHarness)} variant=
