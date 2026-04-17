@@ -66,11 +66,7 @@ program
   .name("kuzushi")
   .description("Kuzushi — security-native AI operating environment")
   .option("--verbose", "Show debug-level diagnostics", false)
-  .option(
-    "--debug",
-    "Expand progressive-disclosure sections and show raw stack traces",
-    false,
-  )
+  .option("--debug", "Expand progressive-disclosure sections and show raw stack traces", false)
   .version((createRequire(import.meta.url)("../package.json") as { version: string }).version);
 
 program.hook("preAction", (_thisCommand, actionCommand) => {
@@ -141,12 +137,14 @@ function ensureLlmCredentialsForCommand(actionCommand: Command): void {
   // credential prompt. We only hard-fail in non-TTY contexts.
   if (process.stdout.isTTY && process.stdin.isTTY) return;
 
-  // Last check: a config-stored API key counts. Loading config can throw on
-  // malformed JSON; if it does, the underlying command will surface a better
-  // error than this hook can.
+  // Last check: a config-stored API key counts, whether inline or via the
+  // `apiKeyFile` escape hatch. Loading config can throw on malformed JSON;
+  // if it does, the underlying command will surface a better error than
+  // this hook can.
   try {
     const cfg = loadConfig();
     if (cfg.agentRuntimeConfig?.apiKey) return;
+    if (cfg.agentRuntimeConfig?.apiKeyFile) return;
   } catch {
     // Fall through to the failure path below.
   }
@@ -156,10 +154,11 @@ function ensureLlmCredentialsForCommand(actionCommand: Command): void {
       "No LLM credentials detected and the terminal is non-interactive.",
       "",
       "Set one of the following before invoking kuzushi:",
-      "  • export ANTHROPIC_API_KEY=sk-ant-...        (recommended for CI/CD)",
-      "  • export ANTHROPIC_OAUTH_TOKEN=...           (Claude Code OAuth)",
-      "  • kuzushi config set agentRuntimeConfig.apiKey sk-ant-...",
-      "  • kuzushi <command> --api-key sk-ant-...     (one-off)",
+      "  • export ANTHROPIC_API_KEY=sk-ant-...                (recommended for CI/CD)",
+      "  • export ANTHROPIC_OAUTH_TOKEN=...                   (Claude Code OAuth)",
+      "  • kuzushi config set agentRuntimeConfig.apiKey sk-ant-...           (plaintext)",
+      "  • kuzushi config set agentRuntimeConfig.apiKeyFile /path/to/key     (0600 file; preferred)",
+      "  • kuzushi <command> --api-key sk-ant-...             (one-off)",
       "",
       "To run without an LLM provider, use a local model (e.g. `--model ollama:<name>`).",
     ].join("\n"),
@@ -325,6 +324,12 @@ program
   )
   .option("--max-modules <n>", "Max modules to scan in Phase 2 (top N by priority)", parseInt)
   .option("--dry-run", "Print scan scope (modules, tasks, tasks) without running", false)
+  .option(
+    "-y, --yes",
+    "Confirm opt-in for code-execution features (--dynamic-analysis, pocExecute). " +
+      "Equivalent to KUZUSHI_YES_RUN_GENERATED_CODE=1.",
+    false,
+  )
   .option("--enable-external-tasks", "Enable loading of external tasks from config", false)
   .option(
     "--trust-repo-config",
