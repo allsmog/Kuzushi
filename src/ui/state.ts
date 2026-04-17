@@ -291,6 +291,15 @@ export interface UIState {
   review: ReviewSession | null;
   /** Shell mode state — interactive copilot. */
   shell?: ShellState | null;
+  /**
+   * Wayfinding state — optional breadcrumb shown at the top of the UI for
+   * nested flows. Null/undefined means "hide the breadcrumb row".
+   */
+  breadcrumb?: {
+    segments: ReadonlyArray<string>;
+    currentStep?: number;
+    totalSteps?: number;
+  } | null;
 }
 
 export interface ShellHistoryEntry {
@@ -413,6 +422,7 @@ export class UIStore {
       stages: [],
       preflight: null,
       review: null,
+      breadcrumb: null,
     };
   }
 

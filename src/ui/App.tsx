@@ -29,6 +29,9 @@ import { SetupWizard } from "./components/SetupWizard.js";
 import { StatusFooter } from "./components/StatusFooter.js";
 import { ThreatModelEditor } from "./components/ThreatModelEditor.js";
 import { useUIState } from "./hooks.js";
+import { KeybindingsProvider } from "./hooks/useKeybindings.js";
+import { Breadcrumb } from "./primitives/Breadcrumb.js";
+import { KeybindFooter } from "./primitives/KeybindFooter.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
 import type { ResultLine as ResultLineData, UIStore } from "./state.js";
 
@@ -37,6 +40,14 @@ interface AppProps {
 }
 
 export function App({ store }: AppProps): React.ReactElement {
+  return (
+    <KeybindingsProvider>
+      <AppInner store={store} />
+    </KeybindingsProvider>
+  );
+}
+
+function AppInner({ store }: AppProps): React.ReactElement {
   const state = useUIState(store);
   const [replCtx] = React.useState(() => createReplContext(store));
 
@@ -61,7 +72,12 @@ export function App({ store }: AppProps): React.ReactElement {
 
   // Shell mode renders only the CopilotShell — no scan banner/header/pipeline chrome
   if (state.mode === "shell") {
-    return <Box flexDirection="column">{state.shell && <CopilotShell store={store} />}</Box>;
+    return (
+      <Box flexDirection="column">
+        {state.shell && <CopilotShell store={store} />}
+        <KeybindFooter />
+      </Box>
+    );
   }
 
   return (
@@ -75,6 +91,15 @@ export function App({ store }: AppProps): React.ReactElement {
           selectedForTriage={state.startBannerShown ? state.selectedForTriage : undefined}
         />
       )}
+      {state.breadcrumb && state.breadcrumb.segments.length > 0 ? (
+        <Box paddingLeft={2} marginTop={1}>
+          <Breadcrumb
+            segments={state.breadcrumb.segments}
+            currentStep={state.breadcrumb.currentStep}
+            totalSteps={state.breadcrumb.totalSteps}
+          />
+        </Box>
+      ) : null}
 
       {/* Config banner — rendered once */}
       {state.configBanner && state.mode !== "preflight" && (
@@ -207,6 +232,8 @@ export function App({ store }: AppProps): React.ReactElement {
           onQuit={state.review.onQuit}
         />
       )}
+
+      <KeybindFooter />
     </Box>
   );
 }
