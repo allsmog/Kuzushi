@@ -26,11 +26,11 @@
  *   ╰──────────────────────────────────────────────────────╯
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
 import { formatCost, formatDuration, terminalCardWidth } from "../format.js";
 import type { SummaryData } from "../state.js";
+import { tokens } from "../tokens.js";
 
 interface TrophyScreenProps {
   data: SummaryData;
@@ -43,12 +43,12 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   const hasExploitable = data.exploitable > 0;
   const hasChains = data.exploitChains.length > 0;
 
-  const borderChar = isClean ? chalk.green("─") : chalk.red("─");
-  const cornerTL = isClean ? chalk.green("╭") : chalk.red("╭");
-  const cornerTR = isClean ? chalk.green("╮") : chalk.red("╮");
-  const cornerBL = isClean ? chalk.green("╰") : chalk.red("╰");
-  const cornerBR = isClean ? chalk.green("╯") : chalk.red("╯");
-  const side = isClean ? chalk.green("│") : chalk.red("│");
+  const borderChar = isClean ? tokens.success("─") : tokens.danger("─");
+  const cornerTL = isClean ? tokens.success("╭") : tokens.danger("╭");
+  const cornerTR = isClean ? tokens.success("╮") : tokens.danger("╮");
+  const cornerBL = isClean ? tokens.success("╰") : tokens.danger("╰");
+  const cornerBR = isClean ? tokens.success("╯") : tokens.danger("╯");
+  const side = isClean ? tokens.success("│") : tokens.danger("│");
 
   const topBorder = `${cornerTL}${borderChar.repeat(innerWidth)}${cornerTR}`;
   const bottomBorder = `${cornerBL}${borderChar.repeat(innerWidth)}${cornerBR}`;
@@ -59,11 +59,11 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   const duration = data.runMetrics?.durationBreakdown?.total;
   const statsParts = [`${data.totalTriaged} triaged`, formatCost(totalCost)];
   if (duration) statsParts.push(formatDuration(duration));
-  const statsLine = statsParts.join(chalk.dim("  ·  "));
+  const statsLine = statsParts.join(tokens.muted("  ·  "));
 
   if (isClean) {
     // ✦ ALL CLEAR ✦
-    const headline = chalk.green.bold("✦  ALL CLEAR  ✦");
+    const headline = tokens.successStrong("✦  ALL CLEAR  ✦");
     const subline = `0 true positives across ${data.totalTriaged} findings`;
     const message = "This repository passed all security checks.";
 
@@ -106,7 +106,7 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
         <Text>
           {"  "}
           {side}
-          {centerPad(chalk.dim(message), innerWidth)}
+          {centerPad(tokens.muted(message), innerWidth)}
           {side}
         </Text>
         <Text>
@@ -122,13 +122,13 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   }
 
   // ⚠ ACTION REQUIRED ⚠
-  const headline = chalk.red.bold("⚠  ACTION REQUIRED  ⚠");
+  const headline = tokens.dangerStrong("⚠  ACTION REQUIRED  ⚠");
   const mainStat = [
-    chalk.red.bold(`${tp} true positive${tp > 1 ? "s" : ""}`),
-    hasExploitable ? chalk.red(`${data.exploitable} exploitable`) : null,
+    tokens.dangerStrong(`${tp} true positive${tp > 1 ? "s" : ""}`),
+    hasExploitable ? tokens.danger(`${data.exploitable} exploitable`) : null,
   ]
     .filter(Boolean)
-    .join(chalk.dim("  ·  "));
+    .join(tokens.muted("  ·  "));
 
   const chainStat = hasChains
     ? `${data.exploitChains.length} attack chain${data.exploitChains.length > 1 ? "s" : ""} (${data.exploitChains.map((c) => c.overallSeverity).join(", ")})`
@@ -137,7 +137,7 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   const needsReview = data.verdictCounts.needs_review;
   const reviewStat =
     needsReview > 0
-      ? chalk.yellow(`${needsReview} finding${needsReview > 1 ? "s" : ""} need review`)
+      ? tokens.warn(`${needsReview} finding${needsReview > 1 ? "s" : ""} need review`)
       : null;
   const nextAction = hasExploitable
     ? "Next: investigate exploitable findings first."
@@ -200,7 +200,7 @@ export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
       <Text>
         {"  "}
         {side}
-        {centerPad(chalk.dim(nextAction), innerWidth)}
+        {centerPad(tokens.muted(nextAction), innerWidth)}
         {side}
       </Text>
       <Text>

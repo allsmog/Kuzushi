@@ -36,9 +36,11 @@ import {
 import {
   type FileContentCache,
   preReadForTriage,
+  type TriageOutput,
   triageFindingsBatch,
-  triageFindingWithAgent,
+  triageFindingWithEvidenceEnforcement,
   triageSystemPromptPrefix,
+  validateTriageEvidence,
 } from "../../triage.js";
 import type { KuzushiConfig } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
@@ -237,7 +239,20 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           // 1C-pre: Threat model context — inject application-level context for verdict decisions
           {
             const tmSummary = event.payload.threatModelSummary;
+            const knownIds = event.payload.knownThreatIds ?? [];
             if (typeof tmSummary === "string" && tmSummary.length > 0) {
+              // Emit a structured, machine-parseable preamble so the agent can
+              // (a) see the exact threat IDs to cross-link in source_threat_ids
+              // and (b) distinguish them from prose IDs elsewhere in context.
+              const idManifest =
+                knownIds.length > 0
+                  ? [
+                      "### Known threat IDs",
+                      "Only IDs from this list are valid in `source_threat_ids[]`; other IDs will be discarded.",
+                      ...knownIds.map((id) => `- ${id}`),
+                      "",
+                    ].join("\n")
+                  : "";
               extraSections.push(
                 "## Application Threat Model Context\n" +
                   "The following threat model was derived from automated analysis of this application.\n" +
@@ -247,6 +262,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
                   "3. Identify which trust boundaries are crossed and which attacker-controlled inputs are involved.\n" +
                   "4. Check existing mitigations listed below — if a mitigation covers this finding, it may be a false positive.\n" +
                   "5. Include relevant threat IDs in your source_threat_ids output field.\n\n" +
+                  idManifest +
                   tmSummary,
               );
             }
@@ -324,7 +340,7 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             ? collector.wrapCallback(baseActivityCallback)
             : baseActivityCallback;
 
-          let triageOutput;
+          let triageOutput: TriageOutput;
 
           // Cache system prompt prefix on first event (same for all findings in a run).
           // repoContext is invariant per run, so keying on runId alone is stable.
@@ -362,7 +378,12 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               extraPromptContext,
             );
           } else {
-            triageOutput = await triageFindingWithAgent(
+            const enforceEvidence = deps.config.enforceTriageEvidence !== false;
+            // Resolve an optional escalation model for the enforcement retry.
+            // Falls back to the triage model when no `triage-escalation`
+            // taskConfig is provided.
+            const escalationModel = resolveStageModel(deps.config, "triage-escalation", "triage");
+            triageOutput = await triageFindingWithEvidenceEnforcement(
               triageConfigProvider,
               finding,
               context.scanPath ?? context.repoRoot,
@@ -377,6 +398,8 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
               extraPromptContext,
               resolvedTemplates.triage,
               cachedSystemPromptPrefix,
+              enforceEvidence ? 1 : 0,
+              escalationModel,
             );
           }
 
@@ -472,6 +495,30 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
           console.error(
             `[triage] Multi-agent escalation failed for ${finding.fingerprint}: ${toErrorMessage(error)}`,
           );
+        }
+      }
+
+      // Filter source_threat_ids against the known threat model so
+      // hallucinated IDs (e.g. the agent inventing "T-99" when only T-01..T-05
+      // exist) don't land in persisted output or cross-references.
+      {
+        const knownIds = event.payload.knownThreatIds ?? [];
+        const referenced = result.sourceThreatIds ?? [];
+        if (knownIds.length > 0 && referenced.length > 0) {
+          const knownSet = new Set(knownIds);
+          const filtered = referenced.filter((id) => knownSet.has(id));
+          const dropped = referenced.filter((id) => !knownSet.has(id));
+          if (dropped.length > 0) {
+            console.error(
+              `[triage] dropped ${dropped.length} hallucinated threat ID(s) for ${finding.fingerprint}: ${dropped.join(", ")}`,
+            );
+          }
+          result.sourceThreatIds = filtered;
+        } else if (knownIds.length === 0 && referenced.length > 0) {
+          // No threat model loaded — the agent still returned IDs, which must
+          // be hallucinations. Drop them silently; the prompt already told the
+          // agent not to invent IDs.
+          result.sourceThreatIds = [];
         }
       }
 
@@ -588,11 +635,20 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
 
       const perFindingCost = findings.length > 0 ? costUsd / findings.length : 0;
       const missingFingerprintSet = new Set(missingFingerprints);
+      const enforceEvidence = deps.config.enforceTriageEvidence !== false;
+      const repoRoot = context.scanPath ?? context.repoRoot;
 
       for (const [idx, finding] of findings.entries()) {
         const result = results.get(finding.fingerprint);
+        const includedInBatch = result && !missingFingerprintSet.has(finding.fingerprint);
+        // Escalate tp/needs_review verdicts whose evidence fails validation:
+        // batch prompts elicit thinner per-finding detail than single-shot, so
+        // re-running through the single-shot enforcement wrapper gives the
+        // agent a chance to produce citations + chain before we accept it.
+        const needsEscalation =
+          includedInBatch && enforceEvidence ? !validateTriageEvidence(result, repoRoot).ok : false;
 
-        if (result && !missingFingerprintSet.has(finding.fingerprint)) {
+        if (includedInBatch && !needsEscalation && result) {
           result.triageCostUsd = perFindingCost;
           await bus.publish(
             createEvent("triage:result", runId, {
@@ -606,9 +662,10 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
             }),
           );
         } else {
-          // Escalate batch-incomplete findings to individual triage instead of
-          // accepting a synthesized result — individual triage has pre-read
-          // context and can spend more turns investigating.
+          // Escalate batch-incomplete findings and batch results whose
+          // evidence failed validation. Individual triage has pre-read
+          // context, more turns, and the enforcement wrapper to spend on
+          // deeper investigation.
           await bus.publish(
             createEvent("triage:finding-queued", runId, {
               context,

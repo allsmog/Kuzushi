@@ -4,11 +4,11 @@
  * Renders:   ⚡ Triaging 142 findings via claude-opus...
  */
 
-import chalk from "chalk";
-import { Text } from "ink";
+import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
 import type { Phase } from "../state.js";
+import { tokens } from "../tokens.js";
 
 const STAGE_ICONS: Record<string, string> = {
   scanning: icons.lightning,
@@ -18,10 +18,10 @@ const STAGE_ICONS: Record<string, string> = {
 };
 
 const STAGE_COLORS: Record<string, (s: string) => string> = {
-  scanning: chalk.redBright,
-  triaging: chalk.red,
-  verifying: chalk.yellow,
-  poc: chalk.white,
+  scanning: tokens.dangerStrong,
+  triaging: tokens.danger,
+  verifying: tokens.warn,
+  poc: tokens.strong,
 };
 
 interface StageHeaderProps {
@@ -31,12 +31,11 @@ interface StageHeaderProps {
 
 export function StageHeader({ phase, label }: StageHeaderProps): React.ReactElement {
   const icon = STAGE_ICONS[phase] ?? icons.active;
-  const colorFn = STAGE_COLORS[phase] ?? chalk.white;
+  const colorFn = STAGE_COLORS[phase] ?? tokens.strong;
 
   return (
-    <Text>
-      {"  "}
-      {colorFn(`${icon} ${label}`)}
-    </Text>
+    <Box paddingLeft={2}>
+      <Text>{colorFn(`${icon} ${label}`)}</Text>
+    </Box>
   );
 }

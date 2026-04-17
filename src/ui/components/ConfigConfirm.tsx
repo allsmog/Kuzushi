@@ -1,22 +1,17 @@
 /**
  * Config confirmation prompt for returning users on fresh scans.
  *
- * Shows resolved config and asks to proceed, edit, or quit.
- * NOT shown for --resume runs (those skip straight to pipeline).
- *
- *   ┌─ Config ────────────────────────────────────────────┐
- *   │  Model:     claude-opus       Severity: ERROR, WARNING │
- *   │  Tasks:     semgrep, codeql   Concurrency: 5           │
- *   │  Preset:    standard          Verify: yes               │
- *   └────────────────────────────────────────────────────────┘
- *
- *   [enter] proceed  [e] edit (opens wizard)  [q] quit
+ * Shows resolved config and asks to proceed, edit, or quit. Renders the
+ * resolved fields via a Table primitive so labels + values align. Keys
+ * are registered with the shared keybind footer.
  */
 
-import chalk from "chalk";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { boxFooter, boxHeader, formatCost, terminalCardWidth } from "../format.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { Table } from "../primitives/Table.js";
+import { tokens } from "../tokens.js";
 
 export interface ConfigConfirmData {
   model: string;
@@ -37,6 +32,11 @@ interface ConfigConfirmProps {
   onQuit: () => void;
 }
 
+interface Row {
+  label: string;
+  value: string;
+}
+
 export function ConfigConfirm({
   config,
   repoName,
@@ -46,80 +46,61 @@ export function ConfigConfirm({
 }: ConfigConfirmProps): React.ReactElement {
   const width = terminalCardWidth();
 
+  useRegisterKeybindings([
+    { keys: "Enter", label: "Start scan" },
+    { keys: "e", label: "Edit" },
+    { keys: "q", label: "Quit", secondary: true },
+  ]);
+
   useInput((input, key) => {
-    if (key.return || input === "y") {
-      onProceed();
-    } else if (input === "e") {
-      onEdit();
-    } else if (input === "q" || key.escape) {
-      onQuit();
-    }
+    if (key.return || input === "y") onProceed();
+    else if (input === "e") onEdit();
+    else if (input === "q" || key.escape) onQuit();
   });
 
   const modelShort = config.model.replace("anthropic:", "").replace("-latest", "");
+
+  const rows: Row[] = [
+    { label: "Model", value: modelShort },
+    { label: "Tasks", value: config.tasks.join(", ") },
+  ];
+  if (config.severity && config.severity.length > 0) {
+    rows.push({ label: "Severity", value: config.severity.join(", ") });
+  }
+  if (config.preset) rows.push({ label: "Preset", value: config.preset });
+  if (config.verify) rows.push({ label: "Verify", value: "yes" });
+  if (config.pocHarness) rows.push({ label: "PoC Harness", value: "yes" });
+  if (config.concurrency && config.concurrency > 1) {
+    rows.push({ label: "Concurrency", value: String(config.concurrency) });
+  }
+  if (config.budget != null && config.budget > 0) {
+    rows.push({ label: "Budget", value: formatCost(config.budget) });
+  }
 
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
       <Text>{boxHeader(`${repoName}`, width)}</Text>
       <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.dim("Press Enter to start this scan with the resolved config below.")}
-      </Text>
+      <Box paddingLeft={2}>
+        <Text>
+          {tokens.muted("Press Enter to start this scan with the resolved config below.")}
+        </Text>
+      </Box>
       <Text>{""}</Text>
-
-      <Text>
-        {"  "}
-        {chalk.dim("Model:")} {chalk.white(modelShort)}
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.dim("Tasks:")} {chalk.white(config.tasks.join(", "))}
-      </Text>
-
-      {config.severity && config.severity.length > 0 && (
-        <Text>
-          {"  "}
-          {chalk.dim("Severity:")} {config.severity.join(", ")}
-        </Text>
-      )}
-      {config.preset && (
-        <Text>
-          {"  "}
-          {chalk.dim("Preset:")} {config.preset}
-        </Text>
-      )}
-      {config.verify && (
-        <Text>
-          {"  "}
-          {chalk.dim("Verify:")} {chalk.green("yes")}
-        </Text>
-      )}
-      {config.pocHarness && (
-        <Text>
-          {"  "}
-          {chalk.dim("PoC Harness:")} {chalk.green("yes")}
-        </Text>
-      )}
-      {config.concurrency && config.concurrency > 1 && (
-        <Text>
-          {"  "}
-          {chalk.dim("Concurrency:")} {config.concurrency}
-        </Text>
-      )}
-      {config.budget != null && config.budget > 0 && (
-        <Text>
-          {"  "}
-          {chalk.dim("Budget:")} {formatCost(config.budget)}
-        </Text>
-      )}
-
-      <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.redBright.bold("[enter]")} start scan {chalk.dim("[e]")} edit {chalk.dim("[q]")} quit
-      </Text>
+      <Box paddingLeft={2}>
+        <Table<Row>
+          columns={[
+            { key: "label", width: 14, align: "left" },
+            { key: "value", flex: 1, align: "left", truncate: "end" },
+          ]}
+          rows={rows}
+          showHeader={false}
+          divider={false}
+          maxWidth={width - 2}
+          gap={2}
+        />
+      </Box>
       <Text>{boxFooter(width)}</Text>
     </Box>
   );

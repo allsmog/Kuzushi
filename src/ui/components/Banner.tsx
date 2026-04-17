@@ -7,9 +7,9 @@ import { spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import chalk from "chalk";
 import { Box, Static, Text } from "ink";
 import type React from "react";
+import { tokens } from "../tokens.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const assetsRoot = path.resolve(__dirname, "..", "..", "..", "assets");
@@ -45,8 +45,6 @@ function playStartupSound(): void {
 let soundPlayed = false;
 
 export function Banner(): React.ReactElement {
-  const rb = chalk.white.bold;
-  const dim = chalk.dim;
   const logoLines = loadLogo();
 
   if (!soundPlayed) {
@@ -69,20 +67,24 @@ export function Banner(): React.ReactElement {
               <Text>{""}</Text>
               <Text>{""}</Text>
               <Text>{""}</Text>
-              <Text>{chalk.italic.dim('"Bismillah"')}</Text>
+              <Text>{tokens.hint('"Bismillah"')}</Text>
             </Box>
           </Box>
           <Text>{""}</Text>
-          <Text>{rb("   ██╗  ██╗██╗   ██╗███████╗██╗   ██╗███████╗██╗  ██╗██╗")}</Text>
-          <Text>{rb("   ██║ ██╔╝██║   ██║╚══███╔╝██║   ██║██╔════╝██║  ██║██║")}</Text>
-          <Text>{rb("   █████╔╝ ██║   ██║  ███╔╝ ██║   ██║███████╗███████║██║")}</Text>
-          <Text>{rb("   ██╔═██╗ ██║   ██║ ███╔╝  ██║   ██║╚════██║██╔══██║██║")}</Text>
-          <Text>{rb("   ██║  ██╗╚██████╔╝███████╗╚██████╔╝███████║██║  ██║██║")}</Text>
-          <Text>{rb("   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝")}</Text>
+          <Box flexDirection="column" paddingLeft={3}>
+            <Text>{tokens.strong("\u2588\u2588\u2557  \u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557\u2588\u2588\u2557")}</Text>
+            <Text>{tokens.strong("\u2588\u2588\u2551 \u2588\u2588\u2554\u255D\u2588\u2588\u2551   \u2588\u2588\u2551\u255A\u2550\u2550\u2550\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551")}</Text>
+            <Text>{tokens.strong("\u2588\u2588\u2588\u2588\u2588\u2554\u255D \u2588\u2588\u2551   \u2588\u2588\u2551  \u2588\u2588\u2588\u2554\u255D \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551")}</Text>
+            <Text>{tokens.strong("\u2588\u2588\u2554\u2550\u2588\u2588\u2557 \u2588\u2588\u2551   \u2588\u2588\u2551 \u2588\u2588\u2588\u2554\u255D  \u2588\u2588\u2551   \u2588\u2588\u2551\u255A\u2550\u2550\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2551")}</Text>
+            <Text>{tokens.strong("\u2588\u2588\u2551  \u2588\u2588\u2557\u255A\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u255A\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551")}</Text>
+            <Text>{tokens.strong("\u255A\u2550\u255D  \u255A\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D\u255A\u2550\u255D  \u255A\u2550\u255D\u255A\u2550\u255D")}</Text>
+          </Box>
           <Text>{""}</Text>
-          <Text>
-            {chalk.white("   崩し ")} {dim("— Agentic SAST Orchestration")}
-          </Text>
+          <Box paddingLeft={3}>
+            <Text>
+              {tokens.strong("\u5D29\u3057 ")} {tokens.muted("\u2014 Agentic SAST Orchestration")}
+            </Text>
+          </Box>
           <Text>{""}</Text>
         </Box>
       )}

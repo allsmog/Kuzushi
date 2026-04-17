@@ -1,23 +1,18 @@
 /**
  * Structured diff display for patch previews.
  *
- * Renders unified diff format with colored additions/removals:
- *   ├─ Patch for sql-injection (src/api/users.ts)
- *   │    42  - db.query(`SELECT * WHERE name = '${name}'`);
- *   │    42  + db.query(`SELECT * WHERE name = ?`, [name]);
+ * Uses paddingLeft for indentation and tokens for color. Parse logic
+ * preserved from the earlier implementation.
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
+import { tokens } from "../tokens.js";
 
 interface DiffViewProps {
-  /** The unified diff string (output of git diff or similar). */
   diff: string;
-  /** Optional title shown above the diff. */
   title?: string;
-  /** Max lines to show (default 20). */
   maxLines?: number;
 }
 
@@ -35,63 +30,49 @@ export function DiffView({ diff, title, maxLines = 20 }: DiffViewProps): React.R
   return (
     <Box flexDirection="column">
       {title && (
-        <Text>
-          {"  "}
-          {chalk.bold(title)}
-        </Text>
+        <Box paddingLeft={2}>
+          <Text>{tokens.label(title)}</Text>
+        </Box>
       )}
-      {visible.map((line, i) => (
-        <DiffLine key={i} line={line} />
-      ))}
-      {truncated && (
-        <Text>
-          {"    "}
-          {chalk.dim(`... ${lines.length - maxLines} more lines`)}
-        </Text>
-      )}
+      <Box flexDirection="column" paddingLeft={4}>
+        {visible.map((line, i) => (
+          <DiffLineRow key={i} line={line} />
+        ))}
+        {truncated && (
+          <Text>{tokens.muted(`... ${lines.length - maxLines} more lines`)}</Text>
+        )}
+      </Box>
     </Box>
   );
 }
 
-function DiffLine({ line }: { line: DiffLine }): React.ReactElement {
-  const lineNum = line.lineNumber != null ? chalk.dim(String(line.lineNumber).padStart(4)) : "    ";
+function DiffLineRow({ line }: { line: DiffLine }): React.ReactElement {
+  const lineNum =
+    line.lineNumber != null ? tokens.muted(String(line.lineNumber).padStart(4)) : "    ";
 
   switch (line.type) {
     case "add":
       return (
         <Text>
-          {"    "}
-          {lineNum} {chalk.green(`+ ${line.content}`)}
+          {lineNum} {tokens.success(`+ ${line.content}`)}
         </Text>
       );
     case "remove":
       return (
         <Text>
-          {"    "}
-          {lineNum} {chalk.red(`- ${line.content}`)}
+          {lineNum} {tokens.danger(`- ${line.content}`)}
         </Text>
       );
     case "context":
       return (
         <Text>
-          {"    "}
-          {lineNum} {chalk.dim(`  ${line.content}`)}
+          {lineNum} {tokens.muted(`  ${line.content}`)}
         </Text>
       );
     case "hunk-header":
-      return (
-        <Text>
-          {"    "}
-          {chalk.dim(icons.ellipsis)}
-        </Text>
-      );
+      return <Text>{tokens.muted(icons.ellipsis)}</Text>;
     case "meta":
-      return (
-        <Text>
-          {"    "}
-          {chalk.dim(line.content)}
-        </Text>
-      );
+      return <Text>{tokens.muted(line.content)}</Text>;
   }
 }
 
@@ -103,7 +84,6 @@ function parseDiff(diff: string): DiffLine[] {
 
   for (const raw of rawLines) {
     if (raw.startsWith("@@")) {
-      // Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
       const match = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       if (match) {
         currentLineOld = parseInt(match[1]!, 10);

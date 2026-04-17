@@ -5,6 +5,7 @@ import type {
   StrideCategory,
   StrideThreat,
   ThreatModelDocument,
+  ThreatModelNarrative,
 } from "./agents/tasks/threat-modeling/types.js";
 
 const PERSISTENT_THREAT_MODEL_PATH = ".kuzushi/threat-model.json";
@@ -92,16 +93,123 @@ function formatStrideCategory(category: StrideCategory | string): string {
 
 /**
  * Render a ThreatModelDocument as a human-readable Markdown context document.
- * Produces sections matching Codex Cyber output: Overview, Trust Boundaries,
- * Attack Surface, Criticality Calibration.
+ * Produces sections matching Codex Cyber output: Overview, Trust Boundaries
+ * & Assumptions (with categorised inputs), Attack surface with attacker
+ * stories, Criticality calibration, and Out-of-scope.
+ *
+ * When `doc.narrative` is present, the narrative fields take precedence and
+ * the DFD/STRIDE data is rendered as secondary detail. When it is absent,
+ * falls back to the original DFD/count-based rendering for back-compat with
+ * older persisted `.kuzushi/threat-model.json` files.
  */
 export function renderThreatModelContext(doc: ThreatModelDocument): string {
   const lines: string[] = [];
+  const narrative = doc.narrative;
 
   // 1. Overview
   lines.push("### 1. Overview");
   lines.push("");
+  if (narrative?.overview) {
+    lines.push(narrative.overview);
+    lines.push("");
+  } else {
+    renderOverviewFromDfd(doc, lines);
+  }
 
+  // 2. Trust boundaries and assumptions
+  lines.push("### 2. Trust boundaries and assumptions");
+  lines.push("");
+  if (narrative) {
+    renderInputCategories(narrative, lines);
+  }
+  renderDfdTrustBoundaries(doc, lines);
+  if (!narrative) {
+    renderTrustZoneFallback(doc, lines);
+  }
+
+  // 3. Attack surface, mitigations and attacker stories
+  lines.push("### 3. Attack surface, mitigations and attacker stories");
+  lines.push("");
+  if (narrative && narrative.attackerStories.length > 0) {
+    renderAttackerStories(narrative, lines);
+  }
+  renderStrideThreats(doc, lines, /* asSecondary */ Boolean(narrative));
+
+  // 4. Criticality calibration
+  lines.push("### 4. Criticality calibration");
+  lines.push("");
+  if (narrative) {
+    renderCriticalityBuckets(narrative, lines);
+  }
+  renderSummaryCounts(doc, lines);
+
+  // 5. Out-of-scope (only when narrative provides it)
+  if (narrative && narrative.outOfScope.length > 0) {
+    lines.push("### 5. Out-of-scope / less critical classes");
+    lines.push("");
+    for (const item of narrative.outOfScope) {
+      lines.push(`- ${item}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+// ── Narrative-aware helpers ──
+
+function renderInputCategories(narrative: ThreatModelNarrative, lines: string[]): void {
+  const cats = narrative.inputCategories;
+  const blocks: Array<[string, string[]]> = [
+    ["Attacker-controlled inputs", cats.attackerControlled],
+    ["Operator-controlled inputs", cats.operatorControlled],
+    ["Developer-controlled inputs", cats.developerControlled],
+    ["External services / dependencies", cats.externalServices],
+    ["Sandbox boundary", cats.sandboxBoundary],
+    ["Assumptions", cats.assumptions],
+  ];
+  for (const [heading, items] of blocks) {
+    if (items.length === 0) continue;
+    lines.push(`**${heading}**`);
+    for (const item of items) lines.push(`- ${item}`);
+    lines.push("");
+  }
+}
+
+function renderAttackerStories(narrative: ThreatModelNarrative, lines: string[]): void {
+  lines.push("**Attacker stories**");
+  lines.push("");
+  for (const story of narrative.attackerStories) {
+    lines.push(`- **${story.title}** — ${story.narrative}`);
+    if (story.mitigation) {
+      lines.push(`  Mitigation: ${story.mitigation}`);
+    }
+    if (story.threatIds && story.threatIds.length > 0) {
+      lines.push(`  Related threats: ${story.threatIds.join(", ")}`);
+    }
+  }
+  lines.push("");
+}
+
+function renderCriticalityBuckets(narrative: ThreatModelNarrative, lines: string[]): void {
+  const buckets = narrative.criticalityBuckets;
+  const order: Array<[string, string[]]> = [
+    ["Critical", buckets.critical],
+    ["High", buckets.high],
+    ["Medium", buckets.medium],
+    ["Low", buckets.low],
+  ];
+  for (const [label, items] of order) {
+    if (items.length === 0) continue;
+    lines.push(`**${label}**`);
+    for (const item of items) lines.push(`- ${item}`);
+    lines.push("");
+  }
+}
+
+// ── DFD fallback helpers (used when no narrative is present, or alongside it as detail) ──
+
+function renderOverviewFromDfd(doc: ThreatModelDocument, lines: string[]): void {
   const processes = doc.dfd.elements.filter((e: DfdElement) => e.type === "process");
   const externalEntities = doc.dfd.elements.filter((e: DfdElement) => e.type === "external-entity");
   const dataStores = doc.dfd.elements.filter((e: DfdElement) => e.type === "data-store");
@@ -124,94 +232,102 @@ export function renderThreatModelContext(doc: ThreatModelDocument): string {
     lines.push(`Data flows: ${dataFlows.length} identified.`);
   }
   lines.push("");
+}
 
-  // 2. Trust boundaries & assumptions
-  lines.push("### 2. Trust boundaries and assumptions");
-  lines.push("");
-  if (doc.dfd.trustBoundaries.length > 0) {
-    for (const boundary of doc.dfd.trustBoundaries) {
-      lines.push(`- **${boundary.name}**: ${boundary.innerZone} \u2194 ${boundary.outerZone}`);
-      if (boundary.crossingFlows.length > 0) {
-        lines.push(`  Crossing flows: ${boundary.crossingFlows.join(", ")}`);
-      }
+function renderDfdTrustBoundaries(doc: ThreatModelDocument, lines: string[]): void {
+  if (doc.dfd.trustBoundaries.length === 0) {
+    if (!doc.narrative) {
+      lines.push("No explicit trust boundaries identified.");
+      lines.push("");
     }
-  } else {
-    lines.push("No explicit trust boundaries identified.");
+    return;
+  }
+  lines.push("**DFD trust boundaries**");
+  for (const boundary of doc.dfd.trustBoundaries) {
+    lines.push(`- **${boundary.name}**: ${boundary.innerZone} \u2194 ${boundary.outerZone}`);
+    if (boundary.crossingFlows.length > 0) {
+      lines.push(`  Crossing flows: ${boundary.crossingFlows.join(", ")}`);
+    }
   }
   lines.push("");
+}
 
-  // Trust zone assumptions from external entities
+function renderTrustZoneFallback(doc: ThreatModelDocument, lines: string[]): void {
+  const externalEntities = doc.dfd.elements.filter((e: DfdElement) => e.type === "external-entity");
   const zones = new Set(externalEntities.map((e: DfdElement) => e.trustZone).filter(Boolean));
-  if (zones.size > 0) {
-    lines.push("Trust zone assumptions:");
-    for (const zone of zones) {
-      const actors = externalEntities
-        .filter((e: DfdElement) => e.trustZone === zone)
-        .map((e: DfdElement) => e.name);
-      lines.push(`- **${zone}**: ${actors.join(", ")}`);
-    }
-    lines.push("");
+  if (zones.size === 0) return;
+  lines.push("Trust zone assumptions:");
+  for (const zone of zones) {
+    const actors = externalEntities
+      .filter((e: DfdElement) => e.trustZone === zone)
+      .map((e: DfdElement) => e.name);
+    lines.push(`- **${zone}**: ${actors.join(", ")}`);
   }
-
-  // 3. Attack surface & mitigations
-  lines.push("### 3. Attack surface, mitigations and attacker stories");
   lines.push("");
-  if (doc.threats.length > 0) {
-    // Group by STRIDE category
-    const byCategory = new Map<StrideCategory, StrideThreat[]>();
-    for (const threat of doc.threats) {
-      const existing = byCategory.get(threat.category) ?? [];
-      existing.push(threat);
-      byCategory.set(threat.category, existing);
-    }
-    for (const [category, threats] of byCategory) {
-      lines.push(
-        `**${formatStrideCategory(category)}** (${threats.length} threat${threats.length > 1 ? "s" : ""}):`,
-      );
-      lines.push("");
-      // Cap per-category to avoid overwhelming output
-      for (const threat of threats.slice(0, 10)) {
-        lines.push(`- **${threat.title}** [${threat.impact}]`);
-        lines.push(`  Attack vector: ${threat.attackVector}`);
-        if (threat.existingMitigations.length > 0) {
-          lines.push(`  Existing mitigations: ${threat.existingMitigations.join("; ")}`);
-        }
-        if (threat.missingMitigations.length > 0) {
-          lines.push(`  Missing mitigations: ${threat.missingMitigations.join("; ")}`);
-        }
-        if (threat.relatedCwe.length > 0) {
-          lines.push(`  CWE: ${threat.relatedCwe.join(", ")}`);
-        }
-      }
+}
+
+function renderStrideThreats(
+  doc: ThreatModelDocument,
+  lines: string[],
+  asSecondary: boolean,
+): void {
+  if (doc.threats.length === 0) {
+    if (!asSecondary) {
+      lines.push("No STRIDE threats identified.");
       lines.push("");
     }
-  } else {
-    lines.push("No STRIDE threats identified.");
+    return;
+  }
+  if (asSecondary) {
+    lines.push("**STRIDE detail**");
     lines.push("");
   }
+  const byCategory = new Map<StrideCategory, StrideThreat[]>();
+  for (const threat of doc.threats) {
+    const existing = byCategory.get(threat.category) ?? [];
+    existing.push(threat);
+    byCategory.set(threat.category, existing);
+  }
+  for (const [category, threats] of byCategory) {
+    lines.push(
+      `**${formatStrideCategory(category)}** (${threats.length} threat${threats.length > 1 ? "s" : ""}):`,
+    );
+    lines.push("");
+    // Cap per-category to avoid overwhelming output
+    for (const threat of threats.slice(0, 10)) {
+      lines.push(`- **${threat.title}** [${threat.impact}]`);
+      lines.push(`  Attack vector: ${threat.attackVector}`);
+      if (threat.existingMitigations.length > 0) {
+        lines.push(`  Existing mitigations: ${threat.existingMitigations.join("; ")}`);
+      }
+      if (threat.missingMitigations.length > 0) {
+        lines.push(`  Missing mitigations: ${threat.missingMitigations.join("; ")}`);
+      }
+      if (threat.relatedCwe.length > 0) {
+        lines.push(`  CWE: ${threat.relatedCwe.join(", ")}`);
+      }
+    }
+    lines.push("");
+  }
+}
 
-  // 4. Criticality calibration
-  lines.push("### 4. Criticality calibration");
+function renderSummaryCounts(doc: ThreatModelDocument, lines: string[]): void {
+  if (!doc.summary) return;
+  lines.push(`Total threats: ${doc.summary.total}`);
   lines.push("");
-  if (doc.summary) {
-    lines.push(`Total threats: ${doc.summary.total}`);
+  if (Object.keys(doc.summary.bySeverity).length > 0) {
+    lines.push("By severity:");
+    for (const [severity, count] of Object.entries(doc.summary.bySeverity)) {
+      if (count > 0) lines.push(`- ${severity}: ${count}`);
+    }
     lines.push("");
-    if (Object.keys(doc.summary.bySeverity).length > 0) {
-      lines.push("By severity:");
-      for (const [severity, count] of Object.entries(doc.summary.bySeverity)) {
-        if (count > 0) lines.push(`- ${severity}: ${count}`);
-      }
-      lines.push("");
-    }
-    if (Object.keys(doc.summary.byCategory).length > 0) {
-      lines.push("By STRIDE category:");
-      for (const [cat, count] of Object.entries(doc.summary.byCategory)) {
-        if (Number(count) > 0)
-          lines.push(`- ${formatStrideCategory(cat as StrideCategory)}: ${count}`);
-      }
-      lines.push("");
-    }
   }
-
-  return lines.join("\n");
+  if (Object.keys(doc.summary.byCategory).length > 0) {
+    lines.push("By STRIDE category:");
+    for (const [cat, count] of Object.entries(doc.summary.byCategory)) {
+      if (Number(count) > 0)
+        lines.push(`- ${formatStrideCategory(cat as StrideCategory)}: ${count}`);
+    }
+    lines.push("");
+  }
 }

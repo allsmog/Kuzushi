@@ -10,6 +10,8 @@ export interface RandoriArtifacts {
   s2Scope: Record<string, unknown> | null;
   s3Decomposition: Record<string, unknown> | null;
   s4Threats: Record<string, unknown> | null;
+  /** Narrative synthesis (S5) — Overview / InputCategories / AttackerStories / Criticality / OutOfScope. */
+  narrative: Record<string, unknown> | null;
 }
 
 export function readRandoriArtifacts(
@@ -22,6 +24,7 @@ export function readRandoriArtifacts(
     s2Scope: readJson(path.join(outputDir, "pasta-s2.json")),
     s3Decomposition: readJson(path.join(outputDir, "pasta-s3.json")),
     s4Threats: readJson(path.join(outputDir, "pasta-s4.json")),
+    narrative: readJson(path.join(outputDir, "pasta-narrative.json")),
   };
 }
 
@@ -156,6 +159,13 @@ export function mergeRandoriStageOutputs(
 
   dfd["elements"] = elements;
   merged["dfd"] = dfd;
+
+  // Narrative synthesis (S5) — pass through so the adapter can attach it to
+  // ThreatModelDocument.narrative. Snake_case keys are normalised by the adapter.
+  if (artifacts.narrative) {
+    merged["narrative"] = artifacts.narrative;
+  }
+
   return merged;
 }
 

@@ -3,12 +3,42 @@
  *
  * Creates a UIStore and either renders an Ink app (TTY) or registers
  * a plain-text fallback (non-TTY/piped output).
+ *
+ * Registers an `exit` handler that writes the ANSI "cursor show" sequence
+ * unconditionally so a crash, Ctrl+C during a modal, or an SDK abort never
+ * leaves a hidden cursor in the user's shell. This is redundant with
+ * `useCursorVisibility` at the component level but acts as a process-wide
+ * safety net.
  */
 import { createUIStore, type UIStore } from "./state.js";
 
 export interface UIRenderer {
   store: UIStore;
   cleanup: () => void;
+}
+
+const SHOW_CURSOR = "\u001b[?25h";
+
+let exitHandlerInstalled = false;
+
+function ensureExitCursorRestore(): void {
+  if (exitHandlerInstalled) return;
+  exitHandlerInstalled = true;
+  const restore = () => {
+    if (!process.stdout.isTTY) return;
+    try {
+      process.stdout.write(SHOW_CURSOR);
+    } catch {
+      /* noop */
+    }
+  };
+  process.once("exit", restore);
+  process.once("SIGINT", () => {
+    restore();
+  });
+  process.once("SIGTERM", () => {
+    restore();
+  });
 }
 
 /**
@@ -19,6 +49,7 @@ export interface UIRenderer {
  */
 export async function createUIRenderer(): Promise<UIRenderer> {
   const store = createUIStore();
+  ensureExitCursorRestore();
 
   if (process.stdout.isTTY) {
     // Detect terminal theme before rendering so colors adapt
@@ -32,7 +63,18 @@ export async function createUIRenderer(): Promise<UIRenderer> {
     const instance = render(createElement(App, { store }));
     return {
       store,
-      cleanup: () => instance.unmount(),
+      cleanup: () => {
+        instance.unmount();
+        // Ensure cursor is visible after unmount even if Ink's default
+        // restore ran before our exit handler installs.
+        if (process.stdout.isTTY) {
+          try {
+            process.stdout.write(SHOW_CURSOR);
+          } catch {
+            /* noop */
+          }
+        }
+      },
     };
   }
 

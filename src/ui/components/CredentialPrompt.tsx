@@ -1,32 +1,25 @@
 /**
  * Interactive credential prompt for missing API tokens.
  *
- * Shown when the Claude backend is selected but no ANTHROPIC_API_KEY or
- * ANTHROPIC_OAUTH_TOKEN is detected.  Offers three choices:
- *
- *   1. Paste an API key
- *   2. Paste an OAuth token
- *   3. Use inherited mode (rely on parent-process env / Claude Code login)
- *
- *   ┌─ Authentication Required ──────────────────────────────┐
- *   │                                                        │
- *   │  No Anthropic credentials detected.                    │
- *   │  Choose how to authenticate:                           │
- *   │                                                        │
- *   │  > ◆ API Key          Paste an ANTHROPIC_API_KEY       │
- *   │    ◆ OAuth Token      Paste an ANTHROPIC_OAUTH_TOKEN   │
- *   │    ◆ Inherited        Use credentials from environment │
- *   │                                                        │
- *   │  [↑↓] navigate  [enter] select  [q] quit              │
- *   └────────────────────────────────────────────────────────┘
+ * Choose step delegates to the shared <SelectList> primitive with a
+ * custom renderer that shows the detail line beneath the highlighted row.
+ * Input step delegates to <TextInput>. Keybindings flow through
+ * useRegisterKeybindings so the shared <KeybindFooter> stays accurate.
  */
 
-import chalk from "chalk";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
+import {
+  SelectList,
+  type SelectListItem,
+  type SelectListRenderContext,
+} from "../primitives/SelectList.js";
+import { TextInput } from "../primitives/TextInput.js";
+import { tokens } from "../tokens.js";
 
 export type CredentialChoice =
   | { kind: "api-key"; value: string }
@@ -66,99 +59,101 @@ const CHOICES: ChoiceOption[] = [
   },
 ];
 
+const CHOICE_ITEMS: ReadonlyArray<SelectListItem<ChoiceOption["id"]>> = CHOICES.map(
+  (c) => ({ id: c.id, label: c.name, detail: c.description }),
+);
+
 type Step = "choose" | "input";
+
+const CHOOSE_KEYBINDS = [
+  { keys: "\u2191/\u2193", label: "Navigate" },
+  { keys: "Enter", label: "Select" },
+  { keys: "q", label: "Quit", secondary: true },
+];
+
+const INPUT_KEYBINDS = [
+  { keys: "Enter", label: "Confirm" },
+  { keys: "Esc", label: "Back" },
+];
+
+function chooseRenderer(
+  ctx: SelectListRenderContext<ChoiceOption["id"]>,
+): React.ReactElement {
+  const opt = CHOICES.find((c) => c.id === ctx.item.id)!;
+  const name = ctx.isCursor ? tokens.strong(opt.name) : tokens.muted(opt.name);
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      <Text>
+        {ctx.cursorPrefix} {icons.complete} {name} {tokens.muted(opt.description)}
+      </Text>
+      {ctx.isCursor && (
+        <Box paddingLeft={6}>
+          <Text>{opt.detail}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
 
 export function CredentialPrompt({
   onComplete,
   onCancel,
 }: CredentialPromptProps): React.ReactElement {
   const [step, setStep] = useState<Step>("choose");
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const [chosenOption, setChosenOption] = useState<"api-key" | "oauth-token" | null>(null);
   const [inputValue, setInputValue] = useState("");
   const width = terminalCardWidth();
 
-  useInput((input, key) => {
-    if (step === "choose") {
-      if (input === "q" || key.escape) {
-        onCancel();
-        return;
-      }
-      if (key.upArrow) {
-        setSelectedIndex((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setSelectedIndex((i) => Math.min(CHOICES.length - 1, i + 1));
-        return;
-      }
-      if (key.return) {
-        const choice = CHOICES[selectedIndex]!;
-        if (choice.id === "inherited") {
-          onComplete({ kind: "inherited" });
-        } else {
-          setChosenOption(choice.id);
-          setStep("input");
-          setInputValue("");
-        }
-      }
-      return;
-    }
+  useRegisterKeybindings(step === "choose" ? CHOOSE_KEYBINDS : INPUT_KEYBINDS);
 
-    // Input step — collecting the token value
-    if (key.escape) {
-      setStep("choose");
-      setChosenOption(null);
+  // Escape/q → cancel at the choose step. SelectList owns arrow/Enter keys.
+  useInput(
+    (input, key) => {
+      if (input === "q" || key.escape) onCancel();
+    },
+    { isActive: step === "choose" },
+  );
+
+  const handleSelect = (id: ChoiceOption["id"]) => {
+    if (id === "inherited") {
+      onComplete({ kind: "inherited" });
+    } else {
+      setChosenOption(id);
+      setStep("input");
       setInputValue("");
-      return;
     }
-
-    if (key.return) {
-      const trimmed = inputValue.trim();
-      if (trimmed.length > 0) {
-        onComplete({ kind: chosenOption!, value: trimmed });
-      }
-      return;
-    }
-
-    if (key.backspace || key.delete) {
-      setInputValue((v) => v.slice(0, -1));
-      return;
-    }
-
-    // Accumulate printable characters
-    if (input && !key.ctrl && !key.meta) {
-      setInputValue((v) => v + input);
-    }
-  });
+  };
 
   if (step === "input") {
     const label = chosenOption === "api-key" ? "API Key" : "OAuth Token";
-    const masked =
-      inputValue.length > 0
-        ? inputValue.slice(0, 8) + "*".repeat(Math.max(0, inputValue.length - 8))
-        : "";
-
     return (
       <Box flexDirection="column">
         <Text>{""}</Text>
         <Text>{boxHeader(`Enter ${label}`, width)}</Text>
         <Text>{""}</Text>
-        <Text>
-          {"  "}
-          {chalk.dim(`Paste your ${label} below:`)}
-        </Text>
+        <Box paddingLeft={2}>
+          <Text>{tokens.muted(`Paste your ${label} below:`)}</Text>
+        </Box>
         <Text>{""}</Text>
-        <Text>
-          {"  "}
-          {chalk.redBright(icons.arrow)}{" "}
-          {masked ? chalk.white(masked) : chalk.dim("(paste and press enter)")}
-        </Text>
-        <Text>{""}</Text>
-        <Text>
-          {"  "}
-          {chalk.dim("[enter] confirm  [esc] back")}
-        </Text>
+        <Box paddingLeft={2}>
+          <TextInput
+            value={inputValue}
+            onChange={setInputValue}
+            onSubmit={(value) => {
+              const trimmed = value.trim();
+              if (trimmed.length > 0 && chosenOption) {
+                onComplete({ kind: chosenOption, value: trimmed });
+              }
+            }}
+            onCancel={() => {
+              setStep("choose");
+              setChosenOption(null);
+              setInputValue("");
+            }}
+            placeholder="(paste and press enter)"
+            mask
+          />
+        </Box>
         <Text>{boxFooter(width)}</Text>
       </Box>
     );
@@ -169,42 +164,20 @@ export function CredentialPrompt({
       <Text>{""}</Text>
       <Text>{boxHeader("Authentication Required", width)}</Text>
       <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.dim("No Anthropic credentials detected.")}
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.dim("Choose how to authenticate:")}
-      </Text>
+      <Box paddingLeft={2}>
+        <Text>{tokens.muted("No Anthropic credentials detected.")}</Text>
+      </Box>
+      <Box paddingLeft={2}>
+        <Text>{tokens.muted("Choose how to authenticate:")}</Text>
+      </Box>
       <Text>{""}</Text>
 
-      {CHOICES.map((option, i) => {
-        const isSelected = i === selectedIndex;
-        const prefix = isSelected ? chalk.redBright(icons.arrow) : " ";
-        const name = isSelected ? chalk.white.bold(option.name) : chalk.dim(option.name);
+      <SelectList<ChoiceOption["id"]>
+        items={CHOICE_ITEMS}
+        onSelect={handleSelect}
+        renderItem={chooseRenderer}
+      />
 
-        return (
-          <Box key={i} flexDirection="column">
-            <Text>
-              {"  "}
-              {prefix} {icons.complete} {name} {chalk.dim(option.description)}
-            </Text>
-            {isSelected && (
-              <Text>
-                {"      "}
-                {chalk.white(option.detail)}
-              </Text>
-            )}
-          </Box>
-        );
-      })}
-
-      <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.dim("[↑↓] navigate  [enter] select  [q] quit")}
-      </Text>
       <Text>{boxFooter(width)}</Text>
     </Box>
   );

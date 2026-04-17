@@ -148,6 +148,86 @@ describe("generateMarkdownReport", () => {
     db.close();
   });
 
+  it("renders codex-cyber-style per-finding sections (title, summary, validation, artifact, attack path)", () => {
+    const db = initDb(":memory:");
+    const runId = "run-md-codex";
+
+    createRun(db, runId, "repo", makeConfig(), makeScanOpts());
+    updateRunStatus(db, runId, "triaging");
+
+    const finding = { ...makeFinding(), fingerprint: "fp-codex" };
+    const triage: TriageResult = {
+      fingerprint: "fp-codex",
+      verdict: "tp",
+      confidence: 0.92,
+      rationale: "Raw rationale — used only when no attack narrative exists.",
+      verificationSteps: [
+        "Identify shell default allowed tools (src/copilot/shell.ts:28).",
+        "Verify allowedTools passes into agent session (src/agent-runtime/claude.ts:433-454).",
+      ],
+      fixPatch: null,
+      title: "Copilot shell enables Bash tool for LLM command execution",
+      displaySeverity: "high",
+      attackNarrative:
+        "Alice, controlling repo content, triggers prompt injection; Bob runs kuzushi shell and the LLM invokes Bash, granting Alice RCE on Bob's host.",
+      codeCitations: [
+        {
+          filePath: "src/copilot/shell.ts",
+          startLine: 28,
+          endLine: 28,
+          snippet: 'const SHELL_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "LS"];',
+          description: "Shell whitelists Bash by default",
+        },
+      ],
+      attackPath: {
+        chain: [
+          "Untrusted repo content",
+          "Prompt injection into LLM session",
+          "Bash tool dispatch",
+          "bash -c executes on host",
+        ],
+        narrative: "Repo content flows into LLM, which invokes Bash.",
+        likelihoodReasoning: "Medium — requires running the shell with LLM credentials.",
+        impactReasoning: "High — arbitrary code execution on operator host.",
+      },
+      assumptions: ["Operator runs the interactive copilot shell with LLM credentials."],
+      controls: [
+        {
+          name: "Tool policy framework",
+          description: "Supports allow/deny layers, but Bash is allowed by default.",
+          filePath: "src/prompts/tool-policy.ts",
+        },
+      ],
+      blindspots: ["No dynamic PoC executed."],
+    };
+    upsertFinding(db, finding, triage, "repo", "HEAD");
+
+    const markdown = generateMarkdownReport(db, "repo", {}, runId);
+
+    // Title used as heading, not ruleId
+    expect(markdown).toContain("### Copilot shell enables Bash tool for LLM command execution");
+    // Display severity surfaced, uppercased
+    expect(markdown).toContain("- Severity: **HIGH**");
+    // Summary uses attack narrative, not raw rationale
+    expect(markdown).toContain("**Summary.**");
+    expect(markdown).toContain("Alice, controlling repo content");
+    // Validation steps present and numbered
+    expect(markdown).toContain("**Validation.**");
+    expect(markdown).toContain("1. Identify shell default allowed tools");
+    expect(markdown).toContain("2. Verify allowedTools passes into agent session");
+    // Evidence block renamed to "Validation artifact"
+    expect(markdown).toContain("**Validation artifact.**");
+    expect(markdown).toContain("SHELL_ALLOWED_TOOLS");
+    // Attack-path chain rendered with arrows
+    expect(markdown).toContain("**Attack-path analysis.**");
+    expect(markdown).toContain("Untrusted repo content --> Prompt injection into LLM session");
+    // Likelihood and impact are first-class labels
+    expect(markdown).toContain("**Likelihood.** Medium");
+    expect(markdown).toContain("**Impact.** High");
+
+    db.close();
+  });
+
   it("escapes triple-backtick sequences in PoC payload to prevent fence injection", () => {
     const db = initDb(":memory:");
     const runId = "run-md-fence";

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { cleanupBatchFiles, writeBatchFile } from "./agent-runtime/batch-files.js";
@@ -362,6 +363,219 @@ export async function triageFindingWithAgent(
   return {
     result: parsedResult,
     costUsd,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Evidence enforcement
+//
+// Triage prompts ASK for citations, attack paths, and level reasoning, but
+// nothing in the harness rejects a tp/needs_review verdict that arrives with
+// empty citations or a fabricated file path. `validateTriageEvidence` runs
+// after each agent response; when the response is weak, the enforcement
+// wrapper re-invokes triage once with an explicit reinforcement prompt that
+// tells the agent what was missing and instructs it to use GetCallers /
+// GetFunctionBody / GetCallees. If the second response is still weak, the
+// verdict is downgraded to needs_review with the gaps recorded in blindspots.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Outcome of `validateTriageEvidence`. */
+export interface EvidenceValidation {
+  ok: boolean;
+  /** Human-readable reasons explaining why evidence is insufficient. */
+  reasons: string[];
+}
+
+/** Minimum citation count for tp/needs_review verdicts. */
+const MIN_CITATIONS_FOR_ACTIONABLE_VERDICT = 2;
+/** Minimum attack-path chain length for tp verdicts. */
+const MIN_CHAIN_STEPS_FOR_TP = 2;
+
+/**
+ * Resolve a citation path against the repo root, handling both absolute and
+ * repo-relative paths. Returns true only when the path escapes to an existing
+ * file on disk (directories and non-existent paths return false).
+ */
+function citationFileExists(filePath: string, repoRoot: string): boolean {
+  if (!filePath) return false;
+  try {
+    const abs = path.isAbsolute(filePath) ? filePath : path.join(repoRoot, filePath);
+    return existsSync(abs);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate that a TriageResult carries evidence commensurate with its verdict.
+ *
+ * - `fp` / `by_design`: always considered valid (these dismissals don't need
+ *   citations).
+ * - `tp` / `needs_review`: must cite at least 2 code locations whose file
+ *   paths exist on disk. `tp` additionally requires an attack_path chain with
+ *   at least 2 steps.
+ */
+export function validateTriageEvidence(result: TriageResult, repoRoot: string): EvidenceValidation {
+  if (result.verdict === "fp" || result.verdict === "by_design") {
+    return { ok: true, reasons: [] };
+  }
+
+  const citations = result.codeCitations ?? [];
+  const existing = citations.filter((c) => citationFileExists(c.filePath, repoRoot));
+  const reasons: string[] = [];
+
+  if (citations.length < MIN_CITATIONS_FOR_ACTIONABLE_VERDICT) {
+    reasons.push(
+      `verdict="${result.verdict}" requires at least ${MIN_CITATIONS_FOR_ACTIONABLE_VERDICT} code_citations (got ${citations.length})`,
+    );
+  }
+  if (existing.length < MIN_CITATIONS_FOR_ACTIONABLE_VERDICT) {
+    const missing = citations
+      .filter((c) => !citationFileExists(c.filePath, repoRoot))
+      .map((c) => c.filePath);
+    reasons.push(
+      `at least ${MIN_CITATIONS_FOR_ACTIONABLE_VERDICT} citations must reference files that exist in the repo (got ${existing.length} existing; missing: ${missing.join(", ") || "none listed"})`,
+    );
+  }
+  if (result.verdict === "tp") {
+    const chain = result.attackPath?.chain ?? [];
+    if (chain.length < MIN_CHAIN_STEPS_FOR_TP) {
+      reasons.push(
+        `tp verdict requires attack_path.chain with at least ${MIN_CHAIN_STEPS_FOR_TP} steps (got ${chain.length})`,
+      );
+    }
+  }
+
+  return { ok: reasons.length === 0, reasons };
+}
+
+/**
+ * Build a reinforcement prompt that follows up a weak triage response. Lists
+ * the exact validation failures and instructs the agent to use the semantic
+ * navigation tools to produce stronger evidence.
+ */
+export function buildEvidenceReinforcementPrompt(reasons: string[]): string {
+  return [
+    "Your previous response does not meet the evidence requirements for this verdict:",
+    ...reasons.map((r) => `- ${r}`),
+    "",
+    "Re-investigate and return a stronger response. You MUST:",
+    "1. Use GetCallers to find attacker-controlled call sites of the flagged function.",
+    "2. Use GetFunctionBody to inspect sanitizers, validators, or guards along the path.",
+    "3. Use GetCallees to understand what downstream functions the vulnerable code invokes.",
+    `4. Return at least ${MIN_CITATIONS_FOR_ACTIONABLE_VERDICT} code_citations, each with file_path/start_line/end_line/snippet/description.`,
+    "   Every file_path MUST exist in the repository — do not fabricate paths or line numbers.",
+    `5. If this is a true positive, return attack_path.chain with at least ${MIN_CHAIN_STEPS_FOR_TP} steps from entry to impact.`,
+    "",
+    'If after re-investigation you cannot find sufficient evidence, return verdict "needs_review"',
+    "with confidence <= 0.5 and list the evidence gaps in blindspots[].",
+  ].join("\n");
+}
+
+/**
+ * Downgrade a tp/needs_review result whose evidence remains insufficient.
+ * Sets verdict to needs_review, caps confidence at 0.5, and appends the
+ * validation reasons to blindspots[] so the report documents the gap.
+ */
+function downgradeForInsufficientEvidence(result: TriageResult, reasons: string[]): TriageResult {
+  if (result.verdict === "fp" || result.verdict === "by_design") return result;
+  const prefixed = reasons.map((r) => `Evidence-enforcement: ${r}`);
+  return {
+    ...result,
+    verdict: "needs_review",
+    confidence: Math.min(result.confidence, 0.5),
+    blindspots: [...(result.blindspots ?? []), ...prefixed],
+  };
+}
+
+/**
+ * Wraps {@link triageFindingWithAgent} with evidence enforcement. When the
+ * first response is tp/needs_review but fails {@link validateTriageEvidence},
+ * re-invokes triage once with a reinforcement prompt. If the second response
+ * is still insufficient, the result is downgraded to needs_review with the
+ * gaps recorded in blindspots[]. Costs from both calls are summed.
+ *
+ * Pass `maxEnforcementAttempts: 0` to get the original single-shot behaviour.
+ * Pass `escalationModel` to use a stronger (and typically more expensive)
+ * model for the re-invocation only — leaves the common case on the cheaper
+ * triage model.
+ */
+export async function triageFindingWithEvidenceEnforcement(
+  registry: TriageConfigProvider,
+  finding: Finding,
+  repoRoot: string,
+  repoName: string,
+  model: string,
+  repoContextOrRuntimeOptions?: RepoContext | TriageRuntimeOptions,
+  maybeRuntimeOptions: TriageRuntimeOptions = {},
+  extraPromptContext?: string,
+  triageTemplate?: string,
+  precomputedSystemPromptPrefix?: string,
+  maxEnforcementAttempts: number = 1,
+  escalationModel?: string,
+): Promise<TriageOutput> {
+  const first = await triageFindingWithAgent(
+    registry,
+    finding,
+    repoRoot,
+    repoName,
+    model,
+    repoContextOrRuntimeOptions,
+    maybeRuntimeOptions,
+    extraPromptContext,
+    triageTemplate,
+    precomputedSystemPromptPrefix,
+  );
+
+  if (maxEnforcementAttempts <= 0) return first;
+
+  const firstValidation = validateTriageEvidence(first.result, repoRoot);
+  if (firstValidation.ok) return first;
+
+  const retryModel = escalationModel && escalationModel !== model ? escalationModel : model;
+  const modelNote = retryModel === model ? "" : ` (escalating to model=${retryModel})`;
+  log.info(
+    `Evidence enforcement: re-invoking triage for ${finding.fingerprint} (${firstValidation.reasons.length} reason(s))${modelNote}`,
+  );
+
+  const reinforcement = buildEvidenceReinforcementPrompt(firstValidation.reasons);
+  const combinedContext = extraPromptContext
+    ? `${extraPromptContext}\n\n${reinforcement}`
+    : reinforcement;
+
+  let second: TriageOutput;
+  try {
+    second = await triageFindingWithAgent(
+      registry,
+      finding,
+      repoRoot,
+      repoName,
+      retryModel,
+      repoContextOrRuntimeOptions,
+      maybeRuntimeOptions,
+      combinedContext,
+      triageTemplate,
+      precomputedSystemPromptPrefix,
+    );
+  } catch (err) {
+    log.warn(
+      `Evidence-enforcement re-invocation failed for ${finding.fingerprint}: ${toErrorMessage(err)}. Returning downgraded first response.`,
+    );
+    return {
+      result: downgradeForInsufficientEvidence(first.result, firstValidation.reasons),
+      costUsd: first.costUsd,
+    };
+  }
+
+  const totalCost = first.costUsd + second.costUsd;
+  const secondValidation = validateTriageEvidence(second.result, repoRoot);
+  if (secondValidation.ok) {
+    return { result: second.result, costUsd: totalCost };
+  }
+
+  return {
+    result: downgradeForInsufficientEvidence(second.result, secondValidation.reasons),
+    costUsd: totalCost,
   };
 }
 

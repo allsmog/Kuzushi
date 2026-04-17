@@ -1,20 +1,15 @@
 /**
  * Pre-scan config summary banner.
  *
- * Shows resolved configuration before the pipeline begins so the user
- * knows what settings are in effect. Rendered once via <Static>.
- *
- *   ╭─ Config ────────────────────────────────────────────╮
- *   │  Model: claude-opus       Severity: ERROR, WARNING  │
- *   │  Tasks: semgrep, codeql   Concurrency: 5            │
- *   │  Backend: pi-ai           Budget: $5.00             │
- *   ╰────────────────────────────────────────────────────╯
+ * Renders the resolved configuration as an aligned two-column Table so
+ * labels and values land on the same column across rows regardless of
+ * label length.
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
 import { boxFooter, boxHeader, formatCost, terminalCardWidth } from "../format.js";
+import { Table } from "../primitives/Table.js";
 
 export interface ConfigBannerData {
   model: string;
@@ -30,37 +25,49 @@ interface ConfigBannerProps {
   config: ConfigBannerData;
 }
 
+interface Row {
+  label: string;
+  value: string;
+}
+
 export function ConfigBanner({ config }: ConfigBannerProps): React.ReactElement {
   const width = terminalCardWidth();
-  const rows: Array<[string, string]> = [
-    ["Model", config.model],
-    ["Tasks", config.tasks.join(", ")],
+  const rows: Row[] = [
+    { label: "Model", value: config.model },
+    { label: "Tasks", value: config.tasks.join(", ") },
   ];
   if (config.backend && config.backend !== "claude") {
-    rows.push(["Backend", config.backend]);
+    rows.push({ label: "Backend", value: config.backend });
   }
   if (config.scanMode && config.scanMode !== "sequential") {
-    rows.push(["Scan mode", config.scanMode]);
+    rows.push({ label: "Scan mode", value: config.scanMode });
   }
   if (config.severity && config.severity.length > 0) {
-    rows.push(["Severity", config.severity.join(", ")]);
+    rows.push({ label: "Severity", value: config.severity.join(", ") });
   }
   if (config.concurrency && config.concurrency > 1) {
-    rows.push(["Concurrency", String(config.concurrency)]);
+    rows.push({ label: "Concurrency", value: String(config.concurrency) });
   }
   if (config.budget != null && config.budget > 0) {
-    rows.push(["Budget", formatCost(config.budget)]);
+    rows.push({ label: "Budget", value: formatCost(config.budget) });
   }
 
   return (
     <Box flexDirection="column">
       <Text>{boxHeader("Config", width)}</Text>
-      {rows.map(([label, value]) => (
-        <Text key={label}>
-          {"  "}
-          {chalk.dim(`${label}:`)} {value}
-        </Text>
-      ))}
+      <Box paddingLeft={2}>
+        <Table<Row>
+          columns={[
+            { key: "label", width: 14, align: "left" },
+            { key: "value", flex: 1, align: "left", truncate: "end" },
+          ]}
+          rows={rows}
+          showHeader={false}
+          divider={false}
+          maxWidth={width - 2}
+          gap={2}
+        />
+      </Box>
       <Text>{boxFooter(width)}</Text>
     </Box>
   );

@@ -237,6 +237,12 @@ export interface ActionableFinding {
   blindspots?: string[];
   sourceThreatIds?: string[];
   verificationSteps?: string[];
+  /** Human-readable finding title from triage (e.g. "Copilot shell enables Bash tool"). */
+  title?: string;
+  /** Triage-assessed display severity ("critical" | "high" | "medium" | "low"). */
+  displaySeverity?: "critical" | "high" | "medium" | "low";
+  /** 2-3 sentence Alice-and-Bob attack scenario from triage. */
+  attackNarrative?: string;
   blame?: { sha: string; author: string; date: string; summary: string };
   introducedIn?: string;
 }
@@ -291,6 +297,43 @@ export interface UIState {
   review: ReviewSession | null;
   /** Shell mode state — interactive copilot. */
   shell?: ShellState | null;
+  /**
+   * Wayfinding state — optional breadcrumb shown at the top of the UI for
+   * nested flows. Null/undefined means "hide the breadcrumb row".
+   */
+  breadcrumb?: {
+    segments: ReadonlyArray<string>;
+    currentStep?: number;
+    totalSteps?: number;
+  } | null;
+}
+
+const PREFLIGHT_STEP_ORDER = [
+  "wizard",
+  "confirm",
+  "credentials",
+  "context-intake",
+  "threat-editor",
+] as const;
+
+const PREFLIGHT_SEGMENT_LABELS: Record<(typeof PREFLIGHT_STEP_ORDER)[number], string> = {
+  wizard: "Preset",
+  confirm: "Confirm",
+  credentials: "Credentials",
+  "context-intake": "Context Intake",
+  "threat-editor": "Threat Model",
+};
+
+function preflightBreadcrumb(
+  kind: (typeof PREFLIGHT_STEP_ORDER)[number],
+): UIState["breadcrumb"] {
+  const stepIdx = PREFLIGHT_STEP_ORDER.indexOf(kind);
+  if (stepIdx < 0) return null;
+  return {
+    segments: ["Setup", PREFLIGHT_SEGMENT_LABELS[kind]],
+    currentStep: stepIdx + 1,
+    totalSteps: PREFLIGHT_STEP_ORDER.length,
+  };
 }
 
 export interface ShellHistoryEntry {
@@ -413,6 +456,7 @@ export class UIStore {
       stages: [],
       preflight: null,
       review: null,
+      breadcrumb: null,
     };
   }
 
@@ -434,6 +478,11 @@ export class UIStore {
     if (preflight) {
       this.preflightReturnMode = returnMode ?? this.state.mode;
     }
+    const breadcrumb = preflight
+      ? preflightBreadcrumb(preflight.kind)
+      : this.state.mode === "preflight"
+        ? null
+        : this.state.breadcrumb ?? null;
     this.state = {
       ...this.state,
       preflight,
@@ -442,7 +491,17 @@ export class UIStore {
         : this.state.mode === "preflight"
           ? this.preflightReturnMode
           : this.state.mode,
+      breadcrumb,
     };
+    this.notify();
+  }
+
+  /**
+   * Set (or clear) the wayfinding breadcrumb. Consumers can also rely on
+   * `setPreflight` populating it automatically for preflight flows.
+   */
+  setBreadcrumb(breadcrumb: UIState["breadcrumb"]): void {
+    this.state = { ...this.state, breadcrumb };
     this.notify();
   }
 

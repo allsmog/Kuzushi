@@ -1,28 +1,25 @@
 /**
  * Interactive setup wizard for first-time users.
  *
- * Walks through preset selection, then optionally model/severity/verification.
+ * Walks through preset selection, then optionally model/save-location.
  * Saves config to .kuzushi/config.json or ~/.kuzushi/config.json.
  *
- *   ┌─ Welcome to Kuzushi ──────────────────────────────────┐
- *   │                                                        │
- *   │  Choose a scan preset:                                 │
- *   │                                                        │
- *   │  > ⚡ Quick       semgrep only (~30s, ~$0.50)          │
- *   │    ◆ Standard     semgrep + taint analysis (~3min)     │
- *   │    ◆ Deep         all scanners + threat model (~10min) │
- *   │    ⚙ Custom       pick individual options              │
- *   │                                                        │
- *   │  [↑↓] navigate  [enter] select                        │
- *   └────────────────────────────────────────────────────────┘
+ * Uses the shared <SelectList> primitive with a custom renderItem that
+ * shows a detail block beneath the currently-highlighted option.
  */
 
-import chalk from "chalk";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
+import {
+  SelectList,
+  type SelectListItem,
+  type SelectListRenderContext,
+} from "../primitives/SelectList.js";
+import { tokens } from "../tokens.js";
 
 export interface WizardResult {
   preset: string;
@@ -39,7 +36,7 @@ interface SetupWizardProps {
   onCancel: () => void;
 }
 
-interface PresetOption {
+interface RichOption {
   id: string;
   icon: string;
   name: string;
@@ -48,7 +45,7 @@ interface PresetOption {
   summary: string;
 }
 
-const PRESETS: PresetOption[] = [
+const PRESETS: RichOption[] = [
   {
     id: "fast",
     icon: icons.lightning,
@@ -83,7 +80,7 @@ const PRESETS: PresetOption[] = [
   },
   {
     id: "reference",
-    icon: chalk.redBright("◉"),
+    icon: tokens.danger("\u25C9"),
     name: "Reference",
     description: "augment current config",
     detail:
@@ -92,27 +89,96 @@ const PRESETS: PresetOption[] = [
   },
 ];
 
-type WizardStep = "preset" | "model" | "save" | "done";
+type WizardStep = "preset" | "model" | "save";
 
-const MODELS = [
+const STEP_ORDER: WizardStep[] = ["preset", "model", "save"];
+
+const MODELS: RichOption[] = [
   {
     id: "anthropic:claude-sonnet-4-6",
+    icon: icons.complete,
     name: "Claude Sonnet",
-    detail: "Fast, cost-effective (default)",
+    description: "Fast, cost-effective (default)",
+    detail: "Balanced option. Best price/accuracy ratio for most scans.",
+    summary: "Picks triage, verify, and PoC generation without breaking the bank.",
   },
-  { id: "anthropic:claude-opus-4-6", name: "Claude Opus", detail: "Most accurate, slower" },
-  { id: "anthropic:claude-haiku-4-5", name: "Claude Haiku", detail: "Fastest, cheapest" },
+  {
+    id: "anthropic:claude-opus-4-6",
+    icon: icons.active,
+    name: "Claude Opus",
+    description: "Most accurate, slower",
+    detail: "Highest recall + reasoning depth. Significantly higher cost.",
+    summary: "Use for deep investigative runs or when accuracy beats cost.",
+  },
+  {
+    id: "anthropic:claude-haiku-4-5",
+    icon: icons.lightning,
+    name: "Claude Haiku",
+    description: "Fastest, cheapest",
+    detail: "Speed-first model. Lower accuracy; skip verify-heavy presets.",
+    summary: "Ideal for huge repos where per-finding cost dominates.",
+  },
 ];
 
-const SAVE_OPTIONS = [
+const SAVE_OPTIONS: RichOption[] = [
   {
-    id: "project" as const,
+    id: "project",
+    icon: icons.complete,
     name: "Save to project",
-    detail: ".kuzushi/config.json (shared with team)",
+    description: ".kuzushi/config.json",
+    detail: "Commit-ready path. Shares settings with everyone on the team.",
+    summary: "Recommended when the settings apply broadly to this repo.",
   },
-  { id: "global" as const, name: "Save globally", detail: "~/.kuzushi/config.json (personal)" },
-  { id: "none" as const, name: "Don't save", detail: "Use these settings for this run only" },
+  {
+    id: "global",
+    icon: icons.complete,
+    name: "Save globally",
+    description: "~/.kuzushi/config.json",
+    detail: "Per-user path. Keeps settings private to your machine.",
+    summary: "Use when preferences reflect your workflow, not the repo.",
+  },
+  {
+    id: "none",
+    icon: icons.info,
+    name: "Don't save",
+    description: "Use for this run only",
+    detail: "No file written. Settings discarded after this scan.",
+    summary: "Pick when you're experimenting and don't want artifacts.",
+  },
 ];
+
+function toSelectItems(options: RichOption[]): SelectListItem<string>[] {
+  return options.map((opt) => ({
+    id: opt.id,
+    label: opt.name,
+    detail: opt.description,
+  }));
+}
+
+function richRenderer(options: RichOption[]) {
+  return (ctx: SelectListRenderContext<string>): React.ReactElement => {
+    const opt = options.find((o) => o.id === ctx.item.id);
+    if (!opt) return <Text>{ctx.item.label}</Text>;
+    const name = ctx.isCursor ? tokens.strong(opt.name) : tokens.muted(opt.name);
+    return (
+      <Box flexDirection="column" paddingLeft={2}>
+        <Text>
+          {ctx.cursorPrefix} {opt.icon} {name} {tokens.muted(opt.description)}
+        </Text>
+        {ctx.isCursor && (
+          <>
+            <Box paddingLeft={6}>
+              <Text>{tokens.muted(opt.detail)}</Text>
+            </Box>
+            <Box paddingLeft={6}>
+              <Text>{tokens.strong(opt.summary)}</Text>
+            </Box>
+          </>
+        )}
+      </Box>
+    );
+  };
+}
 
 export function SetupWizard({
   repoName,
@@ -120,54 +186,21 @@ export function SetupWizard({
   onCancel,
 }: SetupWizardProps): React.ReactElement {
   const [step, setStep] = useState<WizardStep>("preset");
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const [result, setResult] = useState<Partial<WizardResult>>({});
   const width = terminalCardWidth();
 
+  useRegisterKeybindings([
+    { keys: "\u2191/\u2193", label: "Navigate" },
+    { keys: "Enter", label: "Select" },
+    { keys: "q", label: "Quit", secondary: true },
+  ]);
+
   const currentOptions =
-    step === "preset" ? PRESETS : step === "model" ? MODELS : step === "save" ? SAVE_OPTIONS : [];
-
-  useInput((input, key) => {
-    if (input === "q" || key.escape) {
-      onCancel();
-      return;
-    }
-
-    if (key.upArrow) {
-      setSelectedIndex((i) => Math.max(0, i - 1));
-      return;
-    }
-    if (key.downArrow) {
-      setSelectedIndex((i) => Math.min(currentOptions.length - 1, i + 1));
-      return;
-    }
-
-    if (key.return) {
-      if (step === "preset") {
-        const preset = PRESETS[selectedIndex]!;
-        setResult((r) => ({ ...r, preset: preset.id }));
-        setStep("model");
-        setSelectedIndex(0);
-      } else if (step === "model") {
-        const model = MODELS[selectedIndex]!;
-        setResult((r) => ({ ...r, model: model.id }));
-        setStep("save");
-        setSelectedIndex(0);
-      } else if (step === "save") {
-        const save = SAVE_OPTIONS[selectedIndex]!;
-        const final: WizardResult = {
-          preset: result.preset!,
-          model: result.model,
-          saveLocation: save.id,
-        };
-        onComplete(final);
-      }
-    }
-  });
+    step === "preset" ? PRESETS : step === "model" ? MODELS : SAVE_OPTIONS;
 
   const stepTitle =
     step === "preset"
-      ? `Setup — ${repoName}`
+      ? `Setup \u2014 ${repoName}`
       : step === "model"
         ? "Choose a model"
         : "Save configuration?";
@@ -179,56 +212,56 @@ export function SetupWizard({
         ? "Which AI model for triage?"
         : "Where should we save these settings?";
 
+  const currentStep = STEP_ORDER.indexOf(step) + 1;
+
+  const handleSelect = (id: string) => {
+    if (step === "preset") {
+      setResult((r) => ({ ...r, preset: id }));
+      setStep("model");
+    } else if (step === "model") {
+      setResult((r) => ({ ...r, model: id }));
+      setStep("save");
+    } else {
+      const final: WizardResult = {
+        preset: result.preset!,
+        model: result.model,
+        saveLocation: id as "project" | "global" | "none",
+      };
+      onComplete(final);
+    }
+  };
+
+  // Esc/q handling — delegated to a one-off listener rather than tangling the
+  // SelectList's useInput. isActive gating ensures no keystroke leak.
+  useEscapeCancel(onCancel);
+
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
       <Text>{boxHeader(stepTitle, width)}</Text>
       <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.dim(stepHint)}
-      </Text>
+      <Box paddingLeft={2}>
+        <Text>{tokens.muted(stepHint)}</Text>
+      </Box>
+      <Box paddingLeft={2}>
+        <Text>{tokens.hint(`Step ${currentStep} of ${STEP_ORDER.length}`)}</Text>
+      </Box>
       <Text>{""}</Text>
 
-      {currentOptions.map((option, i) => {
-        const isSelected = i === selectedIndex;
-        const prefix = isSelected ? chalk.redBright(icons.arrow) : " ";
-        const name = isSelected ? chalk.white.bold(option.name) : chalk.dim(option.name);
-        const icon = "icon" in option ? (option as PresetOption).icon : icons.complete;
-        const desc =
-          "description" in option
-            ? chalk.dim((option as PresetOption).description)
-            : chalk.dim(option.detail);
-        const summary = "summary" in option ? (option as PresetOption).summary : option.detail;
+      <SelectList
+        items={toSelectItems(currentOptions)}
+        onSelect={handleSelect}
+        renderItem={richRenderer(currentOptions)}
+      />
 
-        return (
-          <Box key={i} flexDirection="column">
-            <Text>
-              {"  "}
-              {prefix} {icon} {name} {desc}
-            </Text>
-            {isSelected && (
-              <>
-                <Text>
-                  {"      "}
-                  {chalk.dim(option.detail)}
-                </Text>
-                <Text>
-                  {"      "}
-                  {chalk.white(summary)}
-                </Text>
-              </>
-            )}
-          </Box>
-        );
-      })}
-
-      <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.dim("[↑↓] navigate  [enter] select  [q] quit")}
-      </Text>
       <Text>{boxFooter(width)}</Text>
     </Box>
   );
+}
+
+/** Minimal Escape / "q" cancel handler. */
+function useEscapeCancel(onCancel: () => void): void {
+  useInput((input, key) => {
+    if (input === "q" || key.escape) onCancel();
+  });
 }
