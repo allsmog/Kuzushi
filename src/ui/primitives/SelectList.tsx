@@ -146,9 +146,7 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
           </Box>
         );
       })}
-      {isActive ? null : (
-        <Text>{tokens.hint(`  ${icons.dot} inactive`)}</Text>
-      )}
+      {isActive ? null : <Text>{tokens.hint(`  ${icons.dot} inactive`)}</Text>}
     </Box>
   );
 }

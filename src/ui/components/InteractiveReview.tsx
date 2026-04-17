@@ -98,8 +98,7 @@ export function InteractiveReview({
         <Text>{tokens.successStrong(`${icons.success} Review complete`)}</Text>
         <Text>
           {tokens.muted("tp:")} {tally.tp} {tokens.muted("fp:")} {tally.fp}{" "}
-          {tokens.muted("by_design:")} {tally.by_design} {tokens.muted("skipped:")}{" "}
-          {tally.skipped}
+          {tokens.muted("by_design:")} {tally.by_design} {tokens.muted("skipped:")} {tally.skipped}
         </Text>
         <Text>{""}</Text>
       </Box>

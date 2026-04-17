@@ -19,9 +19,7 @@ export interface UseCursorVisibilityOptions {
   restoreOnExit?: boolean;
 }
 
-export function useCursorVisibility(
-  options: UseCursorVisibilityOptions = {},
-): void {
+export function useCursorVisibility(options: UseCursorVisibilityOptions = {}): void {
   const { visible = false, restoreOnExit = true } = options;
 
   useEffect(() => {

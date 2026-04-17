@@ -161,8 +161,7 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
 
   const hasValidation =
     finding.verificationSteps !== undefined && finding.verificationSteps.length > 0;
-  const hasDetails =
-    details.length > 0 || finding.corroboratingSignals.length > 0 || hasValidation;
+  const hasDetails = details.length > 0 || finding.corroboratingSignals.length > 0 || hasValidation;
 
   const summary = (
     <Box flexDirection="column">
@@ -201,9 +200,7 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
   }
 
   const expandableHintCount =
-    details.length +
-    (finding.corroboratingSignals.length > 0 ? 1 : 0) +
-    (hasValidation ? 1 : 0);
+    details.length + (finding.corroboratingSignals.length > 0 ? 1 : 0) + (hasValidation ? 1 : 0);
 
   return (
     <Box flexDirection="column" paddingLeft={2}>

@@ -66,11 +66,7 @@ program
   .name("kuzushi")
   .description("Kuzushi — security-native AI operating environment")
   .option("--verbose", "Show debug-level diagnostics", false)
-  .option(
-    "--debug",
-    "Expand progressive-disclosure sections and show raw stack traces",
-    false,
-  )
+  .option("--debug", "Expand progressive-disclosure sections and show raw stack traces", false)
   .version((createRequire(import.meta.url)("../package.json") as { version: string }).version);
 
 program.hook("preAction", (_thisCommand, actionCommand) => {

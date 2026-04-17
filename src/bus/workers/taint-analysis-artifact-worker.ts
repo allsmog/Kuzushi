@@ -55,7 +55,10 @@ export function registerTaintAnalysisArtifactWorker(
       );
       // Also save to persistent path for cross-run persistence
       try {
-        savePersistentThreatModel(state.repoRoot, output["document"] as unknown as ThreatModelDocument);
+        savePersistentThreatModel(
+          state.repoRoot,
+          output["document"] as unknown as ThreatModelDocument,
+        );
       } catch {
         // best-effort — don't fail the pipeline
       }

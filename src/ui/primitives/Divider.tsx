@@ -18,12 +18,7 @@ export interface DividerProps {
   title?: string;
 }
 
-export const Divider: FC<DividerProps> = ({
-  width,
-  char = "\u2500",
-  dim = true,
-  title,
-}) => {
+export const Divider: FC<DividerProps> = ({ width, char = "\u2500", dim = true, title }) => {
   const resolvedWidth = width ?? process.stdout.columns ?? 80;
   const safeWidth = Math.max(4, resolvedWidth);
   const fill = (n: number) => char.repeat(Math.max(0, n));

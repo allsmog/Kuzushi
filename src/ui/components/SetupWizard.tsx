@@ -195,8 +195,7 @@ export function SetupWizard({
     { keys: "q", label: "Quit", secondary: true },
   ]);
 
-  const currentOptions =
-    step === "preset" ? PRESETS : step === "model" ? MODELS : SAVE_OPTIONS;
+  const currentOptions = step === "preset" ? PRESETS : step === "model" ? MODELS : SAVE_OPTIONS;
 
   const stepTitle =
     step === "preset"

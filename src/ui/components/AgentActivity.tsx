@@ -33,7 +33,9 @@ export function AgentActivity({
 
   const summary = (
     <Box>
-      <Text>[{latest.index}/{latest.total}] </Text>
+      <Text>
+        [{latest.index}/{latest.total}]{" "}
+      </Text>
       <Spinner color="warn" />
       <Text> {tokens.muted(fingerprint.slice(0, 12))}\u2026</Text>
     </Box>

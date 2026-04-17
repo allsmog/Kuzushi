@@ -14,8 +14,8 @@ import { Box, Static, Text, useApp, useInput } from "ink";
 import type React from "react";
 import { useRef, useState } from "react";
 import { buildShellPrompt } from "../../copilot/shell.js";
-import { useUIState } from "../hooks.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useUIState } from "../hooks.js";
 import { MultilineText } from "../primitives/MultilineText.js";
 import type { ShellHistoryEntry, ShellState, UIStore } from "../state.js";
 import { tokens } from "../tokens.js";
@@ -32,9 +32,7 @@ const IDLE_KEYBINDS = [
   { keys: "Ctrl+C", label: "Exit", secondary: true },
 ];
 
-const PROCESSING_KEYBINDS = [
-  { keys: "Ctrl+C", label: "Abort" },
-];
+const PROCESSING_KEYBINDS = [{ keys: "Ctrl+C", label: "Abort" }];
 
 export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const state = useUIState(store);
