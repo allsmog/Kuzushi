@@ -1,4 +1,5 @@
 export { createCoreSastModule } from "./core-sast.js";
+export { createNDayDiffHunterModule } from "./n-day-diff-hunter.js";
 export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
 export type {
   CopilotModule,
