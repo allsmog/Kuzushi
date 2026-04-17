@@ -911,18 +911,26 @@ export class PipelineOrchestrator {
 
       const outcomes = tasksToRun.map((taskId) => this.waitForTaskOutcome(runId, taskId));
 
-      for (const taskId of tasksToRun) {
-        const task = this.deps.taskRegistry.get(taskId);
-        await this.bus.publish(
-          createEvent("task:start", runId, {
-            context: state.context,
-            taskId,
-            outputKind: task.outputKind,
-            input: state.scanOpts,
-            upstreamOutputs: new Map(state.taskOutputs),
-          }),
-        );
-      }
+      // Fan-out `task:start` events in parallel so the tasks in a stage
+      // genuinely run concurrently. The previous sequential `for await`
+      // was essentially free for the in-process bus (emit is synchronous)
+      // but serialised dispatch for any bus that awaits real delivery
+      // (HTTP, queue-backed) and obscured the parallel intent in reads.
+      const upstreamSnapshot = new Map(state.taskOutputs);
+      await Promise.all(
+        tasksToRun.map((taskId) => {
+          const task = this.deps.taskRegistry.get(taskId);
+          return this.bus.publish(
+            createEvent("task:start", runId, {
+              context: state.context,
+              taskId,
+              outputKind: task.outputKind,
+              input: state.scanOpts,
+              upstreamOutputs: upstreamSnapshot,
+            }),
+          );
+        }),
+      );
 
       const resolved = await allSettledCollect(outcomes);
       const successes = resolved.filter((o) => o.kind === "complete");
@@ -949,18 +957,21 @@ export class PipelineOrchestrator {
         for (const id of retryIds) taskRetryCount.set(id, (taskRetryCount.get(id) ?? 0) + 1);
 
         const retryOutcomes = retryIds.map((taskId) => this.waitForTaskOutcome(runId, taskId));
-        for (const taskId of retryIds) {
-          const task = this.deps.taskRegistry!.get(taskId);
-          await this.bus.publish(
-            createEvent("task:start", runId, {
-              context: state.context,
-              taskId,
-              outputKind: task.outputKind,
-              input: state.scanOpts,
-              upstreamOutputs: new Map(state.taskOutputs),
-            }),
-          );
-        }
+        const retryUpstreamSnapshot = new Map(state.taskOutputs);
+        await Promise.all(
+          retryIds.map((taskId) => {
+            const task = this.deps.taskRegistry!.get(taskId);
+            return this.bus.publish(
+              createEvent("task:start", runId, {
+                context: state.context,
+                taskId,
+                outputKind: task.outputKind,
+                input: state.scanOpts,
+                upstreamOutputs: retryUpstreamSnapshot,
+              }),
+            );
+          }),
+        );
 
         const retryResolved = await allSettledCollect(retryOutcomes);
         const retrySuccesses = retryResolved.filter((o) => o.kind === "complete");
