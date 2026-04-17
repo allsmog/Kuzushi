@@ -76,4 +76,37 @@ describe("CLI surface", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("--module-filter");
   }, 40000);
+
+  it("refuses --dynamic-analysis in non-TTY without --yes", () => {
+    const repoDir = makeTempRepo();
+    const result = runCli(["scan", repoDir, "--verify", "--dynamic-analysis"]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("LLM-generated code");
+    expect(result.stderr).toContain("--yes");
+    expect(result.stderr).toContain("KUZUSHI_YES_RUN_GENERATED_CODE");
+  }, 40000);
+
+  it("accepts KUZUSHI_YES_RUN_GENERATED_CODE=1 as an explicit opt-in", () => {
+    const repoDir = makeTempRepo();
+    // We ask for --dry-run so the scan aborts before running tasks; the
+    // gate still fires earlier in the command setup.
+    const result = spawnSync(
+      tsxBin,
+      [cliPath, "scan", repoDir, "--verify", "--dynamic-analysis", "--dry-run"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ANTHROPIC_API_KEY: "sk-ant-test-placeholder",
+          KUZUSHI_YES_RUN_GENERATED_CODE: "1",
+        },
+      },
+    );
+    // With --dry-run + env opt-in the command should complete without the
+    // "refusing to run LLM-generated code" banner. Status may still be
+    // non-zero for unrelated reasons (missing binaries on CI etc.); we
+    // just assert the gate didn't fire.
+    expect(result.stderr).not.toContain("Refusing to run LLM-generated code");
+  }, 40000);
 });

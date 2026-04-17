@@ -231,6 +231,14 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
 
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
 
+  // Gate code-execution features behind explicit confirmation. `pocExecute`
+  // and `dynamicAnalysisEnabled` both instruct the orchestrator to run
+  // LLM-generated proof-of-concept harnesses inside `pocSandbox`. Even with
+  // the sandbox (process/docker), running generated code against a target
+  // is a meaningful security decision; we force the operator to opt in
+  // per-invocation rather than silently honouring a flag or config key.
+  ensureCodeExecutionOptIn(config, opts);
+
   // Interactive credential prompt for the Claude backend when no credentials are detected.
   const isClaudeBackend = (config.agentRuntimeBackend ?? "claude") === "claude";
   if (isClaudeBackend && !opts.resume && process.stdout.isTTY) {
@@ -284,6 +292,54 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     resetTerminalOutput();
     cleanupUI();
   }
+}
+
+/**
+ * Guardrail for features that execute LLM-generated code against the target
+ * (`pocExecute`, `dynamicAnalysisEnabled`). If either is enabled, require one
+ * of the following explicit opt-ins, in priority order:
+ *
+ *   1. `--yes` / `--assume-yes` CLI flag on the scan command.
+ *   2. `KUZUSHI_YES_RUN_GENERATED_CODE=1` in the environment (for CI).
+ *   3. An interactive TTY — the UI will prompt via the existing
+ *      setup/confirmation flow before any code runs.
+ *
+ * Non-TTY invocations without an opt-in fail fast with an actionable
+ * `CliUsageError`. We do not print the banner and proceed; users running
+ * kuzushi in CI should make the decision deliberately per-run.
+ */
+function ensureCodeExecutionOptIn(config: KuzushiConfig, opts: ScanCommandOptions): void {
+  const runsGeneratedCode = config.dynamicAnalysisEnabled === true || config.pocExecute === true;
+  if (!runsGeneratedCode) return;
+
+  const explicitYes = opts.yes === true || process.env["KUZUSHI_YES_RUN_GENERATED_CODE"] === "1";
+  if (explicitYes) return;
+
+  // TTY users see an interactive confirmation later in the scan pipeline
+  // (via the credential/context prompts); no need to block here.
+  if (process.stdout.isTTY && process.stdin.isTTY) return;
+
+  const reasons: string[] = [];
+  if (config.dynamicAnalysisEnabled === true) reasons.push("dynamicAnalysisEnabled");
+  if (config.pocExecute === true) reasons.push("pocExecute");
+
+  throw new CliUsageError(
+    [
+      `Refusing to run LLM-generated code in a non-interactive context.`,
+      ``,
+      `The following feature(s) would execute generated PoC harnesses:`,
+      ...reasons.map((r) => `  • ${r}`),
+      ``,
+      `Even with pocSandbox=${String(config.pocSandbox ?? "process")}, running generated code`,
+      `against the target is a deliberate security decision. Opt in by:`,
+      ``,
+      `  • kuzushi scan <repo> --yes ...`,
+      `  • KUZUSHI_YES_RUN_GENERATED_CODE=1 kuzushi scan <repo> ...`,
+      ``,
+      `To scan without executing generated code, drop --dynamic-analysis and`,
+      `unset \`pocExecute\` / \`dynamicAnalysisEnabled\` in your config.`,
+    ].join("\n"),
+  );
 }
 
 export async function resolveMonorepoExecution(params: {

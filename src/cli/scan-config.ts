@@ -74,6 +74,11 @@ export interface ScanCommandOptions {
   modulePriority?: string;
   maxModules?: number;
   dryRun?: boolean;
+  /**
+   * Explicit opt-in for running LLM-generated PoC harnesses (via
+   * `--dynamic-analysis` / `pocExecute`). Required in non-TTY contexts.
+   */
+  yes?: boolean;
 }
 
 export function applyScanCommandConfigOverrides(
