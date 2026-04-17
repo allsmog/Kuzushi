@@ -2,7 +2,6 @@
  * Full scan summary display using box-drawing sections.
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
 import {
@@ -15,10 +14,17 @@ import {
   terminalCardWidth,
 } from "../format.js";
 import { icons } from "../icons.js";
+import { Table } from "../primitives/Table.js";
 import type { SummaryData } from "../state.js";
+import { tokens } from "../tokens.js";
 import { AttackChainDiagram } from "./AttackChainDiagram.js";
 import { FindingCard } from "./FindingCard.js";
 import { TrophyScreen } from "./TrophyScreen.js";
+
+interface VerdictRow {
+  label: string;
+  value: string;
+}
 
 interface ScanSummaryProps {
   data: SummaryData;
@@ -31,12 +37,12 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
   const actionableCount = counts.tp + counts.needs_review;
   const riskLabel =
     data.exploitable > 0
-      ? chalk.red.bold("Critical")
+      ? tokens.dangerStrong("Critical")
       : counts.tp > 0
-        ? chalk.red("High")
+        ? tokens.danger("High")
         : counts.needs_review > 0
-          ? chalk.yellow("Review")
-          : chalk.green("Low");
+          ? tokens.warn("Review")
+          : tokens.success("Low");
   const nextAction =
     data.exploitable > 0
       ? "Fix exploitable findings first."
@@ -74,31 +80,33 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       <Text>{boxHeader(`${icons.complete} Scan Results`, width)}</Text>
       <Text>{""}</Text>
 
-      <Text>
-        {"  "}
-        {chalk.dim("Risk:")} {riskLabel}
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.dim("Actionable:")} {actionableCount} of {total} triaged
-      </Text>
-      {hasVerificationData && (
-        <Text>
-          {"  "}
-          {chalk.dim("Exploitable:")} {data.exploitable}
-        </Text>
-      )}
-      <Text>
-        {"  "}
-        {chalk.dim("Next:")} {nextAction}
-      </Text>
+      <Box paddingLeft={2}>
+        <Table<VerdictRow>
+          columns={[
+            { key: "label", width: 14, align: "left" },
+            { key: "value", flex: 1, align: "left", truncate: "end" },
+          ]}
+          rows={[
+            { label: "Risk", value: riskLabel },
+            { label: "Actionable", value: `${actionableCount} of ${total} triaged` },
+            ...(hasVerificationData
+              ? [{ label: "Exploitable", value: String(data.exploitable) }]
+              : []),
+            { label: "Next", value: nextAction },
+          ]}
+          showHeader={false}
+          divider={false}
+          maxWidth={width - 2}
+          gap={2}
+        />
+      </Box>
 
       {/* Failed tasks warning */}
       {data.failedTasks.length > 0 && (
         <Text>
           {"  "}
-          {chalk.red("Scanners failed:")} {data.failedTasks.join(", ")}{" "}
-          {chalk.dim("(results may be incomplete)")}
+          {tokens.danger("Scanners failed:")} {data.failedTasks.join(", ")}{" "}
+          {tokens.muted("(results may be incomplete)")}
         </Text>
       )}
 
@@ -106,7 +114,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {data.extractionDegradation && data.extractionDegradation.status !== "ok" && (
         <Text>
           {"  "}
-          {(data.extractionDegradation.status === "failed" ? chalk.red : chalk.yellow)(
+          {(data.extractionDegradation.status === "failed" ? tokens.danger : tokens.warn)(
             "Extraction:",
           )}{" "}
           {data.extractionDegradation.status} [{data.extractionDegradation.reasons.join(", ")}]
@@ -115,79 +123,90 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       {data.stitchDegradation && (
         <Text>
           {"  "}
-          {chalk.yellow("Stitch:")} degraded [{data.stitchDegradation.reason}]
+          {tokens.warn("Stitch:")} degraded [{data.stitchDegradation.reason}]
         </Text>
       )}
       {data.tiPriorDegraded && (
         <Text>
           {"  "}
-          {chalk.yellow("TI Prior:")} degraded
+          {tokens.warn("TI Prior:")} degraded
         </Text>
       )}
 
-      {/* Verdict counts */}
-      <Text>
-        {"  "}
-        {chalk.dim("Total triaged:")} {total}
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.red.bold(`${icons.error} True positives:`)} {counts.tp}
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.green(`${icons.success} False positives:`)} {counts.fp}
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.yellow(`${icons.warning} Needs review:`)} {counts.needs_review}
-      </Text>
+      {/* Verdict counts — aligned via Table primitive */}
+      <Box paddingLeft={2}>
+        <Table<VerdictRow>
+          columns={[
+            { key: "label", width: 26, align: "left" },
+            { key: "value", width: 8, align: "right" },
+          ]}
+          rows={[
+            { label: tokens.muted("Total triaged"), value: String(total) },
+            {
+              label: tokens.dangerStrong(`${icons.error} True positives`),
+              value: String(counts.tp),
+            },
+            {
+              label: tokens.success(`${icons.success} False positives`),
+              value: String(counts.fp),
+            },
+            {
+              label: tokens.warn(`${icons.warning} Needs review`),
+              value: String(counts.needs_review),
+            },
+          ]}
+          showHeader={false}
+          divider={false}
+          maxWidth={width - 2}
+          gap={2}
+        />
+      </Box>
 
       {data.triageErrors > 0 && (
         <Text>
           {"  "}
-          {chalk.red("Triage errors:")} {data.triageErrors}
+          {tokens.danger("Triage errors:")} {data.triageErrors}
         </Text>
       )}
       {data.skippedLowConfidence > 0 && (
         <Text>
           {"  "}
-          {chalk.dim("Skipped (low confidence):")} {data.skippedLowConfidence}
+          {tokens.muted("Skipped (low confidence):")} {data.skippedLowConfidence}
         </Text>
       )}
       {data.skippedByFpFilter > 0 && (
         <Text>
           {"  "}
-          {chalk.dim("Skipped (hard exclusions):")} {data.skippedByFpFilter}
+          {tokens.muted("Skipped (hard exclusions):")} {data.skippedByFpFilter}
         </Text>
       )}
       {data.softSuppressedFindings > 0 && (
         <Text>
           {"  "}
-          {chalk.dim("Soft-suppressed findings:")} {data.softSuppressedFindings}
+          {tokens.muted("Soft-suppressed findings:")} {data.softSuppressedFindings}
         </Text>
       )}
       {data.skippedByLlmRescore > 0 && (
         <Text>
           {"  "}
-          {chalk.dim("Skipped (LLM rescore):")} {data.skippedByLlmRescore}
+          {tokens.muted("Skipped (LLM rescore):")} {data.skippedByLlmRescore}
         </Text>
       )}
       {data.corroboratedClusters > 0 && (
         <Text>
           {"  "}
-          {chalk.dim("Corroborated clusters:")} {data.corroboratedClusters}
+          {tokens.muted("Corroborated clusters:")} {data.corroboratedClusters}
         </Text>
       )}
       {(data.verifyGateAutoAccepted > 0 || data.verifyGateSkipped > 0) && (
         <>
           <Text>
             {"  "}
-            {chalk.dim("Gate auto-accepted:")} {data.verifyGateAutoAccepted}
+            {tokens.muted("Gate auto-accepted:")} {data.verifyGateAutoAccepted}
           </Text>
           <Text>
             {"  "}
-            {chalk.dim("Gate skipped:")} {data.verifyGateSkipped}
+            {tokens.muted("Gate skipped:")} {data.verifyGateSkipped}
           </Text>
         </>
       )}
@@ -197,9 +216,9 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
         <>
           <Text>{""}</Text>
           {miniBarChart([
-            { label: "tp", value: counts.tp, color: chalk.red },
-            { label: "fp", value: counts.fp, color: chalk.green },
-            { label: "needs_review", value: counts.needs_review, color: chalk.yellow },
+            { label: "tp", value: counts.tp, color: tokens.danger },
+            { label: "fp", value: counts.fp, color: tokens.success },
+            { label: "needs_review", value: counts.needs_review, color: tokens.warn },
           ]).map((line, i) => (
             <Text key={i}>
               {"  "}
@@ -216,20 +235,20 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{boxDivider(width)}</Text>
           <Text>
             {"  "}
-            {chalk.bold("Verification")}
+            {tokens.label("Verification")}
           </Text>
           <Text>
             {"  "}
-            {chalk.red.bold(`${icons.error} Exploitable:`)} {data.exploitable}
+            {tokens.dangerStrong(`${icons.error} Exploitable:`)} {data.exploitable}
           </Text>
           <Text>
             {"  "}
-            {chalk.green(`${icons.success} Not exploitable:`)} {data.notExploitable}
+            {tokens.success(`${icons.success} Not exploitable:`)} {data.notExploitable}
           </Text>
           {data.verifyErrors > 0 && (
             <Text>
               {"  "}
-              {chalk.red("Verification errors:")} {data.verifyErrors}
+              {tokens.danger("Verification errors:")} {data.verifyErrors}
             </Text>
           )}
         </>
@@ -242,26 +261,26 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{boxDivider(width)}</Text>
           <Text>
             {"  "}
-            {chalk.bold("PoC Harnesses")}
+            {tokens.label("PoC Harnesses")}
           </Text>
           <Text>
             {"  "}
-            {chalk.cyan(`${icons.gear} Generated:`)} {data.pocGenerated}
+            {tokens.accent(`${icons.gear} Generated:`)} {data.pocGenerated}
           </Text>
           <Text>
             {"  "}
-            {chalk.yellow(`${icons.pending} Skipped:`)} {data.pocSkipped}
+            {tokens.warn(`${icons.pending} Skipped:`)} {data.pocSkipped}
           </Text>
           {data.pocHarnessErrors > 0 && (
             <Text>
               {"  "}
-              {chalk.red("Errors:")} {data.pocHarnessErrors}
+              {tokens.danger("Errors:")} {data.pocHarnessErrors}
             </Text>
           )}
           {data.pocOutputDir && (
             <Text>
               {"  "}
-              {chalk.dim("Output dir:")} {data.pocOutputDir}
+              {tokens.muted("Output dir:")} {data.pocOutputDir}
             </Text>
           )}
         </>
@@ -273,7 +292,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>
             {"  "}
-            {chalk.cyan("Variant findings:")} {data.variantFindings}
+            {tokens.accent("Variant findings:")} {data.variantFindings}
           </Text>
         </>
       )}
@@ -285,30 +304,30 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{boxDivider(width)}</Text>
           <Text>
             {"  "}
-            {chalk.bold("Dynamic Analysis")}
+            {tokens.label("Dynamic Analysis")}
           </Text>
           <Text>
             {"    "}
-            {chalk.red.bold(`Confirmed:`)} {data.dynamicConfirmed}
+            {tokens.dangerStrong(`Confirmed:`)} {data.dynamicConfirmed}
           </Text>
           <Text>
             {"    "}
-            {chalk.yellow(`Interesting:`)} {data.dynamicInteresting}
+            {tokens.warn(`Interesting:`)} {data.dynamicInteresting}
           </Text>
           <Text>
             {"    "}
-            {chalk.green(`Rejected:`)} {data.dynamicRejected}
+            {tokens.success(`Rejected:`)} {data.dynamicRejected}
           </Text>
           {data.dynamicErrors > 0 && (
             <Text>
               {"    "}
-              {chalk.red("Errors:")} {data.dynamicErrors}
+              {tokens.danger("Errors:")} {data.dynamicErrors}
             </Text>
           )}
           {data.dynamicCostUsd > 0 && (
             <Text>
               {"    "}
-              {chalk.dim("Cost:")} {formatCost(data.dynamicCostUsd)}
+              {tokens.muted("Cost:")} {formatCost(data.dynamicCostUsd)}
             </Text>
           )}
         </>
@@ -320,7 +339,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>
             {"  "}
-            {chalk.dim("Incremental:")} {chalk.green(`${data.incrementalCachedFiles} cached`)},{" "}
+            {tokens.muted("Incremental:")} {tokens.success(`${data.incrementalCachedFiles} cached`)},{" "}
             {data.incrementalRescannedFiles} rescanned
             {data.incrementalDepExpandedFiles > 0
               ? `, ${data.incrementalDepExpandedFiles} dependency-expanded`
@@ -336,32 +355,32 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{boxDivider(width)}</Text>
           <Text>
             {"  "}
-            {chalk.bold("Patch Synthesis")}
+            {tokens.label("Patch Synthesis")}
           </Text>
           <Text>
             {"    "}
-            {chalk.cyan("Generated:")} {data.patchGenerated}
+            {tokens.accent("Generated:")} {data.patchGenerated}
           </Text>
           <Text>
             {"    "}
-            {chalk.green("Verified:")} {data.patchVerified} (finding eliminated after patch)
+            {tokens.success("Verified:")} {data.patchVerified} (finding eliminated after patch)
           </Text>
           {data.patchFailed > 0 && (
             <Text>
               {"    "}
-              {chalk.red("Failed:")} {data.patchFailed}
+              {tokens.danger("Failed:")} {data.patchFailed}
             </Text>
           )}
           {data.patchErrors > 0 && (
             <Text>
               {"    "}
-              {chalk.red("Errors:")} {data.patchErrors}
+              {tokens.danger("Errors:")} {data.patchErrors}
             </Text>
           )}
           {data.patchCostUsd > 0 && (
             <Text>
               {"    "}
-              {chalk.dim("Cost:")} {formatCost(data.patchCostUsd)}
+              {tokens.muted("Cost:")} {formatCost(data.patchCostUsd)}
             </Text>
           )}
         </>
@@ -374,7 +393,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{boxDivider(width)}</Text>
           <Text>
             {"  "}
-            {chalk.bold("Exploitation Chains")}
+            {tokens.label("Exploitation Chains")}
           </Text>
           <Text>{""}</Text>
           {data.exploitChains.map((chain, ci) => (
@@ -401,7 +420,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{boxDivider(width)}</Text>
           <Text>
             {"  "}
-            {chalk.bold("Actionable Findings")}
+            {tokens.label("Actionable Findings")}
           </Text>
           <Text>{""}</Text>
           {data.actionableFindings.map((f, i) => (
@@ -414,7 +433,7 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>
             {"  "}
-            {chalk.green.bold(
+            {tokens.successStrong(
               `${icons.success} All findings triaged as false positives. Code looks clean.`,
             )}
           </Text>
@@ -426,24 +445,24 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       <Text>{boxDivider(width)}</Text>
       <Text>
         {"  "}
-        {chalk.dim("Triage cost:")} {formatCost(data.triageCostUsd)}
+        {tokens.muted("Triage cost:")} {formatCost(data.triageCostUsd)}
       </Text>
       {hasVerificationData && (
         <Text>
           {"  "}
-          {chalk.dim("Verification cost:")} {formatCost(data.verificationCostUsd)}
+          {tokens.muted("Verification cost:")} {formatCost(data.verificationCostUsd)}
         </Text>
       )}
       {hasPocData && (
         <Text>
           {"  "}
-          {chalk.dim("PoC harness cost:")} {formatCost(data.pocHarnessCostUsd)}
+          {tokens.muted("PoC harness cost:")} {formatCost(data.pocHarnessCostUsd)}
         </Text>
       )}
       {data.variantAnalysisCostUsd > 0 && (
         <Text>
           {"  "}
-          {chalk.dim("Variant analysis cost:")} {formatCost(data.variantAnalysisCostUsd)}
+          {tokens.muted("Variant analysis cost:")} {formatCost(data.variantAnalysisCostUsd)}
         </Text>
       )}
       {data.budgetExceeded && (
@@ -451,14 +470,14 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           <Text>{""}</Text>
           <Text>
             {"  "}
-            {chalk.yellow.bold("Budget exceeded:")} pipeline stopped early to stay within cost limit
+            {tokens.warnStrong("Budget exceeded:")} pipeline stopped early to stay within cost limit
           </Text>
         </>
       )}
       {data.auditLogDir && (
         <Text>
           {"  "}
-          {chalk.dim("Audit log:")} {data.auditLogDir}/
+          {tokens.muted("Audit log:")} {data.auditLogDir}/
         </Text>
       )}
 
@@ -483,7 +502,7 @@ function RunMetricsSummary({
       <Text>{boxDivider(terminalCardWidth(96, 60))}</Text>
       <Text>
         {"  "}
-        {chalk.bold("Run Metrics")}
+        {tokens.label("Run Metrics")}
       </Text>
       <Text>{""}</Text>
 
@@ -494,17 +513,17 @@ function RunMetricsSummary({
             return (
               <Text key={verdict}>
                 {"  "}
-                {chalk.dim(`${verdict}:`)} {count} ({pct}%)
+                {tokens.muted(`${verdict}:`)} {count} ({pct}%)
               </Text>
             );
           })}
           <Text>
             {"  "}
-            {chalk.dim("TP Rate:")} {(metrics.tpRate * 100).toFixed(1)}%
+            {tokens.muted("TP Rate:")} {(metrics.tpRate * 100).toFixed(1)}%
           </Text>
           <Text>
             {"  "}
-            {chalk.dim("FP Rate:")} {(metrics.fpRate * 100).toFixed(1)}%
+            {tokens.muted("FP Rate:")} {(metrics.fpRate * 100).toFixed(1)}%
           </Text>
           <Text>{""}</Text>
         </>
@@ -513,7 +532,7 @@ function RunMetricsSummary({
       {Object.keys(metrics.severityCounts).length > 0 && (
         <Text>
           {"  "}
-          {chalk.dim("Severity:")}{" "}
+          {tokens.muted("Severity:")}{" "}
           {Object.entries(metrics.severityCounts)
             .map(([s, c]) => `${s}=${c}`)
             .join(", ")}
@@ -522,7 +541,7 @@ function RunMetricsSummary({
       {Object.keys(metrics.taskYield).length > 0 && (
         <Text>
           {"  "}
-          {chalk.dim("Task yield:")}{" "}
+          {tokens.muted("Task yield:")}{" "}
           {Object.entries(metrics.taskYield)
             .map(([s, c]) => `${s}=${c}`)
             .join(", ")}
@@ -531,25 +550,25 @@ function RunMetricsSummary({
       {metrics.averageConfidence > 0 && (
         <Text>
           {"  "}
-          {chalk.dim("Avg confidence:")} {(metrics.averageConfidence * 100).toFixed(1)}%
+          {tokens.muted("Avg confidence:")} {(metrics.averageConfidence * 100).toFixed(1)}%
         </Text>
       )}
       {metrics.exploitabilityRate != null && (
         <Text>
           {"  "}
-          {chalk.dim("Exploitability rate:")} {(metrics.exploitabilityRate * 100).toFixed(1)}%
+          {tokens.muted("Exploitability rate:")} {(metrics.exploitabilityRate * 100).toFixed(1)}%
         </Text>
       )}
       <Text>
         {"  "}
-        {chalk.dim("Structured evidence:")} taint-path=
+        {tokens.muted("Structured evidence:")} taint-path=
         {metrics.structuredEvidence.findingsWithTaintPath}
       </Text>
 
       <Text>{""}</Text>
       <Text>
         {"  "}
-        {chalk.dim("Duration:")} scan={formatDuration(metrics.durationBreakdown.scan)} triage=
+        {tokens.muted("Duration:")} scan={formatDuration(metrics.durationBreakdown.scan)} triage=
         {formatDuration(metrics.durationBreakdown.triage)}
         {metrics.durationBreakdown.verify != null
           ? ` verify=${formatDuration(metrics.durationBreakdown.verify)}`
@@ -561,7 +580,7 @@ function RunMetricsSummary({
       </Text>
       <Text>
         {"  "}
-        {chalk.dim("Cost:")} triage={formatCost(metrics.costBreakdown.triage)} verify=
+        {tokens.muted("Cost:")} triage={formatCost(metrics.costBreakdown.triage)} verify=
         {formatCost(metrics.costBreakdown.verify)} poc=
         {formatCost(metrics.costBreakdown.pocHarness)} variant=
         {formatCost(metrics.costBreakdown.variantAnalysis)} total=

@@ -1,26 +1,21 @@
 /**
- * Inline code preview — reads the actual source file and displays
- * context around the vulnerable line.
+ * Inline code preview — reads the actual source file and displays context
+ * around the vulnerable line.
  *
- * Renders:
- *     │  40 │  const name = req.body.name;
- *     │  41 │  const query = `SELECT * FROM users
- *     │▸ 42 │    WHERE name = '${name}'`;
- *     │  43 │  const result = await db.query(query);
+ * Uses strict Flexbox (`paddingLeft`) for indentation rather than leading
+ * whitespace literals, and tokens for coloring.
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import type React from "react";
+import { tokens } from "../tokens.js";
 
 interface CodePreviewProps {
-  /** Absolute or relative file path. */
   filePath: string;
-  /** The flagged line (1-indexed). */
   line: number;
-  /** Lines of context above/below (default 2). */
   context?: number;
-  /** Repo root for resolving relative paths. */
   repoRoot?: string;
 }
 
@@ -34,19 +29,18 @@ export function CodePreview({
   if (!lines || lines.length === 0) return null;
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" paddingLeft={6}>
       {lines.map(({ lineNumber, text, isTarget }) => {
         const num = String(lineNumber).padStart(4);
-        const marker = isTarget ? chalk.redBright("▸") : " ";
-        const lineContent = isTarget ? chalk.white(text) : chalk.dim(text);
-        const lineNum = isTarget ? chalk.redBright(num) : chalk.dim(num);
+        const marker = isTarget ? tokens.dangerStrong("\u25B8") : " ";
+        const lineContent = isTarget ? tokens.strong(text) : tokens.muted(text);
+        const lineNum = isTarget ? tokens.dangerStrong(num) : tokens.muted(num);
 
         return (
           <Text key={lineNumber}>
-            {"      "}
-            {chalk.dim("│")}
+            {tokens.muted("\u2502")}
             {marker}
-            {lineNum} {chalk.dim("│")} {lineContent}
+            {lineNum} {tokens.muted("\u2502")} {lineContent}
           </Text>
         );
       })}
@@ -67,18 +61,15 @@ function readSourceLines(
   repoRoot?: string,
 ): SourceLine[] | null {
   try {
-    const path = require("node:path") as typeof import("node:path");
-    const fs = require("node:fs") as typeof import("node:fs");
-
-    const absolute = path.isAbsolute(filePath)
+    const absolute = isAbsolute(filePath)
       ? filePath
       : repoRoot
-        ? path.resolve(repoRoot, filePath)
-        : path.resolve(filePath);
+        ? resolve(repoRoot, filePath)
+        : resolve(filePath);
 
-    if (!fs.existsSync(absolute)) return null;
+    if (!existsSync(absolute)) return null;
 
-    const content = fs.readFileSync(absolute, "utf-8");
+    const content = readFileSync(absolute, "utf-8");
     const allLines = content.split("\n");
 
     const start = Math.max(0, targetLine - 1 - context);

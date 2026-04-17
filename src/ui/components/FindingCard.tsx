@@ -17,6 +17,7 @@ import { badge, colorVerdict, severityLabel } from "../format.js";
 import { fileLink } from "../hyperlink.js";
 import { icons } from "../icons.js";
 import { renderMarkdownInline } from "../markdown.js";
+import { ExpandableSection } from "../primitives/ExpandableSection.js";
 import type { ActionableFinding } from "../state.js";
 import {
   accent,
@@ -30,6 +31,8 @@ import {
   warnStrong,
 } from "../tokens.js";
 import { CodePreview } from "./CodePreview.js";
+
+const DEBUG_ON = process.env.KUZUSHI_DEBUG === "1";
 
 interface FindingCardProps {
   finding: ActionableFinding;
@@ -150,44 +153,59 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
     );
   }
 
-  return (
+  const hasDetails = details.length > 0 || finding.corroboratingSignals.length > 0;
+
+  const summary = (
     <Box flexDirection="column">
       <Text>
-        {"  "}
         {verdict} {conf} {severity} {scanner}
         {verificationBadge}
       </Text>
-      <Text>
-        {"    "}
-        {location}
-      </Text>
+      <Box paddingLeft={2}>
+        <Text>{location}</Text>
+      </Box>
       <CodePreview filePath={finding.filePath} line={finding.startLine} context={2} />
-      <Text dimColor>
-        {"    "}
-        {finding.ruleId}
-      </Text>
-      <Text>
-        {"    "}
-        {renderMarkdownInline(finding.rationale.slice(0, 120))}
-        {finding.rationale.length > 120 ? "..." : ""}
-      </Text>
-      {details.length > 0 &&
-        details.map((detail, i) => {
+      <Box paddingLeft={2}>
+        <Text dimColor>{finding.ruleId}</Text>
+      </Box>
+      <Box paddingLeft={2}>
+        <Text>
+          {renderMarkdownInline(finding.rationale.slice(0, 120))}
+          {finding.rationale.length > 120 ? "\u2026" : ""}
+        </Text>
+      </Box>
+    </Box>
+  );
+
+  if (!hasDetails) {
+    return (
+      <Box flexDirection="column" paddingLeft={2}>
+        {summary}
+        <Text> </Text>
+      </Box>
+    );
+  }
+
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      <ExpandableSection
+        summary={summary}
+        defaultExpanded={DEBUG_ON}
+        hint={`(press space for ${details.length + (finding.corroboratingSignals.length > 0 ? 1 : 0)} detail rows)`}
+      >
+        {details.map((detail, i) => {
           const isLast = i === details.length - 1 && finding.corroboratingSignals.length === 0;
           const connector = isLast ? icons.treeLast : icons.treeMiddle;
           return (
-            <Text key={i}>
-              {"    "}
+            <Text key={`detail-${i}`}>
               {muted(connector)} {detail}
             </Text>
           );
         })}
-
-      {/* Corroboration cluster tree */}
-      {finding.corroboratingSignals.length > 0 && (
-        <CorroborationTree signals={finding.corroboratingSignals} isLastDetail={true} />
-      )}
-
+        {finding.corroboratingSignals.length > 0 && (
+          <CorroborationTree signals={finding.corroboratingSignals} isLastDetail={true} />
+        )}
+      </ExpandableSection>
       <Text> </Text>
     </Box>
   );
@@ -209,7 +227,6 @@ function CorroborationTree({
   return (
     <Box flexDirection="column">
       <Text>
-        {"    "}
         {muted(connector)} {muted("Corroborated by")} {strong(`${signals.length}`)}{" "}
         {muted(`scanner${signals.length > 1 ? "s" : ""}:`)} {muted(uniqueTasks.join(", "))}
       </Text>
@@ -230,7 +247,6 @@ function CorroborationTree({
         const parts = [strong(signal.taskId), cwes, score, loc].filter(Boolean);
         return (
           <Text key={i}>
-            {"    "}
             {continuation} {muted(sigConnector)} {parts.join("  ")}
           </Text>
         );

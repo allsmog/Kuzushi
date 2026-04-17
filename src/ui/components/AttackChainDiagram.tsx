@@ -16,13 +16,12 @@
  *   ╰───────────────────────────────────────────────────────╯
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import React from "react";
 import type { ExploitChain } from "../../types.js";
 import { terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
-import { danger, dangerStrong, warn } from "../tokens.js";
+import { danger, dangerStrong, tokens, warn } from "../tokens.js";
 
 interface AttackChainDiagramProps {
   chain: ExploitChain;
@@ -66,11 +65,11 @@ export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.Re
   const titleLine = `${borderColor("╭─")}${borderColor(titleText)}${borderColor("─".repeat(fillLen))}${sevColor(sevText)}${borderColor("─╮")}`;
 
   // Build the three lines of each step box (top, content, bottom)
-  const stepTop = steps.map((s) => s.top).join(chalk.dim(ARROW.replace(/[─→]/g, " ")));
-  const stepMid1 = steps.map((s) => s.line1).join(chalk.dim(ARROW));
-  const stepMid2 = steps.map((s) => s.line2).join(chalk.dim(ARROW.replace(/[─→]/g, " ")));
-  const stepRole = steps.map((s) => s.role).join(chalk.dim(ARROW.replace(/[─→]/g, " ")));
-  const stepBot = steps.map((s) => s.bottom).join(chalk.dim(ARROW.replace(/[─→]/g, " ")));
+  const stepTop = steps.map((s) => s.top).join(tokens.muted(ARROW.replace(/[─→]/g, " ")));
+  const stepMid1 = steps.map((s) => s.line1).join(tokens.muted(ARROW));
+  const stepMid2 = steps.map((s) => s.line2).join(tokens.muted(ARROW.replace(/[─→]/g, " ")));
+  const stepRole = steps.map((s) => s.role).join(tokens.muted(ARROW.replace(/[─→]/g, " ")));
+  const stepBot = steps.map((s) => s.bottom).join(tokens.muted(ARROW.replace(/[─→]/g, " ")));
   const impactLines = wrapText(`${icons.warning} ${chain.impactDescription}`, outerWidth - 4);
   const preconditionLines =
     chain.preconditions.length > 0
@@ -116,16 +115,16 @@ export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.Re
           <React.Fragment key={`${step.findingFingerprint}-${index}`}>
             <Text>
               {"  "}
-              {borderColor("│")} {chalk.dim(`${index + 1}.`)} {step.description}
+              {borderColor("│")} {tokens.muted(`${index + 1}.`)} {step.description}
             </Text>
             <Text>
               {"  "}
-              {borderColor("│")} {chalk.dim(`(${step.role})`)}
+              {borderColor("│")} {tokens.muted(`(${step.role})`)}
             </Text>
             {index < chain.steps.length - 1 && (
               <Text>
                 {"  "}
-                {borderColor("│")} {chalk.dim("↓")}
+                {borderColor("│")} {tokens.muted("↓")}
               </Text>
             )}
           </React.Fragment>
@@ -137,13 +136,13 @@ export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.Re
       {impactLines.map((line, index) => (
         <Text key={`impact-${index}`}>
           {"  "}
-          {borderColor("│")} {index === 0 ? line : chalk.dim(line)}
+          {borderColor("│")} {index === 0 ? line : tokens.muted(line)}
         </Text>
       ))}
       {preconditionLines.map((line, index) => (
         <Text key={`pre-${index}`}>
           {"  "}
-          {borderColor("│")} {chalk.dim(line)}
+          {borderColor("│")} {tokens.muted(line)}
         </Text>
       ))}
       <Text>
@@ -186,11 +185,11 @@ function buildStepBox(description: string, role: string): StepBox {
   const padRole = roleText.length > w ? roleText.slice(0, w) : roleText;
 
   return {
-    top: chalk.dim(`┌${"─".repeat(w)}┐`),
-    line1: chalk.dim("│") + chalk.white(line1.padEnd(w)) + chalk.dim("│"),
-    line2: chalk.dim("│") + chalk.white(line2.padEnd(w)) + chalk.dim("│"),
-    role: chalk.dim("│") + chalk.dim(padRole.padEnd(w)) + chalk.dim("│"),
-    bottom: chalk.dim(`└${"─".repeat(w)}┘`),
+    top: tokens.muted(`┌${"─".repeat(w)}┐`),
+    line1: tokens.muted("│") + tokens.strong(line1.padEnd(w)) + tokens.muted("│"),
+    line2: tokens.muted("│") + tokens.strong(line2.padEnd(w)) + tokens.muted("│"),
+    role: tokens.muted("│") + tokens.muted(padRole.padEnd(w)) + tokens.muted("│"),
+    bottom: tokens.muted(`└${"─".repeat(w)}┘`),
   };
 }
 

@@ -1,17 +1,10 @@
 /**
  * Interactive credential prompt for missing API tokens.
  *
- * Shown when the Claude backend is selected but no ANTHROPIC_API_KEY or
- * ANTHROPIC_OAUTH_TOKEN is detected. Offers three choices:
- *
- *   1. Paste an API key
- *   2. Paste an OAuth token
- *   3. Use inherited mode (rely on parent-process env / Claude Code login)
- *
- * Choose step uses a bespoke custom-rendered menu (retained for the
- * selected-row detail summary). Input step delegates to the shared
- * <TextInput> primitive. Keybindings flow through useRegisterKeybindings so
- * the shared <KeybindFooter> reflects the active context.
+ * Choose step delegates to the shared <SelectList> primitive with a
+ * custom renderer that shows the detail line beneath the highlighted row.
+ * Input step delegates to <TextInput>. Keybindings flow through
+ * useRegisterKeybindings so the shared <KeybindFooter> stays accurate.
  */
 
 import { Box, Text, useInput } from "ink";
@@ -20,6 +13,11 @@ import { useState } from "react";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
+import {
+  SelectList,
+  type SelectListItem,
+  type SelectListRenderContext,
+} from "../primitives/SelectList.js";
 import { TextInput } from "../primitives/TextInput.js";
 import { tokens } from "../tokens.js";
 
@@ -61,6 +59,10 @@ const CHOICES: ChoiceOption[] = [
   },
 ];
 
+const CHOICE_ITEMS: ReadonlyArray<SelectListItem<ChoiceOption["id"]>> = CHOICES.map(
+  (c) => ({ id: c.id, label: c.name, detail: c.description }),
+);
+
 type Step = "choose" | "input";
 
 const CHOOSE_KEYBINDS = [
@@ -74,49 +76,56 @@ const INPUT_KEYBINDS = [
   { keys: "Esc", label: "Back" },
 ];
 
+function chooseRenderer(
+  ctx: SelectListRenderContext<ChoiceOption["id"]>,
+): React.ReactElement {
+  const opt = CHOICES.find((c) => c.id === ctx.item.id)!;
+  const name = ctx.isCursor ? tokens.strong(opt.name) : tokens.muted(opt.name);
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      <Text>
+        {ctx.cursorPrefix} {icons.complete} {name} {tokens.muted(opt.description)}
+      </Text>
+      {ctx.isCursor && (
+        <Box paddingLeft={6}>
+          <Text>{opt.detail}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 export function CredentialPrompt({
   onComplete,
   onCancel,
 }: CredentialPromptProps): React.ReactElement {
   const [step, setStep] = useState<Step>("choose");
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const [chosenOption, setChosenOption] = useState<"api-key" | "oauth-token" | null>(null);
   const [inputValue, setInputValue] = useState("");
   const width = terminalCardWidth();
 
   useRegisterKeybindings(step === "choose" ? CHOOSE_KEYBINDS : INPUT_KEYBINDS);
 
+  // Escape/q → cancel at the choose step. SelectList owns arrow/Enter keys.
   useInput(
     (input, key) => {
-      if (input === "q" || key.escape) {
-        onCancel();
-        return;
-      }
-      if (key.upArrow) {
-        setSelectedIndex((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setSelectedIndex((i) => Math.min(CHOICES.length - 1, i + 1));
-        return;
-      }
-      if (key.return) {
-        const choice = CHOICES[selectedIndex]!;
-        if (choice.id === "inherited") {
-          onComplete({ kind: "inherited" });
-        } else {
-          setChosenOption(choice.id);
-          setStep("input");
-          setInputValue("");
-        }
-      }
+      if (input === "q" || key.escape) onCancel();
     },
     { isActive: step === "choose" },
   );
 
+  const handleSelect = (id: ChoiceOption["id"]) => {
+    if (id === "inherited") {
+      onComplete({ kind: "inherited" });
+    } else {
+      setChosenOption(id);
+      setStep("input");
+      setInputValue("");
+    }
+  };
+
   if (step === "input") {
     const label = chosenOption === "api-key" ? "API Key" : "OAuth Token";
-
     return (
       <Box flexDirection="column">
         <Text>{""}</Text>
@@ -163,26 +172,11 @@ export function CredentialPrompt({
       </Box>
       <Text>{""}</Text>
 
-      {CHOICES.map((option, i) => {
-        const isSelected = i === selectedIndex;
-        const prefix = isSelected ? tokens.accent(icons.arrow) : " ";
-        const name = isSelected ? tokens.strong(option.name) : tokens.muted(option.name);
-
-        return (
-          <Box key={option.id} flexDirection="column">
-            <Box paddingLeft={2}>
-              <Text>
-                {prefix} {icons.complete} {name} {tokens.muted(option.description)}
-              </Text>
-            </Box>
-            {isSelected && (
-              <Box paddingLeft={6}>
-                <Text>{option.detail}</Text>
-              </Box>
-            )}
-          </Box>
-        );
-      })}
+      <SelectList<ChoiceOption["id"]>
+        items={CHOICE_ITEMS}
+        onSelect={handleSelect}
+        renderItem={chooseRenderer}
+      />
 
       <Text>{boxFooter(width)}</Text>
     </Box>
