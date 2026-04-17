@@ -15,6 +15,14 @@ _Snapshot: 2026-04-17 against v0.16.0 on `main`. GAPs 1–6 and 8 have been addr
 | 7 | Auth / multi-tenant | ⏸ Deferred | Single-user design intentional. Revisit only if team/enterprise positioning changes. |
 | 8 | Test coverage unevenness | ✅ Done (targeted) | New suites: `tests/copilot/execute-tool.test.ts` (dispatch, governance deny, cost/audit), `tests/cli/preflight.test.ts`, `tests/report-junit.test.ts`, JSON-format logger cases. 1779/1780 tests passing (1 pre-existing skip). |
 
+### Roadmap modules shipped since the audit
+
+| Module | Status | Ships as |
+|--------|--------|----------|
+| `shinsa` | ✅ Shipped | Built-in module wrapping `shinsa-plugin` — ISO 27001 Annex A + NIST SP 800-53 Rev 5. Tools: `shinsa:scan`, `shinsa:quick-check`, `shinsa:nist-scan`, `shinsa:nist-quick-check`, `shinsa:frameworks`. |
+| `prompt-armor` | ✅ Shipped | Built-in module wrapping `promptarmor-plugin` — LLM red teaming. Tools: `prompt-armor:scan`, `prompt-armor:analyze`, `prompt-armor:attack`, `prompt-armor:diff`, `prompt-armor:report`, `prompt-armor:config`. Network commands gated on `authorized: true`. |
+| `blackbox`, `pwn`, `honeypot`, `yokai`, `pentest`, `revgraph` | ⏳ Plugins exist (`allsmog/blackbox-claude-plugin`, `allsmog/pwn-claude-plugin`, `allsmog/Sasoi`, `allsmog/yokai`, `allsmog/mcp-pentest`, `allsmog/revgraph`) but not yet wrapped into built-in CopilotModules. Candidates for the next batch. |
+
 The body below is the original audit — preserved verbatim so PR reviewers can diff claim vs. delivery.
 
 ---

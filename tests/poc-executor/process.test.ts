@@ -23,7 +23,7 @@ describe("ProcessPocExecutor", () => {
     it("returns PASS for exit code 0", async () => {
       vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, callback) => {
         if (callback) {
-          (callback as Function)(null, "success", "");
+          (callback as (...args: unknown[]) => unknown)(null, "success", "");
         }
         return undefined as any;
       });
@@ -41,7 +41,7 @@ describe("ProcessPocExecutor", () => {
       vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, callback) => {
         if (callback) {
           const error = Object.assign(new Error("exit 1"), { code: 1 });
-          (callback as Function)(error, "", "error");
+          (callback as (...args: unknown[]) => unknown)(error, "", "error");
         }
         return undefined as any;
       });
@@ -57,7 +57,7 @@ describe("ProcessPocExecutor", () => {
       vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, callback) => {
         if (callback) {
           const error = Object.assign(new Error("killed"), { killed: true });
-          (callback as Function)(error, "", "");
+          (callback as (...args: unknown[]) => unknown)(error, "", "");
         }
         return undefined as any;
       });
@@ -72,7 +72,7 @@ describe("ProcessPocExecutor", () => {
     it("resolves correct binary for different languages", async () => {
       vi.mocked(execFile).mockImplementation((cmd, args, _opts, callback) => {
         if (callback) {
-          (callback as Function)(null, `ran: ${cmd} ${args}`, "");
+          (callback as (...args: unknown[]) => unknown)(null, `ran: ${cmd} ${args}`, "");
         }
         return undefined as any;
       });

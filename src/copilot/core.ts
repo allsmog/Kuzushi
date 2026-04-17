@@ -17,8 +17,10 @@ import nodePath from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { MessageBus } from "../bus/types.js";
+import { createCorePromptArmorModule } from "../modules/core-prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/core-randori.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
+import { createCoreShinsaModule } from "../modules/core-shinsa.js";
 import { createCoreTobModule } from "../modules/core-tob.js";
 import { createCoreVulnScoutModule } from "../modules/core-vuln-scout.js";
 import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
@@ -331,6 +333,20 @@ export class CopilotCore {
         });
         break;
       }
+      case "shinsa": {
+        const shinsa = createCoreShinsaModule();
+        await this.registry.loadModule(shinsa, this.moduleCtx, {
+          taskRegistry: this.taskRegistry,
+        });
+        break;
+      }
+      case "prompt-armor": {
+        const promptArmor = createCorePromptArmorModule();
+        await this.registry.loadModule(promptArmor, this.moduleCtx, {
+          taskRegistry: this.taskRegistry,
+        });
+        break;
+      }
       // Future built-in modules go here as they're ported
       default:
         throw new Error(`Unknown built-in module: "${id}"`);
@@ -494,6 +510,8 @@ export function builtinHintFor(packageName: string): string {
     "@kuzushi/randori-plugin": "randori",
     "@kuzushi/vuln-scout": "vuln-scout",
     "@kuzushi/tob-skills": "tob",
+    "shinsa-plugin": "shinsa",
+    "promptarmor-plugin": "prompt-armor",
   };
   const builtinId = map[packageName];
   if (builtinId) {

@@ -53,6 +53,8 @@ describe("builtinHintFor", () => {
     expect(builtinHintFor("@kuzushi/randori-plugin")).toContain("builtin:randori");
     expect(builtinHintFor("@kuzushi/vuln-scout")).toContain("builtin:vuln-scout");
     expect(builtinHintFor("@kuzushi/tob-skills")).toContain("builtin:tob");
+    expect(builtinHintFor("shinsa-plugin")).toContain("builtin:shinsa");
+    expect(builtinHintFor("promptarmor-plugin")).toContain("builtin:prompt-armor");
   });
 
   it("falls back to a generic message for unknown packages", () => {

@@ -61,6 +61,8 @@ Kuzushi's capabilities come from `CopilotModule`s that expose tools (for interac
 | **randori** | intel | PASTA threat modeling (S1–S4 + narrative) via the `@kuzushi/randori-plugin` Claude Code plugin, returning a normalized `ThreatModelDocument` |
 | **vuln-scout** | offense | Whitebox pentest via the `@kuzushi/vuln-scout` plugin — agentic SAST + taint analysis returning normalized Findings |
 | **tob** | offense | Security audit via `@kuzushi/tob-skills` — fp-check, sharp-edges, insecure-defaults, static-analysis, variant-analysis, and more |
+| **shinsa** | governance | Compliance assessment via `shinsa-plugin` — ISO 27001 Annex A + NIST SP 800-53 Rev 5 with evidence-backed findings |
+| **prompt-armor** | offense | LLM red teaming via `promptarmor-plugin` — 80+ attack plugins, 25+ mutation strategies, code-aware remediation |
 | **variant-hunter** | offense | Lifts confirmed findings into portable signatures and hunts for variants across the repo (including vendored deps) |
 | **n-day-diff-hunter** | offense | CVE-diff-based n-day hunting and variant search |
 
@@ -81,8 +83,6 @@ These are the North Star modules — design intent exists, implementations do no
 | **pentest** | offense | MCP server wrapping metasploit, nmap, hydra, john (loaded natively via MCP) |
 | **honeypot** | defense | Autonomous honeypot orchestration: service types, honeytokens, decoys, Falco |
 | **yokai** | defense | Supply chain tripwires: dependency confusion, typosquatting, registry canaries |
-| **prompt-armor** | offense | LLM red teaming: attack plugins, mutation strategies, orchestrating agents |
-| **shinsa** | governance | Multi-framework compliance: ISO 27001, NIST 800-53, SOC 2, PCI DSS |
 | **revgraph** | intel | Binary reverse engineering: Ghidra + Neo4j, NL2Cypher queries, function embeddings |
 
 ## What a Session Looks Like
