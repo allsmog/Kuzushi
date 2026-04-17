@@ -17,6 +17,14 @@ const { triageFindingWithAgentMock, triageFindingsBatchMock } = vi.hoisted(() =>
 
 vi.mock("../../src/triage.js", () => ({
   triageFindingWithAgent: triageFindingWithAgentMock,
+  // Worker uses the enforcement wrapper for single-shot triage. For tests the
+  // enforcement layer is a pass-through — existing assertions about the
+  // underlying `triageFindingWithAgent` mock still match.
+  triageFindingWithEvidenceEnforcement: triageFindingWithAgentMock,
+  // Default validator stub: treat every result as evidence-complete so the
+  // batch path's escalation check does not fire in unrelated tests. Tests that
+  // want to exercise evidence enforcement can override this mock per-case.
+  validateTriageEvidence: () => ({ ok: true, reasons: [] }),
   triageSystemPromptPrefix: () => "mocked-system-prompt-prefix",
   triageFindingsBatch: triageFindingsBatchMock,
   preReadForTriage: async () => "",
@@ -131,6 +139,8 @@ describe("triage-worker", () => {
       expect.any(String),
       expect.any(String),
       "mocked-system-prompt-prefix",
+      // Evidence-enforcement attempt cap passed by the worker (default 1).
+      expect.any(Number),
     );
 
     await bus.close();
@@ -190,6 +200,8 @@ describe("triage-worker", () => {
       expect.any(String),
       expect.any(String),
       "mocked-system-prompt-prefix",
+      // Evidence-enforcement attempt cap passed by the worker (default 1).
+      expect.any(Number),
     );
 
     await bus.close();
