@@ -13,3 +13,4 @@ export type {
   ToolExecutionContext,
   ToolResult,
 } from "./types.js";
+export { createVariantHunterModule } from "./variant-hunter.js";
