@@ -4,6 +4,7 @@ import { cryptoModule } from "./modules/crypto.js";
 import { deserializationModule } from "./modules/deserialization.js";
 import { fileUploadModule } from "./modules/file-upload.js";
 import { idorModule } from "./modules/idor.js";
+import { nDayPatternsModule } from "./modules/n-day-patterns.js";
 import { nosqlInjectionModule } from "./modules/nosql-injection.js";
 import { pathTraversalModule } from "./modules/path-traversal.js";
 import { raceConditionModule } from "./modules/race-condition.js";
@@ -35,6 +36,7 @@ export function createDefaultKnowledgeRegistry(): InMemoryKnowledgeRegistry {
   registry.register(fileUploadModule);
   registry.register(idorModule);
   registry.register(nosqlInjectionModule);
+  registry.register(nDayPatternsModule);
 
   return registry;
 }
