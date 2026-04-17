@@ -280,3 +280,77 @@ export function terminalCardWidth(maxWidth = 88, minWidth = 56): number {
   const columns = process.stdout.columns ?? maxWidth;
   return Math.max(minWidth, Math.min(maxWidth, columns - 4));
 }
+
+// ─── Column / path width utilities ────────────────────────────────────────
+// Added as part of the Wave 1 responsive-geometry pass (S4).
+
+const ANSI_RE =
+  /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+
+/** Horizontal alignment for `padCell`. */
+export type Align = "left" | "right" | "center";
+
+/**
+ * Measure the visible width of a string with ANSI escape codes stripped.
+ * Tiny ANSI-strip implementation — `string-width` isn't currently a dep.
+ */
+export function visibleWidth(s: string): number {
+  return s.replace(ANSI_RE, "").length;
+}
+
+/**
+ * Truncate the end of a string with an ellipsis, respecting visible width.
+ */
+export function truncateEnd(s: string, maxWidth: number, ellipsis = "\u2026"): string {
+  if (visibleWidth(s) <= maxWidth) return s;
+  if (maxWidth <= ellipsis.length) return ellipsis.slice(0, Math.max(0, maxWidth));
+  const plain = s.replace(ANSI_RE, "");
+  return plain.slice(0, maxWidth - ellipsis.length) + ellipsis;
+}
+
+/**
+ * Middle-truncate a path-like string, preserving the trailing basename.
+ * `"src/ui/components/CopilotShell.tsx"` at width 22 becomes
+ * `"src…/CopilotShell.tsx"`. For non-path strings, truncates in the middle.
+ */
+export function truncateMiddle(
+  s: string,
+  maxWidth: number,
+  ellipsis = "\u2026",
+): string {
+  const plain = s.replace(ANSI_RE, "");
+  if (plain.length <= maxWidth) return s;
+  if (maxWidth <= ellipsis.length) return ellipsis.slice(0, Math.max(0, maxWidth));
+
+  const slash = plain.lastIndexOf("/");
+  if (slash >= 0) {
+    const basename = plain.slice(slash); // includes leading "/"
+    const budget = maxWidth - ellipsis.length - basename.length;
+    if (budget > 0) {
+      return plain.slice(0, budget) + ellipsis + basename;
+    }
+    // Basename itself is too long — end-truncate basename preserving last chars.
+    const kept = Math.max(0, maxWidth - ellipsis.length);
+    return ellipsis + basename.slice(-kept);
+  }
+
+  const head = Math.ceil((maxWidth - ellipsis.length) / 2);
+  const tail = maxWidth - ellipsis.length - head;
+  return plain.slice(0, head) + ellipsis + plain.slice(plain.length - tail);
+}
+
+/**
+ * Pad a string to exactly `width` columns, ANSI-aware.
+ */
+export function padCell(s: string, width: number, align: Align = "left"): string {
+  const vw = visibleWidth(s);
+  if (vw >= width) return s;
+  const gap = width - vw;
+  if (align === "right") return " ".repeat(gap) + s;
+  if (align === "center") {
+    const left = Math.floor(gap / 2);
+    const right = gap - left;
+    return " ".repeat(left) + s + " ".repeat(right);
+  }
+  return s + " ".repeat(gap);
+}
