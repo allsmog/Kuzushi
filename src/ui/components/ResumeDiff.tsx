@@ -79,9 +79,7 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
                 );
               })}
               {data.verdictChanges.length > 5 && (
-                <Text>
-                  {tokens.muted(`... and ${data.verdictChanges.length - 5} more`)}
-                </Text>
+                <Text>{tokens.muted(`... and ${data.verdictChanges.length - 5} more`)}</Text>
               )}
             </Box>
           </>

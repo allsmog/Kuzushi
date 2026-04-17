@@ -101,352 +101,336 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           gap={2}
         />
 
-      {/* Failed tasks warning */}
-      {data.failedTasks.length > 0 && (
-        <Text>
+        {/* Failed tasks warning */}
+        {data.failedTasks.length > 0 && (
+          <Text>
             {tokens.danger("Scanners failed:")} {data.failedTasks.join(", ")}{" "}
-          {tokens.muted("(results may be incomplete)")}
-        </Text>
-      )}
+            {tokens.muted("(results may be incomplete)")}
+          </Text>
+        )}
 
-      {/* Degradation warnings */}
-      {data.extractionDegradation && data.extractionDegradation.status !== "ok" && (
-        <Text>
+        {/* Degradation warnings */}
+        {data.extractionDegradation && data.extractionDegradation.status !== "ok" && (
+          <Text>
             {(data.extractionDegradation.status === "failed" ? tokens.danger : tokens.warn)(
-            "Extraction:",
-          )}{" "}
-          {data.extractionDegradation.status} [{data.extractionDegradation.reasons.join(", ")}]
-        </Text>
-      )}
-      {data.stitchDegradation && (
-        <Text>
+              "Extraction:",
+            )}{" "}
+            {data.extractionDegradation.status} [{data.extractionDegradation.reasons.join(", ")}]
+          </Text>
+        )}
+        {data.stitchDegradation && (
+          <Text>
             {tokens.warn("Stitch:")} degraded [{data.stitchDegradation.reason}]
-        </Text>
-      )}
-      {data.tiPriorDegraded && (
-        <Text>
-            {tokens.warn("TI Prior:")} degraded
-        </Text>
-      )}
+          </Text>
+        )}
+        {data.tiPriorDegraded && <Text>{tokens.warn("TI Prior:")} degraded</Text>}
 
-      {/* Verdict counts — aligned via Table primitive (already inside the
+        {/* Verdict counts — aligned via Table primitive (already inside the
           paddingLeft=2 wrapper above, no extra padding needed here). */}
-      <Table<VerdictRow>
-        columns={[
-          { key: "label", width: 26, align: "left" },
-          { key: "value", width: 8, align: "right" },
-        ]}
-        rows={[
-          { label: tokens.muted("Total triaged"), value: String(total) },
-          {
-            label: tokens.dangerStrong(`${icons.error} True positives`),
-            value: String(counts.tp),
-          },
-          {
-            label: tokens.success(`${icons.success} False positives`),
-            value: String(counts.fp),
-          },
-          {
-            label: tokens.warn(`${icons.warning} Needs review`),
-            value: String(counts.needs_review),
-          },
-        ]}
-        showHeader={false}
-        divider={false}
-        maxWidth={width - 2}
-        gap={2}
-      />
+        <Table<VerdictRow>
+          columns={[
+            { key: "label", width: 26, align: "left" },
+            { key: "value", width: 8, align: "right" },
+          ]}
+          rows={[
+            { label: tokens.muted("Total triaged"), value: String(total) },
+            {
+              label: tokens.dangerStrong(`${icons.error} True positives`),
+              value: String(counts.tp),
+            },
+            {
+              label: tokens.success(`${icons.success} False positives`),
+              value: String(counts.fp),
+            },
+            {
+              label: tokens.warn(`${icons.warning} Needs review`),
+              value: String(counts.needs_review),
+            },
+          ]}
+          showHeader={false}
+          divider={false}
+          maxWidth={width - 2}
+          gap={2}
+        />
 
-      {data.triageErrors > 0 && (
-        <Text>
+        {data.triageErrors > 0 && (
+          <Text>
             {tokens.danger("Triage errors:")} {data.triageErrors}
-        </Text>
-      )}
-      {data.skippedLowConfidence > 0 && (
-        <Text>
+          </Text>
+        )}
+        {data.skippedLowConfidence > 0 && (
+          <Text>
             {tokens.muted("Skipped (low confidence):")} {data.skippedLowConfidence}
-        </Text>
-      )}
-      {data.skippedByFpFilter > 0 && (
-        <Text>
+          </Text>
+        )}
+        {data.skippedByFpFilter > 0 && (
+          <Text>
             {tokens.muted("Skipped (hard exclusions):")} {data.skippedByFpFilter}
-        </Text>
-      )}
-      {data.softSuppressedFindings > 0 && (
-        <Text>
+          </Text>
+        )}
+        {data.softSuppressedFindings > 0 && (
+          <Text>
             {tokens.muted("Soft-suppressed findings:")} {data.softSuppressedFindings}
-        </Text>
-      )}
-      {data.skippedByLlmRescore > 0 && (
-        <Text>
+          </Text>
+        )}
+        {data.skippedByLlmRescore > 0 && (
+          <Text>
             {tokens.muted("Skipped (LLM rescore):")} {data.skippedByLlmRescore}
-        </Text>
-      )}
-      {data.corroboratedClusters > 0 && (
-        <Text>
+          </Text>
+        )}
+        {data.corroboratedClusters > 0 && (
+          <Text>
             {tokens.muted("Corroborated clusters:")} {data.corroboratedClusters}
-        </Text>
-      )}
-      {(data.verifyGateAutoAccepted > 0 || data.verifyGateSkipped > 0) && (
-        <>
-          <Text>
-                {tokens.muted("Gate auto-accepted:")} {data.verifyGateAutoAccepted}
           </Text>
-          <Text>
-                {tokens.muted("Gate skipped:")} {data.verifyGateSkipped}
-          </Text>
-        </>
-      )}
-
-      {/* Verdict distribution bar */}
-      {total > 0 && (
-        <>
-          <Text>{""}</Text>
-          {miniBarChart([
-            { label: "tp", value: counts.tp, color: tokens.danger },
-            { label: "fp", value: counts.fp, color: tokens.success },
-            { label: "needs_review", value: counts.needs_review, color: tokens.warn },
-          ]).map((line, i) => (
-            <Text key={i}>
-                    {line}
-            </Text>
-          ))}
-        </>
-      )}
-
-      {/* Verification section */}
-      {hasVerificationData && (
-        <>
-          <Text>{""}</Text>
-          <Text>{boxDivider(width)}</Text>
-          <Text>
-                {tokens.label("Verification")}
-          </Text>
-          <Text>
-                {tokens.dangerStrong(`${icons.error} Exploitable:`)} {data.exploitable}
-          </Text>
-          <Text>
-                {tokens.success(`${icons.success} Not exploitable:`)} {data.notExploitable}
-          </Text>
-          {data.verifyErrors > 0 && (
+        )}
+        {(data.verifyGateAutoAccepted > 0 || data.verifyGateSkipped > 0) && (
+          <>
             <Text>
-                    {tokens.danger("Verification errors:")} {data.verifyErrors}
+              {tokens.muted("Gate auto-accepted:")} {data.verifyGateAutoAccepted}
             </Text>
-          )}
-        </>
-      )}
-
-      {/* PoC section */}
-      {hasPocData && (
-        <>
-          <Text>{""}</Text>
-          <Text>{boxDivider(width)}</Text>
-          <Text>
-                {tokens.label("PoC Harnesses")}
-          </Text>
-          <Text>
-                {tokens.accent(`${icons.gear} Generated:`)} {data.pocGenerated}
-          </Text>
-          <Text>
-                {tokens.warn(`${icons.pending} Skipped:`)} {data.pocSkipped}
-          </Text>
-          {data.pocHarnessErrors > 0 && (
             <Text>
-                    {tokens.danger("Errors:")} {data.pocHarnessErrors}
+              {tokens.muted("Gate skipped:")} {data.verifyGateSkipped}
             </Text>
-          )}
-          {data.pocOutputDir && (
+          </>
+        )}
+
+        {/* Verdict distribution bar */}
+        {total > 0 && (
+          <>
+            <Text>{""}</Text>
+            {miniBarChart([
+              { label: "tp", value: counts.tp, color: tokens.danger },
+              { label: "fp", value: counts.fp, color: tokens.success },
+              { label: "needs_review", value: counts.needs_review, color: tokens.warn },
+            ]).map((line, i) => (
+              <Text key={i}>{line}</Text>
+            ))}
+          </>
+        )}
+
+        {/* Verification section */}
+        {hasVerificationData && (
+          <>
+            <Text>{""}</Text>
+            <Text>{boxDivider(width)}</Text>
+            <Text>{tokens.label("Verification")}</Text>
             <Text>
-                    {tokens.muted("Output dir:")} {data.pocOutputDir}
+              {tokens.dangerStrong(`${icons.error} Exploitable:`)} {data.exploitable}
             </Text>
-          )}
-        </>
-      )}
-
-      {/* Variant findings */}
-      {data.variantFindings > 0 && (
-        <>
-          <Text>{""}</Text>
-          <Text>
-                {tokens.accent("Variant findings:")} {data.variantFindings}
-          </Text>
-        </>
-      )}
-
-      {/* Dynamic analysis */}
-      {hasDynamic && (
-        <>
-          <Text>{""}</Text>
-          <Text>{boxDivider(width)}</Text>
-          <Text>
-                {tokens.label("Dynamic Analysis")}
-          </Text>
-          <Text>
-            {"    "}
-            {tokens.dangerStrong(`Confirmed:`)} {data.dynamicConfirmed}
-          </Text>
-          <Text>
-            {"    "}
-            {tokens.warn(`Interesting:`)} {data.dynamicInteresting}
-          </Text>
-          <Text>
-            {"    "}
-            {tokens.success(`Rejected:`)} {data.dynamicRejected}
-          </Text>
-          {data.dynamicErrors > 0 && (
             <Text>
-              {"    "}
-              {tokens.danger("Errors:")} {data.dynamicErrors}
+              {tokens.success(`${icons.success} Not exploitable:`)} {data.notExploitable}
             </Text>
-          )}
-          {data.dynamicCostUsd > 0 && (
-            <Text>
-              {"    "}
-              {tokens.muted("Cost:")} {formatCost(data.dynamicCostUsd)}
-            </Text>
-          )}
-        </>
-      )}
-
-      {/* Incremental */}
-      {hasIncremental && (
-        <>
-          <Text>{""}</Text>
-          <Text>
-                {tokens.muted("Incremental:")} {tokens.success(`${data.incrementalCachedFiles} cached`)},{" "}
-            {data.incrementalRescannedFiles} rescanned
-            {data.incrementalDepExpandedFiles > 0
-              ? `, ${data.incrementalDepExpandedFiles} dependency-expanded`
-              : ""}
-          </Text>
-        </>
-      )}
-
-      {/* Patch synthesis */}
-      {hasPatch && (
-        <>
-          <Text>{""}</Text>
-          <Text>{boxDivider(width)}</Text>
-          <Text>
-                {tokens.label("Patch Synthesis")}
-          </Text>
-          <Text>
-            {"    "}
-            {tokens.accent("Generated:")} {data.patchGenerated}
-          </Text>
-          <Text>
-            {"    "}
-            {tokens.success("Verified:")} {data.patchVerified} (finding eliminated after patch)
-          </Text>
-          {data.patchFailed > 0 && (
-            <Text>
-              {"    "}
-              {tokens.danger("Failed:")} {data.patchFailed}
-            </Text>
-          )}
-          {data.patchErrors > 0 && (
-            <Text>
-              {"    "}
-              {tokens.danger("Errors:")} {data.patchErrors}
-            </Text>
-          )}
-          {data.patchCostUsd > 0 && (
-            <Text>
-              {"    "}
-              {tokens.muted("Cost:")} {formatCost(data.patchCostUsd)}
-            </Text>
-          )}
-        </>
-      )}
-
-      {/* Exploit chains — flow diagram */}
-      {data.exploitChains.length > 0 && (
-        <>
-          <Text>{""}</Text>
-          <Text>{boxDivider(width)}</Text>
-          <Text>
-                {tokens.label("Exploitation Chains")}
-          </Text>
-          <Text>{""}</Text>
-          {data.exploitChains.map((chain, ci) => (
-            <Box key={ci} flexDirection="column">
-              <AttackChainDiagram chain={chain} />
-              <Text>{""}</Text>
-            </Box>
-          ))}
-        </>
-      )}
-
-      {/* Threat model context */}
-      {data.threatModelSummary && (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text bold>Threat Model Context</Text>
-          <Text>{data.threatModelSummary}</Text>
-        </Box>
-      )}
-
-      {/* Actionable findings */}
-      {data.actionableFindings.length > 0 && (
-        <>
-          <Text>{""}</Text>
-          <Text>{boxDivider(width)}</Text>
-          <Text>
-                {tokens.label("Actionable Findings")}
-          </Text>
-          <Text>{""}</Text>
-          {data.actionableFindings.map((f, i) => (
-            <FindingCard key={i} finding={f} />
-          ))}
-        </>
-      )}
-      {data.actionableFindings.length === 0 && total > 0 && (
-        <>
-          <Text>{""}</Text>
-          <Text>
-                {tokens.successStrong(
-              `${icons.success} All findings triaged as false positives. Code looks clean.`,
+            {data.verifyErrors > 0 && (
+              <Text>
+                {tokens.danger("Verification errors:")} {data.verifyErrors}
+              </Text>
             )}
-          </Text>
-        </>
-      )}
+          </>
+        )}
 
-      {/* Cost summary */}
-      <Text>{""}</Text>
-      <Text>{boxDivider(width)}</Text>
-      <Text>
-        {tokens.muted("Triage cost:")} {formatCost(data.triageCostUsd)}
-      </Text>
-      {hasVerificationData && (
+        {/* PoC section */}
+        {hasPocData && (
+          <>
+            <Text>{""}</Text>
+            <Text>{boxDivider(width)}</Text>
+            <Text>{tokens.label("PoC Harnesses")}</Text>
+            <Text>
+              {tokens.accent(`${icons.gear} Generated:`)} {data.pocGenerated}
+            </Text>
+            <Text>
+              {tokens.warn(`${icons.pending} Skipped:`)} {data.pocSkipped}
+            </Text>
+            {data.pocHarnessErrors > 0 && (
+              <Text>
+                {tokens.danger("Errors:")} {data.pocHarnessErrors}
+              </Text>
+            )}
+            {data.pocOutputDir && (
+              <Text>
+                {tokens.muted("Output dir:")} {data.pocOutputDir}
+              </Text>
+            )}
+          </>
+        )}
+
+        {/* Variant findings */}
+        {data.variantFindings > 0 && (
+          <>
+            <Text>{""}</Text>
+            <Text>
+              {tokens.accent("Variant findings:")} {data.variantFindings}
+            </Text>
+          </>
+        )}
+
+        {/* Dynamic analysis */}
+        {hasDynamic && (
+          <>
+            <Text>{""}</Text>
+            <Text>{boxDivider(width)}</Text>
+            <Text>{tokens.label("Dynamic Analysis")}</Text>
+            <Text>
+              {"    "}
+              {tokens.dangerStrong(`Confirmed:`)} {data.dynamicConfirmed}
+            </Text>
+            <Text>
+              {"    "}
+              {tokens.warn(`Interesting:`)} {data.dynamicInteresting}
+            </Text>
+            <Text>
+              {"    "}
+              {tokens.success(`Rejected:`)} {data.dynamicRejected}
+            </Text>
+            {data.dynamicErrors > 0 && (
+              <Text>
+                {"    "}
+                {tokens.danger("Errors:")} {data.dynamicErrors}
+              </Text>
+            )}
+            {data.dynamicCostUsd > 0 && (
+              <Text>
+                {"    "}
+                {tokens.muted("Cost:")} {formatCost(data.dynamicCostUsd)}
+              </Text>
+            )}
+          </>
+        )}
+
+        {/* Incremental */}
+        {hasIncremental && (
+          <>
+            <Text>{""}</Text>
+            <Text>
+              {tokens.muted("Incremental:")}{" "}
+              {tokens.success(`${data.incrementalCachedFiles} cached`)},{" "}
+              {data.incrementalRescannedFiles} rescanned
+              {data.incrementalDepExpandedFiles > 0
+                ? `, ${data.incrementalDepExpandedFiles} dependency-expanded`
+                : ""}
+            </Text>
+          </>
+        )}
+
+        {/* Patch synthesis */}
+        {hasPatch && (
+          <>
+            <Text>{""}</Text>
+            <Text>{boxDivider(width)}</Text>
+            <Text>{tokens.label("Patch Synthesis")}</Text>
+            <Text>
+              {"    "}
+              {tokens.accent("Generated:")} {data.patchGenerated}
+            </Text>
+            <Text>
+              {"    "}
+              {tokens.success("Verified:")} {data.patchVerified} (finding eliminated after patch)
+            </Text>
+            {data.patchFailed > 0 && (
+              <Text>
+                {"    "}
+                {tokens.danger("Failed:")} {data.patchFailed}
+              </Text>
+            )}
+            {data.patchErrors > 0 && (
+              <Text>
+                {"    "}
+                {tokens.danger("Errors:")} {data.patchErrors}
+              </Text>
+            )}
+            {data.patchCostUsd > 0 && (
+              <Text>
+                {"    "}
+                {tokens.muted("Cost:")} {formatCost(data.patchCostUsd)}
+              </Text>
+            )}
+          </>
+        )}
+
+        {/* Exploit chains — flow diagram */}
+        {data.exploitChains.length > 0 && (
+          <>
+            <Text>{""}</Text>
+            <Text>{boxDivider(width)}</Text>
+            <Text>{tokens.label("Exploitation Chains")}</Text>
+            <Text>{""}</Text>
+            {data.exploitChains.map((chain, ci) => (
+              <Box key={ci} flexDirection="column">
+                <AttackChainDiagram chain={chain} />
+                <Text>{""}</Text>
+              </Box>
+            ))}
+          </>
+        )}
+
+        {/* Threat model context */}
+        {data.threatModelSummary && (
+          <Box flexDirection="column" marginBottom={1}>
+            <Text bold>Threat Model Context</Text>
+            <Text>{data.threatModelSummary}</Text>
+          </Box>
+        )}
+
+        {/* Actionable findings */}
+        {data.actionableFindings.length > 0 && (
+          <>
+            <Text>{""}</Text>
+            <Text>{boxDivider(width)}</Text>
+            <Text>{tokens.label("Actionable Findings")}</Text>
+            <Text>{""}</Text>
+            {data.actionableFindings.map((f, i) => (
+              <FindingCard key={i} finding={f} />
+            ))}
+          </>
+        )}
+        {data.actionableFindings.length === 0 && total > 0 && (
+          <>
+            <Text>{""}</Text>
+            <Text>
+              {tokens.successStrong(
+                `${icons.success} All findings triaged as false positives. Code looks clean.`,
+              )}
+            </Text>
+          </>
+        )}
+
+        {/* Cost summary */}
+        <Text>{""}</Text>
+        <Text>{boxDivider(width)}</Text>
         <Text>
-            {tokens.muted("Verification cost:")} {formatCost(data.verificationCostUsd)}
+          {tokens.muted("Triage cost:")} {formatCost(data.triageCostUsd)}
         </Text>
-      )}
-      {hasPocData && (
-        <Text>
-            {tokens.muted("PoC harness cost:")} {formatCost(data.pocHarnessCostUsd)}
-        </Text>
-      )}
-      {data.variantAnalysisCostUsd > 0 && (
-        <Text>
-            {tokens.muted("Variant analysis cost:")} {formatCost(data.variantAnalysisCostUsd)}
-        </Text>
-      )}
-      {data.budgetExceeded && (
-        <>
-          <Text>{""}</Text>
+        {hasVerificationData && (
           <Text>
-                {tokens.warnStrong("Budget exceeded:")} pipeline stopped early to stay within cost limit
+            {tokens.muted("Verification cost:")} {formatCost(data.verificationCostUsd)}
           </Text>
-        </>
-      )}
-      {data.auditLogDir && (
-        <Text>
+        )}
+        {hasPocData && (
+          <Text>
+            {tokens.muted("PoC harness cost:")} {formatCost(data.pocHarnessCostUsd)}
+          </Text>
+        )}
+        {data.variantAnalysisCostUsd > 0 && (
+          <Text>
+            {tokens.muted("Variant analysis cost:")} {formatCost(data.variantAnalysisCostUsd)}
+          </Text>
+        )}
+        {data.budgetExceeded && (
+          <>
+            <Text>{""}</Text>
+            <Text>
+              {tokens.warnStrong("Budget exceeded:")} pipeline stopped early to stay within cost
+              limit
+            </Text>
+          </>
+        )}
+        {data.auditLogDir && (
+          <Text>
             {tokens.muted("Audit log:")} {data.auditLogDir}/
-        </Text>
-      )}
+          </Text>
+        )}
 
-      {/* Run metrics */}
-      {data.runMetrics && <RunMetricsSummary metrics={data.runMetrics} />}
+        {/* Run metrics */}
+        {data.runMetrics && <RunMetricsSummary metrics={data.runMetrics} />}
       </Box>
 
       <Text>{boxFooter(width)}</Text>
@@ -465,9 +449,7 @@ function RunMetricsSummary({
     <Box flexDirection="column">
       <Text>{""}</Text>
       <Text>{boxDivider(terminalCardWidth(96, 60))}</Text>
-      <Text>
-        {tokens.label("Run Metrics")}
-      </Text>
+      <Text>{tokens.label("Run Metrics")}</Text>
       <Text>{""}</Text>
 
       {verdictTotal > 0 && (
@@ -476,15 +458,15 @@ function RunMetricsSummary({
             const pct = ((count / verdictTotal) * 100).toFixed(1);
             return (
               <Text key={verdict}>
-                        {tokens.muted(`${verdict}:`)} {count} ({pct}%)
+                {tokens.muted(`${verdict}:`)} {count} ({pct}%)
               </Text>
             );
           })}
           <Text>
-                {tokens.muted("TP Rate:")} {(metrics.tpRate * 100).toFixed(1)}%
+            {tokens.muted("TP Rate:")} {(metrics.tpRate * 100).toFixed(1)}%
           </Text>
           <Text>
-                {tokens.muted("FP Rate:")} {(metrics.fpRate * 100).toFixed(1)}%
+            {tokens.muted("FP Rate:")} {(metrics.fpRate * 100).toFixed(1)}%
           </Text>
           <Text>{""}</Text>
         </>
@@ -492,7 +474,7 @@ function RunMetricsSummary({
 
       {Object.keys(metrics.severityCounts).length > 0 && (
         <Text>
-            {tokens.muted("Severity:")}{" "}
+          {tokens.muted("Severity:")}{" "}
           {Object.entries(metrics.severityCounts)
             .map(([s, c]) => `${s}=${c}`)
             .join(", ")}
@@ -500,7 +482,7 @@ function RunMetricsSummary({
       )}
       {Object.keys(metrics.taskYield).length > 0 && (
         <Text>
-            {tokens.muted("Task yield:")}{" "}
+          {tokens.muted("Task yield:")}{" "}
           {Object.entries(metrics.taskYield)
             .map(([s, c]) => `${s}=${c}`)
             .join(", ")}
@@ -508,12 +490,12 @@ function RunMetricsSummary({
       )}
       {metrics.averageConfidence > 0 && (
         <Text>
-            {tokens.muted("Avg confidence:")} {(metrics.averageConfidence * 100).toFixed(1)}%
+          {tokens.muted("Avg confidence:")} {(metrics.averageConfidence * 100).toFixed(1)}%
         </Text>
       )}
       {metrics.exploitabilityRate != null && (
         <Text>
-            {tokens.muted("Exploitability rate:")} {(metrics.exploitabilityRate * 100).toFixed(1)}%
+          {tokens.muted("Exploitability rate:")} {(metrics.exploitabilityRate * 100).toFixed(1)}%
         </Text>
       )}
       <Text>

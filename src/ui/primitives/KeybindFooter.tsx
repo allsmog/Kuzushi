@@ -8,11 +8,8 @@
  */
 import { Box, Text } from "ink";
 import type { FC } from "react";
+import { type Keybinding, useKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
-import {
-  type Keybinding,
-  useKeybindings,
-} from "../hooks/useKeybindings.js";
 import { tokens } from "../tokens.js";
 
 export interface KeybindFooterProps {
@@ -20,10 +17,7 @@ export interface KeybindFooterProps {
   maxShown?: number;
 }
 
-export const KeybindFooter: FC<KeybindFooterProps> = ({
-  bindings: override,
-  maxShown = 6,
-}) => {
+export const KeybindFooter: FC<KeybindFooterProps> = ({ bindings: override, maxShown = 6 }) => {
   const ctx = useKeybindings();
   const bindings = override ?? ctx.bindings;
   if (!bindings || bindings.length === 0) return null;
@@ -40,9 +34,7 @@ export const KeybindFooter: FC<KeybindFooterProps> = ({
           {shown
             .map((b, i) => {
               const key = tokens.hint(`[${b.keys}]`);
-              const label = b.secondary
-                ? tokens.subtle(b.label)
-                : tokens.muted(b.label);
+              const label = b.secondary ? tokens.subtle(b.label) : tokens.muted(b.label);
               const sep = i > 0 ? tokens.subtle(`  ${icons.dot}  `) : "";
               return `${sep}${key} ${label}`;
             })

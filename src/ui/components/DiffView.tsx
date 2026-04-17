@@ -38,9 +38,7 @@ export function DiffView({ diff, title, maxLines = 20 }: DiffViewProps): React.R
         {visible.map((line, i) => (
           <DiffLineRow key={i} line={line} />
         ))}
-        {truncated && (
-          <Text>{tokens.muted(`... ${lines.length - maxLines} more lines`)}</Text>
-        )}
+        {truncated && <Text>{tokens.muted(`... ${lines.length - maxLines} more lines`)}</Text>}
       </Box>
     </Box>
   );

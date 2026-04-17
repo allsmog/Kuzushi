@@ -294,9 +294,9 @@ export function ContextIntake({
       if (item) {
         const [sectionKey, arrayName, index] = item.path;
         const section = {
-          ...(
-            context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>
-          )[sectionKey]!,
+          ...(context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>)[
+            sectionKey
+          ]!,
         };
         const arr = [...section[arrayName]!];
         const current = arr[index]!;

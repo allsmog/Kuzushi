@@ -324,9 +324,7 @@ const PREFLIGHT_SEGMENT_LABELS: Record<(typeof PREFLIGHT_STEP_ORDER)[number], st
   "threat-editor": "Threat Model",
 };
 
-function preflightBreadcrumb(
-  kind: (typeof PREFLIGHT_STEP_ORDER)[number],
-): UIState["breadcrumb"] {
+function preflightBreadcrumb(kind: (typeof PREFLIGHT_STEP_ORDER)[number]): UIState["breadcrumb"] {
   const stepIdx = PREFLIGHT_STEP_ORDER.indexOf(kind);
   if (stepIdx < 0) return null;
   return {
@@ -482,7 +480,7 @@ export class UIStore {
       ? preflightBreadcrumb(preflight.kind)
       : this.state.mode === "preflight"
         ? null
-        : this.state.breadcrumb ?? null;
+        : (this.state.breadcrumb ?? null);
     this.state = {
       ...this.state,
       preflight,

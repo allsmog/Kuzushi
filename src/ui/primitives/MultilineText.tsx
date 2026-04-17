@@ -25,19 +25,13 @@ function applyToken(value: string, color: ColorKey | undefined): string {
   return fn ? fn(value) : value;
 }
 
-export const MultilineText: FC<MultilineTextProps> = ({
-  text,
-  color,
-  dimEmpty = false,
-  wrap,
-}) => {
+export const MultilineText: FC<MultilineTextProps> = ({ text, color, dimEmpty = false, wrap }) => {
   const lines = text.split("\n");
   return (
     <Box flexDirection="column">
       {lines.map((line, idx) => {
         const isEmpty = line.length === 0;
-        const rendered =
-          isEmpty && dimEmpty ? tokens.muted(" ") : applyToken(line, color);
+        const rendered = isEmpty && dimEmpty ? tokens.muted(" ") : applyToken(line, color);
         return (
           <Text key={`${idx}-${line.length}`} wrap={wrap}>
             {rendered || " "}

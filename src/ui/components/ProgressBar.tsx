@@ -19,8 +19,7 @@ interface ProgressBarProps {
 
 export function ProgressBar({ current, total, width }: ProgressBarProps): React.ReactElement {
   const { columns } = useTerminalSize();
-  const resolvedWidth =
-    width ?? Math.max(10, Math.min(40, Math.floor(columns * 0.4)));
+  const resolvedWidth = width ?? Math.max(10, Math.min(40, Math.floor(columns * 0.4)));
   const bar = progressBar(current, total, resolvedWidth);
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
 
