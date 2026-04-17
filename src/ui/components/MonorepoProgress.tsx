@@ -9,14 +9,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import {
-  formatCost,
-  formatDuration,
-  padCell,
-  statusBadge,
-  terminalCardWidth,
-  truncateMiddle,
-} from "../format.js";
+import { formatCost, formatDuration, padCell, statusBadge, truncateMiddle } from "../format.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { icons } from "../icons.js";
 import { tokens } from "../tokens.js";
@@ -84,10 +77,7 @@ export function MonorepoProgress({
 
         return (
           <Box key={mod.path} paddingLeft={2}>
-            <Text>
-              {tokens.muted(icons.treePipe)}
-              {" "}
-            </Text>
+            <Text>{tokens.muted(icons.treePipe)} </Text>
             <ModuleLine module={mod} connector={connector} />
           </Box>
         );
@@ -120,12 +110,14 @@ function ModuleLine({
       mod.tp != null
         ? `${tokens.danger(`tp=${mod.tp}`)} ${tokens.success(`fp=${mod.fp ?? 0}`)} ${tokens.warn(`nr=${mod.needsReview ?? 0}`)}`
         : "";
-    const cost = mod.costUsd != null ? tokens.muted(padCell(formatCost(mod.costUsd), 8, "right")) : "";
-    const elapsed = mod.elapsedMs != null ? tokens.muted(padCell(formatDuration(mod.elapsedMs), 8, "right")) : "";
+    const cost =
+      mod.costUsd != null ? tokens.muted(padCell(formatCost(mod.costUsd), 8, "right")) : "";
+    const elapsed =
+      mod.elapsedMs != null ? tokens.muted(padCell(formatDuration(mod.elapsedMs), 8, "right")) : "";
     return (
       <Text>
-        {tokens.muted(connector)} {tokens.muted(icons.complete)} {tokens.muted(paddedName)} {verdicts}{" "}
-        {cost} {elapsed}
+        {tokens.muted(connector)} {tokens.muted(icons.complete)} {tokens.muted(paddedName)}{" "}
+        {verdicts} {cost} {elapsed}
       </Text>
     );
   }
@@ -158,9 +150,7 @@ function ModuleLine({
   }
 
   const statusLabel = mod.detail ?? mod.status;
-  const activity = mod.activityDetail
-    ? `  ${tokens.muted(mod.activityDetail.slice(0, 60))}`
-    : "";
+  const activity = mod.activityDetail ? `  ${tokens.muted(mod.activityDetail.slice(0, 60))}` : "";
   return (
     <Box>
       <Text>{tokens.muted(connector)} </Text>

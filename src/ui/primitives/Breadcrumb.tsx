@@ -26,15 +26,13 @@ export const Breadcrumb: FC<BreadcrumbProps> = ({
 }) => {
   if (segments.length === 0) return null;
 
-  const showStep =
-    typeof currentStep === "number" && typeof totalSteps === "number";
+  const showStep = typeof currentStep === "number" && typeof totalSteps === "number";
   const stepSuffix = showStep ? `  (step ${currentStep}/${totalSteps})` : "";
 
   let visible: string[] = [...segments];
   let collapsed = false;
   if (typeof maxWidth === "number" && maxWidth > 0) {
-    const joinedLen = (segs: string[]) =>
-      segs.join(separator).length + stepSuffix.length;
+    const joinedLen = (segs: string[]) => segs.join(separator).length + stepSuffix.length;
     while (visible.length > 1 && joinedLen(visible) > maxWidth) {
       visible = visible.slice(1);
       collapsed = true;
@@ -50,12 +48,14 @@ export const Breadcrumb: FC<BreadcrumbProps> = ({
   return (
     <Box>
       <Text>
-        {visible.map((seg, i) => {
-          const isLast = i === lastIdx;
-          const styled = isLast ? tokens.strong(seg) : tokens.muted(seg);
-          const sep = i > 0 ? tokens.subtle(separator) : "";
-          return `${sep}${styled}`;
-        }).join("")}
+        {visible
+          .map((seg, i) => {
+            const isLast = i === lastIdx;
+            const styled = isLast ? tokens.strong(seg) : tokens.muted(seg);
+            const sep = i > 0 ? tokens.subtle(separator) : "";
+            return `${sep}${styled}`;
+          })
+          .join("")}
         {showStep ? tokens.hint(stepSuffix) : ""}
       </Text>
     </Box>

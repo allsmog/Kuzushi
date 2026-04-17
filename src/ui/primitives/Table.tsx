@@ -34,6 +34,7 @@ export interface TableProps<Row> {
   emptyMessage?: string;
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ESC/CSI bytes are intrinsic to ANSI escape detection
 const ANSI_RE = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
 
 function stripAnsi(s: string): string {
@@ -90,33 +91,21 @@ function computeWidths<Row>(
   const gaps = gap * Math.max(0, columns.length - 1);
   const fixedSum = columns.reduce((acc, c) => acc + (c.width ?? 0), 0);
   const flexTotal = columns.reduce((acc, c) => acc + (c.flex ?? 0), 0);
-  let remaining = Math.max(0, totalWidth - fixedSum - gaps);
+  const remaining = Math.max(0, totalWidth - fixedSum - gaps);
   return columns.map((col) => {
     if (typeof col.width === "number") return col.width;
     if (flexTotal <= 0) return 0;
-    const share = Math.max(
-      0,
-      Math.floor(((col.flex ?? 0) / flexTotal) * remaining),
-    );
+    const share = Math.max(0, Math.floor(((col.flex ?? 0) / flexTotal) * remaining));
     return share;
   });
 }
 
 export function Table<Row>(props: TableProps<Row>): JSX.Element {
-  const {
-    columns,
-    rows,
-    showHeader,
-    divider = true,
-    maxWidth,
-    gap = 2,
-    emptyMessage,
-  } = props;
+  const { columns, rows, showHeader, divider = true, maxWidth, gap = 2, emptyMessage } = props;
 
   const totalWidth = maxWidth ?? process.stdout.columns ?? 80;
   const widths = computeWidths(columns, totalWidth, gap);
-  const headerVisible =
-    showHeader ?? columns.some((c) => typeof c.header === "string");
+  const headerVisible = showHeader ?? columns.some((c) => typeof c.header === "string");
 
   if (rows.length === 0 && emptyMessage) {
     return (
@@ -145,9 +134,7 @@ export function Table<Row>(props: TableProps<Row>): JSX.Element {
         <Box>
           <Text>
             {columns
-              .map((col, i) =>
-                renderCell(tokens.label(col.header ?? col.key), col, widths[i] ?? 0),
-              )
+              .map((col, i) => renderCell(tokens.label(col.header ?? col.key), col, widths[i] ?? 0))
               .join(gapStr)}
           </Text>
         </Box>

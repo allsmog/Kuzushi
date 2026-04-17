@@ -66,9 +66,7 @@ export const ConfirmDialog: FC<ConfirmDialogProps> = ({
       </Box>
       <Box marginTop={1}>
         <Text>
-          {tokens.hint(
-            "[\u2190/\u2192] toggle  [Y/N] shortcut  [Enter] submit  [Esc] cancel",
-          )}
+          {tokens.hint("[\u2190/\u2192] toggle  [Y/N] shortcut  [Enter] submit  [Esc] cancel")}
         </Text>
       </Box>
     </Box>

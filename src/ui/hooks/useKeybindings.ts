@@ -6,7 +6,17 @@
  * Registrations are stacked LIFO — the most recently-mounted set wins, so
  * focus/mode switches swap the visible hints automatically.
  */
-import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  createElement,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 export interface Keybinding {
   keys: string;
@@ -51,6 +61,7 @@ export function KeybindingsProvider(props: { children: ReactNode }): JSX.Element
     };
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the intentional re-render trigger for ref-backed state
   const value = useMemo<KeybindingsContextValue>(() => {
     const last = orderRef.current[orderRef.current.length - 1];
     const current = last ? (mapRef.current.get(last) ?? []) : [];
@@ -61,24 +72,23 @@ export function KeybindingsProvider(props: { children: ReactNode }): JSX.Element
 }
 
 function cacheKey(bindings: ReadonlyArray<Keybinding>): string {
-  return bindings.map((b) => `${b.keys}\u241F${b.label}\u241F${b.secondary ? 1 : 0}`).join("\u241E");
+  return bindings
+    .map((b) => `${b.keys}\u241F${b.label}\u241F${b.secondary ? 1 : 0}`)
+    .join("\u241E");
 }
 
 /**
  * Register keybindings for the lifetime of the calling component. Safe to
  * call without a provider (becomes a no-op).
  */
-export function useRegisterKeybindings(
-  bindings: ReadonlyArray<Keybinding>,
-): void {
+export function useRegisterKeybindings(bindings: ReadonlyArray<Keybinding>): void {
   const ctx = useContext(Ctx);
   const key = cacheKey(bindings);
   const bindingsRef = useRef(bindings);
   bindingsRef.current = bindings;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-register only when logical binding set changes (via cache key), not when the array identity does
   useEffect(() => {
     if (!ctx) return;
     return ctx.register(bindingsRef.current);
-    // Only re-register when the logical binding set changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, key]);
 }

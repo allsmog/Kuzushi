@@ -66,8 +66,7 @@ export function ErrorCard({
     category ?? (error != null ? classifyError(error) : "unknown");
   const categoryBadge = CATEGORY_BADGES[resolvedCategory];
   const nextStep =
-    suggestNextStep(error, resolvedCategory) ??
-    CATEGORY_FALLBACK_HINTS[resolvedCategory];
+    suggestNextStep(error, resolvedCategory) ?? CATEGORY_FALLBACK_HINTS[resolvedCategory];
   const retryInfo =
     attempts && maxAttempts
       ? tokens.muted(` (attempt ${attempts}/${maxAttempts})`)
@@ -75,7 +74,8 @@ export function ErrorCard({
         ? tokens.muted(` (attempt ${attempts})`)
         : "";
 
-  const formatted = error != null ? formatError(error, { maxFrames: 3, includeRaw: showStack }) : null;
+  const formatted =
+    error != null ? formatError(error, { maxFrames: 3, includeRaw: showStack }) : null;
   const frames = formatted?.frames ?? [];
 
   return (

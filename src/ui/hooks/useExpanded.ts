@@ -20,9 +20,7 @@ export interface UseExpandedResult {
   collapse: () => void;
 }
 
-export function useExpanded(
-  options: UseExpandedOptions = {},
-): UseExpandedResult {
+export function useExpanded(options: UseExpandedOptions = {}): UseExpandedResult {
   const { initial = false, isActive = true, onChange } = options;
   const [expanded, setExpanded] = useState<boolean>(initial);
   const onChangeRef = useRef(onChange);

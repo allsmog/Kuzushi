@@ -16,6 +16,7 @@ import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import type { MessageBus } from "../bus/types.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
+import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
 import type {
   ModuleContext,
@@ -23,6 +24,7 @@ import type {
   ToolExecutionContext,
   ToolResult,
 } from "../modules/types.js";
+import { createVariantHunterModule } from "../modules/variant-hunter.js";
 import type { KuzushiConfig } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -285,6 +287,20 @@ export class CopilotCore {
       case "sast": {
         const sast = createCoreSastModule();
         await this.registry.loadModule(sast, this.moduleCtx, {
+          taskRegistry: this.taskRegistry,
+        });
+        break;
+      }
+      case "variant-hunter": {
+        const variantHunter = createVariantHunterModule();
+        await this.registry.loadModule(variantHunter, this.moduleCtx, {
+          taskRegistry: this.taskRegistry,
+        });
+        break;
+      }
+      case "n-day-diff-hunter": {
+        const ndiff = createNDayDiffHunterModule();
+        await this.registry.loadModule(ndiff, this.moduleCtx, {
           taskRegistry: this.taskRegistry,
         });
         break;

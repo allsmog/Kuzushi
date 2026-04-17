@@ -89,10 +89,7 @@ export function classifyError(err: unknown): ErrorCategory {
   return "unknown";
 }
 
-export function suggestNextStep(
-  _err: unknown,
-  category: ErrorCategory,
-): string | undefined {
+export function suggestNextStep(_err: unknown, category: ErrorCategory): string | undefined {
   switch (category) {
     case "auth":
       return "Check ANTHROPIC_API_KEY environment variable or --api-key flag.";
@@ -109,19 +106,13 @@ export function suggestNextStep(
   }
 }
 
-export function formatError(
-  err: unknown,
-  options: FormatErrorOptions = {},
-): FormattedError {
+export function formatError(err: unknown, options: FormatErrorOptions = {}): FormattedError {
   const { maxFrames = 5, includeRaw = false } = options;
   const message = safeMessage(err);
-  const headline =
-    message.split("\n")[0]?.slice(0, HEADLINE_MAX) ?? "Error";
+  const headline = message.split("\n")[0]?.slice(0, HEADLINE_MAX) ?? "Error";
   const category = classifyError(err);
   const frames = parseFrames(stackOf(err), maxFrames);
-  const raw = includeRaw
-    ? stackOf(err) || safeMessage(err)
-    : "";
+  const raw = includeRaw ? stackOf(err) || safeMessage(err) : "";
   return {
     headline,
     category,
