@@ -19,10 +19,17 @@
  *   ○ Report
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import React from "react";
-import { colorVerdict, formatCost, formatDuration, progressBar, statusBadge } from "../format.js";
+import {
+  colorVerdict,
+  formatCost,
+  formatDuration,
+  padCell,
+  progressBar,
+  statusBadge,
+  truncateEnd,
+} from "../format.js";
 import { useHeartbeat } from "../hooks.js";
 import { icons } from "../icons.js";
 import type { AgentActivityLine, PipelineStage, ResultLine, SubTask } from "../state.js";
@@ -83,7 +90,7 @@ export function PipelineIndicator({
   if (stages.length === 0) return null;
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={1} paddingLeft={2}>
       {stages.map((stage, stageIdx) => {
         const isLast = stageIdx === stages.length - 1;
         const hasContent =
@@ -114,12 +121,7 @@ export function PipelineIndicator({
             )}
 
             {/* Vertical connector to next stage */}
-            {hasContent && !isLast && (
-              <Text>
-                {"  "}
-                {chalk.dim(icons.treePipe)}
-              </Text>
-            )}
+            {hasContent && !isLast && <Text>{tokens.muted(icons.treePipe)}</Text>}
           </Box>
         );
       })}
@@ -141,20 +143,19 @@ function StageHeaderLine({
   throttle?: { concurrency: number; reason: string } | null;
 }): React.ReactElement {
   const labelWidth = 14;
-  const paddedLabel = stage.label.padEnd(labelWidth);
+  const paddedLabel = padCell(stage.label, labelWidth);
 
   if (stage.status === "done") {
-    // padEnd on RAW strings before coloring — ANSI escape codes don't count
-    // toward visible width, so the column reserves a real cell count.
+    // padCell runs on raw strings before coloring — ANSI-aware width means
+    // the column reserves a real cell count.
     const detailRaw = stage.detail ?? "";
     const elapsedRaw = stage.elapsedMs != null ? formatDuration(stage.elapsedMs) : "";
-    const detail = chalk.dim(detailRaw.padEnd(STAGE_DETAIL_WIDTH));
-    const elapsed = chalk.dim(elapsedRaw.padEnd(STAGE_ELAPSED_WIDTH));
+    const detail = tokens.muted(padCell(detailRaw, STAGE_DETAIL_WIDTH));
+    const elapsed = tokens.muted(padCell(elapsedRaw, STAGE_ELAPSED_WIDTH));
     const { icon } = statusBadge("stage", "done");
     return (
       <Text>
-        {"  "}
-        {chalk.dim(`${icon} ${paddedLabel}`)} {detail} {elapsed}
+        {tokens.muted(`${icon} ${paddedLabel}`)} {detail} {elapsed}
       </Text>
     );
   }
@@ -162,29 +163,28 @@ function StageHeaderLine({
   if (stage.status === "active") {
     const detailRaw = stage.detail ?? "";
     const detail = detailRaw
-      ? `  ${chalk.white(detailRaw.padEnd(STAGE_DETAIL_WIDTH))}`
+      ? `  ${tokens.strong(padCell(detailRaw, STAGE_DETAIL_WIDTH))}`
       : `  ${" ".repeat(STAGE_DETAIL_WIDTH)}`;
     const cost =
-      runningCostUsd && runningCostUsd > 0 ? `  ${chalk.dim(formatCost(runningCostUsd))}` : "";
+      runningCostUsd && runningCostUsd > 0 ? `  ${tokens.muted(formatCost(runningCostUsd))}` : "";
     const throttleLabel = throttle
-      ? `  ${chalk.yellow(`${icons.warning} ${throttle.concurrency} concurrent`)}`
+      ? `  ${tokens.warn(`${icons.warning} ${throttle.concurrency} concurrent`)}`
       : "";
     const bar =
       progress && progress.total > 0
         ? `  ${progressBar(progress.current, progress.total, 12)}`
         : "";
     const elapsedRaw = stage.startedAt ? formatDuration(Date.now() - stage.startedAt) : "";
-    const elapsed = elapsedRaw ? `  ${chalk.dim(elapsedRaw.padEnd(STAGE_ELAPSED_WIDTH))}` : "";
+    const elapsed = elapsedRaw ? `  ${tokens.muted(padCell(elapsedRaw, STAGE_ELAPSED_WIDTH))}` : "";
     // Active stages use the brand accent for the spinner frame. The static
     // filled-circle glyph still carries `dangerStrong` via `statusBadge` when
     // rendered non-animated (e.g. in tests or plain-renderer).
     return (
       <Box>
-        <Text>{"  "}</Text>
         <Spinner color="accent" />
         <Text>
           {" "}
-          {chalk.redBright.bold(paddedLabel)}
+          {tokens.dangerStrong(paddedLabel)}
           {detail}
           {cost}
           {throttleLabel}
@@ -199,7 +199,6 @@ function StageHeaderLine({
     const { icon } = statusBadge("stage", "error");
     return (
       <Text>
-        {"  "}
         {tokens.danger(`${icon} ${paddedLabel}`)}
         {stage.detail ? `  ${tokens.danger(stage.detail)}` : ""}
       </Text>
@@ -207,12 +206,7 @@ function StageHeaderLine({
   }
 
   const { icon } = statusBadge("stage", "pending");
-  return (
-    <Text>
-      {"  "}
-      {chalk.dim(`${icon} ${paddedLabel}`)}
-    </Text>
-  );
+  return <Text>{tokens.muted(`${icon} ${paddedLabel}`)}</Text>;
 }
 
 // --- Sub-task branches (scanners under Scan stage) ---
@@ -224,7 +218,7 @@ function SubTaskBranches({
   subTasks: SubTask[];
   hasMoreBelow: boolean;
 }): React.ReactElement {
-  const pipe = hasMoreBelow ? chalk.dim(icons.treePipe) : " ";
+  const pipe = hasMoreBelow ? tokens.muted(icons.treePipe) : " ";
 
   // Sort: primary detector tasks first, then support tasks.
   const sorted = [...subTasks].sort((a, b) => {
@@ -293,20 +287,16 @@ function SubTaskRow({
     task.findingCount && task.findingCount > 0
       ? `${task.findingCount} finding${task.findingCount === 1 ? "" : "s"}`
       : "";
-  const detailRaw = task.detail
-    ? task.detail.length > 72
-      ? `${task.detail.slice(0, 69)}...`
-      : task.detail
-    : "";
+  const detailRaw = task.detail ? truncateEnd(task.detail, 72) : "";
 
-  const count = anyCount ? `  ${chalk.white(countRaw.padEnd(SUBTASK_COUNT_WIDTH))}` : "";
-  const detail = anyDetail ? `  ${chalk.dim(detailRaw.padEnd(SUBTASK_DETAIL_WIDTH))}` : "";
-  const elapsed = anyElapsed ? `  ${chalk.dim(elapsedRaw.padEnd(SUBTASK_ELAPSED_WIDTH))}` : "";
+  const count = anyCount ? `  ${tokens.strong(padCell(countRaw, SUBTASK_COUNT_WIDTH))}` : "";
+  const detail = anyDetail ? `  ${tokens.muted(padCell(detailRaw, SUBTASK_DETAIL_WIDTH))}` : "";
+  const elapsed = anyElapsed ? `  ${tokens.muted(padCell(elapsedRaw, SUBTASK_ELAPSED_WIDTH))}` : "";
 
-  const labelColor = task.status === "active" ? chalk.white : chalk.dim;
-  const roleTag = task.role === "support" ? chalk.dim(" [setup]") : "";
+  const labelColor = task.status === "active" ? tokens.strong : tokens.muted;
+  const roleTag = task.role === "support" ? tokens.muted(" [setup]") : "";
   const retryTag =
-    task.retryCount && task.retryCount > 0 ? chalk.yellow(` (retry #${task.retryCount})`) : "";
+    task.retryCount && task.retryCount > 0 ? tokens.warn(` (retry #${task.retryCount})`) : "";
   const hasActivity = task.activityLines && task.activityLines.length > 0;
 
   return (
@@ -316,12 +306,12 @@ function SubTaskRow({
         <Box>
           <Text>
             {"  "}
-            {pipe} {chalk.dim(connector)}{" "}
+            {pipe} {tokens.muted(connector)}{" "}
           </Text>
           <Spinner color="accent" />
           <Text>
             {" "}
-            {chalk.white(task.label)}
+            {tokens.strong(task.label)}
             {roleTag}
             {count}
             {detail}
@@ -332,15 +322,15 @@ function SubTaskRow({
       ) : task.status === "error" ? (
         <Text>
           {"  "}
-          {pipe} {chalk.dim(connector)} {statusIcon} {tokens.danger(task.label)}
+          {pipe} {tokens.muted(connector)} {statusIcon} {tokens.danger(task.label)}
           {task.lastError ? `  ${tokens.danger(task.lastError.slice(0, 72))}` : detail}
           {retryTag}
-          {chalk.dim("  continuing with remaining tasks")}
+          {tokens.muted("  continuing with remaining tasks")}
         </Text>
       ) : (
         <Text>
           {"  "}
-          {pipe} {chalk.dim(connector)} {statusIcon} {labelColor(task.label)}
+          {pipe} {tokens.muted(connector)} {statusIcon} {labelColor(task.label)}
           {roleTag}
           {count}
           {detail}
@@ -354,12 +344,11 @@ function SubTaskRow({
           {task.activityLines!.map((line, li) => {
             const toolIsLast = li === task.activityLines!.length - 1;
             const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
-            const branchPipe = isLast ? " " : chalk.dim(icons.treePipe);
+            const branchPipe = isLast ? " " : tokens.muted(icons.treePipe);
             return (
               <Text key={li}>
-                {"  "}
                 {pipe} {"  "}
-                {branchPipe} {chalk.dim(toolConnector)} {formatToolLine(line)}
+                {branchPipe} {tokens.muted(toolConnector)} {formatToolLine(line)}
               </Text>
             );
           })}
@@ -371,8 +360,8 @@ function SubTaskRow({
         <Text>
           {"  "}
           {pipe} {"  "}
-          {isLast ? " " : chalk.dim(icons.treePipe)} {chalk.dim(icons.treeLast)}{" "}
-          {chalk.dim.italic(`still analyzing... ${formatDuration(heartbeatElapsed)}`)}
+          {isLast ? " " : tokens.muted(icons.treePipe)} {tokens.muted(icons.treeLast)}{" "}
+          {tokens.hint(`still analyzing... ${formatDuration(heartbeatElapsed)}`)}
         </Text>
       )}
     </Box>
@@ -390,7 +379,7 @@ function ResultBranches({
   agentActivity?: Map<string, AgentActivityLine[]>;
   hasMoreBelow: boolean;
 }): React.ReactElement {
-  const pipe = hasMoreBelow ? chalk.dim(icons.treePipe) : " ";
+  const pipe = hasMoreBelow ? tokens.muted(icons.treePipe) : " ";
   // Show last N results + any active agent activities
   const visible = results.slice(-MAX_VISIBLE_RESULTS);
   const skipped = results.length - visible.length;
@@ -401,7 +390,7 @@ function ResultBranches({
       {skipped > 0 && (
         <Text>
           {"  "}
-          {pipe} {chalk.dim(`${icons.treeMiddle} ... ${skipped} more above`)}
+          {pipe} {tokens.muted(`${icons.treeMiddle} ... ${skipped} more above`)}
         </Text>
       )}
       {visible.map((r, i) => {
@@ -410,7 +399,7 @@ function ResultBranches({
         return (
           <Text key={i}>
             {"  "}
-            {pipe} {chalk.dim(connector)} {formatResultBranchLine(r)}
+            {pipe} {tokens.muted(connector)} {formatResultBranchLine(r)}
           </Text>
         );
       })}
@@ -426,13 +415,12 @@ function ResultBranches({
             {/* Active finding header */}
             <Box>
               <Text>
-                {"  "}
-                {pipe} {chalk.dim(connector)}{" "}
+                {pipe} {tokens.muted(connector)}{" "}
               </Text>
               <Spinner color="warn" />
               <Text>
                 {" "}
-                {chalk.white(prefix)} {chalk.dim(fp.slice(0, 12))}...
+                {tokens.strong(prefix)} {tokens.muted(fp.slice(0, 12))}...
               </Text>
             </Box>
             {/* Tool call sub-branches */}
@@ -440,12 +428,11 @@ function ResultBranches({
               const toolIsLast = li === lines.length - 1;
               const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
               // Continuation pipe from the active finding
-              const branchPipe = isLast ? " " : chalk.dim(icons.treePipe);
+              const branchPipe = isLast ? " " : tokens.muted(icons.treePipe);
               return (
                 <Text key={li}>
-                  {"  "}
                   {pipe} {"  "}
-                  {branchPipe} {chalk.dim(toolConnector)} {formatToolLine(line)}
+                  {branchPipe} {tokens.muted(toolConnector)} {formatToolLine(line)}
                 </Text>
               );
             })}
@@ -461,59 +448,59 @@ function formatResultBranchLine(r: ResultLine): string {
 
   if (r.kind === "error") {
     const stage = r.errorStage?.toUpperCase() ?? "TRIAGE";
-    return `${chalk.red(`${icons.error} ${prefix} ${stage} ERROR`)}`;
+    return `${tokens.danger(`${icons.error} ${prefix} ${stage} ERROR`)}`;
   }
 
   if (r.kind === "triage" && r.verdict) {
     const verdict = colorVerdict(r.verdict);
-    const conf = chalk.dim(`(${((r.confidence ?? 0) * 100).toFixed(0)}%)`);
-    const cost = r.costUsd && r.costUsd > 0 ? ` ${chalk.dim(formatCost(r.costUsd))}` : "";
-    return `${chalk.dim(icons.complete)} ${prefix} ${verdict} ${conf}${cost}`;
+    const conf = tokens.muted(`(${((r.confidence ?? 0) * 100).toFixed(0)}%)`);
+    const cost = r.costUsd && r.costUsd > 0 ? ` ${tokens.muted(formatCost(r.costUsd))}` : "";
+    return `${tokens.muted(icons.complete)} ${prefix} ${verdict} ${conf}${cost}`;
   }
 
   if (r.kind === "verify") {
-    const statusIcon = r.exploitable ? chalk.red(icons.error) : chalk.green(icons.success);
+    const statusIcon = r.exploitable ? tokens.danger(icons.error) : tokens.success(icons.success);
     const label = r.exploitable ? "EXPLOITABLE" : "not exploitable";
-    const cost = r.costUsd && r.costUsd > 0 ? ` ${chalk.dim(formatCost(r.costUsd))}` : "";
-    return `${chalk.dim(icons.complete)} ${prefix} ${statusIcon} ${label}${cost}`;
+    const cost = r.costUsd && r.costUsd > 0 ? ` ${tokens.muted(formatCost(r.costUsd))}` : "";
+    return `${tokens.muted(icons.complete)} ${prefix} ${statusIcon} ${label}${cost}`;
   }
 
   if (r.kind === "poc") {
-    const statusIcon = r.skipped ? chalk.yellow(icons.pending) : chalk.cyan(icons.gear);
+    const statusIcon = r.skipped ? tokens.warn(icons.pending) : tokens.accent(icons.gear);
     const label = r.skipped ? "SKIPPED" : "GENERATED";
     const parsed = r.skipped ? "" : r.parsed ? " parsed" : " parse-error";
-    return `${chalk.dim(icons.complete)} ${prefix} ${statusIcon} ${label}${parsed}`;
+    return `${tokens.muted(icons.complete)} ${prefix} ${statusIcon} ${label}${parsed}`;
   }
 
-  return `${chalk.dim(prefix)}`;
+  return `${tokens.muted(prefix)}`;
 }
 
 function formatToolLine(line: AgentActivityLine): string {
   switch (line.kind) {
     case "tool-start": {
       const detail = line.detail ?? line.toolName ?? "Tool";
-      return chalk.dim(`${icons.arrow} ${detail}`);
+      return tokens.muted(`${icons.arrow} ${detail}`);
     }
     case "tool-progress": {
       const toolName = line.toolName ?? "tool";
       const elapsed =
         line.elapsedSeconds != null ? ` (${formatDuration(line.elapsedSeconds * 1000)})` : "";
-      return chalk.dim(`${icons.ellipsis} ${toolName}${elapsed}`);
+      return tokens.muted(`${icons.ellipsis} ${toolName}${elapsed}`);
     }
     case "tool-complete":
       return line.detail
-        ? `${chalk.green(icons.success)} ${line.detail}`
-        : chalk.green(icons.success);
+        ? `${tokens.success(icons.success)} ${line.detail}`
+        : tokens.success(icons.success);
     case "reasoning":
       // Reasoning IS the story — show it prominently, not dimmed.
       return line.detail
-        ? chalk.white(line.detail.slice(0, 120) + ((line.detail.length ?? 0) > 120 ? "..." : ""))
+        ? tokens.strong(line.detail.slice(0, 120) + ((line.detail.length ?? 0) > 120 ? "..." : ""))
         : "";
     case "summary":
-      return line.detail ? `${chalk.cyan(icons.dot)} ${line.detail.slice(0, 120)}` : "";
+      return line.detail ? `${tokens.accent(icons.dot)} ${line.detail.slice(0, 120)}` : "";
     case "finding-preview":
       return line.detail
-        ? `${chalk.redBright(icons.error)} ${chalk.white(line.detail.slice(0, 120))}`
+        ? `${tokens.dangerStrong(icons.error)} ${tokens.strong(line.detail.slice(0, 120))}`
         : "";
   }
 }

@@ -7,7 +7,6 @@
  * to minimize flicker from spinner ticks.
  */
 
-import chalk from "chalk";
 import { Box, Static, Text } from "ink";
 import React from "react";
 import { Banner } from "./components/Banner.js";
@@ -34,6 +33,7 @@ import { Breadcrumb } from "./primitives/Breadcrumb.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
 import type { ResultLine as ResultLineData, UIStore } from "./state.js";
+import { tokens } from "./tokens.js";
 
 interface AppProps {
   store: UIStore;
@@ -124,7 +124,7 @@ function AppInner({ store }: AppProps): React.ReactElement {
             {() => (
               <Text key="skip-info">
                 {"  "}
-                {chalk.dim(
+                {tokens.muted(
                   `Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`,
                 )}
               </Text>

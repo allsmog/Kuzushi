@@ -1,23 +1,20 @@
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
 import type { UINotice } from "../state.js";
+import { tokens } from "../tokens.js";
 
 interface NoticeRailProps {
   notices: UINotice[];
 }
 
 export function NoticeRail({ notices }: NoticeRailProps): React.ReactElement | null {
-  if (notices.length === 0) {
-    return null;
-  }
+  if (notices.length === 0) return null;
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
       {notices.map((notice) => (
         <Text key={notice.id}>
-          {"  "}
           {formatIcon(notice.level)} {formatMessage(notice)}
         </Text>
       ))}
@@ -28,26 +25,26 @@ export function NoticeRail({ notices }: NoticeRailProps): React.ReactElement | n
 function formatIcon(level: UINotice["level"]): string {
   switch (level) {
     case "success":
-      return chalk.green(icons.success);
+      return tokens.success(icons.success);
     case "warning":
-      return chalk.yellow(icons.warning);
+      return tokens.warn(icons.warning);
     case "error":
-      return chalk.red(icons.error);
+      return tokens.danger(icons.error);
     default:
-      return chalk.blue(icons.info);
+      return tokens.info(icons.info);
   }
 }
 
 function formatMessage(notice: UINotice): string {
   const message =
     notice.level === "error"
-      ? chalk.red(notice.message)
+      ? tokens.danger(notice.message)
       : notice.level === "warning"
-        ? chalk.yellow(notice.message)
+        ? tokens.warn(notice.message)
         : notice.level === "success"
-          ? chalk.green(notice.message)
-          : chalk.white(notice.message);
+          ? tokens.success(notice.message)
+          : tokens.strong(notice.message);
 
-  const detail = notice.detail ? ` ${chalk.dim(notice.detail)}` : "";
+  const detail = notice.detail ? ` ${tokens.muted(notice.detail)}` : "";
   return `${message}${detail}`;
 }

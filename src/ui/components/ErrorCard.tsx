@@ -80,9 +80,8 @@ export function ErrorCard({
 
   return (
     <Box flexDirection="column">
-      <Box>
+      <Box paddingLeft={2}>
         <Text>
-          {"  "}
           {categoryBadge} {tokens.strong(message)}
           {retryInfo}
         </Text>
