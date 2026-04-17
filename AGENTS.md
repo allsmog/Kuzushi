@@ -1,152 +1,292 @@
-# Repository Guidelines
+# CLAUDE.md
 
-- Repo: https://github.com/allsmog/Kuzushi
+This guide is for AI/code agents (Claude, Codex, etc.) working in Kuzushi, with a focus on the **Copilot module system**: how modules are structured, how they load, and how to add new ones safely.
 
-## Project Structure & Module Organization
+## TL;DR
 
-- Source: `src/` — CLI entry in `src/cli.ts`, core types in `src/types.ts`, config in `src/config.ts`.
-- Agents (primary abstraction): `src/agents/`
-  - Types: `src/agents/types.ts` (`AgentTask`, `TaskContext`, `TaskOutputKind`)
-  - Registry: `src/agents/registry.ts` (`TaskRegistry`, DAG resolution + cycle detection)
-  - Factory: `src/agents/index.ts` (`createDefaultTaskRegistry()` — registers all native tasks including semgrep/codeql/agentic)
-- Scanner implementations: `src/scanners/` — native task wrappers
-  - Semgrep: `src/scanners/semgrep.ts`, `src/scanners/run-semgrep.ts`, `src/scanners/resolve-semgrep.ts`
-  - CodeQL: `src/scanners/codeql.ts`, `src/scanners/run-codeql.ts`, `src/scanners/resolve-codeql.ts`
-  - Agentic scanner: `src/scanners/agentic.ts`, `src/scanners/run-agentic.ts`
-  - Scoring: `src/scanners/scoring.ts`
-  - Types: `src/scanners/types.ts` (`Finding`, `TaskId`, `ScannerPlugin`)
-- Event bus: `src/bus/` — transport-agnostic message bus + coordinator
-  - Interface: `src/bus/types.ts`
-  - Events: `src/bus/events.ts`
-  - Orchestrator: `src/bus/orchestrator.ts` (DAG-aware stage execution)
-  - Workers: `src/bus/workers/`
-- Agent runtime abstraction: `src/agent-runtime/`
-  - Contract: `src/agent-runtime/types.ts` (`AgentRuntime`, `AgentSession`, normalized messages/options)
-  - Claude adapter: `src/agent-runtime/claude.ts` (`ClaudeSession` for subprocess reuse)
-  - Batch file I/O: `src/agent-runtime/batch-files.ts` (`.kuzushi/batches/` read/write/cleanup)
-  - Runtime selector: `src/agent-runtime/index.ts`
-- Triage: `src/triage.ts` (agentic triage via `AgentRuntime`, not SDK-bound).
-- Store: `src/store.ts` (SQLite persistence via `better-sqlite3`).
-- Report: `src/report.ts` (terminal output with chalk).
-- Context utility: `src/context.ts`.
-- Tests: `tests/`; bus tests in `tests/bus/`, agent tests in `tests/agents/`.
+- A module is a `CopilotModule` (`src/modules/types.ts`).
+- Modules expose **tools** (`module:action`) and may also contribute **pipeline tasks** (`AgentTask[]`).
+- `CopilotCore` owns lifecycle and dispatch (`src/copilot/core.ts`).
+- `ModuleRegistry` registers/initializes modules and resolves tools (`src/modules/registry.ts`).
+- The built-in `sast` module is the reference implementation (`src/modules/core-sast.ts`).
+- External modules can be loaded from:
+  - builtin (`builtin:sast`)
+  - local filesystem (`file:///abs/path` + `module.manifest.json`)
+  - package (`package:@scope/name`)
+  - MCP (`mcp:<server-spec>`)
 
-## Build, Test, and Development Commands
+---
 
-- Runtime: Node **22+**
-- Package manager: pnpm
-- Install deps: `pnpm install`
-- Dev run: `pnpm dev` or `npx tsx src/cli.ts`
-- Build: `pnpm build`
-- Type-check: `pnpm typecheck`
-- Tests: `pnpm test`
-- Coverage: `pnpm test:coverage`
+## 1) Mental model: where modules fit
 
-## Architecture: AgentTask + DAG
+Kuzushi has one runtime core and three execution modes:
 
-- `AgentTask` is the first-class execution unit:
-  - `id`, `displayName`, `outputKind`, `dependsOn`, `run(input, context)`, optional `init(config)`
-- `TaskRegistry.resolveOrder(enabledIds)` returns DAG stages as parallel groups.
-- Orchestrator flow:
-  1. `pipeline:start`
-  2. `resolveInitialTaskPlan()` determines enabled task IDs from `config.tasks` + transitive deps
-  3. `resolveOrderWithPolicyEdges()` topological-sorts into parallel stage groups
-  4. `runTaskDag()` executes each stage: publishes `task:start`, waits for `task:complete`/`task:error`
-  5. Emit `stage:complete` per group
-  6. Forward upstream outputs to dependent tasks via `TaskContext.upstreamOutputs`
-  7. Continue triage/report pipeline
-- Task events: `task:start`, `task:progress`, `task:complete`, `task:error`, `stage:complete`
-- Finding events: `scan:finding` still emitted by scan worker for finding-producing tasks
+1. **scan mode** (`kuzushi scan`) — DAG pipeline execution.
+2. **shell mode** (`kuzushi`) — conversational agent + tool dispatch.
+3. **run mode** (`kuzushi run`) — headless single-tool execution.
 
-## Adding a New Agent Task
+All three modes converge on the same module abstraction (`CopilotModule`) and tool execution path (`CopilotCore.executeTool(...)`).
 
-1. Create `src/agents/tasks/<name>.ts` implementing `AgentTask<TInput, TOutput>`.
-2. Pick `outputKind` and declare dependencies in `dependsOn`.
-3. Register task in `createDefaultTaskRegistry()`.
-4. If task needs config, read from `TaskContext.config` and optional task-specific config block.
-5. Emit task-level progress through `TaskContext.bus` when useful.
+### Core flow
 
-## Configuration
+1. `CopilotCore.init()` creates/loads modules.
+2. `ModuleRegistry.loadModule()` registers module + calls `init()` + wires tasks.
+3. Tool calls resolve by fully-qualified name (`module:action`).
+4. `ToolExecutionContext` provides runtime, bus, config, cwd, signal, and optional UI state.
 
-- Layered precedence: defaults -> `~/.kuzushi/config.json` -> `<repo>/.kuzushi/config.json` -> CLI flags.
-- Task selection: `config.tasks: TaskId[]` — the single public selection surface.
-- Per-task config: `config.taskConfig: Record<string, TaskConfig>` — keyed by task ID or reserved stage ID.
-- Stage model overrides: `taskConfig["triage"].model`, `taskConfig["verify"].model`, `taskConfig["poc-harness"].model` (replaces old top-level `triageModel`/`verifyModel`/`pocHarnessModel`).
-- CLI: `--tasks <csv>`, `--task-model <taskId>=<model>`, `--preset <name>`.
-- Key fields:
-  - `model`, `tasks`, `taskConfig`
-  - `agentRuntimeBackend` (`pi-ai`)
-  - `severity`, `excludePatterns`
-  - `busBackend`, `triageConcurrency`, `scanMode`
+---
 
-## Testing Guidelines
+## 2) Canonical interfaces you should know
 
-- Unit tests for DAG behavior belong in `tests/agents/`.
-- Orchestrator integration tests belong in `tests/bus/` and should assert stage gating and dependency handoff.
-- Run `pnpm test` before pushing when touching orchestration or task contracts.
+### `CopilotModule`
 
-## Security
+Defined in `src/modules/types.ts`.
 
-- Never commit API keys or `ANTHROPIC_API_KEY` values.
-- Do not commit findings DB files (`<repo>/.kuzushi/findings.sqlite3`).
+A module must provide:
 
-## Commits & Git Hooks
+- `id`, `displayName`, `category`, `version`, `description`
+- `tools: ModuleTool[]`
 
-- Commit messages must pass `commitlint` (conventional-commits format). Allowed types: `feat, fix, chore, perf, refactor, docs, test, style, ci, build, revert, merge`.
-- Header: `<type>(<scope>): <subject>` — max 100 chars, imperative mood.
-- Pre-commit hook (`.husky/pre-commit`) runs `lint-staged` on staged files only (kept <5s). Full config: `commitlint.config.js` + `.lintstagedrc.json`.
-- Escape hatches: `HUSKY=0` disables all hooks; `git commit --no-verify` bypasses for a single commit; `SKIP=<task>` skips a specific lint-staged task. See `docs/devex/05-conventions-assessment.md` for when each is acceptable.
-- Activate the commit-message template locally: `git config commit.template .gitmessage`.
+Optional:
 
-## Terminal UI (Ink)
+- `tasks: AgentTask[]` (for DAG pipeline)
+- `knowledge` modules
+- `events` metadata
+- lifecycle hooks: `init(...)`, `dispose()`
 
-- **All UI must go through the Ink shell.** Never use raw `readline`, `process.stdout.write`, or `console.log` for interactive terminal output. The Ink React app (`src/ui/App.tsx`) owns the terminal.
-- UI state lives in `UIStore` (`src/ui/state.ts`). Components subscribe via `useUIState(store)`.
-- UI modes: `"preflight"`, `"running"`, `"summary"`, `"review"`, `"done"`, `"shell"`. Each mode renders a different component tree in `App.tsx`.
-- The copilot shell (`"shell"` mode) is rendered by `src/ui/components/CopilotShell.tsx`. Command logic lives in `src/copilot/shell.ts` — keep React components pure (display only).
-- Non-TTY environments fall back to `src/ui/plain-renderer.ts` (subscribe-based console.log).
-- New UI features: add state to `UIState`, create a component in `src/ui/components/`, wire it into `App.tsx` conditionally on `state.mode` or `state.phase`.
+### `ModuleTool`
 
-## Copilot Module System
+Each tool must provide:
 
-- `CopilotModule` (`src/modules/types.ts`) is the pluggable capability unit. Each module exposes tools + optional tasks + knowledge.
-- `ModuleRegistry` (`src/modules/registry.ts`) manages module lifecycle. Tools are namespaced as `module:action`.
-- `CopilotCore` (`src/copilot/core.ts`) coordinates modules, dispatches tools, assembles agent context.
-- The built-in `sast` module (`src/modules/core-sast.ts`) wraps the existing 40+ task pipeline.
-- Three execution modes share the same core: pipeline (`kuzushi scan`), shell (`kuzushi` default), run (`kuzushi run`).
+- `name`: **must be fully-qualified** (`"<moduleId>:<action>"`)
+- `description`
+- `inputSchema` (JSON schema-ish object)
+- `headless` (if usable in non-interactive mode)
+- `execute(input, ctx): Promise<ToolResult>`
 
-## Release Workflow
+### `ToolExecutionContext`
 
-When releasing a new version:
+You get:
 
-```bash
-# 1. Bump version in package.json
-# 2. Stage, commit, tag
-git add <files>
-git commit -m "feat/fix/chore: description
+- `runtime` (LLM backend abstraction)
+- `bus` (events)
+- `config`
+- `cwd`
+- optional `target`, `workspaceId`, `signal`, `uiStore`, `seedTaskOutputs`
 
-git tag v<version>
+Use this context instead of creating ad-hoc global dependencies.
 
-# 3. Push
-git push origin main
-git push origin v<version>
+---
 
-# 4. Publish to npm
-npm publish
+## 3) Module lifecycle and registry behavior
 
-# 5. Update global install
-npm cache clean --force
-npm install -g kuzushi@<version>
-kuzushi --version
+`ModuleRegistry` (`src/modules/registry.ts`) is strict about lifecycle:
+
+- `register(mod)` throws on duplicate module ID.
+- `loadModule(...)`:
+  1. register
+  2. `init(...)`
+  3. add module tasks into shared `TaskRegistry` (if provided)
+  4. rollback on failure
+- `unloadModule(id)` calls `dispose()` if initialized.
+- `disposeAll()` unloads in reverse order.
+
+Tool routing:
+
+- `resolveTool("module:action")` finds exact tool object.
+- `allTools({ headlessOnly })` filters by headless compatibility.
+
+---
+
+## 4) How module specifiers are parsed
+
+`parseModuleSpecifier()` in `src/modules/registry.ts` supports:
+
+- `builtin:sast`
+- `file:///absolute/path/to/module`
+- `package:@kuzushi/some-module`
+- `mcp:http://localhost:3000`
+- bare string defaults to builtin ID (`"sast"` => builtin)
+
+---
+
+## 5) How loading works in `CopilotCore`
+
+Private loaders in `src/copilot/core.ts`:
+
+- `loadBuiltinModule(id)`
+  - currently supports built-in `sast`.
+- `loadLocalModule(path)`
+  - reads `module.manifest.json`
+  - validates requirements (`env`, `nodeVersion`)
+  - imports entry module
+  - enforces manifest ID == exported module ID
+- `loadPackageModule(name)`
+  - resolves installed package
+  - if manifest exists: uses local-manifest flow
+  - else: directly imports package export as `CopilotModule`
+- `loadMcpModule(spec)`
+  - bridges MCP tools as module tools via `createMcpModule(...)`
+
+---
+
+## 6) Required shape for local modules
+
+For file-based module loading, include `module.manifest.json`.
+
+Minimal example:
+
+```json
+{
+  "id": "my-module",
+  "displayName": "My Module",
+  "version": "0.1.0",
+  "description": "Custom Kuzushi module",
+  "category": "offense",
+  "entry": "./dist/index.js",
+  "requires": {
+    "nodeVersion": ">=22",
+    "env": ["MY_API_KEY"]
+  }
+}
 ```
 
-- Always bump `version` in `package.json` before publishing.
-- Tag format: `v0.11.4` (prefixed with `v`).
-- Wait a few seconds after `npm publish` if `npm install` returns `notarget` — registry propagation delay.
-- Run `pnpm typecheck && pnpm test` before committing.
+Validation and requirement checks live in `src/modules/loader.ts`.
 
-## Agent-Specific Notes
+---
 
-- Verify behavior in code; do not guess.
-- Never edit `node_modules`.
-- `MessageBus` and `AgentTask` are stable contracts; changes require explicit review.
+## 7) Add a new module: practical checklist
+
+### A) Implement the module
+
+Create a module package (local repo folder or separate package) exporting a `CopilotModule`.
+
+Suggested file layout:
+
+```text
+my-module/
+  module.manifest.json
+  src/index.ts
+  src/tools/<tool>.ts
+  package.json
+```
+
+### B) Define at least one tool
+
+- Tool name must start with your module ID (`my-module:scan`, etc.).
+- Keep `description` concrete; the shell planner relies on it.
+- Define strict `inputSchema` so tool invocations are predictable.
+- Return `ToolResult` with `ok` and useful `output`; include `data` for automation.
+
+### C) (Optional) contribute DAG tasks
+
+If module contributes pipeline tasks:
+
+- expose `tasks: AgentTask[]`
+- define clear `dependsOn` relationships
+- ensure task IDs do not collide with existing IDs
+
+`ModuleRegistry.loadModule(...)` auto-registers these tasks into the shared `TaskRegistry`.
+
+### D) Load and test
+
+Examples:
+
+```bash
+# shell with extra module
+kuzushi shell --load file:///absolute/path/to/my-module
+
+# run one tool headlessly
+kuzushi run my-module:scan --input '{"target":"."}' --load file:///absolute/path/to/my-module
+```
+
+### E) Production hardening
+
+- implement `init()` to validate credentials/connectivity up front
+- implement `dispose()` for cleanup (connections, subprocesses)
+- prefer deterministic outputs and structured `data`
+- keep side effects explicit and auditable
+
+---
+
+## 8) Use `sast` module as your reference
+
+`src/modules/core-sast.ts` shows best current patterns:
+
+- rich tool catalog (`sast:scan`, `sast:semgrep`, `sast:codeql`, etc.)
+- shared helpers for option merge and pipeline execution
+- consistent summary output + optional cost accounting (`costUsd`)
+- graceful handling of auth/config errors
+- reuse of core scan pipeline instead of forked implementations
+
+When in doubt, mirror `createCoreSastModule()` conventions for naming, schemas, and output ergonomics.
+
+---
+
+## 9) Guardrails for agents editing this repo
+
+- Do not break `CopilotModule`/`ModuleTool` contracts without deliberate migration planning.
+- Preserve the `module:action` naming convention.
+- Prefer adding behavior in module/tool layer before touching orchestrator internals.
+- If you add task-producing modules, include tests around dependency ordering.
+- Keep `headless` truthful: shell-only behavior should not be marked headless.
+
+---
+
+## 10) Quick troubleshooting
+
+### "Unknown tool: module:action"
+
+- Module not loaded, wrong module ID, or tool name mismatch.
+- Check `module.id`, `tool.name`, and load specifier.
+
+### "No module.manifest.json found"
+
+- Local module loader requires manifest at module root.
+
+### "requirements not met"
+
+- Missing env vars and/or Node version mismatch (see manifest `requires`).
+
+### "Module ID mismatch"
+
+- `module.manifest.json` `id` must match exported module object's `id`.
+
+---
+
+## 11) One-file module starter (TypeScript)
+
+```ts
+import type { CopilotModule } from "kuzushi/modules";
+
+const module: CopilotModule = {
+  id: "my-module",
+  displayName: "My Module",
+  category: "offense",
+  version: "0.1.0",
+  description: "Example custom module",
+  tools: [
+    {
+      name: "my-module:ping",
+      description: "Connectivity check",
+      inputSchema: {
+        type: "object",
+        properties: { target: { type: "string" } },
+      },
+      headless: true,
+      async execute(input) {
+        const target = (input as { target?: string }).target ?? "default";
+        return {
+          ok: true,
+          output: `pong: ${target}`,
+          data: { target },
+        };
+      },
+    },
+  ],
+};
+
+export default module;
+```
+
+Use this as a skeleton, then add runtime/bus/config integration through `ToolExecutionContext` as needed.
