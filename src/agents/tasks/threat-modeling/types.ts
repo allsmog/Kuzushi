@@ -64,6 +64,58 @@ export interface StrideThreat {
   evidenceAnchors?: EvidenceAnchor[];
 }
 
+/**
+ * Narrative layer overlaid on top of the DFD/STRIDE data, matching the
+ * codex-cyber-style threat-model document (Overview; Trust boundaries &
+ * assumptions with categorised inputs; Attack surface with attacker stories;
+ * Criticality calibration; Out-of-scope).
+ *
+ * All fields are optional at the document level (populated by the Randori
+ * narrative-synthesis stage) so older persisted models keep loading.
+ */
+export interface ThreatModelInputCategories {
+  /** Inputs an external attacker can shape (repo content, network, PR body, …). */
+  attackerControlled: string[];
+  /** Inputs the trusted operator supplies (CLI flags, config, env vars, creds). */
+  operatorControlled: string[];
+  /** Inputs committed by developers (prompts, built-in tasks, tool policies). */
+  developerControlled: string[];
+  /** Upstream services / providers trusted by the application. */
+  externalServices: string[];
+  /** Isolation / sandbox guarantees and fallbacks. */
+  sandboxBoundary: string[];
+  /** Free-form assumptions under which the model holds. */
+  assumptions: string[];
+}
+
+export interface ThreatModelAttackerStory {
+  title: string;
+  /** 2-4 sentence Alice-and-Bob narrative describing the attack. */
+  narrative: string;
+  /** How the attack is mitigated today (or what should mitigate it). */
+  mitigation: string;
+  /** Related StrideThreat.id values from `threats[]`. */
+  threatIds?: string[];
+}
+
+export interface ThreatModelCriticalityBuckets {
+  critical: string[];
+  high: string[];
+  medium: string[];
+  low: string[];
+}
+
+export interface ThreatModelNarrative {
+  /** 1-3 paragraph overview of the application's runtime and exposure. */
+  overview: string;
+  inputCategories: ThreatModelInputCategories;
+  attackerStories: ThreatModelAttackerStory[];
+  /** Concrete examples of what belongs in each severity bucket for this app. */
+  criticalityBuckets: ThreatModelCriticalityBuckets;
+  /** Classes of issues explicitly declared out-of-scope. */
+  outOfScope: string[];
+}
+
 export interface ThreatModelDocument {
   version: string;
   dfd: {
@@ -76,6 +128,8 @@ export interface ThreatModelDocument {
     bySeverity: Record<string, number>;
     byCategory: Record<StrideCategory, number>;
   };
+  /** Narrative layer (Overview / Trust boundaries / Attacker stories / …). */
+  narrative?: ThreatModelNarrative;
   /** Operator annotations keyed by threat ID. */
   userAnnotations?: Record<string, string>;
   /** Operator-confirmed mitigations that the scanner should trust. */
