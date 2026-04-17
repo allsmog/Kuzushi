@@ -22,6 +22,7 @@ import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 
 export interface WizardResult {
@@ -123,6 +124,12 @@ export function SetupWizard({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [result, setResult] = useState<Partial<WizardResult>>({});
   const width = terminalCardWidth();
+
+  useRegisterKeybindings([
+    { keys: "\u2191/\u2193", label: "Navigate" },
+    { keys: "Enter", label: "Select" },
+    { keys: "q", label: "Quit", secondary: true },
+  ]);
 
   const currentOptions =
     step === "preset" ? PRESETS : step === "model" ? MODELS : step === "save" ? SAVE_OPTIONS : [];

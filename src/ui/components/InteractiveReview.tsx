@@ -22,6 +22,7 @@ import type React from "react";
 import { useState } from "react";
 import type { Verdict } from "../../types.js";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 import type { ActionableFinding } from "../state.js";
 import { FindingCard } from "./FindingCard.js";
@@ -47,6 +48,14 @@ export function InteractiveReview({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [tally, setTally] = useState<ReviewTally>({ tp: 0, fp: 0, by_design: 0, skipped: 0 });
   const width = terminalCardWidth();
+
+  useRegisterKeybindings([
+    { keys: "t", label: "True positive" },
+    { keys: "f", label: "False positive" },
+    { keys: "b", label: "By design" },
+    { keys: "s", label: "Skip", secondary: true },
+    { keys: "q", label: "Quit", secondary: true },
+  ]);
 
   const finding = findings[currentIndex];
   const isLast = currentIndex >= findings.length - 1;
