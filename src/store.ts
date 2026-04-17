@@ -29,6 +29,7 @@ import type {
   VerificationResult,
 } from "./types.js";
 import { safeJsonParse, safeJsonStringify } from "./utils/safe-json.js";
+import { isRecord } from "./utils.js";
 
 export type PipelineRunStatus =
   | "scanning"
@@ -1622,6 +1623,141 @@ export function updateVerificationResult(
     result.verifyCostUsd ?? null,
     fingerprint,
   );
+
+  // Merge verify-produced evidence (code_citations, attack_path, assumptions,
+  // controls, blindspots) into triage_details_json when verify found stronger
+  // evidence than triage. Verify's deeper investigation (longer runtime,
+  // bypass attempts, PoC construction) often surfaces citations that the
+  // triage stage missed; previously those were discarded because verify only
+  // wrote its scalar verify_* columns.
+  mergeVerificationEvidenceIntoTriageDetails(db, fingerprint, result);
+}
+
+/**
+ * Read the existing `triage_details_json` for a finding and merge in any
+ * stronger evidence fields from the verification result. Never downgrades an
+ * existing field: citations are deduped + appended, attack_path is replaced
+ * only if verify's chain is strictly longer, assumptions/controls/blindspots
+ * are deduped and merged.
+ */
+function mergeVerificationEvidenceIntoTriageDetails(
+  db: Database.Database,
+  fingerprint: string,
+  result: VerificationResult,
+): void {
+  const row = db
+    .prepare("SELECT triage_details_json FROM findings WHERE fingerprint = ?")
+    .get(fingerprint) as { triage_details_json: string | null } | undefined;
+  if (!row) return;
+
+  const existing = parseTriageDetailsRecord(row.triage_details_json) ?? {};
+  const merged = { ...existing };
+  let changed = false;
+
+  if (result.codeCitations && result.codeCitations.length > 0) {
+    const existingCites = Array.isArray(existing["code_citations"])
+      ? (existing["code_citations"] as Array<Record<string, unknown>>)
+      : [];
+    const seen = new Set<string>(
+      existingCites.map((c) => `${c["file_path"]}:${c["start_line"]}-${c["end_line"]}`),
+    );
+    const additions: Array<Record<string, unknown>> = [];
+    for (const cite of result.codeCitations) {
+      const key = `${cite.filePath}:${cite.startLine}-${cite.endLine}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        additions.push({
+          file_path: cite.filePath,
+          start_line: cite.startLine,
+          end_line: cite.endLine,
+          snippet: cite.snippet,
+          description: cite.description,
+        });
+      }
+    }
+    if (additions.length > 0) {
+      merged["code_citations"] = [...existingCites, ...additions];
+      changed = true;
+    }
+  }
+
+  if (result.attackPath && Array.isArray(result.attackPath.chain)) {
+    const existingPath = isRecord(existing["attack_path"])
+      ? (existing["attack_path"] as Record<string, unknown>)
+      : null;
+    const existingChain = Array.isArray(existingPath?.["chain"])
+      ? (existingPath["chain"] as unknown[])
+      : [];
+    if (result.attackPath.chain.length > existingChain.length) {
+      merged["attack_path"] = {
+        chain: result.attackPath.chain,
+        narrative: result.attackPath.narrative,
+        likelihood_reasoning: result.attackPath.likelihoodReasoning,
+        impact_reasoning: result.attackPath.impactReasoning,
+      };
+      changed = true;
+    }
+  }
+
+  if (result.assumptions && result.assumptions.length > 0) {
+    const existingList = Array.isArray(existing["assumptions"])
+      ? (existing["assumptions"] as string[])
+      : [];
+    const deduped = dedupeStrings([...existingList, ...result.assumptions]);
+    if (deduped.length > existingList.length) {
+      merged["assumptions"] = deduped;
+      changed = true;
+    }
+  }
+
+  if (result.controls && result.controls.length > 0) {
+    const existingList = Array.isArray(existing["controls"])
+      ? (existing["controls"] as Array<Record<string, unknown>>)
+      : [];
+    const seen = new Set(existingList.map((c) => String(c["name"])));
+    const additions: Array<Record<string, unknown>> = [];
+    for (const c of result.controls) {
+      if (!seen.has(c.name)) {
+        seen.add(c.name);
+        additions.push({ name: c.name, description: c.description, file_path: c.filePath });
+      }
+    }
+    if (additions.length > 0) {
+      merged["controls"] = [...existingList, ...additions];
+      changed = true;
+    }
+  }
+
+  if (result.blindspots && result.blindspots.length > 0) {
+    const existingList = Array.isArray(existing["blindspots"])
+      ? (existing["blindspots"] as string[])
+      : [];
+    const deduped = dedupeStrings([...existingList, ...result.blindspots]);
+    if (deduped.length > existingList.length) {
+      merged["blindspots"] = deduped;
+      changed = true;
+    }
+  }
+
+  if (!changed) return;
+
+  db.prepare(`
+    UPDATE findings
+    SET triage_details_json = ?, updated_at = datetime('now')
+    WHERE fingerprint = ?
+  `).run(safeJsonStringify(merged), fingerprint);
+}
+
+function dedupeStrings(items: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
 }
 
 /** Persist verification cost for a finding even when verification errors. */
