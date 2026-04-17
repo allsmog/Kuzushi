@@ -25,9 +25,7 @@ export function CompactHeader({
     <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
       <Text>
         {tokens.dangerStrong("Kuzushi")} {tokens.subtle("\u00B7")} {tokens.strong(repoName)}
-        {findingsLabel
-          ? `${tokens.subtle(" \u00B7 ")}${tokens.strong(findingsLabel)}`
-          : ""}
+        {findingsLabel ? `${tokens.subtle(" \u00B7 ")}${tokens.strong(findingsLabel)}` : ""}
       </Text>
       {tasks.length > 0 && (
         <Text>

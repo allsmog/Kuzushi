@@ -6,9 +6,9 @@
  * whitespace literals, and tokens for coloring.
  */
 
-import { Box, Text } from "ink";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { Box, Text } from "ink";
 import type React from "react";
 import { tokens } from "../tokens.js";
 

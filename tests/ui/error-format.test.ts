@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  classifyError,
-  formatError,
-  suggestNextStep,
-} from "../../src/ui/error-format.js";
+import { classifyError, formatError, suggestNextStep } from "../../src/ui/error-format.js";
 
 describe("classifyError", () => {
   it("classifies 401 as auth", () => {
@@ -20,9 +16,7 @@ describe("classifyError", () => {
     expect(classifyError(new Error("Spend budget exceeded"))).toBe("budget");
   });
   it("classifies transient network errors", () => {
-    expect(classifyError(new Error("fetch failed ECONNRESET"))).toBe(
-      "transient",
-    );
+    expect(classifyError(new Error("fetch failed ECONNRESET"))).toBe("transient");
   });
   it("classifies validation errors", () => {
     expect(classifyError(new Error("Zod validation failed"))).toBe("validation");
@@ -80,10 +74,7 @@ describe("formatError", () => {
     const err = new Error("boom");
     err.stack =
       "Error: boom\n" +
-      Array.from(
-        { length: 20 },
-        (_, i) => `    at fn${i} (/src/f${i}.ts:1:1)`,
-      ).join("\n");
+      Array.from({ length: 20 }, (_, i) => `    at fn${i} (/src/f${i}.ts:1:1)`).join("\n");
     const out = formatError(err, { maxFrames: 3 });
     expect(out.frames).toHaveLength(3);
   });

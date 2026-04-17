@@ -59,9 +59,11 @@ const CHOICES: ChoiceOption[] = [
   },
 ];
 
-const CHOICE_ITEMS: ReadonlyArray<SelectListItem<ChoiceOption["id"]>> = CHOICES.map(
-  (c) => ({ id: c.id, label: c.name, detail: c.description }),
-);
+const CHOICE_ITEMS: ReadonlyArray<SelectListItem<ChoiceOption["id"]>> = CHOICES.map((c) => ({
+  id: c.id,
+  label: c.name,
+  detail: c.description,
+}));
 
 type Step = "choose" | "input";
 
@@ -76,9 +78,7 @@ const INPUT_KEYBINDS = [
   { keys: "Esc", label: "Back" },
 ];
 
-function chooseRenderer(
-  ctx: SelectListRenderContext<ChoiceOption["id"]>,
-): React.ReactElement {
+function chooseRenderer(ctx: SelectListRenderContext<ChoiceOption["id"]>): React.ReactElement {
   const opt = CHOICES.find((c) => c.id === ctx.item.id)!;
   const name = ctx.isCursor ? tokens.strong(opt.name) : tokens.muted(opt.name);
   return (

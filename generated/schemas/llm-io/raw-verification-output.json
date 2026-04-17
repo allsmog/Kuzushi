@@ -3,6 +3,39 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "attack_path": {
+      "additionalProperties": false,
+      "properties": {
+        "chain": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "impact_reasoning": {
+          "type": "string"
+        },
+        "likelihood_reasoning": {
+          "type": "string"
+        },
+        "narrative": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "chain",
+        "narrative",
+        "likelihood_reasoning",
+        "impact_reasoning"
+      ],
+      "type": "object"
+    },
     "attack_vector": {
       "anyOf": [
         {
@@ -13,14 +46,73 @@
         }
       ]
     },
+    "blindspots": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "bypass_attempts": {
       "items": {
         "type": "string"
       },
       "type": "array"
     },
+    "code_citations": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "end_line": {
+            "type": "number"
+          },
+          "file_path": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "start_line": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "file_path",
+          "start_line",
+          "end_line",
+          "snippet",
+          "description"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "confidence": {
       "type": "number"
+    },
+    "controls": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "file_path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "type": "object"
+      },
+      "type": "array"
     },
     "exploitable": {
       "type": "boolean"

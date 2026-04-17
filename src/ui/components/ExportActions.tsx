@@ -74,12 +74,8 @@ export function ExportActions({
         <Text>
           {tokens.dangerStrong("[c]")} Copy to clipboard {tokens.muted("(markdown)")}
         </Text>
-        <Text>
-          {tokens.strong("[g]")} GitHub issue template
-        </Text>
-        <Text>
-          {tokens.info("[j]")} Jira CSV export
-        </Text>
+        <Text>{tokens.strong("[g]")} GitHub issue template</Text>
+        <Text>{tokens.info("[j]")} Jira CSV export</Text>
       </Box>
 
       {status && (

@@ -35,9 +35,7 @@ export function useTerminalSize(): TerminalSize {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         const next = measure(s);
-        setSize((prev) =>
-          prev.columns === next.columns && prev.rows === next.rows ? prev : next,
-        );
+        setSize((prev) => (prev.columns === next.columns && prev.rows === next.rows ? prev : next));
       }, DEBOUNCE_MS);
     };
     s.on("resize", handleResize);
