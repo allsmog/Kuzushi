@@ -4,7 +4,9 @@ import type { AgentRuntime } from "../../agent-runtime/types.js";
 import type { TaskRegistry } from "../../agents/registry.js";
 import type { TaskContext } from "../../agents/types.js";
 import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
+import { untrackWorktree } from "../../patch.js";
 import { getPatchResultsForFinding, updatePatchResultStatus } from "../../store/patch-results.js";
+import { getStoredFinding } from "../../store.js";
 import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import { toErrorMessage } from "../../utils.js";
 import type { PatchVerifyRequestedEvent } from "../events.js";
@@ -33,6 +35,13 @@ export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
     await bus.publish(createEvent("patch-verify:start", runId, { context, fingerprint }));
 
     try {
+      // Prefer to re-run only the task that originally produced the finding.
+      // This cuts re-verify cost by N (where N = number of configured tasks)
+      // and keeps the signal clean: if a different task happens to flag the
+      // same code, that's new information, not a patch regression.
+      const stored = getStoredFinding(db, fingerprint);
+      const originatingTaskId = stored?.taskId;
+
       const verified = await verifyPatch(
         fingerprint,
         worktreePath,
@@ -41,6 +50,7 @@ export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
         config,
         runtime,
         taskRegistry,
+        originatingTaskId,
       );
 
       const patchResults = getPatchResultsForFinding(db, fingerprint);
@@ -86,6 +96,7 @@ async function verifyPatch(
   config: KuzushiConfig,
   runtime: AgentRuntime,
   taskRegistry: TaskRegistry,
+  originatingTaskId?: string,
 ): Promise<boolean> {
   const silentBus: MessageBus = {
     async publish() {},
@@ -97,7 +108,14 @@ async function verifyPatch(
     async close() {},
   };
 
-  for (const taskId of config.tasks) {
+  // Scope re-verification to the originating task when we know it. That's
+  // the cheapest, most targeted signal of "did this specific finding go
+  // away?" Falling back to all configured finding tasks preserves the
+  // previous behaviour for old findings without a stored taskId.
+  const tasksToRun =
+    originatingTaskId && taskRegistry.has(originatingTaskId) ? [originatingTaskId] : config.tasks;
+
+  for (const taskId of tasksToRun) {
     if (!taskRegistry.has(taskId)) continue;
     const task = taskRegistry.get(taskId);
     if (task.outputKind !== "findings" && task.outputKind !== "threat-model") {
@@ -145,5 +163,10 @@ function cleanupWorktree(worktreePath: string, repoRoot: string): void {
     });
   } catch {
     /* best-effort cleanup */
+  } finally {
+    // Mirror the bookkeeping in patch.ts so the SIGINT/SIGTERM shutdown
+    // hook in patch-worker.ts doesn't try to double-free an already-gone
+    // worktree.
+    untrackWorktree(worktreePath);
   }
 }
