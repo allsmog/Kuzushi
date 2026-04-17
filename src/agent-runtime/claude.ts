@@ -11,7 +11,10 @@ import {
 import Anthropic from "@anthropic-ai/sdk";
 import type { LlmCallCompleteEvent, LlmCallErrorEvent, LlmCallStartEvent } from "../bus/events.js";
 import type { MessageBus } from "../bus/types.js";
+import { resolveAgentRuntimeConfig } from "../credentials.js";
+import { classifyError } from "../errors.js";
 import { getLogger } from "../logger.js";
+import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeConfig } from "../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { buildSubprocessEnv } from "./env.js";
@@ -134,10 +137,12 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   runId: string | null = null;
 
   constructor(config?: AgentRuntimeConfig) {
-    this.config = config;
+    // Resolve apiKeyFile → apiKey at construction time so downstream code
+    // (and the Anthropic SDK client) can keep reading `.apiKey` directly.
+    this.config = resolveAgentRuntimeConfig(config);
     this.client = new Anthropic({
-      apiKey: config?.apiKey,
-      baseURL: config?.baseUrl,
+      apiKey: this.config?.apiKey,
+      baseURL: this.config?.baseUrl,
     });
   }
 
@@ -338,6 +343,16 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       }
     }
 
+    // Acquire an adaptive rate-limit slot for this model before issuing the
+    // API call. The registry halves per-model concurrency on 429 hits and
+    // gradually recovers on sustained successes. We don't use the returned
+    // release fn — `release()` below is called with an explicit success flag
+    // so the registry knows whether to penalise the pool.
+    const rateLimitModelSpec = request.options.model ?? model;
+    const registry = getRateLimitRegistry();
+    await registry.acquire(rateLimitModelSpec);
+    let rateLimitSuccess = true;
+
     try {
       // Build output_config — effort errors on Haiku, so skip it
       const outputConfig: Record<string, unknown> = {};
@@ -447,8 +462,13 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       };
     } catch (error) {
       const durationMs = Date.now() - startedAtMs;
-      const retryable =
-        error instanceof Anthropic.RateLimitError || error instanceof Anthropic.InternalServerError;
+      const isRateLimit =
+        error instanceof Anthropic.RateLimitError || classifyError(error) === "rate_limit";
+      // Report rate-limit errors to the registry so adaptive concurrency
+      // can halve the pool size. All other errors (including transient
+      // 5xx) shouldn't penalise the pool.
+      rateLimitSuccess = !isRateLimit;
+      const retryable = isRateLimit || error instanceof Anthropic.InternalServerError;
 
       log.error(
         `Direct API query failed (${durationMs}ms, retryable=${retryable}): ${toErrorMessage(error)}`,
@@ -478,6 +498,8 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         numTurns: 0,
         totalCostUsd: 0,
       };
+    } finally {
+      registry.release(rateLimitModelSpec, rateLimitSuccess);
     }
   }
 
@@ -494,6 +516,15 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     }
 
     await acquireSlot();
+    // Adaptive rate-limit slot for the subprocess path. The subprocess semaphore
+    // (`acquireSlot`) bounds parallel Claude Code processes at the OS level;
+    // `registry.acquire` additionally halves per-model concurrency on 429 hits
+    // so we back off globally instead of retry-storming the API.
+    const rateLimitModelSpec = request.options.model ?? "claude-sonnet-4-6";
+    const registry = getRateLimitRegistry();
+    await registry.acquire(rateLimitModelSpec);
+    let rateLimitSuccess = true;
+
     const startedAtMs = Date.now();
     let totalCostUsd = 0;
     let numTurns = 0;
@@ -699,6 +730,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       }
     } catch (error) {
       const durationMs = Date.now() - startedAtMs;
+      // Report 429s to the rate-limit registry so it can halve the pool.
+      // Other errors (spawn failures, transient 5xx) don't penalise.
+      rateLimitSuccess = classifyError(error) !== "rate_limit";
       log.error(`Claude SDK query failed (${durationMs}ms): ${toErrorMessage(error)}`);
 
       // Emit llm:call-error
@@ -714,7 +748,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
             payload: {
               model: request.options.model,
               error: toErrorMessage(error),
-              retryable: false,
+              retryable: !rateLimitSuccess,
               runId: turnRunId,
             },
           });
@@ -732,6 +766,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         totalCostUsd,
       };
     } finally {
+      registry.release(rateLimitModelSpec, rateLimitSuccess);
       releaseSlot();
     }
   }
