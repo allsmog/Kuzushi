@@ -23,6 +23,7 @@ import type {
   ToolExecutionContext,
   ToolResult,
 } from "../modules/types.js";
+import { createVariantHunterModule } from "../modules/variant-hunter.js";
 import type { KuzushiConfig } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -285,6 +286,13 @@ export class CopilotCore {
       case "sast": {
         const sast = createCoreSastModule();
         await this.registry.loadModule(sast, this.moduleCtx, {
+          taskRegistry: this.taskRegistry,
+        });
+        break;
+      }
+      case "variant-hunter": {
+        const variantHunter = createVariantHunterModule();
+        await this.registry.loadModule(variantHunter, this.moduleCtx, {
           taskRegistry: this.taskRegistry,
         });
         break;
