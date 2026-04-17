@@ -138,10 +138,12 @@ Kuzushi's capabilities come from `CopilotModule`s that expose tools (for shell a
 | **randori** | intel | PASTA threat modeling via the `@kuzushi/randori-plugin` — S1–S4 stages plus narrative synthesis, returning a `ThreatModelDocument` | `randori:pasta`, `randori:threat-model` |
 | **vuln-scout** | offense | Whitebox pentest via the `@kuzushi/vuln-scout` plugin — agentic SAST + taint analysis returning normalized Findings | `vuln-scout:audit` |
 | **tob** | offense | Trail of Bits skills audit via `@kuzushi/tob-skills` — fp-check, sharp-edges, insecure-defaults, static-analysis, variant-analysis, and more | `tob:audit`, `tob:skills` |
+| **shinsa** | governance | ISO 27001 Annex A + NIST SP 800-53 Rev 5 compliance assessment via `shinsa-plugin` — evidence-backed controls mapped to file:line citations | `shinsa:scan`, `shinsa:quick-check`, `shinsa:nist-scan`, `shinsa:nist-quick-check`, `shinsa:frameworks` |
+| **prompt-armor** | offense | LLM red teaming via `promptarmor-plugin` — 80+ attack plugins, 25+ mutation strategies, code-aware remediation (network commands require `authorized: true`) | `prompt-armor:scan`, `prompt-armor:analyze`, `prompt-armor:attack`, `prompt-armor:diff`, `prompt-armor:report`, `prompt-armor:config` |
 | **variant-hunter** | offense | Lifts confirmed findings into portable signatures and hunts for variants across the repo (including vendored deps) | `variant:lift-pattern`, `variant:hunt` |
 | **n-day-diff-hunter** | offense | CVE-diff-based n-day hunting and variant search against a target | `ndiff:fetch-cve`, `ndiff:search-patch-shape`, `ndiff:hunt-variants` |
 
-Load with the shell or at startup: `kuzushi shell --load randori,vuln-scout,tob,variant-hunter,n-day-diff-hunter` (the bare id works — `builtin:` prefix is optional).
+Load with the shell or at startup: `kuzushi shell --load randori,vuln-scout,tob,shinsa,prompt-armor,variant-hunter,n-day-diff-hunter` (the bare id works — `builtin:` prefix is optional).
 
 ### External `CopilotModule` packages
 
@@ -158,10 +160,12 @@ These are dependencies consumed by the built-in wrappers above, not directly loa
 | `@kuzushi/randori-plugin` | built-in `randori` | PASTA threat-modeling plugin (commands, agents, skills, hooks). |
 | `@kuzushi/vuln-scout` | built-in `vuln-scout` | Whitebox pentest skill pack under `whitebox-pentest/`. |
 | `@kuzushi/tob-skills` | built-in `tob` | Fork of trailofbits/skills — security-relevant plugins under `plugins/`. |
+| `shinsa-plugin` | built-in `shinsa` | ISO 27001 + NIST 800-53 compliance assessment (4 commands, 10 assessor agents). |
+| `promptarmor-plugin` | built-in `prompt-armor` | LLM red teaming (6 commands + MCP server under `server/`). |
 
 ### Roadmap (not yet shipped)
 
-`blackbox`, `pwn`, `pentest`, `honeypot`, `yokai`, `prompt-armor`, `shinsa`, `revgraph` — referenced in the long-term vision but not currently implemented as loadable modules. See [VISION.md](VISION.md) for direction.
+`blackbox`, `pwn`, `pentest`, `honeypot`, `yokai`, `revgraph` — referenced in the long-term vision but not currently implemented as loadable modules. See [VISION.md](VISION.md) for direction.
 
 ## The SAST Pipeline
 

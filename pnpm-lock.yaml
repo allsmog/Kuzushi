@@ -41,9 +41,15 @@ importers:
       ink:
         specifier: ^5
         version: 5.2.1(@types/react@18.3.28)(react@18.3.1)
+      promptarmor-plugin:
+        specifier: github:allsmog/promptarmor-plugin
+        version: https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9
       react:
         specifier: ^18
         version: 18.3.1
+      shinsa-plugin:
+        specifier: github:allsmog/shinsa-plugin
+        version: https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/76cdc58acd4776044f55bb5069c7c3493f5cdd8f
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -2565,6 +2571,10 @@ packages:
     resolution: {integrity: sha512-973driJZvxiGOQ5ONsFhOF/DtzPMOMtgC11kCpUrPGMTgqp2q/1gwzCquocrN33is0VZ5GFHXZYMM9l6h67v2Q==}
     engines: {node: '>=10'}
 
+  promptarmor-plugin@https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9:
+    resolution: {tarball: https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9}
+    version: 1.0.0
+
   protobufjs@7.5.4:
     resolution: {integrity: sha512-CvexbZtbov6jW2eXAvLukXjXUW1TzFaivC46BpWc/3BpcCysb5Vffu+B3XHMm8lVEuy2Mm4XGex8hBSg1yapPg==}
     engines: {node: '>=12.0.0'}
@@ -2722,6 +2732,10 @@ packages:
   shebang-regex@3.0.0:
     resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
     engines: {node: '>=8'}
+
+  shinsa-plugin@https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/76cdc58acd4776044f55bb5069c7c3493f5cdd8f:
+    resolution: {tarball: https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/76cdc58acd4776044f55bb5069c7c3493f5cdd8f}
+    version: 0.0.0
 
   side-channel-list@1.0.0:
     resolution: {integrity: sha512-FCLHtRD/gnpCiCHEiJLOwdmFP+wzCmDEkc9y7NsYxeF4u7Btsn1ZuwgwJGxImImHicJArLP4R0yX4c2KCrMrTA==}
@@ -5895,6 +5909,8 @@ snapshots:
     dependencies:
       parse-ms: 2.1.0
 
+  promptarmor-plugin@https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9: {}
+
   protobufjs@7.5.4:
     dependencies:
       '@protobufjs/aspromise': 1.1.2
@@ -6110,6 +6126,8 @@ snapshots:
       shebang-regex: 3.0.0
 
   shebang-regex@3.0.0: {}
+
+  shinsa-plugin@https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/76cdc58acd4776044f55bb5069c7c3493f5cdd8f: {}
 
   side-channel-list@1.0.0:
     dependencies:

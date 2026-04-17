@@ -35,7 +35,7 @@ describe("DockerPocExecutor", () => {
     it("constructs correct docker command for JavaScript", async () => {
       vi.mocked(execFile).mockImplementation((_cmd, args, _opts, callback) => {
         if (callback) {
-          (callback as Function)(null, "PASS", "");
+          (callback as (...args: unknown[]) => unknown)(null, "PASS", "");
         }
         return { kill: vi.fn() } as any;
       });
@@ -57,7 +57,7 @@ describe("DockerPocExecutor", () => {
     it("constructs correct docker command for Python", async () => {
       vi.mocked(execFile).mockImplementation((_cmd, args, _opts, callback) => {
         if (callback) {
-          (callback as Function)(null, "output", "");
+          (callback as (...args: unknown[]) => unknown)(null, "output", "");
         }
         return { kill: vi.fn() } as any;
       });
@@ -74,7 +74,7 @@ describe("DockerPocExecutor", () => {
       vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, callback) => {
         if (callback) {
           const error = Object.assign(new Error("exit 1"), { code: 1 });
-          (callback as Function)(error, "", "error output");
+          (callback as (...args: unknown[]) => unknown)(error, "", "error output");
         }
         return { kill: vi.fn() } as any;
       });
@@ -90,7 +90,7 @@ describe("DockerPocExecutor", () => {
       vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, callback) => {
         if (callback) {
           const error = Object.assign(new Error("killed"), { killed: true });
-          (callback as Function)(error, "", "");
+          (callback as (...args: unknown[]) => unknown)(error, "", "");
         }
         return { kill: vi.fn() } as any;
       });
