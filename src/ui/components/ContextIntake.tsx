@@ -1,26 +1,22 @@
 /**
  * Operator context intake — multi-section progressive editor.
  *
- * Auto-populated from task outputs, operators review each item:
- *
- *   ┌─ Scan Context: Trust (1/4) ──────────────────────┐
- *   │                                                    │
- *   │  Deployment & Infrastructure:                      │
- *   │  > ✓ Kubernetes behind AWS ALB                     │
- *   │    ○ Redis ElastiCache (in-VPC)                    │
- *   │                                                    │
- *   │  [↑↓] navigate  [a] accept  [e] edit  [d] delete  │
- *   │  [s] skip  [n] add  [A] accept all  [tab] next    │
- *   └──────────────────────────────────────────────────┘
+ * Auto-populated from task outputs, operators review each item and accept,
+ * edit, delete, or skip. Navigation uses the shared useBoundedIndex hook,
+ * inline edit mode uses the shared <TextInput> primitive, and keybindings
+ * flow through useRegisterKeybindings so the footer reflects context.
  */
 
-import chalk from "chalk";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useCallback, useState } from "react";
 import type { IntakeItemStatus, OperatorContextItem, OperatorScanContext } from "../../types.js";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
+import { TextInput } from "../primitives/TextInput.js";
+import { tokens } from "../tokens.js";
 
 type IntakeSection = "trust" | "scope" | "architecture" | "historical";
 const SECTIONS: IntakeSection[] = ["trust", "scope", "architecture", "historical"];
@@ -38,27 +34,25 @@ interface ContextIntakeProps {
   onCancel: () => void;
 }
 
-/** Flatten a section's items into a displayable list. */
 interface DisplayItem {
   label: string;
   groupLabel?: string;
   status: IntakeItemStatus;
-  /** Path into context for mutation: [sectionKey, arrayName, index] */
   path: [string, string, number];
 }
 
 function statusIcon(status: IntakeItemStatus): string {
   switch (status) {
     case "accepted":
-      return chalk.green(icons.success);
+      return tokens.success(icons.success);
     case "edited":
-      return chalk.yellow("\u270E"); // ✎
+      return tokens.warn("\u270E");
     case "deleted":
-      return chalk.red(icons.error);
+      return tokens.danger(icons.error);
     case "added":
-      return chalk.cyan("+");
+      return tokens.accent("+");
     default:
-      return chalk.dim(icons.pending);
+      return tokens.muted(icons.pending);
   }
 }
 
@@ -202,6 +196,20 @@ function acceptAllInSection(ctx: OperatorScanContext, section: IntakeSection): O
   return updated;
 }
 
+const EDIT_KEYBINDS = [
+  { keys: "Enter", label: "Save" },
+  { keys: "Esc", label: "Cancel" },
+];
+
+const NAV_KEYBINDS = [
+  { keys: "\u2191/\u2193", label: "Navigate" },
+  { keys: "a", label: "Accept" },
+  { keys: "e", label: "Edit" },
+  { keys: "d", label: "Delete" },
+  { keys: "A", label: "Accept all", secondary: true },
+  { keys: "Tab", label: "Next section", secondary: true },
+];
+
 export function ContextIntake({
   initialContext,
   onComplete,
@@ -209,7 +217,6 @@ export function ContextIntake({
   onCancel,
 }: ContextIntakeProps): React.ReactElement {
   const [sectionIdx, setSectionIdx] = useState(0);
-  const [selectedIdx, setSelectedIdx] = useState(0);
   const [context, setContext] = useState<OperatorScanContext>({ ...initialContext });
   const [editMode, setEditMode] = useState(false);
   const [editBuffer, setEditBuffer] = useState("");
@@ -218,9 +225,16 @@ export function ContextIntake({
   const currentSection = SECTIONS[sectionIdx]!;
   const displayItems = getDisplayItems(context, currentSection);
 
+  const nav = useBoundedIndex(displayItems.length, {
+    isActive: !editMode,
+    wrap: false,
+  });
+  const selectedIdx = nav.index;
+
+  useRegisterKeybindings(editMode ? EDIT_KEYBINDS : NAV_KEYBINDS);
+
   const advanceSection = useCallback(() => {
     if (sectionIdx >= SECTIONS.length - 1) {
-      // Done — mark as reviewed and complete
       const finalCtx: OperatorScanContext = {
         ...context,
         operatorReviewed: true,
@@ -229,103 +243,84 @@ export function ContextIntake({
       onComplete(finalCtx);
     } else {
       setSectionIdx((i) => i + 1);
-      setSelectedIdx(0);
+      nav.setIndex(0);
     }
-  }, [sectionIdx, context, onComplete]);
+  }, [sectionIdx, context, onComplete, nav]);
 
-  useInput((input, key) => {
-    if (editMode) {
-      if (key.return) {
-        // Save inline edit (update the string value for simple string items)
-        if (editBuffer.trim()) {
-          const item = displayItems[selectedIdx];
-          if (item) {
-            const [sectionKey, arrayName, index] = item.path;
-            const section = {
-              ...(
-                context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>
-              )[sectionKey]!,
-            };
-            const arr = [...section[arrayName]!];
-            const current = arr[index]!;
-            if (typeof current.value === "string") {
-              arr[index] = {
-                ...current,
-                value: editBuffer.trim(),
-                status: "edited",
-                original: current.original ?? current.value,
-              };
-              section[arrayName] = arr;
-              setContext({ ...context, [sectionKey]: section });
-            }
-          }
+  // Command keys (not handled by useBoundedIndex or TextInput)
+  useInput(
+    (input, key) => {
+      if (editMode) return;
+      if (key.tab) {
+        advanceSection();
+      } else if (key.escape || input === "q") {
+        onCancel();
+      } else if (input === "a" && !key.shift) {
+        const item = displayItems[selectedIdx];
+        if (item) setContext(mutateItemStatus(context, item.path, "accepted"));
+      } else if (input === "A") {
+        setContext(acceptAllInSection(context, currentSection));
+        advanceSection();
+      } else if (input === "d") {
+        const item = displayItems[selectedIdx];
+        if (item) setContext(mutateItemStatus(context, item.path, "deleted"));
+      } else if (input === "s") {
+        const item = displayItems[selectedIdx];
+        if (item) setContext(mutateItemStatus(context, item.path, "skipped"));
+      } else if (input === "e") {
+        const item = displayItems[selectedIdx];
+        if (item && typeof item.label === "string") {
+          const [sectionKey, arrayName, index] = item.path;
+          const section = (
+            context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>
+          )[sectionKey];
+          const raw = section?.[arrayName]?.[index];
+          setEditBuffer(typeof raw?.value === "string" ? raw.value : item.label);
+          setEditMode(true);
         }
-        setEditMode(false);
-        setEditBuffer("");
-      } else if (key.escape) {
-        setEditMode(false);
-        setEditBuffer("");
-      } else if (key.backspace || key.delete) {
-        setEditBuffer((b) => b.slice(0, -1));
-      } else if (input && !key.ctrl && !key.meta) {
-        setEditBuffer((b) => b + input);
+      } else if (input === "S") {
+        onSkip();
+      } else if (key.return) {
+        advanceSection();
       }
-      return;
-    }
+    },
+    { isActive: !editMode },
+  );
 
-    // Navigation
-    if (key.upArrow) {
-      setSelectedIdx((i) => Math.max(0, i - 1));
-    } else if (key.downArrow) {
-      setSelectedIdx((i) => Math.min(displayItems.length - 1, i + 1));
-    } else if (key.tab) {
-      advanceSection();
-    } else if (key.escape || input === "q") {
-      onCancel();
-    } else if (input === "a" && !key.shift) {
-      // Accept current item
+  const commitEdit = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed) {
       const item = displayItems[selectedIdx];
       if (item) {
-        setContext(mutateItemStatus(context, item.path, "accepted"));
-      }
-    } else if (input === "A") {
-      // Accept all in section and advance
-      setContext(acceptAllInSection(context, currentSection));
-      advanceSection();
-    } else if (input === "d") {
-      // Delete current item
-      const item = displayItems[selectedIdx];
-      if (item) {
-        setContext(mutateItemStatus(context, item.path, "deleted"));
-      }
-    } else if (input === "s") {
-      // Skip current item
-      const item = displayItems[selectedIdx];
-      if (item) {
-        setContext(mutateItemStatus(context, item.path, "skipped"));
-      }
-    } else if (input === "e") {
-      // Enter edit mode for string items
-      const item = displayItems[selectedIdx];
-      if (item && typeof item.label === "string") {
-        setEditMode(true);
-        // Find the raw value to seed the edit buffer
         const [sectionKey, arrayName, index] = item.path;
-        const section = (
-          context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>
-        )[sectionKey];
-        const raw = section?.[arrayName]?.[index];
-        setEditBuffer(typeof raw?.value === "string" ? raw.value : item.label);
+        const section = {
+          ...(
+            context as unknown as Record<string, Record<string, OperatorContextItem<unknown>[]>>
+          )[sectionKey]!,
+        };
+        const arr = [...section[arrayName]!];
+        const current = arr[index]!;
+        if (typeof current.value === "string") {
+          arr[index] = {
+            ...current,
+            value: trimmed,
+            status: "edited",
+            original: current.original ?? current.value,
+          };
+          section[arrayName] = arr;
+          setContext({ ...context, [sectionKey]: section });
+        }
       }
-    } else if (input === "S") {
-      // Skip entire intake
-      onSkip();
-    } else if (key.return) {
-      advanceSection();
     }
-  });
+    setEditMode(false);
+    setEditBuffer("");
+  };
 
-  // Empty section: auto-advance
+  const cancelEdit = () => {
+    setEditMode(false);
+    setEditBuffer("");
+  };
+
   if (displayItems.length === 0) {
     return (
       <Box flexDirection="column">
@@ -337,21 +332,18 @@ export function ContextIntake({
           )}
         </Text>
         <Text>{""}</Text>
-        <Text>
-          {"  "}
-          {chalk.dim("No items detected for this section.")}
-        </Text>
-        <Text>
-          {"  "}
-          {chalk.dim("Press [tab] or [enter] to continue, [n] to add items.")}
-        </Text>
+        <Box paddingLeft={2}>
+          <Text>{tokens.muted("No items detected for this section.")}</Text>
+        </Box>
+        <Box paddingLeft={2}>
+          <Text>{tokens.muted("Press [tab] or [enter] to continue, [n] to add items.")}</Text>
+        </Box>
         <Text>{""}</Text>
         <Text>{boxFooter(width)}</Text>
       </Box>
     );
   }
 
-  // Track displayed group headers
   let lastGroup: string | undefined;
 
   return (
@@ -369,22 +361,21 @@ export function ContextIntake({
         const showGroup = item.groupLabel && item.groupLabel !== lastGroup;
         if (item.groupLabel) lastGroup = item.groupLabel;
         const isSelected = i === selectedIdx;
-        const cursor = isSelected ? chalk.cyan("> ") : "  ";
+        const cursor = isSelected ? tokens.accent("> ") : "  ";
         const icon = statusIcon(item.status);
         const label =
           item.status === "deleted"
-            ? chalk.strikethrough.dim(item.label)
+            ? tokens.subtle(item.label)
             : isSelected
-              ? chalk.white(item.label)
-              : chalk.dim(item.label);
+              ? tokens.strong(item.label)
+              : tokens.muted(item.label);
 
         return (
           <Box key={i} flexDirection="column">
             {showGroup && (
-              <Text>
-                {"  "}
-                {chalk.bold.underline(item.groupLabel)}
-              </Text>
+              <Box paddingLeft={2}>
+                <Text>{tokens.heading(item.groupLabel!)}</Text>
+              </Box>
             )}
             <Text>
               {cursor}
@@ -394,18 +385,19 @@ export function ContextIntake({
         );
       })}
 
-      {/* Inline edit mode */}
       {editMode && (
-        <Box marginTop={1}>
-          <Text>
-            {"  "}
-            {chalk.cyan("Edit:")} {editBuffer}
-            {chalk.cyan("\u2588")}
-          </Text>
+        <Box marginTop={1} paddingLeft={2}>
+          <Text>{tokens.accent("Edit: ")}</Text>
+          <TextInput
+            value={editBuffer}
+            onChange={setEditBuffer}
+            onSubmit={commitEdit}
+            onCancel={cancelEdit}
+            prefix=""
+          />
         </Box>
       )}
 
-      {/* Running tally */}
       {(() => {
         const accepted = displayItems.filter(
           (i) => i.status === "accepted" || i.status === "edited",
@@ -413,29 +405,17 @@ export function ContextIntake({
         const deleted = displayItems.filter((i) => i.status === "deleted").length;
         const pending = displayItems.filter((i) => i.status === "skipped").length;
         return (
-          <Box marginTop={1}>
+          <Box marginTop={1} paddingLeft={2}>
             <Text>
-              {"  "}
-              {chalk.dim("Items:")}
-              {accepted > 0 ? ` ${chalk.green(`${accepted} accepted`)}` : ""}
-              {deleted > 0 ? ` ${chalk.red(`${deleted} deleted`)}` : ""}
-              {pending > 0 ? ` ${chalk.dim(`${pending} pending`)}` : ""}
+              {tokens.muted("Items:")}
+              {accepted > 0 ? ` ${tokens.success(`${accepted} accepted`)}` : ""}
+              {deleted > 0 ? ` ${tokens.danger(`${deleted} deleted`)}` : ""}
+              {pending > 0 ? ` ${tokens.muted(`${pending} pending`)}` : ""}
             </Text>
           </Box>
         );
       })()}
 
-      <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.dim(`[${icons.arrow.replace("→", "↑↓")}]`)} navigate {chalk.green.bold("[a]")} accept{" "}
-        {chalk.yellow.bold("[e]")} edit {chalk.red.bold("[d]")} delete
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.dim("[s]")} skip {chalk.cyan.bold("[A]")} accept all {chalk.dim("[tab]")} next{" "}
-        {chalk.dim("[q]")} cancel {chalk.dim("[S]")} skip all
-      </Text>
       <Text>{boxFooter(width)}</Text>
     </Box>
   );

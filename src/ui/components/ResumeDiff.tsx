@@ -1,22 +1,13 @@
 /**
  * Resume diff display — shows what changed since the last run.
- *
  * Rendered once via <Static> when resuming a scan.
- *
- *   ┌─ Resume ────────────────────────────────────────────┐
- *   │  Previous run: 2024-04-14 (42 findings, 38 triaged) │
- *   │                                                      │
- *   │  New findings:       3                               │
- *   │  Previously triaged: 38 (skipped)                    │
- *   │  Pending re-triage:  4                               │
- *   └────────────────────────────────────────────────────┘
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
+import { tokens } from "../tokens.js";
 
 export interface ResumeDiffData {
   previousRunDate?: string;
@@ -46,58 +37,56 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
   return (
     <Box flexDirection="column">
       <Text>{boxHeader("Resume", width)}</Text>
-      <Text>
-        {"  "}
-        {chalk.dim("Previous run:")} {prevDate} ({data.previousFindingCount} findings,{" "}
-        {data.previousTriagedCount} triaged)
-      </Text>
-      <Text>{""}</Text>
-
-      {data.newFindings > 0 && (
+      <Box paddingLeft={2} flexDirection="column">
         <Text>
-          {"  "}
-          {chalk.redBright(`${icons.active} New findings:`)} {data.newFindings}
+          {tokens.muted("Previous run:")} {prevDate} ({data.previousFindingCount} findings,{" "}
+          {data.previousTriagedCount} triaged)
         </Text>
-      )}
-      <Text>
-        {"  "}
-        {chalk.dim(`${icons.complete} Previously triaged:`)} {data.skipped} {chalk.dim("(skipped)")}
-      </Text>
-      {data.pendingRetriage > 0 && (
-        <Text>
-          {"  "}
-          {chalk.yellow(`${icons.warning} Pending re-triage:`)} {data.pendingRetriage}
-        </Text>
-      )}
+        <Text>{""}</Text>
 
-      {data.verdictChanges.length > 0 && (
-        <>
-          <Text>{""}</Text>
+        {data.newFindings > 0 && (
           <Text>
-            {"  "}
-            {chalk.yellow(`${icons.warning} Verdict changes:`)} {data.verdictChanges.length}
+            {tokens.dangerStrong(`${icons.active} New findings:`)} {data.newFindings}
           </Text>
-          {data.verdictChanges.slice(0, 5).map((change, i) => {
-            const isLast = i === Math.min(data.verdictChanges.length, 5) - 1;
-            const connector = isLast ? icons.treeLast : icons.treeMiddle;
-            return (
-              <Text key={i}>
-                {"    "}
-                {chalk.dim(connector)} {chalk.dim(change.fingerprint.slice(0, 12))}{" "}
-                {chalk.red(change.fromVerdict)} {icons.arrow} {chalk.green(change.toVerdict)}
-                {change.reason ? chalk.dim(` (${change.reason})`) : ""}
-              </Text>
-            );
-          })}
-          {data.verdictChanges.length > 5 && (
-            <Text>
-              {"    "}
-              {chalk.dim(`... and ${data.verdictChanges.length - 5} more`)}
-            </Text>
-          )}
-        </>
-      )}
+        )}
+        <Text>
+          {tokens.muted(`${icons.complete} Previously triaged:`)} {data.skipped}{" "}
+          {tokens.muted("(skipped)")}
+        </Text>
+        {data.pendingRetriage > 0 && (
+          <Text>
+            {tokens.warn(`${icons.warning} Pending re-triage:`)} {data.pendingRetriage}
+          </Text>
+        )}
 
+        {data.verdictChanges.length > 0 && (
+          <>
+            <Text>{""}</Text>
+            <Text>
+              {tokens.warn(`${icons.warning} Verdict changes:`)} {data.verdictChanges.length}
+            </Text>
+            <Box flexDirection="column" paddingLeft={2}>
+              {data.verdictChanges.slice(0, 5).map((change, i) => {
+                const isLast = i === Math.min(data.verdictChanges.length, 5) - 1;
+                const connector = isLast ? icons.treeLast : icons.treeMiddle;
+                return (
+                  <Text key={i}>
+                    {tokens.muted(connector)} {tokens.muted(change.fingerprint.slice(0, 12))}{" "}
+                    {tokens.danger(change.fromVerdict)} {icons.arrow}{" "}
+                    {tokens.success(change.toVerdict)}
+                    {change.reason ? tokens.muted(` (${change.reason})`) : ""}
+                  </Text>
+                );
+              })}
+              {data.verdictChanges.length > 5 && (
+                <Text>
+                  {tokens.muted(`... and ${data.verdictChanges.length - 5} more`)}
+                </Text>
+              )}
+            </Box>
+          </>
+        )}
+      </Box>
       <Text>{boxFooter(width)}</Text>
     </Box>
   );

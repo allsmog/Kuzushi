@@ -299,4 +299,68 @@ describe("generateSarifReport", () => {
 
     db.close();
   });
+
+  it("maps displaySeverity to level and surfaces title/attackNarrative/verificationSteps", () => {
+    const db = initDb(":memory:");
+    const runId = "run-sarif-display";
+
+    createRun(db, runId, "repo", makeConfig(), makeScanOpts());
+    updateRunStatus(db, runId, "triaging");
+
+    // Scanner severity is WARNING (→ would map to "warning"), but triage
+    // assessed it as "critical" — displaySeverity must win and produce "error".
+    const finding = makeFinding({
+      fingerprint: "fp-sarif-display",
+      ruleId: "codeshell-bash-enabled",
+      severity: "WARNING",
+      message: "Generic scanner message",
+    });
+    const triage: TriageResult = {
+      fingerprint: finding.fingerprint,
+      verdict: "tp",
+      confidence: 0.9,
+      rationale: "Raw rationale.",
+      verificationSteps: ["verify shell default", "confirm bash dispatch"],
+      fixPatch: null,
+      title: "Copilot shell enables Bash tool for LLM command execution",
+      displaySeverity: "critical",
+      attackNarrative:
+        "Alice, controlling repo content, triggers prompt injection; Bob's host runs bash -c.",
+    };
+    upsertFinding(db, finding, triage, "repo", "HEAD");
+    updateRunFindings(db, runId, [finding]);
+
+    const parsed = JSON.parse(generateSarifReport(db, "repo", {}, runId)) as {
+      runs: Array<{
+        results: Array<{
+          level: string;
+          message: { text: string; markdown?: string };
+          properties: {
+            title?: string;
+            displaySeverity?: string;
+            attackNarrative?: string;
+            verificationSteps?: string[];
+          };
+        }>;
+      }>;
+    };
+
+    const res = parsed.runs[0].results[0];
+    // displaySeverity=critical must override scanner WARNING → error
+    expect(res.level).toBe("error");
+    // Title promoted to message.text
+    expect(res.message.text).toBe("Copilot shell enables Bash tool for LLM command execution");
+    // Attack narrative in message.markdown
+    expect(res.message.markdown).toContain("Alice");
+    // Properties carry the extended triage fields
+    expect(res.properties.title).toBe("Copilot shell enables Bash tool for LLM command execution");
+    expect(res.properties.displaySeverity).toBe("critical");
+    expect(res.properties.attackNarrative).toContain("prompt injection");
+    expect(res.properties.verificationSteps).toEqual([
+      "verify shell default",
+      "confirm bash dispatch",
+    ]);
+
+    db.close();
+  });
 });

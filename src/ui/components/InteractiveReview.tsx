@@ -16,14 +16,15 @@
  *   └────────────────────────────────────────────────────┘
  */
 
-import chalk from "chalk";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
 import type { Verdict } from "../../types.js";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 import type { ActionableFinding } from "../state.js";
+import { tokens } from "../tokens.js";
 import { FindingCard } from "./FindingCard.js";
 
 interface InteractiveReviewProps {
@@ -47,6 +48,14 @@ export function InteractiveReview({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [tally, setTally] = useState<ReviewTally>({ tp: 0, fp: 0, by_design: 0, skipped: 0 });
   const width = terminalCardWidth();
+
+  useRegisterKeybindings([
+    { keys: "t", label: "True positive" },
+    { keys: "f", label: "False positive" },
+    { keys: "b", label: "By design" },
+    { keys: "s", label: "Skip", secondary: true },
+    { keys: "q", label: "Quit", secondary: true },
+  ]);
 
   const finding = findings[currentIndex];
   const isLast = currentIndex >= findings.length - 1;
@@ -84,16 +93,13 @@ export function InteractiveReview({
 
   if (!finding) {
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" paddingLeft={2}>
         <Text>{""}</Text>
+        <Text>{tokens.successStrong(`${icons.success} Review complete`)}</Text>
         <Text>
-          {"  "}
-          {chalk.green.bold(`${icons.success} Review complete`)}
-        </Text>
-        <Text>
-          {"  "}
-          {chalk.dim("tp:")} {tally.tp} {chalk.dim("fp:")} {tally.fp} {chalk.dim("by_design:")}{" "}
-          {tally.by_design} {chalk.dim("skipped:")} {tally.skipped}
+          {tokens.muted("tp:")} {tally.tp} {tokens.muted("fp:")} {tally.fp}{" "}
+          {tokens.muted("by_design:")} {tally.by_design} {tokens.muted("skipped:")}{" "}
+          {tally.skipped}
         </Text>
         <Text>{""}</Text>
       </Box>
@@ -110,27 +116,17 @@ export function InteractiveReview({
 
       {/* Running tally */}
       {tally.tp + tally.fp + tally.by_design + tally.skipped > 0 && (
-        <Text>
-          {"  "}
-          {chalk.dim("So far:")}
-          {tally.tp > 0 ? ` ${chalk.red(`tp=${tally.tp}`)}` : ""}
-          {tally.fp > 0 ? ` ${chalk.green(`fp=${tally.fp}`)}` : ""}
-          {tally.by_design > 0 ? ` ${chalk.blue(`by_design=${tally.by_design}`)}` : ""}
-          {tally.skipped > 0 ? ` ${chalk.dim(`skipped=${tally.skipped}`)}` : ""}
-        </Text>
+        <Box paddingLeft={2}>
+          <Text>
+            {tokens.muted("So far:")}
+            {tally.tp > 0 ? ` ${tokens.danger(`tp=${tally.tp}`)}` : ""}
+            {tally.fp > 0 ? ` ${tokens.success(`fp=${tally.fp}`)}` : ""}
+            {tally.by_design > 0 ? ` ${tokens.info(`by_design=${tally.by_design}`)}` : ""}
+            {tally.skipped > 0 ? ` ${tokens.muted(`skipped=${tally.skipped}`)}` : ""}
+          </Text>
+        </Box>
       )}
       <Text>{""}</Text>
-
-      {/* Key bindings */}
-      <Text>
-        {"  "}
-        {chalk.redBright.bold("[t]")} true positive {chalk.green.bold("[f]")} false positive{" "}
-        {chalk.dim("[s]")} skip
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.blue.bold("[b]")} by design {chalk.dim("[q]")} quit review
-      </Text>
 
       <Text>{boxFooter(width)}</Text>
     </Box>

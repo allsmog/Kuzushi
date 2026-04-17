@@ -73,20 +73,32 @@ export function generateSarifReport(
   const rulesById = new Map<string, RuleDraft>();
 
   const results = findings.map((finding) => {
-    const level = toSarifLevel(finding.severity);
+    const level =
+      toSarifLevelFromDisplay(finding.displaySeverity) ?? toSarifLevel(finding.severity);
     const checkpointMeta = checkpointMetaByFingerprint.get(finding.fingerprint);
     const cweTags = checkpointMeta?.cweTags ?? [];
     upsertRule(rulesById, finding.ruleId, level, cweTags);
 
-    const messageText = finding.message || checkpointMeta?.message || finding.ruleId;
+    const messageText =
+      finding.title?.trim() || finding.message || checkpointMeta?.message || finding.ruleId;
+    const message: Record<string, unknown> = { text: messageText };
+    if (finding.attackNarrative?.trim()) {
+      message["markdown"] = finding.attackNarrative;
+    }
+
     const result: Record<string, unknown> = {
       ruleId: finding.ruleId,
       level,
-      message: {
-        text: messageText,
-      },
+      message,
       locations: [buildSarifLocation(finding.filePath, finding.startLine)],
       properties: {
+        title: finding.title ?? undefined,
+        displaySeverity: finding.displaySeverity ?? undefined,
+        attackNarrative: finding.attackNarrative ?? undefined,
+        verificationSteps:
+          finding.verificationSteps && finding.verificationSteps.length > 0
+            ? finding.verificationSteps
+            : undefined,
         verdict: finding.verdict,
         confidence: finding.confidence,
         rationale: finding.rationale,
@@ -359,6 +371,21 @@ function toSarifLevel(severity: string): SarifLevel {
     return "warning";
   }
   return "note";
+}
+
+/**
+ * Map the triage-assessed display severity ("critical" | "high" | "medium" | "low")
+ * onto the SARIF level spectrum. critical/high → error, medium → warning,
+ * low → note. Returns undefined when no display severity is available, so the
+ * caller can fall back to the scanner-reported severity.
+ */
+function toSarifLevelFromDisplay(displaySeverity: string | undefined): SarifLevel | undefined {
+  if (!displaySeverity) return undefined;
+  const normalized = displaySeverity.trim().toLowerCase();
+  if (normalized === "critical" || normalized === "high") return "error";
+  if (normalized === "medium") return "warning";
+  if (normalized === "low") return "note";
+  return undefined;
 }
 
 function buildSarifLocation(filePath: string, startLine: number): Record<string, unknown> {

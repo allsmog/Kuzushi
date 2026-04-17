@@ -8,7 +8,11 @@ import type {
   EvidenceAnchor,
   StrideCategory,
   StrideThreat,
+  ThreatModelAttackerStory,
+  ThreatModelCriticalityBuckets,
   ThreatModelDocument,
+  ThreatModelInputCategories,
+  ThreatModelNarrative,
   TrustBoundary,
 } from "./types.js";
 
@@ -32,12 +36,101 @@ export function convertRandoriToThreatModel(randoriOutput: unknown): ThreatModel
   const threats = parseThreatScenarios(
     randoriOutput["threat_scenarios"] ?? randoriOutput["threats"],
   );
+  const narrative = parseNarrative(randoriOutput["narrative"]);
 
   return {
     version: "1.0",
     dfd: { elements, trustBoundaries },
     threats,
     summary: buildSummary(threats),
+    ...(narrative ? { narrative } : {}),
+  };
+}
+
+// ── Narrative (S5 synthesis) ──
+
+function parseNarrative(raw: unknown): ThreatModelNarrative | null {
+  if (!isRecord(raw)) return null;
+  const overview = str(raw["overview"]);
+  const inputCategories = parseInputCategories(raw["input_categories"] ?? raw["inputCategories"]);
+  const attackerStories = parseAttackerStories(raw["attacker_stories"] ?? raw["attackerStories"]);
+  const criticalityBuckets = parseCriticalityBuckets(
+    raw["criticality_buckets"] ?? raw["criticalityBuckets"],
+  );
+  const outOfScope = strArray(raw["out_of_scope"] ?? raw["outOfScope"]);
+
+  // Require at least one populated section — otherwise fall back to no narrative
+  // so renderers can keep using the DFD/STRIDE view.
+  const hasContent =
+    overview.length > 0 ||
+    attackerStories.length > 0 ||
+    outOfScope.length > 0 ||
+    Object.values(inputCategories).some((v) => v.length > 0) ||
+    Object.values(criticalityBuckets).some((v) => v.length > 0);
+  if (!hasContent) return null;
+
+  return {
+    overview,
+    inputCategories,
+    attackerStories,
+    criticalityBuckets,
+    outOfScope,
+  };
+}
+
+function parseInputCategories(raw: unknown): ThreatModelInputCategories {
+  const empty: ThreatModelInputCategories = {
+    attackerControlled: [],
+    operatorControlled: [],
+    developerControlled: [],
+    externalServices: [],
+    sandboxBoundary: [],
+    assumptions: [],
+  };
+  if (!isRecord(raw)) return empty;
+  return {
+    attackerControlled: strArray(raw["attacker_controlled"] ?? raw["attackerControlled"]),
+    operatorControlled: strArray(raw["operator_controlled"] ?? raw["operatorControlled"]),
+    developerControlled: strArray(raw["developer_controlled"] ?? raw["developerControlled"]),
+    externalServices: strArray(raw["external_services"] ?? raw["externalServices"]),
+    sandboxBoundary: strArray(raw["sandbox_boundary"] ?? raw["sandboxBoundary"]),
+    assumptions: strArray(raw["assumptions"]),
+  };
+}
+
+function parseAttackerStories(raw: unknown): ThreatModelAttackerStory[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ThreatModelAttackerStory[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const title = str(item["title"]);
+    const narrative = str(item["narrative"]);
+    const mitigation = str(item["mitigation"]);
+    if (!title || !narrative) continue;
+    const threatIds = strArray(item["threat_ids"] ?? item["threatIds"]);
+    out.push({
+      title,
+      narrative,
+      mitigation,
+      ...(threatIds.length > 0 ? { threatIds } : {}),
+    });
+  }
+  return out;
+}
+
+function parseCriticalityBuckets(raw: unknown): ThreatModelCriticalityBuckets {
+  const empty: ThreatModelCriticalityBuckets = {
+    critical: [],
+    high: [],
+    medium: [],
+    low: [],
+  };
+  if (!isRecord(raw)) return empty;
+  return {
+    critical: strArray(raw["critical"]),
+    high: strArray(raw["high"]),
+    medium: strArray(raw["medium"]),
+    low: strArray(raw["low"]),
   };
 }
 

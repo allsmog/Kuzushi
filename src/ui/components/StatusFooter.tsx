@@ -3,15 +3,18 @@
  *
  * Shows:  claude-opus │ $0.84 │ 8/42 triaged │ 4m 12s
  *
- * Inspired by CC's StatusLine but adapted for Kuzushi's scan context.
+ * Uses useTerminalSize so the divider reflows when the terminal is resized,
+ * and the Divider primitive replaces the old "─".repeat hack.
  */
 
-import chalk from "chalk";
 import { Box, Text } from "ink";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { formatCost, formatDuration } from "../format.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
+import { Divider } from "../primitives/Divider.js";
 import type { Phase } from "../state.js";
+import { tokens } from "../tokens.js";
 
 interface StatusFooterProps {
   model: string;
@@ -22,7 +25,7 @@ interface StatusFooterProps {
   throttle?: { concurrency: number; reason: string } | null;
 }
 
-const SEP = chalk.dim(" │ ");
+const SEP = tokens.subtle(" \u2502 ");
 
 export function StatusFooter({
   model,
@@ -33,6 +36,7 @@ export function StatusFooter({
   throttle,
 }: StatusFooterProps): React.ReactElement | null {
   const [elapsed, setElapsed] = useState(0);
+  const { columns } = useTerminalSize();
   useEffect(() => {
     if (!startedAt) return;
     const interval = setInterval(() => {
@@ -62,16 +66,13 @@ export function StatusFooter({
 
   const elapsedStr = elapsed > 0 ? formatDuration(elapsed) : "0s";
 
-  const throttleStr = throttle ? chalk.yellow(` │ ⚠ throttled`) : "";
-
-  const termWidth = process.stdout.columns ?? 80;
-  const divider = chalk.dim("─".repeat(Math.min(termWidth, 80)));
+  const throttleStr = throttle ? tokens.warn(` \u2502 \u26A0 throttled`) : "";
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text>{divider}</Text>
+      <Divider width={Math.min(columns, 80)} />
       <Text>
-        {chalk.redBright.bold(modelShort)}
+        {tokens.dangerStrong(modelShort)}
         {SEP}
         {costStr}
         {SEP}

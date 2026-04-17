@@ -11,13 +11,18 @@
  *   /cost                 — show cost breakdown
  *   /export               — open export menu
  *   /help or ?            — show available commands
+ *
+ * Typing is delegated to the <TextInput> primitive once the user types
+ * `/` or `?` to enter command mode.
  */
 
-import chalk from "chalk";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
+import { TextInput } from "../primitives/TextInput.js";
+import { tokens } from "../tokens.js";
 
 export interface ReplCommand {
   name: string;
@@ -31,9 +36,7 @@ export interface CommandResult {
 }
 
 interface CommandInputProps {
-  /** Whether the input is active (accepts typing). */
   active: boolean;
-  /** Callback when a command is submitted. */
   onCommand: (cmd: ReplCommand) => CommandResult | undefined;
 }
 
@@ -48,120 +51,115 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: "/help", args: "", desc: "Show this help" },
 ];
 
+const IDLE_KEYBINDS = [
+  { keys: "/", label: "Command" },
+  { keys: "?", label: "Help", secondary: true },
+];
+
+const COMMAND_KEYBINDS = [
+  { keys: "Enter", label: "Run" },
+  { keys: "Esc", label: "Cancel" },
+];
+
 export function CommandInput({ active, onCommand }: CommandInputProps): React.ReactElement | null {
   const [input, setInput] = useState("");
   const [lastResult, setLastResult] = useState<CommandResult | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  // Guard: stdin must support raw mode for useInput to work
   const canUseInput = active && process.stdin.isTTY === true;
 
+  useRegisterKeybindings(expanded ? COMMAND_KEYBINDS : IDLE_KEYBINDS);
+
+  // Idle-state watcher: waits for "/" or "?" to flip into command mode.
+  // Typing itself is handled by <TextInput> once expanded.
   useInput(
-    (char, key) => {
-      if (!expanded && char === "/") {
+    (char) => {
+      if (expanded) return;
+      if (char === "/") {
         setExpanded(true);
         setInput("/");
-        return;
-      }
-
-      if (!expanded && char === "?") {
+      } else if (char === "?") {
         setExpanded(true);
         setShowHelp(true);
         setLastResult({ message: "", type: "info" });
-        return;
-      }
-
-      if (!expanded) {
-        return;
-      }
-
-      if (key.return && input.length > 0) {
-        const cmd = parseCommand(input);
-        if (cmd) {
-          if (cmd.name === "help") {
-            setShowHelp((v) => !v);
-            setLastResult({ message: "", type: "info" });
-          } else {
-            const result = onCommand(cmd);
-            setLastResult(result ?? { message: `${cmd.name}: ok`, type: "success" });
-            setShowHelp(false);
-          }
-        } else {
-          setLastResult({ message: `Unknown command: ${input}`, type: "error" });
-        }
-        setInput("");
-        setExpanded(false);
-        return;
-      }
-
-      if (key.backspace || key.delete) {
-        setInput((v) => v.slice(0, -1));
-        return;
-      }
-
-      if (key.escape) {
-        setInput("");
-        setLastResult(null);
-        setShowHelp(false);
-        setExpanded(false);
-        return;
-      }
-
-      // Only accept printable characters
-      if (char && !key.ctrl && !key.meta && char.length === 1) {
-        setInput((v) => v + char);
       }
     },
-    { isActive: canUseInput },
+    { isActive: canUseInput && !expanded },
   );
+
+  const runCommand = (value: string) => {
+    if (value.length === 0) return;
+    const cmd = parseCommand(value);
+    if (cmd) {
+      if (cmd.name === "help") {
+        setShowHelp((v) => !v);
+        setLastResult({ message: "", type: "info" });
+      } else {
+        const result = onCommand(cmd);
+        setLastResult(result ?? { message: `${cmd.name}: ok`, type: "success" });
+        setShowHelp(false);
+      }
+    } else {
+      setLastResult({ message: `Unknown command: ${value}`, type: "error" });
+    }
+    setInput("");
+    setExpanded(false);
+  };
+
+  const cancel = () => {
+    setInput("");
+    setLastResult(null);
+    setShowHelp(false);
+    setExpanded(false);
+  };
 
   if (!active || !process.stdin.isTTY) return null;
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      {/* Help overlay */}
       {showHelp && (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text>
-            {"  "}
-            {chalk.dim("Available commands:")}
-          </Text>
-          {COMMANDS.map((cmd) => (
-            <Text key={cmd.name}>
-              {"    "}
-              {chalk.redBright(cmd.name)} {chalk.dim(cmd.args)}
-              {"  "}
-              {chalk.dim(cmd.desc)}
-            </Text>
-          ))}
-          <Text>{""}</Text>
+        <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+          <Text>{tokens.muted("Available commands:")}</Text>
+          <Box flexDirection="column" paddingLeft={2}>
+            {COMMANDS.map((cmd) => (
+              <Text key={cmd.name}>
+                {tokens.accent(cmd.name)} {tokens.muted(cmd.args)}
+                {"  "}
+                {tokens.muted(cmd.desc)}
+              </Text>
+            ))}
+          </Box>
         </Box>
       )}
 
-      {/* Last command result */}
       {lastResult?.message && (
-        <Text>
-          {"  "}
-          {lastResult.type === "success"
-            ? chalk.green(icons.success)
-            : lastResult.type === "error"
-              ? chalk.red(icons.error)
-              : chalk.dim(icons.dot)}{" "}
-          {lastResult.type === "error"
-            ? chalk.red(lastResult.message)
-            : chalk.dim(lastResult.message)}
-        </Text>
+        <Box paddingLeft={2}>
+          <Text>
+            {lastResult.type === "success"
+              ? tokens.success(icons.success)
+              : lastResult.type === "error"
+                ? tokens.danger(icons.error)
+                : tokens.muted(icons.dot)}{" "}
+            {lastResult.type === "error"
+              ? tokens.danger(lastResult.message)
+              : tokens.muted(lastResult.message)}
+          </Text>
+        </Box>
       )}
 
-      {/* Input line */}
       {expanded && (
-        <Text>
-          {"  "}
-          {chalk.dim(icons.arrow)} {input}
-          {chalk.redBright("█")}
-          {input.length === 0 && chalk.dim(" type / for commands, ? for help")}
-        </Text>
+        <Box paddingLeft={2}>
+          <TextInput
+            value={input}
+            onChange={setInput}
+            onSubmit={runCommand}
+            onCancel={cancel}
+            isActive={canUseInput}
+            prefix={`${icons.arrow} `}
+            placeholder="type / for commands, ? for help"
+          />
+        </Box>
       )}
     </Box>
   );

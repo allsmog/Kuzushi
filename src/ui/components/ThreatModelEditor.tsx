@@ -1,21 +1,11 @@
 /**
- * Interactive threat model editor — review, dismiss, annotate threats.
+ * Interactive threat model editor — review, dismiss, mitigate, annotate.
  *
- *   ┌─ Threat Model Editor (12 threats) ──────────────────┐
- *   │                                                      │
- *   │  > T-01  SQL Injection via user search               │
- *   │         ● HIGH  likelihood: high  [elevation-of-priv]│
- *   │         Mitigations: parameterized queries           │
- *   │                                                      │
- *   │    T-02  XSS in admin panel           [DISMISSED]    │
- *   │         ● MEDIUM  likelihood: medium  [tampering]    │
- *   │                                                      │
- *   │  [↑↓] navigate  [m] mitigate  [d] dismiss           │
- *   │  [r] restore  [a] annotate  [q] done                 │
- *   └────────────────────────────────────────────────────┘
+ * Uses useBoundedIndex for navigation and TextInput for annotations so the
+ * component shares keyboard code with the rest of the interactive fleet.
+ * Keybindings publish through useRegisterKeybindings for the shared footer.
  */
 
-import chalk from "chalk";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
@@ -24,8 +14,11 @@ import type {
   ThreatModelDocument,
 } from "../../agents/tasks/threat-modeling/types.js";
 import { badge, boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
-import { dangerStrong, info, muted, warnStrong } from "../tokens.js";
+import { TextInput } from "../primitives/TextInput.js";
+import { dangerStrong, info, muted, tokens, warnStrong } from "../tokens.js";
 
 interface ThreatModelEditorProps {
   threatModel: ThreatModelDocument;
@@ -67,34 +60,54 @@ function impactBadge(impact: string): string {
 function statusBadge(status: ThreatStatus): string {
   switch (status) {
     case "dismissed":
-      return chalk.bgGray.white(" DISMISSED ");
+      return badge("DISMISSED", "magenta");
     case "mitigated":
-      return chalk.bgGreen.white(" MITIGATED ");
+      return badge("MITIGATED", "green");
     default:
       return "";
   }
 }
 
 function categoryLabel(cat: string): string {
-  return chalk.dim(`[${cat}]`);
+  return tokens.muted(`[${cat}]`);
 }
+
+const NAV_KEYBINDS = [
+  { keys: "\u2191/\u2193", label: "Navigate" },
+  { keys: "m", label: "Mitigate" },
+  { keys: "d", label: "Dismiss" },
+  { keys: "r", label: "Restore", secondary: true },
+  { keys: "a", label: "Annotate", secondary: true },
+  { keys: "q", label: "Done" },
+];
+
+const ANNOTATE_KEYBINDS = [
+  { keys: "Enter", label: "Save" },
+  { keys: "Esc", label: "Cancel" },
+];
 
 export function ThreatModelEditor({
   threatModel,
   onComplete,
   onSkip,
-  onCancel,
+  onCancel: _onCancel,
 }: ThreatModelEditorProps): React.ReactElement {
   const [model, setModel] = useState<ThreatModelDocument>({ ...threatModel });
-  const [selectedIdx, setSelectedIdx] = useState(0);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [annotateBuffer, setAnnotateBuffer] = useState("");
   const width = terminalCardWidth();
 
   const threats = model.threats;
+
+  const nav = useBoundedIndex(threats.length, {
+    wrap: false,
+    isActive: !annotateMode,
+  });
+  const selectedIdx = nav.index;
   const threat = threats[selectedIdx];
 
-  // Scroll window
+  useRegisterKeybindings(annotateMode ? ANNOTATE_KEYBINDS : NAV_KEYBINDS);
+
   const VISIBLE_COUNT = 8;
   const scrollStart = Math.max(
     0,
@@ -111,64 +124,51 @@ export function ThreatModelEditor({
     onComplete(updated);
   };
 
-  useInput((input, key) => {
-    if (annotateMode) {
-      if (key.return) {
-        if (threat && annotateBuffer.trim()) {
-          const annotations = { ...(model.userAnnotations ?? {}) };
-          annotations[threat.id] = annotateBuffer.trim();
-          setModel({ ...model, userAnnotations: annotations });
-        }
-        setAnnotateMode(false);
-        setAnnotateBuffer("");
-      } else if (key.escape) {
-        setAnnotateMode(false);
-        setAnnotateBuffer("");
-      } else if (key.backspace || key.delete) {
-        setAnnotateBuffer((b) => b.slice(0, -1));
-      } else if (input && !key.ctrl && !key.meta) {
-        setAnnotateBuffer((b) => b + input);
+  useInput(
+    (input, key) => {
+      if (annotateMode) return;
+      if (input === "d" && threat) {
+        const dismissed = [...(model.dismissedThreats ?? [])];
+        if (!dismissed.includes(threat.id)) dismissed.push(threat.id);
+        setModel({ ...model, dismissedThreats: dismissed });
+      } else if (input === "m" && threat) {
+        const confirmed = [...(model.confirmedMitigations ?? [])];
+        const mitigation = `${threat.title} (operator-confirmed)`;
+        if (!confirmed.includes(mitigation)) confirmed.push(mitigation);
+        const dismissed = (model.dismissedThreats ?? []).filter((id) => id !== threat.id);
+        setModel({ ...model, confirmedMitigations: confirmed, dismissedThreats: dismissed });
+      } else if (input === "r" && threat) {
+        const dismissed = (model.dismissedThreats ?? []).filter((id) => id !== threat.id);
+        const confirmed = (model.confirmedMitigations ?? []).filter(
+          (m) => !m.includes(threat.title),
+        );
+        setModel({ ...model, dismissedThreats: dismissed, confirmedMitigations: confirmed });
+      } else if (input === "a" && threat) {
+        setAnnotateBuffer(model.userAnnotations?.[threat.id] ?? "");
+        setAnnotateMode(true);
+      } else if (input === "q" || key.escape) {
+        finish();
+      } else if (input === "S") {
+        onSkip();
       }
-      return;
-    }
+    },
+    { isActive: !annotateMode },
+  );
 
-    // Navigation
-    if (key.upArrow) {
-      setSelectedIdx((i) => Math.max(0, i - 1));
-    } else if (key.downArrow) {
-      setSelectedIdx((i) => Math.min(threats.length - 1, i + 1));
-    } else if (input === "d" && threat) {
-      // Dismiss
-      const dismissed = [...(model.dismissedThreats ?? [])];
-      if (!dismissed.includes(threat.id)) {
-        dismissed.push(threat.id);
-      }
-      setModel({ ...model, dismissedThreats: dismissed });
-    } else if (input === "m" && threat) {
-      // Mark mitigated
-      const confirmed = [...(model.confirmedMitigations ?? [])];
-      const mitigation = `${threat.title} (operator-confirmed)`;
-      if (!confirmed.includes(mitigation)) {
-        confirmed.push(mitigation);
-      }
-      // Remove from dismissed if it was there
-      const dismissed = (model.dismissedThreats ?? []).filter((id) => id !== threat.id);
-      setModel({ ...model, confirmedMitigations: confirmed, dismissedThreats: dismissed });
-    } else if (input === "r" && threat) {
-      // Restore
-      const dismissed = (model.dismissedThreats ?? []).filter((id) => id !== threat.id);
-      const confirmed = (model.confirmedMitigations ?? []).filter((m) => !m.includes(threat.title));
-      setModel({ ...model, dismissedThreats: dismissed, confirmedMitigations: confirmed });
-    } else if (input === "a" && threat) {
-      // Annotate
-      setAnnotateMode(true);
-      setAnnotateBuffer(model.userAnnotations?.[threat.id] ?? "");
-    } else if (input === "q" || key.escape) {
-      finish();
-    } else if (input === "S") {
-      onSkip();
+  const commitAnnotation = (value: string) => {
+    if (threat && value.trim()) {
+      const annotations = { ...(model.userAnnotations ?? {}) };
+      annotations[threat.id] = value.trim();
+      setModel({ ...model, userAnnotations: annotations });
     }
-  });
+    setAnnotateMode(false);
+    setAnnotateBuffer("");
+  };
+
+  const cancelAnnotation = () => {
+    setAnnotateMode(false);
+    setAnnotateBuffer("");
+  };
 
   if (threats.length === 0) {
     return (
@@ -176,17 +176,15 @@ export function ThreatModelEditor({
         <Text>{""}</Text>
         <Text>{boxHeader("Threat Model Editor", width)}</Text>
         <Text>{""}</Text>
-        <Text>
-          {"  "}
-          {chalk.dim("No threats in threat model. Press [q] to continue.")}
-        </Text>
+        <Box paddingLeft={2}>
+          <Text>{tokens.muted("No threats in threat model. Press [q] to continue.")}</Text>
+        </Box>
         <Text>{""}</Text>
         <Text>{boxFooter(width)}</Text>
       </Box>
     );
   }
 
-  // Summary counts
   const activeCount = threats.filter((t) => getThreatStatus(t, model) === "active").length;
   const dismissedCount = threats.filter((t) => getThreatStatus(t, model) === "dismissed").length;
   const mitigatedCount = threats.filter((t) => getThreatStatus(t, model) === "mitigated").length;
@@ -197,107 +195,94 @@ export function ThreatModelEditor({
       <Text>{boxHeader(`Threat Model Editor (${threats.length} threats)`, width)}</Text>
       <Text>{""}</Text>
 
-      {/* Summary bar */}
-      <Text>
-        {"  "}
-        {chalk.green(`${activeCount} active`)} {chalk.dim(`${dismissedCount} dismissed`)}{" "}
-        {chalk.blue(`${mitigatedCount} mitigated`)}
-      </Text>
+      <Box paddingLeft={2}>
+        <Text>
+          {tokens.success(`${activeCount} active`)} {tokens.muted(`${dismissedCount} dismissed`)}{" "}
+          {tokens.info(`${mitigatedCount} mitigated`)}
+        </Text>
+      </Box>
       <Text>{""}</Text>
 
-      {/* Threat list */}
       {visibleThreats.map((t, vi) => {
         const realIdx = scrollStart + vi;
         const isSelected = realIdx === selectedIdx;
         const status = getThreatStatus(t, model);
-        const cursor = isSelected ? chalk.cyan("> ") : "  ";
+        const cursor = isSelected ? tokens.accent("> ") : "  ";
         const annotation = model.userAnnotations?.[t.id];
-        const badge = statusBadge(status);
+        const statusCell = statusBadge(status);
 
         const titleText =
           status === "dismissed"
-            ? chalk.strikethrough.dim(t.title)
+            ? tokens.subtle(t.title)
             : isSelected
-              ? chalk.white.bold(t.title)
-              : chalk.white(t.title);
+              ? tokens.strong(t.title)
+              : t.title;
 
         return (
           <Box key={t.id} flexDirection="column">
             <Text>
               {cursor}
-              {chalk.dim(t.id)} {titleText} {badge}
+              {tokens.muted(t.id)} {titleText} {statusCell}
             </Text>
-            <Text>
-              {"     "}
-              {icons.bullet} {impactBadge(t.impact)} {chalk.dim("likelihood:")} {t.likelihood}{" "}
-              {categoryLabel(t.category)}
-            </Text>
+            <Box paddingLeft={5}>
+              <Text>
+                {icons.bullet} {impactBadge(t.impact)} {tokens.muted("likelihood:")} {t.likelihood}{" "}
+                {categoryLabel(t.category)}
+              </Text>
+            </Box>
             {isSelected && (
-              <>
+              <Box flexDirection="column" paddingLeft={5}>
                 {t.attackVector && (
                   <Text>
-                    {"     "}
-                    {chalk.dim("Attack:")} {t.attackVector.slice(0, 70)}
+                    {tokens.muted("Attack:")} {t.attackVector.slice(0, 70)}
                     {t.attackVector.length > 70 ? "..." : ""}
                   </Text>
                 )}
                 {t.existingMitigations.length > 0 && (
                   <Text>
-                    {"     "}
-                    {chalk.green("Mitigations:")} {t.existingMitigations.join(", ")}
+                    {tokens.success("Mitigations:")} {t.existingMitigations.join(", ")}
                   </Text>
                 )}
                 {t.missingMitigations.length > 0 && (
                   <Text>
-                    {"     "}
-                    {chalk.yellow("Missing:")} {t.missingMitigations.join(", ")}
+                    {tokens.warn("Missing:")} {t.missingMitigations.join(", ")}
                   </Text>
                 )}
                 {annotation && (
                   <Text>
-                    {"     "}
-                    {chalk.cyan("Note:")} {annotation}
+                    {tokens.accent("Note:")} {annotation}
                   </Text>
                 )}
-              </>
+              </Box>
             )}
-            {!isSelected && vi < visibleThreats.length - 1 && <Text>{""}</Text>}
-            {isSelected && <Text>{""}</Text>}
+            {vi < visibleThreats.length - 1 && <Text>{""}</Text>}
           </Box>
         );
       })}
 
-      {/* Scroll indicator */}
       {threats.length > VISIBLE_COUNT && (
-        <Text>
-          {"  "}
-          {chalk.dim(
-            `Showing ${scrollStart + 1}-${Math.min(scrollStart + VISIBLE_COUNT, threats.length)} of ${threats.length}`,
-          )}
-        </Text>
-      )}
-
-      {/* Annotation input */}
-      {annotateMode && (
-        <Box marginTop={1}>
+        <Box paddingLeft={2}>
           <Text>
-            {"  "}
-            {chalk.cyan("Note:")} {annotateBuffer}
-            {chalk.cyan("\u2588")}
+            {tokens.muted(
+              `Showing ${scrollStart + 1}-${Math.min(scrollStart + VISIBLE_COUNT, threats.length)} of ${threats.length}`,
+            )}
           </Text>
         </Box>
       )}
 
-      <Text>{""}</Text>
-      <Text>
-        {"  "}
-        {chalk.dim("[↑↓]")} navigate {chalk.blue.bold("[m]")} mitigate {chalk.red.bold("[d]")}{" "}
-        dismiss {chalk.green.bold("[r]")} restore
-      </Text>
-      <Text>
-        {"  "}
-        {chalk.cyan.bold("[a]")} annotate {chalk.dim("[q]")} done {chalk.dim("[S]")} skip
-      </Text>
+      {annotateMode && (
+        <Box marginTop={1} paddingLeft={2}>
+          <Text>{tokens.accent("Note: ")}</Text>
+          <TextInput
+            value={annotateBuffer}
+            onChange={setAnnotateBuffer}
+            onSubmit={commitAnnotation}
+            onCancel={cancelAnnotation}
+            prefix=""
+          />
+        </Box>
+      )}
+
       <Text>{boxFooter(width)}</Text>
     </Box>
   );

@@ -545,6 +545,15 @@ export interface KuzushiConfig {
   jsonlOutput?: string;
   /** Retry count for triage worker transient failures. */
   maxTriageRetries?: number;
+  /**
+   * When a triage response is tp/needs_review but lacks sufficient evidence
+   * (< 2 citations referencing real files, or a tp without a 2+ step attack
+   * path), re-invoke triage once with a reinforcement prompt that tells the
+   * agent what was missing and instructs it to use semantic navigation tools.
+   * If the second response is still insufficient, the verdict is downgraded
+   * to needs_review with the gaps recorded in blindspots[]. Defaults to true.
+   */
+  enforceTriageEvidence?: boolean;
   /** Retry count for verification worker transient failures. */
   maxVerifyRetries?: number;
   /** Retry count for PoC harness worker transient failures. */
