@@ -14,6 +14,80 @@ const DEFAULT_BASH_TIMEOUT = 120_000;
 const MAX_BASH_TIMEOUT = 300_000;
 const BASH_MAX_BUFFER = 64 * 1024 * 1024;
 
+/**
+ * LRU file-content cache for the agent's tool invocations.
+ *
+ * Triage / verification frequently re-reads the same hot files (the file
+ * containing the finding, plus a handful of imports) — once per finding
+ * in that file. Without caching, a 100-finding scan that touches 20 files
+ * issues hundreds of `readFileSync` calls for the same content.
+ *
+ * Cache key includes mtimeMs + size so any on-disk change invalidates the
+ * entry on the next stat. Bounded by entry count and total bytes so a
+ * pathological scan can't OOM the parent process.
+ */
+const FILE_CACHE_MAX_ENTRIES = 128;
+const FILE_CACHE_MAX_BYTES = 32 * 1024 * 1024; // 32 MiB
+
+interface CachedFileEntry {
+  key: string;
+  content: string;
+  bytes: number;
+}
+
+const fileCache = new Map<string, CachedFileEntry>();
+let fileCacheBytes = 0;
+
+function evictUntilUnderLimits(): void {
+  while (fileCache.size > FILE_CACHE_MAX_ENTRIES || fileCacheBytes > FILE_CACHE_MAX_BYTES) {
+    const oldest = fileCache.keys().next();
+    if (oldest.done) break;
+    const entry = fileCache.get(oldest.value);
+    fileCache.delete(oldest.value);
+    if (entry) fileCacheBytes -= entry.bytes;
+  }
+}
+
+/**
+ * Read a file as UTF-8 with an mtime+size-keyed LRU cache. Falls back to
+ * an uncached read if statSync fails. Safe to use anywhere in the agent
+ * tools where the file is expected to be reasonably-sized text.
+ */
+function cachedReadFileUtf8(absolutePath: string): string {
+  let stat: ReturnType<typeof statSync> | undefined;
+  try {
+    stat = statSync(absolutePath);
+  } catch {
+    return readFileSync(absolutePath, "utf8");
+  }
+  // Skip caching huge files — keeping them in-memory hurts more than helps.
+  if (stat.size > FILE_CACHE_MAX_BYTES / 4) {
+    return readFileSync(absolutePath, "utf8");
+  }
+  const key = `${absolutePath}\u0000${stat.mtimeMs}\u0000${stat.size}`;
+  const existing = fileCache.get(key);
+  if (existing) {
+    // Refresh recency: re-insert at the end of the Map's iteration order.
+    fileCache.delete(key);
+    fileCache.set(key, existing);
+    return existing.content;
+  }
+  const content = readFileSync(absolutePath, "utf8");
+  // Approximate byte cost — UTF-8 is at most 4 bytes/char, but `length` is a
+  // safe lower-bound proxy for the heap pressure the entry adds.
+  const bytes = Buffer.byteLength(content, "utf8");
+  fileCache.set(key, { key, content, bytes });
+  fileCacheBytes += bytes;
+  evictUntilUnderLimits();
+  return content;
+}
+
+/** Test/debug helper: clear the cache between tests. */
+export function __clearAgentToolFileCache(): void {
+  fileCache.clear();
+  fileCacheBytes = 0;
+}
+
 const DEFAULT_READ_LIMIT = 200;
 const DEFAULT_GLOB_LIMIT = 200;
 const DEFAULT_GREP_LIMIT = 200;
@@ -277,7 +351,7 @@ function executeRead(args: Record<string, unknown>, cwd: string): string {
     throw new Error(`Read path is not a file: ${inputPath}`);
   }
 
-  const fileContent = readFileSync(absolutePath, "utf8");
+  const fileContent = cachedReadFileUtf8(absolutePath);
   const lines = fileContent.split(/\r?\n/);
   const totalLines = lines.length;
 
@@ -392,7 +466,7 @@ function executeGrep(args: Record<string, unknown>, cwd: string): string {
 
     let fileContent: string;
     try {
-      fileContent = readFileSync(absolutePath, "utf8");
+      fileContent = cachedReadFileUtf8(absolutePath);
     } catch {
       continue;
     }
@@ -1231,7 +1305,7 @@ function executeGetFunctionBody(args: Record<string, unknown>, cwd: string): str
   for (const absolutePath of filesToSearch) {
     let fileContent: string;
     try {
-      fileContent = readFileSync(absolutePath, "utf8");
+      fileContent = cachedReadFileUtf8(absolutePath);
     } catch {
       continue;
     }
@@ -1304,7 +1378,7 @@ function executeGetCallers(args: Record<string, unknown>, cwd: string): string {
 
     let fileContent: string;
     try {
-      fileContent = readFileSync(absolutePath, "utf8");
+      fileContent = cachedReadFileUtf8(absolutePath);
     } catch {
       continue;
     }
@@ -1363,7 +1437,7 @@ function executeGetCallees(args: Record<string, unknown>, cwd: string): string {
 
   let fileContent: string;
   try {
-    fileContent = readFileSync(absolutePath, "utf8");
+    fileContent = cachedReadFileUtf8(absolutePath);
   } catch {
     throw new Error(`GetCallees could not read file: ${filePath}`);
   }
@@ -1558,7 +1632,7 @@ function normalizeLocationSnippet(
 
 function readLineSnippet(absolutePath: string, lineNumber: number): string {
   try {
-    const fileContent = readFileSync(absolutePath, "utf8");
+    const fileContent = cachedReadFileUtf8(absolutePath);
     const lines = fileContent.split(/\r?\n/);
     return lines[lineNumber - 1] ?? "";
   } catch {
@@ -1572,7 +1646,7 @@ function readSpanText(
   end: { line: number; offset: number },
 ): string | undefined {
   try {
-    const fileContent = readFileSync(absolutePath, "utf8");
+    const fileContent = cachedReadFileUtf8(absolutePath);
     const lines = fileContent.split(/\r?\n/);
     if (start.line !== end.line) {
       return lines[start.line - 1]?.trim();
