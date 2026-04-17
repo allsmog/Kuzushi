@@ -87,6 +87,7 @@ bash "${SCRIPT_DIR}/setup-test-app.sh" "${TEST_APP_DIR}" >"${TEST_LOG_DIR}/setup
 cat > "${TEST_APP_DIR}/.kuzushi/config.json" <<JSON
 {
   "model": "anthropic:claude-sonnet-4-6",
+  "agentRuntimeBackend": "pi-ai",
   "agentRuntimeConfig": { "baseUrl": "${MOCK_BASE_URL}", "apiKey": "fake-key" },
   "scanners": ["semgrep"],
   "enabledTasks": ["context-gatherer"],
@@ -97,6 +98,7 @@ cat > "${TEST_APP_DIR}/.kuzushi/config.json" <<JSON
   "auditLog": false,
   "enableContextGathering": false,
   "enableContextEnrichment": false,
+  "enableDynamicTaskSelection": false,
   "llmRescoreEnabled": false,
   "fpFilterEnabled": false
 }
