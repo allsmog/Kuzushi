@@ -227,6 +227,8 @@ export type TriageFindingQueuedEvent = EventEnvelope<
     enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
     threatModelSummary?: string;
+    /** Threat IDs known to the threat model, used to validate source_threat_ids. */
+    knownThreatIds?: string[];
     operatorContext?: string;
     index: number;
     total: number;
@@ -242,6 +244,8 @@ export type TriageBatchQueuedEvent = EventEnvelope<
     enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
     threatModelSummary?: string;
+    /** Threat IDs known to the threat model, used to validate source_threat_ids. */
+    knownThreatIds?: string[];
     operatorContext?: string;
     total: number;
   }
@@ -345,6 +349,8 @@ export type VerificationFindingQueuedEvent = EventEnvelope<
     enrichedContext?: EnrichedRepoContext["enrichment"];
     precedents?: unknown;
     threatModelSummary?: string;
+    /** Threat IDs known to the threat model, used to validate source_threat_ids. */
+    knownThreatIds?: string[];
     operatorContext?: string;
     index: number;
     total: number;

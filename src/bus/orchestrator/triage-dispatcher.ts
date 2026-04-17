@@ -14,6 +14,24 @@ import type { MessageBus } from "../types.js";
 import type { OrchestratorDeps, RunState } from "./types.js";
 
 /**
+ * Collect the threat IDs present in the threat-model output so downstream
+ * workers can cross-check `source_threat_ids` returned by triage and drop
+ * hallucinated IDs that don't exist in the actual model.
+ */
+export function collectKnownThreatIds(taskOutputs: Map<string, unknown>): string[] {
+  const raw = taskOutputs.get("threat-model-randori");
+  if (!isRecord(raw)) return [];
+  const threats = Array.isArray(raw["threats"]) ? raw["threats"] : [];
+  const ids: string[] = [];
+  for (const t of threats) {
+    if (!isRecord(t)) continue;
+    const id = typeof t["id"] === "string" ? t["id"].trim() : "";
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
+/**
  * Extract a rich threat model context from upstream task outputs
  * to provide application-context for triage/verification decisions.
  *
@@ -279,6 +297,7 @@ export async function dispatchTriage(
           enrichedContext: state.enrichedRepoContext,
           precedents: state.precedents,
           threatModelSummary: buildThreatModelSummary(state.taskOutputs),
+          knownThreatIds: collectKnownThreatIds(state.taskOutputs),
           operatorContext: state.operatorContext,
           index: item.index,
           total: item.total,
