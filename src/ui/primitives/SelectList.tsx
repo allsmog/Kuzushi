@@ -3,8 +3,12 @@
  *
  * Consolidates the bespoke bounded-index + arrow-nav implementations in
  * SetupWizard, CredentialPrompt, ContextIntake, ThreatModelEditor.
+ *
+ * Supports a `renderItem` prop for components that need more than a single
+ * label+detail line per row (e.g. selected-row shows an expanded summary).
  */
 import { Box, Text, useInput } from "ink";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { icons } from "../icons.js";
 import { tokens } from "../tokens.js";
@@ -16,6 +20,13 @@ export interface SelectListItem<T = string> {
   disabled?: boolean;
 }
 
+export interface SelectListRenderContext<T> {
+  item: SelectListItem<T>;
+  isCursor: boolean;
+  cursor: string;
+  cursorPrefix: string;
+}
+
 export interface SelectListProps<T> {
   items: ReadonlyArray<SelectListItem<T>>;
   selectedId?: T;
@@ -25,6 +36,12 @@ export interface SelectListProps<T> {
   cursor?: string;
   cursorColor?: (s: string) => string;
   emptyMessage?: string;
+  /**
+   * Custom row renderer. Receives the item plus cursor/highlight state and
+   * returns a React node (typically a Box). When omitted, the default
+   * `<cursor> <label> <detail>` layout is used.
+   */
+  renderItem?: (ctx: SelectListRenderContext<T>) => ReactNode;
 }
 
 function nextEnabled<T>(
@@ -51,6 +68,7 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
     cursor = ">",
     cursorColor = tokens.accent,
     emptyMessage,
+    renderItem,
   } = props;
 
   const initialIndex = useMemo(() => {
@@ -99,11 +117,20 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
     );
   }
 
+  const cursorPrefixBlank = " ".repeat(cursor.length);
+
   return (
     <Box flexDirection="column">
       {items.map((item, idx) => {
         const isCursor = idx === cursorIdx;
-        const prefix = isCursor ? cursorColor(cursor) : " ".repeat(cursor.length);
+        const cursorPrefix = isCursor ? cursorColor(cursor) : cursorPrefixBlank;
+        if (renderItem) {
+          return (
+            <Box key={`${idx}-${String(item.id)}`} flexDirection="column">
+              {renderItem({ item, isCursor, cursor, cursorPrefix })}
+            </Box>
+          );
+        }
         const label = item.disabled
           ? tokens.muted(item.label)
           : isCursor
@@ -113,7 +140,7 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
         return (
           <Box key={`${idx}-${String(item.id)}`} flexDirection="row">
             <Text>
-              {prefix} {label}
+              {cursorPrefix} {label}
               {detail}
             </Text>
           </Box>

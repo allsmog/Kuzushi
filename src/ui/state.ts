@@ -302,6 +302,34 @@ export interface UIState {
   } | null;
 }
 
+const PREFLIGHT_STEP_ORDER = [
+  "wizard",
+  "confirm",
+  "credentials",
+  "context-intake",
+  "threat-editor",
+] as const;
+
+const PREFLIGHT_SEGMENT_LABELS: Record<(typeof PREFLIGHT_STEP_ORDER)[number], string> = {
+  wizard: "Preset",
+  confirm: "Confirm",
+  credentials: "Credentials",
+  "context-intake": "Context Intake",
+  "threat-editor": "Threat Model",
+};
+
+function preflightBreadcrumb(
+  kind: (typeof PREFLIGHT_STEP_ORDER)[number],
+): UIState["breadcrumb"] {
+  const stepIdx = PREFLIGHT_STEP_ORDER.indexOf(kind);
+  if (stepIdx < 0) return null;
+  return {
+    segments: ["Setup", PREFLIGHT_SEGMENT_LABELS[kind]],
+    currentStep: stepIdx + 1,
+    totalSteps: PREFLIGHT_STEP_ORDER.length,
+  };
+}
+
 export interface ShellHistoryEntry {
   type: "input" | "output" | "error";
   text: string;
@@ -444,6 +472,11 @@ export class UIStore {
     if (preflight) {
       this.preflightReturnMode = returnMode ?? this.state.mode;
     }
+    const breadcrumb = preflight
+      ? preflightBreadcrumb(preflight.kind)
+      : this.state.mode === "preflight"
+        ? null
+        : this.state.breadcrumb ?? null;
     this.state = {
       ...this.state,
       preflight,
@@ -452,7 +485,17 @@ export class UIStore {
         : this.state.mode === "preflight"
           ? this.preflightReturnMode
           : this.state.mode,
+      breadcrumb,
     };
+    this.notify();
+  }
+
+  /**
+   * Set (or clear) the wayfinding breadcrumb. Consumers can also rely on
+   * `setPreflight` populating it automatically for preflight flows.
+   */
+  setBreadcrumb(breadcrumb: UIState["breadcrumb"]): void {
+    this.state = { ...this.state, breadcrumb };
     this.notify();
   }
 
