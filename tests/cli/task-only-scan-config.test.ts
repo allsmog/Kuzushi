@@ -61,14 +61,31 @@ describe("task-only scan config", () => {
     expect(config.taskConfig["threat-hunt"]?.model).toBe("anthropic:claude-opus-4-1");
   });
 
-  it("reference preserves configured tasks while deep-merging taskConfig", () => {
+  it("reference replaces the configured task list with the deep DAG and deep-merges taskConfig", () => {
     const config = makeConfig();
+    // The user's prior task list is intentionally narrow — reference now
+    // promotes them to the full deep DAG so the preset matches the
+    // README description ("deep + PoC + threat-informed hunting +
+    // frontier model"). Per-task tuning still deep-merges on top.
     config.tasks = ["semgrep", "systems-hunt"];
     config.taskConfig["systems-hunt"] = { maxSurfaces: 4 };
 
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "reference" }));
 
-    expect(config.tasks).toEqual(["semgrep", "systems-hunt"]);
+    expect(config.tasks).toEqual([
+      "context-gatherer",
+      "context-enricher",
+      "secrets-crypto-detect",
+      "code-config-detect",
+      "taint-cwe-select",
+      "taint-iris",
+      "threat-model-randori",
+      "threat-hunt",
+      "systems-context-gatherer",
+      "systems-invariant-extract",
+      "systems-trigger-synth",
+      "systems-hunt",
+    ]);
     expect(config.taskConfig["systems-hunt"]).toEqual(
       expect.objectContaining({
         maxSurfaces: 12,
