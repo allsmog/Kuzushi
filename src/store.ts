@@ -209,6 +209,17 @@ function openWithPragmas(dbPath: string): Database.Database {
   // foreign_keys is per-connection and must be set before migrations so that
   // FK-bearing tables are created in an FK-enforced session.
   db.pragma("foreign_keys = ON");
+  // Findings, code citations, and triage rationale are sensitive — restrict
+  // to owner-only on POSIX filesystems. WAL/SHM siblings get the same mode
+  // when present.
+  for (const target of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    try {
+      fs.chmodSync(target, 0o600);
+    } catch {
+      // Best-effort: file may not exist yet (WAL/SHM) or filesystem may not
+      // support POSIX perms.
+    }
+  }
   return db;
 }
 

@@ -423,7 +423,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   const dbPath = params.dbPath ?? resolveDbPath(repoRoot, scanPath);
   const dbDir = path.dirname(dbPath);
   if (!existsSync(dbDir)) {
-    mkdirSync(dbDir, { recursive: true });
+    mkdirSync(dbDir, { recursive: true, mode: 0o700 });
   }
 
   const runRepoId = params.runRepoId ?? path.resolve(repoRoot);

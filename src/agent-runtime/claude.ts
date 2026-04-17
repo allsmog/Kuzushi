@@ -14,6 +14,7 @@ import type { MessageBus } from "../bus/types.js";
 import { getLogger } from "../logger.js";
 import type { AgentRuntimeConfig } from "../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { buildSubprocessEnv } from "./env.js";
 import type { AgentQueryExecutionResult } from "./execution.js";
 import type {
   AgentBatchRequest,
@@ -25,6 +26,9 @@ import type {
 } from "./types.js";
 
 const log = getLogger("claude-runtime");
+
+/** One-time debug-log gate so we don't spam every subprocess spawn. */
+let envFilterLogged = false;
 
 /**
  * Extension of Anthropic.Message for responses that include parsed structured output.
@@ -545,20 +549,37 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
     // API key / base URL from config — always pass env so subprocess
     // inherits credentials even when agentRuntimeConfig is not set.
-    const env: Record<string, string | undefined> = { ...process.env };
+    //
+    // We do NOT spread `process.env` directly: that would leak unrelated
+    // credentials (AWS_*, GITHUB_TOKEN, DB passwords, other LLM provider
+    // keys, etc.) into the Claude Code subprocess where they could surface
+    // in tool output, prompts, or logs. `buildSubprocessEnv` strips
+    // credential-shaped variables and lets us add the ones the runtime
+    // legitimately needs.
+    const extra: Record<string, string | undefined> = {
+      // Raise the default 32K output token cap so large structured outputs
+      // (e.g., PASTA threat models) don't get truncated mid-response.
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "100000",
+    };
     if (this.config?.apiKey) {
-      env.ANTHROPIC_API_KEY = this.config.apiKey;
+      extra.ANTHROPIC_API_KEY = this.config.apiKey;
     }
     if (this.config?.baseUrl) {
-      env.ANTHROPIC_BASE_URL = this.config.baseUrl;
+      extra.ANTHROPIC_BASE_URL = this.config.baseUrl;
     }
+    const { env, stripped } = buildSubprocessEnv(process.env, extra);
     // Claude Code refuses to launch inside another Claude Code session.
     // Strip the nesting detection variable so subprocesses can run.
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_SESSION_ID;
-    // Raise the default 32K output token cap so large structured outputs
-    // (e.g., PASTA threat models) don't get truncated mid-response.
-    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "100000";
+    if (stripped.length > 0 && !envFilterLogged) {
+      envFilterLogged = true;
+      log.debug(
+        `Filtered ${stripped.length} credential-shaped env vars from agent subprocess (e.g. ${stripped
+          .slice(0, 3)
+          .join(", ")}). See src/agent-runtime/env.ts for the allowlist.`,
+      );
+    }
     options.env = env;
 
     // Plugins — load Claude Code plugins in the subprocess
