@@ -95,6 +95,82 @@ function buildNarrativePrompt(outputDir: string): string {
   ].join("\n");
 }
 
+/**
+ * Assess an already-written pasta-narrative.json and return a list of
+ * human-readable reasons it falls short of the schema's hard requirements.
+ * An empty array means the artifact is acceptable. Used to decide whether
+ * Phase 3 needs a retry pass.
+ */
+export function assessNarrativeArtifact(narrative: unknown): string[] {
+  const reasons: string[] = [];
+  if (!narrative || typeof narrative !== "object" || Array.isArray(narrative)) {
+    reasons.push("pasta-narrative.json is missing or is not a JSON object");
+    return reasons;
+  }
+  const record = narrative as Record<string, unknown>;
+
+  const overview = record["overview"];
+  if (typeof overview !== "string" || overview.trim().length < 40) {
+    reasons.push('"overview" must be a substantive paragraph (got empty or too short)');
+  }
+
+  const inputCategories = record["input_categories"] ?? record["inputCategories"];
+  if (!inputCategories || typeof inputCategories !== "object" || Array.isArray(inputCategories)) {
+    reasons.push('"input_categories" must be an object with attacker/operator/developer lists');
+  } else {
+    const cats = inputCategories as Record<string, unknown>;
+    const required = ["attacker_controlled", "operator_controlled", "developer_controlled"];
+    const empty = required.filter((key) => {
+      const arr = cats[key] ?? cats[toCamel(key)];
+      return !Array.isArray(arr) || arr.length === 0;
+    });
+    if (empty.length > 0) {
+      reasons.push(
+        `"input_categories" is missing entries for: ${empty.join(", ")} (each must list at least one item)`,
+      );
+    }
+  }
+
+  const stories = record["attacker_stories"] ?? record["attackerStories"];
+  if (!Array.isArray(stories) || stories.length < 1) {
+    reasons.push('"attacker_stories" must contain 3-6 concrete attacker scenarios (got none)');
+  }
+
+  const outOfScope = record["out_of_scope"] ?? record["outOfScope"];
+  if (!Array.isArray(outOfScope) || outOfScope.length === 0) {
+    reasons.push(
+      '"out_of_scope" must list at least one class of issue that does not apply to this app',
+    );
+  }
+
+  return reasons;
+}
+
+function toCamel(snake: string): string {
+  return snake.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+/**
+ * Build a retry prompt for Phase 3 narrative synthesis that lists the exact
+ * shortcomings from the prior attempt and demands a corrected artifact.
+ */
+function buildNarrativeRetryPrompt(outputDir: string, reasons: string[]): string {
+  return [
+    `Your previous attempt to write ${outputDir}/pasta-narrative.json does not meet the schema requirements:`,
+    ...reasons.map((r) => `- ${r}`),
+    "",
+    "Re-read the S1-S4 artifacts and the source files they reference, then rewrite",
+    `${outputDir}/pasta-narrative.json with the full schema populated. Hard requirements:`,
+    "- overview: 1-3 paragraphs grounded in actual runtime behaviour.",
+    "- input_categories: every category that applies MUST list at least one item with file:line.",
+    "- attacker_stories: 3-6 concrete scenarios with titles, narratives, mitigations.",
+    "- criticality_buckets: examples specific to THIS application, not generic.",
+    "- out_of_scope: list classes that do not apply, with the reason each does not apply.",
+    "",
+    "Return ONLY by writing the JSON file — no prose output.",
+  ].join("\n");
+}
+
 function buildStridePrompt(
   maxThreats: number,
   outputDir: string,
@@ -240,6 +316,30 @@ export const threatModelRandoriTask: AgentTask<
           }
         } catch (error) {
           log.warn(`${tag} Phase 3 (narrative) error: ${toErrorMessage(error)}`);
+        }
+
+        // Validate the artifact. If it's missing or falls short, re-invoke
+        // once with a reinforcement prompt that names the specific gaps — the
+        // one-shot path silently fell back to an empty narrative when the
+        // agent drifted off-schema.
+        const narrativeAfter = readRandoriArtifacts(context.repoRoot, artifactDir).narrative;
+        const narrativeIssues = assessNarrativeArtifact(narrativeAfter);
+        if (narrativeIssues.length > 0) {
+          log.warn(
+            `${tag} Phase 3 narrative incomplete (${narrativeIssues.length} issue(s)); retrying once`,
+          );
+          try {
+            for await (const message of context.runtime.query({
+              prompt: buildNarrativeRetryPrompt(artifactDir, narrativeIssues),
+              options: baseOpts,
+            })) {
+              if (message.type === "result" && typeof message.totalCostUsd === "number") {
+                costUsd += message.totalCostUsd;
+              }
+            }
+          } catch (error) {
+            log.warn(`${tag} Phase 3 retry error: ${toErrorMessage(error)}`);
+          }
         }
       } else {
         log.warn(`${tag} Skipping narrative synthesis — no stage artifacts`);
