@@ -86,6 +86,7 @@ export interface PipelineResult {
   status: "complete" | "error";
   stats?: PipelineStats;
   aborted?: boolean;
+  error?: string;
 }
 
 export interface ScanPlanSummary {
@@ -623,6 +624,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       return {
         runId,
         status: "error",
+        error: outcome.event.payload.error,
       };
     }
 

@@ -142,7 +142,7 @@ async function executeSastPipeline(
         ? options?.postProcessMode === "scan-only"
           ? `${label} complete: ${repoName} — ${findings} findings${cost ? ` ($${cost.toFixed(2)})` : ""}`
           : `${label} complete: ${repoName} — ${findings} findings, ${triaged} triaged${cost ? ` ($${cost.toFixed(2)})` : ""}`
-        : `${label} finished with errors: ${repoName} — ${findings} findings`;
+        : `${label} finished with errors: ${repoName} — ${findings} findings${result.error ? ` (${result.error})` : ""}`;
 
     return {
       ok: result.status === "complete",
