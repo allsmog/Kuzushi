@@ -1283,6 +1283,9 @@ function handleSlashCommand(
     case "set":
       return handleSetCommand(args, core, ctx.focusedModule, shellState);
 
+    case "config":
+      return handleConfigCommand(args);
+
     case "context": {
       const sub = args[0]?.toLowerCase();
 
@@ -1772,6 +1775,103 @@ function handleSetCommand(
   };
 }
 
+const CONFIG_RESTART_KEYS = new Set([
+  "agentRuntimeBackend",
+  "agentRuntimeConfig",
+  "agentModel",
+  "busBackend",
+  "dbPath",
+]);
+
+const CONFIG_SECRET_KEY_PATTERN = /(apiKey|token|secret|password)/i;
+
+function redactConfigSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactConfigSecrets);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (CONFIG_SECRET_KEY_PATTERN.test(k) && typeof v === "string" && v.length > 0) {
+        out[k] = `***redacted*** (len=${v.length})`;
+      } else {
+        out[k] = redactConfigSecrets(v);
+      }
+    }
+    return out;
+  }
+  return value;
+}
+
+const CONFIG_USAGE = [
+  "Usage:",
+  "  /config              Show effective config (secrets redacted)",
+  "  /config path         Show config file paths",
+  "  /config get <key>    Get a value (supports dotted paths)",
+  "  /config set <key> <value>   Set a value in the global config",
+].join("\n");
+
+function handleConfigCommand(args: string[]): LocalCommandResult {
+  const sub = (args[0] ?? "").toLowerCase();
+
+  if (!sub || sub === "list" || sub === "show") {
+    return {
+      asyncExecute: async () => {
+        const { loadConfig, configPath } = await import("../config.js");
+        const cfg = loadConfig();
+        const redacted = redactConfigSecrets(cfg);
+        return `Config: ${configPath()}\n${JSON.stringify(redacted, null, 2)}`;
+      },
+    };
+  }
+
+  if (sub === "path") {
+    return {
+      asyncExecute: async () => {
+        const { configPath } = await import("../config.js");
+        return `Global: ${configPath()}`;
+      },
+    };
+  }
+
+  if (sub === "get") {
+    const key = args[1];
+    if (!key) return { output: "Usage: /config get <key>" };
+    return {
+      asyncExecute: async () => {
+        const { getConfigValue } = await import("../config.js");
+        const value = getConfigValue(key);
+        if (value === undefined) return `No value set for: ${key}`;
+        const redacted = CONFIG_SECRET_KEY_PATTERN.test(key) ? "***redacted***" : value;
+        return `${key} = ${JSON.stringify(redacted, null, 2)}`;
+      },
+    };
+  }
+
+  if (sub === "set") {
+    const key = args[1];
+    const raw = args.slice(2).join(" ").trim();
+    if (!key || !raw) return { output: "Usage: /config set <key> <value>" };
+    return {
+      asyncExecute: async () => {
+        const { setConfigValue } = await import("../config.js");
+        try {
+          setConfigValue(key, raw);
+        } catch (err) {
+          return `Failed to set ${key}: ${err instanceof Error ? err.message : String(err)}`;
+        }
+        const topLevel = key.split(".")[0] ?? key;
+        const needsRestart = CONFIG_RESTART_KEYS.has(topLevel);
+        const displayValue = CONFIG_SECRET_KEY_PATTERN.test(key) ? "***redacted***" : raw;
+        const note = needsRestart
+          ? "\n  Note: restart the shell for this change to take effect."
+          : "";
+        return `Set ${key} = ${displayValue}${note}`;
+      },
+    };
+  }
+
+  return { output: `Unknown /config subcommand: ${sub}\n${CONFIG_USAGE}` };
+}
+
 function formatHelp(core: CopilotCore, opts: ShellOptions): string {
   const modules = core.listModules();
   const toolCount = core.registry.allTools().length;
@@ -1796,6 +1896,8 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/back", "Return to top level"],
         ["/options [tool]", "Show tool options"],
         ["/set <key> <value>", "Set a tool option"],
+        ["/config", "Show global config (secrets redacted)"],
+        ["/config get|set|path", "Read/update ~/.kuzushi/config.json"],
         ["/target <path>", "Set or show the active target"],
         ["/context", "Generate or show application context map"],
         ["/context edit", "Review/edit operator scan context"],

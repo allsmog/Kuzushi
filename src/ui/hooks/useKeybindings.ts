@@ -83,12 +83,13 @@ function cacheKey(bindings: ReadonlyArray<Keybinding>): string {
  */
 export function useRegisterKeybindings(bindings: ReadonlyArray<Keybinding>): void {
   const ctx = useContext(Ctx);
+  const register = ctx?.register;
   const key = cacheKey(bindings);
   const bindingsRef = useRef(bindings);
   bindingsRef.current = bindings;
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-register only when logical binding set changes (via cache key), not when the array identity does
   useEffect(() => {
-    if (!ctx) return;
-    return ctx.register(bindingsRef.current);
-  }, [ctx, key]);
+    if (!register) return;
+    return register(bindingsRef.current);
+  }, [register, key]);
 }
