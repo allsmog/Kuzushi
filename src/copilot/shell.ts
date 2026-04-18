@@ -14,6 +14,15 @@ import path from "node:path";
 import type { AgentQueryOptions, AgentRuntime, AgentSession } from "../agent-runtime/types.js";
 import { createBus } from "../bus/index.js";
 import type { MessageBus } from "../bus/types.js";
+import { explainConfigKey, listConfigKeys } from "../config/docs.js";
+import { formatConfigText } from "../config/render.js";
+import {
+  configPath,
+  getConfigValue,
+  loadConfig,
+  setConfigValue,
+  unsetConfigValue,
+} from "../config.js";
 import { formatContextSummary } from "../modules/core-sast.js";
 import type { ModuleTool } from "../modules/types.js";
 import type { KuzushiConfig } from "../types.js";
@@ -1283,6 +1292,9 @@ function handleSlashCommand(
     case "set":
       return handleSetCommand(args, core, ctx.focusedModule, shellState);
 
+    case "config":
+      return handleConfigCommand(args, opts);
+
     case "context": {
       const sub = args[0]?.toLowerCase();
 
@@ -1706,6 +1718,115 @@ function formatOptions(
   ]);
 }
 
+function handleConfigCommand(args: string[], opts: ShellOptions): LocalCommandResult {
+  const [sub, ...rest] = args;
+  const normalized = sub?.toLowerCase();
+
+  // /config or /config --all — show the grouped summary
+  if (!sub || sub === "--all" || sub === "-a") {
+    const showAll = sub === "--all" || sub === "-a";
+    return {
+      output: formatConfigText(opts.config, {
+        showDefaults: showAll,
+        configPath: configPath(),
+      }),
+    };
+  }
+
+  if (normalized === "path") {
+    return { output: `  ${configPath()}` };
+  }
+
+  if (normalized === "explain") {
+    return handleConfigExplain(rest[0]);
+  }
+
+  if (normalized === "set") {
+    return handleConfigSet(rest, opts);
+  }
+
+  if (normalized === "unset") {
+    return handleConfigUnset(rest, opts);
+  }
+
+  // Anything else: treat as a single-key lookup (supports dotted paths).
+  const value = getConfigValue(sub);
+  if (value === undefined) {
+    return {
+      output: `Unknown config key: ${sub}\nUsage: /config [--all] | /config <key> | /config set <key> <value> | /config unset <key> | /config explain [key] | /config path`,
+    };
+  }
+  return { output: `  ${sub}: ${typeof value === "string" ? value : JSON.stringify(value)}` };
+}
+
+function handleConfigExplain(key: string | undefined): LocalCommandResult {
+  if (!key) {
+    const lines: string[] = ["  Documented config keys:"];
+    for (const entry of listConfigKeys()) {
+      const defaultPart = entry.default !== undefined ? ` (default: ${entry.default})` : "";
+      lines.push(`    ${entry.key.padEnd(32)} ${entry.type}${defaultPart}`);
+      lines.push(`        ${entry.summary}`);
+    }
+    lines.push("");
+    lines.push("  Use `/config explain <key>` for full docs on a single key.");
+    return { output: lines.join("\n") };
+  }
+
+  const doc = explainConfigKey(key);
+  if (!doc) {
+    return { output: `No documentation for config key: ${key}` };
+  }
+  const lines = [
+    `  ${doc.key}`,
+    `    Type:     ${doc.type}`,
+    ...(doc.default !== undefined ? [`    Default:  ${doc.default}`] : []),
+    ...(doc.values ? [`    Values:   ${doc.values.join(", ")}`] : []),
+    ...(doc.envVar ? [`    Env var:  ${doc.envVar}`] : []),
+    `    Summary:  ${doc.summary}`,
+  ];
+  if (doc.details) {
+    lines.push("");
+    lines.push(`    ${doc.details}`);
+  }
+  return { output: lines.join("\n") };
+}
+
+function handleConfigSet(rest: string[], opts: ShellOptions): LocalCommandResult {
+  if (rest.length < 2) {
+    return { output: "Usage: /config set <key> <value>" };
+  }
+  const [key, ...valueParts] = rest;
+  const value = valueParts.join(" ");
+  try {
+    setConfigValue(key, value);
+  } catch (err) {
+    return { output: err instanceof Error ? err.message : String(err) };
+  }
+  // Refresh the in-memory config so subsequent /config reads reflect the change.
+  Object.assign(opts.config, loadConfig());
+  const stored = getConfigValue(key);
+  return {
+    output: `Set ${key} = ${typeof stored === "string" ? stored : JSON.stringify(stored)}\n  saved to ${configPath()}`,
+  };
+}
+
+function handleConfigUnset(rest: string[], opts: ShellOptions): LocalCommandResult {
+  const key = rest[0];
+  if (!key) {
+    return { output: "Usage: /config unset <key>" };
+  }
+  try {
+    unsetConfigValue(key);
+  } catch (err) {
+    return { output: err instanceof Error ? err.message : String(err) };
+  }
+  Object.assign(opts.config, loadConfig());
+  const restored = getConfigValue(key);
+  return {
+    output: `Unset ${key}; reverted to default: ${typeof restored === "string" ? restored : JSON.stringify(restored)}`,
+  };
+}
+
 function handleSetCommand(
   args: string[],
   core: CopilotCore,
@@ -1796,6 +1917,13 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/back", "Return to top level"],
         ["/options [tool]", "Show tool options"],
         ["/set <key> <value>", "Set a tool option"],
+        ["/config", "Show Kuzushi config (overrides only)"],
+        ["/config --all", "Show full config incl. defaults"],
+        ["/config <key>", "Show a single config value"],
+        ["/config set <k> <v>", "Persist a config change to ~/.kuzushi/config.json"],
+        ["/config unset <key>", "Reset a config key to its default"],
+        ["/config explain [key]", "Describe a config key"],
+        ["/config path", "Show config file path"],
         ["/target <path>", "Set or show the active target"],
         ["/context", "Generate or show application context map"],
         ["/context edit", "Review/edit operator scan context"],
