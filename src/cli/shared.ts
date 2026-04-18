@@ -8,7 +8,7 @@ export function resolveRepo(repoPath: string): { root: string; name: string } {
       cwd: absPath,
       encoding: "utf-8",
     }).trim();
-    return { root, name: path.basename(root) };
+    return { root, name: path.basename(absPath) };
   } catch {
     return { root: absPath, name: path.basename(absPath) };
   }
