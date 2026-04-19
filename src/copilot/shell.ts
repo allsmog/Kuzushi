@@ -19,6 +19,11 @@ import type { ModuleTool } from "../modules/types.js";
 import type { KuzushiConfig } from "../types.js";
 import type { ContextSnapshot, ShellHistoryEntry, ShellState, UIStore } from "../ui/state.js";
 import { CopilotCore } from "./core.js";
+import { CoreDispatcher, DispatcherDriver } from "./dispatcher/index.js";
+import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
+import { Datastore } from "./options.js";
+import { createPrintSink, type PrintLevel, type PrintSink } from "./print.js";
+import { loadAndRunResource, saveResourceScript } from "./resource.js";
 import { parseToolArgs } from "./run.js";
 
 const SHELL_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "LS"];
@@ -601,6 +606,97 @@ async function startInkShell(
   const currentCwd = (): string => (opts.target ? path.resolve(opts.target) : process.cwd());
   const shellCtx: ShellContext = { focusedModule: null, uiStore: store, workspaceManager };
 
+  // ---------------------------------------------------------------------------
+  // msfconsole-style CommandDispatcher — first-pass router for help / use /
+  // set / setg / unset / show / info / search / history / resource / makerc /
+  // banner / exit. Unknown commands fall through to routeInput (second pass)
+  // and ultimately the LLM agent (third pass).
+  // ---------------------------------------------------------------------------
+  const dispatcherPrint: PrintSink = createPrintSink({
+    color: false,
+    // Swallow direct writes — Ink owns the render surface. We only care about
+    // the onPrint tap, which appends every emitted line to shell.history as an
+    // "output" entry so it shows up in the conversation stream.
+    write: () => {},
+    onPrint: (line: string, level: PrintLevel) => {
+      appendToHistory(store, {
+        type: level === "error" ? "error" : "output",
+        text: line,
+        timestamp: Date.now(),
+      });
+    },
+  });
+
+  const globals = new Datastore();
+
+  const runToolFromDispatcher = async (
+    tool: ModuleTool,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) => {
+    const snapshot = store.getState().shell?.contextSnapshot ?? null;
+    const seedTaskOutputs = snapshot ? buildSeedMapFromSnapshot(snapshot) : undefined;
+    const execOpts: Parameters<CopilotCore["executeTool"]>[2] = {
+      cwd: currentCwd(),
+      uiStore: store,
+    };
+    if (opts.target) execOpts.target = opts.target;
+    if (opts.workspace) execOpts.workspaceId = opts.workspace;
+    if (signal) execOpts.signal = signal;
+    if (seedTaskOutputs) execOpts.seedTaskOutputs = seedTaskOutputs;
+    return core.executeTool(tool.name, input, execOpts);
+  };
+
+  let driver: DispatcherDriver;
+
+  const coreDispatcher = new CoreDispatcher({
+    registry: core.registry,
+    globals,
+    history: () => store.getState().shell?.commandHistory ?? [],
+    clearHistory: () => {
+      updateShell(store, (shell) => ({ ...shell, commandHistory: [] }));
+    },
+    runResource: async (file: string, signal?: AbortSignal) => {
+      await loadAndRunResource(file, {
+        driver,
+        cwd: currentCwd(),
+        ...(signal ? { signal } : {}),
+      });
+    },
+    makeResource: async (file: string) => {
+      const history = store.getState().shell?.commandHistory ?? [];
+      // Exclude the `makerc ...` line itself; drop empty + `resource`/`makerc`
+      // recursive commands.
+      const commands = history.filter(
+        (line) => !line.startsWith("makerc") && !line.startsWith("resource"),
+      );
+      await saveResourceScript(file, { commands });
+    },
+    runTool: runToolFromDispatcher,
+  });
+
+  driver = new DispatcherDriver({
+    base: coreDispatcher,
+    cwd: currentCwd(),
+    print: dispatcherPrint,
+    promptBase: "kuzushi",
+  });
+
+  /**
+   * Sync `shellCtx.focusedModule` from the dispatcher stack so bare-tool
+   * dispatch (`resolveDirectToolDispatch`) and prompt rendering stay in sync
+   * with `use <module>` / `back`.
+   */
+  const syncFocusFromDispatcher = (): void => {
+    const top = driver.current();
+    if (top instanceof ModuleDispatcher) {
+      shellCtx.focusedModule = top.module.id;
+    } else {
+      shellCtx.focusedModule = null;
+    }
+    syncShellState(store, opts, shellCtx.focusedModule);
+  };
+
   const closeSession = async (): Promise<void> => {
     const currentSession = session;
     session = undefined;
@@ -679,6 +775,36 @@ async function startInkShell(
     if (!alive) return;
 
     beginShellTurn(store, input, shellCtx.focusedModule);
+
+    // First pass: msfconsole-style dispatcher. If a registered command matches,
+    // we render its output and skip the legacy router + LLM agent.
+    const controller = new AbortController();
+    setToolAbort(controller);
+    const dispatched = await driver.handle(input, controller.signal);
+    if (dispatched.matched) {
+      if (dispatched.push || dispatched.pop) syncFocusFromDispatcher();
+      if (dispatched.output) {
+        appendToHistory(store, {
+          type: "output",
+          text: dispatched.output,
+          timestamp: Date.now(),
+        });
+      }
+      finishActiveAction();
+      if (dispatched.exit) {
+        clearTransientShellState(store);
+        setProcessing(store, false);
+        handleExit();
+        return;
+      }
+      clearTransientShellState(store);
+      setProcessing(store, false);
+      return;
+    }
+    // Not matched — clear the controller registered above; subsequent routers
+    // register their own AbortController as needed.
+    finishActiveAction();
+
     const shellState = store.getState().shell;
     const localResult = shellState
       ? routeInput(input, core, opts, shellCtx, shellState)
