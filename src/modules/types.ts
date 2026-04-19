@@ -12,6 +12,7 @@
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { AgentTask } from "../agents/types.js";
 import type { MessageBus } from "../bus/types.js";
+import type { PrintSink } from "../copilot/print.js";
 import type { KnowledgeModule } from "../knowledge/types.js";
 import type { KuzushiConfig } from "../types.js";
 
@@ -21,6 +22,49 @@ import type { KuzushiConfig } from "../types.js";
 
 /** High-level classification for module capabilities. */
 export type ModuleCategory = "offense" | "defense" | "governance" | "intel";
+
+// ---------------------------------------------------------------------------
+// Module ranking + provenance metadata (msfconsole-inspired)
+// ---------------------------------------------------------------------------
+
+/**
+ * Reliability/quality tier. Mirrors Metasploit's Rank system so operators have
+ * a one-word summary of what to expect. Higher = more reliable/accurate.
+ *
+ *  - manual    : requires human driving; not safe to automate
+ *  - low       : works rarely or only under narrow conditions
+ *  - normal    : generic default; no special claims
+ *  - good      : reliable in typical conditions
+ *  - great     : reliable across platforms/versions
+ *  - excellent : production-grade; very high signal
+ */
+export type ModuleRank = "manual" | "low" | "normal" | "good" | "great" | "excellent";
+
+/** Numeric ordering matching msf::RankingName. */
+export const RANK_VALUE: Record<ModuleRank, number> = {
+  manual: 0,
+  low: 100,
+  normal: 300,
+  good: 400,
+  great: 500,
+  excellent: 600,
+};
+
+/** External reference on a module/tool/finding — CVE, CWE, URL, ATT&CK, etc. */
+export interface ModuleReference {
+  type: "CVE" | "CWE" | "URL" | "ATT&CK" | "OSVDB" | "BID" | "EDB" | "KB" | "OWASP";
+  value: string;
+}
+
+/** Qualitative notes about runtime behavior (msf::Notes). */
+export interface ModuleNotes {
+  /** stable | crash-safe | crash-service-down — how stable at runtime. */
+  stability?: string[];
+  /** reliable | unreliable-session | first-attempt — session/tool success profile. */
+  reliability?: string[];
+  /** artifacts-on-disk | ioc-in-logs | screen-effects — observable side effects. */
+  sideEffects?: string[];
+}
 
 // ---------------------------------------------------------------------------
 // Module tool types
@@ -68,6 +112,13 @@ export interface ToolExecutionContext {
    * Avoids re-running context tasks when the shell already has a ContextSnapshot.
    */
   seedTaskOutputs?: Map<string, unknown>;
+  /**
+   * msfconsole-style print helpers. Tools should prefer `ctx.print.status(...)`
+   * / `ctx.print.good(...)` / `ctx.print.error(...)` / `ctx.print.warn(...)`
+   * over direct console.log so output is consistently tagged and auditable.
+   * May be undefined when a tool is invoked outside a shell/run driver.
+   */
+  print?: PrintSink;
 }
 
 /**
@@ -87,6 +138,15 @@ export interface ModuleTool {
    * Tools marked headless: false require shell mode (approval gate in run/pipeline modes).
    */
   readonly headless: boolean;
+  /**
+   * Optional reliability tier — defaults to the module's rank if unset.
+   * Used by `search rank:...` and `info` output.
+   */
+  readonly rank?: ModuleRank;
+  /** Optional external references specific to this tool. */
+  readonly references?: ReadonlyArray<ModuleReference>;
+  /** Optional behavioral notes specific to this tool. */
+  readonly notes?: ModuleNotes;
   /** Execute the tool with validated input. */
   execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult>;
 }
@@ -168,6 +228,20 @@ export interface CopilotModule {
   /** Short description of what the module does. */
   readonly description: string;
 
+  /**
+   * Reliability tier — inherited by tools that don't override `rank`.
+   * Defaults to "normal" when absent.
+   */
+  readonly rank?: ModuleRank;
+  /** Authors (strings or "Name <email>"). */
+  readonly authors?: ReadonlyArray<string>;
+  /** External references — CVEs, ATT&CK techniques, CWEs, relevant URLs. */
+  readonly references?: ReadonlyArray<ModuleReference>;
+  /** Disclosure date (ISO YYYY-MM-DD) — relevant for n-day/CVE-tied modules. */
+  readonly disclosureDate?: string;
+  /** Stability/reliability/side-effect notes. */
+  readonly notes?: ModuleNotes;
+
   /** Tools exposed by this module. */
   readonly tools: ReadonlyArray<ModuleTool>;
 
@@ -221,4 +295,7 @@ export interface ModuleInfo {
   toolCount: number;
   taskCount: number;
   loaded: boolean;
+  rank?: ModuleRank;
+  references?: ReadonlyArray<ModuleReference>;
+  disclosureDate?: string;
 }

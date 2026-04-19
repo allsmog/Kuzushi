@@ -153,6 +153,9 @@ export class ModuleRegistry {
       toolCount: mod.tools.length,
       taskCount: mod.tasks?.length ?? 0,
       loaded: this.initialized.has(mod.id),
+      ...(mod.rank ? { rank: mod.rank } : {}),
+      ...(mod.references ? { references: mod.references } : {}),
+      ...(mod.disclosureDate ? { disclosureDate: mod.disclosureDate } : {}),
     }));
   }
 

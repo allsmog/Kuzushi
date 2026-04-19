@@ -124,8 +124,15 @@ const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
   execution_confirmed: 4,
 };
 
-/** Current canonical schema version. Databases below this get reset. */
-const CURRENT_SCHEMA_VERSION = 100;
+/** Current canonical schema version. */
+const CURRENT_SCHEMA_VERSION = 101;
+
+/**
+ * Lowest schema version that the migration runner can upgrade in-place.
+ * DBs at or above this version get incremental migrations applied;
+ * DBs below get the destructive backup-and-reset treatment.
+ */
+const POST_RESET_BASELINE_VERSION = 100;
 
 /** Options for {@link initDb}. */
 export interface InitDbOpts {
@@ -139,6 +146,7 @@ export interface InitDbOpts {
 type SchemaState =
   | { kind: "fresh" }
   | { kind: "already-current" }
+  | { kind: "needs-upgrade"; version: number }
   | { kind: "legacy-pre-reset"; version: number }
   | { kind: "corrupt"; reason: string };
 
@@ -248,6 +256,9 @@ function inspectSchemaState(db: Database.Database): SchemaState {
       };
     }
     if (maxVersion === CURRENT_SCHEMA_VERSION) return { kind: "already-current" };
+    if (maxVersion >= POST_RESET_BASELINE_VERSION) {
+      return { kind: "needs-upgrade", version: maxVersion };
+    }
     return { kind: "legacy-pre-reset", version: maxVersion };
   } catch (err) {
     return { kind: "corrupt", reason: String(err) };

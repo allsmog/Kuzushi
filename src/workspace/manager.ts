@@ -1,11 +1,43 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { ContextSnapshot } from "../ui/state.js";
+import {
+  CredStore,
+  HostStore,
+  LootStore,
+  NoteStore,
+  ServiceStore,
+  SessionStore,
+  VulnStore,
+} from "./entities.js";
 import type { Workspace } from "./types.js";
 
 /** Manages workspace CRUD and snapshot persistence via SQLite. */
 export class WorkspaceManager {
-  constructor(private readonly db: Database.Database) {}
+  /** Host upsert + query (workspace-scoped). */
+  readonly hosts: HostStore;
+  /** Service upsert + query (host-scoped). */
+  readonly services: ServiceStore;
+  /** Vulnerability records. */
+  readonly vulns: VulnStore;
+  /** Extracted artifacts (files, screenshots, notes). */
+  readonly loot: LootStore;
+  /** Free-form typed observations. */
+  readonly notes: NoteStore;
+  /** Credentials (public/private/realm) + logins. */
+  readonly creds: CredStore;
+  /** Long-lived connections (ssh/browser/honeypot/agent). */
+  readonly sessions: SessionStore;
+
+  constructor(private readonly db: Database.Database) {
+    this.hosts = new HostStore(db);
+    this.services = new ServiceStore(db);
+    this.vulns = new VulnStore(db);
+    this.loot = new LootStore(db);
+    this.notes = new NoteStore(db);
+    this.creds = new CredStore(db);
+    this.sessions = new SessionStore(db);
+  }
 
   create(name: string, targets: string[] = []): Workspace {
     const id = randomUUID();
