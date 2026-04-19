@@ -662,6 +662,42 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
   throw new Error(`Unknown config key: ${key}`);
 }
 
+/** One entry in a config patch: a dotted path and the parsed value to set, or `undefined` to unset. */
+export interface ConfigPatchEntry {
+  path: string;
+  value: unknown;
+}
+
+/**
+ * Apply a batch of changes to the writable config layer in one round-trip.
+ *
+ * The interactive config editor uses this to persist a diff of edits without
+ * going through the per-key validator cascade in `setConfigValue`. Entries
+ * use dotted paths (e.g. `"taskConfig.taint-analysis.tiMode"`) so only the
+ * touched leaves are rewritten — the rest of the user's config file stays
+ * untouched. The final `saveUpdatedConfigLayer` call still runs through
+ * `validateConfigLayer` → `mergeConfigLayers` → `normalizeConfig`, so invalid
+ * values surface the same way they do for `setConfigValue`.
+ */
+export function applyConfigPatch(entries: ConfigPatchEntry[], repoRoot?: string): void {
+  if (entries.length === 0) return;
+  const layer = loadWritableConfigLayer(repoRoot);
+  for (const { path: dottedPath, value } of entries) {
+    const parts = dottedPath.split(".");
+    validatePathParts(parts);
+    if (value === undefined) {
+      unsetByPath(layer, parts);
+      continue;
+    }
+    if (parts.length === 1) {
+      (layer as Record<string, unknown>)[parts[0]] = value;
+    } else {
+      setByPath(layer, parts, value);
+    }
+  }
+  saveUpdatedConfigLayer(layer, repoRoot);
+}
+
 /** Unset a config key (supports dotted paths). */
 export function unsetConfigValue(key: string, repoRoot?: string): void {
   const config = loadWritableConfigLayer(repoRoot);

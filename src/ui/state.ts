@@ -12,11 +12,13 @@ import type {
   AttackPathAnalysis,
   CodeCitation,
   ExploitChain,
+  KuzushiConfig,
   OperatorScanContext,
   SecurityControl,
   Verdict,
 } from "../types.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
+import type { ConfigPatchEntry } from "./components/ConfigEditor.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
 import type { WizardResult } from "./components/SetupWizard.js";
 
@@ -73,6 +75,14 @@ export type PreflightState =
       threatModel: ThreatModelDocument;
       onComplete: (updated: ThreatModelDocument) => void;
       onSkip: () => void;
+      onCancel: () => void;
+    }
+  | {
+      kind: "config-editor";
+      initialConfig: KuzushiConfig;
+      configPath: string;
+      focusKey?: string;
+      onComplete: (patch: ConfigPatchEntry[]) => void;
       onCancel: () => void;
     };
 
@@ -314,6 +324,7 @@ const PREFLIGHT_STEP_ORDER = [
   "credentials",
   "context-intake",
   "threat-editor",
+  "config-editor",
 ] as const;
 
 const PREFLIGHT_SEGMENT_LABELS: Record<(typeof PREFLIGHT_STEP_ORDER)[number], string> = {
@@ -322,6 +333,7 @@ const PREFLIGHT_SEGMENT_LABELS: Record<(typeof PREFLIGHT_STEP_ORDER)[number], st
   credentials: "Credentials",
   "context-intake": "Context Intake",
   "threat-editor": "Threat Model",
+  "config-editor": "Config",
 };
 
 function preflightBreadcrumb(kind: (typeof PREFLIGHT_STEP_ORDER)[number]): UIState["breadcrumb"] {

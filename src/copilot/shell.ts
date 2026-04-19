@@ -1284,7 +1284,7 @@ function handleSlashCommand(
       return handleSetCommand(args, core, ctx.focusedModule, shellState);
 
     case "config":
-      return handleConfigCommand(args);
+      return handleConfigCommand(args, ctx);
 
     case "context": {
       const sub = args[0]?.toLowerCase();
@@ -1803,16 +1803,25 @@ function redactConfigSecrets(value: unknown): unknown {
 
 const CONFIG_USAGE = [
   "Usage:",
-  "  /config              Show effective config (secrets redacted)",
-  "  /config path         Show config file paths",
-  "  /config get <key>    Get a value (supports dotted paths)",
-  "  /config set <key> <value>   Set a value in the global config",
+  "  /config                       Open the interactive config editor (TTY)",
+  "  /config raw                   Print the full effective config as JSON",
+  "  /config path                  Show config file paths",
+  "  /config get <key>             Get a value (supports dotted paths)",
+  "  /config set                   Open the editor focused on the key picker",
+  "  /config set <key> <value>     Set a value in the global config",
+  "  /config edit [key]            Alias for /config (optionally focused)",
 ].join("\n");
 
-function handleConfigCommand(args: string[]): LocalCommandResult {
+function handleConfigCommand(args: string[], ctx: ShellContext): LocalCommandResult {
   const sub = (args[0] ?? "").toLowerCase();
 
-  if (!sub || sub === "list" || sub === "show") {
+  // Default + edit: open the interactive editor (or fall back to raw on no TTY).
+  if (!sub || sub === "list" || sub === "show" || sub === "edit") {
+    const focusKey = sub === "edit" ? args[1] : undefined;
+    return openConfigEditor(ctx, focusKey);
+  }
+
+  if (sub === "raw" || sub === "json") {
     return {
       asyncExecute: async () => {
         const { loadConfig, configPath } = await import("../config.js");
@@ -1849,7 +1858,10 @@ function handleConfigCommand(args: string[]): LocalCommandResult {
   if (sub === "set") {
     const key = args[1];
     const raw = args.slice(2).join(" ").trim();
-    if (!key || !raw) return { output: "Usage: /config set <key> <value>" };
+    // Bare "/config set" → guided picker via the editor.
+    if (!key) return openConfigEditor(ctx);
+    // "/config set <key>" with no value → focus the editor on that key.
+    if (!raw) return openConfigEditor(ctx, key);
     return {
       asyncExecute: async () => {
         const { setConfigValue } = await import("../config.js");
@@ -1870,6 +1882,33 @@ function handleConfigCommand(args: string[]): LocalCommandResult {
   }
 
   return { output: `Unknown /config subcommand: ${sub}\n${CONFIG_USAGE}` };
+}
+
+function openConfigEditor(ctx: ShellContext, focusKey?: string): LocalCommandResult {
+  return {
+    output: focusKey ? `Opening config editor (focus: ${focusKey})...` : "Opening config editor...",
+    asyncExecute: async () => {
+      const { runConfigEditor } = await import("../ui/setup.js");
+      const outcome = await runConfigEditor(ctx.uiStore, focusKey);
+      if (outcome.action === "skipped") {
+        const { loadConfig, configPath } = await import("../config.js");
+        const cfg = loadConfig();
+        const redacted = redactConfigSecrets(cfg);
+        return `Config editor needs an interactive TTY. Falling back to raw view.\nConfig: ${configPath()}\n${JSON.stringify(redacted, null, 2)}`;
+      }
+      if (outcome.action === "cancelled") {
+        return "Config editor closed. No changes saved.";
+      }
+      if (outcome.changed === 0) {
+        return "Config editor closed. No changes.";
+      }
+      const restartNote =
+        outcome.restartKeys.length > 0
+          ? `\n  Note: restart the shell for ${outcome.restartKeys.join(", ")} to take effect.`
+          : "";
+      return `Config updated (${outcome.changed} key${outcome.changed === 1 ? "" : "s"}).${restartNote}`;
+    },
+  };
 }
 
 function formatHelp(core: CopilotCore, opts: ShellOptions): string {
@@ -1896,8 +1935,8 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/back", "Return to top level"],
         ["/options [tool]", "Show tool options"],
         ["/set <key> <value>", "Set a tool option"],
-        ["/config", "Show global config (secrets redacted)"],
-        ["/config get|set|path", "Read/update ~/.kuzushi/config.json"],
+        ["/config", "Open the interactive config editor"],
+        ["/config raw|get|set|path", "Inspect/update ~/.kuzushi/config.json"],
         ["/target <path>", "Set or show the active target"],
         ["/context", "Generate or show application context map"],
         ["/context edit", "Review/edit operator scan context"],

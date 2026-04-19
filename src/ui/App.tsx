@@ -14,6 +14,7 @@ import { CommandInput, type CommandResult, type ReplCommand } from "./components
 import { CompactHeader } from "./components/CompactHeader.js";
 import { ConfigBanner } from "./components/ConfigBanner.js";
 import { ConfigConfirm } from "./components/ConfigConfirm.js";
+import { ConfigEditor } from "./components/ConfigEditor.js";
 import { ContextIntake } from "./components/ContextIntake.js";
 import { CopilotShell } from "./components/CopilotShell.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
@@ -169,6 +170,15 @@ function AppInner({ store }: AppProps): React.ReactElement {
           threatModel={state.preflight.threatModel}
           onComplete={state.preflight.onComplete}
           onSkip={state.preflight.onSkip}
+          onCancel={state.preflight.onCancel}
+        />
+      )}
+      {state.mode === "preflight" && state.preflight?.kind === "config-editor" && (
+        <ConfigEditor
+          initialConfig={state.preflight.initialConfig}
+          configPath={state.preflight.configPath}
+          focusKey={state.preflight.focusKey}
+          onComplete={state.preflight.onComplete}
           onCancel={state.preflight.onCancel}
         />
       )}

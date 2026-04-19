@@ -8,10 +8,12 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
+import { applyConfigPatch, configPath, loadConfig } from "../config.js";
 import { saveOperatorScanContext } from "../operator-context.js";
 import { savePersistentThreatModel } from "../threat-model-renderer.js";
 import type { OperatorScanContext } from "../types.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
+import type { ConfigPatchEntry } from "./components/ConfigEditor.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
 import type { WizardResult } from "./components/SetupWizard.js";
 import { emitOutputNotice } from "./output.js";
@@ -323,6 +325,85 @@ export async function runThreatModelEditor(
         onCancel: () => {
           store.setPreflight(null);
           resolve({ action: "cancel" });
+        },
+      },
+      returnMode,
+    );
+  });
+}
+
+// ── Config Editor ──
+
+export type ConfigEditorOutcome =
+  | { action: "saved"; changed: number; restartKeys: string[] }
+  | { action: "cancelled" }
+  | { action: "skipped" };
+
+const CONFIG_RESTART_KEYS = new Set([
+  "agentRuntimeBackend",
+  "agentRuntimeConfig",
+  "agentModel",
+  "busBackend",
+  "dbPath",
+]);
+
+/**
+ * Show the interactive `/config` editor (TTY only). Persists changes to
+ * `~/.kuzushi/config.json` via {@link applyConfigPatch} and resolves with a
+ * summary the shell uses to acknowledge the action.
+ */
+export async function runConfigEditor(
+  store: UIStore | undefined,
+  focusKey?: string,
+  returnMode: UIMode = "shell",
+): Promise<ConfigEditorOutcome> {
+  if (!process.stdout.isTTY || !store) {
+    return { action: "skipped" };
+  }
+
+  const initialConfig = loadConfig();
+  const cfgPath = configPath();
+
+  return new Promise<ConfigEditorOutcome>((resolve) => {
+    store.setPreflight(
+      {
+        kind: "config-editor",
+        initialConfig,
+        configPath: cfgPath,
+        focusKey,
+        onComplete: (patch: ConfigPatchEntry[]) => {
+          store.setPreflight(null);
+          if (patch.length === 0) {
+            resolve({ action: "saved", changed: 0, restartKeys: [] });
+            return;
+          }
+          try {
+            applyConfigPatch(patch);
+            const restartKeys = [
+              ...new Set(
+                patch.map((e) => e.path.split(".")[0]!).filter((k) => CONFIG_RESTART_KEYS.has(k)),
+              ),
+            ];
+            store.addNotice({
+              level: "success",
+              message: `Config updated (${patch.length} key${patch.length === 1 ? "" : "s"})`,
+              detail: cfgPath,
+              source: "config",
+            });
+            resolve({ action: "saved", changed: patch.length, restartKeys });
+          } catch (err) {
+            store.addNotice({
+              level: "error",
+              message: "Failed to save config",
+              detail: err instanceof Error ? err.message : String(err),
+              source: "config",
+            });
+            resolve({ action: "cancelled" });
+          }
+        },
+        onCancel: () => {
+          store.setPreflight(null);
+          resolve({ action: "cancelled" });
         },
       },
       returnMode,
