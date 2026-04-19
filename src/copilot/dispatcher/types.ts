@@ -24,6 +24,13 @@ export interface CommandResult {
   pop?: boolean;
   /** Exit the shell entirely. */
   exit?: boolean;
+  /**
+   * Whether a dispatcher on the stack actually owned the command.
+   * `true` when a `commands` entry matched; `false` when the driver fell
+   * through to the "Unknown command" default. Callers use this to decide
+   * whether to invoke a downstream router (e.g. the LLM agent fallback).
+   */
+  matched?: boolean;
 }
 
 export interface CommandContext {

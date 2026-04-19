@@ -70,7 +70,7 @@ export class DispatcherDriver implements Driver {
 
   async handle(line: string, signal?: AbortSignal): Promise<CommandResult> {
     const trimmed = line.trim();
-    if (trimmed === "") return {};
+    if (trimmed === "") return { matched: false };
     const tokens = tokenize(trimmed);
     const cmd = tokens[0] ?? "";
     const args = tokens.slice(1);
@@ -85,10 +85,10 @@ export class DispatcherDriver implements Driver {
         const result = (await d.execute(cmd, args, ctx)) ?? {};
         if (result.push) this.push(result.push);
         if (result.pop) this.pop();
-        return result;
+        return { matched: true, ...result };
       }
     }
-    return { output: `Unknown command: ${cmd}` };
+    return { matched: false, output: `Unknown command: ${cmd}` };
   }
 
   complete(line: string): string[] {

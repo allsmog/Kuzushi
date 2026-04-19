@@ -13,7 +13,7 @@ import type { ModuleRegistry } from "../../modules/registry.js";
 import type { CopilotModule } from "../../modules/types.js";
 import { type Datastore, formatOptionsTable } from "../options.js";
 import { formatSearchResult, searchCatalog } from "../search.js";
-import { ModuleDispatcher } from "./module-dispatcher.js";
+import { ModuleDispatcher, type ModuleToolRunner } from "./module-dispatcher.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
 
 export interface CoreDispatcherOptions {
@@ -28,6 +28,12 @@ export interface CoreDispatcherOptions {
   runResource?: (path: string, signal?: AbortSignal) => Promise<void>;
   /** "make rc" — write recent commands as a resource script. */
   makeResource?: (path: string) => Promise<void>;
+  /**
+   * Optional tool runner — when present, every `ModuleDispatcher` pushed by
+   * `use <module>` receives this so `run`/`exploit` actually invoke the tool.
+   * Without it, `run` just prints "[*] Would invoke ..." (useful for tests).
+   */
+  runTool?: ModuleToolRunner;
 }
 
 const COMMANDS: Record<string, string> = {
@@ -173,6 +179,7 @@ export class CoreDispatcher implements CommandDispatcher {
     const dispatcher = new ModuleDispatcher({
       module: mod,
       globals: this.opts.globals,
+      ...(this.opts.runTool ? { runTool: this.opts.runTool } : {}),
     });
     return { push: dispatcher, output: `Selected module: ${mod.id}` };
   }

@@ -145,10 +145,24 @@ describe("CoreDispatcher", () => {
     expect(cleared).toEqual([true]);
   });
 
-  it("reports unknown command", async () => {
+  it("reports unknown command with matched=false", async () => {
     const { driver } = seed();
     const out = await driver.handle("xyzzy");
     expect(out.output).toContain("Unknown command");
+    expect(out.matched).toBe(false);
+  });
+
+  it("sets matched=true on recognized commands", async () => {
+    const { driver } = seed();
+    const out = await driver.handle("modules");
+    expect(out.matched).toBe(true);
+  });
+
+  it("treats empty input as matched=false, no output", async () => {
+    const { driver } = seed();
+    const out = await driver.handle("   ");
+    expect(out.matched).toBe(false);
+    expect(out.output).toBeUndefined();
   });
 
   it("tab-completes command names", () => {
@@ -163,6 +177,59 @@ describe("CoreDispatcher", () => {
     const { driver } = seed();
     const hits = driver.complete("use sa");
     expect(hits).toContain("sast");
+  });
+});
+
+describe("CoreDispatcher runTool wiring", () => {
+  it("forwards `run` inside a module dispatcher to the runTool callback", async () => {
+    const registry = new ModuleRegistry();
+    const tool: ModuleTool = {
+      name: "sast:run",
+      description: "runnable tool",
+      inputSchema: {
+        type: "object",
+        properties: { TARGET: { type: "string", description: "target", default: "." } },
+      },
+      headless: true,
+      async execute(): Promise<ToolResult> {
+        return { ok: true, output: "direct" };
+      },
+    };
+    const mod: CopilotModule = {
+      id: "sast",
+      displayName: "SAST",
+      category: "defense",
+      version: "1.0.0",
+      description: "SAST",
+      rank: "good",
+      tools: [tool],
+    };
+    registry.register(mod);
+    (registry as unknown as { initialized: Set<string> }).initialized.add("sast");
+
+    const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const runTool = async (t: ModuleTool, input: Record<string, unknown>): Promise<ToolResult> => {
+      calls.push({ name: t.name, input });
+      return { ok: true, output: `ran ${t.name}` };
+    };
+
+    const sink = createArraySink();
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+      runTool,
+    });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+
+    await driver.handle("use sast");
+    const result = await driver.handle("run");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe("sast:run");
+    // Default value from JSONSchema is surfaced through the Datastore snapshot.
+    expect(calls[0].input.TARGET).toBe(".");
+    expect(result.matched).toBe(true);
+    expect(result.output).toBe("ran sast:run");
   });
 });
 
