@@ -43,7 +43,7 @@ const CHEAP_VERIFY_SCHEMA = {
   },
 } as const;
 
-const CHEAP_VERIFY_SYSTEM_PROMPT = [
+export const CHEAP_VERIFY_SYSTEM_PROMPT = [
   "You are a security verification expert. You are given a finding that has already been triaged",
   "as a true positive with supporting evidence. Your job is to confirm exploitability and, if",
   "possible, construct a PoC payload — all from the evidence already provided (no tool use).",
