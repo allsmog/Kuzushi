@@ -76,7 +76,7 @@ const SUBTASK_COUNT_WIDTH = 10;
 const SUBTASK_DETAIL_WIDTH = 22;
 const SUBTASK_ELAPSED_WIDTH = 8;
 
-export function PipelineIndicator({
+export const PipelineIndicator = React.memo(function PipelineIndicator({
   stages,
   progress,
   runningCostUsd,
@@ -88,15 +88,15 @@ export function PipelineIndicator({
 }: PipelineIndicatorProps): React.ReactElement | null {
   // Heartbeat timer — re-renders every 5s when scan tasks are active so
   // "still analyzing..." and elapsed time stay fresh.
+  const hasActiveScanTasks = stages.some(
+    (s) => s.id === "scan" && s.subTasks.some((t) => t.status === "active"),
+  );
   const [, setTick] = React.useState(0);
   React.useEffect(() => {
-    const hasActiveScanTasks = stages.some(
-      (s) => s.id === "scan" && s.subTasks.some((t) => t.status === "active"),
-    );
     if (!hasActiveScanTasks) return;
     const id = setInterval(() => setTick((t) => t + 1), 5000);
     return () => clearInterval(id);
-  }, [stages]);
+  }, [hasActiveScanTasks]);
 
   if (stages.length === 0) return null;
 
@@ -140,7 +140,7 @@ export function PipelineIndicator({
       })}
     </Box>
   );
-}
+});
 
 // --- Stage header ---
 
