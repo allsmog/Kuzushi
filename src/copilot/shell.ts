@@ -27,8 +27,10 @@ import { openInEditor } from "./editor.js";
 import { Datastore } from "./options.js";
 import { createPrintSink, type PrintLevel, type PrintSink } from "./print.js";
 import { listRecipes, resolveRecipePath } from "./recipes.js";
+import { openRepl as openDevRepl } from "./repl.js";
 import { loadAndRunResource, saveResourceScript } from "./resource.js";
 import { parseToolArgs } from "./run.js";
+import { SpoolController } from "./spool.js";
 
 const SHELL_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "LS"];
 const SHELL_HISTORY_FILENAME = "shell-history.json";
@@ -648,6 +650,9 @@ async function startInkShell(
   // banner / exit. Unknown commands fall through to routeInput (second pass)
   // and ultimately the LLM agent (third pass).
   // ---------------------------------------------------------------------------
+  // Audit-trail tee controller. `spool <file>` opens; `spool off` closes.
+  const spoolController = new SpoolController();
+
   const dispatcherPrint: PrintSink = createPrintSink({
     color: false,
     // Swallow direct writes — Ink owns the render surface. We only care about
@@ -660,6 +665,9 @@ async function startInkShell(
         text: line,
         timestamp: Date.now(),
       });
+      // Mirror to the spool file if one is active. The tap() call is a no-op
+      // when spooling is off, so the hot path pays ~one map lookup.
+      spoolController.tap(line);
     },
   });
 
@@ -692,6 +700,60 @@ async function startInkShell(
   // `run --bg` backgrounding) and the CoreDispatcher (for the `jobs` family).
   const jobManager = new JobManager();
 
+  // Desktop notification bridge. Jobs that run longer than NOTIFY_THRESHOLD_SECS
+  // fire a system toast on terminal transitions. Opt-in via `setg NOTIFY_ON_COMPLETE true`.
+  {
+    const { sendCompletionNotification } = await import("../ui/notify.js");
+    const notifyIfOptedIn = (label: string, verb: string, record: { startedAt: number }) => {
+      if (String(globals.get("NOTIFY_ON_COMPLETE") ?? "").toLowerCase() !== "true") return;
+      const thresholdRaw = String(globals.get("NOTIFY_THRESHOLD_SECS") ?? "30");
+      const threshold = Number.parseInt(thresholdRaw, 10);
+      const elapsedSecs = (Date.now() - record.startedAt) / 1000;
+      if (!Number.isFinite(threshold) || elapsedSecs < threshold) return;
+      sendCompletionNotification(`Kuzushi: job ${verb}`, `${label} (${elapsedSecs.toFixed(0)}s)`);
+    };
+    jobManager.on("completed", (job) => notifyIfOptedIn(job.label, "completed", job));
+    jobManager.on("failed", (job) => notifyIfOptedIn(job.label, "failed", job));
+    jobManager.on("cancelled", (job) => notifyIfOptedIn(job.label, "cancelled", job));
+  }
+
+  // Auto-triage bridge — when `setg AutoTriage true`, every scan:finding whose
+  // severity meets AUTO_TRIAGE_MIN_SEVERITY queues a triage:run as a
+  // background job. Demonstrates the framework-event model: the scanner
+  // module doesn't know triage exists; the wiring is operator-controlled.
+  const SEVERITY_ORDER: Record<string, number> = {
+    info: 0,
+    low: 1,
+    medium: 2,
+    high: 3,
+    critical: 4,
+  };
+  bus.subscribe<import("../bus/events.js").ScanFindingEvent>("scan:finding", (event) => {
+    if (String(globals.get("AutoTriage") ?? "").toLowerCase() !== "true") return;
+    const minSev = String(globals.get("AUTO_TRIAGE_MIN_SEVERITY") ?? "high").toLowerCase();
+    const minRank = SEVERITY_ORDER[minSev] ?? SEVERITY_ORDER.high ?? 3;
+    const findingSev = String(event.payload.finding.severity ?? "").toLowerCase();
+    const findingRank = SEVERITY_ORDER[findingSev] ?? 0;
+    if (findingRank < minRank) return;
+    const fingerprint = event.payload.finding.fingerprint;
+    if (!fingerprint) return;
+    jobManager.start({ label: `auto-triage:${fingerprint}`, kind: "tool" }, async (jobCtx) => {
+      jobCtx.log(`[*] AutoTriage ${fingerprint} (severity ${findingSev})`);
+      const result = await core.executeTool(
+        "triage:run",
+        { fingerprint },
+        {
+          cwd: currentCwd(),
+          ...(opts.workspace ? { workspaceId: opts.workspace } : {}),
+          ...(workspaceManager ? { workspace: workspaceManager } : {}),
+          signal: jobCtx.signal,
+        },
+      );
+      jobCtx.log(result.ok ? `[+] AutoTriage done` : `[-] AutoTriage failed: ${result.output}`);
+      return result.output;
+    });
+  });
+
   const coreDispatcher = new CoreDispatcher({
     registry: core.registry,
     globals,
@@ -721,7 +783,31 @@ async function startInkShell(
     // Bridge for `edit <NAME>`. Suspending the Ink render while $EDITOR owns
     // the TTY is a future refinement — today we just spawn inheriting stdio.
     openEditor: (initial: string) => openInEditor(initial),
+    // Dev escape hatch — `repl` drops into node:repl with framework objects
+    // bound so developers can poke at live registry / bus / workspace state
+    // without restarting the shell. Non-TTY shells decline gracefully.
+    openRepl: async () => {
+      if (!process.stdin.isTTY) {
+        dispatcherPrint.error("[-] REPL requires an interactive TTY.");
+        return;
+      }
+      await openDevRepl({
+        context: {
+          core,
+          registry: core.registry,
+          events: core.events,
+          moduleCache: core.moduleCache,
+          workspace: workspaceManager,
+          sessions: sessionManager,
+          jobs: jobManager,
+          bus,
+          globals,
+          print: dispatcherPrint,
+        },
+      });
+    },
     jobManager,
+    spool: spoolController,
   });
 
   driver = new DispatcherDriver({
@@ -790,6 +876,7 @@ async function startInkShell(
     const live = sessionManager.liveForWorkspace(opts.workspace).length;
     return live > 0 ? `${live} ${live === 1 ? "session" : "sessions"}` : undefined;
   });
+  driver.addStatusProvider(() => spoolController.status());
 
   // Load ~/.kuzushi/startup.rc if present — lets operators preload setg,
   // aliases, favorites, etc. on every shell launch. Errors are non-fatal;
@@ -1172,6 +1259,7 @@ async function startInkShell(
     } finally {
       await closeSession();
       await jobManager.shutdown();
+      spoolController.stop();
       await core.dispose();
       await bus.close();
       cleanupUI();
@@ -1602,9 +1690,7 @@ function handleSlashCommand(
         return {
           output: "Opening threat model editor...",
           asyncExecute: async () => {
-            const { loadPersistentThreatModel, savePersistentThreatModel } = await import(
-              "../threat-model-renderer.js"
-            );
+            const { loadPersistentThreatModel } = await import("../threat-model-renderer.js");
             const { runThreatModelEditor } = await import("../ui/setup.js");
             const tm = loadPersistentThreatModel(repoRoot);
             if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";

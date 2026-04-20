@@ -7,7 +7,10 @@
  * "what do we have in this engagement so far?"
  */
 
+import path from "node:path";
 import type { SessionManager } from "../../sessions/manager.js";
+import { type ExportFormat, exportToFile } from "../../workspace/io/export.js";
+import { type ImportFormat, importFile } from "../../workspace/io/import.js";
 import type { WorkspaceManager } from "../../workspace/manager.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
 
@@ -27,7 +30,12 @@ const COMMANDS: Record<string, string> = {
   notes: "List notes in the active workspace",
   creds: "List credentials in the active workspace",
   sessions: "List sessions in the active workspace",
+  "workspace:import": "Import a file into the active workspace (sarif | nmap-xml | kz-bundle)",
+  "workspace:export": "Export the active workspace to a file (sarif | kz-bundle)",
 };
+
+const IMPORT_FORMATS: ImportFormat[] = ["sarif", "nmap-xml", "kz-bundle"];
+const EXPORT_FORMATS: ExportFormat[] = ["sarif", "kz-bundle"];
 
 export class WorkspaceDispatcher implements CommandDispatcher {
   readonly name = "workspace";
@@ -56,8 +64,79 @@ export class WorkspaceDispatcher implements CommandDispatcher {
         return { output: renderCreds(ws.creds.listForWorkspace(wid)) };
       case "sessions":
         return this.cmd_sessions(args, ctx);
+      case "workspace:import":
+        return this.cmd_import(args, ctx);
+      case "workspace:export":
+        return this.cmd_export(args, ctx);
       default:
         return undefined;
+    }
+  }
+
+  complete(cmd: string, partial: string, words: string[]): string[] {
+    if (cmd === "workspace:import" && words.length <= 1) {
+      return IMPORT_FORMATS.filter((f) => f.startsWith(partial));
+    }
+    if (cmd === "workspace:export" && words.length <= 1) {
+      return EXPORT_FORMATS.filter((f) => f.startsWith(partial));
+    }
+    return [];
+  }
+
+  private cmd_import(args: string[], ctx: CommandContext): CommandResult {
+    const wid = this.opts.activeWorkspaceId();
+    if (!wid) return { output: "[-] No active workspace." };
+    const fmt = args[0];
+    const file = args[1];
+    if (!fmt || !file) {
+      return {
+        output: `Usage: workspace:import <${IMPORT_FORMATS.join("|")}> <file>`,
+      };
+    }
+    if (!IMPORT_FORMATS.includes(fmt as ImportFormat)) {
+      return { output: `[-] Unknown format: ${fmt}. Use one of: ${IMPORT_FORMATS.join(", ")}` };
+    }
+    const resolved = path.isAbsolute(file) ? file : path.resolve(ctx.cwd, file);
+    try {
+      const summary = importFile(this.opts.workspaces, wid, fmt as ImportFormat, resolved);
+      const counts = [
+        `hosts=${summary.hosts}`,
+        `services=${summary.services}`,
+        `vulns=${summary.vulns}`,
+        `loot=${summary.loot}`,
+        `notes=${summary.notes}`,
+        `creds=${summary.creds}`,
+        `sessions=${summary.sessions}`,
+      ].join(" ");
+      const lines = [`[+] Imported ${summary.format}: ${counts}`];
+      for (const w of summary.warnings) lines.push(`      ! ${w}`);
+      return { output: lines.join("\n") };
+    } catch (err) {
+      return { output: `[-] Import failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+
+  private cmd_export(args: string[], ctx: CommandContext): CommandResult {
+    const wid = this.opts.activeWorkspaceId();
+    if (!wid) return { output: "[-] No active workspace." };
+    const fmt = args[0];
+    const fileArg = args[1];
+    if (!fmt) {
+      return { output: `Usage: workspace:export <${EXPORT_FORMATS.join("|")}> [file]` };
+    }
+    if (!EXPORT_FORMATS.includes(fmt as ExportFormat)) {
+      return { output: `[-] Unknown format: ${fmt}. Use one of: ${EXPORT_FORMATS.join(", ")}` };
+    }
+    const ws = this.opts.workspaces.get(wid);
+    const wsName = ws?.name ?? "workspace";
+    const defaultFile = fmt === "sarif" ? `${wsName}.sarif` : `${wsName}.kz.json`;
+    const file = fileArg ?? defaultFile;
+    const resolved = path.isAbsolute(file) ? file : path.resolve(ctx.cwd, file);
+    try {
+      const { bytes } = exportToFile(this.opts.workspaces, wid, fmt as ExportFormat, resolved);
+      return { output: `[+] Exported ${fmt} → ${resolved} (${bytes} bytes)` };
+    } catch (err) {
+      return { output: `[-] Export failed: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 
