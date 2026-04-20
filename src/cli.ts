@@ -279,6 +279,11 @@ program
   .option("--audit-log", "Persist per-run audit logs to .kuzushi/runs/<runId>/", false)
   .option("--output <path>", "Write markdown report to this path")
   .option("--sarif <path>", "Write SARIF v2.1.0 report to this path")
+  .option(
+    "--ci",
+    "CI mode: disable Ink, print one line per stage transition, default --sarif ./kuzushi.sarif",
+    false,
+  )
   .option("--json <path>", "Write JSON report to this path")
   .option("--csv <path>", "Write CSV report to this path")
   .option("--jsonl <path>", "Write JSONL report to this path")
