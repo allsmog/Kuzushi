@@ -178,6 +178,27 @@ export class DispatcherDriver implements Driver {
       }
     }
 
+    // Before giving up, let the top dispatcher claim the line via fallback().
+    // This is how the InteractiveSessionDispatcher forwards free-form input
+    // to session.interact() — its `commands` only lists control verbs.
+    const top = this._stack[this._stack.length - 1] as CommandDispatcher & {
+      fallback?: (line: string, ctx: CommandContext) => Promise<CommandResult | void>;
+    };
+    if (typeof top.fallback === "function") {
+      const ctx: CommandContext = signal
+        ? { print: this.print, cwd: this.cwd, driver: this, signal }
+        : { print: this.print, cwd: this.cwd, driver: this };
+      const result = (await top.fallback(primary, ctx)) ?? {};
+      if (result.push) this.push(result.push);
+      if (result.pop) this.pop();
+      const filtered = await this.applyFilters(result.output, filters);
+      return {
+        matched: true,
+        ...result,
+        ...(filtered !== undefined ? { output: filtered } : {}),
+      };
+    }
+
     // Unknown command — suggest a near-match if one exists.
     const suggestion = this.nearestCommand(cmd);
     const hint = suggestion ? `\n    Did you mean: ${suggestion}?` : "";

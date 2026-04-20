@@ -366,6 +366,20 @@ export class WorkspaceDispatcher implements CommandDispatcher {
       const out = await handle.interact(input, ctx.signal);
       return { output: out };
     }
+    // `-I <ref>` (capital): push the interactive REPL dispatcher onto the
+    // stack. Operator gets a session-scoped prompt; `back` / `exit` pops.
+    if (args[0] === "-I" && args[1]) {
+      const resolved = resolveSessionRef(ws, wid, args[1] as string);
+      if (typeof resolved !== "string") return { output: resolved.output };
+      const handle = this.opts.sessions?.getLive(resolved);
+      if (!handle?.interact) return { output: "[-] Session not interactive." };
+      const { InteractiveSessionDispatcher } = await import("./session-repl.js");
+      const repl = new InteractiveSessionDispatcher(handle, resolved);
+      return {
+        push: repl,
+        output: `[+] Entering session ${resolved.slice(0, 8)} — type 'back' to return.`,
+      };
+    }
     const openOnly = args.includes("--open");
     const rows = ws.sessions.listForWorkspace(wid, { openOnly });
     return { output: renderSessions(rows) };
