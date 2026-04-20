@@ -329,19 +329,17 @@ export function finalizeAssistantText(
 }
 
 /**
- * If the configured `agentRuntimeBackend` can't create interactive sessions
- * (e.g. `pi-ai`, which is batch-only), swap `opts.runtime` to a fresh
- * `ClaudeAgentRuntime` for the duration of this shell. Pi-ai stays in the
- * config for non-interactive `kuzushi scan ...` runs.
+ * Safety-net fallback: if the configured runtime does not expose
+ * `createSession()`, swap `opts.runtime` to a fresh `ClaudeAgentRuntime` so the
+ * shell still has an interactive session. Both the built-in runtimes (claude,
+ * pi-ai) implement sessions today; this only engages for custom/future
+ * runtimes that skip the optional method.
  *
  * Idempotent — safe to call multiple times.
  */
 async function ensureClaudeShellRuntime(opts: ShellOptions, store?: UIStore): Promise<void> {
-  // Backends other than "claude" don't currently produce real interactive
-  // sessions — the LoggingAgentRuntime wrapper still exposes a createSession
-  // method, but it forwards to a no-op for e.g. pi-ai. Detect by backend name.
+  if (typeof opts.runtime.createSession === "function") return;
   const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
-  if (backend === "claude") return;
   try {
     const { ClaudeAgentRuntime } = await import("../agent-runtime/claude.js");
     const { LoggingAgentRuntime } = await import("../agent-runtime/logging-runtime.js");
@@ -353,7 +351,7 @@ async function ensureClaudeShellRuntime(opts: ShellOptions, store?: UIStore): Pr
     const active = resolveActiveCredentials(opts.config);
     const creds = Object.keys(active).length > 0 ? active : undefined;
     opts.runtime = new LoggingAgentRuntime(new ClaudeAgentRuntime(creds));
-    const base = `Note: agent backend "${backend}" is batch-only and doesn't support interactive sessions. Using "claude" for this shell (your scan backend is unchanged). Run /backend claude to make this the default.`;
+    const base = `Note: agent backend "${backend}" does not support interactive sessions. Using "claude" for this shell (your scan backend is unchanged). Run /backend claude to make this the default.`;
     const hint = !creds
       ? "\nNo claude credentials configured yet — run /auth to paste an Anthropic key."
       : "";
@@ -461,10 +459,7 @@ async function applyCredentialOutcome(
     try {
       const targetCwd = opts.target ? path.resolve(opts.target) : process.cwd();
       const slot = backendConfigSlot(opts.config.agentRuntimeBackend);
-      const writtenTo = persistLocalCredentials(
-        { [slot]: slotPatch },
-        targetCwd,
-      );
+      const writtenTo = persistLocalCredentials({ [slot]: slotPatch }, targetCwd);
       return {
         enabled: true,
         message: `Copilot enabled. ${providerLabel} credentials saved to ${writtenTo} (${slot} slot).`,
@@ -1822,8 +1817,8 @@ async function startInkShell(
           timestamp: Date.now(),
         });
       }
-      // Anthropic creds were just provided — make sure the runtime can
-      // actually create sessions now (swap in claude if backend was pi-ai).
+      // Anthropic creds were just provided — re-check the runtime can create
+      // sessions (no-op if the current backend already supports sessions).
       await ensureClaudeShellRuntime(opts, store);
     }
   }
@@ -1950,9 +1945,10 @@ async function startReadlineShell(
   // a TTY (so users in CI/piped contexts aren't blocked) and when the Claude
   // backend has no credentials available yet. Done BEFORE creating the main
   // `rl` so the prompt's own readline interface owns stdin uncontested.
-  // Always swap in a Claude runtime if the configured backend can't create
-  // interactive sessions (e.g. pi-ai). Done before the credential prompt so
-  // the prompt itself can guide the user to enable the swapped-in backend.
+  // Safety-net: swap in Claude only if the configured runtime doesn't expose
+  // createSession(). Built-in backends (claude, pi-ai) both support sessions,
+  // so this is a no-op for them. Done before the credential prompt so the
+  // prompt can guide the user to enable whichever backend is active.
   await ensureClaudeShellRuntime(opts);
   if (process.stderr.isTTY) {
     const { hasAnthropicCredentials, runReadlineCredentialPrompt } = await import("../ui/setup.js");
@@ -3567,8 +3563,8 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
       opts.config.agentRuntimeBackend = sub;
       const note =
         sub === "claude"
-          ? "Shell sessions now use claude (already in effect). Future scans will too."
-          : "Note: shell sessions still auto-fall-back to claude (pi-ai is batch-only). Future `kuzushi scan ...` runs will use pi-ai.";
+          ? "Shell sessions and future `kuzushi scan ...` runs will use claude. Restart the shell to pick up the change."
+          : "Shell sessions and future `kuzushi scan ...` runs will use pi-ai. Restart the shell to pick up the change.";
       const lines = [`Backend persisted as "${sub}" in ${configPath()}.`, note];
       // Each backend has its own credential slot now, so switching can't leak
       // creds between backends. Just hint when the new slot is empty so the

@@ -669,3 +669,205 @@ describe("isTransientError", () => {
     expect(isTransientError(new Error("content policy violation"))).toBe(false);
   });
 });
+
+describe("PiAiSession", () => {
+  async function collectSessionMessages(
+    session: { query: (prompt: string) => AsyncIterable<AgentMessage> },
+    prompt: string,
+  ): Promise<AgentMessage[]> {
+    const collected: AgentMessage[] = [];
+    for await (const message of session.query(prompt)) {
+      collected.push(message);
+    }
+    return collected;
+  }
+
+  it("preserves conversation context across successive queries", async () => {
+    const cwd = makeTempDir();
+    completeMock
+      .mockResolvedValueOnce(
+        makeAssistantMessage([{ type: "text", text: "first-reply" }], { totalCost: 0.002 }),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage([{ type: "text", text: "second-reply" }], { totalCost: 0.003 }),
+      );
+
+    const runtime = new PiAiAgentRuntime();
+    const session = runtime.createSession?.({ cwd, model: "openai:gpt-4o" });
+    if (!session) throw new Error("createSession returned undefined");
+
+    const firstMessages = await collectSessionMessages(session, "first user prompt");
+    const secondMessages = await collectSessionMessages(session, "second user prompt");
+
+    expect(completeMock).toHaveBeenCalledTimes(2);
+
+    // The second complete() call must see the prior user prompt AND the first
+    // assistant reply in context.messages. That's the whole point of sessions.
+    // (Note: `context.messages` is mutated in place by the loop after each LLM
+    // call, so by assertion time the array has grown past the snapshot we want
+    // to check. Assert the first three slots are what the LLM saw on turn 2.)
+    const secondContext = completeMock.mock.calls[1]?.[1];
+    const messagesAtCall = secondContext.messages.slice(0, 3);
+    const roles = messagesAtCall.map((m: { role: string }) => m.role);
+    expect(roles).toEqual(["user", "assistant", "user"]);
+    expect(messagesAtCall[0].content).toBe("first user prompt");
+    const priorAssistantText = messagesAtCall[1].content.find(
+      (b: { type: string }) => b.type === "text",
+    );
+    expect(priorAssistantText.text).toBe("first-reply");
+    expect(messagesAtCall[2].content).toBe("second user prompt");
+
+    expect(firstMessages[firstMessages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "success",
+      result: "first-reply",
+      numTurns: 1,
+    });
+    expect(secondMessages[secondMessages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "success",
+      result: "second-reply",
+      numTurns: 1,
+    });
+
+    await session.close();
+  });
+
+  it("carries tool-result messages across turns", async () => {
+    const cwd = makeTempDir();
+    writeFileSync(path.join(cwd, "target.ts"), "line1\nline2\n", "utf8");
+
+    completeMock
+      // Turn 1 invokes a tool, then the model produces its final reply.
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "tool-read-1",
+              name: "Read",
+              arguments: { path: "target.ts", offset: 1, limit: 1 },
+            },
+          ],
+          { stopReason: "toolUse", totalCost: 0.001 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage([{ type: "text", text: "ack" }], { totalCost: 0.001 }),
+      )
+      // Turn 2 should see the previous toolResult in context when it runs.
+      .mockResolvedValueOnce(
+        makeAssistantMessage([{ type: "text", text: "follow-up" }], { totalCost: 0.001 }),
+      );
+
+    const runtime = new PiAiAgentRuntime();
+    const session = runtime.createSession?.({ cwd, model: "openai:gpt-4o" });
+    if (!session) throw new Error("createSession returned undefined");
+
+    await collectSessionMessages(session, "please read target.ts");
+    await collectSessionMessages(session, "now summarise it");
+
+    const lastCallContext = completeMock.mock.calls.at(-1)?.[1];
+    const hasToolResult = lastCallContext.messages.some(
+      (m: { role: string }) => m.role === "toolResult",
+    );
+    expect(hasToolResult).toBe(true);
+
+    await session.close();
+  });
+
+  it("refuses to run after close()", async () => {
+    const cwd = makeTempDir();
+    completeMock.mockResolvedValue(
+      makeAssistantMessage([{ type: "text", text: "hello" }], { totalCost: 0 }),
+    );
+
+    const runtime = new PiAiAgentRuntime();
+    const session = runtime.createSession?.({ cwd, model: "openai:gpt-4o" });
+    if (!session) throw new Error("createSession returned undefined");
+
+    await collectSessionMessages(session, "hi");
+    await session.close();
+
+    await expect(collectSessionMessages(session, "again")).rejects.toThrow(/closed/);
+  });
+
+  it("rejects concurrent query() calls on the same session", async () => {
+    const cwd = makeTempDir();
+    let release: (() => void) | undefined;
+    completeMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(makeAssistantMessage([{ type: "text", text: "done" }]));
+        }),
+    );
+
+    const runtime = new PiAiAgentRuntime();
+    const session = runtime.createSession?.({ cwd, model: "openai:gpt-4o" });
+    if (!session) throw new Error("createSession returned undefined");
+
+    const first = collectSessionMessages(session, "first");
+    // Yield once so the generator starts and flips inFlight=true before
+    // the second attempt.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await expect(collectSessionMessages(session, "second")).rejects.toThrow(/in flight/);
+
+    release?.();
+    await first;
+    await session.close();
+  });
+
+  it("close() aborts an in-flight query", async () => {
+    const cwd = makeTempDir();
+    let capturedSignal: AbortSignal | undefined;
+    completeMock.mockImplementation(async (_model, _context, options) => {
+      capturedSignal = options?.signal;
+      await new Promise<void>((resolve) => {
+        if (capturedSignal?.aborted) {
+          resolve();
+          return;
+        }
+        capturedSignal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return makeAssistantMessage([], { stopReason: "aborted", errorMessage: "aborted" });
+    });
+
+    const runtime = new PiAiAgentRuntime();
+    const session = runtime.createSession?.({ cwd, model: "openai:gpt-4o" });
+    if (!session) throw new Error("createSession returned undefined");
+
+    const queryPromise = collectSessionMessages(session, "hang please");
+    await new Promise((resolve) => setImmediate(resolve));
+    await session.close();
+
+    const messages = await queryPromise;
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "error_aborted",
+    });
+  });
+
+  it("forwards an externally-aborted controller into the session signal", async () => {
+    const cwd = makeTempDir();
+    const abortController = new AbortController();
+    abortController.abort();
+    completeMock.mockResolvedValue(
+      makeAssistantMessage([{ type: "text", text: "should-not-run" }]),
+    );
+
+    const runtime = new PiAiAgentRuntime();
+    const session = runtime.createSession?.({ cwd, model: "openai:gpt-4o", abortController });
+    if (!session) throw new Error("createSession returned undefined");
+
+    const messages = await collectSessionMessages(session, "hello");
+    expect(completeMock).not.toHaveBeenCalled();
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "error_aborted",
+    });
+
+    await session.close();
+  });
+});
