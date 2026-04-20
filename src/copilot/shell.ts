@@ -32,6 +32,7 @@ import { CopilotCore } from "./core.js";
 import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
 import { openInEditor } from "./editor.js";
+import { runPlanner, type ShellPlan } from "./nl-planner.js";
 import { Datastore } from "./options.js";
 import { createPrintSink, type PrintLevel, type PrintSink } from "./print.js";
 import { listRecipes, resolveRecipePath } from "./recipes.js";
@@ -134,6 +135,28 @@ function capShellHistory(history: string[]): string[] {
 
 export function buildShellPrompt(focusedModule: string | null): string {
   return focusedModule ? `kuzushi/${focusedModule}> ` : "kuzushi> ";
+}
+
+/**
+ * Best-guess "default tool" for a focused module — mirrors the preference
+ * order used by ModuleDispatcher's `run`. Used when a fresh `/plan` runs
+ * before the operator has touched `/options` and `lastUsedTool` is unset.
+ */
+export function pickDefaultToolName(core: CopilotCore, moduleId: string): string | undefined {
+  if (!core.hasModule(moduleId)) return undefined;
+  const mod = core.registry.get(moduleId);
+  const preferred = [
+    `${moduleId}:run`,
+    `${moduleId}:scan`,
+    `${moduleId}:exploit`,
+    `${moduleId}:audit`,
+  ];
+  for (const name of preferred) {
+    const t = mod.tools.find((x) => x.name === name);
+    if (t) return t.name;
+  }
+  const headless = mod.tools.find((t) => t.headless);
+  return (headless ?? mod.tools[0])?.name;
 }
 
 /** `.kuzushi/house-rules/<moduleId>.md` — per-module nudge text from the operator. */
@@ -2137,6 +2160,97 @@ function handleSlashCommand(
       };
     }
 
+    case "plan": {
+      // Natural-language → option-diff planner. Joins all args into the
+      // request text so quoting is optional: `/plan run harder, focus on auth`.
+      const text = args.join(" ").trim();
+      if (!text) {
+        return { output: 'Usage: /plan "<english>" — e.g. /plan run harder, focus on auth' };
+      }
+      if (!ctx.focusedModule) {
+        return { output: "No focused module. Use /use <module> first." };
+      }
+      const activeToolName = shellState.lastUsedTool;
+      const fallbackToolName = activeToolName?.startsWith(`${ctx.focusedModule}:`)
+        ? activeToolName
+        : pickDefaultToolName(core, ctx.focusedModule);
+      if (!fallbackToolName) {
+        return { output: `No tool resolved for ${ctx.focusedModule}. Use /options <tool> first.` };
+      }
+      const resolved = core.registry.resolveTool(fallbackToolName);
+      if (!resolved) {
+        return { output: `Unknown tool: ${fallbackToolName}` };
+      }
+      const currentOptions = { ...(shellState.moduleOptions[fallbackToolName] ?? {}) };
+      const runtime = opts.runtime;
+      return {
+        output: `Planning: "${text.slice(0, 80)}${text.length > 80 ? "\u2026" : ""}"`,
+        shellStateUpdater: (shell) => ({ ...shell, plannerBusy: true }),
+        asyncExecute: async (signal) => {
+          const abortController = new AbortController();
+          if (signal) {
+            if (signal.aborted) abortController.abort();
+            else signal.addEventListener("abort", () => abortController.abort(), { once: true });
+          }
+          let plan: ShellPlan | undefined;
+          let errorMsg: string | undefined;
+          try {
+            plan = await runPlanner({
+              runtime,
+              cwd: opts.target ? path.resolve(opts.target) : process.cwd(),
+              tool: resolved.tool,
+              currentOptions,
+              text,
+              toolName: fallbackToolName,
+              abortController,
+            });
+          } catch (err) {
+            errorMsg = err instanceof Error ? err.message : String(err);
+          }
+          if (ctx.uiStore) {
+            updateShell(ctx.uiStore, (shell) => ({
+              ...shell,
+              plannerBusy: false,
+              pendingPlan: plan ?? null,
+            }));
+          }
+          if (errorMsg) return `Planner error: ${errorMsg}`;
+          if (!plan) return "Planner returned no plan.";
+          if (plan.changes.length === 0 && plan.unsupported.length === 0) {
+            return "Planner found nothing to change.";
+          }
+          return "Plan ready. Press y to apply, n to discard.";
+        },
+      };
+    }
+
+    case "yes":
+    case "apply-plan": {
+      const plan = shellState.pendingPlan;
+      if (!plan) {
+        return { output: 'No pending plan. Use /plan "<english>" first.' };
+      }
+      const result = applyShellPlan(plan, core, shellState);
+      return {
+        output: result.output,
+        shellStateUpdater: (shell) => ({
+          ...result.updater(shell),
+          pendingPlan: null,
+        }),
+      };
+    }
+
+    case "no":
+    case "discard-plan": {
+      if (!shellState.pendingPlan) {
+        return { output: "No pending plan." };
+      }
+      return {
+        output: "Plan discarded.",
+        shellStateUpdater: (shell) => ({ ...shell, pendingPlan: null }),
+      };
+    }
+
     case "options": {
       const resolved = resolveOptionsTool(
         core,
@@ -2656,6 +2770,75 @@ function formatOptions(
   ]);
 }
 
+/**
+ * Apply a NL-planner proposal against `shell.moduleOptions` using the same
+ * coercion + validation helpers as `handleSetCommand`. Returns a summary
+ * string plus a `ShellState` updater the caller merges into its result.
+ */
+function applyShellPlan(
+  plan: ShellPlan,
+  core: CopilotCore,
+  shellState: ShellState,
+): { output: string; updater: (shell: ShellState) => ShellState } {
+  const resolved = core.registry.resolveTool(plan.toolName);
+  if (!resolved) {
+    return {
+      output: `Plan references unknown tool: ${plan.toolName}`,
+      updater: (shell) => shell,
+    };
+  }
+  const properties = getToolProperties(resolved.tool);
+
+  const applied: Array<{ option: string; value: unknown }> = [];
+  const skipped: Array<{ option: string; reason: string }> = [];
+  const nextOptions: Record<string, unknown> = {
+    ...(shellState.moduleOptions[plan.toolName] ?? {}),
+  };
+
+  for (const change of plan.changes) {
+    const schema = properties[change.option];
+    if (!schema) {
+      skipped.push({ option: change.option, reason: "unknown option" });
+      continue;
+    }
+    // The planner returns JSON values directly; coerceOptionValue expects a
+    // string. Stringify non-strings so enum/boolean/number paths stay in one
+    // validation code path rather than forking by source.
+    const rawValue =
+      typeof change.proposed === "string" ? change.proposed : JSON.stringify(change.proposed);
+    const coerced = coerceOptionValue(rawValue, schema);
+    const typeError = validateOptionType(change.option, coerced, schema);
+    if (typeError) {
+      skipped.push({ option: change.option, reason: typeError });
+      continue;
+    }
+    const enumError = validateOptionValue(change.option, coerced, schema);
+    if (enumError) {
+      skipped.push({ option: change.option, reason: enumError });
+      continue;
+    }
+    nextOptions[change.option] = coerced;
+    applied.push({ option: change.option, value: coerced });
+  }
+
+  const appliedLine = applied.length
+    ? `Applied ${applied.length} change${applied.length === 1 ? "" : "s"} (source: ${plan.source}):\n` +
+      applied.map((a) => `  ${plan.toolName}.${a.option} = ${formatValue(a.value)}`).join("\n")
+    : "No changes applied.";
+  const skippedLine = skipped.length
+    ? `\nSkipped ${skipped.length}: ` + skipped.map((s) => `${s.option} (${s.reason})`).join(", ")
+    : "";
+
+  return {
+    output: `${appliedLine}${skippedLine}`,
+    updater: (shell) => ({
+      ...shell,
+      moduleOptions: { ...shell.moduleOptions, [plan.toolName]: nextOptions },
+      lastUsedTool: plan.toolName,
+    }),
+  };
+}
+
 function handleSetCommand(
   args: string[],
   core: CopilotCore,
@@ -3066,6 +3249,8 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/findings", "Show the findings list for the current module"],
         ["/open <F-NNNN>", "Open a finding in the linear deep page"],
         ["/tune", "Open the tune view for the focused module"],
+        ["/plan <english>", "Propose option changes from a plain-English request"],
+        ["/yes | /no", "Apply or discard the pending planner proposal"],
         ["/options [tool]", "Show tool options"],
         ["/set <key> <value>", "Set a tool option"],
         ["/config", "Open the interactive config editor"],
