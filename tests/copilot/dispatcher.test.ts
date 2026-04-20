@@ -180,6 +180,91 @@ describe("CoreDispatcher", () => {
   });
 });
 
+describe("ModuleDispatcher requires preflight", () => {
+  function mkModuleWithRequires(
+    id: string,
+    requires: import("../../src/modules/types.js").CopilotModuleRequirement[],
+  ): CopilotModule {
+    return {
+      ...mkModule(id, [mkTool(`${id}:run`)]),
+      requires,
+    };
+  }
+
+  it("blocks run when a required snapshot field is missing, with a helpful hint", async () => {
+    const registry = new ModuleRegistry();
+    const mod = mkModuleWithRequires("threat-hunt", [
+      { kind: "snapshot", moduleId: "context", field: "appModel" },
+      { kind: "snapshot", moduleId: "randori", field: "threatModel" },
+    ]);
+    registry.register(mod);
+    (registry as unknown as { initialized: Set<string> }).initialized.add("threat-hunt");
+    const sink = createArraySink();
+    const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+    // Empty ShellState — no contextSnapshot.
+    const driver = new DispatcherDriver({
+      base: core,
+      cwd: "/tmp",
+      print: sink,
+      getShellState: () => ({}),
+    });
+    await driver.handle("use threat-hunt");
+    // Satisfy the required option so the check isn't short-circuited by missing RHOST.
+    await driver.handle("set RHOST x");
+    const result = await driver.handle("run");
+    expect(result.output).toContain("unmet prerequisites");
+    expect(result.output).toContain("appModel");
+    expect(result.output).toContain("run: use context; run");
+    expect(result.output).toContain("threatModel");
+  });
+
+  it("allows run when every snapshot requirement is satisfied", async () => {
+    const registry = new ModuleRegistry();
+    const mod = mkModuleWithRequires("threat-hunt", [
+      { kind: "snapshot", moduleId: "context", field: "appModel" },
+    ]);
+    registry.register(mod);
+    (registry as unknown as { initialized: Set<string> }).initialized.add("threat-hunt");
+    const sink = createArraySink();
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+      runTool: async (t) => ({ ok: true, output: `ran ${t.name}` }),
+    });
+    const driver = new DispatcherDriver({
+      base: core,
+      cwd: "/tmp",
+      print: sink,
+      getShellState: () => ({ contextSnapshot: { appModel: { routes: [] } } }),
+    });
+    await driver.handle("use threat-hunt");
+    await driver.handle("set RHOST x");
+    const result = await driver.handle("run");
+    expect(result.output).toBe("ran threat-hunt:run");
+  });
+
+  it("blocks run when a findings requirement is unmet", async () => {
+    const registry = new ModuleRegistry();
+    const mod = mkModuleWithRequires("triage", [{ kind: "findings", minCount: 1 }]);
+    registry.register(mod);
+    (registry as unknown as { initialized: Set<string> }).initialized.add("triage");
+    const sink = createArraySink();
+    const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+    const driver = new DispatcherDriver({
+      base: core,
+      cwd: "/tmp",
+      print: sink,
+      getFindingCount: () => 0,
+    });
+    await driver.handle("use triage");
+    await driver.handle("set RHOST x");
+    const result = await driver.handle("run");
+    expect(result.output).toContain("1+ findings");
+    expect(result.output).toContain("run a scanner first");
+  });
+});
+
 describe("CoreDispatcher runTool wiring", () => {
   it("forwards `run` inside a module dispatcher to the runTool callback", async () => {
     const registry = new ModuleRegistry();

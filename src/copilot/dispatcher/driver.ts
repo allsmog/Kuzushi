@@ -16,6 +16,10 @@ export interface DriverOptions {
   base: CommandDispatcher;
   /** Promptbase, e.g. "kuzushi". */
   promptBase?: string;
+  /** Optional ShellState accessor — powers module requires preflight. */
+  getShellState?: () => { contextSnapshot?: unknown } | undefined;
+  /** Optional finding-count accessor — powers triage/verify/patch requires. */
+  getFindingCount?: () => number | undefined;
 }
 
 export class DispatcherDriver implements Driver {
@@ -23,12 +27,16 @@ export class DispatcherDriver implements Driver {
   private readonly _stack: CommandDispatcher[];
   private readonly cwd: string;
   private readonly promptBase: string;
+  readonly getShellState?: () => { contextSnapshot?: unknown } | undefined;
+  readonly getFindingCount?: () => number | undefined;
 
   constructor(opts: DriverOptions) {
     this.print = opts.print;
     this._stack = [opts.base];
     this.cwd = opts.cwd;
     this.promptBase = opts.promptBase ?? "kuzushi";
+    if (opts.getShellState) this.getShellState = opts.getShellState;
+    if (opts.getFindingCount) this.getFindingCount = opts.getFindingCount;
   }
 
   current(): CommandDispatcher {
