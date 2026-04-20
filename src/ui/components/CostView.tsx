@@ -14,7 +14,7 @@
  */
 
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { formatCost, miniBarChart } from "../format.js";
 import type { ResultLine } from "../state.js";
 import { tokens } from "../tokens.js";
@@ -25,7 +25,9 @@ interface CostViewProps {
   budget?: number;
 }
 
-export function CostView({ results, runningCostUsd, budget }: CostViewProps): React.ReactElement {
+export const CostView = React.memo(_CostView);
+
+function _CostView({ results, runningCostUsd, budget }: CostViewProps): React.ReactElement {
   // Accumulate per-phase costs from results
   let triageCost = 0;
   let verifyCost = 0;

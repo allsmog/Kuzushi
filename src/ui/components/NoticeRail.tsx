@@ -15,7 +15,7 @@
  */
 
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { icons } from "../icons.js";
 import type { UINotice } from "../state.js";
 import { tokens } from "../tokens.js";
@@ -26,7 +26,9 @@ interface NoticeRailProps {
   expanded?: boolean;
 }
 
-export function NoticeRail({ notices, expanded }: NoticeRailProps): React.ReactElement | null {
+export const NoticeRail = React.memo(_NoticeRail);
+
+function _NoticeRail({ notices, expanded }: NoticeRailProps): React.ReactElement | null {
   if (notices.length === 0) return null;
 
   const errors = notices.filter((n) => n.level === "error");

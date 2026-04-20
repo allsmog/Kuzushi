@@ -9,7 +9,7 @@
  */
 
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { colorVerdict } from "../format.js";
 import { icons } from "../icons.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
@@ -43,7 +43,9 @@ interface UnifiedProps {
 
 type FindingsViewProps = CompactProps | UnifiedProps;
 
-export function FindingsView(props: FindingsViewProps): React.ReactElement {
+export const FindingsView = React.memo(_FindingsView);
+
+function _FindingsView(props: FindingsViewProps): React.ReactElement {
   if (props.mode === "unified") {
     return <UnifiedFindings {...props} />;
   }
