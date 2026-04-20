@@ -22,6 +22,7 @@ const agenticScanTool: ModuleTool = {
         type: "string",
         description:
           "Override the agentic-sast detector prompt. Accepts inline text or a path to .md/.txt.",
+        "x-advanced": true,
       },
     },
     required: ["target"],
