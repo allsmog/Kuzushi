@@ -231,6 +231,7 @@ export class CopilotCore {
       seedTaskOutputs: ctxOverrides?.seedTaskOutputs,
       ...(ctxOverrides?.datastore ? { datastore: ctxOverrides.datastore } : {}),
       ...(ctxOverrides?.print ? { print: ctxOverrides.print } : {}),
+      ...(ctxOverrides?.workspace ? { workspace: ctxOverrides.workspace } : {}),
     };
 
     const result = await tool.execute(input, ctx);

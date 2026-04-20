@@ -85,4 +85,11 @@ export interface Driver {
    * `kind: "findings"` requirement (triage / verify / patch).
    */
   getFindingCount?(): number | undefined;
+  /** Host-count lookup (blackbox / lateral-movement modules). */
+  getHostCount?(): number | undefined;
+  /**
+   * Live-session-count lookup. When `kind` is set, counts only sessions of
+   * that kind (e.g. "ssh"). Omit to count all open sessions.
+   */
+  getLiveSessionCount?(kind?: string): number | undefined;
 }

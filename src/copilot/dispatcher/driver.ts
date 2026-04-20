@@ -20,6 +20,10 @@ export interface DriverOptions {
   getShellState?: () => { contextSnapshot?: unknown } | undefined;
   /** Optional finding-count accessor — powers triage/verify/patch requires. */
   getFindingCount?: () => number | undefined;
+  /** Optional host-count accessor — powers blackbox/lateral requires. */
+  getHostCount?: () => number | undefined;
+  /** Optional live-session count accessor — powers session requires. */
+  getLiveSessionCount?: (kind?: string) => number | undefined;
 }
 
 export class DispatcherDriver implements Driver {
@@ -29,6 +33,8 @@ export class DispatcherDriver implements Driver {
   private readonly promptBase: string;
   readonly getShellState?: () => { contextSnapshot?: unknown } | undefined;
   readonly getFindingCount?: () => number | undefined;
+  readonly getHostCount?: () => number | undefined;
+  readonly getLiveSessionCount?: (kind?: string) => number | undefined;
 
   constructor(opts: DriverOptions) {
     this.print = opts.print;
@@ -37,6 +43,8 @@ export class DispatcherDriver implements Driver {
     this.promptBase = opts.promptBase ?? "kuzushi";
     if (opts.getShellState) this.getShellState = opts.getShellState;
     if (opts.getFindingCount) this.getFindingCount = opts.getFindingCount;
+    if (opts.getHostCount) this.getHostCount = opts.getHostCount;
+    if (opts.getLiveSessionCount) this.getLiveSessionCount = opts.getLiveSessionCount;
   }
 
   current(): CommandDispatcher {

@@ -16,10 +16,11 @@ import { createBus } from "../bus/index.js";
 import type { MessageBus } from "../bus/types.js";
 import { formatContextSummary } from "../modules/core-sast.js";
 import type { ModuleTool } from "../modules/types.js";
+import { SessionManager } from "../sessions/manager.js";
 import type { KuzushiConfig } from "../types.js";
 import type { ContextSnapshot, ShellHistoryEntry, ShellState, UIStore } from "../ui/state.js";
 import { CopilotCore } from "./core.js";
-import { CoreDispatcher, DispatcherDriver } from "./dispatcher/index.js";
+import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
 import { openInEditor } from "./editor.js";
 import { Datastore } from "./options.js";
@@ -271,10 +272,28 @@ function resolveToolName(
     }
   }
 
+  const lowered = toolName.toLowerCase();
   const matches = core.registry.allTools().filter(({ tool }) => {
-    return toolActionName(tool.name).toLowerCase() === toolName.toLowerCase();
+    return toolActionName(tool.name).toLowerCase() === lowered;
   });
-  return matches.length === 1 ? matches[0]!.tool.name : undefined;
+  if (matches.length === 1) return matches[0]!.tool.name;
+
+  // Post SAST-split, a bare word like `semgrep` is likely the module id whose
+  // primary tool is `semgrep:scan`. Fall back to matching module ids and
+  // picking the module's preferred tool (same heuristic as ModuleDispatcher).
+  const modMatches = core.registry.allTools().filter(({ module }) => {
+    return module.id.toLowerCase() === lowered;
+  });
+  if (modMatches.length === 0) return undefined;
+  const preferredSuffixes = ["scan", "run", "audit", "hunt", "exploit", "build", "list"];
+  for (const suffix of preferredSuffixes) {
+    const hit = modMatches.find(({ tool }) => toolActionName(tool.name) === suffix);
+    if (hit) return hit.tool.name;
+  }
+  // Single tool on the module — unambiguous.
+  const uniqueTools = new Set(modMatches.map((m) => m.tool.name));
+  if (uniqueTools.size === 1) return modMatches[0]!.tool.name;
+  return undefined;
 }
 
 function formatUnknownToolMessage(toolName: string): string {
@@ -615,6 +634,13 @@ async function startInkShell(
   const currentCwd = (): string => (opts.target ? path.resolve(opts.target) : process.cwd());
   const shellCtx: ShellContext = { focusedModule: null, uiStore: store, workspaceManager };
 
+  // Live-session registry — used by WorkspaceDispatcher's `sessions -i/-k` and
+  // by the session requirement preflight. Only meaningful when a workspace is
+  // active (sessions are workspace-scoped).
+  const sessionManager = workspaceManager
+    ? new SessionManager(workspaceManager.sessions)
+    : (undefined as unknown as SessionManager);
+
   // ---------------------------------------------------------------------------
   // msfconsole-style CommandDispatcher — first-pass router for help / use /
   // set / setg / unset / show / info / search / history / resource / makerc /
@@ -655,6 +681,7 @@ async function startInkShell(
     if (signal) execOpts.signal = signal;
     if (seedTaskOutputs) execOpts.seedTaskOutputs = seedTaskOutputs;
     if (datastore) execOpts.datastore = datastore;
+    if (workspaceManager) execOpts.workspace = workspaceManager;
     return core.executeTool(tool.name, input, execOpts);
   };
 
@@ -709,7 +736,32 @@ async function startInkShell(
       if (!wsId || !workspaceManager) return 0;
       return workspaceManager.vulns.listForWorkspace(wsId).length;
     },
+    getHostCount: () => {
+      const wsId = opts.workspace;
+      if (!wsId || !workspaceManager) return 0;
+      return workspaceManager.hosts.list(wsId).length;
+    },
+    getLiveSessionCount: (kind?: string) => {
+      const wsId = opts.workspace;
+      if (!wsId) return 0;
+      const live = sessionManager.liveForWorkspace(wsId);
+      return kind ? live.filter((h) => h.record.kind === kind).length : live.length;
+    },
   });
+
+  // Mount the WorkspaceDispatcher — exposes hosts/services/vulns/loot/notes/
+  // creds/sessions as shell commands. Only pushed when a workspace is actually
+  // available; otherwise the dispatcher would report "no active workspace"
+  // for every command.
+  if (workspaceManager) {
+    driver.push(
+      new WorkspaceDispatcher({
+        workspaces: workspaceManager,
+        activeWorkspaceId: () => opts.workspace,
+        sessions: sessionManager,
+      }),
+    );
+  }
 
   /**
    * Sync `shellCtx.focusedModule` from the dispatcher stack so bare-tool

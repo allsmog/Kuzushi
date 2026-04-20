@@ -244,6 +244,68 @@ describe("ModuleDispatcher requires preflight", () => {
     expect(result.output).toBe("ran threat-hunt:run");
   });
 
+  it("blocks run when a hosts requirement is unmet", async () => {
+    const registry = new ModuleRegistry();
+    const mod = mkModuleWithRequires("blackbox", [{ kind: "hosts", minCount: 1 }]);
+    registry.register(mod);
+    (registry as unknown as { initialized: Set<string> }).initialized.add("blackbox");
+    const sink = createArraySink();
+    const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+    const driver = new DispatcherDriver({
+      base: core,
+      cwd: "/tmp",
+      print: sink,
+      getHostCount: () => 0,
+    });
+    await driver.handle("use blackbox");
+    await driver.handle("set RHOST x");
+    const result = await driver.handle("run");
+    expect(result.output).toContain("hosts in workspace");
+    expect(result.output).toContain("use recon; run");
+  });
+
+  it("blocks run when a session requirement is unmet", async () => {
+    const registry = new ModuleRegistry();
+    const mod = mkModuleWithRequires("lateral", [{ kind: "session", sessionKind: "ssh" }]);
+    registry.register(mod);
+    (registry as unknown as { initialized: Set<string> }).initialized.add("lateral");
+    const sink = createArraySink();
+    const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+    const driver = new DispatcherDriver({
+      base: core,
+      cwd: "/tmp",
+      print: sink,
+      getLiveSessionCount: () => 0,
+    });
+    await driver.handle("use lateral");
+    await driver.handle("set RHOST x");
+    const result = await driver.handle("run");
+    expect(result.output).toContain("'ssh' live session");
+  });
+
+  it("blocks run when an env requirement is unmet", async () => {
+    const before = process.env["TEST_KUZUSHI_MISSING"];
+    delete process.env["TEST_KUZUSHI_MISSING"];
+    try {
+      const registry = new ModuleRegistry();
+      const mod = mkModuleWithRequires("recon-shodan", [
+        { kind: "env", name: "TEST_KUZUSHI_MISSING" },
+      ]);
+      registry.register(mod);
+      (registry as unknown as { initialized: Set<string> }).initialized.add("recon-shodan");
+      const sink = createArraySink();
+      const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+      const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+      await driver.handle("use recon-shodan");
+      await driver.handle("set RHOST x");
+      const result = await driver.handle("run");
+      expect(result.output).toContain("TEST_KUZUSHI_MISSING");
+      expect(result.output).toContain("not set");
+    } finally {
+      if (before !== undefined) process.env["TEST_KUZUSHI_MISSING"] = before;
+    }
+  });
+
   it("blocks run when a findings requirement is unmet", async () => {
     const registry = new ModuleRegistry();
     const mod = mkModuleWithRequires("triage", [{ kind: "findings", minCount: 1 }]);
