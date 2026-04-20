@@ -1,0 +1,19 @@
+# CI-deep: CodeQL + taint-iris + triage + verify + patch. Overnight lane.
+commands:
+  - use context
+  - run
+  - back
+  - use codeql
+  - run
+  - back
+  - use taint-iris
+  - run
+  - back
+  - use triage
+  - run
+  - back
+  - use verify
+  - run
+  - back
+  - use patch
+  - run

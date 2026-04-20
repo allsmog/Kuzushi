@@ -265,6 +265,62 @@ describe("ModuleDispatcher requires preflight", () => {
   });
 });
 
+describe("CoreDispatcher recipes", () => {
+  it("lists recipes via listRecipes callback", async () => {
+    const registry = new ModuleRegistry();
+    const sink = createArraySink();
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+      listRecipes: () => [
+        { name: "quick-scan", path: "/r/quick-scan.kzrc.yaml", description: "context → semgrep" },
+        { name: "deep-audit", path: "/r/deep-audit.kzrc.yaml" },
+      ],
+    });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+    const result = await driver.handle("recipes");
+    expect(result.output).toContain("Available recipes");
+    expect(result.output).toContain("quick-scan");
+    expect(result.output).toContain("context → semgrep");
+    expect(result.output).toContain("deep-audit");
+  });
+
+  it("runs a recipe via resolveRecipePath + runResource", async () => {
+    const registry = new ModuleRegistry();
+    const calls: string[] = [];
+    const sink = createArraySink();
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+      resolveRecipePath: (name: string) =>
+        name === "quick-scan" ? "/r/quick-scan.kzrc.yaml" : undefined,
+      runResource: async (file: string) => {
+        calls.push(`ran:${file}`);
+      },
+    });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+    const ok = await driver.handle("recipes run quick-scan");
+    expect(ok.matched).toBe(true);
+    expect(calls).toEqual(["ran:/r/quick-scan.kzrc.yaml"]);
+
+    const missing = await driver.handle("recipes run ghost");
+    expect(missing.output).toContain("Unknown recipe");
+  });
+
+  it("reports graceful errors when recipes are disabled", async () => {
+    const registry = new ModuleRegistry();
+    const sink = createArraySink();
+    const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+    const list = await driver.handle("recipes");
+    expect(list.output).toContain("not enabled");
+    const run = await driver.handle("recipes run foo");
+    expect(run.output).toContain("not enabled");
+  });
+});
+
 describe("CoreDispatcher runTool wiring", () => {
   it("forwards `run` inside a module dispatcher to the runTool callback", async () => {
     const registry = new ModuleRegistry();
