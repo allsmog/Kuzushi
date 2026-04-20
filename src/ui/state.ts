@@ -284,6 +284,12 @@ export interface UIState {
   scanView: "pipeline" | "findings" | "cost";
   /** Expand the B1 heartbeat strip into a per-agent list. Default false. */
   heartbeatExpanded?: boolean;
+  /**
+   * Expand the B2 NoticeRail from its collapsed rollup header into the
+   * full per-notice list. Errors always render full regardless of this
+   * flag. Default false.
+   */
+  noticeRailExpanded?: boolean;
   /** Rate limit / throttle info — shown when active. */
   throttle?: { concurrency: number; reason: string } | null;
   /** Timestamp when pipeline started (for elapsed timer). */
