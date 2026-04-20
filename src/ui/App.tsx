@@ -18,6 +18,7 @@ import { ConfigConfirm } from "./components/ConfigConfirm.js";
 import { ConfigEditor } from "./components/ConfigEditor.js";
 import { ContextIntake } from "./components/ContextIntake.js";
 import { CopilotShell } from "./components/CopilotShell.js";
+import { CostCapHalt } from "./components/CostCapHalt.js";
 import { CostView } from "./components/CostView.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
 import { FindingsView } from "./components/FindingsView.js";
@@ -25,6 +26,7 @@ import { InteractiveReview } from "./components/InteractiveReview.js";
 import { NoticeRail } from "./components/NoticeRail.js";
 import { PipelineIndicator } from "./components/PipelineIndicator.js";
 import { QualityGate } from "./components/QualityGate.js";
+import { RateLimitBanner } from "./components/RateLimitBanner.js";
 import { ResultLine } from "./components/ResultLine.js";
 import { ResumeDiff } from "./components/ResumeDiff.js";
 import { ScanSummary } from "./components/ScanSummary.js";
@@ -65,8 +67,23 @@ function AppInner({ store }: AppProps): React.ReactElement {
 
   // Global tab switching: 1/2/3 keys switch views during running mode.
   // `m` toggles the B1 heartbeat strip's per-agent expansion.
+  // `c` / `a` answer the B4 cost-cap halt prompt when armed.
   useInput(
-    (input) => {
+    (input, key) => {
+      // Cost-cap halt takes priority — it's a blocking confirmation so
+      // `c` and `a` should not also trigger the tab shortcut.
+      if (state.costCapHalted) {
+        if (input === "c") {
+          store.update({ costCapHalted: false });
+          return;
+        }
+        if (input === "a" || (key.ctrl && input === "c")) {
+          state.shell?.onAbort?.();
+          store.update({ costCapHalted: false });
+          return;
+        }
+        return;
+      }
       if (input === "1") store.update({ scanView: "pipeline" });
       else if (input === "2") store.update({ scanView: "findings" });
       else if (input === "3") store.update({ scanView: "cost" });
@@ -247,6 +264,15 @@ function AppInner({ store }: AppProps): React.ReactElement {
           )}
 
           {state.qualityGate && <QualityGate result={state.qualityGate} />}
+
+          <RateLimitBanner throttle={state.throttle} />
+
+          {state.costCapHalted && (
+            <CostCapHalt
+              runningCostUsd={state.runningCostUsd}
+              budgetUsd={state.costCapBudgetUsd ?? state.configBanner?.budget}
+            />
+          )}
 
           <HeartbeatStrip state={state} expanded={state.heartbeatExpanded} />
 
