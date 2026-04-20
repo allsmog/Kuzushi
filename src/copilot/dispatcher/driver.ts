@@ -366,17 +366,63 @@ async function applyOneFilter(input: string, filter: string): Promise<string> {
   switch (head) {
     case "grep": {
       if (rest.length === 0) return input;
-      const needle = rest.join(" ");
+      // Parse grep-style flags from the front: -v (invert), -c (count),
+      // -A <n> (after), -B <n> (before), -C <n> (both). Remaining tokens
+      // are joined into the pattern.
+      let invert = false;
+      let countOnly = false;
+      let after = 0;
+      let before = 0;
+      const tokens = [...rest];
+      while (tokens.length > 0 && tokens[0]?.startsWith("-")) {
+        const flag = tokens.shift() as string;
+        if (flag === "-v") {
+          invert = true;
+        } else if (flag === "-c") {
+          countOnly = true;
+        } else if (flag === "-A" || flag === "-B" || flag === "-C") {
+          const n = Number.parseInt(tokens.shift() ?? "", 10);
+          if (!Number.isFinite(n) || n < 0) return `[-] grep: ${flag} needs a non-negative int`;
+          if (flag === "-A") after = n;
+          else if (flag === "-B") before = n;
+          else {
+            after = n;
+            before = n;
+          }
+        } else if (flag === "--") {
+          break;
+        } else {
+          // Unknown flag — treat as part of the pattern (grep compat).
+          tokens.unshift(flag);
+          break;
+        }
+      }
+      if (tokens.length === 0) return "[-] grep: missing pattern";
+      const needle = tokens.join(" ");
       let regex: RegExp;
       try {
         regex = new RegExp(needle, "i");
       } catch {
         return `[-] grep: invalid pattern: ${needle}`;
       }
-      return input
-        .split("\n")
-        .filter((line) => regex.test(line))
-        .join("\n");
+      const lines = input.split("\n");
+      const matches = lines.map((line) => {
+        const hit = regex.test(line);
+        return invert ? !hit : hit;
+      });
+      if (countOnly) return `${matches.filter(Boolean).length}`;
+      if (after === 0 && before === 0) {
+        return lines.filter((_, i) => matches[i]).join("\n");
+      }
+      // Context mode: include N lines before/after each match.
+      const keep = new Array<boolean>(lines.length).fill(false);
+      for (let i = 0; i < lines.length; i++) {
+        if (!matches[i]) continue;
+        const lo = Math.max(0, i - before);
+        const hi = Math.min(lines.length - 1, i + after);
+        for (let j = lo; j <= hi; j++) keep[j] = true;
+      }
+      return lines.filter((_, i) => keep[i]).join("\n");
     }
     case "head": {
       const n = Number.parseInt(rest[0] ?? "10", 10);
@@ -403,9 +449,33 @@ async function applyOneFilter(input: string, filter: string): Promise<string> {
         return `[-] save: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
+    case "page": {
+      // `| page` pipes the output through $PAGER (default: less -R -F -X).
+      // Non-TTY shells don't have a pager to hand off to, so we just
+      // return the text unchanged — pipes still compose.
+      return pageOutput(input);
+    }
     default:
       return `${input}\n[!] unknown filter: ${head}`;
   }
+}
+
+async function pageOutput(text: string): Promise<string> {
+  if (!process.stdout.isTTY) return text;
+  const pagerSpec = process.env["PAGER"] ?? "less -R -F -X";
+  const [cmd, ...args] = pagerSpec.split(" ").filter(Boolean);
+  if (!cmd) return text;
+  const { spawn } = await import("node:child_process");
+  return await new Promise<string>((resolve) => {
+    try {
+      const child = spawn(cmd, args, { stdio: ["pipe", "inherit", "inherit"] });
+      child.on("error", () => resolve(text));
+      child.on("exit", () => resolve(""));
+      child.stdin.end(text.endsWith("\n") ? text : `${text}\n`);
+    } catch {
+      resolve(text);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

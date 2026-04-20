@@ -754,6 +754,62 @@ async function startInkShell(
     });
   });
 
+  // Auto-verify bridge — when `setg AutoVerify true`, any triage:result with
+  // verdict="tp" queues verify:finding as a background job. Chains off the
+  // AutoTriage output: operator opts in once, the scan → triage → verify loop
+  // runs without further intervention. Ignored for fp / needs_review / by_design.
+  bus.subscribe<import("../bus/events.js").TriageResultEvent>("triage:result", (event) => {
+    if (String(globals.get("AutoVerify") ?? "").toLowerCase() !== "true") return;
+    const verdict = event.payload.result.verdict;
+    if (verdict !== "tp") return;
+    const fingerprint = event.payload.finding.fingerprint;
+    if (!fingerprint) return;
+    jobManager.start({ label: `auto-verify:${fingerprint}`, kind: "tool" }, async (jobCtx) => {
+      jobCtx.log(`[*] AutoVerify ${fingerprint} (verdict ${verdict})`);
+      const result = await core.executeTool(
+        "verify:finding",
+        { fingerprint },
+        {
+          cwd: currentCwd(),
+          ...(opts.workspace ? { workspaceId: opts.workspace } : {}),
+          ...(workspaceManager ? { workspace: workspaceManager } : {}),
+          signal: jobCtx.signal,
+        },
+      );
+      jobCtx.log(result.ok ? `[+] AutoVerify done` : `[-] AutoVerify failed: ${result.output}`);
+      return result.output;
+    });
+  });
+
+  // Auto-patch bridge — when `setg AutoPatch true`, any verification:result
+  // with exploitable=true queues patch:finding as a background job. Closes
+  // the scan → triage → verify → patch loop. Intentionally gated on
+  // exploitable-only to avoid patching false positives.
+  bus.subscribe<import("../bus/events.js").VerificationResultEvent>(
+    "verification:result",
+    (event) => {
+      if (String(globals.get("AutoPatch") ?? "").toLowerCase() !== "true") return;
+      if (!event.payload.result.exploitable) return;
+      const fingerprint = event.payload.finding.fingerprint;
+      if (!fingerprint) return;
+      jobManager.start({ label: `auto-patch:${fingerprint}`, kind: "tool" }, async (jobCtx) => {
+        jobCtx.log(`[*] AutoPatch ${fingerprint}`);
+        const result = await core.executeTool(
+          "patch:finding",
+          { fingerprint },
+          {
+            cwd: currentCwd(),
+            ...(opts.workspace ? { workspaceId: opts.workspace } : {}),
+            ...(workspaceManager ? { workspace: workspaceManager } : {}),
+            signal: jobCtx.signal,
+          },
+        );
+        jobCtx.log(result.ok ? `[+] AutoPatch done` : `[-] AutoPatch failed: ${result.output}`);
+        return result.output;
+      });
+    },
+  );
+
   const coreDispatcher = new CoreDispatcher({
     registry: core.registry,
     globals,
