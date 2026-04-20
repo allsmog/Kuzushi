@@ -21,6 +21,7 @@ iris.pdf
 .playwright-mcp/
 .claude/
 cc-repo/
+vendor/
 .codex
 .worktrees
 perf/results.json

@@ -1,0 +1,300 @@
+/**
+ * Per-module dispatcher — pushed onto the stack by `use <module>`.
+ *
+ * Provides:
+ *   run [tool]       — invoke a module tool (defaults to first/only headless tool)
+ *   check            — call the module's `check` tool if one exists ("module:check")
+ *   options          — alias for `show options` (msfconsole convention)
+ *   tools            — list module tools
+ *
+ * The dispatcher owns the module's local Datastore. It seeds the datastore from
+ * the tool's JSONSchema (if no explicit option specs are wired) so users still
+ * get `set FOO bar` ergonomics even on legacy modules.
+ */
+
+import type { CopilotModule, JSONSchema, ModuleTool, ToolResult } from "../../modules/types.js";
+import { Datastore, type OptionSpec } from "../options.js";
+import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
+
+export type ModuleToolRunner = (
+  tool: ModuleTool,
+  input: Record<string, unknown>,
+  signal?: AbortSignal,
+  /** Active module-local datastore — lets tools honor operator-set overrides. */
+  datastore?: Datastore,
+) => Promise<ToolResult>;
+
+export interface ModuleDispatcherOptions {
+  module: CopilotModule;
+  /** Shared global datastore (set by `setg`). */
+  globals: Datastore;
+  /** Optional executor — when present, `run` invokes the tool. Otherwise prints the call. */
+  runTool?: ModuleToolRunner;
+}
+
+export class ModuleDispatcher implements CommandDispatcher {
+  readonly name: string;
+  readonly commands: Record<string, string>;
+  /** Local datastore (specific to this module instance). */
+  readonly datastore: Datastore;
+  readonly module: CopilotModule;
+  private readonly runTool?: ModuleToolRunner;
+
+  constructor(opts: ModuleDispatcherOptions) {
+    this.module = opts.module;
+    this.runTool = opts.runTool;
+    this.name = `module(${opts.module.id})`;
+    this.commands = {
+      run: "Run the active module's primary tool",
+      exploit: "Alias for run",
+      check: "Run the module's check action (if defined)",
+      options: "Alias for `show options`",
+      tools: "List tools exposed by this module",
+    };
+    this.datastore = createModuleDatastore(opts.module, opts.globals);
+  }
+
+  async execute(cmd: string, args: string[], ctx: CommandContext): Promise<CommandResult | void> {
+    switch (cmd) {
+      case "run":
+      case "exploit":
+        return this.cmd_run(args, ctx);
+      case "check":
+        return this.cmd_check(ctx);
+      case "options":
+        // Falls through to the core dispatcher's `show options` via re-issuing.
+        return ctx.driver.handle("show options", ctx.signal);
+      case "tools":
+        return this.cmd_tools();
+      default:
+        return undefined;
+    }
+  }
+
+  complete(cmd: string, partial: string): string[] {
+    if (cmd === "run" || cmd === "exploit") {
+      return this.module.tools.map((t) => t.name).filter((n) => n.startsWith(partial));
+    }
+    return [];
+  }
+
+  // -------------------------------------------------------------------------
+  // Handlers
+  // -------------------------------------------------------------------------
+
+  private cmd_tools(): CommandResult {
+    const lines = this.module.tools.map((t) => `  ${t.name.padEnd(28)}  ${t.description}`);
+    return { output: lines.length === 0 ? "  (no tools)" : lines.join("\n") };
+  }
+
+  private async cmd_check(ctx: CommandContext): Promise<CommandResult> {
+    const checkName = `${this.module.id}:check`;
+    const tool = this.module.tools.find((t) => t.name === checkName);
+    if (!tool) return { output: `[-] Module ${this.module.id} has no check action.` };
+    return this.invoke(tool, ctx);
+  }
+
+  private async cmd_run(args: string[], ctx: CommandContext): Promise<CommandResult> {
+    const explicit = args[0];
+    const tool = explicit
+      ? this.module.tools.find(
+          (t) => t.name === explicit || t.name === `${this.module.id}:${explicit}`,
+        )
+      : pickDefaultTool(this.module);
+    if (!tool) {
+      return { output: explicit ? `[-] Unknown tool: ${explicit}` : "[-] No runnable tool." };
+    }
+    return this.invoke(tool, ctx);
+  }
+
+  private async invoke(tool: ModuleTool, ctx: CommandContext): Promise<CommandResult> {
+    const missing = this.datastore.missingRequired();
+    if (missing.length > 0) {
+      return { output: `[-] Missing required: ${missing.join(", ")}` };
+    }
+    const depError = this.checkRequires(ctx);
+    if (depError) return { output: depError };
+    if (!this.runTool) {
+      return {
+        output: `[*] Would invoke ${tool.name} with: ${JSON.stringify(this.datastore.snapshot())}`,
+      };
+    }
+    ctx.print.status(`Running ${tool.name}...`);
+    const result = await this.runTool(tool, this.datastore.snapshot(), ctx.signal, this.datastore);
+    if (result.ok) ctx.print.good(`${tool.name} completed`);
+    else ctx.print.error(`${tool.name} failed`);
+    return { output: result.output };
+  }
+
+  /**
+   * Preflight module.requires against the driver's optional ShellState /
+   * finding-count hooks. Returns an error message if any dep is unmet, else null.
+   */
+  private checkRequires(ctx: CommandContext): string | null {
+    const reqs = this.module.requires;
+    if (!reqs || reqs.length === 0) return null;
+    const shell = ctx.driver.getShellState?.();
+    const snapshot = (shell?.contextSnapshot ?? undefined) as Record<string, unknown> | undefined;
+
+    const missing: string[] = [];
+    for (const req of reqs) {
+      if (req.kind === "snapshot") {
+        const ok = !!snapshot && snapshot[req.field] != null;
+        if (!ok) {
+          missing.push(`  - ${req.field} from '${req.moduleId}' — run: use ${req.moduleId}; run`);
+        }
+      } else if (req.kind === "findings") {
+        const count = ctx.driver.getFindingCount?.() ?? 0;
+        const need = req.minCount ?? 1;
+        if (count < need) {
+          missing.push(
+            `  - ${need}+ findings in workspace — run a scanner first (e.g. use semgrep; run)`,
+          );
+        }
+      } else if (req.kind === "hosts") {
+        const count = ctx.driver.getHostCount?.() ?? 0;
+        const need = req.minCount ?? 1;
+        if (count < need) {
+          missing.push(`  - ${need}+ hosts in workspace — run recon first (e.g. use recon; run)`);
+        }
+      } else if (req.kind === "session") {
+        const count = ctx.driver.getLiveSessionCount?.(req.sessionKind) ?? 0;
+        if (count < 1) {
+          const label = req.sessionKind ? `'${req.sessionKind}'` : "any";
+          missing.push(
+            `  - ${label} live session — open one first (e.g. use blackbox; run connect)`,
+          );
+        }
+      } else if (req.kind === "env") {
+        if (!process.env[req.name]) {
+          missing.push(`  - env var ${req.name} is not set — export it before running`);
+        }
+      }
+    }
+    if (missing.length === 0) return null;
+    return [
+      `[-] ${this.module.id} has unmet prerequisites:`,
+      ...missing,
+      `    Or run the full DAG via: use sast; run`,
+    ].join("\n");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
+function pickDefaultTool(mod: CopilotModule): ModuleTool | undefined {
+  // Prefer "<id>:run" or "<id>:scan" or "<id>:exploit", else the first headless tool, else the first tool.
+  const preferred = [`${mod.id}:run`, `${mod.id}:scan`, `${mod.id}:exploit`, `${mod.id}:audit`];
+  for (const name of preferred) {
+    const t = mod.tools.find((x) => x.name === name);
+    if (t) return t;
+  }
+  return mod.tools.find((t) => t.headless) ?? mod.tools[0];
+}
+
+/**
+ * Build a datastore for a module by reading its tools' JSONSchema.
+ * If a tool's input properties have `description` + `default`, those become
+ * OptionSpecs so `show options` works without per-module wiring.
+ */
+export function createModuleDatastore(mod: CopilotModule, globals: Datastore): Datastore {
+  const specs: OptionSpec[] = [];
+  const seen = new Set<string>();
+  for (const tool of mod.tools) {
+    const props = readProperties(tool.inputSchema);
+    const required = new Set(readRequired(tool.inputSchema));
+    for (const [name, schema] of Object.entries(props)) {
+      const key = name.toUpperCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      specs.push(propertyToSpec(name, schema, required.has(name)));
+    }
+  }
+  // Inherit any globally-set values into the resolved view (no copy — they
+  // live in `globals`; the new store and `globals` are queried separately
+  // via Datastore.get(), but for the per-module view we want a single store).
+  // To keep the layered semantics, we use a *delegating* datastore.
+  return new DelegatingDatastore(specs, globals);
+}
+
+function readProperties(schema: JSONSchema): Record<string, JSONSchema> {
+  const props = (schema as { properties?: Record<string, JSONSchema> }).properties;
+  return props ?? {};
+}
+
+function readRequired(schema: JSONSchema): string[] {
+  const req = (schema as { required?: unknown }).required;
+  return Array.isArray(req) ? req.filter((x): x is string => typeof x === "string") : [];
+}
+
+function propertyToSpec(name: string, schema: JSONSchema, required: boolean): OptionSpec {
+  const t = (schema as { type?: string }).type;
+  const description = String((schema as { description?: string }).description ?? "");
+  const def = (schema as { default?: unknown }).default;
+  const choices = (schema as { enum?: unknown[] }).enum;
+  if (Array.isArray(choices) && choices.every((c) => typeof c === "string")) {
+    return {
+      name,
+      type: "enum",
+      description,
+      required,
+      ...(def !== undefined ? { default: def as string } : {}),
+      choices: choices as string[],
+    };
+  }
+  switch (t) {
+    case "boolean":
+      return {
+        name,
+        type: "bool",
+        description,
+        required,
+        ...(def !== undefined ? { default: def as boolean } : {}),
+      };
+    case "integer":
+      return {
+        name,
+        type: "int",
+        description,
+        required,
+        ...(def !== undefined ? { default: def as number } : {}),
+      };
+    case "number":
+      return {
+        name,
+        type: "float",
+        description,
+        required,
+        ...(def !== undefined ? { default: def as number } : {}),
+      };
+    default:
+      return {
+        name,
+        type: "string",
+        description,
+        required,
+        ...(def !== undefined ? { default: def as string } : {}),
+      };
+  }
+}
+
+/**
+ * A Datastore that falls back to a parent (`globals`) when no module-local
+ * value or default is present.
+ */
+class DelegatingDatastore extends Datastore {
+  constructor(
+    specs: ReadonlyArray<OptionSpec>,
+    private readonly parent: Datastore,
+  ) {
+    super(specs);
+  }
+
+  override get<T = unknown>(name: string): T | undefined {
+    const local = super.get<T>(name);
+    if (local !== undefined) return local;
+    return this.parent.get<T>(name);
+  }
+}

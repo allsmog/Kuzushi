@@ -30,36 +30,64 @@ const baseConfig: KuzushiConfig = {
   taskConfig: { semgrep: {} },
 };
 
-function createMockCore() {
-  const module = createCoreSastModule();
+async function createMockCore() {
+  const { createSemgrepModule } = await import("../../src/modules/sast/core-semgrep.js");
+  const { createThreatHuntModule } = await import("../../src/modules/sast/core-threat-hunt.js");
+  const { createContextModule } = await import("../../src/modules/sast/core-context.js");
+
+  const sast = createCoreSastModule();
+  const semgrep = createSemgrepModule();
+  const threatHunt = createThreatHuntModule();
+  const context = createContextModule();
+  const mods = [sast, semgrep, threatHunt, context];
+  const module = sast; // back-compat name; older assertions still reference `module`
+
   const executeTool = vi.fn(async (_toolName: string, input: unknown) => ({
     ok: true,
     output: JSON.stringify(input),
   }));
 
+  // Legacy aliases so code dispatching on `sast:semgrep` still finds a tool.
+  const aliases: Record<string, string> = {
+    "sast:semgrep": "semgrep:scan",
+    "sast:threat-hunt": "threat-hunt:run",
+    "sast:context": "context:build",
+  };
+
+  const allTools = () => mods.flatMap((m) => m.tools.map((tool) => ({ module: m, tool })));
+
+  const resolveTool = (name: string) => {
+    for (const m of mods) {
+      const tool = m.tools.find((t) => t.name === name);
+      if (tool) return { module: m, tool };
+    }
+    const aliased = aliases[name];
+    if (aliased) return resolveTool(aliased);
+    return undefined;
+  };
+
   const core = {
-    listModules: () => [
-      {
-        id: module.id,
-        displayName: module.displayName,
-        category: module.category,
-        version: module.version,
-        description: module.description,
-        toolCount: module.tools.length,
+    listModules: () =>
+      mods.map((m) => ({
+        id: m.id,
+        displayName: m.displayName,
+        category: m.category,
+        version: m.version,
+        description: m.description,
+        toolCount: m.tools.length,
         taskCount: 0,
         loaded: true,
-      },
-    ],
-    hasModule: (id: string) => id === module.id,
+      })),
+    hasModule: (id: string) => mods.some((m) => m.id === id),
     executeTool,
     registry: {
-      get: () => module,
-      allTools: () => module.tools.map((tool) => ({ module, tool })),
-      moduleTools: () => module.tools,
-      resolveTool: (name: string) => {
-        const tool = module.tools.find((entry) => entry.name === name);
-        return tool ? { module, tool } : undefined;
-      },
+      get: (id: string) => mods.find((m) => m.id === id) ?? module,
+      allTools,
+      moduleTools: (id: string) =>
+        (mods.find((m) => m.id === id)?.tools ?? []) as ReadonlyArray<
+          (typeof module.tools)[number]
+        >,
+      resolveTool,
     },
   } as unknown as CopilotCore;
 
@@ -99,15 +127,15 @@ afterEach(() => {
 });
 
 describe("shell prompt", () => {
-  it("renders top-level and focused prompts consistently", () => {
+  it("renders top-level and focused prompts consistently", async () => {
     expect(buildShellPrompt(null)).toBe("kuzushi> ");
     expect(buildShellPrompt("sast")).toBe("kuzushi/sast> ");
   });
 });
 
 describe("local shell commands", () => {
-  it("uses slash-prefixed commands for workspace, focus, and help", () => {
-    const { core, module } = createMockCore();
+  it("uses slash-prefixed commands for workspace, focus, and help", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const shellState = createShellState(module.tools.map((tool) => tool.name));
     const ctx = { focusedModule: null };
@@ -127,8 +155,10 @@ describe("local shell commands", () => {
 
     ctx.focusedModule = "sast";
     const toolsResult = __shellInternals.handleLocalCommand("/tools", core, opts, ctx, shellState);
-    expect(toolsResult?.output).toContain("threat-hunt");
-    expect(toolsResult?.output).not.toContain("sast:threat-hunt");
+    // Post-split the sast umbrella only lists its own `scan` tool; threat-hunt
+    // lives in its own module now. Exercising that here would require focusing
+    // on `threat-hunt`, which is covered by the dispatcher tests.
+    expect(toolsResult?.output).toContain("scan");
 
     const backResult = __shellInternals.handleLocalCommand("/back", core, opts, ctx, shellState);
     expect(backResult).toEqual({ setFocus: null, output: "Returned to top level." });
@@ -138,8 +168,8 @@ describe("local shell commands", () => {
     ).toBeUndefined();
   });
 
-  it("renders options tables and stores per-tool settings", () => {
-    const { core, module } = createMockCore();
+  it("renders options tables and stores per-tool settings", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     let shellState = createShellState(module.tools.map((tool) => tool.name));
     const ctx = { focusedModule: "sast" };
@@ -184,8 +214,8 @@ describe("local shell commands", () => {
     expect(optionsAgain?.output).toContain("* 7");
   });
 
-  it("errors on unknown slash commands and missing /set context", () => {
-    const { core, module } = createMockCore();
+  it("errors on unknown slash commands and missing /set context", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const shellState = createShellState(module.tools.map((tool) => tool.name));
     const ctx = { focusedModule: "sast" };
@@ -205,8 +235,8 @@ describe("local shell commands", () => {
     expect(setResult).toEqual({ output: "No active tool selected. Use /options <tool> first." });
   });
 
-  it("supports clear/history and bare exit aliases", () => {
-    const { core, module } = createMockCore();
+  it("supports clear/history and bare exit aliases", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const shellState = {
       ...createShellState(module.tools.map((tool) => tool.name)),
@@ -236,7 +266,7 @@ describe("local shell commands", () => {
   });
 
   it("resolves direct tool execution and merges stored options", async () => {
-    const { core, module, executeTool } = createMockCore();
+    const { core, module, executeTool } = await createMockCore();
     const opts = createShellOptions();
     const ctx = { focusedModule: "sast" };
     const shellState = {
@@ -263,16 +293,19 @@ describe("local shell commands", () => {
       { focusedModule: null },
       shellState,
     );
-    expect(qualified?.executedToolName).toBe("sast:semgrep");
+    expect(qualified?.executedToolName).toBe("semgrep:scan");
 
+    // "semgrep" as a bare word no longer resolves (post-split it's a module id,
+    // not a tool action). The qualified form above covers that path; the bare
+    // `scan .` in focused mode below covers the shorthand path.
     const global = __shellInternals.handleLocalCommand(
-      "semgrep .",
+      "semgrep:scan .",
       core,
       opts,
       { focusedModule: null },
       shellState,
     );
-    expect(global?.executedToolName).toBe("sast:semgrep");
+    expect(global?.executedToolName).toBe("semgrep:scan");
 
     const focused = __shellInternals.handleLocalCommand("scan .", core, opts, ctx, shellState);
     expect(focused?.executedToolName).toBe("sast:scan");
@@ -284,13 +317,13 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(threatHunt?.executedToolName).toBe("sast:threat-hunt");
+    expect(threatHunt?.executedToolName).toBe("threat-hunt:run");
     expect(threatHunt?.asyncExecute).toBeTypeOf("function");
 
     await threatHunt?.asyncExecute?.();
 
     expect(executeTool).toHaveBeenCalledWith(
-      "sast:threat-hunt",
+      "threat-hunt:run",
       expect.objectContaining({
         target: "/repo",
         maxActors: 7,
@@ -336,8 +369,8 @@ describe("context system", () => {
     },
   };
 
-  it("/context with no target returns error", () => {
-    const { core, module } = createMockCore();
+  it("/context with no target returns error", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = undefined;
     const shellState = createShellState(module.tools.map((t) => t.name));
@@ -347,8 +380,8 @@ describe("context system", () => {
     expect(result?.output).toContain("No target set");
   });
 
-  it("/context with existing snapshot returns formatted summary", () => {
-    const { core, module } = createMockCore();
+  it("/context with existing snapshot returns formatted summary", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = "/resolved/repo";
     const shellState = {
@@ -365,20 +398,20 @@ describe("context system", () => {
     expect(result?.output).toContain("SSRF via webhook");
   });
 
-  it("/context without snapshot dispatches sast:context tool", () => {
-    const { core, module } = createMockCore();
+  it("/context without snapshot dispatches sast:context tool", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = "./repo";
     const shellState = createShellState(module.tools.map((t) => t.name));
     const ctx = { focusedModule: null };
 
     const result = __shellInternals.handleLocalCommand("/context", core, opts, ctx, shellState);
-    expect(result?.executedToolName).toBe("sast:context");
+    expect(result?.executedToolName).toBe("context:build");
     expect(result?.asyncExecute).toBeTypeOf("function");
   });
 
-  it("/context regenerate always dispatches tool", () => {
-    const { core, module } = createMockCore();
+  it("/context regenerate always dispatches tool", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = "/resolved/repo";
     const shellState = {
@@ -394,12 +427,12 @@ describe("context system", () => {
       ctx,
       shellState,
     );
-    expect(result?.executedToolName).toBe("sast:context");
+    expect(result?.executedToolName).toBe("context:build");
     expect(result?.asyncExecute).toBeTypeOf("function");
   });
 
-  it("context gating blocks threat-hunt without snapshot", () => {
-    const { core, module } = createMockCore();
+  it("context gating blocks threat-hunt without snapshot", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const ctx = { focusedModule: "sast" };
     const shellState = createShellState(module.tools.map((t) => t.name));
@@ -415,8 +448,8 @@ describe("context system", () => {
     expect(result?.executedToolName).toBeUndefined();
   });
 
-  it("context gating allows threat-hunt with snapshot", () => {
-    const { core, module } = createMockCore();
+  it("context gating allows threat-hunt with snapshot", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const ctx = { focusedModule: "sast" };
     const shellState = {
@@ -431,11 +464,11 @@ describe("context system", () => {
       ctx,
       shellState,
     );
-    expect(result?.executedToolName).toBe("sast:threat-hunt");
+    expect(result?.executedToolName).toBe("threat-hunt:run");
   });
 
-  it("semgrep is not gated regardless of context", () => {
-    const { core, module } = createMockCore();
+  it("semgrep is not gated regardless of context", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const ctx = { focusedModule: null };
     const shellState = createShellState(module.tools.map((t) => t.name));
@@ -447,11 +480,12 @@ describe("context system", () => {
       ctx,
       shellState,
     );
-    expect(result?.executedToolName).toBe("sast:semgrep");
+    // sast:semgrep resolves through the registry alias to semgrep:scan.
+    expect(result?.executedToolName).toBe("semgrep:scan");
   });
 
-  it("/target invalidates context when changed", () => {
-    const { core, module } = createMockCore();
+  it("/target invalidates context when changed", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = "/old";
     const shellState = {
@@ -468,8 +502,8 @@ describe("context system", () => {
     expect(updated.contextSnapshot).toBeNull();
   });
 
-  it("/target does not invalidate when unchanged", () => {
-    const { core, module } = createMockCore();
+  it("/target does not invalidate when unchanged", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = "/same";
     const shellState = {
@@ -491,7 +525,7 @@ describe("context system", () => {
 });
 
 describe("assistant streaming", () => {
-  it("prefers streamed assistant text over the final result payload", () => {
+  it("prefers streamed assistant text over the final result payload", async () => {
     const streamedText = __shellInternals.extractAssistantText([
       { type: "text", text: "Investigating " },
       { type: "text", text: "the repo" },
@@ -509,7 +543,7 @@ describe("assistant streaming", () => {
 });
 
 describe("session creation", () => {
-  it("surfaces createSession failures without crashing", () => {
+  it("surfaces createSession failures without crashing", async () => {
     const runtime = {
       id: "test",
       async *query() {},
@@ -529,7 +563,7 @@ describe("session creation", () => {
 });
 
 describe("shell history persistence", () => {
-  it("persists capped shell history to disk", () => {
+  it("persists capped shell history to disk", async () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "kuzushi-shell-history-"));
     tempDirs.push(tempDir);
 

@@ -29,6 +29,13 @@ export interface ModuleRegistryEvents {
 export class ModuleRegistry {
   private readonly modules = new Map<string, CopilotModule>();
   private readonly initialized = new Set<string>();
+  /**
+   * Tool-name aliases. Keyed by old fully-qualified name, value is the new
+   * fully-qualified name. Used for backward-compat when a tool moves between
+   * modules (e.g. `sast:semgrep` → `semgrep:scan`). `resolveTool()` consults
+   * this map after a direct lookup misses.
+   */
+  private readonly aliases = new Map<string, string>();
 
   /**
    * Register a module instance. Does NOT call init — use loadModule() for full lifecycle.
@@ -153,6 +160,9 @@ export class ModuleRegistry {
       toolCount: mod.tools.length,
       taskCount: mod.tasks?.length ?? 0,
       loaded: this.initialized.has(mod.id),
+      ...(mod.rank ? { rank: mod.rank } : {}),
+      ...(mod.references ? { references: mod.references } : {}),
+      ...(mod.disclosureDate ? { disclosureDate: mod.disclosureDate } : {}),
     }));
   }
 
@@ -162,17 +172,36 @@ export class ModuleRegistry {
 
   /**
    * Resolve a fully-qualified tool name ("module:action") to the ModuleTool.
-   * Returns undefined if not found.
+   * Returns undefined if not found. Falls back to the alias map on miss so
+   * legacy names (e.g. `sast:semgrep`) resolve to their current home.
    */
   resolveTool(qualifiedName: string): { module: CopilotModule; tool: ModuleTool } | undefined {
     const [moduleId, ...rest] = qualifiedName.split(":");
-    if (!moduleId || rest.length === 0) return undefined;
+    if (moduleId && rest.length > 0) {
+      const mod = this.modules.get(moduleId);
+      const tool = mod?.tools.find((t) => t.name === qualifiedName);
+      if (mod && tool) return { module: mod, tool };
+    }
 
-    const mod = this.modules.get(moduleId);
-    if (!mod) return undefined;
+    // Alias fallback — guarded to avoid pathological cycles.
+    const aliased = this.aliases.get(qualifiedName);
+    if (aliased && aliased !== qualifiedName) {
+      return this.resolveTool(aliased);
+    }
+    return undefined;
+  }
 
-    const tool = mod.tools.find((t) => t.name === qualifiedName);
-    return tool ? { module: mod, tool } : undefined;
+  /**
+   * Register a legacy name → canonical name redirect. Used to keep old tool
+   * names resolvable after a module split. Overwrites any prior entry.
+   */
+  registerAlias(oldName: string, newName: string): void {
+    this.aliases.set(oldName, newName);
+  }
+
+  /** Snapshot of all registered aliases (for diagnostics / `info`). */
+  listAliases(): Array<{ from: string; to: string }> {
+    return [...this.aliases.entries()].map(([from, to]) => ({ from, to }));
   }
 
   /**
