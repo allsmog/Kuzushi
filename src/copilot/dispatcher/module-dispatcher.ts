@@ -110,6 +110,8 @@ export class ModuleDispatcher implements CommandDispatcher {
     if (missing.length > 0) {
       return { output: `[-] Missing required: ${missing.join(", ")}` };
     }
+    const depError = this.checkRequires(ctx);
+    if (depError) return { output: depError };
     if (!this.runTool) {
       return {
         output: `[*] Would invoke ${tool.name} with: ${JSON.stringify(this.datastore.snapshot())}`,
@@ -120,6 +122,41 @@ export class ModuleDispatcher implements CommandDispatcher {
     if (result.ok) ctx.print.good(`${tool.name} completed`);
     else ctx.print.error(`${tool.name} failed`);
     return { output: result.output };
+  }
+
+  /**
+   * Preflight module.requires against the driver's optional ShellState /
+   * finding-count hooks. Returns an error message if any dep is unmet, else null.
+   */
+  private checkRequires(ctx: CommandContext): string | null {
+    const reqs = this.module.requires;
+    if (!reqs || reqs.length === 0) return null;
+    const shell = ctx.driver.getShellState?.();
+    const snapshot = (shell?.contextSnapshot ?? undefined) as Record<string, unknown> | undefined;
+
+    const missing: string[] = [];
+    for (const req of reqs) {
+      if (req.kind === "snapshot") {
+        const ok = !!snapshot && snapshot[req.field] != null;
+        if (!ok) {
+          missing.push(`  - ${req.field} from '${req.moduleId}' — run: use ${req.moduleId}; run`);
+        }
+      } else if (req.kind === "findings") {
+        const count = ctx.driver.getFindingCount?.() ?? 0;
+        const need = req.minCount ?? 1;
+        if (count < need) {
+          missing.push(
+            `  - ${need}+ findings in workspace — run a scanner first (e.g. use semgrep; run)`,
+          );
+        }
+      }
+    }
+    if (missing.length === 0) return null;
+    return [
+      `[-] ${this.module.id} has unmet prerequisites:`,
+      ...missing,
+      `    Or run the full DAG via: use sast; run`,
+    ].join("\n");
   }
 }
 

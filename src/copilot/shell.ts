@@ -680,6 +680,19 @@ async function startInkShell(
     cwd: currentCwd(),
     print: dispatcherPrint,
     promptBase: "kuzushi",
+    // Expose the live ShellState to module preflight checks (CopilotModule.requires).
+    getShellState: () => {
+      const shell = store.getState().shell;
+      return shell ? { contextSnapshot: shell.contextSnapshot } : undefined;
+    },
+    // Workspace-DB finding count for triage/verify/patch requires. Optional —
+    // when no workspace is active the count defaults to 0 and the preflight
+    // fires the expected "run a scanner first" hint.
+    getFindingCount: () => {
+      const wsId = opts.workspace;
+      if (!wsId || !workspaceManager) return 0;
+      return workspaceManager.vulns.listForWorkspace(wsId).length;
+    },
   });
 
   /**

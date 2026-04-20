@@ -74,4 +74,15 @@ export interface Driver {
   allCommands(): Array<{ dispatcher: CommandDispatcher; cmd: string; help: string }>;
   /** Tab completion for the entire input line. */
   complete(line: string): string[];
+  /**
+   * Optional peek at the host's ShellState. Module dispatchers use this to
+   * check `requires` preflight constraints (e.g. threat-hunt needs a fresh
+   * ContextSnapshot with appModel). Omit in non-shell contexts.
+   */
+  getShellState?(): { contextSnapshot?: unknown } | undefined;
+  /**
+   * Optional finding-count lookup. Used by modules that declare a
+   * `kind: "findings"` requirement (triage / verify / patch).
+   */
+  getFindingCount?(): number | undefined;
 }

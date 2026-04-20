@@ -67,6 +67,36 @@ export interface ModuleNotes {
 }
 
 // ---------------------------------------------------------------------------
+// Module dependencies
+// ---------------------------------------------------------------------------
+
+/**
+ * A declared prerequisite for running a module. Checked in the shell's `run`
+ * command before the module's tool is invoked; a missing requirement produces
+ * a helpful error instead of garbage output from an unseeded downstream stage.
+ *
+ *  - snapshot: a field on the active ShellState.contextSnapshot must be
+ *    present. Used when sub-module A consumes sub-module B's in-memory
+ *    output (e.g. threat-hunt needs context.appModel + randori.threatModel).
+ *  - findings: the workspace DB must contain at least `minCount` findings.
+ *    Used by triage/verify/patch which operate on previously stored findings
+ *    regardless of which scanner produced them.
+ */
+export type CopilotModuleRequirement =
+  | {
+      kind: "snapshot";
+      /** Upstream module id (for the error hint: `use <moduleId>; run`). */
+      moduleId: string;
+      /** ShellState.contextSnapshot field that must be truthy. */
+      field: "repoContext" | "fileIndex" | "appModel" | "threatModel" | "scenarios" | "modules";
+    }
+  | {
+      kind: "findings";
+      /** Minimum number of findings required (default 1). */
+      minCount?: number;
+    };
+
+// ---------------------------------------------------------------------------
 // Module tool types
 // ---------------------------------------------------------------------------
 
@@ -244,6 +274,14 @@ export interface CopilotModule {
 
   /** Tools exposed by this module. */
   readonly tools: ReadonlyArray<ModuleTool>;
+
+  /**
+   * Upstream artifacts this module needs before `run` can meaningfully execute.
+   * Checked by the shell's ModuleDispatcher against the active ShellState + DB.
+   * Missing requirements produce a helpful "run X first" error. Optional —
+   * modules with no deps (semgrep, codeql, context) omit this field.
+   */
+  readonly requires?: ReadonlyArray<CopilotModuleRequirement>;
 
   /** Pipeline tasks contributed by this module (registered in TaskRegistry). */
   readonly tasks?: ReadonlyArray<AgentTask>;
