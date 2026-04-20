@@ -43,13 +43,17 @@ function parseShellViewArg(): ShellView | null {
   process.exit(2);
 }
 
+function hasPlanFlag(): boolean {
+  return process.argv.includes("--plan");
+}
+
 async function main(): Promise<void> {
   const shellViewArg = parseShellViewArg();
   const store = createUIStore();
   const instance = render(createElement(App, { store }));
 
   if (shellViewArg) {
-    await runShellViewDemo(store, shellViewArg);
+    await runShellViewDemo(store, shellViewArg, hasPlanFlag());
     await sleep(60_000);
     instance.unmount();
     return;
@@ -645,13 +649,19 @@ function demoFindings(): ActionableFinding[] {
   ];
 }
 
-async function runShellViewDemo(store: UIStore, view: ShellView): Promise<void> {
+async function runShellViewDemo(
+  store: UIStore,
+  view: ShellView,
+  includePlan = false,
+): Promise<void> {
   const moduleCatalog = demoModuleCatalog();
   const findings = demoFindings();
   const focusedModule = view === "catalog" ? null : "sast";
 
   const summary: SummaryData | null =
     view === "findings" || view === "finding" ? buildDemoSummary(findings) : null;
+
+  const pendingPlan = includePlan ? demoPlan() : undefined;
 
   store.update({
     mode: "shell",
@@ -681,10 +691,34 @@ async function runShellViewDemo(store: UIStore, view: ShellView): Promise<void> 
       commandHistory: [],
       moduleOptions: {},
       processing: false,
+      pendingPlan,
     },
   });
 
   return;
+}
+
+function demoPlan() {
+  return {
+    reasoning: "Operator wants a harder run focused on admin routes, with budget discipline.",
+    changes: [
+      { option: "preset", current: "standard", proposed: "deep", why: '"run harder"' },
+      { option: "maxTurnsPerHunt", current: 20, proposed: 26, why: "give each hunter slack" },
+      {
+        option: "maxBudgetUsd",
+        current: null,
+        proposed: 5,
+        why: '"stop wasting money" — cap at $5',
+      },
+    ],
+    unsupported: ["focus on auth"],
+    roughCostDeltaUsd: 0.35,
+    roughWallClockDeltaSeconds: 90,
+    toolName: "sast:scan",
+    producedAt: Date.now(),
+    planCostUsd: 0.0023,
+    source: "console-agent/r1",
+  };
 }
 
 function buildDemoSummary(findings: ActionableFinding[]): SummaryData {

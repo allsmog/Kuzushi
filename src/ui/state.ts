@@ -6,7 +6,13 @@
  */
 
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
+import type { ShellPlan } from "../copilot/nl-planner.js";
 import type { ModuleCategory, ModuleRank } from "../modules/types.js";
+
+// Re-export so the UI layer can `import type { ShellPlan } from "../state.js"`
+// without cross-cutting into `src/copilot/`.
+export type { ShellPlan, ShellPlanChange } from "../copilot/nl-planner.js";
+
 import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
 import type {
@@ -482,6 +488,14 @@ export interface ShellState {
   workspace: string | null;
   /** Narrow projection of the user's config used by the v2 Tune screen. */
   tuneSnapshot?: TuneSnapshot;
+  /**
+   * Pending NL-planner proposal awaiting operator confirmation. While set,
+   * the shell renders the PlanCard and routes `y` / `n` / Esc keys to
+   * apply / revise / cancel.
+   */
+  pendingPlan?: ShellPlan | null;
+  /** True while the planner LLM call is in flight. */
+  plannerBusy?: boolean;
   /** Conversation history (rendered in the scroll region). */
   history: ShellHistoryEntry[];
   /** Submitted commands, capped and persisted for prompt recall. */

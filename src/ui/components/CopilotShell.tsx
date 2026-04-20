@@ -23,6 +23,7 @@ import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
 import { ModuleCatalog } from "./ModuleCatalog.js";
 import { ModuleHome } from "./ModuleHome.js";
+import { PlanCard } from "./PlanCard.js";
 import { Spinner } from "./Spinner.js";
 import { TuneView } from "./TuneView.js";
 
@@ -66,6 +67,21 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
       if (shell.processing) {
         return;
+      }
+
+      // When a NL-planner proposal is waiting for confirmation, route y / n /
+      // Esc through the shell's onInput so the same /yes, /no handlers in
+      // shell.ts apply or discard. Single-key shortcut — operator doesn't
+      // need to type a slash command.
+      if (shell.pendingPlan && input.length === 0) {
+        if (char === "y" || char === "Y") {
+          shell.onInput?.("/yes");
+          return;
+        }
+        if (char === "n" || char === "N" || key.escape) {
+          shell.onInput?.("/no");
+          return;
+        }
       }
 
       if (key.return && input.length > 0) {
@@ -163,6 +179,18 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       </Box>
 
       <ShellViewPanel state={state} shell={shell} />
+
+      {shell.plannerBusy && !shell.pendingPlan && (
+        <Box marginTop={1} paddingLeft={2}>
+          <Spinner />
+          <Text>
+            {"  "}
+            {tokens.muted("planning\u2026")}
+          </Text>
+        </Box>
+      )}
+
+      {shell.pendingPlan && <PlanCard plan={shell.pendingPlan} />}
 
       {shell.pendingAssistantText && (
         <HistoryEntry
