@@ -64,15 +64,34 @@ export function useUISelector<T>(
   return useSyncExternalStore((callback) => store.subscribe(callback), getSnapshot);
 }
 
-/** Shallow-equal helper suitable for selector object slices. */
-export function shallowEqual<T extends Record<string, unknown>>(a: T, b: T): boolean {
+/**
+ * Shallow-equal helper suitable for selector slices — works on objects,
+ * arrays, and nullable values. Falls back to `Object.is` for non-object
+ * values and references that can't be iterated.
+ */
+export function shallowEqual<T>(a: T, b: T): boolean {
   if (Object.is(a, b)) return true;
   if (a == null || b == null) return false;
-  const ak = Object.keys(a);
-  const bk = Object.keys(b);
+  if (typeof a !== "object" || typeof b !== "object") return false;
+
+  // Arrays: same length + same elements (Object.is per position).
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!Object.is(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+
+  // Plain objects: same keys + same per-key values.
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const ak = Object.keys(ao);
+  const bk = Object.keys(bo);
   if (ak.length !== bk.length) return false;
   for (const k of ak) {
-    if (!Object.is(a[k], b[k])) return false;
+    if (!Object.is(ao[k], bo[k])) return false;
   }
   return true;
 }
