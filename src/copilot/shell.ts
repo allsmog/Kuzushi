@@ -37,7 +37,14 @@ const CANCELLED_TOOL_MESSAGE = "Cancelled active operation.";
 const CANCELLED_AGENT_MESSAGE = "Cancelled active request.";
 
 /** Tools that require a ContextSnapshot before they can execute from the shell. */
-const CONTEXT_REQUIRED_TOOLS = new Set(["sast:threat-hunt", "sast:taint-iris"]);
+const CONTEXT_REQUIRED_TOOLS = new Set([
+  // Legacy sast:* names (resolved via registry alias).
+  "sast:threat-hunt",
+  "sast:taint-iris",
+  // New sub-module names.
+  "threat-hunt:run",
+  "taint-iris:hunt",
+]);
 
 /** Build a seed map from a ContextSnapshot to inject into pipelines. */
 function buildSeedMapFromSnapshot(snapshot: ContextSnapshot): Map<string, unknown> {
