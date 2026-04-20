@@ -34,6 +34,14 @@ export interface CoreDispatcherOptions {
    * Without it, `run` just prints "[*] Would invoke ..." (useful for tests).
    */
   runTool?: ModuleToolRunner;
+  /**
+   * Optional recipe resolver — returns an absolute path to `<name>.kzrc.yaml`
+   * or undefined if no recipe with that name exists. When present, enables the
+   * `recipes` dispatcher command.
+   */
+  resolveRecipePath?: (name: string) => string | undefined;
+  /** Optional recipe listing — returns an array of {name, path, description?}. */
+  listRecipes?: () => Array<{ name: string; path: string; description?: string }>;
 }
 
 const COMMANDS: Record<string, string> = {
@@ -53,6 +61,7 @@ const COMMANDS: Record<string, string> = {
   history: "Show or clear command history",
   resource: "Replay commands from a resource script",
   makerc: "Save recent commands as a resource script",
+  recipes: "List or run a bundled recipe (e.g. `recipes run quick-scan`)",
   exit: "Exit the shell",
   quit: "Exit the shell (alias for exit)",
 };
@@ -99,6 +108,8 @@ export class CoreDispatcher implements CommandDispatcher {
         return this.cmd_resource(args, ctx);
       case "makerc":
         return this.cmd_makerc(args, ctx);
+      case "recipes":
+        return this.cmd_recipes(args, ctx);
       default:
         return { output: `Unknown command: ${cmd}` };
     }
@@ -304,6 +315,44 @@ export class CoreDispatcher implements CommandDispatcher {
     } catch (err) {
       return { output: `[-] makerc failed: ${err instanceof Error ? err.message : String(err)}` };
     }
+  }
+
+  /**
+   * `recipes` — list available recipes (no args) or run one (`recipes run <name>`).
+   * A recipe is a .kzrc.yaml file under the repo's `recipes/` directory,
+   * resolved via `opts.resolveRecipePath`.
+   */
+  private async cmd_recipes(args: string[], ctx: CommandContext): Promise<CommandResult> {
+    const sub = args[0];
+    if (!sub || sub === "list") {
+      if (!this.opts.listRecipes) {
+        return { output: "[-] Recipes are not enabled in this driver." };
+      }
+      const recipes = this.opts.listRecipes();
+      if (recipes.length === 0) return { output: "  (no recipes available)" };
+      const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - s.length));
+      const width = Math.max(...recipes.map((r) => r.name.length));
+      const lines = recipes.map((r) => `  ${pad(r.name, width)}  ${r.description ?? r.path}`);
+      return { output: ["Available recipes:", ...lines].join("\n") };
+    }
+    if (sub === "run") {
+      const name = args[1];
+      if (!name) return { output: "Usage: recipes run <name>" };
+      if (!this.opts.resolveRecipePath || !this.opts.runResource) {
+        return { output: "[-] Recipes are not enabled in this driver." };
+      }
+      const file = this.opts.resolveRecipePath(name);
+      if (!file) return { output: `[-] Unknown recipe: ${name}. Try: recipes` };
+      ctx.print.status(`Running recipe: ${name}`);
+      try {
+        await this.opts.runResource(file, ctx.signal);
+        return {};
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { output: `[-] Recipe failed: ${msg}` };
+      }
+    }
+    return { output: `Usage: recipes [list] | recipes run <name>` };
   }
 
   /** Find the active module dispatcher's datastore, if a `use` was issued. */

@@ -1,0 +1,12 @@
+# Quick SAST scan: context + semgrep + triage.
+# Good default for PR review and CI smoke-test runs.
+commands:
+  - use context
+  - run
+  - back
+  - use semgrep
+  - run
+  - back
+  - use triage
+  - run
+  - findings list --limit 50

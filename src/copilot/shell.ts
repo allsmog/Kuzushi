@@ -23,6 +23,7 @@ import { CoreDispatcher, DispatcherDriver } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
 import { Datastore } from "./options.js";
 import { createPrintSink, type PrintLevel, type PrintSink } from "./print.js";
+import { listRecipes, resolveRecipePath } from "./recipes.js";
 import { loadAndRunResource, saveResourceScript } from "./resource.js";
 import { parseToolArgs } from "./run.js";
 
@@ -680,6 +681,8 @@ async function startInkShell(
       await saveResourceScript(file, { commands });
     },
     runTool: runToolFromDispatcher,
+    resolveRecipePath: (name: string) => resolveRecipePath(name, currentCwd()),
+    listRecipes: () => listRecipes(currentCwd()),
   });
 
   driver = new DispatcherDriver({
