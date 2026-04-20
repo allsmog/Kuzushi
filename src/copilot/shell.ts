@@ -14,6 +14,7 @@ import path from "node:path";
 import type { AgentQueryOptions, AgentRuntime, AgentSession } from "../agent-runtime/types.js";
 import { createBus } from "../bus/index.js";
 import type { MessageBus } from "../bus/types.js";
+import { JobManager } from "../jobs/manager.js";
 import { formatContextSummary } from "../modules/core-sast.js";
 import type { ModuleTool } from "../modules/types.js";
 import { SessionManager } from "../sessions/manager.js";
@@ -687,6 +688,10 @@ async function startInkShell(
 
   let driver: DispatcherDriver;
 
+  // Background job registry — shared between the ModuleDispatcher (for
+  // `run --bg` backgrounding) and the CoreDispatcher (for the `jobs` family).
+  const jobManager = new JobManager();
+
   const coreDispatcher = new CoreDispatcher({
     registry: core.registry,
     globals,
@@ -716,6 +721,7 @@ async function startInkShell(
     // Bridge for `edit <NAME>`. Suspending the Ink render while $EDITOR owns
     // the TTY is a future refinement — today we just spawn inheriting stdio.
     openEditor: (initial: string) => openInEditor(initial),
+    jobManager,
   });
 
   driver = new DispatcherDriver({
@@ -747,6 +753,7 @@ async function startInkShell(
       const live = sessionManager.liveForWorkspace(wsId);
       return kind ? live.filter((h) => h.record.kind === kind).length : live.length;
     },
+    jobManager,
   });
 
   // Mount the WorkspaceDispatcher — exposes hosts/services/vulns/loot/notes/
@@ -1143,6 +1150,7 @@ async function startInkShell(
       saveShellCommandHistory(dataDir, store.getState().shell?.commandHistory ?? []);
     } finally {
       await closeSession();
+      await jobManager.shutdown();
       await core.dispose();
       await bus.close();
       cleanupUI();

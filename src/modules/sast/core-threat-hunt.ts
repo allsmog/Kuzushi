@@ -25,6 +25,7 @@ const threatHuntTool: ModuleTool = {
         type: "string",
         description:
           "Override the threat-hunt actor system prompt. Accepts inline text or a path to .md/.txt.",
+        "x-advanced": true,
       },
     },
     required: ["target"],

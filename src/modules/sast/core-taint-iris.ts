@@ -19,6 +19,7 @@ const taintIrisHuntTool: ModuleTool = {
         type: "string",
         description:
           "Override the taint-iris system prompt. Accepts inline text or a path to .md/.txt.",
+        "x-advanced": true,
       },
     },
     required: ["target"],

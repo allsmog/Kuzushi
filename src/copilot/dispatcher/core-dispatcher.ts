@@ -53,6 +53,18 @@ export interface CoreDispatcherOptions {
    * cancel.
    */
   openEditor?: (initial: string) => Promise<string | null>;
+  /**
+   * Optional JobManager — when present, enables the `jobs` command and
+   * ModuleDispatcher's `run --bg` path (see that file). Without it, all
+   * runs are foreground and `jobs` reports "not enabled".
+   */
+  jobManager?: import("../../jobs/manager.js").JobManager;
+  /**
+   * Optional REPL launcher — when present, `repl` drops into an interactive
+   * Node REPL with framework objects bound. Host wires this so TTY suspension
+   * (Ink) stays a host-level concern.
+   */
+  openRepl?: () => Promise<void>;
 }
 
 const COMMANDS: Record<string, string> = {
@@ -85,6 +97,8 @@ const COMMANDS: Record<string, string> = {
   pushm: "Push the current module onto the module stack",
   popm: "Pop the last-pushed module back onto the dispatcher stack",
   listm: "List the module stack",
+  jobs: "List / tail / kill background jobs (jobs, jobs -i <id>, jobs -k <id>)",
+  repl: "Drop into a Node REPL with core/registry/workspace bound",
   exit: "Exit the shell",
   quit: "Exit the shell (alias for exit)",
 };
@@ -157,6 +171,10 @@ export class CoreDispatcher implements CommandDispatcher {
         return this.cmd_popm(ctx);
       case "listm":
         return this.cmd_listm(ctx);
+      case "jobs":
+        return this.cmd_jobs(args, ctx);
+      case "repl":
+        return this.cmd_repl(ctx);
       default:
         return { output: `Unknown command: ${cmd}` };
     }
@@ -680,6 +698,82 @@ export class CoreDispatcher implements CommandDispatcher {
     return {
       output: this.savedModules.map((id, i) => `  ${i}  ${id}`).join("\n"),
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Background jobs
+  // -------------------------------------------------------------------------
+
+  private async cmd_jobs(args: string[], _ctx: CommandContext): Promise<CommandResult> {
+    const mgr = this.opts.jobManager;
+    if (!mgr) return { output: "[-] Background jobs are not enabled in this driver." };
+
+    const sub = args[0];
+    if (sub === "-k") {
+      const id = args[1];
+      if (!id) return { output: "Usage: jobs -k <id>" };
+      const killed = mgr.kill(id);
+      return {
+        output: killed ? `[*] Cancelled job ${id}` : `[-] Job ${id} not running.`,
+      };
+    }
+    if (sub === "-i") {
+      const id = args[1];
+      if (!id) return { output: "Usage: jobs -i <id>" };
+      const job = mgr.get(id);
+      if (!job) return { output: `[-] Unknown job: ${id}` };
+      // One-shot snapshot of the buffered output — the prompt status line
+      // and the `log` event cover live-tailing in the Ink UI.
+      const lines = [
+        `[*] Job ${id} (${job.label}) — ${job.state}`,
+        ...job.output.map((l) => `    ${l}`),
+      ];
+      if (job.state !== "running") {
+        const elapsed = ((job.endedAt ?? Date.now()) - job.startedAt) / 1000;
+        lines.push(`    ${job.state} after ${elapsed.toFixed(1)}s`);
+        if (job.result) lines.push(`    ${job.result}`);
+        if (job.error) lines.push(`    error: ${job.error}`);
+      }
+      return { output: lines.join("\n") };
+    }
+    if (sub === "-c" || sub === "--clear") {
+      const removed = mgr.clearCompleted();
+      return { output: `[*] Cleared ${removed} completed job(s).` };
+    }
+
+    // Default: list.
+    const jobs = mgr.list();
+    if (jobs.length === 0) return { output: "  (no jobs)" };
+    const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - s.length));
+    const widths = {
+      id: Math.max(2, ...jobs.map((j) => j.id.length)),
+      state: Math.max(5, ...jobs.map((j) => j.state.length)),
+      elapsed: 7,
+      label: Math.max(5, ...jobs.map((j) => j.label.length)),
+    };
+    const header = `  ${pad("Id", widths.id)}  ${pad("State", widths.state)}  ${pad("Elapsed", widths.elapsed)}  Label`;
+    const sep = `  ${"-".repeat(widths.id)}  ${"-".repeat(widths.state)}  ${"-".repeat(widths.elapsed)}  -----`;
+    const rows = jobs.map((j) => {
+      const elapsed = (((j.endedAt ?? Date.now()) - j.startedAt) / 1000).toFixed(1) + "s";
+      return `  ${pad(j.id, widths.id)}  ${pad(j.state, widths.state)}  ${pad(elapsed, widths.elapsed)}  ${j.label}`;
+    });
+    return { output: [header, sep, ...rows].join("\n") };
+  }
+
+  // -------------------------------------------------------------------------
+  // Dev REPL
+  // -------------------------------------------------------------------------
+
+  private async cmd_repl(_ctx: CommandContext): Promise<CommandResult> {
+    if (!this.opts.openRepl) {
+      return { output: "[-] REPL is not enabled in this driver." };
+    }
+    try {
+      await this.opts.openRepl();
+      return { output: "[*] REPL session ended." };
+    } catch (err) {
+      return { output: `[-] REPL failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
   }
 
   // -------------------------------------------------------------------------

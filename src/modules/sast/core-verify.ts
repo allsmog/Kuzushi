@@ -24,6 +24,7 @@ const verifyFindingTool: ModuleTool = {
       VERIFY_PROMPT: {
         type: "string",
         description: "Override the verify system prompt. Inline text or a path to .md/.txt.",
+        "x-advanced": true,
       },
     },
     required: ["fingerprint"],

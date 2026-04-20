@@ -6,6 +6,7 @@
  * set on top. `back` pops back to the previous level.
  */
 
+import type { JobManager } from "../../jobs/manager.js";
 import type { PrintSink } from "../print.js";
 import type { CommandContext, CommandDispatcher, CommandResult, Driver } from "./types.js";
 
@@ -24,6 +25,8 @@ export interface DriverOptions {
   getHostCount?: () => number | undefined;
   /** Optional live-session count accessor — powers session requires. */
   getLiveSessionCount?: (kind?: string) => number | undefined;
+  /** Optional JobManager — enables `run --bg` and the `jobs` command family. */
+  jobManager?: JobManager;
 }
 
 export class DispatcherDriver implements Driver {
@@ -35,6 +38,7 @@ export class DispatcherDriver implements Driver {
   readonly getFindingCount?: () => number | undefined;
   readonly getHostCount?: () => number | undefined;
   readonly getLiveSessionCount?: (kind?: string) => number | undefined;
+  private readonly _jobManager?: JobManager;
 
   constructor(opts: DriverOptions) {
     this.print = opts.print;
@@ -45,6 +49,7 @@ export class DispatcherDriver implements Driver {
     if (opts.getFindingCount) this.getFindingCount = opts.getFindingCount;
     if (opts.getHostCount) this.getHostCount = opts.getHostCount;
     if (opts.getLiveSessionCount) this.getLiveSessionCount = opts.getLiveSessionCount;
+    if (opts.jobManager) this._jobManager = opts.jobManager;
     // Back-ref: let the base dispatcher peek at the active module for completion.
     const maybeSetDriver = (opts.base as unknown as { setDriver?: (d: unknown) => void }).setDriver;
     if (typeof maybeSetDriver === "function") {
@@ -67,6 +72,10 @@ export class DispatcherDriver implements Driver {
   pop(): CommandDispatcher | undefined {
     if (this._stack.length <= 1) return undefined;
     return this._stack.pop();
+  }
+
+  jobManager(): JobManager | undefined {
+    return this._jobManager;
   }
 
   prompt(): string {

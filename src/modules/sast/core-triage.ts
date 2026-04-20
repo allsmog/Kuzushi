@@ -35,6 +35,7 @@ const triageRunTool: ModuleTool = {
       TRIAGE_PROMPT: {
         type: "string",
         description: "Override the triage system prompt. Inline text or path to a .md/.txt file.",
+        "x-advanced": true,
       },
     },
   },
