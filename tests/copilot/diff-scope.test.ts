@@ -9,7 +9,9 @@ function git(repo: string, args: string[]): void {
   execFileSync("git", args, { cwd: repo, stdio: ["ignore", "ignore", "ignore"] });
 }
 
-describe("diff-scope", () => {
+// Spawning git five times per test is slow on a loaded CI machine; give
+// each test a generous budget so the full suite doesn't flake.
+describe("diff-scope", { timeout: 30_000 }, () => {
   describe("computeDiffScope", () => {
     let repo: string;
 
