@@ -313,7 +313,23 @@ export class CopilotCore {
       ...(toolModel ? { toolModel } : {}),
     };
 
-    const result = await tool.execute(input, ctx);
+    // Module lifecycle events — fire on the module's own scope so the module
+    // can subscribe to its own tool calls in init(). Other modules can
+    // observe too; the bus broadcasts. See src/bus/module-events.ts for
+    // the full well-known event list.
+    scope?.emit("tool:before_run", { qualifiedName, input });
+
+    let result: ToolResult;
+    try {
+      result = await tool.execute(input, ctx);
+    } catch (err) {
+      scope?.emit("tool:on_error", {
+        qualifiedName,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    scope?.emit("tool:after_run", { qualifiedName, result });
 
     // Post-execution: record audit + track cost
     if (this.opts.enforcer && result.costUsd) {

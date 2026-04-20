@@ -24,6 +24,12 @@
  *   service:discovered    [recon]        new service row
  *   job:complete          [jobs]         background job terminal state
  *   recipe:run            [shell]        recipe invoked by operator
+ *   tool:before_run       [core]         about to invoke a module tool
+ *                                        payload: { qualifiedName, input }
+ *   tool:after_run        [core]         module tool returned successfully
+ *                                        payload: { qualifiedName, result }
+ *   tool:on_error         [core]         module tool threw
+ *                                        payload: { qualifiedName, error }
  *
  * Keep handlers fast and non-throwing — a slow handler stalls every
  * other subscriber. Anything expensive should schedule work on the

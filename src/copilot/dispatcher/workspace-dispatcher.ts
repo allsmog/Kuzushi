@@ -34,11 +34,11 @@ const COMMANDS: Record<string, string> = {
   creds: "List / add / delete / export creds (`creds -o csv|jtr|hcat`)",
   sessions: "List sessions in the active workspace",
   "workspace:import": "Import a file into the active workspace (sarif | nmap-xml | kz-bundle)",
-  "workspace:export": "Export the active workspace to a file (sarif | kz-bundle)",
+  "workspace:export": "Export the active workspace to a file (sarif | kz-bundle | markdown)",
 };
 
 const IMPORT_FORMATS: ImportFormat[] = ["sarif", "nmap-xml", "kz-bundle"];
-const EXPORT_FORMATS: ExportFormat[] = ["sarif", "kz-bundle"];
+const EXPORT_FORMATS: ExportFormat[] = ["sarif", "kz-bundle", "markdown"];
 
 export class WorkspaceDispatcher implements CommandDispatcher {
   readonly name = "workspace";
