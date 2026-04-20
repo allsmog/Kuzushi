@@ -6,6 +6,7 @@
  */
 
 import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import { resolvePromptValue } from "./prompts.js";
 import { runSingleTaskPipeline, targetProperty } from "./shared.js";
 
 const threatHuntTool: ModuleTool = {
@@ -31,6 +32,7 @@ const threatHuntTool: ModuleTool = {
   headless: true,
   async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
     const p = input as Record<string, unknown>;
+    const promptOverride = await resolvePromptValue(p["THREAT_HUNT_PROMPT"] as string, ctx.cwd);
     return runSingleTaskPipeline(["threat-hunt"], input, ctx, {
       summaryLabel: "Threat hunt",
       taskConfig: {
@@ -40,6 +42,7 @@ const threatHuntTool: ModuleTool = {
           runsPerActor: p.runsPerActor,
           maxConcurrentHunts: p.maxConcurrentHunts,
           maxTurnsPerHunt: p.maxTurnsPerHunt,
+          ...(promptOverride ? { promptOverride } : {}),
         },
       },
     });

@@ -4,6 +4,7 @@
  */
 
 import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import { resolvePromptValue } from "./prompts.js";
 import { runSingleTaskPipeline, severityProperty, targetProperty } from "./shared.js";
 
 const taintIrisHuntTool: ModuleTool = {
@@ -11,13 +12,26 @@ const taintIrisHuntTool: ModuleTool = {
   description: "Run IRIS taint analysis (taint-cwe-select then taint-iris), scan-only mode.",
   inputSchema: {
     type: "object",
-    properties: { target: targetProperty, severity: severityProperty },
+    properties: {
+      target: targetProperty,
+      severity: severityProperty,
+      TAINT_IRIS_PROMPT: {
+        type: "string",
+        description:
+          "Override the taint-iris system prompt. Accepts inline text or a path to .md/.txt.",
+      },
+    },
     required: ["target"],
   },
   headless: true,
   async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+    const p = input as Record<string, unknown>;
+    const promptOverride = await resolvePromptValue(p["TAINT_IRIS_PROMPT"] as string, ctx.cwd);
+    const taskConfig: Record<string, Record<string, unknown>> = {};
+    if (promptOverride) taskConfig["taint-iris"] = { promptOverride };
     return runSingleTaskPipeline(["taint-cwe-select", "taint-iris"], input, ctx, {
       summaryLabel: "Taint IRIS",
+      ...(Object.keys(taskConfig).length > 0 ? { taskConfig } : {}),
     });
   },
 };
