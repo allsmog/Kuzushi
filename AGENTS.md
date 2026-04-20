@@ -290,3 +290,138 @@ export default module;
 ```
 
 Use this as a skeleton, then add runtime/bus/config integration through `ToolExecutionContext` as needed.
+
+---
+
+## 12) Shell UX — Ink TUI surfaces (Phases A–C)
+
+The interactive shell (`kuzushi shell` or bare `kuzushi`) is the main
+operator surface. It uses React + Ink for rendering and a single
+`ShellState.shellView` dispatcher to switch between sub-screens.
+
+### Shell views
+
+| View                 | Enter with                | What it renders                                     |
+| -------------------- | ------------------------- | --------------------------------------------------- |
+| `catalog`            | bare `kuzushi`            | Module catalog grouped by offense/intel/governance  |
+| `module`             | `/use <id>`               | Per-module home: tools table, last-run, preset      |
+| `findings`           | `/findings` or `/f`       | Unified findings list with filter chips + chains    |
+| `finding`            | `/open F-NNNN`            | Linear deep page: state strip, evidence, timeline   |
+| `tune`               | `/tune` or `/t`           | Six plain controls + optional "house rules" block   |
+| `threat-dfd`         | `/threats dfd` or `1`     | ASCII DFD grouped by trust zone                     |
+| `threat-stride`      | `/threats stride` or `2`  | Element × STRIDE heat matrix + impact × likelihood  |
+| `threat-stories`     | `/threats stories` or `3` | Attacker narrative cards + input-categories rail    |
+| `threat-scope`       | `/threats scope` or `4`   | Criticality buckets + out-of-scope + operator edits |
+| `threat-summary`     | `/threats summary` or `5` | Counts bar charts + drives + artifact paths         |
+
+Press `1..5` at any threat view to cycle without retyping the verb.
+`/back` steps up one level (`finding → findings → module → catalog`).
+
+### Operator verbs — full list
+
+#### Module + view navigation
+
+| Command                 | What it does                                        |
+| ----------------------- | --------------------------------------------------- |
+| `/modules`              | List loaded modules                                 |
+| `/tools`                | List available tools                                |
+| `/use <module>`         | Focus on a module; prompt becomes `kuzushi/<id>>`   |
+| `/back`                 | Step back one view level                            |
+| `/findings` (`/f`)      | Open the unified findings list                      |
+| `/open <F-NNNN>`        | Open a finding in the linear deep page              |
+| `/tune` (`/t`)          | Open tune view for the focused module               |
+| `/threats [sub]`        | Threat-model views (see table above); bare = summary|
+| `/threats edit`         | Open the full `ThreatModelEditor` (expert)          |
+| `/since <ref>`          | Diff-aware view: findings scoped to git-changed files |
+
+#### Natural-language planner (Phase A.1)
+
+| Command                 | What it does                                        |
+| ----------------------- | --------------------------------------------------- |
+| `/plan <english>`       | Haiku translates intent → PlanCard with option diff |
+| `/yes` / `y` key        | Apply the pending plan                              |
+| `/no` / `n` / Esc       | Discard the pending plan                            |
+
+#### Prompt editor (Phase A.2)
+
+| Command                 | What it does                                        |
+| ----------------------- | --------------------------------------------------- |
+| `/prompt edit <verb>`   | Open `$EDITOR` on per-module prompt override        |
+| `/prompt show <verb>`   | Show effective prompt + source (file/inline/default)|
+| `/show prompts`         | Cross-module audit table of every `*_PROMPT` key    |
+
+#### Replay / trace (Phase A.3)
+
+| Command                 | What it does                                        |
+| ----------------------- | --------------------------------------------------- |
+| `/show runs [repo]`     | List recent pipeline runs (id · status · cost)      |
+| `/replay <runId>`       | Re-render the summary of a past run                 |
+| `/trace <runId>`        | Stream the per-event JSONL audit log                |
+
+#### Short-ID aliases (Phase B.3)
+
+| Command                 | What it does                                        |
+| ----------------------- | --------------------------------------------------- |
+| `/show aliases [prefix]`| List F-NNNN / C-NN aliases for the current run      |
+
+Findings and chains get deterministic per-run aliases assigned from the
+severity-sorted list (F-0001 = highest-severity finding; C-01 = highest-
+severity chain). Operator-typed references (`/open F-0108`) resolve
+through the alias map, with raw-fingerprint prefix fallback.
+
+#### Failure-mode surfaces (Phase B.4)
+
+- **Two-stage Ctrl+C at idle prompt** — first press arms, second press
+  within 2s exits. Any other key disarms. In-flight work always aborts
+  on first Ctrl+C (no change from before).
+- **Rate-limit banner** — auto-renders above `StatusFooter` when
+  `state.throttle` is set by the adaptive concurrency registry.
+- **Cost-cap halt card** — `c` continues past budget, `a` aborts. Both
+  reuse `shell.onAbort` for the abort path.
+
+#### CI mode (Phase B.5)
+
+- `kuzushi scan ./repo --ci` — disables Ink, attaches
+  `src/ui/ci-stream.ts` for one-line-per-event output:
+  `[2026-04-20T14:20:12Z] stage: scan → done (8.3s)` etc.
+- `buildPrComment(summary, { repoName, runUrl })` — markdown
+  PR-comment formatter in `src/report-pr-comment.ts`. Pipe to
+  `gh pr comment -F -`.
+
+### On-disk artefacts operators can version-control
+
+| Path                                          | Produced by                    |
+| --------------------------------------------- | ------------------------------ |
+| `~/.kuzushi/config.json`                      | `/config`, setup wizard        |
+| `.kuzushi/threat-model.json`                  | `randori`; edited by operators |
+| `.kuzushi/house-rules/<moduleId>.md`          | `/tune`; free-text nudges      |
+| `.kuzushi/prompts/<moduleId>/<verb>.md`       | `/prompt edit <verb>`          |
+| `.kuzushi/runs/<runId>/summary.json`          | scan worker                    |
+| `.kuzushi/runs/<runId>/triage.jsonl`          | audit-worker                   |
+| `.kuzushi/runs/<runId>/verify.jsonl`          | audit-worker                   |
+| `.kuzushi/findings.sqlite3`                   | scan + shell persistence       |
+
+### Adding a new shell sub-view
+
+1. Add the view id to `ShellView` union in `src/ui/state.ts`.
+2. Add a case in `shell.ts`'s slash-command handler that routes to the
+   new `shellView` (probably via a `resolve<Name>View()` helper for
+   consistency — see `resolveThreatView`).
+3. Add a component under `src/ui/components/<Name>View.tsx` that reads
+   from `shell.*` via props.
+4. Add a case in `ShellViewPanel` (`src/ui/components/CopilotShell.tsx`).
+5. Add a one-line case in `src/ui/plain-renderer.ts` so the non-TTY
+   path prints *something* when the operator enters the view.
+6. If the view has cycle keybinds, add them to the `isThreatShellView`-
+   style helper near the input handler.
+
+### Testing conventions
+
+- Pure helpers (e.g. `computeStrideCell`, `computeFindingAliases`,
+  `buildPrComment`) get focused unit tests in `tests/ui/` or
+  `tests/copilot/`. Target ≥ 5 cases per helper.
+- Ink components render best via `ink-testing-library` when available;
+  strip ANSI and snapshot the visible text.
+- The shell test suite (`tests/copilot/shell.test.ts`) exercises the
+  slash-command router; add an assertion there when shipping a new
+  verb so the `/help` table and the handler stay in sync.
