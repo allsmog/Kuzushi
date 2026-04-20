@@ -187,6 +187,13 @@ export interface ToolExecutionContext {
    * when running outside a workspace (e.g. one-shot `kuzushi run`).
    */
   workspace?: import("../workspace/manager.js").WorkspaceManager;
+  /**
+   * Module-scoped pub/sub handle (framework events). Subscriptions made
+   * through this scope are auto-torn-down when the module is unloaded.
+   * Optional — omitted outside the shell/run driver (e.g. during tests
+   * that exercise a tool directly).
+   */
+  events?: import("../bus/module-events.js").ModuleEventScope;
 }
 
 /**
@@ -263,6 +270,11 @@ export interface ModuleContext {
   config: KuzushiConfig;
   /** The .kuzushi data directory (for module-specific persistence). */
   dataDir: string;
+  /**
+   * Module-scoped framework event handle. Subscriptions created here are
+   * auto-disposed on `dispose()`. Optional for backward compatibility.
+   */
+  events?: import("../bus/module-events.js").ModuleEventScope;
 }
 
 // ---------------------------------------------------------------------------
