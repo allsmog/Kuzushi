@@ -26,6 +26,7 @@ import { ModuleCatalog } from "./ModuleCatalog.js";
 import { ModuleHome } from "./ModuleHome.js";
 import { PlanCard } from "./PlanCard.js";
 import { Spinner } from "./Spinner.js";
+import { ThreatDfdView } from "./ThreatDfdView.js";
 import { ThreatPlaceholder } from "./ThreatPlaceholder.js";
 import { TuneView } from "./TuneView.js";
 
@@ -409,10 +410,10 @@ function ShellViewPanel({
       if (!match) return null;
       return <FindingCard mode="linear" finding={match} />;
     }
-    // Phase C — threat model views. C.1–C.5 each replace one branch with
-    // a real component; until then all five share the ThreatPlaceholder
-    // so the routing is fully exercised.
+    // Phase C — threat model views. C.2–C.5 still route through the
+    // placeholder until their real components land.
     case "threat-dfd":
+      return <ThreatDfdView shell={shell} />;
     case "threat-stride":
     case "threat-stories":
     case "threat-scope":

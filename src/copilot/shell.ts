@@ -2089,6 +2089,10 @@ async function startReadlineShell(
           }
           if (message.type === "tool-summary") {
             process.stderr.write(`  ${message.summary}\n`);
+            const trailer = formatContextTrailer(
+              opts.target ? path.resolve(opts.target) : process.cwd(),
+            );
+            if (trailer) process.stderr.write(`${trailer}\n`);
             continue;
           }
           if (message.type !== "result") {
@@ -3978,9 +3982,12 @@ export const __shellInternals = {
   formatModuleList,
   formatOptions,
   formatTools,
+  formatArtifactBanner,
+  formatContextTrailer,
   formatWelcome,
   handleLocalCommand: routeInput,
   handleSlashCommand,
+  loadArtifactManifest,
   loadShellCommandHistory,
   resolveDirectToolDispatch,
   saveShellCommandHistory,
