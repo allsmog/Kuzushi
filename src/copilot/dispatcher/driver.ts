@@ -78,9 +78,47 @@ export class DispatcherDriver implements Driver {
     return this._jobManager;
   }
 
+  // ---------------------------------------------------------------------
+  // Prompt status providers (msfconsole PROMPT-format equivalent)
+  // ---------------------------------------------------------------------
+
+  /** Registry of `() => string | undefined` closures that decorate `prompt()`. */
+  private readonly statusProviders: Array<() => string | undefined> = [];
+
+  /**
+   * Register a status provider. Each provider is called on every prompt()
+   * and its non-empty return value is joined with ` · ` inside a
+   * `[ ... ]` bracket before the trailing `> `. Order of registration is
+   * preserved.
+   */
+  addStatusProvider(fn: () => string | undefined): void {
+    this.statusProviders.push(fn);
+  }
+
+  /** Clear all registered providers (test helper). */
+  clearStatusProviders(): void {
+    this.statusProviders.length = 0;
+  }
+
   prompt(): string {
     const top = this.current();
-    return top.name === "core" ? `${this.promptBase}> ` : `${this.promptBase}/${top.name}> `;
+    const head = top.name === "core" ? `${this.promptBase}` : `${this.promptBase}/${top.name}`;
+    const status = this.renderStatus();
+    return status ? `${head} [${status}]> ` : `${head}> `;
+  }
+
+  private renderStatus(): string | undefined {
+    if (this.statusProviders.length === 0) return undefined;
+    const parts: string[] = [];
+    for (const fn of this.statusProviders) {
+      try {
+        const out = fn();
+        if (out && out.trim().length > 0) parts.push(out.trim());
+      } catch {
+        // A provider throwing should never break the prompt.
+      }
+    }
+    return parts.length === 0 ? undefined : parts.join(" · ");
   }
 
   allCommands(): Array<{ dispatcher: CommandDispatcher; cmd: string; help: string }> {

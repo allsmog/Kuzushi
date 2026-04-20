@@ -629,6 +629,63 @@ describe("background jobs", () => {
   });
 });
 
+describe("prompt status providers", () => {
+  function basicDriver(): DispatcherDriver {
+    const registry = new ModuleRegistry();
+    registry.register(mkModule("sast", [mkTool("sast:scan")]));
+    (registry as unknown as { initialized: Set<string> }).initialized.add("sast");
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+    });
+    return new DispatcherDriver({ base: core, cwd: "/tmp", print: createArraySink() });
+  }
+
+  it("no providers → plain `kuzushi> ` prompt", () => {
+    const driver = basicDriver();
+    expect(driver.prompt()).toBe("kuzushi> ");
+  });
+
+  it("single provider appears in brackets", () => {
+    const driver = basicDriver();
+    driver.addStatusProvider(() => "2 jobs");
+    expect(driver.prompt()).toBe("kuzushi [2 jobs]> ");
+  });
+
+  it("multiple providers join with ` · `", () => {
+    const driver = basicDriver();
+    driver.addStatusProvider(() => "2 jobs");
+    driver.addStatusProvider(() => "$1.40");
+    driver.addStatusProvider(() => "ws: acme");
+    expect(driver.prompt()).toBe("kuzushi [2 jobs · $1.40 · ws: acme]> ");
+  });
+
+  it("undefined / empty providers are skipped", () => {
+    const driver = basicDriver();
+    driver.addStatusProvider(() => undefined);
+    driver.addStatusProvider(() => "");
+    driver.addStatusProvider(() => "ws: acme");
+    expect(driver.prompt()).toBe("kuzushi [ws: acme]> ");
+  });
+
+  it("a throwing provider doesn't break the prompt", () => {
+    const driver = basicDriver();
+    driver.addStatusProvider(() => {
+      throw new Error("boom");
+    });
+    driver.addStatusProvider(() => "ok");
+    expect(driver.prompt()).toBe("kuzushi [ok]> ");
+  });
+
+  it("providers show up with a module on the stack too", async () => {
+    const driver = basicDriver();
+    driver.addStatusProvider(() => "2 jobs");
+    await driver.handle("use sast");
+    expect(driver.prompt()).toBe("kuzushi/module(sast) [2 jobs]> ");
+  });
+});
+
 describe("dispatch stack semantics", () => {
   it("top of stack shadows base commands", async () => {
     const core = new CoreDispatcher({
