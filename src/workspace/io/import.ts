@@ -335,6 +335,7 @@ export function importKzBundle(
       workspaceId,
       kind: sess.kind,
       state: sess.state,
+      alias: sess.alias,
       description: sess.description,
       tunnelPeer: sess.tunnelPeer,
       tunnelLocal: sess.tunnelLocal,
