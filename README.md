@@ -81,6 +81,10 @@ kuzushi> /threats summary                  # counts, drives, export paths
 # Short-ID aliases — F-0001 / C-01 resolve through a deterministic map
 kuzushi/sast> /show aliases F-             # filter by prefix
 kuzushi/sast> open F-0003                  # same as typing the fingerprint
+
+# Diff-aware — pivot to "what changed since <ref>" without restarting
+kuzushi> /since main                       # findings + threats scoped to changed files
+kuzushi> /since v1.2.0                     # works with any git ref (tags, SHAs, HEAD~5)
 ```
 
 #### On-disk artefacts
