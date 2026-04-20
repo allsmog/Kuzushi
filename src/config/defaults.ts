@@ -35,7 +35,7 @@ export const DEFAULTS: KuzushiConfig = {
   triageBatchSize: 5,
   triageConcurrency: 5,
   scanMode: "concurrent",
-  agentRuntimeBackend: "claude",
+  agentRuntimeBackend: "pi-ai",
   agentRuntimeConfig: undefined,
   tasks: ["semgrep"],
   severity: ["ERROR", "WARNING"],
