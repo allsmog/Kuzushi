@@ -449,9 +449,33 @@ async function applyOneFilter(input: string, filter: string): Promise<string> {
         return `[-] save: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
+    case "page": {
+      // `| page` pipes the output through $PAGER (default: less -R -F -X).
+      // Non-TTY shells don't have a pager to hand off to, so we just
+      // return the text unchanged — pipes still compose.
+      return pageOutput(input);
+    }
     default:
       return `${input}\n[!] unknown filter: ${head}`;
   }
+}
+
+async function pageOutput(text: string): Promise<string> {
+  if (!process.stdout.isTTY) return text;
+  const pagerSpec = process.env["PAGER"] ?? "less -R -F -X";
+  const [cmd, ...args] = pagerSpec.split(" ").filter(Boolean);
+  if (!cmd) return text;
+  const { spawn } = await import("node:child_process");
+  return await new Promise<string>((resolve) => {
+    try {
+      const child = spawn(cmd, args, { stdio: ["pipe", "inherit", "inherit"] });
+      child.on("error", () => resolve(text));
+      child.on("exit", () => resolve(""));
+      child.stdin.end(text.endsWith("\n") ? text : `${text}\n`);
+    } catch {
+      resolve(text);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
