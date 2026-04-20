@@ -28,11 +28,24 @@ interface CopilotShellProps {
 const IDLE_KEYBINDS = [
   { keys: "Enter", label: "Send" },
   { keys: "\u2191/\u2193", label: "History" },
+  { keys: "Tab", label: "Autocomplete", secondary: true },
   { keys: "Esc", label: "Clear input", secondary: true },
   { keys: "Ctrl+C", label: "Exit", secondary: true },
 ];
 
 const PROCESSING_KEYBINDS = [{ keys: "Ctrl+C", label: "Abort" }];
+const SHELL_QUICK_COMMANDS = [
+  "/help",
+  "/modules",
+  "/tools",
+  "/use <module>",
+  "/target <path>",
+  "/workspace open <name>",
+  "/options",
+  "/set <key> <value>",
+  "/run",
+  "/history",
+];
 
 export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const state = useUIState(store);
@@ -112,6 +125,15 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         return;
       }
 
+      if (key.tab && input.trim().startsWith("/")) {
+        const suggestion = firstShellSuggestion(input);
+        if (suggestion) {
+          setInput(suggestion);
+          setHistoryIndex(null);
+        }
+        return;
+      }
+
       if (char && !key.ctrl && !key.meta && !key.tab) {
         if (historyIndex === null) draftInputRef.current = "";
         setInput((v) => v + char);
@@ -128,6 +150,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     shell.history.length > LIVE_COUNT ? shell.history.slice(0, -LIVE_COUNT) : [];
   const liveHistory =
     shell.history.length > LIVE_COUNT ? shell.history.slice(-LIVE_COUNT) : shell.history;
+  const slashSuggestions = input.trim().startsWith("/") ? listShellSuggestions(input) : [];
 
   return (
     <Box flexDirection="column">
@@ -180,19 +203,32 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
 
       {!shell.processing && (
-        <Box marginTop={1}>
-          <Text>
-            {tokens.accent(buildShellPrompt(shell.focusedModule))}
-            {input}
-            {tokens.muted("\u2588")}
-          </Text>
-        </Box>
+        <>
+          <Box marginTop={1}>
+            <Text>
+              {tokens.accent(buildShellPrompt(shell.focusedModule))}
+              {input}
+              {tokens.muted("\u2588")}
+            </Text>
+          </Box>
+
+          {slashSuggestions.length > 0 && (
+            <Box flexDirection="column" paddingLeft={2}>
+              <Text>{tokens.muted("Suggestions:")}</Text>
+              <Text>{tokens.muted(slashSuggestions.map((v) => `${v}`).join("  •  "))}</Text>
+            </Box>
+          )}
+        </>
       )}
     </Box>
   );
 }
 
 function ShellBanner({ shell }: { shell: ShellState }): React.ReactElement {
+  const quickActions = SHELL_QUICK_COMMANDS.slice(0, 5).join("  •  ");
+  const focusedContext =
+    shell.focusedModule === null ? "none" : (shell.lastUsedTool ?? `${shell.focusedModule}:*`);
+
   return (
     <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
       <Text>{""}</Text>
@@ -201,12 +237,25 @@ function ShellBanner({ shell }: { shell: ShellState }): React.ReactElement {
       <Text>{""}</Text>
       <Text>{`Modules:   ${shell.modules.join(", ") || "none"}`}</Text>
       <Text>{`Tools:     ${shell.tools.length} available`}</Text>
+      <Text>{`Context:   ${focusedContext}`}</Text>
       {shell.target && <Text>{`Target:    ${shell.target}`}</Text>}
       {shell.workspace && <Text>{`Workspace: ${shell.workspace}`}</Text>}
       <Text>{""}</Text>
+      <Text>{tokens.muted(`Quick actions: ${quickActions}`)}</Text>
       <Text>{tokens.muted('Type "/help" for commands, or just describe what you need.')}</Text>
     </Box>
   );
+}
+
+function listShellSuggestions(input: string): string[] {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/")) return [];
+  return SHELL_QUICK_COMMANDS.filter((cmd) => cmd.startsWith(trimmed)).slice(0, 4);
+}
+
+function firstShellSuggestion(input: string): string | null {
+  const suggestions = listShellSuggestions(input);
+  return suggestions.length > 0 ? suggestions[0]! : null;
 }
 
 function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
