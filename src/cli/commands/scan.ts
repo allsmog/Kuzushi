@@ -233,12 +233,15 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
 
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
 
-  // Interactive credential prompt for the Claude backend when no credentials are detected.
-  const isClaudeBackend = (config.agentRuntimeBackend ?? "pi-ai") === "claude";
-  if (isClaudeBackend && !opts.resume && process.stdout.isTTY) {
-    const { hasAnthropicCredentials, runCredentialPrompt } = await import("../../ui/setup.js");
-    const claudeSlotKey = config.agentRuntimeConfig?.claude?.apiKey;
-    if (!hasAnthropicCredentials(claudeSlotKey)) {
+  // Interactive credential prompt when no credentials are detected for the
+  // default provider. pi-ai resolves creds from env vars, so setting the
+  // right env var per provider is sufficient for the scan run.
+  if (!opts.resume && process.stdout.isTTY) {
+    const { hasAnyProviderCredentials, runCredentialPrompt } = await import("../../ui/setup.js");
+    if (!hasAnyProviderCredentials()) {
+      const { providerEnvVar, providerBaseUrlEnvVar, backendConfigSlot } = await import(
+        "../../config.js"
+      );
       const credOutcome = await runCredentialPrompt(uiStore);
       if (credOutcome.action === "cancel") {
         resetTerminalOutput();
@@ -247,30 +250,43 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
       }
 
       const choice = credOutcome.choice;
+      const slot = backendConfigSlot(config.agentRuntimeBackend);
+
       if (choice.kind === "api-key") {
         const existing = config.agentRuntimeConfig ?? {};
         config.agentRuntimeConfig = {
           ...existing,
-          claude: {
-            ...(existing.claude ?? {}),
+          [slot]: {
+            ...(existing[slot] ?? {}),
             apiKey: choice.value,
             ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
           },
         };
-        process.env["ANTHROPIC_API_KEY"] = choice.value;
-        if (choice.baseUrl) process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
-      } else if (choice.kind === "oauth-token") {
-        process.env["ANTHROPIC_OAUTH_TOKEN"] = choice.value;
+        const envKey = providerEnvVar(choice.providerId);
+        if (envKey) process.env[envKey] = choice.value;
         if (choice.baseUrl) {
-          const existing = config.agentRuntimeConfig ?? {};
-          config.agentRuntimeConfig = {
-            ...existing,
-            claude: { ...(existing.claude ?? {}), baseUrl: choice.baseUrl },
-          };
-          process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
+          const envUrl = providerBaseUrlEnvVar(choice.providerId);
+          if (envUrl) process.env[envUrl] = choice.baseUrl;
+        }
+      } else if (choice.kind === "base-url") {
+        // Local/proxy providers (Ollama, OpenRouter, etc.)
+        const existing = config.agentRuntimeConfig ?? {};
+        config.agentRuntimeConfig = {
+          ...existing,
+          [slot]: {
+            ...(existing[slot] ?? {}),
+            baseUrl: choice.baseUrl,
+            ...(choice.apiKey ? { apiKey: choice.apiKey } : {}),
+          },
+        };
+        const envUrl = providerBaseUrlEnvVar(choice.providerId);
+        if (envUrl) process.env[envUrl] = choice.baseUrl;
+        if (choice.apiKey) {
+          const envKey = providerEnvVar(choice.providerId);
+          if (envKey) process.env[envKey] = choice.apiKey;
         }
       }
-      // "inherited" — no changes needed, subprocess will use parent env
+      // "inherited" — no changes needed, we rely on ambient env vars
     }
   }
 
