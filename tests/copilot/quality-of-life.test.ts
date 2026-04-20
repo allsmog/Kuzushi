@@ -118,6 +118,36 @@ describe("output filters", () => {
     const result = await driver.handle("modules | grep good | head 1");
     expect((result.output ?? "").split("\n")).toHaveLength(1);
   });
+
+  it("grep -v inverts the match", async () => {
+    const { driver } = seed();
+    const all = await driver.handle("modules");
+    const inverted = await driver.handle("modules | grep -v semgrep");
+    expect(all.output).toContain("semgrep");
+    expect(inverted.output).not.toContain("semgrep");
+  });
+
+  it("grep -c prints just the match count", async () => {
+    const { driver } = seed();
+    const result = await driver.handle("modules | grep -c semgrep");
+    expect(result.output).toMatch(/^\d+$/);
+  });
+
+  it("grep -A prints trailing context", async () => {
+    const { driver } = seed();
+    // Match the separator row; -A 1 should include one line after it.
+    const result = await driver.handle("modules | grep -A 1 -- ---");
+    const lines = (result.output ?? "").split("\n");
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("grep -C wraps matches with before/after context", async () => {
+    const { driver } = seed();
+    const result = await driver.handle("modules | grep -C 1 semgrep");
+    const lines = (result.output ?? "").split("\n");
+    expect(lines.length).toBeGreaterThan(1);
+    expect(result.output).toContain("semgrep");
+  });
 });
 
 describe("typo correction", () => {
