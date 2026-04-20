@@ -770,6 +770,27 @@ async function startInkShell(
     );
   }
 
+  // Prompt status line — msfconsole-style bracketed telemetry segments.
+  // Each provider returns a short string (or undefined to suppress).
+  driver.addStatusProvider(() => {
+    const n = jobManager.activeCount();
+    return n > 0 ? `${n} ${n === 1 ? "job" : "jobs"}` : undefined;
+  });
+  driver.addStatusProvider(() => {
+    const wsId = opts.workspace;
+    if (!wsId || !workspaceManager) return undefined;
+    const ws = workspaceManager.get(wsId);
+    const cost =
+      typeof ws?.metadata.totalCostUsd === "number" ? ws.metadata.totalCostUsd : undefined;
+    return cost && cost > 0 ? `$${cost.toFixed(2)}` : undefined;
+  });
+  driver.addStatusProvider(() => (opts.workspace ? `ws: ${opts.workspace}` : undefined));
+  driver.addStatusProvider(() => {
+    if (!opts.workspace || !workspaceManager) return undefined;
+    const live = sessionManager.liveForWorkspace(opts.workspace).length;
+    return live > 0 ? `${live} ${live === 1 ? "session" : "sessions"}` : undefined;
+  });
+
   // Load ~/.kuzushi/startup.rc if present — lets operators preload setg,
   // aliases, favorites, etc. on every shell launch. Errors are non-fatal;
   // they show up as dispatcher output but don't abort shell start.
