@@ -133,6 +133,48 @@ describe("shell prompt", () => {
   });
 });
 
+describe("artifact visibility", () => {
+  function makeTempRepo(withKuzushi: boolean, files: string[] = []): string {
+    const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+    const dir = mkdtempSync(path.join(os.tmpdir(), "kuzushi-banner-"));
+    tempDirs.push(dir);
+    if (withKuzushi) {
+      mkdirSync(path.join(dir, ".kuzushi"), { recursive: true });
+      for (const rel of files) {
+        writeFileSync(path.join(dir, ".kuzushi", rel), "{}", "utf-8");
+      }
+    }
+    return dir;
+  }
+
+  it("emits an empty banner and trailer in a fresh directory", async () => {
+    const dir = makeTempRepo(false);
+    expect(__shellInternals.formatArtifactBanner(dir)).toBe("");
+    expect(__shellInternals.formatContextTrailer(dir)).toBe("");
+    expect(__shellInternals.loadArtifactManifest(dir)).toEqual([]);
+  });
+
+  it("banner lists scan-context + threat-model when present, with a /ask pointer", async () => {
+    const dir = makeTempRepo(true, ["scan-context.json", "threat-model.json"]);
+    const banner = __shellInternals.formatArtifactBanner(dir);
+    expect(banner).toContain("Prior artifacts in .kuzushi/:");
+    expect(banner).toContain("scan-context.json");
+    expect(banner).toContain("threat-model.json");
+    expect(banner).toContain("/ask uses these as context.");
+  });
+
+  it("trailer is a compact filename list — keeps tool-summary readable", async () => {
+    const dir = makeTempRepo(true, ["scan-context.json", "threat-model.json", "findings.sqlite3"]);
+    const trailer = __shellInternals.formatContextTrailer(dir);
+    expect(trailer).toContain("(context:");
+    expect(trailer).toContain("scan-context.json");
+    expect(trailer).toContain("threat-model.json");
+    expect(trailer).toContain("findings.sqlite3");
+    // No expanded "modified YYYY-MM-DD" tags in the trailer — keep it one line.
+    expect(trailer).not.toContain("modified");
+  });
+});
+
 describe("local shell commands", () => {
   it("uses slash-prefixed commands for workspace, focus, and help", async () => {
     const { core, module } = await createMockCore();
