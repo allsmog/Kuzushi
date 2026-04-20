@@ -1,0 +1,94 @@
+/**
+ * BannerSplash — Phase D.2 one-shot "welcome" header rendered at shell boot.
+ *
+ * Stays intentionally light: a compact ASCII wordmark, an identity line,
+ * and a rotating "tip of the day" picked deterministically from the
+ * operator's boot timestamp so two boots in the same minute show the
+ * same tip (less jarring than strict random).
+ *
+ * Rendered once (via Ink <Static>) at the very top of CopilotShell so it
+ * scrolls away naturally as the session fills in. Non-TTY callers skip
+ * it — the plain-renderer emits one line of "kuzushi shell (ws=…)" so
+ * log transcripts stay compact.
+ */
+
+import { Box, Text } from "ink";
+import type React from "react";
+import { tokens } from "../tokens.js";
+
+const WORDMARK = [
+  "  ██╗  ██╗██╗   ██╗███████╗██╗   ██╗███████╗██╗  ██╗██╗",
+  "  ██║ ██╔╝██║   ██║╚══███╔╝██║   ██║██╔════╝██║  ██║██║",
+  "  █████╔╝ ██║   ██║  ███╔╝ ██║   ██║███████╗███████║██║",
+  "  ██╔═██╗ ██║   ██║ ███╔╝  ██║   ██║╚════██║██╔══██║██║",
+  "  ██║  ██╗╚██████╔╝███████╗╚██████╔╝███████║██║  ██║██║",
+  "  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝",
+] as const;
+
+const TIPS: ReadonlyArray<string> = [
+  'type /plan "run harder, focus on auth" to have Haiku propose option changes',
+  "/prompt edit triage opens the operator system-prompt override in $EDITOR",
+  "/show runs lists every past scan; /replay <id> re-renders the summary",
+  "/threats dfd — ASCII box-and-arrow of the randori data flow diagram (1..5 to cycle)",
+  "F-0001 / C-01 short-IDs resolve deterministically — /show aliases to list them",
+  "house rules live at .kuzushi/house-rules/<moduleId>.md and round-trip with git",
+  "two-stage Ctrl+C at the prompt: once to arm, again within 2s to exit",
+  "kuzushi scan . --ci disables Ink and writes one line per stage transition",
+  "/tune shows six plain controls; press p or /config for the full editor",
+  "/trace <runId> streams the per-event JSONL audit log of a past scan",
+];
+
+interface BannerSplashProps {
+  /** Workspace / target context — shown below the wordmark when present. */
+  workspace?: string | null;
+  target?: string | null;
+  /** Override the tip shown. Primarily a test hook. */
+  tip?: string;
+}
+
+export function BannerSplash({ workspace, target, tip }: BannerSplashProps): React.ReactElement {
+  const resolvedTip = tip ?? pickTip(Date.now());
+  const contextParts: string[] = [];
+  if (workspace) contextParts.push(`workspace ${workspace}`);
+  if (target) contextParts.push(`target ${target}`);
+
+  return (
+    <Box flexDirection="column" paddingLeft={2} marginTop={1} marginBottom={1}>
+      {WORDMARK.map((row, i) => (
+        <Text key={`w-${i}`}>{tokens.accent(row)}</Text>
+      ))}
+      <Box marginTop={1}>
+        <Text>
+          {tokens.muted("  \u5D29\u3057 \u2014 ")}
+          {tokens.strong("Kuzushi")}
+          {tokens.muted(" \u2014 agentic SAST orchestration")}
+        </Text>
+      </Box>
+      {contextParts.length > 0 ? (
+        <Box>
+          <Text>
+            {tokens.muted("  ")}
+            {tokens.muted(contextParts.join("  \u00B7  "))}
+          </Text>
+        </Box>
+      ) : null}
+      <Box marginTop={1}>
+        <Text>
+          {tokens.hint("  tip: ")}
+          {tokens.hint(resolvedTip)}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+/**
+ * Deterministic tip pick: quantise the boot timestamp to the minute so
+ * two shell starts in the same minute show the same tip. Exported for
+ * tests — keeps the index-from-time logic pure.
+ */
+export function pickTip(bootMs: number): string {
+  const minute = Math.floor(bootMs / 60_000);
+  const idx = Math.abs(minute) % TIPS.length;
+  return TIPS[idx]!;
+}
