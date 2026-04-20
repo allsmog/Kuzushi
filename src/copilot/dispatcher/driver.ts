@@ -79,6 +79,31 @@ export class DispatcherDriver implements Driver {
   }
 
   // ---------------------------------------------------------------------
+  // Command observers (for macros + audit)
+  // ---------------------------------------------------------------------
+
+  private readonly commandObservers: Array<(line: string) => void> = [];
+
+  /** Register a post-handle callback fired for every non-empty input. */
+  onCommand(observer: (line: string) => void): () => void {
+    this.commandObservers.push(observer);
+    return () => {
+      const idx = this.commandObservers.indexOf(observer);
+      if (idx >= 0) this.commandObservers.splice(idx, 1);
+    };
+  }
+
+  private notifyObservers(line: string): void {
+    for (const obs of this.commandObservers) {
+      try {
+        obs(line);
+      } catch {
+        // A broken observer shouldn't affect the command path.
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Prompt status providers (msfconsole PROMPT-format equivalent)
   // ---------------------------------------------------------------------
 
@@ -170,6 +195,7 @@ export class DispatcherDriver implements Driver {
         if (result.push) this.push(result.push);
         if (result.pop) this.pop();
         const filtered = await this.applyFilters(result.output, filters);
+        this.notifyObservers(trimmed);
         return {
           matched: true,
           ...result,
@@ -192,6 +218,7 @@ export class DispatcherDriver implements Driver {
       if (result.push) this.push(result.push);
       if (result.pop) this.pop();
       const filtered = await this.applyFilters(result.output, filters);
+      this.notifyObservers(trimmed);
       return {
         matched: true,
         ...result,

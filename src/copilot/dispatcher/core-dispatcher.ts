@@ -131,6 +131,8 @@ const COMMANDS: Record<string, string> = {
   logs: "Tail the audit log (`logs` for last 50 lines, `logs -f` to follow)",
   connect: "Open a raw TCP socket to <host> <port> (interactive)",
   schedule: "Interval-based job runner (`schedule every <n>m|h|d <cmd...>` / list / remove)",
+  macro:
+    "Record / replay / list / delete command macros (`macro record <name>` / stop / play / list / delete)",
   exit: "Exit the shell",
   quit: "Exit the shell (alias for exit)",
 };
@@ -225,6 +227,8 @@ export class CoreDispatcher implements CommandDispatcher {
         return this.cmd_connect(args, ctx);
       case "schedule":
         return this.cmd_schedule(args);
+      case "macro":
+        return this.cmd_macro(args, ctx);
       default:
         return { output: `Unknown command: ${cmd}` };
     }
@@ -949,6 +953,94 @@ export class CoreDispatcher implements CommandDispatcher {
     return {
       output: tail.length === 0 ? "  (empty log)" : tail.join("\n"),
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Macros — record / replay a sequence of commands
+  // -------------------------------------------------------------------------
+
+  private readonly macros = new Map<string, string[]>();
+  private recordingTarget: string | null = null;
+  private recordingBuffer: string[] = [];
+  private recordingUnsub: (() => void) | null = null;
+
+  private async cmd_macro(args: string[], ctx: CommandContext): Promise<CommandResult> {
+    const sub = args[0];
+    const driver = ctx.driver as unknown as {
+      onCommand?: (o: (line: string) => void) => () => void;
+      handle: (line: string, signal?: AbortSignal) => Promise<CommandResult>;
+    };
+    switch (sub) {
+      case "record": {
+        const name = args[1];
+        if (!name) return { output: "Usage: macro record <name>" };
+        if (this.recordingTarget) {
+          return { output: `[-] Already recording '${this.recordingTarget}' — stop first.` };
+        }
+        if (typeof driver.onCommand !== "function") {
+          return { output: "[-] Driver does not expose onCommand() — macros disabled." };
+        }
+        this.recordingTarget = name;
+        this.recordingBuffer = [];
+        this.recordingUnsub = driver.onCommand((line) => {
+          // Skip lines that are themselves `macro …` commands so a recorder
+          // doesn't loop on the `macro stop` that ends it.
+          if (line.startsWith("macro ")) return;
+          this.recordingBuffer.push(line);
+        });
+        return { output: `[*] Recording macro '${name}'. Type 'macro stop' to save.` };
+      }
+      case "stop": {
+        if (!this.recordingTarget) return { output: "[-] No active recording." };
+        const name = this.recordingTarget;
+        this.macros.set(name, [...this.recordingBuffer]);
+        this.recordingUnsub?.();
+        this.recordingUnsub = null;
+        this.recordingTarget = null;
+        this.recordingBuffer = [];
+        return { output: `[+] Saved macro '${name}' (${this.macros.get(name)!.length} lines)` };
+      }
+      case "list": {
+        if (this.macros.size === 0) return { output: "  (no macros)" };
+        const rows = [...this.macros.entries()].map(
+          ([name, lines]) => `  ${name.padEnd(20)} ${lines.length} lines`,
+        );
+        return { output: ["Macros:", ...rows].join("\n") };
+      }
+      case "delete": {
+        const name = args[1];
+        if (!name) return { output: "Usage: macro delete <name>" };
+        return {
+          output: this.macros.delete(name)
+            ? `[+] Deleted macro '${name}'`
+            : `[-] No macro '${name}'`,
+        };
+      }
+      case "play": {
+        const name = args[1];
+        if (!name) return { output: "Usage: macro play <name>" };
+        const lines = this.macros.get(name);
+        if (!lines) return { output: `[-] No macro '${name}'` };
+        const outLines: string[] = [`[*] Playing macro '${name}' (${lines.length} lines)`];
+        for (const line of lines) {
+          const r = await driver.handle(line, ctx.signal);
+          if (r.output) outLines.push(r.output);
+        }
+        return { output: outLines.join("\n") };
+      }
+      case "show": {
+        const name = args[1];
+        if (!name) return { output: "Usage: macro show <name>" };
+        const lines = this.macros.get(name);
+        if (!lines) return { output: `[-] No macro '${name}'` };
+        return { output: lines.map((l, i) => `  ${i + 1}  ${l}`).join("\n") };
+      }
+      default:
+        return {
+          output:
+            "Usage: macro record <name> | stop | list | show <name> | play <name> | delete <name>",
+        };
+    }
   }
 
   private cmd_schedule(args: string[]): CommandResult {
