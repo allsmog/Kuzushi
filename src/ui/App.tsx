@@ -163,36 +163,29 @@ function AppInner({ store }: AppProps): React.ReactElement {
         </Box>
       ) : null}
 
-      {/* Config banner — rendered once */}
-      {routing.configBanner && routing.mode !== "preflight" && (
-        <Static items={["config-banner"]}>
-          {() => <ConfigBanner key="config-banner" config={routing.configBanner!} />}
-        </Static>
-      )}
-
-      {/* Resume diff — shown when resuming a previous run */}
-      {routing.resumeDiff && (
-        <Static items={["resume-diff"]}>
-          {() => <ResumeDiff key="resume-diff" data={routing.resumeDiff!} />}
-        </Static>
-      )}
-
-      {/* Skipped info (plain fallback if no resume diff) */}
-      {!routing.resumeDiff &&
-        routing.skippedAlreadyTriaged > 0 &&
-        routing.phase === "triaging" &&
-        routing.mode === "running" && (
-          <Static items={["skip-info"]}>
-            {() => (
-              <Text key="skip-info">
-                {"  "}
-                {tokens.muted(
-                  `Skipping ${routing.skippedAlreadyTriaged} already-triaged findings, ${routing.selectedForTriage} remaining`,
-                )}
-              </Text>
-            )}
-          </Static>
-        )}
+      {/*
+       * One-shot banners — config / resume / skip-info — share a single
+       * <Static> region. Multiple Static regions in one Ink tree are
+       * known to cause flicker (see CC's note in
+       * cc-repo/src/utils/staticRender.tsx:8-10), so we batch them into
+       * one items array. Each item carries the data needed to render
+       * the right banner type.
+       */}
+      <PreflightBannersStatic
+        configBanner={routing.mode !== "preflight" ? routing.configBanner : null}
+        resumeDiff={routing.resumeDiff}
+        skipInfo={
+          !routing.resumeDiff &&
+          routing.skippedAlreadyTriaged > 0 &&
+          routing.phase === "triaging" &&
+          routing.mode === "running"
+            ? {
+                skipped: routing.skippedAlreadyTriaged,
+                remaining: routing.selectedForTriage,
+              }
+            : null
+        }
+      />
 
       <NoticeRail notices={routing.notices} expanded={routing.noticeRailExpanded} />
 
@@ -271,3 +264,67 @@ function AppInner({ store }: AppProps): React.ReactElement {
     </Box>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Single-Static banner consolidation
+// ---------------------------------------------------------------------------
+
+type BannerItem =
+  | { kind: "config"; data: NonNullable<ReturnType<typeof getConfigBannerType>> }
+  | { kind: "resume"; data: NonNullable<ReturnType<typeof getResumeDiffType>> }
+  | { kind: "skip"; skipped: number; remaining: number };
+
+// Type-extracting helpers — purely for the BannerItem variants above.
+function getConfigBannerType(): React.ComponentProps<typeof ConfigBanner>["config"] | null {
+  return null;
+}
+function getResumeDiffType(): React.ComponentProps<typeof ResumeDiff>["data"] | null {
+  return null;
+}
+
+interface PreflightBannersStaticProps {
+  configBanner: React.ComponentProps<typeof ConfigBanner>["config"] | null | undefined;
+  resumeDiff: React.ComponentProps<typeof ResumeDiff>["data"] | null | undefined;
+  skipInfo: { skipped: number; remaining: number } | null;
+}
+
+const PreflightBannersStatic = React.memo(function PreflightBannersStatic({
+  configBanner,
+  resumeDiff,
+  skipInfo,
+}: PreflightBannersStaticProps): React.ReactElement | null {
+  // Build the items array for <Static>. Items are stable as long as their
+  // input is stable (parent passes already-narrow slices).
+  const items = React.useMemo<Array<BannerItem & { _key: string }>>(() => {
+    const out: Array<BannerItem & { _key: string }> = [];
+    if (configBanner) out.push({ _key: "config", kind: "config", data: configBanner });
+    if (resumeDiff) out.push({ _key: "resume", kind: "resume", data: resumeDiff });
+    if (skipInfo)
+      out.push({ _key: "skip", kind: "skip", skipped: skipInfo.skipped, remaining: skipInfo.remaining });
+    return out;
+  }, [configBanner, resumeDiff, skipInfo]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <Static items={items}>
+      {(item) => {
+        switch (item.kind) {
+          case "config":
+            return <ConfigBanner key={item._key} config={item.data} />;
+          case "resume":
+            return <ResumeDiff key={item._key} data={item.data} />;
+          case "skip":
+            return (
+              <Text key={item._key}>
+                {"  "}
+                {tokens.muted(
+                  `Skipping ${item.skipped} already-triaged findings, ${item.remaining} remaining`,
+                )}
+              </Text>
+            );
+        }
+      }}
+    </Static>
+  );
+});
