@@ -45,6 +45,11 @@ export class DispatcherDriver implements Driver {
     if (opts.getFindingCount) this.getFindingCount = opts.getFindingCount;
     if (opts.getHostCount) this.getHostCount = opts.getHostCount;
     if (opts.getLiveSessionCount) this.getLiveSessionCount = opts.getLiveSessionCount;
+    // Back-ref: let the base dispatcher peek at the active module for completion.
+    const maybeSetDriver = (opts.base as unknown as { setDriver?: (d: unknown) => void }).setDriver;
+    if (typeof maybeSetDriver === "function") {
+      maybeSetDriver.call(opts.base, this);
+    }
   }
 
   current(): CommandDispatcher {
@@ -197,6 +202,19 @@ export class DispatcherDriver implements Driver {
       current = await applyOneFilter(current, filter);
     }
     return current;
+  }
+
+  /**
+   * The top-most dispatcher that behaves like a ModuleDispatcher (has a
+   * `.datastore` field). Used by CoreDispatcher's tab-completion to offer
+   * option names / values for `set`/`unset`.
+   */
+  activeModuleLike(): { datastore?: unknown } | undefined {
+    for (let i = this._stack.length - 1; i >= 0; i--) {
+      const d = this._stack[i] as unknown as { datastore?: unknown };
+      if (d && "datastore" in d && d.datastore) return d;
+    }
+    return undefined;
   }
 
   complete(line: string): string[] {

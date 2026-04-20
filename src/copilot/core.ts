@@ -24,6 +24,7 @@ import { createCoreShinsaModule } from "../modules/core-shinsa.js";
 import { createCoreTobModule } from "../modules/core-tob.js";
 import { createCoreVulnScoutModule } from "../modules/core-vuln-scout.js";
 import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
+import { createReconModule } from "../modules/recon/core-recon.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
 import { createAgenticSastModule } from "../modules/sast/core-agentic-sast.js";
 import { createCodeqlModule } from "../modules/sast/core-codeql.js";
@@ -108,6 +109,7 @@ export class CopilotCore {
         createPatchModule(),
         createFindingsModule(),
         createContextModule(),
+        createReconModule(),
       ];
       for (const mod of sastFamily) {
         await this.registry.loadModule(mod, this.moduleCtx, {
