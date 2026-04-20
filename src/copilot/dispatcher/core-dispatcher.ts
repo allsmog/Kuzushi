@@ -81,6 +81,13 @@ export interface CoreDispatcherOptions {
   frameworkVersion?: string;
   /** Audit log path resolver for the `logs` command. */
   getLogPath?: () => string | undefined;
+  /**
+   * Optional Scheduler accessor — lazily resolved to accommodate the
+   * circular build order in shell.ts (Scheduler needs the Driver, the
+   * Driver contains the CoreDispatcher). When unset, the `schedule`
+   * command reports "not enabled."
+   */
+  scheduler?: () => import("../../scheduler/core.js").Scheduler | undefined;
 }
 
 const COMMANDS: Record<string, string> = {
@@ -123,6 +130,7 @@ const COMMANDS: Record<string, string> = {
   version: "Show Kuzushi version + loaded module summary",
   logs: "Tail the audit log (`logs` for last 50 lines, `logs -f` to follow)",
   connect: "Open a raw TCP socket to <host> <port> (interactive)",
+  schedule: "Interval-based job runner (`schedule every <n>m|h|d <cmd...>` / list / remove)",
   exit: "Exit the shell",
   quit: "Exit the shell (alias for exit)",
 };
@@ -215,6 +223,8 @@ export class CoreDispatcher implements CommandDispatcher {
         return this.cmd_logs(args);
       case "connect":
         return this.cmd_connect(args, ctx);
+      case "schedule":
+        return this.cmd_schedule(args);
       default:
         return { output: `Unknown command: ${cmd}` };
     }
@@ -938,6 +948,46 @@ export class CoreDispatcher implements CommandDispatcher {
     const tail = lines.slice(-limit);
     return {
       output: tail.length === 0 ? "  (empty log)" : tail.join("\n"),
+    };
+  }
+
+  private cmd_schedule(args: string[]): CommandResult {
+    const sched = this.opts.scheduler?.();
+    if (!sched) return { output: "[-] Scheduler is not enabled in this driver." };
+    const sub = args[0];
+    if (!sub || sub === "list") {
+      const rows = sched.list();
+      if (rows.length === 0) return { output: "  (no schedules)" };
+      const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - s.length));
+      const lines = rows.map((r) => {
+        const eta = Math.max(0, (r.nextFireAt - Date.now()) / 1000).toFixed(0);
+        return `  ${pad(r.label, 20)}  every ${pad(r.interval, 6)}  next in ${pad(`${eta}s`, 8)}  ${r.command}`;
+      });
+      return { output: ["Schedules:", ...lines].join("\n") };
+    }
+    if (sub === "remove" && args[1]) {
+      const ok = sched.remove(args[1] as string);
+      return { output: ok ? `[+] Removed schedule '${args[1]}'` : `[-] No schedule '${args[1]}'` };
+    }
+    if (sub === "every" && args[1] && args[2]) {
+      const interval = args[1] as string;
+      const rest = args.slice(2).join(" ");
+      // Allow an explicit --label; otherwise synthesize one from the command.
+      let label = rest.startsWith("--label ") ? (rest.split(/\s+/)[1] ?? "") : "";
+      const cmd = label ? rest.replace(/^--label \S+\s*/, "") : rest;
+      if (!label) label = `${interval}:${cmd.split(/\s+/)[0] ?? "job"}`;
+      try {
+        const entry = sched.add(label, interval, cmd);
+        return {
+          output: `[+] Scheduled '${entry.label}' every ${entry.interval} → ${entry.command}`,
+        };
+      } catch (err) {
+        return { output: `[-] ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
+    return {
+      output:
+        "Usage: schedule every <Ns|Nm|Nh|Nd> <cmd...> | schedule list | schedule remove <label>",
     };
   }
 

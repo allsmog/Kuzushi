@@ -758,6 +758,12 @@ async function startInkShell(
   // `run --bg` backgrounding) and the CoreDispatcher (for the `jobs` family).
   const jobManager = new JobManager();
 
+  // Scheduler — layered on JobManager. Forward-declared here; the
+  // `runCommand` callback closes over `driver` so we instantiate lazily
+  // just before driver construction below. Actual setup lives at a
+  // `const scheduler = new Scheduler(...)` line further down.
+  let scheduler: import("../scheduler/core.js").Scheduler | undefined;
+
   // Desktop notification bridge. Jobs that run longer than NOTIFY_THRESHOLD_SECS
   // fire a system toast on terminal transitions. Opt-in via `setg NOTIFY_ON_COMPLETE true`.
   {
@@ -925,6 +931,7 @@ async function startInkShell(
     events: core.events,
     frameworkVersion: resolveFrameworkVersion(),
     getLogPath: () => resolveAuditLogPath(opts.config, dataDir),
+    scheduler: () => scheduler,
   });
 
   driver = new DispatcherDriver({
@@ -994,6 +1001,28 @@ async function startInkShell(
     return live > 0 ? `${live} ${live === 1 ? "session" : "sessions"}` : undefined;
   });
   driver.addStatusProvider(() => spoolController.status());
+
+  // Instantiate the Scheduler now that the driver exists (it references
+  // `driver.handle` to replay commands). Late assignment lands in the
+  // `scheduler` binding that the CoreDispatcher's `schedule()` accessor
+  // reads. Backed by the workspace DB when one's available.
+  {
+    const { Scheduler } = await import("../scheduler/core.js");
+    let store: import("../scheduler/core.js").SchedulerStore | undefined;
+    if (workspaceManager) {
+      const { SqliteScheduleStore } = await import("../scheduler/store.js");
+      store = new SqliteScheduleStore(workspaceManager.rawDb());
+    }
+    scheduler = new Scheduler({
+      jobs: jobManager,
+      store,
+      runCommand: async (command: string) => {
+        const out = await driver.handle(command);
+        return out.output;
+      },
+    });
+    scheduler.start();
+  }
 
   // Load ~/.kuzushi/startup.rc if present — lets operators preload setg,
   // aliases, favorites, etc. on every shell launch. Errors are non-fatal;
@@ -1376,6 +1405,7 @@ async function startInkShell(
     } finally {
       await closeSession();
       await jobManager.shutdown();
+      scheduler?.stop();
       spoolController.stop();
       await core.dispose();
       await bus.close();
