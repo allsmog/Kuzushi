@@ -75,6 +75,13 @@ export async function createUIRenderer(options: CreateUIRendererOptions = {}): P
     const { detectTheme } = await import("./theme.js");
     await detectTheme(200).catch(() => {}); // best-effort, don't block
 
+    // Wrap stdout writes in DEC 2026 synchronized-update markers when the
+    // terminal supports them. Eliminates partial-redraw tearing from Ink's
+    // frame updates on iTerm2/WezTerm/Ghostty/Kitty/Alacritty/Windows
+    // Terminal. No-op on unsupported terminals (tmux, older shells).
+    const { wrapStdoutForSyncOutput } = await import("./sync-output.js");
+    const restoreStdout = wrapStdoutForSyncOutput();
+
     // Dynamic import to avoid loading React/Ink when not needed (CI, pipes)
     const { render } = await import("ink");
     const { App } = await import("./App.js");
@@ -84,6 +91,7 @@ export async function createUIRenderer(options: CreateUIRendererOptions = {}): P
       store,
       cleanup: () => {
         instance.unmount();
+        restoreStdout();
         // Ensure cursor is visible after unmount even if Ink's default
         // restore ran before our exit handler installs.
         if (process.stdout.isTTY) {

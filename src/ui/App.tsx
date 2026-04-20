@@ -9,37 +9,30 @@
 
 import { Box, Static, Text, useInput } from "ink";
 import React from "react";
-import { HeartbeatStrip } from "./components/AgentActivity.js";
 import { Banner } from "./components/Banner.js";
-import { CommandInput, type CommandResult, type ReplCommand } from "./components/CommandInput.js";
+import type { CommandResult, ReplCommand } from "./components/CommandInput.js";
 import { CompactHeader } from "./components/CompactHeader.js";
 import { ConfigBanner } from "./components/ConfigBanner.js";
 import { ConfigConfirm } from "./components/ConfigConfirm.js";
 import { ConfigEditor } from "./components/ConfigEditor.js";
 import { ContextIntake } from "./components/ContextIntake.js";
 import { CopilotShell } from "./components/CopilotShell.js";
-import { CostCapHalt } from "./components/CostCapHalt.js";
-import { CostView } from "./components/CostView.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
-import { FindingsView } from "./components/FindingsView.js";
 import { InteractiveReview } from "./components/InteractiveReview.js";
 import { NoticeRail } from "./components/NoticeRail.js";
-import { PipelineIndicator } from "./components/PipelineIndicator.js";
-import { QualityGate } from "./components/QualityGate.js";
-import { RateLimitBanner } from "./components/RateLimitBanner.js";
-import { ResultLine } from "./components/ResultLine.js";
 import { ResumeDiff } from "./components/ResumeDiff.js";
+import { RunningView } from "./components/RunningView.js";
 import { ScanSummary } from "./components/ScanSummary.js";
 import { SetupWizard } from "./components/SetupWizard.js";
-import { StatusFooter } from "./components/StatusFooter.js";
 import { ThreatModelEditor } from "./components/ThreatModelEditor.js";
+import { QualityGate } from "./components/QualityGate.js";
 import { KeybindingsProvider } from "./hooks/useKeybindings.js";
-import { useUIState } from "./hooks.js";
+import { shallowEqual, useUISelector } from "./hooks.js";
 import { Breadcrumb } from "./primitives/Breadcrumb.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
-import { TabBar } from "./primitives/TabBar.js";
+import { SpinnerClockProvider } from "./primitives/SpinnerClock.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
-import type { Phase, PipelineStage, ResultLine as ResultLineData, UIStore } from "./state.js";
+import type { UIStore } from "./state.js";
 import { tokens } from "./tokens.js";
 
 interface AppProps {
@@ -49,13 +42,14 @@ interface AppProps {
 export function App({ store }: AppProps): React.ReactElement {
   return (
     <KeybindingsProvider>
-      <AppInner store={store} />
+      <SpinnerClockProvider>
+        <AppInner store={store} />
+      </SpinnerClockProvider>
     </KeybindingsProvider>
   );
 }
 
 function AppInner({ store }: AppProps): React.ReactElement {
-  const state = useUIState(store);
   const [replCtx] = React.useState(() => createReplContext(store));
 
   const handleCommand = React.useCallback(
@@ -65,20 +59,62 @@ function AppInner({ store }: AppProps): React.ReactElement {
     [replCtx],
   );
 
-  // Global tab switching: 1/2/3 keys switch views during running mode.
-  // `m` toggles the B1 heartbeat strip's per-agent expansion.
-  // `c` / `a` answer the B4 cost-cap halt prompt when armed.
+  // Routing-only subscription — this hook re-renders only when one of these
+  // fields changes (shallowEqual on the slice object). Spinner ticks, result
+  // additions, progress updates, and agent-activity deltas happen on other
+  // fields and do NOT re-render AppInner or the routing shell — they only
+  // re-render the subtree that subscribes to them.
+  const routing = useUISelector(
+    store,
+    (s) => ({
+      mode: s.mode,
+      phase: s.phase,
+      preflight: s.preflight,
+      configBanner: s.configBanner,
+      resumeDiff: s.resumeDiff,
+      skippedAlreadyTriaged: s.skippedAlreadyTriaged,
+      selectedForTriage: s.selectedForTriage,
+      notices: s.notices,
+      breadcrumb: s.breadcrumb,
+      repoName: s.repoName,
+      tasks: s.tasks,
+      totalFindings: s.totalFindings,
+      startBannerShown: s.startBannerShown,
+      costCapHalted: s.costCapHalted,
+      heartbeatExpanded: s.heartbeatExpanded,
+      noticeRailExpanded: s.noticeRailExpanded,
+      summary: s.summary,
+      qualityGate: s.qualityGate,
+      review: s.review,
+      shell: s.shell,
+    }),
+    shallowEqual,
+  );
+
+  // Key-handler state comes from a separate selector so key events that mutate
+  // costCapHalted/heartbeatExpanded/noticeRailExpanded don't re-run effects
+  // that depend on routing.
+  const keyState = useUISelector(
+    store,
+    (s) => ({
+      mode: s.mode,
+      costCapHalted: s.costCapHalted,
+      heartbeatExpanded: s.heartbeatExpanded,
+      noticeRailExpanded: s.noticeRailExpanded,
+      shellAbort: s.shell?.onAbort,
+    }),
+    shallowEqual,
+  );
+
   useInput(
     (input, key) => {
-      // Cost-cap halt takes priority — it's a blocking confirmation so
-      // `c` and `a` should not also trigger the tab shortcut.
-      if (state.costCapHalted) {
+      if (keyState.costCapHalted) {
         if (input === "c") {
           store.update({ costCapHalted: false });
           return;
         }
         if (input === "a" || (key.ctrl && input === "c")) {
-          state.shell?.onAbort?.();
+          keyState.shellAbort?.();
           store.update({ costCapHalted: false });
           return;
         }
@@ -87,29 +123,20 @@ function AppInner({ store }: AppProps): React.ReactElement {
       if (input === "1") store.update({ scanView: "pipeline" });
       else if (input === "2") store.update({ scanView: "findings" });
       else if (input === "3") store.update({ scanView: "cost" });
-      else if (input === "m") store.update({ heartbeatExpanded: !state.heartbeatExpanded });
-      else if (input === "n") store.update({ noticeRailExpanded: !state.noticeRailExpanded });
+      else if (input === "m") store.update({ heartbeatExpanded: !keyState.heartbeatExpanded });
+      else if (input === "n") store.update({ noticeRailExpanded: !keyState.noticeRailExpanded });
     },
-    { isActive: state.mode === "running" && process.stdin.isTTY === true },
+    { isActive: keyState.mode === "running" && process.stdin.isTTY === true },
   );
 
-  // Results that have scrolled past the live window go to Static (no re-render).
-  // Only the last few stay in the live PipelineIndicator.
-  const LIVE_RESULT_COUNT = 3;
-  const staticResults =
-    state.results.length > LIVE_RESULT_COUNT ? state.results.slice(0, -LIVE_RESULT_COUNT) : [];
-  const liveResults =
-    state.results.length > LIVE_RESULT_COUNT
-      ? state.results.slice(-LIVE_RESULT_COUNT)
-      : state.results;
   const showCompactHeader =
-    state.mode !== "preflight" && state.mode !== "shell" && state.repoName.length > 0;
+    routing.mode !== "preflight" && routing.mode !== "shell" && routing.repoName.length > 0;
 
   // Shell mode renders only the CopilotShell — no scan banner/header/pipeline chrome
-  if (state.mode === "shell") {
+  if (routing.mode === "shell") {
     return (
       <Box flexDirection="column">
-        {state.shell && <CopilotShell store={store} />}
+        {routing.shell && <CopilotShell store={store} />}
         <KeybindFooter />
       </Box>
     );
@@ -120,200 +147,116 @@ function AppInner({ store }: AppProps): React.ReactElement {
       <Banner />
       {showCompactHeader && (
         <CompactHeader
-          repoName={state.repoName}
-          tasks={state.tasks}
-          totalFindings={state.startBannerShown ? state.totalFindings : undefined}
-          selectedForTriage={state.startBannerShown ? state.selectedForTriage : undefined}
+          repoName={routing.repoName}
+          tasks={routing.tasks}
+          totalFindings={routing.startBannerShown ? routing.totalFindings : undefined}
+          selectedForTriage={routing.startBannerShown ? routing.selectedForTriage : undefined}
         />
       )}
-      {state.breadcrumb && state.breadcrumb.segments.length > 0 ? (
+      {routing.breadcrumb && routing.breadcrumb.segments.length > 0 ? (
         <Box paddingLeft={2} marginTop={1}>
           <Breadcrumb
-            segments={state.breadcrumb.segments}
-            currentStep={state.breadcrumb.currentStep}
-            totalSteps={state.breadcrumb.totalSteps}
+            segments={routing.breadcrumb.segments}
+            currentStep={routing.breadcrumb.currentStep}
+            totalSteps={routing.breadcrumb.totalSteps}
           />
         </Box>
       ) : null}
 
-      {/* Config banner — rendered once */}
-      {state.configBanner && state.mode !== "preflight" && (
-        <Static items={["config-banner"]}>
-          {() => <ConfigBanner key="config-banner" config={state.configBanner!} />}
-        </Static>
-      )}
+      {/*
+       * One-shot banners — config / resume / skip-info — share a single
+       * <Static> region. Multiple Static regions in one Ink tree are
+       * known to cause flicker (see CC's note in
+       * cc-repo/src/utils/staticRender.tsx:8-10), so we batch them into
+       * one items array. Each item carries the data needed to render
+       * the right banner type.
+       */}
+      <PreflightBannersStatic
+        configBanner={routing.mode !== "preflight" ? routing.configBanner : null}
+        resumeDiff={routing.resumeDiff}
+        skipInfo={
+          !routing.resumeDiff &&
+          routing.skippedAlreadyTriaged > 0 &&
+          routing.phase === "triaging" &&
+          routing.mode === "running"
+            ? {
+                skipped: routing.skippedAlreadyTriaged,
+                remaining: routing.selectedForTriage,
+              }
+            : null
+        }
+      />
 
-      {/* Resume diff — shown when resuming a previous run */}
-      {state.resumeDiff && (
-        <Static items={["resume-diff"]}>
-          {() => <ResumeDiff key="resume-diff" data={state.resumeDiff!} />}
-        </Static>
-      )}
+      <NoticeRail notices={routing.notices} expanded={routing.noticeRailExpanded} />
 
-      {/* Skipped info (plain fallback if no resume diff) */}
-      {!state.resumeDiff &&
-        state.skippedAlreadyTriaged > 0 &&
-        state.phase === "triaging" &&
-        state.mode === "running" && (
-          <Static items={["skip-info"]}>
-            {() => (
-              <Text key="skip-info">
-                {"  "}
-                {tokens.muted(
-                  `Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`,
-                )}
-              </Text>
-            )}
-          </Static>
-        )}
-
-      <NoticeRail notices={state.notices} expanded={state.noticeRailExpanded} />
-
-      {state.mode === "preflight" && state.preflight?.kind === "wizard" && (
+      {routing.mode === "preflight" && routing.preflight?.kind === "wizard" && (
         <SetupWizard
-          repoName={state.preflight.repoName}
-          onComplete={state.preflight.onComplete}
-          onCancel={state.preflight.onCancel}
+          repoName={routing.preflight.repoName}
+          onComplete={routing.preflight.onComplete}
+          onCancel={routing.preflight.onCancel}
         />
       )}
-      {state.mode === "preflight" && state.preflight?.kind === "confirm" && (
+      {routing.mode === "preflight" && routing.preflight?.kind === "confirm" && (
         <ConfigConfirm
-          config={state.preflight.config}
-          repoName={state.preflight.repoName}
-          onProceed={state.preflight.onProceed}
-          onEdit={state.preflight.onEdit}
-          onQuit={state.preflight.onQuit}
+          config={routing.preflight.config}
+          repoName={routing.preflight.repoName}
+          onProceed={routing.preflight.onProceed}
+          onEdit={routing.preflight.onEdit}
+          onQuit={routing.preflight.onQuit}
         />
       )}
-      {state.mode === "preflight" && state.preflight?.kind === "credentials" && (
+      {routing.mode === "preflight" && routing.preflight?.kind === "credentials" && (
         <CredentialPrompt
-          onComplete={state.preflight.onComplete}
-          onCancel={state.preflight.onCancel}
+          onComplete={routing.preflight.onComplete}
+          onCancel={routing.preflight.onCancel}
         />
       )}
-      {state.mode === "preflight" && state.preflight?.kind === "context-intake" && (
+      {routing.mode === "preflight" && routing.preflight?.kind === "context-intake" && (
         <ContextIntake
-          initialContext={state.preflight.initialContext}
-          onComplete={state.preflight.onComplete}
-          onSkip={state.preflight.onSkip}
-          onCancel={state.preflight.onCancel}
+          initialContext={routing.preflight.initialContext}
+          onComplete={routing.preflight.onComplete}
+          onSkip={routing.preflight.onSkip}
+          onCancel={routing.preflight.onCancel}
         />
       )}
-      {state.mode === "preflight" && state.preflight?.kind === "threat-editor" && (
+      {routing.mode === "preflight" && routing.preflight?.kind === "threat-editor" && (
         <ThreatModelEditor
-          threatModel={state.preflight.threatModel}
-          onComplete={state.preflight.onComplete}
-          onSkip={state.preflight.onSkip}
-          onCancel={state.preflight.onCancel}
+          threatModel={routing.preflight.threatModel}
+          onComplete={routing.preflight.onComplete}
+          onSkip={routing.preflight.onSkip}
+          onCancel={routing.preflight.onCancel}
         />
       )}
-      {state.mode === "preflight" && state.preflight?.kind === "config-editor" && (
+      {routing.mode === "preflight" && routing.preflight?.kind === "config-editor" && (
         <ConfigEditor
-          initialConfig={state.preflight.initialConfig}
-          configPath={state.preflight.configPath}
-          focusKey={state.preflight.focusKey}
-          onComplete={state.preflight.onComplete}
-          onCancel={state.preflight.onCancel}
+          initialConfig={routing.preflight.initialConfig}
+          configPath={routing.preflight.configPath}
+          focusKey={routing.preflight.focusKey}
+          onComplete={routing.preflight.onComplete}
+          onCancel={routing.preflight.onCancel}
         />
       )}
 
-      {state.mode === "running" && (
-        <>
-          <Static items={staticResults.map((r, i) => ({ ...r, _key: `r-${i}` }))}>
-            {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
-          </Static>
-
-          {/* Tab bar for view switching */}
-          <TabBar
-            tabs={[
-              { id: "pipeline", label: "Pipeline", shortcut: "1" },
-              { id: "findings", label: "Findings", shortcut: "2" },
-              { id: "cost", label: "Cost", shortcut: "3" },
-            ]}
-            activeId={state.scanView}
-          />
-
-          {/* Pipeline view (default) */}
-          {state.scanView === "pipeline" && (
-            <>
-              {state.stages.length > 0 && (
-                <PipelineIndicator
-                  stages={state.stages}
-                  progress={state.progress}
-                  runningCostUsd={state.runningCostUsd}
-                  throttle={state.throttle}
-                  results={liveResults}
-                  agentActivity={state.agentActivity}
-                  etaMs={state.etaMs}
-                  phase={phaseLabel(state.phase, state.stages)}
-                />
-              )}
-            </>
-          )}
-
-          {/* Findings view */}
-          {state.scanView === "findings" && <FindingsView results={state.results} />}
-
-          {/* Cost view */}
-          {state.scanView === "cost" && (
-            <CostView
-              results={state.results}
-              runningCostUsd={state.runningCostUsd}
-              budget={state.configBanner?.budget}
-            />
-          )}
-
-          {state.qualityGate && <QualityGate result={state.qualityGate} />}
-
-          <RateLimitBanner throttle={state.throttle} />
-
-          {state.costCapHalted && (
-            <CostCapHalt
-              runningCostUsd={state.runningCostUsd}
-              budgetUsd={state.costCapBudgetUsd ?? state.configBanner?.budget}
-            />
-          )}
-
-          <HeartbeatStrip state={state} expanded={state.heartbeatExpanded} />
-
-          {state.phase !== "idle" && state.phase !== "done" && state.phase !== "summary" && (
-            <StatusFooter
-              model={state.model || state.configBanner?.model || ""}
-              phase={state.phase}
-              runningCostUsd={state.runningCostUsd}
-              progress={state.progress}
-              startedAt={state.pipelineStartedAt}
-              throttle={state.throttle}
-            />
-          )}
-
-          <CommandInput
-            active={
-              state.phase === "triaging" ||
-              state.phase === "verifying" ||
-              state.phase === "scanning"
-            }
-            onCommand={handleCommand}
-          />
-        </>
+      {routing.mode === "running" && (
+        <RunningView store={store} onCommand={handleCommand} />
       )}
 
-      {state.mode === "summary" && state.summary && (
+      {routing.mode === "summary" && routing.summary && (
         <Static items={["scan-summary"]}>
           {() => (
             <React.Fragment key="scan-summary">
-              <ScanSummary data={state.summary!} />
-              {state.qualityGate && <QualityGate result={state.qualityGate} />}
+              <ScanSummary data={routing.summary!} />
+              {routing.qualityGate && <QualityGate result={routing.qualityGate} />}
             </React.Fragment>
           )}
         </Static>
       )}
 
-      {state.mode === "review" && state.review && (
+      {routing.mode === "review" && routing.review && (
         <InteractiveReview
-          findings={state.review.findings}
-          onVerdict={state.review.onVerdict}
-          onQuit={state.review.onQuit}
+          findings={routing.review.findings}
+          onVerdict={routing.review.onVerdict}
+          onQuit={routing.review.onQuit}
         />
       )}
 
@@ -322,27 +265,66 @@ function AppInner({ store }: AppProps): React.ReactElement {
   );
 }
 
-/**
- * Render the current scan phase as an English sentence for the v2 screen-03
- * "now" band. Derives detail from the active stage so the header stays
- * grounded in real pipeline state rather than a static string.
- */
-function phaseLabel(
-  phase: Phase,
-  stages: PipelineStage[],
-): { title: string; detail?: string } | undefined {
-  if (phase === "idle" || phase === "done" || phase === "summary") return undefined;
-  const active = stages.find((s) => s.status === "active");
-  const detail = active?.detail ?? active?.label;
-  switch (phase) {
-    case "scanning":
-      return { title: "mapping the codebase and hunting for candidates", detail };
-    case "triaging":
-      return { title: "triaging candidates", detail };
-    case "verifying":
-      return { title: "verifying the worst offenders", detail };
-    case "poc":
-      return { title: "building proof-of-concept harnesses", detail };
-  }
-  return undefined;
+// ---------------------------------------------------------------------------
+// Single-Static banner consolidation
+// ---------------------------------------------------------------------------
+
+type BannerItem =
+  | { kind: "config"; data: NonNullable<ReturnType<typeof getConfigBannerType>> }
+  | { kind: "resume"; data: NonNullable<ReturnType<typeof getResumeDiffType>> }
+  | { kind: "skip"; skipped: number; remaining: number };
+
+// Type-extracting helpers — purely for the BannerItem variants above.
+function getConfigBannerType(): React.ComponentProps<typeof ConfigBanner>["config"] | null {
+  return null;
 }
+function getResumeDiffType(): React.ComponentProps<typeof ResumeDiff>["data"] | null {
+  return null;
+}
+
+interface PreflightBannersStaticProps {
+  configBanner: React.ComponentProps<typeof ConfigBanner>["config"] | null | undefined;
+  resumeDiff: React.ComponentProps<typeof ResumeDiff>["data"] | null | undefined;
+  skipInfo: { skipped: number; remaining: number } | null;
+}
+
+const PreflightBannersStatic = React.memo(function PreflightBannersStatic({
+  configBanner,
+  resumeDiff,
+  skipInfo,
+}: PreflightBannersStaticProps): React.ReactElement | null {
+  // Build the items array for <Static>. Items are stable as long as their
+  // input is stable (parent passes already-narrow slices).
+  const items = React.useMemo<Array<BannerItem & { _key: string }>>(() => {
+    const out: Array<BannerItem & { _key: string }> = [];
+    if (configBanner) out.push({ _key: "config", kind: "config", data: configBanner });
+    if (resumeDiff) out.push({ _key: "resume", kind: "resume", data: resumeDiff });
+    if (skipInfo)
+      out.push({ _key: "skip", kind: "skip", skipped: skipInfo.skipped, remaining: skipInfo.remaining });
+    return out;
+  }, [configBanner, resumeDiff, skipInfo]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <Static items={items}>
+      {(item) => {
+        switch (item.kind) {
+          case "config":
+            return <ConfigBanner key={item._key} config={item.data} />;
+          case "resume":
+            return <ResumeDiff key={item._key} data={item.data} />;
+          case "skip":
+            return (
+              <Text key={item._key}>
+                {"  "}
+                {tokens.muted(
+                  `Skipping ${item.skipped} already-triaged findings, ${item.remaining} remaining`,
+                )}
+              </Text>
+            );
+        }
+      }}
+    </Static>
+  );
+});
