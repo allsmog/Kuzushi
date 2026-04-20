@@ -340,7 +340,7 @@ async function ensureClaudeShellRuntime(opts: ShellOptions, store?: UIStore): Pr
   // Backends other than "claude" don't currently produce real interactive
   // sessions — the LoggingAgentRuntime wrapper still exposes a createSession
   // method, but it forwards to a no-op for e.g. pi-ai. Detect by backend name.
-  const backend = opts.config.agentRuntimeBackend ?? "claude";
+  const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
   if (backend === "claude") return;
   try {
     const { ClaudeAgentRuntime } = await import("../agent-runtime/claude.js");
@@ -410,7 +410,7 @@ function mergeIntoActiveSlot(
   opts: ShellOptions,
   patch: { apiKey?: string; baseUrl?: string },
 ): void {
-  const backend = opts.config.agentRuntimeBackend ?? "claude";
+  const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
   const slot = backend === "pi-ai" ? "piAi" : "claude";
   const existing = opts.config.agentRuntimeConfig?.[slot] ?? {};
   const nextSlot = { ...existing, ...patch };
@@ -1420,7 +1420,7 @@ async function startInkShell(
   };
 
   const lazyPromptForCredentials = async (): Promise<boolean> => {
-    const isClaudeBackend = (opts.config.agentRuntimeBackend ?? "claude") === "claude";
+    const isClaudeBackend = (opts.config.agentRuntimeBackend ?? "pi-ai") === "claude";
     if (!isClaudeBackend) return false;
     const { hasAnthropicCredentials, runCredentialPrompt } = await import("../ui/setup.js");
     const { resolveActiveCredentials } = await import("../config.js");
@@ -3507,7 +3507,7 @@ function closestBackend(input: string, candidates: readonly string[]): string | 
 
 function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandResult {
   const sub = (args[0] ?? "").toLowerCase();
-  const current = opts.config.agentRuntimeBackend ?? "claude";
+  const current = opts.config.agentRuntimeBackend ?? "pi-ai";
   // `current` is what the live shell session uses, which may differ from the
   // persisted ~/.kuzushi/config.json value when ensureClaudeShellRuntime has
   // swapped a non-claude backend for the shell. /backend should always compare
@@ -3517,7 +3517,7 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
     return {
       asyncExecute: async () => {
         const { loadConfig, configPath } = await import("../config.js");
-        const persisted = loadConfig().agentRuntimeBackend ?? "claude";
+        const persisted = loadConfig().agentRuntimeBackend ?? "pi-ai";
         const lines = [`Shell backend (live): ${current}`, `Persisted backend:    ${persisted}`];
         if (persisted !== current) {
           lines.push(
@@ -3551,7 +3551,7 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
   return {
     asyncExecute: async () => {
       const { applyConfigPatch, configPath, loadConfig } = await import("../config.js");
-      const persisted = loadConfig().agentRuntimeBackend ?? "claude";
+      const persisted = loadConfig().agentRuntimeBackend ?? "pi-ai";
       if (persisted === sub) {
         return `Persisted backend in ${configPath()} is already "${sub}". No change.`;
       }

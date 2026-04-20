@@ -1675,7 +1675,7 @@ function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undef
 export function resolveActiveCredentials(
   config: Pick<KuzushiConfig, "agentRuntimeBackend" | "agentRuntimeConfig">,
 ): AgentRuntimeCredentials {
-  const backend = config.agentRuntimeBackend ?? "claude";
+  const backend = config.agentRuntimeBackend ?? "pi-ai";
   const slot = backend === "pi-ai" ? "piAi" : "claude";
   return config.agentRuntimeConfig?.[slot] ?? {};
 }

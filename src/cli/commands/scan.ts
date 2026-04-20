@@ -234,7 +234,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
 
   // Interactive credential prompt for the Claude backend when no credentials are detected.
-  const isClaudeBackend = (config.agentRuntimeBackend ?? "claude") === "claude";
+  const isClaudeBackend = (config.agentRuntimeBackend ?? "pi-ai") === "claude";
   if (isClaudeBackend && !opts.resume && process.stdout.isTTY) {
     const { hasAnthropicCredentials, runCredentialPrompt } = await import("../../ui/setup.js");
     const claudeSlotKey = config.agentRuntimeConfig?.claude?.apiKey;
@@ -385,7 +385,7 @@ export function prepareScanExecution(
 export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts): AgentRuntime {
   const activeModels = resolveActivePiAiModels(config, scanOpts.tasks ?? [], config.tasks ?? []);
 
-  const isClaudeRuntime = (config.agentRuntimeBackend ?? "claude") === "claude";
+  const isClaudeRuntime = (config.agentRuntimeBackend ?? "pi-ai") === "claude";
   if (!isClaudeRuntime) {
     const missingCredentials = validatePiAiProviderCredentials(activeModels, {
       anthropicApiKey: resolveActiveCredentials(config).apiKey,
