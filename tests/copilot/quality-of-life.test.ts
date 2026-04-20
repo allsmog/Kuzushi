@@ -148,6 +148,15 @@ describe("output filters", () => {
     expect(lines.length).toBeGreaterThan(1);
     expect(result.output).toContain("semgrep");
   });
+
+  it("page filter passes text through when stdout is not a TTY", async () => {
+    const { driver } = seed();
+    // Vitest drives stdout through pipes (non-TTY), so `| page` should return
+    // the input unchanged rather than spawn a pager.
+    const piped = await driver.handle("modules | page");
+    const raw = await driver.handle("modules");
+    expect(piped.output).toBe(raw.output);
+  });
 });
 
 describe("typo correction", () => {
