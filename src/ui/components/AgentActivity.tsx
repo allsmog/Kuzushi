@@ -9,10 +9,10 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import { formatDuration } from "../format.js";
+import { formatCost, formatDuration } from "../format.js";
 import { icons } from "../icons.js";
 import { ExpandableSection } from "../primitives/ExpandableSection.js";
-import type { AgentActivityLine } from "../state.js";
+import type { AgentActivityLine, UIState } from "../state.js";
 import { tokens } from "../tokens.js";
 import { Spinner } from "./Spinner.js";
 
@@ -61,6 +61,96 @@ export function AgentActivity({
       </ExpandableSection>
     </Box>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Heartbeat strip — Phase B.1
+// ---------------------------------------------------------------------------
+
+/**
+ * One-line "what's happening right now" strip rendered above StatusFooter
+ * during the running phase. Computes its display entirely from existing
+ * state fields (`agentActivity`, `runningCostUsd`, `pipelineStartedAt`,
+ * `stages`) so no new producer wiring is required.
+ *
+ * When `expanded` is true, the strip adds a second line with a compact
+ * per-agent list so operators can press `m` to drill in without losing
+ * the primary "am I spending money?" at-a-glance read.
+ */
+export function HeartbeatStrip({
+  state,
+  expanded,
+}: {
+  state: UIState;
+  expanded?: boolean;
+}): React.ReactElement | null {
+  if (state.mode !== "running") return null;
+
+  const activeFingerprints = countActiveFingerprints(state.agentActivity);
+  const elapsedMs = state.pipelineStartedAt ? Date.now() - state.pipelineStartedAt : 0;
+  const elapsedStr = elapsedMs > 0 ? formatDuration(elapsedMs) : "0s";
+  const costStr = state.runningCostUsd > 0 ? formatCost(state.runningCostUsd) : "$0.00";
+  const agentStr = `${activeFingerprints} agent${activeFingerprints === 1 ? "" : "s"} active`;
+
+  return (
+    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+      <Text>
+        {tokens.accent(icons.active)}
+        {"  "}
+        {tokens.strong(agentStr)}
+        {tokens.muted(`  ·  ${costStr}  ·  ${elapsedStr}`)}
+        {state.throttle ? tokens.warn(`  ·  throttled (${state.throttle.concurrency})`) : ""}
+        {tokens.hint("   (m) expand")}
+      </Text>
+      {expanded && activeFingerprints > 0 ? <HeartbeatAgentList state={state} /> : null}
+    </Box>
+  );
+}
+
+function HeartbeatAgentList({ state }: { state: UIState }): React.ReactElement {
+  // Each active fingerprint is one "agent" from the operator's perspective —
+  // show its last activity line so the expanded strip reads like a live feed
+  // without duplicating the full AgentActivity tree.
+  const rows: React.ReactElement[] = [];
+  for (const [fingerprint, lines] of state.agentActivity) {
+    if (lines.length === 0) continue;
+    const latest = lines[lines.length - 1]!;
+    rows.push(
+      <Text key={fingerprint}>
+        {"  "}
+        {tokens.muted(icons.treeMiddle)} {tokens.muted(fingerprint.slice(0, 8))}
+        {"  "}
+        {tokens.muted(oneLineActivity(latest))}
+      </Text>,
+    );
+    if (rows.length >= 5) break;
+  }
+  return <Box flexDirection="column">{rows}</Box>;
+}
+
+function countActiveFingerprints(map: Map<string, AgentActivityLine[]>): number {
+  let count = 0;
+  for (const lines of map.values()) {
+    if (lines.length > 0) count++;
+  }
+  return count;
+}
+
+function oneLineActivity(line: AgentActivityLine): string {
+  switch (line.kind) {
+    case "tool-start":
+      return `${icons.arrow} ${line.detail ?? line.toolName ?? "tool"}`;
+    case "tool-progress":
+      return `${icons.ellipsis} ${line.toolName ?? "tool"}`;
+    case "tool-complete":
+      return `${icons.success} ${line.detail ?? "done"}`;
+    case "reasoning":
+      return `${icons.bullet} ${(line.detail ?? "").slice(0, 60)}`;
+    case "summary":
+      return line.detail ?? "";
+    case "finding-preview":
+      return `${icons.error} ${(line.detail ?? "").slice(0, 60)}`;
+  }
 }
 
 function formatActivityLine(line: AgentActivityLine): string {
