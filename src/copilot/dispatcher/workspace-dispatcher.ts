@@ -7,8 +7,11 @@
  * "what do we have in this engagement so far?"
  */
 
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { SessionManager } from "../../sessions/manager.js";
+import { type CredsExportFormat, exportCreds } from "../../workspace/creds-export.js";
+import type { PrivateType } from "../../workspace/entities.js";
 import { type ExportFormat, exportToFile } from "../../workspace/io/export.js";
 import { type ImportFormat, importFile } from "../../workspace/io/import.js";
 import type { WorkspaceManager } from "../../workspace/manager.js";
@@ -23,12 +26,12 @@ export interface WorkspaceDispatcherOptions {
 }
 
 const COMMANDS: Record<string, string> = {
-  hosts: "List hosts in the active workspace",
+  hosts: "List hosts (`-d <addr>` deletes)",
   services: "List services in the active workspace",
-  vulns: "List vulnerabilities in the active workspace",
-  loot: "List loot captured in the active workspace",
-  notes: "List notes in the active workspace",
-  creds: "List credentials in the active workspace",
+  vulns: "List vulns (`-d <id|name>` deletes)",
+  loot: "List / add / save / delete loot (`loot add|save <id> <file>|delete`)",
+  notes: "List / add / delete notes (`notes add --type t --data '...'`)",
+  creds: "List / add / delete / export creds (`creds -o csv|jtr|hcat`)",
   sessions: "List sessions in the active workspace",
   "workspace:import": "Import a file into the active workspace (sarif | nmap-xml | kz-bundle)",
   "workspace:export": "Export the active workspace to a file (sarif | kz-bundle)",
@@ -51,17 +54,17 @@ export class WorkspaceDispatcher implements CommandDispatcher {
     const ws = this.opts.workspaces;
     switch (cmd) {
       case "hosts":
-        return { output: renderHosts(ws.hosts.list(wid)) };
+        return this.cmd_hosts(args, wid);
       case "services":
         return { output: renderServices(this.listAllServices(wid)) };
       case "vulns":
-        return { output: renderVulns(ws.vulns.listForWorkspace(wid)) };
+        return this.cmd_vulns(args, wid);
       case "loot":
-        return { output: renderLoot(ws.loot.listForWorkspace(wid, args[0])) };
+        return this.cmd_loot(args, wid, ctx);
       case "notes":
-        return { output: renderNotes(ws.notes.listForWorkspace(wid, args[0])) };
+        return this.cmd_notes(args, wid);
       case "creds":
-        return { output: renderCreds(ws.creds.listForWorkspace(wid)) };
+        return this.cmd_creds(args, wid, ctx);
       case "sessions":
         return this.cmd_sessions(args, ctx);
       case "workspace:import":
@@ -71,6 +74,172 @@ export class WorkspaceDispatcher implements CommandDispatcher {
       default:
         return undefined;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Entity CRUD
+  // -------------------------------------------------------------------------
+
+  private cmd_hosts(args: string[], wid: string): CommandResult {
+    if (args[0] === "-d" && args[1]) {
+      const hit = this.opts.workspaces.hosts.findByAddress(wid, args[1] as string);
+      if (!hit) return { output: `[-] No host at '${args[1]}'.` };
+      this.opts.workspaces.hosts.delete(hit.id);
+      return { output: `[+] Deleted host ${args[1]}` };
+    }
+    return { output: renderHosts(this.opts.workspaces.hosts.list(wid)) };
+  }
+
+  private cmd_vulns(args: string[], wid: string): CommandResult {
+    if (args[0] === "-d" && args[1]) {
+      const all = this.opts.workspaces.vulns.listForWorkspace(wid);
+      const match = all.find((v) => v.id.startsWith(args[1] as string) || v.name === args[1]);
+      if (!match) return { output: `[-] No vuln matches '${args[1]}'.` };
+      this.opts.workspaces.vulns.delete(match.id);
+      return { output: `[+] Deleted vuln ${match.id.slice(0, 8)} (${match.name})` };
+    }
+    return { output: renderVulns(this.opts.workspaces.vulns.listForWorkspace(wid)) };
+  }
+
+  private cmd_loot(args: string[], wid: string, ctx: CommandContext): CommandResult {
+    const sub = args[0];
+    if (sub === "add") {
+      const flags = parseFlags(args.slice(1));
+      if (!flags.name || (!flags.file && !flags.data)) {
+        return {
+          output:
+            "Usage: loot add --type <t> --name <n> [--file <path> | --data '...'] [--host <addr>]",
+        };
+      }
+      let data: Buffer | null = null;
+      let contentType: string | null = null;
+      if (flags.file) {
+        const abs = path.isAbsolute(flags.file) ? flags.file : path.resolve(ctx.cwd, flags.file);
+        try {
+          data = readFileSync(abs);
+          contentType = flags.type ?? null;
+        } catch (err) {
+          return { output: `[-] loot add: ${err instanceof Error ? err.message : err}` };
+        }
+      } else if (flags.data) {
+        data = Buffer.from(flags.data, "utf8");
+        contentType = "text/plain";
+      }
+      let hostId: string | null = null;
+      if (flags.host) {
+        const h = this.opts.workspaces.hosts.findByAddress(wid, flags.host);
+        if (!h) return { output: `[-] Unknown host '${flags.host}'.` };
+        hostId = h.id;
+      }
+      const insert: Parameters<WorkspaceManager["loot"]["create"]>[0] = {
+        workspaceId: wid,
+        ltype: flags.type ?? "file",
+        name: flags.name,
+      };
+      if (data) insert.data = data;
+      if (contentType) insert.contentType = contentType;
+      if (hostId) insert.hostId = hostId;
+      if (flags.info) insert.info = flags.info;
+      const row = this.opts.workspaces.loot.create(insert);
+      return { output: `[+] Loot added: ${row.id.slice(0, 8)} (${row.name})` };
+    }
+    if (sub === "save" && args[1] && args[2]) {
+      const all = this.opts.workspaces.loot.listForWorkspace(wid);
+      const match = all.find((l) => l.id.startsWith(args[1] as string));
+      if (!match) return { output: `[-] No loot matches '${args[1]}'.` };
+      if (!match.data) return { output: "[-] Loot has no data to save." };
+      const outPath = path.isAbsolute(args[2] as string)
+        ? (args[2] as string)
+        : path.resolve(ctx.cwd, args[2] as string);
+      writeFileSync(outPath, match.data);
+      return { output: `[+] Wrote ${match.data.length} bytes to ${outPath}` };
+    }
+    if (sub === "delete" && args[1]) {
+      const all = this.opts.workspaces.loot.listForWorkspace(wid);
+      const match = all.find((l) => l.id.startsWith(args[1] as string));
+      if (!match) return { output: `[-] No loot matches '${args[1]}'.` };
+      this.opts.workspaces.loot.delete(match.id);
+      return { output: `[+] Deleted loot ${match.id.slice(0, 8)}` };
+    }
+    return { output: renderLoot(this.opts.workspaces.loot.listForWorkspace(wid, args[0])) };
+  }
+
+  private cmd_notes(args: string[], wid: string): CommandResult {
+    const sub = args[0];
+    if (sub === "add") {
+      const flags = parseFlags(args.slice(1));
+      if (!flags.type || !flags.data) {
+        return { output: "Usage: notes add --type <t> --data '...' [--host <addr>]" };
+      }
+      let hostId: string | null = null;
+      if (flags.host) {
+        const h = this.opts.workspaces.hosts.findByAddress(wid, flags.host);
+        if (!h) return { output: `[-] Unknown host '${flags.host}'.` };
+        hostId = h.id;
+      }
+      const insert: Parameters<WorkspaceManager["notes"]["create"]>[0] = {
+        workspaceId: wid,
+        ntype: flags.type,
+        data: { note: flags.data },
+      };
+      if (hostId) insert.hostId = hostId;
+      const row = this.opts.workspaces.notes.create(insert);
+      return { output: `[+] Note added: ${row.id.slice(0, 8)}` };
+    }
+    if (sub === "delete" && args[1]) {
+      const all = this.opts.workspaces.notes.listForWorkspace(wid);
+      const match = all.find((n) => n.id.startsWith(args[1] as string));
+      if (!match) return { output: `[-] No note matches '${args[1]}'.` };
+      this.opts.workspaces.notes.delete(match.id);
+      return { output: `[+] Deleted note ${match.id.slice(0, 8)}` };
+    }
+    return { output: renderNotes(this.opts.workspaces.notes.listForWorkspace(wid, args[0])) };
+  }
+
+  private cmd_creds(args: string[], wid: string, ctx: CommandContext): CommandResult {
+    const sub = args[0];
+    if (sub === "add") {
+      const flags = parseFlags(args.slice(1));
+      if (!flags.user && !flags.private) {
+        return {
+          output:
+            "Usage: creds add --user <u> --private <p> [--private-type password|ssh_key|token|hash|api_key|cookie|other] [--realm <r>]",
+        };
+      }
+      const insert: Parameters<WorkspaceManager["creds"]["upsert"]>[0] = {
+        workspaceId: wid,
+      };
+      if (flags.user) insert.publicUsername = flags.user;
+      if (flags.private) insert.privateData = flags.private;
+      const pt = (flags["private-type"] ?? "password") as PrivateType;
+      insert.privateType = pt;
+      if (flags.realm) insert.realmValue = flags.realm;
+      const row = this.opts.workspaces.creds.upsert(insert);
+      return {
+        output: `[+] Cred added: ${row.id.slice(0, 8)} (${row.publicUsername ?? "<no user>"})`,
+      };
+    }
+    if (sub === "delete" && args[1]) {
+      const all = this.opts.workspaces.creds.listForWorkspace(wid);
+      const match = all.find((c) => c.id.startsWith(args[1] as string));
+      if (!match) return { output: `[-] No cred matches '${args[1]}'.` };
+      this.opts.workspaces.creds.delete(match.id);
+      return { output: `[+] Deleted cred ${match.id.slice(0, 8)}` };
+    }
+    if (sub === "-o" && args[1]) {
+      const fmt = args[1] as string;
+      if (fmt !== "csv" && fmt !== "jtr" && fmt !== "hcat") {
+        return { output: "[-] creds -o <csv|jtr|hcat> [file]" };
+      }
+      const rows = this.opts.workspaces.creds.listForWorkspace(wid);
+      const body = exportCreds(rows, fmt as CredsExportFormat);
+      const file = args[2];
+      if (!file) return { output: body };
+      const outPath = path.isAbsolute(file) ? file : path.resolve(ctx.cwd, file);
+      writeFileSync(outPath, body, "utf8");
+      return { output: `[+] Wrote ${rows.length} creds → ${outPath} (${fmt})` };
+    }
+    return { output: renderCreds(this.opts.workspaces.creds.listForWorkspace(wid)) };
   }
 
   complete(cmd: string, partial: string, words: string[]): string[] {
@@ -319,4 +488,38 @@ function renderSessions(
       [s.viaModule, s.viaTool].filter(Boolean).join(":"),
     ]),
   );
+}
+
+/**
+ * Parse `--flag value` argv into a flat record. Supports `--flag=value`,
+ * `--flag value`, and bare `--flag` (sets to "true"). Unknown positional
+ * tokens are collected under the underscore key.
+ */
+function parseFlags(args: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  let i = 0;
+  while (i < args.length) {
+    const tok = args[i] ?? "";
+    if (tok.startsWith("--")) {
+      const eq = tok.indexOf("=");
+      if (eq > 0) {
+        out[tok.slice(2, eq)] = tok.slice(eq + 1);
+        i++;
+      } else {
+        const key = tok.slice(2);
+        const next = args[i + 1];
+        if (next !== undefined && !next.startsWith("--")) {
+          out[key] = next;
+          i += 2;
+        } else {
+          out[key] = "true";
+          i++;
+        }
+      }
+    } else {
+      out._ = ((out._ ?? "") + " " + tok).trim();
+      i++;
+    }
+  }
+  return out;
 }

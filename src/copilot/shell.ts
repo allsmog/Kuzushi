@@ -10,6 +10,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import type { AgentQueryOptions, AgentRuntime, AgentSession } from "../agent-runtime/types.js";
 import { createBus } from "../bus/index.js";
@@ -426,6 +427,30 @@ function formatOptionDescription(schema: ToolPropertySchema): string {
   return description ? `${description} (${suffix})` : suffix;
 }
 
+function filteredWorkspaceListing(
+  mgr: import("../workspace/manager.js").WorkspaceManager,
+  pattern: string,
+  activeId: string | undefined,
+): { output: string } {
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern, "i");
+  } catch {
+    return { output: `[-] Invalid regex: ${pattern}` };
+  }
+  const rows = mgr
+    .list()
+    .filter((ws) => regex.test(ws.name))
+    .map((ws) => {
+      const active = ws.id === activeId ? " *" : "  ";
+      const targets = ws.targets.join(", ") || "no targets";
+      return `${active}${ws.name}  —  ${targets}`;
+    });
+  return {
+    output: rows.length === 0 ? `  (no matches for /${pattern}/i)` : rows.join("\n"),
+  };
+}
+
 function formatHistory(commandHistory: string[]): string {
   const entries = commandHistory.slice(-50);
   if (entries.length === 0) {
@@ -566,6 +591,16 @@ export async function startShell(opts: ShellOptions): Promise<void> {
     const db = initDb(dbPath);
     const { WorkspaceManager } = await import("../workspace/manager.js");
     workspaceManager = new WorkspaceManager(db);
+
+    // If `-D` has persisted a default workspace from a prior shell and the
+    // current launch didn't pass `--workspace`, honor it.
+    if (!opts.workspace) {
+      const defaultFile = path.join(homedir(), ".kuzushi", "default-workspace");
+      if (existsSync(defaultFile)) {
+        const name = readFileSync(defaultFile, "utf8").trim();
+        if (name) opts.workspace = name;
+      }
+    }
 
     if (opts.workspace) {
       const ws = workspaceManager.getOrCreate(opts.workspace, opts.target ? [opts.target] : []);
@@ -1810,6 +1845,66 @@ function handleSlashCommand(
     case "workspace": {
       const sub = args[0]?.toLowerCase();
       const mgr = ctx.workspaceManager;
+
+      // -a / -d / -r / -D / -v / -S — msfconsole-style flags. These live
+      // alongside the positional subcommands (list / create / switch) so
+      // muscle memory from either side keeps working.
+      if (sub === "-a" && args[1] && mgr) {
+        const name = args.slice(1).join(" ");
+        if (mgr.getByName(name)) return { output: `[-] Workspace '${name}' already exists.` };
+        const ws = mgr.create(name, opts.target ? [opts.target] : []);
+        opts.workspace = ws.id;
+        return { output: `[+] Workspace created: ${name} (${ws.id.slice(0, 8)})` };
+      }
+      if (sub === "-d" && args[1] && mgr) {
+        const target = args.slice(1).join(" ");
+        const existing = mgr.getByName(target);
+        if (!existing) return { output: `[-] No workspace named '${target}'.` };
+        mgr.delete(existing.id);
+        if (opts.workspace === existing.id) opts.workspace = undefined;
+        return { output: `[+] Deleted workspace '${target}'.` };
+      }
+      if (sub === "-r" && args[1] && args[2] && mgr) {
+        const oldName = args[1] as string;
+        const newName = args[2] as string;
+        const existing = mgr.getByName(oldName);
+        if (!existing) return { output: `[-] No workspace named '${oldName}'.` };
+        if (mgr.getByName(newName)) {
+          return { output: `[-] A workspace named '${newName}' already exists.` };
+        }
+        mgr.update(existing.id, { name: newName });
+        return { output: `[+] Renamed workspace '${oldName}' → '${newName}'.` };
+      }
+      // -D (capital): set default workspace for next shell launch. We check
+      // the raw arg to distinguish from -d (delete). parseCommand splits on
+      // whitespace but preserves case.
+      if (args[0] === "-D" && args[1]) {
+        const name = args.slice(1).join(" ");
+        const defaultPath = path.join(homedir(), ".kuzushi", "default-workspace");
+        mkdirSync(path.dirname(defaultPath), { recursive: true });
+        writeFileSync(defaultPath, name, "utf8");
+        return { output: `[+] Default workspace for next launch: ${name}` };
+      }
+      if (sub === "-v" && mgr) {
+        const workspaces = mgr.list();
+        if (workspaces.length === 0) return { output: "  No workspaces yet." };
+        const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - s.length));
+        const rows = workspaces.map((ws) => {
+          const hosts = mgr.hosts.list(ws.id).length;
+          const vulns = mgr.vulns.listForWorkspace(ws.id).length;
+          const loot = mgr.loot.listForWorkspace(ws.id).length;
+          const notes = mgr.notes.listForWorkspace(ws.id).length;
+          const creds = mgr.creds.listForWorkspace(ws.id).length;
+          const sess = mgr.sessions.listForWorkspace(ws.id).length;
+          const active = ws.id === opts.workspace ? " *" : "  ";
+          return `${active}${pad(ws.name, 24)} hosts=${hosts} vulns=${vulns} loot=${loot} notes=${notes} creds=${creds} sessions=${sess}`;
+        });
+        return { output: ["Workspaces (counts):", ...rows].join("\n") };
+      }
+      if ((args[0] === "-S" || args[0] === "-s") && mgr) {
+        if (!args[1]) return { output: "Usage: workspace -S <pattern>" };
+        return filteredWorkspaceListing(mgr, args.slice(1).join(" "), opts.workspace);
+      }
 
       // /workspace list
       if (sub === "list" && mgr) {
