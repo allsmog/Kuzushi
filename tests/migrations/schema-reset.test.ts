@@ -46,7 +46,12 @@ describe("schema reset and incremental migrations", () => {
     const db = initDb(dbPath);
     try {
       const rows = db.prepare("SELECT version FROM schema_version ORDER BY version").all();
-      expect(rows).toEqual([{ version: 100 }, { version: 101 }, { version: 102 }]);
+      expect(rows).toEqual([
+        { version: 100 },
+        { version: 101 },
+        { version: 102 },
+        { version: 103 },
+      ]);
       expect(readdirSync(path.dirname(dbPath)).filter((n) => n.includes(".bak-"))).toHaveLength(0);
     } finally {
       db.close();
@@ -69,7 +74,12 @@ describe("schema reset and incremental migrations", () => {
 
       // New DB has v100+v101 and no legacy data.
       const versions = db.prepare("SELECT version FROM schema_version ORDER BY version").all();
-      expect(versions).toEqual([{ version: 100 }, { version: 101 }, { version: 102 }]);
+      expect(versions).toEqual([
+        { version: 100 },
+        { version: 101 },
+        { version: 102 },
+        { version: 103 },
+      ]);
       const legacyRow = db.prepare("SELECT COUNT(*) as n FROM findings").get() as { n: number };
       expect(legacyRow.n).toBe(0);
     } finally {
@@ -83,6 +93,7 @@ describe("schema reset and incremental migrations", () => {
     // Roll the DB back to "v100 only" to simulate a pre-v101 install.
     first.prepare("DELETE FROM schema_version WHERE version > 100").run();
     first.exec(`
+      DROP TABLE IF EXISTS schedules;
       DROP TABLE IF EXISTS sessions;
       DROP TABLE IF EXISTS cred_logins;
       DROP TABLE IF EXISTS creds;
@@ -99,7 +110,12 @@ describe("schema reset and incremental migrations", () => {
     try {
       expect(resets).toHaveLength(0); // No backup — pure in-place upgrade.
       const versions = second.prepare("SELECT version FROM schema_version ORDER BY version").all();
-      expect(versions).toEqual([{ version: 100 }, { version: 101 }, { version: 102 }]);
+      expect(versions).toEqual([
+        { version: 100 },
+        { version: 101 },
+        { version: 102 },
+        { version: 103 },
+      ]);
       const hostsExists = second
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='hosts'")
         .get();
@@ -119,7 +135,12 @@ describe("schema reset and incremental migrations", () => {
     try {
       expect(resets).toHaveLength(0);
       const versions = second.prepare("SELECT version FROM schema_version ORDER BY version").all();
-      expect(versions).toEqual([{ version: 100 }, { version: 101 }, { version: 102 }]);
+      expect(versions).toEqual([
+        { version: 100 },
+        { version: 101 },
+        { version: 102 },
+        { version: 103 },
+      ]);
     } finally {
       second.close();
     }
