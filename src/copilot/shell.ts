@@ -27,6 +27,7 @@ import { openInEditor } from "./editor.js";
 import { Datastore } from "./options.js";
 import { createPrintSink, type PrintLevel, type PrintSink } from "./print.js";
 import { listRecipes, resolveRecipePath } from "./recipes.js";
+import { openRepl as openDevRepl } from "./repl.js";
 import { loadAndRunResource, saveResourceScript } from "./resource.js";
 import { parseToolArgs } from "./run.js";
 
@@ -738,6 +739,29 @@ async function startInkShell(
     // Bridge for `edit <NAME>`. Suspending the Ink render while $EDITOR owns
     // the TTY is a future refinement — today we just spawn inheriting stdio.
     openEditor: (initial: string) => openInEditor(initial),
+    // Dev escape hatch — `repl` drops into node:repl with framework objects
+    // bound so developers can poke at live registry / bus / workspace state
+    // without restarting the shell. Non-TTY shells decline gracefully.
+    openRepl: async () => {
+      if (!process.stdin.isTTY) {
+        dispatcherPrint.error("[-] REPL requires an interactive TTY.");
+        return;
+      }
+      await openDevRepl({
+        context: {
+          core,
+          registry: core.registry,
+          events: core.events,
+          moduleCache: core.moduleCache,
+          workspace: workspaceManager,
+          sessions: sessionManager,
+          jobs: jobManager,
+          bus,
+          globals,
+          print: dispatcherPrint,
+        },
+      });
+    },
     jobManager,
   });
 
@@ -1619,9 +1643,7 @@ function handleSlashCommand(
         return {
           output: "Opening threat model editor...",
           asyncExecute: async () => {
-            const { loadPersistentThreatModel, savePersistentThreatModel } = await import(
-              "../threat-model-renderer.js"
-            );
+            const { loadPersistentThreatModel } = await import("../threat-model-renderer.js");
             const { runThreatModelEditor } = await import("../ui/setup.js");
             const tm = loadPersistentThreatModel(repoRoot);
             if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
