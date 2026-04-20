@@ -22,8 +22,8 @@ import { TextInput } from "../primitives/TextInput.js";
 import { tokens } from "../tokens.js";
 
 export type CredentialChoice =
-  | { kind: "api-key"; value: string }
-  | { kind: "oauth-token"; value: string }
+  | { kind: "api-key"; value: string; baseUrl?: string; persist: boolean }
+  | { kind: "oauth-token"; value: string; baseUrl?: string }
   | { kind: "inherited" };
 
 interface CredentialPromptProps {
@@ -65,7 +65,7 @@ const CHOICE_ITEMS: ReadonlyArray<SelectListItem<ChoiceOption["id"]>> = CHOICES.
   detail: c.description,
 }));
 
-type Step = "choose" | "input";
+type Step = "choose" | "input" | "base-url" | "save";
 
 const CHOOSE_KEYBINDS = [
   { keys: "\u2191/\u2193", label: "Navigate" },
@@ -77,6 +77,50 @@ const INPUT_KEYBINDS = [
   { keys: "Enter", label: "Confirm" },
   { keys: "Esc", label: "Back" },
 ];
+
+const BASE_URL_KEYBINDS = [
+  { keys: "Enter", label: "Confirm (blank = default)" },
+  { keys: "Esc", label: "Back" },
+];
+
+const SAVE_KEYBINDS = [
+  { keys: "\u2191/\u2193", label: "Navigate" },
+  { keys: "Enter", label: "Confirm" },
+  { keys: "Esc", label: "Back" },
+];
+
+type SaveOption = "save" | "skip";
+
+const SAVE_ITEMS: ReadonlyArray<SelectListItem<SaveOption>> = [
+  {
+    id: "save",
+    label: "Save to ./.kuzushi/credentials.json",
+    detail:
+      "Persist project-local; auto-added to .gitignore. Future kuzushi runs in this dir pick it up",
+  },
+  {
+    id: "skip",
+    label: "Don't save",
+    detail: "Use the key for this session only (env-only)",
+  },
+];
+
+function saveRenderer(ctx: SelectListRenderContext<SaveOption>): React.ReactElement {
+  const item = SAVE_ITEMS.find((c) => c.id === ctx.item.id)!;
+  const name = ctx.isCursor ? tokens.strong(item.label) : tokens.muted(item.label);
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      <Text>
+        {ctx.cursorPrefix} {icons.complete} {name}
+      </Text>
+      {ctx.isCursor && item.detail && (
+        <Box paddingLeft={6}>
+          <Text>{tokens.muted(item.detail)}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
 
 function chooseRenderer(ctx: SelectListRenderContext<ChoiceOption["id"]>): React.ReactElement {
   const opt = CHOICES.find((c) => c.id === ctx.item.id)!;
@@ -102,9 +146,20 @@ export function CredentialPrompt({
   const [step, setStep] = useState<Step>("choose");
   const [chosenOption, setChosenOption] = useState<"api-key" | "oauth-token" | null>(null);
   const [inputValue, setInputValue] = useState("");
+  const [capturedValue, setCapturedValue] = useState("");
+  const [baseUrlValue, setBaseUrlValue] = useState("");
+  const [capturedBaseUrl, setCapturedBaseUrl] = useState<string | undefined>(undefined);
   const width = terminalCardWidth();
 
-  useRegisterKeybindings(step === "choose" ? CHOOSE_KEYBINDS : INPUT_KEYBINDS);
+  const stepKeybinds =
+    step === "choose"
+      ? CHOOSE_KEYBINDS
+      : step === "input"
+        ? INPUT_KEYBINDS
+        : step === "base-url"
+          ? BASE_URL_KEYBINDS
+          : SAVE_KEYBINDS;
+  useRegisterKeybindings(stepKeybinds);
 
   // Escape/q → cancel at the choose step. SelectList owns arrow/Enter keys.
   useInput(
@@ -112,6 +167,27 @@ export function CredentialPrompt({
       if (input === "q" || key.escape) onCancel();
     },
     { isActive: step === "choose" },
+  );
+
+  // Esc → back to input on save step.
+  useInput(
+    (_input, key) => {
+      if (key.escape) {
+        setStep("input");
+      }
+    },
+    { isActive: step === "save" },
+  );
+
+  // Esc → back to input from base-url step.
+  useInput(
+    (_input, key) => {
+      if (key.escape) {
+        setStep("input");
+        setBaseUrlValue("");
+      }
+    },
+    { isActive: step === "base-url" },
   );
 
   const handleSelect = (id: ChoiceOption["id"]) => {
@@ -123,6 +199,79 @@ export function CredentialPrompt({
       setInputValue("");
     }
   };
+
+  const handleSaveSelect = (id: SaveOption) => {
+    onComplete({
+      kind: "api-key",
+      value: capturedValue,
+      baseUrl: capturedBaseUrl,
+      persist: id === "save",
+    });
+  };
+
+  if (step === "save") {
+    return (
+      <Box flexDirection="column">
+        <Text>{""}</Text>
+        <Text>{boxHeader("Persist API Key?", width)}</Text>
+        <Text>{""}</Text>
+        <Box paddingLeft={2}>
+          <Text>{tokens.muted("Save the key to ./.kuzushi/credentials.json (in the")}</Text>
+        </Box>
+        <Box paddingLeft={2}>
+          <Text>{tokens.muted("dir kuzushi was launched from). Auto-added to .gitignore.")}</Text>
+        </Box>
+        <Text>{""}</Text>
+        <SelectList<SaveOption>
+          items={SAVE_ITEMS}
+          onSelect={handleSaveSelect}
+          renderItem={saveRenderer}
+        />
+        <Text>{boxFooter(width)}</Text>
+      </Box>
+    );
+  }
+
+  if (step === "base-url") {
+    return (
+      <Box flexDirection="column">
+        <Text>{""}</Text>
+        <Text>{boxHeader("Custom Base URL? (optional)", width)}</Text>
+        <Text>{""}</Text>
+        <Box paddingLeft={2}>
+          <Text>
+            {tokens.muted("Leave blank to use Anthropic's default (https://api.anthropic.com).")}
+          </Text>
+        </Box>
+        <Box paddingLeft={2}>
+          <Text>{tokens.muted("Set this for proxies, gateways, or local endpoints.")}</Text>
+        </Box>
+        <Text>{""}</Text>
+        <Box paddingLeft={2}>
+          <TextInput
+            value={baseUrlValue}
+            onChange={setBaseUrlValue}
+            onSubmit={(value) => {
+              const trimmed = value.trim();
+              const baseUrl = trimmed.length > 0 ? trimmed : undefined;
+              setCapturedBaseUrl(baseUrl);
+              if (chosenOption === "api-key") {
+                setStep("save");
+                return;
+              }
+              onComplete({ kind: "oauth-token", value: capturedValue, baseUrl });
+            }}
+            onCancel={() => {
+              setStep("input");
+              setBaseUrlValue("");
+            }}
+            placeholder="(Enter to skip, or paste URL)"
+          />
+        </Box>
+        <Text>{boxFooter(width)}</Text>
+      </Box>
+    );
+  }
 
   if (step === "input") {
     const label = chosenOption === "api-key" ? "API Key" : "OAuth Token";
@@ -141,9 +290,10 @@ export function CredentialPrompt({
             onChange={setInputValue}
             onSubmit={(value) => {
               const trimmed = value.trim();
-              if (trimmed.length > 0 && chosenOption) {
-                onComplete({ kind: chosenOption, value: trimmed });
-              }
+              if (trimmed.length === 0 || !chosenOption) return;
+              setCapturedValue(trimmed);
+              setBaseUrlValue("");
+              setStep("base-url");
             }}
             onCancel={() => {
               setStep("choose");
