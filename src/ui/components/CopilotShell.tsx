@@ -20,6 +20,7 @@ import { useUIState } from "../hooks.js";
 import { MultilineText } from "../primitives/MultilineText.js";
 import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
 import { tokens } from "../tokens.js";
+import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
 import { ModuleCatalog } from "./ModuleCatalog.js";
@@ -412,13 +413,14 @@ function ShellViewPanel({
       if (!match) return null;
       return <FindingCard mode="linear" finding={match} />;
     }
-    // Phase C — threat model views. C.3–C.5 still route through the
+    // Phase C — threat model views. C.4–C.5 still route through the
     // placeholder until their real components land.
     case "threat-dfd":
       return <ThreatDfdView shell={shell} />;
     case "threat-stride":
       return <ThreatStrideMatrix shell={shell} />;
     case "threat-stories":
+      return <AttackerStoriesView shell={shell} />;
     case "threat-scope":
     case "threat-summary":
       return <ThreatPlaceholder shell={shell} />;
