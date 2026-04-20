@@ -71,6 +71,7 @@ function AppInner({ store }: AppProps): React.ReactElement {
       else if (input === "2") store.update({ scanView: "findings" });
       else if (input === "3") store.update({ scanView: "cost" });
       else if (input === "m") store.update({ heartbeatExpanded: !state.heartbeatExpanded });
+      else if (input === "n") store.update({ noticeRailExpanded: !state.noticeRailExpanded });
     },
     { isActive: state.mode === "running" && process.stdin.isTTY === true },
   );
@@ -149,7 +150,7 @@ function AppInner({ store }: AppProps): React.ReactElement {
           </Static>
         )}
 
-      <NoticeRail notices={state.notices} />
+      <NoticeRail notices={state.notices} expanded={state.noticeRailExpanded} />
 
       {state.mode === "preflight" && state.preflight?.kind === "wizard" && (
         <SetupWizard
