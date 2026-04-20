@@ -78,6 +78,45 @@ describe("ModuleRegistry", () => {
     expect(reg.resolveTool("nocolon")).toBeUndefined();
   });
 
+  it("resolves tool names via registered alias", () => {
+    const reg = new ModuleRegistry();
+    const tool = makeDummyTool("semgrep:scan");
+    reg.register(makeDummyModule("semgrep", [tool]));
+    reg.registerAlias("sast:semgrep", "semgrep:scan");
+    const resolved = reg.resolveTool("sast:semgrep");
+    expect(resolved).toBeDefined();
+    expect(resolved!.tool.name).toBe("semgrep:scan");
+    expect(resolved!.module.id).toBe("semgrep");
+  });
+
+  it("alias to unknown tool returns undefined cleanly", () => {
+    const reg = new ModuleRegistry();
+    reg.registerAlias("sast:ghost", "missing:tool");
+    expect(reg.resolveTool("sast:ghost")).toBeUndefined();
+  });
+
+  it("alias does not shadow a real tool with the same name", () => {
+    const reg = new ModuleRegistry();
+    const direct = makeDummyTool("sast:scan");
+    reg.register(makeDummyModule("sast", [direct]));
+    const elsewhere = makeDummyTool("other:scan");
+    reg.register(makeDummyModule("other", [elsewhere]));
+    reg.registerAlias("sast:scan", "other:scan");
+    // Direct lookup wins.
+    expect(reg.resolveTool("sast:scan")?.tool).toBe(direct);
+  });
+
+  it("listAliases returns all registered redirects", () => {
+    const reg = new ModuleRegistry();
+    reg.registerAlias("sast:semgrep", "semgrep:scan");
+    reg.registerAlias("sast:codeql", "codeql:scan");
+    const entries = reg
+      .listAliases()
+      .map((a) => `${a.from}=>${a.to}`)
+      .sort();
+    expect(entries).toEqual(["sast:codeql=>codeql:scan", "sast:semgrep=>semgrep:scan"]);
+  });
+
   it("allTools filters by headless", () => {
     const reg = new ModuleRegistry();
     const headlessTool = makeDummyTool("m:headless", true);
