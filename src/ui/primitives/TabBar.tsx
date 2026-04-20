@@ -7,7 +7,7 @@
  */
 
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { tokens } from "../tokens.js";
 
 export interface Tab {
@@ -23,7 +23,9 @@ interface TabBarProps {
   onChange?: (id: string) => void;
 }
 
-export function TabBar({ tabs, activeId }: TabBarProps): React.ReactElement {
+export const TabBar = React.memo(_TabBar);
+
+function _TabBar({ tabs, activeId }: TabBarProps): React.ReactElement {
   return (
     <Box flexDirection="row" paddingLeft={2} marginBottom={1}>
       {tabs.map((tab, i) => {
