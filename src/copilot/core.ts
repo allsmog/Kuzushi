@@ -18,6 +18,7 @@ import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import { ModuleEventBus, type ModuleEventScope } from "../bus/module-events.js";
 import type { MessageBus } from "../bus/types.js";
+import { ModuleCache } from "../modules/cache.js";
 import { createCorePromptArmorModule } from "../modules/core-prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/core-randori.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
@@ -76,6 +77,8 @@ export class CopilotCore {
   readonly registry: ModuleRegistry;
   /** Cross-module framework events (msfconsole-style). */
   readonly events: ModuleEventBus;
+  /** Materialized metadata cache — written on init, consulted by search/info. */
+  readonly moduleCache: ModuleCache;
   private readonly moduleCtx: ModuleContext;
   private readonly taskRegistry?: TaskRegistry;
   /** Lifecycle-scoped event handles per module — disposed on unload. */
@@ -84,6 +87,7 @@ export class CopilotCore {
   constructor(private readonly opts: CopilotCoreOptions) {
     this.registry = new ModuleRegistry();
     this.events = new ModuleEventBus();
+    this.moduleCache = new ModuleCache(opts.dataDir);
     this.moduleCtx = {
       runtime: opts.runtime,
       bus: opts.bus,
@@ -110,6 +114,7 @@ export class CopilotCore {
         taskRegistry: this.taskRegistry,
         ...extra,
       });
+      this.moduleCache.upsertFromModule(mod);
     } catch (err) {
       scope.disposeAll();
       this.moduleScopes.delete(mod.id);
@@ -169,6 +174,15 @@ export class CopilotCore {
       for (const spec of this.opts.modules) {
         await this.loadModuleFromSpecifier(spec);
       }
+    }
+
+    // Persist the module metadata cache so follow-up `search` / `info`
+    // launches can read it without re-importing every module. Errors are
+    // non-fatal — the cache is an optimization, not a source of truth.
+    try {
+      this.moduleCache.save();
+    } catch {
+      // Ignore — a missing/unwritable dataDir should never break init.
     }
   }
 
