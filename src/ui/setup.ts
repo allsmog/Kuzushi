@@ -226,6 +226,130 @@ export async function runCredentialPrompt(
   });
 }
 
+/**
+ * Stdin-based credential prompt for the readline (non-Ink) shell.
+ *
+ * Asks the user to choose an auth method, paste a token (echoed as `*`), and
+ * (for API keys only) opt into persisting it to `~/.kuzushi/config.json`.
+ * Returns `{ action: "cancel" }` on EOF or empty selection so the caller can
+ * surface the same disabled-copilot message as the Ink path.
+ */
+export async function runReadlineCredentialPrompt(): Promise<CredentialOutcome> {
+  const readline = await import("node:readline");
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+    terminal: true,
+  });
+
+  const ask = (question: string): Promise<string | null> =>
+    new Promise((resolve) => {
+      rl.question(question, (answer) => resolve(answer));
+      rl.once("close", () => resolve(null));
+    });
+
+  const askMasked = (question: string): Promise<string | null> => {
+    const out = process.stderr as NodeJS.WriteStream & { _writeToOutput?: (s: string) => void };
+    process.stderr.write(question);
+    let buffer = "";
+    return new Promise((resolve) => {
+      const onData = (chunk: Buffer): void => {
+        const str = chunk.toString("utf-8");
+        for (const ch of str) {
+          if (ch === "\n" || ch === "\r") {
+            process.stdin.removeListener("data", onData);
+            try {
+              process.stdin.setRawMode?.(false);
+            } catch {
+              // ignore — not all environments support raw mode
+            }
+            process.stderr.write("\n");
+            resolve(buffer);
+            return;
+          }
+          if (ch === "\u0003") {
+            // Ctrl-C
+            process.stdin.removeListener("data", onData);
+            try {
+              process.stdin.setRawMode?.(false);
+            } catch {
+              // ignore
+            }
+            process.stderr.write("\n");
+            resolve(null);
+            return;
+          }
+          if (ch === "\u007f" || ch === "\b") {
+            buffer = buffer.slice(0, -1);
+            continue;
+          }
+          buffer += ch;
+          process.stderr.write("*");
+        }
+      };
+      try {
+        process.stdin.setRawMode?.(true);
+      } catch {
+        // ignore
+      }
+      process.stdin.resume();
+      process.stdin.on("data", onData);
+      // Touch out._writeToOutput to silence biome unused-var on platforms
+      // without raw mode; the variable is only here for typing.
+      void out;
+    });
+  };
+
+  try {
+    const choice = await ask(
+      "Authenticate the copilot — choose: [1] API Key  [2] OAuth Token  [Enter] Skip: ",
+    );
+    if (choice === null) return { action: "cancel" };
+    const trimmedChoice = choice.trim();
+    if (trimmedChoice === "" || trimmedChoice.toLowerCase() === "q") {
+      return { action: "cancel" };
+    }
+
+    if (trimmedChoice === "1") {
+      const value = await askMasked("Paste ANTHROPIC_API_KEY (input hidden): ");
+      if (value === null) return { action: "cancel" };
+      const trimmed = value.trim();
+      if (trimmed.length === 0) return { action: "cancel" };
+
+      const baseUrlRaw = await ask("Custom ANTHROPIC_BASE_URL? (blank for Anthropic default): ");
+      if (baseUrlRaw === null) return { action: "cancel" };
+      const baseUrl = baseUrlRaw.trim() || undefined;
+
+      const save = await ask(
+        "Save to ./.kuzushi/credentials.json so future runs pick it up? [Y/n]: ",
+      );
+      if (save === null) return { action: "cancel" };
+      const persist = save.trim().toLowerCase() !== "n" && save.trim().toLowerCase() !== "no";
+
+      return {
+        action: "proceed",
+        choice: { kind: "api-key", value: trimmed, baseUrl, persist },
+      };
+    }
+
+    if (trimmedChoice === "2") {
+      const value = await askMasked("Paste ANTHROPIC_OAUTH_TOKEN (input hidden): ");
+      if (value === null) return { action: "cancel" };
+      const trimmed = value.trim();
+      if (trimmed.length === 0) return { action: "cancel" };
+      const baseUrlRaw = await ask("Custom ANTHROPIC_BASE_URL? (blank for Anthropic default): ");
+      if (baseUrlRaw === null) return { action: "cancel" };
+      const baseUrl = baseUrlRaw.trim() || undefined;
+      return { action: "proceed", choice: { kind: "oauth-token", value: trimmed, baseUrl } };
+    }
+
+    return { action: "cancel" };
+  } finally {
+    rl.close();
+  }
+}
+
 // ── Context Intake ──
 
 export type ContextIntakeOutcome =

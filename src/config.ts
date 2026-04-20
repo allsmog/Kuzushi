@@ -31,6 +31,90 @@ const log = getLogger("config");
 
 export { configPath, DEFAULTS, projectConfigPath };
 
+const LOCAL_CREDENTIALS_FILENAME = "credentials.json";
+
+/**
+ * Resolve the project-local credentials file path: `<cwd>/.kuzushi/credentials.json`.
+ * This file is treated as user-trusted (it's never embedded in a repo by an
+ * attacker — the user types it through `/auth`) so it bypasses the
+ * UNSAFE_PROJECT_CONFIG_KEYS strip applied to project `config.json`.
+ */
+export function localCredentialsPath(cwd: string = process.cwd()): string {
+  return path.join(cwd, ".kuzushi", LOCAL_CREDENTIALS_FILENAME);
+}
+
+/**
+ * Read the project-local credentials file at `<cwd>/.kuzushi/credentials.json`,
+ * if present. Returns the parsed `agentRuntimeConfig` shape (`{ apiKey?, baseUrl? }`)
+ * or undefined when the file is missing or malformed.
+ */
+export function loadLocalCredentials(cwd: string = process.cwd()): AgentRuntimeConfig | undefined {
+  const filePath = localCredentialsPath(cwd);
+  if (!existsSync(filePath)) return undefined;
+  try {
+    const raw = JSON.parse(readFileSync(filePath, "utf-8")) as unknown;
+    if (!isRecord(raw)) return undefined;
+    const result: AgentRuntimeConfig = {};
+    if (typeof raw["apiKey"] === "string") result.apiKey = raw["apiKey"];
+    if (typeof raw["baseUrl"] === "string") result.baseUrl = raw["baseUrl"];
+    return Object.keys(result).length > 0 ? result : undefined;
+  } catch (error) {
+    log.warn(`Failed to read local credentials at ${filePath}: ${String(error)}`);
+    return undefined;
+  }
+}
+
+/**
+ * Persist credentials to `<cwd>/.kuzushi/credentials.json` and best-effort add
+ * the file to `<cwd>/.gitignore` so it isn't accidentally committed.
+ *
+ * Returns the absolute path the file was written to.
+ */
+export function persistLocalCredentials(
+  creds: AgentRuntimeConfig,
+  cwd: string = process.cwd(),
+): string {
+  const filePath = localCredentialsPath(cwd);
+  const targetDir = path.dirname(filePath);
+  if (!existsSync(targetDir)) {
+    mkdirSync(targetDir, { recursive: true });
+  }
+
+  const existing = loadLocalCredentials(cwd) ?? {};
+  const merged: AgentRuntimeConfig = { ...existing, ...creds };
+  writeFileSync(filePath, `${JSON.stringify(merged, null, 2)}\n`, {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+
+  // Best-effort .gitignore add. Skips silently when the cwd has no .gitignore
+  // and isn't a git repo we recognize, to avoid creating noise.
+  try {
+    const gitignorePath = path.join(cwd, ".gitignore");
+    const entry = ".kuzushi/credentials.json";
+    let body = "";
+    if (existsSync(gitignorePath)) {
+      body = readFileSync(gitignorePath, "utf-8");
+      const lines = body.split(/\r?\n/);
+      if (
+        lines.some((line) => line.trim() === entry || line.trim() === "/.kuzushi/credentials.json")
+      ) {
+        return filePath;
+      }
+      const trailingNewline = body.endsWith("\n") ? "" : "\n";
+      body = `${body}${trailingNewline}${entry}\n`;
+      writeFileSync(gitignorePath, body, "utf-8");
+    } else if (existsSync(path.join(cwd, ".git"))) {
+      // Has .git/ but no .gitignore yet — create one with just our entry.
+      writeFileSync(gitignorePath, `${entry}\n`, "utf-8");
+    }
+  } catch (error) {
+    log.warn(`Failed to update .gitignore at ${cwd}: ${String(error)}`);
+  }
+
+  return filePath;
+}
+
 /** Derived from KuzushiConfigSchema so that adding a new config key to the
  *  interface automatically makes it valid here — no manual list to maintain. */
 const VALID_TOP_LEVEL_KEYS = new Set<string>(Object.keys(KuzushiConfigSchema.shape));

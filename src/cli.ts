@@ -112,10 +112,30 @@ Examples:
         apiKey?: string;
       }) => {
         const { startShell } = await import("./copilot/shell.js");
+        const { loadLocalCredentials } = await import("./config.js");
         const config = loadConfig();
         if (opts.model) {
           config.model = opts.model;
         }
+
+        // Project-local credentials (`<cwd>/.kuzushi/credentials.json`)
+        // override env-only state so per-project keys "just work".
+        const localCreds = loadLocalCredentials(opts.target ?? process.cwd());
+        if (localCreds?.apiKey) {
+          config.agentRuntimeConfig = {
+            ...config.agentRuntimeConfig,
+            apiKey: localCreds.apiKey,
+          };
+          process.env.ANTHROPIC_API_KEY = localCreds.apiKey;
+        }
+        if (localCreds?.baseUrl) {
+          config.agentRuntimeConfig = {
+            ...config.agentRuntimeConfig,
+            baseUrl: localCreds.baseUrl,
+          };
+          process.env.ANTHROPIC_BASE_URL = localCreds.baseUrl;
+        }
+
         if (opts.apiKey) {
           process.env.ANTHROPIC_API_KEY = opts.apiKey;
         }

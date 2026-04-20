@@ -25,3 +25,4 @@ vendor/
 .codex
 .worktrees
 perf/results.json
+*.txt
