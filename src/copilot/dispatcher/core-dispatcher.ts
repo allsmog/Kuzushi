@@ -13,6 +13,7 @@ import type { ModuleRegistry } from "../../modules/registry.js";
 import type { CopilotModule } from "../../modules/types.js";
 import { type Datastore, formatOptionsTable } from "../options.js";
 import { formatSearchResult, searchCatalog } from "../search.js";
+import { randomTip } from "../tips.js";
 import { ModuleDispatcher, type ModuleToolRunner } from "./module-dispatcher.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
 
@@ -73,6 +74,17 @@ const COMMANDS: Record<string, string> = {
   makerc: "Save recent commands as a resource script",
   recipes: "List or run a bundled recipe (e.g. `recipes run quick-scan`)",
   edit: "Open $EDITOR on a Datastore value (typically an agent prompt)",
+  tip: "Print a random tip of the day",
+  examples: "Show canonical usage examples for a module (`examples semgrep`)",
+  why: "Explain why the active module's `run` preflight would fail",
+  alias: "Define a command alias (`alias qs = recipes run quick-scan`)",
+  unalias: "Remove a previously-defined alias",
+  favorite: "Star a module or tool for quick recall",
+  favorites: "List starred modules/tools (prefix with ! to run, e.g. !1)",
+  unfavorite: "Remove a star",
+  pushm: "Push the current module onto the module stack",
+  popm: "Pop the last-pushed module back onto the dispatcher stack",
+  listm: "List the module stack",
   exit: "Exit the shell",
   quit: "Exit the shell (alias for exit)",
 };
@@ -123,6 +135,28 @@ export class CoreDispatcher implements CommandDispatcher {
         return this.cmd_recipes(args, ctx);
       case "edit":
         return this.cmd_edit(args, ctx);
+      case "tip":
+        return this.cmd_tip();
+      case "examples":
+        return this.cmd_examples(args);
+      case "why":
+        return this.cmd_why(ctx);
+      case "alias":
+        return this.cmd_alias(args, ctx);
+      case "unalias":
+        return this.cmd_unalias(args, ctx);
+      case "favorite":
+        return this.cmd_favorite(args, ctx);
+      case "favorites":
+        return this.cmd_favorites(ctx);
+      case "unfavorite":
+        return this.cmd_unfavorite(args, ctx);
+      case "pushm":
+        return this.cmd_pushm(ctx);
+      case "popm":
+        return this.cmd_popm(ctx);
+      case "listm":
+        return this.cmd_listm(ctx);
       default:
         return { output: `Unknown command: ${cmd}` };
     }
@@ -396,12 +430,211 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: `[+] Updated ${name} (${updated.length} chars, scope=${scope}).` };
   }
 
+  // -------------------------------------------------------------------------
+  // Discovery & learning-curve commands
+  // -------------------------------------------------------------------------
+
+  private cmd_tip(): CommandResult {
+    return { output: `[*] Tip: ${randomTip()}` };
+  }
+
+  private cmd_examples(args: string[]): CommandResult {
+    const id = args[0];
+    if (!id) return { output: "Usage: examples <module>" };
+    if (!this.opts.registry.has(id)) return { output: `Unknown module: ${id}` };
+    const mod = this.opts.registry.get(id);
+    const examples = mod.examples;
+    if (!examples || examples.length === 0) {
+      return { output: `  (${id} has no examples registered)` };
+    }
+    const lines: string[] = [`Common invocations for module: ${id}`, ""];
+    for (const ex of examples) {
+      for (const line of ex.split("\n")) lines.push(`  ${line}`);
+      lines.push("");
+    }
+    return { output: lines.join("\n") };
+  }
+
+  private cmd_why(ctx: CommandContext): CommandResult {
+    const topModule = this.activeModuleDispatcher(ctx);
+    if (!topModule) {
+      return { output: "[*] No module selected — `why` explains preflight failures." };
+    }
+    const mod = topModule.module;
+    const reqs = mod.requires ?? [];
+    if (reqs.length === 0) {
+      return {
+        output: `[*] ${mod.id} declares no preflight requirements — any failure was a runtime error.`,
+      };
+    }
+    const shell = ctx.driver.getShellState?.();
+    const snapshot = (shell?.contextSnapshot ?? undefined) as Record<string, unknown> | undefined;
+    const lines: string[] = [`Why ${mod.id}'s preflight cares:`];
+    for (const req of reqs) {
+      if (req.kind === "snapshot") {
+        const present = !!snapshot && snapshot[req.field] != null;
+        lines.push(
+          `  ${present ? "✓" : "✗"} snapshot.${req.field}   (produced by: ${req.moduleId})`,
+        );
+        if (!present) {
+          lines.push(`      Fix: use ${req.moduleId}; run`);
+        }
+      } else if (req.kind === "findings") {
+        const count = ctx.driver.getFindingCount?.() ?? 0;
+        const need = req.minCount ?? 1;
+        lines.push(`  ${count >= need ? "✓" : "✗"} findings   (have ${count}, need ${need}+)`);
+        if (count < need) lines.push(`      Fix: run a scanner first (e.g. use semgrep; run)`);
+      } else if (req.kind === "hosts") {
+        const count = ctx.driver.getHostCount?.() ?? 0;
+        const need = req.minCount ?? 1;
+        lines.push(`  ${count >= need ? "✓" : "✗"} hosts   (have ${count}, need ${need}+)`);
+        if (count < need) lines.push(`      Fix: use recon; run`);
+      } else if (req.kind === "session") {
+        const count = ctx.driver.getLiveSessionCount?.(req.sessionKind) ?? 0;
+        const label = req.sessionKind ? `'${req.sessionKind}'` : "any";
+        lines.push(`  ${count > 0 ? "✓" : "✗"} ${label} live session   (have ${count})`);
+      } else if (req.kind === "env") {
+        const present = !!process.env[req.name];
+        lines.push(`  ${present ? "✓" : "✗"} env ${req.name}`);
+      }
+    }
+    lines.push("");
+    lines.push(`  Or run the full DAG: use sast; run`);
+    return { output: lines.join("\n") };
+  }
+
+  // -------------------------------------------------------------------------
+  // Aliases
+  // -------------------------------------------------------------------------
+
+  private cmd_alias(args: string[], ctx: CommandContext): CommandResult {
+    const driver = ctx.driver as unknown as {
+      registerAlias?: (n: string, v: string) => void;
+      listAliases?: () => Array<{ name: string; value: string }>;
+    };
+    if (args.length === 0) {
+      const aliases = driver.listAliases?.() ?? [];
+      if (aliases.length === 0) return { output: "  (no aliases)" };
+      const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - s.length));
+      const width = Math.max(...aliases.map((a) => a.name.length));
+      return {
+        output: aliases.map((a) => `  ${pad(a.name, width)}  =>  ${a.value}`).join("\n"),
+      };
+    }
+    // Parse `name = value...` or `name value...`
+    const eqIdx = args.indexOf("=");
+    const name = args[0];
+    const value = eqIdx > 0 ? args.slice(eqIdx + 1).join(" ") : args.slice(1).join(" ");
+    if (!name || !value) return { output: "Usage: alias <name> = <command...>" };
+    driver.registerAlias?.(name, value);
+    return { output: `[+] Alias set: ${name} => ${value}` };
+  }
+
+  private cmd_unalias(args: string[], ctx: CommandContext): CommandResult {
+    const name = args[0];
+    if (!name) return { output: "Usage: unalias <name>" };
+    const driver = ctx.driver as unknown as { unregisterAlias?: (n: string) => boolean };
+    const removed = driver.unregisterAlias?.(name) ?? false;
+    return { output: removed ? `[+] Removed alias: ${name}` : `[-] No such alias: ${name}` };
+  }
+
+  // -------------------------------------------------------------------------
+  // Favorites (numeric-recall aliases)
+  // -------------------------------------------------------------------------
+
+  private readonly favorites: string[] = [];
+
+  private cmd_favorite(args: string[], ctx: CommandContext): CommandResult {
+    const target = args.join(" ").trim();
+    if (!target) {
+      const top = this.activeModuleDispatcher(ctx);
+      if (!top) return { output: "Usage: favorite <module|tool|command>" };
+      if (!this.favorites.includes(top.module.id)) this.favorites.push(top.module.id);
+      return { output: `[+] Starred ${top.module.id}` };
+    }
+    if (!this.favorites.includes(target)) this.favorites.push(target);
+    const driver = ctx.driver as unknown as { registerAlias?: (n: string, v: string) => void };
+    // Register `!<idx>` shortcut for each favorite.
+    const idx = this.favorites.indexOf(target) + 1;
+    driver.registerAlias?.(`!${idx}`, target);
+    return { output: `[+] Starred ${target}  (recall: !${idx})` };
+  }
+
+  private cmd_favorites(_ctx: CommandContext): CommandResult {
+    if (this.favorites.length === 0) return { output: "  (no favorites yet)" };
+    return {
+      output: this.favorites.map((f, i) => `  !${i + 1}  ${f}`).join("\n"),
+    };
+  }
+
+  private cmd_unfavorite(args: string[], ctx: CommandContext): CommandResult {
+    const target = args.join(" ").trim();
+    const idx = this.favorites.indexOf(target);
+    if (idx < 0) return { output: `[-] Not in favorites: ${target}` };
+    this.favorites.splice(idx, 1);
+    const driver = ctx.driver as unknown as { unregisterAlias?: (n: string) => boolean };
+    driver.unregisterAlias?.(`!${idx + 1}`);
+    return { output: `[+] Unstarred ${target}` };
+  }
+
+  // -------------------------------------------------------------------------
+  // Module stack (pushm / popm / listm)
+  // -------------------------------------------------------------------------
+
+  private readonly savedModules: string[] = [];
+
+  private cmd_pushm(ctx: CommandContext): CommandResult {
+    const top = this.activeModuleDispatcher(ctx);
+    if (!top) return { output: "[-] No module to push. Use `use <module>` first." };
+    this.savedModules.push(top.module.id);
+    return {
+      output: `[+] Saved ${top.module.id} on the module stack (depth ${this.savedModules.length}).`,
+    };
+  }
+
+  private cmd_popm(ctx: CommandContext): CommandResult {
+    const id = this.savedModules.pop();
+    if (!id) return { output: "[-] Module stack is empty." };
+    if (!this.opts.registry.has(id)) return { output: `[-] Module '${id}' is no longer loaded.` };
+    // Pop any currently-focused module first so `use` doesn't stack.
+    const driver = ctx.driver;
+    while (driver.current() instanceof ModuleDispatcher) driver.pop();
+    const mod = this.opts.registry.get(id);
+    const newDispatcher = new ModuleDispatcher({
+      module: mod,
+      globals: this.opts.globals,
+      ...(this.opts.runTool ? { runTool: this.opts.runTool } : {}),
+    });
+    return { push: newDispatcher, output: `[+] Popped ${id} back.` };
+  }
+
+  private cmd_listm(_ctx: CommandContext): CommandResult {
+    if (this.savedModules.length === 0) return { output: "  (module stack empty)" };
+    return {
+      output: this.savedModules.map((id, i) => `  ${i}  ${id}`).join("\n"),
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // helpers
+  // -------------------------------------------------------------------------
+
   /** Find the active module dispatcher's datastore, if a `use` was issued. */
   private findModuleStore(ctx: CommandContext): Datastore | undefined {
     const stack = ctx.driver.stack();
     for (let i = stack.length - 1; i >= 0; i--) {
       const d = stack[i];
       if (d instanceof ModuleDispatcher) return d.datastore;
+    }
+    return undefined;
+  }
+
+  /** Top-most ModuleDispatcher in the stack, or undefined. */
+  private activeModuleDispatcher(ctx: CommandContext): ModuleDispatcher | undefined {
+    const stack = ctx.driver.stack();
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const d = stack[i];
+      if (d instanceof ModuleDispatcher) return d;
     }
     return undefined;
   }

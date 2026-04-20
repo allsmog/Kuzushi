@@ -314,6 +314,13 @@ export interface CopilotModule {
   readonly tools: ReadonlyArray<ModuleTool>;
 
   /**
+   * Canonical usage examples — rendered verbatim by `examples <moduleId>`.
+   * Each entry is a short multi-line snippet; keep them copy-pasteable into
+   * the shell. Example: "use semgrep\nset TARGET ./\nrun".
+   */
+  readonly examples?: ReadonlyArray<string>;
+
+  /**
    * Upstream artifacts this module needs before `run` can meaningfully execute.
    * Checked by the shell's ModuleDispatcher against the active ShellState + DB.
    * Missing requirements produce a helpful "run X first" error. Optional —

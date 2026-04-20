@@ -763,6 +763,20 @@ async function startInkShell(
     );
   }
 
+  // Load ~/.kuzushi/startup.rc if present — lets operators preload setg,
+  // aliases, favorites, etc. on every shell launch. Errors are non-fatal;
+  // they show up as dispatcher output but don't abort shell start.
+  try {
+    const os = await import("node:os");
+    const fs = await import("node:fs");
+    const startupPath = path.join(os.homedir(), ".kuzushi", "startup.rc");
+    if (fs.existsSync(startupPath)) {
+      await loadAndRunResource(startupPath, { driver, cwd: currentCwd() });
+    }
+  } catch {
+    // Best-effort — a broken startup.rc shouldn't block shell use.
+  }
+
   /**
    * Sync `shellCtx.focusedModule` from the dispatcher stack so bare-tool
    * dispatch (`resolveDirectToolDispatch`) and prompt rendering stay in sync
