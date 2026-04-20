@@ -192,6 +192,29 @@ export function hasAnthropicCredentials(configApiKey?: string): boolean {
   return false;
 }
 
+/**
+ * Check whether *any* provider has credentials present, via env vars.
+ *
+ * Matches pi-ai's env resolution so we don't prompt when the operator
+ * already exported ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY /
+ * etc., or pointed at a local Ollama endpoint.
+ */
+export function hasAnyProviderCredentials(): boolean {
+  const envKeys = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_OAUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "MISTRAL_API_KEY",
+    "GROQ_API_KEY",
+    "CEREBRAS_API_KEY",
+    "XAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "OLLAMA_BASE_URL",
+  ];
+  return envKeys.some((k) => Boolean(process.env[k]));
+}
+
 export type CredentialOutcome =
   | { action: "proceed"; choice: CredentialChoice }
   | { action: "cancel" };
@@ -302,13 +325,17 @@ export async function runReadlineCredentialPrompt(): Promise<CredentialOutcome> 
   };
 
   try {
+    // Readline fallback is kept minimal — defaults to Anthropic because it's
+    // the most common path and the user can always use the full Ink TTY
+    // flow for other providers.
     const choice = await ask(
-      "Authenticate the copilot — choose: [1] API Key  [2] OAuth Token  [Enter] Skip: ",
+      "Authenticate — [1] Anthropic API key  [i] use env vars  [Enter] Skip: ",
     );
     if (choice === null) return { action: "cancel" };
-    const trimmedChoice = choice.trim();
-    if (trimmedChoice === "" || trimmedChoice.toLowerCase() === "q") {
-      return { action: "cancel" };
+    const trimmedChoice = choice.trim().toLowerCase();
+    if (trimmedChoice === "" || trimmedChoice === "q") return { action: "cancel" };
+    if (trimmedChoice === "i" || trimmedChoice === "inherited") {
+      return { action: "proceed", choice: { kind: "inherited", providerId: "anthropic" } };
     }
 
     if (trimmedChoice === "1") {
@@ -317,7 +344,7 @@ export async function runReadlineCredentialPrompt(): Promise<CredentialOutcome> 
       const trimmed = value.trim();
       if (trimmed.length === 0) return { action: "cancel" };
 
-      const baseUrlRaw = await ask("Custom ANTHROPIC_BASE_URL? (blank for Anthropic default): ");
+      const baseUrlRaw = await ask("Custom ANTHROPIC_BASE_URL? (blank for default): ");
       if (baseUrlRaw === null) return { action: "cancel" };
       const baseUrl = baseUrlRaw.trim() || undefined;
 
@@ -329,19 +356,8 @@ export async function runReadlineCredentialPrompt(): Promise<CredentialOutcome> 
 
       return {
         action: "proceed",
-        choice: { kind: "api-key", value: trimmed, baseUrl, persist },
+        choice: { kind: "api-key", providerId: "anthropic", value: trimmed, baseUrl, persist },
       };
-    }
-
-    if (trimmedChoice === "2") {
-      const value = await askMasked("Paste ANTHROPIC_OAUTH_TOKEN (input hidden): ");
-      if (value === null) return { action: "cancel" };
-      const trimmed = value.trim();
-      if (trimmed.length === 0) return { action: "cancel" };
-      const baseUrlRaw = await ask("Custom ANTHROPIC_BASE_URL? (blank for Anthropic default): ");
-      if (baseUrlRaw === null) return { action: "cancel" };
-      const baseUrl = baseUrlRaw.trim() || undefined;
-      return { action: "proceed", choice: { kind: "oauth-token", value: trimmed, baseUrl } };
     }
 
     return { action: "cancel" };

@@ -13,7 +13,7 @@ export function configureAgentRuntime(config: KuzushiConfig): AgentRuntime {
 }
 
 export function createAgentRuntimeInstance(config: KuzushiConfig): AgentRuntime {
-  const backend = config.agentRuntimeBackend ?? "claude";
+  const backend = config.agentRuntimeBackend ?? "pi-ai";
   // Pull only the active backend's slot — the other slot must not leak into
   // this runtime. Before the per-backend split a single shared bag caused
   // pi-ai creds to poison the claude runtime and vice-versa.

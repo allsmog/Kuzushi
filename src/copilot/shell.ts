@@ -340,7 +340,7 @@ async function ensureClaudeShellRuntime(opts: ShellOptions, store?: UIStore): Pr
   // Backends other than "claude" don't currently produce real interactive
   // sessions — the LoggingAgentRuntime wrapper still exposes a createSession
   // method, but it forwards to a no-op for e.g. pi-ai. Detect by backend name.
-  const backend = opts.config.agentRuntimeBackend ?? "claude";
+  const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
   if (backend === "claude") return;
   try {
     const { ClaudeAgentRuntime } = await import("../agent-runtime/claude.js");
@@ -410,7 +410,7 @@ function mergeIntoActiveSlot(
   opts: ShellOptions,
   patch: { apiKey?: string; baseUrl?: string },
 ): void {
-  const backend = opts.config.agentRuntimeBackend ?? "claude";
+  const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
   const slot = backend === "pi-ai" ? "piAi" : "claude";
   const existing = opts.config.agentRuntimeConfig?.[slot] ?? {};
   const nextSlot = { ...existing, ...patch };
@@ -434,54 +434,52 @@ async function applyCredentialOutcome(
     return { enabled: true };
   }
 
-  if (choice.kind === "api-key") {
-    mergeIntoActiveSlot(opts, {
-      apiKey: choice.value,
-      ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
-    });
-    process.env["ANTHROPIC_API_KEY"] = choice.value;
-    if (choice.baseUrl) process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
-    await rebuildShellRuntime(opts);
+  const { providerEnvVar, providerBaseUrlEnvVar, backendConfigSlot, persistLocalCredentials } =
+    await import("../config.js");
 
-    if (choice.persist) {
-      try {
-        const { persistLocalCredentials, backendConfigSlot } = await import("../config.js");
-        const targetCwd = opts.target ? path.resolve(opts.target) : process.cwd();
-        const slot = backendConfigSlot(opts.config.agentRuntimeBackend);
-        const writtenTo = persistLocalCredentials(
-          {
-            [slot]: {
-              apiKey: choice.value,
-              ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
-            },
-          },
-          targetCwd,
-        );
-        return {
-          enabled: true,
-          message: `Copilot enabled. Credentials saved to ${writtenTo} (${slot} slot).`,
-          persistedTo: writtenTo,
-        };
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        return {
-          enabled: true,
-          message: `Copilot enabled (in-memory). Failed to persist credentials: ${detail}`,
-        };
-      }
-    }
+  const providerLabel = choice.providerId;
+  const apiKey = choice.kind === "api-key" ? choice.value : choice.apiKey;
+  const baseUrl = choice.baseUrl;
+  const persist = choice.persist === true;
 
-    return { enabled: true, message: "Copilot enabled for this session." };
-  }
+  // Merge the new creds into the active backend slot so rebuildShellRuntime
+  // can pick them up this session.
+  const slotPatch: Record<string, string> = {};
+  if (apiKey) slotPatch.apiKey = apiKey;
+  if (baseUrl) slotPatch.baseUrl = baseUrl;
+  mergeIntoActiveSlot(opts, slotPatch);
 
-  // oauth-token
-  process.env["ANTHROPIC_OAUTH_TOKEN"] = choice.value;
-  if (choice.baseUrl) {
-    mergeIntoActiveSlot(opts, { baseUrl: choice.baseUrl });
-    process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
-  }
+  // Export to env vars pi-ai will resolve when the runtime initializes.
+  const envKey = providerEnvVar(providerLabel);
+  if (envKey && apiKey) process.env[envKey] = apiKey;
+  const envUrl = providerBaseUrlEnvVar(providerLabel);
+  if (envUrl && baseUrl) process.env[envUrl] = baseUrl;
+
   await rebuildShellRuntime(opts);
-  return { enabled: true, message: "Copilot enabled for this session (OAuth token)." };
+
+  if (persist) {
+    try {
+      const targetCwd = opts.target ? path.resolve(opts.target) : process.cwd();
+      const slot = backendConfigSlot(opts.config.agentRuntimeBackend);
+      const writtenTo = persistLocalCredentials(
+        { [slot]: slotPatch },
+        targetCwd,
+      );
+      return {
+        enabled: true,
+        message: `Copilot enabled. ${providerLabel} credentials saved to ${writtenTo} (${slot} slot).`,
+        persistedTo: writtenTo,
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        enabled: true,
+        message: `Copilot enabled (in-memory). Failed to persist credentials: ${detail}`,
+      };
+    }
+  }
+
+  return { enabled: true, message: `Copilot enabled for this session (${providerLabel}).` };
 }
 
 export function createShellSession(
@@ -1420,7 +1418,7 @@ async function startInkShell(
   };
 
   const lazyPromptForCredentials = async (): Promise<boolean> => {
-    const isClaudeBackend = (opts.config.agentRuntimeBackend ?? "claude") === "claude";
+    const isClaudeBackend = (opts.config.agentRuntimeBackend ?? "pi-ai") === "claude";
     if (!isClaudeBackend) return false;
     const { hasAnthropicCredentials, runCredentialPrompt } = await import("../ui/setup.js");
     const { resolveActiveCredentials } = await import("../config.js");
@@ -2487,6 +2485,9 @@ function handleSlashCommand(
     case "backend":
       return handleBackendCommand(args, opts);
 
+    case "provider":
+      return handleProviderCommand(args, opts);
+
     case "context": {
       const sub = args[0]?.toLowerCase();
 
@@ -3507,7 +3508,7 @@ function closestBackend(input: string, candidates: readonly string[]): string | 
 
 function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandResult {
   const sub = (args[0] ?? "").toLowerCase();
-  const current = opts.config.agentRuntimeBackend ?? "claude";
+  const current = opts.config.agentRuntimeBackend ?? "pi-ai";
   // `current` is what the live shell session uses, which may differ from the
   // persisted ~/.kuzushi/config.json value when ensureClaudeShellRuntime has
   // swapped a non-claude backend for the shell. /backend should always compare
@@ -3517,7 +3518,7 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
     return {
       asyncExecute: async () => {
         const { loadConfig, configPath } = await import("../config.js");
-        const persisted = loadConfig().agentRuntimeBackend ?? "claude";
+        const persisted = loadConfig().agentRuntimeBackend ?? "pi-ai";
         const lines = [`Shell backend (live): ${current}`, `Persisted backend:    ${persisted}`];
         if (persisted !== current) {
           lines.push(
@@ -3528,11 +3529,13 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
         lines.push(...formatBackendSlots(opts.config.agentRuntimeConfig));
         lines.push(
           "",
-          "Available: claude, pi-ai",
+          "Available: pi-ai (default, 20+ providers), claude (legacy CC subprocess)",
           "Usage:",
           "  /backend show           Show current + persisted backend + credentials",
-          "  /backend claude         Use claude (interactive shell + scans)",
-          "  /backend pi-ai          Use pi-ai (scans only; shell auto-falls-back to claude)",
+          "  /backend pi-ai          Use pi-ai — multi-provider, in-process (recommended)",
+          "  /backend claude         Use Claude Code SDK — Anthropic only, subprocess-per-task",
+          "",
+          "For provider/model selection, use /provider instead.",
           `Persists to ${configPath()}.`,
         );
         return lines.join("\n");
@@ -3551,7 +3554,7 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
   return {
     asyncExecute: async () => {
       const { applyConfigPatch, configPath, loadConfig } = await import("../config.js");
-      const persisted = loadConfig().agentRuntimeBackend ?? "claude";
+      const persisted = loadConfig().agentRuntimeBackend ?? "pi-ai";
       if (persisted === sub) {
         return `Persisted backend in ${configPath()} is already "${sub}". No change.`;
       }
@@ -3578,6 +3581,78 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
         );
       }
       return lines.join("\n");
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// /provider — show or set the default model (provider:model)
+// ---------------------------------------------------------------------------
+
+/** Common model presets surfaced by `/provider list` for fast switching. */
+const PROVIDER_PRESETS = [
+  { id: "anthropic:claude-sonnet-4-6", label: "Anthropic — Claude Sonnet (recommended)" },
+  { id: "anthropic:claude-opus-4-6", label: "Anthropic — Claude Opus (accurate)" },
+  { id: "anthropic:claude-haiku-4-5", label: "Anthropic — Claude Haiku (fast)" },
+  { id: "openai:gpt-5-mini", label: "OpenAI — GPT-5 mini" },
+  { id: "openai:gpt-5", label: "OpenAI — GPT-5" },
+  { id: "google:gemini-2.5-pro", label: "Google — Gemini 2.5 Pro" },
+  { id: "google:gemini-2.5-flash", label: "Google — Gemini 2.5 Flash" },
+  { id: "groq:llama-3.3-70b-versatile", label: "Groq — Llama 3.3 70B" },
+  { id: "openrouter:anthropic/claude-sonnet-4-6", label: "OpenRouter — Sonnet proxy" },
+] as const;
+
+function handleProviderCommand(args: string[], opts: ShellOptions): LocalCommandResult {
+  const sub = (args[0] ?? "").toLowerCase();
+
+  if (!sub || sub === "show") {
+    return {
+      output: [
+        `Current model: ${opts.config.model ?? "(unset)"}`,
+        "",
+        "Usage:",
+        "  /provider show             Show current model",
+        "  /provider list             List preset provider:model combos",
+        "  /provider <provider:model> Set model (persists to config.json)",
+        "",
+        "Credentials for the chosen provider must be set via /auth.",
+      ].join("\n"),
+    };
+  }
+
+  if (sub === "list") {
+    const lines = ["Preset provider:model combos:"];
+    for (const preset of PROVIDER_PRESETS) {
+      const active = preset.id === opts.config.model ? " (active)" : "";
+      lines.push(`  ${preset.id.padEnd(44)} ${preset.label}${active}`);
+    }
+    lines.push("", "Set one with: /provider <id>");
+    lines.push("See pi-ai docs for the full list of supported models.");
+    return { output: lines.join("\n") };
+  }
+
+  // Otherwise treat `sub` as a raw model id (e.g. `/provider openai:gpt-5`)
+  const modelId = args.join(" ").trim();
+  if (!modelId.includes(":")) {
+    return {
+      output: `Model id must be "<provider>:<model>" (e.g. "openai:gpt-5-mini"). Got: ${modelId}`,
+    };
+  }
+  return {
+    asyncExecute: async () => {
+      const { applyConfigPatch, configPath } = await import("../config.js");
+      try {
+        applyConfigPatch([{ path: "model", value: modelId }]);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return `Failed to set model: ${detail}`;
+      }
+      opts.config.model = modelId;
+      const providerId = modelId.split(":")[0];
+      return [
+        `Model set to "${modelId}" in ${configPath()}.`,
+        `Ensure ${providerId} credentials are configured (run /auth if not).`,
+      ].join("\n");
     },
   };
 }
@@ -3880,9 +3955,10 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/set <key> <value>", "Set a tool option"],
         ["/config", "Open the interactive config editor"],
         ["/config raw|get|set|path", "Inspect/update ~/.kuzushi/config.json"],
-        ["/auth", "Set or change Anthropic API key / OAuth token for the copilot"],
-        ["/ask <question>", "Ask Claude with current shell context (? prefix also works)"],
-        ["/backend [claude|pi-ai]", "Show or change the agent runtime backend"],
+        ["/auth", "Set or change credentials for any supported provider"],
+        ["/provider", "Show or set the default <provider>:<model> (e.g. openai:gpt-5-mini)"],
+        ["/ask <question>", "Ask the agent with current shell context (? prefix also works)"],
+        ["/backend [claude|pi-ai]", "Show or change the agent runtime backend (advanced)"],
         ["/target <path>", "Set or show the active target"],
         ["/context", "Generate or show application context map"],
         ["/context edit", "Review/edit operator scan context"],

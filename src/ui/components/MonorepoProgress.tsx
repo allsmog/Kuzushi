@@ -8,7 +8,7 @@
  */
 
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { formatCost, formatDuration, padCell, statusBadge, truncateMiddle } from "../format.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { icons } from "../icons.js";
@@ -44,7 +44,9 @@ interface MonorepoProgressProps {
   phaseLabel?: string;
 }
 
-export function MonorepoProgress({
+export const MonorepoProgress = React.memo(_MonorepoProgress);
+
+function _MonorepoProgress({
   modules,
   phaseLabel,
 }: MonorepoProgressProps): React.ReactElement | null {

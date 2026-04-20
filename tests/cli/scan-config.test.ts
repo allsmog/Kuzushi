@@ -63,7 +63,7 @@ describe("applyScanCommandConfigOverrides", () => {
 
     expect(config.tasks).toEqual([...DEFAULTS.tasks, "custom-a", "custom-b"]);
     expect(config.agentRuntimeConfig).toEqual({
-      claude: { apiKey: "sk-test", baseUrl: "https://proxy.example/" },
+      piAi: { apiKey: "sk-test", baseUrl: "https://proxy.example/" },
     });
     expect(config.qualityGates).toMatchObject({
       failOnHighSeverityTP: true,

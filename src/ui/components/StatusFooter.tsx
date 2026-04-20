@@ -8,9 +8,9 @@
  */
 
 import { Box, Text } from "ink";
-import type React from "react";
-import { useEffect, useState } from "react";
+import React from "react";
 import { formatCost, formatDuration } from "../format.js";
+import { useElapsed } from "../hooks.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { Divider } from "../primitives/Divider.js";
 import type { Phase } from "../state.js";
@@ -27,7 +27,7 @@ interface StatusFooterProps {
 
 const SEP = tokens.subtle(" \u2502 ");
 
-export function StatusFooter({
+export const StatusFooter = React.memo(function StatusFooter({
   model,
   phase,
   runningCostUsd,
@@ -35,15 +35,8 @@ export function StatusFooter({
   startedAt,
   throttle,
 }: StatusFooterProps): React.ReactElement | null {
-  const [elapsed, setElapsed] = useState(0);
   const { columns } = useTerminalSize();
-  useEffect(() => {
-    if (!startedAt) return;
-    const interval = setInterval(() => {
-      setElapsed(Date.now() - startedAt);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [startedAt]);
+  const elapsed = useElapsed(startedAt);
 
   if (phase === "idle" || phase === "done") return null;
 
@@ -83,4 +76,4 @@ export function StatusFooter({
       </Text>
     </Box>
   );
-}
+});

@@ -1,7 +1,7 @@
 /**
  * React hooks for subscribing to the UIStore.
  */
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Phase, UIState, UIStore } from "./state.js";
 
 /**
@@ -22,6 +22,78 @@ export function usePhase(store: UIStore): Phase {
     (callback) => store.subscribe(callback),
     () => store.getState().phase,
   );
+}
+
+/**
+ * Subscribe to a narrow slice of UIState.
+ *
+ * Unlike `useUIState` (which re-renders on any store mutation), this hook
+ * only re-renders when the selector's return value actually changes per the
+ * provided equality function (default `Object.is`).
+ *
+ * For object slices, pass `shallowEqual` to avoid re-renders when the object
+ * reference changes but its fields haven't.
+ *
+ * Caching the selected value in a ref avoids tearing between subscribe /
+ * getSnapshot calls within a single render.
+ */
+export function useUISelector<T>(
+  store: UIStore,
+  selector: (state: UIState) => T,
+  equalityFn: (a: T, b: T) => boolean = Object.is,
+): T {
+  const cacheRef = useRef<{ state: UIState; value: T } | null>(null);
+
+  const getSnapshot = (): T => {
+    const state = store.getState();
+    const cache = cacheRef.current;
+    if (cache && cache.state === state) {
+      return cache.value;
+    }
+    const next = selector(state);
+    if (cache && equalityFn(cache.value, next)) {
+      // State reference changed but selected slice didn't — reuse value
+      // so useSyncExternalStore sees referential equality and skips render.
+      cacheRef.current = { state, value: cache.value };
+      return cache.value;
+    }
+    cacheRef.current = { state, value: next };
+    return next;
+  };
+
+  return useSyncExternalStore((callback) => store.subscribe(callback), getSnapshot);
+}
+
+/** Shallow-equal helper suitable for selector object slices. */
+export function shallowEqual<T extends Record<string, unknown>>(a: T, b: T): boolean {
+  if (Object.is(a, b)) return true;
+  if (a == null || b == null) return false;
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  for (const k of ak) {
+    if (!Object.is(a[k], b[k])) return false;
+  }
+  return true;
+}
+
+/**
+ * Live elapsed-ms since `startedAt`. Re-renders at `tickMs` cadence
+ * (default 1s) and cleans up when the component unmounts or `startedAt`
+ * becomes null.
+ *
+ * Isolates elapsed-time re-renders to the component that uses it, so a
+ * 1s footer tick doesn't re-render the rest of the UI.
+ */
+export function useElapsed(startedAt: number | undefined, tickMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt == null) return;
+    const id = setInterval(() => setNow(Date.now()), tickMs);
+    return () => clearInterval(id);
+  }, [startedAt, tickMs]);
+
+  return startedAt != null ? Math.max(0, now - startedAt) : 0;
 }
 
 /** Minimum shape `useHeartbeat` needs — compatible with `SubTask`, stage entries,
