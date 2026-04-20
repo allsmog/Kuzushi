@@ -53,6 +53,7 @@ describe("SimpleTextIndexProvider", () => {
     execFileSync("git", ["init"], { cwd: repoRoot });
     execFileSync("git", ["config", "user.email", "codex@example.com"], { cwd: repoRoot });
     execFileSync("git", ["config", "user.name", "Codex"], { cwd: repoRoot });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repoRoot });
     execFileSync("git", ["add", "."], { cwd: repoRoot });
     execFileSync("git", ["commit", "-m", "init"], { cwd: repoRoot });
     writeFileSync(path.join(repoRoot, "src/app.ts"), "export const answer = 42;\n", "utf-8");
@@ -111,6 +112,7 @@ describe("SimpleTextIndexProvider", () => {
     execFileSync("git", ["init"], { cwd: repoRoot });
     execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoRoot });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: repoRoot });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repoRoot });
     execFileSync("git", ["add", "."], { cwd: repoRoot });
     execFileSync("git", ["commit", "-m", "init"], { cwd: repoRoot });
 
