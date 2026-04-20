@@ -2,11 +2,14 @@ import {
   resolveDefaultReadOnlyTools,
   runStructuredAgentQuery,
 } from "../../agent-runtime/execution.js";
+import { getLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask } from "../types.js";
+
+const log = getLogger("chain-analysis");
 
 export interface ChainInput {
   confirmedFindings: Array<{ finding: Finding; triageResult: TriageResult }>;
@@ -205,9 +208,9 @@ export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
         : undefined) ?? context.config.model;
 
     const prompt = buildPrompt(input.confirmedFindings, context.repoName);
-    const tag = "[chain-analysis]";
-    console.error(
-      `${tag} Analyzing ${input.confirmedFindings.length} confirmed findings for exploitation chains`,
+    log.info(
+      { count: input.confirmedFindings.length },
+      "Analyzing confirmed findings for exploitation chains",
     );
 
     try {
@@ -223,7 +226,7 @@ export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
         });
 
       if (executionError) {
-        console.error(`${tag} Agent error: ${executionError}`);
+        log.warn({ executionError }, "Agent error during chain analysis");
         return attachTaskOutputMeta(
           { chains: [], analysisNotes: `Agent error: ${executionError}` },
           { costUsd },
@@ -231,12 +234,10 @@ export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
       }
 
       const output = parseOutput(structuredOutput ?? resultText);
-      console.error(
-        `${tag} Found ${output.chains.length} exploitation chains ($${costUsd.toFixed(4)})`,
-      );
+      log.info({ chains: output.chains.length, costUsd }, "Chain analysis complete");
       return attachTaskOutputMeta(output, { costUsd });
     } catch (error) {
-      console.error(`${tag} Error: ${toErrorMessage(error)}`);
+      log.error({ error: toErrorMessage(error) }, "Chain analysis failed");
       return { chains: [], analysisNotes: `Error: ${toErrorMessage(error)}` };
     }
   },

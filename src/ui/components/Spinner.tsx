@@ -9,7 +9,10 @@ import { useEffect, useState } from "react";
 import { tokens } from "../tokens.js";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const FRAME_INTERVAL = 80; // ms per frame
+// 200ms / 5Hz: slow enough to feel steady on the terminal (avoids the
+// perceived flicker that 80ms introduced with content beneath it), fast
+// enough to still read as animation.
+const FRAME_INTERVAL = 200;
 
 /** Semantic spinner colors — map onto the shared token palette. */
 export type SpinnerColor = "accent" | "success" | "warn" | "danger" | "muted";

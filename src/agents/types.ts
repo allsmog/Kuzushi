@@ -45,6 +45,13 @@ export interface TaskContext {
   db?: Database.Database;
   /** Optional per-execution model override used by internal orchestration features such as ensembles. */
   modelOverride?: string;
+  /**
+   * Abort signal propagated from the shell/tool-invocation layer. Tasks that
+   * spawn LLM queries should forward this (wrapped in an AbortController
+   * passed to `runtime.query`) so Ctrl+C actually cancels in-flight work
+   * instead of letting it print after the operator has already aborted.
+   */
+  signal?: AbortSignal;
 }
 
 /**

@@ -5,7 +5,9 @@
  *
  * Sole threat model provider — powered by the @kuzushi/randori-plugin dependency.
  */
+import crypto from "node:crypto";
 import path from "node:path";
+import type { TaskPhaseProgressEvent } from "../../../bus/events.js";
 import { createLogger } from "../../../logger.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
@@ -43,6 +45,22 @@ export const threatModelRandoriTask: AgentTask<
       `Starting Randori PASTA analysis (stages=${cfg.randoriStages.join(",")}, model=${cfg.model})`,
     );
 
+    const publishPhase = (phase: string): void => {
+      void context.bus
+        .publish<TaskPhaseProgressEvent>({
+          type: "task:phase-progress",
+          meta: {
+            id: crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+            runId: context.runId,
+          },
+          payload: { taskId: "threat-model-randori", phase },
+        })
+        .catch(() => {
+          /* non-fatal — progress events are best-effort */
+        });
+    };
+
     const result = await runRandoriPasta({
       runtime: context.runtime,
       repoRoot: context.repoRoot,
@@ -58,6 +76,7 @@ export const threatModelRandoriTask: AgentTask<
       findingThreshold: cfg.findingThreshold,
       previousModel,
       logTag: "[threat-model-randori]",
+      onPhase: publishPhase,
     });
 
     return attachTaskOutputMeta(

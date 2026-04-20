@@ -350,6 +350,13 @@ export interface RandoriRunnerParams {
   previousModel?: ThreatModelDocument | null;
   signal?: AbortSignal;
   logTag?: string;
+  /**
+   * Called at the start of each phase with a short human-readable label
+   * ("phase 1 (S1-S3 scope)", "phase 2 (S4 threats)", "phase 3 (narrative)").
+   * Lets the calling task surface sub-progress on the shell spinner so the
+   * operator can tell phase-2 LLM-call-in-flight from a hang.
+   */
+  onPhase?: (phase: string) => void;
 }
 
 export interface RandoriRunnerResult {
@@ -388,6 +395,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
   // ── Phase 1: S1-S3 (scope, tech decomposition, DFD) ──
   if (scopeStages.length > 0) {
     log.info(`${tag} Phase 1: running stages ${scopeStages.join(",")}`);
+    params.onPhase?.(`phase 1 (${scopeStages.join("/").toUpperCase()} scope)`);
     try {
       for await (const message of params.runtime.query({
         prompt: buildScopePrompt(params.maxElements, params.artifactDir),
@@ -407,6 +415,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     const scopeArtifacts = readRandoriArtifacts(params.repoRoot, params.artifactDir);
     if (Object.keys(scopeArtifacts).length > 0) {
       log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
+      params.onPhase?.("phase 2 (S4 threats)");
       try {
         for await (const message of params.runtime.query({
           prompt: buildStridePrompt(params.maxThreats, params.artifactDir, params.previousModel),
@@ -430,6 +439,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     const haveStageOutputs = postS4.s2Scope || postS4.s3Decomposition || postS4.s4Threats;
     if (haveStageOutputs) {
       log.info(`${tag} Phase 3: synthesising narrative layer`);
+      params.onPhase?.("phase 3 (narrative)");
       try {
         for await (const message of params.runtime.query({
           prompt: buildNarrativePrompt(params.artifactDir),
@@ -450,6 +460,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
         log.warn(
           `${tag} Phase 3 narrative incomplete (${narrativeIssues.length} issue(s)); retrying once`,
         );
+        params.onPhase?.("phase 3 (narrative retry)");
         try {
           for await (const message of params.runtime.query({
             prompt: buildNarrativeRetryPrompt(params.artifactDir, narrativeIssues),

@@ -214,42 +214,42 @@ export interface ContextGenOptions {
 }
 
 /**
- * Per-stage progress tracker. Republishes `elapsedSeconds` every second so the
- * shell spinner ticks while a stage is in flight. Without this, `currentTool`
- * would freeze at 0s and the operator can't tell a slow LLM call from a hang.
+ * Human-friendly names for the internal task ids. The raw task id is
+ * debug-grade ("threat-model-randori"); the operator-visible spinner should
+ * describe the intent ("building threat model"). Unknown ids pass through.
+ */
+const STAGE_LABELS: Record<string, string> = {
+  "context-gatherer": "scanning repo structure",
+  "context-enricher": "enriching context",
+  "threat-model-randori": "building threat model",
+  "app-model-build": "building app model",
+  "threat-scenario-build": "building threat scenarios",
+};
+
+function humanizeStage(taskName: string): string {
+  return STAGE_LABELS[taskName] ?? taskName;
+}
+
+/**
+ * Per-stage progress tracker. Publishes a `startedAt` timestamp once per
+ * stage; the UI derives live elapsed inside a small self-ticking component
+ * so we don't re-render the whole shell subtree every second (that was
+ * causing visible flicker on the spinner line).
  */
 function createProgressTracker(ctx: ToolExecutionContext): {
   update: (name: string) => void;
   clear: () => void;
 } {
-  let timer: ReturnType<typeof setInterval> | undefined;
-  let currentName: string | undefined;
-  let startedAt = 0;
-
-  const publish = () => {
-    if (!ctx.uiStore || !currentName) return;
-    const shell = ctx.uiStore.getState().shell;
-    if (!shell) return;
-    const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
-    ctx.uiStore.update({
-      shell: { ...shell, currentTool: { name: currentName, elapsedSeconds } },
-    });
-  };
-
   return {
     update(name: string) {
-      if (timer) clearInterval(timer);
-      currentName = name;
-      startedAt = Date.now();
-      publish();
-      timer = setInterval(publish, 1000);
+      if (!ctx.uiStore) return;
+      const shell = ctx.uiStore.getState().shell;
+      if (!shell) return;
+      ctx.uiStore.update({
+        shell: { ...shell, currentTool: { name, startedAt: Date.now() } },
+      });
     },
     clear() {
-      if (timer) {
-        clearInterval(timer);
-        timer = undefined;
-      }
-      currentName = undefined;
       if (!ctx.uiStore) return;
       const shell = ctx.uiStore.getState().shell;
       if (!shell) return;
@@ -286,7 +286,7 @@ export async function generateContextSnapshot(
       repoRoot,
       ctx,
       opts,
-      tracker.update,
+      (task) => tracker.update(humanizeStage(task)),
     );
 
     return {
@@ -347,7 +347,8 @@ async function generateMonorepoSnapshot(
               repoRoot,
               ctx,
               opts,
-              (task) => tracker.update(`${mod.path} (${moduleIndex}/${total}): ${task}`),
+              (task) =>
+                tracker.update(`${mod.path} (${moduleIndex}/${total}) · ${humanizeStage(task)}`),
             );
             modules[mod.path] = moduleSnapshot;
           } catch {
@@ -401,6 +402,7 @@ async function generateSingleProjectContext(
     runtime: ctx.runtime,
     bus: ctx.bus,
     upstreamOutputs,
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
   });
 
   updateProgress("context-gatherer");
