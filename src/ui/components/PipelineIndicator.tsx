@@ -49,6 +49,13 @@ interface PipelineIndicatorProps {
   agentActivity?: Map<string, AgentActivityLine[]>;
   /** Estimated time remaining in ms for the active phase. */
   etaMs?: number;
+  /**
+   * Optional English phase label shown above the stage tree (Ink UI v2
+   * screen 03). Example: "hunting the top threats". When undefined the
+   * header is skipped — preserves backward compatibility for callers that
+   * haven't wired the new header yet.
+   */
+  phase?: { title: string; detail?: string };
 }
 
 const MAX_VISIBLE_RESULTS = 5;
@@ -77,6 +84,7 @@ export function PipelineIndicator({
   results,
   agentActivity,
   etaMs,
+  phase,
 }: PipelineIndicatorProps): React.ReactElement | null {
   // Heartbeat timer — re-renders every 5s when scan tasks are active so
   // "still analyzing..." and elapsed time stay fresh.
@@ -94,6 +102,7 @@ export function PipelineIndicator({
 
   return (
     <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+      {phase ? <PhaseHeader phase={phase} /> : null}
       {stages.map((stage, stageIdx) => {
         const isLast = stageIdx === stages.length - 1;
         const hasContent =
@@ -182,7 +191,8 @@ function StageHeaderLine({
         : "";
     const elapsedRaw = stage.startedAt ? formatDuration(Date.now() - stage.startedAt) : "";
     const elapsed = elapsedRaw ? `  ${tokens.muted(padCell(elapsedRaw, STAGE_ELAPSED_WIDTH))}` : "";
-    const eta = etaMs && etaMs > 0 ? `  ${tokens.muted(`~${formatDuration(etaMs)} remaining`)}` : "";
+    const eta =
+      etaMs && etaMs > 0 ? `  ${tokens.muted(`~${formatDuration(etaMs)} remaining`)}` : "";
     // Active stages use the brand accent for the spinner frame. The static
     // filled-circle glyph still carries `dangerStrong` via `statusBadge` when
     // rendered non-animated (e.g. in tests or plain-renderer).
@@ -511,4 +521,28 @@ function formatToolLine(line: AgentActivityLine): string {
         ? `${tokens.dangerStrong(icons.error)} ${tokens.strong(line.detail.slice(0, 120))}`
         : "";
   }
+}
+
+// --- Phase header (Ink UI v2 screen 03) ---
+
+/**
+ * A single "now" band above the stage tree that names the current phase in
+ * plain English. Kept tiny on purpose — the tree below carries the detail.
+ */
+function PhaseHeader({ phase }: { phase: { title: string; detail?: string } }): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text>
+        {tokens.label("now")}
+        {"   "}
+        {tokens.warn(phase.title)}
+      </Text>
+      {phase.detail ? (
+        <Text>
+          {"        "}
+          {tokens.muted(phase.detail)}
+        </Text>
+      ) : null}
+    </Box>
+  );
 }

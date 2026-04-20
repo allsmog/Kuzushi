@@ -2,22 +2,58 @@
 /**
  * Visual test harness for the Kuzushi terminal UI.
  *
- * Run with: pnpm tsx src/ui/demo.tsx
+ * Full pipeline simulation (default):
+ *   pnpm tsx src/ui/demo.tsx
  *
- * Simulates a full pipeline run with fake data to verify all UI components
- * render correctly. No real scans, DB, or agent runtime needed.
+ * Single shell-view snapshot (Ink UI v2 screens):
+ *   pnpm tsx src/ui/demo.tsx --shell-view=catalog
+ *   pnpm tsx src/ui/demo.tsx --shell-view=module
+ *   pnpm tsx src/ui/demo.tsx --shell-view=tune
+ *   pnpm tsx src/ui/demo.tsx --shell-view=findings
+ *   pnpm tsx src/ui/demo.tsx --shell-view=finding
  */
 import { render } from "ink";
 import { createElement } from "react";
 import { App } from "./App.js";
-import type { ActionableFinding, SummaryData } from "./state.js";
-import { createUIStore } from "./state.js";
+import type {
+  ActionableFinding,
+  ShellModuleCard,
+  ShellModuleToolSummary,
+  ShellView,
+  SummaryData,
+} from "./state.js";
+import { createUIStore, type UIStore } from "./state.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function parseShellViewArg(): ShellView | null {
+  const arg = process.argv.find((a) => a.startsWith("--shell-view="));
+  if (!arg) return null;
+  const value = arg.split("=")[1] ?? "";
+  if (
+    value === "catalog" ||
+    value === "module" ||
+    value === "tune" ||
+    value === "findings" ||
+    value === "finding"
+  ) {
+    return value;
+  }
+  console.error(`Unknown shell-view: ${value}`);
+  process.exit(2);
+}
+
 async function main(): Promise<void> {
+  const shellViewArg = parseShellViewArg();
   const store = createUIStore();
   const instance = render(createElement(App, { store }));
+
+  if (shellViewArg) {
+    await runShellViewDemo(store, shellViewArg);
+    await sleep(60_000);
+    instance.unmount();
+    return;
+  }
 
   // --- Banner ---
   store.update({ bannerShown: true });
@@ -430,6 +466,294 @@ function makeFakeFindings(): ActionableFinding[] {
       suppressionReasons: [],
     },
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Shell-view demos — scripted snapshots for the Ink UI v2 screens so we can
+// eyeball each layout without running the full pipeline simulation.
+// ---------------------------------------------------------------------------
+
+function demoModuleCatalog(): ShellModuleCard[] {
+  const sastTools: ShellModuleToolSummary[] = [
+    { name: "sast:scan", verb: "scan", description: "run the full pipeline", headless: true },
+    { name: "sast:semgrep", verb: "semgrep", description: "semgrep task only", headless: true },
+    {
+      name: "sast:codeql",
+      verb: "codeql",
+      description: "codeql task only (opt-in)",
+      headless: true,
+    },
+    { name: "sast:triage", verb: "triage", description: "re-triage one finding", headless: true },
+    {
+      name: "sast:verify",
+      verb: "verify",
+      description: "construct + run PoC harness",
+      headless: true,
+    },
+    { name: "sast:patch", verb: "patch", description: "generate + verify a fix", headless: true },
+    {
+      name: "sast:findings",
+      verb: "findings",
+      description: "list / filter / export",
+      headless: true,
+    },
+    {
+      name: "sast:context",
+      verb: "context",
+      description: "detected stack / frameworks",
+      headless: true,
+    },
+    {
+      name: "sast:threat-hunt",
+      verb: "threat-hunt",
+      description: "adversarial agents guided by randori",
+      headless: true,
+    },
+    {
+      name: "sast:taint-iris",
+      verb: "taint-iris",
+      description: "LLM-driven CodeQL taint (ICLR 2025)",
+      headless: true,
+    },
+  ];
+
+  return [
+    {
+      id: "sast",
+      displayName: "SAST",
+      category: "offense",
+      description: "40+ task pipeline · semgrep · codeql · agentic",
+      toolCount: sastTools.length,
+      toolSummaries: sastTools,
+      lastRunSummary: "ran  2h  · 4 tp",
+      lastRunAt: Date.now() - 2 * 60 * 60 * 1000,
+    },
+    {
+      id: "vuln-scout",
+      displayName: "Vuln-scout",
+      category: "offense",
+      description: "whitebox pentest — agentic taint + source-to-sink",
+      toolCount: 8,
+      lastRunSummary: "ran  1d",
+      lastRunAt: Date.now() - 24 * 60 * 60 * 1000,
+    },
+    {
+      id: "tob",
+      displayName: "Trail of Bits skills",
+      category: "offense",
+      description: "fp-check, sharp-edges, variants",
+      toolCount: 3,
+    },
+    {
+      id: "prompt-armor",
+      displayName: "Prompt Armor",
+      category: "offense",
+      description: "LLM red teaming — 80+ attack plugins, 25+ mutations",
+      toolCount: 12,
+    },
+    {
+      id: "variant-hunter",
+      displayName: "Variant Hunter",
+      category: "offense",
+      description: "lift a confirmed finding to a signature, hunt variants",
+      toolCount: 2,
+      lastRunSummary: "ran  2h",
+    },
+    {
+      id: "n-day-diff",
+      displayName: "n-day diff hunter",
+      category: "offense",
+      description: "CVE diff → patch-shape search → variant hunt",
+      toolCount: 2,
+    },
+    {
+      id: "randori",
+      displayName: "Randori",
+      category: "intel",
+      description: "PASTA threat model · S1–S4 · STRIDE · ATT&CK mapped",
+      toolCount: 4,
+      lastRunSummary: "ran  2h  · 12 threats",
+    },
+    {
+      id: "shinsa",
+      displayName: "Shinsa",
+      category: "governance",
+      description: "ISO 27001 Annex A + NIST 800-53 Rev 5",
+      toolCount: 3,
+    },
+    {
+      id: "augur",
+      displayName: "Augur",
+      category: "offense",
+      description: "[ext] neuro-symbolic SAST · IRIS taint · ICLR 2025",
+      toolCount: 2,
+      external: true,
+    },
+  ];
+}
+
+function demoFindings(): ActionableFinding[] {
+  return [
+    {
+      verdict: "tp",
+      confidence: 0.92,
+      severity: "critical",
+      displaySeverity: "critical",
+      taskId: "sast",
+      filePath: "src/api/admin.ts",
+      startLine: 24,
+      ruleId: "auth.missing-middleware",
+      rationale: "auth gap on /admin/*",
+      fingerprint: "02150000abcd",
+      title: "auth gap on /admin/*",
+      corroboratingSignals: [],
+      suppressionReasons: [],
+    },
+    {
+      verdict: "tp",
+      confidence: 0.9,
+      severity: "high",
+      displaySeverity: "high",
+      taskId: "sast",
+      filePath: "src/api/admin.ts",
+      startLine: 88,
+      ruleId: "ssrf.no-allowlist",
+      rationale:
+        "Router mounts /admin/fetch before authMiddleware; handler calls fetch(req.query.url) with no allowlist, so an unauthenticated caller can reach 169.254.169.254 (AWS IMDS) and harvest creds.",
+      fingerprint: "02160000abcd",
+      title: "ssrf on /admin/fetch",
+      verifyExploitable: 1,
+      verifyPocPayload: "curl -s $BASE/admin/fetch?url=http://169.254.169.254/latest/meta-data/",
+      corroboratingSignals: [],
+      suppressionReasons: [],
+    },
+    {
+      verdict: "tp",
+      confidence: 0.88,
+      severity: "high",
+      displaySeverity: "high",
+      taskId: "sast",
+      filePath: "src/worker/queue.ts",
+      startLine: 55,
+      ruleId: "deserialization.unsafe",
+      rationale: "upload queue deserializes attacker-controlled payloads without validation",
+      fingerprint: "02180000abcd",
+      title: "deserialization on upload queue",
+      corroboratingSignals: [],
+      suppressionReasons: [],
+    },
+  ];
+}
+
+async function runShellViewDemo(store: UIStore, view: ShellView): Promise<void> {
+  const moduleCatalog = demoModuleCatalog();
+  const findings = demoFindings();
+  const focusedModule = view === "catalog" ? null : "sast";
+
+  const summary: SummaryData | null =
+    view === "findings" || view === "finding" ? buildDemoSummary(findings) : null;
+
+  store.update({
+    mode: "shell",
+    bannerShown: true,
+    ...(summary ? { summary } : {}),
+    shell: {
+      modules: moduleCatalog.map((m) => m.id),
+      moduleCatalog,
+      tools: moduleCatalog.flatMap((m) => m.toolSummaries?.map((t) => t.name) ?? []),
+      focusedModule,
+      shellView: view,
+      openFindingId: view === "finding" ? "F-0216" : null,
+      target: "./acme-api",
+      workspace: "acme-api",
+      tuneSnapshot: {
+        preset: "deep",
+        tasks: ["semgrep", "codeql", "agentic", "iris-taint"],
+        verify: true,
+        autoPatch: false,
+        triageConcurrency: 5,
+        model: "anthropic:claude-sonnet-4-6",
+        houseRules:
+          "Pay extra attention to /admin/* — previously behind a reverse-proxy auth layer that was removed last sprint. Our webhook HMAC check was historically weak; scrutinise it.",
+        houseRulesPath: ".kuzushi/house-rules/sast.md",
+      },
+      history: [],
+      commandHistory: [],
+      moduleOptions: {},
+      processing: false,
+    },
+  });
+
+  return;
+}
+
+function buildDemoSummary(findings: ActionableFinding[]): SummaryData {
+  {
+    const summary: SummaryData = {
+      repoName: "acme-api",
+      verdictCounts: { tp: 3, fp: 0, needs_review: 0, by_design: 0 },
+      totalTriaged: 3,
+      triageCostUsd: 0.11,
+      verificationCostUsd: 0.05,
+      pocHarnessCostUsd: 0,
+      variantAnalysisCostUsd: 0,
+      exploitable: 1,
+      notExploitable: 0,
+      pocGenerated: 0,
+      pocSkipped: 0,
+      triageErrors: 0,
+      verifyErrors: 0,
+      pocHarnessErrors: 0,
+      skippedLowConfidence: 0,
+      skippedByFpFilter: 0,
+      softSuppressedFindings: 0,
+      skippedByLlmRescore: 0,
+      corroboratedClusters: 0,
+      verifyGateAutoAccepted: 0,
+      verifyGateSkipped: 0,
+      variantFindings: 0,
+      dynamicConfirmed: 0,
+      dynamicInteresting: 0,
+      dynamicRejected: 0,
+      dynamicErrors: 0,
+      dynamicCostUsd: 0,
+      incrementalCachedFiles: 0,
+      incrementalRescannedFiles: 0,
+      incrementalDepExpandedFiles: 0,
+      patchGenerated: 0,
+      patchVerified: 0,
+      patchFailed: 0,
+      patchErrors: 0,
+      patchCostUsd: 0,
+      budgetExceeded: false,
+      failedTasks: [],
+      tiPriorDegraded: false,
+      exploitChains: [
+        {
+          id: "C-01",
+          name: "admin auth bypass → SSRF → IMDS exfil",
+          overallSeverity: "CRITICAL",
+          preconditions: ["unauthenticated HTTP access"],
+          impactDescription:
+            "unauthenticated caller reaches cloud metadata and harvests credentials",
+          steps: [
+            {
+              findingFingerprint: "f02150000000",
+              role: "entry",
+              description: "admin auth gap",
+            },
+            {
+              findingFingerprint: "f02160000000",
+              role: "pivot",
+              description: "ssrf to IMDS",
+            },
+          ],
+        },
+      ],
+      actionableFindings: findings,
+    };
+    return summary;
+  }
 }
 
 main().catch(console.error);

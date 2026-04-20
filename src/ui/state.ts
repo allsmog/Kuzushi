@@ -6,6 +6,7 @@
  */
 
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
+import type { ModuleCategory, ModuleRank } from "../modules/types.js";
 import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
 import type {
@@ -394,17 +395,93 @@ export interface ContextSnapshot {
   modules?: Record<string, Omit<ContextSnapshot, "modules" | "discovery" | "options">>;
 }
 
+/**
+ * Which sub-surface the shell is showing right now.
+ *
+ * Introduced by the Ink UI v2 "modules calmed" redesign so the shell can
+ * carry a catalog / module home / findings / finding / tune screen without
+ * needing a separate UIMode. `mode === "shell"` && `shellView` together
+ * drive the dispatcher in App.tsx.
+ */
+export type ShellView = "catalog" | "module" | "findings" | "finding" | "tune";
+
+/**
+ * Rich per-module info used by the v2 ModuleCatalog and ModuleHome screens.
+ * Populated once at shell init from `core.listModules()`; kept as a plain
+ * struct (no functions) so the UI layer never needs to reach into the core.
+ */
+export interface ShellModuleCard {
+  id: string;
+  displayName: string;
+  category: ModuleCategory;
+  description: string;
+  rank?: ModuleRank;
+  /** Number of tools this module exposes. */
+  toolCount: number;
+  /** True for packages loaded via `--load package:` (shown in EXTERNAL group). */
+  external?: boolean;
+  /** Unix epoch ms of the most recent run for this module; undefined = never run. */
+  lastRunAt?: number;
+  /** Human-readable one-liner summary of the last run (e.g. "ran 2h · 4 tp"). */
+  lastRunSummary?: string;
+  /** Tools this module exposes — pre-enumerated at shell init for ModuleHome. */
+  toolSummaries?: ReadonlyArray<ShellModuleToolSummary>;
+}
+
+export interface ShellModuleToolSummary {
+  /** Fully qualified name, e.g. "sast:scan". */
+  name: string;
+  /** Short verb — the text after the colon, rendered as the primary column. */
+  verb: string;
+  /** One-liner from the tool's `description`. */
+  description: string;
+  /** Tool runs in non-interactive / run mode. */
+  headless: boolean;
+}
+
+/**
+ * Lightweight view of the user's config, sliced down to the six controls the
+ * v2 Tune screen renders. Read-only; edits still go through the full
+ * ConfigEditor (opened via `p` / `/config`).
+ */
+export interface TuneSnapshot {
+  /** e.g. "fast" | "standard" | "deep" — `scan --preset <name>` */
+  preset?: string;
+  /** Enabled task IDs from config.tasks. */
+  tasks: string[];
+  /** config.verify — whether the verify phase runs. */
+  verify: boolean;
+  /** config.autoPatchEnabled — whether auto-patch runs. */
+  autoPatch: boolean;
+  /** config.triageConcurrency — how many triage tasks in-flight. */
+  triageConcurrency: number;
+  /** config.model — default model identifier. */
+  model: string;
+  /** Optional operator house rules (contents of .kuzushi/house-rules/<id>.md). */
+  houseRules?: string;
+  /** Absolute path of the house-rules file, shown under the textarea. */
+  houseRulesPath?: string;
+}
+
 export interface ShellState {
   /** Loaded module IDs. */
   modules: string[];
+  /** Rich module info for the v2 catalog — populated at shell init. */
+  moduleCatalog?: ShellModuleCard[];
   /** Available tool names. */
   tools: string[];
   /** Currently focused module (for shorthand commands). */
   focusedModule: string | null;
+  /** Sub-surface within the shell (catalog / module / findings / finding / tune). */
+  shellView: ShellView;
+  /** When shellView === "finding", which finding ID is open (e.g. "F-0216"). */
+  openFindingId: string | null;
   /** Active target. */
   target: string | null;
   /** Workspace ID. */
   workspace: string | null;
+  /** Narrow projection of the user's config used by the v2 Tune screen. */
+  tuneSnapshot?: TuneSnapshot;
   /** Conversation history (rendered in the scroll region). */
   history: ShellHistoryEntry[];
   /** Submitted commands, capped and persisted for prompt recall. */

@@ -161,7 +161,11 @@ describe("local shell commands", () => {
     expect(toolsResult?.output).toContain("scan");
 
     const backResult = __shellInternals.handleLocalCommand("/back", core, opts, ctx, shellState);
-    expect(backResult).toEqual({ setFocus: null, output: "Returned to top level." });
+    expect(backResult?.setFocus).toBeNull();
+    expect(backResult?.output).toBe("Returned to top level.");
+    // The v2 "modules calmed" redesign adds a shellStateUpdater on /back so
+    // the shell-view + openFindingId fields reset alongside focus.
+    expect(typeof backResult?.shellStateUpdater).toBe("function");
 
     expect(
       __shellInternals.handleLocalCommand("help", core, opts, ctx, shellState),

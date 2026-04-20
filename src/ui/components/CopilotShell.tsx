@@ -17,9 +17,14 @@ import { buildShellPrompt } from "../../copilot/shell.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useUIState } from "../hooks.js";
 import { MultilineText } from "../primitives/MultilineText.js";
-import type { ShellHistoryEntry, ShellState, UIStore } from "../state.js";
+import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
 import { tokens } from "../tokens.js";
+import { FindingCard } from "./FindingCard.js";
+import { FindingsView } from "./FindingsView.js";
+import { ModuleCatalog } from "./ModuleCatalog.js";
+import { ModuleHome } from "./ModuleHome.js";
 import { Spinner } from "./Spinner.js";
+import { TuneView } from "./TuneView.js";
 
 interface CopilotShellProps {
   store: UIStore;
@@ -129,11 +134,21 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const liveHistory =
     shell.history.length > LIVE_COUNT ? shell.history.slice(-LIVE_COUNT) : shell.history;
 
+  // ModuleCatalog re-reads shell.moduleCatalog on every render; wrapping it in
+  // <Static> would freeze the first snapshot and hide module/last-run updates.
+  // Render it as a plain child at the top — there's exactly one catalog per
+  // session, so the cost is negligible.
+  const showCatalog = shell.moduleCatalog && shell.moduleCatalog.length > 0;
+
   return (
     <Box flexDirection="column">
-      <Static items={["shell-banner"]}>
-        {() => <ShellBanner key="shell-banner" shell={shell} />}
-      </Static>
+      {showCatalog ? (
+        <ShellBanner shell={shell} />
+      ) : (
+        <Static items={["shell-banner"]}>
+          {() => <ShellBanner key="shell-banner" shell={shell} />}
+        </Static>
+      )}
 
       <Static items={staticHistory.map((entry, i) => ({ ...entry, _key: `h-${i}` }))}>
         {(item) => (
@@ -146,6 +161,8 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           <HistoryEntry key={`live-${i}`} entry={entry} />
         ))}
       </Box>
+
+      <ShellViewPanel state={state} shell={shell} />
 
       {shell.pendingAssistantText && (
         <HistoryEntry
@@ -192,7 +209,71 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   );
 }
 
+/**
+ * Dynamic panel that replaces itself based on `shell.shellView`. The catalog
+ * still lives in the <Static> banner up top (rendered once per session) — this
+ * panel is for the sub-surfaces (module home, findings, finding detail, tune)
+ * that need to re-render as the operator navigates.
+ *
+ * Returns an empty box when the view is the catalog (already drawn above) so
+ * the component is free to add/remove itself without flicker.
+ */
+function ShellViewPanel({
+  state,
+  shell,
+}: {
+  state: UIState;
+  shell: ShellState;
+}): React.ReactElement | null {
+  switch (shell.shellView) {
+    case "module":
+      return shell.focusedModule ? <ModuleHome shell={shell} /> : null;
+    case "tune":
+      return shell.focusedModule ? <TuneView shell={shell} /> : null;
+    case "findings": {
+      const summary = state.summary;
+      const findings = summary?.actionableFindings ?? [];
+      const chains = (summary?.exploitChains ?? []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        severity: c.overallSeverity,
+        findingFingerprints: c.steps.map((s) => s.findingFingerprint),
+      }));
+      return <FindingsView mode="unified" findings={findings} chains={chains} />;
+    }
+    case "finding": {
+      const summary = state.summary;
+      const openId = shell.openFindingId;
+      const match = openId
+        ? summary?.actionableFindings?.find((f) => matchesFindingId(f, openId))
+        : undefined;
+      if (!match) {
+        return null;
+      }
+      return <FindingCard mode="linear" finding={match} />;
+    }
+    default:
+      return null;
+  }
+}
+
+function matchesFindingId(finding: { fingerprint: string }, openId: string): boolean {
+  if (finding.fingerprint === openId) return true;
+  // `F-NNNN` alias = "F-" + first 4 chars of the fingerprint.
+  if (openId.toUpperCase().startsWith("F-")) {
+    const short = openId.slice(2).toLowerCase();
+    return finding.fingerprint.slice(0, short.length).toLowerCase() === short;
+  }
+  return false;
+}
+
 function ShellBanner({ shell }: { shell: ShellState }): React.ReactElement {
+  // Prefer the v2 catalog view whenever we have module data; fall back to the
+  // legacy flat header only if `moduleCatalog` hasn't been populated yet
+  // (e.g. during an early boot tick before `startInkShell` finishes init).
+  if (shell.moduleCatalog && shell.moduleCatalog.length > 0) {
+    return <ModuleCatalog shell={shell} />;
+  }
   return (
     <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
       <Text>{""}</Text>
