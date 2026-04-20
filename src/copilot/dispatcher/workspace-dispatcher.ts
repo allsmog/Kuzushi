@@ -35,10 +35,14 @@ const COMMANDS: Record<string, string> = {
   sessions: "List sessions in the active workspace",
   "workspace:import": "Import a file into the active workspace (sarif | nmap-xml | kz-bundle)",
   "workspace:export": "Export the active workspace to a file (sarif | kz-bundle | markdown)",
+  "workspace:github":
+    "Post a vulns-summary comment to a PR: `workspace:github <owner>/<repo>#<num> [--dry]`",
 };
 
 const IMPORT_FORMATS: ImportFormat[] = ["sarif", "nmap-xml", "kz-bundle"];
 const EXPORT_FORMATS: ExportFormat[] = ["sarif", "kz-bundle", "markdown"];
+type GithubFormat = "github";
+const GITHUB_FORMAT: GithubFormat = "github";
 
 export class WorkspaceDispatcher implements CommandDispatcher {
   readonly name = "workspace";
@@ -71,6 +75,8 @@ export class WorkspaceDispatcher implements CommandDispatcher {
         return this.cmd_import(args, ctx);
       case "workspace:export":
         return this.cmd_export(args, ctx);
+      case "workspace:github":
+        return this.cmd_github(args, wid);
       default:
         return undefined;
     }
@@ -330,6 +336,40 @@ export class WorkspaceDispatcher implements CommandDispatcher {
       }
     }
     return out;
+  }
+
+  private async cmd_github(args: string[], wid: string): Promise<CommandResult> {
+    const ref = args[0];
+    if (!ref) {
+      return { output: "Usage: workspace:github <owner>/<repo>#<num> [--dry]" };
+    }
+    const { parsePrRef, renderGitHubComment, postPrComment } = await import(
+      "../../workspace/io/github.js"
+    );
+    const prRef = parsePrRef(ref);
+    if (!prRef) return { output: `[-] Invalid PR ref: ${ref} (expected owner/repo#123)` };
+    const dryRun = args.includes("--dry");
+    const body = renderGitHubComment(this.opts.workspaces, wid);
+    const result = await postPrComment(prRef, body, { dryRun });
+    if (dryRun) {
+      return {
+        output: [
+          `[*] DRY RUN — would post to ${prRef.owner}/${prRef.repo}#${prRef.number}`,
+          "--- body ---",
+          body,
+        ].join("\n"),
+      };
+    }
+    if (result.posted) {
+      return {
+        output: `[+] Posted to ${prRef.owner}/${prRef.repo}#${prRef.number}${
+          result.url ? ` → ${result.url}` : ""
+        }`,
+      };
+    }
+    return {
+      output: `[-] ${result.warning ?? "Unknown error posting comment"}`,
+    };
   }
 
   private async cmd_sessions(args: string[], ctx: CommandContext): Promise<CommandResult> {
