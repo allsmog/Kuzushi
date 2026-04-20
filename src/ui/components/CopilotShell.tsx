@@ -28,6 +28,7 @@ import { PlanCard } from "./PlanCard.js";
 import { Spinner } from "./Spinner.js";
 import { ThreatDfdView } from "./ThreatDfdView.js";
 import { ThreatPlaceholder } from "./ThreatPlaceholder.js";
+import { ThreatStrideMatrix } from "./ThreatStrideMatrix.js";
 import { TuneView } from "./TuneView.js";
 
 interface CopilotShellProps {
@@ -270,6 +271,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
             <Text>
               {"  "}
               {tokens.muted(shell.currentTool.name)}
+              {shell.currentTool.subLabel ? tokens.muted(` · ${shell.currentTool.subLabel}`) : ""}
             </Text>
             {shell.currentTool.startedAt ? (
               <LiveElapsed startedAt={shell.currentTool.startedAt} />
@@ -410,11 +412,12 @@ function ShellViewPanel({
       if (!match) return null;
       return <FindingCard mode="linear" finding={match} />;
     }
-    // Phase C — threat model views. C.2–C.5 still route through the
+    // Phase C — threat model views. C.3–C.5 still route through the
     // placeholder until their real components land.
     case "threat-dfd":
       return <ThreatDfdView shell={shell} />;
     case "threat-stride":
+      return <ThreatStrideMatrix shell={shell} />;
     case "threat-stories":
     case "threat-scope":
     case "threat-summary":
