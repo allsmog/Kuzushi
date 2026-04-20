@@ -3,7 +3,7 @@
  */
 
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import {
   boxDivider,
   boxFooter,
@@ -30,7 +30,9 @@ interface ScanSummaryProps {
   data: SummaryData;
 }
 
-export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
+export const ScanSummary = React.memo(_ScanSummary);
+
+function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
   const width = terminalCardWidth(96, 60);
   const { verdictCounts: counts } = data;
   const total = counts.tp + counts.fp + counts.needs_review;

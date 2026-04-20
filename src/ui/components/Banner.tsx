@@ -8,7 +8,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Box, Static, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { tokens } from "../tokens.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -44,7 +44,9 @@ function playStartupSound(): void {
 
 let soundPlayed = false;
 
-export function Banner(): React.ReactElement {
+export const Banner = React.memo(_Banner);
+
+function _Banner(): React.ReactElement {
   const logoLines = loadLogo();
 
   if (!soundPlayed) {

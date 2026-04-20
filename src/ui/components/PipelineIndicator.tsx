@@ -144,7 +144,9 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
 
 // --- Stage header ---
 
-function StageHeaderLine({
+const StageHeaderLine = React.memo(_StageHeaderLine);
+
+function _StageHeaderLine({
   stage,
   progress,
   runningCostUsd,
@@ -229,7 +231,9 @@ function StageHeaderLine({
 
 // --- Sub-task branches (scanners under Scan stage) ---
 
-function SubTaskBranches({
+const SubTaskBranches = React.memo(_SubTaskBranches);
+
+function _SubTaskBranches({
   subTasks,
   hasMoreBelow,
 }: {
@@ -271,7 +275,9 @@ function SubTaskBranches({
   );
 }
 
-function SubTaskRow({
+const SubTaskRow = React.memo(_SubTaskRow);
+
+function _SubTaskRow({
   task,
   isLast,
   pipe,
@@ -388,7 +394,9 @@ function SubTaskRow({
 
 // --- Result branches (findings under Triage/Verify/PoC) ---
 
-function ResultBranches({
+const ResultBranches = React.memo(_ResultBranches);
+
+function _ResultBranches({
   results,
   agentActivity,
   hasMoreBelow,
