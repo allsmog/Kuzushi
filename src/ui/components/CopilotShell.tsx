@@ -22,6 +22,7 @@ import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.j
 import { tokens } from "../tokens.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
+import { DiffSinceView } from "./DiffSinceView.js";
 import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
 import { ModuleCatalog } from "./ModuleCatalog.js";
@@ -441,6 +442,8 @@ function ShellViewPanel({
       return <ScopeAndCriticalityView shell={shell} />;
     case "threat-summary":
       return <ThreatSummaryExport shell={shell} />;
+    case "diff-since":
+      return <DiffSinceView state={state} shell={shell} />;
     default:
       return null;
   }

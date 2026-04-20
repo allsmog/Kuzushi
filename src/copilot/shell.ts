@@ -2543,6 +2543,46 @@ function handleSlashCommand(
       return resolveToolExecution("sast:context", [], core, opts, ctx, shellState);
     }
 
+    case "since": {
+      // `/since <ref>` — diff-aware view. Computes the changed-file set
+      // between HEAD and `<ref>` via git, stores it on shell.diffSince,
+      // and pivots to the diff-since shellView. Works on any git ref
+      // including tags and commit SHAs.
+      const ref = args[0];
+      if (!ref) {
+        return { output: "Usage: /since <git-ref>  e.g.  /since main" };
+      }
+      if (!opts.target) {
+        return { output: "No target set. Use /target <path> first." };
+      }
+      const repoRoot = path.resolve(opts.target);
+      return {
+        output: `Diffing HEAD against ${ref}\u2026`,
+        shellStateUpdater: (shell) => ({ ...shell, shellView: "diff-since" }),
+        asyncExecute: async () => {
+          const { computeDiffScope } = await import("./diff-scope.js");
+          const scope = computeDiffScope(repoRoot, ref);
+          if (ctx.uiStore) {
+            updateShell(ctx.uiStore, (shell) => ({
+              ...shell,
+              diffSince: {
+                ref: scope.ref,
+                repoRoot: scope.repoRoot,
+                changedFiles: scope.changedFiles,
+                ...(scope.error ? { error: scope.error } : {}),
+              },
+            }));
+          }
+          if (!scope.ok) {
+            return `git diff failed: ${scope.error ?? "unknown error"}`;
+          }
+          return `Found ${scope.changedFiles.length} changed file${
+            scope.changedFiles.length === 1 ? "" : "s"
+          } since ${ref}.`;
+        },
+      };
+    }
+
     case "threats": {
       const sub = args[0]?.toLowerCase();
 
