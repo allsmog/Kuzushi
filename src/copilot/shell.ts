@@ -9,7 +9,7 @@
  * as the conversation flows.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { AgentQueryOptions, AgentRuntime, AgentSession } from "../agent-runtime/types.js";
@@ -1480,75 +1480,87 @@ async function startInkShell(
     finishActiveAction();
 
     const shellState = store.getState().shell;
-    const localResult = shellState
-      ? routeInput(input, core, opts, shellCtx, shellState)
-      : undefined;
-    if (localResult !== undefined) {
-      if (localResult.setFocus !== undefined) {
-        shellCtx.focusedModule = localResult.setFocus;
-      }
-      if (localResult.shellStateUpdater) {
-        updateShell(store, localResult.shellStateUpdater);
-      }
-      syncShellState(store, opts, shellCtx.focusedModule);
+    if (!shellState) {
+      appendToHistory(store, {
+        type: "error",
+        text: "Shell state missing — cannot route input.",
+        timestamp: Date.now(),
+      });
+      clearTransientShellState(store);
+      setProcessing(store, false);
+      return;
+    }
+    const localResult = routeInput(input, core, opts, shellCtx, shellState);
 
-      if (localResult.exit) {
-        setProcessing(store, false);
-        clearTransientShellState(store);
-        handleExit();
-        return;
-      }
+    if (localResult.setFocus !== undefined) {
+      shellCtx.focusedModule = localResult.setFocus;
+    }
+    if (localResult.shellStateUpdater) {
+      updateShell(store, localResult.shellStateUpdater);
+    }
+    syncShellState(store, opts, shellCtx.focusedModule);
 
-      if (localResult.resetSession) {
-        await closeSession();
-      }
+    if (localResult.exit) {
+      setProcessing(store, false);
+      clearTransientShellState(store);
+      handleExit();
+      return;
+    }
 
-      if (localResult.clearHistory) {
-        updateShell(store, (shell) => ({
-          ...shell,
-          history: [],
-        }));
-      }
+    if (localResult.resetSession) {
+      await closeSession();
+    }
 
-      if (localResult.asyncExecute) {
-        const controller = new AbortController();
-        setToolAbort(controller);
-        try {
-          const output = await localResult.asyncExecute(controller.signal);
-          if (localResult.executedToolName) {
-            updateShell(store, (shell) => ({
-              ...shell,
-              lastUsedTool: localResult.executedToolName,
-            }));
-          }
-          if (output) {
-            appendToHistory(store, { type: "output", text: output, timestamp: Date.now() });
-          }
-        } catch (error) {
-          if (finishActiveAction()) {
-            appendToHistory(store, {
-              type: "output",
-              text: CANCELLED_TOOL_MESSAGE,
-              timestamp: Date.now(),
-            });
-          } else {
-            appendToHistory(store, {
-              type: "error",
-              text: error instanceof Error ? error.message : String(error),
-              timestamp: Date.now(),
-            });
-          }
-          clearTransientShellState(store);
-          setProcessing(store, false);
-          return;
+    if (localResult.clearHistory) {
+      updateShell(store, (shell) => ({
+        ...shell,
+        history: [],
+      }));
+    }
+
+    if (localResult.asyncExecute) {
+      const controller = new AbortController();
+      setToolAbort(controller);
+      try {
+        const output = await localResult.asyncExecute(controller.signal);
+        if (localResult.executedToolName) {
+          updateShell(store, (shell) => ({
+            ...shell,
+            lastUsedTool: localResult.executedToolName,
+          }));
         }
-
-        finishActiveAction();
+        if (output) {
+          appendToHistory(store, { type: "output", text: output, timestamp: Date.now() });
+        }
+      } catch (error) {
+        if (finishActiveAction()) {
+          appendToHistory(store, {
+            type: "output",
+            text: CANCELLED_TOOL_MESSAGE,
+            timestamp: Date.now(),
+          });
+        } else {
+          appendToHistory(store, {
+            type: "error",
+            text: error instanceof Error ? error.message : String(error),
+            timestamp: Date.now(),
+          });
+        }
         clearTransientShellState(store);
         setProcessing(store, false);
         return;
       }
 
+      finishActiveAction();
+      clearTransientShellState(store);
+      setProcessing(store, false);
+      return;
+    }
+
+    // Only `/ask` (and the `?` prefix) set `askQuestion` to route through
+    // the agent session; every other unknown input gets an "Unknown command"
+    // message from routeInput, never a silent handoff.
+    if (localResult.askQuestion === undefined) {
       if (localResult.output) {
         appendToHistory(store, { type: "output", text: localResult.output, timestamp: Date.now() });
       }
@@ -1557,6 +1569,7 @@ async function startInkShell(
       return;
     }
 
+    const agentInput = localResult.askQuestion;
     const currentSession = await ensureSession();
     if (!currentSession) {
       appendToHistory(store, {
@@ -1575,7 +1588,7 @@ async function startInkShell(
     let fallbackResultText = "";
 
     try {
-      for await (const message of currentSession.query(input)) {
+      for await (const message of currentSession.query(agentInput)) {
         if (!alive) break;
 
         switch (message.type) {
@@ -1877,63 +1890,67 @@ async function startReadlineShell(
       };
 
       const localResult = routeInput(input, core, opts, rlCtx, rlState);
-      if (localResult !== undefined) {
-        if (localResult.setFocus !== undefined) {
-          rlCtx.focusedModule = localResult.setFocus;
-          rlState = { ...rlState, focusedModule: rlCtx.focusedModule };
-          updatePrompt();
-        }
-        if (localResult.shellStateUpdater) {
-          rlState = localResult.shellStateUpdater(rlState);
-        }
+      if (localResult.setFocus !== undefined) {
+        rlCtx.focusedModule = localResult.setFocus;
+        rlState = { ...rlState, focusedModule: rlCtx.focusedModule };
+        updatePrompt();
+      }
+      if (localResult.shellStateUpdater) {
+        rlState = localResult.shellStateUpdater(rlState);
+      }
+      rlState = {
+        ...rlState,
+        focusedModule: rlCtx.focusedModule,
+        target: opts.target ?? null,
+        workspace: opts.workspace ?? null,
+      };
+      if (localResult.exit) {
+        break;
+      }
+      if (localResult.resetSession) {
+        await closeSession();
+      }
+      if (localResult.clearHistory) {
         rlState = {
           ...rlState,
-          focusedModule: rlCtx.focusedModule,
-          target: opts.target ?? null,
-          workspace: opts.workspace ?? null,
+          history: [],
         };
-        if (localResult.exit) {
-          break;
-        }
-        if (localResult.resetSession) {
-          await closeSession();
-        }
-        if (localResult.clearHistory) {
-          rlState = {
-            ...rlState,
-            history: [],
-          };
-        }
-        if (localResult.asyncExecute) {
-          const controller = new AbortController();
-          activeActionKind = "tool";
-          activeAbortRequested = false;
-          activeToolController = controller;
-          try {
-            const output = await localResult.asyncExecute(controller.signal);
-            if (localResult.executedToolName) {
-              rlState = {
-                ...rlState,
-                lastUsedTool: localResult.executedToolName,
-              };
-            }
-            if (output) {
-              process.stdout.write(`${output}\n`);
-            }
-          } catch (error) {
-            const message = activeAbortRequested
-              ? CANCELLED_TOOL_MESSAGE
-              : error instanceof Error
-                ? error.message
-                : String(error);
-            process.stdout.write(`${message}\n`);
+      }
+      if (localResult.asyncExecute) {
+        const controller = new AbortController();
+        activeActionKind = "tool";
+        activeAbortRequested = false;
+        activeToolController = controller;
+        try {
+          const output = await localResult.asyncExecute(controller.signal);
+          if (localResult.executedToolName) {
+            rlState = {
+              ...rlState,
+              lastUsedTool: localResult.executedToolName,
+            };
           }
-          activeActionKind = null;
-          activeAbortRequested = false;
-          activeToolController = null;
-          rl.prompt();
-          continue;
+          if (output) {
+            process.stdout.write(`${output}\n`);
+          }
+        } catch (error) {
+          const message = activeAbortRequested
+            ? CANCELLED_TOOL_MESSAGE
+            : error instanceof Error
+              ? error.message
+              : String(error);
+          process.stdout.write(`${message}\n`);
         }
+        activeActionKind = null;
+        activeAbortRequested = false;
+        activeToolController = null;
+        rl.prompt();
+        continue;
+      }
+
+      // Only `/ask` (and the `?` prefix) set `askQuestion` to route through
+      // the agent session; every other unknown input gets an "Unknown command"
+      // message from routeInput, never a silent handoff.
+      if (localResult.askQuestion === undefined) {
         if (localResult.output) {
           process.stdout.write(`${localResult.output}\n`);
         }
@@ -1941,6 +1958,7 @@ async function startReadlineShell(
         continue;
       }
 
+      const agentInput = localResult.askQuestion;
       const currentSession = await ensureSession();
       if (!currentSession) {
         process.stdout.write(
@@ -1957,7 +1975,7 @@ async function startReadlineShell(
       activeAbortRequested = false;
 
       try {
-        for await (const message of currentSession.query(input)) {
+        for await (const message of currentSession.query(agentInput)) {
           if (message.type === "assistant") {
             pendingAssistantText += extractAssistantText(message.content);
             continue;
@@ -2028,10 +2046,23 @@ async function startReadlineShell(
 // ---------------------------------------------------------------------------
 
 /**
- * Three-layer input router:
- *   1. Slash commands (/help, /use, /options, /set, ...) — local only
- *   2. Direct tool dispatch (sast:scan ., semgrep ., scan .) — local only
- *   3. Natural language — undefined falls through to AgentSession
+ * One-shot flag — on the operator's first bare-sentence input we prepend a
+ * hint steering them to `/ask`. After that, the error message stays terse.
+ * Module scope is fine: one shell per process.
+ */
+let firstBareSentenceHintShown = false;
+
+/**
+ * Input router:
+ *   1. `?<question>` → `/ask <question>`.
+ *   2. Slash commands (/help, /use, /options, /set, /ask, ...) — local only.
+ *   3. exit / quit / q.
+ *   4. Direct tool dispatch (sast:scan ., semgrep ., scan .).
+ *   5. Anything else → explicit "Unknown command" error (never a silent
+ *      handoff to the agent).
+ *
+ * Silent NL fallback was removed to prevent the agent from hallucinating
+ * answers from cached `.kuzushi/` artifacts. `/ask` is the explicit door.
  */
 function routeInput(
   input: string,
@@ -2039,9 +2070,13 @@ function routeInput(
   opts: ShellOptions,
   ctx: ShellContext,
   shellState: ShellState,
-): LocalCommandResult | undefined {
+): LocalCommandResult {
   const trimmed = input.trim();
   const lower = trimmed.toLowerCase();
+
+  if (trimmed.startsWith("?")) {
+    return handleAskCommand([trimmed.slice(1).trim()], opts, shellState);
+  }
 
   if (trimmed.startsWith("/")) {
     return handleSlashCommand(trimmed, core, opts, ctx, shellState);
@@ -2056,7 +2091,13 @@ function routeInput(
     return toolResult;
   }
 
-  return undefined;
+  const preview = trimmed.length > 60 ? `${trimmed.slice(0, 60)}…` : trimmed;
+  const base = `Unknown command: "${preview}". Try /help, or /ask <question> to ask Claude with current shell context.`;
+  const hint = firstBareSentenceHintShown
+    ? ""
+    : "\n(hint: natural-language chat moved to /ask — type /ask <question> or prefix with ?)";
+  firstBareSentenceHintShown = true;
+  return { output: base + hint };
 }
 
 function handleSlashCommand(
@@ -2332,6 +2373,9 @@ function handleSlashCommand(
 
     case "auth":
       return handleAuthCommand(opts, ctx);
+
+    case "ask":
+      return handleAskCommand(args, opts, shellState);
 
     case "backend":
       return handleBackendCommand(args, opts);
@@ -3360,6 +3404,102 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
   };
 }
 
+// ---------------------------------------------------------------------------
+// /ask — explicit natural-language query, with screen context injected
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the "# Current shell context" block prepended to `/ask` queries so
+ * the agent has a deterministic view of what the operator is looking at
+ * (focused module, view, last tool, tail of history). Kept compact — it
+ * rides on every turn, so bloat = caching churn + token waste.
+ */
+function buildAskContextPrefix(shellState: ShellState, opts: ShellOptions): string {
+  const lines: string[] = ["# Current shell context"];
+  if (shellState.focusedModule) lines.push(`- focused module: ${shellState.focusedModule}`);
+  if (shellState.shellView) lines.push(`- shell view: ${shellState.shellView}`);
+  if (opts.target) lines.push(`- target: ${opts.target}`);
+  if (opts.workspace) lines.push(`- workspace: ${opts.workspace}`);
+  if (shellState.openFindingId) lines.push(`- open finding: ${shellState.openFindingId}`);
+  if (shellState.lastUsedTool) lines.push(`- last tool: ${shellState.lastUsedTool}`);
+
+  const snapshot = shellState.contextSnapshot;
+  if (snapshot) {
+    const snapshotLines: string[] = [];
+    if (snapshot.repoContext) snapshotLines.push("repoContext");
+    if (snapshot.appModel) snapshotLines.push("appModel");
+    if (snapshot.threatModel) snapshotLines.push("threatModel");
+    if (snapshot.enrichedContext) snapshotLines.push("enrichedContext");
+    if (snapshotLines.length > 0) {
+      lines.push(`- context snapshot loaded: ${snapshotLines.join(", ")}`);
+    }
+  }
+
+  const recent = (shellState.history ?? []).slice(-10);
+  if (recent.length > 0) {
+    lines.push("", "## Recent conversation (last 10 entries)");
+    for (const entry of recent) {
+      const label = entry.type === "input" ? "user" : entry.type;
+      const text = (entry.text ?? "").replaceAll("\n", " ").slice(0, 500);
+      lines.push(`- ${label}: ${text}`);
+    }
+  }
+
+  const artifactRoot = opts.target ? path.resolve(opts.target) : process.cwd();
+  const manifest = loadArtifactManifest(artifactRoot);
+  lines.push("", "## Loaded artifacts (.kuzushi/)");
+  if (manifest.length > 0) {
+    for (const line of manifest) lines.push(`- ${line}`);
+  } else {
+    lines.push("- (none — this is a fresh directory)");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Stat the `.kuzushi/` artifacts the agent might draw on. Pure disk read, no
+ * opens — so a corrupt findings DB can't break `/ask`. Returned lines are
+ * printed verbatim inside the context block.
+ */
+function loadArtifactManifest(repoRoot: string): string[] {
+  const out: string[] = [];
+  const kuzushiDir = path.join(repoRoot, ".kuzushi");
+  if (!existsSync(kuzushiDir)) return out;
+  const files: Array<{ rel: string; label: string }> = [
+    { rel: "scan-context.json", label: "operator-authored scan context" },
+    { rel: "threat-model.json", label: "persistent threat model" },
+    { rel: "findings.sqlite3", label: "prior findings DB" },
+  ];
+  for (const { rel, label } of files) {
+    const full = path.join(kuzushiDir, rel);
+    if (!existsSync(full)) continue;
+    try {
+      const stat = statSync(full);
+      const mtime = stat.mtime.toISOString().slice(0, 10);
+      out.push(`${rel} (${label}, modified ${mtime})`);
+    } catch {
+      out.push(`${rel} (${label})`);
+    }
+  }
+  return out;
+}
+
+function handleAskCommand(
+  args: string[],
+  opts: ShellOptions,
+  shellState: ShellState,
+): LocalCommandResult {
+  const question = args.join(" ").trim();
+  if (!question) {
+    return {
+      output: "Usage: /ask <question>  (or prefix any input with ? to route to /ask)",
+    };
+  }
+  const contextPrefix = buildAskContextPrefix(shellState, opts);
+  return { askQuestion: `${contextPrefix}\n\n---\n${question}` };
+}
+
 function handleAuthCommand(opts: ShellOptions, ctx: ShellContext): LocalCommandResult {
   // Ink shell: open the modal credential prompt and apply the outcome.
   if (ctx.uiStore) {
@@ -3532,6 +3672,7 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/config", "Open the interactive config editor"],
         ["/config raw|get|set|path", "Inspect/update ~/.kuzushi/config.json"],
         ["/auth", "Set or change Anthropic API key / OAuth token for the copilot"],
+        ["/ask <question>", "Ask Claude with current shell context (? prefix also works)"],
         ["/backend [claude|pi-ai]", "Show or change the agent runtime backend"],
         ["/target <path>", "Set or show the active target"],
         ["/context", "Generate or show application context map"],

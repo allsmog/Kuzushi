@@ -167,9 +167,69 @@ describe("local shell commands", () => {
     // the shell-view + openFindingId fields reset alongside focus.
     expect(typeof backResult?.shellStateUpdater).toBe("function");
 
-    expect(
-      __shellInternals.handleLocalCommand("help", core, opts, ctx, shellState),
-    ).toBeUndefined();
+    // After the NL-fallback removal, bare `help` (no slash) no longer falls
+    // through to the agent — it surfaces an "Unknown command" pointer to the
+    // new `/help` / `/ask` paths instead.
+    const bareHelp = __shellInternals.handleLocalCommand("help", core, opts, ctx, shellState);
+    expect(bareHelp?.output).toContain("Unknown command");
+    expect(bareHelp?.output).toContain("/ask");
+  });
+
+  it("routes /ask through askQuestion with current screen context", async () => {
+    const { core } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState: ShellState = {
+      ...createShellState([]),
+      focusedModule: "threat-hunt",
+      shellView: "module",
+      target: "./demo-target",
+      lastUsedTool: "threat-hunt:run",
+    };
+    const ctx = { focusedModule: "threat-hunt" };
+
+    const ask = __shellInternals.handleLocalCommand(
+      "/ask what findings stand out?",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(ask?.askQuestion).toBeDefined();
+    // Context preamble should mention the focused module, shell view, and
+    // the actual question so the agent has both framing and intent.
+    expect(ask?.askQuestion).toContain("focused module: threat-hunt");
+    expect(ask?.askQuestion).toContain("shell view: module");
+    expect(ask?.askQuestion).toContain("last tool: threat-hunt:run");
+    expect(ask?.askQuestion).toContain("Loaded artifacts (.kuzushi/)");
+    expect(ask?.askQuestion).toContain("what findings stand out?");
+  });
+
+  it("routes ? prefix through askQuestion", async () => {
+    const { core } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState([]);
+    const ctx = { focusedModule: null };
+
+    const ask = __shellInternals.handleLocalCommand(
+      "?how do I triage",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(ask?.askQuestion).toBeDefined();
+    expect(ask?.askQuestion).toContain("how do I triage");
+  });
+
+  it("/ask with no question prints usage instead of streaming", async () => {
+    const { core } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState([]);
+    const ctx = { focusedModule: null };
+
+    const ask = __shellInternals.handleLocalCommand("/ask", core, opts, ctx, shellState);
+    expect(ask?.askQuestion).toBeUndefined();
+    expect(ask?.output).toContain("Usage: /ask <question>");
   });
 
   it("renders options tables and stores per-tool settings", async () => {
