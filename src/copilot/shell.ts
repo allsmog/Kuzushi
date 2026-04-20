@@ -692,6 +692,23 @@ async function startInkShell(
   // `run --bg` backgrounding) and the CoreDispatcher (for the `jobs` family).
   const jobManager = new JobManager();
 
+  // Desktop notification bridge. Jobs that run longer than NOTIFY_THRESHOLD_SECS
+  // fire a system toast on terminal transitions. Opt-in via `setg NOTIFY_ON_COMPLETE true`.
+  {
+    const { sendCompletionNotification } = await import("../ui/notify.js");
+    const notifyIfOptedIn = (label: string, verb: string, record: { startedAt: number }) => {
+      if (String(globals.get("NOTIFY_ON_COMPLETE") ?? "").toLowerCase() !== "true") return;
+      const thresholdRaw = String(globals.get("NOTIFY_THRESHOLD_SECS") ?? "30");
+      const threshold = Number.parseInt(thresholdRaw, 10);
+      const elapsedSecs = (Date.now() - record.startedAt) / 1000;
+      if (!Number.isFinite(threshold) || elapsedSecs < threshold) return;
+      sendCompletionNotification(`Kuzushi: job ${verb}`, `${label} (${elapsedSecs.toFixed(0)}s)`);
+    };
+    jobManager.on("completed", (job) => notifyIfOptedIn(job.label, "completed", job));
+    jobManager.on("failed", (job) => notifyIfOptedIn(job.label, "failed", job));
+    jobManager.on("cancelled", (job) => notifyIfOptedIn(job.label, "cancelled", job));
+  }
+
   const coreDispatcher = new CoreDispatcher({
     registry: core.registry,
     globals,
