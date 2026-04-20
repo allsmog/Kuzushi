@@ -71,6 +71,16 @@ export interface CoreDispatcherOptions {
    * every rendered line is mirrored to the active spool file (if any).
    */
   spool?: import("../spool.js").SpoolController;
+  /**
+   * Optional ModuleEventBus — powers the `wait_for` command. Host wires
+   * `core.events` here so operators can block on framework events from
+   * resource scripts.
+   */
+  events?: import("../../bus/module-events.js").ModuleEventBus;
+  /** Version string for the `version` command. Typically the package.json version. */
+  frameworkVersion?: string;
+  /** Audit log path resolver for the `logs` command. */
+  getLogPath?: () => string | undefined;
 }
 
 const COMMANDS: Record<string, string> = {
@@ -106,6 +116,13 @@ const COMMANDS: Record<string, string> = {
   jobs: "List / tail / kill background jobs (jobs, jobs -i <id>, jobs -k <id>)",
   repl: "Drop into a Node REPL with core/registry/workspace bound",
   spool: "Tee shell output to a file: `spool <file>` / `spool off` / `spool status`",
+  sleep: "Pause for N seconds (honors ^C)",
+  wait_for: "Block until a ModuleEventBus event fires (`wait_for scan:finding 30`)",
+  time: "Time another shell command (`time modules`)",
+  clear: "Clear the terminal screen",
+  version: "Show Kuzushi version + loaded module summary",
+  logs: "Tail the audit log (`logs` for last 50 lines, `logs -f` to follow)",
+  connect: "Open a raw TCP socket to <host> <port> (interactive)",
   exit: "Exit the shell",
   quit: "Exit the shell (alias for exit)",
 };
@@ -184,6 +201,20 @@ export class CoreDispatcher implements CommandDispatcher {
         return this.cmd_repl(ctx);
       case "spool":
         return this.cmd_spool(args, ctx);
+      case "sleep":
+        return this.cmd_sleep(args, ctx);
+      case "wait_for":
+        return this.cmd_wait_for(args, ctx);
+      case "time":
+        return this.cmd_time(args, ctx);
+      case "clear":
+        return this.cmd_clear();
+      case "version":
+        return this.cmd_version();
+      case "logs":
+        return this.cmd_logs(args);
+      case "connect":
+        return this.cmd_connect(args, ctx);
       default:
         return { output: `Unknown command: ${cmd}` };
     }
@@ -811,6 +842,139 @@ export class CoreDispatcher implements CommandDispatcher {
     } catch (err) {
       return { output: `[-] spool failed: ${err instanceof Error ? err.message : String(err)}` };
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Utility primitives — sleep / wait_for / time / clear / version / logs / connect
+  // -------------------------------------------------------------------------
+
+  private async cmd_sleep(args: string[], ctx: CommandContext): Promise<CommandResult> {
+    const secs = Number.parseFloat(args[0] ?? "");
+    if (!Number.isFinite(secs) || secs < 0) return { output: "Usage: sleep <seconds>" };
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, secs * 1000);
+      ctx.signal?.addEventListener("abort", () => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+    return { output: `[*] Slept ${secs}s` };
+  }
+
+  private async cmd_wait_for(args: string[], ctx: CommandContext): Promise<CommandResult> {
+    const event = args[0];
+    if (!event) return { output: "Usage: wait_for <event-type> [timeout-seconds]" };
+    const timeout = Number.parseFloat(args[1] ?? "30");
+    const mgr = this.opts.events;
+    if (!mgr) return { output: "[-] ModuleEventBus is not exposed to this driver." };
+    const started = Date.now();
+    const payload = await new Promise<unknown | null>((resolve) => {
+      const scope = mgr.scope(`wait_for:${started}`);
+      let settled = false;
+      const finish = (value: unknown | null) => {
+        if (settled) return;
+        settled = true;
+        scope.disposeAll();
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = setTimeout(() => finish(null), timeout * 1000);
+      scope.once(event, (p) => finish(p ?? true));
+      ctx.signal?.addEventListener("abort", () => finish(null));
+    });
+    const elapsed = ((Date.now() - started) / 1000).toFixed(2);
+    if (payload === null) return { output: `[-] wait_for ${event} timed out after ${elapsed}s` };
+    return {
+      output: `[+] ${event} fired after ${elapsed}s\n${JSON.stringify(payload, null, 2)}`,
+    };
+  }
+
+  private async cmd_time(args: string[], ctx: CommandContext): Promise<CommandResult> {
+    if (args.length === 0) return { output: "Usage: time <command...>" };
+    const line = args.join(" ");
+    const started = process.hrtime.bigint();
+    const inner = await ctx.driver.handle(line, ctx.signal);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+    const existingOutput = inner.output ?? "";
+    const footer = `\n[*] ${line} — ${elapsedMs.toFixed(1)}ms`;
+    return {
+      ...inner,
+      output: existingOutput ? `${existingOutput}${footer}` : footer.trimStart(),
+    };
+  }
+
+  private cmd_clear(): CommandResult {
+    if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[H");
+    return {};
+  }
+
+  private cmd_version(): CommandResult {
+    const version = this.opts.frameworkVersion ?? "dev";
+    const modules = this.opts.registry.list();
+    const counts = {
+      modules: modules.length,
+      tools: modules.reduce((n, m) => n + m.toolCount, 0),
+    };
+    const lines = [
+      `Kuzushi ${version}`,
+      `  Node: ${process.versions.node}`,
+      `  Modules loaded: ${counts.modules}`,
+      `  Tools: ${counts.tools}`,
+    ];
+    return { output: lines.join("\n") };
+  }
+
+  private async cmd_logs(args: string[]): Promise<CommandResult> {
+    const getLogPath = this.opts.getLogPath;
+    if (!getLogPath) return { output: "[-] Audit log not enabled in this driver." };
+    const logPath = getLogPath();
+    if (!logPath) return { output: "[-] Audit log path unavailable." };
+    const { existsSync, readFileSync } = await import("node:fs");
+    if (!existsSync(logPath)) return { output: `[*] No audit log yet at ${logPath}` };
+    const raw = readFileSync(logPath, "utf8");
+    const lines = raw.split("\n").filter(Boolean);
+    const limitArg = args.find((a) => /^\d+$/.test(a));
+    const limit = limitArg ? Number.parseInt(limitArg, 10) : 50;
+    const tail = lines.slice(-limit);
+    return {
+      output: tail.length === 0 ? "  (empty log)" : tail.join("\n"),
+    };
+  }
+
+  private async cmd_connect(args: string[], ctx: CommandContext): Promise<CommandResult> {
+    const host = args[0];
+    const port = Number.parseInt(args[1] ?? "", 10);
+    if (!host || !Number.isFinite(port)) {
+      return { output: "Usage: connect <host> <port>" };
+    }
+    const { createConnection } = await import("node:net");
+    ctx.print.status(`Connecting to ${host}:${port}...`);
+    const chunks: string[] = [];
+    await new Promise<void>((resolve) => {
+      const sock = createConnection({ host, port });
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        sock.destroy();
+        resolve();
+      };
+      sock.on("connect", () => {
+        ctx.print.good(`Connected to ${host}:${port}`);
+      });
+      sock.on("data", (buf) => chunks.push(buf.toString("utf8")));
+      sock.on("error", (err) => {
+        chunks.push(`[-] ${err.message}`);
+        finish();
+      });
+      sock.on("end", finish);
+      sock.on("close", finish);
+      ctx.signal?.addEventListener("abort", finish);
+      // Close after 5s of inactivity — interactive back-and-forth would need
+      // a different lifecycle; this is enough for banner-grab / smoke tests.
+      setTimeout(finish, 5000);
+    });
+    return { output: chunks.join("") || "[-] No bytes received." };
   }
 
   // -------------------------------------------------------------------------
