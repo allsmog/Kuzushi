@@ -65,6 +65,12 @@ export interface CoreDispatcherOptions {
    * (Ink) stays a host-level concern.
    */
   openRepl?: () => Promise<void>;
+  /**
+   * Optional spool controller — enables the `spool` command. The host wires
+   * the same controller's `tap(line)` into the print sink's onPrint hook so
+   * every rendered line is mirrored to the active spool file (if any).
+   */
+  spool?: import("../spool.js").SpoolController;
 }
 
 const COMMANDS: Record<string, string> = {
@@ -99,6 +105,7 @@ const COMMANDS: Record<string, string> = {
   listm: "List the module stack",
   jobs: "List / tail / kill background jobs (jobs, jobs -i <id>, jobs -k <id>)",
   repl: "Drop into a Node REPL with core/registry/workspace bound",
+  spool: "Tee shell output to a file: `spool <file>` / `spool off` / `spool status`",
   exit: "Exit the shell",
   quit: "Exit the shell (alias for exit)",
 };
@@ -175,6 +182,8 @@ export class CoreDispatcher implements CommandDispatcher {
         return this.cmd_jobs(args, ctx);
       case "repl":
         return this.cmd_repl(ctx);
+      case "spool":
+        return this.cmd_spool(args, ctx);
       default:
         return { output: `Unknown command: ${cmd}` };
     }
@@ -773,6 +782,34 @@ export class CoreDispatcher implements CommandDispatcher {
       return { output: "[*] REPL session ended." };
     } catch (err) {
       return { output: `[-] REPL failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Spool — tee shell output to a file
+  // -------------------------------------------------------------------------
+
+  private cmd_spool(args: string[], ctx: CommandContext): CommandResult {
+    const spool = this.opts.spool;
+    if (!spool) return { output: "[-] Spool is not enabled in this driver." };
+    const sub = args[0];
+    if (!sub || sub === "status") {
+      const active = spool.path();
+      return {
+        output: active ? `[*] Spooling to ${active}` : "[*] Spool is off.",
+      };
+    }
+    if (sub === "off" || sub === "-c") {
+      const closed = spool.stop();
+      return {
+        output: closed ? `[+] Stopped spool (was ${closed}).` : "[-] Spool was not active.",
+      };
+    }
+    try {
+      const resolved = spool.start(sub, ctx.cwd);
+      return { output: `[+] Spooling to ${resolved}` };
+    } catch (err) {
+      return { output: `[-] spool failed: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 
