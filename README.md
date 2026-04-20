@@ -46,6 +46,60 @@ kuzushi> run sast:verify fingerprint=abc123
 kuzushi> exit
 ```
 
+#### Common shell flows
+
+```
+# Catalog / module home / tune
+kuzushi> use sast             # focus → module home
+kuzushi/sast> findings        # unified list with filter chips + chain boxing
+kuzushi/sast> open F-0001     # linear deep page for a finding
+kuzushi/sast> tune            # six plain controls + optional "house rules"
+kuzushi/sast> back            # step up one level
+
+# Natural-language planner — English → option diff → y/n apply
+kuzushi/sast> /plan run harder, focus on auth, stop wasting money
+kuzushi/sast> y               # apply the proposed changes
+
+# Prompt editor — per-tool system-prompt override in $EDITOR
+kuzushi/sast> /prompt edit triage          # opens .kuzushi/prompts/sast/triage.md
+kuzushi/sast> /prompt show verify          # show effective prompt + source
+kuzushi/sast> /show prompts                # cross-module audit table
+
+# Replay / trace — re-read the outcome of a past run, no re-exec
+kuzushi> /show runs                        # list recent runs
+kuzushi> /replay 7f3a                      # re-render a past summary
+kuzushi> /trace 7f3a                       # stream the per-event JSONL log
+
+# Threat-model views — five screens over the randori output
+kuzushi> /threats dfd                      # ASCII data flow diagram
+kuzushi> /threats stride                   # element × STRIDE heat matrix
+kuzushi> /threats stories                  # attacker narrative cards
+kuzushi> /threats scope                    # criticality + operator edits
+kuzushi> /threats summary                  # counts, drives, export paths
+# Press 1..5 at any threat view to cycle.
+
+# Short-ID aliases — F-0001 / C-01 resolve through a deterministic map
+kuzushi/sast> /show aliases F-             # filter by prefix
+kuzushi/sast> open F-0003                  # same as typing the fingerprint
+```
+
+#### On-disk artefacts
+
+Operators can version-control any of these and have them round-trip with
+the shell — `/prompt edit` and `/tune` write here, and randori / scan runs
+read from here.
+
+| Path                                       | Role                                       |
+| ------------------------------------------ | ------------------------------------------ |
+| `~/.kuzushi/config.json`                   | Global config (`/config`)                  |
+| `.kuzushi/threat-model.json`               | Persistent threat model (editable)         |
+| `.kuzushi/house-rules/<moduleId>.md`       | Operator nudges per module (`/tune`)       |
+| `.kuzushi/prompts/<moduleId>/<verb>.md`    | Per-tool system-prompt override            |
+| `.kuzushi/runs/<runId>/summary.json`       | Run summary (for `/replay`)                |
+| `.kuzushi/runs/<runId>/triage.jsonl`       | Per-event triage audit log (for `/trace`)  |
+| `.kuzushi/runs/<runId>/verify.jsonl`       | Per-event verify audit log (for `/trace`)  |
+| `.kuzushi/findings.sqlite3`                | Findings + pipeline_runs DB                |
+
 ### Scan (headless pipeline)
 
 The full SAST pipeline — 40+ agent tasks orchestrated as a DAG. Semgrep, CodeQL, 30+ agentic detectors, AI triage, verification, PoC generation, patch synthesis. CI/CD-native with SARIF, quality gates, and exit codes.
@@ -238,12 +292,41 @@ jobs:
 
 Exit codes: `0` clean, `1` findings (or task failures), `2` usage/config/auth, `3` unexpected crash. See `.github/workflows/kuzushi-reference.yml` for a reference workflow with SARIF upload, JUnit publish, and PR sticky comment.
 
+#### `--ci` stream mode
+
+`--ci` disables the Ink TUI and attaches a plain-text stream formatter
+that writes one line per meaningful pipeline event. Log-renderer-friendly,
+grep-friendly, and free of ANSI control codes:
+
+```sh
+kuzushi scan ./repo --ci --sarif results.sarif
+```
+
+```
+[2026-04-20T14:20:01Z] scan: ./repo started
+[2026-04-20T14:20:01Z] phase: (init) → scanning
+[2026-04-20T14:20:12Z] stage: scan → done [8.3s]
+[2026-04-20T14:20:12Z] stage: triage → active (15 findings)
+[2026-04-20T14:20:45Z] finding: abc123def456 tp 92% $0.0041
+[2026-04-20T14:21:20Z] summary: 4 tp · 10 fp · $0.87 · 1m 18s
+```
+
+Honoured from a TTY too — `kuzushi scan … --ci | tee run.log` works.
+
+#### PR comments
+
+`buildPrComment(summary, { repoName, runUrl })` (in `src/report-pr-comment.ts`)
+renders a GitHub-markdown block suitable for `gh pr comment -F -`. Includes
+verdict counts, exploitable badge, cost + duration, and a top-10 TP table
+with severity emojis.
+
 ### Quality Gates
 
 ```sh
 kuzushi scan <repo> --quality-gate         # fail CI on threshold violations
 kuzushi scan <repo> --fail-on-tp           # fail if any high/critical TP is found
 kuzushi scan <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
+kuzushi scan <repo> --ci                   # plain-text stream mode (no Ink)
 ```
 
 ## Scan Presets
