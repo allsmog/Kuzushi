@@ -768,13 +768,27 @@ async function startInkShell(
   // fire a system toast on terminal transitions. Opt-in via `setg NOTIFY_ON_COMPLETE true`.
   {
     const { sendCompletionNotification } = await import("../ui/notify.js");
+    const { postSlack } = await import("../ui/slack.js");
     const notifyIfOptedIn = (label: string, verb: string, record: { startedAt: number }) => {
-      if (String(globals.get("NOTIFY_ON_COMPLETE") ?? "").toLowerCase() !== "true") return;
       const thresholdRaw = String(globals.get("NOTIFY_THRESHOLD_SECS") ?? "30");
       const threshold = Number.parseInt(thresholdRaw, 10);
       const elapsedSecs = (Date.now() - record.startedAt) / 1000;
       if (!Number.isFinite(threshold) || elapsedSecs < threshold) return;
-      sendCompletionNotification(`Kuzushi: job ${verb}`, `${label} (${elapsedSecs.toFixed(0)}s)`);
+
+      // Desktop toast
+      if (String(globals.get("NOTIFY_ON_COMPLETE") ?? "").toLowerCase() === "true") {
+        sendCompletionNotification(`Kuzushi: job ${verb}`, `${label} (${elapsedSecs.toFixed(0)}s)`);
+      }
+      // Slack webhook
+      if (String(globals.get("SLACK_NOTIFY") ?? "").toLowerCase() === "true") {
+        const webhookUrl = String(globals.get("SLACK_WEBHOOK_URL") ?? "");
+        if (webhookUrl) {
+          void postSlack({
+            webhookUrl,
+            text: `🔐 Kuzushi: job *${verb}* — ${label} (${elapsedSecs.toFixed(0)}s)`,
+          });
+        }
+      }
     };
     jobManager.on("completed", (job) => notifyIfOptedIn(job.label, "completed", job));
     jobManager.on("failed", (job) => notifyIfOptedIn(job.label, "failed", job));
