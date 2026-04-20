@@ -30,6 +30,7 @@ import { listRecipes, resolveRecipePath } from "./recipes.js";
 import { openRepl as openDevRepl } from "./repl.js";
 import { loadAndRunResource, saveResourceScript } from "./resource.js";
 import { parseToolArgs } from "./run.js";
+import { SpoolController } from "./spool.js";
 
 const SHELL_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "LS"];
 const SHELL_HISTORY_FILENAME = "shell-history.json";
@@ -649,6 +650,9 @@ async function startInkShell(
   // banner / exit. Unknown commands fall through to routeInput (second pass)
   // and ultimately the LLM agent (third pass).
   // ---------------------------------------------------------------------------
+  // Audit-trail tee controller. `spool <file>` opens; `spool off` closes.
+  const spoolController = new SpoolController();
+
   const dispatcherPrint: PrintSink = createPrintSink({
     color: false,
     // Swallow direct writes — Ink owns the render surface. We only care about
@@ -661,6 +665,9 @@ async function startInkShell(
         text: line,
         timestamp: Date.now(),
       });
+      // Mirror to the spool file if one is active. The tap() call is a no-op
+      // when spooling is off, so the hot path pays ~one map lookup.
+      spoolController.tap(line);
     },
   });
 
@@ -763,6 +770,7 @@ async function startInkShell(
       });
     },
     jobManager,
+    spool: spoolController,
   });
 
   driver = new DispatcherDriver({
@@ -831,6 +839,7 @@ async function startInkShell(
     const live = sessionManager.liveForWorkspace(opts.workspace).length;
     return live > 0 ? `${live} ${live === 1 ? "session" : "sessions"}` : undefined;
   });
+  driver.addStatusProvider(() => spoolController.status());
 
   // Load ~/.kuzushi/startup.rc if present — lets operators preload setg,
   // aliases, favorites, etc. on every shell launch. Errors are non-fatal;
@@ -1213,6 +1222,7 @@ async function startInkShell(
     } finally {
       await closeSession();
       await jobManager.shutdown();
+      spoolController.stop();
       await core.dispose();
       await bus.close();
       cleanupUI();
