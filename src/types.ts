@@ -50,12 +50,32 @@ export type ScanMode = "sequential" | "concurrent";
 /** Runtime provider for agent execution. */
 export type AgentRuntimeBackend = "claude" | "pi-ai";
 
-/** Configuration for agent runtime authentication and endpoint selection. */
-export interface AgentRuntimeConfig {
-  /** API key for the LLM provider. Overrides ANTHROPIC_API_KEY when set. */
+/**
+ * Credentials for a single agent runtime backend.
+ *
+ * Consumed directly by `ClaudeAgentRuntime` and `PiAiAgentRuntime`. The shape
+ * matches the env-var pair they resolve to.
+ */
+export interface AgentRuntimeCredentials {
+  /** API key for the backend's LLM provider. Overrides ANTHROPIC_API_KEY when set. */
   apiKey?: string;
-  /** Base URL for the LLM API endpoint. Overrides ANTHROPIC_BASE_URL when set. */
+  /** Base URL for the backend's LLM API endpoint. Overrides ANTHROPIC_BASE_URL when set. */
   baseUrl?: string;
+}
+
+/**
+ * Per-backend credentials bag. Switching `agentRuntimeBackend` selects which
+ * slot is active; the unselected slot is preserved so operators can flip back
+ * without re-authing.
+ *
+ * Legacy flat configs (`{ apiKey, baseUrl }` at the top level) are migrated on
+ * load into `{ claude: { ... } }` — see `normalizeAgentRuntimeConfig`.
+ */
+export interface AgentRuntimeConfig {
+  /** Credentials used when `agentRuntimeBackend === "claude"` (default). */
+  claude?: AgentRuntimeCredentials;
+  /** Credentials used when `agentRuntimeBackend === "pi-ai"`. */
+  piAi?: AgentRuntimeCredentials;
 }
 
 /** Configuration for triage quality assertion checks. */

@@ -22,7 +22,13 @@ import type { QualityGateConfig } from "./quality-gate-types.js";
 import type { TaskConfig } from "./scanners/types.js";
 import { KuzushiConfigSchema } from "./schemas.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
-import type { AgentRuntimeConfig, KuzushiConfig, Verdict } from "./types.js";
+import type {
+  AgentRuntimeBackend,
+  AgentRuntimeConfig,
+  AgentRuntimeCredentials,
+  KuzushiConfig,
+  Verdict,
+} from "./types.js";
 import { isPathWithinRoot, isRecord } from "./utils.js";
 
 type ConfigLayer = Record<string, unknown>;
@@ -44,20 +50,19 @@ export function localCredentialsPath(cwd: string = process.cwd()): string {
 }
 
 /**
- * Read the project-local credentials file at `<cwd>/.kuzushi/credentials.json`,
- * if present. Returns the parsed `agentRuntimeConfig` shape (`{ apiKey?, baseUrl? }`)
- * or undefined when the file is missing or malformed.
+ * Read the project-local credentials file at `<cwd>/.kuzushi/credentials.json`.
+ *
+ * Accepts both the modern per-backend shape (`{ claude: {apiKey, baseUrl}, piAi: {...} }`)
+ * and the legacy flat shape (`{ apiKey, baseUrl }`). Legacy input is migrated
+ * into the `claude` slot so pre-split creds continue to work without operator action.
  */
 export function loadLocalCredentials(cwd: string = process.cwd()): AgentRuntimeConfig | undefined {
   const filePath = localCredentialsPath(cwd);
   if (!existsSync(filePath)) return undefined;
   try {
     const raw = JSON.parse(readFileSync(filePath, "utf-8")) as unknown;
-    if (!isRecord(raw)) return undefined;
-    const result: AgentRuntimeConfig = {};
-    if (typeof raw["apiKey"] === "string") result.apiKey = raw["apiKey"];
-    if (typeof raw["baseUrl"] === "string") result.baseUrl = raw["baseUrl"];
-    return Object.keys(result).length > 0 ? result : undefined;
+    const normalized = normalizeAgentRuntimeConfig(raw);
+    return normalized;
   } catch (error) {
     log.warn(`Failed to read local credentials at ${filePath}: ${String(error)}`);
     return undefined;
@@ -81,7 +86,15 @@ export function persistLocalCredentials(
   }
 
   const existing = loadLocalCredentials(cwd) ?? {};
-  const merged: AgentRuntimeConfig = { ...existing, ...creds };
+  // Deep merge each backend slot so writing claude doesn't wipe piAi, and
+  // each slot's apiKey/baseUrl merge field-wise rather than replacing the
+  // whole object.
+  const merged: AgentRuntimeConfig = {
+    claude: { ...(existing.claude ?? {}), ...(creds.claude ?? {}) },
+    piAi: { ...(existing.piAi ?? {}), ...(creds.piAi ?? {}) },
+  };
+  if (!merged.claude || Object.keys(merged.claude).length === 0) delete merged.claude;
+  if (!merged.piAi || Object.keys(merged.piAi).length === 0) delete merged.piAi;
   writeFileSync(filePath, `${JSON.stringify(merged, null, 2)}\n`, {
     encoding: "utf-8",
     mode: 0o600,
@@ -199,6 +212,11 @@ function writeConfigFile(targetPath: string, config: unknown): void {
 export function getConfigValue(key: string, repoRoot?: string): unknown {
   const config = loadConfig(repoRoot);
 
+  const legacyAgentMatch = key.match(/^agentRuntimeConfig\.(apiKey|baseUrl)$/);
+  if (legacyAgentMatch) {
+    key = `agentRuntimeConfig.claude.${legacyAgentMatch[1]}`;
+  }
+
   if (!key.includes(".")) {
     if (!VALID_TOP_LEVEL_KEYS.has(key)) return undefined;
     return config[key as keyof KuzushiConfig];
@@ -210,6 +228,14 @@ export function getConfigValue(key: string, repoRoot?: string): unknown {
 /** Set a config value by key (supports dotted paths like taskConfig.semgrep.binary). */
 export function setConfigValue(key: string, raw: string, repoRoot?: string): void {
   const config = loadWritableConfigLayer(repoRoot);
+
+  // Legacy dotted paths `agentRuntimeConfig.apiKey` / `.baseUrl` retarget to
+  // the claude slot after the per-backend split. Users with the old scripts
+  // keep working; new callers should use `agentRuntimeConfig.claude.apiKey`.
+  const legacyAgentMatch = key.match(/^agentRuntimeConfig\.(apiKey|baseUrl)$/);
+  if (legacyAgentMatch) {
+    key = `agentRuntimeConfig.claude.${legacyAgentMatch[1]}`;
+  }
 
   if (key.includes(".")) {
     const parts = key.split(".");
@@ -786,6 +812,11 @@ export function applyConfigPatch(entries: ConfigPatchEntry[], repoRoot?: string)
 export function unsetConfigValue(key: string, repoRoot?: string): void {
   const config = loadWritableConfigLayer(repoRoot);
 
+  const legacyAgentMatch = key.match(/^agentRuntimeConfig\.(apiKey|baseUrl)$/);
+  if (legacyAgentMatch) {
+    key = `agentRuntimeConfig.claude.${legacyAgentMatch[1]}`;
+  }
+
   if (key.includes(".")) {
     const parts = key.split(".");
     validatePathParts(parts);
@@ -1026,10 +1057,27 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
           continue;
         }
 
+        const normalizedLayer = normalizeAgentRuntimeConfig(value);
+        if (!normalizedLayer) continue;
+        const existing = merged.agentRuntimeConfig ?? {};
+        // Deep-merge each backend slot so a project layer setting claude.baseUrl
+        // doesn't wipe a global claude.apiKey.
         merged.agentRuntimeConfig = {
-          ...(merged.agentRuntimeConfig ?? {}),
-          ...cloneLayerValue(value),
+          claude: { ...(existing.claude ?? {}), ...(normalizedLayer.claude ?? {}) },
+          piAi: { ...(existing.piAi ?? {}), ...(normalizedLayer.piAi ?? {}) },
         };
+        if (
+          !merged.agentRuntimeConfig.claude ||
+          Object.keys(merged.agentRuntimeConfig.claude).length === 0
+        ) {
+          delete merged.agentRuntimeConfig.claude;
+        }
+        if (
+          !merged.agentRuntimeConfig.piAi ||
+          Object.keys(merged.agentRuntimeConfig.piAi).length === 0
+        ) {
+          delete merged.agentRuntimeConfig.piAi;
+        }
         continue;
       }
 
@@ -1578,22 +1626,63 @@ function normalizeConfidenceSignalWeights(value: unknown): ConfidenceSignalWeigh
   return hasAny ? result : undefined;
 }
 
-function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
+function normalizeAgentRuntimeCredentials(value: unknown): AgentRuntimeCredentials | undefined {
+  if (!isRecord(value)) return undefined;
   const apiKey = normalizeOptionalString(value["apiKey"]);
   const baseUrl = normalizeOptionalString(value["baseUrl"]);
+  if (!apiKey && !baseUrl) return undefined;
+  const out: AgentRuntimeCredentials = {};
+  if (apiKey) out.apiKey = apiKey;
+  if (baseUrl) out.baseUrl = baseUrl;
+  return out;
+}
 
-  if (!apiKey && !baseUrl) {
-    return undefined;
-  }
+/**
+ * Normalize `agentRuntimeConfig` input from any layer (config file, setConfigValue
+ * JSON, local credentials file). Accepts:
+ *
+ *   - Modern per-backend shape:  { claude: {apiKey, baseUrl}, piAi: {...} }
+ *   - Legacy flat shape:         { apiKey, baseUrl }  → migrates to { claude: {...} }
+ *   - Mixed (flat + per-backend): flat keys route to `claude` unless it's already set.
+ *
+ * Returns undefined when no credentials are present in any slot.
+ */
+function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undefined {
+  if (!isRecord(value)) return undefined;
 
-  const normalized: AgentRuntimeConfig = {};
-  if (apiKey) normalized.apiKey = apiKey;
-  if (baseUrl) normalized.baseUrl = baseUrl;
-  return normalized;
+  const claudeFromSlot = normalizeAgentRuntimeCredentials(value["claude"]);
+  const piAiFromSlot = normalizeAgentRuntimeCredentials(value["piAi"]);
+  const legacyFlat = normalizeAgentRuntimeCredentials(value);
+
+  // Merge legacy flat into claude only when the claude slot hasn't been set
+  // explicitly — we don't want legacy keys to silently overwrite a modern
+  // config. Order: modern slot wins, legacy fills the gap.
+  const claude: AgentRuntimeCredentials | undefined = claudeFromSlot ?? legacyFlat;
+
+  if (!claude && !piAiFromSlot) return undefined;
+
+  const out: AgentRuntimeConfig = {};
+  if (claude) out.claude = claude;
+  if (piAiFromSlot) out.piAi = piAiFromSlot;
+  return out;
+}
+
+/**
+ * Pick the credentials slot that matches the active `agentRuntimeBackend`.
+ * The single choke point for "which creds should this run use?" — used by
+ * agent-runtime, CLI env-var priming, and the shell credential flow.
+ */
+export function resolveActiveCredentials(
+  config: Pick<KuzushiConfig, "agentRuntimeBackend" | "agentRuntimeConfig">,
+): AgentRuntimeCredentials {
+  const backend = config.agentRuntimeBackend ?? "claude";
+  const slot = backend === "pi-ai" ? "piAi" : "claude";
+  return config.agentRuntimeConfig?.[slot] ?? {};
+}
+
+/** Slot name for `agentRuntimeConfig` that matches a backend id. */
+export function backendConfigSlot(backend: AgentRuntimeBackend | undefined): "claude" | "piAi" {
+  return (backend ?? "claude") === "pi-ai" ? "piAi" : "claude";
 }
 
 function normalizeQualityGateConfig(value: unknown): QualityGateConfig | undefined {

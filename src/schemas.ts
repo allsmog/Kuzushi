@@ -594,11 +594,17 @@ export type ScanOptsZ = z.infer<typeof ScanOptsSchema>;
 // Agent runtime config
 // ---------------------------------------------------------------------------
 
-export const AgentRuntimeConfigSchema = z.object({
+export const AgentRuntimeCredentialsSchema = z.object({
   apiKey: z.string().optional(),
   baseUrl: z.string().optional(),
 });
 
+export const AgentRuntimeConfigSchema = z.object({
+  claude: AgentRuntimeCredentialsSchema.optional(),
+  piAi: AgentRuntimeCredentialsSchema.optional(),
+});
+
+export type AgentRuntimeCredentialsZ = z.infer<typeof AgentRuntimeCredentialsSchema>;
 export type AgentRuntimeConfigZ = z.infer<typeof AgentRuntimeConfigSchema>;
 
 export const DiscoveredModuleSchema = z.object({

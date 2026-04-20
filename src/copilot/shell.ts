@@ -306,14 +306,19 @@ async function ensureClaudeShellRuntime(opts: ShellOptions, store?: UIStore): Pr
   try {
     const { ClaudeAgentRuntime } = await import("../agent-runtime/claude.js");
     const { LoggingAgentRuntime } = await import("../agent-runtime/logging-runtime.js");
-    opts.runtime = new LoggingAgentRuntime(new ClaudeAgentRuntime(opts.config.agentRuntimeConfig));
     // Mark the live config so subsequent calls (and other code that checks the
     // backend) treat the shell as running on claude. The user's persisted
     // global config is untouched — switch is per-process unless they /backend.
     opts.config.agentRuntimeBackend = "claude";
-    const foreign = claudeCredsLookForeign(opts.config.agentRuntimeConfig);
+    const { resolveActiveCredentials } = await import("../config.js");
+    const active = resolveActiveCredentials(opts.config);
+    const creds = Object.keys(active).length > 0 ? active : undefined;
+    opts.runtime = new LoggingAgentRuntime(new ClaudeAgentRuntime(creds));
     const base = `Note: agent backend "${backend}" is batch-only and doesn't support interactive sessions. Using "claude" for this shell (your scan backend is unchanged). Run /backend claude to make this the default.`;
-    const message = foreign ? `${base}\n${foreignCredsWarning(foreign)}` : base;
+    const hint = !creds
+      ? "\nNo claude credentials configured yet — run /auth to paste an Anthropic key."
+      : "";
+    const message = base + hint;
     if (store) {
       appendToHistory(store, { type: "output", text: message, timestamp: Date.now() });
     } else {
@@ -355,7 +360,25 @@ type CredentialApplyResult = {
 async function rebuildShellRuntime(opts: ShellOptions): Promise<void> {
   const { ClaudeAgentRuntime } = await import("../agent-runtime/claude.js");
   const { LoggingAgentRuntime } = await import("../agent-runtime/logging-runtime.js");
-  opts.runtime = new LoggingAgentRuntime(new ClaudeAgentRuntime(opts.config.agentRuntimeConfig));
+  const { resolveActiveCredentials } = await import("../config.js");
+  const active = resolveActiveCredentials(opts.config);
+  const creds = Object.keys(active).length > 0 ? active : undefined;
+  opts.runtime = new LoggingAgentRuntime(new ClaudeAgentRuntime(creds));
+}
+
+/** Merge `patch` into the active backend's slot in agentRuntimeConfig. */
+function mergeIntoActiveSlot(
+  opts: ShellOptions,
+  patch: { apiKey?: string; baseUrl?: string },
+): void {
+  const backend = opts.config.agentRuntimeBackend ?? "claude";
+  const slot = backend === "pi-ai" ? "piAi" : "claude";
+  const existing = opts.config.agentRuntimeConfig?.[slot] ?? {};
+  const nextSlot = { ...existing, ...patch };
+  opts.config.agentRuntimeConfig = {
+    ...opts.config.agentRuntimeConfig,
+    [slot]: nextSlot,
+  };
 }
 
 async function applyCredentialOutcome(
@@ -373,26 +396,31 @@ async function applyCredentialOutcome(
   }
 
   if (choice.kind === "api-key") {
-    opts.config.agentRuntimeConfig = {
-      ...opts.config.agentRuntimeConfig,
+    mergeIntoActiveSlot(opts, {
       apiKey: choice.value,
       ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
-    };
+    });
     process.env["ANTHROPIC_API_KEY"] = choice.value;
     if (choice.baseUrl) process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
     await rebuildShellRuntime(opts);
 
     if (choice.persist) {
       try {
-        const { persistLocalCredentials } = await import("../config.js");
+        const { persistLocalCredentials, backendConfigSlot } = await import("../config.js");
         const targetCwd = opts.target ? path.resolve(opts.target) : process.cwd();
+        const slot = backendConfigSlot(opts.config.agentRuntimeBackend);
         const writtenTo = persistLocalCredentials(
-          { apiKey: choice.value, ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}) },
+          {
+            [slot]: {
+              apiKey: choice.value,
+              ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
+            },
+          },
           targetCwd,
         );
         return {
           enabled: true,
-          message: `Copilot enabled. Credentials saved to ${writtenTo}.`,
+          message: `Copilot enabled. Credentials saved to ${writtenTo} (${slot} slot).`,
           persistedTo: writtenTo,
         };
       } catch (error) {
@@ -410,10 +438,7 @@ async function applyCredentialOutcome(
   // oauth-token
   process.env["ANTHROPIC_OAUTH_TOKEN"] = choice.value;
   if (choice.baseUrl) {
-    opts.config.agentRuntimeConfig = {
-      ...opts.config.agentRuntimeConfig,
-      baseUrl: choice.baseUrl,
-    };
+    mergeIntoActiveSlot(opts, { baseUrl: choice.baseUrl });
     process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
   }
   await rebuildShellRuntime(opts);
@@ -1349,7 +1374,8 @@ async function startInkShell(
     const isClaudeBackend = (opts.config.agentRuntimeBackend ?? "claude") === "claude";
     if (!isClaudeBackend) return false;
     const { hasAnthropicCredentials, runCredentialPrompt } = await import("../ui/setup.js");
-    if (hasAnthropicCredentials(opts.config.agentRuntimeConfig?.apiKey)) {
+    const { resolveActiveCredentials } = await import("../config.js");
+    if (hasAnthropicCredentials(resolveActiveCredentials(opts.config).apiKey)) {
       // Creds appeared from env between calls — clear the disabled flag.
       assistantDisabledReason = undefined;
       credentialsMissing = false;
@@ -1702,7 +1728,8 @@ async function startInkShell(
   await ensureClaudeShellRuntime(opts, store);
   {
     const { hasAnthropicCredentials, runCredentialPrompt } = await import("../ui/setup.js");
-    if (!hasAnthropicCredentials(opts.config.agentRuntimeConfig?.apiKey)) {
+    const { resolveActiveCredentials } = await import("../config.js");
+    if (!hasAnthropicCredentials(resolveActiveCredentials(opts.config).apiKey)) {
       const credentialOutcome = await runCredentialPrompt(store, "shell");
       const result = await applyCredentialOutcome(credentialOutcome, opts);
       if (!result.enabled) {
@@ -1843,7 +1870,8 @@ async function startReadlineShell(
   await ensureClaudeShellRuntime(opts);
   if (process.stderr.isTTY) {
     const { hasAnthropicCredentials, runReadlineCredentialPrompt } = await import("../ui/setup.js");
-    if (!hasAnthropicCredentials(opts.config.agentRuntimeConfig?.apiKey)) {
+    const { resolveActiveCredentials } = await import("../config.js");
+    if (!hasAnthropicCredentials(resolveActiveCredentials(opts.config).apiKey)) {
       const credentialOutcome = await runReadlineCredentialPrompt();
       const result = await applyCredentialOutcome(credentialOutcome, opts);
       if (!result.enabled) {
@@ -3191,44 +3219,39 @@ const CONFIG_USAGE = [
   "  /config edit [key]            Alias for /config (optionally focused)",
 ].join("\n");
 
+function maskApiKey(key: string | undefined): string {
+  if (!key) return "(unset)";
+  if (key.length <= 11) return `${key.slice(0, 3)}…`;
+  return `${key.slice(0, 7)}…${key.slice(-4)}`;
+}
+
+function formatBackendSlots(
+  cfg:
+    | {
+        claude?: { apiKey?: string; baseUrl?: string };
+        piAi?: { apiKey?: string; baseUrl?: string };
+      }
+    | undefined,
+): string[] {
+  const out: string[] = [];
+  for (const slot of ["claude", "piAi"] as const) {
+    const s = cfg?.[slot];
+    if (!s || (!s.apiKey && !s.baseUrl)) {
+      out.push(
+        `  ${slot.padEnd(6)} (unset — run /backend ${slot === "piAi" ? "pi-ai" : "claude"} then /auth)`,
+      );
+      continue;
+    }
+    out.push(
+      `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  baseUrl=${s.baseUrl ?? "(default)"}`,
+    );
+  }
+  return out;
+}
+
 /**
- * Detect when `agentRuntimeConfig` (apiKey/baseUrl) is shaped for a non-Claude
- * backend — e.g. the user had pi-ai pointing at a local Ollama endpoint, then
- * switched to claude. Anthropic will reject the foreign key/URL with a misleading
- * "Invalid API key" error, so we surface this upfront with remediation.
- *
- * Returns a short human-readable reason string, or undefined when the config
- * looks plausibly Anthropic-shaped (or is empty so defaults apply).
+ * Levenshtein edit distance — used by `/backend <name>` typo suggestion.
  */
-function claudeCredsLookForeign(
-  cfg: { apiKey?: string; baseUrl?: string } | undefined,
-): string | undefined {
-  if (!cfg) return undefined;
-  const reasons: string[] = [];
-  if (cfg.baseUrl) {
-    let host = "";
-    try {
-      host = new URL(cfg.baseUrl).host.toLowerCase();
-    } catch {
-      reasons.push(`agentRuntimeConfig.baseUrl="${cfg.baseUrl}" is not a valid URL`);
-    }
-    if (host && !host.endsWith("anthropic.com")) {
-      reasons.push(`agentRuntimeConfig.baseUrl="${cfg.baseUrl}" is not an Anthropic endpoint`);
-    }
-  }
-  if (cfg.apiKey && !cfg.apiKey.startsWith("sk-ant-")) {
-    reasons.push(`agentRuntimeConfig.apiKey doesn't start with "sk-ant-"`);
-  }
-  return reasons.length ? reasons.join("; ") : undefined;
-}
-
-function foreignCredsWarning(reason: string): string {
-  return (
-    `Warning: ${reason}. Claude will send this to Anthropic and likely get "Invalid API key". ` +
-    `Run /auth to set an Anthropic key, or clear it via /config set agentRuntimeConfig.baseUrl "" (and/or .apiKey).`
-  );
-}
-
 function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   if (!a.length) return b.length;
@@ -3280,22 +3303,13 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
             `(Swapped for this session because "${persisted}" doesn't support interactive shell.)`,
           );
         }
-        const rc = opts.config.agentRuntimeConfig;
-        if (rc?.baseUrl || rc?.apiKey) {
-          lines.push(
-            "",
-            "agentRuntimeConfig (shared across backends):",
-            `  baseUrl: ${rc?.baseUrl ?? "(default)"}`,
-            `  apiKey:  ${rc?.apiKey ? `${rc.apiKey.slice(0, 7)}…${rc.apiKey.slice(-4)}` : "(unset)"}`,
-          );
-          const foreign = current === "claude" ? claudeCredsLookForeign(rc) : undefined;
-          if (foreign) lines.push(`  ⚠ ${foreign}`);
-        }
+        lines.push("", "Credentials (per backend):");
+        lines.push(...formatBackendSlots(opts.config.agentRuntimeConfig));
         lines.push(
           "",
           "Available: claude, pi-ai",
           "Usage:",
-          "  /backend show           Show current + persisted backend",
+          "  /backend show           Show current + persisted backend + credentials",
           "  /backend claude         Use claude (interactive shell + scans)",
           "  /backend pi-ai          Use pi-ai (scans only; shell auto-falls-back to claude)",
           `Persists to ${configPath()}.`,
@@ -3331,10 +3345,17 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
         sub === "claude"
           ? "Shell sessions now use claude (already in effect). Future scans will too."
           : "Note: shell sessions still auto-fall-back to claude (pi-ai is batch-only). Future `kuzushi scan ...` runs will use pi-ai.";
-      const foreign =
-        sub === "claude" ? claudeCredsLookForeign(opts.config.agentRuntimeConfig) : undefined;
       const lines = [`Backend persisted as "${sub}" in ${configPath()}.`, note];
-      if (foreign) lines.push(foreignCredsWarning(foreign));
+      // Each backend has its own credential slot now, so switching can't leak
+      // creds between backends. Just hint when the new slot is empty so the
+      // operator knows to /auth.
+      const slot = sub === "pi-ai" ? "piAi" : "claude";
+      const slotCreds = opts.config.agentRuntimeConfig?.[slot];
+      if (!slotCreds || (!slotCreds.apiKey && !slotCreds.baseUrl)) {
+        lines.push(
+          `No ${slot} credentials configured yet — run /auth to paste an API key (and optional base URL).`,
+        );
+      }
       return lines.join("\n");
     },
   };

@@ -19,7 +19,7 @@ import { KuzushiError, wrapError } from "../errors.js";
 import { installGlobalDispatcher } from "../http-agent.js";
 import { getLogger } from "../logger.js";
 import { getRateLimitRegistry } from "../scheduler/index.js";
-import type { AgentRuntimeConfig } from "../types.js";
+import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
@@ -203,13 +203,13 @@ async function retryTransient<T>(
 
 export class PiAiAgentRuntime implements AgentRuntime {
   readonly id = "pi-ai";
-  private readonly runtimeConfig?: AgentRuntimeConfig;
+  private readonly runtimeConfig?: AgentRuntimeCredentials;
   /** Optional message bus for LLM observability events. */
   bus?: MessageBus;
   /** Optional run ID for correlating observability events. */
   runId?: string;
 
-  constructor(runtimeConfig?: AgentRuntimeConfig) {
+  constructor(runtimeConfig?: AgentRuntimeCredentials) {
     this.runtimeConfig = runtimeConfig;
   }
 
@@ -683,7 +683,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
   }
 }
 
-function applyRuntimeEnvOverrides(runtimeConfig: AgentRuntimeConfig | undefined): () => void {
+function applyRuntimeEnvOverrides(runtimeConfig: AgentRuntimeCredentials | undefined): () => void {
   const shouldOverrideApiKey = Boolean(runtimeConfig?.apiKey);
   const shouldOverrideBaseUrl = Boolean(runtimeConfig?.baseUrl);
 

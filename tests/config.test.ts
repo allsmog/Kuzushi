@@ -150,8 +150,7 @@ describe("loadConfig", () => {
     expect(config.verifyRefinementMaxIterations).toBe(5);
     expect(config.verifyReflectionInterval).toBe(4);
     expect(config.agentRuntimeConfig).toEqual({
-      apiKey: "sk-test",
-      baseUrl: "https://api.example.com/",
+      claude: { apiKey: "sk-test", baseUrl: "https://api.example.com/" },
     });
     expect(config.taskConfig.semgrep?.verify).toBe(false);
   });
@@ -188,8 +187,7 @@ describe("loadConfig", () => {
 
     const config = loadConfig(TMP_REPO, { trustProjectConfig: true });
     expect(config.agentRuntimeConfig).toEqual({
-      apiKey: "global-key",
-      baseUrl: "https://api.example.com/",
+      claude: { apiKey: "global-key", baseUrl: "https://api.example.com/" },
     });
   });
 
@@ -224,7 +222,7 @@ describe("loadConfig", () => {
     expect(config.model).toBe("project-model");
     expect(config.agentRuntimeBackend).toBe(DEFAULTS.agentRuntimeBackend);
     expect(config.agentRuntimeConfig).toEqual({
-      apiKey: "global-key",
+      claude: { apiKey: "global-key" },
     });
     expect(config.taskConfig.semgrep?.binary).toBeUndefined();
     expect(config.taskConfig["code-graph"]?.maxEntryPoints).toBe(5);
@@ -242,7 +240,7 @@ describe("loadConfig", () => {
 
     const config = loadConfig(TMP_REPO, { trustProjectConfig: true });
     expect(config.agentRuntimeConfig).toEqual({
-      baseUrl: "https://trusted.example/",
+      claude: { baseUrl: "https://trusted.example/" },
     });
   });
 
@@ -423,8 +421,7 @@ describe("setConfigValue", () => {
       '{"apiKey":"sk-test","baseUrl":"https://api.example.com/"}',
     );
     expect(getConfigValue("agentRuntimeConfig")).toEqual({
-      apiKey: "sk-test",
-      baseUrl: "https://api.example.com/",
+      claude: { apiKey: "sk-test", baseUrl: "https://api.example.com/" },
     });
   });
 

@@ -12,7 +12,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { LlmCallCompleteEvent, LlmCallErrorEvent, LlmCallStartEvent } from "../bus/events.js";
 import type { MessageBus } from "../bus/types.js";
 import { getLogger } from "../logger.js";
-import type { AgentRuntimeConfig } from "../types.js";
+import type { AgentRuntimeCredentials } from "../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type { AgentQueryExecutionResult } from "./execution.js";
 import type {
@@ -124,12 +124,12 @@ export function __getSemaphoreState(): { active: number; leaked: number; waiting
 
 export class ClaudeAgentRuntime implements AgentRuntime {
   readonly id = "claude";
-  private readonly config: AgentRuntimeConfig | undefined;
+  private readonly config: AgentRuntimeCredentials | undefined;
   private readonly client: Anthropic;
   bus: MessageBus | null = null;
   runId: string | null = null;
 
-  constructor(config?: AgentRuntimeConfig) {
+  constructor(config?: AgentRuntimeCredentials) {
     this.config = config;
     this.client = new Anthropic({
       apiKey: config?.apiKey,
@@ -778,7 +778,7 @@ class ClaudeSession implements AgentSession {
 
   constructor(
     private readonly baseOptions: AgentQueryOptions,
-    private readonly config: AgentRuntimeConfig | undefined,
+    private readonly config: AgentRuntimeCredentials | undefined,
     readonly _bus: MessageBus | null,
     readonly _runId: string | null,
   ) {}
