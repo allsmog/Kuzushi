@@ -47,6 +47,8 @@ interface PipelineIndicatorProps {
   results?: ResultLine[];
   /** Active agent activity to nest under the current finding. */
   agentActivity?: Map<string, AgentActivityLine[]>;
+  /** Estimated time remaining in ms for the active phase. */
+  etaMs?: number;
 }
 
 const MAX_VISIBLE_RESULTS = 5;
@@ -74,6 +76,7 @@ export function PipelineIndicator({
   throttle,
   results,
   agentActivity,
+  etaMs,
 }: PipelineIndicatorProps): React.ReactElement | null {
   // Heartbeat timer — re-renders every 5s when scan tasks are active so
   // "still analyzing..." and elapsed time stay fresh.
@@ -104,6 +107,7 @@ export function PipelineIndicator({
               progress={stage.status === "active" ? progress : undefined}
               runningCostUsd={stage.status === "active" ? runningCostUsd : undefined}
               throttle={stage.status === "active" ? throttle : undefined}
+              etaMs={stage.status === "active" ? etaMs : undefined}
             />
 
             {/* Sub-task branches for scanner tasks (scan stage) */}
@@ -136,11 +140,13 @@ function StageHeaderLine({
   progress,
   runningCostUsd,
   throttle,
+  etaMs,
 }: {
   stage: PipelineStage;
   progress?: { current: number; total: number };
   runningCostUsd?: number;
   throttle?: { concurrency: number; reason: string } | null;
+  etaMs?: number;
 }): React.ReactElement {
   const labelWidth = 14;
   const paddedLabel = padCell(stage.label, labelWidth);
@@ -176,6 +182,7 @@ function StageHeaderLine({
         : "";
     const elapsedRaw = stage.startedAt ? formatDuration(Date.now() - stage.startedAt) : "";
     const elapsed = elapsedRaw ? `  ${tokens.muted(padCell(elapsedRaw, STAGE_ELAPSED_WIDTH))}` : "";
+    const eta = etaMs && etaMs > 0 ? `  ${tokens.muted(`~${formatDuration(etaMs)} remaining`)}` : "";
     // Active stages use the brand accent for the spinner frame. The static
     // filled-circle glyph still carries `dangerStrong` via `statusBadge` when
     // rendered non-animated (e.g. in tests or plain-renderer).
@@ -190,6 +197,7 @@ function StageHeaderLine({
           {throttleLabel}
           {bar}
           {elapsed}
+          {eta}
         </Text>
       </Box>
     );

@@ -269,6 +269,12 @@ export interface UIState {
   progress: { current: number; total: number };
   /** Running cost total — updated on every result. */
   runningCostUsd: number;
+  /** Per-phase cost breakdown — updated live. */
+  costBreakdown: { triage: number; verify: number; poc: number };
+  /** Estimated time remaining in ms for the active phase. */
+  etaMs?: number;
+  /** Active view tab during running mode. */
+  scanView: "pipeline" | "findings" | "cost";
   /** Rate limit / throttle info — shown when active. */
   throttle?: { concurrency: number; reason: string } | null;
   /** Timestamp when pipeline started (for elapsed timer). */
@@ -454,6 +460,8 @@ export class UIStore {
       model: "",
       progress: { current: 0, total: 0 },
       runningCostUsd: 0,
+      costBreakdown: { triage: 0, verify: 0, poc: 0 },
+      scanView: "pipeline",
       results: [],
       agentActivity: new Map(),
       summary: null,
@@ -532,11 +540,18 @@ export class UIStore {
   }
 
   addResult(result: ResultLine): void {
+    const cost = result.costUsd ?? 0;
+    const cb = { ...this.state.costBreakdown };
+    if (result.kind === "triage") cb.triage += cost;
+    else if (result.kind === "verify") cb.verify += cost;
+    else if (result.kind === "poc") cb.poc += cost;
+
     this.state = {
       ...this.state,
       results: [...this.state.results, result],
       progress: { current: result.index, total: result.total },
-      runningCostUsd: this.state.runningCostUsd + (result.costUsd ?? 0),
+      runningCostUsd: this.state.runningCostUsd + cost,
+      costBreakdown: cb,
     };
     this.notify();
   }
