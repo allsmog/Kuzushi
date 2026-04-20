@@ -95,9 +95,12 @@ export class ModuleDispatcher implements CommandDispatcher {
   }
 
   private async cmd_run(args: string[], ctx: CommandContext): Promise<CommandResult> {
-    // Pull off backgrounding flags before tool-name resolution.
+    // Pull off flags before tool-name resolution. `--dry` previews the call
+    // without invoking the tool (useful for agentic workflows where the
+    // operator wants to see what options resolved to before burning tokens).
     const bg = args.includes("--bg") || args.includes("&");
-    const posArgs = args.filter((a) => a !== "--bg" && a !== "&");
+    const dry = args.includes("--dry");
+    const posArgs = args.filter((a) => a !== "--bg" && a !== "&" && a !== "--dry");
     const explicit = posArgs[0];
     const tool = explicit
       ? this.module.tools.find(
@@ -107,8 +110,35 @@ export class ModuleDispatcher implements CommandDispatcher {
     if (!tool) {
       return { output: explicit ? `[-] Unknown tool: ${explicit}` : "[-] No runnable tool." };
     }
+    if (dry) return this.preview(tool, ctx);
     if (bg) return this.invokeInBackground(tool, ctx);
     return this.invoke(tool, ctx);
+  }
+
+  /**
+   * Dry-run preview. Runs the same preflight as a real invoke (missing-required
+   * + module.requires checks) and then prints the resolved Datastore snapshot
+   * without calling the tool.
+   */
+  private preview(tool: ModuleTool, ctx: CommandContext): CommandResult {
+    const missing = this.datastore.missingRequired();
+    if (missing.length > 0) {
+      return { output: `[-] Missing required: ${missing.join(", ")}` };
+    }
+    const depError = this.checkRequires(ctx);
+    if (depError) return { output: depError };
+    const snapshot = this.datastore.snapshot();
+    const lines = [
+      `[*] DRY RUN — would invoke ${tool.name}`,
+      `      module: ${this.module.id}`,
+      `      inputs:`,
+    ];
+    const pretty = JSON.stringify(snapshot, null, 2)
+      .split("\n")
+      .map((l) => `        ${l}`)
+      .join("\n");
+    lines.push(pretty);
+    return { output: lines.join("\n") };
   }
 
   /**

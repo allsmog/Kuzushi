@@ -194,6 +194,13 @@ export interface ToolExecutionContext {
    * that exercise a tool directly).
    */
   events?: import("../bus/module-events.js").ModuleEventScope;
+  /**
+   * Optional per-tool model override. When the operator runs
+   * `setg TRIAGE_MODEL haiku`, the shell resolves that to this field
+   * before calling `tool.execute`. Tools that honor the override read
+   * `ctx.toolModel ?? ctx.config.model`.
+   */
+  toolModel?: string;
 }
 
 /**

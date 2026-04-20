@@ -727,6 +727,9 @@ async function startInkShell(
   });
 
   const globals = new Datastore();
+  // Tell CopilotCore about the globals Datastore so BUDGET_USD + <MOD>_MODEL
+  // live-settings land. Only needs to happen once per shell boot.
+  core.setGlobals(globals);
 
   const runToolFromDispatcher = async (
     tool: ModuleTool,

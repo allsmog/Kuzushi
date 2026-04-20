@@ -67,6 +67,14 @@ export interface CopilotCoreOptions {
   enforcer?: import("../governance/enforcer.js").GovernanceEnforcer;
   /** Optional audit trail for logging tool executions. */
   auditTrail?: import("../governance/audit.js").AuditTrail;
+  /**
+   * Optional global Datastore. When provided, live operator `setg`s take
+   * effect per-execution:
+   *   BUDGET_USD       → governance enforcer budget cap override
+   *   <MOD>_MODEL      → model override for tools in module <mod>
+   *                      (upper-cased, e.g. TRIAGE_MODEL / VERIFY_MODEL)
+   */
+  globals?: import("./options.js").Datastore;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +103,16 @@ export class CopilotCore {
       dataDir: opts.dataDir,
     };
     this.taskRegistry = opts.taskRegistry;
+  }
+
+  /**
+   * Late-bind the globals Datastore so operator `setg`s land on the same
+   * store CopilotCore reads for live knobs (BUDGET_USD, <MOD>_MODEL).
+   * The shell instantiates CopilotCore before the Datastore is available;
+   * this setter closes the gap.
+   */
+  setGlobals(globals: import("./options.js").Datastore): void {
+    (this.opts as { globals?: import("./options.js").Datastore }).globals = globals;
   }
 
   /**
@@ -249,8 +267,19 @@ export class CopilotCore {
         : {};
     const target = ctxOverrides?.target ?? (inputRecord.target as string | undefined);
 
+    // Live operator knobs read from the global Datastore (set via `setg`).
+    // BUDGET_USD caps the enforcer's budget check; <MOD>_MODEL picks a
+    // model for this specific invocation.
+    const budgetOverride = parseBudgetOverride(this.opts.globals?.get("BUDGET_USD"));
+    const moduleId = resolved.module.id;
+    const modelKey = `${moduleId.toUpperCase().replace(/-/g, "_")}_MODEL`;
+    const toolModel = this.opts.globals?.get<string>(modelKey);
+
     if (this.opts.enforcer) {
-      const check = this.opts.enforcer.checkExecution(qualifiedName, target);
+      const check =
+        budgetOverride !== undefined
+          ? this.opts.enforcer.checkExecutionWithBudget(qualifiedName, target, budgetOverride)
+          : this.opts.enforcer.checkExecution(qualifiedName, target);
       if (!check.allowed) {
         if (this.opts.auditTrail) {
           this.opts.auditTrail.record(
@@ -281,6 +310,7 @@ export class CopilotCore {
       ...(ctxOverrides?.print ? { print: ctxOverrides.print } : {}),
       ...(ctxOverrides?.workspace ? { workspace: ctxOverrides.workspace } : {}),
       ...(scope ? { events: scope } : {}),
+      ...(toolModel ? { toolModel } : {}),
     };
 
     const result = await tool.execute(input, ctx);
@@ -506,6 +536,18 @@ export class CopilotCore {
     const { module: mod } = await createMcpModule(serverSpec, moduleId);
     await this.loadWithScope(mod);
   }
+}
+
+/**
+ * Parse a BUDGET_USD global value into a non-negative number. Returns
+ * undefined when unset or unparseable — callers treat that as "use the
+ * scope policy's static cap."
+ */
+function parseBudgetOverride(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return n;
 }
 
 // ---------------------------------------------------------------------------

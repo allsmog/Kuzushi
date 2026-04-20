@@ -129,15 +129,47 @@ export class GovernanceEnforcer {
     return { allowed: true };
   }
 
-  /** Check if budget has been exceeded. */
-  checkBudget(): EnforcementResult {
-    if (this.scope.budgetUsd !== null && this.cumulativeCostUsd >= this.scope.budgetUsd) {
+  /**
+   * Check if budget has been exceeded.
+   *
+   * `budgetOverride` (from a live `setg BUDGET_USD ...`) takes precedence
+   * over the static ScopePolicy when provided. Pass `null` (or omit) to
+   * use the scope-configured cap.
+   */
+  checkBudget(budgetOverride?: number | null): EnforcementResult {
+    const cap =
+      budgetOverride !== undefined && budgetOverride !== null
+        ? budgetOverride
+        : this.scope.budgetUsd;
+    if (cap !== null && this.cumulativeCostUsd >= cap) {
       return {
         allowed: false,
-        reason: `Budget exceeded: $${this.cumulativeCostUsd.toFixed(2)} / $${this.scope.budgetUsd.toFixed(2)}`,
+        reason: `Budget exceeded: $${this.cumulativeCostUsd.toFixed(2)} / $${cap.toFixed(2)}`,
       };
     }
 
+    return { allowed: true };
+  }
+
+  /**
+   * Execute-check + budget. Equivalent to calling `checkExecution` but
+   * with an operator-supplied budget cap that overrides the scope's static
+   * `budgetUsd`. Used by CopilotCore when a `BUDGET_USD` global is set.
+   */
+  checkExecutionWithBudget(
+    toolName: string,
+    target: string | undefined,
+    budgetOverride: number | null,
+  ): EnforcementResult {
+    if (target) {
+      const targetResult = this.checkTarget(target);
+      if (!targetResult.allowed) return targetResult;
+    }
+    const tier = this.getToolTier(toolName);
+    const tierResult = this.checkTier(tier);
+    if (!tierResult.allowed) return tierResult;
+    const budgetResult = this.checkBudget(budgetOverride);
+    if (!budgetResult.allowed) return budgetResult;
     return { allowed: true };
   }
 
