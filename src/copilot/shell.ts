@@ -46,6 +46,7 @@ import {
 } from "./prompt-edit.js";
 import { listRecipes, resolveRecipePath } from "./recipes.js";
 import { openRepl as openDevRepl } from "./repl.js";
+import { formatRunReplay, formatRunsTable, formatRunTrace, readTraceEvents } from "./replay.js";
 import { loadAndRunResource, saveResourceScript } from "./resource.js";
 import { parseToolArgs } from "./run.js";
 import { SpoolController } from "./spool.js";
@@ -2286,8 +2287,20 @@ function handleSlashCommand(
         const rows = readPromptAudit(core, shellState.moduleOptions, cwd);
         return { output: formatPromptAuditTable(rows) };
       }
-      return { output: "Usage: /show prompts" };
+      if (sub === "runs") {
+        return handleShowRunsCommand(args.slice(1), ctx);
+      }
+      return { output: "Usage: /show prompts  or  /show runs" };
     }
+
+    case "runs":
+      return handleShowRunsCommand(args, ctx);
+
+    case "replay":
+      return handleReplayCommand(args, ctx);
+
+    case "trace":
+      return handleTraceCommand(args, ctx);
 
     case "options": {
       const resolved = resolveOptionsTool(
@@ -2917,6 +2930,96 @@ function handlePromptShowCommand(
 }
 
 /**
+ * Lazy DB handle for replay commands. Each call opens (or reuses) a
+ * better-sqlite3 connection against `<dataDir>/findings.sqlite3`. The
+ * handle is deliberately not cached on ShellContext so `/replay` stays
+ * independent of the workspace/DB boot block (which may have been
+ * skipped in degraded environments).
+ */
+async function openRunsDb(ctx: ShellContext) {
+  if (!ctx.dataDir) return undefined;
+  const dbPath = path.join(ctx.dataDir, "findings.sqlite3");
+  if (!existsSync(dbPath)) return undefined;
+  const { initDb } = await import("../store.js");
+  return initDb(dbPath);
+}
+
+function handleShowRunsCommand(args: string[], ctx: ShellContext): LocalCommandResult {
+  const limitFlagIdx = args.indexOf("--limit");
+  const limit =
+    limitFlagIdx >= 0 && args[limitFlagIdx + 1]
+      ? Math.max(1, Math.min(250, Number.parseInt(args[limitFlagIdx + 1]!, 10) || 25))
+      : 25;
+  const repoFilter = args.find((a) => !a.startsWith("--") && a !== String(limit));
+  return {
+    output: "Listing runs…",
+    asyncExecute: async () => {
+      const db = await openRunsDb(ctx);
+      if (!db) {
+        return "No runs database found. .kuzushi/findings.sqlite3 is created on first scan.";
+      }
+      const { listRuns } = await import("../store.js");
+      const runs = listRuns(db, { limit, ...(repoFilter ? { repo: repoFilter } : {}) });
+      return formatRunsTable(runs, limit);
+    },
+  };
+}
+
+function handleReplayCommand(args: string[], ctx: ShellContext): LocalCommandResult {
+  const runId = args[0];
+  if (!runId) {
+    return { output: "Usage: /replay <runId>  (find IDs with /show runs)" };
+  }
+  return {
+    output: `Loading run ${runId}…`,
+    asyncExecute: async () => {
+      const db = await openRunsDb(ctx);
+      if (!db) return "No runs database found.";
+      const { getRun } = await import("../store.js");
+      const run = getRun(db, runId);
+      if (!run) {
+        // Allow prefix match via listRuns so short IDs work.
+        const { listRuns } = await import("../store.js");
+        const matches = listRuns(db, { limit: 250 }).filter((r) => r.runId.startsWith(runId));
+        if (matches.length === 0) return `Unknown runId: ${runId}`;
+        if (matches.length > 1) {
+          return `Ambiguous runId prefix "${runId}" — matches: ${matches.map((m) => m.runId).join(", ")}`;
+        }
+        return formatRunReplay(matches[0]!);
+      }
+      return formatRunReplay(run);
+    },
+  };
+}
+
+function handleTraceCommand(args: string[], ctx: ShellContext): LocalCommandResult {
+  const runId = args[0];
+  if (!runId) {
+    return { output: "Usage: /trace <runId>  (find IDs with /show runs)" };
+  }
+  if (!ctx.dataDir) {
+    return { output: "No data directory resolved for this shell." };
+  }
+  const dataDir = ctx.dataDir;
+  return {
+    output: `Reading trace for ${runId}…`,
+    asyncExecute: async () => {
+      // If the user passed a prefix, resolve it via the DB so trace and
+      // replay share the same short-ID semantics.
+      let fullRunId = runId;
+      const db = await openRunsDb(ctx);
+      if (db) {
+        const { listRuns } = await import("../store.js");
+        const matches = listRuns(db, { limit: 250 }).filter((r) => r.runId.startsWith(runId));
+        if (matches.length === 1) fullRunId = matches[0]!.runId;
+      }
+      const events = readTraceEvents(dataDir, fullRunId);
+      return formatRunTrace(fullRunId, events);
+    },
+  };
+}
+
+/**
  * Apply a NL-planner proposal against `shell.moduleOptions` using the same
  * coercion + validation helpers as `handleSetCommand`. Returns a summary
  * string plus a `ShellState` updater the caller merges into its result.
@@ -3400,6 +3503,9 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/prompt edit <verb>", "Open the operator system-prompt override in $EDITOR"],
         ["/prompt show <verb>", "Show the effective prompt + source for a tool"],
         ["/show prompts", "Cross-module audit of every *_PROMPT override"],
+        ["/show runs [repo]", "List recent pipeline runs (id · status · cost)"],
+        ["/replay <runId>", "Re-render the summary of a past run from stored state"],
+        ["/trace <runId>", "Stream the per-event JSONL audit log of a past run"],
         ["/options [tool]", "Show tool options"],
         ["/set <key> <value>", "Set a tool option"],
         ["/config", "Open the interactive config editor"],
