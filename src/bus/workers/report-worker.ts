@@ -87,6 +87,7 @@ export function registerReportWorker(
   store?: UIStore,
 ): void {
   const runState = new Map<string, RunReportState>();
+  let triageStartedAt: number | undefined;
 
   bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
@@ -270,6 +271,7 @@ export function registerReportWorker(
           ? `${selected} of ${total} findings selected · ${filtered} filtered`
           : `${selected} findings via ${event.payload.model}`;
       store.activateStage("triage", triageDetail);
+      triageStartedAt = Date.now();
 
       const skipped = event.payload.skippedAlreadyTriaged ?? 0;
       if (skipped > 0) {
@@ -319,6 +321,16 @@ export function registerReportWorker(
         attempts,
       });
       store.clearAgentActivity(result.fingerprint);
+
+      // Compute ETA from running average (only after 3+ findings for stability)
+      if (triageStartedAt && index >= 3 && index < total) {
+        const elapsed = Date.now() - triageStartedAt;
+        const avgPerFinding = elapsed / index;
+        const remaining = (total - index) * avgPerFinding;
+        store.update({ etaMs: Math.round(remaining) });
+      } else if (index >= total) {
+        store.update({ etaMs: undefined });
+      }
     } else {
       printTriageProgress(result, index, total, attempts);
     }

@@ -393,27 +393,23 @@ export function ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
           </>
         )}
 
-        {/* Cost summary */}
+        {/* Cost summary — bar chart */}
         <Text>{""}</Text>
         <Text>{boxDivider(width)}</Text>
-        <Text>
-          {tokens.muted("Triage cost:")} {formatCost(data.triageCostUsd)}
-        </Text>
-        {hasVerificationData && (
-          <Text>
-            {tokens.muted("Verification cost:")} {formatCost(data.verificationCostUsd)}
-          </Text>
-        )}
-        {hasPocData && (
-          <Text>
-            {tokens.muted("PoC harness cost:")} {formatCost(data.pocHarnessCostUsd)}
-          </Text>
-        )}
-        {data.variantAnalysisCostUsd > 0 && (
-          <Text>
-            {tokens.muted("Variant analysis cost:")} {formatCost(data.variantAnalysisCostUsd)}
-          </Text>
-        )}
+        <Text>{tokens.label(`Cost (${formatCost(data.triageCostUsd + data.verificationCostUsd + data.pocHarnessCostUsd + data.variantAnalysisCostUsd + data.dynamicCostUsd + data.patchCostUsd)})`)}</Text>
+        <Text>{""}</Text>
+        {miniBarChart(
+          [
+            { label: "Triage", value: data.triageCostUsd, color: tokens.accent },
+            { label: "Verify", value: data.verificationCostUsd, color: tokens.danger },
+            { label: "PoC", value: data.pocHarnessCostUsd, color: tokens.warn },
+            { label: "Variant", value: data.variantAnalysisCostUsd, color: tokens.info },
+            { label: "Dynamic", value: data.dynamicCostUsd, color: tokens.success },
+            { label: "Patch", value: data.patchCostUsd, color: tokens.muted },
+          ].filter((e) => e.value > 0),
+        ).map((line, i) => (
+          <Text key={`cost-${i}`}>  {line}</Text>
+        ))}
         {data.budgetExceeded && (
           <>
             <Text>{""}</Text>
