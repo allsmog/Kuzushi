@@ -717,6 +717,43 @@ async function startInkShell(
     jobManager.on("cancelled", (job) => notifyIfOptedIn(job.label, "cancelled", job));
   }
 
+  // Auto-triage bridge — when `setg AutoTriage true`, every scan:finding whose
+  // severity meets AUTO_TRIAGE_MIN_SEVERITY queues a triage:run as a
+  // background job. Demonstrates the framework-event model: the scanner
+  // module doesn't know triage exists; the wiring is operator-controlled.
+  const SEVERITY_ORDER: Record<string, number> = {
+    info: 0,
+    low: 1,
+    medium: 2,
+    high: 3,
+    critical: 4,
+  };
+  bus.subscribe<import("../bus/events.js").ScanFindingEvent>("scan:finding", (event) => {
+    if (String(globals.get("AutoTriage") ?? "").toLowerCase() !== "true") return;
+    const minSev = String(globals.get("AUTO_TRIAGE_MIN_SEVERITY") ?? "high").toLowerCase();
+    const minRank = SEVERITY_ORDER[minSev] ?? SEVERITY_ORDER.high ?? 3;
+    const findingSev = String(event.payload.finding.severity ?? "").toLowerCase();
+    const findingRank = SEVERITY_ORDER[findingSev] ?? 0;
+    if (findingRank < minRank) return;
+    const fingerprint = event.payload.finding.fingerprint;
+    if (!fingerprint) return;
+    jobManager.start({ label: `auto-triage:${fingerprint}`, kind: "tool" }, async (jobCtx) => {
+      jobCtx.log(`[*] AutoTriage ${fingerprint} (severity ${findingSev})`);
+      const result = await core.executeTool(
+        "triage:run",
+        { fingerprint },
+        {
+          cwd: currentCwd(),
+          ...(opts.workspace ? { workspaceId: opts.workspace } : {}),
+          ...(workspaceManager ? { workspace: workspaceManager } : {}),
+          signal: jobCtx.signal,
+        },
+      );
+      jobCtx.log(result.ok ? `[+] AutoTriage done` : `[-] AutoTriage failed: ${result.output}`);
+      return result.output;
+    });
+  });
+
   const coreDispatcher = new CoreDispatcher({
     registry: core.registry,
     globals,
