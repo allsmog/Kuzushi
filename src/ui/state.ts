@@ -430,7 +430,20 @@ export interface ContextSnapshot {
  * needing a separate UIMode. `mode === "shell"` && `shellView` together
  * drive the dispatcher in App.tsx.
  */
-export type ShellView = "catalog" | "module" | "findings" | "finding" | "tune";
+export type ShellView =
+  | "catalog"
+  | "module"
+  | "findings"
+  | "finding"
+  | "tune"
+  // Phase C — randori threat-model sub-views. One ThreatModelDocument
+  // snapshot loads into shell.threatModel and is shared across all five
+  // views; press 1..5 at any threat view to cycle.
+  | "threat-dfd"
+  | "threat-stride"
+  | "threat-stories"
+  | "threat-scope"
+  | "threat-summary";
 
 /**
  * Rich per-module info used by the v2 ModuleCatalog and ModuleHome screens.
@@ -517,6 +530,19 @@ export interface ShellState {
   pendingPlan?: ShellPlan | null;
   /** True while the planner LLM call is in flight. */
   plannerBusy?: boolean;
+  /**
+   * Loaded randori threat model — shared across Phase C views
+   * (threat-dfd / threat-stride / threat-stories / threat-scope /
+   * threat-summary). Populated lazily on entry; null when no scan has
+   * produced a threat model yet.
+   */
+  threatModel?: ThreatModelDocument | null;
+  /**
+   * Path the threat model snapshot came from (`.kuzushi/threat-model.json`
+   * or a per-run fallback), used in the "loaded from … (modified Xh ago)"
+   * hint at the top of threat views so staleness is visible.
+   */
+  threatModelSource?: { path: string; mtimeMs: number };
   /** Conversation history (rendered in the scroll region). */
   history: ShellHistoryEntry[];
   /** Submitted commands, capped and persisted for prompt recall. */
@@ -531,8 +557,13 @@ export interface ShellState {
   pendingAssistantText?: string;
   /** Whether the agent is currently processing a query. */
   processing: boolean;
-  /** Currently executing tool (shown as inline activity). */
-  currentTool?: { name: string; elapsedSeconds: number };
+  /**
+   * Currently executing tool (shown as inline activity).
+   * `startedAt` (epoch ms) lets the UI tick elapsed locally without poking
+   * shell state every second. `elapsedSeconds` is a one-shot push from SDK
+   * tool-progress messages that self-report elapsed time.
+   */
+  currentTool?: { name: string; startedAt?: number; elapsedSeconds?: number };
   /**
    * Rolling LLM-call heartbeat for the active turn — populated from
    * `llm:call-start/complete/error` bus events so the shell spinner can show

@@ -25,6 +25,7 @@ import type {
   ShellHistoryEntry,
   ShellModuleCard,
   ShellState,
+  ShellView,
   TuneSnapshot,
   UIStore,
 } from "../ui/state.js";
@@ -153,6 +154,36 @@ function capShellHistory(history: string[]): string[] {
 
 export function buildShellPrompt(focusedModule: string | null): string {
   return focusedModule ? `kuzushi/${focusedModule}> ` : "kuzushi> ";
+}
+
+/**
+ * Map the sub-verb of `/threats <sub>` to a threat-model shellView. Accepts
+ * both named (`dfd`, `stride`, `stories`, `scope`, `summary`) and numeric
+ * (`1..5`) shortcuts so operators can cycle through the Phase C views with
+ * the same keys shown in the footer.
+ */
+function resolveThreatView(
+  sub: string | undefined,
+): { shellView: ShellView; label: string } | undefined {
+  switch (sub) {
+    case "dfd":
+    case "1":
+      return { shellView: "threat-dfd", label: "data flow diagram" };
+    case "stride":
+    case "2":
+      return { shellView: "threat-stride", label: "STRIDE matrix" };
+    case "stories":
+    case "3":
+      return { shellView: "threat-stories", label: "attacker stories" };
+    case "scope":
+    case "4":
+      return { shellView: "threat-scope", label: "scope & criticality" };
+    case "summary":
+    case "5":
+      return { shellView: "threat-summary", label: "threat summary" };
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -777,6 +808,7 @@ function beginShellTurn(store: UIStore, input: string, focusedModule: string | n
     processing: true,
     pendingAssistantText: undefined,
     currentTool: undefined,
+    llmHeartbeat: undefined,
   }));
 }
 
@@ -839,6 +871,7 @@ function clearTransientShellState(store: UIStore): void {
     currentTool: undefined,
     pendingAssistantText: undefined,
     onAbort: undefined,
+    llmHeartbeat: undefined,
   }));
 }
 
@@ -1124,6 +1157,50 @@ async function startInkShell(
       );
       jobCtx.log(result.ok ? `[+] AutoVerify done` : `[-] AutoVerify failed: ${result.output}`);
       return result.output;
+    });
+  });
+
+  // LLM heartbeat — subscribe to runtime-level call events so the shell can
+  // show a live "model · N calls · $cost" line under the spinner. Without
+  // this the spinner freezes at a stage name and the operator can't tell a
+  // slow LLM call from a hang.
+  bus.subscribe<import("../bus/events.js").LlmCallStartEvent>("llm:call-start", (event) => {
+    updateShell(store, (shell) => ({
+      ...shell,
+      llmHeartbeat: {
+        activeCalls: (shell.llmHeartbeat?.activeCalls ?? 0) + 1,
+        completedCalls: shell.llmHeartbeat?.completedCalls ?? 0,
+        latestModel: event.payload.model,
+        totalCostUsd: shell.llmHeartbeat?.totalCostUsd ?? 0,
+      },
+    }));
+  });
+  bus.subscribe<import("../bus/events.js").LlmCallCompleteEvent>("llm:call-complete", (event) => {
+    updateShell(store, (shell) => {
+      const prev = shell.llmHeartbeat;
+      return {
+        ...shell,
+        llmHeartbeat: {
+          activeCalls: Math.max(0, (prev?.activeCalls ?? 1) - 1),
+          completedCalls: (prev?.completedCalls ?? 0) + 1,
+          latestModel: prev?.latestModel ?? event.payload.model,
+          totalCostUsd: (prev?.totalCostUsd ?? 0) + (event.payload.costUsd ?? 0),
+        },
+      };
+    });
+  });
+  bus.subscribe<import("../bus/events.js").LlmCallErrorEvent>("llm:call-error", (_event) => {
+    updateShell(store, (shell) => {
+      const prev = shell.llmHeartbeat;
+      return {
+        ...shell,
+        llmHeartbeat: {
+          activeCalls: Math.max(0, (prev?.activeCalls ?? 1) - 1),
+          completedCalls: (prev?.completedCalls ?? 0) + 1,
+          ...(prev?.latestModel ? { latestModel: prev.latestModel } : {}),
+          totalCostUsd: prev?.totalCostUsd ?? 0,
+        },
+      };
     });
   });
 
@@ -1607,6 +1684,16 @@ async function startInkShell(
 
           case "tool-summary": {
             updateToolSummary(store, message.summary);
+            const trailer = formatContextTrailer(
+              opts.target ? path.resolve(opts.target) : process.cwd(),
+            );
+            if (trailer) {
+              appendToHistory(store, {
+                type: "output",
+                text: trailer,
+                timestamp: Date.now(),
+              });
+            }
             break;
           }
 
@@ -1705,6 +1792,15 @@ async function startInkShell(
       onAbort: abortActiveAction,
     },
   });
+
+  // Surface prior .kuzushi/ artifacts so operators see the cache surface
+  // before they run anything. Silent on fresh dirs.
+  {
+    const banner = formatArtifactBanner(opts.target ? path.resolve(opts.target) : process.cwd());
+    if (banner) {
+      appendToHistory(store, { type: "output", text: banner, timestamp: Date.now() });
+    }
+  }
 
   // The interactive shell always uses the Claude Agent SDK for sessions —
   // other backends (e.g. pi-ai) are designed for batch scans and don't expose
@@ -1844,6 +1940,13 @@ async function startReadlineShell(
   process.on("SIGINT", abortActiveAction);
 
   console.error(formatWelcome(core, opts));
+
+  // Surface prior .kuzushi/ artifacts so operators see the cache surface
+  // before they run anything. Silent on fresh dirs.
+  {
+    const banner = formatArtifactBanner(opts.target ? path.resolve(opts.target) : process.cwd());
+    if (banner) console.error(`\n${banner}\n`);
+  }
 
   // Startup credential prompt for the readline shell. Only runs when stderr is
   // a TTY (so users in CI/piped contexts aren't blocked) and when the Claude
@@ -2438,6 +2541,37 @@ function handleSlashCommand(
 
     case "threats": {
       const sub = args[0]?.toLowerCase();
+
+      // /threats dfd|stride|stories|scope|summary (and 1..5) — Phase C
+      // visualization views. Each routes to a shellView; the component
+      // reads shell.threatModel which this handler populates below.
+      const viewRoute = resolveThreatView(sub);
+      if (viewRoute) {
+        if (!opts.target) return { output: "No target set. Use /target <path> first." };
+        const repoRoot = path.resolve(opts.target);
+        return {
+          output: `Loading threat model for ${viewRoute.label}…`,
+          shellStateUpdater: (shell) => ({ ...shell, shellView: viewRoute.shellView }),
+          asyncExecute: async () => {
+            const { loadShellThreatModel } = await import("./threat-model-loader.js");
+            const loaded = loadShellThreatModel(repoRoot);
+            if (!loaded) {
+              return "No threat model found. Run a scan with threat modeling enabled first.";
+            }
+            if (ctx.uiStore) {
+              updateShell(ctx.uiStore, (shell) => ({
+                ...shell,
+                threatModel: loaded.document,
+                threatModelSource: {
+                  path: loaded.sourcePath,
+                  mtimeMs: loaded.mtimeMs,
+                },
+              }));
+            }
+            return `Showing ${viewRoute.label}.`;
+          },
+        };
+      }
 
       // /threats edit — open the threat model editor
       if (sub === "edit") {
@@ -3483,6 +3617,37 @@ function loadArtifactManifest(repoRoot: string): string[] {
     }
   }
   return out;
+}
+
+/**
+ * Dim trailer appended after each tool summary so operators can see which
+ * `.kuzushi/` files were on disk while the tool ran — makes it impossible to
+ * dress up cached findings as fresh scan output. Shell-local: no per-tool
+ * provenance tracking, just "what was available at the time."
+ */
+function formatContextTrailer(repoRoot: string): string {
+  const manifest = loadArtifactManifest(repoRoot);
+  if (manifest.length === 0) return "";
+  // Each manifest line starts with the filename followed by " (label, …)" —
+  // strip the label for a compact trailer.
+  const names = manifest.map((m) => m.split(" ")[0]).join(", ");
+  return `  (context: ${names})`;
+}
+
+/**
+ * Multi-line banner listing prior `.kuzushi/` artifacts the shell will carry
+ * into `/ask` and tool runs. Returned as a single string ready to feed into
+ * `appendToHistory` or `console.error`; empty string for fresh dirs so callers
+ * can skip rendering entirely.
+ */
+function formatArtifactBanner(repoRoot: string): string {
+  const manifest = loadArtifactManifest(repoRoot);
+  if (manifest.length === 0) return "";
+  return [
+    "Prior artifacts in .kuzushi/:",
+    ...manifest.map((m) => `  - ${m}`),
+    "/ask uses these as context.",
+  ].join("\n");
 }
 
 function handleAskCommand(
