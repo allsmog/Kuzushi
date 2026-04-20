@@ -12,7 +12,7 @@
 
 import { Box, Static, Text, useApp, useInput } from "ink";
 import type React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
 import { buildShellPrompt } from "../../copilot/shell.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
@@ -26,6 +26,7 @@ import { ModuleCatalog } from "./ModuleCatalog.js";
 import { ModuleHome } from "./ModuleHome.js";
 import { PlanCard } from "./PlanCard.js";
 import { Spinner } from "./Spinner.js";
+import { ThreatPlaceholder } from "./ThreatPlaceholder.js";
 import { TuneView } from "./TuneView.js";
 
 interface CopilotShellProps {
@@ -43,6 +44,17 @@ const PROCESSING_KEYBINDS = [{ keys: "Ctrl+C", label: "Abort" }];
 
 /** Window during which a second Ctrl+C at the idle prompt commits the exit. */
 const CTRL_C_ARM_WINDOW_MS = 2000;
+
+/** True for any of the Phase C threat-model sub-views. */
+function isThreatShellView(view: ShellState["shellView"] | undefined): boolean {
+  return (
+    view === "threat-dfd" ||
+    view === "threat-stride" ||
+    view === "threat-stories" ||
+    view === "threat-scope" ||
+    view === "threat-summary"
+  );
+}
 
 export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const state = useUIState(store);
@@ -101,6 +113,33 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         }
         if (char === "n" || char === "N" || key.escape) {
           shell.onInput?.("/no");
+          return;
+        }
+      }
+
+      // Phase C — while on a threat view, 1..5 cycle through the five
+      // sub-views without having to retype `/threats <name>`. Only active
+      // when the input buffer is empty so the digits don't interfere
+      // with natural-language input.
+      if (isThreatShellView(shell.shellView) && input.length === 0) {
+        if (char === "1") {
+          shell.onInput?.("/threats dfd");
+          return;
+        }
+        if (char === "2") {
+          shell.onInput?.("/threats stride");
+          return;
+        }
+        if (char === "3") {
+          shell.onInput?.("/threats stories");
+          return;
+        }
+        if (char === "4") {
+          shell.onInput?.("/threats scope");
+          return;
+        }
+        if (char === "5") {
+          shell.onInput?.("/threats summary");
           return;
         }
       }
@@ -230,9 +269,12 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
             <Text>
               {"  "}
               {tokens.muted(shell.currentTool.name)}
-              {shell.currentTool.elapsedSeconds > 0 &&
-                tokens.muted(` ${shell.currentTool.elapsedSeconds.toFixed(0)}s`)}
             </Text>
+            {shell.currentTool.startedAt ? (
+              <LiveElapsed startedAt={shell.currentTool.startedAt} />
+            ) : shell.currentTool.elapsedSeconds && shell.currentTool.elapsedSeconds > 0 ? (
+              <Text>{tokens.muted(` ${shell.currentTool.elapsedSeconds.toFixed(0)}s`)}</Text>
+            ) : null}
           </Box>
           {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
         </Box>
@@ -268,6 +310,24 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
     </Box>
   );
+}
+
+/**
+ * Self-ticking elapsed-time display. Owns its own 1s timer so the shell
+ * subtree doesn't re-render every second when only the seconds digit
+ * changed — fixes the visible flicker that happened when the tracker in
+ * shared.ts was writing elapsed into shell state on an interval.
+ */
+function LiveElapsed({ startedAt }: { startedAt: number }): React.ReactElement {
+  const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - startedAt) / 1000));
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+  if (elapsed <= 0) return <Text>{""}</Text>;
+  return <Text>{tokens.muted(` ${elapsed}s`)}</Text>;
 }
 
 /**
@@ -349,6 +409,15 @@ function ShellViewPanel({
       if (!match) return null;
       return <FindingCard mode="linear" finding={match} />;
     }
+    // Phase C — threat model views. C.1–C.5 each replace one branch with
+    // a real component; until then all five share the ThreatPlaceholder
+    // so the routing is fully exercised.
+    case "threat-dfd":
+    case "threat-stride":
+    case "threat-stories":
+    case "threat-scope":
+    case "threat-summary":
+      return <ThreatPlaceholder shell={shell} />;
     default:
       return null;
   }
