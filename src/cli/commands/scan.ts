@@ -112,8 +112,9 @@ export interface MonorepoExecutionDecision {
 
 export async function runScanCommand(repoPath: string, opts: ScanCommandOptions): Promise<void> {
   // Initialize the renderer before preflight so one session owns the entire run.
+  // `--ci` swaps the Ink app for the machine-readable stream formatter.
   const { createUIRenderer } = await import("../../ui/render.js");
-  const renderer = await createUIRenderer();
+  const renderer = await createUIRenderer({ ci: Boolean(opts.ci) });
   const { store: uiStore, cleanup: cleanupUI } = renderer;
   configureTerminalOutput({
     store: uiStore,

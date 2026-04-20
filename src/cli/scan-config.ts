@@ -54,6 +54,7 @@ export interface ScanCommandOptions {
   auditLog: boolean;
   output?: string;
   sarif?: string;
+  ci?: boolean;
   json?: string;
   csv?: string;
   jsonl?: string;

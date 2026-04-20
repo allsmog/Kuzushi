@@ -17,6 +17,16 @@ export interface UIRenderer {
   cleanup: () => void;
 }
 
+export interface CreateUIRendererOptions {
+  /**
+   * CI mode — skip Ink entirely and attach the machine-readable stream
+   * formatter (`src/ui/ci-stream.ts`) instead. Useful for `--ci` / build
+   * pipelines where we want one line per stage transition rather than a
+   * live TUI.
+   */
+  ci?: boolean;
+}
+
 const SHOW_CURSOR = "\u001b[?25h";
 
 let exitHandlerInstalled = false;
@@ -47,9 +57,18 @@ function ensureExitCursorRestore(): void {
  * When stdout is a TTY, renders the full Ink app with live updates.
  * Otherwise, falls back to plain console.log output with enhanced formatting.
  */
-export async function createUIRenderer(): Promise<UIRenderer> {
+export async function createUIRenderer(options: CreateUIRendererOptions = {}): Promise<UIRenderer> {
   const store = createUIStore();
   ensureExitCursorRestore();
+
+  // CI mode — skip Ink, attach the stream formatter. Runs ahead of the TTY
+  // check so `--ci` is honoured even from an interactive terminal (handy
+  // for `kuzushi scan ... --ci | tee run.log`).
+  if (options.ci) {
+    const { attachCiStream } = await import("./ci-stream.js");
+    const unsubscribe = attachCiStream(store);
+    return { store, cleanup: unsubscribe };
+  }
 
   if (process.stdout.isTTY) {
     // Detect terminal theme before rendering so colors adapt
