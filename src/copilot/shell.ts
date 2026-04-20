@@ -35,6 +35,15 @@ import { openInEditor } from "./editor.js";
 import { runPlanner, type ShellPlan } from "./nl-planner.js";
 import { Datastore } from "./options.js";
 import { createPrintSink, type PrintLevel, type PrintSink } from "./print.js";
+import {
+  editPrompt,
+  formatEffectivePromptLine,
+  formatPromptAuditTable,
+  promptKeyToVerb,
+  readEffectivePrompt,
+  readPromptAudit,
+  verbToPromptKey,
+} from "./prompt-edit.js";
 import { listRecipes, resolveRecipePath } from "./recipes.js";
 import { openRepl as openDevRepl } from "./repl.js";
 import { loadAndRunResource, saveResourceScript } from "./resource.js";
@@ -2251,6 +2260,35 @@ function handleSlashCommand(
       };
     }
 
+    case "prompt": {
+      const sub = args[0]?.toLowerCase();
+      const verb = args[1];
+      if (sub === "edit") {
+        return handlePromptEditCommand(verb, core, opts, ctx, shellState);
+      }
+      if (sub === "show") {
+        return handlePromptShowCommand(verb, core, opts, ctx, shellState);
+      }
+      return {
+        output: [
+          "Usage:",
+          "  /prompt edit <verb>    open the operator override in $EDITOR",
+          "  /prompt show <verb>    print the current effective prompt + source",
+          "  /show prompts          cross-module audit of all *_PROMPT keys",
+        ].join("\n"),
+      };
+    }
+
+    case "show": {
+      const sub = args[0]?.toLowerCase();
+      if (sub === "prompts") {
+        const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
+        const rows = readPromptAudit(core, shellState.moduleOptions, cwd);
+        return { output: formatPromptAuditTable(rows) };
+      }
+      return { output: "Usage: /show prompts" };
+    }
+
     case "options": {
       const resolved = resolveOptionsTool(
         core,
@@ -2771,6 +2809,114 @@ function formatOptions(
 }
 
 /**
+ * `/prompt edit <verb>` — opens $EDITOR on `.kuzushi/prompts/<module>/<verb>.md`,
+ * saves on exit, and seeds `shell.moduleOptions[<tool>][<KEY>_PROMPT]` with
+ * the absolute path. `resolvePromptValue` in the module layer reads this at
+ * tool-execution time.
+ */
+function handlePromptEditCommand(
+  verbArg: string | undefined,
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  if (!ctx.focusedModule) {
+    return { output: "No focused module. Use /use <module> first." };
+  }
+  if (!ctx.dataDir) {
+    return { output: "No data directory resolved for this shell." };
+  }
+  const verb = verbArg?.trim();
+  if (!verb) {
+    return { output: "Usage: /prompt edit <verb>  (e.g. /prompt edit triage)" };
+  }
+  const promptKey = verbToPromptKey(verb);
+  if (!promptKey) {
+    return { output: `No prompt override for verb "${verb}".` };
+  }
+  const toolName = `${ctx.focusedModule}:${verb}`;
+  const resolved = core.registry.resolveTool(toolName);
+  if (!resolved) {
+    return { output: `Tool ${toolName} not found. Use /tools to list.` };
+  }
+  const dataDir = ctx.dataDir;
+  const focusedModule = ctx.focusedModule;
+  const description = resolved.tool.description;
+  return {
+    output: `Opening ${promptKey} override in $EDITOR…`,
+    asyncExecute: async () => {
+      try {
+        const outcome = await editPrompt({
+          dataDir,
+          moduleId: focusedModule,
+          verb,
+          toolDescription: description,
+        });
+        if (!outcome.saved) {
+          return "Prompt editor closed without saving.";
+        }
+        // Store the absolute path on the shell's in-memory option map so the
+        // same path the tool reads at run-time matches what we just wrote.
+        if (ctx.uiStore) {
+          updateShell(ctx.uiStore, (shell) => ({
+            ...shell,
+            moduleOptions: {
+              ...shell.moduleOptions,
+              [toolName]: {
+                ...(shell.moduleOptions[toolName] ?? {}),
+                [outcome.promptKey]: outcome.filePath,
+              },
+            },
+            lastUsedTool: toolName,
+          }));
+        }
+        return [
+          `Saved ${outcome.byteLen} bytes to ${outcome.filePath}`,
+          `Set ${toolName}.${outcome.promptKey} = ${outcome.filePath}`,
+        ].join("\n");
+      } catch (err) {
+        return `Prompt editor error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+/**
+ * `/prompt show <verb>` — reports the currently effective prompt for the
+ * focused tool: its source (file / inline / default), size, and path.
+ */
+function handlePromptShowCommand(
+  verbArg: string | undefined,
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  if (!ctx.focusedModule) {
+    return { output: "No focused module. Use /use <module> first." };
+  }
+  const verb = verbArg?.trim();
+  if (!verb) {
+    return { output: "Usage: /prompt show <verb>" };
+  }
+  const promptKey = verbToPromptKey(verb);
+  if (!promptKey) {
+    return { output: `No prompt override for verb "${verb}".` };
+  }
+  const toolName = `${ctx.focusedModule}:${verb}`;
+  if (!core.registry.resolveTool(toolName)) {
+    return { output: `Tool ${toolName} not found.` };
+  }
+  const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
+  const stored = shellState.moduleOptions[toolName];
+  const effective = readEffectivePrompt(toolName, promptKey, stored, cwd);
+  const verbSuffix = promptKeyToVerb(promptKey);
+  const header = `Prompt for ${toolName} (${verbSuffix})`;
+  return { output: `${header}\n  ${formatEffectivePromptLine(effective)}` };
+}
+
+/**
  * Apply a NL-planner proposal against `shell.moduleOptions` using the same
  * coercion + validation helpers as `handleSetCommand`. Returns a summary
  * string plus a `ShellState` updater the caller merges into its result.
@@ -2826,7 +2972,7 @@ function applyShellPlan(
       applied.map((a) => `  ${plan.toolName}.${a.option} = ${formatValue(a.value)}`).join("\n")
     : "No changes applied.";
   const skippedLine = skipped.length
-    ? `\nSkipped ${skipped.length}: ` + skipped.map((s) => `${s.option} (${s.reason})`).join(", ")
+    ? `\nSkipped ${skipped.length}: ${skipped.map((s) => `${s.option} (${s.reason})`).join(", ")}`
     : "";
 
   return {
@@ -3251,6 +3397,9 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/tune", "Open the tune view for the focused module"],
         ["/plan <english>", "Propose option changes from a plain-English request"],
         ["/yes | /no", "Apply or discard the pending planner proposal"],
+        ["/prompt edit <verb>", "Open the operator system-prompt override in $EDITOR"],
+        ["/prompt show <verb>", "Show the effective prompt + source for a tool"],
+        ["/show prompts", "Cross-module audit of every *_PROMPT override"],
         ["/options [tool]", "Show tool options"],
         ["/set <key> <value>", "Set a tool option"],
         ["/config", "Open the interactive config editor"],
