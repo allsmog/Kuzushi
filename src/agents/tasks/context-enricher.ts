@@ -1,3 +1,4 @@
+import { getLogger } from "../../logger.js";
 import { languageGeneralHintsModule } from "../../prompts/language-tuning.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
@@ -5,6 +6,8 @@ import type { EnrichedRepoContext, RepoContext } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask, TaskContext } from "../types.js";
 import { resolveTaskAllowedTools, resolveTaskModel } from "./runtime-overrides.js";
+
+const log = getLogger("context-enricher");
 
 const ENRICHED_CONTEXT_SCHEMA = {
   type: "object",
@@ -215,7 +218,16 @@ export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrich
     let costUsd = 0;
 
     const tag = "[context-enricher]";
-    console.error(`${tag} Starting context enrichment (model=${model})`);
+    log.info({ model }, "Starting context enrichment");
+
+    // Forward the caller's abort signal into the runtime so Ctrl+C in the
+    // shell actually cancels this call instead of leaking an in-flight LLM
+    // query that keeps spending tokens after the operator has moved on.
+    const abortController = new AbortController();
+    if (context.signal) {
+      if (context.signal.aborted) abortController.abort();
+      else context.signal.addEventListener("abort", () => abortController.abort(), { once: true });
+    }
 
     try {
       for await (const message of runtime.query({
@@ -223,6 +235,7 @@ export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrich
         options: {
           cwd: workRoot,
           model,
+          abortController,
 
           allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",

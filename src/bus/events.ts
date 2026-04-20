@@ -779,6 +779,22 @@ export type LlmRetryEvent = EventEnvelope<
   }
 >;
 
+/* ── Task phase-progress events ───────────────────────────────────── */
+
+/**
+ * Fine-grained progress inside a long-running task — lets the shell spinner
+ * show "building threat model · phase 2 (S4 threats)" instead of freezing on
+ * just the task id while a multi-phase LLM pipeline churns.
+ */
+export type TaskPhaseProgressEvent = EventEnvelope<
+  "task:phase-progress",
+  {
+    taskId: string;
+    /** Short human-readable phase label, e.g. "phase 2 (S4 threats)". */
+    phase: string;
+  }
+>;
+
 /* ── Retry observability events ───────────────────────────────────── */
 
 export type RetryAttemptEvent = EventEnvelope<
@@ -1066,6 +1082,7 @@ export type KuzushiEvent =
   | LlmCallCompleteEvent
   | LlmCallErrorEvent
   | LlmRetryEvent
+  | TaskPhaseProgressEvent
   | RetryAttemptEvent
   | RetryExhaustedEvent
   | BudgetCheckEvent
