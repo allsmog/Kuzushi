@@ -4,6 +4,7 @@ export type { Migration } from "./types.js";
 import { migration100 } from "./100_schema_reset.js";
 import { migration101 } from "./101_workspace_entities.js";
 import { migration102 } from "./102_session_aliases.js";
+import { migration103 } from "./103_schedules.js";
 import type { Migration } from "./types.js";
 
 /**
@@ -15,4 +16,4 @@ import type { Migration } from "./types.js";
  * `findings.sqlite3.bak-v<N>-<UTC-ts>` and re-opens a fresh DB that v100
  * populates. See `docs/data-model/03-migration-hygiene.md`.
  */
-export const allMigrations: Migration[] = [migration100, migration101, migration102];
+export const allMigrations: Migration[] = [migration100, migration101, migration102, migration103];
