@@ -13,7 +13,15 @@ import {
   terminalCardWidth,
 } from "./format.js";
 import { icons } from "./icons.js";
-import type { AgentActivityLine, Phase, ResultLine, SummaryData, UIStore } from "./state.js";
+import type {
+  AgentActivityLine,
+  Phase,
+  ResultLine,
+  ShellPlan,
+  ShellState,
+  SummaryData,
+  UIStore,
+} from "./state.js";
 
 /**
  * Register a plain-text renderer that subscribes to store changes
@@ -29,6 +37,15 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
   let startBannerPrinted = false;
   let summaryPrinted = false;
   let lastQualityGate: unknown;
+  // Phase D.5: shell-view + pendingPlan + threatModel + diffSince diff
+  // trackers so the non-TTY path prints *something* when those state
+  // transitions fire. The TUI carries the layout; the plain renderer
+  // just logs the transition + headline counts so piped output stays
+  // readable.
+  let lastShellView: string | null = null;
+  let lastPlanSource: string | null = null;
+  let lastThreatModelPath: string | null = null;
+  let lastDiffSinceRef: string | null = null;
   const taskState = new Map<string, { status: string; findingCount: number; detail?: string }>();
   const completedStages = new Set<string>();
   const scanActivityPrinted = new Map<string, number>();
@@ -141,6 +158,45 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
     if (state.qualityGate && state.qualityGate !== lastQualityGate) {
       lastQualityGate = state.qualityGate;
       printQualityGate(state.qualityGate);
+    }
+
+    // Phase D.5 — shell-view + pendingPlan + threatModel + diffSince
+    // transitions. Each emits one terse line so piped output is still
+    // useful; the full layouts live in the Ink components.
+    const shell = state.shell;
+    if (shell) {
+      const viewKey = `${shell.shellView}:${shell.focusedModule ?? ""}:${shell.openFindingId ?? ""}`;
+      if (viewKey !== lastShellView) {
+        lastShellView = viewKey;
+        printShellView(shell);
+      }
+
+      const planSource = shell.pendingPlan?.source ?? null;
+      if (planSource !== lastPlanSource) {
+        lastPlanSource = planSource;
+        if (shell.pendingPlan) printPendingPlan(shell.pendingPlan);
+        else console.log(chalk.dim("  [plan] discarded"));
+      }
+
+      const tmPath = shell.threatModelSource?.path ?? null;
+      if (tmPath && tmPath !== lastThreatModelPath) {
+        lastThreatModelPath = tmPath;
+        const threats = shell.threatModel?.threats.length ?? 0;
+        const elements = shell.threatModel?.dfd.elements.length ?? 0;
+        console.log(
+          chalk.dim(`  [threats] loaded ${tmPath} · ${elements} elements · ${threats} threats`),
+        );
+      }
+
+      const diffRef = shell.diffSince?.ref ?? null;
+      if (diffRef !== lastDiffSinceRef) {
+        lastDiffSinceRef = diffRef;
+        if (shell.diffSince) {
+          const n = shell.diffSince.changedFiles.length;
+          const suffix = shell.diffSince.error ? ` · error: ${shell.diffSince.error}` : "";
+          console.log(chalk.dim(`  [since ${shell.diffSince.ref}] ${n} changed file(s)${suffix}`));
+        }
+      }
     }
   });
 
@@ -307,4 +363,69 @@ function printPlainSummary(data: SummaryData): void {
     console.log(`  ${chalk.dim("PoC harness cost:")} ${formatCost(data.pocHarnessCostUsd)}`);
   }
   console.log(chalk.bold("─".repeat(width)));
+}
+
+// ---------------------------------------------------------------------------
+// Phase D.5 helpers — shell-view + planner + threats + diff-since
+// ---------------------------------------------------------------------------
+
+function printShellView(shell: ShellState): void {
+  const mod = shell.focusedModule ? ` (${shell.focusedModule})` : "";
+  switch (shell.shellView) {
+    case "catalog": {
+      const n = shell.moduleCatalog?.length ?? 0;
+      console.log(chalk.dim(`  [shell] catalog · ${n} modules`));
+      return;
+    }
+    case "module":
+      console.log(chalk.dim(`  [shell] module home${mod}`));
+      return;
+    case "tune":
+      console.log(chalk.dim(`  [shell] tune${mod}`));
+      return;
+    case "findings":
+      console.log(chalk.dim(`  [shell] findings list${mod}`));
+      return;
+    case "finding":
+      if (shell.openFindingId) {
+        console.log(chalk.dim(`  [shell] finding ${shell.openFindingId}${mod}`));
+      } else {
+        console.log(chalk.dim(`  [shell] finding${mod}`));
+      }
+      return;
+    case "threat-dfd":
+    case "threat-stride":
+    case "threat-stories":
+    case "threat-scope":
+    case "threat-summary": {
+      const suffix = shell.shellView.replace(/^threat-/, "");
+      const threats = shell.threatModel?.threats.length ?? 0;
+      const elements = shell.threatModel?.dfd.elements.length ?? 0;
+      console.log(chalk.dim(`  [threats] ${suffix} · ${elements} elements · ${threats} threats`));
+      return;
+    }
+    case "diff-since": {
+      const ref = shell.diffSince?.ref ?? "?";
+      const n = shell.diffSince?.changedFiles.length ?? 0;
+      console.log(chalk.dim(`  [since ${ref}] ${n} changed file(s)`));
+      return;
+    }
+  }
+}
+
+function printPendingPlan(plan: ShellPlan): void {
+  const changes = plan.changes.length;
+  const unsupported = plan.unsupported.length;
+  const parts = [`${changes} change${changes === 1 ? "" : "s"} proposed`];
+  if (unsupported > 0) parts.push(`${unsupported} unsupported`);
+  parts.push(`$${plan.planCostUsd.toFixed(4)} plan cost`);
+  console.log(chalk.dim(`  [plan] ${plan.source} · ${parts.join(" · ")} · y/n to apply`));
+  if (changes > 0) {
+    for (const c of plan.changes.slice(0, 3)) {
+      const current = c.current == null ? "(default)" : JSON.stringify(c.current);
+      const proposed = JSON.stringify(c.proposed);
+      console.log(chalk.dim(`    ${c.option}: ${current} → ${proposed}`));
+    }
+    if (changes > 3) console.log(chalk.dim(`    (+${changes - 3} more)`));
+  }
 }
