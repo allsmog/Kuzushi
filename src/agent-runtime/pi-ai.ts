@@ -23,7 +23,13 @@ import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
-import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "./types.js";
+import type {
+  AgentMessage,
+  AgentQueryOptions,
+  AgentQueryRequest,
+  AgentRuntime,
+  AgentSession,
+} from "./types.js";
 
 process.env.PI_CACHE_RETENTION ??= "long";
 
@@ -219,13 +225,6 @@ export class PiAiAgentRuntime implements AgentRuntime {
     const signal = request.options.abortController?.signal;
     const maxBudgetUsd = normalizeBudget(request.options.maxBudgetUsd);
     const outputFormat = request.options.outputFormat;
-    const strictStructuredOutput = outputFormat?.strict === true;
-    let invalidStructuredOutputRetriesRemaining = normalizeRetryCount(
-      outputFormat?.retryInvalidStructuredOutput,
-    );
-    let totalCostUsd = 0;
-    let generatedToolCallCounter = 0;
-    const truncatedTextParts: string[] = [];
 
     try {
       const modelSpec = request.options.model;
@@ -246,295 +245,344 @@ export class PiAiAgentRuntime implements AgentRuntime {
         ],
         ...(enabledTools.length > 0 ? { tools: enabledTools } : {}),
       };
-
       const toolsByName = new Map(enabledTools.map((tool) => [tool.name, tool]));
 
-      for (let turn = 1; ; turn++) {
-        if (signal?.aborted) {
+      yield* runTurnLoop({
+        context,
+        modelSpec,
+        model,
+        options: request.options,
+        enabledTools,
+        toolsByName,
+        signal,
+        startedAtMs,
+        outputFormat,
+        maxBudgetUsd,
+        bus: this.bus,
+        runId: this.runId,
+      });
+    } finally {
+      restoreRuntimeEnv();
+    }
+  }
+
+  createSession(baseOptions: AgentQueryOptions): AgentSession {
+    return new PiAiSession(this, this.runtimeConfig, baseOptions);
+  }
+}
+
+interface RunTurnLoopArgs {
+  context: PiAiContext;
+  modelSpec: string;
+  model: ReturnType<typeof resolveModel>;
+  options: AgentQueryOptions;
+  enabledTools: Tool[];
+  toolsByName: Map<string, Tool>;
+  signal: AbortSignal | undefined;
+  startedAtMs: number;
+  outputFormat: AgentQueryOptions["outputFormat"] | undefined;
+  maxBudgetUsd: number | undefined;
+  bus?: MessageBus;
+  runId?: string;
+}
+
+/**
+ * Core per-turn loop: repeatedly LLM-call + tool-exec until the assistant
+ * stops emitting tool calls (or errors/aborts/exceeds budget). Extracted from
+ * `PiAiAgentRuntime.query()` so both one-shot queries and long-lived sessions
+ * (which reuse the same `context`) share identical retry, tool-dispatch, and
+ * observability behaviour.
+ *
+ * The provided `context.messages` is mutated in place — caller decides whether
+ * to allocate it fresh (query) or reuse it across turns (session).
+ */
+async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> {
+  const {
+    context,
+    modelSpec,
+    model,
+    options,
+    enabledTools,
+    toolsByName,
+    signal,
+    startedAtMs,
+    outputFormat,
+    maxBudgetUsd,
+    bus,
+    runId,
+  } = args;
+  const strictStructuredOutput = outputFormat?.strict === true;
+  let invalidStructuredOutputRetriesRemaining = normalizeRetryCount(
+    outputFormat?.retryInvalidStructuredOutput,
+  );
+  let totalCostUsd = 0;
+  let generatedToolCallCounter = 0;
+  const truncatedTextParts: string[] = [];
+
+  try {
+    for (let turn = 1; ; turn++) {
+      if (signal?.aborted) {
+        yield errorResult(
+          "error_aborted",
+          "pi-ai agent run aborted",
+          startedAtMs,
+          turn - 1,
+          totalCostUsd,
+        );
+        return;
+      }
+
+      const observability = { bus, model: options.model, runId };
+
+      // Capture timing BEFORE the bus publish so llm:call-complete durationMs
+      // is symmetric with llm:call-start.
+      const turnStartMs = Date.now();
+
+      // Emit llm:call-start for each turn's LLM call
+      if (bus) {
+        try {
+          const turnRunId = runId ?? "";
+          const promptLength = context.messages.reduce((len, m) => {
+            const content = typeof m.content === "string" ? m.content : "";
+            return len + content.length;
+          }, 0);
+          await bus.publish<LlmCallStartEvent>({
+            type: "llm:call-start",
+            meta: {
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              runId: turnRunId,
+            },
+            payload: {
+              model: options.model,
+              promptLength,
+              runId: turnRunId,
+            },
+          });
+        } catch {
+          // Non-fatal
+        }
+      }
+      let assistant = await retryTransient(
+        () =>
+          rateLimitedComplete(modelSpec, model, context, {
+            signal,
+            temperature: options.temperature,
+            maxTokens: options.maxOutputTokens,
+          }),
+        signal,
+        TRANSIENT_RETRY_MAX,
+        TRANSIENT_RETRY_BASE_MS,
+        observability,
+      );
+
+      // Handle transient soft errors (stopReason === "error" with transient message).
+      // pi-ai's complete() never throws on API errors — it returns them as soft errors
+      // (stopReason === "error"). We must retry by checking the return value.
+      if (
+        assistant.stopReason === "error" &&
+        assistant.errorMessage &&
+        isTransientErrorMessage(assistant.errorMessage)
+      ) {
+        let retried = false;
+        for (let softRetry = 0; softRetry < TRANSIENT_RETRY_MAX; softRetry++) {
+          if (signal?.aborted) break;
+          const isRateLimit = /\b429\b|rate.?limit/i.test(assistant.errorMessage ?? "");
+          const rateFactor = isRateLimit ? 3 : 1;
+          const delay = TRANSIENT_RETRY_BASE_MS * rateFactor * 2 ** softRetry;
+          log.warn(
+            `[pi-ai] Transient soft error (attempt ${softRetry + 1}/${TRANSIENT_RETRY_MAX}), retrying in ${delay / 1000}s: ${assistant.errorMessage}`,
+          );
+
+          // Emit llm:retry for soft error retry
+          if (bus) {
+            try {
+              const retryRunId = runId ?? "";
+              await bus.publish<LlmRetryEvent>({
+                type: "llm:retry",
+                meta: {
+                  id: crypto.randomUUID(),
+                  timestamp: new Date().toISOString(),
+                  runId: retryRunId,
+                },
+                payload: {
+                  model: options.model,
+                  attempt: softRetry + 1,
+                  maxAttempts: TRANSIENT_RETRY_MAX,
+                  delayMs: delay,
+                  runId: retryRunId,
+                },
+              });
+            } catch {
+              // Non-fatal
+            }
+          }
+
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, delay);
+            if (signal) {
+              const onAbort = () => {
+                clearTimeout(timer);
+                resolve();
+              };
+              signal.addEventListener("abort", onAbort, { once: true });
+            }
+          });
+          if (signal?.aborted) break;
+          assistant = await rateLimitedComplete(modelSpec, model, context, {
+            signal,
+            temperature: options.temperature,
+            maxTokens: options.maxOutputTokens,
+          });
+          if (
+            assistant.stopReason !== "error" ||
+            !assistant.errorMessage ||
+            !isTransientErrorMessage(assistant.errorMessage)
+          ) {
+            retried = true;
+            break;
+          }
+        }
+        if (!retried && assistant.stopReason === "error") {
           yield errorResult(
-            "error_aborted",
-            "pi-ai agent run aborted",
+            "error_runtime",
+            assistant.errorMessage ?? "pi-ai transient error retries exhausted",
             startedAtMs,
-            turn - 1,
+            turn,
             totalCostUsd,
           );
           return;
         }
+      }
 
-        const observability = { bus: this.bus, model: request.options.model, runId: this.runId };
+      context.messages.push(assistant);
+      const turnCostUsd = extractCostUsd(assistant);
+      totalCostUsd += turnCostUsd;
 
-        // Capture timing BEFORE the bus publish so llm:call-complete durationMs
-        // is symmetric with llm:call-start.
-        const turnStartMs = Date.now();
-
-        // Emit llm:call-start for each turn's LLM call
-        if (this.bus) {
-          try {
-            const turnRunId = this.runId ?? "";
-            const promptLength = context.messages.reduce((len, m) => {
-              const content = typeof m.content === "string" ? m.content : "";
-              return len + content.length;
-            }, 0);
-            await this.bus.publish<LlmCallStartEvent>({
-              type: "llm:call-start",
+      // Emit llm:call-complete or llm:call-error for this turn
+      if (bus) {
+        const turnDurationMs = Date.now() - turnStartMs;
+        const turnRunId = runId ?? "";
+        try {
+          if (assistant.stopReason === "error") {
+            await bus.publish<LlmCallErrorEvent>({
+              type: "llm:call-error",
               meta: {
                 id: crypto.randomUUID(),
                 timestamp: new Date().toISOString(),
                 runId: turnRunId,
               },
               payload: {
-                model: request.options.model,
-                promptLength,
+                model: options.model,
+                error: assistant.errorMessage ?? "pi-ai request failed",
+                retryable: assistant.errorMessage
+                  ? isTransientErrorMessage(assistant.errorMessage)
+                  : false,
                 runId: turnRunId,
               },
             });
-          } catch {
-            // Non-fatal
+          } else {
+            const tokensUsed = (assistant.usage?.input ?? 0) + (assistant.usage?.output ?? 0);
+            await bus.publish<LlmCallCompleteEvent>({
+              type: "llm:call-complete",
+              meta: {
+                id: crypto.randomUUID(),
+                timestamp: new Date().toISOString(),
+                runId: turnRunId,
+              },
+              payload: {
+                model: options.model,
+                durationMs: turnDurationMs,
+                tokensUsed,
+                costUsd: turnCostUsd,
+                runId: turnRunId,
+              },
+            });
           }
+        } catch {
+          // Non-fatal
         }
-        let assistant = await retryTransient(
-          () =>
-            rateLimitedComplete(modelSpec, model, context, {
-              signal,
-              temperature: request.options.temperature,
-              maxTokens: request.options.maxOutputTokens,
-            }),
-          signal,
-          TRANSIENT_RETRY_MAX,
-          TRANSIENT_RETRY_BASE_MS,
-          observability,
+      }
+
+      const assistantContent = mapAssistantContent(assistant);
+      if (assistantContent.length > 0) {
+        yield {
+          type: "assistant",
+          content: assistantContent,
+        };
+      }
+
+      if (assistant.stopReason === "aborted" || signal?.aborted) {
+        yield errorResult(
+          "error_aborted",
+          assistant.errorMessage ?? "pi-ai agent run aborted",
+          startedAtMs,
+          turn,
+          totalCostUsd,
         );
+        return;
+      }
 
-        // Handle transient soft errors (stopReason === "error" with transient message).
-        // pi-ai's complete() never throws on API errors — it returns them as soft errors
-        // (stopReason === "error"). We must retry by checking the return value.
+      if (assistant.stopReason === "error") {
+        yield errorResult(
+          "error_runtime",
+          assistant.errorMessage ?? "pi-ai request failed",
+          startedAtMs,
+          turn,
+          totalCostUsd,
+        );
+        return;
+      }
+
+      // Handle output truncation (hit max output tokens).
+      // When expecting structured JSON output, accumulate the partial text
+      // and signal the LLM to continue where it left off.
+      if (assistant.stopReason === "length") {
+        const hasToolCalls = assistant.content.some((block) => block.type === "toolCall");
+        if (!hasToolCalls && outputFormat) {
+          truncatedTextParts.push(extractText(assistant));
+          // Re-send with a continuation prompt so the LLM finishes its JSON.
+          context.messages.push(assistant as unknown as PiAiContext["messages"][number]);
+          context.messages.push({
+            role: "user",
+            content:
+              "Your response was truncated due to length. Please continue your JSON output exactly where you left off. Do not restart — just continue from the cut-off point.",
+            timestamp: Date.now(),
+          });
+          continue;
+        }
+      }
+
+      const toolCalls = assistant.content.filter(
+        (block): block is PiAiToolCall => block.type === "toolCall",
+      );
+
+      if (toolCalls.length === 0) {
+        const currentText = extractText(assistant);
+        const resultText =
+          truncatedTextParts.length > 0 ? truncatedTextParts.join("") + currentText : currentText;
+        const structuredResult = outputFormat
+          ? parseStructuredOutput(resultText)
+          : { structuredOutput: undefined, parseError: null };
+
         if (
-          assistant.stopReason === "error" &&
-          assistant.errorMessage &&
-          isTransientErrorMessage(assistant.errorMessage)
+          outputFormat &&
+          strictStructuredOutput &&
+          structuredResult.structuredOutput === undefined
         ) {
-          let retried = false;
-          for (let softRetry = 0; softRetry < TRANSIENT_RETRY_MAX; softRetry++) {
-            if (signal?.aborted) break;
-            const isRateLimit = /\b429\b|rate.?limit/i.test(assistant.errorMessage ?? "");
-            const rateFactor = isRateLimit ? 3 : 1;
-            const delay = TRANSIENT_RETRY_BASE_MS * rateFactor * 2 ** softRetry;
-            log.warn(
-              `[pi-ai] Transient soft error (attempt ${softRetry + 1}/${TRANSIENT_RETRY_MAX}), retrying in ${delay / 1000}s: ${assistant.errorMessage}`,
-            );
-
-            // Emit llm:retry for soft error retry
-            if (this.bus) {
-              try {
-                const retryRunId = this.runId ?? "";
-                await this.bus.publish<LlmRetryEvent>({
-                  type: "llm:retry",
-                  meta: {
-                    id: crypto.randomUUID(),
-                    timestamp: new Date().toISOString(),
-                    runId: retryRunId,
-                  },
-                  payload: {
-                    model: request.options.model,
-                    attempt: softRetry + 1,
-                    maxAttempts: TRANSIENT_RETRY_MAX,
-                    delayMs: delay,
-                    runId: retryRunId,
-                  },
-                });
-              } catch {
-                // Non-fatal
-              }
-            }
-
-            await new Promise<void>((resolve) => {
-              const timer = setTimeout(resolve, delay);
-              if (signal) {
-                const onAbort = () => {
-                  clearTimeout(timer);
-                  resolve();
-                };
-                signal.addEventListener("abort", onAbort, { once: true });
-              }
-            });
-            if (signal?.aborted) break;
-            assistant = await rateLimitedComplete(modelSpec, model, context, {
-              signal,
-              temperature: request.options.temperature,
-              maxTokens: request.options.maxOutputTokens,
-            });
-            if (
-              assistant.stopReason !== "error" ||
-              !assistant.errorMessage ||
-              !isTransientErrorMessage(assistant.errorMessage)
-            ) {
-              retried = true;
-              break;
-            }
-          }
-          if (!retried && assistant.stopReason === "error") {
-            yield errorResult(
-              "error_runtime",
-              assistant.errorMessage ?? "pi-ai transient error retries exhausted",
-              startedAtMs,
-              turn,
-              totalCostUsd,
-            );
-            return;
-          }
-        }
-
-        context.messages.push(assistant);
-        const turnCostUsd = extractCostUsd(assistant);
-        totalCostUsd += turnCostUsd;
-
-        // Emit llm:call-complete or llm:call-error for this turn
-        if (this.bus) {
-          const turnDurationMs = Date.now() - turnStartMs;
-          const turnRunId = this.runId ?? "";
-          try {
-            if (assistant.stopReason === "error") {
-              await this.bus.publish<LlmCallErrorEvent>({
-                type: "llm:call-error",
-                meta: {
-                  id: crypto.randomUUID(),
-                  timestamp: new Date().toISOString(),
-                  runId: turnRunId,
-                },
-                payload: {
-                  model: request.options.model,
-                  error: assistant.errorMessage ?? "pi-ai request failed",
-                  retryable: assistant.errorMessage
-                    ? isTransientErrorMessage(assistant.errorMessage)
-                    : false,
-                  runId: turnRunId,
-                },
-              });
-            } else {
-              const tokensUsed = (assistant.usage?.input ?? 0) + (assistant.usage?.output ?? 0);
-              await this.bus.publish<LlmCallCompleteEvent>({
-                type: "llm:call-complete",
-                meta: {
-                  id: crypto.randomUUID(),
-                  timestamp: new Date().toISOString(),
-                  runId: turnRunId,
-                },
-                payload: {
-                  model: request.options.model,
-                  durationMs: turnDurationMs,
-                  tokensUsed,
-                  costUsd: turnCostUsd,
-                  runId: turnRunId,
-                },
-              });
-            }
-          } catch {
-            // Non-fatal
-          }
-        }
-
-        const assistantContent = mapAssistantContent(assistant);
-        if (assistantContent.length > 0) {
-          yield {
-            type: "assistant",
-            content: assistantContent,
-          };
-        }
-
-        if (assistant.stopReason === "aborted" || signal?.aborted) {
-          yield errorResult(
-            "error_aborted",
-            assistant.errorMessage ?? "pi-ai agent run aborted",
-            startedAtMs,
-            turn,
-            totalCostUsd,
-          );
-          return;
-        }
-
-        if (assistant.stopReason === "error") {
-          yield errorResult(
-            "error_runtime",
-            assistant.errorMessage ?? "pi-ai request failed",
-            startedAtMs,
-            turn,
-            totalCostUsd,
-          );
-          return;
-        }
-
-        // Handle output truncation (hit max output tokens).
-        // When expecting structured JSON output, accumulate the partial text
-        // and signal the LLM to continue where it left off.
-        if (assistant.stopReason === "length") {
-          const hasToolCalls = assistant.content.some((block) => block.type === "toolCall");
-          if (!hasToolCalls && outputFormat) {
-            truncatedTextParts.push(extractText(assistant));
-            // Re-send with a continuation prompt so the LLM finishes its JSON.
-            context.messages.push(assistant as unknown as PiAiContext["messages"][number]);
+          if (invalidStructuredOutputRetriesRemaining > 0) {
+            invalidStructuredOutputRetriesRemaining -= 1;
             context.messages.push({
               role: "user",
-              content:
-                "Your response was truncated due to length. Please continue your JSON output exactly where you left off. Do not restart — just continue from the cut-off point.",
+              content: buildStructuredOutputRetryMessage(outputFormat.schema),
               timestamp: Date.now(),
             });
             continue;
           }
-        }
 
-        const toolCalls = assistant.content.filter(
-          (block): block is PiAiToolCall => block.type === "toolCall",
-        );
-
-        if (toolCalls.length === 0) {
-          const currentText = extractText(assistant);
-          const resultText =
-            truncatedTextParts.length > 0 ? truncatedTextParts.join("") + currentText : currentText;
-          const structuredResult = outputFormat
-            ? parseStructuredOutput(resultText)
-            : { structuredOutput: undefined, parseError: null };
-
-          if (
-            outputFormat &&
-            strictStructuredOutput &&
-            structuredResult.structuredOutput === undefined
-          ) {
-            if (invalidStructuredOutputRetriesRemaining > 0) {
-              invalidStructuredOutputRetriesRemaining -= 1;
-              context.messages.push({
-                role: "user",
-                content: buildStructuredOutputRetryMessage(outputFormat.schema),
-                timestamp: Date.now(),
-              });
-              continue;
-            }
-
-            yield errorResult(
-              "error_output_format",
-              `pi-ai structured output parsing failed: ${structuredResult.parseError ?? "response did not contain valid JSON output"}`,
-              startedAtMs,
-              turn,
-              totalCostUsd,
-            );
-            return;
-          }
-
-          yield {
-            type: "result",
-            subtype: "success",
-            result: resultText,
-            structuredOutput: structuredResult.structuredOutput,
-            durationMs: Date.now() - startedAtMs,
-            numTurns: turn,
-            totalCostUsd: normalizeCostUsd(totalCostUsd),
-          };
-          return;
-        }
-
-        if (maxBudgetUsd != null && totalCostUsd > maxBudgetUsd) {
           yield errorResult(
-            "error_budget_exceeded",
-            `pi-ai budget exceeded: cost $${normalizeCostUsd(totalCostUsd).toFixed(4)} > max $${maxBudgetUsd.toFixed(4)}`,
+            "error_output_format",
+            `pi-ai structured output parsing failed: ${structuredResult.parseError ?? "response did not contain valid JSON output"}`,
             startedAtMs,
             turn,
             totalCostUsd,
@@ -542,108 +590,37 @@ export class PiAiAgentRuntime implements AgentRuntime {
           return;
         }
 
-        for (const toolCall of toolCalls) {
-          const toolUseId =
-            toolCall.id || `${toolCall.name}_${Date.now()}_${++generatedToolCallCounter}`;
-          const startedToolMs = Date.now();
+        yield {
+          type: "result",
+          subtype: "success",
+          result: resultText,
+          structuredOutput: structuredResult.structuredOutput,
+          durationMs: Date.now() - startedAtMs,
+          numTurns: turn,
+          totalCostUsd: normalizeCostUsd(totalCostUsd),
+        };
+        return;
+      }
 
-          const tool = toolsByName.get(toolCall.name);
-          if (!tool) {
-            const unknownToolMessage = `Tool "${toolCall.name}" is not enabled`;
-            const elapsedSeconds = Math.max(0, (Date.now() - startedToolMs) / 1000);
-            yield {
-              type: "tool-progress",
-              toolUseId,
-              toolName: toolCall.name,
-              elapsedSeconds,
-            };
-            yield {
-              type: "tool-summary",
-              summary: summarizeToolResult(toolCall.name, unknownToolMessage, true),
-              precedingToolUseIds: [toolUseId],
-            };
-            context.messages.push({
-              role: "toolResult",
-              toolCallId: toolUseId,
-              toolName: toolCall.name,
-              content: [{ type: "text", text: unknownToolMessage }],
-              isError: true,
-              timestamp: Date.now(),
-            });
-            continue;
-          }
+      if (maxBudgetUsd != null && totalCostUsd > maxBudgetUsd) {
+        yield errorResult(
+          "error_budget_exceeded",
+          `pi-ai budget exceeded: cost $${normalizeCostUsd(totalCostUsd).toFixed(4)} > max $${maxBudgetUsd.toFixed(4)}`,
+          startedAtMs,
+          turn,
+          totalCostUsd,
+        );
+        return;
+      }
 
-          let validatedArgs: Record<string, unknown>;
-          try {
-            validatedArgs = validateToolCall(enabledTools, toolCall) as Record<string, unknown>;
-          } catch (error) {
-            const validationError = toErrorMessage(error);
-            const elapsedSeconds = Math.max(0, (Date.now() - startedToolMs) / 1000);
-            yield {
-              type: "tool-progress",
-              toolUseId,
-              toolName: toolCall.name,
-              elapsedSeconds,
-            };
-            yield {
-              type: "tool-summary",
-              summary: summarizeToolResult(toolCall.name, validationError, true),
-              precedingToolUseIds: [toolUseId],
-            };
-            context.messages.push({
-              role: "toolResult",
-              toolCallId: toolUseId,
-              toolName: toolCall.name,
-              content: [{ type: "text", text: validationError }],
-              isError: true,
-              timestamp: Date.now(),
-            });
-            continue;
-          }
+      for (const toolCall of toolCalls) {
+        const toolUseId =
+          toolCall.id || `${toolCall.name}_${Date.now()}_${++generatedToolCallCounter}`;
+        const startedToolMs = Date.now();
 
-          const permission = await canUseTool(
-            request,
-            toolCall.name,
-            validatedArgs,
-            signal,
-            toolUseId,
-          );
-
-          if (permission.behavior === "deny") {
-            const denyMessage =
-              permission.message ?? `Permission denied for tool "${toolCall.name}"`;
-            const elapsedSecondsDeny = Math.max(0, (Date.now() - startedToolMs) / 1000);
-            yield {
-              type: "tool-progress" as const,
-              toolUseId,
-              toolName: toolCall.name,
-              elapsedSeconds: elapsedSecondsDeny,
-            };
-            yield {
-              type: "tool-summary" as const,
-              summary: summarizeToolResult(toolCall.name, denyMessage, true),
-              precedingToolUseIds: [toolUseId],
-            };
-            context.messages.push({
-              role: "toolResult",
-              toolCallId: toolUseId,
-              toolName: toolCall.name,
-              content: [{ type: "text", text: denyMessage }],
-              isError: true,
-              timestamp: Date.now(),
-            });
-            continue;
-          }
-
-          let isToolError = false;
-          let toolResultText = "";
-          try {
-            toolResultText = await executeTool(toolCall.name, validatedArgs, request.options.cwd);
-          } catch (error) {
-            isToolError = true;
-            toolResultText = toErrorMessage(error);
-          }
-
+        const tool = toolsByName.get(toolCall.name);
+        if (!tool) {
+          const unknownToolMessage = `Tool "${toolCall.name}" is not enabled`;
           const elapsedSeconds = Math.max(0, (Date.now() - startedToolMs) / 1000);
           yield {
             type: "tool-progress",
@@ -653,33 +630,220 @@ export class PiAiAgentRuntime implements AgentRuntime {
           };
           yield {
             type: "tool-summary",
-            summary: summarizeToolResult(toolCall.name, toolResultText, isToolError),
+            summary: summarizeToolResult(toolCall.name, unknownToolMessage, true),
             precedingToolUseIds: [toolUseId],
           };
-
           context.messages.push({
             role: "toolResult",
             toolCallId: toolUseId,
             toolName: toolCall.name,
-            content: [{ type: "text", text: toolResultText }],
-            isError: isToolError,
+            content: [{ type: "text", text: unknownToolMessage }],
+            isError: true,
             timestamp: Date.now(),
           });
+          continue;
         }
+
+        let validatedArgs: Record<string, unknown>;
+        try {
+          validatedArgs = validateToolCall(enabledTools, toolCall) as Record<string, unknown>;
+        } catch (error) {
+          const validationError = toErrorMessage(error);
+          const elapsedSeconds = Math.max(0, (Date.now() - startedToolMs) / 1000);
+          yield {
+            type: "tool-progress",
+            toolUseId,
+            toolName: toolCall.name,
+            elapsedSeconds,
+          };
+          yield {
+            type: "tool-summary",
+            summary: summarizeToolResult(toolCall.name, validationError, true),
+            precedingToolUseIds: [toolUseId],
+          };
+          context.messages.push({
+            role: "toolResult",
+            toolCallId: toolUseId,
+            toolName: toolCall.name,
+            content: [{ type: "text", text: validationError }],
+            isError: true,
+            timestamp: Date.now(),
+          });
+          continue;
+        }
+
+        const permission = await canUseTool(
+          options,
+          toolCall.name,
+          validatedArgs,
+          signal,
+          toolUseId,
+        );
+
+        if (permission.behavior === "deny") {
+          const denyMessage = permission.message ?? `Permission denied for tool "${toolCall.name}"`;
+          const elapsedSecondsDeny = Math.max(0, (Date.now() - startedToolMs) / 1000);
+          yield {
+            type: "tool-progress" as const,
+            toolUseId,
+            toolName: toolCall.name,
+            elapsedSeconds: elapsedSecondsDeny,
+          };
+          yield {
+            type: "tool-summary" as const,
+            summary: summarizeToolResult(toolCall.name, denyMessage, true),
+            precedingToolUseIds: [toolUseId],
+          };
+          context.messages.push({
+            role: "toolResult",
+            toolCallId: toolUseId,
+            toolName: toolCall.name,
+            content: [{ type: "text", text: denyMessage }],
+            isError: true,
+            timestamp: Date.now(),
+          });
+          continue;
+        }
+
+        let isToolError = false;
+        let toolResultText = "";
+        try {
+          toolResultText = await executeTool(toolCall.name, validatedArgs, options.cwd);
+        } catch (error) {
+          isToolError = true;
+          toolResultText = toErrorMessage(error);
+        }
+
+        const elapsedSeconds = Math.max(0, (Date.now() - startedToolMs) / 1000);
+        yield {
+          type: "tool-progress",
+          toolUseId,
+          toolName: toolCall.name,
+          elapsedSeconds,
+        };
+        yield {
+          type: "tool-summary",
+          summary: summarizeToolResult(toolCall.name, toolResultText, isToolError),
+          precedingToolUseIds: [toolUseId],
+        };
+
+        context.messages.push({
+          role: "toolResult",
+          toolCallId: toolUseId,
+          toolName: toolCall.name,
+          content: [{ type: "text", text: toolResultText }],
+          isError: isToolError,
+          timestamp: Date.now(),
+        });
       }
-    } catch (error) {
-      const aborted = signal?.aborted === true;
-      const wrapped = error instanceof KuzushiError ? error : wrapError(error);
-      yield errorResult(
-        aborted ? "error_aborted" : "error_runtime",
-        wrapped.message,
-        startedAtMs,
-        0,
-        totalCostUsd,
-      );
-    } finally {
-      restoreRuntimeEnv();
     }
+  } catch (error) {
+    const aborted = signal?.aborted === true;
+    const wrapped = error instanceof KuzushiError ? error : wrapError(error);
+    yield errorResult(
+      aborted ? "error_aborted" : "error_runtime",
+      wrapped.message,
+      startedAtMs,
+      0,
+      totalCostUsd,
+    );
+  }
+}
+
+/**
+ * Long-lived pi-ai session: keeps the `PiAiContext` (systemPrompt, messages,
+ * tools) alive across multiple `query()` calls so the shell can have a real
+ * multi-turn conversation. The conversation runs in-process — pi-ai has no
+ * subprocess — so there is nothing to dispose on close() besides aborting any
+ * in-flight completion and restoring env-var overrides.
+ */
+class PiAiSession implements AgentSession {
+  private readonly context: PiAiContext;
+  private readonly modelSpec: string;
+  private readonly model: ReturnType<typeof resolveModel>;
+  private readonly enabledTools: Tool[];
+  private readonly toolsByName: Map<string, Tool>;
+  private readonly options: AgentQueryOptions;
+  private readonly outputFormat: AgentQueryOptions["outputFormat"] | undefined;
+  private readonly maxBudgetUsd: number | undefined;
+  private readonly internalAbort = new AbortController();
+  private readonly restoreRuntimeEnv: () => void;
+  private closed = false;
+  private inFlight = false;
+
+  constructor(
+    private readonly runtime: PiAiAgentRuntime,
+    runtimeConfig: AgentRuntimeCredentials | undefined,
+    baseOptions: AgentQueryOptions,
+  ) {
+    this.restoreRuntimeEnv = applyRuntimeEnvOverrides(runtimeConfig);
+    this.options = baseOptions;
+    this.modelSpec = baseOptions.model;
+    this.model = resolveModel(baseOptions.model, runtimeConfig?.baseUrl);
+    this.enabledTools = resolveEnabledTools(baseOptions.allowedTools, baseOptions.disallowedTools);
+    this.toolsByName = new Map(this.enabledTools.map((tool) => [tool.name, tool]));
+    this.outputFormat = baseOptions.outputFormat;
+    this.maxBudgetUsd = normalizeBudget(baseOptions.maxBudgetUsd);
+    this.context = {
+      systemPrompt: buildSystemPrompt(this.outputFormat?.schema, baseOptions.systemPromptPrefix),
+      messages: [...mapHistoryToMessages(baseOptions.history)],
+      ...(this.enabledTools.length > 0 ? { tools: this.enabledTools } : {}),
+    };
+
+    // Link caller-supplied abort to our internal controller so shell Ctrl+C
+    // (which typically calls session.close()) and any externally-provided
+    // signal both terminate in-flight completions.
+    if (baseOptions.abortController) {
+      const outerSignal = baseOptions.abortController.signal;
+      if (outerSignal.aborted) {
+        this.internalAbort.abort();
+      } else {
+        outerSignal.addEventListener("abort", () => this.internalAbort.abort(), { once: true });
+      }
+    }
+  }
+
+  async *query(prompt: string): AsyncIterable<AgentMessage> {
+    if (this.closed) {
+      throw new Error("pi-ai session is closed");
+    }
+    if (this.inFlight) {
+      throw new Error("pi-ai session query already in flight");
+    }
+    this.inFlight = true;
+    const startedAtMs = Date.now();
+    this.context.messages.push({
+      role: "user",
+      content: prompt,
+      timestamp: startedAtMs,
+    });
+    try {
+      yield* runTurnLoop({
+        context: this.context,
+        modelSpec: this.modelSpec,
+        model: this.model,
+        options: this.options,
+        enabledTools: this.enabledTools,
+        toolsByName: this.toolsByName,
+        signal: this.internalAbort.signal,
+        startedAtMs,
+        outputFormat: this.outputFormat,
+        maxBudgetUsd: this.maxBudgetUsd,
+        bus: this.runtime.bus,
+        runId: this.runtime.runId,
+      });
+    } finally {
+      this.inFlight = false;
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    if (!this.internalAbort.signal.aborted) {
+      this.internalAbort.abort();
+    }
+    this.restoreRuntimeEnv();
   }
 }
 
@@ -939,17 +1103,17 @@ function mapHistoryToMessages(
 }
 
 async function canUseTool(
-  request: AgentQueryRequest,
+  options: AgentQueryOptions,
   toolName: string,
   args: Record<string, unknown>,
   signal: AbortSignal | undefined,
   toolUseId: string,
 ) {
-  if (!request.options.canUseTool) {
+  if (!options.canUseTool) {
     return { behavior: "allow" } as const;
   }
 
-  return request.options.canUseTool(toolName, args, {
+  return options.canUseTool(toolName, args, {
     signal: signal ?? new AbortController().signal,
     toolUseId,
   });
