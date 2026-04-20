@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { migration100 } from "../../src/migrations/100_schema_reset.js";
 import { migration101 } from "../../src/migrations/101_workspace_entities.js";
+import { migration102 } from "../../src/migrations/102_session_aliases.js";
 import { SessionManager } from "../../src/sessions/manager.js";
 import type { SessionRecord } from "../../src/workspace/entities.js";
 import { SessionStore } from "../../src/workspace/entities.js";
@@ -20,6 +21,7 @@ function createTestDb(): Database.Database {
   db.pragma("foreign_keys = ON");
   migration100.up(db);
   migration101.up(db);
+  migration102.up(db);
   return db;
 }
 

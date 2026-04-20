@@ -787,6 +787,8 @@ export interface SessionRecord {
   state: "open" | "closed" | "error";
   tunnelPeer: string | null;
   tunnelLocal: string | null;
+  /** Operator-assigned human-friendly name (msfconsole `sessions -n`). */
+  alias: string | null;
   description: string | null;
   viaModule: string | null;
   viaTool: string | null;
@@ -806,8 +808,8 @@ export class SessionStore {
     this.db
       .prepare(
         `INSERT INTO sessions (id, workspace_id, host_id, service_id, kind, state,
-                               tunnel_peer, tunnel_local, description, via_module, via_tool, metadata_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                               tunnel_peer, tunnel_local, alias, description, via_module, via_tool, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -818,12 +820,39 @@ export class SessionStore {
         input.state ?? "open",
         input.tunnelPeer ?? null,
         input.tunnelLocal ?? null,
+        input.alias ?? null,
         input.description ?? null,
         input.viaModule ?? null,
         input.viaTool ?? null,
         JSON.stringify(input.metadata ?? {}),
       );
     return this.get(id) as SessionRecord;
+  }
+
+  /**
+   * Resolve a short prefix, full id, or alias to a session id. Returns
+   * the id on unique match, null if no match, or an array on ambiguity
+   * (caller decides how to render).
+   */
+  resolveRef(workspaceId: string, ref: string): { id: string } | { ambiguous: string[] } | null {
+    if (!ref) return null;
+    const aliased = this.db
+      .prepare("SELECT id FROM sessions WHERE workspace_id = ? AND alias = ?")
+      .all(workspaceId, ref) as Array<{ id: string }>;
+    if (aliased.length === 1) return { id: aliased[0]!.id };
+    if (aliased.length > 1) return { ambiguous: aliased.map((r) => r.id) };
+    // Fall back to id prefix (UUIDs are long; operators type the first 8).
+    const prefixed = this.db
+      .prepare("SELECT id FROM sessions WHERE workspace_id = ? AND id LIKE ?")
+      .all(workspaceId, `${ref}%`) as Array<{ id: string }>;
+    if (prefixed.length === 1) return { id: prefixed[0]!.id };
+    if (prefixed.length > 1) return { ambiguous: prefixed.map((r) => r.id) };
+    return null;
+  }
+
+  /** Set or clear the alias on a session. */
+  setAlias(id: string, alias: string | null): void {
+    this.db.prepare("UPDATE sessions SET alias = ? WHERE id = ?").run(alias, id);
   }
 
   get(id: string): SessionRecord | null {
@@ -880,6 +909,7 @@ interface SessionRow {
   state: SessionRecord["state"];
   tunnel_peer: string | null;
   tunnel_local: string | null;
+  alias: string | null;
   description: string | null;
   via_module: string | null;
   via_tool: string | null;
@@ -898,6 +928,7 @@ function rowToSession(row: SessionRow): SessionRecord {
     state: row.state,
     tunnelPeer: row.tunnel_peer,
     tunnelLocal: row.tunnel_local,
+    alias: row.alias ?? null,
     description: row.description,
     viaModule: row.via_module,
     viaTool: row.via_tool,

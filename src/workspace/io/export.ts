@@ -144,6 +144,7 @@ export function exportKzBundle(ws: WorkspaceManager, workspaceId: string): strin
   const sessions = ws.sessions.listForWorkspace(workspaceId).map((s) => ({
     kind: s.kind,
     state: s.state,
+    alias: s.alias,
     description: s.description,
     tunnelPeer: s.tunnelPeer,
     tunnelLocal: s.tunnelLocal,

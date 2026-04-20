@@ -168,12 +168,30 @@ export class WorkspaceDispatcher implements CommandDispatcher {
     const ws = this.opts.workspaces;
     const sub = args[0];
     if (sub === "-k" && args[1]) {
+      const resolved = resolveSessionRef(ws, wid, args[1] as string);
+      if (typeof resolved !== "string") return { output: resolved.output };
       if (!this.opts.sessions) return { output: "[-] Session manager not available." };
-      await this.opts.sessions.close(args[1] as string, "closed");
+      await this.opts.sessions.close(resolved, "closed");
       return {};
     }
+    if (sub === "-n" && args[1]) {
+      // `sessions -n <ref> <alias>` — assign an alias. Empty alias clears it.
+      const ref = args[1] as string;
+      const alias = args.slice(2).join(" ").trim();
+      const resolved = resolveSessionRef(ws, wid, ref);
+      if (typeof resolved !== "string") return { output: resolved.output };
+      ws.sessions.setAlias(resolved, alias.length > 0 ? alias : null);
+      return {
+        output:
+          alias.length > 0
+            ? `[+] Session ${resolved.slice(0, 8)} → ${alias}`
+            : `[+] Cleared alias on session ${resolved.slice(0, 8)}`,
+      };
+    }
     if (sub === "-i" && args[1]) {
-      const handle = this.opts.sessions?.getLive(args[1] as string);
+      const resolved = resolveSessionRef(ws, wid, args[1] as string);
+      if (typeof resolved !== "string") return { output: resolved.output };
+      const handle = this.opts.sessions?.getLive(resolved);
       if (!handle?.interact) return { output: "[-] Session not interactive." };
       const input = args.slice(2).join(" ");
       const out = await handle.interact(input, ctx.signal);
@@ -183,6 +201,20 @@ export class WorkspaceDispatcher implements CommandDispatcher {
     const rows = ws.sessions.listForWorkspace(wid, { openOnly });
     return { output: renderSessions(rows) };
   }
+}
+
+function resolveSessionRef(
+  ws: WorkspaceManager,
+  workspaceId: string,
+  ref: string,
+): string | { output: string } {
+  const result = ws.sessions.resolveRef(workspaceId, ref);
+  if (!result) return { output: `[-] No session matches '${ref}'.` };
+  if ("ambiguous" in result) {
+    const pretty = result.ambiguous.map((id) => id.slice(0, 8)).join(", ");
+    return { output: `[-] Ambiguous session ref '${ref}' matches: ${pretty}` };
+  }
+  return result.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,9 +309,10 @@ function renderSessions(
   rows: ReturnType<WorkspaceManager["sessions"]["listForWorkspace"]>,
 ): string {
   return makeTable(
-    ["Id", "Kind", "State", "Peer", "Via"],
+    ["Id", "Alias", "Kind", "State", "Peer", "Via"],
     rows.map((s) => [
       s.id.slice(0, 8),
+      s.alias ?? "",
       s.kind,
       s.state,
       s.tunnelPeer ?? "",
