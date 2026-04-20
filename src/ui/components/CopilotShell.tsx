@@ -29,8 +29,8 @@ import { PlanCard } from "./PlanCard.js";
 import { ScopeAndCriticalityView } from "./ScopeAndCriticalityView.js";
 import { Spinner } from "./Spinner.js";
 import { ThreatDfdView } from "./ThreatDfdView.js";
-import { ThreatPlaceholder } from "./ThreatPlaceholder.js";
 import { ThreatStrideMatrix } from "./ThreatStrideMatrix.js";
+import { ThreatSummaryExport } from "./ThreatSummaryExport.js";
 import { TuneView } from "./TuneView.js";
 
 interface CopilotShellProps {
@@ -426,7 +426,7 @@ function ShellViewPanel({
     case "threat-scope":
       return <ScopeAndCriticalityView shell={shell} />;
     case "threat-summary":
-      return <ThreatPlaceholder shell={shell} />;
+      return <ThreatSummaryExport shell={shell} />;
     default:
       return null;
   }
