@@ -9,6 +9,7 @@
 
 import { Box, Static, Text, useInput } from "ink";
 import React from "react";
+import { HeartbeatStrip } from "./components/AgentActivity.js";
 import { Banner } from "./components/Banner.js";
 import { CommandInput, type CommandResult, type ReplCommand } from "./components/CommandInput.js";
 import { CompactHeader } from "./components/CompactHeader.js";
@@ -62,12 +63,14 @@ function AppInner({ store }: AppProps): React.ReactElement {
     [replCtx],
   );
 
-  // Global tab switching: 1/2/3 keys switch views during running mode
+  // Global tab switching: 1/2/3 keys switch views during running mode.
+  // `m` toggles the B1 heartbeat strip's per-agent expansion.
   useInput(
     (input) => {
       if (input === "1") store.update({ scanView: "pipeline" });
       else if (input === "2") store.update({ scanView: "findings" });
       else if (input === "3") store.update({ scanView: "cost" });
+      else if (input === "m") store.update({ heartbeatExpanded: !state.heartbeatExpanded });
     },
     { isActive: state.mode === "running" && process.stdin.isTTY === true },
   );
@@ -243,6 +246,8 @@ function AppInner({ store }: AppProps): React.ReactElement {
           )}
 
           {state.qualityGate && <QualityGate result={state.qualityGate} />}
+
+          <HeartbeatStrip state={state} expanded={state.heartbeatExpanded} />
 
           {state.phase !== "idle" && state.phase !== "done" && state.phase !== "summary" && (
             <StatusFooter

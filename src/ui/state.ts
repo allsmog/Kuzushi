@@ -282,6 +282,8 @@ export interface UIState {
   etaMs?: number;
   /** Active view tab during running mode. */
   scanView: "pipeline" | "findings" | "cost";
+  /** Expand the B1 heartbeat strip into a per-agent list. Default false. */
+  heartbeatExpanded?: boolean;
   /** Rate limit / throttle info — shown when active. */
   throttle?: { concurrency: number; reason: string } | null;
   /** Timestamp when pipeline started (for elapsed timer). */
