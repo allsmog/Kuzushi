@@ -130,6 +130,18 @@ export class WorkspaceManager {
       return null;
     }
   }
+
+  /**
+   * Internal escape hatch — returns the raw better-sqlite3 handle.
+   *
+   * Prefer the typed stores (`hosts`, `services`, `vulns`, ...) when
+   * possible. This accessor exists for agent tools that delegate to
+   * legacy DB-coupled functions (`runPatchPipeline`, `triageFindingsBatch`,
+   * etc.) which take a `Database.Database` directly.
+   */
+  rawDb(): Database.Database {
+    return this.db;
+  }
 }
 
 interface WorkspaceRow {
