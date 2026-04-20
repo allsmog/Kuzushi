@@ -427,6 +427,26 @@ function formatOptionDescription(schema: ToolPropertySchema): string {
   return description ? `${description} (${suffix})` : suffix;
 }
 
+function resolveFrameworkVersion(): string {
+  try {
+    const url = new URL("../../package.json", import.meta.url);
+    const pkg = JSON.parse(readFileSync(url, "utf8")) as { version?: string };
+    return pkg.version ?? "dev";
+  } catch {
+    return "dev";
+  }
+}
+
+function resolveAuditLogPath(
+  config: KuzushiConfig | undefined,
+  dataDir: string,
+): string | undefined {
+  const auditLog = (config as { auditLog?: string | boolean } | undefined)?.auditLog;
+  if (!auditLog) return undefined;
+  if (typeof auditLog === "string") return auditLog;
+  return path.join(dataDir, "audit.log");
+}
+
 function filteredWorkspaceListing(
   mgr: import("../workspace/manager.js").WorkspaceManager,
   pattern: string,
@@ -899,6 +919,9 @@ async function startInkShell(
     },
     jobManager,
     spool: spoolController,
+    events: core.events,
+    frameworkVersion: resolveFrameworkVersion(),
+    getLogPath: () => resolveAuditLogPath(opts.config, dataDir),
   });
 
   driver = new DispatcherDriver({
