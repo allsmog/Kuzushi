@@ -151,6 +151,24 @@ export class ModuleDispatcher implements CommandDispatcher {
             `  - ${need}+ findings in workspace — run a scanner first (e.g. use semgrep; run)`,
           );
         }
+      } else if (req.kind === "hosts") {
+        const count = ctx.driver.getHostCount?.() ?? 0;
+        const need = req.minCount ?? 1;
+        if (count < need) {
+          missing.push(`  - ${need}+ hosts in workspace — run recon first (e.g. use recon; run)`);
+        }
+      } else if (req.kind === "session") {
+        const count = ctx.driver.getLiveSessionCount?.(req.sessionKind) ?? 0;
+        if (count < 1) {
+          const label = req.sessionKind ? `'${req.sessionKind}'` : "any";
+          missing.push(
+            `  - ${label} live session — open one first (e.g. use blackbox; run connect)`,
+          );
+        }
+      } else if (req.kind === "env") {
+        if (!process.env[req.name]) {
+          missing.push(`  - env var ${req.name} is not set — export it before running`);
+        }
       }
     }
     if (missing.length === 0) return null;

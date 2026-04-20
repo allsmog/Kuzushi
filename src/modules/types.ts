@@ -94,6 +94,32 @@ export type CopilotModuleRequirement =
       kind: "findings";
       /** Minimum number of findings required (default 1). */
       minCount?: number;
+    }
+  | {
+      /**
+       * Hosts exist in the active workspace (e.g. blackbox modules that probe
+       * previously-discovered services). Used by offense tooling that runs
+       * after `recon`.
+       */
+      kind: "hosts";
+      minCount?: number;
+    }
+  | {
+      /**
+       * A live session of the given kind must be registered with the
+       * SessionManager (e.g. verify modules that exploit via an open shell).
+       * Omit `sessionKind` to accept any live session.
+       */
+      kind: "session";
+      sessionKind?: string;
+    }
+  | {
+      /**
+       * An environment variable must be set (e.g. SHODAN_KEY for recon feeds,
+       * NVD_KEY for CVE enrichment). Checked against process.env.
+       */
+      kind: "env";
+      name: string;
     };
 
 // ---------------------------------------------------------------------------
@@ -155,6 +181,12 @@ export interface ToolExecutionContext {
    * fall back to their compiled default. Optional — undefined outside shell.
    */
   datastore?: import("../copilot/options.js").Datastore;
+  /**
+   * WorkspaceManager for tools that read/write engagement state (hosts,
+   * services, vulns, loot, creds, notes, sessions). Optional — undefined
+   * when running outside a workspace (e.g. one-shot `kuzushi run`).
+   */
+  workspace?: import("../workspace/manager.js").WorkspaceManager;
 }
 
 /**
