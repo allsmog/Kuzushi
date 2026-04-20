@@ -14,7 +14,15 @@ const agenticScanTool: ModuleTool = {
     "auth-logic, etc.), with scan-only post-processing.",
   inputSchema: {
     type: "object",
-    properties: { target: targetProperty, severity: severityProperty },
+    properties: {
+      target: targetProperty,
+      severity: severityProperty,
+      AGENTIC_SAST_PROMPT: {
+        type: "string",
+        description:
+          "Override the agentic-sast detector prompt. Accepts inline text or a path to .md/.txt.",
+      },
+    },
     required: ["target"],
   },
   headless: true,

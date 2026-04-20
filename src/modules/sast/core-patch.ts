@@ -14,6 +14,11 @@ const patchFindingTool: ModuleTool = {
     type: "object",
     properties: {
       fingerprint: { type: "string", description: "Finding fingerprint to patch." },
+      PATCH_PROMPT: {
+        type: "string",
+        description:
+          "Override the patch-generation system prompt. Accepts inline text or a path to a .md/.txt file.",
+      },
     },
     required: ["fingerprint"],
   },

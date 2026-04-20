@@ -38,6 +38,11 @@ const contextBuildTool: ModuleTool = {
         default: true,
         description: "Build threat scenarios from STRIDE threats.",
       },
+      CONTEXT_PROMPT: {
+        type: "string",
+        description:
+          "Override the context-enricher system prompt. Accepts inline text or a path to .md/.txt.",
+      },
     },
     required: ["target"],
   },

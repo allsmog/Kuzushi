@@ -20,6 +20,8 @@ export type ModuleToolRunner = (
   tool: ModuleTool,
   input: Record<string, unknown>,
   signal?: AbortSignal,
+  /** Active module-local datastore — lets tools honor operator-set overrides. */
+  datastore?: Datastore,
 ) => Promise<ToolResult>;
 
 export interface ModuleDispatcherOptions {
@@ -118,7 +120,7 @@ export class ModuleDispatcher implements CommandDispatcher {
       };
     }
     ctx.print.status(`Running ${tool.name}...`);
-    const result = await this.runTool(tool, this.datastore.snapshot(), ctx.signal);
+    const result = await this.runTool(tool, this.datastore.snapshot(), ctx.signal, this.datastore);
     if (result.ok) ctx.print.good(`${tool.name} completed`);
     else ctx.print.error(`${tool.name} failed`);
     return { output: result.output };

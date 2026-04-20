@@ -20,6 +20,11 @@ const threatHuntTool: ModuleTool = {
       runsPerActor: { type: "integer", default: 1, description: "Hunts per actor." },
       maxConcurrentHunts: { type: "integer", default: 3, description: "Concurrent hunts." },
       maxTurnsPerHunt: { type: "integer", default: 30, description: "Turns per hunt." },
+      THREAT_HUNT_PROMPT: {
+        type: "string",
+        description:
+          "Override the threat-hunt actor system prompt. Accepts inline text or a path to .md/.txt.",
+      },
     },
     required: ["target"],
   },

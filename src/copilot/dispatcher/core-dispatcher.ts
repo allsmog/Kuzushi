@@ -42,6 +42,16 @@ export interface CoreDispatcherOptions {
   resolveRecipePath?: (name: string) => string | undefined;
   /** Optional recipe listing — returns an array of {name, path, description?}. */
   listRecipes?: () => Array<{ name: string; path: string; description?: string }>;
+  /**
+   * Optional editor launcher — when present, `edit <NAME>` opens $EDITOR on
+   * a scratch file pre-seeded with the current value of NAME and, on save,
+   * writes the contents back to the active Datastore.
+   *
+   * The host wires this (shell.ts), because suspending the Ink render surface
+   * during $EDITOR is a host-level concern. Returns the new value or null on
+   * cancel.
+   */
+  openEditor?: (initial: string) => Promise<string | null>;
 }
 
 const COMMANDS: Record<string, string> = {
@@ -62,6 +72,7 @@ const COMMANDS: Record<string, string> = {
   resource: "Replay commands from a resource script",
   makerc: "Save recent commands as a resource script",
   recipes: "List or run a bundled recipe (e.g. `recipes run quick-scan`)",
+  edit: "Open $EDITOR on a Datastore value (typically an agent prompt)",
   exit: "Exit the shell",
   quit: "Exit the shell (alias for exit)",
 };
@@ -110,6 +121,8 @@ export class CoreDispatcher implements CommandDispatcher {
         return this.cmd_makerc(args, ctx);
       case "recipes":
         return this.cmd_recipes(args, ctx);
+      case "edit":
+        return this.cmd_edit(args, ctx);
       default:
         return { output: `Unknown command: ${cmd}` };
     }
@@ -353,6 +366,34 @@ export class CoreDispatcher implements CommandDispatcher {
       }
     }
     return { output: `Usage: recipes [list] | recipes run <name>` };
+  }
+
+  /**
+   * `edit <NAME>` — open $EDITOR on a scratch file pre-seeded with the current
+   * Datastore value, then store the edited contents back on save.
+   */
+  private async cmd_edit(args: string[], ctx: CommandContext): Promise<CommandResult> {
+    const name = args[0];
+    if (!name) return { output: "Usage: edit <NAME>" };
+    if (!this.opts.openEditor) return { output: "[-] `edit` is not enabled in this driver." };
+
+    const moduleStore = this.findModuleStore(ctx);
+    const target = moduleStore ?? this.opts.globals;
+    const scope: "module" | "global" = moduleStore ? "module" : "global";
+    const current = target.get<string>(name);
+    const initial = typeof current === "string" ? current : "";
+
+    let updated: string | null;
+    try {
+      updated = await this.opts.openEditor(initial);
+    } catch (err) {
+      return { output: `[-] edit failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    if (updated == null) return { output: "[*] Edit cancelled — value unchanged." };
+
+    const err = target.set(name, updated, scope);
+    if (err) return { output: `[-] Invalid value: ${err}` };
+    return { output: `[+] Updated ${name} (${updated.length} chars, scope=${scope}).` };
   }
 
   /** Find the active module dispatcher's datastore, if a `use` was issued. */

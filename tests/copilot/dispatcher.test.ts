@@ -265,6 +265,72 @@ describe("ModuleDispatcher requires preflight", () => {
   });
 });
 
+describe("CoreDispatcher edit", () => {
+  it("opens the editor and stores the edited value in the active module store", async () => {
+    const registry = new ModuleRegistry();
+    const mod = mkModule("sast", [mkTool("sast:scan")]);
+    registry.register(mod);
+    (registry as unknown as { initialized: Set<string> }).initialized.add("sast");
+
+    const sink = createArraySink();
+    const captured: string[] = [];
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+      openEditor: async (initial: string) => {
+        captured.push(initial);
+        return "# edited prompt body\nYou are a careful agent.";
+      },
+    });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+
+    await driver.handle("use sast");
+    const result = await driver.handle("edit TRIAGE_PROMPT");
+    expect(result.output).toContain("Updated TRIAGE_PROMPT");
+    expect(result.output).toContain("scope=module");
+    // Editor was called once, seeded with "" (no prior value).
+    expect(captured).toEqual([""]);
+  });
+
+  it("falls back to the global store when no module is selected", async () => {
+    const registry = new ModuleRegistry();
+    const sink = createArraySink();
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+      openEditor: async () => "new-text",
+    });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+    const result = await driver.handle("edit CONTEXT_PROMPT");
+    expect(result.output).toContain("scope=global");
+  });
+
+  it("reports a helpful message on cancel", async () => {
+    const registry = new ModuleRegistry();
+    const sink = createArraySink();
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+      openEditor: async () => null,
+    });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+    const result = await driver.handle("edit TRIAGE_PROMPT");
+    expect(result.output).toContain("Edit cancelled");
+  });
+
+  it("reports gracefully when disabled", async () => {
+    const registry = new ModuleRegistry();
+    const sink = createArraySink();
+    const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+    const result = await driver.handle("edit FOO");
+    expect(result.output).toContain("not enabled");
+  });
+});
+
 describe("CoreDispatcher recipes", () => {
   it("lists recipes via listRecipes callback", async () => {
     const registry = new ModuleRegistry();

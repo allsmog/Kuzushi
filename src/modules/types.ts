@@ -149,6 +149,12 @@ export interface ToolExecutionContext {
    * May be undefined when a tool is invoked outside a shell/run driver.
    */
   print?: PrintSink;
+  /**
+   * Active datastore for resolving operator-set options (e.g. TRIAGE_PROMPT,
+   * VERIFY_PROMPT). Tools that respect prompt overrides read here first and
+   * fall back to their compiled default. Optional — undefined outside shell.
+   */
+  datastore?: import("../copilot/options.js").Datastore;
 }
 
 /**
