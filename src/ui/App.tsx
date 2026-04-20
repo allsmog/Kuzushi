@@ -7,7 +7,7 @@
  * to minimize flicker from spinner ticks.
  */
 
-import { Box, Static, Text } from "ink";
+import { Box, Static, Text, useInput } from "ink";
 import React from "react";
 import { Banner } from "./components/Banner.js";
 import { CommandInput, type CommandResult, type ReplCommand } from "./components/CommandInput.js";
@@ -35,6 +35,9 @@ import { KeybindFooter } from "./primitives/KeybindFooter.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
 import type { ResultLine as ResultLineData, UIStore } from "./state.js";
 import { tokens } from "./tokens.js";
+import { TabBar } from "./primitives/TabBar.js";
+import { FindingsView } from "./components/FindingsView.js";
+import { CostView } from "./components/CostView.js";
 
 interface AppProps {
   store: UIStore;
@@ -57,6 +60,16 @@ function AppInner({ store }: AppProps): React.ReactElement {
       return handleReplCommand(replCtx, cmd);
     },
     [replCtx],
+  );
+
+  // Global tab switching: 1/2/3 keys switch views during running mode
+  useInput(
+    (input) => {
+      if (input === "1") store.update({ scanView: "pipeline" });
+      else if (input === "2") store.update({ scanView: "findings" });
+      else if (input === "3") store.update({ scanView: "cost" });
+    },
+    { isActive: state.mode === "running" && process.stdin.isTTY === true },
   );
 
   // Results that have scrolled past the live window go to Static (no re-render).
@@ -189,14 +202,44 @@ function AppInner({ store }: AppProps): React.ReactElement {
             {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
           </Static>
 
-          {state.stages.length > 0 && (
-            <PipelineIndicator
-              stages={state.stages}
-              progress={state.progress}
+          {/* Tab bar for view switching */}
+          <TabBar
+            tabs={[
+              { id: "pipeline", label: "Pipeline", shortcut: "1" },
+              { id: "findings", label: "Findings", shortcut: "2" },
+              { id: "cost", label: "Cost", shortcut: "3" },
+            ]}
+            activeId={state.scanView}
+          />
+
+          {/* Pipeline view (default) */}
+          {state.scanView === "pipeline" && (
+            <>
+              {state.stages.length > 0 && (
+                <PipelineIndicator
+                  stages={state.stages}
+                  progress={state.progress}
+                  runningCostUsd={state.runningCostUsd}
+                  throttle={state.throttle}
+                  results={liveResults}
+                  agentActivity={state.agentActivity}
+                  etaMs={state.etaMs}
+                />
+              )}
+            </>
+          )}
+
+          {/* Findings view */}
+          {state.scanView === "findings" && (
+            <FindingsView results={state.results} />
+          )}
+
+          {/* Cost view */}
+          {state.scanView === "cost" && (
+            <CostView
+              results={state.results}
               runningCostUsd={state.runningCostUsd}
-              throttle={state.throttle}
-              results={liveResults}
-              agentActivity={state.agentActivity}
+              budget={state.configBanner?.budget}
             />
           )}
 
