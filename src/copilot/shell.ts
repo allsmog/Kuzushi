@@ -17,10 +17,17 @@ import { createBus } from "../bus/index.js";
 import type { MessageBus } from "../bus/types.js";
 import { JobManager } from "../jobs/manager.js";
 import { formatContextSummary } from "../modules/core-sast.js";
-import type { ModuleTool } from "../modules/types.js";
+import type { ModuleInfo, ModuleTool } from "../modules/types.js";
 import { SessionManager } from "../sessions/manager.js";
 import type { KuzushiConfig } from "../types.js";
-import type { ContextSnapshot, ShellHistoryEntry, ShellState, UIStore } from "../ui/state.js";
+import type {
+  ContextSnapshot,
+  ShellHistoryEntry,
+  ShellModuleCard,
+  ShellState,
+  TuneSnapshot,
+  UIStore,
+} from "../ui/state.js";
 import { CopilotCore } from "./core.js";
 import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
@@ -83,6 +90,8 @@ interface ShellContext {
   uiStore?: UIStore;
   /** Workspace manager for persistence (optional — degrades gracefully). */
   workspaceManager?: import("../workspace/manager.js").WorkspaceManager;
+  /** Absolute path to `.kuzushi/` for this session — used by tune/house-rules. */
+  dataDir?: string;
 }
 
 interface LocalCommandResult {
@@ -125,6 +134,88 @@ function capShellHistory(history: string[]): string[] {
 
 export function buildShellPrompt(focusedModule: string | null): string {
   return focusedModule ? `kuzushi/${focusedModule}> ` : "kuzushi> ";
+}
+
+/** `.kuzushi/house-rules/<moduleId>.md` — per-module nudge text from the operator. */
+function houseRulesPath(dataDir: string, moduleId: string): string {
+  return path.join(dataDir, "house-rules", `${moduleId}.md`);
+}
+
+/**
+ * Read the optional house-rules text for a module. Returns undefined when no
+ * file exists; never throws — an unreadable file just surfaces as empty.
+ */
+export function readHouseRules(dataDir: string, moduleId: string): string | undefined {
+  const file = houseRulesPath(dataDir, moduleId);
+  if (!existsSync(file)) return undefined;
+  try {
+    return readFileSync(file, "utf-8").trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Build the narrow TuneSnapshot the v2 Tune screen renders from. Pulls from
+ * KuzushiConfig so the Tune screen stays a pure read of the config the
+ * operator already has; edits still flow through the full ConfigEditor.
+ */
+export function buildTuneSnapshot(
+  config: KuzushiConfig,
+  dataDir: string,
+  focusedModule: string | null,
+): TuneSnapshot {
+  const houseRules = focusedModule ? readHouseRules(dataDir, focusedModule) : undefined;
+  const houseRulesPathStr = focusedModule ? houseRulesPath(dataDir, focusedModule) : undefined;
+  return {
+    // Preset is a CLI-level notion that doesn't round-trip to the stored
+    // config; when present in the live `config` snapshot it's available, but
+    // we leave it undefined if the user hasn't pinned one.
+    preset: (config as unknown as { preset?: string }).preset,
+    tasks: config.tasks ?? [],
+    verify: config.verify ?? false,
+    autoPatch: config.autoPatchEnabled ?? false,
+    triageConcurrency: config.triageConcurrency ?? 5,
+    model: config.model ?? "",
+    houseRules,
+    houseRulesPath: houseRulesPathStr,
+  };
+}
+
+/**
+ * Transform `core.listModules()` into the flat struct the v2 ModuleCatalog /
+ * ModuleHome screens render from. Keeping this here (rather than inside the
+ * UI layer) so the UI never has to import anything from `src/modules/`.
+ */
+export function buildModuleCatalog(
+  modules: ReadonlyArray<ModuleInfo>,
+  core: CopilotCore,
+): ShellModuleCard[] {
+  return modules.map((mod) => {
+    const instance = core.registry.has(mod.id) ? core.registry.get(mod.id) : undefined;
+    const toolSummaries = instance
+      ? instance.tools.map((tool) => ({
+          name: tool.name,
+          // Tool names are always fully-qualified "module:verb"; split to get the
+          // bare verb. Fall back to the full name if a module somehow used a
+          // different convention (e.g. an external package).
+          verb: tool.name.includes(":") ? tool.name.split(":").slice(1).join(":") : tool.name,
+          description: tool.description,
+          headless: tool.headless,
+        }))
+      : undefined;
+    return {
+      id: mod.id,
+      displayName: mod.displayName,
+      category: mod.category,
+      description: mod.description,
+      rank: mod.rank,
+      toolCount: mod.toolCount,
+      // External packages surface later via a loader flag; default false here.
+      external: false,
+      toolSummaries,
+    };
+  });
 }
 
 export function loadShellCommandHistory(dataDir: string): string[] {
@@ -412,6 +503,15 @@ function resolveToolName(
     return toolActionName(tool.name).toLowerCase() === lowered;
   });
   if (matches.length === 1) return matches[0]!.tool.name;
+
+  // Multiple action matches (e.g. `scan` → sast:scan, semgrep:scan, codeql:scan).
+  // Prefer the sast module when present — that's the canonical pipeline the CLI
+  // runs for `kuzushi scan .`, so bare `scan` in the shell should map there too.
+  // Without this, the input falls through to the NL agent and rambles.
+  if (matches.length > 1) {
+    const sastMatch = matches.find(({ module }) => module.id === "sast");
+    if (sastMatch) return sastMatch.tool.name;
+  }
 
   // Post SAST-split, a bare word like `semgrep` is likely the module id whose
   // primary tool is `semgrep:scan`. Fall back to matching module ids and
@@ -823,7 +923,12 @@ async function startInkShell(
   let activeAbortRequested = false;
 
   const currentCwd = (): string => (opts.target ? path.resolve(opts.target) : process.cwd());
-  const shellCtx: ShellContext = { focusedModule: null, uiStore: store, workspaceManager };
+  const shellCtx: ShellContext = {
+    focusedModule: null,
+    uiStore: store,
+    workspaceManager,
+    dataDir,
+  };
 
   // Live-session registry — used by WorkspaceDispatcher's `sessions -i/-k` and
   // by the session requirement preflight. Only meaningful when a workspace is
@@ -1538,10 +1643,14 @@ async function startInkShell(
     mode: "shell",
     shell: {
       modules: modules.map((module) => module.id),
+      moduleCatalog: buildModuleCatalog(modules, core),
       tools: tools.map(({ tool }) => tool.name),
       focusedModule: null,
+      shellView: "catalog",
+      openFindingId: null,
       target: opts.target ?? null,
       workspace: opts.workspace ?? null,
+      tuneSnapshot: buildTuneSnapshot(opts.config, dataDir, null),
       history: [],
       commandHistory,
       moduleOptions: {},
@@ -1617,13 +1726,17 @@ async function startReadlineShell(
   const commandHistory = loadShellCommandHistory(dataDir);
   const modules = core.listModules();
   const tools = core.registry.allTools();
-  const rlCtx: ShellContext = { focusedModule: null, workspaceManager };
+  const rlCtx: ShellContext = { focusedModule: null, workspaceManager, dataDir };
   let rlState: ShellState = {
     modules: modules.map((module) => module.id),
+    moduleCatalog: buildModuleCatalog(modules, core),
     tools: tools.map(({ tool }) => tool.name),
     focusedModule: null,
+    shellView: "catalog",
+    openFindingId: null,
     target: opts.target ?? null,
     workspace: opts.workspace ?? null,
+    tuneSnapshot: buildTuneSnapshot(opts.config, dataDir, null),
     history: [],
     commandHistory,
     moduleOptions: {},
@@ -1942,17 +2055,87 @@ function handleSlashCommand(
         return { output: `Unknown module: "${moduleId}". Type /modules to list available.` };
       }
       const mod = core.registry.get(moduleId);
+      const tuneSnapshot = ctx.dataDir
+        ? buildTuneSnapshot(opts.config, ctx.dataDir, moduleId)
+        : undefined;
       return {
         setFocus: moduleId,
+        shellStateUpdater: (shell) => ({
+          ...shell,
+          shellView: "module",
+          openFindingId: null,
+          tuneSnapshot: tuneSnapshot ?? shell.tuneSnapshot,
+        }),
         output: `Focused on ${mod.displayName}. ${mod.tools.length} tools available.`,
       };
     }
 
-    case "back":
+    case "back": {
+      // Step up through the shellView stack before falling back to top-level.
+      const currentView = shellState.shellView;
+      if (currentView === "finding") {
+        return {
+          shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
+          output: "Back to findings.",
+        };
+      }
+      if (currentView === "findings" || currentView === "tune") {
+        return {
+          shellStateUpdater: (shell) => ({ ...shell, shellView: "module" }),
+          output: "Back to module home.",
+        };
+      }
       if (ctx.focusedModule) {
-        return { setFocus: null, output: "Returned to top level." };
+        const clearedTune = ctx.dataDir
+          ? buildTuneSnapshot(opts.config, ctx.dataDir, null)
+          : undefined;
+        return {
+          setFocus: null,
+          shellStateUpdater: (shell) => ({
+            ...shell,
+            shellView: "catalog",
+            openFindingId: null,
+            tuneSnapshot: clearedTune ?? shell.tuneSnapshot,
+          }),
+          output: "Returned to top level.",
+        };
       }
       return { output: "Already at top level." };
+    }
+
+    case "findings":
+    case "f":
+      return {
+        shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
+        output: ctx.focusedModule
+          ? `Showing findings for ${ctx.focusedModule}.`
+          : "Showing all findings across modules.",
+      };
+
+    case "tune":
+    case "t":
+      if (!ctx.focusedModule) {
+        return { output: "Usage: /use <module> first, then /tune." };
+      }
+      return {
+        shellStateUpdater: (shell) => ({ ...shell, shellView: "tune" }),
+        output: `Tuning ${ctx.focusedModule}. Press p for expert prompt editor.`,
+      };
+
+    case "open": {
+      const findingId = args[0];
+      if (!findingId) {
+        return { output: "Usage: /open <F-NNNN|fingerprint>" };
+      }
+      return {
+        shellStateUpdater: (shell) => ({
+          ...shell,
+          shellView: "finding",
+          openFindingId: findingId,
+        }),
+        output: `Opening ${findingId}.`,
+      };
+    }
 
     case "options": {
       const resolved = resolveOptionsTool(
@@ -2294,19 +2477,26 @@ function resolveDirectToolDispatch(
     return undefined;
   }
 
-  if (cmd.toLowerCase() === "run" && args.length > 0) {
-    return resolveToolExecution(args[0]!, args.slice(1), core, opts, ctx, shellState);
-  }
-
   if (cmd.includes(":")) {
     return resolveToolExecution(cmd, args, core, opts, ctx, shellState);
   }
 
+  // Focused-module shorthand takes precedence over the `run <tool>` escape.
+  // Without this, inside a module whose primary tool is literally named `run`
+  // (e.g. `threat-hunt:run`), typing `run .` is parsed as "dispatch tool `.`"
+  // instead of "dispatch threat-hunt:run with positional `.`".
   if (ctx.focusedModule) {
     const qualifiedName = `${ctx.focusedModule}:${cmd}`;
     if (core.registry.resolveTool(qualifiedName)) {
       return resolveToolExecution(qualifiedName, args, core, opts, ctx, shellState);
     }
+  }
+
+  // `run <tool> [args]` explicit escape. Kept after focused-module resolution
+  // so that a focused module whose tool is named `run` wins; still available
+  // at top level and for explicit cross-module dispatch like `run sast:scan .`.
+  if (cmd.toLowerCase() === "run" && args.length > 0) {
+    return resolveToolExecution(args[0]!, args.slice(1), core, opts, ctx, shellState);
   }
 
   const resolvedToolName = resolveToolName(cmd, core, null);
@@ -2872,7 +3062,10 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/modules", "List loaded modules"],
         ["/tools", "List available tools"],
         ["/use <module>", "Focus on a module"],
-        ["/back", "Return to top level"],
+        ["/back", "Step back one level (finding → findings → module → catalog)"],
+        ["/findings", "Show the findings list for the current module"],
+        ["/open <F-NNNN>", "Open a finding in the linear deep page"],
+        ["/tune", "Open the tune view for the focused module"],
         ["/options [tool]", "Show tool options"],
         ["/set <key> <value>", "Set a tool option"],
         ["/config", "Open the interactive config editor"],

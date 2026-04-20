@@ -36,9 +36,18 @@ const DEBUG_ON = process.env.KUZUSHI_DEBUG === "1";
 
 interface FindingCardProps {
   finding: ActionableFinding;
+  /**
+   * Rendering mode. Defaults to the legacy `collapsible` card used on the
+   * running scan tab and in ScanSummary. `linear` is the Ink UI v2 screen 05
+   * deep page — state strip + vertical fields + action hint footer.
+   */
+  mode?: "collapsible" | "linear";
 }
 
-export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
+export function FindingCard({ finding, mode }: FindingCardProps): React.ReactElement {
+  if (mode === "linear") {
+    return <LinearFinding finding={finding} />;
+  }
   const verdict = colorVerdict(finding.verdict);
   const conf = muted(`(${(finding.confidence * 100).toFixed(0)}%)`);
   // Prefer the triage-assessed display severity when present — it reflects
@@ -242,6 +251,171 @@ export function FindingCard({ finding }: FindingCardProps): React.ReactElement {
       <Text> </Text>
     </Box>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Linear mode — Ink UI v2 screen 05 (finding deep page)
+// ---------------------------------------------------------------------------
+
+const STATE_STRIP: ReadonlyArray<{ key: string; label: string }> = [
+  { key: "new", label: "new" },
+  { key: "triaged", label: "triaged" },
+  { key: "verified", label: "verified" },
+  { key: "assigned", label: "assigned" },
+  { key: "in-review", label: "in-review" },
+  { key: "resolved", label: "resolved" },
+];
+
+function LinearFinding({ finding }: { finding: ActionableFinding }): React.ReactElement {
+  const shortId = `F-${finding.fingerprint.slice(0, 4)}`;
+  const sevLabel = severityLabel(finding.displaySeverity ?? finding.severity);
+  const titleLine = finding.title?.trim() ?? finding.ruleId;
+  const loc = `${finding.filePath}:${finding.startLine}`;
+  const current = resolveCurrentState(finding);
+
+  const evidenceLines: string[] = [];
+  if (finding.codeCitations && finding.codeCitations.length > 0) {
+    for (const cite of finding.codeCitations.slice(0, 3)) {
+      evidenceLines.push(`${cite.filePath}:${cite.startLine} — ${cite.description}`);
+    }
+  }
+  if (finding.attackPath?.chain?.length) {
+    evidenceLines.push(`taint: ${finding.attackPath.chain.join(" \u2192 ")}`);
+  }
+
+  return (
+    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+      <Box>
+        <Text>
+          {muted("\u25C2 findings   ")}
+          {strong(shortId)}
+          {muted("   \u2502   ")}
+          {sevLabel}
+          {"   "}
+          {strong(titleLine)}
+        </Text>
+      </Box>
+
+      <Box marginTop={1}>
+        <Text>
+          {"   "}
+          {STATE_STRIP.map((step, i) => {
+            const active = step.key === current;
+            const text = active ? strong(step.label) : muted(step.label);
+            return i === 0 ? text : `${muted(" \u2500\u25B6 ")}${text}`;
+          }).reduce((a, b) => a + b, "")}
+        </Text>
+      </Box>
+
+      <LinearRow label="where" value={loc} />
+      <LinearRow
+        label="found by"
+        value={`${finding.taskId || "sast"}${finding.ruleId ? ` · ${finding.ruleId}` : ""}`}
+      />
+      <LinearRow
+        label="fingerprint"
+        value={finding.fingerprint.slice(0, 16)}
+        hint="(stable — won't re-triage)"
+      />
+
+      <LinearParagraph label="rationale" text={finding.rationale} />
+
+      {evidenceLines.length > 0 && <LinearList label="evidence" items={evidenceLines} />}
+
+      {finding.verifyExploitable === 1 && (
+        <LinearRow
+          label="verification"
+          value={`${successStrong("exploit harness passed")} · exit 0`}
+        />
+      )}
+      {finding.verifyPocPayload && (
+        <LinearRow label="PoC" value={accent(finding.verifyPocPayload.slice(0, 100))} />
+      )}
+
+      {finding.verificationSteps && finding.verificationSteps.length > 0 && (
+        <LinearList label="next verification" items={finding.verificationSteps.slice(0, 4)} />
+      )}
+
+      <Box marginTop={1}>
+        <Text>{muted("\u2500".repeat(78))}</Text>
+      </Box>
+      <Box>
+        <Text>
+          {muted("a assign   c comment   s suppress   r resolve   p patch   v re-verify   q back")}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+function LinearRow({
+  label: labelText,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}): React.ReactElement {
+  return (
+    <Box marginTop={1}>
+      <Text>
+        {"  "}
+        {label(labelText.padEnd(14))}
+        {value}
+        {hint ? `  ${muted(hint)}` : ""}
+      </Text>
+    </Box>
+  );
+}
+
+function LinearParagraph({
+  label: labelText,
+  text,
+}: {
+  label: string;
+  text: string;
+}): React.ReactElement | null {
+  if (!text) return null;
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text>
+        {"  "}
+        {label(labelText)}
+      </Text>
+      <Box paddingLeft={4}>
+        <Text>{text}</Text>
+      </Box>
+    </Box>
+  );
+}
+
+function LinearList({
+  label: labelText,
+  items,
+}: {
+  label: string;
+  items: ReadonlyArray<string>;
+}): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text>
+        {"  "}
+        {label(labelText)}
+      </Text>
+      <Box flexDirection="column" paddingLeft={4}>
+        {items.map((item, i) => (
+          <Text key={`${i}-${item.slice(0, 12)}`}>{muted(item)}</Text>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
+function resolveCurrentState(finding: ActionableFinding): string {
+  if (finding.verifyExploitable === 1) return "verified";
+  if (finding.verdict && finding.verdict !== "needs_review") return "triaged";
+  return "new";
 }
 
 type CorroborationSignal = ActionableFinding["corroboratingSignals"][number];

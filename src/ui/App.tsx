@@ -17,7 +17,9 @@ import { ConfigConfirm } from "./components/ConfigConfirm.js";
 import { ConfigEditor } from "./components/ConfigEditor.js";
 import { ContextIntake } from "./components/ContextIntake.js";
 import { CopilotShell } from "./components/CopilotShell.js";
+import { CostView } from "./components/CostView.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
+import { FindingsView } from "./components/FindingsView.js";
 import { InteractiveReview } from "./components/InteractiveReview.js";
 import { NoticeRail } from "./components/NoticeRail.js";
 import { PipelineIndicator } from "./components/PipelineIndicator.js";
@@ -32,12 +34,10 @@ import { KeybindingsProvider } from "./hooks/useKeybindings.js";
 import { useUIState } from "./hooks.js";
 import { Breadcrumb } from "./primitives/Breadcrumb.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
-import { createReplContext, handleReplCommand } from "./repl.js";
-import type { ResultLine as ResultLineData, UIStore } from "./state.js";
-import { tokens } from "./tokens.js";
 import { TabBar } from "./primitives/TabBar.js";
-import { FindingsView } from "./components/FindingsView.js";
-import { CostView } from "./components/CostView.js";
+import { createReplContext, handleReplCommand } from "./repl.js";
+import type { Phase, PipelineStage, ResultLine as ResultLineData, UIStore } from "./state.js";
+import { tokens } from "./tokens.js";
 
 interface AppProps {
   store: UIStore;
@@ -224,15 +224,14 @@ function AppInner({ store }: AppProps): React.ReactElement {
                   results={liveResults}
                   agentActivity={state.agentActivity}
                   etaMs={state.etaMs}
+                  phase={phaseLabel(state.phase, state.stages)}
                 />
               )}
             </>
           )}
 
           {/* Findings view */}
-          {state.scanView === "findings" && (
-            <FindingsView results={state.results} />
-          )}
+          {state.scanView === "findings" && <FindingsView results={state.results} />}
 
           {/* Cost view */}
           {state.scanView === "cost" && (
@@ -289,4 +288,29 @@ function AppInner({ store }: AppProps): React.ReactElement {
       <KeybindFooter />
     </Box>
   );
+}
+
+/**
+ * Render the current scan phase as an English sentence for the v2 screen-03
+ * "now" band. Derives detail from the active stage so the header stays
+ * grounded in real pipeline state rather than a static string.
+ */
+function phaseLabel(
+  phase: Phase,
+  stages: PipelineStage[],
+): { title: string; detail?: string } | undefined {
+  if (phase === "idle" || phase === "done" || phase === "summary") return undefined;
+  const active = stages.find((s) => s.status === "active");
+  const detail = active?.detail ?? active?.label;
+  switch (phase) {
+    case "scanning":
+      return { title: "mapping the codebase and hunting for candidates", detail };
+    case "triaging":
+      return { title: "triaging candidates", detail };
+    case "verifying":
+      return { title: "verifying the worst offenders", detail };
+    case "poc":
+      return { title: "building proof-of-concept harnesses", detail };
+  }
+  return undefined;
 }
