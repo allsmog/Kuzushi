@@ -12,7 +12,7 @@
 
 import { Box, Static, Text, useApp, useInput } from "ink";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
 import { buildShellPrompt } from "../../copilot/shell.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
@@ -26,6 +26,7 @@ import { FindingsView } from "./FindingsView.js";
 import { ModuleCatalog } from "./ModuleCatalog.js";
 import { ModuleHome } from "./ModuleHome.js";
 import { PlanCard } from "./PlanCard.js";
+import { ScopeAndCriticalityView } from "./ScopeAndCriticalityView.js";
 import { Spinner } from "./Spinner.js";
 import { ThreatDfdView } from "./ThreatDfdView.js";
 import { ThreatPlaceholder } from "./ThreatPlaceholder.js";
@@ -214,18 +215,19 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     shell.history.length > LIVE_COUNT ? shell.history.slice(-LIVE_COUNT) : shell.history;
 
   // ModuleCatalog re-reads shell.moduleCatalog on every render; wrapping it in
-  // <Static> would freeze the first snapshot and hide module/last-run updates.
-  // Render it as a plain child at the top — there's exactly one catalog per
-  // session, so the cost is negligible.
+  // <Static> would freeze the first snapshot and hide module/last-run updates,
+  // so we render it plainly. To stop it from re-rendering on every shell state
+  // update (heartbeat ticks, phase events, etc. — which previously caused
+  // visible flicker), the banner is memoized on just the fields it reads.
   const showCatalog = shell.moduleCatalog && shell.moduleCatalog.length > 0;
 
   return (
     <Box flexDirection="column">
       {showCatalog ? (
-        <ShellBanner shell={shell} />
+        <MemoShellBanner shell={shell} />
       ) : (
         <Static items={["shell-banner"]}>
-          {() => <ShellBanner key="shell-banner" shell={shell} />}
+          {() => <MemoShellBanner key="shell-banner" shell={shell} />}
         </Static>
       )}
 
@@ -241,7 +243,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         ))}
       </Box>
 
-      <ShellViewPanel state={state} shell={shell} />
+      <MemoShellViewPanel state={state} shell={shell} />
 
       {shell.plannerBusy && !shell.pendingPlan && (
         <Box marginTop={1} paddingLeft={2}>
@@ -422,6 +424,7 @@ function ShellViewPanel({
     case "threat-stories":
       return <AttackerStoriesView shell={shell} />;
     case "threat-scope":
+      return <ScopeAndCriticalityView shell={shell} />;
     case "threat-summary":
       return <ThreatPlaceholder shell={shell} />;
     default:
@@ -429,7 +432,39 @@ function ShellViewPanel({
   }
 }
 
-function ShellBanner({ shell }: { shell: ShellState }): React.ReactElement {
+/**
+ * Memoized wrapper around ShellBanner — re-renders only when a field it
+ * actually reads changes. Without this, every `store.update(...)` (LLM
+ * heartbeat tick, phase-progress event, currentTool change) forces
+ * ModuleCatalog to redraw its whole table, which caused visible flicker
+ * on long-running tool runs.
+ */
+const MemoShellBanner = memo(
+  ShellBannerImpl,
+  (prev, next) =>
+    prev.shell.moduleCatalog === next.shell.moduleCatalog &&
+    prev.shell.modules === next.shell.modules &&
+    prev.shell.tools === next.shell.tools &&
+    prev.shell.target === next.shell.target &&
+    prev.shell.workspace === next.shell.workspace,
+);
+
+/**
+ * Same idea as `MemoShellBanner`, applied to the sub-view panel — so a
+ * running tool-spinner doesn't redraw the (unrelated) findings/finding/tune
+ * view tree on every heartbeat update.
+ */
+const MemoShellViewPanel = memo(
+  ShellViewPanel,
+  (prev, next) =>
+    prev.shell.shellView === next.shell.shellView &&
+    prev.shell.focusedModule === next.shell.focusedModule &&
+    prev.shell.openFindingId === next.shell.openFindingId &&
+    prev.shell.threatModel === next.shell.threatModel &&
+    prev.state.summary === next.state.summary,
+);
+
+function ShellBannerImpl({ shell }: { shell: ShellState }): React.ReactElement {
   // Prefer the v2 catalog view whenever we have module data; fall back to the
   // legacy flat header only if `moduleCatalog` hasn't been populated yet
   // (e.g. during an early boot tick before `startInkShell` finishes init).
