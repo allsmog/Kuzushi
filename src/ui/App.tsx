@@ -30,6 +30,7 @@ import { KeybindingsProvider } from "./hooks/useKeybindings.js";
 import { shallowEqual, useUISelector } from "./hooks.js";
 import { Breadcrumb } from "./primitives/Breadcrumb.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
+import { SpinnerClockProvider } from "./primitives/SpinnerClock.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
 import type { UIStore } from "./state.js";
 import { tokens } from "./tokens.js";
@@ -41,7 +42,9 @@ interface AppProps {
 export function App({ store }: AppProps): React.ReactElement {
   return (
     <KeybindingsProvider>
-      <AppInner store={store} />
+      <SpinnerClockProvider>
+        <AppInner store={store} />
+      </SpinnerClockProvider>
     </KeybindingsProvider>
   );
 }
