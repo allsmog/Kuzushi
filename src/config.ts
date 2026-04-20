@@ -1682,7 +1682,37 @@ export function resolveActiveCredentials(
 
 /** Slot name for `agentRuntimeConfig` that matches a backend id. */
 export function backendConfigSlot(backend: AgentRuntimeBackend | undefined): "claude" | "piAi" {
-  return (backend ?? "claude") === "pi-ai" ? "piAi" : "claude";
+  return (backend ?? "pi-ai") === "pi-ai" ? "piAi" : "claude";
+}
+
+/**
+ * Env var name for a provider's API key. Matches pi-ai's env resolution
+ * so setting via /auth mirrors what an operator would get by exporting.
+ */
+export function providerEnvVar(providerId: string): string | undefined {
+  const map: Record<string, string> = {
+    anthropic: "ANTHROPIC_API_KEY",
+    openai: "OPENAI_API_KEY",
+    google: "GOOGLE_API_KEY",
+    mistral: "MISTRAL_API_KEY",
+    groq: "GROQ_API_KEY",
+    cerebras: "CEREBRAS_API_KEY",
+    xai: "XAI_API_KEY",
+    openrouter: "OPENROUTER_API_KEY",
+  };
+  return map[providerId];
+}
+
+/**
+ * Env var name for a provider's base URL override.
+ */
+export function providerBaseUrlEnvVar(providerId: string): string | undefined {
+  const map: Record<string, string> = {
+    anthropic: "ANTHROPIC_BASE_URL",
+    openai: "OPENAI_BASE_URL",
+    google: "GOOGLE_BASE_URL",
+  };
+  return map[providerId];
 }
 
 function normalizeQualityGateConfig(value: unknown): QualityGateConfig | undefined {

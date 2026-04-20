@@ -434,54 +434,52 @@ async function applyCredentialOutcome(
     return { enabled: true };
   }
 
-  if (choice.kind === "api-key") {
-    mergeIntoActiveSlot(opts, {
-      apiKey: choice.value,
-      ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
-    });
-    process.env["ANTHROPIC_API_KEY"] = choice.value;
-    if (choice.baseUrl) process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
-    await rebuildShellRuntime(opts);
+  const { providerEnvVar, providerBaseUrlEnvVar, backendConfigSlot, persistLocalCredentials } =
+    await import("../config.js");
 
-    if (choice.persist) {
-      try {
-        const { persistLocalCredentials, backendConfigSlot } = await import("../config.js");
-        const targetCwd = opts.target ? path.resolve(opts.target) : process.cwd();
-        const slot = backendConfigSlot(opts.config.agentRuntimeBackend);
-        const writtenTo = persistLocalCredentials(
-          {
-            [slot]: {
-              apiKey: choice.value,
-              ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
-            },
-          },
-          targetCwd,
-        );
-        return {
-          enabled: true,
-          message: `Copilot enabled. Credentials saved to ${writtenTo} (${slot} slot).`,
-          persistedTo: writtenTo,
-        };
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        return {
-          enabled: true,
-          message: `Copilot enabled (in-memory). Failed to persist credentials: ${detail}`,
-        };
-      }
-    }
+  const providerLabel = choice.providerId;
+  const apiKey = choice.kind === "api-key" ? choice.value : choice.apiKey;
+  const baseUrl = choice.baseUrl;
+  const persist = choice.persist === true;
 
-    return { enabled: true, message: "Copilot enabled for this session." };
-  }
+  // Merge the new creds into the active backend slot so rebuildShellRuntime
+  // can pick them up this session.
+  const slotPatch: Record<string, string> = {};
+  if (apiKey) slotPatch.apiKey = apiKey;
+  if (baseUrl) slotPatch.baseUrl = baseUrl;
+  mergeIntoActiveSlot(opts, slotPatch);
 
-  // oauth-token
-  process.env["ANTHROPIC_OAUTH_TOKEN"] = choice.value;
-  if (choice.baseUrl) {
-    mergeIntoActiveSlot(opts, { baseUrl: choice.baseUrl });
-    process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
-  }
+  // Export to env vars pi-ai will resolve when the runtime initializes.
+  const envKey = providerEnvVar(providerLabel);
+  if (envKey && apiKey) process.env[envKey] = apiKey;
+  const envUrl = providerBaseUrlEnvVar(providerLabel);
+  if (envUrl && baseUrl) process.env[envUrl] = baseUrl;
+
   await rebuildShellRuntime(opts);
-  return { enabled: true, message: "Copilot enabled for this session (OAuth token)." };
+
+  if (persist) {
+    try {
+      const targetCwd = opts.target ? path.resolve(opts.target) : process.cwd();
+      const slot = backendConfigSlot(opts.config.agentRuntimeBackend);
+      const writtenTo = persistLocalCredentials(
+        { [slot]: slotPatch },
+        targetCwd,
+      );
+      return {
+        enabled: true,
+        message: `Copilot enabled. ${providerLabel} credentials saved to ${writtenTo} (${slot} slot).`,
+        persistedTo: writtenTo,
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        enabled: true,
+        message: `Copilot enabled (in-memory). Failed to persist credentials: ${detail}`,
+      };
+    }
+  }
+
+  return { enabled: true, message: `Copilot enabled for this session (${providerLabel}).` };
 }
 
 export function createShellSession(
