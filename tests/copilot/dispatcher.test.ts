@@ -4,6 +4,7 @@ import { DispatcherDriver, tokenize } from "../../src/copilot/dispatcher/driver.
 import type { CommandDispatcher } from "../../src/copilot/dispatcher/types.js";
 import { Datastore } from "../../src/copilot/options.js";
 import { createArraySink } from "../../src/copilot/print.js";
+import { JobManager } from "../../src/jobs/manager.js";
 import { ModuleRegistry } from "../../src/modules/registry.js";
 import type { CopilotModule, ModuleTool, ToolResult } from "../../src/modules/types.js";
 
@@ -499,6 +500,132 @@ describe("CoreDispatcher runTool wiring", () => {
     expect(calls[0].input.TARGET).toBe(".");
     expect(result.matched).toBe(true);
     expect(result.output).toBe("ran sast:run");
+  });
+});
+
+describe("background jobs", () => {
+  function seedWithJobs(): {
+    driver: DispatcherDriver;
+    jobs: JobManager;
+    tool: ModuleTool;
+  } {
+    const registry = new ModuleRegistry();
+    const tool: ModuleTool = {
+      name: "sast:scan",
+      description: "dummy",
+      inputSchema: { type: "object", properties: {} },
+      headless: true,
+      async execute(): Promise<ToolResult> {
+        return { ok: true, output: "scan done" };
+      },
+    };
+    registry.register(mkModule("sast", [tool]));
+    (registry as unknown as { initialized: Set<string> }).initialized.add("sast");
+
+    const jobs = new JobManager();
+    const runTool = async (t: ModuleTool): Promise<ToolResult> => {
+      await new Promise((r) => setImmediate(r));
+      return { ok: true, output: `ran ${t.name}` };
+    };
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+      jobManager: jobs,
+      runTool,
+    });
+    const sink = createArraySink();
+    const driver = new DispatcherDriver({
+      base: core,
+      cwd: "/tmp",
+      print: sink,
+      jobManager: jobs,
+    });
+    return { driver, jobs, tool };
+  }
+
+  it("`jobs` with no jobs prints the empty-state message", async () => {
+    const { driver } = seedWithJobs();
+    const result = await driver.handle("jobs");
+    expect(result.output).toContain("(no jobs)");
+  });
+
+  it("`run --bg` backgrounds the tool and `jobs -i` tails output", async () => {
+    const { driver, jobs } = seedWithJobs();
+    await driver.handle("use sast");
+    const bg = await driver.handle("run --bg");
+    expect(bg.output).toContain("Started job");
+    expect(jobs.list()).toHaveLength(1);
+
+    // Wait for the background run to terminate.
+    await new Promise<void>((resolve) => {
+      const poll = () => {
+        if (jobs.list().every((j) => j.state !== "running")) resolve();
+        else setImmediate(poll);
+      };
+      poll();
+    });
+
+    const id = jobs.list()[0]?.id ?? "";
+    const inspect = await driver.handle(`jobs -i ${id}`);
+    expect(inspect.output).toContain(`Job ${id}`);
+    expect(inspect.output).toContain("sast:scan");
+    expect(inspect.output).toContain("completed");
+  });
+
+  it("`jobs -k` cancels a running job", async () => {
+    const registry = new ModuleRegistry();
+    const tool: ModuleTool = {
+      name: "sast:scan",
+      description: "slow",
+      inputSchema: { type: "object", properties: {} },
+      headless: true,
+      async execute(_input, ctx): Promise<ToolResult> {
+        await new Promise((resolve, reject) => {
+          ctx.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        });
+        return { ok: true, output: "" };
+      },
+    };
+    registry.register(mkModule("sast", [tool]));
+    (registry as unknown as { initialized: Set<string> }).initialized.add("sast");
+
+    const jobs = new JobManager();
+    // Minimal runner: honor the provided signal so `jobs -k` aborts the run.
+    const runTool = (t: ModuleTool, _input: Record<string, unknown>, signal?: AbortSignal) =>
+      new Promise<ToolResult>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      history: () => [],
+      jobManager: jobs,
+      runTool,
+    });
+    const driver = new DispatcherDriver({
+      base: core,
+      cwd: "/tmp",
+      print: createArraySink(),
+      jobManager: jobs,
+    });
+
+    await driver.handle("use sast");
+    const bg = await driver.handle("run --bg");
+    expect(bg.output).toContain("Started job");
+    const id = jobs.list()[0]?.id ?? "";
+    const killed = await driver.handle(`jobs -k ${id}`);
+    expect(killed.output).toContain(`Cancelled job ${id}`);
+
+    await new Promise<void>((resolve) => {
+      const poll = () => {
+        const j = jobs.get(id);
+        if (j && j.state !== "running") resolve();
+        else setImmediate(poll);
+      };
+      poll();
+    });
+    expect(jobs.get(id)?.state).toBe("cancelled");
   });
 });
 

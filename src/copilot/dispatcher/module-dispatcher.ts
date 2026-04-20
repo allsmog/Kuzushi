@@ -95,7 +95,10 @@ export class ModuleDispatcher implements CommandDispatcher {
   }
 
   private async cmd_run(args: string[], ctx: CommandContext): Promise<CommandResult> {
-    const explicit = args[0];
+    // Pull off backgrounding flags before tool-name resolution.
+    const bg = args.includes("--bg") || args.includes("&");
+    const posArgs = args.filter((a) => a !== "--bg" && a !== "&");
+    const explicit = posArgs[0];
     const tool = explicit
       ? this.module.tools.find(
           (t) => t.name === explicit || t.name === `${this.module.id}:${explicit}`,
@@ -104,7 +107,39 @@ export class ModuleDispatcher implements CommandDispatcher {
     if (!tool) {
       return { output: explicit ? `[-] Unknown tool: ${explicit}` : "[-] No runnable tool." };
     }
+    if (bg) return this.invokeInBackground(tool, ctx);
     return this.invoke(tool, ctx);
+  }
+
+  /**
+   * Fire-and-forget variant of `invoke`. Registers the tool run as a job
+   * with the driver's JobManager (if any) and returns immediately with the
+   * assigned job id. Preflight (requires, missing-required) still runs so
+   * operators get immediate feedback on unmet deps.
+   */
+  private async invokeInBackground(tool: ModuleTool, ctx: CommandContext): Promise<CommandResult> {
+    const missing = this.datastore.missingRequired();
+    if (missing.length > 0) {
+      return { output: `[-] Missing required: ${missing.join(", ")}` };
+    }
+    const depError = this.checkRequires(ctx);
+    if (depError) return { output: depError };
+    if (!this.runTool) {
+      return { output: `[*] Would background ${tool.name}` };
+    }
+    const jobMgr = ctx.driver.jobManager?.();
+    if (!jobMgr) {
+      return { output: "[-] Background jobs are not enabled. Run foreground instead." };
+    }
+    const input = this.datastore.snapshot();
+    const id = jobMgr.start({ label: tool.name, kind: "tool" }, async (jobCtx) => {
+      jobCtx.log(`[*] Running ${tool.name} in background`);
+      const result = await this.runTool!(tool, input, jobCtx.signal, this.datastore);
+      jobCtx.log(result.ok ? `[+] ${tool.name} completed` : `[-] ${tool.name} failed`);
+      if (result.output) for (const line of result.output.split("\n")) jobCtx.log(line);
+      return result.output;
+    });
+    return { output: `[*] Started job ${id} — ${tool.name} (tail: jobs -i ${id})` };
   }
 
   private async invoke(tool: ModuleTool, ctx: CommandContext): Promise<CommandResult> {
@@ -234,6 +269,15 @@ function propertyToSpec(name: string, schema: JSONSchema, required: boolean): Op
   const description = String((schema as { description?: string }).description ?? "");
   const def = (schema as { default?: unknown }).default;
   const choices = (schema as { enum?: unknown[] }).enum;
+  // JSONSchema extensions that classify an option's display surface.
+  // `show options`    → non-advanced, non-evasion only
+  // `show advanced`   → advanced only
+  // `show evasion`    → evasion only
+  const advanced = (schema as { "x-advanced"?: boolean })["x-advanced"] === true;
+  const evasion = (schema as { "x-evasion"?: boolean })["x-evasion"] === true;
+  const extra: Partial<OptionSpec> = {};
+  if (advanced) extra.advanced = true;
+  if (evasion) extra.evasion = true;
   if (Array.isArray(choices) && choices.every((c) => typeof c === "string")) {
     return {
       name,
@@ -242,6 +286,7 @@ function propertyToSpec(name: string, schema: JSONSchema, required: boolean): Op
       required,
       ...(def !== undefined ? { default: def as string } : {}),
       choices: choices as string[],
+      ...extra,
     };
   }
   switch (t) {
@@ -252,6 +297,7 @@ function propertyToSpec(name: string, schema: JSONSchema, required: boolean): Op
         description,
         required,
         ...(def !== undefined ? { default: def as boolean } : {}),
+        ...extra,
       };
     case "integer":
       return {
@@ -260,6 +306,7 @@ function propertyToSpec(name: string, schema: JSONSchema, required: boolean): Op
         description,
         required,
         ...(def !== undefined ? { default: def as number } : {}),
+        ...extra,
       };
     case "number":
       return {
@@ -268,6 +315,7 @@ function propertyToSpec(name: string, schema: JSONSchema, required: boolean): Op
         description,
         required,
         ...(def !== undefined ? { default: def as number } : {}),
+        ...extra,
       };
     default:
       return {
@@ -276,6 +324,7 @@ function propertyToSpec(name: string, schema: JSONSchema, required: boolean): Op
         description,
         required,
         ...(def !== undefined ? { default: def as string } : {}),
+        ...extra,
       };
   }
 }

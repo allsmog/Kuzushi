@@ -12,6 +12,7 @@
  * (e.g. routing to the LLM agent or printing "unknown command").
  */
 
+import type { JobManager } from "../../jobs/manager.js";
 import type { PrintSink } from "../print.js";
 
 /** Result returned by a command handler. */
@@ -92,4 +93,12 @@ export interface Driver {
    * that kind (e.g. "ssh"). Omit to count all open sessions.
    */
   getLiveSessionCount?(kind?: string): number | undefined;
+  /**
+   * Optional JobManager accessor. Module dispatchers call this to register
+   * `run --bg` tool invocations as background jobs; the core dispatcher's
+   * `jobs` command uses the same manager to list/kill/tail jobs.
+   *
+   * Omitted when the host shell doesn't enable backgrounding (tests, run-mode).
+   */
+  jobManager?(): JobManager | undefined;
 }
