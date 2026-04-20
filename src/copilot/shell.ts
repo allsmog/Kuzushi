@@ -2485,6 +2485,9 @@ function handleSlashCommand(
     case "backend":
       return handleBackendCommand(args, opts);
 
+    case "provider":
+      return handleProviderCommand(args, opts);
+
     case "context": {
       const sub = args[0]?.toLowerCase();
 
@@ -3526,11 +3529,13 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
         lines.push(...formatBackendSlots(opts.config.agentRuntimeConfig));
         lines.push(
           "",
-          "Available: claude, pi-ai",
+          "Available: pi-ai (default, 20+ providers), claude (legacy CC subprocess)",
           "Usage:",
           "  /backend show           Show current + persisted backend + credentials",
-          "  /backend claude         Use claude (interactive shell + scans)",
-          "  /backend pi-ai          Use pi-ai (scans only; shell auto-falls-back to claude)",
+          "  /backend pi-ai          Use pi-ai — multi-provider, in-process (recommended)",
+          "  /backend claude         Use Claude Code SDK — Anthropic only, subprocess-per-task",
+          "",
+          "For provider/model selection, use /provider instead.",
           `Persists to ${configPath()}.`,
         );
         return lines.join("\n");
@@ -3576,6 +3581,78 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
         );
       }
       return lines.join("\n");
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// /provider — show or set the default model (provider:model)
+// ---------------------------------------------------------------------------
+
+/** Common model presets surfaced by `/provider list` for fast switching. */
+const PROVIDER_PRESETS = [
+  { id: "anthropic:claude-sonnet-4-6", label: "Anthropic — Claude Sonnet (recommended)" },
+  { id: "anthropic:claude-opus-4-6", label: "Anthropic — Claude Opus (accurate)" },
+  { id: "anthropic:claude-haiku-4-5", label: "Anthropic — Claude Haiku (fast)" },
+  { id: "openai:gpt-5-mini", label: "OpenAI — GPT-5 mini" },
+  { id: "openai:gpt-5", label: "OpenAI — GPT-5" },
+  { id: "google:gemini-2.5-pro", label: "Google — Gemini 2.5 Pro" },
+  { id: "google:gemini-2.5-flash", label: "Google — Gemini 2.5 Flash" },
+  { id: "groq:llama-3.3-70b-versatile", label: "Groq — Llama 3.3 70B" },
+  { id: "openrouter:anthropic/claude-sonnet-4-6", label: "OpenRouter — Sonnet proxy" },
+] as const;
+
+function handleProviderCommand(args: string[], opts: ShellOptions): LocalCommandResult {
+  const sub = (args[0] ?? "").toLowerCase();
+
+  if (!sub || sub === "show") {
+    return {
+      output: [
+        `Current model: ${opts.config.model ?? "(unset)"}`,
+        "",
+        "Usage:",
+        "  /provider show             Show current model",
+        "  /provider list             List preset provider:model combos",
+        "  /provider <provider:model> Set model (persists to config.json)",
+        "",
+        "Credentials for the chosen provider must be set via /auth.",
+      ].join("\n"),
+    };
+  }
+
+  if (sub === "list") {
+    const lines = ["Preset provider:model combos:"];
+    for (const preset of PROVIDER_PRESETS) {
+      const active = preset.id === opts.config.model ? " (active)" : "";
+      lines.push(`  ${preset.id.padEnd(44)} ${preset.label}${active}`);
+    }
+    lines.push("", "Set one with: /provider <id>");
+    lines.push("See pi-ai docs for the full list of supported models.");
+    return { output: lines.join("\n") };
+  }
+
+  // Otherwise treat `sub` as a raw model id (e.g. `/provider openai:gpt-5`)
+  const modelId = args.join(" ").trim();
+  if (!modelId.includes(":")) {
+    return {
+      output: `Model id must be "<provider>:<model>" (e.g. "openai:gpt-5-mini"). Got: ${modelId}`,
+    };
+  }
+  return {
+    asyncExecute: async () => {
+      const { applyConfigPatch, configPath } = await import("../config.js");
+      try {
+        applyConfigPatch([{ path: "model", value: modelId }]);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return `Failed to set model: ${detail}`;
+      }
+      opts.config.model = modelId;
+      const providerId = modelId.split(":")[0];
+      return [
+        `Model set to "${modelId}" in ${configPath()}.`,
+        `Ensure ${providerId} credentials are configured (run /auth if not).`,
+      ].join("\n");
     },
   };
 }
@@ -3878,9 +3955,10 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/set <key> <value>", "Set a tool option"],
         ["/config", "Open the interactive config editor"],
         ["/config raw|get|set|path", "Inspect/update ~/.kuzushi/config.json"],
-        ["/auth", "Set or change Anthropic API key / OAuth token for the copilot"],
-        ["/ask <question>", "Ask Claude with current shell context (? prefix also works)"],
-        ["/backend [claude|pi-ai]", "Show or change the agent runtime backend"],
+        ["/auth", "Set or change credentials for any supported provider"],
+        ["/provider", "Show or set the default <provider>:<model> (e.g. openai:gpt-5-mini)"],
+        ["/ask <question>", "Ask the agent with current shell context (? prefix also works)"],
+        ["/backend [claude|pi-ai]", "Show or change the agent runtime backend (advanced)"],
         ["/target <path>", "Set or show the active target"],
         ["/context", "Generate or show application context map"],
         ["/context edit", "Review/edit operator scan context"],
