@@ -443,7 +443,11 @@ export type ShellView =
   | "threat-stride"
   | "threat-stories"
   | "threat-scope"
-  | "threat-summary";
+  | "threat-summary"
+  // Phase D.3 — diff-aware view showing findings + threat elements scoped
+  // to the set of files that differ between HEAD and a user-supplied git
+  // ref (e.g. main). Interactive surface over the existing scan `--since`.
+  | "diff-since";
 
 /**
  * Rich per-module info used by the v2 ModuleCatalog and ModuleHome screens.
@@ -543,6 +547,17 @@ export interface ShellState {
    * hint at the top of threat views so staleness is visible.
    */
   threatModelSource?: { path: string; mtimeMs: number };
+  /**
+   * Diff-aware scope populated on `/since <ref>` — the list of repo-
+   * relative paths that differ between HEAD and the operator-supplied
+   * ref. Read by DiffSinceView to filter findings + threat elements.
+   */
+  diffSince?: {
+    ref: string;
+    repoRoot: string;
+    changedFiles: string[];
+    error?: string;
+  } | null;
   /** Conversation history (rendered in the scroll region). */
   history: ShellHistoryEntry[];
   /** Submitted commands, capped and persisted for prompt recall. */
@@ -561,9 +576,16 @@ export interface ShellState {
    * Currently executing tool (shown as inline activity).
    * `startedAt` (epoch ms) lets the UI tick elapsed locally without poking
    * shell state every second. `elapsedSeconds` is a one-shot push from SDK
-   * tool-progress messages that self-report elapsed time.
+   * tool-progress messages that self-report elapsed time. `subLabel` is a
+   * fine-grained phase ("phase 2 (S4 threats)") populated from
+   * `task:phase-progress` bus events and reset whenever `name` changes.
    */
-  currentTool?: { name: string; startedAt?: number; elapsedSeconds?: number };
+  currentTool?: {
+    name: string;
+    startedAt?: number;
+    elapsedSeconds?: number;
+    subLabel?: string;
+  };
   /**
    * Rolling LLM-call heartbeat for the active turn — populated from
    * `llm:call-start/complete/error` bus events so the shell spinner can show
