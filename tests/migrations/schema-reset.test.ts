@@ -40,20 +40,20 @@ afterEach(() => {
   }
 });
 
-describe("v100 schema reset", () => {
-  it("applies v100 to a fresh DB without producing a backup", () => {
+describe("schema reset and incremental migrations", () => {
+  it("applies all migrations to a fresh DB without producing a backup", () => {
     const dbPath = tmpDb();
     const db = initDb(dbPath);
     try {
-      const rows = db.prepare("SELECT version FROM schema_version").all();
-      expect(rows).toEqual([{ version: 100 }]);
+      const rows = db.prepare("SELECT version FROM schema_version ORDER BY version").all();
+      expect(rows).toEqual([{ version: 100 }, { version: 101 }]);
       expect(readdirSync(path.dirname(dbPath)).filter((n) => n.includes(".bak-"))).toHaveLength(0);
     } finally {
       db.close();
     }
   });
 
-  it("renames a legacy pre-v100 DB and applies v100 to a fresh file", () => {
+  it("renames a legacy pre-v100 DB and applies all migrations to a fresh file", () => {
     const dbPath = tmpDb();
     seedLegacyDb(dbPath, 25);
 
@@ -67,9 +67,9 @@ describe("v100 schema reset", () => {
       const backup = path.join(path.dirname(dbPath), "findings.sqlite3.bak-v25-20260416T142307");
       expect(existsSync(backup)).toBe(true);
 
-      // New DB has only v100 and no legacy data.
-      const versions = db.prepare("SELECT version FROM schema_version").all();
-      expect(versions).toEqual([{ version: 100 }]);
+      // New DB has v100+v101 and no legacy data.
+      const versions = db.prepare("SELECT version FROM schema_version ORDER BY version").all();
+      expect(versions).toEqual([{ version: 100 }, { version: 101 }]);
       const legacyRow = db.prepare("SELECT COUNT(*) as n FROM findings").get() as { n: number };
       expect(legacyRow.n).toBe(0);
     } finally {
@@ -77,7 +77,39 @@ describe("v100 schema reset", () => {
     }
   });
 
-  it("is a no-op on an already-v100 DB", () => {
+  it("upgrades a v100 DB in place to v101 without backup", () => {
+    const dbPath = tmpDb();
+    const first = initDb(dbPath);
+    // Roll the DB back to "v100 only" to simulate a pre-v101 install.
+    first.prepare("DELETE FROM schema_version WHERE version > 100").run();
+    first.exec(`
+      DROP TABLE IF EXISTS sessions;
+      DROP TABLE IF EXISTS cred_logins;
+      DROP TABLE IF EXISTS creds;
+      DROP TABLE IF EXISTS notes;
+      DROP TABLE IF EXISTS loot;
+      DROP TABLE IF EXISTS vulns;
+      DROP TABLE IF EXISTS services;
+      DROP TABLE IF EXISTS hosts;
+    `);
+    first.close();
+
+    const resets: unknown[] = [];
+    const second = initDb(dbPath, { onReset: (i) => resets.push(i) });
+    try {
+      expect(resets).toHaveLength(0); // No backup — pure in-place upgrade.
+      const versions = second.prepare("SELECT version FROM schema_version ORDER BY version").all();
+      expect(versions).toEqual([{ version: 100 }, { version: 101 }]);
+      const hostsExists = second
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='hosts'")
+        .get();
+      expect(hostsExists).toBeTruthy();
+    } finally {
+      second.close();
+    }
+  });
+
+  it("is a no-op on an already-current DB", () => {
     const dbPath = tmpDb();
     const first = initDb(dbPath);
     first.close();
@@ -86,14 +118,14 @@ describe("v100 schema reset", () => {
     const second = initDb(dbPath, { onReset: (i) => resets.push(i) });
     try {
       expect(resets).toHaveLength(0);
-      const versions = second.prepare("SELECT version FROM schema_version").all();
-      expect(versions).toEqual([{ version: 100 }]);
+      const versions = second.prepare("SELECT version FROM schema_version ORDER BY version").all();
+      expect(versions).toEqual([{ version: 100 }, { version: 101 }]);
     } finally {
       second.close();
     }
   });
 
-  it("throws SchemaStateError on a future schema_version > 100", () => {
+  it("throws SchemaStateError on a future schema_version > current", () => {
     const dbPath = tmpDb();
     const db = new Database(dbPath);
     db.exec(`

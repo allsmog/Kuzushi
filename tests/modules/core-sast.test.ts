@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCoreSastModule } from "../../src/modules/core-sast.js";
+import { createSemgrepModule } from "../../src/modules/sast/core-semgrep.js";
+import { createTaintIrisModule } from "../../src/modules/sast/core-taint-iris.js";
+import { createThreatHuntModule } from "../../src/modules/sast/core-threat-hunt.js";
 import type { ToolExecutionContext } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
@@ -108,12 +111,11 @@ describe("createCoreSastModule tool execution", () => {
       },
     });
 
-    const module = createCoreSastModule();
     const ctx = createContext();
 
-    const semgrepTool = module.tools.find((entry) => entry.name === "sast:semgrep");
-    const threatHuntTool = module.tools.find((entry) => entry.name === "sast:threat-hunt");
-    const taintIrisTool = module.tools.find((entry) => entry.name === "sast:taint-iris");
+    const semgrepTool = createSemgrepModule().tools.find((e) => e.name === "semgrep:scan");
+    const threatHuntTool = createThreatHuntModule().tools.find((e) => e.name === "threat-hunt:run");
+    const taintIrisTool = createTaintIrisModule().tools.find((e) => e.name === "taint-iris:hunt");
 
     await semgrepTool!.execute({ target: "/tmp/repo", severity: ["high"] }, ctx);
     expect(runPipelineMock).toHaveBeenLastCalledWith(

@@ -78,6 +78,45 @@ describe("ModuleRegistry", () => {
     expect(reg.resolveTool("nocolon")).toBeUndefined();
   });
 
+  it("resolves tool names via registered alias", () => {
+    const reg = new ModuleRegistry();
+    const tool = makeDummyTool("semgrep:scan");
+    reg.register(makeDummyModule("semgrep", [tool]));
+    reg.registerAlias("sast:semgrep", "semgrep:scan");
+    const resolved = reg.resolveTool("sast:semgrep");
+    expect(resolved).toBeDefined();
+    expect(resolved!.tool.name).toBe("semgrep:scan");
+    expect(resolved!.module.id).toBe("semgrep");
+  });
+
+  it("alias to unknown tool returns undefined cleanly", () => {
+    const reg = new ModuleRegistry();
+    reg.registerAlias("sast:ghost", "missing:tool");
+    expect(reg.resolveTool("sast:ghost")).toBeUndefined();
+  });
+
+  it("alias does not shadow a real tool with the same name", () => {
+    const reg = new ModuleRegistry();
+    const direct = makeDummyTool("sast:scan");
+    reg.register(makeDummyModule("sast", [direct]));
+    const elsewhere = makeDummyTool("other:scan");
+    reg.register(makeDummyModule("other", [elsewhere]));
+    reg.registerAlias("sast:scan", "other:scan");
+    // Direct lookup wins.
+    expect(reg.resolveTool("sast:scan")?.tool).toBe(direct);
+  });
+
+  it("listAliases returns all registered redirects", () => {
+    const reg = new ModuleRegistry();
+    reg.registerAlias("sast:semgrep", "semgrep:scan");
+    reg.registerAlias("sast:codeql", "codeql:scan");
+    const entries = reg
+      .listAliases()
+      .map((a) => `${a.from}=>${a.to}`)
+      .sort();
+    expect(entries).toEqual(["sast:codeql=>codeql:scan", "sast:semgrep=>semgrep:scan"]);
+  });
+
   it("allTools filters by headless", () => {
     const reg = new ModuleRegistry();
     const headlessTool = makeDummyTool("m:headless", true);
@@ -165,40 +204,41 @@ describe("parseModuleSpecifier", () => {
 });
 
 describe("createCoreSastModule", () => {
-  it("creates a valid module with expected properties", () => {
+  it("is now a slim umbrella owning only sast:scan", () => {
     const mod = createCoreSastModule();
     expect(mod.id).toBe("sast");
-    expect(mod.category).toBe("offense");
-    expect(mod.tools).toHaveLength(11);
-    expect(mod.tools.map((t) => t.name)).toEqual([
-      "sast:context",
-      "sast:scan",
-      "sast:semgrep",
-      "sast:codeql",
-      "sast:agentic",
-      "sast:threat-hunt",
-      "sast:taint-iris",
-      "sast:triage",
-      "sast:verify",
-      "sast:patch",
-      "sast:findings",
-    ]);
+    expect(mod.category).toBe("defense");
+    expect(mod.tools).toHaveLength(1);
+    expect(mod.tools.map((t) => t.name)).toEqual(["sast:scan"]);
     // All tools should be headless
     for (const tool of mod.tools) {
       expect(tool.headless).toBe(true);
     }
   });
 
-  it("resolves the standalone SAST task tools", () => {
+  it("legacy sast:<action> names resolve through aliases to the sub-modules", async () => {
+    // Mirror what CopilotCore.init() does: load the family + register aliases.
+    const { createSemgrepModule } = await import("../../src/modules/sast/core-semgrep.js");
+    const { createCodeqlModule } = await import("../../src/modules/sast/core-codeql.js");
+    const { createTriageModule } = await import("../../src/modules/sast/core-triage.js");
     const reg = new ModuleRegistry();
-    const mod = createCoreSastModule();
-    reg.register(mod);
-    (reg as any).initialized.add("sast");
+    for (const m of [
+      createCoreSastModule(),
+      createSemgrepModule(),
+      createCodeqlModule(),
+      createTriageModule(),
+    ]) {
+      reg.register(m);
+      (reg as any).initialized.add(m.id);
+    }
+    reg.registerAlias("sast:semgrep", "semgrep:scan");
+    reg.registerAlias("sast:codeql", "codeql:scan");
+    reg.registerAlias("sast:triage", "triage:run");
 
-    expect(reg.resolveTool("sast:semgrep")?.tool.name).toBe("sast:semgrep");
-    expect(reg.resolveTool("sast:codeql")?.tool.name).toBe("sast:codeql");
-    expect(reg.resolveTool("sast:agentic")?.tool.name).toBe("sast:agentic");
-    expect(reg.resolveTool("sast:threat-hunt")?.tool.name).toBe("sast:threat-hunt");
-    expect(reg.resolveTool("sast:taint-iris")?.tool.name).toBe("sast:taint-iris");
+    expect(reg.resolveTool("sast:semgrep")?.tool.name).toBe("semgrep:scan");
+    expect(reg.resolveTool("sast:codeql")?.tool.name).toBe("codeql:scan");
+    expect(reg.resolveTool("sast:triage")?.tool.name).toBe("triage:run");
+    // Direct `sast:scan` still wins via direct lookup.
+    expect(reg.resolveTool("sast:scan")?.tool.name).toBe("sast:scan");
   });
 });

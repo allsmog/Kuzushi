@@ -1,0 +1,7 @@
+# CI-fast: no LLM-heavy stages. Use in the lightest presubmit lane.
+commands:
+  - use semgrep
+  - run
+  - back
+  - use triage
+  - run
