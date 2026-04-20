@@ -21,6 +21,7 @@ import { MultilineText } from "../primitives/MultilineText.js";
 import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
 import { tokens } from "../tokens.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
+import { BannerSplash } from "./BannerSplash.js";
 import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
 import { ModuleCatalog } from "./ModuleCatalog.js";
@@ -223,6 +224,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
   return (
     <Box flexDirection="column">
+      {/* Phase D.2 banner splash — one-shot ASCII wordmark + tip. Inside
+          a <Static> so it stays at the top and doesn't re-render during
+          normal shell churn. */}
+      <Static items={["kz-splash"]}>
+        {() => <BannerSplash key="kz-splash" workspace={shell.workspace} target={shell.target} />}
+      </Static>
+
       {showCatalog ? (
         <MemoShellBanner shell={shell} />
       ) : (
@@ -321,8 +329,10 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 /**
  * Self-ticking elapsed-time display. Owns its own 1s timer so the shell
  * subtree doesn't re-render every second when only the seconds digit
- * changed — fixes the visible flicker that happened when the tracker in
- * shared.ts was writing elapsed into shell state on an interval.
+ * changed. Always formats `mm:ss` so the line width stays constant
+ * between updates — variable-width elapsed ("9s" → "10s" → "1m 0s")
+ * was shifting downstream text left/right each second, which read as
+ * flicker on top of the spinner's frame animation.
  */
 function LiveElapsed({ startedAt }: { startedAt: number }): React.ReactElement {
   const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - startedAt) / 1000));
@@ -333,7 +343,11 @@ function LiveElapsed({ startedAt }: { startedAt: number }): React.ReactElement {
     return () => clearInterval(timer);
   }, [startedAt]);
   if (elapsed <= 0) return <Text>{""}</Text>;
-  return <Text>{tokens.muted(` ${elapsed}s`)}</Text>;
+  const mm = Math.floor(elapsed / 60)
+    .toString()
+    .padStart(2, "0");
+  const ss = (elapsed % 60).toString().padStart(2, "0");
+  return <Text>{tokens.muted(`  ${mm}:${ss}`)}</Text>;
 }
 
 /**
