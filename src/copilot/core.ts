@@ -25,6 +25,16 @@ import { createCoreTobModule } from "../modules/core-tob.js";
 import { createCoreVulnScoutModule } from "../modules/core-vuln-scout.js";
 import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
+import { createAgenticSastModule } from "../modules/sast/core-agentic-sast.js";
+import { createCodeqlModule } from "../modules/sast/core-codeql.js";
+import { createContextModule } from "../modules/sast/core-context.js";
+import { createFindingsModule } from "../modules/sast/core-findings.js";
+import { createPatchModule } from "../modules/sast/core-patch.js";
+import { createSemgrepModule } from "../modules/sast/core-semgrep.js";
+import { createTaintIrisModule } from "../modules/sast/core-taint-iris.js";
+import { createThreatHuntModule } from "../modules/sast/core-threat-hunt.js";
+import { createTriageModule } from "../modules/sast/core-triage.js";
+import { createVerifyModule } from "../modules/sast/core-verify.js";
 import type {
   ModuleContext,
   ModuleInfo,
@@ -80,12 +90,48 @@ export class CopilotCore {
    * Initialize the copilot: load built-in modules and any requested external modules.
    */
   async init(): Promise<void> {
-    // Load the core SAST module (unless explicitly disabled)
+    // Load the core SAST module family (unless explicitly disabled).
+    // The umbrella `sast` module owns the full-DAG `sast:scan`; each
+    // capability (semgrep, codeql, agentic-sast, threat-hunt, taint-iris,
+    // triage, verify, patch, findings, context) is its own CopilotModule so
+    // operators can `use <capability>` and get a focused option surface.
     if (this.opts.loadCoreSast !== false) {
-      const sast = createCoreSastModule();
-      await this.registry.loadModule(sast, this.moduleCtx, {
-        taskRegistry: this.taskRegistry,
-      });
+      const sastFamily = [
+        createCoreSastModule(),
+        createSemgrepModule(),
+        createCodeqlModule(),
+        createAgenticSastModule(),
+        createThreatHuntModule(),
+        createTaintIrisModule(),
+        createTriageModule(),
+        createVerifyModule(),
+        createPatchModule(),
+        createFindingsModule(),
+        createContextModule(),
+      ];
+      for (const mod of sastFamily) {
+        await this.registry.loadModule(mod, this.moduleCtx, {
+          taskRegistry: this.taskRegistry,
+        });
+      }
+
+      // Backward-compat aliases for one release — legacy sast:<action> names
+      // resolve to their new homes. See src/modules/registry.ts.
+      const aliases: Array<[string, string]> = [
+        ["sast:semgrep", "semgrep:scan"],
+        ["sast:codeql", "codeql:scan"],
+        ["sast:agentic", "agentic-sast:scan"],
+        ["sast:threat-hunt", "threat-hunt:run"],
+        ["sast:taint-iris", "taint-iris:hunt"],
+        ["sast:triage", "triage:run"],
+        ["sast:verify", "verify:finding"],
+        ["sast:patch", "patch:finding"],
+        ["sast:findings", "findings:list"],
+        ["sast:context", "context:build"],
+      ];
+      for (const [oldName, newName] of aliases) {
+        this.registry.registerAlias(oldName, newName);
+      }
     }
 
     // Load any additional modules specified at startup
