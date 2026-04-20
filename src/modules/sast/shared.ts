@@ -213,6 +213,51 @@ export interface ContextGenOptions {
   discovery: "auto" | "flat" | "modules";
 }
 
+/**
+ * Per-stage progress tracker. Republishes `elapsedSeconds` every second so the
+ * shell spinner ticks while a stage is in flight. Without this, `currentTool`
+ * would freeze at 0s and the operator can't tell a slow LLM call from a hang.
+ */
+function createProgressTracker(ctx: ToolExecutionContext): {
+  update: (name: string) => void;
+  clear: () => void;
+} {
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let currentName: string | undefined;
+  let startedAt = 0;
+
+  const publish = () => {
+    if (!ctx.uiStore || !currentName) return;
+    const shell = ctx.uiStore.getState().shell;
+    if (!shell) return;
+    const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+    ctx.uiStore.update({
+      shell: { ...shell, currentTool: { name: currentName, elapsedSeconds } },
+    });
+  };
+
+  return {
+    update(name: string) {
+      if (timer) clearInterval(timer);
+      currentName = name;
+      startedAt = Date.now();
+      publish();
+      timer = setInterval(publish, 1000);
+    },
+    clear() {
+      if (timer) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+      currentName = undefined;
+      if (!ctx.uiStore) return;
+      const shell = ctx.uiStore.getState().shell;
+      if (!shell) return;
+      ctx.uiStore.update({ shell: { ...shell, currentTool: undefined } });
+    },
+  };
+}
+
 export async function generateContextSnapshot(
   target: string,
   ctx: ToolExecutionContext,
@@ -232,46 +277,30 @@ export async function generateContextSnapshot(
     }
   }
 
-  const updateProgress = (taskName: string) => {
-    if (ctx.uiStore) {
-      const shell = ctx.uiStore.getState().shell;
-      if (shell) {
-        ctx.uiStore.update({
-          shell: { ...shell, currentTool: { name: taskName, elapsedSeconds: 0 } },
-        });
-      }
-    }
-  };
+  const tracker = createProgressTracker(ctx);
 
-  const clearProgress = () => {
-    if (ctx.uiStore) {
-      const shell = ctx.uiStore.getState().shell;
-      if (shell) {
-        ctx.uiStore.update({ shell: { ...shell, currentTool: undefined } });
-      }
-    }
-  };
+  try {
+    const result = await generateSingleProjectContext(
+      scanPath,
+      repoName,
+      repoRoot,
+      ctx,
+      opts,
+      tracker.update,
+    );
 
-  const result = await generateSingleProjectContext(
-    scanPath,
-    repoName,
-    repoRoot,
-    ctx,
-    opts,
-    updateProgress,
-  );
-
-  clearProgress();
-
-  return {
-    ...result,
-    discovery: opts.discovery,
-    options: {
-      enrichment: opts.enrichment,
-      threatModel: opts.threatModel,
-      scenarios: opts.scenarios,
-    },
-  };
+    return {
+      ...result,
+      discovery: opts.discovery,
+      options: {
+        enrichment: opts.enrichment,
+        threatModel: opts.threatModel,
+        scenarios: opts.scenarios,
+      },
+    };
+  } finally {
+    tracker.clear();
+  }
 }
 
 async function generateMonorepoSnapshot(
@@ -285,77 +314,63 @@ async function generateMonorepoSnapshot(
   const pathMod = await import("node:path");
   const { discoverRepoStructure } = await import("../../discovery/repo-discovery.js");
 
-  const updateProgress = (taskName: string) => {
-    if (ctx.uiStore) {
-      const shell = ctx.uiStore.getState().shell;
-      if (shell) {
-        ctx.uiStore.update({
-          shell: { ...shell, currentTool: { name: taskName, elapsedSeconds: 0 } },
-        });
-      }
+  const tracker = createProgressTracker(ctx);
+
+  try {
+    tracker.update("discovering modules");
+    const discovery = await discoverRepoStructure(repoRoot, { maxModules: 15 });
+    const discoveredModules = discovery.modules;
+
+    if (discoveredModules.length === 0) {
+      tracker.clear();
+      return generateContextSnapshot(target, ctx, { ...opts, discovery: "flat" });
     }
-  };
 
-  const clearProgress = () => {
-    if (ctx.uiStore) {
-      const shell = ctx.uiStore.getState().shell;
-      if (shell) {
-        ctx.uiStore.update({ shell: { ...shell, currentTool: undefined } });
-      }
+    const modules: Record<
+      string,
+      Omit<import("../../ui/state.js").ContextSnapshot, "modules" | "discovery" | "options">
+    > = {};
+    const CONCURRENCY = 3;
+    const total = discoveredModules.length;
+
+    for (let i = 0; i < discoveredModules.length; i += CONCURRENCY) {
+      const batch = discoveredModules.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        batch.map(async (mod, batchIdx) => {
+          const modulePath = pathMod.default.resolve(repoRoot, mod.path);
+          const moduleRepoName = `${repoName}/${mod.path}`;
+          const moduleIndex = i + batchIdx + 1;
+          try {
+            const moduleSnapshot = await generateSingleProjectContext(
+              modulePath,
+              moduleRepoName,
+              repoRoot,
+              ctx,
+              opts,
+              (task) => tracker.update(`${mod.path} (${moduleIndex}/${total}): ${task}`),
+            );
+            modules[mod.path] = moduleSnapshot;
+          } catch {
+            // Skip failing modules, continue with others
+          }
+        }),
+      );
     }
-  };
 
-  updateProgress("discovering modules");
-  const discovery = await discoverRepoStructure(repoRoot, { maxModules: 15 });
-  const discoveredModules = discovery.modules;
-
-  if (discoveredModules.length === 0) {
-    clearProgress();
-    return generateContextSnapshot(target, ctx, { ...opts, discovery: "flat" });
+    return {
+      target: scanPath,
+      timestamp: Date.now(),
+      discovery: opts.discovery,
+      options: {
+        enrichment: opts.enrichment,
+        threatModel: opts.threatModel,
+        scenarios: opts.scenarios,
+      },
+      modules,
+    };
+  } finally {
+    tracker.clear();
   }
-
-  const modules: Record<
-    string,
-    Omit<import("../../ui/state.js").ContextSnapshot, "modules" | "discovery" | "options">
-  > = {};
-  const CONCURRENCY = 3;
-
-  for (let i = 0; i < discoveredModules.length; i += CONCURRENCY) {
-    const batch = discoveredModules.slice(i, i + CONCURRENCY);
-    await Promise.all(
-      batch.map(async (mod) => {
-        const modulePath = pathMod.default.resolve(repoRoot, mod.path);
-        const moduleRepoName = `${repoName}/${mod.path}`;
-        try {
-          const moduleSnapshot = await generateSingleProjectContext(
-            modulePath,
-            moduleRepoName,
-            repoRoot,
-            ctx,
-            opts,
-            (task) => updateProgress(`${mod.path}/${task}`),
-          );
-          modules[mod.path] = moduleSnapshot;
-        } catch {
-          // Skip failing modules, continue with others
-        }
-      }),
-    );
-  }
-
-  clearProgress();
-
-  return {
-    target: scanPath,
-    timestamp: Date.now(),
-    discovery: opts.discovery,
-    options: {
-      enrichment: opts.enrichment,
-      threatModel: opts.threatModel,
-      scenarios: opts.scenarios,
-    },
-    modules,
-  };
 }
 
 async function generateSingleProjectContext(

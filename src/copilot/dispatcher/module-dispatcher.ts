@@ -12,8 +12,8 @@
  * get `set FOO bar` ergonomics even on legacy modules.
  */
 
-import { existsSync } from "node:fs";
 import type { CopilotModule, JSONSchema, ModuleTool, ToolResult } from "../../modules/types.js";
+import { looksLikePath } from "../dispatch/resolve-tool.js";
 import { Datastore, type OptionSpec } from "../options.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
 
@@ -232,28 +232,32 @@ export class ModuleDispatcher implements CommandDispatcher {
       if (req.kind === "snapshot") {
         const ok = !!snapshot && snapshot[req.field] != null;
         if (!ok) {
-          missing.push(`  - ${req.field} from '${req.moduleId}' — run: use ${req.moduleId}; run`);
+          missing.push(
+            `  - ${req.field} from '${req.moduleId}' — fix: 'use ${req.moduleId}' then 'run'`,
+          );
         }
       } else if (req.kind === "findings") {
         const count = ctx.driver.getFindingCount?.() ?? 0;
         const need = req.minCount ?? 1;
         if (count < need) {
           missing.push(
-            `  - ${need}+ findings in workspace — run a scanner first (e.g. use semgrep; run)`,
+            `  - ${need}+ findings in workspace — run a scanner first (e.g. 'use semgrep' then 'run')`,
           );
         }
       } else if (req.kind === "hosts") {
         const count = ctx.driver.getHostCount?.() ?? 0;
         const need = req.minCount ?? 1;
         if (count < need) {
-          missing.push(`  - ${need}+ hosts in workspace — run recon first (e.g. use recon; run)`);
+          missing.push(
+            `  - ${need}+ hosts in workspace — run recon first (e.g. 'use recon' then 'run')`,
+          );
         }
       } else if (req.kind === "session") {
         const count = ctx.driver.getLiveSessionCount?.(req.sessionKind) ?? 0;
         if (count < 1) {
           const label = req.sessionKind ? `'${req.sessionKind}'` : "any";
           missing.push(
-            `  - ${label} live session — open one first (e.g. use blackbox; run connect)`,
+            `  - ${label} live session — open one first (e.g. 'use blackbox' then 'run connect')`,
           );
         }
       } else if (req.kind === "env") {
@@ -266,7 +270,7 @@ export class ModuleDispatcher implements CommandDispatcher {
     return [
       `[-] ${this.module.id} has unmet prerequisites:`,
       ...missing,
-      `    Or run the full DAG via: use sast; run`,
+      `    Or run the full DAG: 'use sast' then 'run'`,
     ].join("\n");
   }
 }
@@ -274,24 +278,6 @@ export class ModuleDispatcher implements CommandDispatcher {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
-/**
- * True when `value` is plausibly a path the user typed as a positional (e.g.
- * `.`, `./`, `/abs`, `~/foo`, `sub/dir`) or an existing filesystem entry.
- * Used by `run <pos>` to distinguish positional targets from mistyped tool names.
- */
-function looksLikePath(value: string): boolean {
-  if (!value) return false;
-  if (value === "." || value === "..") return true;
-  if (value.startsWith("./") || value.startsWith("../")) return true;
-  if (value.startsWith("/") || value.startsWith("~")) return true;
-  if (value.includes("/")) return true;
-  try {
-    return existsSync(value);
-  } catch {
-    return false;
-  }
-}
 
 function pickDefaultTool(mod: CopilotModule): ModuleTool | undefined {
   // Prefer "<id>:run" or "<id>:scan" or "<id>:exploit", else the first headless tool, else the first tool.

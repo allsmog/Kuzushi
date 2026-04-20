@@ -67,7 +67,7 @@ export function createThreatHuntModule(): CopilotModule {
     },
     requires: [
       { kind: "snapshot", moduleId: "context", field: "appModel" },
-      { kind: "snapshot", moduleId: "randori", field: "threatModel" },
+      { kind: "snapshot", moduleId: "context", field: "threatModel" },
     ],
     tools: [threatHuntTool],
   };

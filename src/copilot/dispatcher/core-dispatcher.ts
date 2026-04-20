@@ -616,18 +616,20 @@ export class CoreDispatcher implements CommandDispatcher {
           `  ${present ? "✓" : "✗"} snapshot.${req.field}   (produced by: ${req.moduleId})`,
         );
         if (!present) {
-          lines.push(`      Fix: use ${req.moduleId}; run`);
+          lines.push(`      Fix: 'use ${req.moduleId}' then 'run'`);
         }
       } else if (req.kind === "findings") {
         const count = ctx.driver.getFindingCount?.() ?? 0;
         const need = req.minCount ?? 1;
         lines.push(`  ${count >= need ? "✓" : "✗"} findings   (have ${count}, need ${need}+)`);
-        if (count < need) lines.push(`      Fix: run a scanner first (e.g. use semgrep; run)`);
+        if (count < need) {
+          lines.push(`      Fix: run a scanner first (e.g. 'use semgrep' then 'run')`);
+        }
       } else if (req.kind === "hosts") {
         const count = ctx.driver.getHostCount?.() ?? 0;
         const need = req.minCount ?? 1;
         lines.push(`  ${count >= need ? "✓" : "✗"} hosts   (have ${count}, need ${need}+)`);
-        if (count < need) lines.push(`      Fix: use recon; run`);
+        if (count < need) lines.push(`      Fix: 'use recon' then 'run'`);
       } else if (req.kind === "session") {
         const count = ctx.driver.getLiveSessionCount?.(req.sessionKind) ?? 0;
         const label = req.sessionKind ? `'${req.sessionKind}'` : "any";
@@ -638,7 +640,7 @@ export class CoreDispatcher implements CommandDispatcher {
       }
     }
     lines.push("");
-    lines.push(`  Or run the full DAG: use sast; run`);
+    lines.push(`  Or run the full DAG: 'use sast' then 'run'`);
     return { output: lines.join("\n") };
   }
 

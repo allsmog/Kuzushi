@@ -244,7 +244,7 @@ describe("why command", () => {
     await driver.handle("use threat-hunt");
     const result = await driver.handle("why");
     expect(result.output).toContain("snapshot.appModel");
-    expect(result.output).toContain("use context; run");
+    expect(result.output).toContain("'use context' then 'run'");
   });
 
   it("no-op when no module is active", async () => {

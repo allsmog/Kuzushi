@@ -215,7 +215,7 @@ describe("ModuleDispatcher requires preflight", () => {
     const result = await driver.handle("run");
     expect(result.output).toContain("unmet prerequisites");
     expect(result.output).toContain("appModel");
-    expect(result.output).toContain("run: use context; run");
+    expect(result.output).toContain("'use context' then 'run'");
     expect(result.output).toContain("threatModel");
   });
 
@@ -262,7 +262,7 @@ describe("ModuleDispatcher requires preflight", () => {
     await driver.handle("set RHOST x");
     const result = await driver.handle("run");
     expect(result.output).toContain("hosts in workspace");
-    expect(result.output).toContain("use recon; run");
+    expect(result.output).toContain("'use recon' then 'run'");
   });
 
   it("blocks run when a session requirement is unmet", async () => {
