@@ -31,7 +31,9 @@ interface AttackChainDiagramProps {
 const STEP_INNER_WIDTH = 18;
 const ARROW = " ───→ ";
 
-export function AttackChainDiagram({ chain }: AttackChainDiagramProps): React.ReactElement {
+export const AttackChainDiagram = React.memo(_AttackChainDiagram);
+
+function _AttackChainDiagram({ chain }: AttackChainDiagramProps): React.ReactElement {
   const availableWidth = Math.max(38, terminalCardWidth(96, 60) - 6);
   // Single severity → (headline, border) token mapping — avoids the two
   // near-duplicate ternaries we had before. Border stays one shade below

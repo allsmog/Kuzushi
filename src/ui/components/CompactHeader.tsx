@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { icons } from "../icons.js";
 import { tokens } from "../tokens.js";
 
@@ -10,7 +10,9 @@ interface CompactHeaderProps {
   selectedForTriage?: number;
 }
 
-export function CompactHeader({
+export const CompactHeader = React.memo(_CompactHeader);
+
+function _CompactHeader({
   repoName,
   tasks,
   totalFindings,

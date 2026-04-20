@@ -27,7 +27,7 @@
  */
 
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { formatCost, formatDuration, terminalCardWidth } from "../format.js";
 import type { SummaryData } from "../state.js";
 import { tokens } from "../tokens.js";
@@ -36,7 +36,9 @@ interface TrophyScreenProps {
   data: SummaryData;
 }
 
-export function TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
+export const TrophyScreen = React.memo(_TrophyScreen);
+
+function _TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
   const innerWidth = Math.max(44, terminalCardWidth(74, 56) - 2);
   const tp = data.verdictCounts.tp;
   const isClean = tp === 0;

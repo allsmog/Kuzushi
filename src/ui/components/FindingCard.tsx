@@ -12,7 +12,7 @@
  */
 
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { badge, colorVerdict, severityLabel } from "../format.js";
 import { fileLink } from "../hyperlink.js";
 import { icons } from "../icons.js";
@@ -44,7 +44,9 @@ interface FindingCardProps {
   mode?: "collapsible" | "linear";
 }
 
-export function FindingCard({ finding, mode }: FindingCardProps): React.ReactElement {
+export const FindingCard = React.memo(_FindingCard);
+
+function _FindingCard({ finding, mode }: FindingCardProps): React.ReactElement {
   if (mode === "linear") {
     return <LinearFinding finding={finding} />;
   }

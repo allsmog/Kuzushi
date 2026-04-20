@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { Box, Text } from "ink";
-import type React from "react";
+import React from "react";
 import { tokens } from "../tokens.js";
 
 interface CodePreviewProps {
@@ -19,7 +19,9 @@ interface CodePreviewProps {
   repoRoot?: string;
 }
 
-export function CodePreview({
+export const CodePreview = React.memo(_CodePreview);
+
+function _CodePreview({
   filePath,
   line,
   context = 2,
