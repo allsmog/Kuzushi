@@ -162,7 +162,16 @@ export class CoreDispatcher implements CommandDispatcher {
     }
   }
 
-  complete(cmd: string, partial: string, _words: string[]): string[] {
+  /** Driver ref threaded in by the DispatcherDriver so completion can peek
+   * at the active module's datastore. Null until wired. */
+  private driverRef: { activeModuleLike?: () => { datastore?: unknown } | undefined } | undefined;
+
+  /** Called by DispatcherDriver post-construction so complete() can reach the active module. */
+  setDriver(driver: { activeModuleLike?: () => { datastore?: unknown } | undefined }): void {
+    this.driverRef = driver;
+  }
+
+  complete(cmd: string, partial: string, words: string[]): string[] {
     if (cmd === "use" || cmd === "info") {
       const ids = this.opts.registry.ids();
       return ids.filter((id) => id.startsWith(partial));
@@ -172,13 +181,71 @@ export class CoreDispatcher implements CommandDispatcher {
         s.startsWith(partial),
       );
     }
-    if (cmd === "set" || cmd === "unset") {
-      // Suggest known module-option names from the top-of-stack module dispatcher.
-      const top = this.opts.registry.list();
-      void top;
+    if (cmd === "search") {
+      // Partial is the token being typed. If it doesn't contain a colon, it
+      // might be a key (type:, category:, rank:...); offer those.
+      if (!partial.includes(":")) {
+        const keys = ["type:", "category:", "rank:", "cve:", "cwe:", "author:", "module:", "tool:"];
+        return keys.filter((k) => k.startsWith(partial));
+      }
+      const [key, valuePartial] = partial.split(":", 2);
+      if (key === "type") return ["module", "tool"].filter((v) => v.startsWith(valuePartial ?? ""));
+      if (key === "category") {
+        return ["offense", "defense", "governance", "intel"].filter((v) =>
+          v.startsWith(valuePartial ?? ""),
+        );
+      }
+      if (key === "rank") {
+        return ["manual", "low", "normal", "good", "great", "excellent"].filter((v) =>
+          v.startsWith(valuePartial ?? ""),
+        );
+      }
       return [];
     }
+    if (cmd === "set" || cmd === "unset" || cmd === "setg" || cmd === "unsetg") {
+      // `words` always includes the command itself. argPosition is 1-based:
+      //   words=[cmd]          → completing arg 1 (option name)
+      //   words=[cmd, NAME]    → completing arg 2 (value)
+      const argPosition = words.length;
+      if (argPosition <= 1) {
+        // Completing the option name.
+        const storeModule = this.activeModuleDispatcherFromRegistry();
+        const specs = storeModule?.datastore.allSpecs() ?? this.opts.globals.allSpecs();
+        return specs
+          .filter((s) => !s.advanced && !s.evasion)
+          .map((s) => s.name)
+          .filter((n) => n.toUpperCase().startsWith(partial.toUpperCase()));
+      }
+      if (argPosition === 2) {
+        // Completing a value. Look up the option by name (words[1]).
+        const optName = (words[1] ?? "").toUpperCase();
+        const storeModule = this.activeModuleDispatcherFromRegistry();
+        const spec = storeModule?.datastore.spec(optName) ?? this.opts.globals.spec(optName);
+        if (!spec) return [];
+        if (spec.type === "enum" && spec.choices) {
+          return (spec.choices as readonly string[]).filter((c) => c.startsWith(partial));
+        }
+        if (spec.type === "bool") {
+          return ["true", "false", "yes", "no"].filter((c) => c.startsWith(partial));
+        }
+      }
+      return [];
+    }
+    if (cmd === "recipes" && words.length <= 1) {
+      return ["list", "run"].filter((s) => s.startsWith(partial));
+    }
+    if (cmd === "recipes" && words[1] === "run") {
+      const recipes = this.opts.listRecipes?.() ?? [];
+      return recipes.map((r) => r.name).filter((n) => n.startsWith(partial));
+    }
     return [];
+  }
+
+  /** Peek at the active ModuleDispatcher via the Driver back-ref, if set. */
+  private activeModuleDispatcherFromRegistry(): ModuleDispatcher | undefined {
+    const peek = this.driverRef?.activeModuleLike?.();
+    if (peek && peek instanceof ModuleDispatcher) return peek;
+    return undefined;
   }
 
   // -------------------------------------------------------------------------
