@@ -16,7 +16,9 @@ import { type Dirent, existsSync, readdirSync } from "node:fs";
 import nodePath from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
+import { ModuleEventBus, type ModuleEventScope } from "../bus/module-events.js";
 import type { MessageBus } from "../bus/types.js";
+import { ModuleCache } from "../modules/cache.js";
 import { createCorePromptArmorModule } from "../modules/core-prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/core-randori.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
@@ -73,11 +75,19 @@ export interface CopilotCoreOptions {
 
 export class CopilotCore {
   readonly registry: ModuleRegistry;
+  /** Cross-module framework events (msfconsole-style). */
+  readonly events: ModuleEventBus;
+  /** Materialized metadata cache — written on init, consulted by search/info. */
+  readonly moduleCache: ModuleCache;
   private readonly moduleCtx: ModuleContext;
   private readonly taskRegistry?: TaskRegistry;
+  /** Lifecycle-scoped event handles per module — disposed on unload. */
+  private readonly moduleScopes = new Map<string, ModuleEventScope>();
 
   constructor(private readonly opts: CopilotCoreOptions) {
     this.registry = new ModuleRegistry();
+    this.events = new ModuleEventBus();
+    this.moduleCache = new ModuleCache(opts.dataDir);
     this.moduleCtx = {
       runtime: opts.runtime,
       bus: opts.bus,
@@ -85,6 +95,31 @@ export class CopilotCore {
       dataDir: opts.dataDir,
     };
     this.taskRegistry = opts.taskRegistry;
+  }
+
+  /**
+   * Load a module while attaching a per-module event scope.
+   * Use instead of `this.registry.loadModule(...)` so cross-module pub/sub
+   * subscriptions are lifecycle-managed.
+   */
+  private async loadWithScope(
+    mod: import("../modules/types.js").CopilotModule,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    const scope = this.events.scope(mod.id);
+    this.moduleScopes.set(mod.id, scope);
+    const moduleCtx: ModuleContext = { ...this.moduleCtx, events: scope };
+    try {
+      await this.registry.loadModule(mod, moduleCtx, {
+        taskRegistry: this.taskRegistry,
+        ...extra,
+      });
+      this.moduleCache.upsertFromModule(mod);
+    } catch (err) {
+      scope.disposeAll();
+      this.moduleScopes.delete(mod.id);
+      throw err;
+    }
   }
 
   /**
@@ -112,9 +147,7 @@ export class CopilotCore {
         createReconModule(),
       ];
       for (const mod of sastFamily) {
-        await this.registry.loadModule(mod, this.moduleCtx, {
-          taskRegistry: this.taskRegistry,
-        });
+        await this.loadWithScope(mod);
       }
 
       // Backward-compat aliases for one release — legacy sast:<action> names
@@ -141,6 +174,15 @@ export class CopilotCore {
       for (const spec of this.opts.modules) {
         await this.loadModuleFromSpecifier(spec);
       }
+    }
+
+    // Persist the module metadata cache so follow-up `search` / `info`
+    // launches can read it without re-importing every module. Errors are
+    // non-fatal — the cache is an optimization, not a source of truth.
+    try {
+      this.moduleCache.save();
+    } catch {
+      // Ignore — a missing/unwritable dataDir should never break init.
     }
   }
 
@@ -221,6 +263,10 @@ export class CopilotCore {
       }
     }
 
+    // Inject the module's framework-event scope so `ctx.events.emit(...)`
+    // reaches other modules subscribing to well-known events.
+    const scope = this.moduleScopes.get(resolved.module.id);
+
     const ctx: ToolExecutionContext = {
       cwd: ctxOverrides?.cwd ?? this.opts.dataDir,
       runtime: ctxOverrides?.runtime ?? this.opts.runtime,
@@ -234,6 +280,7 @@ export class CopilotCore {
       ...(ctxOverrides?.datastore ? { datastore: ctxOverrides.datastore } : {}),
       ...(ctxOverrides?.print ? { print: ctxOverrides.print } : {}),
       ...(ctxOverrides?.workspace ? { workspace: ctxOverrides.workspace } : {}),
+      ...(scope ? { events: scope } : {}),
     };
 
     const result = await tool.execute(input, ctx);
@@ -331,6 +378,8 @@ export class CopilotCore {
   /** Gracefully shut down all modules. */
   async dispose(): Promise<void> {
     await this.registry.disposeAll();
+    for (const scope of this.moduleScopes.values()) scope.disposeAll();
+    this.moduleScopes.clear();
   }
 
   // -------------------------------------------------------------------------
@@ -342,62 +391,30 @@ export class CopilotCore {
     if (this.registry.has(id)) return;
 
     switch (id) {
-      case "sast": {
-        const sast = createCoreSastModule();
-        await this.registry.loadModule(sast, this.moduleCtx, {
-          taskRegistry: this.taskRegistry,
-        });
+      case "sast":
+        await this.loadWithScope(createCoreSastModule());
         break;
-      }
-      case "variant-hunter": {
-        const variantHunter = createVariantHunterModule();
-        await this.registry.loadModule(variantHunter, this.moduleCtx, {
-          taskRegistry: this.taskRegistry,
-        });
+      case "variant-hunter":
+        await this.loadWithScope(createVariantHunterModule());
         break;
-      }
-      case "n-day-diff-hunter": {
-        const ndiff = createNDayDiffHunterModule();
-        await this.registry.loadModule(ndiff, this.moduleCtx, {
-          taskRegistry: this.taskRegistry,
-        });
+      case "n-day-diff-hunter":
+        await this.loadWithScope(createNDayDiffHunterModule());
         break;
-      }
-      case "randori": {
-        const randori = createCoreRandoriModule();
-        await this.registry.loadModule(randori, this.moduleCtx, {
-          taskRegistry: this.taskRegistry,
-        });
+      case "randori":
+        await this.loadWithScope(createCoreRandoriModule());
         break;
-      }
-      case "vuln-scout": {
-        const vulnScout = createCoreVulnScoutModule();
-        await this.registry.loadModule(vulnScout, this.moduleCtx, {
-          taskRegistry: this.taskRegistry,
-        });
+      case "vuln-scout":
+        await this.loadWithScope(createCoreVulnScoutModule());
         break;
-      }
-      case "tob": {
-        const tob = createCoreTobModule();
-        await this.registry.loadModule(tob, this.moduleCtx, {
-          taskRegistry: this.taskRegistry,
-        });
+      case "tob":
+        await this.loadWithScope(createCoreTobModule());
         break;
-      }
-      case "shinsa": {
-        const shinsa = createCoreShinsaModule();
-        await this.registry.loadModule(shinsa, this.moduleCtx, {
-          taskRegistry: this.taskRegistry,
-        });
+      case "shinsa":
+        await this.loadWithScope(createCoreShinsaModule());
         break;
-      }
-      case "prompt-armor": {
-        const promptArmor = createCorePromptArmorModule();
-        await this.registry.loadModule(promptArmor, this.moduleCtx, {
-          taskRegistry: this.taskRegistry,
-        });
+      case "prompt-armor":
+        await this.loadWithScope(createCorePromptArmorModule());
         break;
-      }
       // Future built-in modules go here as they're ported
       default:
         throw new Error(`Unknown built-in module: "${id}"`);
@@ -430,9 +447,7 @@ export class CopilotCore {
       );
     }
 
-    await this.registry.loadModule(mod, this.moduleCtx, {
-      taskRegistry: this.taskRegistry,
-    });
+    await this.loadWithScope(mod);
   }
 
   private async loadPackageModule(packageName: string): Promise<void> {
@@ -473,9 +488,7 @@ export class CopilotCore {
     // Otherwise try direct import as CopilotModule
     const { dynamicImportModule } = await import("../modules/loader.js");
     const mod = await dynamicImportModule(require.resolve(packageName));
-    await this.registry.loadModule(mod, this.moduleCtx, {
-      taskRegistry: this.taskRegistry,
-    });
+    await this.loadWithScope(mod);
   }
 
   private async loadMcpModule(serverSpec: string): Promise<void> {
@@ -491,9 +504,7 @@ export class CopilotCore {
         .slice(0, 30) || "mcp";
 
     const { module: mod } = await createMcpModule(serverSpec, moduleId);
-    await this.registry.loadModule(mod, this.moduleCtx, {
-      taskRegistry: this.taskRegistry,
-    });
+    await this.loadWithScope(mod);
   }
 }
 

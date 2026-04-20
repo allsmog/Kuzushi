@@ -42,6 +42,7 @@ const contextBuildTool: ModuleTool = {
         type: "string",
         description:
           "Override the context-enricher system prompt. Accepts inline text or a path to .md/.txt.",
+        "x-advanced": true,
       },
     },
     required: ["target"],
