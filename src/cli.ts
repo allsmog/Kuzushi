@@ -34,12 +34,27 @@ import { setGlobalLogLevel } from "./logger.js";
 import { defaultDbPath, getRun, initDb, listRuns } from "./store.js";
 
 function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
-  let storesApiKey = key === "agentRuntimeConfig.apiKey";
+  // True if the path (after legacy-retarget) stores an apiKey — either a
+  // dotted slot write (claude.apiKey / piAi.apiKey) or a whole-object write
+  // whose shape contains apiKey at any depth.
+  const isSlotApiKeyPath =
+    key === "agentRuntimeConfig.claude.apiKey" ||
+    key === "agentRuntimeConfig.piAi.apiKey" ||
+    key === "agentRuntimeConfig.apiKey"; // legacy form — retargeted, still worth warning
+  let storesApiKey = isSlotApiKeyPath;
 
   if (!storesApiKey && key === "agentRuntimeConfig") {
     try {
-      const parsed = JSON.parse(value);
-      storesApiKey = typeof parsed?.["apiKey"] === "string" && parsed["apiKey"].trim().length > 0;
+      const parsed = JSON.parse(value) as Record<string, unknown> | null;
+      const hasApiKey = (obj: unknown): boolean =>
+        typeof obj === "object" &&
+        obj !== null &&
+        typeof (obj as Record<string, unknown>)["apiKey"] === "string" &&
+        (obj as Record<string, string>)["apiKey"].trim().length > 0;
+      storesApiKey =
+        hasApiKey(parsed) ||
+        hasApiKey((parsed ?? {})["claude"]) ||
+        hasApiKey((parsed ?? {})["piAi"]);
     } catch {
       storesApiKey = false;
     }
@@ -112,29 +127,43 @@ Examples:
         apiKey?: string;
       }) => {
         const { startShell } = await import("./copilot/shell.js");
-        const { loadLocalCredentials } = await import("./config.js");
+        const { loadLocalCredentials, resolveActiveCredentials } = await import("./config.js");
         const config = loadConfig();
         if (opts.model) {
           config.model = opts.model;
         }
 
         // Project-local credentials (`<cwd>/.kuzushi/credentials.json`)
-        // override env-only state so per-project keys "just work".
+        // override env-only state so per-project keys "just work". Local
+        // credentials files now follow the per-backend shape
+        // (`{ claude: {...}, piAi: {...} }`), but legacy flat files are
+        // migrated by `loadLocalCredentials` into the claude slot.
         const localCreds = loadLocalCredentials(opts.target ?? process.cwd());
-        if (localCreds?.apiKey) {
+        if (localCreds) {
+          const existing = config.agentRuntimeConfig ?? {};
           config.agentRuntimeConfig = {
-            ...config.agentRuntimeConfig,
-            apiKey: localCreds.apiKey,
+            claude: { ...(existing.claude ?? {}), ...(localCreds.claude ?? {}) },
+            piAi: { ...(existing.piAi ?? {}), ...(localCreds.piAi ?? {}) },
           };
-          process.env.ANTHROPIC_API_KEY = localCreds.apiKey;
+          if (
+            !config.agentRuntimeConfig.claude ||
+            Object.keys(config.agentRuntimeConfig.claude).length === 0
+          ) {
+            delete config.agentRuntimeConfig.claude;
+          }
+          if (
+            !config.agentRuntimeConfig.piAi ||
+            Object.keys(config.agentRuntimeConfig.piAi).length === 0
+          ) {
+            delete config.agentRuntimeConfig.piAi;
+          }
         }
-        if (localCreds?.baseUrl) {
-          config.agentRuntimeConfig = {
-            ...config.agentRuntimeConfig,
-            baseUrl: localCreds.baseUrl,
-          };
-          process.env.ANTHROPIC_BASE_URL = localCreds.baseUrl;
-        }
+
+        // Prime env vars from the active backend's slot so child processes
+        // (Claude Code subprocess, pi-ai fetch) inherit the right credentials.
+        const active = resolveActiveCredentials(config);
+        if (active.apiKey) process.env.ANTHROPIC_API_KEY = active.apiKey;
+        if (active.baseUrl) process.env.ANTHROPIC_BASE_URL = active.baseUrl;
 
         if (opts.apiKey) {
           process.env.ANTHROPIC_API_KEY = opts.apiKey;

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { isValidPreset, SCAN_PRESETS } from "../config/presets.js";
+import { backendConfigSlot } from "../config.js";
 import type { KuzushiConfig } from "../types.js";
 import { CliUsageError } from "./errors.js";
 import { parseCommaSeparatedList } from "./shared.js";
@@ -157,20 +158,21 @@ export function applyScanCommandConfigOverrides(
   if (opts.enableExternalTasks) config.enableExternalTasks = true;
 
   if (opts.apiKey || opts.baseUrl) {
-    const runtimeConfig = {
-      ...(config.agentRuntimeConfig ?? {}),
-    };
+    const runtimeConfig = { ...(config.agentRuntimeConfig ?? {}) };
+    const slot = backendConfigSlot(config.agentRuntimeBackend);
+    const next = { ...(runtimeConfig[slot] ?? {}) };
 
     if (opts.apiKey) {
       const apiKey = opts.apiKey.trim();
-      runtimeConfig.apiKey = apiKey || undefined;
+      next.apiKey = apiKey || undefined;
     }
 
     if (opts.baseUrl) {
       const baseUrl = opts.baseUrl.trim();
-      runtimeConfig.baseUrl = baseUrl || undefined;
+      next.baseUrl = baseUrl || undefined;
     }
 
+    runtimeConfig[slot] = next;
     config.agentRuntimeConfig = runtimeConfig;
   }
 

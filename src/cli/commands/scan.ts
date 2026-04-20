@@ -20,7 +20,7 @@ import {
   hasConfigValidationErrors,
   validateKuzushiConfig,
 } from "../../config/validation.js";
-import { loadConfig } from "../../config.js";
+import { loadConfig, resolveActiveCredentials } from "../../config.js";
 import { looksLikeMonorepo } from "../../discovery/repo-discovery.js";
 import { registerShutdownHook } from "../../lifecycle.js";
 import { getGlobalLogLevel } from "../../logger.js";
@@ -236,7 +236,8 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   const isClaudeBackend = (config.agentRuntimeBackend ?? "claude") === "claude";
   if (isClaudeBackend && !opts.resume && process.stdout.isTTY) {
     const { hasAnthropicCredentials, runCredentialPrompt } = await import("../../ui/setup.js");
-    if (!hasAnthropicCredentials(config.agentRuntimeConfig?.apiKey)) {
+    const claudeSlotKey = config.agentRuntimeConfig?.claude?.apiKey;
+    if (!hasAnthropicCredentials(claudeSlotKey)) {
       const credOutcome = await runCredentialPrompt(uiStore);
       if (credOutcome.action === "cancel") {
         resetTerminalOutput();
@@ -246,10 +247,27 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
 
       const choice = credOutcome.choice;
       if (choice.kind === "api-key") {
-        config.agentRuntimeConfig = { ...config.agentRuntimeConfig, apiKey: choice.value };
+        const existing = config.agentRuntimeConfig ?? {};
+        config.agentRuntimeConfig = {
+          ...existing,
+          claude: {
+            ...(existing.claude ?? {}),
+            apiKey: choice.value,
+            ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
+          },
+        };
         process.env["ANTHROPIC_API_KEY"] = choice.value;
+        if (choice.baseUrl) process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
       } else if (choice.kind === "oauth-token") {
         process.env["ANTHROPIC_OAUTH_TOKEN"] = choice.value;
+        if (choice.baseUrl) {
+          const existing = config.agentRuntimeConfig ?? {};
+          config.agentRuntimeConfig = {
+            ...existing,
+            claude: { ...(existing.claude ?? {}), baseUrl: choice.baseUrl },
+          };
+          process.env["ANTHROPIC_BASE_URL"] = choice.baseUrl;
+        }
       }
       // "inherited" — no changes needed, subprocess will use parent env
     }
@@ -369,7 +387,7 @@ export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts)
   const isClaudeRuntime = (config.agentRuntimeBackend ?? "claude") === "claude";
   if (!isClaudeRuntime) {
     const missingCredentials = validatePiAiProviderCredentials(activeModels, {
-      anthropicApiKey: config.agentRuntimeConfig?.apiKey,
+      anthropicApiKey: resolveActiveCredentials(config).apiKey,
     });
 
     if (missingCredentials.length > 0) {
@@ -390,7 +408,7 @@ export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts)
 
   if (!isClaudeRuntime) {
     warnPiAiBackendApiKeys(activeModels, {
-      anthropicApiKey: config.agentRuntimeConfig?.apiKey,
+      anthropicApiKey: resolveActiveCredentials(config).apiKey,
     });
   }
 

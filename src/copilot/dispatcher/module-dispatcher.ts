@@ -12,6 +12,7 @@
  * get `set FOO bar` ergonomics even on legacy modules.
  */
 
+import { existsSync } from "node:fs";
 import type { CopilotModule, JSONSchema, ModuleTool, ToolResult } from "../../modules/types.js";
 import { Datastore, type OptionSpec } from "../options.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
@@ -102,14 +103,39 @@ export class ModuleDispatcher implements CommandDispatcher {
     const dry = args.includes("--dry");
     const posArgs = args.filter((a) => a !== "--bg" && a !== "&" && a !== "--dry");
     const explicit = posArgs[0];
-    const tool = explicit
-      ? this.module.tools.find(
-          (t) => t.name === explicit || t.name === `${this.module.id}:${explicit}`,
-        )
-      : pickDefaultTool(this.module);
-    if (!tool) {
-      return { output: explicit ? `[-] Unknown tool: ${explicit}` : "[-] No runnable tool." };
+
+    let tool: ModuleTool | undefined;
+    let positionals: string[] = [];
+    if (explicit) {
+      const matchedTool = this.module.tools.find(
+        (t) => t.name === explicit || t.name === `${this.module.id}:${explicit}`,
+      );
+      if (matchedTool) {
+        tool = matchedTool;
+        positionals = posArgs.slice(1);
+      } else if (looksLikePath(explicit)) {
+        // Positional path (e.g. `run .`) — treat as value for the default tool's
+        // first required option so users don't have to `set target .; run`.
+        tool = pickDefaultTool(this.module);
+        positionals = posArgs;
+      } else {
+        return { output: `[-] Unknown tool: ${explicit}` };
+      }
+    } else {
+      tool = pickDefaultTool(this.module);
     }
+
+    if (!tool) {
+      return { output: "[-] No runnable tool." };
+    }
+
+    if (positionals.length > 0) {
+      const requiredSpecs = this.datastore.allSpecs().filter((s) => s.required);
+      for (let i = 0; i < positionals.length && i < requiredSpecs.length; i += 1) {
+        this.datastore.set(requiredSpecs[i]!.name, positionals[i]!);
+      }
+    }
+
     if (dry) return this.preview(tool, ctx);
     if (bg) return this.invokeInBackground(tool, ctx);
     return this.invoke(tool, ctx);
@@ -248,6 +274,24 @@ export class ModuleDispatcher implements CommandDispatcher {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * True when `value` is plausibly a path the user typed as a positional (e.g.
+ * `.`, `./`, `/abs`, `~/foo`, `sub/dir`) or an existing filesystem entry.
+ * Used by `run <pos>` to distinguish positional targets from mistyped tool names.
+ */
+function looksLikePath(value: string): boolean {
+  if (!value) return false;
+  if (value === "." || value === "..") return true;
+  if (value.startsWith("./") || value.startsWith("../")) return true;
+  if (value.startsWith("/") || value.startsWith("~")) return true;
+  if (value.includes("/")) return true;
+  try {
+    return existsSync(value);
+  } catch {
+    return false;
+  }
+}
 
 function pickDefaultTool(mod: CopilotModule): ModuleTool | undefined {
   // Prefer "<id>:run" or "<id>:scan" or "<id>:exploit", else the first headless tool, else the first tool.
