@@ -29,9 +29,11 @@ import type {
   UIStore,
 } from "../ui/state.js";
 import { CopilotCore } from "./core.js";
+import { resolveTool } from "./dispatch/resolve-tool.js";
 import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
 import { openInEditor } from "./editor.js";
+import { computeChainAliases, computeFindingAliases, formatAliasTable } from "./finding-alias.js";
 import { runPlanner, type ShellPlan } from "./nl-planner.js";
 import { Datastore } from "./options.js";
 import { createPrintSink, type PrintLevel, type PrintSink } from "./print.js";
@@ -120,6 +122,12 @@ interface LocalCommandResult {
   executedToolName?: string;
   /** Async tool execution needed — returns a promise of output. */
   asyncExecute?: (signal?: AbortSignal) => Promise<string>;
+  /**
+   * When set, the shell should stream this string through `currentSession.query()`
+   * — this is the `/ask` pathway. Replaces the old silent fallback that
+   * forwarded any unknown input to the agent and invited hallucinated answers.
+   */
+  askQuestion?: string;
 }
 
 type ShellSessionOutcome = {
@@ -541,52 +549,16 @@ function resolveToolName(
   core: CopilotCore,
   focusedModule: string | null,
 ): string | undefined {
-  if (!toolName) {
-    return undefined;
-  }
-
-  if (toolName.includes(":")) {
-    return core.registry.resolveTool(toolName)?.tool.name;
-  }
-
-  if (focusedModule) {
-    const focusedName = `${focusedModule}:${toolName}`;
-    if (core.registry.resolveTool(focusedName)) {
-      return focusedName;
-    }
-  }
-
-  const lowered = toolName.toLowerCase();
-  const matches = core.registry.allTools().filter(({ tool }) => {
-    return toolActionName(tool.name).toLowerCase() === lowered;
+  // Thin adapter over the shared resolver — keeps the legacy signature that
+  // callers in this file rely on (undefined on unresolved). For richer info
+  // (ambiguous / path), use `resolveTool()` from `./dispatch/resolve-tool.js`
+  // directly.
+  const result = resolveTool({
+    input: toolName,
+    focusedModule,
+    registry: core.registry,
   });
-  if (matches.length === 1) return matches[0]!.tool.name;
-
-  // Multiple action matches (e.g. `scan` → sast:scan, semgrep:scan, codeql:scan).
-  // Prefer the sast module when present — that's the canonical pipeline the CLI
-  // runs for `kuzushi scan .`, so bare `scan` in the shell should map there too.
-  // Without this, the input falls through to the NL agent and rambles.
-  if (matches.length > 1) {
-    const sastMatch = matches.find(({ module }) => module.id === "sast");
-    if (sastMatch) return sastMatch.tool.name;
-  }
-
-  // Post SAST-split, a bare word like `semgrep` is likely the module id whose
-  // primary tool is `semgrep:scan`. Fall back to matching module ids and
-  // picking the module's preferred tool (same heuristic as ModuleDispatcher).
-  const modMatches = core.registry.allTools().filter(({ module }) => {
-    return module.id.toLowerCase() === lowered;
-  });
-  if (modMatches.length === 0) return undefined;
-  const preferredSuffixes = ["scan", "run", "audit", "hunt", "exploit", "build", "list"];
-  for (const suffix of preferredSuffixes) {
-    const hit = modMatches.find(({ tool }) => toolActionName(tool.name) === suffix);
-    if (hit) return hit.tool.name;
-  }
-  // Single tool on the module — unambiguous.
-  const uniqueTools = new Set(modMatches.map((m) => m.tool.name));
-  if (uniqueTools.size === 1) return modMatches[0]!.tool.name;
-  return undefined;
+  return result.kind === "tool" ? result.toolName : undefined;
 }
 
 function formatUnknownToolMessage(toolName: string): string {
@@ -2318,7 +2290,10 @@ function handleSlashCommand(
       if (sub === "runs") {
         return handleShowRunsCommand(args.slice(1), ctx);
       }
-      return { output: "Usage: /show prompts  or  /show runs" };
+      if (sub === "aliases") {
+        return handleShowAliasesCommand(args.slice(1), ctx);
+      }
+      return { output: "Usage: /show prompts  |  /show runs  |  /show aliases [prefix]" };
     }
 
     case "runs":
@@ -2972,6 +2947,30 @@ async function openRunsDb(ctx: ShellContext) {
   return initDb(dbPath);
 }
 
+function handleShowAliasesCommand(args: string[], ctx: ShellContext): LocalCommandResult {
+  // Prefer live state.summary (post-scan); fall back to the persisted latest
+  // run in the DB so `/show aliases` works even immediately after a shell
+  // launch with no in-memory summary yet.
+  const liveSummary = ctx.uiStore?.getState().summary;
+  if (liveSummary) {
+    const findingAliases = computeFindingAliases(liveSummary.actionableFindings ?? []);
+    const chainAliases = computeChainAliases(liveSummary.exploitChains ?? []);
+    const titles: Record<string, string | undefined> = {};
+    for (const f of liveSummary.actionableFindings ?? []) {
+      titles[f.fingerprint] = f.title ?? f.ruleId;
+    }
+    for (const c of liveSummary.exploitChains ?? []) {
+      titles[c.id] = c.name;
+    }
+    return {
+      output: formatAliasTable(findingAliases, chainAliases, args[0], titles),
+    };
+  }
+  return {
+    output: "No run summary in memory. Start a scan or use /replay <runId> to hydrate.",
+  };
+}
+
 function handleShowRunsCommand(args: string[], ctx: ShellContext): LocalCommandResult {
   const limitFlagIdx = args.indexOf("--limit");
   const limit =
@@ -3525,6 +3524,7 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
         ["/prompt show <verb>", "Show the effective prompt + source for a tool"],
         ["/show prompts", "Cross-module audit of every *_PROMPT override"],
         ["/show runs [repo]", "List recent pipeline runs (id · status · cost)"],
+        ["/show aliases [pfx]", "List short-ID aliases (F-0001, C-01) for the current run"],
         ["/replay <runId>", "Re-render the summary of a past run from stored state"],
         ["/trace <runId>", "Stream the per-event JSONL audit log of a past run"],
         ["/options [tool]", "Show tool options"],

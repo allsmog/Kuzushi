@@ -13,6 +13,7 @@
 import { Box, Static, Text, useApp, useInput } from "ink";
 import type React from "react";
 import { useRef, useState } from "react";
+import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
 import { buildShellPrompt } from "../../copilot/shell.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useUIState } from "../hooks.js";
@@ -272,27 +273,25 @@ function ShellViewPanel({
     case "finding": {
       const summary = state.summary;
       const openId = shell.openFindingId;
-      const match = openId
-        ? summary?.actionableFindings?.find((f) => matchesFindingId(f, openId))
+      if (!openId || !summary) return null;
+      // Resolve through the deterministic B.3 alias map so F-NNNN always
+      // maps to the same finding for a given summary snapshot, and fall
+      // back to fingerprint / prefix matching for raw input.
+      const aliases = computeFindingAliases(summary.actionableFindings ?? []);
+      const target = resolveAlias(
+        openId,
+        aliases,
+        (summary.actionableFindings ?? []).map((f) => f.fingerprint),
+      );
+      const match = target
+        ? summary.actionableFindings?.find((f) => f.fingerprint === target)
         : undefined;
-      if (!match) {
-        return null;
-      }
+      if (!match) return null;
       return <FindingCard mode="linear" finding={match} />;
     }
     default:
       return null;
   }
-}
-
-function matchesFindingId(finding: { fingerprint: string }, openId: string): boolean {
-  if (finding.fingerprint === openId) return true;
-  // `F-NNNN` alias = "F-" + first 4 chars of the fingerprint.
-  if (openId.toUpperCase().startsWith("F-")) {
-    const short = openId.slice(2).toLowerCase();
-    return finding.fingerprint.slice(0, short.length).toLowerCase() === short;
-  }
-  return false;
 }
 
 function ShellBanner({ shell }: { shell: ShellState }): React.ReactElement {
