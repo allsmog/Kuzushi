@@ -290,6 +290,19 @@ export interface UIState {
    * flag. Default false.
    */
   noticeRailExpanded?: boolean;
+  /**
+   * Timestamp (epoch ms) of the first press of the two-stage Ctrl+C.
+   * When set and within CTRL_C_ARM_WINDOW_MS, a second press actually
+   * aborts; otherwise the armed state decays silently. B.4.
+   */
+  ctrlCArmedAt?: number;
+  /**
+   * True when the pipeline has crossed the cost budget and is awaiting
+   * operator confirmation to continue or abort. B.4.
+   */
+  costCapHalted?: boolean;
+  /** Optional budget snapshot the CostCapHalt card renders from. */
+  costCapBudgetUsd?: number;
   /** Rate limit / throttle info — shown when active. */
   throttle?: { concurrency: number; reason: string } | null;
   /** Timestamp when pipeline started (for elapsed timer). */
@@ -520,6 +533,22 @@ export interface ShellState {
   processing: boolean;
   /** Currently executing tool (shown as inline activity). */
   currentTool?: { name: string; elapsedSeconds: number };
+  /**
+   * Rolling LLM-call heartbeat for the active turn — populated from
+   * `llm:call-start/complete/error` bus events so the shell spinner can show
+   * a second line like "· sonnet-4-6 · 2 calls · $0.03". Undefined until the
+   * first LLM call of a turn; reset on new input and on turn completion.
+   */
+  llmHeartbeat?: {
+    /** Calls started but not yet completed. */
+    activeCalls: number;
+    /** Calls that finished (complete or error). */
+    completedCalls: number;
+    /** Last model string observed on a start event. */
+    latestModel?: string;
+    /** Running total cost for this turn, in USD. */
+    totalCostUsd: number;
+  };
   /** Callback to handle user input from the Ink component. */
   onInput?: (input: string) => void;
   /** Callback to exit the shell. */

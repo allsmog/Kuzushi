@@ -41,6 +41,9 @@ const IDLE_KEYBINDS = [
 
 const PROCESSING_KEYBINDS = [{ keys: "Ctrl+C", label: "Abort" }];
 
+/** Window during which a second Ctrl+C at the idle prompt commits the exit. */
+const CTRL_C_ARM_WINDOW_MS = 2000;
+
 export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const state = useUIState(store);
   const shell = state.shell;
@@ -57,13 +60,30 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       if (!shell) return;
 
       if ((key.ctrl && char === "c") || (key.ctrl && char === "d")) {
+        // In-flight work always gets an immediate abort — no point arming
+        // when there's something to interrupt. `onAbort` is idempotent;
+        // a second Ctrl+C after abort falls through to the exit path.
         if (shell.processing) {
           shell.onAbort?.();
           return;
         }
-        shell.onExit?.();
-        exit();
+        // B.4 two-stage Ctrl+C at the idle prompt: first press arms,
+        // second press within CTRL_C_ARM_WINDOW_MS exits. Anything else
+        // pressed within the window disarms silently.
+        const now = Date.now();
+        const armedAt = state.ctrlCArmedAt ?? 0;
+        if (now - armedAt <= CTRL_C_ARM_WINDOW_MS) {
+          shell.onExit?.();
+          exit();
+          return;
+        }
+        store.update({ ctrlCArmedAt: now });
         return;
+      }
+
+      // Any other key disarms the Ctrl+C stage counter if one is in flight.
+      if (state.ctrlCArmedAt) {
+        store.update({ ctrlCArmedAt: undefined });
       }
 
       if (shell.processing) {
@@ -204,26 +224,38 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
 
       {shell.processing && shell.currentTool && (
-        <Box marginTop={1} paddingLeft={2}>
-          <Spinner />
-          <Text>
-            {"  "}
-            {tokens.muted(shell.currentTool.name)}
-            {shell.currentTool.elapsedSeconds > 0 &&
-              tokens.muted(` ${shell.currentTool.elapsedSeconds.toFixed(0)}s`)}
-          </Text>
+        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+          <Box>
+            <Spinner />
+            <Text>
+              {"  "}
+              {tokens.muted(shell.currentTool.name)}
+              {shell.currentTool.elapsedSeconds > 0 &&
+                tokens.muted(` ${shell.currentTool.elapsedSeconds.toFixed(0)}s`)}
+            </Text>
+          </Box>
+          {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
         </Box>
       )}
 
       {shell.processing && !shell.currentTool && (
-        <Box marginTop={1} paddingLeft={2}>
-          <Spinner />
-          <Text>
-            {"  "}
-            {tokens.muted("running...")}
-          </Text>
+        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+          <Box>
+            <Spinner />
+            <Text>
+              {"  "}
+              {tokens.muted("running...")}
+            </Text>
+          </Box>
+          {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
         </Box>
       )}
+
+      {state.ctrlCArmedAt && Date.now() - state.ctrlCArmedAt < CTRL_C_ARM_WINDOW_MS ? (
+        <Box marginTop={1} paddingLeft={2}>
+          <Text>{tokens.warn("press Ctrl+C again to exit")}</Text>
+        </Box>
+      ) : null}
 
       {!shell.processing && (
         <Box marginTop={1}>
@@ -234,6 +266,34 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           </Text>
         </Box>
       )}
+    </Box>
+  );
+}
+
+/**
+ * One-line LLM heartbeat shown under the tool spinner. Reads the rolling
+ * `shell.llmHeartbeat` state (populated via `llm:call-start/complete/error`
+ * bus subscriptions in shell.ts) so operators can tell a slow LLM call from
+ * a hang without dropping into `--verbose`.
+ */
+function LlmHeartbeatLine({
+  heartbeat,
+}: {
+  heartbeat: NonNullable<ShellState["llmHeartbeat"]>;
+}): React.ReactElement | null {
+  const { activeCalls, completedCalls, latestModel, totalCostUsd } = heartbeat;
+  if (activeCalls === 0 && completedCalls === 0) return null;
+  const parts: string[] = [];
+  if (latestModel) parts.push(latestModel);
+  const calls =
+    activeCalls > 0
+      ? `${activeCalls} call${activeCalls === 1 ? "" : "s"} in flight`
+      : `${completedCalls} call${completedCalls === 1 ? "" : "s"}`;
+  parts.push(calls);
+  if (totalCostUsd > 0) parts.push(`$${totalCostUsd.toFixed(2)}`);
+  return (
+    <Box paddingLeft={4}>
+      <Text>{tokens.muted(`· ${parts.join(" · ")}`)}</Text>
     </Box>
   );
 }
