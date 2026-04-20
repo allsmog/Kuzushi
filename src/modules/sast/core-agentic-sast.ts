@@ -5,6 +5,7 @@
  */
 
 import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import { resolvePromptValue } from "./prompts.js";
 import { runSingleTaskPipeline, severityProperty, targetProperty } from "./shared.js";
 
 const agenticScanTool: ModuleTool = {
@@ -27,7 +28,15 @@ const agenticScanTool: ModuleTool = {
   },
   headless: true,
   async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
-    return runSingleTaskPipeline(["agentic"], input, ctx, { summaryLabel: "Agentic" });
+    const p = input as Record<string, unknown>;
+    const promptOverride = await resolvePromptValue(p["AGENTIC_SAST_PROMPT"] as string, ctx.cwd);
+    const extra: Record<string, Record<string, unknown>> | undefined = promptOverride
+      ? { agentic: { promptOverride } }
+      : undefined;
+    return runSingleTaskPipeline(["agentic"], input, ctx, {
+      summaryLabel: "Agentic",
+      ...(extra ? { taskConfig: extra } : {}),
+    });
   },
 };
 

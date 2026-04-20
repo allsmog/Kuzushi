@@ -43,6 +43,12 @@ interface ThreatHuntConfig {
   runsPerActor: number;
   maxConcurrentHunts: number;
   maxTurnsPerHunt: number;
+  /**
+   * Optional system-prompt override. When present, replaces the default
+   * buildPrompt() output. Set via the shell's `set THREAT_HUNT_PROMPT ...`
+   * or by threading `promptOverride` through taskConfig["threat-hunt"].
+   */
+  promptOverride?: string;
 }
 
 interface ActorWithThreats {
@@ -68,6 +74,9 @@ function resolveConfig(ctx: TaskContext): ThreatHuntConfig {
   const maxTurnsPerHunt = resolveTaskPositiveInt(ctx, "threat-hunt", "maxTurnsPerHunt", 30);
   const effort = resolveTaskEffort(ctx, "threat-hunt") ?? DEFAULT_THREAT_HUNT_EFFORT;
   const thinkingDisabled = resolveTaskThinkingDisabled(ctx, "threat-hunt") ?? false;
+  const rawOverride = ctx.config.taskConfig?.["threat-hunt"]?.["promptOverride"];
+  const promptOverride =
+    typeof rawOverride === "string" && rawOverride.length > 0 ? rawOverride : undefined;
   return {
     model,
     maxFindings,
@@ -77,6 +86,7 @@ function resolveConfig(ctx: TaskContext): ThreatHuntConfig {
     maxTurnsPerHunt,
     effort,
     thinkingDisabled,
+    ...(promptOverride ? { promptOverride } : {}),
   };
 }
 
@@ -163,8 +173,13 @@ function buildPrompt(actor: DfdElement, threats: StrideThreat[]): string {
   ].join("\n");
 }
 
-function buildScopedPrompt(actor: DfdElement, threats: StrideThreat[], scanScope: string): string {
-  const base = buildPrompt(actor, threats);
+function buildScopedPrompt(
+  actor: DfdElement,
+  threats: StrideThreat[],
+  scanScope: string,
+  promptOverride?: string,
+): string {
+  const base = promptOverride ?? buildPrompt(actor, threats);
   return [
     `IMPORTANT: Only examine files under ${scanScope}. Do not read, grep, or navigate outside this directory.`,
     "",
@@ -179,7 +194,7 @@ async function runActorHunt(
   config: ThreatHuntConfig,
 ): Promise<FindingOutput> {
   const scanScope = context.scanPath ?? context.repoRoot;
-  const prompt = buildScopedPrompt(actor, threats, scanScope);
+  const prompt = buildScopedPrompt(actor, threats, scanScope, config.promptOverride);
   const runtime = resolveTaskRuntime(context);
   const tag = `[threat-hunt/${actor.name}]`;
 
