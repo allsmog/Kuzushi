@@ -22,6 +22,12 @@ const triageRunTool: ModuleTool = {
         items: { type: "string" },
         description: "Multiple finding fingerprints to triage.",
       },
+      TRIAGE_PROMPT: {
+        type: "string",
+        description:
+          "Override the triage system prompt. Accepts inline text or a path to a .md/.txt file. " +
+          "Common use: `set TRIAGE_PROMPT ./prompts/acme-triage.md` then `run`.",
+      },
     },
   },
   headless: true,

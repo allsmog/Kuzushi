@@ -15,6 +15,11 @@ const verifyFindingTool: ModuleTool = {
     type: "object",
     properties: {
       fingerprint: { type: "string", description: "Finding fingerprint to verify." },
+      VERIFY_PROMPT: {
+        type: "string",
+        description:
+          "Override the verify system prompt. Accepts inline text or a path to a .md/.txt file.",
+      },
     },
     required: ["fingerprint"],
   },

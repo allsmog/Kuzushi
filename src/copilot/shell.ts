@@ -21,6 +21,7 @@ import type { ContextSnapshot, ShellHistoryEntry, ShellState, UIStore } from "..
 import { CopilotCore } from "./core.js";
 import { CoreDispatcher, DispatcherDriver } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
+import { openInEditor } from "./editor.js";
 import { Datastore } from "./options.js";
 import { createPrintSink, type PrintLevel, type PrintSink } from "./print.js";
 import { listRecipes, resolveRecipePath } from "./recipes.js";
@@ -641,6 +642,7 @@ async function startInkShell(
     tool: ModuleTool,
     input: Record<string, unknown>,
     signal?: AbortSignal,
+    datastore?: Datastore,
   ) => {
     const snapshot = store.getState().shell?.contextSnapshot ?? null;
     const seedTaskOutputs = snapshot ? buildSeedMapFromSnapshot(snapshot) : undefined;
@@ -652,6 +654,7 @@ async function startInkShell(
     if (opts.workspace) execOpts.workspaceId = opts.workspace;
     if (signal) execOpts.signal = signal;
     if (seedTaskOutputs) execOpts.seedTaskOutputs = seedTaskOutputs;
+    if (datastore) execOpts.datastore = datastore;
     return core.executeTool(tool.name, input, execOpts);
   };
 
@@ -683,6 +686,9 @@ async function startInkShell(
     runTool: runToolFromDispatcher,
     resolveRecipePath: (name: string) => resolveRecipePath(name, currentCwd()),
     listRecipes: () => listRecipes(currentCwd()),
+    // Bridge for `edit <NAME>`. Suspending the Ink render while $EDITOR owns
+    // the TTY is a future refinement — today we just spawn inheriting stdio.
+    openEditor: (initial: string) => openInEditor(initial),
   });
 
   driver = new DispatcherDriver({

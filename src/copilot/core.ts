@@ -229,6 +229,8 @@ export class CopilotCore {
       signal: ctxOverrides?.signal,
       uiStore: ctxOverrides?.uiStore,
       seedTaskOutputs: ctxOverrides?.seedTaskOutputs,
+      ...(ctxOverrides?.datastore ? { datastore: ctxOverrides.datastore } : {}),
+      ...(ctxOverrides?.print ? { print: ctxOverrides.print } : {}),
     };
 
     const result = await tool.execute(input, ctx);
