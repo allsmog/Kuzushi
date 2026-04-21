@@ -210,10 +210,11 @@ export class ModuleDispatcher implements CommandDispatcher {
         output: `[*] Would invoke ${tool.name} with: ${JSON.stringify(this.datastore.snapshot())}`,
       };
     }
-    ctx.print.status(`Running ${tool.name}...`);
+    // Progress + completion are now printed by `runToolFromDispatcher` in
+    // `shell.ts` as cc-repo-style `⏺ tool(hint)` + `⎿  done/failed in Xs`
+    // history entries. Intentionally no `print.status` / `print.good` here
+    // to avoid duplicating the header/footer in scrollback.
     const result = await this.runTool(tool, this.datastore.snapshot(), ctx.signal, this.datastore);
-    if (result.ok) ctx.print.good(`${tool.name} completed`);
-    else ctx.print.error(`${tool.name} failed`);
     return { output: result.output };
   }
 

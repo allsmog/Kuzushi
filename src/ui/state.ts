@@ -390,10 +390,16 @@ function preflightBreadcrumb(kind: (typeof PREFLIGHT_STEP_ORDER)[number]): UISta
 }
 
 export interface ShellHistoryEntry {
-  type: "input" | "output" | "error" | "tool-progress";
+  type: "input" | "output" | "error" | "tool-progress" | "tool-call";
   text: string;
   timestamp: number;
   prompt?: string;
+  /** For `tool-call`: qualified tool name (e.g. `context:build`). */
+  tool?: string;
+  /** For `tool-call`: ≤40-char input summary rendered as `(…)`. */
+  inputHint?: string;
+  /** For `tool-progress`: status hint — success/failure/stale colorization. */
+  progressKind?: "info" | "ok" | "fail" | "abort";
 }
 
 /**
