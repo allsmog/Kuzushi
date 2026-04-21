@@ -15,6 +15,7 @@ import { createLogger } from "../../../logger.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding } from "../../../scanners/types.js";
 import { toErrorMessage } from "../../../utils.js";
+import { forwardSubAgentMessage } from "../forward-subagent-output.js";
 import { convertRandoriToThreatModel } from "./randori-adapter.js";
 import {
   mergeRandoriStageOutputs,
@@ -363,6 +364,13 @@ export interface RandoriRunnerParams {
    * shell so a 3–5 minute phase doesn't look like a frozen label.
    */
   onActivity?: (description: string) => void;
+  /**
+   * Sub-agent output sink — fires once per Claude Code tool_use block the
+   * PASTA subprocess performs. Typically `ctx.reportOutput` so the
+   * operator sees "Read(src/api/admin.ts)" etc. live under the `⏺`
+   * header while S1-S4 runs.
+   */
+  onOutput?: (line: string) => void;
 }
 
 export interface RandoriRunnerResult {
@@ -408,6 +416,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
         prompt: buildScopePrompt(params.maxElements, params.artifactDir),
         options: baseOpts,
       })) {
+        forwardSubAgentMessage(message, params.onOutput);
         if (message.type === "result" && typeof message.totalCostUsd === "number") {
           costUsd += message.totalCostUsd;
         }
@@ -429,6 +438,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
           prompt: buildStridePrompt(params.maxThreats, params.artifactDir, params.previousModel),
           options: baseOpts,
         })) {
+          forwardSubAgentMessage(message, params.onOutput);
           if (message.type === "result" && typeof message.totalCostUsd === "number") {
             costUsd += message.totalCostUsd;
           }
@@ -454,6 +464,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
           prompt: buildNarrativePrompt(params.artifactDir),
           options: baseOpts,
         })) {
+          forwardSubAgentMessage(message, params.onOutput);
           if (message.type === "result" && typeof message.totalCostUsd === "number") {
             costUsd += message.totalCostUsd;
           }
@@ -476,6 +487,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
             prompt: buildNarrativeRetryPrompt(params.artifactDir, narrativeIssues),
             options: baseOpts,
           })) {
+            forwardSubAgentMessage(message, params.onOutput);
             if (message.type === "result" && typeof message.totalCostUsd === "number") {
               costUsd += message.totalCostUsd;
             }
