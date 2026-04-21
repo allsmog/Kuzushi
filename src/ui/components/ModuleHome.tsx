@@ -8,7 +8,7 @@
  * component is purely presentational.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import type { ShellModuleCard, ShellModuleToolSummary, ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
@@ -18,6 +18,9 @@ interface ModuleHomeProps {
 }
 
 export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 120;
+  const narrow = columns < 110;
   const moduleId = shell.focusedModule;
   if (!moduleId) {
     return <Text>{tokens.muted("(no module focused)")}</Text>;
@@ -30,6 +33,13 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   return (
     <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
       <Header moduleId={moduleId} card={card} />
+      <Box marginTop={1}>
+        <Text>
+          {tokens.strong("Primary action: ")}
+          {tokens.accent("run one tool verb")}
+          {tokens.muted(" (listed below).")}
+        </Text>
+      </Box>
 
       {card?.description ? (
         <Section label="what it does">
@@ -41,7 +51,9 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
         {tools.length === 0 ? (
           <Text>{tokens.muted("   (no tools declared)")}</Text>
         ) : (
-          tools.map((tool) => <ToolRow key={tool.name} tool={tool} verbWidth={verbWidth} />)
+          tools.map((tool) => (
+            <ToolRow key={tool.name} tool={tool} verbWidth={verbWidth} compact={narrow} />
+          ))
         )}
       </Section>
 
@@ -57,18 +69,9 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
       <Box marginTop={1}>
         <Text>{tokens.muted("─".repeat(78))}</Text>
       </Box>
-      <Box>
-        <Text>
-          {tokens.hint("type a tool   ")}
-          {tokens.muted("t")}
-          {tokens.hint(" tune   ")}
-          {tokens.muted("f")}
-          {tokens.hint(" findings   ")}
-          {tokens.muted("b")}
-          {tokens.hint(" back   ")}
-          {tokens.muted("/help")}
-          {tokens.hint(" more")}
-        </Text>
+      <Box flexDirection="column">
+        <Text>{tokens.hint("Primary: type a tool verb and press Enter.")}</Text>
+        <Text>{tokens.muted("Secondary: t tune · f findings · b back · /help more")}</Text>
       </Box>
     </Box>
   );
@@ -119,12 +122,14 @@ function Section({
 function ToolRow({
   tool,
   verbWidth,
+  compact,
 }: {
   tool: ShellModuleToolSummary;
   verbWidth: number;
+  compact: boolean;
 }): React.ReactElement {
   const verb = tool.verb.padEnd(verbWidth + 2);
-  const desc = truncate(tool.description, 50).padEnd(50);
+  const desc = truncate(tool.description, compact ? 34 : 50).padEnd(compact ? 34 : 50);
   return (
     <Text>
       {"   "}

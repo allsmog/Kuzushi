@@ -11,7 +11,7 @@
  * out as `prompt edit --expert`.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import type { ShellState, TuneSnapshot } from "../state.js";
 import { tokens } from "../tokens.js";
@@ -26,6 +26,9 @@ interface TuneViewProps {
 }
 
 export function TuneView({ shell }: TuneViewProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 120;
+  const narrow = columns < 110;
   const moduleId = shell.focusedModule ?? "(no module)";
   const snap = shell.tuneSnapshot;
 
@@ -95,6 +98,9 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
       <Box marginTop={1}>
         <Text>{tokens.muted("\u2500".repeat(78))}</Text>
       </Box>
+      <Box marginTop={1}>
+        <Text>{tokens.strong("Primary action: x run with these settings.")}</Text>
+      </Box>
 
       <Box marginTop={1}>
         <HouseRules text={snap?.houseRules} path={snap?.houseRulesPath} />
@@ -104,13 +110,14 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
         <Text>{tokens.muted("\u2500".repeat(78))}</Text>
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
+        <Text>{tokens.hint("Primary: x run with these settings")}</Text>
         <Text>
-          {tokens.hint("s save   r reset   x run with these   ")}
-          {tokens.muted("p")}
-          {tokens.hint(" full prompt editor (--expert)   ")}
-          {tokens.muted("/config")}
-          {tokens.hint(" open editor")}
+          {tokens.muted(
+            narrow
+              ? "Secondary: s save · r reset · p prompt editor · /config full editor"
+              : "Secondary: s save · r reset · p prompt editor (--expert) · /config full editor",
+          )}
         </Text>
       </Box>
     </Box>

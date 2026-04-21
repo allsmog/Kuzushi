@@ -10,7 +10,7 @@
  * the shared footer.
  */
 
-import { Box, Static, Text, useApp, useInput } from "ink";
+import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import type React from "react";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
@@ -78,6 +78,8 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const shell = state.shell;
   const { exit } = useApp();
   const [input, setInput] = useState("");
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 120;
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const draftInputRef = useRef("");
 
@@ -341,6 +343,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       </Box>
 
       <MemoShellViewPanel state={state} shell={shell} />
+      <ShellWayfinding shell={shell} narrow={columns < 110} />
 
       {shell.plannerBusy && !shell.pendingPlan && (
         <Box marginTop={1} paddingLeft={2}>
@@ -409,6 +412,42 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
     </Box>
   );
+}
+
+function ShellWayfinding({
+  shell,
+  narrow,
+}: {
+  shell: ShellState;
+  narrow: boolean;
+}): React.ReactElement {
+  const location = describeShellLocation(shell);
+  const backHint =
+    shell.shellView === "catalog"
+      ? "top-level"
+      : shell.shellView === "finding"
+        ? "/back → findings"
+        : shell.shellView === "module"
+          ? "/back → catalog"
+          : "/back → module";
+  return (
+    <Box marginTop={1} paddingLeft={2}>
+      <Text>
+        {tokens.muted("you are in ")}
+        {tokens.strong(location)}
+        {tokens.muted(" · mode ")}
+        {tokens.value(shell.processing ? "running" : "idle")}
+        {!narrow ? <>{tokens.muted(` · ${backHint}`)}</> : null}
+      </Text>
+    </Box>
+  );
+}
+
+function describeShellLocation(shell: ShellState): string {
+  if (shell.shellView === "module") return `${shell.focusedModule ?? "module"} home`;
+  if (shell.shellView === "finding") return `finding ${shell.openFindingId ?? "detail"}`;
+  if (shell.shellView.startsWith("threat-")) return shell.shellView.replace("threat-", "threat/");
+  return shell.shellView;
 }
 
 function historyEntryKey(entry: ShellHistoryEntry): string {
