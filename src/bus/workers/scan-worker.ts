@@ -11,6 +11,7 @@ import type { KuzushiConfig } from "../../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TaskStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
+import { wrapRuntimeWithActivityForwarding } from "../runtime-forwarding.js";
 import { executeAgentTask } from "../task-execution.js";
 import type { MessageBus } from "../types.js";
 
@@ -75,7 +76,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
         ...(context.gitRoot ? { gitRoot: context.gitRoot } : {}),
         repoName: context.repoName,
         config: deps.config,
-        runtime: deps.runtime,
+        runtime: wrapRuntimeWithActivityForwarding(deps.runtime, bus, taskId, runId),
         bus,
         upstreamOutputs,
         securityProfiles,

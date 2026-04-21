@@ -18,6 +18,7 @@ import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
 import { publishTaskActivity, publishTaskOutput } from "../bus/activity.js";
 import { ModuleEventBus, type ModuleEventScope } from "../bus/module-events.js";
+import { wrapRuntimeWithActivityForwarding } from "../bus/runtime-forwarding.js";
 import type { MessageBus } from "../bus/types.js";
 import { ModuleCache } from "../modules/cache.js";
 import { createCorePromptArmorModule } from "../modules/core-prompt-armor.js";
@@ -298,9 +299,15 @@ export class CopilotCore {
     const scope = this.moduleScopes.get(resolved.module.id);
 
     const ctxBus = ctxOverrides?.bus ?? this.opts.bus;
+    const toolRuntime = wrapRuntimeWithActivityForwarding(
+      ctxOverrides?.runtime ?? this.opts.runtime,
+      ctxBus,
+      qualifiedName,
+      "shell",
+    );
     const ctx: ToolExecutionContext = {
       cwd: ctxOverrides?.cwd ?? this.opts.dataDir,
-      runtime: ctxOverrides?.runtime ?? this.opts.runtime,
+      runtime: toolRuntime,
       bus: ctxBus,
       config: ctxOverrides?.config ?? this.opts.config,
       workspaceId: ctxOverrides?.workspaceId,
