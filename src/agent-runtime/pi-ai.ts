@@ -22,6 +22,7 @@ import { getLogger } from "../logger.js";
 import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { maybeCompactContext } from "./context-compactor.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 import { normalizeToolInput } from "./tool-input-normalizer.js";
 import { summarizeToolCompletion } from "./tool-summary.js";
@@ -565,6 +566,27 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
       context.messages.push(assistant);
       const turnCostUsd = extractCostUsd(assistant);
       totalCostUsd += turnCostUsd;
+
+      // Context compaction: when `assistant.usage.input` crosses 75% of
+      // the model's context window, compact old tool-result content in
+      // place. Keeps many-turn agent runs (threat-hunt's 50-turn
+      // free-exploration hunts especially) from hitting provider
+      // `prompt is too long` 400s. See context-compactor.ts for the
+      // rationale and knobs.
+      const lastInputTokens = assistant.usage?.input ?? 0;
+      const contextWindow = (model as { contextWindow?: number } | undefined)?.contextWindow ?? 0;
+      if (contextWindow > 0 && lastInputTokens > 0) {
+        const compactResult = maybeCompactContext(context, {
+          contextWindow,
+          lastInputTokens,
+          turn,
+        });
+        if (compactResult.compacted) {
+          log.info(
+            `[pi-ai] compacted ${compactResult.compactedCount} tool-result(s), freed ~${compactResult.estimatedFreedTokens} input tokens (turn ${turn}, usage ${lastInputTokens}/${contextWindow})`,
+          );
+        }
+      }
 
       // Emit llm:call-complete or llm:call-error for this turn
       if (bus) {

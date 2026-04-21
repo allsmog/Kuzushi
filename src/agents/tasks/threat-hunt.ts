@@ -71,13 +71,11 @@ function resolveConfig(ctx: TaskContext): ThreatHuntConfig {
   const maxActors = resolveTaskPositiveInt(ctx, "threat-hunt", "maxActors", 5);
   const runsPerActor = Math.min(resolveTaskPositiveInt(ctx, "threat-hunt", "runsPerActor", 1), 5);
   const maxConcurrentHunts = resolveTaskPositiveInt(ctx, "threat-hunt", "maxConcurrentHunts", 3);
-  // 15 turns is the point at which a free-exploring agent (Read/Grep/Glob
-  // allowed) typically approaches Opus 4.6's 1M input-context cap on real
-  // repos: each Read appends file contents to pi-ai's context.messages,
-  // and 30 turns blew the cap with a raw `400 prompt is too long`. 15
-  // gives enough runway for most hunts; operators can override via
-  // taskConfig when they know the target is small.
-  const maxTurnsPerHunt = resolveTaskPositiveInt(ctx, "threat-hunt", "maxTurnsPerHunt", 15);
+  // Deep hunts need runway. Pi-ai's turn loop now auto-compacts old
+  // tool-result content when `assistant.usage.input` crosses 75% of the
+  // model's context window, so a 50-turn free exploration no longer
+  // blows the 1M input-context cap. Operators can still override.
+  const maxTurnsPerHunt = resolveTaskPositiveInt(ctx, "threat-hunt", "maxTurnsPerHunt", 50);
   const effort = resolveTaskEffort(ctx, "threat-hunt") ?? DEFAULT_THREAT_HUNT_EFFORT;
   const thinkingDisabled = resolveTaskThinkingDisabled(ctx, "threat-hunt") ?? false;
   const rawOverride = ctx.config.taskConfig?.["threat-hunt"]?.["promptOverride"];

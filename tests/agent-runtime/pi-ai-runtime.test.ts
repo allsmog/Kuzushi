@@ -704,6 +704,75 @@ describe("PiAiAgentRuntime", () => {
     expect(err).toContain("prompt is too long");
   });
 
+  it("auto-compacts old tool-results when input tokens cross the context-window threshold", async () => {
+    // Goal: simulate a multi-turn run where turn 1 reports input usage
+    // > 75% of contextWindow. The context.messages array is shared
+    // across turns; after turn 1's assistant is appended, pi-ai compacts
+    // any already-present old toolResult entries so turn 2's request
+    // stays under the cap.
+    const cwd = makeTempDir();
+    writeFileSync(path.join(cwd, "big.ts"), "x\n".repeat(10), "utf8");
+
+    // Small contextWindow → threshold easy to trigger with mock usage.
+    getModelMock.mockReturnValue({
+      ...makeModel(),
+      contextWindow: 1_000,
+    });
+
+    const assistantWithToolCall = (id: string, usageInput: number) => {
+      const a = makeAssistantMessage(
+        [{ type: "toolCall", id, name: "Read", arguments: { path: "big.ts" } }],
+        { stopReason: "toolUse" },
+      );
+      a.usage.input = usageInput;
+      return a;
+    };
+
+    // Observe the context fed into each complete call BEFORE any
+    // compaction. We snapshot each turn's tool-result state so we can
+    // compare turn 2 vs turn 1.
+    const observed: Array<Array<{ toolCallId: string; textLen: number }>> = [];
+    // Turn-specific assistant responses — each with high usage.input to
+    // force compaction between turns.
+    const scripted = [
+      assistantWithToolCall("t1", 900),
+      assistantWithToolCall("t2", 900),
+      makeAssistantMessage([{ type: "text", text: "done" }]),
+    ];
+    let call = 0;
+    completeMock.mockImplementation(async (_m: unknown, context: unknown) => {
+      const ctx = context as { messages: Array<Record<string, unknown>> };
+      observed.push(
+        ctx.messages
+          .filter((m) => m.role === "toolResult")
+          .map((m) => {
+            const content = (m as { content: unknown }).content;
+            const firstText = Array.isArray(content)
+              ? (content.find((c: { type?: string }) => c.type === "text") as
+                  | { text?: string }
+                  | undefined)
+              : undefined;
+            return {
+              toolCallId: (m as { toolCallId: string }).toolCallId,
+              textLen: firstText?.text?.length ?? 0,
+            };
+          }),
+      );
+      return scripted[call++] ?? scripted[scripted.length - 1];
+    });
+
+    const runtime = new PiAiAgentRuntime();
+    await collectMessages(runtime, makeRequest(cwd));
+
+    // At turn 2's request, turn 1's toolResult ("t1") should already
+    // be compacted to the elided stub (well under 200 chars).
+    expect(observed.length).toBeGreaterThanOrEqual(2);
+    const turn2 = observed[1]!;
+    const t1Result = turn2.find((r) => r.toolCallId === "t1");
+    expect(t1Result).toBeDefined();
+    expect(t1Result!.textLen).toBeLessThan(200);
+  });
+
   it("detects multiple provider context-overflow phrasings", async () => {
     const cwd = makeTempDir();
     // "request_too_large" appears in Anthropic responses for oversized

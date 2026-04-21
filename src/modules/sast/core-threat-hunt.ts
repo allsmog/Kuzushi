@@ -32,7 +32,7 @@ const threatHuntTool: ModuleTool = {
       maxActors: { type: "integer", default: 5, description: "Maximum threat actors to spawn." },
       runsPerActor: { type: "integer", default: 1, description: "Hunts per actor." },
       maxConcurrentHunts: { type: "integer", default: 3, description: "Concurrent hunts." },
-      maxTurnsPerHunt: { type: "integer", default: 15, description: "Turns per hunt." },
+      maxTurnsPerHunt: { type: "integer", default: 50, description: "Turns per hunt." },
       THREAT_HUNT_PROMPT: {
         type: "string",
         description:
