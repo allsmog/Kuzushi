@@ -16,7 +16,7 @@ import { type Dirent, existsSync, readdirSync } from "node:fs";
 import nodePath from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
-import { publishTaskActivity } from "../bus/activity.js";
+import { publishTaskActivity, publishTaskOutput } from "../bus/activity.js";
 import { ModuleEventBus, type ModuleEventScope } from "../bus/module-events.js";
 import type { MessageBus } from "../bus/types.js";
 import { ModuleCache } from "../modules/cache.js";
@@ -315,6 +315,9 @@ export class CopilotCore {
       ...(toolModel ? { toolModel } : {}),
       reportActivity: (description, meta) => {
         void publishTaskActivity(ctxBus, qualifiedName, description, meta ?? {});
+      },
+      reportOutput: (line) => {
+        void publishTaskOutput(ctxBus, qualifiedName, line);
       },
     };
 

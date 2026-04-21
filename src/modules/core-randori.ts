@@ -187,6 +187,7 @@ const pastaTool: ModuleTool = {
         previousModel,
         signal: ctx.signal,
         logTag: "[randori]",
+        onOutput: ctx.reportOutput,
       });
 
       const lines = [

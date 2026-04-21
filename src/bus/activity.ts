@@ -37,6 +37,32 @@ export function publishTaskActivity(
 }
 
 /**
+ * Publish a `task:output` event — a raw subprocess output line for the
+ * shell's ephemeral `⎿` live tail. Unlike `publishTaskActivity`, these
+ * events never land in scrollback — the shell drops them when the tool
+ * resolves. Use for stdout preview, sub-agent tool-use streaming, and
+ * other noise that should be live-only.
+ */
+export function publishTaskOutput(
+  bus: MessageBus,
+  taskId: string,
+  line: string,
+  opts: { runId?: string } = {},
+): void {
+  const runId = opts.runId ?? "shell";
+  void bus
+    .publish(
+      createEvent("task:output", runId, {
+        taskId,
+        line,
+      }),
+    )
+    .catch(() => {
+      /* non-fatal — output previews are best-effort */
+    });
+}
+
+/**
  * Publish a `task:phase-progress` event — updates the "⏵ phase N/M" strip.
  */
 export function publishTaskPhase(
