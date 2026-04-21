@@ -10,7 +10,7 @@
 
 import { createHash } from "node:crypto";
 import path from "node:path";
-import type { AgentRuntime } from "../../../agent-runtime/types.js";
+import type { AgentMessage, AgentRuntime } from "../../../agent-runtime/types.js";
 import { createLogger } from "../../../logger.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding } from "../../../scanners/types.js";
@@ -330,8 +330,58 @@ function normalizeFilePath(repoRoot: string, filePath: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Runner
+// Streaming activity extraction
 // ---------------------------------------------------------------------------
+
+const ACTIVITY_MAX = 80;
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
+
+/**
+ * Extract short human-readable activity lines from a runtime message so the
+ * shell's progress rail sees forward motion while the plugin's LLM churns on
+ * S1/S2/S3. Returns one entry per `tool_use` block in an assistant message
+ * and a single line for tool summaries; `tool-progress` ticks and `result`
+ * envelopes are ignored (too noisy / handled separately for cost).
+ */
+export function describeRuntimeMessage(message: AgentMessage): string[] {
+  if (message.type === "assistant") {
+    const blocks = Array.isArray(message.content) ? message.content : [];
+    const out: string[] = [];
+    for (const block of blocks) {
+      if (block?.["type"] !== "tool_use") continue;
+      const name = typeof block["name"] === "string" ? block["name"] : "tool";
+      const input = block["input"];
+      let hint = "";
+      if (input && typeof input === "object") {
+        const record = input as Record<string, unknown>;
+        const primary =
+          record["target"] ??
+          record["path"] ??
+          record["file"] ??
+          record["query"] ??
+          record["pattern"] ??
+          record["name"];
+        if (typeof primary === "string" && primary.length > 0) {
+          hint = truncate(primary, 40);
+        }
+      }
+      out.push(hint ? `${name} · ${hint}` : name);
+    }
+    return out;
+  }
+  if (message.type === "tool-summary") {
+    const summary = typeof message.summary === "string" ? message.summary.trim() : "";
+    if (!summary) return [];
+    const firstLine = summary.split("\n")[0]?.trim() ?? "";
+    if (!firstLine) return [];
+    return [truncate(firstLine, ACTIVITY_MAX)];
+  }
+  return [];
+}
 
 export interface RandoriRunnerParams {
   runtime: AgentRuntime;
@@ -395,6 +445,28 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
 
   let costUsd = 0;
 
+  // Runs one plugin query to completion, accumulating cost and forwarding
+  // every meaningful streaming message as an `onActivity` pulse. Without this
+  // the shell sees a single phase label, then ~5 minutes of silence until
+  // the `result` envelope — long enough for `ToolRunningStatus`'s 15s
+  // staleness watchdog to show a misleading `waiting…` chip.
+  const runPhase = async (prompt: string, phaseTag: string): Promise<void> => {
+    try {
+      for await (const message of params.runtime.query({ prompt, options: baseOpts })) {
+        if (message.type === "result" && typeof message.totalCostUsd === "number") {
+          costUsd += message.totalCostUsd;
+        }
+        if (params.onActivity) {
+          for (const line of describeRuntimeMessage(message)) {
+            params.onActivity(line);
+          }
+        }
+      }
+    } catch (error) {
+      log.warn(`${phaseTag} error: ${toErrorMessage(error)}`);
+    }
+  };
+
   const hasS4 = params.stages.includes("s4");
   const scopeStages = hasS4 ? params.stages.filter((s) => s !== "s4") : params.stages;
 
@@ -403,18 +475,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     log.info(`${tag} Phase 1: running stages ${scopeStages.join(",")}`);
     params.onPhase?.(`phase 1 (${scopeStages.join("/").toUpperCase()} scope)`);
     params.onActivity?.(`scoping ${scopeStages.join(", ")}`);
-    try {
-      for await (const message of params.runtime.query({
-        prompt: buildScopePrompt(params.maxElements, params.artifactDir),
-        options: baseOpts,
-      })) {
-        if (message.type === "result" && typeof message.totalCostUsd === "number") {
-          costUsd += message.totalCostUsd;
-        }
-      }
-    } catch (error) {
-      log.warn(`${tag} Phase 1 error: ${toErrorMessage(error)}`);
-    }
+    await runPhase(buildScopePrompt(params.maxElements, params.artifactDir), `${tag} Phase 1`);
   }
 
   // ── Phase 2: S4 (STRIDE threat scenarios with evidence) ──
@@ -424,18 +485,10 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
       log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
       params.onPhase?.("phase 2 (S4 threats)");
       params.onActivity?.("enumerating STRIDE threats");
-      try {
-        for await (const message of params.runtime.query({
-          prompt: buildStridePrompt(params.maxThreats, params.artifactDir, params.previousModel),
-          options: baseOpts,
-        })) {
-          if (message.type === "result" && typeof message.totalCostUsd === "number") {
-            costUsd += message.totalCostUsd;
-          }
-        }
-      } catch (error) {
-        log.warn(`${tag} Phase 2 (S4) error: ${toErrorMessage(error)}`);
-      }
+      await runPhase(
+        buildStridePrompt(params.maxThreats, params.artifactDir, params.previousModel),
+        `${tag} Phase 2 (S4)`,
+      );
     } else {
       log.warn(`${tag} Skipping S4 — no scope artifacts from S1-S3`);
     }
@@ -449,18 +502,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
       log.info(`${tag} Phase 3: synthesising narrative layer`);
       params.onPhase?.("phase 3 (narrative)");
       params.onActivity?.("drafting attacker narrative");
-      try {
-        for await (const message of params.runtime.query({
-          prompt: buildNarrativePrompt(params.artifactDir),
-          options: baseOpts,
-        })) {
-          if (message.type === "result" && typeof message.totalCostUsd === "number") {
-            costUsd += message.totalCostUsd;
-          }
-        }
-      } catch (error) {
-        log.warn(`${tag} Phase 3 (narrative) error: ${toErrorMessage(error)}`);
-      }
+      await runPhase(buildNarrativePrompt(params.artifactDir), `${tag} Phase 3 (narrative)`);
 
       // Retry once if the artifact is missing or incomplete.
       const narrativeAfter = readRandoriArtifacts(params.repoRoot, params.artifactDir).narrative;
@@ -471,18 +513,10 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
         );
         params.onPhase?.("phase 3 (narrative retry)");
         params.onActivity?.(`retrying narrative (${narrativeIssues.length} issue(s))`);
-        try {
-          for await (const message of params.runtime.query({
-            prompt: buildNarrativeRetryPrompt(params.artifactDir, narrativeIssues),
-            options: baseOpts,
-          })) {
-            if (message.type === "result" && typeof message.totalCostUsd === "number") {
-              costUsd += message.totalCostUsd;
-            }
-          }
-        } catch (error) {
-          log.warn(`${tag} Phase 3 retry error: ${toErrorMessage(error)}`);
-        }
+        await runPhase(
+          buildNarrativeRetryPrompt(params.artifactDir, narrativeIssues),
+          `${tag} Phase 3 retry`,
+        );
       }
     } else {
       log.warn(`${tag} Skipping narrative synthesis — no stage artifacts`);
