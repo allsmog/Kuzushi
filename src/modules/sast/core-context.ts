@@ -5,6 +5,7 @@
  */
 
 import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import { saveContextSnapshot } from "./context-persist.js";
 import { formatContextSummary, generateContextSnapshot } from "./shared.js";
 
 const contextBuildTool: ModuleTool = {
@@ -84,6 +85,11 @@ const contextBuildTool: ModuleTool = {
         const shell = ctx.uiStore.getState().shell;
         if (shell) ctx.uiStore.update({ shell: { ...shell, contextSnapshot: snapshot } });
       }
+
+      // Persist to `<target>/.kuzushi/context-snapshot.json` so a fresh
+      // shell session in the same repo can auto-load without requiring
+      // the operator to re-run context:build (or pass --workspace).
+      saveContextSnapshot(target, snapshot);
 
       return { ok: true, output: formatContextSummary(snapshot), data: snapshot };
     } catch (err) {
