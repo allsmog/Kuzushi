@@ -22,6 +22,7 @@ import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
+import { normalizeToolInput } from "./tool-input-normalizer.js";
 import { summarizeToolCompletion } from "./tool-summary.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type {
@@ -319,6 +320,15 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
   let totalCostUsd = 0;
   let generatedToolCallCounter = 0;
   const truncatedTextParts: string[] = [];
+  // Consecutive validation-failure tracking across turns. When the LLM keeps
+  // re-emitting the same bad tool call (e.g. {filePath} vs expected {file_path}),
+  // we break out of the turn loop instead of burning tokens indefinitely.
+  // MAX_CONSECUTIVE_VALIDATION_FAILURES = 3 matches the retry cap randori's
+  // runPhase uses downstream, so operators see one consistent "3 strikes"
+  // behavior across both runtimes.
+  const MAX_CONSECUTIVE_VALIDATION_FAILURES = 3;
+  let lastFailedValidationTool: string | null = null;
+  let consecutiveValidationFailures = 0;
 
   try {
     for (let turn = 1; ; turn++) {
@@ -651,12 +661,45 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
           continue;
         }
 
+        // Pre-validation alias normalization. Weaker models often emit
+        // camelCase aliases (`filePath`, `oldString`, `newString`, `text`)
+        // for tools whose schemas demand snake_case (`file_path`,
+        // `old_string`, ...). Without this, AJV rejects every call and the
+        // next turn sees the error, retries with the same wrong key, and
+        // we loop for 20+ minutes on PASTA S4. normalizeToolInput returns
+        // the same reference when no change is needed — cheap on hot path.
+        const {
+          input: normalizedArgs,
+          changed,
+          renames,
+        } = normalizeToolInput(toolCall.name, toolCall.arguments);
+        if (changed) {
+          log.debug(`[pi-ai] normalized ${toolCall.name} input: ${renames.join(", ")}`);
+          (toolCall as { arguments: unknown }).arguments = normalizedArgs;
+        }
+
         let validatedArgs: Record<string, unknown>;
         try {
           validatedArgs = validateToolCall(enabledTools, toolCall) as Record<string, unknown>;
+          // Reset the retry counter on any successful validation — the
+          // model corrected itself, or different tool calls interleaved.
+          lastFailedValidationTool = null;
+          consecutiveValidationFailures = 0;
         } catch (error) {
           const validationError = toErrorMessage(error);
           const elapsedSeconds = Math.max(0, (Date.now() - startedToolMs) / 1000);
+
+          // Track same-tool consecutive validation failures. After
+          // MAX_CONSECUTIVE_VALIDATION_FAILURES in a row we bail the turn
+          // loop instead of feeding yet another toolResult back to the LLM
+          // — there's no evidence the model is going to self-correct.
+          if (lastFailedValidationTool === toolCall.name) {
+            consecutiveValidationFailures += 1;
+          } else {
+            lastFailedValidationTool = toolCall.name;
+            consecutiveValidationFailures = 1;
+          }
+
           yield {
             type: "tool-progress",
             toolUseId,
@@ -674,6 +717,32 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
             ),
             precedingToolUseIds: [toolUseId],
           };
+          // Also surface on the structured tool-result stream so downstream
+          // consumers (e.g. randori-runner's retry cap) can observe failures
+          // directly rather than relying on the cosmetic tool-summary.
+          yield {
+            type: "tool-result",
+            toolUseId,
+            isError: true,
+            content: validationError,
+          };
+
+          if (consecutiveValidationFailures >= MAX_CONSECUTIVE_VALIDATION_FAILURES) {
+            const truncated =
+              validationError.length > 200 ? `${validationError.slice(0, 200)}…` : validationError;
+            log.warn(
+              `[pi-ai] Tool "${toolCall.name}" failed validation ${consecutiveValidationFailures} consecutive times; aborting turn.`,
+            );
+            yield errorResult(
+              "error_tool_loop",
+              `Tool "${toolCall.name}" failed validation ${consecutiveValidationFailures} consecutive times; aborting. Last error: ${truncated}`,
+              startedAtMs,
+              turn,
+              totalCostUsd,
+            );
+            return;
+          }
+
           context.messages.push({
             role: "toolResult",
             toolCallId: toolUseId,
@@ -713,6 +782,12 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
             ),
             precedingToolUseIds: [toolUseId],
           };
+          yield {
+            type: "tool-result" as const,
+            toolUseId,
+            isError: true,
+            content: denyMessage,
+          };
           context.messages.push({
             role: "toolResult",
             toolCallId: toolUseId,
@@ -750,6 +825,12 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
             elapsedSeconds,
           ),
           precedingToolUseIds: [toolUseId],
+        };
+        yield {
+          type: "tool-result",
+          toolUseId,
+          isError: isToolError,
+          content: toolResultText,
         };
 
         context.messages.push({
