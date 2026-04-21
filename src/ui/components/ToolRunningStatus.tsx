@@ -1,28 +1,17 @@
 /**
- * Multi-line progress block rendered while a shell tool is running.
+ * Compact spinner block rendered beneath the conversation while a shell
+ * tool is running. Progressive phase/activity lines now accumulate in the
+ * conversation history (cc-repo style — each step prints a new line), so
+ * this component stays small: spinner + tool name + live `mm:ss` elapsed,
+ * an optional one-line phase caption, and the LLM heartbeat underneath.
  *
- * Replaces the previous single-line `⠋ <tool> · <subLabel>  <elapsed>` with
- * a progressive layout that evolves as `task:phase-progress` /
- * `task:activity` events arrive:
- *
- *   ⠙  context:build · 02:14
- *      ⏵ phase 2/15 · building threat model
- *        ↳ lab · analyzing trust zones          just now
- *        ↳ lab · 3 input categories enumerated  5s ago
- *      · 4 LLM calls · sonnet-4-5 · $0.08
- *
- * When `phase` and `activities` are both empty, falls back to the original
- * single-line rendering so quick tools never flash a multi-row block.
- *
- * Re-render cadence is driven by `useHeartbeat` (5s tick), which also flags
- * `isStale` after 15s of silence. Stale → spinner flips to `warn` + a
- * `waiting…` affordance appears next to the elapsed counter.
+ * `useHeartbeat` drives the elapsed tick + flips the spinner to `warn` +
+ * appends a `waiting…` affordance after 15s of silence.
  */
 
 import { Box, Text } from "ink";
 import React, { useEffect, useState } from "react";
 import { useHeartbeat } from "../hooks.js";
-import { formatRelativeAgo } from "../format.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 import { Spinner } from "./Spinner.js";
@@ -44,11 +33,9 @@ function _ToolRunningStatus({ tool, heartbeat }: ToolRunningStatusProps): React.
     15,
   );
 
-  const activities = tool.activities ?? [];
-  const hasPhase = !!tool.phase;
-  const progressive = hasPhase || activities.length > 0;
   const spinnerColor = isStale ? "warn" : "accent";
   const phaseLine = buildPhaseLine(tool);
+  const caption = phaseLine ?? tool.subLabel;
 
   return (
     <Box flexDirection="column" marginTop={1} paddingLeft={2}>
@@ -57,19 +44,10 @@ function _ToolRunningStatus({ tool, heartbeat }: ToolRunningStatusProps): React.
         <Text>
           {"  "}
           {tokens.muted(tool.name)}
-          {!progressive && tool.subLabel ? tokens.muted(` · ${tool.subLabel}`) : ""}
+          {caption ? tokens.muted(` · ${caption}`) : ""}
         </Text>
         <ElapsedReadout tool={tool} isStale={isStale} />
       </Box>
-      {progressive && phaseLine && (
-        <Box paddingLeft={3}>
-          <Text>
-            {tokens.accent("⏵ ")}
-            {tokens.muted(phaseLine)}
-          </Text>
-        </Box>
-      )}
-      {progressive && activities.length > 0 && <ActivityTail lines={activities.slice(0, 3)} />}
       {heartbeat && <LlmHeartbeatLine heartbeat={heartbeat} />}
     </Box>
   );
@@ -124,31 +102,6 @@ function ElapsedReadout({
       {tokens.muted(`  ${mm}:${ss}`)}
       {isStale ? tokens.warn(" · waiting…") : ""}
     </Text>
-  );
-}
-
-function ActivityTail({
-  lines,
-}: {
-  lines: NonNullable<ToolRunningStatusProps["tool"]["activities"]>;
-}): React.ReactElement {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 5000);
-    return () => clearInterval(id);
-  }, []);
-  return (
-    <Box flexDirection="column" paddingLeft={5}>
-      {lines.map((line, i) => (
-        <Box key={`${line.ts}-${i}`}>
-          <Text>
-            {tokens.muted("↳ ")}
-            {tokens.muted(line.text)}
-            {tokens.muted(`  ${formatRelativeAgo(line.ts, now)}`)}
-          </Text>
-        </Box>
-      ))}
-    </Box>
   );
 }
 

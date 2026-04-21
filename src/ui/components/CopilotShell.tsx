@@ -489,5 +489,14 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
           <Text>{tokens.danger(entry.text)}</Text>
         </Box>
       );
+    case "tool-progress":
+      return (
+        <Box paddingLeft={2}>
+          <Text>
+            {tokens.muted("⎿ ")}
+            {tokens.muted(entry.text)}
+          </Text>
+        </Box>
+      );
   }
 }

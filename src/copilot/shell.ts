@@ -1315,20 +1315,31 @@ async function startInkShell(
     });
   });
 
-  // Tool progress rail — `task:phase-progress` drives the "⏵ phase N/M" strip
-  // beneath the spinner, `task:activity` pushes onto the rolling activity
-  // tail. Both fire throughout a long-running tool (e.g. context:build,
-  // randori, sast:scan) so operators see forward motion instead of a frozen
-  // label. See src/ui/components/ToolRunningStatus.tsx for the consumer.
+  // Tool progress rail — `task:phase-progress` updates the current tool's
+  // phase strip and also appends a permanent history entry so operators see
+  // each phase transition accumulate downward (cc-repo style) instead of
+  // watching one line update in place. `task:activity` does the same for
+  // sub-step descriptions. The in-place spinner below just shows elapsed;
+  // the scrollback is the source of truth for what has happened so far.
   bus.subscribe<import("../bus/events.js").TaskPhaseProgressEvent>(
     "task:phase-progress",
     (event) => {
       pushToolPhase(store, event.payload.phase);
+      appendToHistory(store, {
+        type: "tool-progress",
+        text: event.payload.phase,
+        timestamp: Date.now(),
+      });
     },
   );
   bus.subscribe<import("../bus/events.js").TaskActivityEvent>("task:activity", (event) => {
     if (event.payload.phase) pushToolPhase(store, event.payload.phase);
     pushToolActivity(store, event.payload.description);
+    appendToHistory(store, {
+      type: "tool-progress",
+      text: event.payload.description,
+      timestamp: Date.now(),
+    });
   });
 
   // Auto-patch bridge — when `setg AutoPatch true`, any verification:result
@@ -1624,8 +1635,22 @@ async function startInkShell(
     activeActionKind = "tool";
     activeAbortRequested = false;
     setAbortHandler(store, () => {
+      if (activeAbortRequested) return;
       activeAbortRequested = true;
       controller.abort(new Error("Shell tool execution aborted"));
+      // Immediately return the operator to the prompt instead of waiting
+      // for the tool to notice the signal. A tool that ignores the signal
+      // will still finish in the background; its cleanup path is idempotent
+      // with what we do here. This is the core "Ctrl+C once goes back"
+      // behavior — the alternative (waiting for the tool to unwind) felt
+      // like the shell was hung even though the abort had fired.
+      appendToHistory(store, {
+        type: "output",
+        text: "[aborted]",
+        timestamp: Date.now(),
+      });
+      clearTransientShellState(store);
+      setProcessing(store, false);
     });
   };
 
@@ -1659,6 +1684,14 @@ async function startInkShell(
     const controller = new AbortController();
     setToolAbort(controller);
     const dispatched = await driver.handle(input, controller.signal);
+    // If Ctrl+C fired during dispatch, the abort handler already returned the
+    // operator to the prompt and marked `processing: false`. Swallow the
+    // late output/exit from the now-cancelled tool so it doesn't append
+    // after the operator has moved on.
+    if (activeAbortRequested) {
+      finishActiveAction();
+      return;
+    }
     if (dispatched.matched) {
       if (dispatched.push || dispatched.pop) syncFocusFromDispatcher();
       if (dispatched.output) {
@@ -1801,11 +1834,19 @@ async function startInkShell(
             if (text) {
               appendPendingAssistantText(store, text);
             }
-            // Surface each tool-use block as an activity line so operators
-            // see what the model is calling, not just a frozen spinner.
+            // Surface each tool-use block as a progressive log line so
+            // operators see what the model is calling, not just a frozen
+            // spinner. Appends to history (accumulating downward) *and*
+            // bumps the currentTool.activities buffer used by the compact
+            // spinner tail.
             const toolCalls = extractToolUseActivities(message.content);
             for (const call of toolCalls) {
               pushToolActivity(store, call);
+              appendToHistory(store, {
+                type: "tool-progress",
+                text: call,
+                timestamp: Date.now(),
+              });
             }
             break;
           }

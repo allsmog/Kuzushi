@@ -390,7 +390,7 @@ function preflightBreadcrumb(kind: (typeof PREFLIGHT_STEP_ORDER)[number]): UISta
 }
 
 export interface ShellHistoryEntry {
-  type: "input" | "output" | "error";
+  type: "input" | "output" | "error" | "tool-progress";
   text: string;
   timestamp: number;
   prompt?: string;
