@@ -20,8 +20,8 @@ const require = createRequire(import.meta.url);
 
 // ---------------------------------------------------------------------------
 // Minimal type surface for the parts of undici we touch at runtime.
-// We load undici dynamically via require() because it ships with Node 22+
-// but is not listed as a direct dependency.
+// We load undici via require() to keep startup light and avoid ESM/CJS interop
+// friction in this module.
 // ---------------------------------------------------------------------------
 
 interface UndiciDispatcher {
