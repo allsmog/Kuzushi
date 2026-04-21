@@ -98,4 +98,28 @@ describe("resolveInitialTaskPlan", () => {
     expect(plan.useAllTasks).toBe(true);
     expect(new Set(plan.enabledTaskIds)).toEqual(new Set(["semgrep", "codeql", "threat-hunt"]));
   });
+
+  it("does NOT inject task-selector when enableDynamicTaskSelection is false", () => {
+    // Regression: /use threat-hunt; run . had the shell's
+    // executeSastPipeline clamp config.tasks=[] but leave dynamic
+    // selection on, so resolveInitialTaskPlan still added task-selector
+    // which then merged detectors like secrets-crypto-detect into the
+    // run. Lock in that the flag alone is sufficient to keep the
+    // selector out.
+    const registry = makeRegistry([
+      stubTask("task-selector"),
+      stubTask("threat-hunt"),
+      stubTask("secrets-crypto-detect"),
+    ]);
+    const plan = resolveInitialTaskPlan(registry, ["threat-hunt"], {
+      tasks: [],
+      enableContextGathering: false,
+      enableContextEnrichment: false,
+      enableDynamicTaskSelection: false,
+    });
+    expect(plan.enabledTaskIds).toContain("threat-hunt");
+    expect(plan.enabledTaskIds).not.toContain("task-selector");
+    expect(plan.enabledTaskIds).not.toContain("secrets-crypto-detect");
+    expect(plan.dynamicSelectionActive).toBe(false);
+  });
 });

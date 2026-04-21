@@ -80,11 +80,20 @@ export async function executeSastPipeline(
   // Single-task dispatch (e.g. `/threat-hunt run .`, `/context build`) must
   // not merge with the ambient `config.tasks` baseline from
   // ~/.kuzushi/config.json — operators expect "run ONLY this" semantics.
-  // Without this, `config.tasks: ["semgrep"]` (a default) leaks in and
-  // threat-hunt runs semgrep in parallel. Clear the baseline when the
-  // caller pinned an explicit task list.
+  //
+  // Two independent leaks close here when the caller pinned a task list:
+  //   1. config.tasks baseline — defaults to ["semgrep"], would run semgrep
+  //      alongside the pinned task.
+  //   2. enableDynamicTaskSelection — defaults to true, injects
+  //      "task-selector" (task-policy.ts:42-55), an LLM chooser that adds
+  //      extra detectors (e.g. secrets-crypto-detect) it judges relevant.
+  //
+  // The full-DAG path (`kuzushi scan` / `/use sast; run`) passes
+  // taskIds=undefined and keeps both features on.
   const config =
-    taskIds && taskIds.length > 0 ? { ...mergedConfig, tasks: [] as string[] } : mergedConfig;
+    taskIds && taskIds.length > 0
+      ? { ...mergedConfig, tasks: [] as string[], enableDynamicTaskSelection: false }
+      : mergedConfig;
   const severityOpt = Array.isArray(params.severity)
     ? (params.severity as string[]).join(",")
     : undefined;
