@@ -15,6 +15,7 @@ import { createLogger } from "../../../logger.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding } from "../../../scanners/types.js";
 import { toErrorMessage } from "../../../utils.js";
+import { forwardSubAgentMessage } from "../forward-subagent-output.js";
 import { convertRandoriToThreatModel } from "./randori-adapter.js";
 import {
   mergeRandoriStageOutputs,
@@ -413,6 +414,13 @@ export interface RandoriRunnerParams {
    * shell so a 3–5 minute phase doesn't look like a frozen label.
    */
   onActivity?: (description: string) => void;
+  /**
+   * Sub-agent output sink — fires once per Claude Code tool_use block the
+   * PASTA subprocess performs. Typically `ctx.reportOutput` so the
+   * operator sees "Read(src/api/admin.ts)" etc. live under the `⏺`
+   * header while S1-S4 runs.
+   */
+  onOutput?: (line: string) => void;
 }
 
 export interface RandoriRunnerResult {
@@ -453,6 +461,12 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
   const runPhase = async (prompt: string, phaseTag: string): Promise<void> => {
     try {
       for await (const message of params.runtime.query({ prompt, options: baseOpts })) {
+        // Forward the sub-agent's per-action stream (tool_use headers,
+        // tool-progress heartbeats) to the ephemeral live-tail sink so
+        // operators see what PASTA is doing right now under the `⏺`
+        // header. Independent of `onActivity` because output lines are
+        // live-only — they never land in scrollback.
+        forwardSubAgentMessage(message, params.onOutput);
         if (message.type === "result" && typeof message.totalCostUsd === "number") {
           costUsd += message.totalCostUsd;
         }

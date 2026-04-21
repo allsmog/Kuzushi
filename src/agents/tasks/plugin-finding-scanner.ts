@@ -15,6 +15,7 @@ import {
   selectFindings,
 } from "../../scanners/normalize-findings.js";
 import type { Finding } from "../../scanners/types.js";
+import { forwardSubAgentMessage } from "./forward-subagent-output.js";
 
 export interface PluginFindingScannerParams {
   runtime: AgentRuntime;
@@ -34,6 +35,13 @@ export interface PluginFindingScannerParams {
   /** Log prefix (e.g. `"[vuln-scout]"`); purely cosmetic. */
   logTag?: string;
   signal?: AbortSignal;
+  /**
+   * Optional live-output sink — called once per sub-agent action the
+   * Claude Code subprocess takes (tool_use headers, tool-progress
+   * heartbeats). Typically bound to `ctx.reportOutput` so the operator
+   * sees what the audit is doing mid-run under the `⏺` header.
+   */
+  onOutput?: (line: string) => void;
 }
 
 export interface PluginFindingScannerResult {
@@ -74,6 +82,10 @@ export async function runPluginFindingScanner(
       message.type === "tool-summary" ||
       message.type === "assistant"
     ) {
+      // Forward sub-agent actions to the caller's live-tail sink, if any.
+      // The subprocess runs blind otherwise — operators see only a spinner
+      // for 30-60s while the audit loops through dozens of tool calls.
+      forwardSubAgentMessage(message, params.onOutput);
       continue;
     }
     if (message.type !== "result") continue;

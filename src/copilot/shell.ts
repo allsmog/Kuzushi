@@ -951,10 +951,14 @@ function finalizeRunningToolCalls(
 
 /**
  * Push a short activity line onto a running tool-call's `liveActivities`
- * tail (newest at index 0, max 3). Silently no-ops when the id isn't a
+ * tail (newest at index 0, max 5). Silently no-ops when the id isn't a
  * running tool-call.
+ *
+ * Cap bumped from 3 → 5 in Phase 15 so subprocess stdout preview (via
+ * `ctx.reportOutput`) has room to show several streaming lines without
+ * starving `task:activity` labels.
  */
-const LIVE_ACTIVITY_CAP = 3;
+const LIVE_ACTIVITY_CAP = 5;
 const LIVE_ACTIVITY_TEXT_CAP = 80;
 function pushLiveActivity(store: UIStore, id: string, text: string): void {
   const trimmed =
@@ -1563,6 +1567,14 @@ async function startInkShell(
       text: event.payload.description,
       timestamp: Date.now(),
     });
+  });
+  // Ephemeral subprocess stdout / tool-use preview — shows in the running
+  // `⏺` entry's live tail but never lands in scrollback. cc-repo's
+  // `ShellProgressMessage` analogue: operators see live Bash output during
+  // execution, then it's gone once the tool resolves.
+  bus.subscribe<import("../bus/events.js").TaskOutputEvent>("task:output", (event) => {
+    const entryId = store.getState().shell?.currentTool?.historyEntryId;
+    if (entryId) pushLiveActivity(store, entryId, event.payload.line);
   });
 
   // Auto-patch bridge — when `setg AutoPatch true`, any verification:result

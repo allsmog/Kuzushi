@@ -115,6 +115,7 @@ const auditTool: ModuleTool = {
         maxFindings,
         logTag: "[vuln-scout]",
         signal: ctx.signal,
+        onOutput: ctx.reportOutput,
       });
 
       const lines = [

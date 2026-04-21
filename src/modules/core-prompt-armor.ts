@@ -18,6 +18,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { resolveDefaultReadOnlyTools } from "../agent-runtime/execution.js";
 import type { AgentRuntime } from "../agent-runtime/types.js";
+import { forwardSubAgentMessage } from "../agents/tasks/forward-subagent-output.js";
 import { resolvePromptArmorPluginPath } from "../agents/tasks/prompt-armor/resolve-promptarmor-plugin.js";
 import { resolveRepo } from "../cli/shared.js";
 import { createLogger } from "../logger.js";
@@ -38,6 +39,8 @@ interface PromptArmorRunParams {
   model: string;
   allowedTools: string[];
   signal?: AbortSignal;
+  /** Live-output sink for the `⎿` tail — see ctx.reportOutput. */
+  onOutput?: (line: string) => void;
 }
 
 interface PromptArmorRunResult {
@@ -104,6 +107,9 @@ async function runPromptArmor(params: PromptArmorRunParams): Promise<PromptArmor
       plugins: [{ type: "local" as const, path: params.pluginPath }],
     },
   })) {
+    // Forward sub-agent actions to the live tail before the final-result
+    // accounting below swallows them.
+    forwardSubAgentMessage(message, params.onOutput);
     if (message.type !== "result") continue;
     if (typeof message.totalCostUsd === "number" && Number.isFinite(message.totalCostUsd)) {
       costUsd += message.totalCostUsd;
@@ -223,6 +229,7 @@ function buildCommandTool(spec: BuildToolSpec): ModuleTool {
           model,
           allowedTools: [...resolveDefaultReadOnlyTools(), "Bash", "Write"],
           signal: ctx.signal,
+          onOutput: ctx.reportOutput,
         });
 
         const lines = [

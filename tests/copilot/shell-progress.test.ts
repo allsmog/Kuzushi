@@ -394,6 +394,39 @@ describe("patchHistoryEntry", () => {
   });
 });
 
+describe("pushLiveActivity cap bumped to 5 (Phase 15)", () => {
+  function seedWithRunningToolCall(): UIStore {
+    const store = seedShellState();
+    store.update({
+      ...store.getState(),
+      shell: {
+        ...store.getState().shell!,
+        history: [
+          {
+            type: "tool-call",
+            id: "tc-cap",
+            tool: "sast:scan",
+            text: "",
+            status: "running",
+            timestamp: 1,
+          },
+        ],
+      },
+    });
+    return store;
+  }
+
+  it("keeps up to 5 liveActivity entries (was 3)", () => {
+    const store = seedWithRunningToolCall();
+    for (let i = 0; i < 10; i++) pushLiveActivity(store, "tc-cap", `line ${i}`);
+    const entry = store.getState().shell!.history[0]!;
+    // cap is 5; older ones drop off the tail
+    expect(entry.liveActivities!.length).toBe(5);
+    expect(entry.liveActivities![0]).toBe("line 9");
+    expect(entry.liveActivities![4]).toBe("line 5");
+  });
+});
+
 describe("pushLiveActivity", () => {
   function seedWithRunningToolCall(): UIStore {
     const store = seedShellState();
@@ -428,7 +461,8 @@ describe("pushLiveActivity", () => {
     const store = seedWithRunningToolCall();
     for (let i = 0; i < 10; i++) pushLiveActivity(store, "tc-1", `step ${i}`);
     const entry = store.getState().shell!.history[0]!;
-    expect(entry.liveActivities!.length).toBeLessThanOrEqual(3);
+    // Phase 15: cap bumped 3 → 5 so subprocess stdout preview has headroom.
+    expect(entry.liveActivities!.length).toBeLessThanOrEqual(5);
     expect(entry.liveActivities![0]).toBe("step 9");
   });
 
