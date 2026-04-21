@@ -259,3 +259,197 @@ describe("runRandoriPasta — activity forwarding", () => {
     expect(activity).toContain("scoping s1");
   });
 });
+
+describe("runRandoriPasta — tool-failure retry cap", () => {
+  // When the sub-Claude retries the same tool on validation errors, we
+  // cap at 3 consecutive failures and abort the phase. Without this,
+  // context:build was observed wedged for 20+ minutes on an S4 Write
+  // retry loop that never converged.
+
+  const makeRuntime = (messages: AgentMessage[]): AgentRuntime => ({
+    id: "test",
+    async *query() {
+      for (const m of messages) yield m;
+    },
+  });
+
+  it("emits a pulse for each failed tool_result with the failure count", async () => {
+    const scripted: AgentMessage[] = [
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "tu-1", name: "Write", input: { file_path: "/x" } }],
+      },
+      {
+        type: "tool-result",
+        toolUseId: "tu-1",
+        isError: true,
+        content: "Validation failed for tool Write",
+      },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "tu-2", name: "Write", input: { file_path: "/x" } }],
+      },
+      {
+        type: "tool-result",
+        toolUseId: "tu-2",
+        isError: true,
+        content: "Validation failed for tool Write",
+      },
+      { type: "result", subtype: "success", result: "ok", totalCostUsd: 0.01 },
+    ];
+
+    const activity: string[] = [];
+    await runRandoriPasta({
+      runtime: makeRuntime(scripted),
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      pluginPath: "/plugin",
+      model: "test-model",
+      allowedTools: [],
+      stages: ["s1"],
+      artifactDir: ".kuzushi/randori",
+      maxElements: 40,
+      maxThreats: 30,
+      emitFindings: false,
+      findingThreshold: "medium",
+      onActivity: (a) => activity.push(a),
+    });
+
+    expect(activity).toContain("Write failed (1/3): Validation failed for tool Write");
+    expect(activity).toContain("Write failed (2/3): Validation failed for tool Write");
+    // Only two failures — under the cap, no abort pulse.
+    expect(activity.some((l) => l.startsWith("aborting phase"))).toBe(false);
+  });
+
+  it("aborts the phase after 3 consecutive failures from the same tool", async () => {
+    const scripted: AgentMessage[] = [];
+    for (let i = 0; i < 4; i++) {
+      scripted.push({
+        type: "assistant",
+        content: [{ type: "tool_use", id: `tu-${i}`, name: "Write", input: { file_path: "/x" } }],
+      });
+      scripted.push({
+        type: "tool-result",
+        toolUseId: `tu-${i}`,
+        isError: true,
+        content: "Validation failed for tool Write",
+      });
+    }
+    scripted.push({ type: "result", subtype: "success", result: "ok", totalCostUsd: 0.01 });
+
+    const activity: string[] = [];
+    await runRandoriPasta({
+      runtime: makeRuntime(scripted),
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      pluginPath: "/plugin",
+      model: "test-model",
+      allowedTools: [],
+      stages: ["s1"],
+      artifactDir: ".kuzushi/randori",
+      maxElements: 40,
+      maxThreats: 30,
+      emitFindings: false,
+      findingThreshold: "medium",
+      onActivity: (a) => activity.push(a),
+    });
+
+    expect(activity).toContain("Write failed (3/3): Validation failed for tool Write");
+    expect(activity).toContain("aborting phase after 3 Write failures");
+    // The cap fires at the 3rd failure, so the 4th scripted failure is
+    // never consumed. We don't assert the exact index of the abort pulse,
+    // just that it was emitted.
+    const abortIndex = activity.findIndex((l) => l.startsWith("aborting"));
+    expect(abortIndex).toBeGreaterThan(-1);
+    // No pulse after the abort — we break out of the loop.
+    expect(activity.slice(abortIndex + 1)).toEqual([]);
+  });
+
+  it("resets the counter when the same tool succeeds between failures", async () => {
+    const scripted: AgentMessage[] = [
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "tu-a", name: "Write", input: { file_path: "/x" } }],
+      },
+      { type: "tool-result", toolUseId: "tu-a", isError: true, content: "fail 1" },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "tu-b", name: "Write", input: { file_path: "/y" } }],
+      },
+      { type: "tool-result", toolUseId: "tu-b", isError: false, content: "ok" },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "tu-c", name: "Write", input: { file_path: "/z" } }],
+      },
+      { type: "tool-result", toolUseId: "tu-c", isError: true, content: "fail 2" },
+      { type: "result", subtype: "success", result: "ok", totalCostUsd: 0 },
+    ];
+
+    const activity: string[] = [];
+    await runRandoriPasta({
+      runtime: makeRuntime(scripted),
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      pluginPath: "/plugin",
+      model: "test-model",
+      allowedTools: [],
+      stages: ["s1"],
+      artifactDir: ".kuzushi/randori",
+      maxElements: 40,
+      maxThreats: 30,
+      emitFindings: false,
+      findingThreshold: "medium",
+      onActivity: (a) => activity.push(a),
+    });
+
+    // Two failures total but both reset to (1/3) because a success came
+    // between them.
+    const failurePulses = activity.filter((l) => l.startsWith("Write failed"));
+    expect(failurePulses).toEqual(["Write failed (1/3): fail 1", "Write failed (1/3): fail 2"]);
+    expect(activity.some((l) => l.startsWith("aborting phase"))).toBe(false);
+  });
+
+  it("resets the counter when a DIFFERENT tool fails between same-tool failures", async () => {
+    const scripted: AgentMessage[] = [
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "tu-1", name: "Write", input: {} }],
+      },
+      { type: "tool-result", toolUseId: "tu-1", isError: true, content: "w1" },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "tu-2", name: "Read", input: {} }],
+      },
+      { type: "tool-result", toolUseId: "tu-2", isError: true, content: "r1" },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "tu-3", name: "Write", input: {} }],
+      },
+      { type: "tool-result", toolUseId: "tu-3", isError: true, content: "w2" },
+      { type: "result", subtype: "success", result: "ok", totalCostUsd: 0 },
+    ];
+
+    const activity: string[] = [];
+    await runRandoriPasta({
+      runtime: makeRuntime(scripted),
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      pluginPath: "/plugin",
+      model: "test-model",
+      allowedTools: [],
+      stages: ["s1"],
+      artifactDir: ".kuzushi/randori",
+      maxElements: 40,
+      maxThreats: 30,
+      emitFindings: false,
+      findingThreshold: "medium",
+      onActivity: (a) => activity.push(a),
+    });
+
+    // Interleaved failures don't accumulate — each is (1/3).
+    expect(activity).toContain("Write failed (1/3): w1");
+    expect(activity).toContain("Read failed (1/3): r1");
+    expect(activity).toContain("Write failed (1/3): w2");
+    expect(activity.some((l) => l.startsWith("aborting phase"))).toBe(false);
+  });
+});

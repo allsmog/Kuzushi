@@ -18,6 +18,7 @@ import { getLogger } from "../logger.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type { AgentQueryExecutionResult } from "./execution.js";
+import { buildSdkHooks } from "./sdk-hooks.js";
 import type {
   AgentBatchRequest,
   AgentMessage,
@@ -701,6 +702,17 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       options.plugins = request.options.plugins;
     }
 
+    // PreToolUse input normalizer — rewrites camelCase aliases
+    // (filePath → file_path, text → content, etc.) so the SDK's Zod
+    // validation doesn't reject perfectly reasonable tool calls. Without
+    // this, weaker sub-Claude models burn phases in a retry loop on
+    // "Validation failed for tool Write".
+    (options as unknown as { hooks?: Record<string, unknown> }).hooks = buildSdkHooks({
+      onNormalize: (toolName, renames) => {
+        log.debug(`${toolName} input normalized: ${renames.join(", ")}`);
+      },
+    });
+
     // Abort controller
     if (request.options.abortController) {
       options.abortController = request.options.abortController;
@@ -1019,6 +1031,14 @@ class ClaudeSession implements AgentSession {
       options.plugins = this.baseOptions.plugins;
     }
 
+    // Same PreToolUse normalizer the one-shot query() uses — shared hook
+    // set defined in sdk-hooks.ts. See rationale there.
+    (options as unknown as { hooks?: Record<string, unknown> }).hooks = buildSdkHooks({
+      onNormalize: (toolName, renames) => {
+        log.debug(`session ${toolName} input normalized: ${renames.join(", ")}`);
+      },
+    });
+
     // Intercept subprocess spawn so close() can SIGTERM/SIGKILL directly.
     options.spawnClaudeCodeProcess = createTrackedSpawn(this.trackedProcesses);
 
@@ -1211,6 +1231,41 @@ function mapMessage(msg: SDKMessage): AgentMessage | null {
           ? sdkSummary.preceding_tool_use_ids
           : [],
       };
+    }
+
+    case "user": {
+      // User messages carry tool_result blocks back to the model. Surface
+      // the first tool_result so callers (e.g. randori's runPhase) can
+      // detect retry loops on "Validation failed for tool X" and break
+      // out instead of burning the full phase on a doomed tool call.
+      const sdkUser = msg as unknown as {
+        message?: { content?: unknown };
+      };
+      const content = sdkUser.message?.content;
+      if (!Array.isArray(content)) return null;
+      for (const block of content as Array<Record<string, unknown>>) {
+        if (block?.["type"] !== "tool_result") continue;
+        const toolUseId = typeof block["tool_use_id"] === "string" ? block["tool_use_id"] : "";
+        const isError = block["is_error"] === true;
+        const blockContent = block["content"];
+        let text = "";
+        if (typeof blockContent === "string") {
+          text = blockContent;
+        } else if (Array.isArray(blockContent)) {
+          const parts: string[] = [];
+          for (const p of blockContent as Array<Record<string, unknown>>) {
+            if (typeof p?.["text"] === "string") parts.push(p["text"] as string);
+          }
+          text = parts.join("\n");
+        }
+        return {
+          type: "tool-result",
+          toolUseId,
+          isError,
+          content: text,
+        };
+      }
+      return null;
     }
 
     default:

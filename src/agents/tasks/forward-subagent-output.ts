@@ -27,7 +27,13 @@ type AssistantToolUse = {
  * for telemetry / test assertions).
  */
 export function forwardSubAgentMessage(
-  message: { type: string; content?: unknown; toolName?: unknown; toolUseId?: unknown },
+  message: {
+    type: string;
+    content?: unknown;
+    toolName?: unknown;
+    toolUseId?: unknown;
+    isError?: unknown;
+  },
   onOutput?: (line: string) => void,
 ): boolean {
   if (!onOutput) return false;
@@ -49,6 +55,22 @@ export function forwardSubAgentMessage(
   if (message.type === "tool-progress") {
     const name = typeof message.toolName === "string" ? message.toolName : "tool";
     onOutput(`${name}…`);
+    return true;
+  }
+
+  // Surface tool_result failures in the live-tail too — otherwise a
+  // silent retry loop reads as "the same Write over and over", with no
+  // hint that each attempt failed. Successes stay quiet (we already
+  // emitted the tool_use header; the user sees activity stop ticking
+  // when the tool succeeds).
+  if (message.type === "tool-result" && message.isError === true) {
+    const raw = typeof message.content === "string" ? message.content : "";
+    const firstLine =
+      raw
+        .split(/\r?\n/)
+        .find((l) => l.trim().length > 0)
+        ?.trim() ?? "tool error";
+    onOutput(`tool failed: ${clamp(firstLine)}`);
     return true;
   }
 
