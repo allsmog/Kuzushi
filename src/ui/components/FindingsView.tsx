@@ -12,6 +12,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { colorVerdict } from "../format.js";
 import { icons } from "../icons.js";
+import { normalizeSeverity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
 import { tokens } from "../tokens.js";
 import { ChainGroup } from "./ChainGroup.js";
@@ -231,12 +232,20 @@ function SeverityCounts({
 }: {
   counts: { crit: number; high: number; med: number; low: number };
 }): React.ReactElement {
+  // Render with glyph+label pairs so NO_COLOR / grayscale readers still
+  // see the severity tier. See src/ui/severity.ts.
+  const critGlyph = severityStyle("critical").glyph;
+  const highGlyph = severityStyle("high").glyph;
+  const medGlyph = severityStyle("medium").glyph;
+  const lowGlyph = severityStyle("low").glyph;
   return (
     <Text>
-      {counts.crit > 0 ? `${tokens.dangerStrong(`${counts.crit} crit`)}  ` : ""}
-      {counts.high > 0 ? `${tokens.danger(`${counts.high} high`)}  ` : ""}
-      {counts.med > 0 ? `${tokens.warn(`${counts.med} med`)}  ` : ""}
-      {counts.low > 0 ? `${tokens.muted(`${counts.low} low`)}` : ""}
+      {counts.crit > 0
+        ? `${severityChalk("critical")(`${critGlyph} ${counts.crit} crit`)}  `
+        : ""}
+      {counts.high > 0 ? `${severityChalk("high")(`${highGlyph} ${counts.high} high`)}  ` : ""}
+      {counts.med > 0 ? `${severityChalk("medium")(`${medGlyph} ${counts.med} med`)}  ` : ""}
+      {counts.low > 0 ? `${severityChalk("low")(`${lowGlyph} ${counts.low} low`)}` : ""}
     </Text>
   );
 }
@@ -274,24 +283,14 @@ function severityRank(finding: ActionableFinding): number {
 }
 
 function mapSeverity(severity: string): "critical" | "high" | "medium" | "low" {
-  const norm = severity.toLowerCase();
-  if (norm.includes("crit")) return "critical";
-  if (norm.includes("high")) return "high";
-  if (norm.includes("med")) return "medium";
-  return "low";
+  const sev = normalizeSeverity(severity);
+  return sev === "info" ? "low" : sev;
 }
 
 function severityInline(sev: "critical" | "high" | "medium" | "low"): string {
-  switch (sev) {
-    case "critical":
-      return tokens.dangerStrong("CRIT");
-    case "high":
-      return tokens.danger("HIGH");
-    case "medium":
-      return tokens.warn("MED ");
-    default:
-      return tokens.muted("LOW ");
-  }
+  // Glyph + label pairing so color-blind / NO_COLOR / SR users still read the tier.
+  const style = severityStyle(sev);
+  return severityChalk(sev)(`${style.glyph} ${style.label}`);
 }
 
 function clip(text: string, max: number): string {

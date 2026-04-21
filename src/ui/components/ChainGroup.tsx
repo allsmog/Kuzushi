@@ -10,6 +10,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -90,14 +91,10 @@ function FindingRow({
 }
 
 function severityBadge(severity: "CRITICAL" | "HIGH" | "MEDIUM"): string {
-  switch (severity) {
-    case "CRITICAL":
-      return tokens.dangerStrong("critical");
-    case "HIGH":
-      return tokens.danger("high");
-    default:
-      return tokens.warn("medium");
-  }
+  const tier = severity === "CRITICAL" ? "critical" : severity === "HIGH" ? "high" : "medium";
+  const style = severityStyle(tier);
+  // Glyph + lowercase label — pairing guarantees tier is readable without color.
+  return severityChalk(tier)(`${style.glyph} ${tier}`);
 }
 
 function clip(text: string, max: number): string {

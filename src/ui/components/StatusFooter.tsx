@@ -10,8 +10,7 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { formatCost, formatDuration } from "../format.js";
-import { useElapsed } from "../hooks.js";
-import { useTerminalSize } from "../hooks/useTerminalSize.js";
+import { classifyTerminalWidth, useElapsed, useTerminalWidth } from "../hooks.js";
 import { Divider } from "../primitives/Divider.js";
 import type { Phase } from "../state.js";
 import { tokens } from "../tokens.js";
@@ -35,7 +34,8 @@ export const StatusFooter = React.memo(function StatusFooter({
   startedAt,
   throttle,
 }: StatusFooterProps): React.ReactElement | null {
-  const { columns } = useTerminalSize();
+  const columns = useTerminalWidth();
+  const widthClass = classifyTerminalWidth(columns);
   const elapsed = useElapsed(startedAt);
 
   if (phase === "idle" || phase === "done") return null;
@@ -61,12 +61,15 @@ export const StatusFooter = React.memo(function StatusFooter({
 
   const throttleStr = throttle ? tokens.warn(` \u2502 \u26A0 throttled`) : "";
 
+  // Narrow terms (<60 col): drop the model tag to avoid truncation.
+  const narrow = widthClass === "tiny";
+
   return (
     <Box flexDirection="column" marginTop={1}>
       <Divider width={Math.min(columns, 80)} />
       <Text>
-        {tokens.dangerStrong(modelShort)}
-        {SEP}
+        {narrow ? "" : tokens.strong(modelShort)}
+        {narrow ? "" : SEP}
         {costStr}
         {SEP}
         {progressStr}

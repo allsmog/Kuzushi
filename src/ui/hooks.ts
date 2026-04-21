@@ -2,6 +2,7 @@
  * React hooks for subscribing to the UIStore.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useTerminalSize } from "./hooks/useTerminalSize.js";
 import type { Phase, UIState, UIStore } from "./state.js";
 
 /**
@@ -113,6 +114,47 @@ export function useElapsed(startedAt: number | undefined, tickMs = 1000): number
   }, [startedAt, tickMs]);
 
   return startedAt != null ? Math.max(0, now - startedAt) : 0;
+}
+
+/**
+ * Live terminal width in columns — SIGWINCH-driven via `useTerminalSize`.
+ *
+ * Convenience wrapper for components that only care about the horizontal
+ * axis (tables, header rails, findings rows). Non-TTY fallback is 80.
+ *
+ * Use alongside the accessibility helpers to classify:
+ *   - `< 60`  → hide chrome, stack cells vertically
+ *   - `< 80`  → shorten labels, drop optional columns
+ *   - `>= 80` → full layout
+ *
+ * Example:
+ *   const width = useTerminalWidth();
+ *   const narrow = width < 80;
+ *   const rowWidth = Math.min(width - 4, 88);
+ */
+export function useTerminalWidth(): number {
+  return useTerminalSize().columns;
+}
+
+/**
+ * Thresholds for narrow-terminal handling. Use `classifyTerminalWidth` to
+ * pick a layout bucket rather than hard-coding `< 80` all over the codebase.
+ */
+export type TerminalWidthClass = "tiny" | "narrow" | "standard" | "wide";
+
+/**
+ * Classify a terminal width into a named bucket for layout decisions.
+ *
+ *   tiny     < 60 — stack vertically, glyph + label only
+ *   narrow   < 80 — single-line, abbreviated labels
+ *   standard < 120 — full layout, default
+ *   wide     >= 120 — may enable optional detail columns
+ */
+export function classifyTerminalWidth(columns: number): TerminalWidthClass {
+  if (columns < 60) return "tiny";
+  if (columns < 80) return "narrow";
+  if (columns < 120) return "standard";
+  return "wide";
 }
 
 /** Minimum shape `useHeartbeat` needs — compatible with `SubTask`, stage entries,

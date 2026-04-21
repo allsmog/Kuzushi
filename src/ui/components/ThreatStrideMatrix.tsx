@@ -18,6 +18,7 @@ import type {
   StrideThreat,
 } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
+import { severityChalk } from "../severity.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -268,18 +269,10 @@ function MatrixRow({
 function colorCell(impact: CellImpact): string {
   const glyph = cellGlyph(impact);
   const padded = ` ${glyph} `;
-  switch (impact) {
-    case "critical":
-      return tokens.dangerStrong(padded);
-    case "high":
-      return tokens.danger(padded);
-    case "medium":
-      return tokens.warn(padded);
-    case "low":
-      return tokens.info(padded);
-    default:
-      return tokens.muted(padded);
-  }
+  if (impact === null) return tokens.muted(padded);
+  // Pure severity pass-through: the cell glyph already carries the tier
+  // visually, so colorblind/NO_COLOR readers still parse the matrix.
+  return severityChalk(impact)(padded);
 }
 
 function Legend(): React.ReactElement {
@@ -287,13 +280,13 @@ function Legend(): React.ReactElement {
     <Box marginTop={1}>
       <Text>
         {tokens.hint("cells: ")}
-        {tokens.dangerStrong("\u2588 crit")}
+        {severityChalk("critical")("\u2588 crit")}
         {tokens.muted("  ")}
-        {tokens.danger("\u2593 high")}
+        {severityChalk("high")("\u2593 high")}
         {tokens.muted("  ")}
-        {tokens.warn("\u2592 med")}
+        {severityChalk("medium")("\u2592 med")}
         {tokens.muted("  ")}
-        {tokens.info("\u2591 low")}
+        {severityChalk("low")("\u2591 low")}
         {tokens.muted("  ")}
         {tokens.muted("\u00B7 none")}
       </Text>
@@ -327,10 +320,7 @@ function PivotTable({
               const n = pivot[impact][l];
               const body = String(n).padEnd(8);
               if (n === 0) return tokens.muted(body);
-              if (impact === "critical") return tokens.dangerStrong(body);
-              if (impact === "high") return tokens.danger(body);
-              if (impact === "medium") return tokens.warn(body);
-              return tokens.info(body);
+              return severityChalk(impact)(body);
             })
             .join("")}
         </Text>

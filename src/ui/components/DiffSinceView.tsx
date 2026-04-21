@@ -21,6 +21,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import type { StrideThreat } from "../../agents/tasks/threat-modeling/types.js";
+import { type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ShellState, UIState } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -216,24 +217,27 @@ function ScopedThreats({
 }
 
 function severityBadge(f: ActionableFinding): string {
-  const sev = (f.displaySeverity ?? f.severity ?? "").toLowerCase();
-  if (sev.includes("crit")) return tokens.dangerStrong("CRIT");
-  if (sev.includes("high")) return tokens.danger("HIGH");
-  if (sev.includes("med")) return tokens.warn("MED ");
-  return tokens.info("LOW ");
+  const raw = (f.displaySeverity ?? f.severity ?? "").toLowerCase();
+  let sev: Severity = "info";
+  if (raw.includes("crit")) sev = "critical";
+  else if (raw.includes("high")) sev = "high";
+  else if (raw.includes("med")) sev = "medium";
+  else if (raw.includes("low")) sev = "low";
+  const style = severityStyle(sev);
+  return severityChalk(sev)(`${style.glyph} ${style.label}`);
 }
 
 function impactBadge(impact: StrideThreat["impact"]): string {
-  switch (impact) {
-    case "critical":
-      return tokens.dangerStrong("CRIT");
-    case "high":
-      return tokens.danger("HIGH");
-    case "medium":
-      return tokens.warn("MED ");
-    default:
-      return tokens.info("LOW ");
-  }
+  const sev: Severity =
+    impact === "critical"
+      ? "critical"
+      : impact === "high"
+        ? "high"
+        : impact === "medium"
+          ? "medium"
+          : "low";
+  const style = severityStyle(sev);
+  return severityChalk(sev)(`${style.glyph} ${style.label}`);
 }
 
 function HintFooter(): React.ReactElement {
