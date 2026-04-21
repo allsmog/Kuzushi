@@ -95,6 +95,15 @@ export interface AgentToolSummaryMessage {
   precedingToolUseIds: string[];
 }
 
+export interface AgentToolResultMessage {
+  type: "tool-result";
+  toolUseId: string;
+  /** True when the tool returned an error (SDK Zod validation, execution error, etc.). */
+  isError: boolean;
+  /** Text content of the tool_result block, already flattened to a string. */
+  content: string;
+}
+
 export interface AgentUnknownMessage {
   type: "unknown";
   raw: unknown;
@@ -106,6 +115,7 @@ export type AgentMessage =
   | AgentAssistantMessage
   | AgentToolProgressMessage
   | AgentToolSummaryMessage
+  | AgentToolResultMessage
   | AgentUnknownMessage;
 
 export interface AgentSession {

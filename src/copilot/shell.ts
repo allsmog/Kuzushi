@@ -4699,6 +4699,89 @@ function openConfigEditor(ctx: ShellContext, focusKey?: string): LocalCommandRes
   };
 }
 
+export interface ShellCommandEntry {
+  readonly syntax: string;
+  readonly description: string;
+}
+
+// Single source of truth for shell slash commands. Consumed by `formatHelp()`
+// and by the Tab-autocomplete / suggestions strip in CopilotShell.tsx. Add new
+// commands here — they propagate to both `/help` and the UI automatically.
+export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
+  { syntax: "/help", description: "Show this help" },
+  { syntax: "/modules", description: "List loaded modules" },
+  { syntax: "/tools", description: "List available tools" },
+  { syntax: "/use <module>", description: "Focus on a module" },
+  { syntax: "/back", description: "Step back one level (finding → findings → module → catalog)" },
+  { syntax: "/findings", description: "Show the findings list for the current module" },
+  { syntax: "/open <F-NNNN>", description: "Open a finding in the linear deep page" },
+  { syntax: "/tune", description: "Open the tune view for the focused module" },
+  { syntax: "/plan <english>", description: "Propose option changes from a plain-English request" },
+  { syntax: "/yes | /no", description: "Apply or discard the pending planner proposal" },
+  {
+    syntax: "/prompt edit <verb>",
+    description: "Open the operator system-prompt override in $EDITOR",
+  },
+  { syntax: "/prompt show <verb>", description: "Show the effective prompt + source for a tool" },
+  { syntax: "/show prompts", description: "Cross-module audit of every *_PROMPT override" },
+  { syntax: "/show runs [repo]", description: "List recent pipeline runs (id · status · cost)" },
+  {
+    syntax: "/show aliases [pfx]",
+    description: "List short-ID aliases (F-0001, C-01) for the current run",
+  },
+  {
+    syntax: "/replay <runId>",
+    description: "Re-render the summary of a past run from stored state",
+  },
+  { syntax: "/trace <runId>", description: "Stream the per-event JSONL audit log of a past run" },
+  { syntax: "/options [tool]", description: "Show tool options" },
+  { syntax: "/set <key> <value>", description: "Set a tool option" },
+  { syntax: "/config", description: "Open the interactive config editor" },
+  { syntax: "/config raw|get|set|path", description: "Inspect/update ~/.kuzushi/config.json" },
+  { syntax: "/auth", description: "Set or change credentials for any supported provider" },
+  {
+    syntax: "/provider",
+    description: "Show or set the default <provider>:<model> (e.g. openai:gpt-5-mini)",
+  },
+  {
+    syntax: "/ask <question>",
+    description: "Ask the agent with current shell context (? prefix also works)",
+  },
+  {
+    syntax: "/backend [claude|pi-ai]",
+    description: "Show or change the agent runtime backend (advanced)",
+  },
+  { syntax: "/target <path>", description: "Set or show the active target" },
+  { syntax: "/context", description: "Generate or show application context map" },
+  { syntax: "/context edit", description: "Review/edit operator scan context" },
+  { syntax: "/context regenerate", description: "Re-generate context for current target" },
+  { syntax: "/threats", description: "Show threat model summary" },
+  { syntax: "/threats edit", description: "Review/edit threat model interactively" },
+  { syntax: "/load <specifier>", description: "Load an external module at runtime" },
+  { syntax: "/workspace <id>", description: "Set or show the active workspace" },
+  { syntax: "/clear", description: "Clear conversation history" },
+  { syntax: "/history", description: "Show command history" },
+  { syntax: "/exit", description: "Exit the shell" },
+];
+
+export function listShellSuggestions(input: string, limit = 4): string[] {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/")) return [];
+  const prefix = trimmed.toLowerCase();
+  const matches: string[] = [];
+  for (const { syntax } of SHELL_COMMAND_CATALOG) {
+    if (syntax.toLowerCase().startsWith(prefix)) {
+      matches.push(syntax);
+      if (matches.length >= limit) break;
+    }
+  }
+  return matches;
+}
+
+export function firstShellSuggestion(input: string): string | null {
+  return listShellSuggestions(input, 1)[0] ?? null;
+}
+
 function formatHelp(core: CopilotCore, opts: ShellOptions): string {
   const modules = core.listModules();
   const toolCount = core.registry.allTools().length;
@@ -4715,44 +4798,9 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
     ],
     [
       "  Commands",
-      ...formatCommandRows([
-        ["/help", "Show this help"],
-        ["/modules", "List loaded modules"],
-        ["/tools", "List available tools"],
-        ["/use <module>", "Focus on a module"],
-        ["/back", "Step back one level (finding → findings → module → catalog)"],
-        ["/findings", "Show the findings list for the current module"],
-        ["/open <F-NNNN>", "Open a finding in the linear deep page"],
-        ["/tune", "Open the tune view for the focused module"],
-        ["/plan <english>", "Propose option changes from a plain-English request"],
-        ["/yes | /no", "Apply or discard the pending planner proposal"],
-        ["/prompt edit <verb>", "Open the operator system-prompt override in $EDITOR"],
-        ["/prompt show <verb>", "Show the effective prompt + source for a tool"],
-        ["/show prompts", "Cross-module audit of every *_PROMPT override"],
-        ["/show runs [repo]", "List recent pipeline runs (id · status · cost)"],
-        ["/show aliases [pfx]", "List short-ID aliases (F-0001, C-01) for the current run"],
-        ["/replay <runId>", "Re-render the summary of a past run from stored state"],
-        ["/trace <runId>", "Stream the per-event JSONL audit log of a past run"],
-        ["/options [tool]", "Show tool options"],
-        ["/set <key> <value>", "Set a tool option"],
-        ["/config", "Open the interactive config editor"],
-        ["/config raw|get|set|path", "Inspect/update ~/.kuzushi/config.json"],
-        ["/auth", "Set or change credentials for any supported provider"],
-        ["/provider", "Show or set the default <provider>:<model> (e.g. openai:gpt-5-mini)"],
-        ["/ask <question>", "Ask the agent with current shell context (? prefix also works)"],
-        ["/backend [claude|pi-ai]", "Show or change the agent runtime backend (advanced)"],
-        ["/target <path>", "Set or show the active target"],
-        ["/context", "Generate or show application context map"],
-        ["/context edit", "Review/edit operator scan context"],
-        ["/context regenerate", "Re-generate context for current target"],
-        ["/threats", "Show threat model summary"],
-        ["/threats edit", "Review/edit threat model interactively"],
-        ["/load <specifier>", "Load an external module at runtime"],
-        ["/workspace <id>", "Set or show the active workspace"],
-        ["/clear", "Clear conversation history"],
-        ["/history", "Show command history"],
-        ["/exit", "Exit the shell"],
-      ]),
+      ...formatCommandRows(
+        SHELL_COMMAND_CATALOG.map((entry) => [entry.syntax, entry.description] as [string, string]),
+      ),
     ],
     [
       "  Tool Shortcuts",

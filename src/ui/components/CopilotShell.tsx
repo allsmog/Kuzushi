@@ -14,7 +14,11 @@ import { Box, Static, Text, useApp, useInput } from "ink";
 import type React from "react";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
-import { buildShellPrompt } from "../../copilot/shell.js";
+import {
+  buildShellPrompt,
+  firstShellSuggestion,
+  listShellSuggestions,
+} from "../../copilot/shell.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useUIState } from "../hooks.js";
@@ -48,6 +52,7 @@ interface CopilotShellProps {
 const IDLE_KEYBINDS = [
   { keys: "Enter", label: "Send" },
   { keys: "\u2191/\u2193", label: "History" },
+  { keys: "Tab", label: "Autocomplete", secondary: true },
   { keys: "Esc", label: "Clear input", secondary: true },
   { keys: "Ctrl+C", label: "Exit", secondary: true },
 ];
@@ -261,6 +266,15 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         return;
       }
 
+      if (key.tab && input.trim().startsWith("/")) {
+        const suggestion = firstShellSuggestion(input);
+        if (suggestion) {
+          setInput(suggestion);
+          setHistoryIndex(null);
+        }
+        return;
+      }
+
       if (char && !key.ctrl && !key.meta && !key.tab) {
         if (historyIndex === null) draftInputRef.current = "";
         setInput((v) => v + char);
@@ -291,6 +305,8 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   // updates, so we render it plainly when present. The memoized wrapper
   // stops it from re-rendering on every heartbeat tick.
   const showCatalog = shell.moduleCatalog && shell.moduleCatalog.length > 0;
+
+  const slashSuggestions = input.trim().startsWith("/") ? listShellSuggestions(input) : [];
 
   return (
     <Box flexDirection="column">
@@ -372,13 +388,21 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       ) : null}
 
       {!shell.processing && (
-        <Box marginTop={1}>
-          <Text>
-            {tokens.accent(buildShellPrompt(shell.focusedModule))}
-            {input}
-            {tokens.muted("\u2588")}
-          </Text>
-        </Box>
+        <>
+          <Box marginTop={1}>
+            <Text>
+              {tokens.accent(buildShellPrompt(shell.focusedModule))}
+              {input}
+              {tokens.muted("\u2588")}
+            </Text>
+          </Box>
+          {slashSuggestions.length > 0 && (
+            <Box flexDirection="column" paddingLeft={2}>
+              <Text>{tokens.muted("Suggestions:")}</Text>
+              <Text>{tokens.muted(slashSuggestions.join("  •  "))}</Text>
+            </Box>
+          )}
+        </>
       )}
     </Box>
   );

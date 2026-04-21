@@ -9,7 +9,10 @@ import {
   __shellInternals,
   buildShellPrompt,
   createShellSession,
+  firstShellSuggestion,
+  listShellSuggestions,
   loadShellCommandHistory,
+  SHELL_COMMAND_CATALOG,
   saveShellCommandHistory,
 } from "../../src/copilot/shell.js";
 import { createCoreSastModule } from "../../src/modules/core-sast.js";
@@ -841,5 +844,77 @@ describe("abort handler dispatch contract", () => {
 
     expect(callCount).toBe(0);
     expect(controller.signal.aborted).toBe(false);
+  });
+});
+
+describe("slash suggestions", () => {
+  it("returns empty for non-slash input", () => {
+    expect(listShellSuggestions("")).toEqual([]);
+    expect(listShellSuggestions("foo")).toEqual([]);
+    expect(listShellSuggestions("   ")).toEqual([]);
+    expect(listShellSuggestions("hello /use")).toEqual([]);
+  });
+
+  it("returns the first N catalog entries for a bare slash", () => {
+    const result = listShellSuggestions("/");
+    expect(result).toHaveLength(4);
+    expect(result).toEqual(["/help", "/modules", "/tools", "/use <module>"]);
+  });
+
+  it("narrows by prefix", () => {
+    expect(listShellSuggestions("/us")).toEqual(["/use <module>"]);
+    expect(listShellSuggestions("/ta")).toEqual(["/target <path>"]);
+  });
+
+  it("returns multiple matches when the prefix is ambiguous", () => {
+    const showMatches = listShellSuggestions("/show");
+    expect(showMatches).toContain("/show prompts");
+    expect(showMatches).toContain("/show runs [repo]");
+    expect(showMatches).toContain("/show aliases [pfx]");
+  });
+
+  it("is case-insensitive", () => {
+    expect(listShellSuggestions("/US")).toEqual(["/use <module>"]);
+    expect(listShellSuggestions("/THREATS")).toEqual(
+      expect.arrayContaining(["/threats", "/threats edit"]),
+    );
+  });
+
+  it("returns empty when nothing matches", () => {
+    expect(listShellSuggestions("/nothing-matches")).toEqual([]);
+  });
+
+  it("respects the custom limit", () => {
+    expect(listShellSuggestions("/", 2)).toEqual(["/help", "/modules"]);
+    expect(listShellSuggestions("/", 10)).toHaveLength(10);
+  });
+
+  it("trims leading/trailing whitespace before matching", () => {
+    expect(listShellSuggestions("  /us  ")).toEqual(["/use <module>"]);
+  });
+
+  it("firstShellSuggestion returns the top match or null", () => {
+    expect(firstShellSuggestion("/ta")).toBe("/target <path>");
+    expect(firstShellSuggestion("/")).toBe("/help");
+    expect(firstShellSuggestion("/zzz-nope")).toBeNull();
+    expect(firstShellSuggestion("not a slash")).toBeNull();
+  });
+
+  it("catalog still covers key commands referenced in docs", () => {
+    const syntaxes = SHELL_COMMAND_CATALOG.map((c) => c.syntax);
+    for (const expected of [
+      "/help",
+      "/modules",
+      "/tools",
+      "/use <module>",
+      "/findings",
+      "/open <F-NNNN>",
+      "/tune",
+      "/threats",
+      "/workspace <id>",
+      "/exit",
+    ]) {
+      expect(syntaxes).toContain(expected);
+    }
   });
 });

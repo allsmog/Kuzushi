@@ -115,6 +115,43 @@ describe("forwardSubAgentMessage", () => {
     expect(sink).not.toHaveBeenCalled();
   });
 
+  it("surfaces tool_result failures with first-line content", () => {
+    const sink = vi.fn();
+    const result = forwardSubAgentMessage(
+      {
+        type: "tool-result",
+        toolUseId: "tu-1",
+        isError: true,
+        content: "Validation failed for tool Write\n<stack trace lines>",
+      },
+      sink,
+    );
+    expect(result).toBe(true);
+    expect(sink).toHaveBeenCalledWith("tool failed: Validation failed for tool Write");
+  });
+
+  it("ignores tool_result successes (no noise for normal completion)", () => {
+    const sink = vi.fn();
+    const result = forwardSubAgentMessage(
+      { type: "tool-result", toolUseId: "tu-1", isError: false, content: "ok" },
+      sink,
+    );
+    expect(result).toBe(false);
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it("clamps long tool_result failure lines", () => {
+    const sink = vi.fn();
+    const long = "x".repeat(120);
+    forwardSubAgentMessage(
+      { type: "tool-result", toolUseId: "tu", isError: true, content: long },
+      sink,
+    );
+    const [line] = sink.mock.calls[0]!;
+    expect((line as string).length).toBeLessThanOrEqual("tool failed: ".length + 40);
+    expect((line as string).endsWith("…")).toBe(true);
+  });
+
   it("is a safe no-op when onOutput is undefined", () => {
     expect(() =>
       forwardSubAgentMessage(

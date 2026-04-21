@@ -457,6 +457,12 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
 
   let costUsd = 0;
 
+  // Max consecutive failures of the same tool before we consider the
+  // phase wedged and abort it. The sub-Claude retries in a tight loop on
+  // validation errors ("filePath" vs "file_path", content too long, etc.)
+  // and without a cap it burns 20+ minutes before we ever see the result.
+  const MAX_CONSECUTIVE_TOOL_FAILURES = 3;
+
   // Runs one plugin query to completion, accumulating cost and forwarding
   // every meaningful streaming message as an `onActivity` pulse. Without this
   // the shell sees a single phase label, then ~5 minutes of silence until
@@ -464,12 +470,64 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
   // staleness watchdog to show a misleading `waiting…` chip.
   const runPhase = async (prompt: string, phaseTag: string): Promise<void> => {
     params.signal?.throwIfAborted();
+    // tool_use_id → tool_name; needed so when a tool_result comes back
+    // (keyed only by tool_use_id) we can identify WHICH tool failed.
+    const toolNames = new Map<string, string>();
+    // Per-tool consecutive-failure counter. Reset when the same tool
+    // succeeds or a different tool runs. Cross-tool alternation won't
+    // trip the cap — only a stuck retry loop on a single tool.
+    let lastFailedTool: string | null = null;
+    let consecutiveFailures = 0;
     try {
       for await (const message of params.runtime.query({ prompt, options: baseOpts })) {
         // Respect aborts eagerly — the abortController in baseOpts is
         // linked to params.signal, so the SDK will eventually stop, but
         // bailing here returns control to the shell immediately.
         if (params.signal?.aborted) break;
+        // Record tool_use_id → tool_name for upcoming tool_result lookups.
+        if (message.type === "assistant" && Array.isArray(message.content)) {
+          for (const block of message.content as Array<Record<string, unknown>>) {
+            if (block?.["type"] !== "tool_use") continue;
+            const id = typeof block["id"] === "string" ? block["id"] : "";
+            const name = typeof block["name"] === "string" ? block["name"] : "tool";
+            if (id) toolNames.set(id, name);
+          }
+        }
+        // Detect retry loops on "Validation failed for tool X" / any
+        // tool failure. After MAX consecutive failures from the same tool
+        // we abort this phase so the operator isn't stuck watching an
+        // infinite loop — the next phase (or enclosing task) gets whatever
+        // partial artifacts S1-S3 produced.
+        if (message.type === "tool-result") {
+          const toolName = toolNames.get(message.toolUseId) ?? "tool";
+          if (message.isError) {
+            if (lastFailedTool === toolName) consecutiveFailures += 1;
+            else {
+              lastFailedTool = toolName;
+              consecutiveFailures = 1;
+            }
+            const firstLine =
+              message.content
+                .split(/\r?\n/)
+                .find((l) => l.trim().length > 0)
+                ?.trim() ?? "";
+            const summary = firstLine ? firstLine.slice(0, 80) : "tool error";
+            const pulse = `${toolName} failed (${consecutiveFailures}/${MAX_CONSECUTIVE_TOOL_FAILURES}): ${summary}`;
+            log.warn(`${phaseTag} ${pulse}`);
+            params.onActivity?.(pulse);
+            if (consecutiveFailures >= MAX_CONSECUTIVE_TOOL_FAILURES) {
+              const abortMsg = `aborting phase after ${consecutiveFailures} ${toolName} failures`;
+              log.warn(`${phaseTag} ${abortMsg}`);
+              params.onActivity?.(abortMsg);
+              abortController.abort();
+              break;
+            }
+          } else {
+            // Any successful tool result clears the retry counter.
+            lastFailedTool = null;
+            consecutiveFailures = 0;
+          }
+        }
         // Forward the sub-agent's per-action stream (tool_use headers,
         // tool-progress heartbeats) to the ephemeral live-tail sink so
         // operators see what PASTA is doing right now under the `⏺`
