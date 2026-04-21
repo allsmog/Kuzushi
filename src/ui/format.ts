@@ -87,6 +87,25 @@ export function formatDuration(ms: number): string {
 }
 
 /**
+ * Human-friendly relative age for activity timestamps. Used by the shell's
+ * tool progress tail to annotate each entry with "just now / 12s ago / 2m ago".
+ */
+export function formatRelativeAgo(ts: number, now: number = Date.now()): string {
+  const deltaMs = Math.max(0, now - ts);
+  if (deltaMs < 5_000) return "just now";
+  const seconds = Math.floor(deltaMs / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) {
+    return remainingSeconds === 0 ? `${minutes}m ago` : `${minutes}m ${remainingSeconds}s ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes === 0 ? `${hours}h ago` : `${hours}h ${remainingMinutes}m ago`;
+}
+
+/**
  * Create a colored background badge.
  *
  * @returns Chalk-formatted string like " CRITICAL "
