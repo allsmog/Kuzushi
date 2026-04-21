@@ -26,3 +26,4 @@ vendor/
 .worktrees
 perf/results.json
 *.txt
+.kuzushi/credentials.json
