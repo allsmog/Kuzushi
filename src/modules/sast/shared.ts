@@ -72,10 +72,19 @@ export async function executeSastPipeline(
   const { configureTerminalOutput, resetTerminalOutput } = await import("../../ui/output.js");
   const path = await import("node:path");
 
-  const config = mergeTaskConfig(ctx.config, options?.taskConfig);
+  const mergedConfig = mergeTaskConfig(ctx.config, options?.taskConfig);
   const scanPath = path.default.resolve(target);
   const { root: repoRoot, name: repoName } = resolveRepo(target);
   const taskIds = options?.tasks ?? (params.tasks as string[] | undefined);
+
+  // Single-task dispatch (e.g. `/threat-hunt run .`, `/context build`) must
+  // not merge with the ambient `config.tasks` baseline from
+  // ~/.kuzushi/config.json — operators expect "run ONLY this" semantics.
+  // Without this, `config.tasks: ["semgrep"]` (a default) leaks in and
+  // threat-hunt runs semgrep in parallel. Clear the baseline when the
+  // caller pinned an explicit task list.
+  const config =
+    taskIds && taskIds.length > 0 ? { ...mergedConfig, tasks: [] as string[] } : mergedConfig;
   const severityOpt = Array.isArray(params.severity)
     ? (params.severity as string[]).join(",")
     : undefined;
