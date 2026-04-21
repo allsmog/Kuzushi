@@ -30,6 +30,7 @@ import type { KuzushiConfig, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TaintAnalysisRefinementStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
+import { wrapRuntimeWithActivityForwarding } from "../runtime-forwarding.js";
 import type { MessageBus } from "../types.js";
 
 export interface TaintAnalysisRefinementWorkerDeps {
@@ -160,7 +161,12 @@ export function registerTaintAnalysisRefinementWorker(
           scanPath: context.scanPath,
           repoName: context.repoName,
           config: deps.config,
-          runtime: deps.runtime,
+          runtime: wrapRuntimeWithActivityForwarding(
+            deps.runtime,
+            bus,
+            "taint-analysis-run",
+            event.meta.runId,
+          ),
           bus,
           upstreamOutputs: new Map([["taint-analysis-label", refinedLabelOutput]]),
         };

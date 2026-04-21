@@ -109,6 +109,7 @@ import {
   registerVerifiedPattern,
   type VerifyGateResult,
 } from "./orchestrator/verify-gate.js";
+import { wrapRuntimeWithActivityForwarding } from "./runtime-forwarding.js";
 import { executeAgentTask } from "./task-execution.js";
 import type { MessageBus } from "./types.js";
 import { runVariantAnalysis } from "./workers/variant-analysis-worker.js";
@@ -1404,7 +1405,12 @@ export class PipelineOrchestrator {
           scanPath: state.context.scanPath,
           repoName: state.context.repoName,
           config: state.config,
-          runtime: this.deps.runtime,
+          runtime: wrapRuntimeWithActivityForwarding(
+            this.deps.runtime,
+            this.bus,
+            "reachability-check",
+            runId,
+          ),
           bus: this.bus,
           upstreamOutputs: new Map(state.taskOutputs),
         };
@@ -1446,7 +1452,12 @@ export class PipelineOrchestrator {
           scanPath: state.context.scanPath,
           repoName: state.context.repoName,
           config: state.config,
-          runtime: this.deps.runtime,
+          runtime: wrapRuntimeWithActivityForwarding(
+            this.deps.runtime,
+            this.bus,
+            "call-graph-assist",
+            runId,
+          ),
           bus: this.bus,
           upstreamOutputs: new Map(state.taskOutputs),
         };
@@ -2191,7 +2202,12 @@ export class PipelineOrchestrator {
             scanPath: state.context.scanPath,
             repoName: state.context.repoName,
             config: state.config,
-            runtime: this.deps.runtime,
+            runtime: wrapRuntimeWithActivityForwarding(
+              this.deps.runtime,
+              this.bus,
+              "chain-analysis",
+              runId,
+            ),
             bus: this.bus,
             upstreamOutputs: state.taskOutputs,
           };
@@ -2691,7 +2707,12 @@ export class PipelineOrchestrator {
       // Step 2: LLM gate
       const gateResults = await gateVerificationCandidates(afterDedup, {
         model: resolveStageModel(state.config, "verify-gate", "verify"),
-        runtime: this.deps.runtime,
+        runtime: wrapRuntimeWithActivityForwarding(
+          this.deps.runtime,
+          this.bus,
+          "verify:gate",
+          runId,
+        ),
         repoRoot: state.context.scanPath ?? state.context.repoRoot,
       });
 
@@ -2730,7 +2751,12 @@ export class PipelineOrchestrator {
         log.info(`Running cheap verification on ${toCheapVerify.length} candidate(s)`);
         const cheapResults = await cheapVerifyCandidates(toCheapVerify, {
           model: resolveStageModel(state.config, "verify", "triage"),
-          runtime: this.deps.runtime,
+          runtime: wrapRuntimeWithActivityForwarding(
+            this.deps.runtime,
+            this.bus,
+            "verify:cheap",
+            runId,
+          ),
           repoRoot: state.context.scanPath ?? state.context.repoRoot,
         });
 
