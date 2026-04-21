@@ -162,8 +162,19 @@ function buildCommandTool(spec: BuildToolSpec): ModuleTool {
     };
   }
 
+  // Human-friendly label for the `⏺` header: "Scan" / "Analyze" / etc.
+  const capitalized = spec.command.charAt(0).toUpperCase() + spec.command.slice(1);
   return {
     name: spec.toolId,
+    displayName: `PromptArmor ${capitalized}`,
+    formatInput(input) {
+      const p = (input ?? {}) as Record<string, unknown>;
+      return typeof p["target"] === "string" ? (p["target"] as string) : null;
+    },
+    renderResult(result) {
+      const first = result.output.split("\n", 1)[0]?.trim();
+      return first && first.length > 0 ? first : null;
+    },
     description: `${spec.blurb} Drives the promptarmor-plugin /${spec.command} slash command.${
       requiresAuth
         ? " Requires `authorized: true` input (generates real traffic against live endpoints)."

@@ -48,6 +48,15 @@ function resolveMaxFindings(ctx: ToolExecutionContext, override?: unknown): numb
 
 const auditTool: ModuleTool = {
   name: "tob:audit",
+  displayName: "ToB Audit",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    return typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Run the Trail of Bits security skills audit against the target repository. " +
     "An AI agent loaded with fp-check, variant-analysis, sharp-edges, insecure-defaults, " +
@@ -181,6 +190,10 @@ const auditTool: ModuleTool = {
 
 const skillsTool: ModuleTool = {
   name: "tob:skills",
+  displayName: "ToB Skills",
+  formatInput() {
+    return "";
+  },
   description:
     "List the Trail of Bits security skill plugins that are currently resolvable " +
     "from the installed @kuzushi/tob-skills package. Returns plugin IDs and absolute paths.",

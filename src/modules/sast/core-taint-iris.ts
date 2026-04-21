@@ -9,6 +9,15 @@ import { runSingleTaskPipeline, severityProperty, targetProperty } from "./share
 
 const taintIrisHuntTool: ModuleTool = {
   name: "taint-iris:hunt",
+  displayName: "Taint IRIS",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    return typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description: "Run IRIS taint analysis (taint-cwe-select then taint-iris), scan-only mode.",
   inputSchema: {
     type: "object",

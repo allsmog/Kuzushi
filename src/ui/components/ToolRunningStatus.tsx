@@ -36,6 +36,16 @@ export const ToolRunningStatus = React.memo(_ToolRunningStatus, (prev, next) => 
   return a.name === b.name && a.startedAt === b.startedAt && a.lastEventAt === b.lastEventAt;
 });
 
+/**
+ * How long of a `task:activity` silence before the pulse flips from cyan
+ * → yellow (and the operator sees "· waiting…"). cc-repo interpolates to
+ * red at 3s with smooth RGB; we use a hard flip, so 5s is a calmer
+ * threshold — still 3x faster than the previous 15s — without false-
+ * triggering on tools whose activity cadence is naturally a few seconds
+ * apart (LLM calls, remote probes).
+ */
+const STALE_SECONDS = 5;
+
 function _ToolRunningStatus({ tool }: ToolRunningStatusProps): React.ReactElement {
   const { isStale } = useHeartbeat(
     {
@@ -43,10 +53,10 @@ function _ToolRunningStatus({ tool }: ToolRunningStatusProps): React.ReactElemen
       lastEventAt: tool.lastEventAt,
       status: "active",
     },
-    15,
+    STALE_SECONDS,
   );
 
-  // Stale (>15s silent) → use the warn status so the PulseDot renders in
+  // Stale (>3s silent) → use the warn status so the PulseDot renders in
   // yellow instead of cyan. Otherwise stays `running` (cyan pulse).
   const label = tool.displayName ?? tool.name;
 
