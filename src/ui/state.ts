@@ -165,6 +165,15 @@ export interface AgentActivityLine {
   total: number;
 }
 
+/**
+ * One sub-step in the rolling tail shown beneath a running shell tool.
+ * Timestamps drive "just now / 5s ago" relative-age labels.
+ */
+export interface ToolActivityLine {
+  text: string;
+  ts: number;
+}
+
 export interface SummaryData {
   repoName: string;
   verdictCounts: Record<Verdict, number>;
@@ -585,6 +594,16 @@ export interface ShellState {
     startedAt?: number;
     elapsedSeconds?: number;
     subLabel?: string;
+    /** Current phase label from `task:phase-progress` (populated live). */
+    phase?: string;
+    /** Step index parsed from phase when formatted as "<label> (N/M)". */
+    step?: number;
+    /** Total step count parsed from phase when formatted as "<label> (N/M)". */
+    total?: number;
+    /** Rolling buffer of recent sub-steps (max 5, newest at index 0). */
+    activities?: ToolActivityLine[];
+    /** Epoch ms of the most recent event — feeds stale-spinner detection. */
+    lastEventAt?: number;
   };
   /**
    * Rolling LLM-call heartbeat for the active turn — populated from

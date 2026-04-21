@@ -26,6 +26,7 @@ import type {
   ShellModuleCard,
   ShellState,
   ShellView,
+  ToolActivityLine,
   TuneSnapshot,
   UIStore,
 } from "../ui/state.js";
@@ -849,10 +850,80 @@ function syncShellState(store: UIStore, opts: ShellOptions, focusedModule: strin
 }
 
 function updateToolActivity(store: UIStore, toolName: string, elapsedSeconds: number): void {
-  updateShell(store, (shell) => ({
-    ...shell,
-    currentTool: { name: toolName, elapsedSeconds },
-  }));
+  updateShell(store, (shell) => {
+    const prev = shell.currentTool;
+    const sameTool = prev && prev.name === toolName;
+    return {
+      ...shell,
+      currentTool: {
+        name: toolName,
+        elapsedSeconds,
+        startedAt: sameTool ? prev.startedAt : Date.now(),
+        phase: sameTool ? prev.phase : undefined,
+        step: sameTool ? prev.step : undefined,
+        total: sameTool ? prev.total : undefined,
+        subLabel: sameTool ? prev.subLabel : undefined,
+        activities: sameTool ? prev.activities : undefined,
+        lastEventAt: Date.now(),
+      },
+    };
+  });
+}
+
+const PHASE_COUNT_RE = /\((\d+)\s*\/\s*(\d+)\)\s*$/;
+
+/**
+ * Update the current tool's phase label. Parses a trailing "(N/M)" into
+ * step/total so the UI can render a separate "phase 2/15" strip.
+ */
+function pushToolPhase(store: UIStore, phase: string): void {
+  const match = phase.match(PHASE_COUNT_RE);
+  const step = match ? Number(match[1]) : undefined;
+  const total = match ? Number(match[2]) : undefined;
+  updateShell(store, (shell) => {
+    if (!shell.currentTool) return shell;
+    return {
+      ...shell,
+      currentTool: {
+        ...shell.currentTool,
+        phase,
+        step,
+        total,
+        subLabel: phase,
+        lastEventAt: Date.now(),
+      },
+    };
+  });
+}
+
+const ACTIVITY_BUFFER_CAP = 5;
+const ACTIVITY_TEXT_CAP = 80;
+
+/**
+ * Prepend a new activity line to the rolling tail. Dedupes by matching the
+ * most recent entry's text (just bumps its timestamp) and caps the buffer.
+ */
+function pushToolActivity(store: UIStore, text: string): void {
+  const trimmed = text.length > ACTIVITY_TEXT_CAP ? `${text.slice(0, ACTIVITY_TEXT_CAP - 1)}…` : text;
+  const now = Date.now();
+  updateShell(store, (shell) => {
+    if (!shell.currentTool) return shell;
+    const prev = shell.currentTool.activities ?? [];
+    let next: ToolActivityLine[];
+    if (prev[0]?.text === trimmed) {
+      next = [{ text: trimmed, ts: now }, ...prev.slice(1)];
+    } else {
+      next = [{ text: trimmed, ts: now }, ...prev].slice(0, ACTIVITY_BUFFER_CAP);
+    }
+    return {
+      ...shell,
+      currentTool: {
+        ...shell.currentTool,
+        activities: next,
+        lastEventAt: now,
+      },
+    };
+  });
 }
 
 function updateToolSummary(store: UIStore, summary: string): void {
