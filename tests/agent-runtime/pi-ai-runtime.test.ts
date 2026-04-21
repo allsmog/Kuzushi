@@ -782,7 +782,7 @@ describe("PiAiAgentRuntime", () => {
     });
   });
 
-  it("aborts the turn loop after 3 consecutive same-tool validation failures", async () => {
+  it("aborts the turn loop after 3 same-tool validation failures", async () => {
     const cwd = makeTempDir();
     for (let i = 0; i < 5; i++) {
       completeMock.mockResolvedValueOnce(
@@ -821,47 +821,25 @@ describe("PiAiAgentRuntime", () => {
     > & {
       errors?: string[];
     };
-    expect(finalErrorResult.errors?.[0] ?? "").toContain("3 consecutive times");
+    expect(finalErrorResult.errors?.[0] ?? "").toContain("3 times this turn");
     expect(finalErrorResult.errors?.[0] ?? "").toContain("Write");
   });
 
-  it("resets the validation-failure counter on a successful tool call", async () => {
+  it("interleaved successful OTHER tool does NOT reset the stuck tool's counter", async () => {
+    // Write fail → Read success → Write fail → Read success → Write fail
+    // should trip the Write cap at 3, because a Read success must NOT
+    // reset Write's counter. This is the real-world PASTA S4 symptom.
     const cwd = makeTempDir();
     writeFileSync(path.join(cwd, "target.ts"), "x\n", "utf8");
-    // Two failed Writes, then a successful Read, then two more failed Writes.
-    // Should NOT trip the cap at 3 — the Read resets the counter.
-    completeMock
-      .mockResolvedValueOnce(
-        makeAssistantMessage(
-          [{ type: "toolCall", id: "tu-1", name: "Write", arguments: { filePath: "/x" } }],
-          { stopReason: "toolUse" },
-        ),
-      )
-      .mockResolvedValueOnce(
-        makeAssistantMessage(
-          [{ type: "toolCall", id: "tu-2", name: "Write", arguments: { filePath: "/x" } }],
-          { stopReason: "toolUse" },
-        ),
-      )
-      .mockResolvedValueOnce(
-        makeAssistantMessage(
-          [{ type: "toolCall", id: "tu-3", name: "Read", arguments: { path: "target.ts" } }],
-          { stopReason: "toolUse" },
-        ),
-      )
-      .mockResolvedValueOnce(
-        makeAssistantMessage(
-          [{ type: "toolCall", id: "tu-4", name: "Write", arguments: { filePath: "/x" } }],
-          { stopReason: "toolUse" },
-        ),
-      )
-      .mockResolvedValueOnce(
-        makeAssistantMessage(
-          [{ type: "toolCall", id: "tu-5", name: "Write", arguments: { filePath: "/x" } }],
-          { stopReason: "toolUse" },
-        ),
-      )
-      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: "done" }]));
+    for (let i = 1; i <= 5; i++) {
+      const name = i % 2 === 1 ? "Write" : "Read";
+      const args = i % 2 === 1 ? { filePath: "/x" } : { path: "target.ts" };
+      completeMock.mockResolvedValueOnce(
+        makeAssistantMessage([{ type: "toolCall", id: `tu-${i}`, name, arguments: args }], {
+          stopReason: "toolUse",
+        }),
+      );
+    }
     validateToolCallMock.mockImplementation((_tools, tc) => {
       if (tc.name === "Write") {
         throw new Error('Validation failed for tool "Write":\n  - x: y');
@@ -872,8 +850,66 @@ describe("PiAiAgentRuntime", () => {
     const runtime = new PiAiAgentRuntime();
     const messages = await collectMessages(runtime, makeRequest(cwd));
 
-    // All six assistant turns consumed — cap did NOT fire.
-    expect(completeMock).toHaveBeenCalledTimes(6);
+    // Cap trips on the 3rd Write failure. That's turn #5 (W/R/W/R/W),
+    // so completeMock is called 5 times, not 6.
+    expect(completeMock).toHaveBeenCalledTimes(5);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "error_tool_loop",
+    });
+    const finalError = messages[messages.length - 1] as Extract<
+      AgentMessage,
+      { type: "result" }
+    > & { errors?: string[] };
+    expect(finalError.errors?.[0] ?? "").toContain("3 times this turn");
+    expect(finalError.errors?.[0] ?? "").toContain("Write");
+  });
+
+  it("a tool's own success resets ONLY its own counter", async () => {
+    const cwd = makeTempDir();
+    writeFileSync(path.join(cwd, "target.ts"), "x\n", "utf8");
+    // Write fail → Write success → Write fail: final Write counter = 1.
+    completeMock
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [{ type: "toolCall", id: "tu-1", name: "Write", arguments: { filePath: "/x" } }],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "tu-2",
+              name: "Write",
+              arguments: { file_path: "/y", content: "ok" },
+            },
+          ],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [{ type: "toolCall", id: "tu-3", name: "Write", arguments: { filePath: "/z" } }],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: "done" }]));
+    let call = 0;
+    validateToolCallMock.mockImplementation((_tools, tc) => {
+      call += 1;
+      // Fail on calls 1 and 3, succeed on call 2.
+      if (call === 2) return tc.arguments;
+      throw new Error('Validation failed for tool "Write":\n  - : bad');
+    });
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    // All four turns consumed — cap did NOT trip because Write's own
+    // success between the two failures reset its counter.
+    expect(completeMock).toHaveBeenCalledTimes(4);
     expect(messages[messages.length - 1]).toMatchObject({
       type: "result",
       subtype: "success",
