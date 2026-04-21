@@ -7,8 +7,15 @@
  * that decide which messages become `onOutput(line)` calls and what the
  * line content looks like.
  */
-import { describe, expect, it, vi } from "vitest";
-import { forwardSubAgentMessage } from "../../../src/agents/tasks/forward-subagent-output.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  __resetDeltaState,
+  forwardSubAgentMessage,
+} from "../../../src/agents/tasks/forward-subagent-output.js";
+
+beforeEach(() => {
+  __resetDeltaState();
+});
 
 describe("forwardSubAgentMessage", () => {
   it("emits one line per tool_use block in an assistant message", () => {
@@ -187,5 +194,80 @@ describe("forwardSubAgentMessage", () => {
       sink,
     );
     expect(result).toBe(true);
+  });
+
+  it("emits a 'building' pulse on tool-call-start", () => {
+    const sink = vi.fn();
+    const emitted = forwardSubAgentMessage(
+      { type: "tool-call-start", toolUseId: "tu-1", toolName: "Write" },
+      sink,
+    );
+    expect(emitted).toBe(true);
+    expect(sink).toHaveBeenCalledWith("Write · building");
+  });
+
+  it("emits a throttled byte-count pulse on tool-call-delta", () => {
+    const sink = vi.fn();
+    // First delta fires immediately (lastPulseAt defaults to 0).
+    forwardSubAgentMessage(
+      { type: "tool-call-delta", toolUseId: "tu-x", toolName: "Write", delta: "a".repeat(100) },
+      sink,
+    );
+    // Immediate second delta is throttled (within 250ms window).
+    forwardSubAgentMessage(
+      { type: "tool-call-delta", toolUseId: "tu-x", toolName: "Write", delta: "a".repeat(50) },
+      sink,
+    );
+    expect(sink).toHaveBeenCalledTimes(1);
+    const [firstLine] = sink.mock.calls[0]!;
+    expect(firstLine).toMatch(/^Write · building \(100 B\)$/);
+  });
+
+  it("formats byte counts with KB/MB units for large payloads", () => {
+    const sink = vi.fn();
+    forwardSubAgentMessage(
+      {
+        type: "tool-call-delta",
+        toolUseId: "tu-big",
+        toolName: "Write",
+        delta: "a".repeat(3_000),
+      },
+      sink,
+    );
+    const [line] = sink.mock.calls[0]!;
+    expect(line).toMatch(/Write · building \(2\.9 KB\)/);
+  });
+
+  it("tracks byte counts per toolUseId independently", () => {
+    const sink = vi.fn();
+    forwardSubAgentMessage(
+      { type: "tool-call-delta", toolUseId: "a", toolName: "Write", delta: "x".repeat(200) },
+      sink,
+    );
+    forwardSubAgentMessage(
+      { type: "tool-call-delta", toolUseId: "b", toolName: "Edit", delta: "y".repeat(500) },
+      sink,
+    );
+    expect(sink).toHaveBeenCalledTimes(2);
+    const [firstLine] = sink.mock.calls[0]!;
+    const [secondLine] = sink.mock.calls[1]!;
+    expect(firstLine).toContain("Write · building (200 B)");
+    expect(secondLine).toContain("Edit · building (500 B)");
+  });
+
+  it("drops tool-call-delta with no toolUseId silently", () => {
+    const sink = vi.fn();
+    const emitted = forwardSubAgentMessage({ type: "tool-call-delta", delta: "x" }, sink);
+    expect(emitted).toBe(false);
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it("ignores text-delta and thinking-delta (too noisy for live-tail)", () => {
+    const sink = vi.fn();
+    const r1 = forwardSubAgentMessage({ type: "text-delta", delta: "x" }, sink);
+    const r2 = forwardSubAgentMessage({ type: "thinking-delta", delta: "y" }, sink);
+    expect(r1).toBe(false);
+    expect(r2).toBe(false);
+    expect(sink).not.toHaveBeenCalled();
   });
 });

@@ -7,10 +7,11 @@ import type { AgentMessage, AgentQueryRequest } from "../../src/agent-runtime/ty
 const ORIGINAL_ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"];
 const ORIGINAL_ANTHROPIC_BASE_URL = process.env["ANTHROPIC_BASE_URL"];
 
-const { completeMock, getModelMock, validateToolCallMock } = vi.hoisted(() => ({
+const { completeMock, getModelMock, validateToolCallMock, streamMock } = vi.hoisted(() => ({
   completeMock: vi.fn(),
   getModelMock: vi.fn(),
   validateToolCallMock: vi.fn(),
+  streamMock: vi.fn(),
 }));
 
 vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
@@ -20,8 +21,54 @@ vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
     complete: completeMock,
     getModel: getModelMock,
     validateToolCall: validateToolCallMock,
+    stream: streamMock,
   };
 });
+
+/**
+ * Build a mock AssistantMessageEventStream that yields scripted events
+ * (including the terminal `done`) and resolves `.result()` with the
+ * AssistantMessage from the `done` event. Used by tests that previously
+ * drove the runtime via completeMock — after the streaming migration,
+ * runTurnLoop calls stream() instead of complete().
+ */
+function makeEventStream(assistant: ReturnType<typeof makeAssistantMessage>) {
+  const events: Array<Record<string, unknown>> = [
+    { type: "done", reason: assistant.stopReason, message: assistant },
+  ];
+  return {
+    [Symbol.asyncIterator]: async function* () {
+      for (const e of events) yield e;
+    },
+    result: async () => assistant,
+  };
+}
+
+/**
+ * Adapter for legacy tests: each call to streamMock consumes the next
+ * scripted return from completeMock and wraps it as a done-only event
+ * stream. Tests that previously set up `completeMock.mockResolvedValueOnce`
+ * keep working; tests that want mid-stream events can `streamMock.mockReturnValueOnce`
+ * with a richer event list.
+ */
+function wireCompleteMockToStreamMock(): void {
+  streamMock.mockImplementation((...args: unknown[]) => {
+    // Delegate to completeMock so the per-call return-value queue
+    // (mockResolvedValueOnce / mockImplementationOnce) is honored.
+    const msgPromise = Promise.resolve(
+      (completeMock as unknown as (...a: unknown[]) => unknown)(...args) as ReturnType<
+        typeof makeAssistantMessage
+      >,
+    );
+    return {
+      [Symbol.asyncIterator]: async function* () {
+        const msg = await msgPromise;
+        yield { type: "done", reason: msg.stopReason, message: msg };
+      },
+      result: () => msgPromise,
+    };
+  });
+}
 
 import { isTransientError, PiAiAgentRuntime } from "../../src/agent-runtime/pi-ai.js";
 
@@ -113,8 +160,13 @@ beforeEach(() => {
   completeMock.mockReset();
   getModelMock.mockReset();
   validateToolCallMock.mockReset();
+  streamMock.mockReset();
   getModelMock.mockReturnValue(makeModel());
   validateToolCallMock.mockImplementation((_tools, toolCall) => toolCall.arguments);
+  // Default streamMock delegates to completeMock's scripted return values so
+  // tests that only set up completeMock.mockResolvedValue(...) keep working
+  // after the runtime switched from complete() to stream().
+  wireCompleteMockToStreamMock();
 });
 
 afterEach(() => {
@@ -862,6 +914,192 @@ describe("PiAiAgentRuntime", () => {
       { type: "result" }
     > & { errors?: string[] };
     expect(finalError.errors?.[0] ?? "").toContain("3 times this turn");
+    expect(finalError.errors?.[0] ?? "").toContain("Write");
+  });
+
+  // ── Streaming migration ──
+
+  it("yields text-delta AgentMessages as the stream emits text chunks", async () => {
+    const cwd = makeTempDir();
+    const assistant = makeAssistantMessage([{ type: "text", text: "hello world" }], {
+      stopReason: "stop",
+    });
+    streamMock.mockReturnValueOnce({
+      [Symbol.asyncIterator]: async function* () {
+        yield { type: "text_start", contentIndex: 0, partial: assistant };
+        yield { type: "text_delta", contentIndex: 0, delta: "hello ", partial: assistant };
+        yield { type: "text_delta", contentIndex: 0, delta: "world", partial: assistant };
+        yield { type: "text_end", contentIndex: 0, content: "hello world", partial: assistant };
+        yield { type: "done", reason: "stop", message: assistant };
+      },
+      result: async () => assistant,
+    });
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    const deltas = messages.filter((m) => m.type === "text-delta");
+    expect(deltas.length).toBe(2);
+    expect(deltas).toEqual([
+      { type: "text-delta", delta: "hello " },
+      { type: "text-delta", delta: "world" },
+    ]);
+    // Final assistant + result still arrive downstream of the deltas.
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "success",
+      result: "hello world",
+    });
+  });
+
+  it("yields tool-call-start + tool-call-delta events for streamed tool calls", async () => {
+    const cwd = makeTempDir();
+    const finalAssistant = makeAssistantMessage(
+      [
+        {
+          type: "toolCall",
+          id: "tu-1",
+          name: "Write",
+          arguments: { file_path: "/tmp/x", content: "hi" },
+        },
+      ],
+      { stopReason: "toolUse" },
+    );
+    const resolveAssistant = makeAssistantMessage([{ type: "text", text: "done" }]);
+
+    streamMock
+      .mockReturnValueOnce({
+        [Symbol.asyncIterator]: async function* () {
+          const partialFirst = {
+            ...finalAssistant,
+            content: [{ type: "toolCall" as const, id: "tu-1", name: "Write", arguments: {} }],
+          };
+          yield { type: "toolcall_start", contentIndex: 0, partial: partialFirst };
+          yield {
+            type: "toolcall_delta",
+            contentIndex: 0,
+            delta: '{"file_path":"/tmp/x"',
+            partial: partialFirst,
+          };
+          yield {
+            type: "toolcall_delta",
+            contentIndex: 0,
+            delta: ',"content":"hi"}',
+            partial: partialFirst,
+          };
+          yield {
+            type: "toolcall_end",
+            contentIndex: 0,
+            toolCall: finalAssistant.content[0],
+            partial: finalAssistant,
+          };
+          yield { type: "done", reason: "toolUse", message: finalAssistant };
+        },
+        result: async () => finalAssistant,
+      })
+      .mockReturnValueOnce({
+        [Symbol.asyncIterator]: async function* () {
+          yield { type: "done", reason: "stop", message: resolveAssistant };
+        },
+        result: async () => resolveAssistant,
+      });
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    const starts = messages.filter((m) => m.type === "tool-call-start");
+    const deltas = messages.filter((m) => m.type === "tool-call-delta");
+    expect(starts).toEqual([{ type: "tool-call-start", toolUseId: "tu-1", toolName: "Write" }]);
+    expect(deltas).toEqual([
+      { type: "tool-call-delta", toolUseId: "tu-1", delta: '{"file_path":"/tmp/x"' },
+      { type: "tool-call-delta", toolUseId: "tu-1", delta: ',"content":"hi"}' },
+    ]);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "success",
+    });
+  });
+
+  it("emits tool-result with truncation guidance when stopReason=length for a tool call", async () => {
+    const cwd = makeTempDir();
+    // First turn: provider truncates the tool call mid-argument (stopReason=length,
+    // but the toolCall block is still present with partial args).
+    const truncated = makeAssistantMessage(
+      [
+        {
+          type: "toolCall",
+          id: "tu-trunc",
+          name: "Write",
+          arguments: { file_path: "/huge.json" }, // content missing — truncated
+        },
+      ],
+      { stopReason: "length" },
+    );
+    // Second turn: recovers with a small Write.
+    const recovered = makeAssistantMessage([{ type: "text", text: "ok" }]);
+
+    completeMock.mockResolvedValueOnce(truncated).mockResolvedValueOnce(recovered);
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    // No AJV validation attempted on the truncated call — assertion: we
+    // see a tool-result with the truncation-guidance content, not a
+    // "missing required property" message.
+    const toolResults = messages.filter(
+      (m): m is Extract<AgentMessage, { type: "tool-result" }> => m.type === "tool-result",
+    );
+    expect(toolResults).toHaveLength(1);
+    expect(toolResults[0]!.toolUseId).toBe("tu-trunc");
+    expect(toolResults[0]!.isError).toBe(true);
+    expect(toolResults[0]!.content).toContain("truncated");
+    // Guidance explicitly names smaller-payload strategies (Edit-append,
+    // reducing content) so the model knows HOW to fix it next turn.
+    expect(toolResults[0]!.content).toMatch(/Edit-append|smaller payload|fewer items/);
+
+    // validateToolCall must NOT have been invoked on the truncated call.
+    // The recovered second turn has no tool calls, so 0 total validations.
+    expect(validateToolCallMock).not.toHaveBeenCalled();
+
+    // Final result is success (recovery turn).
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "success",
+    });
+  });
+
+  it("trips error_tool_loop after 3 same-tool truncations", async () => {
+    const cwd = makeTempDir();
+    for (let i = 0; i < 4; i++) {
+      completeMock.mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: `tu-${i}`,
+              name: "Write",
+              arguments: { file_path: "/x" },
+            },
+          ],
+          { stopReason: "length" },
+        ),
+      );
+    }
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    // 3 truncations → cap trips. completeMock only called 3 times, not 4.
+    expect(completeMock).toHaveBeenCalledTimes(3);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "error_tool_loop",
+    });
+    const finalError = messages[messages.length - 1] as Extract<
+      AgentMessage,
+      { type: "result" }
+    > & { errors?: string[] };
+    expect(finalError.errors?.[0] ?? "").toContain("truncated 3 times");
     expect(finalError.errors?.[0] ?? "").toContain("Write");
   });
 

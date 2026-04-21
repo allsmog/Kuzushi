@@ -74,7 +74,85 @@ export function forwardSubAgentMessage(
     return true;
   }
 
+  // Streaming delta events — surface a throttled "building" pulse so
+  // operators see forward motion during a 20-second tool-call emission.
+  // We coalesce deltas per-toolUseId with byte-count progress and throttle
+  // emissions to at most one every DELTA_PULSE_THROTTLE_MS to avoid
+  // flooding scrollback on fast providers.
+  if (message.type === "tool-call-start") {
+    const name = typeof message.toolName === "string" ? message.toolName : "tool";
+    onOutput(`${name} · building`);
+    return true;
+  }
+
+  if (message.type === "tool-call-delta") {
+    return recordToolCallDelta(message, onOutput);
+  }
+
   return false;
+}
+
+const DELTA_PULSE_THROTTLE_MS = 250;
+interface DeltaState {
+  bytes: number;
+  lastPulseAt: number;
+  toolName: string;
+}
+const deltaStateByToolUseId = new Map<string, DeltaState>();
+let deltaResetScheduled = false;
+
+function recordToolCallDelta(
+  message: { toolUseId?: unknown; delta?: unknown; toolName?: unknown },
+  onOutput: (line: string) => void,
+): boolean {
+  const toolUseId = typeof message.toolUseId === "string" ? message.toolUseId : "";
+  if (!toolUseId) return false;
+  const delta = typeof message.delta === "string" ? message.delta : "";
+  const state = deltaStateByToolUseId.get(toolUseId) ?? {
+    bytes: 0,
+    lastPulseAt: 0,
+    toolName: typeof message.toolName === "string" ? message.toolName : "tool",
+  };
+  state.bytes += delta.length;
+  const now = Date.now();
+  if (now - state.lastPulseAt < DELTA_PULSE_THROTTLE_MS) {
+    deltaStateByToolUseId.set(toolUseId, state);
+    return false;
+  }
+  state.lastPulseAt = now;
+  deltaStateByToolUseId.set(toolUseId, state);
+  // Self-cleaning: schedule a single sweep to drop stale toolUseIds so
+  // long-lived runs don't leak Map entries for finished tools.
+  if (!deltaResetScheduled) {
+    deltaResetScheduled = true;
+    setTimeout(() => {
+      deltaResetScheduled = false;
+      const cutoff = Date.now() - 30_000;
+      for (const [id, s] of deltaStateByToolUseId.entries()) {
+        if (s.lastPulseAt < cutoff) deltaStateByToolUseId.delete(id);
+      }
+    }, 30_000).unref?.();
+  }
+  onOutput(`${state.toolName} · building (${formatBytes(state.bytes)})`);
+  return true;
+}
+
+/**
+ * Reset internal delta-tracking state. Exported for tests; the live-tail
+ * renderer relies on a module-scope Map that persists across invocations,
+ * so per-test runs need a way to reset between assertions.
+ */
+export function __resetDeltaState(): void {
+  deltaStateByToolUseId.clear();
+  deltaResetScheduled = false;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
 }
 
 /**
