@@ -87,6 +87,27 @@ kuzushi> /since main                       # findings + threats scoped to change
 kuzushi> /since v1.2.0                     # works with any git ref (tags, SHAs, HEAD~5)
 ```
 
+#### Keyboard shortcuts
+
+| Key            | While running                     | At the idle prompt                  |
+| -------------- | --------------------------------- | ----------------------------------- |
+| `Ctrl+C`       | Abort the running tool / turn     | First press arms, second exits (2s) |
+| `Ctrl+D`       | Abort (same as `Ctrl+C`)          | Exits                               |
+| `Enter`        | —                                 | Send input                          |
+| `↑` / `↓`      | —                                 | Previous / next command             |
+| `Esc`          | —                                 | Clear input buffer                  |
+| `1`–`5`        | —                                 | Cycle threat-model sub-views        |
+
+Ctrl+C aborts through four independent paths (Ink `useInput` on raw stdin,
+a byte-level stdin watcher, `SIGINT`, and a dedicated `/dev/tty` reader)
+so long-running LLM tools still cancel cleanly even when a subprocess has
+grabbed the terminal's foreground group. Under abort every Claude Agent
+SDK subprocess (and its descendants) receives `SIGTERM` directly — no
+relying on the SDK's own signal handling.
+
+Set `KUZUSHI_ABORT_DEBUG=1` to trace the abort path to stderr when
+diagnosing Ctrl+C issues.
+
 #### On-disk artefacts
 
 Operators can version-control any of these and have them round-trip with
