@@ -104,6 +104,37 @@ export interface AgentToolResultMessage {
   content: string;
 }
 
+/**
+ * Streaming deltas surfaced by the pi-ai runtime while an assistant turn
+ * is building. Consumers are free to ignore them; they carry no semantic
+ * state the final `assistant` / `tool-result` yields don't already cover.
+ *
+ * Exists so UIs can show forward motion during a slow turn (e.g. a 20-second
+ * Write emitting a 30KB JSON) instead of a silent spinner.
+ */
+export interface AgentTextDeltaMessage {
+  type: "text-delta";
+  delta: string;
+}
+
+export interface AgentToolCallStartMessage {
+  type: "tool-call-start";
+  toolUseId: string;
+  toolName: string;
+}
+
+export interface AgentToolCallDeltaMessage {
+  type: "tool-call-delta";
+  toolUseId: string;
+  /** Raw JSON fragment appended to the tool call's input-so-far. */
+  delta: string;
+}
+
+export interface AgentThinkingDeltaMessage {
+  type: "thinking-delta";
+  delta: string;
+}
+
 export interface AgentUnknownMessage {
   type: "unknown";
   raw: unknown;
@@ -116,6 +147,10 @@ export type AgentMessage =
   | AgentToolProgressMessage
   | AgentToolSummaryMessage
   | AgentToolResultMessage
+  | AgentTextDeltaMessage
+  | AgentToolCallStartMessage
+  | AgentToolCallDeltaMessage
+  | AgentThinkingDeltaMessage
   | AgentUnknownMessage;
 
 export interface AgentSession {

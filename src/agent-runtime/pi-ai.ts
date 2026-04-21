@@ -1,10 +1,11 @@
 import {
-  complete,
+  type AssistantMessageEvent,
   getModel,
   type KnownProvider,
   type AssistantMessage as PiAiAssistantMessage,
   type Context as PiAiContext,
   type ToolCall as PiAiToolCall,
+  stream,
   type Tool,
   validateToolCall,
 } from "@mariozechner/pi-ai";
@@ -98,80 +99,87 @@ function isRateLimitError(error: unknown): boolean {
 }
 
 /**
- * Call `complete()` with rate-limit gating.
+ * Stream one LLM turn with rate-limit gating and transient-error retry.
  *
- * Acquires a concurrency slot from the global `RateLimitRegistry` before
- * invoking the LLM, and releases it afterward with the appropriate
- * success/failure signal so adaptive concurrency can adjust.
+ * Generator-shaped so callers (`runTurnLoop`) can `yield*` events in
+ * real time and still receive the final AssistantMessage via the
+ * generator's return value. Without a generator, the outer turn loop
+ * can't surface deltas during an in-flight await — JS can't yield from
+ * a suspended awaitee — so a 20-second PASTA S4 Write would still look
+ * like a silent spinner.
+ *
+ * Events yielded: `AssistantMessageEvent` (text deltas, tool-call deltas,
+ * thinking deltas, terminal done/error).
+ * Generator return: the final `PiAiAssistantMessage`.
+ *
+ * Retry semantics match the old retryTransient + rateLimitedComplete
+ * combo: retry on thrown network-class errors with exponential backoff,
+ * respect AbortSignal, release the concurrency slot exactly once per
+ * attempt. Soft-error retry (stopReason === "error" with transient
+ * message) is handled by the caller, not here, to preserve the old
+ * separation of concerns.
  */
-async function rateLimitedComplete(
+async function* streamLlmCall(
   modelSpec: string,
-  model: Parameters<typeof complete>[0],
+  model: Parameters<typeof stream>[0],
   context: PiAiContext,
-  options: { signal?: AbortSignal; temperature?: number; maxTokens?: number },
-): Promise<PiAiAssistantMessage> {
+  options: {
+    signal?: AbortSignal;
+    temperature?: number;
+    maxTokens?: number;
+    maxRetries?: number;
+    backoffMs?: number;
+    observability?: { bus?: MessageBus; model?: string; runId?: string };
+  },
+): AsyncGenerator<AssistantMessageEvent, PiAiAssistantMessage> {
   const registry = getRateLimitRegistry();
-  // acquire() returns a safety-net release function, but we call
-  // registry.release() explicitly so we can pass the success flag.
-  // We intentionally ignore the returned function to avoid double-release.
-  await registry.acquire(modelSpec);
-  let success = true;
+  const maxRetries = options.maxRetries ?? TRANSIENT_RETRY_MAX;
+  const backoffMs = options.backoffMs ?? TRANSIENT_RETRY_BASE_MS;
+  const streamOptions = {
+    signal: options.signal,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+  };
 
-  try {
-    const result = await complete(model, context, options);
-
-    // Detect rate-limit soft errors returned by pi-ai.
-    if (
-      result.stopReason === "error" &&
-      result.errorMessage &&
-      isRateLimitError(result.errorMessage)
-    ) {
-      success = false;
-    }
-
-    return result;
-  } catch (error) {
-    success = !isRateLimitError(error);
-    throw error;
-  } finally {
-    registry.release(modelSpec, success);
-  }
-}
-
-async function retryTransient<T>(
-  fn: () => Promise<T>,
-  signal: AbortSignal | undefined,
-  maxRetries = TRANSIENT_RETRY_MAX,
-  backoffMs = TRANSIENT_RETRY_BASE_MS,
-  observability?: { bus?: MessageBus; model?: string; runId?: string },
-): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await registry.acquire(modelSpec);
+    let success = true;
     try {
-      return await fn();
+      const events = stream(model, context, streamOptions);
+      // Yield each event to the caller in real time. Once the stream
+      // ends, await events.result() for the final AssistantMessage.
+      for await (const event of events) {
+        yield event;
+      }
+      const result = await events.result();
+      if (
+        result.stopReason === "error" &&
+        result.errorMessage &&
+        isRateLimitError(result.errorMessage)
+      ) {
+        success = false;
+      }
+      return result;
     } catch (error) {
       lastError = error;
-      // Wrap non-KuzushiError instances so callers always get typed errors.
+      success = !isRateLimitError(error);
       const wrapped = error instanceof KuzushiError ? error : wrapError(error);
-
       if (!wrapped.retryable || attempt === maxRetries) {
         throw wrapped;
       }
-      if (signal?.aborted) {
+      if (options.signal?.aborted) {
         throw wrapped;
       }
-      // Rate-limit errors get longer backoff.
       const factor = wrapped.category === "rate_limit" ? 3 : 1;
       const delay = backoffMs * factor * 2 ** attempt;
       log.warn(
         `[pi-ai] ${wrapped.name} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay / 1000}s: ${wrapped.message}`,
       );
-
-      // Emit llm:retry event
-      if (observability?.bus) {
+      if (options.observability?.bus) {
         try {
-          const retryRunId = observability.runId ?? "";
-          await observability.bus.publish<LlmRetryEvent>({
+          const retryRunId = options.observability.runId ?? "";
+          await options.observability.bus.publish<LlmRetryEvent>({
             type: "llm:retry",
             meta: {
               id: crypto.randomUUID(),
@@ -179,7 +187,7 @@ async function retryTransient<T>(
               runId: retryRunId,
             },
             payload: {
-              model: observability.model ?? "unknown",
+              model: options.observability.model ?? "unknown",
               attempt: attempt + 1,
               maxAttempts: maxRetries + 1,
               delayMs: delay,
@@ -190,24 +198,63 @@ async function retryTransient<T>(
           // Non-fatal: observability emission should never break retry logic
         }
       }
-
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, delay);
-        if (signal) {
+        if (options.signal) {
           const onAbort = () => {
             clearTimeout(timer);
             resolve();
           };
-          signal.addEventListener("abort", onAbort, { once: true });
+          options.signal.addEventListener("abort", onAbort, { once: true });
         }
       });
-      if (signal?.aborted) {
+      if (options.signal?.aborted) {
         throw wrapped;
       }
+      // fallthrough: next attempt
+    } finally {
+      registry.release(modelSpec, success);
     }
   }
   throw wrapError(lastError);
 }
+
+/**
+ * Translate one pi-ai AssistantMessageEvent into the AgentMessage delta
+ * variant (if any) operators should see on the live-tail. Returns null
+ * for bookkeeping events (`start`, `*_end`, `done`, `error`, etc.) so
+ * consumers don't get flooded.
+ */
+function mapPiAiEventToAgentMessage(event: AssistantMessageEvent): AgentMessage | null {
+  switch (event.type) {
+    case "text_delta":
+      return { type: "text-delta", delta: event.delta };
+    case "thinking_delta":
+      return { type: "thinking-delta", delta: event.delta };
+    case "toolcall_start": {
+      const block = event.partial.content[event.contentIndex];
+      const toolName =
+        block && block.type === "toolCall" && typeof block.name === "string" ? block.name : "tool";
+      const toolUseId =
+        block && block.type === "toolCall" && typeof block.id === "string" ? block.id : "";
+      return { type: "tool-call-start", toolUseId, toolName };
+    }
+    case "toolcall_delta": {
+      const block = event.partial.content[event.contentIndex];
+      const toolUseId =
+        block && block.type === "toolCall" && typeof block.id === "string" ? block.id : "";
+      return { type: "tool-call-delta", toolUseId, delta: event.delta };
+    }
+    default:
+      return null;
+  }
+}
+
+// retryTransient was the pre-streaming retry wrapper for rateLimitedComplete.
+// Both have been replaced by streamLlmCall (a generator that bakes retry
+// + rate-limit + streaming into one). Removing retryTransient avoids a
+// dead-code trap for future contributors who might wire it into a new
+// non-streaming path and miss the streaming-first contract.
 
 export class PiAiAgentRuntime implements AgentRuntime {
   readonly id = "pi-ai";
@@ -377,18 +424,31 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
           // Non-fatal
         }
       }
-      let assistant = await retryTransient(
-        () =>
-          rateLimitedComplete(modelSpec, model, context, {
-            signal,
-            temperature: options.temperature,
-            maxTokens: options.maxOutputTokens,
-          }),
+      // Stream the LLM turn, fanning out per-event AgentMessage deltas
+      // (`text-delta`, `tool-call-start`, `tool-call-delta`, ...) in real
+      // time. The generator returns the final AssistantMessage via its
+      // return value, which we capture with the two-step do-while/yield*
+      // pattern below — `yield*` forwards the yielded events and binds
+      // the return value on completion.
+      const streamGen = streamLlmCall(modelSpec, model, context, {
         signal,
-        TRANSIENT_RETRY_MAX,
-        TRANSIENT_RETRY_BASE_MS,
+        temperature: options.temperature,
+        maxTokens: options.maxOutputTokens,
         observability,
-      );
+      });
+      let assistant: PiAiAssistantMessage;
+      {
+        let next: IteratorResult<AssistantMessageEvent, PiAiAssistantMessage>;
+        for (;;) {
+          next = await streamGen.next();
+          if (next.done) {
+            assistant = next.value;
+            break;
+          }
+          const mapped = mapPiAiEventToAgentMessage(next.value);
+          if (mapped) yield mapped;
+        }
+      }
 
       // Handle transient soft errors (stopReason === "error" with transient message).
       // pi-ai's complete() never throws on API errors — it returns them as soft errors
@@ -443,11 +503,26 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
             }
           });
           if (signal?.aborted) break;
-          assistant = await rateLimitedComplete(modelSpec, model, context, {
+          // Soft-error retry also streams — same generator/yield* plumbing
+          // as the first attempt so operators see deltas during retries.
+          const retryGen = streamLlmCall(modelSpec, model, context, {
             signal,
             temperature: options.temperature,
             maxTokens: options.maxOutputTokens,
+            // Soft-retry loop manages its own attempt count; disable
+            // streamLlmCall's internal network-retry so we don't double-retry.
+            maxRetries: 0,
+            observability,
           });
+          for (;;) {
+            const next = await retryGen.next();
+            if (next.done) {
+              assistant = next.value;
+              break;
+            }
+            const mapped = mapPiAiEventToAgentMessage(next.value);
+            if (mapped) yield mapped;
+          }
           if (
             assistant.stopReason !== "error" ||
             !assistant.errorMessage ||
@@ -553,6 +628,67 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
       // and signal the LLM to continue where it left off.
       if (assistant.stopReason === "length") {
         const hasToolCalls = assistant.content.some((block) => block.type === "toolCall");
+
+        // Tool-call truncation path. The provider cut off the tool's
+        // JSON argument mid-field, so `toolCall.arguments` is incomplete
+        // (e.g. missing `content`). Feeding an incomplete call to AJV
+        // produces a puzzling "missing required property" error and the
+        // model retries the same oversized Write next turn. Short-circuit:
+        // skip validation, feed back a clear corrective message, and emit
+        // a `tool-result isError` per truncated call so the per-tool cap
+        // still trips if the model can't shrink.
+        if (hasToolCalls) {
+          const truncatedToolCalls = assistant.content.filter(
+            (block): block is PiAiToolCall => block.type === "toolCall",
+          );
+          for (const tc of truncatedToolCalls) {
+            const tcId = tc.id || `${tc.name}_${Date.now()}_${++generatedToolCallCounter}`;
+            const truncMsg = `Your "${tc.name}" tool call was truncated at the output-token limit before the arguments were complete. Retry with a smaller payload: for a large JSON artifact, Write a header first and Edit-append remaining sections, or reduce the content (fewer items, shorter descriptions).`;
+            const activityMsg = `${tc.name} truncated at output limit`;
+            log.warn(`[pi-ai] ${activityMsg} — asking model to split`);
+            yield {
+              type: "tool-summary",
+              summary: activityMsg,
+              precedingToolUseIds: [tcId],
+            };
+            yield {
+              type: "tool-result",
+              toolUseId: tcId,
+              isError: true,
+              content: truncMsg,
+            };
+            // Track under the per-tool cap so repeated truncations of
+            // the same tool eventually bail the turn loop.
+            const currentCount = (validationFailuresByTool.get(tc.name) ?? 0) + 1;
+            validationFailuresByTool.set(tc.name, currentCount);
+            if (currentCount >= MAX_VALIDATION_FAILURES_PER_TOOL) {
+              log.warn(
+                `[pi-ai] Tool "${tc.name}" truncated ${currentCount} times this turn; aborting.`,
+              );
+              yield errorResult(
+                "error_tool_loop",
+                `Tool "${tc.name}" truncated ${currentCount} times this turn; aborting. The tool's arguments exceed the model's output-token budget.`,
+                startedAtMs,
+                turn,
+                totalCostUsd,
+              );
+              return;
+            }
+            context.messages.push({
+              role: "toolResult",
+              toolCallId: tcId,
+              toolName: tc.name,
+              content: [{ type: "text", text: truncMsg }],
+              isError: true,
+              timestamp: Date.now(),
+            });
+          }
+          // Don't push the incomplete assistant message into context — the
+          // toolResults above are enough to cue the LLM. Move to the next
+          // turn so the model can retry with a smaller payload.
+          continue;
+        }
+
         if (!hasToolCalls && outputFormat) {
           truncatedTextParts.push(extractText(assistant));
           // Re-send with a continuation prompt so the LLM finishes its JSON.
