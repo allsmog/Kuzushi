@@ -24,6 +24,7 @@ import { MultilineText } from "../primitives/MultilineText.js";
 import { Ratchet } from "../primitives/Ratchet.js";
 import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
 import { tokens } from "../tokens.js";
+import { ErrorMessage } from "./ErrorMessage.js";
 import { PulseDot } from "./PulseDot.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
@@ -510,7 +511,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
     case "error":
       return (
         <Box marginTop={1}>
-          <Text>{tokens.danger(entry.text)}</Text>
+          <ErrorMessage text={entry.text} />
         </Box>
       );
     case "tool-call":

@@ -11,6 +11,7 @@ const {
   renderToolInputHint,
   patchHistoryEntry,
   pushLiveActivity,
+  finalizeRunningToolCalls,
 } = __shellInternals;
 
 function seedShellState(): UIStore {
@@ -225,6 +226,103 @@ describe("extractToolUseHeaders", () => {
 
   it("skips non-tool_use blocks", () => {
     expect(extractToolUseHeaders([{ type: "text", text: "hi" }])).toEqual([]);
+  });
+
+  it("captures the Anthropic tool_use id when present", () => {
+    const headers = extractToolUseHeaders([
+      { type: "tool_use", id: "toolu_123", name: "Read", input: { path: "/a" } },
+      { type: "tool_use", id: "toolu_456", name: "Bash" },
+      { type: "tool_use", name: "NoId" }, // id missing
+    ]);
+    expect(headers).toEqual([
+      { id: "toolu_123", name: "Read", inputHint: "/a" },
+      { id: "toolu_456", name: "Bash" },
+      { name: "NoId" },
+    ]);
+  });
+});
+
+describe("finalizeRunningToolCalls", () => {
+  function seedWithHistory(entries: Parameters<typeof patchHistoryEntry>[1] extends infer _ ? Array<Record<string, unknown>> : never): UIStore {
+    const store = seedShellState();
+    store.update({
+      ...store.getState(),
+      shell: {
+        ...store.getState().shell!,
+        history: entries as never,
+      },
+    });
+    return store;
+  }
+
+  it("flips all running tool-call entries to the supplied status", () => {
+    const store = seedWithHistory([
+      { type: "tool-call", id: "tc-1", tool: "a", text: "", status: "running", timestamp: 1 },
+      { type: "tool-call", id: "tc-2", tool: "b", text: "", status: "running", timestamp: 2 },
+    ]);
+    finalizeRunningToolCalls(store, "ok");
+    const history = store.getState().shell!.history;
+    expect(history[0]!.status).toBe("ok");
+    expect(history[1]!.status).toBe("ok");
+  });
+
+  it("does not touch already-resolved entries", () => {
+    const store = seedWithHistory([
+      { type: "tool-call", id: "tc-1", tool: "a", text: "", status: "ok", timestamp: 1 },
+      { type: "tool-call", id: "tc-2", tool: "b", text: "", status: "running", timestamp: 2 },
+    ]);
+    finalizeRunningToolCalls(store, "fail");
+    const history = store.getState().shell!.history;
+    expect(history[0]!.status).toBe("ok"); // preserved
+    expect(history[1]!.status).toBe("fail"); // flipped
+  });
+
+  it("preserves non-tool-call entries verbatim", () => {
+    const store = seedWithHistory([
+      { type: "output", text: "hello", timestamp: 1 },
+      { type: "tool-call", id: "tc-1", tool: "a", text: "", status: "running", timestamp: 2 },
+      { type: "error", text: "boom", timestamp: 3 },
+    ]);
+    finalizeRunningToolCalls(store, "abort");
+    const history = store.getState().shell!.history;
+    expect(history[0]!.type).toBe("output");
+    expect(history[1]!.status).toBe("abort");
+    expect(history[2]!.type).toBe("error");
+  });
+
+  it("clears liveActivities when finalizing", () => {
+    const store = seedWithHistory([
+      {
+        type: "tool-call",
+        id: "tc-1",
+        tool: "a",
+        text: "",
+        status: "running",
+        liveActivities: ["step1", "step2"],
+        timestamp: 1,
+      },
+    ]);
+    finalizeRunningToolCalls(store, "ok");
+    expect(store.getState().shell!.history[0]!.liveActivities).toBeUndefined();
+  });
+
+  it("attaches the resultOutput when provided", () => {
+    const store = seedWithHistory([
+      { type: "tool-call", id: "tc-1", tool: "a", text: "", status: "running", timestamp: 1 },
+    ]);
+    finalizeRunningToolCalls(store, "ok", "done summary");
+    expect(store.getState().shell!.history[0]!.resultOutput).toBe("done summary");
+  });
+
+  it("is a no-op when there are no running tool-calls", () => {
+    const store = seedWithHistory([
+      { type: "output", text: "hello", timestamp: 1 },
+    ]);
+    const before = store.getState().shell!.history;
+    finalizeRunningToolCalls(store, "ok");
+    // Reference equality: with no mutation the history array should be the
+    // same reference (updateShell returns the same shell object).
+    expect(store.getState().shell!.history).toBe(before);
   });
 });
 

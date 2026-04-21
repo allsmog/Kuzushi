@@ -11,6 +11,18 @@ import { runSingleTaskPipeline, targetProperty } from "./shared.js";
 
 const threatHuntTool: ModuleTool = {
   name: "threat-hunt:run",
+  displayName: "Threat Hunt",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    const target = typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+    const actors = typeof p?.["maxActors"] === "number" ? (p["maxActors"] as number) : null;
+    if (target && actors) return `${target} · ${actors} actors`;
+    return target ?? null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description: "Run the threat-hunt task — CTF-framed actors hunting STRIDE threats end-to-end.",
   inputSchema: {
     type: "object",

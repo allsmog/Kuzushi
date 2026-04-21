@@ -339,19 +339,28 @@ export function extractToolUseActivities(content: Array<Record<string, unknown>>
 
 /**
  * Parse tool_use blocks out of an assistant message into `⏺` header entries
- * — `{ name, inputHint }` pairs. Separate from `extractToolUseActivities`
+ * — `{ id, name, inputHint }` triples. Separate from `extractToolUseActivities`
  * (which returns the legacy `⎿ ` body-form string) because the cc-repo-style
  * flow emits the header once per tool call, not as a progress line.
+ *
+ * The `id` is the Anthropic `tool_use` block id (when present), used later
+ * to correlate with `tool-summary` / `tool-progress` events so agent-driven
+ * `⏺` entries can flip from running → resolved without manual bookkeeping.
  */
 export function extractToolUseHeaders(
   content: Array<Record<string, unknown>>,
-): Array<{ name: string; inputHint?: string }> {
-  const out: Array<{ name: string; inputHint?: string }> = [];
+): Array<{ id?: string; name: string; inputHint?: string }> {
+  const out: Array<{ id?: string; name: string; inputHint?: string }> = [];
   for (const block of content) {
     if (block["type"] !== "tool_use") continue;
+    const id = typeof block["id"] === "string" ? (block["id"] as string) : undefined;
     const name = typeof block["name"] === "string" ? block["name"] : "tool";
     const hint = summarizeInput(block["input"]);
-    out.push(hint ? { name, inputHint: hint } : { name });
+    out.push({
+      ...(id ? { id } : {}),
+      name,
+      ...(hint ? { inputHint: hint } : {}),
+    });
   }
   return out;
 }
@@ -915,6 +924,33 @@ function patchHistoryEntry(
     const next = shell.history.slice();
     next[idx] = { ...next[idx]!, ...patch };
     return { ...shell, history: next };
+  });
+}
+
+/**
+ * Safety-net: sweep the history for any tool-call entries still marked
+ * `status: "running"` and flip them to `status` + optional `resultOutput`.
+ * Called at turn boundaries so an aborted / errored turn doesn't leave
+ * agent-driven `⏺` entries pulsing forever.
+ */
+function finalizeRunningToolCalls(
+  store: UIStore,
+  status: "ok" | "fail" | "abort",
+  resultOutput?: string,
+): void {
+  updateShell(store, (shell) => {
+    let mutated = false;
+    const next = shell.history.map((entry) => {
+      if (entry.type !== "tool-call" || entry.status !== "running") return entry;
+      mutated = true;
+      return {
+        ...entry,
+        status,
+        ...(resultOutput ? { resultOutput } : {}),
+        liveActivities: undefined,
+      };
+    });
+    return mutated ? { ...shell, history: next } : shell;
   });
 }
 
@@ -2054,16 +2090,21 @@ async function startInkShell(
                 store,
                 header.inputHint ? `${label} · ${header.inputHint}` : label,
               );
+              // Use the Anthropic tool_use.id as the history entry's `id`
+              // when available — lets `tool-summary` messages correlate
+              // by `precedingToolUseIds` to flip status on resolution.
+              // Fall back to a synthetic id so the entry is still
+              // mutable (liveActivities tail, Static exclusion).
+              const entryId =
+                header.id ?? `atc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
               appendToHistory(store, {
                 type: "tool-call",
+                id: entryId,
+                ...(header.id ? { toolUseId: header.id } : {}),
                 tool: header.name,
                 ...(agentDisplayName ? { displayName: agentDisplayName } : {}),
                 ...(header.inputHint ? { inputHint: header.inputHint } : {}),
-                // Agent-driven calls have no reliable "resolved" signal in
-                // our message stream, so omit `status` — the renderer
-                // treats this as a solid cyan `⏺` (no pulse, no color
-                // flip). When we wire up tool_result block tracking, this
-                // can become "running" + flip on resolution.
+                status: "running",
                 text: headerText,
                 timestamp: Date.now(),
               });
@@ -2073,10 +2114,39 @@ async function startInkShell(
 
           case "tool-progress": {
             updateToolActivity(store, message.toolName, message.elapsedSeconds);
+            // Also feed the live tail of the matching agent-driven
+            // `⏺` entry so operators watching the scrollback see a
+            // ticking "12s" / tool-specific heartbeat under the header.
+            const history = store.getState().shell?.history ?? [];
+            const entry = history.find(
+              (e) => e.type === "tool-call" && e.toolUseId === message.toolUseId,
+            );
+            if (entry?.id && entry.status === "running") {
+              pushLiveActivity(store, entry.id, `${message.elapsedSeconds}s`);
+            }
             break;
           }
 
           case "tool-summary": {
+            // Flip any agent-driven `⏺` entries whose toolUseId is in the
+            // batch's `precedingToolUseIds` from "running" → "ok". The
+            // Anthropic SDK doesn't expose per-tool success/failure at
+            // the summary level — it bundles multiple uses together —
+            // so we mark everything in the batch as successful and rely
+            // on follow-up assistant text to surface errors explicitly.
+            const precedingIds = message.precedingToolUseIds ?? [];
+            for (const toolUseId of precedingIds) {
+              const history = store.getState().shell?.history ?? [];
+              const entry = history.find(
+                (e) => e.type === "tool-call" && e.toolUseId === toolUseId,
+              );
+              if (entry?.id) {
+                patchHistoryEntry(store, entry.id, {
+                  status: "ok",
+                  liveActivities: undefined,
+                });
+              }
+            }
             updateToolSummary(store, message.summary);
             const trailer = formatContextTrailer(
               opts.target ? path.resolve(opts.target) : process.cwd(),
@@ -2119,6 +2189,9 @@ async function startInkShell(
         });
       }
       setPendingAssistantText(store, undefined);
+      // Seal any agent-driven `⏺` entries that were still pulsing when
+      // the error / abort fired. Otherwise they'd stay "running" forever.
+      finalizeRunningToolCalls(store, wasAborted ? "abort" : "fail");
       appendToHistory(store, {
         type: wasAborted ? "output" : "error",
         text: message,
@@ -2130,6 +2203,11 @@ async function startInkShell(
     }
 
     const wasAborted = finishActiveAction();
+    // Clean end-of-turn — mark any still-"running" tool-call entries as
+    // resolved. Most should already be `ok` from `tool-summary`, but if
+    // the SDK didn't emit one for every batch (or we missed the
+    // correlation), this catches the leak.
+    finalizeRunningToolCalls(store, wasAborted ? "abort" : "ok");
     const pendingAssistantText = store.getState().shell?.pendingAssistantText;
     if (pendingAssistantText) {
       appendToHistory(store, {
@@ -4495,6 +4573,7 @@ export const __shellInternals = {
   renderToolInputHint,
   patchHistoryEntry,
   pushLiveActivity,
+  finalizeRunningToolCalls,
   pushToolActivity,
   pushToolPhase,
   formatHelp,

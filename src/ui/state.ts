@@ -401,6 +401,13 @@ export interface ShellHistoryEntry {
    * from `<Static>` until its `status` becomes terminal.
    */
   id?: string;
+  /**
+   * For `tool-call` entries seeded from an agent `tool_use` block: the
+   * Anthropic-side tool_use id. Used to correlate with later
+   * `tool-progress` / `tool-summary` events so agent-driven `⏺` entries
+   * flip running → ok on resolution.
+   */
+  toolUseId?: string;
   /** For `tool-call`: qualified tool name (e.g. `context:build`). */
   tool?: string;
   /** For `tool-call`: human-friendly label rendered instead of `tool` when set. */
