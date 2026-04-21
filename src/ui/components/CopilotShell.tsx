@@ -15,11 +15,17 @@ import type React from "react";
 import { memo, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
 import { buildShellPrompt } from "../../copilot/shell.js";
+import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useUIState } from "../hooks.js";
+import { Gutter } from "../primitives/Gutter.js";
+import { Markdown } from "../primitives/Markdown.js";
 import { MultilineText } from "../primitives/MultilineText.js";
+import { Ratchet } from "../primitives/Ratchet.js";
 import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
 import { tokens } from "../tokens.js";
+import { ErrorMessage } from "./ErrorMessage.js";
+import { PulseDot } from "./PulseDot.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { DiffSinceView } from "./DiffSinceView.js";
@@ -212,10 +218,18 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   if (!shell) return <Text>Loading...</Text>;
 
   const LIVE_COUNT = 8;
-  const staticHistory =
-    shell.history.length > LIVE_COUNT ? shell.history.slice(0, -LIVE_COUNT) : [];
-  const liveHistory =
-    shell.history.length > LIVE_COUNT ? shell.history.slice(-LIVE_COUNT) : shell.history;
+  // Running tool-call entries mutate in place (status flip, resultOutput
+  // injection, liveActivities tail). They can't go into `<Static>` until
+  // they reach a terminal status, so everything at-or-after the oldest
+  // running tool-call stays in the live zone regardless of entry age.
+  const firstRunningIdx = shell.history.findIndex(
+    (e) => e.type === "tool-call" && e.status === "running",
+  );
+  const defaultCutoff = Math.max(0, shell.history.length - LIVE_COUNT);
+  const staticCutoff =
+    firstRunningIdx >= 0 ? Math.min(firstRunningIdx, defaultCutoff) : defaultCutoff;
+  const staticHistory = shell.history.slice(0, staticCutoff);
+  const liveHistory = shell.history.slice(staticCutoff);
 
   // ModuleCatalog re-reads shell.moduleCatalog on every render; wrapping it in
   // <Static> would freeze the first snapshot and hide module/last-run updates,
@@ -469,6 +483,14 @@ function ShellBannerImpl({ shell }: { shell: ShellState }): React.ReactElement {
   );
 }
 
+/**
+ * Render a single history entry. Tool-call entries are the richest: they
+ * own a `PulseDot` for the `⏺` glyph (pulsing while running, solid green /
+ * red / dim on resolution), a bold display name, an `(args)` hint, and —
+ * when the tool completes — a `⎿  <resultOutput>` summary line underneath.
+ * While running, the entry also renders a tail of recent `liveActivities`
+ * so operators can see what the tool is doing at a glance.
+ */
 function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
   switch (entry.type) {
     case "input":
@@ -483,25 +505,17 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
     case "output":
       return (
         <Box marginTop={1}>
-          <MultilineText text={entry.text} />
+          <Markdown text={entry.text} />
         </Box>
       );
     case "error":
       return (
         <Box marginTop={1}>
-          <Text>{tokens.danger(entry.text)}</Text>
+          <ErrorMessage text={entry.text} />
         </Box>
       );
     case "tool-call":
-      return (
-        <Box marginTop={1}>
-          <Text>
-            {tokens.accent("⏺ ")}
-            <Text bold>{entry.tool ?? entry.text.replace(/^⏺\s*/, "")}</Text>
-            {entry.inputHint ? tokens.muted(`(${entry.inputHint})`) : ""}
-          </Text>
-        </Box>
-      );
+      return <ToolCallEntry entry={entry} />;
     case "tool-progress": {
       const kind = entry.progressKind ?? "info";
       const wrap = (s: string): string => {
@@ -510,13 +524,98 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
         return tokens.muted(s);
       };
       return (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={0}>
+          <Gutter>
+            <Text dimColor>{LOWER_HOOK}</Text>
+          </Gutter>
           <Text>
-            {tokens.muted("⎿  ")}
+            {" "}
             {wrap(entry.text)}
           </Text>
         </Box>
       );
     }
   }
+}
+
+/**
+ * Header + optional result line for a tool-call entry. Ratchet wraps the
+ * whole block so that when `resultOutput` arrives (and replaces shorter
+ * `liveActivities`) the total height never shrinks — no flicker during
+ * the transition.
+ */
+function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
+  const status = entry.status;
+  const label =
+    entry.displayName ?? entry.tool ?? entry.text.replace(/^[⏺●]\s*/, "");
+  const elapsedSuffix =
+    status && status !== "running" && entry.elapsedSeconds && entry.elapsedSeconds > 0
+      ? tokens.muted(` · ${entry.elapsedSeconds}s`)
+      : "";
+
+  // Result line — per-tool renderResult output (or generic verb) shown
+  // under the `⏺` when the tool resolves. Muted when ok, danger on
+  // failure, dim-muted on abort.
+  const hasResult = status && status !== "running" && entry.resultOutput;
+  const resultColor = (text: string): string => {
+    if (status === "ok") return tokens.success(text);
+    if (status === "fail") return tokens.danger(text);
+    return tokens.muted(text);
+  };
+  const outcomeGlyph =
+    status === "ok"
+      ? OUTCOME_GLYPH.ok
+      : status === "fail"
+        ? OUTCOME_GLYPH.fail
+        : status === "abort"
+          ? OUTCOME_GLYPH.abort
+          : "";
+
+  return (
+    <Ratchet>
+      <Box marginTop={1}>
+        <Gutter>
+          {status ? (
+            <PulseDot status={status} />
+          ) : (
+            <Text>{tokens.accent(BLACK_CIRCLE)}</Text>
+          )}
+        </Gutter>
+        <Text>
+          <Text bold>{label}</Text>
+          {entry.inputHint ? tokens.muted(`(${entry.inputHint})`) : ""}
+          {elapsedSuffix}
+        </Text>
+      </Box>
+      {status === "running" && entry.liveActivities && entry.liveActivities.length > 0 ? (
+        <Box flexDirection="column">
+          {entry.liveActivities.slice(0, 3).map((activity, i) => (
+            <Box key={`la-${i}`}>
+              <Gutter />
+              <Gutter>
+                <Text dimColor>{LOWER_HOOK}</Text>
+              </Gutter>
+              <Text>
+                {" "}
+                {tokens.muted(activity)}
+              </Text>
+            </Box>
+          ))}
+        </Box>
+      ) : null}
+      {hasResult ? (
+        <Box>
+          <Gutter />
+          <Gutter>
+            <Text dimColor>{LOWER_HOOK}</Text>
+          </Gutter>
+          <Text>
+            {" "}
+            {outcomeGlyph ? `${resultColor(outcomeGlyph)} ` : ""}
+            {resultColor(entry.resultOutput!)}
+          </Text>
+        </Box>
+      ) : null}
+    </Ratchet>
+  );
 }

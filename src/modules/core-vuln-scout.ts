@@ -45,6 +45,15 @@ function resolveMaxFindings(ctx: ToolExecutionContext, override?: unknown): numb
 
 const auditTool: ModuleTool = {
   name: "vuln-scout:audit",
+  displayName: "VulnScout",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    return typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Run the @kuzushi/vuln-scout whitebox pentesting plugin against the target repository. " +
     "An AI agent equipped with vuln-scout's scan/verify/trace skills explores the codebase, " +

@@ -36,6 +36,15 @@ function readNdiffConfig(ctx: ToolExecutionContext): {
 
 const fetchCveTool: ModuleTool = {
   name: "ndiff:fetch-cve",
+  displayName: "Fetch CVE",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    return typeof p?.["id"] === "string" ? (p["id"] as string) : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Fetch a CVE or GitHub Security Advisory record, including description, CWEs, " +
     "affected products, and patch URLs. Accepts a CVE ID (CVE-YYYY-N...) or a GHSA " +
@@ -166,6 +175,17 @@ const FIX_PATTERN_SCHEMA = {
 
 const extractFixPatternTool: ModuleTool = {
   name: "ndiff:extract-fix-pattern",
+  displayName: "Extract Fix Pattern",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    if (typeof p?.["id"] === "string") return p["id"] as string;
+    if (typeof p?.["patch"] === "string") return "<patch>";
+    return null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Read a CVE patch diff and extract a portable fix-shape signature: what was " +
     "added to fix the bug, what the pre-patch code looked like, which CWEs apply, " +
@@ -382,6 +402,17 @@ interface FixPattern {
 
 const huntVariantsTool: ModuleTool = {
   name: "ndiff:hunt-variants",
+  displayName: "Hunt CVE Variants",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    const pattern = p?.["pattern"] as Record<string, unknown> | undefined;
+    const cwe = pattern && Array.isArray(pattern["cwes"]) ? (pattern["cwes"] as string[]).join(",") : null;
+    return cwe ?? null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Given a fix-shape signature (from ndiff:extract-fix-pattern), hunt the target " +
     "repository for pre-patch variants — code that still has the vulnerable shape. " +

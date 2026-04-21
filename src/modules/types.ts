@@ -245,6 +245,27 @@ export interface ModuleTool {
   readonly references?: ReadonlyArray<ModuleReference>;
   /** Optional behavioral notes specific to this tool. */
   readonly notes?: ModuleNotes;
+  // --- Optional display hooks (shell rendering) ---
+  /**
+   * Human-friendly label used in the shell's `⏺ <name>(...)` header instead
+   * of the raw `module:action` name. Falls back to `name` when unset.
+   * Example: `"Scan"` for `sast:scan`, `"Read"` for a `fs:read` tool.
+   */
+  readonly displayName?: string;
+  /**
+   * Custom renderer for the `(args)` portion of the `⏺` header. Return `null`
+   * / `undefined` to fall back to the generic `summarizeInput()` extractor
+   * (primary-field + 40-char clamp). Return `""` to suppress the hint entirely.
+   * Example: Bash shows truncated command; Read shows the display path.
+   */
+  formatInput?(input: unknown): string | null | undefined;
+  /**
+   * Custom renderer for the per-tool result summary line (`⎿  <output>`) shown
+   * under the `⏺` header on completion. Return `null` / `undefined` to fall
+   * back to the generic `✓ done in Xs` line. Example: Read → `"Read 559 lines"`,
+   * Glob → `"Matched 12 files"`, Bash → first stdout line truncated.
+   */
+  renderResult?(result: ToolResult): string | null | undefined;
   /** Execute the tool with validated input. */
   execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult>;
 }

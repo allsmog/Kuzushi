@@ -19,6 +19,18 @@ type Params = Record<string, unknown>;
 
 const nmapTool: ModuleTool = {
   name: "recon:nmap",
+  displayName: "Nmap",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    const target = typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+    const ports = typeof p?.["ports"] === "string" ? (p["ports"] as string) : null;
+    if (target && ports) return `${target} · ${ports}`;
+    return target ?? null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description: "Nmap-style port scan. Writes discovered hosts + open services to the workspace.",
   inputSchema: {
     type: "object",
@@ -72,6 +84,15 @@ const nmapTool: ModuleTool = {
 
 const subdomainTool: ModuleTool = {
   name: "recon:subdomain",
+  displayName: "Subdomain Enum",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    return typeof p?.["domain"] === "string" ? (p["domain"] as string) : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Passive subdomain enumeration. Queries CT logs / archival sources and writes each " +
     "discovered subdomain as a host in the workspace.",
@@ -114,6 +135,15 @@ const subdomainTool: ModuleTool = {
 
 const httpFingerprintTool: ModuleTool = {
   name: "recon:http-fingerprint",
+  displayName: "HTTP Fingerprint",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    return typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Fetch HTTP(S) headers + body signature for a host, write banner + inferred tech to " +
     "the services table.",

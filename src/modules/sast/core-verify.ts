@@ -14,6 +14,17 @@ type Params = Record<string, unknown>;
 
 const verifyFindingTool: ModuleTool = {
   name: "verify:finding",
+  displayName: "Verify",
+  formatInput(input) {
+    const p = (input ?? {}) as Record<string, unknown>;
+    return typeof p["fingerprint"] === "string"
+      ? (p["fingerprint"] as string).slice(0, 12)
+      : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Verify exploitability of a triaged finding. Constructs a concrete PoC payload " +
     "and runs in a sandbox. Returns exploitability assessment + attack vector.",

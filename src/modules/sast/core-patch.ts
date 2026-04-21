@@ -12,6 +12,17 @@ type Params = Record<string, unknown>;
 
 const patchFindingTool: ModuleTool = {
   name: "patch:finding",
+  displayName: "Patch",
+  formatInput(input) {
+    const p = (input ?? {}) as Record<string, unknown>;
+    return typeof p["fingerprint"] === "string"
+      ? (p["fingerprint"] as string).slice(0, 12)
+      : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Generate a security patch for a confirmed vulnerability. Creates a fix in a " +
     "disposable worktree, runs build + test to verify the fix eliminates the finding, " +
