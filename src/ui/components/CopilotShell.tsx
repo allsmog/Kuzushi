@@ -283,6 +283,15 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     firstRunningIdx >= 0 ? Math.min(firstRunningIdx, defaultCutoff) : defaultCutoff;
   const staticHistory = shell.history.slice(0, staticCutoff);
   const liveHistory = shell.history.slice(staticCutoff);
+  const historyKeys = buildHistoryKeys(shell.history);
+  const staticHistoryItems = staticHistory.map((entry, i) => ({
+    entry,
+    key: historyKeys[i] ?? `hist-static-${i}`,
+  }));
+  const liveHistoryItems = liveHistory.map((entry, i) => ({
+    entry,
+    key: historyKeys[staticCutoff + i] ?? `hist-live-${staticCutoff + i}`,
+  }));
 
   // ModuleCatalog re-reads shell.moduleCatalog on every render; wrapping it
   // in <Static> would freeze the first snapshot and hide module/last-run
@@ -307,15 +316,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         </Static>
       )}
 
-      <Static items={staticHistory.map((entry, i) => ({ ...entry, _key: `h-${i}` }))}>
-        {(item) => (
-          <HistoryEntry key={(item as { _key: string })._key} entry={item as ShellHistoryEntry} />
-        )}
+      <Static items={staticHistoryItems}>
+        {(item) => <HistoryEntry key={item.key} entry={item.entry} />}
       </Static>
 
       <Box flexDirection="column">
-        {liveHistory.map((entry, i) => (
-          <HistoryEntry key={`live-${i}`} entry={entry} />
+        {liveHistoryItems.map((item) => (
+          <HistoryEntry key={item.key} entry={item.entry} />
         ))}
       </Box>
 
@@ -408,6 +415,18 @@ function LlmHeartbeatLine({
       <Text>{tokens.muted(`· ${parts.join(" · ")}`)}</Text>
     </Box>
   );
+}
+
+function buildHistoryKeys(history: ReadonlyArray<ShellHistoryEntry>): string[] {
+  const seen = new Map<string, number>();
+  return history.map((entry, idx) => {
+    const base =
+      entry.id ??
+      `${entry.type}:${entry.timestamp}:${entry.toolUseId ?? entry.tool ?? entry.text.slice(0, 24)}`;
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    return count === 0 ? base : `${base}:${count}:${idx}`;
+  });
 }
 
 /**
