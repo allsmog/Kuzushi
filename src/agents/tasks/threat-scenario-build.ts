@@ -91,6 +91,7 @@ export const threatScenarioBuildTask: AgentTask<unknown, ThreatScenarioBuildOutp
   dependsOn: ["app-model-build"],
 
   async run(_input, context): Promise<ThreatScenarioBuildOutput> {
+    context.signal?.throwIfAborted();
     const appModel = asApplicationModel(context.upstreamOutputs.get("app-model-build"));
     const strideOutput = asStrideDocument(resolveThreatModelOutput(context.upstreamOutputs));
     if (!appModel || !strideOutput) {

@@ -34,6 +34,7 @@ export const threatModelRandoriTask: AgentTask<
   dependsOn: ["context-gatherer"],
 
   async run(_input, context): Promise<{ document: ThreatModelDocument; findings: Finding[] }> {
+    context.signal?.throwIfAborted();
     const cfg = resolveThreatModelConfig(context.config);
     const pluginPath = resolveRandoriPluginPath();
 
@@ -69,6 +70,7 @@ export const threatModelRandoriTask: AgentTask<
       logTag: "[threat-model-randori]",
       onPhase: publishPhase,
       onActivity: publishActivity,
+      ...(context.signal ? { signal: context.signal } : {}),
     });
 
     return attachTaskOutputMeta(

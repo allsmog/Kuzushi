@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { summarizeToolCompletion } from "../../src/agent-runtime/tool-summary.js";
 import { __shellInternals } from "../../src/copilot/shell.js";
 import { createUIStore, type UIStore } from "../../src/ui/state.js";
 
 const {
   extractToolUseActivities,
   extractToolUseHeaders,
+  looksLikeSubagentToolLine,
   summarizeInput,
   pushToolActivity,
   pushToolPhase,
@@ -59,7 +61,9 @@ describe("extractToolUseActivities", () => {
 
   it("truncates long input hints to 40 chars", () => {
     const long = "/".repeat(80);
-    const lines = extractToolUseActivities([{ type: "tool_use", name: "Read", input: { path: long } }]);
+    const lines = extractToolUseActivities([
+      { type: "tool_use", name: "Read", input: { path: long } },
+    ]);
     expect(lines[0]).toBeDefined();
     const [label] = lines;
     const hint = label!.split(" · ")[1]!;
@@ -206,6 +210,69 @@ describe("summarizeInput", () => {
   });
 });
 
+describe("looksLikeSubagentToolLine", () => {
+  it("matches tool_use invocation headers with `·` separator", () => {
+    expect(looksLikeSubagentToolLine("Read · src/foo.ts")).toBe(true);
+    expect(looksLikeSubagentToolLine("Glob · **/*.go")).toBe(true);
+    expect(looksLikeSubagentToolLine("Grep · needle")).toBe(true);
+    expect(looksLikeSubagentToolLine("Bash · pnpm test")).toBe(true);
+    expect(looksLikeSubagentToolLine("Write · src/new.ts")).toBe(true);
+    expect(looksLikeSubagentToolLine("Edit · src/foo.ts")).toBe(true);
+    expect(looksLikeSubagentToolLine("LS · .")).toBe(true);
+    expect(looksLikeSubagentToolLine("Task · investigate auth")).toBe(true);
+  });
+
+  it("matches summarizeToolCompletion result lines", () => {
+    expect(
+      looksLikeSubagentToolLine(summarizeToolCompletion("Read", { path: "a.ts" }, "1\n2\n", false)),
+    ).toBe(true);
+    expect(
+      looksLikeSubagentToolLine(
+        summarizeToolCompletion("Glob", { pattern: "**/*.ts" }, "a\nb\nc\n", false),
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeSubagentToolLine(
+        summarizeToolCompletion("Bash", { command: "echo hi" }, "exit 0", false, {
+          elapsedSeconds: 0.5,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("matches tool-name-only headers when hint was absent", () => {
+    expect(looksLikeSubagentToolLine("Read")).toBe(true);
+    expect(looksLikeSubagentToolLine("Bash")).toBe(true);
+  });
+
+  it("matches error variants (same leading tool name)", () => {
+    expect(looksLikeSubagentToolLine("Read . failed: Read path is not a file: .")).toBe(true);
+  });
+
+  it("does NOT match Kuzushi's own free-form reportActivity pulses", () => {
+    // Free-form pulses from ctx.reportActivity / randori-runner start with
+    // lowercase verbs — they are body-text, not invocation headers.
+    expect(looksLikeSubagentToolLine("scanning repo structure")).toBe(false);
+    expect(looksLikeSubagentToolLine("enriching context")).toBe(false);
+    expect(looksLikeSubagentToolLine("building threat model")).toBe(false);
+    expect(looksLikeSubagentToolLine("scoping s1, s2, s3")).toBe(false);
+    expect(looksLikeSubagentToolLine("enumerating STRIDE threats")).toBe(false);
+    expect(looksLikeSubagentToolLine("drafting attacker narrative")).toBe(false);
+    expect(looksLikeSubagentToolLine("phase 1 (S1/S2/S3 scope)")).toBe(false);
+  });
+
+  it("does NOT match qualified module:action tool names", () => {
+    expect(looksLikeSubagentToolLine("context:build")).toBe(false);
+    expect(looksLikeSubagentToolLine("sast:scan")).toBe(false);
+  });
+
+  it("does NOT match lowercase look-alikes that start with a tool-name substring", () => {
+    // `Readable`/`Reading` would false-positive without the \b word-boundary.
+    expect(looksLikeSubagentToolLine("Reading files")).toBe(false);
+    expect(looksLikeSubagentToolLine("Globbing patterns")).toBe(false);
+  });
+});
+
 describe("extractToolUseHeaders", () => {
   it("returns { name, inputHint } per tool_use block", () => {
     const headers = extractToolUseHeaders([
@@ -213,10 +280,7 @@ describe("extractToolUseHeaders", () => {
       { type: "tool_use", name: "Read", input: { path: "/src/foo.ts" } },
       { type: "tool_use", name: "Bash", input: {} },
     ]);
-    expect(headers).toEqual([
-      { name: "Read", inputHint: "/src/foo.ts" },
-      { name: "Bash" },
-    ]);
+    expect(headers).toEqual([{ name: "Read", inputHint: "/src/foo.ts" }, { name: "Bash" }]);
   });
 
   it("omits inputHint when input is missing", () => {
@@ -243,7 +307,11 @@ describe("extractToolUseHeaders", () => {
 });
 
 describe("finalizeRunningToolCalls", () => {
-  function seedWithHistory(entries: Parameters<typeof patchHistoryEntry>[1] extends infer _ ? Array<Record<string, unknown>> : never): UIStore {
+  function seedWithHistory(
+    entries: Parameters<typeof patchHistoryEntry>[1] extends infer _
+      ? Array<Record<string, unknown>>
+      : never,
+  ): UIStore {
     const store = seedShellState();
     store.update({
       ...store.getState(),
@@ -315,9 +383,7 @@ describe("finalizeRunningToolCalls", () => {
   });
 
   it("is a no-op when there are no running tool-calls", () => {
-    const store = seedWithHistory([
-      { type: "output", text: "hello", timestamp: 1 },
-    ]);
+    const store = seedWithHistory([{ type: "output", text: "hello", timestamp: 1 }]);
     const before = store.getState().shell!.history;
     finalizeRunningToolCalls(store, "ok");
     // Reference equality: with no mutation the history array should be the
@@ -377,7 +443,11 @@ describe("patchHistoryEntry", () => {
         ],
       },
     });
-    patchHistoryEntry(store, "tc-1", { status: "ok", resultOutput: "done summary", elapsedSeconds: 5 });
+    patchHistoryEntry(store, "tc-1", {
+      status: "ok",
+      resultOutput: "done summary",
+      elapsedSeconds: 5,
+    });
     const entry = store.getState().shell!.history[0]!;
     expect(entry.status).toBe("ok");
     expect(entry.resultOutput).toBe("done summary");
@@ -496,5 +566,213 @@ describe("pushLiveActivity", () => {
     pushLiveActivity(store, "missing", "whatever");
     const entry = store.getState().shell!.history[0]!;
     expect(entry.liveActivities ?? []).toEqual([]);
+  });
+});
+
+describe("summarizeToolCompletion — Read", () => {
+  it("formats with file path and line count from cat-style output", () => {
+    const result = ["     1 │ export function foo() {", "     2 │   return 42;", "     3 │ }"].join(
+      "\n",
+    );
+    expect(summarizeToolCompletion("Read", { path: "src/foo.ts" }, result, false)).toBe(
+      "Read src/foo.ts (3 lines)",
+    );
+  });
+
+  it("uses file_path alias", () => {
+    const result = "     1 │ a\n     2 │ b";
+    expect(summarizeToolCompletion("Read", { file_path: "a.txt" }, result, false)).toBe(
+      "Read a.txt (2 lines)",
+    );
+  });
+
+  it("singular 'line' when one line", () => {
+    expect(summarizeToolCompletion("Read", { path: "x.md" }, "     1 │ hi", false)).toBe(
+      "Read x.md (1 line)",
+    );
+  });
+
+  it("shortens very long paths to basename with abbreviated dir", () => {
+    const longPath = "/Users/x/very/long/path/that/exceeds/fifty/characters/finally/foo.ts";
+    const out = summarizeToolCompletion("Read", { path: longPath }, "     1 │ hi", false);
+    expect(out).toContain("foo.ts");
+    expect(out.length).toBeLessThan(longPath.length + 20);
+  });
+
+  it("falls back to bare 'Read <path>' when line count is zero", () => {
+    expect(summarizeToolCompletion("Read", { path: "empty.txt" }, "", false)).toBe(
+      "Read empty.txt",
+    );
+  });
+
+  it("produces error form on failure", () => {
+    const out = summarizeToolCompletion("Read", { path: "no.ts" }, "ENOENT: not found", true);
+    expect(out).toBe("Read no.ts failed: ENOENT: not found");
+  });
+});
+
+describe("summarizeToolCompletion — Grep", () => {
+  it("formats pattern + search path + match count", () => {
+    const result = "src/a.ts:12:match here\nsrc/b.ts:5:another";
+    expect(
+      summarizeToolCompletion("Grep", { pattern: "override", path: "src/" }, result, false),
+    ).toBe('Grep "override" in src/ (2 matches)');
+  });
+
+  it("prefers explicit 'N matches' header when present", () => {
+    const result = "14 matches across 5 files\nsrc/a.ts:1:x";
+    const out = summarizeToolCompletion("Grep", { pattern: "foo", path: "." }, result, false);
+    expect(out).toBe('Grep "foo" in . (14 matches)');
+  });
+
+  it("singular 'match'", () => {
+    expect(summarizeToolCompletion("Grep", { pattern: "x" }, "a:1:y", false)).toBe(
+      'Grep "x" (1 match)',
+    );
+  });
+
+  it("handles zero matches", () => {
+    expect(summarizeToolCompletion("Grep", { pattern: "x" }, "", false)).toBe(
+      'Grep "x" (0 matches)',
+    );
+  });
+
+  it("clamps very long patterns", () => {
+    const long = "a".repeat(80);
+    const out = summarizeToolCompletion("Grep", { pattern: long }, "", false);
+    expect(out).toMatch(/Grep "a+…"/);
+    expect(out.length).toBeLessThan(80);
+  });
+});
+
+describe("summarizeToolCompletion — Glob", () => {
+  it("formats with file count", () => {
+    const result = "src/a.ts\nsrc/b.ts\nsrc/c.ts";
+    expect(summarizeToolCompletion("Glob", { pattern: "**/*.ts" }, result, false)).toBe(
+      'Glob "**/*.ts" (3 files)',
+    );
+  });
+
+  it("reports no files when result is empty", () => {
+    expect(summarizeToolCompletion("Glob", { pattern: "**/*.xyz" }, "", false)).toBe(
+      'Glob "**/*.xyz" (no files)',
+    );
+  });
+
+  it("singular 'file' when one", () => {
+    expect(summarizeToolCompletion("Glob", { pattern: "README.md" }, "README.md", false)).toBe(
+      'Glob "README.md" (1 file)',
+    );
+  });
+
+  it("handles missing pattern", () => {
+    expect(summarizeToolCompletion("Glob", {}, "a\nb", false)).toBe("Glob (2 files)");
+  });
+
+  it("ignores blank lines in count", () => {
+    const result = "a\n\nb\n\nc\n";
+    expect(summarizeToolCompletion("Glob", { pattern: "x" }, result, false)).toBe(
+      'Glob "x" (3 files)',
+    );
+  });
+});
+
+describe("summarizeToolCompletion — Bash", () => {
+  it("includes exit code and elapsed time", () => {
+    const result = "all tests passed\nexit code: 0";
+    expect(
+      summarizeToolCompletion("Bash", { command: "pnpm test" }, result, false, {
+        elapsedSeconds: 18.4,
+      }),
+    ).toBe('Bash "pnpm test" (exit 0, 18s)');
+  });
+
+  it("formats sub-second elapsed in ms", () => {
+    const out = summarizeToolCompletion("Bash", { command: "echo hi" }, "hi\nexit 0", false, {
+      elapsedSeconds: 0.08,
+    });
+    expect(out).toBe('Bash "echo hi" (exit 0, 80ms)');
+  });
+
+  it("omits elapsed when not provided", () => {
+    expect(summarizeToolCompletion("Bash", { command: "ls" }, "foo\nexit 0", false)).toBe(
+      'Bash "ls" (exit 0)',
+    );
+  });
+
+  it("omits exit code when not parseable", () => {
+    expect(summarizeToolCompletion("Bash", { command: "ls" }, "random output", false)).toBe(
+      'Bash "ls"',
+    );
+  });
+
+  it("clamps very long commands", () => {
+    const long = "a".repeat(200);
+    const out = summarizeToolCompletion("Bash", { command: long }, "exit 0", false);
+    expect(out.length).toBeLessThan(80);
+    expect(out).toContain("…");
+  });
+});
+
+describe("summarizeToolCompletion — Write/Edit", () => {
+  it("Write counts lines from content", () => {
+    expect(
+      summarizeToolCompletion(
+        "Write",
+        { file_path: "new.ts", content: "line1\nline2\nline3" },
+        "File created",
+        false,
+      ),
+    ).toBe("Write new.ts (3 lines)");
+  });
+
+  it("Write falls back to result line when content absent", () => {
+    expect(summarizeToolCompletion("Write", { file_path: "x.ts" }, "Created: x.ts", false)).toBe(
+      "Write x.ts: Created: x.ts",
+    );
+  });
+
+  it("Edit reports replacement count when present", () => {
+    expect(
+      summarizeToolCompletion("Edit", { file_path: "a.ts" }, "3 replacements made", false),
+    ).toBe("Edit a.ts (3 replacements made)");
+  });
+
+  it("Edit without replacement metric renders bare label", () => {
+    expect(summarizeToolCompletion("Edit", { file_path: "a.ts" }, "ok", false)).toBe("Edit a.ts");
+  });
+
+  it("Write error mentions path + failure reason", () => {
+    expect(
+      summarizeToolCompletion(
+        "Write",
+        { file_path: "x.ts", content: "y" },
+        "EACCES: permission denied",
+        true,
+      ),
+    ).toBe("Write x.ts failed: EACCES: permission denied");
+  });
+});
+
+describe("summarizeToolCompletion — fallback / module tools", () => {
+  it("renders module tool with input hint and clamped result head", () => {
+    expect(
+      summarizeToolCompletion(
+        "sast:scan",
+        { target: "./repo" },
+        "Found 12 findings in 4 files",
+        false,
+      ),
+    ).toBe("sast:scan(./repo) → Found 12 findings in 4 files");
+  });
+
+  it("omits arrow when result empty", () => {
+    expect(summarizeToolCompletion("sast:scan", { target: "./repo" }, "", false)).toBe(
+      "sast:scan(./repo)",
+    );
+  });
+
+  it("omits hint when input has no recognized primary field", () => {
+    expect(summarizeToolCompletion("custom:verb", {}, "done", false)).toBe("custom:verb → done");
   });
 });

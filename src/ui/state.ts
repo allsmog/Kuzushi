@@ -439,8 +439,18 @@ export interface ShellHistoryEntry {
    * `⎿  <activity>` lines until the tool resolves.
    */
   liveActivities?: string[];
-  /** For `tool-progress`: status hint — success/failure/stale colorization. */
-  progressKind?: "info" | "ok" | "fail" | "abort";
+  /**
+   * For `tool-progress`: status hint — success/failure/stale colorization.
+   *
+   * - `info` (default): free-form activity pulse ("scanning repo structure"),
+   *   rendered muted like body text.
+   * - `invocation`: a nested sub-agent tool-use header ("Read · path.ts" /
+   *   "Glob \"*.go\" (300 files)"), rendered in base text like the parent
+   *   `⏺` tool-call row — opencode/Claude Code convention.
+   * - `ok` / `fail` / `abort`: terminal result of a shell-dispatched tool,
+   *   colored green/red accordingly.
+   */
+  progressKind?: "info" | "invocation" | "ok" | "fail" | "abort";
 }
 
 /**

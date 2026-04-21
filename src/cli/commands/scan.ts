@@ -61,6 +61,11 @@ export interface PipelineParams {
   repoRoot: string;
   scanPath: string;
   repoName: string;
+  /** Enclosing git toplevel when different from `repoRoot`; undefined when the
+   * target *is* the git root or is not inside a git repo. Used for DB-path
+   * fallback and for the rare task (cross-service taint) that legitimately
+   * needs to reach beyond the scan scope. */
+  gitRoot?: string;
   config: KuzushiConfig;
   scanOpts: ScanOpts;
   opts: ScanCommandOptions;
@@ -123,8 +128,15 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   });
 
   const scanPath = path.resolve(repoPath);
-  const { root: repoRoot, name: repoName } = resolveRepo(repoPath);
+  const { root: repoRoot, name: repoName, gitRoot } = resolveRepo(repoPath);
   uiStore.update({ repoName });
+
+  // Make the narrowing visible when the operator targets a subdir of a
+  // larger git repo — without this, side-effects like config loading
+  // and DB paths silently switch to the git root.
+  if (gitRoot && !opts.resume) {
+    console.log(`Scope: ${repoRoot} (git repo: ${gitRoot})`);
+  }
 
   // Interactive setup flow (skip for --resume)
   if (!opts.resume && process.stdout.isTTY) {
@@ -309,6 +321,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
       repoRoot,
       scanPath,
       repoName,
+      gitRoot,
       config,
       scanOpts,
       opts,
@@ -456,7 +469,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
 
   const runtime = runtimeOverride ?? createPipelineRuntime(config, scanOpts);
   const ownsRuntime = runtimeOverride == null;
-  const dbPath = params.dbPath ?? resolveDbPath(repoRoot, scanPath);
+  const dbPath = params.dbPath ?? resolveDbPath(repoRoot, scanPath, params.gitRoot);
   const dbDir = path.dirname(dbPath);
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });
@@ -577,6 +590,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     dbPath,
     postProcessMode: params.postProcessMode ?? "full",
     reportMode,
+    ...(params.gitRoot ? { gitRoot: params.gitRoot } : {}),
   };
 
   const pipelineComplete = bus
@@ -845,23 +859,31 @@ function resolveResumeRunId(
  * existing DB at the scan target, then the git root, then default to the git
  * root for new databases.
  */
-function resolveDbPath(repoRoot: string, scanPath: string): string {
-  const gitRootDb = defaultDbPath(repoRoot);
-
-  // When scan target is the git root there's nothing else to check.
-  if (path.resolve(scanPath) === path.resolve(repoRoot)) {
-    return gitRootDb;
+function resolveDbPath(repoRoot: string, scanPath: string, gitRoot?: string): string {
+  // repoRoot and scanPath are normally the same (the user-provided target)
+  // since resolveRepo() now returns the target as root. scanPath and
+  // gitRoot are retained so callers can override, and so we can find a
+  // pre-existing DB that was written before the scope-narrowing fix.
+  const targetDb = defaultDbPath(repoRoot);
+  if (existsSync(targetDb)) {
+    return targetDb;
   }
 
-  const scanTargetDb = defaultDbPath(scanPath);
-
-  // Prefer an existing DB at the scan target (more specific).
-  if (existsSync(scanTargetDb)) {
-    return scanTargetDb;
+  if (scanPath) {
+    const scanTargetDb = defaultDbPath(scanPath);
+    if (existsSync(scanTargetDb)) {
+      return scanTargetDb;
+    }
   }
 
-  // Fall back to git root (shared monorepo DB).
-  return gitRootDb;
+  if (gitRoot && path.resolve(gitRoot) !== path.resolve(repoRoot)) {
+    const gitRootDb = defaultDbPath(gitRoot);
+    if (existsSync(gitRootDb)) {
+      return gitRootDb;
+    }
+  }
+
+  return targetDb;
 }
 
 function reportConfigValidationIssues(issues: ReturnType<typeof validateKuzushiConfig>): void {

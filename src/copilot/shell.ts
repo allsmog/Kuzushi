@@ -12,6 +12,8 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { killAllClaudeSubprocesses } from "../agent-runtime/claude.js";
+import { clampHint, summarizeInput } from "../agent-runtime/tool-summary.js";
 import type { AgentQueryOptions, AgentRuntime, AgentSession } from "../agent-runtime/types.js";
 import { createBus } from "../bus/index.js";
 import type { MessageBus } from "../bus/types.js";
@@ -74,6 +76,41 @@ const CONTEXT_REQUIRED_TOOLS = new Set([
   "threat-hunt:run",
   "taint-iris:hunt",
 ]);
+
+/**
+ * Claude Agent SDK built-in tool names — used to tag `task:activity` pulses
+ * that are really sub-agent tool-use / tool-summary headers ("Read · path",
+ * "Glob \"**\/*.go\" (300 files)"). Those render in base text color like the
+ * parent `⏺` tool-call row, matching opencode/Claude Code's `∟`/`⎿`
+ * convention where muted gray is reserved for free-form body-text pulses
+ * ("scanning repo structure"), not for nested invocation headers.
+ *
+ * Intentionally case-sensitive: Kuzushi's own `ctx.reportActivity` messages
+ * start with lowercase verbs ("scanning", "enriching", "phase N (…)") so
+ * this match won't false-positive on them.
+ */
+const SUBAGENT_TOOL_NAMES = [
+  "Read",
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "Glob",
+  "Grep",
+  "Bash",
+  "LS",
+  "Task",
+  "TodoWrite",
+  "WebFetch",
+  "WebSearch",
+  "NotebookRead",
+  "NotebookEdit",
+] as const;
+const SUBAGENT_TOOL_RE = new RegExp(`^(?:${SUBAGENT_TOOL_NAMES.join("|")})\\b`);
+
+/** True when a task:activity description is a sub-agent tool invocation/summary header. */
+function looksLikeSubagentToolLine(text: string): boolean {
+  return SUBAGENT_TOOL_RE.test(text);
+}
 
 /** Build a seed map from a ContextSnapshot to inject into pipelines. */
 function buildSeedMapFromSnapshot(snapshot: ContextSnapshot): Map<string, unknown> {
@@ -365,54 +402,7 @@ export function extractToolUseHeaders(
   return out;
 }
 
-/**
- * Render a ≤40-char summary of a tool input for the `⏺ tool(<hint>)` and
- * activity-tail displays. Returns `undefined` when no sensible primary field
- * exists — callers fall back to bare `toolName`.
- *
- * Accepts object, string, number, boolean, array. Falls back to `JSON.stringify`
- * for objects without a recognized primary field so the operator at least sees
- * *something* useful instead of a bare tool name.
- */
-export function summarizeInput(input: unknown): string | undefined {
-  if (input == null) return undefined;
-  if (typeof input === "string") return clampHint(input);
-  if (typeof input === "number" || typeof input === "boolean") return String(input);
-  if (Array.isArray(input)) {
-    if (input.length === 0) return undefined;
-    const first = input[0];
-    if (typeof first === "string") return clampHint(first);
-    return clampHint(JSON.stringify(input));
-  }
-  if (typeof input === "object") {
-    const record = input as Record<string, unknown>;
-    const primary =
-      record["target"] ??
-      record["path"] ??
-      record["file"] ??
-      record["query"] ??
-      record["name"] ??
-      record["url"] ??
-      record["module"];
-    if (typeof primary === "string" && primary.length > 0) return clampHint(primary);
-    if (typeof primary === "number" || typeof primary === "boolean") return String(primary);
-    // Fallback: serialize the whole object, clamped
-    try {
-      const json = JSON.stringify(record);
-      if (json && json.length > 2) return clampHint(json);
-    } catch {
-      // ignore
-    }
-    return undefined;
-  }
-  return undefined;
-}
-
-function clampHint(s: string): string {
-  const trimmed = s.trim();
-  if (trimmed.length <= 40) return trimmed;
-  return `${trimmed.slice(0, 39)}…`;
-}
+export { summarizeInput };
 
 /**
  * Resolve the `(args)` portion of a tool-call header: prefer the per-tool
@@ -908,11 +898,7 @@ function appendToHistory(store: UIStore, entry: ShellHistoryEntry): void {
  * no-ops when the id isn't found so bus subscriptions can fire lazily
  * without ordering hazards.
  */
-function patchHistoryEntry(
-  store: UIStore,
-  id: string,
-  patch: Partial<ShellHistoryEntry>,
-): void {
+function patchHistoryEntry(store: UIStore, id: string, patch: Partial<ShellHistoryEntry>): void {
   updateShell(store, (shell) => {
     const idx = shell.history.findIndex((entry) => entry.id === id);
     if (idx < 0) return shell;
@@ -962,9 +948,7 @@ const LIVE_ACTIVITY_CAP = 5;
 const LIVE_ACTIVITY_TEXT_CAP = 80;
 function pushLiveActivity(store: UIStore, id: string, text: string): void {
   const trimmed =
-    text.length > LIVE_ACTIVITY_TEXT_CAP
-      ? `${text.slice(0, LIVE_ACTIVITY_TEXT_CAP - 1)}…`
-      : text;
+    text.length > LIVE_ACTIVITY_TEXT_CAP ? `${text.slice(0, LIVE_ACTIVITY_TEXT_CAP - 1)}…` : text;
   updateShell(store, (shell) => {
     const idx = shell.history.findIndex((entry) => entry.id === id);
     if (idx < 0) return shell;
@@ -1013,6 +997,47 @@ function setAbortHandler(store: UIStore, onAbort?: () => void): void {
     ...shell,
     onAbort,
   }));
+}
+
+/**
+ * Re-enable stdin raw mode if it's been turned off. The Claude Agent SDK
+ * subprocess (used by `randori` and friends) opens `/dev/tty` and disables
+ * raw mode on the parent; when it exits it doesn't restore it. Once raw
+ * mode is off, Ink's `useInput` stops receiving Ctrl+C as `0x03` and the
+ * terminal falls back to line-buffered cooked mode — typed characters echo
+ * below the Ink frame, which is exactly what the user reported.
+ *
+ * Calling this after every turn edge (abort handler, finally block around
+ * driver.handle / agent query) closes the window. Stock Ink doesn't do
+ * this; Claude Code's custom Ink does (see
+ * yasasbanukaofficial/claude-code/src/ink/components/App.tsx rawModeEnabledCount).
+ */
+/**
+ * Opt-in tracer for the abort path. Enable with `KUZUSHI_ABORT_DEBUG=1`.
+ * Writes to stderr so Ink's scrollback isn't disturbed (Ink owns stdout).
+ * Use to pinpoint which hop of the Ctrl+C chain actually fires in a repro.
+ */
+function abortDebug(msg: string): void {
+  if (!process.env.KUZUSHI_ABORT_DEBUG) return;
+  try {
+    process.stderr.write(`[abort] ${msg}\n`);
+  } catch {
+    /* best-effort */
+  }
+}
+
+function ensureRawMode(): void {
+  const stdin = process.stdin as NodeJS.ReadStream & {
+    isRaw?: boolean;
+    setRawMode?: (mode: boolean) => void;
+  };
+  if (!stdin.isTTY || !stdin.setRawMode) return;
+  if (stdin.isRaw) return;
+  try {
+    stdin.setRawMode(true);
+  } catch {
+    /* best-effort — terminal may be in a weird state */
+  }
 }
 
 function setPendingAssistantText(store: UIStore, text: string | undefined): void {
@@ -1094,7 +1119,8 @@ const ACTIVITY_TEXT_CAP = 80;
  * most recent entry's text (just bumps its timestamp) and caps the buffer.
  */
 function pushToolActivity(store: UIStore, text: string): void {
-  const trimmed = text.length > ACTIVITY_TEXT_CAP ? `${text.slice(0, ACTIVITY_TEXT_CAP - 1)}…` : text;
+  const trimmed =
+    text.length > ACTIVITY_TEXT_CAP ? `${text.slice(0, ACTIVITY_TEXT_CAP - 1)}…` : text;
   const now = Date.now();
   updateShell(store, (shell) => {
     if (!shell.currentTool) return shell;
@@ -1244,6 +1270,37 @@ async function startInkShell(
   let activeActionKind: "tool" | "agent" | null = null;
   let activeAbortRequested = false;
 
+  // runId-based blacklist for the task:phase-progress / task:activity bus
+  // subscribers. When the operator Ctrl+Cs a tool that doesn't honor
+  // `ctx.signal` (many context-pipeline tasks don't), it keeps emitting
+  // progress events afterwards. Without this, those events would leak
+  // into the *next* turn's history once processing=true flips back on.
+  //
+  // Strategy: every event we accept adds its runId to `seenRunIdsThisTurn`.
+  // On abort, we migrate that set into `abortedRunIds` so any future event
+  // with one of those runIds is dropped unconditionally. New turns get new
+  // task runIds (fresh UUIDs from `buildTaskContext`), so legitimate
+  // progress still flows. Cap the blacklist FIFO to bound memory over
+  // a long shell session.
+  const seenRunIdsThisTurn = new Set<string>();
+  const abortedRunIds = new Set<string>();
+  const ABORTED_RUNIDS_CAP = 512;
+  const blacklistCurrentTurnRunIds = (): void => {
+    for (const id of seenRunIdsThisTurn) {
+      abortedRunIds.add(id);
+    }
+    seenRunIdsThisTurn.clear();
+    if (abortedRunIds.size > ABORTED_RUNIDS_CAP) {
+      // Drop oldest entries (Set preserves insertion order) until under cap.
+      const overflow = abortedRunIds.size - ABORTED_RUNIDS_CAP;
+      let dropped = 0;
+      for (const id of abortedRunIds) {
+        abortedRunIds.delete(id);
+        if (++dropped >= overflow) break;
+      }
+    }
+  };
+
   const currentCwd = (): string => (opts.target ? path.resolve(opts.target) : process.cwd());
   const shellCtx: ShellContext = {
     focusedModule: null,
@@ -1365,14 +1422,10 @@ async function startInkShell(
       // Per-tool renderResult() may return a concise summary like
       // "Read 559 lines". Fall back to the generic verb when omitted.
       const customResult =
-        status === "ok" && finalResult
-          ? tool.renderResult?.(finalResult)
-          : undefined;
+        status === "ok" && finalResult ? tool.renderResult?.(finalResult) : undefined;
       const verb = aborted ? "aborted" : ok ? "done" : "failed";
       const resultOutput =
-        customResult && customResult.length > 0
-          ? customResult
-          : `${verb} in ${elapsed}s`;
+        customResult && customResult.length > 0 ? customResult : `${verb} in ${elapsed}s`;
       patchHistoryEntry(store, historyEntryId, {
         status,
         elapsedSeconds: elapsed,
@@ -1545,6 +1598,14 @@ async function startInkShell(
   bus.subscribe<import("../bus/events.js").TaskPhaseProgressEvent>(
     "task:phase-progress",
     (event) => {
+      // Drop events from any task the operator has already Ctrl+C'd. Many
+      // pipeline tasks (notably `context:build` sub-agents) don't honor
+      // `ctx.signal`, so they keep emitting after abort. Without this their
+      // output would appear under the operator's next prompt.
+      const runId = event.meta.runId;
+      if (abortedRunIds.has(runId)) return;
+      if (activeAbortRequested || store.getState().shell?.processing !== true) return;
+      seenRunIdsThisTurn.add(runId);
       pushToolPhase(store, event.payload.phase);
       // Also feed the running tool-call's live tail so operators see the
       // latest phase inline under the `⏺` header while the tool runs.
@@ -1558,14 +1619,20 @@ async function startInkShell(
     },
   );
   bus.subscribe<import("../bus/events.js").TaskActivityEvent>("task:activity", (event) => {
+    const runId = event.meta.runId;
+    if (abortedRunIds.has(runId)) return;
+    if (activeAbortRequested || store.getState().shell?.processing !== true) return;
+    seenRunIdsThisTurn.add(runId);
     if (event.payload.phase) pushToolPhase(store, event.payload.phase);
     pushToolActivity(store, event.payload.description);
     const entryId = store.getState().shell?.currentTool?.historyEntryId;
     if (entryId) pushLiveActivity(store, entryId, event.payload.description);
+    const isSubagentTool = looksLikeSubagentToolLine(event.payload.description);
     appendToHistory(store, {
       type: "tool-progress",
       text: event.payload.description,
       timestamp: Date.now(),
+      ...(isSubagentTool ? { progressKind: "invocation" as const } : {}),
     });
   });
   // Ephemeral subprocess stdout / tool-use preview — shows in the running
@@ -1854,24 +1921,42 @@ async function startInkShell(
 
   const abortActiveAction = (): void => {
     if (!activeActionKind) {
+      abortDebug("abortActiveAction: no active action, skipping");
       return;
     }
-
-    activeAbortRequested = true;
-    if (activeActionKind === "tool") {
-      store.getState().shell?.onAbort?.();
-      return;
-    }
-
-    void closeSession();
+    // Belt-and-suspenders: hard-kill every tracked Claude subprocess
+    // before running the cooperative abort. If the onAbort handler
+    // (or anything it calls) is stuck on an await, at least the
+    // subprocess dies immediately. Per-session abort listeners still
+    // fire their own kills — those are idempotent with this one.
+    const killed = killAllClaudeSubprocesses();
+    const onAbort = store.getState().shell?.onAbort;
+    abortDebug(
+      `abortActiveAction: kind=${activeActionKind} killed=${killed} onAbort=${
+        onAbort ? "set" : "missing"
+      }`,
+    );
+    // Pure delegation. Each setXAbort installer owns the
+    // activeAbortRequested flag AND the kind-specific teardown
+    // (controller.abort() for tools, closeSession + controller.abort()
+    // for agents). We must NOT pre-set the flag here — the installed
+    // handler's dedupe guard would then see the flag already set and
+    // skip the real work, which is exactly why SIGINT-triggered
+    // aborts silently no-op'd.
+    onAbort?.();
   };
 
   const setToolAbort = (controller: AbortController): void => {
     activeActionKind = "tool";
     activeAbortRequested = false;
+    abortDebug("setToolAbort: handler installed, flag reset");
     setAbortHandler(store, () => {
-      if (activeAbortRequested) return;
+      if (activeAbortRequested) {
+        abortDebug("tool onAbort: duplicate, swallowed by guard");
+        return;
+      }
       activeAbortRequested = true;
+      abortDebug("tool onAbort: firing controller.abort()");
       controller.abort(new Error("Shell tool execution aborted"));
       // Immediately return the operator to the prompt instead of waiting
       // for the tool to notice the signal. A tool that ignores the signal
@@ -1879,6 +1964,7 @@ async function startInkShell(
       // with what we do here. This is the core "Ctrl+C once goes back"
       // behavior — the alternative (waiting for the tool to unwind) felt
       // like the shell was hung even though the abort had fired.
+      blacklistCurrentTurnRunIds();
       appendToHistory(store, {
         type: "output",
         text: "[aborted]",
@@ -1886,14 +1972,52 @@ async function startInkShell(
       });
       clearTransientShellState(store);
       setProcessing(store, false);
+      // Restore raw mode in case a Claude SDK subprocess disabled it. Must
+      // happen before the next keystroke or the terminal echoes chars
+      // below Ink's frame and Ctrl+C keeps missing `useInput`.
+      ensureRawMode();
     });
   };
 
   const setAgentAbort = (): void => {
     activeActionKind = "agent";
     activeAbortRequested = false;
+    abortDebug("setAgentAbort: handler installed, flag reset");
     setAbortHandler(store, () => {
+      if (activeAbortRequested) {
+        abortDebug("agent onAbort: duplicate, swallowed by guard");
+        return;
+      }
       activeAbortRequested = true;
+      // Mirror the tool-abort path: immediately return the operator to the
+      // prompt instead of waiting for the LLM stream to unwind. Some backends
+      // (notably the Claude Agent SDK subprocess) won't fully tear down the
+      // HTTP stream on close() right away — without this, the shell looked
+      // frozen until the stream naturally ended.
+      blacklistCurrentTurnRunIds();
+      const pendingAssistantText = store.getState().shell?.pendingAssistantText;
+      if (pendingAssistantText) {
+        appendToHistory(store, {
+          type: "output",
+          text: pendingAssistantText,
+          timestamp: Date.now(),
+        });
+        setPendingAssistantText(store, undefined);
+      }
+      appendToHistory(store, {
+        type: "output",
+        text: CANCELLED_AGENT_MESSAGE,
+        timestamp: Date.now(),
+      });
+      clearTransientShellState(store);
+      setProcessing(store, false);
+      // Restore raw mode — the session's subprocess almost certainly
+      // disabled it. Without this the next keystroke echoes below Ink.
+      ensureRawMode();
+      // Tear down the session in the background. Any straggler messages the
+      // for-await loop drains are swallowed via the `activeAbortRequested`
+      // guard inside the loop; `ensureSession()` lazily opens a fresh
+      // session on the next agent turn.
       void closeSession();
     });
   };
@@ -1912,18 +2036,50 @@ async function startInkShell(
   async function handleInput(input: string): Promise<void> {
     if (!alive) return;
 
+    // Fresh per-turn runId set — previous turn's task runIds were either
+    // consumed normally (tasks done, no more events) or blacklisted on
+    // abort. Clearing here keeps `blacklistCurrentTurnRunIds()` tied to
+    // the turn that actually got aborted.
+    seenRunIdsThisTurn.clear();
     beginShellTurn(store, input, shellCtx.focusedModule);
 
     // First pass: msfconsole-style dispatcher. If a registered command matches,
     // we render its output and skip the legacy router + LLM agent.
     const controller = new AbortController();
     setToolAbort(controller);
-    const dispatched = await driver.handle(input, controller.signal);
+    let dispatched: Awaited<ReturnType<typeof driver.handle>>;
+    try {
+      dispatched = await driver.handle(input, controller.signal);
+    } catch (err) {
+      // Tasks that honor `ctx.signal` bubble AbortError up through the
+      // dispatcher. The abort handler already rendered `[aborted]` and
+      // returned the operator to the prompt — swallow the error here so
+      // there's no unhandled-rejection noise.
+      if (controller.signal.aborted) {
+        finishActiveAction();
+        return;
+      }
+      appendToHistory(store, {
+        type: "error",
+        text: err instanceof Error ? err.message : String(err),
+        timestamp: Date.now(),
+      });
+      finishActiveAction();
+      clearTransientShellState(store);
+      setProcessing(store, false);
+      return;
+    } finally {
+      // Any tool invocation might have spawned a Claude SDK subprocess that
+      // disabled raw mode; re-assert so the next keystroke lands in Ink.
+      ensureRawMode();
+    }
     // If Ctrl+C fired during dispatch, the abort handler already returned the
     // operator to the prompt and marked `processing: false`. Swallow the
     // late output/exit from the now-cancelled tool so it doesn't append
-    // after the operator has moved on.
-    if (activeAbortRequested) {
+    // after the operator has moved on. Gate on the per-turn controller so a
+    // racing next-turn's `setToolAbort` (which resets `activeAbortRequested`)
+    // can't let this turn's output through.
+    if (controller.signal.aborted) {
       finishActiveAction();
       return;
     }
@@ -1995,6 +2151,13 @@ async function startInkShell(
       setToolAbort(controller);
       try {
         const output = await localResult.asyncExecute(controller.signal);
+        // Gate on the per-turn controller rather than the shared
+        // `activeAbortRequested` flag so a racing next-turn's setToolAbort
+        // can't let this turn's stale output through.
+        if (controller.signal.aborted) {
+          finishActiveAction();
+          return;
+        }
         if (localResult.executedToolName) {
           updateShell(store, (shell) => ({
             ...shell,
@@ -2005,22 +2168,24 @@ async function startInkShell(
           appendToHistory(store, { type: "output", text: output, timestamp: Date.now() });
         }
       } catch (error) {
-        if (finishActiveAction()) {
-          appendToHistory(store, {
-            type: "output",
-            text: CANCELLED_TOOL_MESSAGE,
-            timestamp: Date.now(),
-          });
-        } else {
-          appendToHistory(store, {
-            type: "error",
-            text: error instanceof Error ? error.message : String(error),
-            timestamp: Date.now(),
-          });
+        const wasAborted = controller.signal.aborted;
+        finishActiveAction();
+        if (wasAborted) {
+          // Abort handler already rendered `[aborted]` — no need to also
+          // append CANCELLED_TOOL_MESSAGE.
+          return;
         }
+        appendToHistory(store, {
+          type: "error",
+          text: error instanceof Error ? error.message : String(error),
+          timestamp: Date.now(),
+        });
         clearTransientShellState(store);
         setProcessing(store, false);
         return;
+      } finally {
+        // Tool may have spawned a subprocess that disabled raw mode.
+        ensureRawMode();
       }
 
       finishActiveAction();
@@ -2062,6 +2227,11 @@ async function startInkShell(
     try {
       for await (const message of currentSession.query(agentInput)) {
         if (!alive) break;
+        // Ctrl+C already handed the operator back the prompt and rendered
+        // `[cancelled]` via the abort handler. Drain the rest of the stream
+        // silently so late tool-use / assistant / result events don't
+        // append to history after the fact.
+        if (activeAbortRequested) continue;
 
         switch (message.type) {
           case "assistant": {
@@ -2093,10 +2263,7 @@ async function startInkShell(
               const headerText = header.inputHint
                 ? `⏺ ${label}(${header.inputHint})`
                 : `⏺ ${label}`;
-              pushToolActivity(
-                store,
-                header.inputHint ? `${label} · ${header.inputHint}` : label,
-              );
+              pushToolActivity(store, header.inputHint ? `${label} · ${header.inputHint}` : label);
               // Use the Anthropic tool_use.id as the history entry's `id`
               // when available — lets `tool-summary` messages correlate
               // by `precedingToolUseIds` to flip status on resolution.
@@ -2182,11 +2349,15 @@ async function startInkShell(
       }
     } catch (error) {
       const wasAborted = finishActiveAction();
-      const message = wasAborted
-        ? CANCELLED_AGENT_MESSAGE
-        : error instanceof Error
-          ? error.message
-          : String(error);
+      // The abort handler already flushed pending text, rendered the
+      // cancel message, and cleared processing. Common cause of landing
+      // here post-abort: the HTTP client throws an AbortError when the
+      // internal signal fires. Swallow it.
+      if (wasAborted) {
+        ensureRawMode();
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
       const pendingAssistantText = store.getState().shell?.pendingAssistantText;
       if (pendingAssistantText) {
         appendToHistory(store, {
@@ -2200,12 +2371,13 @@ async function startInkShell(
       // the error / abort fired. Otherwise they'd stay "running" forever.
       finalizeRunningToolCalls(store, wasAborted ? "abort" : "fail");
       appendToHistory(store, {
-        type: wasAborted ? "output" : "error",
+        type: "error",
         text: message,
         timestamp: Date.now(),
       });
       clearTransientShellState(store);
       setProcessing(store, false);
+      ensureRawMode();
       return;
     }
 
@@ -2233,20 +2405,16 @@ async function startInkShell(
 
     if (pendingErrorText) {
       appendToHistory(store, {
-        type: pendingErrorText === CANCELLED_AGENT_MESSAGE || wasAborted ? "output" : "error",
+        type: pendingErrorText === CANCELLED_AGENT_MESSAGE ? "output" : "error",
         text: pendingErrorText,
-        timestamp: Date.now(),
-      });
-    } else if (wasAborted && !pendingAssistantText && !fallbackResultText) {
-      appendToHistory(store, {
-        type: "output",
-        text: CANCELLED_AGENT_MESSAGE,
         timestamp: Date.now(),
       });
     }
 
     clearTransientShellState(store);
     setProcessing(store, false);
+    // Agent turn may have spawned Claude SDK subprocesses; restore raw mode.
+    ensureRawMode();
   }
 
   store.update({
@@ -2271,6 +2439,83 @@ async function startInkShell(
       onAbort: abortActiveAction,
     },
   });
+
+  // Process-level SIGINT fallback. Ink's `useInput` is the primary Ctrl+C
+  // path — terminal raw mode delivers the 0x03 byte to stdin and Ink dispatches
+  // it. But the Claude Agent SDK subprocess (spawned by randori and similar
+  // tools) can momentarily break raw mode or steal keystrokes, at which point
+  // the terminal falls back to sending SIGINT. Without this handler, cli.ts's
+  // default SIGINT listener would kill the whole process on that fallback
+  // path; with it, we abort the in-flight action and stay in the shell.
+  //
+  // We take over SIGINT/SIGTERM for the shell's lifetime so our handler wins.
+  // On shell exit (`/exit` → `handleExit`), the process exits anyway, so no
+  // restore step is needed.
+  const priorSigintListeners = process.listeners("SIGINT").slice();
+  const priorSigtermListeners = process.listeners("SIGTERM").slice();
+  process.removeAllListeners("SIGINT");
+  process.removeAllListeners("SIGTERM");
+  const shellSigintHandler = (): void => {
+    if (activeActionKind) {
+      // Belt-and-suspenders. The onAbort chain (abortActiveAction →
+      // handler → controller.abort() → per-scope kill listener) is
+      // supposed to reach the Claude SDK subprocess, but if any hop on
+      // that path is racing / stuck / not yet wired (e.g. a subprocess
+      // that just spawned hasn't had its abort listener attached yet),
+      // the spinner keeps spinning. Hard-killing every tracked Claude
+      // subprocess up front guarantees Ctrl+C actually stops work —
+      // the cooperative abort still runs right after to tear the UI
+      // down and return the operator to the prompt.
+      const killed = killAllClaudeSubprocesses();
+      abortDebug(`SIGINT: activeActionKind=${activeActionKind} killed=${killed}`);
+      abortActiveAction();
+      return;
+    }
+    // Idle — fall through to the original cli.ts shutdown behavior so
+    // Ctrl+C at an empty prompt still exits cleanly.
+    abortDebug("SIGINT at idle — forwarding to prior listeners");
+    for (const listener of priorSigintListeners) {
+      try {
+        (listener as NodeJS.SignalsListener)("SIGINT");
+      } catch {
+        /* best-effort */
+      }
+    }
+  };
+  const shellSigtermHandler = (): void => {
+    for (const listener of priorSigtermListeners) {
+      try {
+        (listener as NodeJS.SignalsListener)("SIGTERM");
+      } catch {
+        /* best-effort */
+      }
+    }
+  };
+  process.on("SIGINT", shellSigintHandler);
+  process.on("SIGTERM", shellSigtermHandler);
+
+  // Raw-byte Ctrl+C watcher — independent of Ink's `useInput`. If the
+  // Claude subprocess has grabbed /dev/tty as a separate fd and broken
+  // raw mode, Ink's input pipeline can stop firing. But stdin itself
+  // still receives the 0x03 byte whenever raw mode is on (which our
+  // watchdog restores at 75ms intervals). Watching the byte stream
+  // directly catches Ctrl+C even if Ink has lost the pipe, providing
+  // a third independent abort path alongside SIGINT and useInput.
+  const rawStdinAbortListener = (chunk: Buffer): void => {
+    if (!activeActionKind) return;
+    // 0x03 is the byte terminal raw mode sends for Ctrl+C. 0x04 is Ctrl+D;
+    // both count as an abort trigger.
+    if (!(chunk.includes(0x03) || chunk.includes(0x04))) return;
+    abortDebug(`raw-stdin: 0x03/0x04 detected, activeActionKind=${activeActionKind}`);
+    const killed = killAllClaudeSubprocesses();
+    abortDebug(`raw-stdin: killed=${killed} subprocesses`);
+    abortActiveAction();
+  };
+  try {
+    process.stdin.on("data", rawStdinAbortListener);
+  } catch {
+    /* best-effort — some test harnesses pipe stdin unusually */
+  }
 
   // Surface prior .kuzushi/ artifacts so operators see the cache surface
   // before they run anything. Silent on fresh dirs.
@@ -4577,6 +4822,7 @@ export const __shellInternals = {
   extractToolUseActivities,
   extractToolUseHeaders,
   finalizeAssistantText,
+  looksLikeSubagentToolLine,
   summarizeInput,
   renderToolInputHint,
   patchHistoryEntry,

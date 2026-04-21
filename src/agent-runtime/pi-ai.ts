@@ -22,6 +22,7 @@ import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
+import { summarizeToolCompletion } from "./tool-summary.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type {
   AgentMessage,
@@ -630,7 +631,13 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
           };
           yield {
             type: "tool-summary",
-            summary: summarizeToolResult(toolCall.name, unknownToolMessage, true),
+            summary: summarizeToolResult(
+              toolCall.name,
+              toolCall.arguments as Record<string, unknown> | undefined,
+              unknownToolMessage,
+              true,
+              elapsedSeconds,
+            ),
             precedingToolUseIds: [toolUseId],
           };
           context.messages.push({
@@ -658,7 +665,13 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
           };
           yield {
             type: "tool-summary",
-            summary: summarizeToolResult(toolCall.name, validationError, true),
+            summary: summarizeToolResult(
+              toolCall.name,
+              toolCall.arguments as Record<string, unknown> | undefined,
+              validationError,
+              true,
+              elapsedSeconds,
+            ),
             precedingToolUseIds: [toolUseId],
           };
           context.messages.push({
@@ -691,7 +704,13 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
           };
           yield {
             type: "tool-summary" as const,
-            summary: summarizeToolResult(toolCall.name, denyMessage, true),
+            summary: summarizeToolResult(
+              toolCall.name,
+              validatedArgs,
+              denyMessage,
+              true,
+              elapsedSecondsDeny,
+            ),
             precedingToolUseIds: [toolUseId],
           };
           context.messages.push({
@@ -723,7 +742,13 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
         };
         yield {
           type: "tool-summary",
-          summary: summarizeToolResult(toolCall.name, toolResultText, isToolError),
+          summary: summarizeToolResult(
+            toolCall.name,
+            validatedArgs,
+            toolResultText,
+            isToolError,
+            elapsedSeconds,
+          ),
           precedingToolUseIds: [toolUseId],
         };
 
@@ -1119,17 +1144,14 @@ async function canUseTool(
   });
 }
 
-function summarizeToolResult(toolName: string, toolResult: string, isError: boolean): string {
-  const firstLine = toolResult
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean);
-
-  if (isError) {
-    return `${toolName} failed${firstLine ? `: ${firstLine}` : ""}`;
-  }
-
-  return `${toolName} completed${firstLine ? `: ${firstLine}` : ""}`;
+function summarizeToolResult(
+  toolName: string,
+  toolInput: Record<string, unknown> | undefined,
+  toolResult: string,
+  isError: boolean,
+  elapsedSeconds?: number,
+): string {
+  return summarizeToolCompletion(toolName, toolInput, toolResult, isError, { elapsedSeconds });
 }
 
 function errorResult(

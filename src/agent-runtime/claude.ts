@@ -1,3 +1,4 @@
+import { spawn as childSpawn } from "node:child_process";
 import {
   type Options as ClaudeOptions,
   query as claudeQuery,
@@ -7,6 +8,8 @@ import {
   type SDKToolProgressMessage,
   type SDKToolUseSummaryMessage,
   type SDKUserMessage,
+  type SpawnedProcess,
+  type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
 import type { LlmCallCompleteEvent, LlmCallErrorEvent, LlmCallStartEvent } from "../bus/events.js";
@@ -34,6 +37,138 @@ const log = getLogger("claude-runtime");
  */
 interface MessageWithParsedOutput extends Anthropic.Message {
   parsed_output?: unknown;
+}
+
+/**
+ * Build a `spawnClaudeCodeProcess` hook that tracks each spawned Claude Code
+ * subprocess in the provided Set. Auto-removes entries when a process exits.
+ *
+ * Why this exists: the SDK's `abortController` option is supposed to terminate
+ * the subprocess when the signal fires, but in practice `context:build` with
+ * randori stays stuck: the subprocess keeps running (and holding the terminal's
+ * stdin state, breaking raw mode) long after `abort()` is called. Tracking the
+ * handles lets the caller send SIGTERM/SIGKILL directly on abort or session
+ * close — the one reliable way to stop the subprocess.
+ *
+ * Wraps node's `child_process.spawn` because `ChildProcess` already satisfies
+ * the SDK's `SpawnedProcess` interface (per sdk.d.ts:3985 — "ChildProcess
+ * already satisfies this interface").
+ */
+/**
+ * Process-wide registry of every Claude Code subprocess spawned by this
+ * runtime — across all sessions AND one-shot queries. Exists so the
+ * shell's SIGINT handler has a single "kill everything" switch it can
+ * pull without having to chase individual per-session sets through the
+ * abort-controller plumbing. Belt-and-suspenders: if anything goes
+ * wrong between controller.abort() and the per-scope listener, this
+ * still makes Ctrl+C actually stop a hung subprocess.
+ */
+const globalTrackedProcesses = new Set<SpawnedProcess>();
+
+function createTrackedSpawn(
+  tracked: Set<SpawnedProcess>,
+): (options: SpawnOptions) => SpawnedProcess {
+  return (options: SpawnOptions): SpawnedProcess => {
+    // `detached: true` puts the Claude subprocess in its own process
+    // group via setsid(). Without this, the subprocess shares our pgrp
+    // — and once it opens /dev/tty and issues TCSETA/TIOCSPGRP, the
+    // kernel delivers terminal Ctrl+C SIGINT to the subprocess group
+    // only. Our parent node process never sees Ctrl+C and the
+    // onAbort chain never runs, which is exactly the "spinner keeps
+    // spinning after Ctrl+C" symptom. Isolating the pgrp guarantees
+    // terminal signals land on us.
+    //
+    // We intentionally do NOT call `proc.unref()` — we want the parent
+    // to stay informed of 'exit' so the tracked set stays honest.
+    const proc = childSpawn(options.command, options.args, {
+      cwd: options.cwd,
+      env: options.env,
+      signal: options.signal,
+      stdio: ["pipe", "pipe", "inherit"],
+      detached: true,
+    }) as unknown as SpawnedProcess;
+    tracked.add(proc);
+    globalTrackedProcesses.add(proc);
+    // child_process emits 'exit' once the process is gone — drop it from
+    // both tracked sets so `killTrackedProcesses` doesn't try to kill a
+    // ghost.
+    proc.once("exit", () => {
+      tracked.delete(proc);
+      globalTrackedProcesses.delete(proc);
+    });
+    return proc;
+  };
+}
+
+/**
+ * Nuclear option for Ctrl+C — SIGTERM every tracked Claude subprocess
+ * regardless of which session/query spawned it, then escalate survivors
+ * to SIGKILL after the normal grace window. Called from the shell's
+ * SIGINT handler BEFORE the abort-controller chain runs, so the
+ * subprocess is guaranteed to stop even if an abort listener was never
+ * installed, raced with the spawn, or was blocked by a stuck await.
+ *
+ * Returns the number of processes that received SIGTERM, so callers
+ * can log / diagnose.
+ */
+export function killAllClaudeSubprocesses(): number {
+  const count = globalTrackedProcesses.size;
+  if (count === 0) return 0;
+  killTrackedProcesses(globalTrackedProcesses);
+  return count;
+}
+
+/**
+ * Send SIGTERM to every tracked subprocess, then after `graceMs` escalate
+ * survivors to SIGKILL. Returns once the escalation timer is scheduled — does
+ * not block on exit.
+ */
+function killTrackedProcesses(tracked: Set<SpawnedProcess>, graceMs = 500): void {
+  if (tracked.size === 0) return;
+  const survivors: SpawnedProcess[] = [];
+  for (const proc of tracked) {
+    if (proc.killed || proc.exitCode !== null) continue;
+    try {
+      // We spawn with `detached: true`, so `proc.pid` is the leader of
+      // its own pgrp. Signalling the negative pid delivers to every
+      // process in that group, killing any grandchildren the Claude
+      // subprocess forked (e.g. ripgrep workers) in one shot. Falls
+      // back to signalling the single proc if the pgrp kill fails.
+      const pid = (proc as { pid?: number }).pid;
+      if (typeof pid === "number" && pid > 0) {
+        try {
+          process.kill(-pid, "SIGTERM");
+        } catch {
+          proc.kill("SIGTERM");
+        }
+      } else {
+        proc.kill("SIGTERM");
+      }
+      survivors.push(proc);
+    } catch {
+      /* process already gone */
+    }
+  }
+  if (survivors.length === 0) return;
+  setTimeout(() => {
+    for (const proc of survivors) {
+      if (proc.killed || proc.exitCode !== null) continue;
+      try {
+        const pid = (proc as { pid?: number }).pid;
+        if (typeof pid === "number" && pid > 0) {
+          try {
+            process.kill(-pid, "SIGKILL");
+          } catch {
+            proc.kill("SIGKILL");
+          }
+        } else {
+          proc.kill("SIGKILL");
+        }
+      } catch {
+        /* already gone */
+      }
+    }
+  }, graceMs).unref();
 }
 
 // Prevent EPIPE from crashing the process when Claude SDK subprocesses die.
@@ -571,6 +706,20 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       options.abortController = request.options.abortController;
     }
 
+    // Track the subprocess so we can directly SIGTERM/SIGKILL it when the
+    // caller's abort signal fires. The SDK's own abort-on-signal handling
+    // has proven unreliable for long-running phases (randori S2/S3 can
+    // ignore the signal for 5+ minutes).
+    const trackedProcesses = new Set<SpawnedProcess>();
+    options.spawnClaudeCodeProcess = createTrackedSpawn(trackedProcesses);
+    // When the caller's abortController fires, escalate to process kill.
+    if (request.options.abortController) {
+      const controllerSignal = request.options.abortController.signal;
+      const onAbort = () => killTrackedProcesses(trackedProcesses);
+      if (controllerSignal.aborted) onAbort();
+      else controllerSignal.addEventListener("abort", onAbort, { once: true });
+    }
+
     // Fallback model
     if (request.options.fallbackModel) {
       const fallback = request.options.fallbackModel.includes(":")
@@ -711,6 +860,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         totalCostUsd,
       };
     } finally {
+      // Defensive reap — normally the SDK's for-await exit cleans up, but
+      // a thrown error path may leave survivors.
+      killTrackedProcesses(trackedProcesses);
       releaseSlot();
     }
   }
@@ -775,6 +927,10 @@ class ClaudeSession implements AgentSession {
   private closed = false;
   private slotAcquired = false;
   private queryInFlight = false; // Mutex: prevent concurrent query() calls
+  // Tracks every Claude Code subprocess spawned by this session so close()
+  // can directly kill them. The SDK's internal abort handling is unreliable
+  // — context:build kept running for 5+ minutes past Ctrl+C without this.
+  private readonly trackedProcesses = new Set<SpawnedProcess>();
 
   constructor(
     private readonly baseOptions: AgentQueryOptions,
@@ -862,6 +1018,9 @@ class ClaudeSession implements AgentSession {
     if (this.baseOptions.plugins && this.baseOptions.plugins.length > 0) {
       options.plugins = this.baseOptions.plugins;
     }
+
+    // Intercept subprocess spawn so close() can SIGTERM/SIGKILL directly.
+    options.spawnClaudeCodeProcess = createTrackedSpawn(this.trackedProcesses);
 
     // Pass the async message queue as prompt — SDK keeps one subprocess alive
     const queryResult = claudeQuery({
@@ -969,6 +1128,11 @@ class ClaudeSession implements AgentSession {
     if (this.closed) return;
     this.closed = true;
     this.messageQueue.done();
+    // Kill every tracked subprocess immediately. SDK's abort-on-signal is
+    // unreliable — closing the messageQueue sends EOF on stdin but the
+    // subprocess can keep running (context:build reproducer was stuck 5+
+    // minutes post-abort). SIGTERM → SIGKILL after 500ms.
+    killTrackedProcesses(this.trackedProcesses);
     if (this.slotAcquired) {
       releaseSlot();
     }

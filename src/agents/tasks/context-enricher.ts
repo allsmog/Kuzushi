@@ -207,6 +207,7 @@ export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrich
   dependsOn: ["context-gatherer"],
 
   async run(_input, context): Promise<EnrichedRepoContext["enrichment"]> {
+    context.signal?.throwIfAborted();
     const { model } = resolveConfig(context);
     const workRoot = context.workRoot ?? context.repoRoot;
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));

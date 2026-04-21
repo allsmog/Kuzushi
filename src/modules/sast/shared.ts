@@ -313,6 +313,7 @@ async function generateMonorepoSnapshot(
   const tracker = createProgressTracker(ctx);
 
   try {
+    ctx.signal?.throwIfAborted();
     tracker.update("discovering modules");
     const discovery = await discoverRepoStructure(repoRoot, { maxModules: 15 });
     const discoveredModules = discovery.modules;
@@ -330,6 +331,7 @@ async function generateMonorepoSnapshot(
     const total = discoveredModules.length;
 
     for (let i = 0; i < discoveredModules.length; i += CONCURRENCY) {
+      ctx.signal?.throwIfAborted();
       const batch = discoveredModules.slice(i, i + CONCURRENCY);
       await Promise.all(
         batch.map(async (mod, batchIdx) => {
@@ -347,8 +349,11 @@ async function generateMonorepoSnapshot(
                 tracker.update(`${mod.path} (${moduleIndex}/${total}) · ${humanizeStage(task)}`),
             );
             modules[mod.path] = moduleSnapshot;
-          } catch {
-            // Skip failing modules, continue with others
+          } catch (err) {
+            // Skip individual module failures, but let AbortError bubble so
+            // Ctrl+C stops the outer monorepo loop instead of continuing.
+            if (ctx.signal?.aborted) throw err;
+            if (err instanceof Error && err.name === "AbortError") throw err;
           }
         }),
       );
@@ -401,11 +406,22 @@ async function generateSingleProjectContext(
     ...(ctx.signal ? { signal: ctx.signal } : {}),
   });
 
+  // Helper: swallow non-abort errors ("optional" task failure semantics) but
+  // let AbortError bubble up so Ctrl+C actually short-circuits the pipeline
+  // instead of the catch quietly dropping the signal.
+  const rethrowIfAborted = (err: unknown): void => {
+    if (ctx.signal?.aborted) throw err;
+    const name = err instanceof Error ? err.name : "";
+    if (name === "AbortError") throw err;
+  };
+
+  ctx.signal?.throwIfAborted();
   updateProgress("context-gatherer");
   const { contextGathererTask } = await import("../../agents/tasks/context-gatherer.js");
   const gathererOutput = await contextGathererTask.run(scanOpts, buildTaskContext());
   upstreamOutputs.set("context-gatherer", gathererOutput);
 
+  ctx.signal?.throwIfAborted();
   let enricherOutput: unknown;
   let threatModelOutput: unknown;
   const parallelTasks: Promise<void>[] = [];
@@ -418,7 +434,8 @@ async function generateSingleProjectContext(
           const { contextEnricherTask } = await import("../../agents/tasks/context-enricher.js");
           enricherOutput = await contextEnricherTask.run(undefined, buildTaskContext());
           upstreamOutputs.set("context-enricher", enricherOutput);
-        } catch {
+        } catch (err) {
+          rethrowIfAborted(err);
           /* optional */
         }
       })(),
@@ -435,7 +452,8 @@ async function generateSingleProjectContext(
           );
           threatModelOutput = await threatModelRandoriTask.run(scanOpts, buildTaskContext());
           upstreamOutputs.set("threat-model-randori", threatModelOutput);
-        } catch {
+        } catch (err) {
+          rethrowIfAborted(err);
           /* optional */
         }
       })(),
@@ -443,6 +461,7 @@ async function generateSingleProjectContext(
   }
 
   await Promise.all(parallelTasks);
+  ctx.signal?.throwIfAborted();
 
   updateProgress("app-model-build");
   const { appModelBuildTask } = await import("../../agents/tasks/app-model-build.js");
@@ -450,12 +469,14 @@ async function generateSingleProjectContext(
   try {
     appModel = await appModelBuildTask.run(scanOpts, buildTaskContext());
     upstreamOutputs.set("app-model-build", appModel);
-  } catch {
+  } catch (err) {
+    rethrowIfAborted(err);
     /* optional */
   }
 
   let scenarioOutput: unknown;
   if (opts.scenarios && threatModelOutput && appModel) {
+    ctx.signal?.throwIfAborted();
     updateProgress("threat-scenario-build");
     try {
       const { threatScenarioBuildTask } = await import(
@@ -463,7 +484,8 @@ async function generateSingleProjectContext(
       );
       scenarioOutput = await threatScenarioBuildTask.run(undefined, buildTaskContext());
       upstreamOutputs.set("threat-scenario-build", scenarioOutput);
-    } catch {
+    } catch (err) {
+      rethrowIfAborted(err);
       /* optional */
     }
   }

@@ -10,6 +10,7 @@
 
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { summarizeInput } from "../../../agent-runtime/tool-summary.js";
 import type { AgentMessage, AgentRuntime } from "../../../agent-runtime/types.js";
 import { createLogger } from "../../../logger.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
@@ -355,21 +356,11 @@ export function describeRuntimeMessage(message: AgentMessage): string[] {
     for (const block of blocks) {
       if (block?.["type"] !== "tool_use") continue;
       const name = typeof block["name"] === "string" ? block["name"] : "tool";
-      const input = block["input"];
-      let hint = "";
-      if (input && typeof input === "object") {
-        const record = input as Record<string, unknown>;
-        const primary =
-          record["target"] ??
-          record["path"] ??
-          record["file"] ??
-          record["query"] ??
-          record["pattern"] ??
-          record["name"];
-        if (typeof primary === "string" && primary.length > 0) {
-          hint = truncate(primary, 40);
-        }
-      }
+      // Delegate hint extraction to the shared helper so new aliases
+      // (e.g. file_path / filePath for Read, pattern for Glob/Grep)
+      // get picked up consistently. Without this, valid LLM tool
+      // calls surface as bare "Read" / "Grep" activity lines.
+      const hint = summarizeInput(block["input"]);
       out.push(hint ? `${name} · ${hint}` : name);
     }
     return out;
@@ -442,6 +433,18 @@ export interface RandoriRunnerResult {
  */
 export async function runRandoriPasta(params: RandoriRunnerParams): Promise<RandoriRunnerResult> {
   const tag = params.logTag ?? "[randori]";
+  params.signal?.throwIfAborted();
+
+  // Forward the caller's abort signal into each phase's runtime.query via
+  // an owned AbortController. Without this the Claude Code subprocess
+  // keeps streaming (and billing) after Ctrl+C.
+  const abortController = new AbortController();
+  if (params.signal) {
+    if (params.signal.aborted) abortController.abort();
+    else {
+      params.signal.addEventListener("abort", () => abortController.abort(), { once: true });
+    }
+  }
 
   const baseOpts = {
     cwd: params.repoRoot,
@@ -449,6 +452,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     allowedTools: params.allowedTools,
     permissionMode: "dontAsk" as const,
     plugins: [{ type: "local" as const, path: params.pluginPath }],
+    abortController,
   };
 
   let costUsd = 0;
@@ -459,8 +463,13 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
   // the `result` envelope — long enough for `ToolRunningStatus`'s 15s
   // staleness watchdog to show a misleading `waiting…` chip.
   const runPhase = async (prompt: string, phaseTag: string): Promise<void> => {
+    params.signal?.throwIfAborted();
     try {
       for await (const message of params.runtime.query({ prompt, options: baseOpts })) {
+        // Respect aborts eagerly — the abortController in baseOpts is
+        // linked to params.signal, so the SDK will eventually stop, but
+        // bailing here returns control to the shell immediately.
+        if (params.signal?.aborted) break;
         // Forward the sub-agent's per-action stream (tool_use headers,
         // tool-progress heartbeats) to the ephemeral live-tail sink so
         // operators see what PASTA is doing right now under the `⏺`
@@ -477,6 +486,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
         }
       }
     } catch (error) {
+      if (params.signal?.aborted) throw error;
       log.warn(`${phaseTag} error: ${toErrorMessage(error)}`);
     }
   };
@@ -494,6 +504,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
 
   // ── Phase 2: S4 (STRIDE threat scenarios with evidence) ──
   if (hasS4) {
+    params.signal?.throwIfAborted();
     const scopeArtifacts = readRandoriArtifacts(params.repoRoot, params.artifactDir);
     if (Object.keys(scopeArtifacts).length > 0) {
       log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
@@ -510,6 +521,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
 
   // ── Phase 3: narrative synthesis ──
   if (hasS4) {
+    params.signal?.throwIfAborted();
     const postS4 = readRandoriArtifacts(params.repoRoot, params.artifactDir);
     const haveStageOutputs = postS4.s2Scope || postS4.s3Decomposition || postS4.s4Threats;
     if (haveStageOutputs) {
@@ -519,6 +531,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
       await runPhase(buildNarrativePrompt(params.artifactDir), `${tag} Phase 3 (narrative)`);
 
       // Retry once if the artifact is missing or incomplete.
+      params.signal?.throwIfAborted();
       const narrativeAfter = readRandoriArtifacts(params.repoRoot, params.artifactDir).narrative;
       const narrativeIssues = assessNarrativeArtifact(narrativeAfter);
       if (narrativeIssues.length > 0) {

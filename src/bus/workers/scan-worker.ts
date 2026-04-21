@@ -72,6 +72,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
         workRoot,
         repoRoot: workRoot,
         scanPath: context.scanPath,
+        ...(context.gitRoot ? { gitRoot: context.gitRoot } : {}),
         repoName: context.repoName,
         config: deps.config,
         runtime: deps.runtime,
