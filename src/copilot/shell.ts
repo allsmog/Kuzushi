@@ -1273,6 +1273,22 @@ async function startInkShell(
     });
   });
 
+  // Tool progress rail — `task:phase-progress` drives the "⏵ phase N/M" strip
+  // beneath the spinner, `task:activity` pushes onto the rolling activity
+  // tail. Both fire throughout a long-running tool (e.g. context:build,
+  // randori, sast:scan) so operators see forward motion instead of a frozen
+  // label. See src/ui/components/ToolRunningStatus.tsx for the consumer.
+  bus.subscribe<import("../bus/events.js").TaskPhaseProgressEvent>(
+    "task:phase-progress",
+    (event) => {
+      pushToolPhase(store, event.payload.phase);
+    },
+  );
+  bus.subscribe<import("../bus/events.js").TaskActivityEvent>("task:activity", (event) => {
+    if (event.payload.phase) pushToolPhase(store, event.payload.phase);
+    pushToolActivity(store, event.payload.description);
+  });
+
   // Auto-patch bridge — when `setg AutoPatch true`, any verification:result
   // with exploitable=true queues patch:finding as a background job. Closes
   // the scan → triage → verify → patch loop. Intentionally gated on
