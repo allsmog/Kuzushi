@@ -15,6 +15,11 @@ import type { MessageBus } from "../bus/types.js";
 import type { PrintSink } from "../copilot/print.js";
 import type { KnowledgeModule } from "../knowledge/types.js";
 import type { KuzushiConfig } from "../types.js";
+import type { ModuleReference } from "./reference.js";
+import type { JSONSchema } from "./schema.js";
+
+export type { ModuleReference } from "./reference.js";
+export type { JSONSchema } from "./schema.js";
 
 // ---------------------------------------------------------------------------
 // Module categories
@@ -49,12 +54,6 @@ export const RANK_VALUE: Record<ModuleRank, number> = {
   great: 500,
   excellent: 600,
 };
-
-/** External reference on a module/tool/finding — CVE, CWE, URL, ATT&CK, etc. */
-export interface ModuleReference {
-  type: "CVE" | "CWE" | "URL" | "ATT&CK" | "OSVDB" | "BID" | "EDB" | "KB" | "OWASP";
-  value: string;
-}
 
 /** Qualitative notes about runtime behavior (msf::Notes). */
 export interface ModuleNotes {
@@ -125,9 +124,6 @@ export type CopilotModuleRequirement =
 // ---------------------------------------------------------------------------
 // Module tool types
 // ---------------------------------------------------------------------------
-
-/** JSON Schema type alias — tools declare their input shape this way. */
-export type JSONSchema = Record<string, unknown>;
 
 /** Result returned by a tool execution. */
 export interface ToolResult {
