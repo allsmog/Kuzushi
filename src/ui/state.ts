@@ -435,10 +435,14 @@ export interface ShellHistoryEntry {
   resultOutput?: string;
   /**
    * For `tool-call` while `running`: rolling tail of activity lines
-   * (latest at index 0, max 3). Shown beneath the `⏺` header as dim
+   * (latest at index 0, max 5). Shown beneath the `⏺` header as dim
    * `⎿  <activity>` lines until the tool resolves.
+   *
+   * Each row carries a stable `id` so Ink/React can keep line identity
+   * across prepends; this avoids remount churn/flicker while progress
+   * pulses stream in.
    */
-  liveActivities?: string[];
+  liveActivities?: Array<{ id: string; text: string }>;
   /**
    * For `tool-progress`: status hint — success/failure/stale colorization.
    *

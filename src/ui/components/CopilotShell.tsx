@@ -307,15 +307,18 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         </Static>
       )}
 
-      <Static items={staticHistory.map((entry, i) => ({ ...entry, _key: `h-${i}` }))}>
+      <Static items={staticHistory}>
         {(item) => (
-          <HistoryEntry key={(item as { _key: string })._key} entry={item as ShellHistoryEntry} />
+          <HistoryEntry
+            key={historyEntryKey(item as ShellHistoryEntry)}
+            entry={item as ShellHistoryEntry}
+          />
         )}
       </Static>
 
       <Box flexDirection="column">
-        {liveHistory.map((entry, i) => (
-          <HistoryEntry key={`live-${i}`} entry={entry} />
+        {liveHistory.map((entry) => (
+          <HistoryEntry key={historyEntryKey(entry)} entry={entry} />
         ))}
       </Box>
 
@@ -380,6 +383,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
     </Box>
   );
+}
+
+function historyEntryKey(entry: ShellHistoryEntry): string {
+  // Prefer explicit IDs for mutable tool-call rows, then fall back to
+  // immutable fields that stay stable across shell re-renders.
+  if (entry.id) return `id:${entry.id}`;
+  return `${entry.type}:${entry.timestamp}:${entry.toolUseId ?? ""}:${entry.text}`;
 }
 
 /**
@@ -637,13 +647,13 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
       </Box>
       {status === "running" && entry.liveActivities && entry.liveActivities.length > 0 ? (
         <Box flexDirection="column">
-          {entry.liveActivities.slice(0, 5).map((activity, i) => (
-            <Box key={`la-${i}`}>
+          {entry.liveActivities.slice(0, 5).map((activity) => (
+            <Box key={activity.id}>
               <Gutter />
               <Gutter>
                 <Text dimColor>{LOWER_HOOK}</Text>
               </Gutter>
-              <Text> {tokens.muted(activity)}</Text>
+              <Text> {tokens.muted(activity.text)}</Text>
             </Box>
           ))}
         </Box>
