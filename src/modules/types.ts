@@ -201,6 +201,22 @@ export interface ToolExecutionContext {
    * `ctx.toolModel ?? ctx.config.model`.
    */
   toolModel?: string;
+  /**
+   * Report a sub-step of the currently running tool to the shell's progress
+   * rail. Publishes a `task:activity` bus event under the hood, which the
+   * Ink shell turns into a rolling "↳ <description>" line beneath the
+   * spinner. Best-effort — swallow publish errors, never throw. Optional
+   * because some tool-invocation paths (e.g. unit tests) don't wire a bus.
+   *
+   * Example:
+   *
+   *   ctx.reportActivity?.("scanning deps/package.json");
+   *   ctx.reportActivity?.("analyzing lodash@4.17.11", { step: 3, total: 42 });
+   */
+  reportActivity?: (
+    description: string,
+    meta?: { phase?: string; step?: number; total?: number },
+  ) => void;
 }
 
 /**

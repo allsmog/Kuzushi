@@ -277,6 +277,8 @@ const extractFixPatternTool: ModuleTool = {
       "5. Do NOT invent details the patch doesn't support.",
     ].join("\n");
 
+    ctx.reportActivity?.(`extracting fix pattern ${record?.id ?? id ?? "(inline)"} · ${model}`);
+
     let structuredOutput: unknown;
     let costUsd = 0;
     try {
@@ -462,6 +464,10 @@ const huntVariantsTool: ModuleTool = {
       "- Confidence must be HIGH or MEDIUM (skip LOW).",
       "- Skip files that already apply the fix shape.",
     ].join("\n");
+
+    ctx.reportActivity?.(
+      `hunting ${advisoryId} variants in ${repoName} · max ${maxFindings} · ${model}`,
+    );
 
     let structuredOutput: unknown;
     let costUsd = 0;

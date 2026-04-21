@@ -12,7 +12,7 @@
 
 import { Box, Static, Text, useApp, useInput } from "ink";
 import type React from "react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
 import { buildShellPrompt } from "../../copilot/shell.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
@@ -33,6 +33,7 @@ import { Spinner } from "./Spinner.js";
 import { ThreatDfdView } from "./ThreatDfdView.js";
 import { ThreatStrideMatrix } from "./ThreatStrideMatrix.js";
 import { ThreatSummaryExport } from "./ThreatSummaryExport.js";
+import { ToolRunningStatus } from "./ToolRunningStatus.js";
 import { TuneView } from "./TuneView.js";
 
 interface CopilotShellProps {
@@ -277,22 +278,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
 
       {shell.processing && shell.currentTool && (
-        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
-          <Box>
-            <Spinner />
-            <Text>
-              {"  "}
-              {tokens.muted(shell.currentTool.name)}
-              {shell.currentTool.subLabel ? tokens.muted(` · ${shell.currentTool.subLabel}`) : ""}
-            </Text>
-            {shell.currentTool.startedAt ? (
-              <LiveElapsed startedAt={shell.currentTool.startedAt} />
-            ) : shell.currentTool.elapsedSeconds && shell.currentTool.elapsedSeconds > 0 ? (
-              <Text>{tokens.muted(` ${shell.currentTool.elapsedSeconds.toFixed(0)}s`)}</Text>
-            ) : null}
-          </Box>
-          {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
-        </Box>
+        <ToolRunningStatus tool={shell.currentTool} heartbeat={shell.llmHeartbeat} />
       )}
 
       {shell.processing && !shell.currentTool && (
@@ -325,30 +311,6 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
     </Box>
   );
-}
-
-/**
- * Self-ticking elapsed-time display. Owns its own 1s timer so the shell
- * subtree doesn't re-render every second when only the seconds digit
- * changed. Always formats `mm:ss` so the line width stays constant
- * between updates — variable-width elapsed ("9s" → "10s" → "1m 0s")
- * was shifting downstream text left/right each second, which read as
- * flicker on top of the spinner's frame animation.
- */
-function LiveElapsed({ startedAt }: { startedAt: number }): React.ReactElement {
-  const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - startedAt) / 1000));
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [startedAt]);
-  if (elapsed <= 0) return <Text>{""}</Text>;
-  const mm = Math.floor(elapsed / 60)
-    .toString()
-    .padStart(2, "0");
-  const ss = (elapsed % 60).toString().padStart(2, "0");
-  return <Text>{tokens.muted(`  ${mm}:${ss}`)}</Text>;
 }
 
 /**
@@ -525,6 +487,15 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
       return (
         <Box marginTop={1}>
           <Text>{tokens.danger(entry.text)}</Text>
+        </Box>
+      );
+    case "tool-progress":
+      return (
+        <Box paddingLeft={2}>
+          <Text>
+            {tokens.muted("⎿ ")}
+            {tokens.muted(entry.text)}
+          </Text>
         </Box>
       );
   }
