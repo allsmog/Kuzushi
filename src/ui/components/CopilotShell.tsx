@@ -135,23 +135,25 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
   useInput(
     (char, key) => {
-      if (!shell) return;
+      const liveState = store.getState();
+      const liveShell = liveState.shell;
+      if (!liveShell) return;
 
       if ((key.ctrl && char === "c") || (key.ctrl && char === "d")) {
         // In-flight work always gets an immediate abort — no point arming
         // when there's something to interrupt. `onAbort` is idempotent;
         // a second Ctrl+C after abort falls through to the exit path.
-        if (shell.processing) {
-          shell.onAbort?.();
+        if (liveShell.processing) {
+          liveShell.onAbort?.();
           return;
         }
         // B.4 two-stage Ctrl+C at the idle prompt: first press arms,
         // second press within CTRL_C_ARM_WINDOW_MS exits. Anything else
         // pressed within the window disarms silently.
         const now = Date.now();
-        const armedAt = state.ctrlCArmedAt ?? 0;
+        const armedAt = liveState.ctrlCArmedAt ?? 0;
         if (now - armedAt <= CTRL_C_ARM_WINDOW_MS) {
-          shell.onExit?.();
+          liveShell.onExit?.();
           exit();
           return;
         }
@@ -160,11 +162,11 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       }
 
       // Any other key disarms the Ctrl+C stage counter if one is in flight.
-      if (state.ctrlCArmedAt) {
+      if (liveState.ctrlCArmedAt) {
         store.update({ ctrlCArmedAt: undefined });
       }
 
-      if (shell.processing) {
+      if (liveShell.processing) {
         return;
       }
 
@@ -172,13 +174,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       // Esc through the shell's onInput so the same /yes, /no handlers in
       // shell.ts apply or discard. Single-key shortcut — operator doesn't
       // need to type a slash command.
-      if (shell.pendingPlan && input.length === 0) {
+      if (liveShell.pendingPlan && input.length === 0) {
         if (char === "y" || char === "Y") {
-          shell.onInput?.("/yes");
+          liveShell.onInput?.("/yes");
           return;
         }
         if (char === "n" || char === "N" || key.escape) {
-          shell.onInput?.("/no");
+          liveShell.onInput?.("/no");
           return;
         }
       }
@@ -187,31 +189,31 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       // sub-views without having to retype `/threats <name>`. Only active
       // when the input buffer is empty so the digits don't interfere
       // with natural-language input.
-      if (isThreatShellView(shell.shellView) && input.length === 0) {
+      if (isThreatShellView(liveShell.shellView) && input.length === 0) {
         if (char === "1") {
-          shell.onInput?.("/threats dfd");
+          liveShell.onInput?.("/threats dfd");
           return;
         }
         if (char === "2") {
-          shell.onInput?.("/threats stride");
+          liveShell.onInput?.("/threats stride");
           return;
         }
         if (char === "3") {
-          shell.onInput?.("/threats stories");
+          liveShell.onInput?.("/threats stories");
           return;
         }
         if (char === "4") {
-          shell.onInput?.("/threats scope");
+          liveShell.onInput?.("/threats scope");
           return;
         }
         if (char === "5") {
-          shell.onInput?.("/threats summary");
+          liveShell.onInput?.("/threats summary");
           return;
         }
       }
 
       if (key.return && input.length > 0) {
-        shell.onInput?.(input);
+        liveShell.onInput?.(input);
         setInput("");
         setHistoryIndex(null);
         draftInputRef.current = "";
@@ -225,30 +227,30 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       }
 
       if (key.upArrow) {
-        if (shell.commandHistory.length === 0) return;
+        if (liveShell.commandHistory.length === 0) return;
         if (historyIndex === null) {
           draftInputRef.current = input;
-          const nextIndex = shell.commandHistory.length - 1;
+          const nextIndex = liveShell.commandHistory.length - 1;
           setHistoryIndex(nextIndex);
-          setInput(shell.commandHistory[nextIndex] ?? "");
+          setInput(liveShell.commandHistory[nextIndex] ?? "");
           return;
         }
         const nextIndex = Math.max(0, historyIndex - 1);
         setHistoryIndex(nextIndex);
-        setInput(shell.commandHistory[nextIndex] ?? "");
+        setInput(liveShell.commandHistory[nextIndex] ?? "");
         return;
       }
 
       if (key.downArrow) {
         if (historyIndex === null) return;
         const nextIndex = historyIndex + 1;
-        if (nextIndex >= shell.commandHistory.length) {
+        if (nextIndex >= liveShell.commandHistory.length) {
           setHistoryIndex(null);
           setInput(draftInputRef.current);
           return;
         }
         setHistoryIndex(nextIndex);
-        setInput(shell.commandHistory[nextIndex] ?? "");
+        setInput(liveShell.commandHistory[nextIndex] ?? "");
         return;
       }
 
