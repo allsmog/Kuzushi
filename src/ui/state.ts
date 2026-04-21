@@ -394,10 +394,44 @@ export interface ShellHistoryEntry {
   text: string;
   timestamp: number;
   prompt?: string;
+  /**
+   * Optional stable id so tool-call entries can be mutated in place (e.g.
+   * flipping the `⏺` from cyan→green on resolution, or filling in a
+   * per-tool `renderResult` line). Any entry with `id` set is excluded
+   * from `<Static>` until its `status` becomes terminal.
+   */
+  id?: string;
   /** For `tool-call`: qualified tool name (e.g. `context:build`). */
   tool?: string;
+  /** For `tool-call`: human-friendly label rendered instead of `tool` when set. */
+  displayName?: string;
   /** For `tool-call`: ≤40-char input summary rendered as `(…)`. */
   inputHint?: string;
+  /**
+   * For `tool-call`: lifecycle status driving the `⏺` glyph color.
+   * - `running` (cyan, pulsing)
+   * - `ok` (green static)
+   * - `fail` (red static)
+   * - `abort` (muted static)
+   */
+  status?: "running" | "ok" | "fail" | "abort";
+  /**
+   * For `tool-call`: elapsed seconds at resolution. Rendered as ` · Xs`
+   * after the header once status leaves `running`.
+   */
+  elapsedSeconds?: number;
+  /**
+   * For `tool-call`: per-tool result summary (from `ModuleTool.renderResult`)
+   * rendered as a `⎿  <text>` line directly under the header when the tool
+   * resolves. Falls back to `"✓ done" / "✗ failed" / "· aborted"`.
+   */
+  resultOutput?: string;
+  /**
+   * For `tool-call` while `running`: rolling tail of activity lines
+   * (latest at index 0, max 3). Shown beneath the `⏺` header as dim
+   * `⎿  <activity>` lines until the tool resolves.
+   */
+  liveActivities?: string[];
   /** For `tool-progress`: status hint — success/failure/stale colorization. */
   progressKind?: "info" | "ok" | "fail" | "abort";
 }
@@ -610,6 +644,18 @@ export interface ShellState {
     activities?: ToolActivityLine[];
     /** Epoch ms of the most recent event — feeds stale-spinner detection. */
     lastEventAt?: number;
+    /**
+     * Id of the `tool-call` history entry associated with this tool run.
+     * Populated by `runToolFromDispatcher` so bus subscriptions can route
+     * activity/phase lines into the entry's `liveActivities` tail.
+     */
+    historyEntryId?: string;
+    /**
+     * Human-friendly label (from `ModuleTool.displayName`) — surfaced
+     * here too so the bottom status block can render "Scan" instead of
+     * "sast:scan" without another lookup.
+     */
+    displayName?: string;
   };
   /**
    * Rolling LLM-call heartbeat for the active turn — populated from
