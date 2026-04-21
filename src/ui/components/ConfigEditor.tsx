@@ -19,6 +19,7 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useMemo, useState } from "react";
+import type { ConfigPatchEntry } from "../../config.js";
 import type { KuzushiConfig } from "../../types.js";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
@@ -42,11 +43,6 @@ import {
 } from "./ConfigEditor.valueEditors.js";
 
 const SECRET_KEY_PATTERN = /(apiKey|token|secret|password)/i;
-
-export interface ConfigPatchEntry {
-  path: string;
-  value: unknown;
-}
 
 export interface ConfigEditorProps {
   initialConfig: KuzushiConfig;
