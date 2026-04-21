@@ -177,6 +177,19 @@ my-module/
 - Keep `description` concrete; the shell planner relies on it.
 - Define strict `inputSchema` so tool invocations are predictable.
 - Return `ToolResult` with `ok` and useful `output`; include `data` for automation.
+- Long-running tools (>5s) should call `ctx.reportActivity?.(text)` at each
+  sub-step so the shell's progress rail shows forward motion instead of a
+  frozen spinner. Optional-chained because headless test rigs may not wire a
+  bus. Pass `{ phase, step, total }` if your tool iterates a known batch.
+  Example:
+
+  ```ts
+  ctx.reportActivity?.(`scanning ${name}`);
+  for (let i = 0; i < deps.length; i++) {
+    ctx.reportActivity?.(`analyzing ${deps[i].name}`, { step: i + 1, total: deps.length });
+    // ...
+  }
+  ```
 
 ### C) (Optional) contribute DAG tasks
 
@@ -274,8 +287,9 @@ const module: CopilotModule = {
         properties: { target: { type: "string" } },
       },
       headless: true,
-      async execute(input) {
+      async execute(input, ctx) {
         const target = (input as { target?: string }).target ?? "default";
+        ctx.reportActivity?.(`pinging ${target}`);
         return {
           ok: true,
           output: `pong: ${target}`,
