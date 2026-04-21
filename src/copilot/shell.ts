@@ -320,6 +320,32 @@ export function extractAssistantText(content: Array<Record<string, unknown>>): s
     .join("");
 }
 
+/**
+ * Pull `tool_use` blocks out of an assistant message so they can be surfaced
+ * in the shell's rolling activity tail. Returns one line per tool use —
+ * "<toolName>(<short-input-hint>)" — with the input hint capped so the tail
+ * doesn't blow past the column width.
+ */
+export function extractToolUseActivities(content: Array<Record<string, unknown>>): string[] {
+  const out: string[] = [];
+  for (const block of content) {
+    if (block["type"] !== "tool_use") continue;
+    const name = typeof block["name"] === "string" ? block["name"] : "tool";
+    const input = block["input"];
+    let hint = "";
+    if (input && typeof input === "object") {
+      const record = input as Record<string, unknown>;
+      const primary =
+        record["target"] ?? record["path"] ?? record["file"] ?? record["query"] ?? record["name"];
+      if (typeof primary === "string" && primary.length > 0) {
+        hint = primary.length > 40 ? `${primary.slice(0, 39)}…` : primary;
+      }
+    }
+    out.push(hint ? `${name} · ${hint}` : name);
+  }
+  return out;
+}
+
 export function finalizeAssistantText(
   pendingAssistantText: string | undefined,
   resultText: string,
@@ -1758,6 +1784,12 @@ async function startInkShell(
             const text = extractAssistantText(message.content);
             if (text) {
               appendPendingAssistantText(store, text);
+            }
+            // Surface each tool-use block as an activity line so operators
+            // see what the model is calling, not just a frozen spinner.
+            const toolCalls = extractToolUseActivities(message.content);
+            for (const call of toolCalls) {
+              pushToolActivity(store, call);
             }
             break;
           }
