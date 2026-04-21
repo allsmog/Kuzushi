@@ -320,15 +320,18 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
   let totalCostUsd = 0;
   let generatedToolCallCounter = 0;
   const truncatedTextParts: string[] = [];
-  // Consecutive validation-failure tracking across turns. When the LLM keeps
-  // re-emitting the same bad tool call (e.g. {filePath} vs expected {file_path}),
-  // we break out of the turn loop instead of burning tokens indefinitely.
-  // MAX_CONSECUTIVE_VALIDATION_FAILURES = 3 matches the retry cap randori's
-  // runPhase uses downstream, so operators see one consistent "3 strikes"
-  // behavior across both runtimes.
-  const MAX_CONSECUTIVE_VALIDATION_FAILURES = 3;
-  let lastFailedValidationTool: string | null = null;
-  let consecutiveValidationFailures = 0;
+  // Per-tool validation-failure tracking across turns. When the LLM keeps
+  // re-emitting the same bad tool call (e.g. {file_path} without content),
+  // we bail the turn loop instead of burning tokens indefinitely.
+  //
+  // IMPORTANT: the counter for tool X is cleared ONLY when tool X itself
+  // succeeds — not when any other tool succeeds. In the field, the
+  // sub-agent often alternates a failing Write with many successful Reads
+  // while it hunts for more context; a cross-tool reset would see count=1
+  // indefinitely and the cap would never trip. Per-tool tracking isolates
+  // "Write is stuck" from "Read is healthy".
+  const MAX_VALIDATION_FAILURES_PER_TOOL = 3;
+  const validationFailuresByTool = new Map<string, number>();
 
   try {
     for (let turn = 1; ; turn++) {
@@ -681,24 +684,16 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
         let validatedArgs: Record<string, unknown>;
         try {
           validatedArgs = validateToolCall(enabledTools, toolCall) as Record<string, unknown>;
-          // Reset the retry counter on any successful validation — the
-          // model corrected itself, or different tool calls interleaved.
-          lastFailedValidationTool = null;
-          consecutiveValidationFailures = 0;
+          // Clear THIS tool's failure counter only — leave other tools'
+          // counters untouched so a stuck Write isn't forgiven by a
+          // healthy interleaved Read.
+          validationFailuresByTool.delete(toolCall.name);
         } catch (error) {
           const validationError = toErrorMessage(error);
           const elapsedSeconds = Math.max(0, (Date.now() - startedToolMs) / 1000);
 
-          // Track same-tool consecutive validation failures. After
-          // MAX_CONSECUTIVE_VALIDATION_FAILURES in a row we bail the turn
-          // loop instead of feeding yet another toolResult back to the LLM
-          // — there's no evidence the model is going to self-correct.
-          if (lastFailedValidationTool === toolCall.name) {
-            consecutiveValidationFailures += 1;
-          } else {
-            lastFailedValidationTool = toolCall.name;
-            consecutiveValidationFailures = 1;
-          }
+          const currentCount = (validationFailuresByTool.get(toolCall.name) ?? 0) + 1;
+          validationFailuresByTool.set(toolCall.name, currentCount);
 
           yield {
             type: "tool-progress",
@@ -727,15 +722,15 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
             content: validationError,
           };
 
-          if (consecutiveValidationFailures >= MAX_CONSECUTIVE_VALIDATION_FAILURES) {
+          if (currentCount >= MAX_VALIDATION_FAILURES_PER_TOOL) {
             const truncated =
               validationError.length > 200 ? `${validationError.slice(0, 200)}…` : validationError;
             log.warn(
-              `[pi-ai] Tool "${toolCall.name}" failed validation ${consecutiveValidationFailures} consecutive times; aborting turn.`,
+              `[pi-ai] Tool "${toolCall.name}" failed validation ${currentCount} times this turn; aborting.`,
             );
             yield errorResult(
               "error_tool_loop",
-              `Tool "${toolCall.name}" failed validation ${consecutiveValidationFailures} consecutive times; aborting. Last error: ${truncated}`,
+              `Tool "${toolCall.name}" failed validation ${currentCount} times this turn; aborting. Last error: ${truncated}`,
               startedAtMs,
               turn,
               totalCostUsd,

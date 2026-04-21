@@ -453,6 +453,13 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     permissionMode: "dontAsk" as const,
     plugins: [{ type: "local" as const, path: params.pluginPath }],
     abortController,
+    // PASTA S4 writes a large JSON (threats × evidence anchors, often
+    // 30+ threats). The default per-turn output budget for most
+    // providers tops out ~16k tokens, which truncates the Write tool
+    // call mid-argument and the LLM re-emits {file_path: "..."} with
+    // no `content` field. Bumping this gives the model room for a
+    // single Write call carrying the full artifact.
+    maxOutputTokens: 64_000,
   };
 
   let costUsd = 0;
@@ -473,11 +480,12 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     // tool_use_id → tool_name; needed so when a tool_result comes back
     // (keyed only by tool_use_id) we can identify WHICH tool failed.
     const toolNames = new Map<string, string>();
-    // Per-tool consecutive-failure counter. Reset when the same tool
-    // succeeds or a different tool runs. Cross-tool alternation won't
-    // trip the cap — only a stuck retry loop on a single tool.
-    let lastFailedTool: string | null = null;
-    let consecutiveFailures = 0;
+    // Per-tool failure counter. A tool's counter resets only when THAT
+    // tool succeeds — not when any other tool succeeds. Otherwise a
+    // sub-agent that alternates a failing Write with many successful
+    // Reads appears healthy to the cap and we loop indefinitely. The
+    // cap trips when any single tool's count reaches MAX.
+    const failuresByTool = new Map<string, number>();
     try {
       for await (const message of params.runtime.query({ prompt, options: baseOpts })) {
         // Respect aborts eagerly — the abortController in baseOpts is
@@ -501,31 +509,29 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
         if (message.type === "tool-result") {
           const toolName = toolNames.get(message.toolUseId) ?? "tool";
           if (message.isError) {
-            if (lastFailedTool === toolName) consecutiveFailures += 1;
-            else {
-              lastFailedTool = toolName;
-              consecutiveFailures = 1;
-            }
+            const currentCount = (failuresByTool.get(toolName) ?? 0) + 1;
+            failuresByTool.set(toolName, currentCount);
             const firstLine =
               message.content
                 .split(/\r?\n/)
                 .find((l) => l.trim().length > 0)
                 ?.trim() ?? "";
             const summary = firstLine ? firstLine.slice(0, 80) : "tool error";
-            const pulse = `${toolName} failed (${consecutiveFailures}/${MAX_CONSECUTIVE_TOOL_FAILURES}): ${summary}`;
+            const pulse = `${toolName} failed (${currentCount}/${MAX_CONSECUTIVE_TOOL_FAILURES}): ${summary}`;
             log.warn(`${phaseTag} ${pulse}`);
             params.onActivity?.(pulse);
-            if (consecutiveFailures >= MAX_CONSECUTIVE_TOOL_FAILURES) {
-              const abortMsg = `aborting phase after ${consecutiveFailures} ${toolName} failures`;
+            if (currentCount >= MAX_CONSECUTIVE_TOOL_FAILURES) {
+              const abortMsg = `aborting phase after ${currentCount} ${toolName} failures`;
               log.warn(`${phaseTag} ${abortMsg}`);
               params.onActivity?.(abortMsg);
               abortController.abort();
               break;
             }
           } else {
-            // Any successful tool result clears the retry counter.
-            lastFailedTool = null;
-            consecutiveFailures = 0;
+            // Clear only THIS tool's counter on success — leave other
+            // tools' counters alone so a stuck Write isn't forgiven by a
+            // healthy interleaved Read.
+            failuresByTool.delete(toolName);
           }
         }
         // Forward the sub-agent's per-action stream (tool_use headers,

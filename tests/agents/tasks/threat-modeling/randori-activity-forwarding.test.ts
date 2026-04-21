@@ -365,23 +365,36 @@ describe("runRandoriPasta — tool-failure retry cap", () => {
     expect(activity.slice(abortIndex + 1)).toEqual([]);
   });
 
-  it("resets the counter when the same tool succeeds between failures", async () => {
+  it("clears THIS tool's counter only when THAT tool succeeds (not other tools)", async () => {
+    // Write fail → Read success → Write fail: the Read success does NOT
+    // reset Write's counter. This is the real-world pattern from the
+    // PASTA S4 retry loop.
     const scripted: AgentMessage[] = [
       {
         type: "assistant",
-        content: [{ type: "tool_use", id: "tu-a", name: "Write", input: { file_path: "/x" } }],
+        content: [{ type: "tool_use", id: "w1", name: "Write", input: { file_path: "/x" } }],
       },
-      { type: "tool-result", toolUseId: "tu-a", isError: true, content: "fail 1" },
+      { type: "tool-result", toolUseId: "w1", isError: true, content: "fail 1" },
       {
         type: "assistant",
-        content: [{ type: "tool_use", id: "tu-b", name: "Write", input: { file_path: "/y" } }],
+        content: [{ type: "tool_use", id: "r1", name: "Read", input: { file_path: "/x" } }],
       },
-      { type: "tool-result", toolUseId: "tu-b", isError: false, content: "ok" },
+      { type: "tool-result", toolUseId: "r1", isError: false, content: "ok" },
       {
         type: "assistant",
-        content: [{ type: "tool_use", id: "tu-c", name: "Write", input: { file_path: "/z" } }],
+        content: [{ type: "tool_use", id: "w2", name: "Write", input: { file_path: "/y" } }],
       },
-      { type: "tool-result", toolUseId: "tu-c", isError: true, content: "fail 2" },
+      { type: "tool-result", toolUseId: "w2", isError: true, content: "fail 2" },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "r2", name: "Read", input: { file_path: "/y" } }],
+      },
+      { type: "tool-result", toolUseId: "r2", isError: false, content: "ok" },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "w3", name: "Write", input: { file_path: "/z" } }],
+      },
+      { type: "tool-result", toolUseId: "w3", isError: true, content: "fail 3" },
       { type: "result", subtype: "success", result: "ok", totalCostUsd: 0 },
     ];
 
@@ -402,30 +415,83 @@ describe("runRandoriPasta — tool-failure retry cap", () => {
       onActivity: (a) => activity.push(a),
     });
 
-    // Two failures total but both reset to (1/3) because a success came
-    // between them.
+    // Write counter climbs 1→2→3 despite the Reads succeeding in between.
+    // The cap fires on the 3rd Write failure — which is the whole point
+    // of the per-tool tracking over the old cross-tool-reset behavior.
+    expect(activity).toContain("Write failed (1/3): fail 1");
+    expect(activity).toContain("Write failed (2/3): fail 2");
+    expect(activity).toContain("Write failed (3/3): fail 3");
+    expect(activity).toContain("aborting phase after 3 Write failures");
+  });
+
+  it("a tool's success clears ONLY its own counter", async () => {
+    // Write fail → Write success → Write fail: the Write success resets
+    // Write's own counter, so the final count is 1.
+    const scripted: AgentMessage[] = [
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "w1", name: "Write", input: { file_path: "/x" } }],
+      },
+      { type: "tool-result", toolUseId: "w1", isError: true, content: "fail 1" },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "w2", name: "Write", input: { file_path: "/y" } }],
+      },
+      { type: "tool-result", toolUseId: "w2", isError: false, content: "ok" },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "w3", name: "Write", input: { file_path: "/z" } }],
+      },
+      { type: "tool-result", toolUseId: "w3", isError: true, content: "fail 2" },
+      { type: "result", subtype: "success", result: "ok", totalCostUsd: 0 },
+    ];
+
+    const activity: string[] = [];
+    await runRandoriPasta({
+      runtime: makeRuntime(scripted),
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      pluginPath: "/plugin",
+      model: "test-model",
+      allowedTools: [],
+      stages: ["s1"],
+      artifactDir: ".kuzushi/randori",
+      maxElements: 40,
+      maxThreats: 30,
+      emitFindings: false,
+      findingThreshold: "medium",
+      onActivity: (a) => activity.push(a),
+    });
+
     const failurePulses = activity.filter((l) => l.startsWith("Write failed"));
     expect(failurePulses).toEqual(["Write failed (1/3): fail 1", "Write failed (1/3): fail 2"]);
     expect(activity.some((l) => l.startsWith("aborting phase"))).toBe(false);
   });
 
-  it("resets the counter when a DIFFERENT tool fails between same-tool failures", async () => {
+  it("different tools each have independent counters", async () => {
+    // Write fails twice and Read fails twice — neither trips the cap in
+    // isolation. Interleaved.
     const scripted: AgentMessage[] = [
       {
         type: "assistant",
-        content: [{ type: "tool_use", id: "tu-1", name: "Write", input: {} }],
+        content: [{ type: "tool_use", id: "w1", name: "Write", input: {} }],
       },
-      { type: "tool-result", toolUseId: "tu-1", isError: true, content: "w1" },
+      { type: "tool-result", toolUseId: "w1", isError: true, content: "w1" },
       {
         type: "assistant",
-        content: [{ type: "tool_use", id: "tu-2", name: "Read", input: {} }],
+        content: [{ type: "tool_use", id: "r1", name: "Read", input: {} }],
       },
-      { type: "tool-result", toolUseId: "tu-2", isError: true, content: "r1" },
+      { type: "tool-result", toolUseId: "r1", isError: true, content: "r1" },
       {
         type: "assistant",
-        content: [{ type: "tool_use", id: "tu-3", name: "Write", input: {} }],
+        content: [{ type: "tool_use", id: "w2", name: "Write", input: {} }],
       },
-      { type: "tool-result", toolUseId: "tu-3", isError: true, content: "w2" },
+      { type: "tool-result", toolUseId: "w2", isError: true, content: "w2" },
+      {
+        type: "assistant",
+        content: [{ type: "tool_use", id: "r2", name: "Read", input: {} }],
+      },
+      { type: "tool-result", toolUseId: "r2", isError: true, content: "r2" },
       { type: "result", subtype: "success", result: "ok", totalCostUsd: 0 },
     ];
 
@@ -446,10 +512,11 @@ describe("runRandoriPasta — tool-failure retry cap", () => {
       onActivity: (a) => activity.push(a),
     });
 
-    // Interleaved failures don't accumulate — each is (1/3).
+    // Independent counters: Write 1/3, 2/3 and Read 1/3, 2/3. Neither trips.
     expect(activity).toContain("Write failed (1/3): w1");
     expect(activity).toContain("Read failed (1/3): r1");
-    expect(activity).toContain("Write failed (1/3): w2");
+    expect(activity).toContain("Write failed (2/3): w2");
+    expect(activity).toContain("Read failed (2/3): r2");
     expect(activity.some((l) => l.startsWith("aborting phase"))).toBe(false);
   });
 });
