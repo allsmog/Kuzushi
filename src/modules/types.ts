@@ -217,6 +217,27 @@ export interface ToolExecutionContext {
     description: string,
     meta?: { phase?: string; step?: number; total?: number },
   ) => void;
+  /**
+   * Forward a raw subprocess output line (stdout/stderr, Bash-command preview,
+   * sub-agent tool-use header) into the running tool-call's `⎿` live tail.
+   * Distinct from `reportActivity` in two ways:
+   *   - **No scrollback entry.** The line is ephemeral — it appears in the
+   *     live tail until the tool resolves, then disappears. Scrollback isn't
+   *     polluted with potentially-noisy stdout.
+   *   - **Larger tail buffer.** Output lines are stored up to 5 deep (vs 3
+   *     for activities) so operators can see a few lines of context when a
+   *     subprocess is streaming quickly.
+   *
+   * Use for: subprocess stdout preview, sub-agent tool-use streaming, nmap
+   * per-host callbacks. Do NOT use for structured phase labels — those go
+   * through `reportActivity`.
+   *
+   * Example:
+   *
+   *   ctx.reportOutput?.("npm install: added 142 packages in 3.4s");
+   *   ctx.reportOutput?.("Read(src/utils/format.ts)");
+   */
+  reportOutput?: (line: string) => void;
 }
 
 /**

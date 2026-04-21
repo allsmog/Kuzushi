@@ -814,6 +814,24 @@ export type TaskActivityEvent = EventEnvelope<
   }
 >;
 
+/**
+ * Ephemeral subprocess output preview for the shell's `⎿` live tail.
+ * Sibling of `task:activity` but semantically different: these are
+ * raw stdout / tool-use streams the operator reads "while it runs",
+ * not structured progress. The shell drops them when the tool resolves
+ * and never appends them to scrollback.
+ *
+ * Tools emit via `ctx.reportOutput(line)` (or `publishTaskOutput(...)`).
+ */
+export type TaskOutputEvent = EventEnvelope<
+  "task:output",
+  {
+    taskId: string;
+    /** One output line, already clamped / summarized by the producer. */
+    line: string;
+  }
+>;
+
 /* ── Retry observability events ───────────────────────────────────── */
 
 export type RetryAttemptEvent = EventEnvelope<
@@ -1103,6 +1121,7 @@ export type KuzushiEvent =
   | LlmRetryEvent
   | TaskPhaseProgressEvent
   | TaskActivityEvent
+  | TaskOutputEvent
   | RetryAttemptEvent
   | RetryExhaustedEvent
   | BudgetCheckEvent

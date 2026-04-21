@@ -150,6 +150,7 @@ const auditTool: ModuleTool = {
         maxFindings,
         logTag: "[tob-audit]",
         signal: ctx.signal,
+        onOutput: ctx.reportOutput,
       });
 
       const lines = [
