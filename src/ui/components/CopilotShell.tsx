@@ -278,7 +278,10 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
 
       {shell.processing && shell.currentTool && (
-        <ToolRunningStatus tool={shell.currentTool} heartbeat={shell.llmHeartbeat} />
+        <Box flexDirection="column">
+          <ToolRunningStatus tool={shell.currentTool} />
+          {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
+        </Box>
       )}
 
       {shell.processing && !shell.currentTool && (
@@ -489,14 +492,31 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
           <Text>{tokens.danger(entry.text)}</Text>
         </Box>
       );
-    case "tool-progress":
+    case "tool-call":
       return (
-        <Box paddingLeft={2}>
+        <Box marginTop={1}>
           <Text>
-            {tokens.muted("⎿ ")}
-            {tokens.muted(entry.text)}
+            {tokens.accent("⏺ ")}
+            <Text bold>{entry.tool ?? entry.text.replace(/^⏺\s*/, "")}</Text>
+            {entry.inputHint ? tokens.muted(`(${entry.inputHint})`) : ""}
           </Text>
         </Box>
       );
+    case "tool-progress": {
+      const kind = entry.progressKind ?? "info";
+      const wrap = (s: string): string => {
+        if (kind === "ok") return tokens.success(s);
+        if (kind === "fail") return tokens.danger(s);
+        return tokens.muted(s);
+      };
+      return (
+        <Box paddingLeft={2}>
+          <Text>
+            {tokens.muted("⎿  ")}
+            {wrap(entry.text)}
+          </Text>
+        </Box>
+      );
+    }
   }
 }

@@ -331,19 +331,78 @@ export function extractToolUseActivities(content: Array<Record<string, unknown>>
   for (const block of content) {
     if (block["type"] !== "tool_use") continue;
     const name = typeof block["name"] === "string" ? block["name"] : "tool";
-    const input = block["input"];
-    let hint = "";
-    if (input && typeof input === "object") {
-      const record = input as Record<string, unknown>;
-      const primary =
-        record["target"] ?? record["path"] ?? record["file"] ?? record["query"] ?? record["name"];
-      if (typeof primary === "string" && primary.length > 0) {
-        hint = primary.length > 40 ? `${primary.slice(0, 39)}…` : primary;
-      }
-    }
+    const hint = summarizeInput(block["input"]);
     out.push(hint ? `${name} · ${hint}` : name);
   }
   return out;
+}
+
+/**
+ * Parse tool_use blocks out of an assistant message into `⏺` header entries
+ * — `{ name, inputHint }` pairs. Separate from `extractToolUseActivities`
+ * (which returns the legacy `⎿ ` body-form string) because the cc-repo-style
+ * flow emits the header once per tool call, not as a progress line.
+ */
+export function extractToolUseHeaders(
+  content: Array<Record<string, unknown>>,
+): Array<{ name: string; inputHint?: string }> {
+  const out: Array<{ name: string; inputHint?: string }> = [];
+  for (const block of content) {
+    if (block["type"] !== "tool_use") continue;
+    const name = typeof block["name"] === "string" ? block["name"] : "tool";
+    const hint = summarizeInput(block["input"]);
+    out.push(hint ? { name, inputHint: hint } : { name });
+  }
+  return out;
+}
+
+/**
+ * Render a ≤40-char summary of a tool input for the `⏺ tool(<hint>)` and
+ * activity-tail displays. Returns `undefined` when no sensible primary field
+ * exists — callers fall back to bare `toolName`.
+ *
+ * Accepts object, string, number, boolean, array. Falls back to `JSON.stringify`
+ * for objects without a recognized primary field so the operator at least sees
+ * *something* useful instead of a bare tool name.
+ */
+export function summarizeInput(input: unknown): string | undefined {
+  if (input == null) return undefined;
+  if (typeof input === "string") return clampHint(input);
+  if (typeof input === "number" || typeof input === "boolean") return String(input);
+  if (Array.isArray(input)) {
+    if (input.length === 0) return undefined;
+    const first = input[0];
+    if (typeof first === "string") return clampHint(first);
+    return clampHint(JSON.stringify(input));
+  }
+  if (typeof input === "object") {
+    const record = input as Record<string, unknown>;
+    const primary =
+      record["target"] ??
+      record["path"] ??
+      record["file"] ??
+      record["query"] ??
+      record["name"] ??
+      record["url"] ??
+      record["module"];
+    if (typeof primary === "string" && primary.length > 0) return clampHint(primary);
+    if (typeof primary === "number" || typeof primary === "boolean") return String(primary);
+    // Fallback: serialize the whole object, clamped
+    try {
+      const json = JSON.stringify(record);
+      if (json && json.length > 2) return clampHint(json);
+    } catch {
+      // ignore
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+function clampHint(s: string): string {
+  const trimmed = s.trim();
+  if (trimmed.length <= 40) return trimmed;
+  return `${trimmed.slice(0, 39)}…`;
 }
 
 export function finalizeAssistantText(
@@ -1140,21 +1199,53 @@ async function startInkShell(
     if (seedTaskOutputs) execOpts.seedTaskOutputs = seedTaskOutputs;
     if (datastore) execOpts.datastore = datastore;
     if (workspaceManager) execOpts.workspace = workspaceManager;
+    // Emit the cc-repo-style `⏺ tool(hint)` header once, up front. The
+    // scrollback is now the primary progress surface; `⎿  …` progress lines
+    // will accumulate beneath it as `task:activity` / `task:phase-progress`
+    // events arrive (see bus subscriptions near `startShell`).
+    const inputHint = summarizeInput(input);
+    const headerText = inputHint ? `⏺ ${tool.name}(${inputHint})` : `⏺ ${tool.name}`;
+    appendToHistory(store, {
+      type: "tool-call",
+      tool: tool.name,
+      ...(inputHint ? { inputHint } : {}),
+      text: headerText,
+      timestamp: Date.now(),
+    });
     // Seed `currentTool` so ToolRunningStatus has something to render the
     // moment the dispatcher kicks off a direct `run` — otherwise the
     // `task:activity` events that fire during the tool would hit an empty
     // slot and be dropped.
+    const startedAt = Date.now();
     updateShell(store, (shell) => ({
       ...shell,
       currentTool: {
         name: tool.name,
-        startedAt: Date.now(),
-        lastEventAt: Date.now(),
+        startedAt,
+        lastEventAt: startedAt,
       },
     }));
+    let ok = false;
+    let aborted = false;
     try {
-      return await core.executeTool(tool.name, input, execOpts);
+      const result = await core.executeTool(tool.name, input, execOpts);
+      if (signal?.aborted) aborted = true;
+      else ok = !!result?.ok;
+      return result;
+    } catch (err) {
+      if (signal?.aborted) aborted = true;
+      throw err;
     } finally {
+      const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      const progressKind: "ok" | "fail" | "abort" = aborted ? "abort" : ok ? "ok" : "fail";
+      const verb = aborted ? "aborted" : ok ? "done" : "failed";
+      const glyph = aborted ? "·" : ok ? "✓" : "✗";
+      appendToHistory(store, {
+        type: "tool-progress",
+        text: `${glyph} ${verb} in ${elapsed}s`,
+        progressKind,
+        timestamp: Date.now(),
+      });
       updateShell(store, (shell) => ({ ...shell, currentTool: undefined }));
     }
   };
@@ -1829,17 +1920,33 @@ async function startInkShell(
             if (text) {
               appendPendingAssistantText(store, text);
             }
-            // Surface each tool-use block as a progressive log line so
-            // operators see what the model is calling, not just a frozen
-            // spinner. Appends to history (accumulating downward) *and*
-            // bumps the currentTool.activities buffer used by the compact
-            // spinner tail.
-            const toolCalls = extractToolUseActivities(message.content);
-            for (const call of toolCalls) {
-              pushToolActivity(store, call);
+            // Surface each tool-use block as a cc-repo-style `⏺ tool(hint)`
+            // header. Dedupe against an immediately-preceding tool-call for
+            // the same tool name (e.g. when the shell dispatcher's own
+            // `runToolFromDispatcher` header was just emitted). Progress
+            // body lines accumulate naturally via `task:activity` bus events
+            // subscribed elsewhere.
+            const headers = extractToolUseHeaders(message.content);
+            for (const header of headers) {
+              const historyArr = store.getState().shell?.history ?? [];
+              const last = historyArr[historyArr.length - 1];
+              const isDuplicate =
+                last?.type === "tool-call" &&
+                last.tool === header.name &&
+                last.inputHint === header.inputHint;
+              if (isDuplicate) continue;
+              const headerText = header.inputHint
+                ? `⏺ ${header.name}(${header.inputHint})`
+                : `⏺ ${header.name}`;
+              pushToolActivity(
+                store,
+                header.inputHint ? `${header.name} · ${header.inputHint}` : header.name,
+              );
               appendToHistory(store, {
-                type: "tool-progress",
-                text: call,
+                type: "tool-call",
+                tool: header.name,
+                ...(header.inputHint ? { inputHint: header.inputHint } : {}),
+                text: headerText,
                 timestamp: Date.now(),
               });
             }
@@ -4265,7 +4372,9 @@ export const __shellInternals = {
   createShellSession,
   extractAssistantText,
   extractToolUseActivities,
+  extractToolUseHeaders,
   finalizeAssistantText,
+  summarizeInput,
   pushToolActivity,
   pushToolPhase,
   formatHelp,
