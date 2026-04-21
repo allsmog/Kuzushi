@@ -59,17 +59,12 @@ import {
   initDb,
   type StoredFindingRecord,
 } from "../../store.js";
+import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import type { MonorepoUIHandle } from "../../ui/monorepo-render.js";
 import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js";
 import { CliUsageError } from "../errors.js";
 import type { ScanCommandOptions } from "../scan-config.js";
 import { isShutdownCapableRuntime, resolveRepo } from "../shared.js";
-import {
-  applyPipelineCacheOptions,
-  createPipelineRuntime,
-  prepareScanExecution,
-  runPipeline,
-} from "./scan.js";
 
 const DEFAULT_MONOREPO_CONCURRENCY = 5;
 
@@ -80,6 +75,8 @@ interface ModuleExecutionResult extends MonorepoModuleResult {
 
 export async function runMonorepoScan(repoPath: string, opts: ScanCommandOptions): Promise<void> {
   const { root: monorepoRoot, name: monorepoName } = resolveRepo(repoPath);
+  const { applyPipelineCacheOptions, createPipelineRuntime, prepareScanExecution, runPipeline } =
+    await import("./scan.js");
   const { config, scanOpts } = prepareScanExecution(monorepoRoot, opts);
   let runtime: AgentRuntime | undefined;
   configureTerminalOutput({
@@ -379,7 +376,7 @@ export async function runMonorepoScan(repoPath: string, opts: ScanCommandOptions
 
 async function resolveMonorepoModules(
   monorepoRoot: string,
-  config: ReturnType<typeof prepareScanExecution>["config"],
+  config: KuzushiConfig,
   opts: ScanCommandOptions,
   runtime?: AgentRuntime,
 ): Promise<{ modules: DiscoveredModule[]; products: DiscoveredProduct[]; costUsd: number }> {
@@ -426,8 +423,8 @@ async function runPlansInParallel(params: {
   plans: ModuleScanPlan[];
   monorepoRoot: string;
   monorepoName: string;
-  config: ReturnType<typeof prepareScanExecution>["config"];
-  scanOpts: ReturnType<typeof prepareScanExecution>["scanOpts"];
+  config: KuzushiConfig;
+  scanOpts: ScanOpts;
   opts: ScanCommandOptions;
   dbPath: string;
   runtime: AgentRuntime;
@@ -437,6 +434,7 @@ async function runPlansInParallel(params: {
   budget: ReturnType<typeof createBudget>;
   monorepoUI?: MonorepoUIHandle;
 }): Promise<ModuleExecutionResult[]> {
+  const { runPipeline } = await import("./scan.js");
   const {
     plans,
     monorepoRoot,

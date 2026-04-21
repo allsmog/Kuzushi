@@ -8,12 +8,12 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
+import type { ConfigPatchEntry } from "../config.js";
 import { applyConfigPatch, configPath, loadConfig } from "../config.js";
 import { saveOperatorScanContext } from "../operator-context.js";
 import { savePersistentThreatModel } from "../threat-model-renderer.js";
 import type { OperatorScanContext } from "../types.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
-import type { ConfigPatchEntry } from "./components/ConfigEditor.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
 import type { WizardResult } from "./components/SetupWizard.js";
 import { emitOutputNotice } from "./output.js";

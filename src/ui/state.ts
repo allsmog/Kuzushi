@@ -13,6 +13,7 @@ import type { ModuleCategory, ModuleRank } from "../modules/types.js";
 // without cross-cutting into `src/copilot/`.
 export type { ShellPlan, ShellPlanChange } from "../copilot/nl-planner.js";
 
+import type { ConfigPatchEntry } from "../config.js";
 import type { QualityGateResult } from "../quality-gate.js";
 import type { RunMetrics } from "../scoring/run-metrics.js";
 import type {
@@ -25,7 +26,6 @@ import type {
   Verdict,
 } from "../types.js";
 import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
-import type { ConfigPatchEntry } from "./components/ConfigEditor.js";
 import type { CredentialChoice } from "./components/CredentialPrompt.js";
 import type { WizardResult } from "./components/SetupWizard.js";
 
