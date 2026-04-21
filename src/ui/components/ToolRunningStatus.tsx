@@ -2,11 +2,13 @@
  * Compact spinner block rendered beneath the conversation while a shell
  * tool is running. Progressive phase/activity lines now accumulate in the
  * conversation history (cc-repo style — each step prints a new line), so
- * this component stays small: spinner + tool name + live `mm:ss` elapsed,
- * an optional one-line phase caption, and the LLM heartbeat underneath.
+ * this component stays intentionally thin to avoid redraw flicker:
+ * spinner + tool name + live `mm:ss` elapsed. Phase captions and LLM
+ * heartbeat lines live in the parent `CopilotShell` (and history) where
+ * their update cadence doesn't drag the whole status block into a repaint.
  *
- * `useHeartbeat` drives the elapsed tick + flips the spinner to `warn` +
- * appends a `waiting…` affordance after 15s of silence.
+ * `useHeartbeat` drives the elapsed-stale detection + flips the spinner
+ * to `warn` + appends a `waiting…` affordance after 15s of silence.
  */
 
 import { Box, Text } from "ink";
@@ -18,12 +20,18 @@ import { Spinner } from "./Spinner.js";
 
 interface ToolRunningStatusProps {
   tool: NonNullable<ShellState["currentTool"]>;
-  heartbeat?: ShellState["llmHeartbeat"];
 }
 
-export const ToolRunningStatus = React.memo(_ToolRunningStatus);
+export const ToolRunningStatus = React.memo(_ToolRunningStatus, (prev, next) => {
+  // Only re-render when fields this component actually reads change. Phase /
+  // activity / elapsedSeconds bumps from `task:activity` events must NOT
+  // flicker the bottom block — history owns that surface now.
+  const a = prev.tool;
+  const b = next.tool;
+  return a.name === b.name && a.startedAt === b.startedAt && a.lastEventAt === b.lastEventAt;
+});
 
-function _ToolRunningStatus({ tool, heartbeat }: ToolRunningStatusProps): React.ReactElement {
+function _ToolRunningStatus({ tool }: ToolRunningStatusProps): React.ReactElement {
   const { isStale } = useHeartbeat(
     {
       startedAt: tool.startedAt,
@@ -34,32 +42,17 @@ function _ToolRunningStatus({ tool, heartbeat }: ToolRunningStatusProps): React.
   );
 
   const spinnerColor = isStale ? "warn" : "accent";
-  const phaseLine = buildPhaseLine(tool);
-  const caption = phaseLine ?? tool.subLabel;
 
   return (
-    <Box flexDirection="column" marginTop={1} paddingLeft={2}>
-      <Box>
-        <Spinner color={spinnerColor} />
-        <Text>
-          {"  "}
-          {tokens.muted(tool.name)}
-          {caption ? tokens.muted(` · ${caption}`) : ""}
-        </Text>
-        <ElapsedReadout tool={tool} isStale={isStale} />
-      </Box>
-      {heartbeat && <LlmHeartbeatLine heartbeat={heartbeat} />}
+    <Box marginTop={1} paddingLeft={2}>
+      <Spinner color={spinnerColor} />
+      <Text>
+        {"  "}
+        {tokens.muted(tool.name)}
+      </Text>
+      <ElapsedReadout tool={tool} isStale={isStale} />
     </Box>
   );
-}
-
-function buildPhaseLine(tool: ToolRunningStatusProps["tool"]): string | null {
-  if (!tool.phase) return null;
-  if (tool.step != null && tool.total != null) {
-    const base = tool.phase.replace(/\s*\(\d+\s*\/\s*\d+\)\s*$/, "").trim();
-    return base ? `${tool.step}/${tool.total} · ${base}` : `${tool.step}/${tool.total}`;
-  }
-  return tool.phase;
 }
 
 /**
@@ -105,28 +98,3 @@ function ElapsedReadout({
   );
 }
 
-/**
- * One-line LLM heartbeat shown under the tool spinner. Mirrors the legacy
- * inline version from `CopilotShell.tsx` so the layout stays identical.
- */
-function LlmHeartbeatLine({
-  heartbeat,
-}: {
-  heartbeat: NonNullable<ShellState["llmHeartbeat"]>;
-}): React.ReactElement | null {
-  const { activeCalls, completedCalls, latestModel, totalCostUsd } = heartbeat;
-  if (activeCalls === 0 && completedCalls === 0) return null;
-  const parts: string[] = [];
-  if (latestModel) parts.push(latestModel);
-  const calls =
-    activeCalls > 0
-      ? `${activeCalls} call${activeCalls === 1 ? "" : "s"} in flight`
-      : `${completedCalls} call${completedCalls === 1 ? "" : "s"}`;
-  parts.push(calls);
-  if (totalCostUsd > 0) parts.push(`$${totalCostUsd.toFixed(2)}`);
-  return (
-    <Box paddingLeft={4}>
-      <Text>{tokens.muted(`· ${parts.join(" · ")}`)}</Text>
-    </Box>
-  );
-}
