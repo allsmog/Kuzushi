@@ -339,19 +339,28 @@ export function extractToolUseActivities(content: Array<Record<string, unknown>>
 
 /**
  * Parse tool_use blocks out of an assistant message into `⏺` header entries
- * — `{ name, inputHint }` pairs. Separate from `extractToolUseActivities`
+ * — `{ id, name, inputHint }` triples. Separate from `extractToolUseActivities`
  * (which returns the legacy `⎿ ` body-form string) because the cc-repo-style
  * flow emits the header once per tool call, not as a progress line.
+ *
+ * The `id` is the Anthropic `tool_use` block id (when present), used later
+ * to correlate with `tool-summary` / `tool-progress` events so agent-driven
+ * `⏺` entries can flip from running → resolved without manual bookkeeping.
  */
 export function extractToolUseHeaders(
   content: Array<Record<string, unknown>>,
-): Array<{ name: string; inputHint?: string }> {
-  const out: Array<{ name: string; inputHint?: string }> = [];
+): Array<{ id?: string; name: string; inputHint?: string }> {
+  const out: Array<{ id?: string; name: string; inputHint?: string }> = [];
   for (const block of content) {
     if (block["type"] !== "tool_use") continue;
+    const id = typeof block["id"] === "string" ? (block["id"] as string) : undefined;
     const name = typeof block["name"] === "string" ? block["name"] : "tool";
     const hint = summarizeInput(block["input"]);
-    out.push(hint ? { name, inputHint: hint } : { name });
+    out.push({
+      ...(id ? { id } : {}),
+      name,
+      ...(hint ? { inputHint: hint } : {}),
+    });
   }
   return out;
 }
@@ -403,6 +412,27 @@ function clampHint(s: string): string {
   const trimmed = s.trim();
   if (trimmed.length <= 40) return trimmed;
   return `${trimmed.slice(0, 39)}…`;
+}
+
+/**
+ * Resolve the `(args)` portion of a tool-call header: prefer the per-tool
+ * `formatInput` hook when it produces a non-empty string, otherwise fall
+ * back to the generic primary-field extractor + 40-char clamp.
+ *
+ * Returning `""` from `formatInput` deliberately suppresses the hint (some
+ * tools have no meaningful input to surface). Returning `null`/`undefined`
+ * triggers the fallback.
+ */
+export function renderToolInputHint(
+  tool: { formatInput?(input: unknown): string | null | undefined },
+  input: unknown,
+): string | undefined {
+  if (tool.formatInput) {
+    const custom = tool.formatInput(input);
+    if (custom === "") return undefined;
+    if (custom != null) return clampHint(custom);
+  }
+  return summarizeInput(input);
 }
 
 export function finalizeAssistantText(
@@ -871,6 +901,82 @@ function appendToHistory(store: UIStore, entry: ShellHistoryEntry): void {
   }));
 }
 
+/**
+ * Mutate an existing history entry in place by id. Used by the tool-call
+ * lifecycle to flip `status: "running" → "ok" | "fail" | "abort"` and
+ * inject a `resultOutput` once the dispatcher resolves the tool. Silently
+ * no-ops when the id isn't found so bus subscriptions can fire lazily
+ * without ordering hazards.
+ */
+function patchHistoryEntry(
+  store: UIStore,
+  id: string,
+  patch: Partial<ShellHistoryEntry>,
+): void {
+  updateShell(store, (shell) => {
+    const idx = shell.history.findIndex((entry) => entry.id === id);
+    if (idx < 0) return shell;
+    const next = shell.history.slice();
+    next[idx] = { ...next[idx]!, ...patch };
+    return { ...shell, history: next };
+  });
+}
+
+/**
+ * Safety-net: sweep the history for any tool-call entries still marked
+ * `status: "running"` and flip them to `status` + optional `resultOutput`.
+ * Called at turn boundaries so an aborted / errored turn doesn't leave
+ * agent-driven `⏺` entries pulsing forever.
+ */
+function finalizeRunningToolCalls(
+  store: UIStore,
+  status: "ok" | "fail" | "abort",
+  resultOutput?: string,
+): void {
+  updateShell(store, (shell) => {
+    let mutated = false;
+    const next = shell.history.map((entry) => {
+      if (entry.type !== "tool-call" || entry.status !== "running") return entry;
+      mutated = true;
+      return {
+        ...entry,
+        status,
+        ...(resultOutput ? { resultOutput } : {}),
+        liveActivities: undefined,
+      };
+    });
+    return mutated ? { ...shell, history: next } : shell;
+  });
+}
+
+/**
+ * Push a short activity line onto a running tool-call's `liveActivities`
+ * tail (newest at index 0, max 3). Silently no-ops when the id isn't a
+ * running tool-call.
+ */
+const LIVE_ACTIVITY_CAP = 3;
+const LIVE_ACTIVITY_TEXT_CAP = 80;
+function pushLiveActivity(store: UIStore, id: string, text: string): void {
+  const trimmed =
+    text.length > LIVE_ACTIVITY_TEXT_CAP
+      ? `${text.slice(0, LIVE_ACTIVITY_TEXT_CAP - 1)}…`
+      : text;
+  updateShell(store, (shell) => {
+    const idx = shell.history.findIndex((entry) => entry.id === id);
+    if (idx < 0) return shell;
+    const entry = shell.history[idx]!;
+    if (entry.type !== "tool-call" || entry.status !== "running") return shell;
+    const prev = entry.liveActivities ?? [];
+    // Dedupe consecutive identical text — no point pushing "scanning X"
+    // three times in a row.
+    if (prev[0] === trimmed) return shell;
+    const nextActivities = [trimmed, ...prev].slice(0, LIVE_ACTIVITY_CAP);
+    const next = shell.history.slice();
+    next[idx] = { ...entry, liveActivities: nextActivities };
+    return { ...shell, history: next };
+  });
+}
+
 function beginShellTurn(store: UIStore, input: string, focusedModule: string | null): void {
   updateShell(store, (shell) => ({
     ...shell,
@@ -1202,13 +1308,23 @@ async function startInkShell(
     // Emit the cc-repo-style `⏺ tool(hint)` header once, up front. The
     // scrollback is now the primary progress surface; `⎿  …` progress lines
     // will accumulate beneath it as `task:activity` / `task:phase-progress`
-    // events arrive (see bus subscriptions near `startShell`).
-    const inputHint = summarizeInput(input);
-    const headerText = inputHint ? `⏺ ${tool.name}(${inputHint})` : `⏺ ${tool.name}`;
+    // events arrive (see bus subscriptions near `startShell`). The entry
+    // has a stable `id` so the finally-block can flip its status on
+    // resolution (cyan `⏺` → green / red / dim) without appending a
+    // duplicate completion line.
+    const inputDisplay = renderToolInputHint(tool, input);
+    const displayName = tool.displayName;
+    const headerText = inputDisplay
+      ? `⏺ ${displayName ?? tool.name}(${inputDisplay})`
+      : `⏺ ${displayName ?? tool.name}`;
+    const historyEntryId = `tc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     appendToHistory(store, {
       type: "tool-call",
+      id: historyEntryId,
       tool: tool.name,
-      ...(inputHint ? { inputHint } : {}),
+      ...(displayName ? { displayName } : {}),
+      ...(inputDisplay ? { inputHint: inputDisplay } : {}),
+      status: "running",
       text: headerText,
       timestamp: Date.now(),
     });
@@ -1223,12 +1339,16 @@ async function startInkShell(
         name: tool.name,
         startedAt,
         lastEventAt: startedAt,
+        historyEntryId,
+        ...(displayName ? { displayName } : {}),
       },
     }));
     let ok = false;
     let aborted = false;
+    let finalResult: Awaited<ReturnType<CopilotCore["executeTool"]>> | undefined;
     try {
       const result = await core.executeTool(tool.name, input, execOpts);
+      finalResult = result;
       if (signal?.aborted) aborted = true;
       else ok = !!result?.ok;
       return result;
@@ -1237,14 +1357,25 @@ async function startInkShell(
       throw err;
     } finally {
       const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      const progressKind: "ok" | "fail" | "abort" = aborted ? "abort" : ok ? "ok" : "fail";
+      const status: "ok" | "fail" | "abort" = aborted ? "abort" : ok ? "ok" : "fail";
+      // Per-tool renderResult() may return a concise summary like
+      // "Read 559 lines". Fall back to the generic verb when omitted.
+      const customResult =
+        status === "ok" && finalResult
+          ? tool.renderResult?.(finalResult)
+          : undefined;
       const verb = aborted ? "aborted" : ok ? "done" : "failed";
-      const glyph = aborted ? "·" : ok ? "✓" : "✗";
-      appendToHistory(store, {
-        type: "tool-progress",
-        text: `${glyph} ${verb} in ${elapsed}s`,
-        progressKind,
-        timestamp: Date.now(),
+      const resultOutput =
+        customResult && customResult.length > 0
+          ? customResult
+          : `${verb} in ${elapsed}s`;
+      patchHistoryEntry(store, historyEntryId, {
+        status,
+        elapsedSeconds: elapsed,
+        resultOutput,
+        // Clear the live tail — the tool is done, scrollback already has
+        // the per-activity entries for the audit trail.
+        liveActivities: undefined,
       });
       updateShell(store, (shell) => ({ ...shell, currentTool: undefined }));
     }
@@ -1411,6 +1542,10 @@ async function startInkShell(
     "task:phase-progress",
     (event) => {
       pushToolPhase(store, event.payload.phase);
+      // Also feed the running tool-call's live tail so operators see the
+      // latest phase inline under the `⏺` header while the tool runs.
+      const entryId = store.getState().shell?.currentTool?.historyEntryId;
+      if (entryId) pushLiveActivity(store, entryId, event.payload.phase);
       appendToHistory(store, {
         type: "tool-progress",
         text: event.payload.phase,
@@ -1421,6 +1556,8 @@ async function startInkShell(
   bus.subscribe<import("../bus/events.js").TaskActivityEvent>("task:activity", (event) => {
     if (event.payload.phase) pushToolPhase(store, event.payload.phase);
     pushToolActivity(store, event.payload.description);
+    const entryId = store.getState().shell?.currentTool?.historyEntryId;
+    if (entryId) pushLiveActivity(store, entryId, event.payload.description);
     appendToHistory(store, {
       type: "tool-progress",
       text: event.payload.description,
@@ -1935,17 +2072,34 @@ async function startInkShell(
                 last.tool === header.name &&
                 last.inputHint === header.inputHint;
               if (isDuplicate) continue;
+              // Best-effort lookup of the tool's displayName so agent-driven
+              // calls also surface human-friendly labels. Misses fall back
+              // to the raw `module:action` name.
+              const matchedTool = core.registry.resolveTool(header.name)?.tool;
+              const agentDisplayName = matchedTool?.displayName;
+              const label = agentDisplayName ?? header.name;
               const headerText = header.inputHint
-                ? `⏺ ${header.name}(${header.inputHint})`
-                : `⏺ ${header.name}`;
+                ? `⏺ ${label}(${header.inputHint})`
+                : `⏺ ${label}`;
               pushToolActivity(
                 store,
-                header.inputHint ? `${header.name} · ${header.inputHint}` : header.name,
+                header.inputHint ? `${label} · ${header.inputHint}` : label,
               );
+              // Use the Anthropic tool_use.id as the history entry's `id`
+              // when available — lets `tool-summary` messages correlate
+              // by `precedingToolUseIds` to flip status on resolution.
+              // Fall back to a synthetic id so the entry is still
+              // mutable (liveActivities tail, Static exclusion).
+              const entryId =
+                header.id ?? `atc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
               appendToHistory(store, {
                 type: "tool-call",
+                id: entryId,
+                ...(header.id ? { toolUseId: header.id } : {}),
                 tool: header.name,
+                ...(agentDisplayName ? { displayName: agentDisplayName } : {}),
                 ...(header.inputHint ? { inputHint: header.inputHint } : {}),
+                status: "running",
                 text: headerText,
                 timestamp: Date.now(),
               });
@@ -1955,10 +2109,39 @@ async function startInkShell(
 
           case "tool-progress": {
             updateToolActivity(store, message.toolName, message.elapsedSeconds);
+            // Also feed the live tail of the matching agent-driven
+            // `⏺` entry so operators watching the scrollback see a
+            // ticking "12s" / tool-specific heartbeat under the header.
+            const history = store.getState().shell?.history ?? [];
+            const entry = history.find(
+              (e) => e.type === "tool-call" && e.toolUseId === message.toolUseId,
+            );
+            if (entry?.id && entry.status === "running") {
+              pushLiveActivity(store, entry.id, `${message.elapsedSeconds}s`);
+            }
             break;
           }
 
           case "tool-summary": {
+            // Flip any agent-driven `⏺` entries whose toolUseId is in the
+            // batch's `precedingToolUseIds` from "running" → "ok". The
+            // Anthropic SDK doesn't expose per-tool success/failure at
+            // the summary level — it bundles multiple uses together —
+            // so we mark everything in the batch as successful and rely
+            // on follow-up assistant text to surface errors explicitly.
+            const precedingIds = message.precedingToolUseIds ?? [];
+            for (const toolUseId of precedingIds) {
+              const history = store.getState().shell?.history ?? [];
+              const entry = history.find(
+                (e) => e.type === "tool-call" && e.toolUseId === toolUseId,
+              );
+              if (entry?.id) {
+                patchHistoryEntry(store, entry.id, {
+                  status: "ok",
+                  liveActivities: undefined,
+                });
+              }
+            }
             updateToolSummary(store, message.summary);
             const trailer = formatContextTrailer(
               opts.target ? path.resolve(opts.target) : process.cwd(),
@@ -2001,6 +2184,9 @@ async function startInkShell(
         });
       }
       setPendingAssistantText(store, undefined);
+      // Seal any agent-driven `⏺` entries that were still pulsing when
+      // the error / abort fired. Otherwise they'd stay "running" forever.
+      finalizeRunningToolCalls(store, wasAborted ? "abort" : "fail");
       appendToHistory(store, {
         type: wasAborted ? "output" : "error",
         text: message,
@@ -2012,6 +2198,11 @@ async function startInkShell(
     }
 
     const wasAborted = finishActiveAction();
+    // Clean end-of-turn — mark any still-"running" tool-call entries as
+    // resolved. Most should already be `ok` from `tool-summary`, but if
+    // the SDK didn't emit one for every batch (or we missed the
+    // correlation), this catches the leak.
+    finalizeRunningToolCalls(store, wasAborted ? "abort" : "ok");
     const pendingAssistantText = store.getState().shell?.pendingAssistantText;
     if (pendingAssistantText) {
       appendToHistory(store, {
@@ -4375,6 +4566,10 @@ export const __shellInternals = {
   extractToolUseHeaders,
   finalizeAssistantText,
   summarizeInput,
+  renderToolInputHint,
+  patchHistoryEntry,
+  pushLiveActivity,
+  finalizeRunningToolCalls,
   pushToolActivity,
   pushToolPhase,
   formatHelp,

@@ -14,6 +14,20 @@ type Params = Record<string, unknown>;
 
 const triageRunTool: ModuleTool = {
   name: "triage:run",
+  displayName: "Triage",
+  formatInput(input) {
+    const p = (input ?? {}) as Record<string, unknown>;
+    if (typeof p["fingerprint"] === "string") return (p["fingerprint"] as string).slice(0, 12);
+    if (Array.isArray(p["fingerprints"])) {
+      const arr = p["fingerprints"] as unknown[];
+      return `${arr.length} finding${arr.length === 1 ? "" : "s"}`;
+    }
+    return null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Triage one or more findings from the workspace DB. The triage agent reads the " +
     "code, traces dataflow, and classifies each with a verdict (tp/fp/needs_review/" +

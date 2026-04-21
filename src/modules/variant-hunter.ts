@@ -131,6 +131,17 @@ const VARIANT_SIGNATURE_SCHEMA = {
 
 const liftPatternTool: ModuleTool = {
   name: "variant:lift-pattern",
+  displayName: "Lift Pattern",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    return typeof p?.["fingerprint"] === "string"
+      ? (p["fingerprint"] as string).slice(0, 12)
+      : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Lift a confirmed true-positive finding into a portable semantic signature " +
     "(source / sink / missing guard / keywords) that downstream hunters can use " +
@@ -266,6 +277,17 @@ const DEFAULT_VENDOR_PATHS = [
 
 const huntTool: ModuleTool = {
   name: "variant:hunt",
+  displayName: "Hunt Variants",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    return typeof p?.["fingerprint"] === "string"
+      ? (p["fingerprint"] as string).slice(0, 12)
+      : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Hunt for variants of a confirmed true-positive vulnerability across the repository. " +
     "Loads the finding and its triage rationale from the workspace DB, extracts the bug " +

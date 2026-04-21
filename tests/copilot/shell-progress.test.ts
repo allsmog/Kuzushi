@@ -2,7 +2,17 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { __shellInternals } from "../../src/copilot/shell.js";
 import { createUIStore, type UIStore } from "../../src/ui/state.js";
 
-const { extractToolUseActivities, extractToolUseHeaders, summarizeInput, pushToolActivity, pushToolPhase } = __shellInternals;
+const {
+  extractToolUseActivities,
+  extractToolUseHeaders,
+  summarizeInput,
+  pushToolActivity,
+  pushToolPhase,
+  renderToolInputHint,
+  patchHistoryEntry,
+  pushLiveActivity,
+  finalizeRunningToolCalls,
+} = __shellInternals;
 
 function seedShellState(): UIStore {
   const store = createUIStore();
@@ -216,5 +226,241 @@ describe("extractToolUseHeaders", () => {
 
   it("skips non-tool_use blocks", () => {
     expect(extractToolUseHeaders([{ type: "text", text: "hi" }])).toEqual([]);
+  });
+
+  it("captures the Anthropic tool_use id when present", () => {
+    const headers = extractToolUseHeaders([
+      { type: "tool_use", id: "toolu_123", name: "Read", input: { path: "/a" } },
+      { type: "tool_use", id: "toolu_456", name: "Bash" },
+      { type: "tool_use", name: "NoId" }, // id missing
+    ]);
+    expect(headers).toEqual([
+      { id: "toolu_123", name: "Read", inputHint: "/a" },
+      { id: "toolu_456", name: "Bash" },
+      { name: "NoId" },
+    ]);
+  });
+});
+
+describe("finalizeRunningToolCalls", () => {
+  function seedWithHistory(entries: Parameters<typeof patchHistoryEntry>[1] extends infer _ ? Array<Record<string, unknown>> : never): UIStore {
+    const store = seedShellState();
+    store.update({
+      ...store.getState(),
+      shell: {
+        ...store.getState().shell!,
+        history: entries as never,
+      },
+    });
+    return store;
+  }
+
+  it("flips all running tool-call entries to the supplied status", () => {
+    const store = seedWithHistory([
+      { type: "tool-call", id: "tc-1", tool: "a", text: "", status: "running", timestamp: 1 },
+      { type: "tool-call", id: "tc-2", tool: "b", text: "", status: "running", timestamp: 2 },
+    ]);
+    finalizeRunningToolCalls(store, "ok");
+    const history = store.getState().shell!.history;
+    expect(history[0]!.status).toBe("ok");
+    expect(history[1]!.status).toBe("ok");
+  });
+
+  it("does not touch already-resolved entries", () => {
+    const store = seedWithHistory([
+      { type: "tool-call", id: "tc-1", tool: "a", text: "", status: "ok", timestamp: 1 },
+      { type: "tool-call", id: "tc-2", tool: "b", text: "", status: "running", timestamp: 2 },
+    ]);
+    finalizeRunningToolCalls(store, "fail");
+    const history = store.getState().shell!.history;
+    expect(history[0]!.status).toBe("ok"); // preserved
+    expect(history[1]!.status).toBe("fail"); // flipped
+  });
+
+  it("preserves non-tool-call entries verbatim", () => {
+    const store = seedWithHistory([
+      { type: "output", text: "hello", timestamp: 1 },
+      { type: "tool-call", id: "tc-1", tool: "a", text: "", status: "running", timestamp: 2 },
+      { type: "error", text: "boom", timestamp: 3 },
+    ]);
+    finalizeRunningToolCalls(store, "abort");
+    const history = store.getState().shell!.history;
+    expect(history[0]!.type).toBe("output");
+    expect(history[1]!.status).toBe("abort");
+    expect(history[2]!.type).toBe("error");
+  });
+
+  it("clears liveActivities when finalizing", () => {
+    const store = seedWithHistory([
+      {
+        type: "tool-call",
+        id: "tc-1",
+        tool: "a",
+        text: "",
+        status: "running",
+        liveActivities: ["step1", "step2"],
+        timestamp: 1,
+      },
+    ]);
+    finalizeRunningToolCalls(store, "ok");
+    expect(store.getState().shell!.history[0]!.liveActivities).toBeUndefined();
+  });
+
+  it("attaches the resultOutput when provided", () => {
+    const store = seedWithHistory([
+      { type: "tool-call", id: "tc-1", tool: "a", text: "", status: "running", timestamp: 1 },
+    ]);
+    finalizeRunningToolCalls(store, "ok", "done summary");
+    expect(store.getState().shell!.history[0]!.resultOutput).toBe("done summary");
+  });
+
+  it("is a no-op when there are no running tool-calls", () => {
+    const store = seedWithHistory([
+      { type: "output", text: "hello", timestamp: 1 },
+    ]);
+    const before = store.getState().shell!.history;
+    finalizeRunningToolCalls(store, "ok");
+    // Reference equality: with no mutation the history array should be the
+    // same reference (updateShell returns the same shell object).
+    expect(store.getState().shell!.history).toBe(before);
+  });
+});
+
+describe("renderToolInputHint", () => {
+  it("uses tool.formatInput when it returns a non-empty string", () => {
+    const tool = { formatInput: () => "custom-hint" };
+    expect(renderToolInputHint(tool, { anything: 1 })).toBe("custom-hint");
+  });
+
+  it("clamps per-tool formatInput output to 40 chars", () => {
+    const long = "X".repeat(80);
+    const tool = { formatInput: () => long };
+    const result = renderToolInputHint(tool, {});
+    expect(result).toBeDefined();
+    expect(result!.length).toBeLessThanOrEqual(40);
+    expect(result!.endsWith("…")).toBe(true);
+  });
+
+  it("treats formatInput returning '' as 'suppress hint'", () => {
+    const tool = { formatInput: () => "" };
+    expect(renderToolInputHint(tool, { target: "x" })).toBeUndefined();
+  });
+
+  it("falls back to summarizeInput when formatInput returns null/undefined", () => {
+    const nullTool = { formatInput: () => null };
+    expect(renderToolInputHint(nullTool, { target: "/foo" })).toBe("/foo");
+    const undefinedTool = { formatInput: () => undefined };
+    expect(renderToolInputHint(undefinedTool, { path: "/bar" })).toBe("/bar");
+  });
+
+  it("falls back to summarizeInput when formatInput is missing", () => {
+    expect(renderToolInputHint({}, { target: "/baz" })).toBe("/baz");
+  });
+});
+
+describe("patchHistoryEntry", () => {
+  it("mutates an existing entry in place by id", () => {
+    const store = seedShellState();
+    store.update({
+      ...store.getState(),
+      shell: {
+        ...store.getState().shell!,
+        history: [
+          {
+            type: "tool-call",
+            id: "tc-1",
+            tool: "sast:scan",
+            text: "⏺ sast:scan",
+            status: "running",
+            timestamp: 1,
+          },
+        ],
+      },
+    });
+    patchHistoryEntry(store, "tc-1", { status: "ok", resultOutput: "done summary", elapsedSeconds: 5 });
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.status).toBe("ok");
+    expect(entry.resultOutput).toBe("done summary");
+    expect(entry.elapsedSeconds).toBe(5);
+    expect(entry.tool).toBe("sast:scan"); // Untouched fields preserved
+  });
+
+  it("silently no-ops when the id is not found", () => {
+    const store = seedShellState();
+    const before = store.getState().shell!.history;
+    patchHistoryEntry(store, "missing", { status: "fail" });
+    const after = store.getState().shell!.history;
+    expect(after).toBe(before);
+  });
+});
+
+describe("pushLiveActivity", () => {
+  function seedWithRunningToolCall(): UIStore {
+    const store = seedShellState();
+    store.update({
+      ...store.getState(),
+      shell: {
+        ...store.getState().shell!,
+        history: [
+          {
+            type: "tool-call",
+            id: "tc-1",
+            tool: "sast:scan",
+            text: "⏺ sast:scan",
+            status: "running",
+            timestamp: 1,
+          },
+        ],
+      },
+    });
+    return store;
+  }
+
+  it("prepends to the entry's liveActivities (newest first)", () => {
+    const store = seedWithRunningToolCall();
+    pushLiveActivity(store, "tc-1", "step 1");
+    pushLiveActivity(store, "tc-1", "step 2");
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities).toEqual(["step 2", "step 1"]);
+  });
+
+  it("caps the tail at 3 entries", () => {
+    const store = seedWithRunningToolCall();
+    for (let i = 0; i < 10; i++) pushLiveActivity(store, "tc-1", `step ${i}`);
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities!.length).toBeLessThanOrEqual(3);
+    expect(entry.liveActivities![0]).toBe("step 9");
+  });
+
+  it("dedupes consecutive identical text", () => {
+    const store = seedWithRunningToolCall();
+    pushLiveActivity(store, "tc-1", "same");
+    pushLiveActivity(store, "tc-1", "same");
+    pushLiveActivity(store, "tc-1", "same");
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities).toEqual(["same"]);
+  });
+
+  it("truncates long text to 80 chars", () => {
+    const store = seedWithRunningToolCall();
+    pushLiveActivity(store, "tc-1", "z".repeat(200));
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities![0]!.length).toBeLessThanOrEqual(80);
+    expect(entry.liveActivities![0]!.endsWith("…")).toBe(true);
+  });
+
+  it("silently no-ops for non-running tool-call ids", () => {
+    const store = seedWithRunningToolCall();
+    patchHistoryEntry(store, "tc-1", { status: "ok" });
+    pushLiveActivity(store, "tc-1", "should-not-push");
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities ?? []).toEqual([]);
+  });
+
+  it("silently no-ops for unknown ids", () => {
+    const store = seedWithRunningToolCall();
+    pushLiveActivity(store, "missing", "whatever");
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities ?? []).toEqual([]);
   });
 });

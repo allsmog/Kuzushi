@@ -9,6 +9,19 @@ type Verdict = "tp" | "fp" | "needs_review" | "by_design";
 
 const findingsListTool: ModuleTool = {
   name: "findings:list",
+  displayName: "List Findings",
+  formatInput(input) {
+    const p = (input ?? {}) as Record<string, unknown>;
+    const parts: string[] = [];
+    if (Array.isArray(p["severity"])) parts.push((p["severity"] as string[]).join(","));
+    if (Array.isArray(p["verdict"])) parts.push((p["verdict"] as string[]).join(","));
+    if (typeof p["name"] === "string") parts.push(`~${p["name"]}`);
+    return parts.length > 0 ? parts.join(" · ") : "";
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Query vulnerabilities stored in the active workspace. Filter by severity, " +
     "verdict, file path, or name substring. Reads from the workspace's vulns table " +

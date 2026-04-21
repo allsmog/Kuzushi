@@ -9,6 +9,20 @@ import { formatContextSummary, generateContextSnapshot } from "./shared.js";
 
 const contextBuildTool: ModuleTool = {
   name: "context:build",
+  displayName: "Build Context",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    const target = typeof p?.["target"] === "string" ? (p["target"] as string) : undefined;
+    return target ?? null;
+  },
+  renderResult(result) {
+    // The context builder returns a multi-line `output` that already starts
+    // with a summary sentence like "Built context for foo (12 modules, …)".
+    // Surface the first line — anything longer belongs in scrollback via
+    // ctx.print, not in a one-line result header.
+    const firstLine = result.output.split("\n", 1)[0]?.trim();
+    return firstLine && firstLine.length > 0 ? firstLine : null;
+  },
   description:
     "Generate the application context map for a target repository. Runs context " +
     "gathering, LLM enrichment, app model extraction, PASTA threat modeling, " +

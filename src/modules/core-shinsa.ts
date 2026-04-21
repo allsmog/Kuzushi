@@ -299,6 +299,10 @@ const nistQuickCheckTool = buildScanTool(
 
 const frameworksTool: ModuleTool = {
   name: "shinsa:frameworks",
+  displayName: "Shinsa Frameworks",
+  formatInput() {
+    return "";
+  },
   description:
     "List the control families / framework modules the installed shinsa-plugin supports " +
     "(read from <pluginRoot>/skills/). No LLM call — cheap introspection.",

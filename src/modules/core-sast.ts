@@ -31,6 +31,20 @@ export const formatContextSummary = sharedFormatContextSummary;
 
 const scanTool: ModuleTool = {
   name: "sast:scan",
+  displayName: "Scan",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    const target = typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+    const preset = typeof p?.["preset"] === "string" ? (p["preset"] as string) : null;
+    if (target && preset) return `${target} · ${preset}`;
+    return target ?? preset ?? null;
+  },
+  renderResult(result) {
+    // Pipeline result is a multi-line summary — surface the first line as
+    // the header result; the operator can scroll the scrollback for more.
+    const firstLine = result.output.split("\n", 1)[0]?.trim();
+    return firstLine && firstLine.length > 0 ? firstLine : null;
+  },
   description:
     "Run the full SAST pipeline on a target repository. " +
     "Orchestrates static scanners (Semgrep, CodeQL, agentic detectors), " +
