@@ -676,6 +676,52 @@ describe("PiAiAgentRuntime", () => {
     }
   });
 
+  it("translates context-overflow errors into error_context_overflow with actionable hint", async () => {
+    const cwd = makeTempDir();
+    // Simulate the exact Anthropic/Vertex provider response for a
+    // single request exceeding the 1M input-context cap.
+    completeMock.mockResolvedValue(
+      makeAssistantMessage([{ type: "text", text: "" }], {
+        stopReason: "error",
+        errorMessage:
+          '400 {"error":{"message":"prompt is too long: 1355012 tokens > 1000000 maximum"}}',
+      }),
+    );
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    const final = messages[messages.length - 1] as Extract<AgentMessage, { type: "result" }> & {
+      errors?: string[];
+      subtype: string;
+    };
+    expect(final.subtype).toBe("error_context_overflow");
+    // Hint must point to the two knobs that actually fix the overflow.
+    const err = final.errors?.[0] ?? "";
+    expect(err).toContain("1M-token input limit");
+    expect(err).toMatch(/maxTurnsPerHunt/);
+    // Raw provider error is preserved so operators can see the token count.
+    expect(err).toContain("prompt is too long");
+  });
+
+  it("detects multiple provider context-overflow phrasings", async () => {
+    const cwd = makeTempDir();
+    // "request_too_large" appears in Anthropic responses for oversized
+    // prompts — same bucket, same translation.
+    completeMock.mockResolvedValue(
+      makeAssistantMessage([{ type: "text", text: "" }], {
+        stopReason: "error",
+        errorMessage: "request_too_large: payload exceeded",
+      }),
+    );
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+    const final = messages[messages.length - 1] as Extract<AgentMessage, { type: "result" }> & {
+      subtype: string;
+    };
+    expect(final.subtype).toBe("error_context_overflow");
+  });
+
   it("does not retry non-transient soft errors (stopReason=error)", async () => {
     const cwd = makeTempDir();
     completeMock.mockResolvedValue(

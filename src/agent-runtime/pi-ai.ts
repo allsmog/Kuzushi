@@ -99,6 +99,24 @@ function isRateLimitError(error: unknown): boolean {
 }
 
 /**
+ * Recognize the "single request exceeded the model's input-context cap"
+ * case — observed on Anthropic direct + Vertex proxied responses. Not
+ * retryable: the request was too big the first time and will still be
+ * too big on retry. Callers should surface a human-readable hint
+ * instead of the raw 400.
+ */
+function isContextOverflowMessage(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("prompt is too long") ||
+    lower.includes("exceeds the context window") ||
+    lower.includes("exceeds context length") ||
+    lower.includes("greater than the context length") ||
+    lower.includes("request_too_large")
+  );
+}
+
+/**
  * Stream one LLM turn with rate-limit gating and transient-error retry.
  *
  * Generator-shaped so callers (`runTurnLoop`) can `yield*` events in
@@ -613,13 +631,25 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
       }
 
       if (assistant.stopReason === "error") {
-        yield errorResult(
-          "error_runtime",
-          assistant.errorMessage ?? "pi-ai request failed",
-          startedAtMs,
-          turn,
-          totalCostUsd,
-        );
+        // Translate context-overflow 400s into a specific, actionable
+        // error. The raw message looks like:
+        //   `400 ... "prompt is too long: 1355012 tokens > 1000000 maximum"`
+        // which tells the operator nothing about WHAT to tune. This
+        // helper catches the known patterns and emits a hint pointing
+        // to the two knobs that actually fix it (turn count, file
+        // exploration scope).
+        const rawErr = assistant.errorMessage ?? "pi-ai request failed";
+        if (isContextOverflowMessage(rawErr)) {
+          yield errorResult(
+            "error_context_overflow",
+            `Input-context cap exceeded (${rawErr.slice(0, 160)}). The agent's accumulated tool results exceeded the model's 1M-token input limit. Lower maxTurnsPerHunt, cap Read/Grep scope, or switch to a smaller context-heavy task (e.g. single-file targeted hunts). Raw provider error preserved above.`,
+            startedAtMs,
+            turn,
+            totalCostUsd,
+          );
+          return;
+        }
+        yield errorResult("error_runtime", rawErr, startedAtMs, turn, totalCostUsd);
         return;
       }
 
