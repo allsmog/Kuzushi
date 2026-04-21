@@ -22,7 +22,7 @@ const {
   resetTerminalOutputMock: vi.fn(),
 }));
 
-vi.mock("../../src/cli/commands/scan.js", () => ({
+vi.mock("../../src/cli/commands/scan-pipeline.js", () => ({
   runPipeline: runPipelineMock,
 }));
 

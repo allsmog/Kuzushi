@@ -59,6 +59,7 @@ import {
   initDb,
   type StoredFindingRecord,
 } from "../../store.js";
+import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import type { MonorepoUIHandle } from "../../ui/monorepo-render.js";
 import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js";
 import { CliUsageError } from "../errors.js";
@@ -69,7 +70,7 @@ import {
   createPipelineRuntime,
   prepareScanExecution,
   runPipeline,
-} from "./scan.js";
+} from "./scan-pipeline.js";
 
 const DEFAULT_MONOREPO_CONCURRENCY = 5;
 
@@ -120,7 +121,7 @@ export async function runMonorepoScan(repoPath: string, opts: ScanCommandOptions
     // Reconstruct the module list from existing DB runs and jump to Phase 2.
     if (opts.resume !== undefined) {
       const db = initDb(dbPath);
-      let moduleRuns;
+      let moduleRuns: ReturnType<typeof getResumableModuleRuns>;
       try {
         moduleRuns = getResumableModuleRuns(db, monorepoName);
       } finally {
@@ -379,7 +380,7 @@ export async function runMonorepoScan(repoPath: string, opts: ScanCommandOptions
 
 async function resolveMonorepoModules(
   monorepoRoot: string,
-  config: ReturnType<typeof prepareScanExecution>["config"],
+  config: KuzushiConfig,
   opts: ScanCommandOptions,
   runtime?: AgentRuntime,
 ): Promise<{ modules: DiscoveredModule[]; products: DiscoveredProduct[]; costUsd: number }> {
@@ -426,8 +427,8 @@ async function runPlansInParallel(params: {
   plans: ModuleScanPlan[];
   monorepoRoot: string;
   monorepoName: string;
-  config: ReturnType<typeof prepareScanExecution>["config"];
-  scanOpts: ReturnType<typeof prepareScanExecution>["scanOpts"];
+  config: KuzushiConfig;
+  scanOpts: ScanOpts;
   opts: ScanCommandOptions;
   dbPath: string;
   runtime: AgentRuntime;

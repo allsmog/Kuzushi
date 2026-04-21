@@ -14,7 +14,7 @@
  * See lib/msf/core/option_container.rb and lib/msf/core/opt_*.rb for prior art.
  */
 
-import type { JSONSchema } from "../modules/types.js";
+import type { JSONSchema } from "../modules/schema.js";
 
 // ---------------------------------------------------------------------------
 // Option spec

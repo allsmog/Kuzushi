@@ -10,7 +10,7 @@
 
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { ModuleReference } from "../modules/types.js";
+import type { ModuleReference } from "../modules/reference.js";
 import type { CheckCodeKind } from "../triage/checkcode.js";
 
 // ---------------------------------------------------------------------------

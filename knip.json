@@ -1,7 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/cli.ts", "src/index.ts"],
   "project": ["src/**/*.{ts,tsx}"],
   "ignore": ["tests/**", "dist/**"],
-  "ignoreDependencies": ["@anthropic-ai/sdk", "tsx"]
+  "ignoreDependencies": ["shinsa-plugin"]
 }

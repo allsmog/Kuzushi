@@ -177,9 +177,7 @@ const ${camel(toolSuffix)}Tool: ModuleTool = {
     const params = (input ?? {}) as Record<string, unknown>;
     const target = (params.target as string) ?? ctx.target ?? ctx.cwd;
 
-    // TODO: implement the real action. This starter returns a synthetic result
-    // so the tool is callable end-to-end from \`kuzushi run ${toolName} target=...\`
-    // the moment you build and link the module.
+    // Starter behavior so the generated module runs end-to-end immediately.
     return {
       ok: true,
       output: \`${toolName}: hello from \${target}\`,
