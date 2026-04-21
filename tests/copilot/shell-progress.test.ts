@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { __shellInternals } from "../../src/copilot/shell.js";
 import { createUIStore, type UIStore } from "../../src/ui/state.js";
 
-const { extractToolUseActivities, pushToolActivity, pushToolPhase } = __shellInternals;
+const { extractToolUseActivities, extractToolUseHeaders, summarizeInput, pushToolActivity, pushToolPhase } = __shellInternals;
 
 function seedShellState(): UIStore {
   const store = createUIStore();
@@ -148,5 +148,73 @@ describe("pushToolActivity", () => {
     });
     pushToolActivity(store, "dropped");
     expect(store.getState().shell!.currentTool).toBeUndefined();
+  });
+});
+
+describe("summarizeInput", () => {
+  it("returns undefined for null/undefined", () => {
+    expect(summarizeInput(null)).toBeUndefined();
+    expect(summarizeInput(undefined)).toBeUndefined();
+  });
+
+  it("returns string input directly (trimmed)", () => {
+    expect(summarizeInput("  ./src  ")).toBe("./src");
+  });
+
+  it("clamps strings longer than 40 chars", () => {
+    const long = "a".repeat(60);
+    const result = summarizeInput(long)!;
+    expect(result.length).toBe(40);
+    expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("extracts primary field from object (target, path, file, query, name, url, module)", () => {
+    expect(summarizeInput({ target: "." })).toBe(".");
+    expect(summarizeInput({ path: "/src/foo.ts" })).toBe("/src/foo.ts");
+    expect(summarizeInput({ file: "bar.js" })).toBe("bar.js");
+    expect(summarizeInput({ query: "needle" })).toBe("needle");
+    expect(summarizeInput({ url: "https://example.com" })).toBe("https://example.com");
+    expect(summarizeInput({ module: "sast" })).toBe("sast");
+  });
+
+  it("falls back to JSON.stringify for objects without primary fields", () => {
+    const result = summarizeInput({ foo: 1, bar: 2 });
+    expect(result).toBe('{"foo":1,"bar":2}');
+  });
+
+  it("handles numbers and booleans", () => {
+    expect(summarizeInput(42)).toBe("42");
+    expect(summarizeInput(true)).toBe("true");
+  });
+
+  it("handles arrays with a string first element", () => {
+    expect(summarizeInput(["a", "b"])).toBe("a");
+  });
+
+  it("returns undefined for empty arrays", () => {
+    expect(summarizeInput([])).toBeUndefined();
+  });
+});
+
+describe("extractToolUseHeaders", () => {
+  it("returns { name, inputHint } per tool_use block", () => {
+    const headers = extractToolUseHeaders([
+      { type: "text", text: "thinking" },
+      { type: "tool_use", name: "Read", input: { path: "/src/foo.ts" } },
+      { type: "tool_use", name: "Bash", input: {} },
+    ]);
+    expect(headers).toEqual([
+      { name: "Read", inputHint: "/src/foo.ts" },
+      { name: "Bash" },
+    ]);
+  });
+
+  it("omits inputHint when input is missing", () => {
+    const headers = extractToolUseHeaders([{ type: "tool_use", name: "Grep" }]);
+    expect(headers).toEqual([{ name: "Grep" }]);
+  });
+
+  it("skips non-tool_use blocks", () => {
+    expect(extractToolUseHeaders([{ type: "text", text: "hi" }])).toEqual([]);
   });
 });
