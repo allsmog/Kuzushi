@@ -189,6 +189,8 @@ const liftPatternTool: ModuleTool = {
     const { repoRoot } = await resolveRepoPaths(target);
     const model = resolveModel(ctx, params.model as string | undefined);
 
+    ctx.reportActivity?.(`lifting pattern from ${fingerprint.slice(0, 12)} · ${model}`);
+
     let structuredOutput: unknown;
     let costUsd = 0;
     try {
@@ -351,6 +353,8 @@ const huntTool: ModuleTool = {
           ].join("\n"),
         }
       : triage;
+
+    ctx.reportActivity?.(`hunting variants in ${repoName} · max ${maxFindings}`);
 
     try {
       const result = await analyzeVariants(

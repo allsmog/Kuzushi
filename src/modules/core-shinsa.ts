@@ -215,6 +215,8 @@ function buildScanTool(mode: ScanMode, toolId: string, title: string, blurb: str
         : undefined;
       const family = typeof params.family === "string" ? params.family : undefined;
 
+      ctx.reportActivity?.(`${title} · ${name} · ${mode}`);
+
       try {
         const result = await runShinsaAssessment({
           runtime: ctx.runtime,
