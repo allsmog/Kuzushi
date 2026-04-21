@@ -8,7 +8,7 @@
  *   top, chain-grouped entries, and an action-hint footer.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React from "react";
 import { colorVerdict } from "../format.js";
 import { icons } from "../icons.js";
@@ -136,10 +136,14 @@ const SEVERITY_ORDER: Record<string, number> = {
 };
 
 function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 120;
+  const narrow = columns < 110;
   const chainFingerprints = new Set<string>((chains ?? []).flatMap((c) => c.findingFingerprints));
-  const loose = findings
+  const looseAll = findings
     .filter((f) => !chainFingerprints.has(f.fingerprint))
     .sort((a, b) => severityRank(a) - severityRank(b));
+  const loose = looseAll.slice(0, narrow ? 6 : 10);
 
   const counts = tallyCounts(findings);
 
@@ -155,7 +159,8 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
         </Text>
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
+        <Text>{tokens.strong("Primary action: /open F-NNNN to inspect one finding deeply.")}</Text>
         <FilterChips chips={filters ?? defaultFilters()} />
       </Box>
 
@@ -187,6 +192,15 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
           ))}
         </Box>
       )}
+      {looseAll.length > loose.length ? (
+        <Box marginTop={1}>
+          <Text>
+            {tokens.muted(
+              `${looseAll.length - loose.length} additional loose findings hidden to reduce noise.`,
+            )}
+          </Text>
+        </Box>
+      ) : null}
 
       {findings.length === 0 && (
         <Box flexDirection="column" marginTop={1} paddingLeft={2}>
@@ -202,9 +216,9 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
       </Box>
       <Box>
         <Text>
-          {tokens.hint(
-            "enter open   / filter   e export (sarif|json|csv|junit)   a assign   s suppress",
-          )}
+          {tokens.hint("Primary: /open <alias>")}
+          {"   "}
+          {tokens.muted("Secondary: /filter · e export · a assign · s suppress")}
         </Text>
       </Box>
     </Box>

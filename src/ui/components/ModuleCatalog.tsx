@@ -13,7 +13,7 @@
  * to focus a module, just like today's command flow.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import type { ShellModuleCard, ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
@@ -34,6 +34,9 @@ interface ModuleCatalogProps {
 }
 
 export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 120;
+  const narrow = columns < 110;
   const cards = shell.moduleCatalog ?? [];
   const builtIns = cards.filter((c) => !c.external);
   const externals = cards.filter((c) => c.external);
@@ -50,6 +53,13 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
   return (
     <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
       <CatalogHeader shell={shell} />
+      <Box marginTop={1}>
+        <Text>
+          {tokens.strong("Primary next step: ")}
+          {tokens.accent("/use <module-id>")}
+          {tokens.muted(" to enter one module workflow.")}
+        </Text>
+      </Box>
 
       {CATEGORY_ORDER.map((cat) => {
         const rows = byCategory[cat];
@@ -59,7 +69,7 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
             <Text>{tokens.label(CATEGORY_LABEL[cat])}</Text>
             <Box marginTop={1} flexDirection="column">
               {rows.map((card) => (
-                <ModuleRow key={card.id} card={card} idWidth={widest} />
+                <ModuleRow key={card.id} card={card} idWidth={widest} compact={narrow} />
               ))}
             </Box>
           </Box>
@@ -75,7 +85,7 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
           </Text>
           <Box marginTop={1} flexDirection="column">
             {externals.map((card) => (
-              <ModuleRow key={card.id} card={card} idWidth={widest} />
+              <ModuleRow key={card.id} card={card} idWidth={widest} compact={narrow} />
             ))}
           </Box>
         </Box>
@@ -91,9 +101,14 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
         </Text>
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection={narrow ? "column" : "row"}>
+        <Text>{tokens.hint("Primary: /use <id>")}</Text>
         <Text>
-          {tokens.hint("/use <id> open   /findings list   /tune adjust   /help more   /exit quit")}
+          {tokens.muted(
+            narrow
+              ? "Secondary: /findings · /tune · /help · /exit"
+              : "   Secondary: /findings · /tune · /help · /exit",
+          )}
         </Text>
       </Box>
     </Box>
@@ -138,12 +153,14 @@ function CatalogHeader({ shell }: { shell: ShellState }): React.ReactElement {
 function ModuleRow({
   card,
   idWidth,
+  compact,
 }: {
   card: ShellModuleCard;
   idWidth: number;
+  compact: boolean;
 }): React.ReactElement {
   const id = card.id.padEnd(idWidth + 2);
-  const desc = truncate(card.description, 54).padEnd(54);
+  const desc = truncate(card.description, compact ? 34 : 54).padEnd(compact ? 34 : 54);
   const last = card.lastRunSummary ?? "never run";
   const isNever = !card.lastRunSummary;
 
