@@ -197,10 +197,21 @@ async function runActorHunt(
   context: TaskContext,
   config: ThreatHuntConfig,
 ): Promise<FindingOutput> {
+  context.signal?.throwIfAborted();
   const scanScope = context.scanPath ?? context.repoRoot;
   const prompt = buildScopedPrompt(actor, threats, scanScope, config.promptOverride);
   const runtime = resolveTaskRuntime(context);
   const tag = `[threat-hunt/${actor.name}]`;
+
+  // Link the task's abort signal to a per-hunt AbortController so Ctrl+C
+  // in the shell propagates into pi-ai's turn loop. Without this, the
+  // runtime has no AbortSignal to check and a deep-thinking Opus hunt
+  // keeps burning tokens for minutes after the operator asked to quit.
+  const abortController = new AbortController();
+  if (context.signal) {
+    if (context.signal.aborted) abortController.abort();
+    else context.signal.addEventListener("abort", () => abortController.abort(), { once: true });
+  }
 
   log.info(`${tag} Starting hunt (model=${config.model})`);
 
@@ -218,6 +229,7 @@ async function runActorHunt(
       permissionMode: "dontAsk",
       effort: config.effort,
       thinkingDisabled: config.thinkingDisabled,
+      abortController,
       outputFormat: {
         type: "json_schema",
         schema: FINDING_SCHEMA,
@@ -226,6 +238,10 @@ async function runActorHunt(
       },
     },
   })) {
+    // Bail the stream eagerly on abort. pi-ai's turn loop also honors
+    // the signal, but returning control here skips remaining messages
+    // and lets the enclosing batch move on (or the outer run return).
+    if (context.signal?.aborted) break;
     if (
       message.type === "tool-progress" ||
       message.type === "tool-summary" ||
@@ -275,6 +291,7 @@ function extractActors(upstreamOutputs: Map<string, unknown>): DfdElement[] {
 }
 
 async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
+  context.signal?.throwIfAborted();
   const config = resolveConfig(context);
   const { prioritized, allActors } = extractActorsWithThreats(context.upstreamOutputs);
 
@@ -310,6 +327,9 @@ async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
   const maxConcurrent = Math.min(totalRuns, config.maxConcurrentHunts);
   const results: FindingOutput[] = [];
   for (let i = 0; i < huntTasks.length; i += maxConcurrent) {
+    // Skip remaining batches if the operator aborted mid-hunt — otherwise
+    // Ctrl+C only stops the *current* batch and the next one kicks off.
+    if (context.signal?.aborted) break;
     const batch = huntTasks.slice(i, i + maxConcurrent);
     const batchResults = await Promise.all(batch.map((fn) => fn()));
     results.push(...batchResults);

@@ -200,6 +200,46 @@ describe("wrapRuntimeWithActivityForwarding", () => {
     void bus.close();
   });
 
+  it("publishes pi-ai tool-call-start events as task:activity for early visibility", async () => {
+    // Regression: on the pi-ai path a deep-thinking Opus turn can spend
+    // 5+ minutes streaming `thinking-delta` / `text-delta` events before
+    // the first `assistant` yield — the activity rail was silent during
+    // that window because describeRuntimeMessage only mapped
+    // assistant/tool-summary. With tool-call-start handling, the rail
+    // shows the tool name as soon as the model commits to it.
+    const bus = new InProcessBus();
+    const received = collectActivityEvents(bus);
+
+    const scripted: AgentMessage[] = [
+      { type: "thinking-delta", delta: "reasoning..." },
+      { type: "tool-call-start", toolUseId: "tu-1", toolName: "Read" },
+      { type: "tool-call-delta", toolUseId: "tu-1", delta: '{"file_path":' },
+      {
+        type: "assistant",
+        content: [
+          { type: "tool_use", id: "tu-1", name: "Read", input: { file_path: "/repo/a.ts" } },
+        ],
+      },
+      { type: "result", subtype: "success", result: "ok", totalCostUsd: 0 },
+    ];
+    const wrapped = wrapRuntimeWithActivityForwarding(
+      makeRuntime(scripted),
+      bus,
+      "threat-hunt",
+      "run-1",
+    );
+
+    await drain(wrapped.query({ prompt: "x", options: {} }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const lines = received.map((r) => r.payload.description);
+    // First entry comes from tool-call-start (just the name, no args yet).
+    // Second entry comes from the assistant turn closing with full input.
+    // thinking-delta and tool-call-delta are silent — intentionally.
+    expect(lines).toEqual(["Read", "Read · /repo/a.ts"]);
+    await bus.close();
+  });
+
   it("never breaks the caller's stream on a failing publish", async () => {
     const brokenBus = {
       publish: vi.fn().mockRejectedValue(new Error("boom")),
