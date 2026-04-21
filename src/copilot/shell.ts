@@ -2517,6 +2517,61 @@ async function startInkShell(
     /* best-effort — some test harnesses pipe stdin unusually */
   }
 
+  // Independent Ctrl+C reader bolted directly to /dev/tty. The Claude
+  // SDK subprocess calls TIOCSCTTY and becomes the terminal's
+  // foreground process group leader, which means terminal keystrokes
+  // (including Ctrl+C → SIGINT) stop reaching our parent's stdin or
+  // our pgrp's signal handler. `/dev/tty` is a magic device that
+  // always resolves to the *calling* process's controlling terminal,
+  // so opening it as our own fd gives us a read channel the
+  // subprocess can't intercept. We put it in raw mode on our fd and
+  // watch for 0x03 bytes.
+  //
+  // Best-effort: the open can fail (no controlling terminal, CI mode,
+  // etc.) and that's fine — the other three abort paths remain.
+  let devTtyAbortTeardown: (() => void) | undefined;
+  if (process.stdin.isTTY) {
+    try {
+      const ttyModule = await import("node:tty");
+      const fsModule = await import("node:fs");
+      const ttyFd = fsModule.openSync("/dev/tty", "r");
+      const ttyStream = new ttyModule.ReadStream(ttyFd);
+      try {
+        ttyStream.setRawMode(true);
+      } catch {
+        /* setRawMode may be unavailable on some platforms */
+      }
+      const devTtyListener = (chunk: Buffer): void => {
+        if (!activeActionKind) return;
+        if (!(chunk.includes(0x03) || chunk.includes(0x04))) return;
+        abortDebug(
+          `dev-tty: 0x03/0x04 detected on /dev/tty fd, activeActionKind=${activeActionKind}`,
+        );
+        const killed = killAllClaudeSubprocesses();
+        abortDebug(`dev-tty: killed=${killed} subprocesses`);
+        abortActiveAction();
+      };
+      ttyStream.on("data", devTtyListener);
+      ttyStream.on("error", (err) => {
+        abortDebug(`dev-tty: stream error ${err instanceof Error ? err.message : String(err)}`);
+      });
+      devTtyAbortTeardown = () => {
+        try {
+          ttyStream.off("data", devTtyListener);
+          ttyStream.destroy();
+          fsModule.closeSync(ttyFd);
+        } catch {
+          /* best-effort cleanup */
+        }
+      };
+      abortDebug("dev-tty: reader installed on /dev/tty");
+    } catch (err) {
+      abortDebug(
+        `dev-tty: could not open /dev/tty: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   // Surface prior .kuzushi/ artifacts so operators see the cache surface
   // before they run anything. Silent on fresh dirs.
   {
