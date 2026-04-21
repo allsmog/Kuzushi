@@ -946,6 +946,7 @@ function finalizeRunningToolCalls(
  */
 const LIVE_ACTIVITY_CAP = 5;
 const LIVE_ACTIVITY_TEXT_CAP = 80;
+let liveActivitySeq = 0;
 function pushLiveActivity(store: UIStore, id: string, text: string): void {
   const trimmed =
     text.length > LIVE_ACTIVITY_TEXT_CAP ? `${text.slice(0, LIVE_ACTIVITY_TEXT_CAP - 1)}…` : text;
@@ -957,8 +958,11 @@ function pushLiveActivity(store: UIStore, id: string, text: string): void {
     const prev = entry.liveActivities ?? [];
     // Dedupe consecutive identical text — no point pushing "scanning X"
     // three times in a row.
-    if (prev[0] === trimmed) return shell;
-    const nextActivities = [trimmed, ...prev].slice(0, LIVE_ACTIVITY_CAP);
+    if (prev[0]?.text === trimmed) return shell;
+    const nextActivities = [
+      { id: `la-${Date.now()}-${liveActivitySeq++}`, text: trimmed },
+      ...prev,
+    ].slice(0, LIVE_ACTIVITY_CAP);
     const next = shell.history.slice();
     next[idx] = { ...entry, liveActivities: nextActivities };
     return { ...shell, history: next };

@@ -637,13 +637,13 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
       </Box>
       {status === "running" && entry.liveActivities && entry.liveActivities.length > 0 ? (
         <Box flexDirection="column">
-          {entry.liveActivities.slice(0, 5).map((activity, i) => (
-            <Box key={`la-${i}`}>
+          {entry.liveActivities.slice(0, 5).map((activity) => (
+            <Box key={activity.id}>
               <Gutter />
               <Gutter>
                 <Text dimColor>{LOWER_HOOK}</Text>
               </Gutter>
-              <Text> {tokens.muted(activity)}</Text>
+              <Text> {tokens.muted(activity.text)}</Text>
             </Box>
           ))}
         </Box>
