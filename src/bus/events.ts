@@ -795,6 +795,25 @@ export type TaskPhaseProgressEvent = EventEnvelope<
   }
 >;
 
+/**
+ * Sub-step description for the shell's rolling activity tail. Tools emit
+ * these (via `ctx.reportActivity(...)` or `publishTaskActivity(...)`) so the
+ * operator sees what's happening mid-tool, not just a frozen spinner.
+ */
+export type TaskActivityEvent = EventEnvelope<
+  "task:activity",
+  {
+    taskId: string;
+    /** One-line human description of the current sub-step. */
+    description: string;
+    /** Optional phase label (also feeds the phase strip). */
+    phase?: string;
+    /** Optional step/total if the task is iterating a known-size batch. */
+    step?: number;
+    total?: number;
+  }
+>;
+
 /* ── Retry observability events ───────────────────────────────────── */
 
 export type RetryAttemptEvent = EventEnvelope<
@@ -1083,6 +1102,7 @@ export type KuzushiEvent =
   | LlmCallErrorEvent
   | LlmRetryEvent
   | TaskPhaseProgressEvent
+  | TaskActivityEvent
   | RetryAttemptEvent
   | RetryExhaustedEvent
   | BudgetCheckEvent

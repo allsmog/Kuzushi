@@ -200,6 +200,8 @@ function buildCommandTool(spec: BuildToolSpec): ModuleTool {
       const model = resolveModel(ctx, params.model as string | undefined);
       const augment = formatKeyValueAugment(params, spec.allowedInputs);
 
+      ctx.reportActivity?.(`${spec.toolId} · /${spec.command} on ${name} · ${model}`);
+
       try {
         const result = await runPromptArmor({
           runtime: ctx.runtime,

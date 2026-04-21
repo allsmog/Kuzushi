@@ -26,6 +26,7 @@ import type {
   ShellModuleCard,
   ShellState,
   ShellView,
+  ToolActivityLine,
   TuneSnapshot,
   UIStore,
 } from "../ui/state.js";
@@ -317,6 +318,32 @@ export function extractAssistantText(content: Array<Record<string, unknown>>): s
       block["type"] === "text" && typeof block["text"] === "string" ? block["text"] : "",
     )
     .join("");
+}
+
+/**
+ * Pull `tool_use` blocks out of an assistant message so they can be surfaced
+ * in the shell's rolling activity tail. Returns one line per tool use —
+ * "<toolName>(<short-input-hint>)" — with the input hint capped so the tail
+ * doesn't blow past the column width.
+ */
+export function extractToolUseActivities(content: Array<Record<string, unknown>>): string[] {
+  const out: string[] = [];
+  for (const block of content) {
+    if (block["type"] !== "tool_use") continue;
+    const name = typeof block["name"] === "string" ? block["name"] : "tool";
+    const input = block["input"];
+    let hint = "";
+    if (input && typeof input === "object") {
+      const record = input as Record<string, unknown>;
+      const primary =
+        record["target"] ?? record["path"] ?? record["file"] ?? record["query"] ?? record["name"];
+      if (typeof primary === "string" && primary.length > 0) {
+        hint = primary.length > 40 ? `${primary.slice(0, 39)}…` : primary;
+      }
+    }
+    out.push(hint ? `${name} · ${hint}` : name);
+  }
+  return out;
 }
 
 export function finalizeAssistantText(
@@ -844,10 +871,80 @@ function syncShellState(store: UIStore, opts: ShellOptions, focusedModule: strin
 }
 
 function updateToolActivity(store: UIStore, toolName: string, elapsedSeconds: number): void {
-  updateShell(store, (shell) => ({
-    ...shell,
-    currentTool: { name: toolName, elapsedSeconds },
-  }));
+  updateShell(store, (shell) => {
+    const prev = shell.currentTool;
+    const sameTool = prev && prev.name === toolName;
+    return {
+      ...shell,
+      currentTool: {
+        name: toolName,
+        elapsedSeconds,
+        startedAt: sameTool ? prev.startedAt : Date.now(),
+        phase: sameTool ? prev.phase : undefined,
+        step: sameTool ? prev.step : undefined,
+        total: sameTool ? prev.total : undefined,
+        subLabel: sameTool ? prev.subLabel : undefined,
+        activities: sameTool ? prev.activities : undefined,
+        lastEventAt: Date.now(),
+      },
+    };
+  });
+}
+
+const PHASE_COUNT_RE = /\((\d+)\s*\/\s*(\d+)\)/;
+
+/**
+ * Update the current tool's phase label. Parses a trailing "(N/M)" into
+ * step/total so the UI can render a separate "phase 2/15" strip.
+ */
+function pushToolPhase(store: UIStore, phase: string): void {
+  const match = phase.match(PHASE_COUNT_RE);
+  const step = match ? Number(match[1]) : undefined;
+  const total = match ? Number(match[2]) : undefined;
+  updateShell(store, (shell) => {
+    if (!shell.currentTool) return shell;
+    return {
+      ...shell,
+      currentTool: {
+        ...shell.currentTool,
+        phase,
+        step,
+        total,
+        subLabel: phase,
+        lastEventAt: Date.now(),
+      },
+    };
+  });
+}
+
+const ACTIVITY_BUFFER_CAP = 5;
+const ACTIVITY_TEXT_CAP = 80;
+
+/**
+ * Prepend a new activity line to the rolling tail. Dedupes by matching the
+ * most recent entry's text (just bumps its timestamp) and caps the buffer.
+ */
+function pushToolActivity(store: UIStore, text: string): void {
+  const trimmed = text.length > ACTIVITY_TEXT_CAP ? `${text.slice(0, ACTIVITY_TEXT_CAP - 1)}…` : text;
+  const now = Date.now();
+  updateShell(store, (shell) => {
+    if (!shell.currentTool) return shell;
+    const prev = shell.currentTool.activities ?? [];
+    let next: ToolActivityLine[];
+    if (prev[0]?.text === trimmed) {
+      next = [{ text: trimmed, ts: now }, ...prev.slice(1)];
+    } else {
+      next = [{ text: trimmed, ts: now }, ...prev].slice(0, ACTIVITY_BUFFER_CAP);
+    }
+    return {
+      ...shell,
+      currentTool: {
+        ...shell.currentTool,
+        activities: next,
+        lastEventAt: now,
+      },
+    };
+  });
 }
 
 function updateToolSummary(store: UIStore, summary: string): void {
@@ -1043,7 +1140,23 @@ async function startInkShell(
     if (seedTaskOutputs) execOpts.seedTaskOutputs = seedTaskOutputs;
     if (datastore) execOpts.datastore = datastore;
     if (workspaceManager) execOpts.workspace = workspaceManager;
-    return core.executeTool(tool.name, input, execOpts);
+    // Seed `currentTool` so ToolRunningStatus has something to render the
+    // moment the dispatcher kicks off a direct `run` — otherwise the
+    // `task:activity` events that fire during the tool would hit an empty
+    // slot and be dropped.
+    updateShell(store, (shell) => ({
+      ...shell,
+      currentTool: {
+        name: tool.name,
+        startedAt: Date.now(),
+        lastEventAt: Date.now(),
+      },
+    }));
+    try {
+      return await core.executeTool(tool.name, input, execOpts);
+    } finally {
+      updateShell(store, (shell) => ({ ...shell, currentTool: undefined }));
+    }
   };
 
   let driver: DispatcherDriver;
@@ -1194,6 +1307,33 @@ async function startInkShell(
           totalCostUsd: prev?.totalCostUsd ?? 0,
         },
       };
+    });
+  });
+
+  // Tool progress rail — `task:phase-progress` updates the current tool's
+  // phase strip and also appends a permanent history entry so operators see
+  // each phase transition accumulate downward (cc-repo style) instead of
+  // watching one line update in place. `task:activity` does the same for
+  // sub-step descriptions. The in-place spinner below just shows elapsed;
+  // the scrollback is the source of truth for what has happened so far.
+  bus.subscribe<import("../bus/events.js").TaskPhaseProgressEvent>(
+    "task:phase-progress",
+    (event) => {
+      pushToolPhase(store, event.payload.phase);
+      appendToHistory(store, {
+        type: "tool-progress",
+        text: event.payload.phase,
+        timestamp: Date.now(),
+      });
+    },
+  );
+  bus.subscribe<import("../bus/events.js").TaskActivityEvent>("task:activity", (event) => {
+    if (event.payload.phase) pushToolPhase(store, event.payload.phase);
+    pushToolActivity(store, event.payload.description);
+    appendToHistory(store, {
+      type: "tool-progress",
+      text: event.payload.description,
+      timestamp: Date.now(),
     });
   });
 
@@ -1490,8 +1630,22 @@ async function startInkShell(
     activeActionKind = "tool";
     activeAbortRequested = false;
     setAbortHandler(store, () => {
+      if (activeAbortRequested) return;
       activeAbortRequested = true;
       controller.abort(new Error("Shell tool execution aborted"));
+      // Immediately return the operator to the prompt instead of waiting
+      // for the tool to notice the signal. A tool that ignores the signal
+      // will still finish in the background; its cleanup path is idempotent
+      // with what we do here. This is the core "Ctrl+C once goes back"
+      // behavior — the alternative (waiting for the tool to unwind) felt
+      // like the shell was hung even though the abort had fired.
+      appendToHistory(store, {
+        type: "output",
+        text: "[aborted]",
+        timestamp: Date.now(),
+      });
+      clearTransientShellState(store);
+      setProcessing(store, false);
     });
   };
 
@@ -1525,6 +1679,14 @@ async function startInkShell(
     const controller = new AbortController();
     setToolAbort(controller);
     const dispatched = await driver.handle(input, controller.signal);
+    // If Ctrl+C fired during dispatch, the abort handler already returned the
+    // operator to the prompt and marked `processing: false`. Swallow the
+    // late output/exit from the now-cancelled tool so it doesn't append
+    // after the operator has moved on.
+    if (activeAbortRequested) {
+      finishActiveAction();
+      return;
+    }
     if (dispatched.matched) {
       if (dispatched.push || dispatched.pop) syncFocusFromDispatcher();
       if (dispatched.output) {
@@ -1666,6 +1828,20 @@ async function startInkShell(
             const text = extractAssistantText(message.content);
             if (text) {
               appendPendingAssistantText(store, text);
+            }
+            // Surface each tool-use block as a progressive log line so
+            // operators see what the model is calling, not just a frozen
+            // spinner. Appends to history (accumulating downward) *and*
+            // bumps the currentTool.activities buffer used by the compact
+            // spinner tail.
+            const toolCalls = extractToolUseActivities(message.content);
+            for (const call of toolCalls) {
+              pushToolActivity(store, call);
+              appendToHistory(store, {
+                type: "tool-progress",
+                text: call,
+                timestamp: Date.now(),
+              });
             }
             break;
           }
@@ -4088,7 +4264,10 @@ export const __shellInternals = {
   capShellHistory,
   createShellSession,
   extractAssistantText,
+  extractToolUseActivities,
   finalizeAssistantText,
+  pushToolActivity,
+  pushToolPhase,
   formatHelp,
   formatModuleInfo,
   formatModuleList,

@@ -231,10 +231,14 @@ function humanizeStage(taskName: string): string {
 }
 
 /**
- * Per-stage progress tracker. Publishes a `startedAt` timestamp once per
- * stage; the UI derives live elapsed inside a small self-ticking component
- * so we don't re-render the whole shell subtree every second (that was
- * causing visible flicker on the spinner line).
+ * Per-stage progress tracker — now a thin wrapper around `ctx.reportActivity`.
+ *
+ * Historically this overwrote `currentTool.name` with the humanized stage
+ * label, which clobbered the actual tool name (`context:build`) and gave
+ * operators a single frozen-looking line. It now publishes each stage as a
+ * `task:activity` event so the shell's `ToolRunningStatus` renders the
+ * stage in the rolling activity tail + phase strip while `currentTool.name`
+ * stays pinned to the actual tool id.
  */
 function createProgressTracker(ctx: ToolExecutionContext): {
   update: (name: string) => void;
@@ -242,18 +246,10 @@ function createProgressTracker(ctx: ToolExecutionContext): {
 } {
   return {
     update(name: string) {
-      if (!ctx.uiStore) return;
-      const shell = ctx.uiStore.getState().shell;
-      if (!shell) return;
-      ctx.uiStore.update({
-        shell: { ...shell, currentTool: { name, startedAt: Date.now() } },
-      });
+      ctx.reportActivity?.(name, { phase: name });
     },
     clear() {
-      if (!ctx.uiStore) return;
-      const shell = ctx.uiStore.getState().shell;
-      if (!shell) return;
-      ctx.uiStore.update({ shell: { ...shell, currentTool: undefined } });
+      // no-op — `currentTool` is cleared by the shell when the tool returns
     },
   };
 }

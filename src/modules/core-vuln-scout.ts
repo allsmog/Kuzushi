@@ -90,6 +90,8 @@ const auditTool: ModuleTool = {
     const model = resolveModel(ctx, params.model as string | undefined);
     const maxFindings = resolveMaxFindings(ctx, params.maxFindings);
 
+    ctx.reportActivity?.(`auditing ${name} · ${model}`);
+
     try {
       const result = await runPluginFindingScanner({
         runtime: ctx.runtime,

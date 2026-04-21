@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type Align,
+  formatRelativeAgo,
   padCell,
   truncateEnd,
   truncateMiddle,
@@ -66,5 +67,30 @@ describe("padCell", () => {
   it("respects ANSI width when measuring", () => {
     const colored = "\u001b[31mab\u001b[0m";
     expect(padCell(colored, 5, "right")).toBe(`   ${colored}`);
+  });
+});
+
+describe("formatRelativeAgo", () => {
+  const now = 1_700_000_000_000;
+  it("renders 'just now' within 5 seconds", () => {
+    expect(formatRelativeAgo(now, now)).toBe("just now");
+    expect(formatRelativeAgo(now - 4_999, now)).toBe("just now");
+  });
+  it("renders seconds between 5 and 59", () => {
+    expect(formatRelativeAgo(now - 5_000, now)).toBe("5s ago");
+    expect(formatRelativeAgo(now - 42_000, now)).toBe("42s ago");
+    expect(formatRelativeAgo(now - 59_999, now)).toBe("59s ago");
+  });
+  it("renders minutes past 60s", () => {
+    expect(formatRelativeAgo(now - 60_000, now)).toBe("1m ago");
+    expect(formatRelativeAgo(now - 72_000, now)).toBe("1m 12s ago");
+    expect(formatRelativeAgo(now - 3_599_000, now)).toBe("59m 59s ago");
+  });
+  it("renders hours past 60m", () => {
+    expect(formatRelativeAgo(now - 3_600_000, now)).toBe("1h ago");
+    expect(formatRelativeAgo(now - 4_200_000, now)).toBe("1h 10m ago");
+  });
+  it("clamps negative deltas to 'just now'", () => {
+    expect(formatRelativeAgo(now + 5_000, now)).toBe("just now");
   });
 });

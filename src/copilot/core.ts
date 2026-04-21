@@ -16,6 +16,7 @@ import { type Dirent, existsSync, readdirSync } from "node:fs";
 import nodePath from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
+import { publishTaskActivity } from "../bus/activity.js";
 import { ModuleEventBus, type ModuleEventScope } from "../bus/module-events.js";
 import type { MessageBus } from "../bus/types.js";
 import { ModuleCache } from "../modules/cache.js";
@@ -296,10 +297,11 @@ export class CopilotCore {
     // reaches other modules subscribing to well-known events.
     const scope = this.moduleScopes.get(resolved.module.id);
 
+    const ctxBus = ctxOverrides?.bus ?? this.opts.bus;
     const ctx: ToolExecutionContext = {
       cwd: ctxOverrides?.cwd ?? this.opts.dataDir,
       runtime: ctxOverrides?.runtime ?? this.opts.runtime,
-      bus: ctxOverrides?.bus ?? this.opts.bus,
+      bus: ctxBus,
       config: ctxOverrides?.config ?? this.opts.config,
       workspaceId: ctxOverrides?.workspaceId,
       target,
@@ -311,6 +313,9 @@ export class CopilotCore {
       ...(ctxOverrides?.workspace ? { workspace: ctxOverrides.workspace } : {}),
       ...(scope ? { events: scope } : {}),
       ...(toolModel ? { toolModel } : {}),
+      reportActivity: (description, meta) => {
+        void publishTaskActivity(ctxBus, qualifiedName, description, meta ?? {});
+      },
     };
 
     // Module lifecycle events — fire on the module's own scope so the module
