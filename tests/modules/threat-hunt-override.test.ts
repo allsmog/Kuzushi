@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Mock the scan pipeline so we can inspect what taskConfig makes it through.
 const runPipelineMock = vi.hoisted(() => vi.fn());
-vi.mock("../../src/cli/commands/scan.js", () => ({ runPipeline: runPipelineMock }));
+vi.mock("../../src/cli/commands/scan-pipeline.js", () => ({ runPipeline: runPipelineMock }));
 vi.mock("../../src/cli/shared.js", () => ({
   resolveRepo: () => ({ root: "/tmp/repo", name: "repo" }),
 }));

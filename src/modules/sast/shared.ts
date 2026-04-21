@@ -33,15 +33,15 @@ export function mergeTaskConfig(
   return {
     ...config,
     taskConfig: Object.entries(overrides).reduce<Record<string, Record<string, unknown>>>(
-      (acc, [taskId, taskConfig]) => ({
-        ...acc,
-        [taskId]: {
+      (acc, [taskId, taskConfig]) => {
+        acc[taskId] = {
           ...(config.taskConfig[taskId] ?? {}),
           ...Object.fromEntries(
             Object.entries(taskConfig).filter(([, value]) => value !== undefined),
           ),
-        },
-      }),
+        };
+        return acc;
+      },
       { ...config.taskConfig },
     ),
   };
@@ -66,7 +66,7 @@ export async function executeSastPipeline(
     };
   }
 
-  const { runPipeline } = await import("../../cli/commands/scan.js");
+  const { runPipeline } = await import("../../cli/commands/scan-pipeline.js");
   const { resolveRepo } = await import("../../cli/shared.js");
   const { resolveScanSeverity } = await import("../../cli/scan-config.js");
   const { configureTerminalOutput, resetTerminalOutput } = await import("../../ui/output.js");

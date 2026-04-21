@@ -65,6 +65,12 @@ import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js
 import { CliUsageError } from "../errors.js";
 import type { ScanCommandOptions } from "../scan-config.js";
 import { isShutdownCapableRuntime, resolveRepo } from "../shared.js";
+import {
+  applyPipelineCacheOptions,
+  createPipelineRuntime,
+  prepareScanExecution,
+  runPipeline,
+} from "./scan-pipeline.js";
 
 const DEFAULT_MONOREPO_CONCURRENCY = 5;
 
@@ -75,8 +81,6 @@ interface ModuleExecutionResult extends MonorepoModuleResult {
 
 export async function runMonorepoScan(repoPath: string, opts: ScanCommandOptions): Promise<void> {
   const { root: monorepoRoot, name: monorepoName } = resolveRepo(repoPath);
-  const { applyPipelineCacheOptions, createPipelineRuntime, prepareScanExecution, runPipeline } =
-    await import("./scan.js");
   const { config, scanOpts } = prepareScanExecution(monorepoRoot, opts);
   let runtime: AgentRuntime | undefined;
   configureTerminalOutput({
@@ -117,7 +121,7 @@ export async function runMonorepoScan(repoPath: string, opts: ScanCommandOptions
     // Reconstruct the module list from existing DB runs and jump to Phase 2.
     if (opts.resume !== undefined) {
       const db = initDb(dbPath);
-      let moduleRuns;
+      let moduleRuns: ReturnType<typeof getResumableModuleRuns>;
       try {
         moduleRuns = getResumableModuleRuns(db, monorepoName);
       } finally {
@@ -434,7 +438,6 @@ async function runPlansInParallel(params: {
   budget: ReturnType<typeof createBudget>;
   monorepoUI?: MonorepoUIHandle;
 }): Promise<ModuleExecutionResult[]> {
-  const { runPipeline } = await import("./scan.js");
   const {
     plans,
     monorepoRoot,
