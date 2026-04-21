@@ -1216,6 +1216,21 @@ export async function startShell(opts: ShellOptions): Promise<void> {
     // Workspace persistence is optional — degrade gracefully
   }
 
+  // No-workspace fallback: if the target repo has a prior on-disk
+  // `<target>/.kuzushi/context-snapshot.json` from an earlier
+  // `context:build` run, auto-load it so dependent modules
+  // (threat-hunt, agentic-sast, taint-iris) find their appModel /
+  // threatModel prerequisites without the operator having to re-run
+  // context:build on every session.
+  if (!loadedSnapshot && opts.target) {
+    try {
+      const { loadContextSnapshot } = await import("../modules/sast/context-persist.js");
+      loadedSnapshot = loadContextSnapshot(opts.target);
+    } catch {
+      /* best-effort */
+    }
+  }
+
   const core = new CopilotCore({
     runtime: opts.runtime,
     bus,
