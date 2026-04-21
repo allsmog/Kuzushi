@@ -15,7 +15,7 @@ exports[`Ink component snapshots > BannerSplash — wordmark + tip 1`] = `
 `;
 
 exports[`Ink component snapshots > FindingCard linear — state strip + evidence + timeline 1`] = `
-"  ◂ findings   F-0216   │   ✗ HIGH   ssrf on /admin/fetch
+"  ◂ findings   F-0216   │   ▲ HIGH   ssrf on /admin/fetch
 
      new ─▶ triaged ─▶ verified ─▶ assigned ─▶ in-review ─▶ resolved
 

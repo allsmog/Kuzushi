@@ -29,20 +29,34 @@
  *   - `hint`    — italic + muted; parenthetical hints, tertiary annotations
  */
 import chalk from "chalk";
+import { isHighContrast, isNoColor } from "./severity.js";
 import { getTheme } from "./theme.js";
 
-/** Theme-aware secondary/dim: `chalk.dim` on dark, `chalk.gray` on light. */
+/**
+ * Theme-aware secondary/dim: `chalk.dim` on dark, `chalk.gray` on light.
+ *
+ * Accessibility behavior:
+ *   - `NO_COLOR` set → identity (no ANSI applied; downstream can still
+ *     pad/layout against the string).
+ *   - `KUZUSHI_HIGH_CONTRAST=1` → identity. Dim/gray is often unreadable
+ *     against a white-on-black high-contrast terminal, so we upgrade it
+ *     to regular weight.
+ */
 function muted(text: string): string {
+  if (isNoColor() || isHighContrast()) return text;
   return getTheme() === "light" ? chalk.gray(text) : chalk.dim(text);
 }
 
 /** One step lighter/dimmer than `muted`. Flip the theme mapping to read a bit softer. */
 function subtle(text: string): string {
+  if (isNoColor() || isHighContrast()) return text;
   return getTheme() === "light" ? chalk.dim(text) : chalk.gray(text);
 }
 
 /** Italic + muted — for parenthetical hints and tertiary annotations. */
 function hint(text: string): string {
+  if (isNoColor()) return text;
+  if (isHighContrast()) return chalk.italic(text);
   return chalk.italic(muted(text));
 }
 

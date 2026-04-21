@@ -5,6 +5,7 @@
 import chalk from "chalk";
 import type { Verdict } from "../types.js";
 import { icons } from "./icons.js";
+import { normalizeSeverity, severityChalk, severityStyle } from "./severity.js";
 import { tokens } from "./tokens.js";
 
 /**
@@ -127,24 +128,16 @@ export function badge(
 
 /**
  * Format a severity level with icon and color.
+ *
+ * Pairs a Unicode glyph + uppercase label with the severity color from
+ * `severity.ts`, so color-blind / NO_COLOR / screen-reader consumers still
+ * read the tier. Unknown tiers fall through to `tokens.muted`.
  */
 export function severityLabel(level: string): string {
-  const upper = level.toUpperCase();
-  switch (upper) {
-    case "CRITICAL":
-      return tokens.dangerStrong(`${icons.error} ${upper}`);
-    case "ERROR":
-    case "HIGH":
-      return tokens.danger(`${icons.error} ${upper}`);
-    case "WARNING":
-    case "MEDIUM":
-      return tokens.warn(`${icons.warning} ${upper}`);
-    case "INFO":
-    case "LOW":
-      return tokens.info(`${icons.info} ${upper}`);
-    default:
-      return tokens.muted(upper);
-  }
+  if (!level) return tokens.muted("");
+  const sev = normalizeSeverity(level);
+  const style = severityStyle(sev);
+  return severityChalk(sev)(`${style.glyph} ${style.longLabel}`);
 }
 
 /**

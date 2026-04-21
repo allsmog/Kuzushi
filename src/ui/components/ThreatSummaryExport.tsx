@@ -22,6 +22,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import type { StrideCategory } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
+import { type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -185,16 +186,12 @@ function Counts({
 }
 
 function severityBadge(tier: string): string {
-  switch (tier) {
-    case "critical":
-      return tokens.dangerStrong("CRIT");
-    case "high":
-      return tokens.danger("HIGH");
-    case "medium":
-      return tokens.warn("MED ");
-    default:
-      return tokens.info("LOW ");
-  }
+  const sev = (tier === "critical" || tier === "high" || tier === "medium" || tier === "low"
+    ? tier
+    : "info") as Severity;
+  const style = severityStyle(sev);
+  // Glyph + short label — readable under NO_COLOR and for screen readers.
+  return severityChalk(sev)(`${style.glyph} ${style.label}`);
 }
 
 function bar(n: number, max: number, colorKey: string): string {
@@ -202,18 +199,16 @@ function bar(n: number, max: number, colorKey: string): string {
   const width = 24;
   const filled = Math.max(1, Math.round((n / max) * width));
   const segment = "\u2588".repeat(filled);
-  switch (colorKey) {
-    case "critical":
-      return tokens.dangerStrong(segment);
-    case "high":
-      return tokens.danger(segment);
-    case "medium":
-      return tokens.warn(segment);
-    case "low":
-      return tokens.info(segment);
-    default:
-      return tokens.accent(segment);
+  if (
+    colorKey === "critical" ||
+    colorKey === "high" ||
+    colorKey === "medium" ||
+    colorKey === "low" ||
+    colorKey === "info"
+  ) {
+    return severityChalk(colorKey)(segment);
   }
+  return tokens.accent(segment);
 }
 
 function Drives(): React.ReactElement {
