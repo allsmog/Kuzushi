@@ -13,6 +13,7 @@ import {
   registerAllWorkers,
 } from "../../bus/index.js";
 import { resolveInitialTaskPlan } from "../../bus/orchestrator/task-policy.js";
+import { registerRunSignal, unregisterRunSignal } from "../../bus/run-signals.js";
 import { inflightCache } from "../../cache.js";
 import { expandTaskSelections } from "../../capabilities.js";
 import {
@@ -320,6 +321,14 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       })
     : undefined;
 
+  // Publish the signal under this runId so bus workers (scan-worker, etc.)
+  // can populate `TaskContext.signal`. Without this hop, long-running
+  // tasks like threat-hunt ignore Ctrl+C because their runtime.query
+  // receives no AbortController and pi-ai has nothing to cancel.
+  if (params.signal) {
+    registerRunSignal(runId, params.signal);
+  }
+
   if (reportMode === "full" && !params.uiStore) {
     printScanPlan(config, scanOpts, taskRegistry);
   }
@@ -438,6 +447,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       stats: outcome.event.payload.stats,
     };
   } finally {
+    unregisterRunSignal(runId);
     try {
       await bus.close();
     } finally {

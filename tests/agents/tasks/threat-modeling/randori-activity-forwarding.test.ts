@@ -117,6 +117,38 @@ describe("describeRuntimeMessage", () => {
     );
     expect(out).toEqual([]);
   });
+
+  it("surfaces the tool name for pi-ai tool-call-start events", () => {
+    // pi-ai streaming yields this the moment the model commits to a tool
+    // — before any JSON args stream in. Matters for Opus + max thinking
+    // where the first full assistant turn can take 5+ minutes; without
+    // this signal the activity rail is silent the whole way.
+    const out = describeRuntimeMessage(
+      asMsg({
+        type: "tool-call-start",
+        toolUseId: "tu-1",
+        toolName: "Read",
+      }),
+    );
+    expect(out).toEqual(["Read"]);
+  });
+
+  it("falls back to 'tool' when tool-call-start lacks a name", () => {
+    const out = describeRuntimeMessage(
+      asMsg({
+        type: "tool-call-start",
+        toolUseId: "tu-2",
+      } as unknown as AgentMessage),
+    );
+    expect(out).toEqual(["tool"]);
+  });
+
+  it("returns nothing for text-delta and thinking-delta (too noisy)", () => {
+    expect(describeRuntimeMessage(asMsg({ type: "text-delta", delta: "hello" }))).toEqual([]);
+    expect(describeRuntimeMessage(asMsg({ type: "thinking-delta", delta: "thinking..." }))).toEqual(
+      [],
+    );
+  });
 });
 
 describe("runRandoriPasta — activity forwarding", () => {

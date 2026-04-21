@@ -1,14 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import { TaskRegistry } from "../../src/agents/registry.js";
 import type { AgentTask, TaskContext } from "../../src/agents/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import type { ScanFindingEvent, TaskCompleteEvent, TaskErrorEvent } from "../../src/bus/events.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
+import { __clearRunSignalsForTest, registerRunSignal } from "../../src/bus/run-signals.js";
 import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
 import type { Finding } from "../../src/scanners/types.js";
 import { attachTaskOutputMeta } from "../../src/task-output-meta.js";
 import type { KuzushiConfig, ScanOpts } from "../../src/types.js";
+
+afterEach(() => {
+  __clearRunSignalsForTest();
+});
 
 function makeFinding(taskId: string, fp: string): Finding {
   return {
@@ -417,6 +422,95 @@ describe("scan-worker", () => {
       }),
     );
     expect(complete.payload.costUsd).toBe(0);
+
+    await bus.close();
+  });
+
+  it("populates TaskContext.signal from the run-signal registry", async () => {
+    // runPipeline registers the pipeline's abort signal under runId before
+    // publishing pipeline:start; scan-worker must forward it into TaskContext
+    // so tasks like threat-hunt can cancel their in-flight runtime.query.
+    const bus = new InProcessBus();
+    const taskRegistry = new TaskRegistry();
+    let captured: AbortSignal | undefined;
+    const task: AgentTask<unknown, Finding[]> = {
+      id: "signal-probe",
+      displayName: "Signal Probe",
+      outputKind: "findings",
+      dependsOn: [],
+      async run(_input, context) {
+        captured = context.signal;
+        return [];
+      },
+    };
+    taskRegistry.register(task);
+    registerScanWorker(bus, makeDeps(taskRegistry));
+
+    const runId = generateRunId();
+    const controller = new AbortController();
+    registerRunSignal(runId, controller.signal);
+
+    const completePromise = bus.waitFor<TaskCompleteEvent>(
+      "task:complete",
+      (event) => event.meta.runId === runId && event.payload.taskId === "signal-probe",
+    );
+
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context: { runId, repoRoot: "/tmp/repo", repoName: "repo" },
+        taskId: "signal-probe",
+        outputKind: "findings",
+        input: {},
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    await completePromise;
+    expect(captured).toBe(controller.signal);
+    expect(captured?.aborted).toBe(false);
+
+    // Signal aborts are visible through the same reference.
+    controller.abort();
+    expect(captured?.aborted).toBe(true);
+
+    await bus.close();
+  });
+
+  it("leaves TaskContext.signal undefined when no signal is registered", async () => {
+    const bus = new InProcessBus();
+    const taskRegistry = new TaskRegistry();
+    let captured: AbortSignal | undefined;
+    const task: AgentTask<unknown, Finding[]> = {
+      id: "signal-absent",
+      displayName: "Signal Absent",
+      outputKind: "findings",
+      dependsOn: [],
+      async run(_input, context) {
+        captured = context.signal;
+        return [];
+      },
+    };
+    taskRegistry.register(task);
+    registerScanWorker(bus, makeDeps(taskRegistry));
+
+    const runId = generateRunId();
+    const completePromise = bus.waitFor<TaskCompleteEvent>(
+      "task:complete",
+      (event) => event.meta.runId === runId && event.payload.taskId === "signal-absent",
+    );
+
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context: { runId, repoRoot: "/tmp/repo", repoName: "repo" },
+        taskId: "signal-absent",
+        outputKind: "findings",
+        input: {},
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    await completePromise;
+    expect(captured).toBeUndefined();
 
     await bus.close();
   });
