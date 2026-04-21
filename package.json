@@ -90,6 +90,7 @@
     "promptarmor-plugin": "github:allsmog/promptarmor-plugin",
     "react": "^18",
     "shinsa-plugin": "github:allsmog/shinsa-plugin",
+    "tinyglobby": "^0.2.15",
     "typescript": "^5.7.3",
     "yaml": "^2.7.0",
     "youch": "^4.1.1",

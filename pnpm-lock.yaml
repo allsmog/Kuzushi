@@ -50,6 +50,9 @@ importers:
       shinsa-plugin:
         specifier: github:allsmog/shinsa-plugin
         version: https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/76cdc58acd4776044f55bb5069c7c3493f5cdd8f
+      tinyglobby:
+        specifier: ^0.2.15
+        version: 0.2.15
       typescript:
         specifier: ^5.7.3
         version: 5.9.3

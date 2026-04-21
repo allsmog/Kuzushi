@@ -15,16 +15,22 @@ export type PromptMode = "full" | "minimal" | "none";
 /** Shared context provided to every task execution. */
 export interface TaskContext {
   runId: string;
-  /** Actual repository root for the pipeline run. */
+  /** The scan scope (same as `repoRoot` / `workRoot`). Kept for
+   *  backward-compatibility with tasks written before scope narrowing;
+   *  new code should use `workRoot` or `repoRoot`. */
   projectRoot?: string;
-  /** Effective scan scope for the current task, usually scanPath ?? projectRoot. */
+  /** Effective scan scope for the current task, usually scanPath ?? repoRoot. */
   workRoot?: string;
   /**
    * @deprecated Backward-compatible alias for workRoot.
-   * Prefer projectRoot for repo-wide state and workRoot for scan-scoped work.
+   * Prefer workRoot for scan-scoped work.
    */
   repoRoot: string;
   scanPath?: string;
+  /** Enclosing git toplevel when different from `repoRoot`. Set only when the
+   * operator targeted a subdirectory of a larger git repo. Consumed by
+   * cross-service taint analysis, which intentionally spans services. */
+  gitRoot?: string;
   repoName: string;
   dbPath?: string;
   config: KuzushiConfig;

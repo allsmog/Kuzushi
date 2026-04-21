@@ -50,17 +50,21 @@ export const appModelBuildTask: AgentTask<ScanOpts, ApplicationModel> = {
   dependsOn: ["context-gatherer", "context-enricher"],
 
   async run(_input, context): Promise<ApplicationModel> {
+    context.signal?.throwIfAborted();
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const enrichment = coerceContextEnrichment(context.upstreamOutputs.get("context-enricher"));
     const fileIndex = coerceFileIndex(context.upstreamOutputs.get("context-gatherer"));
     const intelligence = await getCodeIntelligenceProvider(context.repoRoot);
+    context.signal?.throwIfAborted();
     const importGraph = await intelligence.getImportGraph();
+    context.signal?.throwIfAborted();
     const candidateFiles = await loadCandidateFiles(
       context.repoRoot,
       repoContext,
       enrichment,
       fileIndex,
     );
+    context.signal?.throwIfAborted();
 
     const routes = collectRoutes(candidateFiles, repoContext, enrichment);
     const outboundClients = collectOutboundClients(candidateFiles);

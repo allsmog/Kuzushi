@@ -128,7 +128,10 @@ export const taintAnalysisDiscoverTask: AgentTask<ScanOpts, CrossServiceDiscover
   async run(_input, context): Promise<CrossServiceDiscoverOutput> {
     const cfg = resolveTaintAnalysisConfig(context.config);
     const crossCfg = resolveCrossServiceConfig(cfg);
-    const projectRoot = context.projectRoot ?? context.repoRoot;
+    // Cross-service discovery intentionally widens to the enclosing git
+    // repo when the operator has targeted a subdirectory — services often
+    // live in sibling paths. Falls back to the scan scope otherwise.
+    const projectRoot = context.gitRoot ?? context.projectRoot ?? context.repoRoot;
 
     // Check for manifest override
     const manifestPath = path.join(projectRoot, ".kuzushi", "services.json");

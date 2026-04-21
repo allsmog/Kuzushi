@@ -266,7 +266,7 @@ async function runTaintAnalysisForService(
   // Step 1: Preflight
   const preflightContext: TaskContext = {
     runId: parentContext.runId,
-    projectRoot: parentContext.projectRoot ?? parentContext.repoRoot,
+    projectRoot: parentContext.gitRoot ?? parentContext.projectRoot ?? parentContext.repoRoot,
     workRoot: serviceRoot,
     repoRoot: serviceRoot,
     scanPath: serviceRoot,

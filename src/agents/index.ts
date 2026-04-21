@@ -70,7 +70,7 @@ function createNativeFindingTask(plugin: ScannerPlugin): AgentTask<ScanOpts, Fin
         runId: context.runId,
         runContext: {
           runId: context.runId,
-          repoRoot: context.projectRoot ?? context.repoRoot,
+          repoRoot: context.workRoot ?? context.repoRoot,
           scanPath: context.scanPath,
           repoName: context.repoName,
           dbPath: context.dbPath ?? "",

@@ -195,11 +195,15 @@ export const contextGathererTask: AgentTask<ScanOpts, ContextGathererOutput> = {
   outputKind: "custom",
   dependsOn: [],
   async run(_input, context): Promise<ContextGathererOutput> {
-    return gatherContextForRoot(context.workRoot ?? context.repoRoot);
+    context.signal?.throwIfAborted();
+    return gatherContextForRoot(context.workRoot ?? context.repoRoot, context.signal);
   },
 };
 
-export async function gatherContextForRoot(workRoot: string): Promise<ContextGathererOutput> {
+export async function gatherContextForRoot(
+  workRoot: string,
+  signal?: AbortSignal,
+): Promise<ContextGathererOutput> {
   const aggregate = createMutableRepoContext();
 
   await Promise.all([
@@ -209,8 +213,10 @@ export async function gatherContextForRoot(workRoot: string): Promise<ContextGat
     gatherFromCargoToml(workRoot, aggregate),
     gatherFromNativeBuildSystem(workRoot, aggregate),
   ]);
+  signal?.throwIfAborted();
 
   const pathSignals = await walkRepo(workRoot);
+  signal?.throwIfAborted();
   gatherFromPathSignals(pathSignals, aggregate);
 
   const sourceFiles = pathSignals.files.filter((file) =>
@@ -219,7 +225,7 @@ export async function gatherContextForRoot(workRoot: string): Promise<ContextGat
 
   const tree = sourceFiles.slice(0, MAX_FILE_INDEX_ENTRIES).map((file) => ({ path: file.relPath }));
 
-  const patternMatches = await grepSecurityPatterns(workRoot, sourceFiles);
+  const patternMatches = await grepSecurityPatterns(workRoot, sourceFiles, signal);
 
   const repoContext: RepoContext = {
     languages: sortValues(aggregate.languages),
@@ -246,6 +252,7 @@ const GREP_CONCURRENCY = 16;
 async function grepSecurityPatterns(
   repoRoot: string,
   files: WalkEntry[],
+  signal?: AbortSignal,
 ): Promise<Record<string, SecurityPatternMatch[]>> {
   const result: Record<string, SecurityPatternMatch[]> = {};
 
@@ -257,6 +264,7 @@ async function grepSecurityPatterns(
   let cursor = 0;
   const worker = async (): Promise<void> => {
     while (cursor < files.length) {
+      if (signal?.aborted) return;
       const idx = cursor++;
       const file = files[idx];
       const absPath = path.join(repoRoot, file.relPath);

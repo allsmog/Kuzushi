@@ -1,9 +1,15 @@
 import { execFile, spawn } from "node:child_process";
-import { globSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
 import { type Tool, Type } from "@mariozechner/pi-ai";
+// Use tinyglobby instead of node:fs globSync — fs.globSync is still marked
+// experimental on Node 22/23 and emits a one-time stderr warning on first
+// use that tears through the Ink frame. tinyglobby is a stable 0-dep userland
+// alternative (fdir + picomatch) with an identical sync API; `ignore`
+// replaces `exclude`.
+import { globSync } from "tinyglobby";
 import { isRecord, toErrorMessage } from "../utils.js";
 
 const execFileAsync = promisify(execFile);
@@ -333,7 +339,10 @@ function executeGlob(args: Record<string, unknown>, cwd: string): string {
   const limit = toPositiveInt(args["limit"]) ?? DEFAULT_GLOB_LIMIT;
   const rawMatches = globSync(pattern, {
     cwd: searchRoot,
-    ...(exclude.length > 0 ? { exclude } : {}),
+    // Preserve fs.globSync's files-and-dirs default; tinyglobby's default
+    // is files only.
+    onlyFiles: false,
+    ...(exclude.length > 0 ? { ignore: exclude } : {}),
   });
 
   const sorted = rawMatches
@@ -377,7 +386,7 @@ function executeGrep(args: Record<string, unknown>, cwd: string): string {
 
   const files = globSync(filePattern, {
     cwd: searchRoot,
-    exclude: ["**/.git/**", "**/node_modules/**"],
+    ignore: ["**/.git/**", "**/node_modules/**"],
   });
 
   const output: string[] = [];
@@ -1213,7 +1222,7 @@ function executeGetFunctionBody(args: Record<string, unknown>, cwd: string): str
   } else {
     const allFiles = globSync("**/*", {
       cwd,
-      exclude: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
+      ignore: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
     });
     for (const file of allFiles) {
       const ext = path.extname(file).slice(1).toLowerCase();
@@ -1286,7 +1295,7 @@ function executeGetCallers(args: Record<string, unknown>, cwd: string): string {
 
   const files = globSync("**/*", {
     cwd: searchRoot,
-    exclude: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
+    ignore: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
   });
 
   const output: string[] = [];

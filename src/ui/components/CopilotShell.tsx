@@ -6,13 +6,13 @@
  * when a scan runs, the app switches to "running" mode and renders
  * PipelineIndicator/StatusFooter, then switches back here.
  *
- * Uses <MultilineText> for multi-line entries, tokens for all styling, and
- * registers its active keybindings with the shared footer.
+ * Uses tokens for all styling and registers its active keybindings with
+ * the shared footer.
  */
 
 import { Box, Static, Text, useApp, useInput } from "ink";
 import type React from "react";
-import { memo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
 import { buildShellPrompt } from "../../copilot/shell.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
@@ -20,20 +20,19 @@ import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useUIState } from "../hooks.js";
 import { Gutter } from "../primitives/Gutter.js";
 import { Markdown } from "../primitives/Markdown.js";
-import { MultilineText } from "../primitives/MultilineText.js";
 import { Ratchet } from "../primitives/Ratchet.js";
 import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
 import { tokens } from "../tokens.js";
-import { ErrorMessage } from "./ErrorMessage.js";
-import { PulseDot } from "./PulseDot.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { DiffSinceView } from "./DiffSinceView.js";
+import { ErrorMessage } from "./ErrorMessage.js";
 import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
 import { ModuleCatalog } from "./ModuleCatalog.js";
 import { ModuleHome } from "./ModuleHome.js";
 import { PlanCard } from "./PlanCard.js";
+import { PulseDot } from "./PulseDot.js";
 import { ScopeAndCriticalityView } from "./ScopeAndCriticalityView.js";
 import { Spinner } from "./Spinner.js";
 import { ThreatDfdView } from "./ThreatDfdView.js";
@@ -79,6 +78,60 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
   const processing = shell?.processing === true;
   useRegisterKeybindings(processing ? PROCESSING_KEYBINDS : IDLE_KEYBINDS);
+
+  // Raw-mode watchdog. The Claude Agent SDK subprocess (used by `randori` etc.)
+  // disables parent stdin raw mode and doesn't restore it on exit, so Ink's
+  // `useInput` stops receiving Ctrl+C as `0x03` — the terminal falls back to
+  // cooked mode and echoes typed characters below Ink's frame. Re-asserting
+  // in `useLayoutEffect` runs synchronously during React commit, closing the
+  // window before Ink's next render cycle. Claude Code's custom Ink does the
+  // same thing via `handleSetRawMode` tracked with a counter (see
+  // yasasbanukaofficial/claude-code/src/ink/hooks/use-input.ts:46-55).
+  useLayoutEffect(() => {
+    if (!processing) return;
+    const stdin = process.stdin as NodeJS.ReadStream & {
+      isRaw?: boolean;
+      setRawMode?: (mode: boolean) => void;
+    };
+    if (!stdin.isTTY || !stdin.setRawMode) return;
+    // Re-assert on every render while processing. Cheap (no-op if already raw)
+    // but critical on the render that fires right after a subprocess exits.
+    if (!stdin.isRaw) {
+      try {
+        stdin.setRawMode(true);
+      } catch {
+        /* best-effort */
+      }
+    }
+  });
+
+  // Backstop interval: for the rare case where no render fires between a
+  // subprocess exit and the next Ctrl+C press (e.g. no progress events
+  // stream in), poll raw mode while processing. 75 ms closes the gap
+  // between subprocess takeover and Ink reclaiming raw mode — if the
+  // user hits Ctrl+C in that window, cooked mode routes the signal to
+  // the node SIGINT handler (which then runs abortActiveAction), but
+  // once the subprocess has exited we want useInput to be responsive
+  // for the *next* key press. The poll itself is a single `isRaw`
+  // read + optional setRawMode call, trivially cheap.
+  useEffect(() => {
+    if (!processing) return;
+    const id = setInterval(() => {
+      const stdin = process.stdin as NodeJS.ReadStream & {
+        isRaw?: boolean;
+        setRawMode?: (mode: boolean) => void;
+      };
+      if (!stdin.isTTY || !stdin.setRawMode) return;
+      if (!stdin.isRaw) {
+        try {
+          stdin.setRawMode(true);
+        } catch {
+          /* best-effort */
+        }
+      }
+    }, 75);
+    return () => clearInterval(id);
+  }, [processing]);
 
   useInput(
     (char, key) => {
@@ -231,11 +284,10 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const staticHistory = shell.history.slice(0, staticCutoff);
   const liveHistory = shell.history.slice(staticCutoff);
 
-  // ModuleCatalog re-reads shell.moduleCatalog on every render; wrapping it in
-  // <Static> would freeze the first snapshot and hide module/last-run updates,
-  // so we render it plainly. To stop it from re-rendering on every shell state
-  // update (heartbeat ticks, phase events, etc. — which previously caused
-  // visible flicker), the banner is memoized on just the fields it reads.
+  // ModuleCatalog re-reads shell.moduleCatalog on every render; wrapping it
+  // in <Static> would freeze the first snapshot and hide module/last-run
+  // updates, so we render it plainly when present. The memoized wrapper
+  // stops it from re-rendering on every heartbeat tick.
   const showCatalog = shell.moduleCatalog && shell.moduleCatalog.length > 0;
 
   return (
@@ -521,6 +573,10 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
       const wrap = (s: string): string => {
         if (kind === "ok") return tokens.success(s);
         if (kind === "fail") return tokens.danger(s);
+        // Nested sub-agent tool headers (Read/Write/Glob/…) inherit base
+        // text color — muted is reserved for free-form body-text pulses,
+        // matching opencode's `∟` / Claude Code's `⎿` convention.
+        if (kind === "invocation") return tokens.value(s);
         return tokens.muted(s);
       };
       return (
@@ -528,10 +584,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
           <Gutter>
             <Text dimColor>{LOWER_HOOK}</Text>
           </Gutter>
-          <Text>
-            {" "}
-            {wrap(entry.text)}
-          </Text>
+          <Text> {wrap(entry.text)}</Text>
         </Box>
       );
     }
@@ -546,8 +599,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
  */
 function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
   const status = entry.status;
-  const label =
-    entry.displayName ?? entry.tool ?? entry.text.replace(/^[⏺●]\s*/, "");
+  const label = entry.displayName ?? entry.tool ?? entry.text.replace(/^[⏺●]\s*/, "");
   const elapsedSuffix =
     status && status !== "running" && entry.elapsedSeconds && entry.elapsedSeconds > 0
       ? tokens.muted(` · ${entry.elapsedSeconds}s`)
@@ -575,11 +627,7 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
     <Ratchet>
       <Box marginTop={1}>
         <Gutter>
-          {status ? (
-            <PulseDot status={status} />
-          ) : (
-            <Text>{tokens.accent(BLACK_CIRCLE)}</Text>
-          )}
+          {status ? <PulseDot status={status} /> : <Text>{tokens.accent(BLACK_CIRCLE)}</Text>}
         </Gutter>
         <Text>
           <Text bold>{label}</Text>
@@ -595,10 +643,7 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
               <Gutter>
                 <Text dimColor>{LOWER_HOOK}</Text>
               </Gutter>
-              <Text>
-                {" "}
-                {tokens.muted(activity)}
-              </Text>
+              <Text> {tokens.muted(activity)}</Text>
             </Box>
           ))}
         </Box>

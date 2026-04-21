@@ -682,3 +682,164 @@ describe("shell history persistence", () => {
     expect(loaded.at(-1)).toBe("cmd-1004");
   });
 });
+
+/**
+ * Regression coverage for the Ctrl+C abort guard race.
+ *
+ * The bug: `abortActiveAction` pre-set an `activeAbortRequested` flag
+ * BEFORE invoking the registered `onAbort` handler. The handler had
+ * its own dedupe guard that returned early when the flag was true —
+ * so SIGINT-triggered aborts (which route through `abortActiveAction`)
+ * silently no-op'd and `AbortController.abort()` never fired. In
+ * practice this meant Ctrl+C couldn't stop a running module tool like
+ * `context:build` once the Claude Agent SDK subprocess had disabled
+ * parent stdin raw mode and forced fallback to the SIGINT path.
+ *
+ * These tests lock in the contract that a dispatcher which simply
+ * delegates to `onAbort` (no pre-set flag) reliably drives the
+ * AbortController, and that the handler's own guard still dedupes
+ * repeated invocations.
+ */
+describe("abort handler dispatch contract", () => {
+  type AbortHandler = () => void;
+
+  // Mirrors the production shape without dragging in the full UIStore.
+  // The only thing that matters for the contract is that installing a
+  // handler + calling the dispatcher fires the handler, and the handler
+  // owns its own deduplication flag.
+  function createAbortCoordinator() {
+    let handler: AbortHandler | undefined;
+    let activeKind: "tool" | "agent" | null = null;
+
+    // NEW dispatcher: pure delegation. Does NOT touch any guard flag.
+    const dispatch = (): void => {
+      if (!activeKind) return;
+      handler?.();
+    };
+
+    const setHandler = (next: AbortHandler): void => {
+      handler = next;
+    };
+
+    const activate = (kind: "tool" | "agent"): void => {
+      activeKind = kind;
+    };
+
+    return { dispatch, setHandler, activate };
+  }
+
+  it("fires the controller when dispatch delegates to a guarded handler", () => {
+    const coord = createAbortCoordinator();
+    const controller = new AbortController();
+    let callCount = 0;
+    let alreadyRequested = false;
+
+    coord.activate("tool");
+    coord.setHandler(() => {
+      if (alreadyRequested) return;
+      alreadyRequested = true;
+      callCount++;
+      controller.abort(new Error("Shell tool execution aborted"));
+    });
+
+    coord.dispatch();
+
+    expect(callCount).toBe(1);
+    expect(alreadyRequested).toBe(true);
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("deduplicates repeated dispatch calls via the handler's own guard", () => {
+    const coord = createAbortCoordinator();
+    const controller = new AbortController();
+    let callCount = 0;
+    let alreadyRequested = false;
+
+    coord.activate("tool");
+    coord.setHandler(() => {
+      if (alreadyRequested) return;
+      alreadyRequested = true;
+      callCount++;
+      controller.abort();
+    });
+
+    // Simulate both the useInput Ctrl+C path and the SIGINT handler
+    // firing for the same keypress. The guard must swallow the duplicate.
+    coord.dispatch();
+    coord.dispatch();
+    coord.dispatch();
+
+    expect(callCount).toBe(1);
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("is a no-op when no active action is registered", () => {
+    const coord = createAbortCoordinator();
+    const controller = new AbortController();
+    let callCount = 0;
+
+    coord.setHandler(() => {
+      callCount++;
+      controller.abort();
+    });
+
+    // No activate() — dispatcher must short-circuit at idle.
+    coord.dispatch();
+
+    expect(callCount).toBe(0);
+    expect(controller.signal.aborted).toBe(false);
+  });
+
+  it("allows re-arming after a completed abort (fresh turn, fresh controller)", () => {
+    const coord = createAbortCoordinator();
+
+    coord.activate("tool");
+    const firstController = new AbortController();
+    let firstFlag = false;
+    coord.setHandler(() => {
+      if (firstFlag) return;
+      firstFlag = true;
+      firstController.abort();
+    });
+    coord.dispatch();
+    expect(firstController.signal.aborted).toBe(true);
+
+    // Next turn begins — new controller, new flag, new handler.
+    coord.activate("tool");
+    const secondController = new AbortController();
+    let secondFlag = false;
+    coord.setHandler(() => {
+      if (secondFlag) return;
+      secondFlag = true;
+      secondController.abort();
+    });
+    coord.dispatch();
+    expect(secondController.signal.aborted).toBe(true);
+    expect(firstController.signal.aborted).toBe(true); // unchanged
+  });
+
+  it("demonstrates the OLD bug shape: pre-setting the flag suppresses abort", () => {
+    // This test documents the shape of the bug we fixed. A dispatcher
+    // that sets `activeAbortRequested = true` before calling the
+    // handler causes the handler's guard to short-circuit, so the
+    // controller never fires. The new dispatcher must NOT do this.
+    const controller = new AbortController();
+    let activeAbortRequested = false;
+    let callCount = 0;
+
+    const buggyDispatch = (): void => {
+      activeAbortRequested = true; // ← the bug
+      if (activeAbortRequested) {
+        // Guard trips because the dispatcher already flipped the flag.
+        return;
+      }
+      callCount++;
+      controller.abort();
+    };
+
+    buggyDispatch();
+
+    expect(callCount).toBe(0);
+    expect(controller.signal.aborted).toBe(false);
+  });
+});

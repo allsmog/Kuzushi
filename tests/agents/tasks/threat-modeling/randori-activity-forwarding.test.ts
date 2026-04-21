@@ -43,6 +43,22 @@ describe("describeRuntimeMessage", () => {
     expect(out).toEqual(["Bash"]);
   });
 
+  it("recognizes file_path and filePath aliases for Read-style tools", () => {
+    // Regression: earlier versions only checked `path`; LLM variants using
+    // `file_path` / `filePath` surfaced as bare "Read" in the progress rail.
+    const out = describeRuntimeMessage(
+      asMsg({
+        type: "assistant",
+        content: [
+          { type: "tool_use", name: "Read", input: { file_path: "/repo/a.go" } },
+          { type: "tool_use", name: "Read", input: { filePath: "/repo/b.go" } },
+          { type: "tool_use", name: "Bash", input: { command: "pnpm test" } },
+        ],
+      }),
+    );
+    expect(out).toEqual(["Read · /repo/a.go", "Read · /repo/b.go", "Bash · pnpm test"]);
+  });
+
   it("truncates long hints to 40 chars with an ellipsis", () => {
     const long = "/very-deep".repeat(10);
     const [line] = describeRuntimeMessage(
