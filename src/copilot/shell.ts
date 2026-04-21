@@ -896,7 +896,7 @@ function updateToolActivity(store: UIStore, toolName: string, elapsedSeconds: nu
   });
 }
 
-const PHASE_COUNT_RE = /\((\d+)\s*\/\s*(\d+)\)\s*$/;
+const PHASE_COUNT_RE = /\((\d+)\s*\/\s*(\d+)\)/;
 
 /**
  * Update the current tool's phase label. Parses a trailing "(N/M)" into
@@ -1145,7 +1145,23 @@ async function startInkShell(
     if (seedTaskOutputs) execOpts.seedTaskOutputs = seedTaskOutputs;
     if (datastore) execOpts.datastore = datastore;
     if (workspaceManager) execOpts.workspace = workspaceManager;
-    return core.executeTool(tool.name, input, execOpts);
+    // Seed `currentTool` so ToolRunningStatus has something to render the
+    // moment the dispatcher kicks off a direct `run` — otherwise the
+    // `task:activity` events that fire during the tool would hit an empty
+    // slot and be dropped.
+    updateShell(store, (shell) => ({
+      ...shell,
+      currentTool: {
+        name: tool.name,
+        startedAt: Date.now(),
+        lastEventAt: Date.now(),
+      },
+    }));
+    try {
+      return await core.executeTool(tool.name, input, execOpts);
+    } finally {
+      updateShell(store, (shell) => ({ ...shell, currentTool: undefined }));
+    }
   };
 
   let driver: DispatcherDriver;

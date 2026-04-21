@@ -357,6 +357,12 @@ export interface RandoriRunnerParams {
    * operator can tell phase-2 LLM-call-in-flight from a hang.
    */
   onPhase?: (phase: string) => void;
+  /**
+   * Finer-grained sub-step description — "now reading s4 artifacts", "now
+   * writing narrative draft", etc. Feeds the rolling activity tail in the
+   * shell so a 3–5 minute phase doesn't look like a frozen label.
+   */
+  onActivity?: (description: string) => void;
 }
 
 export interface RandoriRunnerResult {
@@ -396,6 +402,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
   if (scopeStages.length > 0) {
     log.info(`${tag} Phase 1: running stages ${scopeStages.join(",")}`);
     params.onPhase?.(`phase 1 (${scopeStages.join("/").toUpperCase()} scope)`);
+    params.onActivity?.(`scoping ${scopeStages.join(", ")}`);
     try {
       for await (const message of params.runtime.query({
         prompt: buildScopePrompt(params.maxElements, params.artifactDir),
@@ -416,6 +423,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     if (Object.keys(scopeArtifacts).length > 0) {
       log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
       params.onPhase?.("phase 2 (S4 threats)");
+      params.onActivity?.("enumerating STRIDE threats");
       try {
         for await (const message of params.runtime.query({
           prompt: buildStridePrompt(params.maxThreats, params.artifactDir, params.previousModel),
@@ -440,6 +448,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     if (haveStageOutputs) {
       log.info(`${tag} Phase 3: synthesising narrative layer`);
       params.onPhase?.("phase 3 (narrative)");
+      params.onActivity?.("drafting attacker narrative");
       try {
         for await (const message of params.runtime.query({
           prompt: buildNarrativePrompt(params.artifactDir),
@@ -461,6 +470,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
           `${tag} Phase 3 narrative incomplete (${narrativeIssues.length} issue(s)); retrying once`,
         );
         params.onPhase?.("phase 3 (narrative retry)");
+        params.onActivity?.(`retrying narrative (${narrativeIssues.length} issue(s))`);
         try {
           for await (const message of params.runtime.query({
             prompt: buildNarrativeRetryPrompt(params.artifactDir, narrativeIssues),
