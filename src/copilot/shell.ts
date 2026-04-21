@@ -1222,10 +1222,17 @@ export async function startShell(opts: ShellOptions): Promise<void> {
   // (threat-hunt, agentic-sast, taint-iris) find their appModel /
   // threatModel prerequisites without the operator having to re-run
   // context:build on every session.
-  if (!loadedSnapshot && opts.target) {
+  //
+  // `opts.target` may be undefined when the operator runs `kuzushi`
+  // from within a repo with no flags; every other tool-dispatch path
+  // treats cwd as the implicit target (see the `currentCwd()`
+  // helper pattern used throughout this file), so the snapshot
+  // loader falls back to cwd too.
+  if (!loadedSnapshot) {
     try {
+      const snapshotTarget = opts.target ?? process.cwd();
       const { loadContextSnapshot } = await import("../modules/sast/context-persist.js");
-      loadedSnapshot = loadContextSnapshot(opts.target);
+      loadedSnapshot = loadContextSnapshot(snapshotTarget);
     } catch {
       /* best-effort */
     }
@@ -4523,6 +4530,10 @@ function loadArtifactManifest(repoRoot: string): string[] {
   const files: Array<{ rel: string; label: string }> = [
     { rel: "scan-context.json", label: "operator-authored scan context" },
     { rel: "threat-model.json", label: "persistent threat model" },
+    // context-snapshot.json is what enables /use threat-hunt (etc.) to pass
+    // the appModel/threatModel prereq check without re-running context:build.
+    // Surface it by name so operators understand what's carrying them.
+    { rel: "context-snapshot.json", label: "context snapshot (appModel + threatModel)" },
     { rel: "findings.sqlite3", label: "prior findings DB" },
   ];
   for (const { rel, label } of files) {

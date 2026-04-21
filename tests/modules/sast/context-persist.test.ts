@@ -111,4 +111,29 @@ describe("context-persist", () => {
       path.join(process.cwd(), ".kuzushi", "context-snapshot.json"),
     );
   });
+
+  it("process.cwd() fallback loads a snapshot when called from inside the target", () => {
+    // Simulates `cd <target>; kuzushi` with no -T flag — the shell
+    // startup loader needs to find the cached snapshot via cwd, not
+    // just via an explicit opts.target.
+    const target = makeTempTarget();
+    const snap = makeSnapshot({
+      target: path.resolve(target),
+      appModel: { routes: [{ path: "/api/x" }] },
+      threatModel: { threats: [{ id: "T1" }] },
+    });
+    saveContextSnapshot(target, snap);
+
+    // The loader calls path.resolve(target) internally; passing cwd-style
+    // "." from inside the target exercises the same code path as the
+    // shell's `opts.target ?? process.cwd()` fallback.
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(target);
+      const loaded = loadContextSnapshot(".");
+      expect(loaded).toEqual(snap);
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
