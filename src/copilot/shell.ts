@@ -112,7 +112,28 @@ function looksLikeSubagentToolLine(text: string): boolean {
   return SUBAGENT_TOOL_RE.test(text);
 }
 
-/** Build a seed map from a ContextSnapshot to inject into pipelines. */
+/** Build a seed map from a ContextSnapshot to inject into pipelines.
+ *
+ * Seed VALUE SHAPE must match what each task actually returns, because
+ * downstream consumers (`extractActorsWithThreats` in threat-hunt,
+ * `asStrideTaskOutput` in scanner tasks, …) deref specific fields on
+ * the upstream output. Mismatches manifest as "0 findings, 0 actors"
+ * with no error — the task just short-circuits on
+ * `!isRecord(raw["document"])`.
+ *
+ * Per-key shapes (derived from each task's `run()` return):
+ *   context-gatherer:      { repoContext, fileIndex }
+ *   context-enricher:      EnrichedContext (bare)
+ *   app-model-build:       ApplicationModel (bare)
+ *   threat-model-randori:  { document: ThreatModelDocument, findings: Finding[] }
+ *   threat-scenario-build: { scenarios: ThreatScenario[] }
+ *
+ * `findings: []` for threat-model-randori is safe — threat-hunt only
+ * reads `.document`, and no other task reads the findings array from
+ * the threat-model output (those findings flow separately via
+ * `taskOutputs["threat-model-randori"].findings` into the report
+ * phase, which isn't reconstructed from the snapshot).
+ */
 function buildSeedMapFromSnapshot(snapshot: ContextSnapshot): Map<string, unknown> {
   const seed = new Map<string, unknown>();
   if (snapshot.repoContext || snapshot.fileIndex) {
@@ -123,7 +144,8 @@ function buildSeedMapFromSnapshot(snapshot: ContextSnapshot): Map<string, unknow
   }
   if (snapshot.enrichedContext) seed.set("context-enricher", snapshot.enrichedContext);
   if (snapshot.appModel) seed.set("app-model-build", snapshot.appModel);
-  if (snapshot.threatModel) seed.set("threat-model-randori", snapshot.threatModel);
+  if (snapshot.threatModel)
+    seed.set("threat-model-randori", { document: snapshot.threatModel, findings: [] });
   if (snapshot.scenarios) seed.set("threat-scenario-build", { scenarios: snapshot.scenarios });
   return seed;
 }
@@ -4948,6 +4970,7 @@ export function formatWelcome(core: CopilotCore, opts: ShellOptions): string {
 }
 
 export const __shellInternals = {
+  buildSeedMapFromSnapshot,
   buildShellPrompt,
   capShellHistory,
   createShellSession,
