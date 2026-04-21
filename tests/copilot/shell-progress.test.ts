@@ -366,7 +366,10 @@ describe("finalizeRunningToolCalls", () => {
         tool: "a",
         text: "",
         status: "running",
-        liveActivities: ["step1", "step2"],
+        liveActivities: [
+          { id: "la-1", text: "step1" },
+          { id: "la-2", text: "step2" },
+        ],
         timestamp: 1,
       },
     ]);
@@ -492,8 +495,8 @@ describe("pushLiveActivity cap bumped to 5 (Phase 15)", () => {
     const entry = store.getState().shell!.history[0]!;
     // cap is 5; older ones drop off the tail
     expect(entry.liveActivities!.length).toBe(5);
-    expect(entry.liveActivities![0]).toBe("line 9");
-    expect(entry.liveActivities![4]).toBe("line 5");
+    expect(entry.liveActivities![0]!.text).toBe("line 9");
+    expect(entry.liveActivities![4]!.text).toBe("line 5");
   });
 });
 
@@ -524,16 +527,16 @@ describe("pushLiveActivity", () => {
     pushLiveActivity(store, "tc-1", "step 1");
     pushLiveActivity(store, "tc-1", "step 2");
     const entry = store.getState().shell!.history[0]!;
-    expect(entry.liveActivities).toEqual(["step 2", "step 1"]);
+    expect(entry.liveActivities?.map((a) => a.text)).toEqual(["step 2", "step 1"]);
   });
 
-  it("caps the tail at 3 entries", () => {
+  it("caps the tail at 5 entries", () => {
     const store = seedWithRunningToolCall();
     for (let i = 0; i < 10; i++) pushLiveActivity(store, "tc-1", `step ${i}`);
     const entry = store.getState().shell!.history[0]!;
     // Phase 15: cap bumped 3 → 5 so subprocess stdout preview has headroom.
     expect(entry.liveActivities!.length).toBeLessThanOrEqual(5);
-    expect(entry.liveActivities![0]).toBe("step 9");
+    expect(entry.liveActivities![0]!.text).toBe("step 9");
   });
 
   it("dedupes consecutive identical text", () => {
@@ -542,15 +545,15 @@ describe("pushLiveActivity", () => {
     pushLiveActivity(store, "tc-1", "same");
     pushLiveActivity(store, "tc-1", "same");
     const entry = store.getState().shell!.history[0]!;
-    expect(entry.liveActivities).toEqual(["same"]);
+    expect(entry.liveActivities?.map((a) => a.text)).toEqual(["same"]);
   });
 
   it("truncates long text to 80 chars", () => {
     const store = seedWithRunningToolCall();
     pushLiveActivity(store, "tc-1", "z".repeat(200));
     const entry = store.getState().shell!.history[0]!;
-    expect(entry.liveActivities![0]!.length).toBeLessThanOrEqual(80);
-    expect(entry.liveActivities![0]!.endsWith("…")).toBe(true);
+    expect(entry.liveActivities![0]!.text.length).toBeLessThanOrEqual(80);
+    expect(entry.liveActivities![0]!.text.endsWith("…")).toBe(true);
   });
 
   it("silently no-ops for non-running tool-call ids", () => {
