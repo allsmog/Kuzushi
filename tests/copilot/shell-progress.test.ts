@@ -2,7 +2,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { __shellInternals } from "../../src/copilot/shell.js";
 import { createUIStore, type UIStore } from "../../src/ui/state.js";
 
-const { extractToolUseActivities, extractToolUseHeaders, summarizeInput, pushToolActivity, pushToolPhase } = __shellInternals;
+const {
+  extractToolUseActivities,
+  extractToolUseHeaders,
+  summarizeInput,
+  pushToolActivity,
+  pushToolPhase,
+  renderToolInputHint,
+  patchHistoryEntry,
+  pushLiveActivity,
+} = __shellInternals;
 
 function seedShellState(): UIStore {
   const store = createUIStore();
@@ -216,5 +225,144 @@ describe("extractToolUseHeaders", () => {
 
   it("skips non-tool_use blocks", () => {
     expect(extractToolUseHeaders([{ type: "text", text: "hi" }])).toEqual([]);
+  });
+});
+
+describe("renderToolInputHint", () => {
+  it("uses tool.formatInput when it returns a non-empty string", () => {
+    const tool = { formatInput: () => "custom-hint" };
+    expect(renderToolInputHint(tool, { anything: 1 })).toBe("custom-hint");
+  });
+
+  it("clamps per-tool formatInput output to 40 chars", () => {
+    const long = "X".repeat(80);
+    const tool = { formatInput: () => long };
+    const result = renderToolInputHint(tool, {});
+    expect(result).toBeDefined();
+    expect(result!.length).toBeLessThanOrEqual(40);
+    expect(result!.endsWith("…")).toBe(true);
+  });
+
+  it("treats formatInput returning '' as 'suppress hint'", () => {
+    const tool = { formatInput: () => "" };
+    expect(renderToolInputHint(tool, { target: "x" })).toBeUndefined();
+  });
+
+  it("falls back to summarizeInput when formatInput returns null/undefined", () => {
+    const nullTool = { formatInput: () => null };
+    expect(renderToolInputHint(nullTool, { target: "/foo" })).toBe("/foo");
+    const undefinedTool = { formatInput: () => undefined };
+    expect(renderToolInputHint(undefinedTool, { path: "/bar" })).toBe("/bar");
+  });
+
+  it("falls back to summarizeInput when formatInput is missing", () => {
+    expect(renderToolInputHint({}, { target: "/baz" })).toBe("/baz");
+  });
+});
+
+describe("patchHistoryEntry", () => {
+  it("mutates an existing entry in place by id", () => {
+    const store = seedShellState();
+    store.update({
+      ...store.getState(),
+      shell: {
+        ...store.getState().shell!,
+        history: [
+          {
+            type: "tool-call",
+            id: "tc-1",
+            tool: "sast:scan",
+            text: "⏺ sast:scan",
+            status: "running",
+            timestamp: 1,
+          },
+        ],
+      },
+    });
+    patchHistoryEntry(store, "tc-1", { status: "ok", resultOutput: "done summary", elapsedSeconds: 5 });
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.status).toBe("ok");
+    expect(entry.resultOutput).toBe("done summary");
+    expect(entry.elapsedSeconds).toBe(5);
+    expect(entry.tool).toBe("sast:scan"); // Untouched fields preserved
+  });
+
+  it("silently no-ops when the id is not found", () => {
+    const store = seedShellState();
+    const before = store.getState().shell!.history;
+    patchHistoryEntry(store, "missing", { status: "fail" });
+    const after = store.getState().shell!.history;
+    expect(after).toBe(before);
+  });
+});
+
+describe("pushLiveActivity", () => {
+  function seedWithRunningToolCall(): UIStore {
+    const store = seedShellState();
+    store.update({
+      ...store.getState(),
+      shell: {
+        ...store.getState().shell!,
+        history: [
+          {
+            type: "tool-call",
+            id: "tc-1",
+            tool: "sast:scan",
+            text: "⏺ sast:scan",
+            status: "running",
+            timestamp: 1,
+          },
+        ],
+      },
+    });
+    return store;
+  }
+
+  it("prepends to the entry's liveActivities (newest first)", () => {
+    const store = seedWithRunningToolCall();
+    pushLiveActivity(store, "tc-1", "step 1");
+    pushLiveActivity(store, "tc-1", "step 2");
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities).toEqual(["step 2", "step 1"]);
+  });
+
+  it("caps the tail at 3 entries", () => {
+    const store = seedWithRunningToolCall();
+    for (let i = 0; i < 10; i++) pushLiveActivity(store, "tc-1", `step ${i}`);
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities!.length).toBeLessThanOrEqual(3);
+    expect(entry.liveActivities![0]).toBe("step 9");
+  });
+
+  it("dedupes consecutive identical text", () => {
+    const store = seedWithRunningToolCall();
+    pushLiveActivity(store, "tc-1", "same");
+    pushLiveActivity(store, "tc-1", "same");
+    pushLiveActivity(store, "tc-1", "same");
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities).toEqual(["same"]);
+  });
+
+  it("truncates long text to 80 chars", () => {
+    const store = seedWithRunningToolCall();
+    pushLiveActivity(store, "tc-1", "z".repeat(200));
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities![0]!.length).toBeLessThanOrEqual(80);
+    expect(entry.liveActivities![0]!.endsWith("…")).toBe(true);
+  });
+
+  it("silently no-ops for non-running tool-call ids", () => {
+    const store = seedWithRunningToolCall();
+    patchHistoryEntry(store, "tc-1", { status: "ok" });
+    pushLiveActivity(store, "tc-1", "should-not-push");
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities ?? []).toEqual([]);
+  });
+
+  it("silently no-ops for unknown ids", () => {
+    const store = seedWithRunningToolCall();
+    pushLiveActivity(store, "missing", "whatever");
+    const entry = store.getState().shell!.history[0]!;
+    expect(entry.liveActivities ?? []).toEqual([]);
   });
 });

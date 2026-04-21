@@ -7,6 +7,15 @@ import { runSingleTaskPipeline, severityProperty, targetProperty } from "./share
 
 const semgrepScanTool: ModuleTool = {
   name: "semgrep:scan",
+  displayName: "Semgrep",
+  formatInput(input) {
+    const p = input as Record<string, unknown> | undefined;
+    return typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description: "Run Semgrep only, with scan-only post-processing and report generation.",
   inputSchema: {
     type: "object",

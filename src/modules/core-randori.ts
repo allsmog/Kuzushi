@@ -59,6 +59,15 @@ function defaultArtifactDir(runId: string): string {
 
 const pastaTool: ModuleTool = {
   name: "randori:pasta",
+  displayName: "PASTA",
+  formatInput(input) {
+    const p = (input ?? {}) as Record<string, unknown>;
+    return typeof p["target"] === "string" ? (p["target"] as string) : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Run the Randori PASTA threat model against a target repository. Executes the " +
     "@kuzushi/randori-plugin across stages S1 (objectives), S2 (scope), S3 (DFD), S4 " +
@@ -224,6 +233,15 @@ const pastaTool: ModuleTool = {
 
 const threatModelTool: ModuleTool = {
   name: "randori:threat-model",
+  displayName: "Threat Model",
+  formatInput(input) {
+    const p = (input ?? {}) as Record<string, unknown>;
+    return typeof p["target"] === "string" ? (p["target"] as string) : null;
+  },
+  renderResult(result) {
+    const first = result.output.split("\n", 1)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  },
   description:
     "Read a previously-written PASTA artifact set and return the normalized " +
     "ThreatModelDocument. Does not invoke the LLM — cheap, deterministic, useful " +
