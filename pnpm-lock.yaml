@@ -19,7 +19,7 @@ importers:
         version: 0.1.0
       '@kuzushi/randori-plugin':
         specifier: github:allsmog/randori-plugin
-        version: https://codeload.github.com/allsmog/randori-plugin/tar.gz/e977f2d6ebe2142a5c325f822f9cc9ccb67e84c0
+        version: https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa
       '@kuzushi/tob-skills':
         specifier: github:allsmog/tob-security-skills
         version: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2
@@ -749,8 +749,8 @@ packages:
   '@kuzushi/augur@0.1.0':
     resolution: {integrity: sha512-YFLJ3N9J5nFzWMEIDFyqE7M/an/fzYyswRJvY5HTPQPXSLl+6OLad+RJvEOwpWgK8Z9up9teUSwsTdL8b8rZcQ==}
 
-  '@kuzushi/randori-plugin@https://codeload.github.com/allsmog/randori-plugin/tar.gz/e977f2d6ebe2142a5c325f822f9cc9ccb67e84c0':
-    resolution: {tarball: https://codeload.github.com/allsmog/randori-plugin/tar.gz/e977f2d6ebe2142a5c325f822f9cc9ccb67e84c0}
+  '@kuzushi/randori-plugin@https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa':
+    resolution: {tarball: https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa}
     version: 1.0.0
 
   '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2':
@@ -3966,7 +3966,7 @@ snapshots:
 
   '@kuzushi/augur@0.1.0': {}
 
-  '@kuzushi/randori-plugin@https://codeload.github.com/allsmog/randori-plugin/tar.gz/e977f2d6ebe2142a5c325f822f9cc9ccb67e84c0': {}
+  '@kuzushi/randori-plugin@https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa': {}
 
   '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2': {}
 

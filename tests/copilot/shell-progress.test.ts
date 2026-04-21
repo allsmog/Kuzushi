@@ -779,3 +779,49 @@ describe("summarizeToolCompletion — fallback / module tools", () => {
     expect(summarizeToolCompletion("custom:verb", {}, "done", false)).toBe("custom:verb → done");
   });
 });
+
+describe("summarizeToolCompletion — AJV validation errors", () => {
+  // pi-ai's AJV validator emits a two-line error:
+  //   Validation failed for tool "Write":
+  //     - : must have required property 'file_path'
+  // The default error formatter keeps only the first line and clamps to 80 chars,
+  // which truncates the actionable detail. These tests lock in the special-case
+  // re-render that surfaces the real cause.
+
+  it("re-renders two-line AJV errors to show the actionable detail", () => {
+    const result =
+      "Validation failed for tool \"Write\":\n  - : must have required property 'file_path'\n\nReceived arguments:\n{}";
+    expect(summarizeToolCompletion("Write", { filePath: "/x" }, result, true)).toBe(
+      "Write validation failed (Write): must have required property 'file_path'",
+    );
+  });
+
+  it("handles a named-path AJV error", () => {
+    const result =
+      'Validation failed for tool "Edit":\n  - old_string: must be string\n\nReceived arguments:\n{"old_string": 42}';
+    expect(summarizeToolCompletion("Edit", { old_string: 42 }, result, true)).toBe(
+      "Edit validation failed (Edit): old_string: must be string",
+    );
+  });
+
+  it("clamps overly long AJV details to 100 chars", () => {
+    const detail = "z".repeat(150);
+    const result = `Validation failed for tool "X":\n  - : ${detail}\n`;
+    const out = summarizeToolCompletion("X", {}, result, true);
+    expect(out.length).toBeLessThan("X validation failed (X): ".length + 102);
+    expect(out.endsWith("…")).toBe(true);
+  });
+
+  it("falls through to the default label-failed-first-line path for non-AJV errors", () => {
+    expect(summarizeToolCompletion("Read", { path: "no.ts" }, "ENOENT: not found", true)).toBe(
+      "Read no.ts failed: ENOENT: not found",
+    );
+  });
+
+  it("does not falsely match text that merely contains 'Validation failed'", () => {
+    // Single-line error that doesn't match the AJV two-line shape — fall through.
+    expect(
+      summarizeToolCompletion("Read", { path: "x" }, "Validation failed somewhere", true),
+    ).toBe("Read x failed: Validation failed somewhere");
+  });
+});

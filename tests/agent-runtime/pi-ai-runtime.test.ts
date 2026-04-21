@@ -642,6 +642,243 @@ describe("PiAiAgentRuntime", () => {
       subtype: "error_runtime",
     });
   });
+
+  // ── Tool-input normalization + retry cap + tool-result yielding ──
+
+  it("normalizes camelCase tool args before validateToolCall", async () => {
+    const cwd = makeTempDir();
+    writeFileSync(path.join(cwd, "target.ts"), "x\n", "utf8");
+    completeMock
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "tool-1",
+              name: "Write",
+              // camelCase aliases — what weaker models actually emit.
+              arguments: { filePath: path.join(cwd, "out.txt"), text: "hello" },
+            },
+          ],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: "done" }]));
+
+    const runtime = new PiAiAgentRuntime();
+    await collectMessages(runtime, makeRequest(cwd));
+
+    // The normalizer rewrote filePath→file_path / text→content BEFORE AJV saw
+    // the args, so validateToolCall received the canonical shape.
+    expect(validateToolCallMock).toHaveBeenCalled();
+    const firstCall = validateToolCallMock.mock.calls[0];
+    const receivedToolCall = firstCall?.[1] as { arguments?: Record<string, unknown> };
+    expect(receivedToolCall.arguments).toEqual({
+      file_path: path.join(cwd, "out.txt"),
+      content: "hello",
+    });
+    expect(receivedToolCall.arguments).not.toHaveProperty("filePath");
+    expect(receivedToolCall.arguments).not.toHaveProperty("text");
+  });
+
+  it("yields tool-result isError:true for validation failures", async () => {
+    const cwd = makeTempDir();
+    completeMock
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "tu-1",
+              name: "Write",
+              arguments: { garbage: "x" },
+            },
+          ],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: "done" }]));
+    validateToolCallMock.mockImplementationOnce(() => {
+      throw new Error(
+        "Validation failed for tool \"Write\":\n  - : must have required property 'file_path'",
+      );
+    });
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    const toolResults = messages.filter((m) => m.type === "tool-result");
+    expect(toolResults).toHaveLength(1);
+    const [failure] = toolResults as Array<Extract<AgentMessage, { type: "tool-result" }>>;
+    expect(failure.toolUseId).toBe("tu-1");
+    expect(failure.isError).toBe(true);
+    expect(failure.content).toContain("Validation failed for tool");
+  });
+
+  it("yields tool-result for permission deny", async () => {
+    const cwd = makeTempDir();
+    completeMock
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "tu-deny",
+              name: "Read",
+              arguments: { path: "target.ts" },
+            },
+          ],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: "ok" }]));
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(
+      runtime,
+      makeRequest(cwd, {
+        canUseTool: () => ({ behavior: "deny", message: "nope" }),
+      }),
+    );
+
+    const toolResults = messages.filter((m) => m.type === "tool-result");
+    expect(toolResults).toHaveLength(1);
+    expect(toolResults[0]).toMatchObject({
+      type: "tool-result",
+      toolUseId: "tu-deny",
+      isError: true,
+      content: "nope",
+    });
+  });
+
+  it("yields tool-result for successful tool execution (isError:false)", async () => {
+    const cwd = makeTempDir();
+    writeFileSync(path.join(cwd, "target.ts"), "line1\n", "utf8");
+    completeMock
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "tu-ok",
+              name: "Read",
+              arguments: { path: "target.ts" },
+            },
+          ],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: "done" }]));
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    const toolResults = messages.filter((m) => m.type === "tool-result");
+    expect(toolResults).toHaveLength(1);
+    expect(toolResults[0]).toMatchObject({
+      type: "tool-result",
+      toolUseId: "tu-ok",
+      isError: false,
+    });
+  });
+
+  it("aborts the turn loop after 3 consecutive same-tool validation failures", async () => {
+    const cwd = makeTempDir();
+    for (let i = 0; i < 5; i++) {
+      completeMock.mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: `tu-${i}`,
+              name: "Write",
+              arguments: { filePath: "/x" },
+            },
+          ],
+          { stopReason: "toolUse" },
+        ),
+      );
+    }
+    // Force every validation call to fail (the normalizer makes filePath
+    // canonical first, so this is a pure schema-level failure for the test).
+    validateToolCallMock.mockImplementation(() => {
+      throw new Error('Validation failed for tool "Write":\n  - extra: unknown property');
+    });
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    // The cap fires after 3 same-tool failures — the LLM is only called 3
+    // times (1 per turn) before we bail. The 4th+ mocks are never consumed.
+    expect(completeMock).toHaveBeenCalledTimes(3);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "error_tool_loop",
+    });
+    const finalErrorResult = messages[messages.length - 1] as Extract<
+      AgentMessage,
+      { type: "result" }
+    > & {
+      errors?: string[];
+    };
+    expect(finalErrorResult.errors?.[0] ?? "").toContain("3 consecutive times");
+    expect(finalErrorResult.errors?.[0] ?? "").toContain("Write");
+  });
+
+  it("resets the validation-failure counter on a successful tool call", async () => {
+    const cwd = makeTempDir();
+    writeFileSync(path.join(cwd, "target.ts"), "x\n", "utf8");
+    // Two failed Writes, then a successful Read, then two more failed Writes.
+    // Should NOT trip the cap at 3 — the Read resets the counter.
+    completeMock
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [{ type: "toolCall", id: "tu-1", name: "Write", arguments: { filePath: "/x" } }],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [{ type: "toolCall", id: "tu-2", name: "Write", arguments: { filePath: "/x" } }],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [{ type: "toolCall", id: "tu-3", name: "Read", arguments: { path: "target.ts" } }],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [{ type: "toolCall", id: "tu-4", name: "Write", arguments: { filePath: "/x" } }],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [{ type: "toolCall", id: "tu-5", name: "Write", arguments: { filePath: "/x" } }],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: "done" }]));
+    validateToolCallMock.mockImplementation((_tools, tc) => {
+      if (tc.name === "Write") {
+        throw new Error('Validation failed for tool "Write":\n  - x: y');
+      }
+      return tc.arguments;
+    });
+
+    const runtime = new PiAiAgentRuntime();
+    const messages = await collectMessages(runtime, makeRequest(cwd));
+
+    // All six assistant turns consumed — cap did NOT fire.
+    expect(completeMock).toHaveBeenCalledTimes(6);
+    expect(messages[messages.length - 1]).toMatchObject({
+      type: "result",
+      subtype: "success",
+    });
+  });
 });
 
 describe("isTransientError", () => {

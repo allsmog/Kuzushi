@@ -104,8 +104,27 @@ function formatError(
   result: string,
 ): string {
   const hint = summarizeInput(input);
-  const firstLine = firstNonEmptyLine(result);
   const label = hint ? `${toolName} ${hint}` : toolName;
+
+  // Special case: pi-ai / AJV "Validation failed for tool \"X\":\n  - path: detail"
+  // formats the tool name on line 1 and the real cause on line 2. The default
+  // first-line-only path truncates away the useful bit and the operator sees
+  // `Write failed: Validation failed for to…` — unactionable. Capture the first
+  // detail line and surface it alongside the tool name.
+  //
+  // AJV emits two forms:
+  //   - `- : must have required property 'file_path'`   (root-level error)
+  //   - `- old_string: must be string`                  (named-path error)
+  // We strip the leading `:` on the root form (no path name) so the rendered
+  // output reads naturally; we keep `old_string:` on the named form.
+  const validationMatch = result.match(/Validation failed for tool "([^"]+)":\s*\n\s*-\s*([^\n]+)/);
+  if (validationMatch) {
+    const [, failedTool, detail] = validationMatch;
+    const cleaned = (detail ?? "").trim().replace(/^:\s*/, "");
+    return `${toolName} validation failed (${failedTool}): ${clamp(cleaned, 100)}`;
+  }
+
+  const firstLine = firstNonEmptyLine(result);
   return firstLine ? `${label} failed: ${clamp(firstLine, 80)}` : `${label} failed`;
 }
 
