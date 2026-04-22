@@ -356,6 +356,18 @@ export function truncateMiddle(s: string, maxWidth: number, ellipsis = "\u2026")
 }
 
 /**
+ * Render a wall-clock HH:MM:SS for a UNIX-ms timestamp. Used by shell history
+ * rows to mark when each event was appended.
+ */
+export function formatClock(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+/**
  * Pad a string to exactly `width` columns, ANSI-aware.
  */
 export function padCell(s: string, width: number, align: Align = "left"): string {

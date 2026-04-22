@@ -28,12 +28,12 @@ import { SetupWizard } from "./components/SetupWizard.js";
 import { ThreatModelEditor } from "./components/ThreatModelEditor.js";
 import { KeybindingsProvider } from "./hooks/useKeybindings.js";
 import { shallowEqual, useUISelector } from "./hooks.js";
-import { deriveNavigation, LayoutProvider } from "./layout-context.js";
+import { deriveNavigation, LayoutProvider, STANDARD_LAYOUT_THEME } from "./layout-context.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
 import { SpinnerClockProvider } from "./primitives/SpinnerClock.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
 import type { UIStore } from "./state.js";
-import { SPACING, tokens } from "./tokens.js";
+import { tokens } from "./tokens.js";
 
 interface AppProps {
   store: UIStore;
@@ -131,7 +131,7 @@ function AppInner({ store }: AppProps): React.ReactElement {
 
   const layoutContext = React.useMemo(
     () => ({
-      theme: { spacing: SPACING, selectionGlyph: "❯" },
+      theme: STANDARD_LAYOUT_THEME,
       navigation: deriveNavigation({
         mode: routing.mode,
         phase: routing.phase,

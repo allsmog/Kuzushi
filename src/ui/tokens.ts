@@ -107,6 +107,8 @@ export const SPACING = {
   md: 2,
   lg: 3,
   xl: 4,
+  xxl: 5,
+  xxxl: 6,
 } as const;
 
 /**
@@ -119,4 +121,20 @@ export const COLUMN_WIDTHS = {
   stageElapsed: 8,
   statusIcon: 2,
   costBadge: 10,
+} as const;
+
+/**
+ * Canonical panel widths. Pulled by SectionBox, ChainGroup, ModuleHome,
+ * AttackerStoriesView, CostCapHalt, KeybindFooter, ThreatSummaryExport.
+ * Pull from this map instead of inlining magic widths so the grid stays
+ * coherent when a screen needs to fit a different terminal.
+ */
+export const WIDTHS = {
+  narrowColumn: 24,
+  defaultPanel: 60,
+  modulePanel: 80,
+  catalogPanel: 61,
+  constrainedPanel: 70,
+  widePanel: 78,
+  footerWidth: 80,
 } as const;

@@ -18,7 +18,7 @@ describe("deriveNavigation", () => {
       shell,
     });
 
-    expect(nav.title).toBe("Module: sast");
+    expect(nav.title).toBe("findings");
     expect(nav.breadcrumbs).toEqual(["shell", "sast", "findings"]);
     expect(nav.status).toContain("idle");
   });
