@@ -43,6 +43,13 @@ export const TextInput: FC<TextInputProps> = ({
     setCursor((prev) => Math.max(0, Math.min(prev, value.length)));
   }, [value]);
 
+  const isCtrlChord = (input: string, letter: string, ctrl: boolean): boolean => {
+    if (!ctrl) return false;
+    const lower = letter.toLowerCase();
+    const ctrlCode = String.fromCharCode(lower.charCodeAt(0) - 96);
+    return input === lower || input === lower.toUpperCase() || input === ctrlCode;
+  };
+
   useInput(
     (input, key) => {
       if (key.return) {
@@ -61,24 +68,30 @@ export const TextInput: FC<TextInputProps> = ({
         setCursor((c) => Math.min(value.length, c + 1));
         return;
       }
-      if (key.ctrl && input === "a") {
+      if (isCtrlChord(input, "a", key.ctrl)) {
         setCursor(0);
         return;
       }
-      if (key.ctrl && input === "e") {
+      if (isCtrlChord(input, "e", key.ctrl)) {
         setCursor(value.length);
         return;
       }
-      if (key.ctrl && input === "u") {
+      if (isCtrlChord(input, "u", key.ctrl)) {
         onChange("");
         setCursor(0);
         return;
       }
-      if (key.backspace || key.delete) {
+      if (key.backspace) {
         if (value.length === 0 || cursor === 0) return;
         const next = value.slice(0, cursor - 1) + value.slice(cursor);
         onChange(next);
         setCursor((c) => Math.max(0, c - 1));
+        return;
+      }
+      if (key.delete) {
+        if (cursor >= value.length) return;
+        const next = value.slice(0, cursor) + value.slice(cursor + 1);
+        onChange(next);
         return;
       }
       if (key.ctrl || key.meta) return;

@@ -91,6 +91,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const draftInputRef = useRef("");
 
   const processing = shell?.processing === true;
+  const isCtrlChord = (char: string, key: { ctrl: boolean }, letter: string): boolean => {
+    if (!key.ctrl) return false;
+    const lower = letter.toLowerCase();
+    const ctrlCode = String.fromCharCode(lower.charCodeAt(0) - 96);
+    return char === lower || char === lower.toUpperCase() || char === ctrlCode;
+  };
+
   useRegisterKeybindings(
     processing
       ? PROCESSING_KEYBINDS
@@ -251,20 +258,26 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         return;
       }
 
-      if (key.ctrl && (char === "a" || char === "A")) {
+      if (isCtrlChord(char, key, "a")) {
         setCursor(0);
         return;
       }
 
-      if (key.ctrl && (char === "e" || char === "E")) {
+      if (isCtrlChord(char, key, "e")) {
         setCursor(input.length);
         return;
       }
 
-      if (key.backspace || key.delete) {
+      if (key.backspace) {
         if (cursor === 0 || input.length === 0) return;
         setInput((v) => v.slice(0, cursor - 1) + v.slice(cursor));
         setCursor((c) => Math.max(0, c - 1));
+        setHistoryIndex(null);
+        return;
+      }
+      if (key.delete) {
+        if (cursor >= input.length) return;
+        setInput((v) => v.slice(0, cursor) + v.slice(cursor + 1));
         setHistoryIndex(null);
         return;
       }
@@ -331,7 +344,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         return;
       }
 
-      if (key.ctrl && (char === "u" || char === "U")) {
+      if (isCtrlChord(char, key, "u")) {
         setInput("");
         setCursor(0);
         setHistoryIndex(null);
