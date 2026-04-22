@@ -29,6 +29,7 @@ import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
+import { ShellFooterHints } from "./ShellFooterHints.js";
 
 interface ScopeAndCriticalityViewProps {
   shell: ShellState;
@@ -263,15 +264,20 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
 }
 
 function HintFooter(): React.ReactElement {
+  // `1..5` cycle across threat views (shared logic in `resolveThreatView`);
+  // `/threats edit` opens the full editor; `q` and `/back` step up.
   return (
-    <Box marginTop={1}>
-      <Text>
-        {tokens.muted("1 dfd  2 stride  3 stories  ")}
-        {tokens.hint("4 scope  ")}
-        {tokens.muted("5 summary")}
-        {tokens.hint("   /threats edit to annotate   q back")}
-      </Text>
-    </Box>
+    <ShellFooterHints
+      hints={[
+        { key: "1", label: "dfd" },
+        { key: "2", label: "stride" },
+        { key: "3", label: "stories" },
+        { key: "4", label: "scope" },
+        { key: "5", label: "summary" },
+        { key: "/threats edit", label: "annotate" },
+        { key: "q", label: "back" },
+      ]}
+    />
   );
 }
 

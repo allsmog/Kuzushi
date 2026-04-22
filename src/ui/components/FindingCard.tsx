@@ -343,6 +343,10 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
       </Box>
       <Box>
         <Text>
+          {/* `q` and `/back` both step up to the findings list. Other letter
+              keys here are placeholders for future actions (see CLAUDE.md §12
+              — they're not wired yet, but flipping them to `/back`-style
+              slash verbs would suggest they're active today). */}
           {muted("a assign   c comment   s suppress   r resolve   p patch   v re-verify   q back")}
         </Text>
       </Box>

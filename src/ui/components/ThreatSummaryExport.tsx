@@ -26,6 +26,7 @@ import { type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
+import { ShellFooterHints } from "./ShellFooterHints.js";
 
 const STRIDE_ORDER: ReadonlyArray<{ category: StrideCategory; label: string }> = [
   { category: "spoofing", label: "Spoofing" },
@@ -282,14 +283,20 @@ function Artifacts({ shell }: { shell: ShellState }): React.ReactElement {
 }
 
 function HintFooter(): React.ReactElement {
+  // `1..5` cycle across threat views; `/threats edit` opens the full
+  // editor; `q` and `/back` step up to the module home.
   return (
-    <Box marginTop={1}>
-      <Text>
-        {tokens.muted("1 dfd  2 stride  3 stories  4 scope  ")}
-        {tokens.hint("5 summary")}
-        {tokens.hint("   /threats edit to annotate   q back")}
-      </Text>
-    </Box>
+    <ShellFooterHints
+      hints={[
+        { key: "1", label: "dfd" },
+        { key: "2", label: "stride" },
+        { key: "3", label: "stories" },
+        { key: "4", label: "scope" },
+        { key: "5", label: "summary" },
+        { key: "/threats edit", label: "annotate" },
+        { key: "q", label: "back" },
+      ]}
+    />
   );
 }
 

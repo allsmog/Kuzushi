@@ -1,0 +1,203 @@
+/**
+ * shell-keybinds — pure keybind-reducer for the interactive shell.
+ *
+ * The Ink `useInput` handler in `CopilotShell.tsx` is wall-to-wall side
+ * effects (it calls `setInput`, `store.update`, `liveShell.onInput`, etc.),
+ * which makes it hard to unit-test. This module factors the decision logic
+ * into a single pure function: given a keystroke + live state, return a
+ * structured `KeybindAction` describing what should happen.  The component
+ * then translates the action into the right setState / store update.
+ *
+ * Everything that affects UX (Ctrl+C two-stage, y/n for pending plans,
+ * 1..5 threat cycling, j/k on findings, q/Esc back, Enter submit, Tab
+ * completion, input editing) goes through this one reducer. That gives
+ * us a single table of truth for what the shell responds to — see
+ * tests/copilot/keybinds.test.ts for the lock-ins.
+ *
+ * Intentionally *not* exhaustive over input editing (typing a char,
+ * backspace) — the component handles those inline because they only
+ * touch local React state. We only gate / prioritize the higher-order
+ * dispatches here.
+ */
+
+import type { ShellState, UIState } from "./state.js";
+
+/** Window during which a second Ctrl+C at the idle prompt commits the exit. */
+export const CTRL_C_ARM_WINDOW_MS = 2000;
+
+/** Default pageSize mirror — must match FindingsView's DEFAULT_PAGE_SIZE. */
+export const FINDINGS_DEFAULT_PAGE_SIZE = 50;
+
+/** Description of a single Ink `useInput` keystroke. */
+export interface Keystroke {
+  /** Printable character (if any). */
+  char: string;
+  /** Ink key flags — `ctrl`, `escape`, `return`, `upArrow`, etc. */
+  key: {
+    ctrl?: boolean;
+    meta?: boolean;
+    shift?: boolean;
+    tab?: boolean;
+    return?: boolean;
+    escape?: boolean;
+    backspace?: boolean;
+    delete?: boolean;
+    upArrow?: boolean;
+    downArrow?: boolean;
+    leftArrow?: boolean;
+    rightArrow?: boolean;
+    pageUp?: boolean;
+    pageDown?: boolean;
+  };
+}
+
+/** Discriminated union of high-order keybind outcomes. */
+export type KeybindAction =
+  /** Nothing to do — the component falls back to its local-edit path. */
+  | { type: "none" }
+  /** Abort the in-flight tool/agent call. */
+  | { type: "abort-inflight" }
+  /** First Ctrl+C at idle prompt — arm the two-stage exit. */
+  | { type: "arm-exit"; at: number }
+  /** Second Ctrl+C within the arm window — exit the shell. */
+  | { type: "exit" }
+  /** Forward a slash-command string through `shell.onInput`. */
+  | { type: "dispatch"; command: string }
+  /** Set `shell.findingCursor` to the given (already-clamped) index. */
+  | { type: "set-finding-cursor"; cursor: number }
+  /** Clear the in-progress input buffer. */
+  | { type: "clear-input" };
+
+export interface KeybindInputs {
+  /** The keystroke to resolve. */
+  stroke: Keystroke;
+  /** Current input buffer (pre-keystroke). */
+  input: string;
+  /** Live UI state (ctrl-c arm timestamp, summary count, etc.). */
+  state: UIState;
+  /** Loose-finding count — used to clamp cursor movement. */
+  looseFindingCount: number;
+  /** Current time — injectable for deterministic tests. */
+  now: number;
+}
+
+/** True for any of the Phase C threat-model sub-views. */
+export function isThreatShellView(view: ShellState["shellView"] | undefined): boolean {
+  return (
+    view === "threat-dfd" ||
+    view === "threat-stride" ||
+    view === "threat-stories" ||
+    view === "threat-scope" ||
+    view === "threat-summary"
+  );
+}
+
+/**
+ * True when the shell is showing a non-catalog sub-view where `q` / Esc
+ * should route to `/back`. The catalog is the top level — falling through
+ * `/back` there would recurse out of the shell with surprising effect.
+ */
+export function isBackableShellView(view: ShellState["shellView"] | undefined): boolean {
+  if (!view) return false;
+  return view !== "catalog";
+}
+
+const THREAT_DIGIT_TO_SUB: Record<string, string> = {
+  "1": "dfd",
+  "2": "stride",
+  "3": "stories",
+  "4": "scope",
+  "5": "summary",
+};
+
+/**
+ * Resolve a keystroke into an action, applying the shell's dispatch
+ * priority:
+ *
+ *   1. Ctrl+C / Ctrl+D — abort in-flight work, else arm/commit exit.
+ *   2. Plan-pending overlay — y / n / Esc apply / discard / cancel.
+ *   3. Threat-view 1..5 — cycle views when buffer is empty.
+ *   4. Findings j/k/g/G/arrow/PgUp/PgDown — drive cursor when buffer is empty.
+ *   5. `q` with empty buffer on a backable view — /back.
+ *   6. `Esc` — clear buffer if non-empty, else /back on backable views.
+ *
+ * Everything else returns `{ type: "none" }` so the component handles it
+ * locally (typing, backspace, Enter submit, Tab completion, history).
+ */
+export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
+  const { stroke, input, state, looseFindingCount, now } = inputs;
+  const { char, key } = stroke;
+  const shell = state.shell;
+  if (!shell) return { type: "none" };
+
+  // --- 1. Ctrl+C / Ctrl+D ---------------------------------------------------
+  if ((key.ctrl && char === "c") || (key.ctrl && char === "d")) {
+    if (shell.processing) {
+      return { type: "abort-inflight" };
+    }
+    const armedAt = state.ctrlCArmedAt ?? 0;
+    if (armedAt > 0 && now - armedAt <= CTRL_C_ARM_WINDOW_MS) {
+      return { type: "exit" };
+    }
+    return { type: "arm-exit", at: now };
+  }
+
+  // If we got here with an armed timestamp, any other keystroke should
+  // disarm — the component handles the store update alongside its other
+  // state mutations. We still compute the real action below.
+  // (Reporting the disarm is the component's concern.)
+
+  if (shell.processing) return { type: "none" };
+
+  // --- 2. Plan-pending overlay ----------------------------------------------
+  if (shell.pendingPlan && input.length === 0) {
+    if (char === "y" || char === "Y") return { type: "dispatch", command: "/yes" };
+    if (char === "n" || char === "N" || key.escape) {
+      return { type: "dispatch", command: "/no" };
+    }
+  }
+
+  // --- 3. Threat-view 1..5 cycle --------------------------------------------
+  if (isThreatShellView(shell.shellView) && input.length === 0) {
+    const sub = THREAT_DIGIT_TO_SUB[char];
+    if (sub) return { type: "dispatch", command: `/threats ${sub}` };
+  }
+
+  // --- 4. Findings cursor ---------------------------------------------------
+  if (shell.shellView === "findings" && input.length === 0 && looseFindingCount > 0) {
+    const cur = shell.findingCursor ?? 0;
+    const pageSize = shell.findingPageSize ?? FINDINGS_DEFAULT_PAGE_SIZE;
+    const clamp = (next: number): number => Math.max(0, Math.min(looseFindingCount - 1, next));
+    if (char === "j" || key.downArrow) {
+      return { type: "set-finding-cursor", cursor: clamp(cur + 1) };
+    }
+    if (char === "k" || key.upArrow) {
+      return { type: "set-finding-cursor", cursor: clamp(cur - 1) };
+    }
+    if (char === "g") return { type: "set-finding-cursor", cursor: 0 };
+    if (char === "G") {
+      return { type: "set-finding-cursor", cursor: looseFindingCount - 1 };
+    }
+    if (key.pageDown) {
+      return { type: "set-finding-cursor", cursor: clamp(cur + pageSize) };
+    }
+    if (key.pageUp) {
+      return { type: "set-finding-cursor", cursor: clamp(cur - pageSize) };
+    }
+  }
+
+  // --- 5. `q` → /back on backable views -------------------------------------
+  if (char === "q" && input.length === 0 && isBackableShellView(shell.shellView)) {
+    return { type: "dispatch", command: "/back" };
+  }
+
+  // --- 6. Esc ---------------------------------------------------------------
+  if (key.escape) {
+    if (input.length > 0) return { type: "clear-input" };
+    if (isBackableShellView(shell.shellView)) {
+      return { type: "dispatch", command: "/back" };
+    }
+  }
+
+  return { type: "none" };
+}
