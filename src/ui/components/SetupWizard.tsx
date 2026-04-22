@@ -19,7 +19,7 @@ import {
   type SelectListItem,
   type SelectListRenderContext,
 } from "../primitives/SelectList.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 export interface WizardResult {
   preset: string;
@@ -209,16 +209,16 @@ function richRenderer(options: RichOption[]) {
     if (!opt) return <Text>{ctx.item.label}</Text>;
     const name = ctx.isCursor ? tokens.strong(opt.name) : tokens.muted(opt.name);
     return (
-      <Box flexDirection="column" paddingLeft={2}>
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
         <Text>
           {ctx.cursorPrefix} {opt.icon} {name} {tokens.muted(opt.description)}
         </Text>
         {ctx.isCursor && (
           <>
-            <Box paddingLeft={6}>
+            <Box paddingLeft={SPACING.xxxl}>
               <Text>{tokens.muted(opt.detail)}</Text>
             </Box>
-            <Box paddingLeft={6}>
+            <Box paddingLeft={SPACING.xxxl}>
               <Text>{tokens.strong(opt.summary)}</Text>
             </Box>
           </>
@@ -287,10 +287,10 @@ export function SetupWizard({
       <Text>{""}</Text>
       <Text>{boxHeader(stepTitle, width)}</Text>
       <Text>{""}</Text>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>{tokens.muted(stepHint)}</Text>
       </Box>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>{tokens.hint(`Step ${currentStep} of ${STEP_ORDER.length}`)}</Text>
       </Box>
       <Text>{""}</Text>

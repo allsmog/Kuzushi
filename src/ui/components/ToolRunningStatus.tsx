@@ -20,7 +20,7 @@ import React, { useEffect, useState } from "react";
 import { useHeartbeat } from "../hooks.js";
 import { Gutter } from "../primitives/Gutter.js";
 import type { ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { PulseDot } from "./PulseDot.js";
 
 interface ToolRunningStatusProps {
@@ -61,7 +61,7 @@ function ToolRunningStatusImpl({ tool }: ToolRunningStatusProps): React.ReactEle
   const label = tool.displayName ?? tool.name;
 
   return (
-    <Box marginTop={1}>
+    <Box marginTop={SPACING.sm}>
       <Gutter>
         <PulseDot status={isStale ? "warn" : "running"} />
       </Gutter>

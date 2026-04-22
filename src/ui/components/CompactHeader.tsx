@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface CompactHeaderProps {
   repoName: string;
@@ -24,7 +24,7 @@ function _CompactHeader({
       : null;
 
   return (
-    <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+    <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>
         {tokens.dangerStrong("Kuzushi")} {tokens.subtle("\u00B7")} {tokens.strong(repoName)}
         {findingsLabel ? `${tokens.subtle(" \u00B7 ")}${tokens.strong(findingsLabel)}` : ""}

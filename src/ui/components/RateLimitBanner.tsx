@@ -11,7 +11,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface RateLimitBannerProps {
   throttle?: { concurrency: number; reason: string } | null;
@@ -20,7 +20,7 @@ interface RateLimitBannerProps {
 export function RateLimitBanner({ throttle }: RateLimitBannerProps): React.ReactElement | null {
   if (!throttle) return null;
   return (
-    <Box marginBottom={1} paddingLeft={2}>
+    <Box marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>
         {tokens.warn(icons.warning)}
         {"  "}

@@ -11,7 +11,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface CostCapHaltProps {
   runningCostUsd: number;
@@ -24,7 +24,7 @@ export function CostCapHalt({ runningCostUsd, budgetUsd }: CostCapHaltProps): Re
   const bar = "\u2500".repeat(width - 12);
 
   return (
-    <Box flexDirection="column" marginTop={1} marginBottom={1} paddingLeft={2}>
+    <Box flexDirection="column" marginTop={SPACING.sm} marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>
         {tokens.muted("\u256D\u2500 ")}
         {tokens.dangerStrong("BUDGET EXCEEDED")}
@@ -42,7 +42,7 @@ export function CostCapHalt({ runningCostUsd, budgetUsd }: CostCapHaltProps): Re
       </Row>
       <Row>{tokens.muted("The pipeline is paused. Continuing will incur additional charges.")}</Row>
       <Text>{tokens.muted(`\u2570${"\u2500".repeat(width - 2)}\u256F`)}</Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.hint("  press ")}
           {tokens.strong("c")}

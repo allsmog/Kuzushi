@@ -8,6 +8,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { SPACING } from "../tokens.js";
 import { progressBar } from "../format.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 
@@ -24,7 +25,7 @@ export function ProgressBar({ current, total, width }: ProgressBarProps): React.
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
 
   return (
-    <Box paddingLeft={2}>
+    <Box paddingLeft={SPACING.md}>
       <Text>
         {bar}
         {"  "}

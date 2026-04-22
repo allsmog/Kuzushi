@@ -8,7 +8,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
 import type { Phase } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 const STAGE_ICONS: Record<string, string> = {
   scanning: icons.lightning,
@@ -34,7 +34,7 @@ export function StageHeader({ phase, label }: StageHeaderProps): React.ReactElem
   const colorFn = STAGE_COLORS[phase] ?? tokens.strong;
 
   return (
-    <Box paddingLeft={2}>
+    <Box paddingLeft={SPACING.md}>
       <Text>{colorFn(`${icon} ${label}`)}</Text>
     </Box>
   );

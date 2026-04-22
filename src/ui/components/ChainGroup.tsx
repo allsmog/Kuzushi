@@ -12,7 +12,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import { Table } from "../primitives/Table.js";
 import type { ActionableFinding } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 export interface ChainGroupProps {
   chainId: string;
@@ -37,7 +37,7 @@ export function ChainGroup({
   const verifiedSuffix = verified ? tokens.success(" · verified") : "";
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {tokens.muted("\u250C\u2500 exploit chain · ")}
         {tokens.strong(chainId)}
@@ -46,7 +46,7 @@ export function ChainGroup({
         {verifiedSuffix}
         {tokens.muted(` ${bar}\u2510`)}
       </Text>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Table
           gap={1}
           columns={[

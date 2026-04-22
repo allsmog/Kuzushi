@@ -23,7 +23,7 @@ import type React from "react";
 import type { StrideThreat } from "../../agents/tasks/threat-modeling/types.js";
 import { Table } from "../primitives/Table.js";
 import type { ActionableFinding, ShellState, UIState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface DiffSinceViewProps {
   state: UIState;
@@ -44,7 +44,7 @@ export function DiffSinceView({ state, shell }: DiffSinceViewProps): React.React
   );
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
       <Header
         diff={diff}
         scopedFindings={scopedFindings.length}
@@ -52,7 +52,7 @@ export function DiffSinceView({ state, shell }: DiffSinceViewProps): React.React
       />
 
       {diff.error ? (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Text>
             {tokens.warn("git diff failed: ")}
             {tokens.muted(diff.error)}
@@ -77,12 +77,12 @@ export function DiffSinceView({ state, shell }: DiffSinceViewProps): React.React
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("diff since \u2026")}
       </Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.warn("No diff computed yet. ")}
           {tokens.muted("Type ")}
@@ -125,9 +125,9 @@ function Header({
 
 function ChangedFiles({ files }: { files: string[] }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("changed files")}</Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         {files.length === 0 ? (
           <Text>{tokens.muted("   (no files changed)")}</Text>
         ) : (
@@ -154,12 +154,12 @@ function ScopedFindings({
   total: number;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {tokens.label("findings in changed files")}
         {tokens.muted(`  (${scopedFindings.length} of ${total})`)}
       </Text>
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         {scopedFindings.length === 0 ? (
           <Text>{tokens.muted("(no findings touch the changed files)")}</Text>
         ) : (
@@ -207,12 +207,12 @@ function ScopedThreats({
   total: number;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {tokens.label("threats touching changed files")}
         {tokens.muted(`  (${scopedThreats.length} of ${total})`)}
       </Text>
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         {scopedThreats.length === 0 ? (
           <Text>{tokens.muted("(no STRIDE threats target the changed files)")}</Text>
         ) : (
@@ -264,7 +264,7 @@ function impactBadge(impact: StrideThreat["impact"]): string {
 
 function HintFooter(): React.ReactElement {
   return (
-    <Box marginTop={1}>
+    <Box marginTop={SPACING.sm}>
       <Text>
         {tokens.hint("/since <ref> to rescope   ")}
         {tokens.muted("/findings for the full list")}

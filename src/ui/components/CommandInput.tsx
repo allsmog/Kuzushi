@@ -22,7 +22,7 @@ import { useState } from "react";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 import { TextInput } from "../primitives/TextInput.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 export interface ReplCommand {
   name: string;
@@ -117,11 +117,11 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
   if (!active || !process.stdin.isTTY) return null;
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       {showHelp && (
-        <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+        <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
           <Text>{tokens.muted("Available commands:")}</Text>
-          <Box flexDirection="column" paddingLeft={2}>
+          <Box flexDirection="column" paddingLeft={SPACING.md}>
             {COMMANDS.map((cmd) => (
               <Text key={cmd.name}>
                 {tokens.accent(cmd.name)} {tokens.muted(cmd.args)}
@@ -134,7 +134,7 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
       )}
 
       {lastResult?.message && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>
             {lastResult.type === "success"
               ? tokens.success(icons.success)
@@ -149,7 +149,7 @@ export function CommandInput({ active, onCommand }: CommandInputProps): React.Re
       )}
 
       {expanded && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <TextInput
             value={input}
             onChange={setInput}

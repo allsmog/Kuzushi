@@ -13,7 +13,7 @@ import { formatCost, formatDuration } from "../format.js";
 import { icons } from "../icons.js";
 import { ExpandableSection } from "../primitives/ExpandableSection.js";
 import type { AgentActivityLine, UIState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { Spinner } from "./Spinner.js";
 
 const DEBUG_ON = process.env.KUZUSHI_DEBUG === "1";
@@ -42,7 +42,7 @@ export function AgentActivity({
   );
 
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <ExpandableSection
         summary={summary}
         defaultExpanded={DEBUG_ON}
@@ -93,7 +93,7 @@ export function HeartbeatStrip({
   const agentStr = `${activeFingerprints} agent${activeFingerprints === 1 ? "" : "s"} active`;
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
       <Text>
         {tokens.accent(icons.active)}
         {"  "}
