@@ -25,6 +25,7 @@ import { type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ShellState, UIState } from "../state.js";
 import { tokens } from "../tokens.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
+import { ShellFooterHints } from "./ShellFooterHints.js";
 
 interface DiffSinceViewProps {
   state: UIState;
@@ -238,13 +239,13 @@ function impactBadge(impact: StrideThreat["impact"]): string {
 
 function HintFooter(): React.ReactElement {
   return (
-    <Box marginTop={1}>
-      <Text>
-        {tokens.hint("/since <ref> to rescope   ")}
-        {tokens.muted("/findings for the full list")}
-        {tokens.hint("   q back")}
-      </Text>
-    </Box>
+    <ShellFooterHints
+      hints={[
+        { key: "/since <ref>", label: "rescope" },
+        { key: "/findings", label: "full list" },
+        { key: "q", label: "back" },
+      ]}
+    />
   );
 }
 

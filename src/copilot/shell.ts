@@ -227,7 +227,7 @@ export function buildShellPrompt(focusedModule: string | null): string {
  * (`1..5`) shortcuts so operators can cycle through the Phase C views with
  * the same keys shown in the footer.
  */
-function resolveThreatView(
+export function resolveThreatView(
   sub: string | undefined,
 ): { shellView: ShellView; label: string } | undefined {
   switch (sub) {

@@ -25,6 +25,7 @@ import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
+import { ShellFooterHints } from "./ShellFooterHints.js";
 
 const INPUT_CATEGORY_ORDER: Array<{
   key: keyof ThreatModelInputCategories;
@@ -227,15 +228,20 @@ function renderThreatChips(threatIds: ReadonlyArray<string> | undefined): string
 }
 
 function HintFooter(): React.ReactElement {
+  // Hints reflect real keybinds wired in CopilotShell: `1..5` cycles through
+  // the five threat views (source of truth is `resolveThreatView` in
+  // shell.ts); `q` and `/back` both step up to the module home.
   return (
-    <Box marginTop={1}>
-      <Text>
-        {tokens.muted("1 dfd  2 stride  ")}
-        {tokens.hint("3 stories  ")}
-        {tokens.muted("4 scope  5 summary")}
-        {tokens.hint("   q back")}
-      </Text>
-    </Box>
+    <ShellFooterHints
+      hints={[
+        { key: "1", label: "dfd" },
+        { key: "2", label: "stride" },
+        { key: "3", label: "stories" },
+        { key: "4", label: "scope" },
+        { key: "5", label: "summary" },
+        { key: "q", label: "back" },
+      ]}
+    />
   );
 }
 

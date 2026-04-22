@@ -590,6 +590,20 @@ export interface ShellState {
   shellView: ShellView;
   /** When shellView === "finding", which finding ID is open (e.g. "F-0216"). */
   openFindingId: string | null;
+  /**
+   * Cursor index into the (severity-sorted) loose-findings list rendered by
+   * FindingsView. Driven by j/k/ArrowDown/ArrowUp/g/G/PgUp/PgDown at the
+   * idle prompt when `shellView === "findings"`. Clamped to the list size
+   * by the input handler; undefined means "anchor at top".
+   */
+  findingCursor?: number;
+  /**
+   * Page size for FindingsView virtualization and for PgUp/PgDown scroll
+   * increments. Optional — FindingsView falls back to its own default when
+   * unset. Operators don't tweak this today; kept as state so a future
+   * terminal-size effect can thread the value through.
+   */
+  findingPageSize?: number;
   /** Active target. */
   target: string | null;
   /** Workspace ID. */

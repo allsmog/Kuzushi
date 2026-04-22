@@ -18,10 +18,15 @@ import {
   buildShellPrompt,
   firstShellSuggestion,
   listShellSuggestions,
+  resolveThreatView,
 } from "../../copilot/shell.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useUIState } from "../hooks.js";
+import {
+  CTRL_C_ARM_WINDOW_MS as CTRL_C_ARM_WINDOW_MS_IMPORTED,
+  resolveKeybind,
+} from "../shell-keybinds.js";
 import { Gutter } from "../primitives/Gutter.js";
 import { Markdown } from "../primitives/Markdown.js";
 import { Ratchet } from "../primitives/Ratchet.js";
@@ -60,17 +65,24 @@ const IDLE_KEYBINDS = [
 const PROCESSING_KEYBINDS = [{ keys: "Ctrl+C", label: "Abort" }];
 
 /** Window during which a second Ctrl+C at the idle prompt commits the exit. */
-const CTRL_C_ARM_WINDOW_MS = 2000;
+const CTRL_C_ARM_WINDOW_MS = CTRL_C_ARM_WINDOW_MS_IMPORTED;
 
-/** True for any of the Phase C threat-model sub-views. */
-function isThreatShellView(view: ShellState["shellView"] | undefined): boolean {
-  return (
-    view === "threat-dfd" ||
-    view === "threat-stride" ||
-    view === "threat-stories" ||
-    view === "threat-scope" ||
-    view === "threat-summary"
-  );
+/**
+ * Count loose (non-chain) findings in the current summary — the population
+ * that the findings cursor scans over. Kept in sync with FindingsView's own
+ * filter so j/k clamps match exactly what the operator sees on screen.
+ */
+function countLooseFindings(state: UIState): number {
+  const summary = state.summary;
+  if (!summary) return 0;
+  const findings = summary.actionableFindings ?? [];
+  const chainFingerprints = new Set<string>();
+  for (const chain of summary.exploitChains ?? []) {
+    for (const step of chain.steps) chainFingerprints.add(step.findingFingerprint);
+  }
+  let count = 0;
+  for (const f of findings) if (!chainFingerprints.has(f.fingerprint)) count += 1;
+  return count;
 }
 
 export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
@@ -144,77 +156,61 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       const liveShell = liveState.shell;
       if (!liveShell) return;
 
-      if ((key.ctrl && char === "c") || (key.ctrl && char === "d")) {
-        // In-flight work always gets an immediate abort — no point arming
-        // when there's something to interrupt. `onAbort` is idempotent;
-        // a second Ctrl+C after abort falls through to the exit path.
-        if (liveShell.processing) {
+      // High-order keybind dispatch — a single pure reducer decides
+      // whether this keystroke maps to an abort, an exit, a slash-command
+      // dispatch, a cursor move, or a buffer clear. The fall-through
+      // `type: "none"` path drops back to the local-edit handler below
+      // (typing, backspace, Enter submit, Tab, history recall). Keeping
+      // this logic in a pure function gives us a single table of truth
+      // for the shell's keymap — see tests/copilot/keybinds.test.ts.
+      const action = resolveKeybind({
+        stroke: { char, key },
+        input,
+        state: liveState,
+        looseFindingCount: countLooseFindings(liveState),
+        now: Date.now(),
+      });
+
+      // Disarm the two-stage Ctrl+C counter on anything that isn't the
+      // arm/exit continuation. Done once here so every branch below sees
+      // a consistent store.
+      if (
+        liveState.ctrlCArmedAt &&
+        action.type !== "arm-exit" &&
+        action.type !== "exit" &&
+        action.type !== "abort-inflight"
+      ) {
+        store.update({ ctrlCArmedAt: undefined });
+      }
+
+      switch (action.type) {
+        case "abort-inflight":
           liveShell.onAbort?.();
           return;
-        }
-        // B.4 two-stage Ctrl+C at the idle prompt: first press arms,
-        // second press within CTRL_C_ARM_WINDOW_MS exits. Anything else
-        // pressed within the window disarms silently.
-        const now = Date.now();
-        const armedAt = liveState.ctrlCArmedAt ?? 0;
-        if (now - armedAt <= CTRL_C_ARM_WINDOW_MS) {
+        case "arm-exit":
+          store.update({ ctrlCArmedAt: action.at });
+          return;
+        case "exit":
           liveShell.onExit?.();
           exit();
           return;
-        }
-        store.update({ ctrlCArmedAt: now });
-        return;
-      }
-
-      // Any other key disarms the Ctrl+C stage counter if one is in flight.
-      if (liveState.ctrlCArmedAt) {
-        store.update({ ctrlCArmedAt: undefined });
+        case "dispatch":
+          liveShell.onInput?.(action.command);
+          return;
+        case "set-finding-cursor":
+          store.update({ shell: { ...liveShell, findingCursor: action.cursor } });
+          return;
+        case "clear-input":
+          setInput("");
+          setHistoryIndex(null);
+          draftInputRef.current = "";
+          return;
+        case "none":
+          break;
       }
 
       if (liveShell.processing) {
         return;
-      }
-
-      // When a NL-planner proposal is waiting for confirmation, route y / n /
-      // Esc through the shell's onInput so the same /yes, /no handlers in
-      // shell.ts apply or discard. Single-key shortcut — operator doesn't
-      // need to type a slash command.
-      if (liveShell.pendingPlan && input.length === 0) {
-        if (char === "y" || char === "Y") {
-          liveShell.onInput?.("/yes");
-          return;
-        }
-        if (char === "n" || char === "N" || key.escape) {
-          liveShell.onInput?.("/no");
-          return;
-        }
-      }
-
-      // Phase C — while on a threat view, 1..5 cycle through the five
-      // sub-views without having to retype `/threats <name>`. Only active
-      // when the input buffer is empty so the digits don't interfere
-      // with natural-language input.
-      if (isThreatShellView(liveShell.shellView) && input.length === 0) {
-        if (char === "1") {
-          liveShell.onInput?.("/threats dfd");
-          return;
-        }
-        if (char === "2") {
-          liveShell.onInput?.("/threats stride");
-          return;
-        }
-        if (char === "3") {
-          liveShell.onInput?.("/threats stories");
-          return;
-        }
-        if (char === "4") {
-          liveShell.onInput?.("/threats scope");
-          return;
-        }
-        if (char === "5") {
-          liveShell.onInput?.("/threats summary");
-          return;
-        }
       }
 
       if (key.return && input.length > 0) {
@@ -256,13 +252,6 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         }
         setHistoryIndex(nextIndex);
         setInput(liveShell.commandHistory[nextIndex] ?? "");
-        return;
-      }
-
-      if (key.escape) {
-        setInput("");
-        setHistoryIndex(null);
-        draftInputRef.current = "";
         return;
       }
 
@@ -476,7 +465,15 @@ function ShellViewPanel({
         severity: c.overallSeverity,
         findingFingerprints: c.steps.map((s) => s.findingFingerprint),
       }));
-      return <FindingsView mode="unified" findings={findings} chains={chains} />;
+      return (
+        <FindingsView
+          mode="unified"
+          findings={findings}
+          chains={chains}
+          findingCursor={shell.findingCursor}
+          pageSize={shell.findingPageSize}
+        />
+      );
     }
     case "finding": {
       const summary = state.summary;
@@ -545,6 +542,8 @@ const MemoShellViewPanel = memo(
     prev.shell.focusedModule === next.shell.focusedModule &&
     prev.shell.openFindingId === next.shell.openFindingId &&
     prev.shell.threatModel === next.shell.threatModel &&
+    prev.shell.findingCursor === next.shell.findingCursor &&
+    prev.shell.findingPageSize === next.shell.findingPageSize &&
     prev.state.summary === next.state.summary,
 );
 
