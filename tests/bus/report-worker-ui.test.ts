@@ -215,4 +215,62 @@ describe("report-worker with UI store", () => {
     await bus.close();
     db.close();
   });
+
+  it("labels threat-hunt start with 'analyzing threats from attack surface' instead of 'initializing'", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const store = createUIStore();
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 2,
+      scanMode: "parallel",
+      tasks: ["threat-hunt"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      taskConfig: { "threat-hunt": {} },
+    };
+
+    registerReportWorker(bus, { db, config }, store);
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          tasks: ["threat-hunt"],
+          fresh: false,
+        },
+      }),
+    );
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "threat-hunt",
+        outputKind: "findings",
+        input: null,
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    const scanStage = store.getState().stages.find((stage) => stage.id === "scan");
+    const threatHuntTask = scanStage?.subTasks.find((task) => task.id === "threat-hunt");
+    expect(threatHuntTask?.detail).toBe("analyzing threats from attack surface");
+    expect(threatHuntTask?.detail).not.toBe("initializing");
+
+    await bus.close();
+    db.close();
+  });
 });
