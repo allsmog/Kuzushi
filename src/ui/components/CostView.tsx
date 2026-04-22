@@ -17,7 +17,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { formatCost, miniBarChart } from "../format.js";
 import type { ResultLine } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface CostViewProps {
   results: ResultLine[];
@@ -51,7 +51,7 @@ function _CostView({ results, runningCostUsd, budget }: CostViewProps): React.Re
   ]);
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginTop={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginTop={SPACING.sm}>
       <Text>{tokens.label(`Cost Breakdown (${formatCost(totalCost)})`)}</Text>
       <Text>{""}</Text>
 

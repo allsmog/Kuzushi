@@ -16,7 +16,7 @@ import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 import type { ActionableFinding } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface ExportActionsProps {
   findings: ActionableFinding[];
@@ -66,11 +66,11 @@ export function ExportActions({
       <Text>{""}</Text>
       <Text>{boxHeader("Export", width)}</Text>
       <Text>{""}</Text>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>{tokens.muted(`${actionableCount} actionable findings available`)}</Text>
       </Box>
       <Text>{""}</Text>
-      <Box flexDirection="column" paddingLeft={2}>
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
         <Text>
           {tokens.dangerStrong("[c]")} Copy to clipboard {tokens.muted("(markdown)")}
         </Text>
@@ -79,7 +79,7 @@ export function ExportActions({
       </Box>
 
       {status && (
-        <Box paddingLeft={2} marginTop={1}>
+        <Box paddingLeft={SPACING.md} marginTop={SPACING.sm}>
           <Text>{tokens.success(status)}</Text>
         </Box>
       )}

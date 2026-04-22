@@ -23,7 +23,7 @@ import type { ConfigPatchEntry } from "../../config.js";
 import type { KuzushiConfig } from "../../types.js";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import {
   FIELDS,
   type FieldDescriptor,
@@ -445,7 +445,7 @@ export function ConfigEditor({
     <Box flexDirection="column">
       <Text>{""}</Text>
       <Text>{boxHeader(drillTitle, width)}</Text>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>
           {tokens.muted(
             `Source: ${cfgPath}${dirty ? "  •  " + tokens.warn("unsaved changes") : ""}`,
@@ -461,7 +461,7 @@ export function ConfigEditor({
       )}
 
       {editingDescriptor && (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <ValueEditorSwitch
             descriptor={editingDescriptor}
             value={editingValue}
@@ -617,7 +617,7 @@ function ValueEditorSwitch({
   }
   if (t.kind === "object") {
     return (
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>{tokens.muted("(object — drill down or edit raw JSON via /config raw)")}</Text>
       </Box>
     );

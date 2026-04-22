@@ -16,7 +16,7 @@ import {
 } from "../error-format.js";
 import { badge } from "../format.js";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 const CATEGORY_BADGES: Record<ErrorCategory, string> = {
   rate_limit: badge("RATE LIMIT", "yellow"),
@@ -80,14 +80,14 @@ export function ErrorCard({
 
   return (
     <Box flexDirection="column">
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>
           {categoryBadge} {tokens.strong(message)}
           {retryInfo}
         </Text>
       </Box>
       {frames.length > 0 ? (
-        <Box flexDirection="column" paddingLeft={4}>
+        <Box flexDirection="column" paddingLeft={SPACING.xl}>
           {frames.map((frame, i) => (
             <Text key={`frame-${i}`}>
               {tokens.muted(
@@ -98,14 +98,14 @@ export function ErrorCard({
         </Box>
       ) : null}
       {nextStep ? (
-        <Box paddingLeft={2} marginTop={1}>
+        <Box paddingLeft={SPACING.md} marginTop={SPACING.sm}>
           <Text>
             {tokens.successStrong("Next step:")} {nextStep}
           </Text>
         </Box>
       ) : null}
       {showStack && formatted?.raw ? (
-        <Box flexDirection="column" paddingLeft={4} marginTop={1}>
+        <Box flexDirection="column" paddingLeft={SPACING.xl} marginTop={SPACING.sm}>
           {formatted.raw.split("\n").map((line, i) => (
             <Text key={`raw-${i}`}>{tokens.subtle(line)}</Text>
           ))}

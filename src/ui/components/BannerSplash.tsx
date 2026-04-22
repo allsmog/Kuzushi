@@ -14,7 +14,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 const WORDMARK = [
   "  ██╗  ██╗██╗   ██╗███████╗██╗   ██╗███████╗██╗  ██╗██╗",
@@ -53,11 +53,11 @@ export function BannerSplash({ workspace, target, tip }: BannerSplashProps): Rea
   if (target) contextParts.push(`target ${target}`);
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginTop={1} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginTop={SPACING.sm} marginBottom={SPACING.sm}>
       {WORDMARK.map((row, i) => (
         <Text key={`w-${i}`}>{tokens.accent(row)}</Text>
       ))}
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.muted("  \u5D29\u3057 \u2014 ")}
           {tokens.strong("Kuzushi")}
@@ -72,7 +72,7 @@ export function BannerSplash({ workspace, target, tip }: BannerSplashProps): Rea
           </Text>
         </Box>
       ) : null}
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.hint("  tip: ")}
           {tokens.hint(resolvedTip)}

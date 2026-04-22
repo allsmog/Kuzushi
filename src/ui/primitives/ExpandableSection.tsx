@@ -7,7 +7,7 @@
 import { Box, Text } from "ink";
 import type { FC, ReactNode } from "react";
 import { useExpanded } from "../hooks/useExpanded.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 export interface ExpandableSectionProps {
   summary: ReactNode;
@@ -44,15 +44,15 @@ export const ExpandableSection: FC<ExpandableSectionProps> = ({
         <Text>
           {caretColor(caretChar)} {typeof summary === "string" ? summary : null}
         </Text>
-        {typeof summary !== "string" ? <Box marginLeft={1}>{summary}</Box> : null}
+        {typeof summary !== "string" ? <Box marginLeft={SPACING.sm}>{summary}</Box> : null}
         {!expanded && hint ? (
-          <Box marginLeft={2}>
+          <Box marginLeft={SPACING.md}>
             <Text>{tokens.hint(hint)}</Text>
           </Box>
         ) : null}
       </Box>
       {expanded ? (
-        <Box flexDirection="column" paddingLeft={2}>
+        <Box flexDirection="column" paddingLeft={SPACING.md}>
           {children}
         </Box>
       ) : null}

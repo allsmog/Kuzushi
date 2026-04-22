@@ -11,7 +11,7 @@ import type React from "react";
 import { boxFooter, boxHeader, formatCost, terminalCardWidth } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 export interface ConfigConfirmData {
   model: string;
@@ -82,13 +82,13 @@ export function ConfigConfirm({
       <Text>{""}</Text>
       <Text>{boxHeader(`${repoName}`, width)}</Text>
       <Text>{""}</Text>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>
           {tokens.muted("Press Enter to start this scan with the resolved config below.")}
         </Text>
       </Box>
       <Text>{""}</Text>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Table<Row>
           columns={[
             { key: "label", width: 14, align: "left" },

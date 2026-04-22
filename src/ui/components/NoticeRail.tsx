@@ -18,7 +18,8 @@ import { Box, Text } from "ink";
 import React from "react";
 import { icons } from "../icons.js";
 import type { UINotice } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { truncateEnd } from "../format.js";
 
 interface NoticeRailProps {
   notices: UINotice[];
@@ -37,7 +38,7 @@ function _NoticeRail({ notices, expanded }: NoticeRailProps): React.ReactElement
 
   if (showFull) {
     return (
-      <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+      <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
         {notices.map((notice) => (
           <Text key={notice.id}>
             {formatIcon(notice.level)} {formatMessage(notice)}
@@ -48,7 +49,7 @@ function _NoticeRail({ notices, expanded }: NoticeRailProps): React.ReactElement
   }
 
   return (
-    <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+    <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>
         {formatRollup(notices)}
         {tokens.hint("   (n) expand")}
@@ -78,7 +79,7 @@ function formatRollup(notices: UINotice[]): string {
   }
   const header = parts.join(tokens.muted("  ·  "));
   const latest = [...notices].reverse().find((n) => n.level !== "error");
-  const tail = latest ? tokens.muted(`  \u2014 ${truncate(latest.message, 60)}`) : "";
+  const tail = latest ? tokens.muted(`  \u2014 ${truncateEnd(latest.message, 60)}`) : "";
   return `${header}${tail}`;
 }
 
@@ -120,6 +121,3 @@ function formatMessage(notice: UINotice): string {
   return `${message}${detail}`;
 }
 
-function truncate(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max - 1)}\u2026`;
-}

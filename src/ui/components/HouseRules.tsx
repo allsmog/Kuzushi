@@ -10,7 +10,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 const MAX_CHARS = 600;
 const WIDTH = 72;
@@ -32,7 +32,7 @@ export function HouseRules({ text, path }: HouseRulesProps): React.ReactElement 
         {"  "}
         {tokens.hint("(optional · nudge this module about your repo)")}
       </Text>
-      <Box marginTop={1} flexDirection="column">
+      <Box marginTop={SPACING.sm} flexDirection="column">
         <Text>{tokens.muted(`   \u256D${bar}\u256E`)}</Text>
         {lines.map((line, i) => (
           <Text key={`${i}-${line.slice(0, 6)}`}>
@@ -43,7 +43,7 @@ export function HouseRules({ text, path }: HouseRulesProps): React.ReactElement 
         ))}
         <Text>{tokens.muted(`   \u2570${bar}\u256F`)}</Text>
       </Box>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.muted(`   ${count} / ${MAX_CHARS} chars`)}
           {path ? tokens.muted(` · saved to ${relativeFrom(path)}`) : null}

@@ -14,7 +14,7 @@ import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { useElapsed } from "../hooks.js";
 import { Divider } from "../primitives/Divider.js";
 import type { Phase } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface StatusFooterProps {
   model: string;
@@ -62,7 +62,7 @@ export const StatusFooter = React.memo(function StatusFooter({
   const throttleStr = throttle ? tokens.warn(` \u2502 \u26A0 throttled`) : "";
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Divider width={Math.min(columns, 80)} />
       <Text>
         {tokens.focus(modelShort)}
