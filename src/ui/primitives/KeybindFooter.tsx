@@ -10,7 +10,8 @@ import { Box, Text } from "ink";
 import type { FC } from "react";
 import { type Keybinding, useKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { Divider } from "./Divider.js";
 
 export interface KeybindFooterProps {
   bindings?: ReadonlyArray<Keybinding>;
@@ -24,12 +25,11 @@ export const KeybindFooter: FC<KeybindFooterProps> = ({ bindings: override, maxS
 
   const extra = bindings.length > maxShown ? bindings.length - (maxShown - 1) : 0;
   const shown = extra > 0 ? bindings.slice(0, maxShown - 1) : bindings;
-  const ruleWidth = process.stdout.columns ?? 80;
 
   return (
     <Box flexDirection="column">
-      <Text>{tokens.muted(icons.boxHorizontal.repeat(Math.max(8, ruleWidth)))}</Text>
-      <Box flexDirection="row">
+      <Divider width={80} />
+      <Box flexDirection="row" paddingLeft={SPACING.md}>
         <Text>
           {shown
             .map((b, i) => {
