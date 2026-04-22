@@ -47,16 +47,24 @@ function hint(text: string): string {
 }
 
 export const tokens = {
+  primary: (text: string) => text,
+  secondary: muted,
+  tertiary: subtle,
+
   // Semantic color
   danger: (text: string) => chalk.red(text),
-  dangerStrong: (text: string) => chalk.redBright.bold(text),
+  dangerStrong: (text: string) => chalk.red.bold(text),
   success: (text: string) => chalk.green(text),
   successStrong: (text: string) => chalk.green.bold(text),
   warn: (text: string) => chalk.yellow(text),
   warnStrong: (text: string) => chalk.yellow.bold(text),
-  info: (text: string) => chalk.blue(text),
+  info: (text: string) => chalk.cyan(text),
   accent: (text: string) => chalk.cyan(text),
-  strong: (text: string) => chalk.white.bold(text),
+  focus: (text: string) => chalk.cyan.bold(text),
+  selection: (text: string) => chalk.black.bgCyan(text),
+  bgEmphasis: (text: string) =>
+    getTheme() === "light" ? chalk.black.bgWhite(text) : chalk.white.bgBlackBright(text),
+  strong: (text: string) => chalk.bold(text),
 
   // Theme-aware
   muted,
@@ -65,7 +73,7 @@ export const tokens = {
   metadata: muted,
 
   // Typography (weight + italic, not color)
-  heading: (text: string) => chalk.bold.underline(text),
+  heading: (text: string) => chalk.bold(text),
   label: (text: string) => chalk.bold(text),
   value: (text: string) => text,
   hint,
@@ -80,6 +88,7 @@ export const warn = tokens.warn;
 export const warnStrong = tokens.warnStrong;
 export const info = tokens.info;
 export const accent = tokens.accent;
+export const focus = tokens.focus;
 export const strong = tokens.strong;
 export const heading = tokens.heading;
 export const label = tokens.label;
