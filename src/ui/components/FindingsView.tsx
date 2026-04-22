@@ -98,7 +98,7 @@ function CompactFindings({ results }: { results: ResultLine[] }): React.ReactEle
       <Text>
         {tokens.muted(`${triageResults.length} of ${results[0]?.total ?? "?"} triaged`)}
         {"  "}
-        {tokens.danger(
+        {tokens.dangerStrong(
           `${icons.error} ${triageResults.filter((r) => r.verdict === "tp").length} tp`,
         )}
         {"  "}
@@ -160,7 +160,7 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
       </Box>
 
       <Box marginTop={1}>
-        <Text>{tokens.muted("\u2500".repeat(78))}</Text>
+        <Text>{tokens.tertiary("\u2500".repeat(78))}</Text>
       </Box>
 
       {(chains ?? []).map((chain) => {
@@ -189,7 +189,7 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
       )}
 
       <Box marginTop={1}>
-        <Text>{tokens.muted("\u2500".repeat(78))}</Text>
+        <Text>{tokens.tertiary("\u2500".repeat(78))}</Text>
       </Box>
       <Box>
         <Text>

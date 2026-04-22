@@ -15,6 +15,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { icons } from "../icons.js";
 import type { ShellModuleCard, ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -47,9 +48,10 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
 
   const widest = Math.max(10, ...cards.map((c) => c.id.length));
 
+  const cardWidth = 61;
   return (
     <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <CatalogHeader shell={shell} />
+      <CatalogHeader shell={shell} width={cardWidth} />
 
       {CATEGORY_ORDER.map((cat) => {
         const rows = byCategory[cat];
@@ -82,7 +84,7 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
       )}
 
       <Box marginTop={1}>
-        <Text>{tokens.muted("─".repeat(74))}</Text>
+        <Text>{tokens.metadata(icons.boxHorizontal.repeat(cardWidth - 2))}</Text>
       </Box>
       <Box>
         <Text>
@@ -100,7 +102,13 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
   );
 }
 
-function CatalogHeader({ shell }: { shell: ShellState }): React.ReactElement {
+function frameLine(label: string, value: string, width: number): string {
+  const contentWidth = Math.max(1, width - 4);
+  const text = `${label}${value}`.slice(0, contentWidth);
+  return `${icons.boxVertical} ${text.padEnd(contentWidth)} ${icons.boxVertical}`;
+}
+
+function CatalogHeader({ shell, width }: { shell: ShellState; width: number }): React.ReactElement {
   const workspace = shell.workspace ?? "(no workspace)";
   const target = shell.target ?? "(no target)";
   const modList = (shell.moduleCatalog ?? [])
@@ -111,26 +119,20 @@ function CatalogHeader({ shell }: { shell: ShellState }): React.ReactElement {
 
   return (
     <Box flexDirection="column">
-      <Text>{tokens.muted("╭─────────────────────────────────────────────────────────────╮")}</Text>
       <Text>
-        {tokens.muted("│  ")}
-        {tokens.strong("kuzushi shell")}
-        {"                      "}
-        {tokens.muted("workspace ")}
-        {tokens.value(workspace)}
-        {tokens.muted("  │")}
+        {tokens.metadata(
+          `${icons.boxTopLeft}${icons.boxHorizontal.repeat(width - 2)}${icons.boxTopRight}`,
+        )}
       </Text>
+      <Text>{tokens.metadata(frameLine("", "kuzushi shell", width))}</Text>
+      <Text>{tokens.metadata(frameLine("workspace ", workspace, width))}</Text>
+      <Text>{tokens.metadata(frameLine("modules   ", modList || "(none)", width))}</Text>
+      <Text>{tokens.metadata(frameLine("target    ", target, width))}</Text>
       <Text>
-        {tokens.muted("│  modules ")}
-        {tokens.value(modList || "(none)")}
-        {tokens.muted("  │")}
+        {tokens.metadata(
+          `${icons.boxBottomLeft}${icons.boxHorizontal.repeat(width - 2)}${icons.boxBottomRight}`,
+        )}
       </Text>
-      <Text>
-        {tokens.muted("│  target ")}
-        {tokens.value(target)}
-        {tokens.muted("  │")}
-      </Text>
-      <Text>{tokens.muted("╰─────────────────────────────────────────────────────────────╯")}</Text>
     </Box>
   );
 }
