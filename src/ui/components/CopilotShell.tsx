@@ -486,7 +486,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
             <Text>
               {tokens.accent(buildShellPrompt(shell.focusedModule))}
               {input.slice(0, cursor)}
-              {tokens.tertiary(cursor < input.length ? input[cursor] : "\u2588")}
+              {tokens.tertiary(cursor < input.length ? input[cursor] : theme.glyphs.textCursor)}
               {cursor < input.length ? input.slice(cursor + 1) : ""}
             </Text>
           </Box>
@@ -589,11 +589,17 @@ function ShellViewPanel({
   state: UIState;
   shell: ShellState;
 }): React.ReactElement | null {
+  // Stable React keys per view stop React from re-mounting sibling sub-trees
+  // when the shellView changes. The `shellView` value is the key — same view
+  // string, same DOM identity, fresh view string, fresh mount. Without keys,
+  // React reconciles by position and reparents (re-running mount effects in
+  // children that should have been preserved) when the view changes shape.
+  const view = shell.shellView ?? "catalog";
   switch (shell.shellView) {
     case "module":
-      return shell.focusedModule ? <ModuleHome shell={shell} /> : null;
+      return shell.focusedModule ? <ModuleHome key={view} shell={shell} /> : null;
     case "tune":
-      return shell.focusedModule ? <TuneView shell={shell} /> : null;
+      return shell.focusedModule ? <TuneView key={view} shell={shell} /> : null;
     case "findings": {
       const summary = state.summary;
       const findings = summary?.actionableFindings ?? [];
@@ -603,7 +609,7 @@ function ShellViewPanel({
         severity: c.overallSeverity,
         findingFingerprints: c.steps.map((s) => s.findingFingerprint),
       }));
-      return <FindingsView mode="unified" findings={findings} chains={chains} />;
+      return <FindingsView key={view} mode="unified" findings={findings} chains={chains} />;
     }
     case "finding": {
       const summary = state.summary;
@@ -622,22 +628,22 @@ function ShellViewPanel({
         ? summary.actionableFindings?.find((f) => f.fingerprint === target)
         : undefined;
       if (!match) return null;
-      return <FindingCard mode="linear" finding={match} />;
+      return <FindingCard key={`finding:${target}`} mode="linear" finding={match} />;
     }
     // Phase C — threat model views. C.4–C.5 still route through the
     // placeholder until their real components land.
     case "threat-dfd":
-      return <ThreatDfdView shell={shell} />;
+      return <ThreatDfdView key={view} shell={shell} />;
     case "threat-stride":
-      return <ThreatStrideMatrix shell={shell} />;
+      return <ThreatStrideMatrix key={view} shell={shell} />;
     case "threat-stories":
-      return <AttackerStoriesView shell={shell} />;
+      return <AttackerStoriesView key={view} shell={shell} />;
     case "threat-scope":
-      return <ScopeAndCriticalityView shell={shell} />;
+      return <ScopeAndCriticalityView key={view} shell={shell} />;
     case "threat-summary":
-      return <ThreatSummaryExport shell={shell} />;
+      return <ThreatSummaryExport key={view} shell={shell} />;
     case "diff-since":
-      return <DiffSinceView state={state} shell={shell} />;
+      return <DiffSinceView key={view} state={state} shell={shell} />;
     default:
       return null;
   }
