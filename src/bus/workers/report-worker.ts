@@ -19,6 +19,7 @@ import { buildScanNotification, sendCompletionNotification } from "../../ui/noti
 import { emitOutputNotice } from "../../ui/output.js";
 import type { UIStore } from "../../ui/state.js";
 import { buildSummaryData } from "../../ui/summary-data.js";
+import { publishTaskActivity } from "../activity.js";
 import type {
   BudgetExceededEvent,
   BudgetWarningEvent,
@@ -66,6 +67,13 @@ interface RunReportState {
   skippedAlreadyTriaged?: number;
   startPrinted: boolean;
   resumePrinted: boolean;
+  /** Cached from the `pipeline:start` event. When true, the run was
+   * kicked off from a shell-embedded single-task module (threat-hunt,
+   * semgrep, etc.) and every handler below must avoid the stage-tree /
+   * mode:"running" / mode:"summary" mutations that drive the Scan Run
+   * teleport. Task lifecycle is surfaced via `task:activity` events so
+   * `ToolRunningStatus` renders the rolling tail in-place. */
+  inline?: boolean;
 }
 
 export interface ReportWorkerDeps {
@@ -92,12 +100,37 @@ export function registerReportWorker(
   bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     const scanOnly = event.payload.context.postProcessMode === "scan-only";
+    const inline = event.payload.context.inline === true;
+    state.inline = inline;
     state.tasks =
       event.payload.scanOpts.tasks !== undefined
         ? [...event.payload.scanOpts.tasks]
         : [...event.payload.config.tasks];
 
     if (store) {
+      if (inline) {
+        // Shell-inline single-task run. Skip stage-tree construction,
+        // mode flip, and config banner — the operator stays on their
+        // current shellView and sees progress via ToolRunningStatus.
+        // Keep the rate-limit bridge so throttle warnings surface in
+        // the NoticeRail regardless.
+        try {
+          const registry = getRateLimitRegistry();
+          registry.on(
+            "concurrency:changed",
+            (data: { model: string; from: number; to: number; reason: string }) => {
+              store.update({
+                throttle:
+                  data.to < data.from ? { concurrency: data.to, reason: data.reason } : null,
+              });
+            },
+          );
+        } catch {
+          // Rate limit registry may not be configured — ignore
+        }
+        return;
+      }
+
       // Build pipeline stages from config
       const stageList: Array<{ id: string; label: string }> = [{ id: "scan", label: "Scan" }];
       if (!scanOnly) {
@@ -151,11 +184,22 @@ export function registerReportWorker(
     }
 
     const state = getOrCreateRunState(runState, event.meta.runId);
+    const inline = state.inline ?? event.payload.context.inline === true;
     const tasks = new Set(state.tasks ?? []);
     tasks.add(event.payload.taskId);
     state.tasks = [...tasks];
 
     if (store) {
+      if (inline) {
+        // Inline runs never leave shell mode — surface the task via the
+        // rolling activity tail instead of the scan-stage sub-task tree.
+        publishTaskActivity(bus, event.payload.taskId, scanTaskStartDetail(event.payload.taskId), {
+          runId: event.meta.runId,
+          phase: event.payload.taskId,
+        });
+        return;
+      }
+
       store.update({ tasks: state.tasks, phase: "scanning", mode: "running" });
       // Add scanner as a sub-task branch under the Scan stage
       const role = SUPPORT_TASK_IDS.has(event.payload.taskId)
@@ -174,6 +218,13 @@ export function registerReportWorker(
 
   bus.subscribe<TaskCompleteEvent>("task:complete", (event) => {
     if (store) {
+      const state = getOrCreateRunState(runState, event.meta.runId);
+      if (state.inline ?? event.payload.context.inline === true) {
+        // Inline runs surface the final summary through the tool's
+        // ToolResult (summarizePipelineResult) — no stage/sub-task tree
+        // to update here.
+        return;
+      }
       const existing = store
         .getState()
         .stages.find((stage) => stage.id === "scan")
@@ -204,6 +255,13 @@ export function registerReportWorker(
     }
 
     const detail = describeTaskProgress(event.payload.progress);
+    const state = getOrCreateRunState(runState, event.meta.runId);
+    if (state.inline ?? event.payload.context.inline === true) {
+      publishTaskActivity(bus, event.payload.taskId, `found: ${detail}`, {
+        runId: event.meta.runId,
+      });
+      return;
+    }
     store.recordSubTaskFinding("scan", event.payload.taskId, detail);
     // Inject the provisional finding as a story beat in the activity lines.
     store.addScanActivity(event.payload.taskId, {
@@ -215,6 +273,19 @@ export function registerReportWorker(
 
   bus.subscribe<TaskErrorEvent>("task:error", (event) => {
     if (store) {
+      const state = getOrCreateRunState(runState, event.meta.runId);
+      const inline = state.inline ?? event.payload.context.inline === true;
+      if (inline) {
+        // Inline runs surface errors in the NoticeRail but skip the
+        // stage-tree sub-task update (there's no tree).
+        store.addNotice({
+          level: "error",
+          message: `Task failed: ${event.payload.taskId}`,
+          detail: truncate(event.payload.error, 120),
+          source: "scan",
+        });
+        return;
+      }
       const existing = store
         .getState()
         .stages.find((stage) => stage.id === "scan")
@@ -242,9 +313,15 @@ export function registerReportWorker(
   bus.subscribe<ScanCompleteEvent>("scan:complete", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     state.totalFindings = event.payload.totalFindings;
+    const inline = state.inline ?? event.payload.context.inline === true;
 
     if (store) {
       store.update({ totalFindings: state.totalFindings });
+      if (inline) {
+        // Inline runs have no "scan" stage — skip the detail update.
+        maybeUpdateStartBanner(store, state, event.payload.context.repoName);
+        return;
+      }
       // Signal that scan tasks are done but post-processing (dedup, filter, rank) is happening.
       const count = event.payload.totalFindings;
       store.updateStageDetail(
@@ -584,6 +661,15 @@ export function registerReportWorker(
               ? undefined
               : (summary ?? undefined);
 
+      const state = getOrCreateRunState(runState, event.meta.runId);
+      if (state.inline ?? event.payload.context.inline === true) {
+        // Inline: route agent chatter into the rolling ToolRunningStatus
+        // tail instead of the stage-tree's per-sub-task activity list.
+        if (detail) {
+          publishTaskActivity(bus, taskId, detail, { runId: event.meta.runId });
+        }
+        return;
+      }
       store.addScanActivity(taskId, {
         kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning",
         toolName,
@@ -673,9 +759,10 @@ export function registerReportWorker(
     const state = getOrCreateRunState(runState, event.meta.runId);
     const reportMode = event.payload.reportMode ?? event.payload.context.reportMode ?? "full";
     const scanOnly = event.payload.context.postProcessMode === "scan-only";
+    const inline = state.inline ?? event.payload.context.inline === true;
 
     if (store) {
-      if (reportMode === "full") {
+      if (reportMode === "full" && !inline) {
         maybeUpdateStartBanner(store, state, event.payload.context.repoName);
 
         if (state.totalFindings === 0) {
@@ -730,6 +817,9 @@ export function registerReportWorker(
         });
         sendCompletionNotification(title, message);
       }
+      // Inline runs: the ToolResult from the scanner module already
+      // carries summarizePipelineResult output to the shell history
+      // entry. Skip stage/mode transitions and the desktop toast.
     } else {
       maybePrintStartBanner(state, event.payload.context.repoName);
 

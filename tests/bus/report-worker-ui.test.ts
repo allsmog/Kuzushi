@@ -216,6 +216,119 @@ describe("report-worker with UI store", () => {
     db.close();
   });
 
+  it("inline runs stay in shell mode, skip the scan stage tree, and republish task:start as task:activity", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shell: {
+        modules: ["threat-hunt"],
+        tools: ["threat-hunt:run"],
+        focusedModule: "threat-hunt",
+        shellView: "module",
+        target: "/tmp/repo",
+        workspace: "acme",
+        history: [],
+        commandHistory: [],
+        moduleOptions: {},
+        processing: true,
+      },
+    });
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 2,
+      scanMode: "parallel",
+      tasks: ["threat-hunt"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      taskConfig: { "threat-hunt": {} },
+    };
+
+    registerReportWorker(bus, { db, config }, store);
+
+    const activityEvents: Array<{ taskId: string; description: string }> = [];
+    bus.subscribe("task:activity", (event) => {
+      activityEvents.push({
+        taskId: event.payload.taskId,
+        description: event.payload.description,
+      });
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+      postProcessMode: "scan-only" as const,
+      inline: true,
+    };
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          tasks: ["threat-hunt"],
+          fresh: false,
+        },
+      }),
+    );
+
+    // No stage tree should be built under inline mode.
+    expect(store.getState().stages).toEqual([]);
+    expect(store.getState().mode).toBe("shell");
+    expect(store.getState().shell?.shellView).toBe("module");
+
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "threat-hunt",
+        outputKind: "findings",
+        input: null,
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    // task:start must be republished as task:activity with the scanner's
+    // operator-visible start label (same mapping used by the stage tree).
+    expect(
+      activityEvents.some(
+        (e) =>
+          e.taskId === "threat-hunt" && e.description === "analyzing threats from attack surface",
+      ),
+    ).toBe(true);
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 0,
+        durationMs: 1000,
+      }),
+    );
+
+    await bus.publish(
+      createEvent("report:requested", runId, {
+        context,
+        reportMode: "full",
+      }),
+    );
+
+    // Inline runs never flip to summary mode and never build a report stage.
+    expect(store.getState().mode).toBe("shell");
+    expect(store.getState().summary).toBeFalsy();
+    expect(store.getState().stages).toEqual([]);
+
+    await bus.close();
+    db.close();
+  });
+
   it("labels threat-hunt start with 'analyzing threats from attack surface' instead of 'initializing'", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
