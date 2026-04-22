@@ -131,7 +131,7 @@ describe("createVariantHunterModule", () => {
     const module = createVariantHunterModule();
     const names = module.tools.map((t) => t.name).sort();
     expect(names).toEqual(["variant:hunt", "variant:lift-pattern"]);
-    expect(module.id).toBe("variant-hunter");
+    expect(module.id).toBe("variant");
     expect(module.category).toBe("offense");
   });
 

@@ -104,7 +104,7 @@ afterEach(() => {
 describe("createNDayDiffHunterModule — tool surface", () => {
   it("exposes all three tools and the correct metadata", () => {
     const module = createNDayDiffHunterModule();
-    expect(module.id).toBe("n-day-diff-hunter");
+    expect(module.id).toBe("ndiff");
     expect(module.category).toBe("intel");
     expect(module.tools.map((t) => t.name).sort()).toEqual([
       "ndiff:extract-fix-pattern",

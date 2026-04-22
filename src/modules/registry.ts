@@ -11,10 +11,12 @@
 import type { TaskRegistry } from "../agents/registry.js";
 import type { AgentTask } from "../agents/types.js";
 import type { KnowledgeRegistry } from "../knowledge/types.js";
+import { ModuleLoadError } from "./errors.js";
 import type {
   CopilotModule,
   ModuleContext,
   ModuleInfo,
+  ModuleManifest,
   ModuleSpecifier,
   ModuleTool,
 } from "./types.js";
@@ -43,7 +45,9 @@ export class ModuleRegistry {
    */
   register(mod: CopilotModule): void {
     if (this.modules.has(mod.id)) {
-      throw new Error(`Module "${mod.id}" is already registered`);
+      throw new ModuleLoadError("ID_MISMATCH", `Module "${mod.id}" is already registered`, {
+        moduleId: mod.id,
+      });
     }
     this.modules.set(mod.id, mod);
   }
@@ -63,11 +67,30 @@ export class ModuleRegistry {
       taskRegistry?: TaskRegistry;
       knowledgeRegistry?: KnowledgeRegistry;
       moduleConfig?: Record<string, unknown>;
+      /**
+       * Optional manifest reference used to enforce `configSchema` against
+       * `moduleConfig` before `mod.init()` runs. When omitted, no schema
+       * validation is performed (matches the pre-SCHEMA-3 behavior for
+       * builtin modules which have no manifest).
+       */
+      manifest?: ModuleManifest;
     },
   ): Promise<void> {
     this.register(mod);
 
     try {
+      // SCHEMA-3 — enforce configSchema against moduleConfig before init().
+      if (opts?.manifest?.configSchema && opts.moduleConfig) {
+        const err = validateConfigAgainstSchema(opts.moduleConfig, opts.manifest.configSchema);
+        if (err) {
+          throw new ModuleLoadError(
+            "CONFIG_INVALID",
+            `Module "${mod.id}" moduleConfig failed configSchema validation: ${err}`,
+            { moduleId: mod.id, issue: err },
+          );
+        }
+      }
+
       // Initialize the module
       if (mod.init) {
         await mod.init(opts?.moduleConfig ?? {}, ctx);
@@ -90,6 +113,10 @@ export class ModuleRegistry {
       // Rollback on init failure
       this.modules.delete(mod.id);
       this.initialized.delete(mod.id);
+      // Preserve `ModuleLoadError` codes through the rollback wrapper.
+      if (err instanceof ModuleLoadError) {
+        throw err;
+      }
       throw new Error(
         `Failed to load module "${mod.id}": ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -129,7 +156,7 @@ export class ModuleRegistry {
   get(id: string): CopilotModule {
     const mod = this.modules.get(id);
     if (!mod) {
-      throw new Error(`Unknown module: "${id}"`);
+      throw new ModuleLoadError("ID_MISMATCH", `Unknown module: "${id}"`, { moduleId: id });
     }
     return mod;
   }
@@ -277,4 +304,74 @@ export function parseModuleSpecifier(spec: string): ModuleSpecifier {
 
   // Default: treat bare strings as builtin IDs
   return { type: "builtin", id: spec };
+}
+
+// ---------------------------------------------------------------------------
+// Lightweight JSON-Schema validation for `configSchema`
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal JSON-Schema-ish validator — enough to enforce the common manifest
+ * patterns (`type: "object"`, `required: [...]`, per-property `type`, `enum`).
+ * Any deeper dialect support (anyOf/allOf/patternProperties/etc.) is out of
+ * scope for the SDK loader; authors that need rich validation should do it
+ * inside `module.init()` with their own zod/ajv schema.
+ *
+ * Returns `null` on success, or a human-readable error string on the first
+ * issue encountered.
+ */
+export function validateConfigAgainstSchema(
+  config: unknown,
+  schema: Record<string, unknown>,
+): string | null {
+  if (typeof config !== "object" || config === null || Array.isArray(config)) {
+    return "config must be a plain object";
+  }
+  const cfg = config as Record<string, unknown>;
+
+  if (schema["type"] && schema["type"] !== "object") {
+    return `configSchema.type "${String(schema["type"])}" is unsupported (expected "object")`;
+  }
+
+  const required = Array.isArray(schema["required"])
+    ? (schema["required"] as unknown[]).filter((v): v is string => typeof v === "string")
+    : [];
+  for (const key of required) {
+    if (!(key in cfg) || cfg[key] === undefined) {
+      return `missing required config field "${key}"`;
+    }
+  }
+
+  const properties =
+    schema["properties"] && typeof schema["properties"] === "object"
+      ? (schema["properties"] as Record<string, Record<string, unknown>>)
+      : null;
+  if (properties) {
+    for (const [key, propSchema] of Object.entries(properties)) {
+      if (!(key in cfg) || cfg[key] === undefined) continue;
+      const expectedType = propSchema["type"];
+      if (typeof expectedType === "string") {
+        const actual = jsonTypeOf(cfg[key]);
+        if (actual !== expectedType) {
+          // "integer" is a refinement of "number"; accept integer-valued number.
+          if (!(expectedType === "number" && actual === "integer")) {
+            return `config field "${key}" expected type ${expectedType}, got ${actual}`;
+          }
+        }
+      }
+      if (Array.isArray(propSchema["enum"])) {
+        if (!(propSchema["enum"] as unknown[]).includes(cfg[key])) {
+          return `config field "${key}" must be one of ${(propSchema["enum"] as unknown[]).join("|")}`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function jsonTypeOf(v: unknown): string {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "array";
+  if (typeof v === "number" && Number.isInteger(v)) return "integer";
+  return typeof v;
 }
