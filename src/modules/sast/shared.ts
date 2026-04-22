@@ -55,6 +55,10 @@ export async function executeSastPipeline(
     tasks?: string[];
     taskConfig?: Record<string, Record<string, unknown>>;
     postProcessMode?: "full" | "scan-only";
+    /** Shell-embedded single-task run — stays on the current shellView
+     * instead of teleporting to the Scan Run pipeline view. See
+     * {@link RunContext.inline}. */
+    inline?: boolean;
   },
 ): Promise<ToolResult> {
   const params = input as Record<string, unknown>;
@@ -155,8 +159,13 @@ export async function executeSastPipeline(
       manageCache: false,
       uiStore: uiStoreInternal,
       signal: ctx.signal,
-      returnModeOnComplete: uiStoreInternal?.getState().shell ? "shell" : undefined,
+      returnModeOnComplete: options?.inline
+        ? undefined
+        : uiStoreInternal?.getState().shell
+          ? "shell"
+          : undefined,
       postProcessMode: options?.postProcessMode ?? "full",
+      ...(options?.inline ? { inline: true } : {}),
       seedTaskOutputs: ctx.seedTaskOutputs,
     });
 
@@ -197,6 +206,10 @@ export async function runSingleTaskPipeline(
   extraOpts?: {
     summaryLabel?: string;
     taskConfig?: Record<string, Record<string, unknown>>;
+    /** Opt-out of the shell-inline render (default true). Set false when
+     * invoked from `kuzushi scan` or the `sast:scan` orchestrator, which
+     * want the full Scan Run teleport. */
+    inline?: boolean;
   },
 ): Promise<ToolResult> {
   return executeSastPipeline(input, ctx, {
@@ -204,6 +217,7 @@ export async function runSingleTaskPipeline(
     tasks: taskIds,
     ...(extraOpts?.taskConfig ? { taskConfig: extraOpts.taskConfig } : {}),
     postProcessMode: "scan-only",
+    inline: extraOpts?.inline ?? true,
   });
 }
 

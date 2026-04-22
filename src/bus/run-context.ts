@@ -18,4 +18,11 @@ export interface RunContext {
   dbPath: string;
   postProcessMode?: "full" | "scan-only";
   reportMode?: "full" | "suppress";
+  /** True when the pipeline was kicked off from a shell-embedded single-
+   * task run (threat-hunt:run, semgrep:scan, ...). Inline runs stay on
+   * the current shell view — report-worker must NOT flip `mode` to
+   * `"running"`, must NOT build the scan-stage sub-task tree, and must
+   * NOT flip to `"summary"` on `report:requested`. The `sast:scan`
+   * orchestrator and the `kuzushi scan` CLI leave this undefined. */
+  inline?: boolean;
 }
