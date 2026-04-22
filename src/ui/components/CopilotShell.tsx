@@ -764,6 +764,7 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
     status && status !== "running" && entry.elapsedSeconds && entry.elapsedSeconds > 0
       ? tokens.muted(` · ${entry.elapsedSeconds}s`)
       : "";
+  const ts = tokens.muted(` ${formatClock(entry.timestamp)}`);
 
   // Result line — per-tool renderResult output (or generic verb) shown
   // under the `⏺` when the tool resolves. Muted when ok, danger on
@@ -793,19 +794,29 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
           {tokens.label(label)}
           {entry.inputHint ? tokens.muted(`(${entry.inputHint})`) : ""}
           {elapsedSuffix}
+          {ts}
         </Text>
       </Box>
       {status === "running" && entry.liveActivities && entry.liveActivities.length > 0 ? (
         <Box flexDirection="column">
-          {entry.liveActivities.slice(0, 5).map((activity) => (
+          {entry.liveActivities.slice(-4).map((activity) => (
             <Box key={activity.id}>
               <Gutter />
               <Gutter>
                 <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
               </Gutter>
-              <Text> {tokens.muted(activity.text)}</Text>
+              <Text> {tokens.muted(clipInline(activity.text, 104))}</Text>
             </Box>
           ))}
+          {entry.liveActivities.length > 4 ? (
+            <Box>
+              <Gutter />
+              <Gutter>
+                <Text dimColor>{LOWER_HOOK}</Text>
+              </Gutter>
+              <Text> {tokens.muted(`… ${entry.liveActivities.length - 4} earlier updates`)}</Text>
+            </Box>
+          ) : null}
         </Box>
       ) : null}
       {hasResult ? (
@@ -823,4 +834,16 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
       ) : null}
     </Ratchet>
   );
+}
+
+function clipInline(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
+function formatClock(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
 }
