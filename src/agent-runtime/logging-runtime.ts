@@ -18,10 +18,48 @@ const log = getLogger("agent");
 export class LoggingAgentRuntime implements AgentRuntime {
   readonly id: string;
   private inner: AgentRuntime;
+  // Optional-method mirrors of the inner runtime. Assigned conditionally in
+  // the constructor — if we defined them as class methods, they'd always be
+  // present on the instance and callers' truthiness checks (`if (runtime.
+  // queryBatch)` / `runtime.createSession?.()`) would enter code paths the
+  // backend can't actually serve, then crash when the call returned undefined.
+  createSession?: AgentRuntime["createSession"];
+  queryBatch?: AgentRuntime["queryBatch"];
 
   constructor(inner: AgentRuntime) {
     this.inner = inner;
     this.id = inner.id;
+
+    if (inner.createSession) {
+      this.createSession = (baseOptions: AgentQueryOptions): AgentSession => {
+        // Non-null because we only assign `this.createSession` when inner has it.
+        const innerSession = inner.createSession!(baseOptions);
+        const origQuery = innerSession.query.bind(innerSession);
+        return {
+          async *query(prompt: string): AsyncIterable<AgentMessage> {
+            const lines = prompt.split("\n");
+            const preview = lines.slice(0, 5).join("\n");
+            const suffix = lines.length > 5 ? `\n  ... (${lines.length} lines total)` : "";
+
+            log.info(`Session prompt (${lines.length} lines):\n${preview}${suffix}`);
+            log.debug(`Full session prompt:\n${prompt}`);
+
+            for await (const msg of origQuery(prompt)) {
+              logMessage(msg);
+              yield msg;
+            }
+          },
+          close: () => innerSession.close(),
+        };
+      };
+    }
+
+    if (inner.queryBatch) {
+      this.queryBatch = (requests: AgentBatchRequest[], baseOptions: AgentQueryOptions) => {
+        log.info(`Batch request: ${requests.length} prompts -> ${baseOptions.model}`);
+        return inner.queryBatch!(requests, baseOptions);
+      };
+    }
   }
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
@@ -37,48 +75,6 @@ export class LoggingAgentRuntime implements AgentRuntime {
       logMessage(message);
       yield message;
     }
-  }
-
-  createSession?(baseOptions: AgentQueryOptions): AgentSession {
-    const innerSession = this.inner.createSession?.(baseOptions);
-    if (!innerSession) return undefined as unknown as AgentSession;
-
-    const origQuery = innerSession.query.bind(innerSession);
-    return {
-      async *query(prompt: string): AsyncIterable<AgentMessage> {
-        const lines = prompt.split("\n");
-        const preview = lines.slice(0, 5).join("\n");
-        const suffix = lines.length > 5 ? `\n  ... (${lines.length} lines total)` : "";
-
-        log.info(`Session prompt (${lines.length} lines):\n${preview}${suffix}`);
-        log.debug(`Full session prompt:\n${prompt}`);
-
-        for await (const msg of origQuery(prompt)) {
-          logMessage(msg);
-          yield msg;
-        }
-      },
-      close: () => innerSession.close(),
-    };
-  }
-
-  queryBatch?(
-    requests: AgentBatchRequest[],
-    baseOptions: AgentQueryOptions,
-  ): Promise<
-    Map<
-      string,
-      {
-        resultText: string;
-        structuredOutput: unknown;
-        executionError: string | null;
-        costUsd: number;
-      }
-    >
-  > {
-    if (!this.inner.queryBatch) return undefined as never;
-    log.info(`Batch request: ${requests.length} prompts -> ${baseOptions.model}`);
-    return this.inner.queryBatch(requests, baseOptions);
   }
 }
 
