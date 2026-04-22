@@ -188,6 +188,15 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
         </Box>
       )}
 
+      {findings.length === 0 && (
+        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+          <Text>{tokens.muted("No actionable findings yet.")}</Text>
+          <Text>
+            {tokens.hint("Try /use <module>, run a scan tool, then return with /findings.")}
+          </Text>
+        </Box>
+      )}
+
       <Box marginTop={1}>
         <Text>{tokens.muted("\u2500".repeat(78))}</Text>
       </Box>
