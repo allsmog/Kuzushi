@@ -38,12 +38,8 @@ exports[`Ink component snapshots > FindingCard linear — state strip + evidence
 `;
 
 exports[`Ink component snapshots > ModuleCatalog — grouped by category with last-run chips 1`] = `
-"  ╭───────────────────────────────────────────────────────────╮
-  │ kuzushi shell                                             │
-  │ workspace acme-api                                        │
-  │ modules   sast, randori, shinsa                           │
-  │ target    ./acme-api                                      │
-  ╰───────────────────────────────────────────────────────────╯
+"  workspace:acme-api · target:./acme-api · 3 modules
+
 
   Primary next step: /use <module-id> to enter one module workflow.
 
@@ -76,13 +72,13 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
 
   ───────────────────────────────────────────────────────────
   coming · blackbox · pwn · pentest · honeypot · yokai · revgraph — see
-  VISION.md
-
-  Primary: /use <id>   Secondary: /findings · /tune · /help · /exit"
+  VISION.md"
 `;
 
 exports[`Ink component snapshots > ModuleHome — tools table + last-run summary 1`] = `
-"  ◂ back  sast  · offense · 40+ task pipeline
+"  offense · 2 tools
+  40+ task pipeline
+
 
   Primary action: run one tool verb (listed below).
 
@@ -103,11 +99,7 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
 
   last run
 
-     ran 2h · 4 tp
-
-  ──────────────────────────────────────────────────────────────────────────────
-  Primary: type a tool verb and press Enter.
-  Secondary: t tune · f findings · b back · /help more"
+     ran 2h · 4 tp"
 `;
 
 exports[`Ink component snapshots > PlanCard — option diff table with unsupported row 1`] = `
@@ -125,8 +117,9 @@ exports[`Ink component snapshots > PlanCard — option diff table with unsupport
 `;
 
 exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + flows 1`] = `
-"  ◂ back   data flow diagram   │   4 elements  ·  0 threats
+"  4 elements · 0 threats
   loaded from /tmp/threat-model.json
+
 
   ╭─ internet ──────────────────────────────────────────────────────────╮
   │ E1      ( ext )  attacker — unauth caller
@@ -147,7 +140,5 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
 
   data flows
 
-     F1      P1 → D1 [http] {cloud-cred}  crosses B1
-
-  1 dfd  2 stride  3 stories  4 scope  5 summary   q back"
+     F1      P1 → D1 [http] {cloud-cred}  crosses B1"
 `;

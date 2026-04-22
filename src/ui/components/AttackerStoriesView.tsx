@@ -23,7 +23,10 @@ import type {
 } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { truncateEnd } from "../format.js";
+import { ContextStrip } from "./ContextStrip.js";
 
 const INPUT_CATEGORY_ORDER: Array<{
   key: keyof ThreatModelInputCategories;
@@ -42,6 +45,14 @@ interface AttackerStoriesViewProps {
 }
 
 export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.ReactElement {
+  useRegisterKeybindings([
+    { keys: "1", label: "dfd", secondary: true },
+    { keys: "2", label: "stride", secondary: true },
+    { keys: "3", label: "stories" },
+    { keys: "4", label: "scope", secondary: true },
+    { keys: "5", label: "summary", secondary: true },
+    { keys: "q", label: "back", secondary: true },
+  ]);
   const tm = shell.threatModel;
   if (!tm) return <EmptyState />;
 
@@ -50,13 +61,23 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
   const inputs = narrative?.inputCategories;
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <Header shell={shell} storyCount={stories.length} threatCount={tm.threats.length} />
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+      <ContextStrip
+        status={[`${stories.length} stories`, `${tm.threats.length} threats`]}
+        subtitle={
+          shell.threatModelSource
+            ? formatThreatModelSource({
+                sourcePath: shell.threatModelSource.path,
+                mtimeMs: shell.threatModelSource.mtimeMs,
+              })
+            : undefined
+        }
+      />
 
       {narrative?.overview ? (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>{tokens.label("overview")}</Text>
-          <Box paddingLeft={3} flexDirection="column" marginTop={1}>
+          <Box paddingLeft={SPACING.lg} flexDirection="column" marginTop={SPACING.sm}>
             {wrap(narrative.overview, 72).map((line, i) => (
               <Text key={`${i}-${line.slice(0, 6)}`}>{tokens.value(line)}</Text>
             ))}
@@ -66,36 +87,34 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
 
       {inputs ? <InputCategoriesRail inputs={inputs} /> : null}
 
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SPACING.sm}>
         <Text>{tokens.label(`attacker stories (${stories.length})`)}</Text>
         {stories.length === 0 ? (
-          <Box marginTop={1}>
+          <Box marginTop={SPACING.sm}>
             <Text>
               {tokens.muted("   (randori didn't emit any attacker stories for this model)")}
             </Text>
           </Box>
         ) : (
-          <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="column" marginTop={SPACING.sm}>
             {stories.map((story, i) => (
               <StoryCard key={`${i}-${story.title}`} story={story} />
             ))}
           </Box>
         )}
       </Box>
-
-      <HintFooter />
     </Box>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("attacker stories")}
       </Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.warn("No threat model loaded. Run a scan with threat modelling enabled first.")}
         </Text>
@@ -104,38 +123,6 @@ function EmptyState(): React.ReactElement {
   );
 }
 
-function Header({
-  shell,
-  storyCount,
-  threatCount,
-}: {
-  shell: ShellState;
-  storyCount: number;
-  threatCount: number;
-}): React.ReactElement {
-  return (
-    <Box flexDirection="column">
-      <Text>
-        {tokens.muted("\u25C2 back   ")}
-        {tokens.strong("attacker stories")}
-        {tokens.muted("   \u2502   ")}
-        {tokens.value(`${storyCount} stor${storyCount === 1 ? "y" : "ies"}`)}
-        {tokens.muted("  \u00B7  ")}
-        {tokens.value(`${threatCount} threats`)}
-      </Text>
-      {shell.threatModelSource ? (
-        <Text>
-          {tokens.hint(
-            formatThreatModelSource({
-              sourcePath: shell.threatModelSource.path,
-              mtimeMs: shell.threatModelSource.mtimeMs,
-            }),
-          )}
-        </Text>
-      ) : null}
-    </Box>
-  );
-}
 
 function InputCategoriesRail({
   inputs,
@@ -143,16 +130,16 @@ function InputCategoriesRail({
   inputs: ThreatModelInputCategories;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("input categories")}</Text>
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         {INPUT_CATEGORY_ORDER.map(({ key, label }) => {
           const items = inputs[key];
           if (!items || items.length === 0) {
             return <Text key={key}>{tokens.muted(`${label.padEnd(22)}  (none listed)`)}</Text>;
           }
           return (
-            <Box key={key} flexDirection="column" marginBottom={1}>
+            <Box key={key} flexDirection="column" marginBottom={SPACING.sm}>
               <Text>
                 {tokens.value(label.padEnd(22))}
                 {tokens.muted(`${items.length} entries`)}
@@ -162,7 +149,7 @@ function InputCategoriesRail({
                   {"   "}
                   {tokens.muted("\u00B7")}
                   {"  "}
-                  {tokens.muted(truncate(entry, 68))}
+                  {tokens.muted(truncateEnd(entry, 68))}
                 </Text>
               ))}
               {items.length > 4 ? (
@@ -183,10 +170,10 @@ function StoryCard({ story }: { story: ThreatModelAttackerStory }): React.ReactE
   const width = 74;
   const bar = "\u2500".repeat(width - 4);
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={SPACING.sm}>
       <Text>
         {tokens.muted("   \u256D\u2500 ")}
-        {tokens.strong(truncate(story.title, width - 8))}
+        {tokens.strong(truncateEnd(story.title, width - 8))}
         {tokens.muted(` ${bar.slice(0, Math.max(0, width - story.title.length - 4))}\u256E`)}
       </Text>
 
@@ -203,7 +190,7 @@ function StoryCard({ story }: { story: ThreatModelAttackerStory }): React.ReactE
           <Text>
             {tokens.muted("   \u2502 ")}
             {tokens.label("mitigation: ")}
-            {tokens.muted(truncate(story.mitigation, width - 18))}
+            {tokens.muted(truncateEnd(story.mitigation, width - 18))}
           </Text>
         </>
       ) : null}
@@ -227,22 +214,6 @@ function renderThreatChips(threatIds: ReadonlyArray<string> | undefined): string
   return `${chips.join(" ")}${extra}`;
 }
 
-function HintFooter(): React.ReactElement {
-  return (
-    <Box marginTop={1}>
-      <Text>
-        {tokens.muted("1 dfd  2 stride  ")}
-        {tokens.hint("3 stories  ")}
-        {tokens.muted("4 scope  5 summary")}
-        {tokens.hint("   q back")}
-      </Text>
-    </Box>
-  );
-}
-
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
-}
 
 function wrap(text: string, width: number): string[] {
   const lines: string[] = [];

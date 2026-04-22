@@ -28,6 +28,7 @@ import { Markdown } from "../primitives/Markdown.js";
 import { Ratchet } from "../primitives/Ratchet.js";
 import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { truncateEnd, formatClock } from "../format.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { DiffSinceView } from "./DiffSinceView.js";
@@ -423,7 +424,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       </Box>
 
       {!shell.processing && liveHistory.length > 0 ? (
-        <Box marginTop={1} paddingLeft={2}>
+        <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
           <Text>{tokens.tertiary("interactive")}</Text>
         </Box>
       ) : null}
@@ -481,7 +482,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
       {!shell.processing && (
         <>
-          <Box marginTop={1}>
+          <Box marginTop={SPACING.sm}>
             <Text>
               {tokens.accent(buildShellPrompt(shell.focusedModule))}
               {input.slice(0, cursor)}
@@ -518,7 +519,7 @@ function ShellWayfinding({
           ? "/back → catalog"
           : "/back → module";
   return (
-    <Box marginTop={1} paddingLeft={2}>
+    <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>
         {tokens.muted("you are in ")}
         {tokens.strong(location)}
@@ -709,7 +710,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
   switch (entry.type) {
     case "input":
       return (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Text>
             {tokens.accent(entry.prompt ?? buildShellPrompt(null))}
             {entry.text}
@@ -718,13 +719,13 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
       );
     case "output":
       return (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Markdown text={entry.text} />
         </Box>
       );
     case "error":
       return (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <ErrorMessage text={entry.text} />
         </Box>
       );
@@ -742,7 +743,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
         return tokens.muted(s);
       };
       return (
-        <Box paddingLeft={0}>
+        <Box paddingLeft={SPACING.xs}>
           <Gutter>
             <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
           </Gutter>
@@ -788,7 +789,7 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
 
   return (
     <Ratchet>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Gutter>
           {status ? <PulseDot status={status} /> : <Text>{tokens.accent(BLACK_CIRCLE)}</Text>}
         </Gutter>
@@ -807,7 +808,7 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
               <Gutter>
                 <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
               </Gutter>
-              <Text> {tokens.muted(clipInline(activity.text, 104))}</Text>
+              <Text> {tokens.muted(truncateEnd(activity.text, 104))}</Text>
             </Box>
           ))}
           {entry.liveActivities.length > 4 ? (
@@ -838,14 +839,3 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
   );
 }
 
-function clipInline(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
-}
-
-function formatClock(ts: number): string {
-  const d = new Date(ts);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
-}

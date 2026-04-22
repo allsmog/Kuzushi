@@ -14,7 +14,8 @@ import { colorVerdict } from "../format.js";
 import { icons } from "../icons.js";
 import { Table } from "../primitives/Table.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { ChainGroup } from "./ChainGroup.js";
 import { type FilterChip, FilterChips } from "./FilterChips.js";
 
@@ -58,14 +59,14 @@ function CompactFindings({ results }: { results: ResultLine[] }): React.ReactEle
 
   if (triageResults.length === 0) {
     return (
-      <Box paddingLeft={2} marginTop={1}>
+      <Box paddingLeft={SPACING.md} marginTop={SPACING.sm}>
         <Text>{tokens.muted("No findings triaged yet...")}</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginTop={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginTop={SPACING.sm}>
       {/* Header */}
       <Text>
         {tokens.muted(pad("#", 4))}
@@ -140,6 +141,14 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 120;
   const narrow = columns < 110;
+  useRegisterKeybindings([
+    { keys: "/open <F-NNNN>", label: "open finding" },
+    { keys: "/filter", label: "filter", secondary: true },
+    { keys: "e", label: "export", secondary: true },
+    { keys: "a", label: "assign", secondary: true },
+    { keys: "s", label: "suppress", secondary: true },
+    { keys: "b", label: "back", secondary: true },
+  ]);
   const chainFingerprints = new Set<string>((chains ?? []).flatMap((c) => c.findingFingerprints));
   const looseAll = findings
     .filter((f) => !chainFingerprints.has(f.fingerprint))
@@ -149,7 +158,7 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
   const counts = tallyCounts(findings);
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
       <Box>
         <Text>
           {tokens.muted("\u25C2 back   ")}
@@ -160,12 +169,12 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
         </Text>
       </Box>
 
-      <Box marginTop={1} flexDirection="column">
+      <Box marginTop={SPACING.sm} flexDirection="column">
         <Text>{tokens.strong("Primary action: /open F-NNNN to inspect one finding deeply.")}</Text>
         <FilterChips chips={filters ?? defaultFilters()} />
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>{tokens.tertiary("\u2500".repeat(78))}</Text>
       </Box>
 
@@ -187,9 +196,9 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
       })}
 
       {loose.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>{tokens.label("ungrouped findings")}</Text>
-          <Box marginTop={1}>
+          <Box marginTop={SPACING.sm}>
             <Table
               showHeader
               gap={1}
@@ -235,7 +244,7 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
         </Box>
       )}
       {looseAll.length > loose.length ? (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Text>
             {tokens.muted(
               `${looseAll.length - loose.length} additional loose findings hidden to reduce noise.`,
@@ -245,7 +254,7 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
       ) : null}
 
       {findings.length === 0 && (
-        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+        <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
           <Text>{tokens.muted("No actionable findings yet.")}</Text>
           <Text>
             {tokens.hint("Try /use <module>, run a scan tool, then return with /findings.")}
@@ -253,16 +262,6 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
         </Box>
       )}
 
-      <Box marginTop={1}>
-        <Text>{tokens.tertiary("\u2500".repeat(78))}</Text>
-      </Box>
-      <Box>
-        <Text>
-          {tokens.hint("Primary: /open <alias>")}
-          {"   "}
-          {tokens.muted("Secondary: /filter · e export · a assign · s suppress")}
-        </Text>
-      </Box>
     </Box>
   );
 }

@@ -18,7 +18,9 @@ import type React from "react";
 import { icons } from "../icons.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellModuleCard, ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { ContextStrip } from "./ContextStrip.js";
 
 /** Roadmap modules — kept in sync with the VISION.md one-liner in the README. */
 const ROADMAP_MODULES = ["blackbox", "pwn", "pentest", "honeypot", "yokai", "revgraph"] as const;
@@ -39,6 +41,13 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 120;
   const narrow = columns < 110;
+  useRegisterKeybindings([
+    { keys: "/use <id>", label: "focus module" },
+    { keys: "/findings", label: "findings", secondary: true },
+    { keys: "/tune", label: "tune", secondary: true },
+    { keys: "?", label: "help", secondary: true },
+    { keys: "Ctrl+C", label: "exit", secondary: true },
+  ]);
   const cards = shell.moduleCatalog ?? [];
   const builtIns = cards.filter((c) => !c.external);
   const externals = cards.filter((c) => c.external);
@@ -52,9 +61,15 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
 
   const cardWidth = 61;
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <CatalogHeader shell={shell} width={cardWidth} />
-      <Box marginTop={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+      <ContextStrip
+        status={[
+          `workspace:${shell.workspace ?? "none"}`,
+          `target:${shell.target ?? "none"}`,
+          `${(shell.moduleCatalog ?? []).length} modules`,
+        ]}
+      />
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.strong("Primary next step: ")}
           {tokens.accent("/use <module-id>")}
@@ -66,9 +81,9 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
         const rows = byCategory[cat];
         if (!rows || rows.length === 0) return null;
         return (
-          <Box key={cat} flexDirection="column" marginTop={1}>
+          <Box key={cat} flexDirection="column" marginTop={SPACING.sm}>
             <Text>{tokens.label(CATEGORY_LABEL[cat])}</Text>
-            <Box marginTop={1}>
+            <Box marginTop={SPACING.sm}>
               <ModuleRows rows={rows} />
             </Box>
           </Box>
@@ -76,19 +91,19 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
       })}
 
       {externals.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>
             {tokens.label("EXTERNAL")}
             {"  "}
             {tokens.muted("(loaded via --load package:<name>)")}
           </Text>
-          <Box marginTop={1}>
+          <Box marginTop={SPACING.sm}>
             <ModuleRows rows={externals} />
           </Box>
         </Box>
       )}
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>{tokens.metadata(icons.boxHorizontal.repeat(cardWidth - 2))}</Text>
       </Box>
       <Box>
@@ -98,51 +113,6 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
         </Text>
       </Box>
 
-      <Box marginTop={1} flexDirection={narrow ? "column" : "row"}>
-        <Text>{tokens.hint("Primary: /use <id>")}</Text>
-        <Text>
-          {tokens.muted(
-            narrow
-              ? "Secondary: /findings · /tune · /help · /exit"
-              : "   Secondary: /findings · /tune · /help · /exit",
-          )}
-        </Text>
-      </Box>
-    </Box>
-  );
-}
-
-function frameLine(label: string, value: string, width: number): string {
-  const contentWidth = Math.max(1, width - 4);
-  const text = `${label}${value}`.slice(0, contentWidth);
-  return `${icons.boxVertical} ${text.padEnd(contentWidth)} ${icons.boxVertical}`;
-}
-
-function CatalogHeader({ shell, width }: { shell: ShellState; width: number }): React.ReactElement {
-  const workspace = shell.workspace ?? "(no workspace)";
-  const target = shell.target ?? "(no target)";
-  const modList = (shell.moduleCatalog ?? [])
-    .filter((c) => !c.external)
-    .slice(0, 5)
-    .map((c) => c.id)
-    .join(", ");
-
-  return (
-    <Box flexDirection="column">
-      <Text>
-        {tokens.metadata(
-          `${icons.boxTopLeft}${icons.boxHorizontal.repeat(width - 2)}${icons.boxTopRight}`,
-        )}
-      </Text>
-      <Text>{tokens.metadata(frameLine("", "kuzushi shell", width))}</Text>
-      <Text>{tokens.metadata(frameLine("workspace ", workspace, width))}</Text>
-      <Text>{tokens.metadata(frameLine("modules   ", modList || "(none)", width))}</Text>
-      <Text>{tokens.metadata(frameLine("target    ", target, width))}</Text>
-      <Text>
-        {tokens.metadata(
-          `${icons.boxBottomLeft}${icons.boxHorizontal.repeat(width - 2)}${icons.boxBottomRight}`,
-        )}
-      </Text>
     </Box>
   );
 }
