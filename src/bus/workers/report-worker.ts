@@ -1035,6 +1035,8 @@ function scanTaskStartDetail(taskId: string): string {
       return "enriching context";
     case "threat-model-randori":
       return "modeling threats";
+    case "threat-hunt":
+      return "analyzing threats from attack surface";
     default:
       return "initializing";
   }
