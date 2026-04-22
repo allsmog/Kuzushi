@@ -59,7 +59,7 @@ const triageRunTool: ModuleTool = {
     if (!ctx.workspace) {
       return { ok: false, output: "triage:run needs an active workspace." };
     }
-    const db = ctx.workspace.rawDb();
+    const db = ctx.workspace.rawDb() as import("better-sqlite3").Database;
 
     const fingerprints = collectFingerprints(p);
     const findings = loadFindingsForTriage(db, ctx.target, fingerprints);

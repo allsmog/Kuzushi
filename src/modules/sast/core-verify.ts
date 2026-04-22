@@ -17,9 +17,7 @@ const verifyFindingTool: ModuleTool = {
   displayName: "Verify",
   formatInput(input) {
     const p = (input ?? {}) as Record<string, unknown>;
-    return typeof p["fingerprint"] === "string"
-      ? (p["fingerprint"] as string).slice(0, 12)
-      : null;
+    return typeof p["fingerprint"] === "string" ? (p["fingerprint"] as string).slice(0, 12) : null;
   },
   renderResult(result) {
     const first = result.output.split("\n", 1)[0]?.trim();
@@ -51,7 +49,7 @@ const verifyFindingTool: ModuleTool = {
       return { ok: false, output: "verify:finding requires a fingerprint." };
     }
 
-    const db = ctx.workspace.rawDb();
+    const db = ctx.workspace.rawDb() as import("better-sqlite3").Database;
     const { getStoredFinding } = await import("../../store.js");
     const stored = getStoredFinding(db, fingerprint);
     if (!stored) {

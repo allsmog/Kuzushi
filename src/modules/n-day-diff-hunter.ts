@@ -406,7 +406,8 @@ const huntVariantsTool: ModuleTool = {
   formatInput(input) {
     const p = input as Record<string, unknown> | undefined;
     const pattern = p?.["pattern"] as Record<string, unknown> | undefined;
-    const cwe = pattern && Array.isArray(pattern["cwes"]) ? (pattern["cwes"] as string[]).join(",") : null;
+    const cwe =
+      pattern && Array.isArray(pattern["cwes"]) ? (pattern["cwes"] as string[]).join(",") : null;
     return cwe ?? null;
   },
   renderResult(result) {
@@ -625,7 +626,7 @@ function normalizeHuntResults(
 
 export function createNDayDiffHunterModule(): CopilotModule {
   return {
-    id: "n-day-diff-hunter",
+    id: "ndiff",
     displayName: "N-day Diff Hunter",
     category: "intel",
     version: "0.1.0",

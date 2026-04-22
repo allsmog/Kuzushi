@@ -53,7 +53,11 @@ const findingsListTool: ModuleTool = {
       };
     }
 
-    const rows = ctx.workspace.vulns.listForWorkspace(ctx.workspaceId);
+    // Narrow `WorkspaceHandle` returns opaque `unknown` arrays; cast to the
+    // concrete `Vuln` shape here — in-tree modules may depend on host types.
+    const rows = ctx.workspace.vulns.listForWorkspace(ctx.workspaceId) as ReadonlyArray<
+      import("../../workspace/entities.js").Vuln
+    >;
     const severity = Array.isArray(params["severity"])
       ? (params["severity"] as Severity[])
       : undefined;

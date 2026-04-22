@@ -66,7 +66,7 @@ const nmapTool: ModuleTool = {
       address: target,
       state: "alive",
       metadata: { discoveredBy: "recon:nmap", discoveredAt: new Date().toISOString() },
-    });
+    }) as { id: string };
     ctx.workspace.notes.create({
       workspaceId: ctx.workspaceId,
       hostId: host.id,
@@ -167,7 +167,7 @@ const httpFingerprintTool: ModuleTool = {
     const hostRow = ctx.workspace.hosts.upsert({
       workspaceId: ctx.workspaceId,
       address: hostname,
-    });
+    }) as { id: string };
     const service = ctx.workspace.services.upsert({
       hostId: hostRow.id,
       port,
@@ -175,7 +175,7 @@ const httpFingerprintTool: ModuleTool = {
       name: port === 443 ? "https" : "http",
       state: "open",
       info: { discoveredBy: "recon:http-fingerprint" },
-    });
+    }) as { id: string; name: string };
     return {
       ok: true,
       output: `[+] Registered ${hostname}:${port} as ${service.name}.`,

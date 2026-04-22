@@ -239,6 +239,20 @@ export class Datastore {
     return spec?.default as T | undefined;
   }
 
+  /**
+   * Whether any layer has an explicit value for the key (i.e. `whence` is
+   * not "default" or "unset"). Doesn't consult `OptionSpec.default`, so this
+   * is a true "was it set by set/setg" check. Satisfies `ToolOptionStore.has`
+   * (see src/modules/host-handles.ts).
+   */
+  has(name: string): boolean {
+    const key = name.toUpperCase();
+    for (const scope of ["module", "workspace", "global"] as const) {
+      if (this.layers[scope].has(key)) return true;
+    }
+    return false;
+  }
+
   /** Which scope currently holds the resolved value (or "default" / "unset"). */
   whence(name: string): DatastoreScope | "default" | "unset" {
     const key = name.toUpperCase();
