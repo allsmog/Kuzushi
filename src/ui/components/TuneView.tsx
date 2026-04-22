@@ -16,6 +16,7 @@ import type React from "react";
 import type { ShellState, TuneSnapshot } from "../state.js";
 import { tokens } from "../tokens.js";
 import { HouseRules } from "./HouseRules.js";
+import { ShellFooterHints } from "./ShellFooterHints.js";
 
 const PRESETS = ["fast", "standard", "deep"] as const;
 const TASK_OPTIONS = ["semgrep", "codeql", "agentic", "iris-taint", "crypto-test"] as const;
@@ -104,15 +105,16 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
         <Text>{tokens.muted("\u2500".repeat(78))}</Text>
       </Box>
 
-      <Box marginTop={1}>
-        <Text>
-          {tokens.hint("s save   r reset   x run with these   ")}
-          {tokens.muted("p")}
-          {tokens.hint(" full prompt editor (--expert)   ")}
-          {tokens.muted("/config")}
-          {tokens.hint(" open editor")}
-        </Text>
-      </Box>
+      <ShellFooterHints
+        divider={false}
+        hints={[
+          { key: "s", label: "save" },
+          { key: "r", label: "reset" },
+          { key: "x", label: "run with these" },
+          { key: "p", label: "full prompt editor (--expert)" },
+          { key: "/config", label: "open editor" },
+        ]}
+      />
     </Box>
   );
 }

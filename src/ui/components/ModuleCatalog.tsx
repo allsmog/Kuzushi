@@ -17,6 +17,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import type { ShellModuleCard, ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
+import { ShellFooterHints } from "./ShellFooterHints.js";
 
 /** Roadmap modules — kept in sync with the VISION.md one-liner in the README. */
 const ROADMAP_MODULES = ["blackbox", "pwn", "pentest", "honeypot", "yokai", "revgraph"] as const;
@@ -91,11 +92,16 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
         </Text>
       </Box>
 
-      <Box marginTop={1}>
-        <Text>
-          {tokens.hint("/use <id> open   /findings list   /tune adjust   /help more   /exit quit")}
-        </Text>
-      </Box>
+      <ShellFooterHints
+        divider={false}
+        hints={[
+          { key: "/use <id>", label: "open" },
+          { key: "/findings", label: "list" },
+          { key: "/tune", label: "adjust" },
+          { key: "/help", label: "more" },
+          { key: "/exit", label: "quit" },
+        ]}
+      />
     </Box>
   );
 }

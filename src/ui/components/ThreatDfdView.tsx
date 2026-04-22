@@ -22,6 +22,7 @@ import type { DfdElement, TrustBoundary } from "../../agents/tasks/threat-modeli
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
+import { ShellFooterHints } from "./ShellFooterHints.js";
 
 interface ThreatDfdViewProps {
   shell: ShellState;
@@ -240,13 +241,17 @@ function FlowRow({
 
 function HintFooter(): React.ReactElement {
   return (
-    <Box marginTop={1}>
-      <Text>
-        {tokens.hint("1 dfd  ")}
-        {tokens.muted("2 stride  3 stories  4 scope  5 summary")}
-        {tokens.hint("   q back")}
-      </Text>
-    </Box>
+    <ShellFooterHints
+      divider={false}
+      hints={[
+        { key: "1", label: "dfd" },
+        { key: "2", label: "stride" },
+        { key: "3", label: "stories" },
+        { key: "4", label: "scope" },
+        { key: "5", label: "summary" },
+        { key: "/back", label: "" },
+      ]}
+    />
   );
 }
 
