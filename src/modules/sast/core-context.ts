@@ -81,9 +81,12 @@ const contextBuildTool: ModuleTool = {
         discovery: discovery as "auto" | "flat" | "modules",
       });
 
-      if (ctx.uiStore) {
-        const shell = ctx.uiStore.getState().shell;
-        if (shell) ctx.uiStore.update({ shell: { ...shell, contextSnapshot: snapshot } });
+      // Cast to the concrete UIStore for typed access to `state.shell` —
+      // modules in src/modules/ are allowed to peek at the host shape.
+      const uiStoreInternal = ctx.uiStore as import("../../ui/state.js").UIStore | undefined;
+      if (uiStoreInternal) {
+        const shell = uiStoreInternal.getState().shell;
+        if (shell) uiStoreInternal.update({ shell: { ...shell, contextSnapshot: snapshot } });
       }
 
       // Persist to `<target>/.kuzushi/context-snapshot.json` so a fresh

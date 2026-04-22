@@ -1,10 +1,17 @@
 /**
  * Module loading utilities — validates manifests, checks requirements,
  * and dynamically imports CopilotModule entry points.
+ *
+ * All load-time failures surface as `ModuleLoadError` with a machine-readable
+ * `code` so callers can programmatically distinguish "manifest missing" from
+ * "entry not found" without string-matching.
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
+import { ModuleLoadError } from "./errors.js";
+import { zModuleManifest } from "./schema.js";
 import type { CopilotModule, ModuleManifest } from "./types.js";
 
 /**
@@ -14,57 +21,129 @@ import type { CopilotModule, ModuleManifest } from "./types.js";
 export function loadManifestFromPath(dirPath: string): ModuleManifest {
   const manifestPath = path.join(dirPath, "module.manifest.json");
   if (!existsSync(manifestPath)) {
-    throw new Error(
+    throw new ModuleLoadError(
+      "MANIFEST_MISSING",
       `No module.manifest.json found in "${dirPath}". ` +
         `Kuzushi modules must include a manifest file.`,
+      { path: dirPath },
     );
   }
 
-  const raw = JSON.parse(readFileSync(manifestPath, "utf-8")) as unknown;
-  return validateManifest(raw, manifestPath);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(manifestPath, "utf-8")) as unknown;
+  } catch (err) {
+    throw new ModuleLoadError(
+      "MANIFEST_INVALID",
+      `Failed to parse module manifest at ${manifestPath}: ${err instanceof Error ? err.message : String(err)}`,
+      { path: manifestPath, cause: err instanceof Error ? err.message : String(err) },
+    );
+  }
+  const manifest = validateManifest(raw, manifestPath);
+  checkSdkCompatibility(manifest, manifestPath);
+  return manifest;
 }
 
 /**
- * Validate a raw parsed manifest object.
- * Returns a typed ModuleManifest or throws with a descriptive error.
+ * Validate a raw parsed manifest object via the Zod schema.
+ * Returns a typed ModuleManifest or throws `ModuleLoadError` on failure.
  */
 export function validateManifest(raw: unknown, source?: string): ModuleManifest {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`Invalid module manifest${source ? ` at ${source}` : ""}: expected an object.`);
-  }
-
-  const obj = raw as Record<string, unknown>;
-  const errors: string[] = [];
-
-  if (typeof obj.id !== "string" || !obj.id) errors.push("missing or invalid 'id' (string)");
-  if (typeof obj.displayName !== "string" || !obj.displayName)
-    errors.push("missing or invalid 'displayName' (string)");
-  if (typeof obj.version !== "string" || !obj.version)
-    errors.push("missing or invalid 'version' (string)");
-  if (typeof obj.entry !== "string" || !obj.entry)
-    errors.push("missing or invalid 'entry' (string)");
-
-  const validCategories = ["offense", "defense", "governance", "intel"];
-  if (typeof obj.category !== "string" || !validCategories.includes(obj.category)) {
-    errors.push(`invalid 'category': expected one of ${validCategories.join(", ")}`);
-  }
-
-  if (errors.length > 0) {
-    throw new Error(
-      `Invalid module manifest${source ? ` at ${source}` : ""}:\n  ${errors.join("\n  ")}`,
+  const parsed = zModuleManifest.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => ({
+      path: i.path.join("."),
+      message: i.message,
+    }));
+    const summary = issues.map((i) => `${i.path || "<root>"}: ${i.message}`).join("\n  ");
+    throw new ModuleLoadError(
+      "MANIFEST_INVALID",
+      `Invalid module manifest${source ? ` at ${source}` : ""}:\n  ${summary}`,
+      { source, issues },
     );
   }
 
-  return {
-    id: obj.id as string,
-    displayName: obj.displayName as string,
-    version: obj.version as string,
-    entry: obj.entry as string,
-    category: obj.category as ModuleManifest["category"],
+  const obj = parsed.data as Record<string, unknown> & ModuleManifest;
+  const result: ModuleManifest = {
+    id: obj.id,
+    displayName: obj.displayName,
+    version: obj.version,
+    entry: obj.entry,
+    category: obj.category,
     description: typeof obj.description === "string" ? obj.description : "",
-    requires: obj.requires as ModuleManifest["requires"],
-    configSchema: obj.configSchema as ModuleManifest["configSchema"],
   };
+  if (obj.requires) result.requires = obj.requires;
+  if (obj.configSchema) result.configSchema = obj.configSchema;
+  if (obj.author) result.author = obj.author;
+  if (obj.license) result.license = obj.license;
+  if (obj.kuzushiSdkVersion) result.kuzushiSdkVersion = obj.kuzushiSdkVersion;
+  return result;
+}
+
+/**
+ * Warn (don't throw) when the manifest's declared `kuzushiSdkVersion` is
+ * absent or major-incompatible with the host `kuzushi` package version.
+ * A warning-only strategy keeps the first release of SDK-versioning
+ * backward-compatible — older manifests still load.
+ */
+function checkSdkCompatibility(manifest: ModuleManifest, source: string): void {
+  const hostVersion = readHostKuzushiVersion();
+  if (!hostVersion) return; // can't compare; stay silent
+
+  if (!manifest.kuzushiSdkVersion) {
+    emitWarn(
+      `Module "${manifest.id}" manifest (${source}) omits kuzushiSdkVersion. ` +
+        `Current host is kuzushi@${hostVersion}. Future releases will require this field.`,
+    );
+    return;
+  }
+
+  const mismatch = sdkMajorMismatch(manifest.kuzushiSdkVersion, hostVersion);
+  if (mismatch) {
+    emitWarn(
+      `Module "${manifest.id}" declares kuzushiSdkVersion "${manifest.kuzushiSdkVersion}" ` +
+        `but host is kuzushi@${hostVersion} (${mismatch}). Loading anyway — breakage possible.`,
+    );
+  }
+}
+
+function emitWarn(msg: string): void {
+  // Keep this lightweight — the host wires a proper UI warning channel
+  // separately; the loader itself just needs the author to see the notice.
+  // eslint-disable-next-line no-console
+  console.warn(`[kuzushi] ${msg}`);
+}
+
+/**
+ * Return the installed `kuzushi` package version, or undefined if the
+ * package.json can't be located (e.g. vendored/worktree checkouts).
+ */
+export function readHostKuzushiVersion(): string | undefined {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require("../../package.json") as { version?: string };
+    return typeof pkg.version === "string" ? pkg.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Very light major-version mismatch check. Returns a description of the
+ * mismatch ("host major N, module requires M") or null when compatible.
+ */
+export function sdkMajorMismatch(constraint: string, hostVersion: string): string | null {
+  const hostMajor = parseInt(hostVersion.split(".")[0] ?? "", 10);
+  if (!Number.isFinite(hostMajor)) return null;
+
+  // Extract the first integer at the start of the constraint (after any
+  // leading operators like ^ ~ >= <= >). Handles ">=0.19", "^1.0.0", "1.2.3".
+  const match = constraint.match(/(\d+)/);
+  if (!match) return null;
+  const requiredMajor = parseInt(match[1]!, 10);
+  if (!Number.isFinite(requiredMajor)) return null;
+  if (requiredMajor === hostMajor) return null;
+  return `major host=${hostMajor} vs required=${requiredMajor}`;
 }
 
 /**
@@ -104,7 +183,11 @@ export function checkRequirements(reqs: NonNullable<ModuleManifest["requires"]>)
 export async function dynamicImportModule(entryPath: string): Promise<CopilotModule> {
   const absolutePath = path.resolve(entryPath);
   if (!existsSync(absolutePath)) {
-    throw new Error(`Module entry point not found: "${absolutePath}"`);
+    throw new ModuleLoadError(
+      "ENTRY_NOT_FOUND",
+      `Module entry point not found: "${absolutePath}"`,
+      { entry: absolutePath },
+    );
   }
 
   const imported = (await import(absolutePath)) as Record<string, unknown>;
@@ -115,12 +198,23 @@ export async function dynamicImportModule(entryPath: string): Promise<CopilotMod
   return mod as CopilotModule;
 }
 
+/** Regex enforced on `tool.name` — lowercase kebab prefix, colon, action. */
+const TOOL_NAME_RE = /^[a-z][a-z0-9-]*:[a-z][a-z0-9_-]*$/;
+
 /**
  * Runtime shape check for CopilotModule interface.
+ *
+ * Also enforces (at load time) that:
+ *   - every tool name matches `<moduleId>:<action>`
+ *   - tool names are syntactically valid (`^[a-z][a-z0-9-]*:[a-z][a-z0-9_-]*$`)
+ *   - no two tools in the same module share a name
  */
 export function validateModuleExport(mod: unknown): asserts mod is CopilotModule {
   if (!mod || typeof mod !== "object") {
-    throw new Error("Module must export an object with CopilotModule shape.");
+    throw new ModuleLoadError(
+      "SHAPE_INVALID",
+      "Module must export an object with CopilotModule shape.",
+    );
   }
 
   const obj = mod as Record<string, unknown>;
@@ -132,21 +226,46 @@ export function validateModuleExport(mod: unknown): asserts mod is CopilotModule
   if (typeof obj.version !== "string") errors.push("missing 'version' (string)");
   if (!Array.isArray(obj.tools)) errors.push("missing 'tools' (array)");
 
+  const moduleId = typeof obj.id === "string" ? obj.id : "";
+
   if (Array.isArray(obj.tools)) {
+    const seenNames = new Set<string>();
     for (let i = 0; i < obj.tools.length; i++) {
       const tool = obj.tools[i] as Record<string, unknown> | undefined;
       if (!tool || typeof tool !== "object") {
         errors.push(`tools[${i}]: expected an object`);
         continue;
       }
-      if (typeof tool.name !== "string") errors.push(`tools[${i}]: missing 'name'`);
+      if (typeof tool.name !== "string") {
+        errors.push(`tools[${i}]: missing 'name'`);
+      } else {
+        if (!TOOL_NAME_RE.test(tool.name)) {
+          errors.push(
+            `tools[${i}].name "${tool.name}": must match ` +
+              `^[a-z][a-z0-9-]*:[a-z][a-z0-9_-]*$ (kebab-case module prefix, colon, kebab-case action)`,
+          );
+        }
+        if (moduleId && !tool.name.startsWith(`${moduleId}:`)) {
+          errors.push(
+            `tools[${i}].name "${tool.name}": must start with "${moduleId}:" (module id prefix)`,
+          );
+        }
+        if (seenNames.has(tool.name)) {
+          errors.push(`tools[${i}].name "${tool.name}": duplicate tool name in module`);
+        }
+        seenNames.add(tool.name);
+      }
       if (typeof tool.execute !== "function")
         errors.push(`tools[${i}]: missing 'execute' function`);
     }
   }
 
   if (errors.length > 0) {
-    throw new Error(`Invalid CopilotModule export:\n  ${errors.join("\n  ")}`);
+    throw new ModuleLoadError(
+      "SHAPE_INVALID",
+      `Invalid CopilotModule export:\n  ${errors.join("\n  ")}`,
+      { moduleId, errors },
+    );
   }
 }
 

@@ -2,25 +2,31 @@
  * Core SAST module — wraps the existing Kuzushi pipeline as the built-in
  * "sast" CopilotModule.
  *
- * This is the bridge between the new module system and the existing
- * 40+ task pipeline. It exposes the pipeline's top-level operations
- * (scan, triage, verify, patch) as ModuleTools while keeping the
- * underlying DAG orchestrator, bus, and task registry intact.
+ * This is the canonical reference implementation for the Kuzushi module SDK.
+ * Third-party authors should mirror its structure:
  *
- * The pipeline mode (`kuzushi scan`) continues to work exactly as before —
- * this module just makes the same capabilities available to shell and run modes.
+ *   - use `defineTool<"sast">({...})` so the `sast:` prefix is enforced at
+ *     compile time,
+ *   - use `defineModule({...})` so every tool's prefix is verified at
+ *     construction time (defence-in-depth on top of the loader),
+ *   - probe `ctx.host?.capabilities.has("workspace")` before reading the
+ *     workspace handle — tools must work in both shell and `kuzushi run`
+ *     modes where the workspace may be unavailable,
+ *   - prefer `ctx.logger?.warn(...)` for machine-readable diagnostics and
+ *     keep `ctx.print` for operator-visible status updates.
  *
  * Pipeline infra (runPipeline wrappers, JSONSchema fragments, context DAG,
  * context-summary renderer, runtime shape helpers) lives in ./sast/shared.ts
- * so the planned per-capability sub-modules (semgrep, codeql, taint-iris,
- * triage, verify, patch, threat-hunt, context, findings) can share it.
+ * so the per-capability sub-modules (semgrep, codeql, taint-iris, triage,
+ * verify, patch, threat-hunt, context, findings) can share it.
  */
 
+import { defineModule, defineTool } from "./define.js";
 import {
   executeSastPipeline,
   formatContextSummary as sharedFormatContextSummary,
 } from "./sast/shared.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
+import type { CopilotModule, ToolExecutionContext, ToolResult } from "./types.js";
 
 // Re-export so external callers (src/copilot/shell.ts) keep working.
 export const formatContextSummary = sharedFormatContextSummary;
@@ -29,7 +35,7 @@ export const formatContextSummary = sharedFormatContextSummary;
 // Tool implementations
 // ---------------------------------------------------------------------------
 
-const scanTool: ModuleTool = {
+const scanTool = defineTool<"sast">({
   name: "sast:scan",
   displayName: "Scan",
   formatInput(input) {
@@ -87,9 +93,18 @@ const scanTool: ModuleTool = {
   },
   headless: true,
   async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+    // Capability probe — the pipeline needs the workspace to persist findings.
+    // In `kuzushi run` mode without a workspace, warn via the structured
+    // logger (if the host wired one) so operators see it in the module log;
+    // the pipeline itself still runs and returns a scan summary.
+    if (!ctx.host?.capabilities.has("workspace")) {
+      ctx.logger?.warn("sast:scan invoked without workspace capability", {
+        sdkVersion: ctx.host?.sdkVersion,
+      });
+    }
     return executeSastPipeline(input, ctx, { summaryLabel: "Scan", postProcessMode: "full" });
   },
-};
+});
 
 // ---------------------------------------------------------------------------
 // Module definition
@@ -103,7 +118,7 @@ const scanTool: ModuleTool = {
  * runtime-specific state during initialization.
  */
 export function createCoreSastModule(): CopilotModule {
-  return {
+  return defineModule({
     id: "sast",
     displayName: "SAST Pipeline",
     category: "defense",
@@ -140,5 +155,5 @@ export function createCoreSastModule(): CopilotModule {
     async dispose() {
       // Pipeline cleanup is handled by the orchestrator's shutdown logic.
     },
-  };
+  });
 }

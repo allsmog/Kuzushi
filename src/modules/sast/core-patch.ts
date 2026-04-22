@@ -15,9 +15,7 @@ const patchFindingTool: ModuleTool = {
   displayName: "Patch",
   formatInput(input) {
     const p = (input ?? {}) as Record<string, unknown>;
-    return typeof p["fingerprint"] === "string"
-      ? (p["fingerprint"] as string).slice(0, 12)
-      : null;
+    return typeof p["fingerprint"] === "string" ? (p["fingerprint"] as string).slice(0, 12) : null;
   },
   renderResult(result) {
     const first = result.output.split("\n", 1)[0]?.trim();
@@ -55,7 +53,7 @@ const patchFindingTool: ModuleTool = {
 
     const repoRoot = ctx.target ?? ctx.cwd;
     const repoName = repoRoot.split("/").pop() ?? "repo";
-    const db = ctx.workspace.rawDb();
+    const db = ctx.workspace.rawDb() as import("better-sqlite3").Database;
     const model = ctx.config.model;
 
     ctx.print?.status(`Generating patch for ${fingerprint}...`);
