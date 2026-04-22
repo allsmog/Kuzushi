@@ -1,10 +1,27 @@
 /**
- * Plain-text fallback renderer for non-TTY output (CI, piped).
+ * Plain-text fallback renderer for non-TTY output (CI, piped, NO_COLOR,
+ * KUZUSHI_PLAIN=1, screen readers).
  *
- * Subscribes to UIStore changes and outputs formatted console.log text
- * with Unicode icons but no live-updating (static output only).
+ * Subscribes to UIStore changes and emits line-oriented text. Every
+ * `ShellView` has a render path; every overlay (`pendingPlan`,
+ * `costCapHalted`, `throttle`) emits a one-line advisory so piped
+ * output stays grep-able and self-descriptive.
+ *
+ * Accessibility:
+ *   - No box-drawing, no ANSI art, no dim-color.
+ *   - Severity labels go through `severityToken(sev, { NO_COLOR: "1" })`
+ *     so they render as `■ CRIT | ▲ HIGH | ◆ MED  | ● LOW  | ○ INFO`
+ *     (plain chars, no color).
+ *   - Headings are structural (`# TITLE`) with labels before values
+ *     (`severity: HIGH`) so screen readers narrate the document order.
+ *   - Every "No X" path routes through `describeEmptyState()` so the
+ *     copy stays in sync with the Ink `<EmptyState>` component.
+ *
+ * The renderer is pure / side-effect-free except for writing to stdout.
+ * Tests inject `{ write: (line) => ... }` to capture output.
  */
 import chalk from "chalk";
+import { describeEmptyState, type EmptyStateContext, type EmptyStateKind } from "./error-format.js";
 import {
   colorVerdict,
   formatCost,
@@ -13,23 +30,39 @@ import {
   terminalCardWidth,
 } from "./format.js";
 import { icons } from "./icons.js";
+import { normalizeSeverity, severityToken } from "./severity.js";
 import type {
+  ActionableFinding,
   AgentActivityLine,
   Phase,
   ResultLine,
   ShellPlan,
   ShellState,
   SummaryData,
+  UIState,
   UIStore,
 } from "./state.js";
 
+export interface PlainRendererOptions {
+  /**
+   * Line sink — default is `console.log`. Tests pass a capture closure.
+   * A single line may contain `\n`, in which case it's emitted as-is
+   * (the sink is responsible for breaking it up if needed).
+   */
+  write?: (line: string) => void;
+}
+
 /**
  * Register a plain-text renderer that subscribes to store changes
- * and outputs to console.log.
+ * and emits lines via the supplied `write` sink (defaults to `console.log`).
  *
  * @returns Unsubscribe function
  */
-export function registerPlainTextRenderer(store: UIStore): () => void {
+export function registerPlainTextRenderer(
+  store: UIStore,
+  options: PlainRendererOptions = {},
+): () => void {
+  const write = options.write ?? ((line: string) => console.log(line));
   let lastPhase: Phase = "idle";
   let lastResultCount = 0;
   let lastNoticeCount = 0;
@@ -46,9 +79,16 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
   let lastPlanSource: string | null = null;
   let lastThreatModelPath: string | null = null;
   let lastDiffSinceRef: string | null = null;
+  // Workstream 5 — overlay trackers. Each overlay emits once per edge
+  // transition (false → true) to avoid duplicate prompts on every
+  // subscriber tick while the overlay stays active.
+  let costCapHaltPrinted = false;
+  let lastThrottleKey: string | null = null;
   const taskState = new Map<string, { status: string; findingCount: number; detail?: string }>();
   const completedStages = new Set<string>();
   const scanActivityPrinted = new Map<string, number>();
+
+  const emit = (line: string): void => write(line);
 
   const unsubscribe = store.subscribe(() => {
     const state = store.getState();
@@ -64,7 +104,7 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
       startBannerPrinted = true;
 
       if (state.skippedAlreadyTriaged > 0) {
-        console.log(
+        emit(
           chalk.dim(
             `  Skipping ${state.skippedAlreadyTriaged} already-triaged findings, ${state.selectedForTriage} remaining`,
           ),
@@ -75,13 +115,11 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
     // Print stage transitions
     if (state.phase !== lastPhase) {
       if (state.phase === "triaging" && state.selectedForTriage > 0) {
-        console.log(chalk.bold(`  Triaging ${state.selectedForTriage} findings...`));
+        emit(chalk.bold(`  Triaging ${state.selectedForTriage} findings...`));
       } else if (state.phase === "verifying" && state.progress.total > 0) {
-        console.log(chalk.bold(`  Verifying ${state.progress.total} findings...`));
+        emit(chalk.bold(`  Verifying ${state.progress.total} findings...`));
       } else if (state.phase === "poc" && state.progress.total > 0) {
-        console.log(
-          chalk.bold(`  Generating PoC harnesses for ${state.progress.total} findings...`),
-        );
+        emit(chalk.bold(`  Generating PoC harnesses for ${state.progress.total} findings...`));
       }
       lastPhase = state.phase;
     }
@@ -92,7 +130,7 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
         completedStages.add(stage.id);
         const elapsed =
           stage.elapsedMs != null ? ` ${chalk.dim(formatDuration(stage.elapsedMs))}` : "";
-        console.log(`  ${chalk.green(icons.success)} ${stage.label}${elapsed}`);
+        emit(`  ${chalk.green(icons.success)} ${stage.label}${elapsed}`);
       }
     }
 
@@ -112,6 +150,7 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
           previous.detail !== current.detail
         ) {
           printScanTaskLine(
+            emit,
             task.label,
             task.status,
             current.findingCount,
@@ -128,7 +167,7 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
         const prevCount = scanActivityPrinted.get(task.id) ?? 0;
         if (lines.length > prevCount) {
           for (const line of lines.slice(prevCount)) {
-            printScanActivityLine(task.id, line);
+            printScanActivityLine(emit, task.id, line);
           }
           scanActivityPrinted.set(task.id, lines.length);
         }
@@ -138,26 +177,52 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
     // Print new results
     const newResults = state.results.slice(lastResultCount);
     for (const result of newResults) {
-      printResultLine(result);
+      printResultLine(emit, result);
     }
     lastResultCount = state.results.length;
 
     const newNotices = state.notices.slice(lastNoticeCount);
     for (const notice of newNotices) {
-      printNotice(notice.level, notice.message, notice.detail);
+      printNotice(emit, notice.level, notice.message, notice.detail);
     }
     lastNoticeCount = state.notices.length;
 
     // Print summary once when it first becomes available
     if (state.phase === "summary" && state.summary && !summaryPrinted) {
       summaryPrinted = true;
-      printPlainSummary(state.summary);
+      printPlainSummary(emit, state.summary);
     }
 
     // Print quality gate result once
     if (state.qualityGate && state.qualityGate !== lastQualityGate) {
       lastQualityGate = state.qualityGate;
-      printQualityGate(state.qualityGate);
+      printQualityGate(emit, state.qualityGate);
+    }
+
+    // Workstream 5 — rate-limit banner. One line per change of concurrency
+    // or reason so tail -f stays readable. Clears (`[throttled] cleared`)
+    // when `throttle` goes back to null.
+    const throttleKey = state.throttle
+      ? `${state.throttle.concurrency}:${state.throttle.reason}`
+      : null;
+    if (throttleKey !== lastThrottleKey) {
+      lastThrottleKey = throttleKey;
+      if (state.throttle) {
+        const reason = state.throttle.reason ? ` · ${state.throttle.reason}` : "";
+        emit(`[!] [throttled] concurrency=${state.throttle.concurrency}${reason}`);
+      } else {
+        emit(`[throttled] cleared`);
+      }
+    }
+
+    // Workstream 5 — cost-cap halt overlay. Print the budget card + the
+    // `continue (c) or abort (a)?` prompt once per halt. Reset on clear so
+    // a second halt later in the run prints again.
+    if (state.costCapHalted && !costCapHaltPrinted) {
+      costCapHaltPrinted = true;
+      printCostCapHalt(emit, state);
+    } else if (!state.costCapHalted && costCapHaltPrinted) {
+      costCapHaltPrinted = false;
     }
 
     // Phase D.5 — shell-view + pendingPlan + threatModel + diffSince
@@ -168,14 +233,14 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
       const viewKey = `${shell.shellView}:${shell.focusedModule ?? ""}:${shell.openFindingId ?? ""}`;
       if (viewKey !== lastShellView) {
         lastShellView = viewKey;
-        printShellView(shell);
+        printShellView(emit, shell, state);
       }
 
       const planSource = shell.pendingPlan?.source ?? null;
       if (planSource !== lastPlanSource) {
         lastPlanSource = planSource;
-        if (shell.pendingPlan) printPendingPlan(shell.pendingPlan);
-        else console.log(chalk.dim("  [plan] discarded"));
+        if (shell.pendingPlan) printPendingPlan(emit, shell.pendingPlan);
+        else emit(chalk.dim("  [plan] discarded"));
       }
 
       const tmPath = shell.threatModelSource?.path ?? null;
@@ -183,9 +248,7 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
         lastThreatModelPath = tmPath;
         const threats = shell.threatModel?.threats.length ?? 0;
         const elements = shell.threatModel?.dfd.elements.length ?? 0;
-        console.log(
-          chalk.dim(`  [threats] loaded ${tmPath} · ${elements} elements · ${threats} threats`),
-        );
+        emit(chalk.dim(`  [threats] loaded ${tmPath} · ${elements} elements · ${threats} threats`));
       }
 
       const diffRef = shell.diffSince?.ref ?? null;
@@ -194,7 +257,7 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
         if (shell.diffSince) {
           const n = shell.diffSince.changedFiles.length;
           const suffix = shell.diffSince.error ? ` · error: ${shell.diffSince.error}` : "";
-          console.log(chalk.dim(`  [since ${shell.diffSince.ref}] ${n} changed file(s)${suffix}`));
+          emit(chalk.dim(`  [since ${shell.diffSince.ref}] ${n} changed file(s)${suffix}`));
         }
       }
     }
@@ -203,7 +266,9 @@ export function registerPlainTextRenderer(store: UIStore): () => void {
   return unsubscribe;
 }
 
-function printResultLine(result: ResultLine): void {
+type Emit = (line: string) => void;
+
+function printResultLine(emit: Emit, result: ResultLine): void {
   const prefix = `  [${result.index}/${result.total}]`;
   const fingerprint = chalk.dim(`${result.fingerprint.slice(0, 12)}...`);
   const retry =
@@ -212,7 +277,7 @@ function printResultLine(result: ResultLine): void {
   if (result.kind === "error") {
     const stage = result.errorStage?.toUpperCase() ?? "TRIAGE";
     const msg = result.errorMessage ? `: ${result.errorMessage.slice(0, 120)}` : "";
-    console.log(`${prefix} ${chalk.red(`${stage} ERROR`)}${msg} ${fingerprint}${retry}`);
+    emit(`${prefix} ${chalk.red(`${stage} ERROR`)}${msg} ${fingerprint}${retry}`);
     return;
   }
 
@@ -221,7 +286,7 @@ function printResultLine(result: ResultLine): void {
     const conf = chalk.dim(`(${((result.confidence ?? 0) * 100).toFixed(0)}%)`);
     const cost =
       result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
-    console.log(`${prefix} ${verdict} ${conf}${cost} ${fingerprint}${retry}`);
+    emit(`${prefix} ${verdict} ${conf}${cost} ${fingerprint}${retry}`);
     return;
   }
 
@@ -232,7 +297,7 @@ function printResultLine(result: ResultLine): void {
       : chalk.green("not exploitable");
     const cost =
       result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
-    console.log(`${prefix} ${statusIcon} ${statusLabel}${cost} ${fingerprint}${retry}`);
+    emit(`${prefix} ${statusIcon} ${statusLabel}${cost} ${fingerprint}${retry}`);
     return;
   }
 
@@ -242,11 +307,12 @@ function printResultLine(result: ResultLine): void {
     const parsed = result.skipped ? "" : result.parsed ? " parsed" : " parse-error";
     const cost =
       result.costUsd && result.costUsd > 0 ? ` ${chalk.dim(formatCost(result.costUsd))}` : "";
-    console.log(`${prefix} ${statusIcon} ${statusLabel}${parsed}${cost} ${fingerprint}${retry}`);
+    emit(`${prefix} ${statusIcon} ${statusLabel}${parsed}${cost} ${fingerprint}${retry}`);
   }
 }
 
 function printScanTaskLine(
+  emit: Emit,
   taskId: string,
   status: string,
   findingCount: number,
@@ -264,28 +330,29 @@ function printScanTaskLine(
   const retryTag = retryCount && retryCount > 0 ? chalk.yellow(` (retry #${retryCount})`) : "";
 
   if (status === "done") {
-    console.log(`  ${chalk.green(icons.success)} ${taskId}${findings}${elapsed}${retryTag}`);
+    emit(`  ${chalk.green(icons.success)} ${taskId}${findings}${elapsed}${retryTag}`);
     return;
   }
   if (status === "error") {
     const errorDetail = lastError ? ` ${chalk.red(lastError.slice(0, 80))}` : suffix;
-    console.log(`  ${chalk.red(icons.error)} ${taskId}${errorDetail}${elapsed}${retryTag}`);
+    emit(`  ${chalk.red(icons.error)} ${taskId}${errorDetail}${elapsed}${retryTag}`);
     return;
   }
   // active / pending — do not spam console every tick; only emit on terminal statuses.
 }
 
-function printScanActivityLine(taskId: string, line: AgentActivityLine): void {
+function printScanActivityLine(emit: Emit, taskId: string, line: AgentActivityLine): void {
   if (line.kind === "tool-complete" && line.detail) {
-    console.log(`    ${chalk.dim(`[${taskId}]`)} ${chalk.dim(line.detail)}`);
+    emit(`    ${chalk.dim(`[${taskId}]`)} ${chalk.dim(line.detail)}`);
   } else if (line.kind === "finding-preview" && line.detail) {
-    console.log(`    ${chalk.dim(`[${taskId}]`)} ${line.detail}`);
+    emit(`    ${chalk.dim(`[${taskId}]`)} ${line.detail}`);
   } else if (line.kind === "reasoning" && line.detail) {
-    console.log(`    ${chalk.dim(`[${taskId}]`)} ${chalk.italic(line.detail)}`);
+    emit(`    ${chalk.dim(`[${taskId}]`)} ${chalk.italic(line.detail)}`);
   }
 }
 
 function printNotice(
+  emit: Emit,
   level: "info" | "warning" | "error" | "success",
   message: string,
   detail?: string,
@@ -301,44 +368,47 @@ function printNotice(
   const body =
     level === "error" ? chalk.red(message) : level === "warning" ? chalk.yellow(message) : message;
   const detailSuffix = detail ? ` ${chalk.dim(detail)}` : "";
-  console.log(`  ${icon} ${body}${detailSuffix}`);
+  emit(`  ${icon} ${body}${detailSuffix}`);
 }
 
-function printQualityGate(result: {
-  passed: boolean;
-  violations?: Array<{ rule: string; message: string }>;
-}): void {
-  console.log("");
+function printQualityGate(
+  emit: Emit,
+  result: {
+    passed: boolean;
+    violations?: Array<{ rule: string; message: string }>;
+  },
+): void {
+  emit("");
   if (result.passed) {
-    console.log(`  ${chalk.green.bold("Quality Gates: PASSED")}`);
+    emit(`  ${chalk.green.bold("Quality Gates: PASSED")}`);
     return;
   }
-  console.log(`  ${chalk.red.bold("Quality Gates: FAILED")}`);
+  emit(`  ${chalk.red.bold("Quality Gates: FAILED")}`);
   for (const violation of result.violations ?? []) {
-    console.log(`    ${chalk.red("x")} ${chalk.bold(violation.rule)}: ${violation.message}`);
+    emit(`    ${chalk.red("x")} ${chalk.bold(violation.rule)}: ${violation.message}`);
   }
 }
 
-function printPlainSummary(data: SummaryData): void {
+function printPlainSummary(emit: Emit, data: SummaryData): void {
   const { verdictCounts: counts } = data;
   const total = counts.tp + counts.fp + counts.needs_review;
   const width = terminalCardWidth(96, 60);
 
-  console.log("");
-  console.log(chalk.bold("─".repeat(width)));
-  console.log(chalk.bold("  Kuzushi Scan Results"));
-  console.log(chalk.bold("─".repeat(width)));
+  emit("");
+  emit(chalk.bold("─".repeat(width)));
+  emit(chalk.bold("  Kuzushi Scan Results"));
+  emit(chalk.bold("─".repeat(width)));
 
   if (data.failedTasks.length > 0) {
-    console.log(
+    emit(
       `  ${chalk.red("Scanners failed:")} ${data.failedTasks.join(", ")} ${chalk.dim("(results may be incomplete)")}`,
     );
   }
 
-  console.log(`  ${chalk.dim("Total triaged:")}    ${total}`);
-  console.log(`  ${chalk.red.bold("True positives:")}   ${counts.tp}`);
-  console.log(`  ${chalk.green("False positives:")}  ${counts.fp}`);
-  console.log(`  ${chalk.yellow("Needs review:")}     ${counts.needs_review}`);
+  emit(`  ${chalk.dim("Total triaged:")}    ${total}`);
+  emit(`  ${chalk.red.bold("True positives:")}   ${counts.tp}`);
+  emit(`  ${chalk.green("False positives:")}  ${counts.fp}`);
+  emit(`  ${chalk.yellow("Needs review:")}     ${counts.needs_review}`);
 
   if (total > 0) {
     for (const line of miniBarChart([
@@ -346,86 +416,406 @@ function printPlainSummary(data: SummaryData): void {
       { label: "fp", value: counts.fp, color: chalk.green },
       { label: "needs_review", value: counts.needs_review, color: chalk.yellow },
     ])) {
-      console.log(`  ${line}`);
+      emit(`  ${line}`);
     }
   }
 
   if (data.exploitable > 0 || data.notExploitable > 0) {
-    console.log(`  ${chalk.red.bold("Exploitable:")}     ${data.exploitable}`);
-    console.log(`  ${chalk.green("Not exploitable:")} ${data.notExploitable}`);
+    emit(`  ${chalk.red.bold("Exploitable:")}     ${data.exploitable}`);
+    emit(`  ${chalk.green("Not exploitable:")} ${data.notExploitable}`);
   }
 
-  console.log(`  ${chalk.dim("Triage cost:")}     ${formatCost(data.triageCostUsd)}`);
+  emit(`  ${chalk.dim("Triage cost:")}     ${formatCost(data.triageCostUsd)}`);
   if (data.verificationCostUsd > 0) {
-    console.log(`  ${chalk.dim("Verification cost:")} ${formatCost(data.verificationCostUsd)}`);
+    emit(`  ${chalk.dim("Verification cost:")} ${formatCost(data.verificationCostUsd)}`);
   }
   if (data.pocHarnessCostUsd > 0) {
-    console.log(`  ${chalk.dim("PoC harness cost:")} ${formatCost(data.pocHarnessCostUsd)}`);
+    emit(`  ${chalk.dim("PoC harness cost:")} ${formatCost(data.pocHarnessCostUsd)}`);
   }
-  console.log(chalk.bold("─".repeat(width)));
+  emit(chalk.bold("─".repeat(width)));
 }
 
 // ---------------------------------------------------------------------------
-// Phase D.5 helpers — shell-view + planner + threats + diff-since
+// Phase D.5 + Workstream 5 helpers — shell-view + planner + threats +
+// diff-since + overlays. Each helper takes the `emit` sink as its first
+// argument so tests can inject a capture closure without stubbing console.
 // ---------------------------------------------------------------------------
 
-function printShellView(shell: ShellState): void {
-  const mod = shell.focusedModule ? ` (${shell.focusedModule})` : "";
+/**
+ * Dispatch the per-view plain render. Headings are structural (`# TITLE`)
+ * and the body uses labels-before-values so screen readers narrate the
+ * view in reading order. Every empty-data path routes through
+ * `describeEmptyState()`.
+ */
+function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
   switch (shell.shellView) {
-    case "catalog": {
-      const n = shell.moduleCatalog?.length ?? 0;
-      console.log(chalk.dim(`  [shell] catalog · ${n} modules`));
+    case "catalog":
+      printCatalogView(emit, shell);
       return;
-    }
     case "module":
-      console.log(chalk.dim(`  [shell] module home${mod}`));
+      printModuleView(emit, shell);
       return;
     case "tune":
-      console.log(chalk.dim(`  [shell] tune${mod}`));
+      printTuneView(emit, shell);
       return;
     case "findings":
-      console.log(chalk.dim(`  [shell] findings list${mod}`));
+      printFindingsView(emit, shell, state);
       return;
     case "finding":
-      if (shell.openFindingId) {
-        console.log(chalk.dim(`  [shell] finding ${shell.openFindingId}${mod}`));
-      } else {
-        console.log(chalk.dim(`  [shell] finding${mod}`));
-      }
+      printFindingView(emit, shell, state);
       return;
     case "threat-dfd":
     case "threat-stride":
     case "threat-stories":
     case "threat-scope":
-    case "threat-summary": {
-      const suffix = shell.shellView.replace(/^threat-/, "");
-      const threats = shell.threatModel?.threats.length ?? 0;
-      const elements = shell.threatModel?.dfd.elements.length ?? 0;
-      console.log(chalk.dim(`  [threats] ${suffix} · ${elements} elements · ${threats} threats`));
+    case "threat-summary":
+      printThreatView(emit, shell);
       return;
-    }
-    case "diff-since": {
-      const ref = shell.diffSince?.ref ?? "?";
-      const n = shell.diffSince?.changedFiles.length ?? 0;
-      console.log(chalk.dim(`  [since ${ref}] ${n} changed file(s)`));
+    case "diff-since":
+      printDiffSinceView(emit, shell);
       return;
-    }
   }
 }
 
-function printPendingPlan(plan: ShellPlan): void {
+function printCatalogView(emit: Emit, shell: ShellState): void {
+  const cards = shell.moduleCatalog ?? [];
+  const count = cards.length;
+  emit(chalk.dim(`  [shell] catalog · ${count} modules`));
+  emit("# CATALOG");
+  if (count === 0) {
+    printEmpty(emit, "module-no-tools", { moduleId: "(no modules loaded)" });
+    return;
+  }
+  // Group by category so the structural order matches the Ink layout.
+  const groups = new Map<string, Array<{ id: string; desc: string; lastRun: string }>>();
+  for (const card of cards) {
+    const key = card.external ? "external" : String(card.category ?? "other");
+    const list = groups.get(key) ?? [];
+    list.push({
+      id: card.id,
+      desc: card.description ?? "",
+      lastRun: card.lastRunSummary ?? "never run",
+    });
+    groups.set(key, list);
+  }
+  const order = ["offense", "intel", "governance", "defense", "other", "external"];
+  for (const key of order) {
+    const list = groups.get(key);
+    if (!list || list.length === 0) continue;
+    emit(`## ${key.toUpperCase()}`);
+    for (const row of list) {
+      emit(`- ${row.id} — ${clipLine(row.desc, 60)} (${row.lastRun})`);
+    }
+  }
+  emit("hint: /use <id> to focus · /findings to list · /help for more");
+}
+
+function printModuleView(emit: Emit, shell: ShellState): void {
+  const mod = shell.focusedModule ? ` (${shell.focusedModule})` : "";
+  emit(chalk.dim(`  [shell] module home${mod}`));
+  if (!shell.focusedModule) {
+    emit("# MODULE");
+    printEmpty(emit, "module-none-focused");
+    return;
+  }
+  const card = (shell.moduleCatalog ?? []).find((c) => c.id === shell.focusedModule);
+  emit(`# MODULE  ${shell.focusedModule}`);
+  if (card?.description) emit(`description: ${card.description}`);
+  const tools = card?.toolSummaries ?? [];
+  if (tools.length === 0) {
+    printEmpty(emit, "module-no-tools", { moduleId: shell.focusedModule });
+    return;
+  }
+  emit("## tools");
+  for (const t of tools) {
+    const headless = t.headless ? " [headless]" : "";
+    emit(`- ${t.verb}${headless}: ${t.description}`);
+  }
+  emit("hint: run <verb> to invoke · /tune to adjust · /back to return");
+}
+
+function printTuneView(emit: Emit, shell: ShellState): void {
+  const mod = shell.focusedModule ? ` (${shell.focusedModule})` : "";
+  emit(chalk.dim(`  [shell] tune${mod}`));
+  emit(`# TUNE  ${shell.focusedModule ?? "(no module)"}`);
+  const snap = shell.tuneSnapshot;
+  if (!snap) {
+    emit("preset: (default)");
+    emit("hint: /config to open the expert editor");
+    return;
+  }
+  emit(`preset: ${snap.preset ?? "standard"}`);
+  emit(`tasks: ${(snap.tasks ?? []).join(", ") || "(none)"}`);
+  emit(`verify: ${snap.verify ? "on" : "off"}`);
+  emit(`autoPatch: ${snap.autoPatch ? "on" : "off"}`);
+  emit(`triageConcurrency: ${snap.triageConcurrency}`);
+  emit(`model: ${snap.model}`);
+  if (snap.houseRules) {
+    emit("## house rules");
+    // Emit as a single multi-line block; screen readers follow line breaks.
+    for (const line of snap.houseRules.split("\n").slice(0, 20)) emit(line);
+    if (snap.houseRulesPath) emit(chalk.dim(`(loaded from ${snap.houseRulesPath})`));
+  }
+  emit("hint: /config to open the expert editor · /back to return");
+}
+
+function printFindingsView(emit: Emit, shell: ShellState, state: UIState): void {
+  const mod = shell.focusedModule ? ` (${shell.focusedModule})` : "";
+  emit(chalk.dim(`  [shell] findings list${mod}`));
+  emit("# FINDINGS");
+
+  const summary = state.summary;
+  const findings: ReadonlyArray<ActionableFinding> = summary?.actionableFindings ?? [];
+  if (findings.length === 0) {
+    const kind: EmptyStateKind =
+      state.phase === "summary" || state.phase === "done"
+        ? "findings-zero-after-scan"
+        : "findings-never-scanned";
+    printEmpty(emit, kind);
+    return;
+  }
+
+  // Sort by severity rank (critical first) so the plain listing matches
+  // the Ink UnifiedFindings ordering.
+  const sorted = [...findings].sort((a, b) => severityPlainRank(a) - severityPlainRank(b));
+  const counts = tallyFindings(sorted);
+  emit(
+    `counts: ${counts.crit} critical · ${counts.high} high · ${counts.med} medium · ${counts.low} low · ${findings.length} total`,
+  );
+  // List up to 50 rows. On larger lists we append a truncation note so
+  // piped output stays bounded; operators who want the full dump pipe
+  // through the CI stream or an export.
+  const MAX_ROWS = 50;
+  const shown = sorted.slice(0, MAX_ROWS);
+  for (let i = 0; i < shown.length; i += 1) {
+    const f = shown[i];
+    const sev = normalizeSeverity(f.displaySeverity ?? f.severity);
+    const token = severityToken(sev, { NO_COLOR: "1" });
+    const alias = `F-${String(i + 1).padStart(4, "0")}`;
+    const title = f.title ?? f.ruleId ?? "(untitled)";
+    emit(`- ${alias}  ${token}  ${clipLine(title, 60)}  [${f.taskId ?? "sast"}]`);
+    emit(`          ${f.filePath}:${f.startLine}`);
+  }
+  if (sorted.length > MAX_ROWS) {
+    emit(`...and ${sorted.length - MAX_ROWS} more (use /open F-NNNN or export)`);
+  }
+  emit("hint: /open F-NNNN to drill in · c clear filter · /back to return");
+}
+
+function printFindingView(emit: Emit, shell: ShellState, state: UIState): void {
+  const mod = shell.focusedModule ? ` (${shell.focusedModule})` : "";
+  const id = shell.openFindingId ?? "";
+  emit(chalk.dim(`  [shell] finding ${id || "(none)"}${mod}`));
+  emit(`# FINDING  ${id || "(none)"}`);
+
+  const summary = state.summary;
+  const findings = summary?.actionableFindings ?? [];
+  // Resolve alias F-NNNN by severity-sorted index, else by fingerprint prefix.
+  const match = resolveFindingByAlias(id, findings);
+  if (!match) {
+    printEmpty(emit, "findings-filter-empty", { filterCount: 0 });
+    emit(`no finding matches "${id}" — try /findings to list, /open F-NNNN to drill in`);
+    return;
+  }
+  const sev = normalizeSeverity(match.displaySeverity ?? match.severity);
+  emit(`severity: ${severityToken(sev, { NO_COLOR: "1" })}`);
+  emit(`title: ${match.title ?? match.ruleId ?? "(untitled)"}`);
+  emit(`where: ${match.filePath}:${match.startLine}`);
+  emit(`found by: ${match.taskId ?? "sast"}${match.ruleId ? ` · ${match.ruleId}` : ""}`);
+  emit(`fingerprint: ${match.fingerprint.slice(0, 16)}`);
+  emit(`verdict: ${(match.verdict ?? "—").toUpperCase()}`);
+  if (match.rationale) {
+    emit("rationale:");
+    for (const line of match.rationale.split("\n").slice(0, 10)) emit(`  ${line}`);
+  }
+  if (match.verifyExploitable === 1) emit("verification: exploit harness passed");
+  if (match.verifyPocPayload) {
+    emit(`PoC: ${clipLine(match.verifyPocPayload, 120)}`);
+  }
+  if (match.attackPath?.chain?.length) {
+    emit(`taint: ${match.attackPath.chain.join(" -> ")}`);
+  }
+  emit("hint: a assign · c comment · s suppress · r resolve · q back");
+}
+
+function printThreatView(emit: Emit, shell: ShellState): void {
+  const suffix = shell.shellView.replace(/^threat-/, "");
+  const tm = shell.threatModel;
+  const threats = tm?.threats.length ?? 0;
+  const elements = tm?.dfd.elements.length ?? 0;
+  emit(chalk.dim(`  [threats] ${suffix} · ${elements} elements · ${threats} threats`));
+  emit(`# THREATS  ${suffix.toUpperCase()}`);
+  if (!tm) {
+    printEmpty(emit, "threat-model-missing", { threatView: suffix });
+    return;
+  }
+  switch (shell.shellView) {
+    case "threat-dfd": {
+      emit(`elements: ${elements}`);
+      emit(`trust boundaries: ${tm.dfd.trustBoundaries?.length ?? 0}`);
+      const zones = new Map<string, number>();
+      for (const el of tm.dfd.elements ?? []) {
+        const key = el.trustZone || "(unzoned)";
+        zones.set(key, (zones.get(key) ?? 0) + 1);
+      }
+      if (zones.size > 0) {
+        emit("## trust zones");
+        for (const [zone, n] of zones) emit(`- ${zone}: ${n} element(s)`);
+      }
+      break;
+    }
+    case "threat-stride": {
+      emit(`total threats: ${threats}`);
+      const by = tm.summary?.byCategory ?? {};
+      emit("## by category");
+      for (const cat of Object.keys(by)) emit(`- ${cat}: ${by[cat as keyof typeof by]}`);
+      break;
+    }
+    case "threat-stories": {
+      emit(`total stories: ${threats}`);
+      for (const t of tm.threats.slice(0, 10)) {
+        emit(`- ${t.id}: ${t.title ?? t.category} [${t.impact}/${t.likelihood}]`);
+      }
+      if (threats > 10) emit(`...and ${threats - 10} more`);
+      break;
+    }
+    case "threat-scope": {
+      const bySev = tm.summary?.bySeverity ?? {};
+      emit("## severity buckets");
+      for (const k of Object.keys(bySev)) emit(`- ${k}: ${(bySev as Record<string, number>)[k]}`);
+      break;
+    }
+    case "threat-summary": {
+      emit(`total: ${tm.summary?.total ?? threats}`);
+      if (tm.summary?.byCategory) {
+        emit("## by category");
+        for (const [k, v] of Object.entries(tm.summary.byCategory)) {
+          emit(`- ${k}: ${v}`);
+        }
+      }
+      break;
+    }
+  }
+  emit("hint: 1..5 to cycle threat views · /threats edit to author · /back to return");
+}
+
+function printDiffSinceView(emit: Emit, shell: ShellState): void {
+  const ref = shell.diffSince?.ref ?? "?";
+  const n = shell.diffSince?.changedFiles.length ?? 0;
+  emit(chalk.dim(`  [since ${ref}] ${n} changed file(s)`));
+  emit(`# DIFF SINCE  ${ref}`);
+  if (!shell.diffSince) {
+    printEmpty(emit, "diff-since-idle");
+    return;
+  }
+  if (shell.diffSince.error) emit(`error: ${shell.diffSince.error}`);
+  emit(`changed files: ${n}`);
+  for (const p of shell.diffSince.changedFiles.slice(0, 40)) emit(`- ${p}`);
+  if (n > 40) emit(`...and ${n - 40} more`);
+  emit("hint: /findings to list scoped findings · /back to return");
+}
+
+function printEmpty(emit: Emit, kind: EmptyStateKind, ctx?: EmptyStateContext): void {
+  const copy = describeEmptyState(kind, ctx);
+  emit(copy.title);
+  emit(copy.reason);
+  emit(copy.action);
+}
+
+function printPendingPlan(emit: Emit, plan: ShellPlan): void {
   const changes = plan.changes.length;
   const unsupported = plan.unsupported.length;
   const parts = [`${changes} change${changes === 1 ? "" : "s"} proposed`];
   if (unsupported > 0) parts.push(`${unsupported} unsupported`);
   parts.push(`$${plan.planCostUsd.toFixed(4)} plan cost`);
-  console.log(chalk.dim(`  [plan] ${plan.source} · ${parts.join(" · ")} · y/n to apply`));
+  emit(chalk.dim(`  [plan] ${plan.source} · ${parts.join(" · ")} · y/n to apply`));
   if (changes > 0) {
     for (const c of plan.changes.slice(0, 3)) {
       const current = c.current == null ? "(default)" : JSON.stringify(c.current);
       const proposed = JSON.stringify(c.proposed);
-      console.log(chalk.dim(`    ${c.option}: ${current} → ${proposed}`));
+      emit(chalk.dim(`    ${c.option}: ${current} → ${proposed}`));
     }
-    if (changes > 3) console.log(chalk.dim(`    (+${changes - 3} more)`));
+    if (changes > 3) emit(chalk.dim(`    (+${changes - 3} more)`));
   }
+  // Workstream 5 — the Ink PlanCard shows a `y / n / Esc` hint row; the
+  // plain renderer prints an explicit prompt so non-TTY operators see
+  // exactly which key to type. `apply? [y/n] ` matches README conventions.
+  emit("apply? [y/n] ");
+}
+
+/**
+ * Cost-cap halt overlay. Mirrors the Ink `<CostCapHalt>` card: spent /
+ * cap + over amount, pause reason, and the continue/abort prompt. No
+ * box-drawing — just structural headings.
+ */
+function printCostCapHalt(emit: Emit, state: UIState): void {
+  const spent = state.runningCostUsd ?? 0;
+  const cap = state.costCapBudgetUsd;
+  const over = cap != null ? Math.max(0, spent - cap) : 0;
+  emit("[!] BUDGET EXCEEDED");
+  if (cap != null) {
+    emit(`spent: $${spent.toFixed(2)} of $${cap.toFixed(2)} cap (+$${over.toFixed(2)} over)`);
+  } else {
+    emit(`spent: $${spent.toFixed(2)} (no cap set)`);
+  }
+  emit("pipeline paused — continuing incurs further charges");
+  emit("continue (c) or abort (a)? ");
+}
+
+/**
+ * severityPlainRank — sort helper mirroring FindingsView's order.
+ */
+function severityPlainRank(f: ActionableFinding): number {
+  const sev = normalizeSeverity(f.displaySeverity ?? f.severity);
+  switch (sev) {
+    case "critical":
+      return 0;
+    case "high":
+      return 1;
+    case "medium":
+      return 2;
+    case "low":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function tallyFindings(findings: ReadonlyArray<ActionableFinding>): {
+  crit: number;
+  high: number;
+  med: number;
+  low: number;
+} {
+  const out = { crit: 0, high: 0, med: 0, low: 0 };
+  for (const f of findings) {
+    const sev = normalizeSeverity(f.displaySeverity ?? f.severity);
+    if (sev === "critical") out.crit += 1;
+    else if (sev === "high") out.high += 1;
+    else if (sev === "medium") out.med += 1;
+    else out.low += 1;
+  }
+  return out;
+}
+
+function resolveFindingByAlias(
+  id: string,
+  findings: ReadonlyArray<ActionableFinding>,
+): ActionableFinding | undefined {
+  if (!id) return undefined;
+  // F-NNNN alias = 1-based index into severity-sorted list.
+  const aliasMatch = /^F-(\d{1,6})$/i.exec(id);
+  if (aliasMatch) {
+    const n = Number.parseInt(aliasMatch[1], 10);
+    const sorted = [...findings].sort((a, b) => severityPlainRank(a) - severityPlainRank(b));
+    return sorted[n - 1];
+  }
+  return findings.find((f) => f.fingerprint.startsWith(id));
+}
+
+function clipLine(text: string, max: number): string {
+  if (!text) return "";
+  const single = text.replace(/\s+/g, " ").trim();
+  if (single.length <= max) return single;
+  return `${single.slice(0, max - 1)}…`;
 }
