@@ -14,7 +14,8 @@
 import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import type { ShellState, TuneSnapshot } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { HouseRules } from "./HouseRules.js";
 
 const PRESETS = ["fast", "standard", "deep"] as const;
@@ -29,11 +30,19 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 120;
   const narrow = columns < 110;
+  useRegisterKeybindings([
+    { keys: "x", label: "run with these settings" },
+    { keys: "s", label: "save", secondary: true },
+    { keys: "r", label: "reset", secondary: true },
+    { keys: "p", label: "prompt editor", secondary: true },
+    { keys: "/config", label: "full editor", secondary: true },
+    { keys: "b", label: "back", secondary: true },
+  ]);
   const moduleId = shell.focusedModule ?? "(no module)";
   const snap = shell.tuneSnapshot;
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
       <Box>
         <Text>
           {tokens.muted("\u25C2 back   ")}
@@ -95,30 +104,15 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
         </Text>
       </TuneControl>
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>{tokens.muted("\u2500".repeat(78))}</Text>
       </Box>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>{tokens.strong("Primary action: x run with these settings.")}</Text>
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <HouseRules text={snap?.houseRules} path={snap?.houseRulesPath} />
-      </Box>
-
-      <Box marginTop={1}>
-        <Text>{tokens.muted("\u2500".repeat(78))}</Text>
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text>{tokens.hint("Primary: x run with these settings")}</Text>
-        <Text>
-          {tokens.muted(
-            narrow
-              ? "Secondary: s save · r reset · p prompt editor · /config full editor"
-              : "Secondary: s save · r reset · p prompt editor (--expert) · /config full editor",
-          )}
-        </Text>
       </Box>
     </Box>
   );
@@ -136,14 +130,14 @@ function TuneControl({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {tokens.label(label)}
         {"     "}
         {tokens.hint(String(configKey))}
         {flag ? tokens.muted(`    ${flag}`) : ""}
       </Text>
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SPACING.sm}>
         {children}
       </Box>
     </Box>

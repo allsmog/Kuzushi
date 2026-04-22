@@ -27,7 +27,10 @@ import type {
 } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { truncateEnd } from "../format.js";
+import { ContextStrip } from "./ContextStrip.js";
 
 interface ScopeAndCriticalityViewProps {
   shell: ShellState;
@@ -36,6 +39,15 @@ interface ScopeAndCriticalityViewProps {
 export function ScopeAndCriticalityView({
   shell,
 }: ScopeAndCriticalityViewProps): React.ReactElement {
+  useRegisterKeybindings([
+    { keys: "1", label: "dfd", secondary: true },
+    { keys: "2", label: "stride", secondary: true },
+    { keys: "3", label: "stories", secondary: true },
+    { keys: "4", label: "scope" },
+    { keys: "5", label: "summary", secondary: true },
+    { keys: "/threats edit", label: "annotate", secondary: true },
+    { keys: "q", label: "back", secondary: true },
+  ]);
   const tm = shell.threatModel;
   if (!tm) return <EmptyState />;
 
@@ -44,19 +56,29 @@ export function ScopeAndCriticalityView({
   const edits = summariseEdits(tm);
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <Header shell={shell} editCount={edits.total} />
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+      <ContextStrip
+        status={[`${edits.total} operator edits`]}
+        subtitle={
+          shell.threatModelSource
+            ? formatThreatModelSource({
+                sourcePath: shell.threatModelSource.path,
+                mtimeMs: shell.threatModelSource.mtimeMs,
+              })
+            : undefined
+        }
+      />
 
       {buckets ? <CriticalityBuckets buckets={buckets} /> : null}
 
       {outOfScope.length > 0 ? (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>{tokens.label("out of scope")}</Text>
-          <Box flexDirection="column" paddingLeft={3} marginTop={1}>
+          <Box flexDirection="column" paddingLeft={SPACING.lg} marginTop={SPACING.sm}>
             {outOfScope.map((line, i) => (
               <Text key={`oos-${i}-${line.slice(0, 6)}`}>
                 {tokens.muted("\u00B7  ")}
-                {tokens.muted(truncate(line, 74))}
+                {tokens.muted(truncateEnd(line, 74))}
               </Text>
             ))}
           </Box>
@@ -64,20 +86,18 @@ export function ScopeAndCriticalityView({
       ) : null}
 
       <OperatorEdits tm={tm} />
-
-      <HintFooter />
     </Box>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("scope & criticality")}
       </Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.warn("No threat model loaded. Run a scan with threat modelling enabled first.")}
         </Text>
@@ -86,36 +106,6 @@ function EmptyState(): React.ReactElement {
   );
 }
 
-function Header({
-  shell,
-  editCount,
-}: {
-  shell: ShellState;
-  editCount: number;
-}): React.ReactElement {
-  return (
-    <Box flexDirection="column">
-      <Text>
-        {tokens.muted("\u25C2 back   ")}
-        {tokens.strong("scope & criticality")}
-        {tokens.muted("   \u2502   ")}
-        {editCount > 0
-          ? tokens.value(`${editCount} operator edit${editCount === 1 ? "" : "s"}`)
-          : tokens.muted("no operator edits yet")}
-      </Text>
-      {shell.threatModelSource ? (
-        <Text>
-          {tokens.hint(
-            formatThreatModelSource({
-              sourcePath: shell.threatModelSource.path,
-              mtimeMs: shell.threatModelSource.mtimeMs,
-            }),
-          )}
-        </Text>
-      ) : null}
-    </Box>
-  );
-}
 
 function CriticalityBuckets({
   buckets,
@@ -124,11 +114,11 @@ function CriticalityBuckets({
 }): React.ReactElement {
   const order: Array<keyof ThreatModelCriticalityBuckets> = ["critical", "high", "medium", "low"];
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("criticality calibration")}</Text>
-      <Box flexDirection="column" paddingLeft={3} marginTop={1}>
+      <Box flexDirection="column" paddingLeft={SPACING.lg} marginTop={SPACING.sm}>
         {order.map((tier) => (
-          <Box key={tier} flexDirection="column" marginBottom={1}>
+          <Box key={tier} flexDirection="column" marginBottom={SPACING.sm}>
             <Text>
               {severityBadge(tier)}
               {"  "}
@@ -141,7 +131,7 @@ function CriticalityBuckets({
                 {"   "}
                 {tokens.muted("\u00B7")}
                 {"  "}
-                {tokens.muted(truncate(item, 70))}
+                {tokens.muted(truncateEnd(item, 70))}
               </Text>
             ))}
             {(buckets[tier] ?? []).length > 5 ? (
@@ -178,9 +168,9 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
   const total = annotations.length + confirmed.length + dismissed.length;
   if (total === 0) {
     return (
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SPACING.sm}>
         <Text>{tokens.label("operator edits")}</Text>
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Text>
             {tokens.muted(
               "   (no operator overrides yet — use /threats edit to annotate or dismiss)",
@@ -192,11 +182,11 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("operator edits")}</Text>
 
       {annotations.length > 0 ? (
-        <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+        <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
           <Text>
             {tokens.accent("\u25CF  ")}
             {tokens.strong(`annotations (${annotations.length})`)}
@@ -206,7 +196,7 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
               {"   "}
               {tokens.muted(`[${id}]`)}
               {"  "}
-              {tokens.muted(truncate(note, 60))}
+              {tokens.muted(truncateEnd(note, 60))}
             </Text>
           ))}
           {annotations.length > 6 ? (
@@ -219,7 +209,7 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
       ) : null}
 
       {confirmed.length > 0 ? (
-        <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+        <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
           <Text>
             {tokens.success("\u25CF  ")}
             {tokens.strong(`confirmed mitigations (${confirmed.length})`)}
@@ -228,7 +218,7 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
             <Text key={`mit-${i}`}>
               {"   "}
               {tokens.muted("\u00B7  ")}
-              {tokens.value(truncate(item, 70))}
+              {tokens.value(truncateEnd(item, 70))}
             </Text>
           ))}
           {confirmed.length > 6 ? (
@@ -241,7 +231,7 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
       ) : null}
 
       {dismissed.length > 0 ? (
-        <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+        <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
           <Text>
             {tokens.warn("\u25CF  ")}
             {tokens.strong(`dismissed threats (${dismissed.length})`)}
@@ -255,7 +245,7 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
       ) : null}
 
       {tm.lastEditedAt ? (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Text>{tokens.hint(`   last edit: ${tm.lastEditedAt}`)}</Text>
         </Box>
       ) : null}
@@ -263,18 +253,6 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
   );
 }
 
-function HintFooter(): React.ReactElement {
-  return (
-    <Box marginTop={1}>
-      <Text>
-        {tokens.muted("1 dfd  2 stride  3 stories  ")}
-        {tokens.hint("4 scope  ")}
-        {tokens.muted("5 summary")}
-        {tokens.hint("   /threats edit to annotate   q back")}
-      </Text>
-    </Box>
-  );
-}
 
 function summariseEdits(tm: ThreatModelDocument): { total: number } {
   const total =
@@ -284,6 +262,3 @@ function summariseEdits(tm: ThreatModelDocument): { total: number } {
   return { total };
 }
 
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
-}
