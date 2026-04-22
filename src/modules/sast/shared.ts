@@ -70,6 +70,7 @@ export async function executeSastPipeline(
   const { resolveRepo } = await import("../../cli/shared.js");
   const { resolveScanSeverity } = await import("../../cli/scan-config.js");
   const { configureTerminalOutput, resetTerminalOutput } = await import("../../ui/output.js");
+  const { summarizePipelineResult } = await import("./pipeline-summary.js");
   const path = await import("node:path");
 
   const mergedConfig = mergeTaskConfig(ctx.config, options?.taskConfig);
@@ -160,17 +161,12 @@ export async function executeSastPipeline(
     });
 
     const label = options?.summaryLabel ?? "Scan";
-    const findings = result.stats?.totalFindings ?? 0;
-    const triaged = result.stats?.triaged ?? 0;
-    const cost = result.stats?.totalCostUsd;
-
-    const summary = result.aborted
-      ? `${label} cancelled: ${repoName}`
-      : result.status === "complete"
-        ? options?.postProcessMode === "scan-only"
-          ? `${label} complete: ${repoName} — ${findings} findings${cost ? ` ($${cost.toFixed(2)})` : ""}`
-          : `${label} complete: ${repoName} — ${findings} findings, ${triaged} triaged${cost ? ` ($${cost.toFixed(2)})` : ""}`
-        : `${label} finished with errors: ${repoName} — ${findings} findings${result.error ? ` (${result.error})` : ""}`;
+    const summary = summarizePipelineResult({
+      result,
+      repoName,
+      label,
+      postProcessMode: options?.postProcessMode ?? "full",
+    });
 
     return {
       ok: result.status === "complete",
