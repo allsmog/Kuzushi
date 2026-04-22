@@ -10,6 +10,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { Table } from "../primitives/Table.js";
 import type { ActionableFinding } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -45,46 +46,42 @@ export function ChainGroup({
         {verifiedSuffix}
         {tokens.muted(` ${bar}\u2510`)}
       </Text>
-      {findings.map((f) => (
-        <FindingRow key={f.fingerprint} finding={f} width={width} />
-      ))}
+      <Box paddingLeft={2}>
+        <Table
+          gap={1}
+          columns={[
+            {
+              key: "id",
+              header: "ID",
+              width: 8,
+              render: (f: ActionableFinding) => `F-${f.fingerprint.slice(0, 4)}`,
+            },
+            {
+              key: "title",
+              header: "TITLE",
+              flex: 4,
+              truncate: "end",
+              render: (f: ActionableFinding) => f.title ?? f.ruleId,
+            },
+            {
+              key: "loc",
+              header: "LOCATION",
+              flex: 3,
+              truncate: "middle",
+              render: (f: ActionableFinding) => `${f.filePath}:${f.startLine}`,
+            },
+            {
+              key: "state",
+              header: "STATE",
+              width: 11,
+              render: (f: ActionableFinding) => f.verdict?.toUpperCase() ?? "—",
+            },
+          ]}
+          rows={findings}
+          showHeader
+        />
+      </Box>
       <Text>{tokens.muted(`\u2514${"\u2500".repeat(width)}\u2518`)}</Text>
-    </Box>
-  );
-}
-
-function FindingRow({
-  finding,
-  width,
-}: {
-  finding: ActionableFinding;
-  width: number;
-}): React.ReactElement {
-  const title = finding.title ?? finding.ruleId;
-  const loc = `${finding.filePath}:${finding.startLine}`;
-  const verdict = finding.verdict?.toUpperCase() ?? "—";
-  // Trim title so the pipe stays aligned for a ~78-col box.
-  const titleClip = clip(title, Math.max(20, width - 20));
-  const locClip = clip(loc, Math.max(20, width - 12));
-
-  return (
-    <Box flexDirection="column">
-      <Text>
-        {tokens.muted("\u2502 ")}
-        {finding.displaySeverity === "critical"
-          ? tokens.dangerStrong(`F-${finding.fingerprint.slice(0, 4)}`)
-          : tokens.danger(`F-${finding.fingerprint.slice(0, 4)}`)}
-        {"  "}
-        {tokens.strong(titleClip)}
-      </Text>
-      <Text>
-        {tokens.muted("\u2502          ")}
-        {tokens.muted(locClip)}
-        {tokens.muted(" · ")}
-        {tokens.muted(`[${finding.taskId || "sast"}]`)}
-        {tokens.muted(" · ")}
-        {tokens.muted(verdict)}
-      </Text>
     </Box>
   );
 }
@@ -98,9 +95,4 @@ function severityBadge(severity: "CRITICAL" | "HIGH" | "MEDIUM"): string {
     default:
       return tokens.warn("medium");
   }
-}
-
-function clip(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}\u2026`;
 }

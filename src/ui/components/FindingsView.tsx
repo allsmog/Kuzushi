@@ -12,6 +12,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { colorVerdict } from "../format.js";
 import { icons } from "../icons.js";
+import { Table } from "../primitives/Table.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
 import { tokens } from "../tokens.js";
 import { ChainGroup } from "./ChainGroup.js";
@@ -182,9 +183,50 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
 
       {loose.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          {loose.map((f) => (
-            <LooseRow key={f.fingerprint} finding={f} />
-          ))}
+          <Text>{tokens.label("ungrouped findings")}</Text>
+          <Box marginTop={1}>
+            <Table
+              showHeader
+              gap={1}
+              columns={[
+                {
+                  key: "sev",
+                  header: "SEV",
+                  width: 5,
+                  render: (f: ActionableFinding) =>
+                    severityInline(f.displaySeverity ?? mapSeverity(f.severity)),
+                },
+                {
+                  key: "id",
+                  header: "ID",
+                  width: 8,
+                  render: (f: ActionableFinding) => `F-${f.fingerprint.slice(0, 4)}`,
+                },
+                {
+                  key: "title",
+                  header: "TITLE",
+                  flex: 5,
+                  truncate: "end",
+                  render: (f: ActionableFinding) => f.title ?? f.ruleId,
+                },
+                {
+                  key: "loc",
+                  header: "LOCATION",
+                  flex: 3,
+                  truncate: "middle",
+                  render: (f: ActionableFinding) => `${f.filePath}:${f.startLine}`,
+                },
+                {
+                  key: "state",
+                  header: "STATE",
+                  width: 12,
+                  truncate: "end",
+                  render: (f: ActionableFinding) => f.verdict?.toUpperCase() ?? "—",
+                },
+              ]}
+              rows={loose}
+            />
+          </Box>
         </Box>
       )}
 
@@ -198,30 +240,6 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
           )}
         </Text>
       </Box>
-    </Box>
-  );
-}
-
-function LooseRow({ finding }: { finding: ActionableFinding }): React.ReactElement {
-  const title = finding.title ?? finding.ruleId;
-  const sev = finding.displaySeverity ?? mapSeverity(finding.severity);
-  const sevTag = severityInline(sev);
-  return (
-    <Box flexDirection="column">
-      <Text>
-        {"  "}
-        {sevTag}
-        {"  "}
-        {tokens.strong(clip(title, 56))}
-        {"  "}
-        {tokens.muted(`[${finding.taskId || "sast"}]`)}
-      </Text>
-      <Text>
-        {"           "}
-        {tokens.muted(`${finding.filePath}:${finding.startLine}`)}
-        {"  "}
-        {tokens.muted(`· ${finding.verdict?.toUpperCase() ?? "—"}`)}
-      </Text>
     </Box>
   );
 }
@@ -292,9 +310,4 @@ function severityInline(sev: "critical" | "high" | "medium" | "low"): string {
     default:
       return tokens.muted("LOW ");
   }
-}
-
-function clip(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}\u2026`;
 }
