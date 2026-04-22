@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import type { ConfigPatchEntry } from "../../config.js";
 import type { KuzushiConfig } from "../../types.js";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { SPACING, tokens } from "../tokens.js";
 import {
@@ -165,7 +166,6 @@ export function ConfigEditor({
   });
   const [drill, setDrill] = useState<DrillTarget | null>(null);
   const [editingPath, setEditingPath] = useState<string | null>(focusKey ?? null);
-  const [cursor, setCursor] = useState<number>(0);
 
   // ── Compute visible rows ─────────────────────────────────────────────
   const otherKeys = useMemo<string[]>(() => {
@@ -243,6 +243,11 @@ export function ConfigEditor({
   }, [cfg.taskConfig, drill]);
 
   const visibleSize = drill ? drillRows.length : rows.length;
+  const nav = useBoundedIndex(Math.max(visibleSize, 1), {
+    wrap: true,
+    isActive: !editingPath,
+  });
+  const cursor = nav.index;
   const safeCursor = Math.min(cursor, Math.max(0, visibleSize - 1));
 
   const editingDescriptor = useMemo<FieldDescriptor | null>(() => {
@@ -296,20 +301,11 @@ export function ConfigEditor({
   );
 
   // ── Input handler ────────────────────────────────────────────────────
+  // Arrow/vim nav is owned by useBoundedIndex; this handler is for the
+  // action keys only (Space, Enter, s, Esc) and mode-specific semantics.
   useInput(
     (input, key) => {
       if (editingPath) return; // value editor owns input
-      const size = visibleSize;
-      if (key.upArrow || input === "k") {
-        if (size === 0) return;
-        setCursor((c) => (c - 1 + size) % size);
-        return;
-      }
-      if (key.downArrow || input === "j") {
-        if (size === 0) return;
-        setCursor((c) => (c + 1) % size);
-        return;
-      }
       if (input === "s") {
         commitSave();
         return;
@@ -317,7 +313,7 @@ export function ConfigEditor({
       if (key.escape) {
         if (drill) {
           setDrill(null);
-          setCursor(0);
+          nav.setIndex(0);
           return;
         }
         onCancel();
@@ -328,7 +324,7 @@ export function ConfigEditor({
         if (!row) return;
         if (row.kind === "back" && key.return) {
           setDrill(null);
-          setCursor(0);
+          nav.setIndex(0);
           return;
         }
         if (row.kind === "field" && key.return) {
@@ -353,7 +349,7 @@ export function ConfigEditor({
       if (row.kind === "task") {
         if (key.return || input === " ") {
           setDrill({ kind: "task", taskId: row.taskId });
-          setCursor(0);
+          nav.setIndex(0);
         }
         return;
       }
