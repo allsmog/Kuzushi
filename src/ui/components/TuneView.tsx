@@ -15,6 +15,7 @@ import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import type { ShellState, TuneSnapshot } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ScreenContent } from "./ScreenContent.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { HouseRules } from "./HouseRules.js";
 
@@ -42,7 +43,7 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
   const snap = shell.tuneSnapshot;
 
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <Box>
         <Text>
           {tokens.muted("\u25C2 back   ")}
@@ -114,7 +115,7 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
       <Box marginTop={SPACING.sm}>
         <HouseRules text={snap?.houseRules} path={snap?.houseRulesPath} />
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 

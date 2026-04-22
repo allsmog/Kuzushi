@@ -20,6 +20,7 @@ import type {
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ScreenContent } from "./ScreenContent.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { ContextStrip } from "./ContextStrip.js";
 
@@ -141,7 +142,7 @@ export function ThreatStrideMatrix({ shell }: ThreatStrideMatrixProps): React.Re
   const nameWidth = Math.max(4, ...sortedElements.map((e) => Math.min(24, e.name.length)));
 
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <ContextStrip
         status={[`${elements.length} elements`, `${threats.length} threats`]}
         subtitle={
@@ -173,13 +174,13 @@ export function ThreatStrideMatrix({ shell }: ThreatStrideMatrixProps): React.Re
         <Text>{tokens.label("impact × likelihood")}</Text>
         <PivotTable pivot={pivot} />
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("STRIDE matrix")}
@@ -189,7 +190,7 @@ function EmptyState(): React.ReactElement {
           {tokens.warn("No threat model loaded. Run a scan with threat modelling enabled first.")}
         </Text>
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 

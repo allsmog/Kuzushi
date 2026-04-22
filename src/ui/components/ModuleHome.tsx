@@ -14,6 +14,7 @@ import { icons } from "../icons.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellModuleToolSummary, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ScreenContent } from "./ScreenContent.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { ContextStrip } from "./ContextStrip.js";
 
@@ -42,7 +43,7 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   const panelWidth = 80;
 
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <ContextStrip
         status={card ? [card.category, `${tools.length} tools`] : [`${tools.length} tools`]}
         subtitle={card?.description}
@@ -87,7 +88,7 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
         </Text>
       </Section>
 
-    </Box>
+    </ScreenContent>
   );
 }
 

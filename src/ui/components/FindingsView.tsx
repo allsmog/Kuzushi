@@ -15,6 +15,7 @@ import { icons } from "../icons.js";
 import { Table } from "../primitives/Table.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ScreenContent } from "./ScreenContent.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { ChainGroup } from "./ChainGroup.js";
 import { type FilterChip, FilterChips } from "./FilterChips.js";
@@ -158,7 +159,7 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
   const counts = tallyCounts(findings);
 
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <Box>
         <Text>
           {tokens.muted("\u25C2 back   ")}
@@ -262,7 +263,7 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
         </Box>
       )}
 
-    </Box>
+    </ScreenContent>
   );
 }
 

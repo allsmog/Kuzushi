@@ -22,6 +22,7 @@ import type { DfdElement, TrustBoundary } from "../../agents/tasks/threat-modeli
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ScreenContent } from "./ScreenContent.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { truncateEnd } from "../format.js";
 import { ContextStrip } from "./ContextStrip.js";
@@ -60,7 +61,7 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
   const zoneOrder = [...zones.keys()].sort(zoneSortFn);
 
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <ContextStrip
         status={[`${elements.length} elements`, `${tm.threats.length} threats`]}
         subtitle={
@@ -104,13 +105,13 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
           </Box>
         </Box>
       )}
-    </Box>
+    </ScreenContent>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("data flow diagram")}
@@ -120,7 +121,7 @@ function EmptyState(): React.ReactElement {
           {tokens.warn("No threat model loaded. Run a scan with threat modelling enabled first.")}
         </Text>
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 

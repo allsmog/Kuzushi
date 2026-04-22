@@ -24,6 +24,7 @@ import type { StrideThreat } from "../../agents/tasks/threat-modeling/types.js";
 import { Table } from "../primitives/Table.js";
 import type { ActionableFinding, ShellState, UIState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 interface DiffSinceViewProps {
   state: UIState;
@@ -44,7 +45,7 @@ export function DiffSinceView({ state, shell }: DiffSinceViewProps): React.React
   );
 
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <Header
         diff={diff}
         scopedFindings={scopedFindings.length}
@@ -71,13 +72,13 @@ export function DiffSinceView({ state, shell }: DiffSinceViewProps): React.React
       ) : null}
 
       <HintFooter />
-    </Box>
+    </ScreenContent>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("diff since \u2026")}
@@ -90,7 +91,7 @@ function EmptyState(): React.ReactElement {
           {tokens.muted(" to scope.")}
         </Text>
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 

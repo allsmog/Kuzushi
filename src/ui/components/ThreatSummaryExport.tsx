@@ -24,6 +24,7 @@ import type { StrideCategory } from "../../agents/tasks/threat-modeling/types.js
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ScreenContent } from "./ScreenContent.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { ContextStrip } from "./ContextStrip.js";
 
@@ -76,7 +77,7 @@ export function ThreatSummaryExport({ shell }: ThreatSummaryExportProps): React.
   const totalThreats = tm.summary?.total ?? tm.threats.length;
 
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <ContextStrip
         status={[`${totalThreats} threats`, `${tm.dfd.elements.length} elements`]}
         subtitle={
@@ -98,13 +99,13 @@ export function ThreatSummaryExport({ shell }: ThreatSummaryExportProps): React.
       <Drives />
 
       <Artifacts shell={shell} />
-    </Box>
+    </ScreenContent>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("threat summary")}
@@ -114,7 +115,7 @@ function EmptyState(): React.ReactElement {
           {tokens.warn("No threat model loaded. Run a scan with threat modelling enabled first.")}
         </Text>
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 
