@@ -10,6 +10,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { icons } from "../icons.js";
 import type { ShellModuleCard, ShellModuleToolSummary, ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -26,10 +27,11 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   const card = shell.moduleCatalog?.find((c) => c.id === moduleId);
   const tools: ReadonlyArray<ShellModuleToolSummary> = card?.toolSummaries ?? [];
   const verbWidth = Math.max(10, ...tools.map((t) => t.verb.length));
+  const panelWidth = 80;
 
   return (
     <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <Header moduleId={moduleId} card={card} />
+      <Header moduleId={moduleId} card={card} width={panelWidth} />
 
       {card?.description ? (
         <Section label="what it does">
@@ -55,7 +57,7 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
       </Section>
 
       <Box marginTop={1}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
+        <Text>{tokens.metadata(icons.boxHorizontal.repeat(panelWidth - 2))}</Text>
       </Box>
       <Box>
         <Text>
@@ -77,19 +79,17 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
 function Header({
   moduleId,
   card,
+  width,
 }: {
   moduleId: string;
   card?: ShellModuleCard;
+  width: number;
 }): React.ReactElement {
   const tagline = card ? `· ${card.category} · ${truncate(card.description, 50)}` : "";
+  const line = `${"\u25C2 back"}  ${moduleId}  ${tagline}`.trim();
   return (
     <Box>
-      <Text>
-        {tokens.muted("\u25C2 back  ")}
-        {tokens.strong(moduleId)}
-        {"  "}
-        {tokens.muted(tagline)}
-      </Text>
+      <Text>{tokens.focus(line.slice(0, width - 2))}</Text>
     </Box>
   );
 }
@@ -150,11 +150,16 @@ function WrappedText({ text, width }: { text: string; width: number }): React.Re
     }
   }
   if (current) lines.push(current);
+  let offset = 0;
+  const keyedLines = lines.map((line) => {
+    offset += line.length + 1;
+    return { line, key: `${offset}-${line.slice(0, 16)}` };
+  });
 
   return (
     <Box flexDirection="column">
-      {lines.map((line, i) => (
-        <Text key={`${i}-${line.slice(0, 10)}`}>
+      {keyedLines.map(({ line, key }) => (
+        <Text key={key}>
           {"   "}
           {line}
         </Text>

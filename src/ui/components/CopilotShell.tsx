@@ -340,6 +340,12 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         ))}
       </Box>
 
+      {!shell.processing && liveHistory.length > 0 ? (
+        <Box marginTop={1} paddingLeft={2}>
+          <Text>{tokens.tertiary("interactive")}</Text>
+        </Box>
+      ) : null}
+
       <MemoShellViewPanel state={state} shell={shell} />
 
       {shell.plannerBusy && !shell.pendingPlan && (
@@ -396,13 +402,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
             <Text>
               {tokens.accent(buildShellPrompt(shell.focusedModule))}
               {input}
-              {tokens.muted("\u2588")}
+              {tokens.tertiary("\u258C")}
             </Text>
           </Box>
           {slashSuggestions.length > 0 && (
             <Box flexDirection="column" paddingLeft={2}>
-              <Text>{tokens.muted("Suggestions:")}</Text>
-              <Text>{tokens.muted(slashSuggestions.join("  •  "))}</Text>
+              <Text>{tokens.tertiary("Suggestions")}</Text>
+              <Text>{tokens.tertiary(slashSuggestions.join("  ·  "))}</Text>
             </Box>
           )}
         </>
@@ -618,7 +624,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
       return (
         <Box paddingLeft={0}>
           <Gutter>
-            <Text dimColor>{LOWER_HOOK}</Text>
+            <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
           </Gutter>
           <Text> {wrap(entry.text)}</Text>
         </Box>
@@ -666,7 +672,7 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
           {status ? <PulseDot status={status} /> : <Text>{tokens.accent(BLACK_CIRCLE)}</Text>}
         </Gutter>
         <Text>
-          <Text bold>{label}</Text>
+          {tokens.label(label)}
           {entry.inputHint ? tokens.muted(`(${entry.inputHint})`) : ""}
           {elapsedSuffix}
         </Text>
@@ -677,7 +683,7 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
             <Box key={activity.id}>
               <Gutter />
               <Gutter>
-                <Text dimColor>{LOWER_HOOK}</Text>
+                <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
               </Gutter>
               <Text> {tokens.muted(activity.text)}</Text>
             </Box>
@@ -688,7 +694,7 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
         <Box>
           <Gutter />
           <Gutter>
-            <Text dimColor>{LOWER_HOOK}</Text>
+            <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
           </Gutter>
           <Text>
             {" "}

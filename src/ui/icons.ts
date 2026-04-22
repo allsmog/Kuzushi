@@ -8,9 +8,9 @@ export const icons = {
   error: "\u2717", // ✗
   warning: "\u26A0", // ⚠
   info: "\u2139", // ℹ
-  pending: "\u25CB", // ○
+  pending: "\u25E6", // ◦
   active: "\u25CF", // ●
-  complete: "\u25C6", // ◆
+  complete: "\u25C9", // ◉
 
   // Connectors
   arrow: "\u2192", // →
