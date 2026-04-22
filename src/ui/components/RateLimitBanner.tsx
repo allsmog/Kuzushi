@@ -24,10 +24,10 @@ export function RateLimitBanner({ throttle }: RateLimitBannerProps): React.React
       <Text>
         {tokens.warn(icons.warning)}
         {"  "}
-        {tokens.warn("rate-limited")}
-        {tokens.muted(`  ·  reduced to ${throttle.concurrency} concurrent`)}
-        {throttle.reason ? tokens.muted(`  ·  ${throttle.reason}`) : ""}
-        {tokens.hint("  — recovering")}
+        {tokens.warnStrong("rate limited")}
+        {tokens.tertiary(`  ·  ${throttle.concurrency} concurrent`)}
+        {throttle.reason ? tokens.tertiary(`  ·  ${throttle.reason}`) : ""}
+        {tokens.hint("  · adapting")}
       </Text>
     </Box>
   );
