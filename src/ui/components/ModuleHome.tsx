@@ -12,6 +12,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import type { ShellModuleCard, ShellModuleToolSummary, ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
+import { EmptyState } from "./EmptyState.js";
 import { ShellFooterHints } from "./ShellFooterHints.js";
 
 interface ModuleHomeProps {
@@ -21,7 +22,11 @@ interface ModuleHomeProps {
 export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   const moduleId = shell.focusedModule;
   if (!moduleId) {
-    return <Text>{tokens.muted("(no module focused)")}</Text>;
+    return (
+      <Box paddingLeft={2}>
+        <EmptyState kind="module-none-focused" />
+      </Box>
+    );
   }
 
   const card = shell.moduleCatalog?.find((c) => c.id === moduleId);
@@ -40,7 +45,9 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
 
       <Section label="tools" hint="(invoke from this shell as verb, or headless via kuzushi run)">
         {tools.length === 0 ? (
-          <Text>{tokens.muted("   (no tools declared)")}</Text>
+          <Box paddingLeft={3}>
+            <EmptyState kind="module-no-tools" context={{ moduleId }} />
+          </Box>
         ) : (
           tools.map((tool) => <ToolRow key={tool.name} tool={tool} verbWidth={verbWidth} />)
         )}

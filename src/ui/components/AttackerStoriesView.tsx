@@ -24,6 +24,7 @@ import type {
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
+import { EmptyState as EmptyStateCard } from "./EmptyState.js";
 
 const INPUT_CATEGORY_ORDER: Array<{
   key: keyof ThreatModelInputCategories;
@@ -96,9 +97,7 @@ function EmptyState(): React.ReactElement {
         {tokens.strong("attacker stories")}
       </Text>
       <Box marginTop={1}>
-        <Text>
-          {tokens.warn("No threat model loaded. Run a scan with threat modelling enabled first.")}
-        </Text>
+        <EmptyStateCard kind="threat-model-missing" context={{ threatView: "stories" }} />
       </Box>
     </Box>
   );

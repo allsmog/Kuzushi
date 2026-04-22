@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { classifyError, formatError, suggestNextStep } from "../../src/ui/error-format.js";
+import {
+  classifyError,
+  editDistance,
+  formatError,
+  formatUnknownModule,
+  formatUnknownTool,
+  formatUnknownVerb,
+  nearestMatches,
+  suggestNextStep,
+} from "../../src/ui/error-format.js";
 
 describe("classifyError", () => {
   it("classifies 401 as auth", () => {
@@ -35,9 +44,23 @@ describe("suggestNextStep", () => {
   it("provides auth hint", () => {
     expect(suggestNextStep(null, "auth")).toContain("ANTHROPIC_API_KEY");
   });
+  it("detects specific env var names in auth errors", () => {
+    const err: Error & { status?: number } = new Error("MY_SPECIAL_KEY not set");
+    err.status = 401;
+    const hint = suggestNextStep(err, "auth");
+    expect(hint).toContain("MY_SPECIAL_KEY");
+  });
   it("returns undefined for fatal/unknown", () => {
     expect(suggestNextStep(null, "fatal")).toBeUndefined();
     expect(suggestNextStep(null, "unknown")).toBeUndefined();
+  });
+  it("rate_limit hint mentions /concurrency", () => {
+    expect(suggestNextStep(null, "rate_limit")).toContain("/concurrency");
+  });
+  it("budget hint mentions c and a keys", () => {
+    const hint = suggestNextStep(null, "budget") ?? "";
+    expect(hint).toMatch(/\bc\b/);
+    expect(hint).toMatch(/\ba\b/);
   });
 });
 
@@ -87,5 +110,89 @@ describe("formatError", () => {
     const out = formatError("boom");
     expect(out.headline).toContain("boom");
     expect(out.frames).toEqual([]);
+  });
+});
+
+describe("editDistance", () => {
+  it("returns 0 for identical strings", () => {
+    expect(editDistance("sast", "sast")).toBe(0);
+  });
+  it("is case-insensitive", () => {
+    expect(editDistance("SAST", "sast")).toBe(0);
+  });
+  it("returns length of longer string when one is empty", () => {
+    expect(editDistance("", "sast")).toBe(4);
+    expect(editDistance("sast", "")).toBe(4);
+  });
+  it("counts single substitutions", () => {
+    expect(editDistance("sast", "mast")).toBe(1);
+  });
+  it("counts insertions and deletions", () => {
+    expect(editDistance("scan", "scanr")).toBe(1);
+    expect(editDistance("scanr", "scan")).toBe(1);
+  });
+});
+
+describe("nearestMatches", () => {
+  it("returns the closest match first", () => {
+    const matches = nearestMatches("sat", ["sast", "dast", "iast", "threats"], 3);
+    expect(matches[0]).toBe("sast");
+  });
+  it("returns at most `limit` matches", () => {
+    const matches = nearestMatches("sat", ["sast", "dast", "iast", "threats"], 2);
+    expect(matches).toHaveLength(2);
+  });
+  it("returns empty when nothing is similar enough", () => {
+    const matches = nearestMatches("xyz", ["completely", "unrelated", "tokens"]);
+    expect(matches).toEqual([]);
+  });
+  it("returns empty on empty haystack or empty needle", () => {
+    expect(nearestMatches("a", [])).toEqual([]);
+    expect(nearestMatches("", ["a", "b"])).toEqual([]);
+  });
+});
+
+describe("formatUnknownTool", () => {
+  it("includes the typo and a suggestion", () => {
+    const out = formatUnknownTool("sast:sca", ["sast:scan", "sast:semgrep", "sast:codeql"]);
+    expect(out).toContain("sast:sca");
+    expect(out).toContain("sast:scan");
+  });
+  it("falls back to /tools when nothing is close", () => {
+    const out = formatUnknownTool("xyzabc", ["sast:scan"]);
+    expect(out).toContain("/tools");
+    expect(out).not.toContain("Did you mean");
+  });
+});
+
+describe("formatUnknownModule", () => {
+  it("suggests the closest loaded module", () => {
+    const out = formatUnknownModule("sat", ["sast", "threats", "randori"]);
+    expect(out).toContain("sast");
+    expect(out).toContain("/modules");
+  });
+  it("handles empty loaded list", () => {
+    const out = formatUnknownModule("sast", []);
+    expect(out).toContain("Unknown module");
+    expect(out).not.toContain("Did you mean");
+  });
+});
+
+describe("formatUnknownVerb", () => {
+  it("suggests the closest known verb", () => {
+    const out = formatUnknownVerb("tunne", ["tune", "trace", "threats"]);
+    expect(out).toContain("tune");
+    expect(out).toContain("/help");
+  });
+  it("strips leading slash from the input", () => {
+    const out = formatUnknownVerb("/threats-foo", ["threats"]);
+    expect(out).toContain("threats-foo");
+    // Shouldn't double-slash.
+    expect(out).not.toContain("//");
+  });
+  it("falls back when no known verbs are given", () => {
+    const out = formatUnknownVerb("xyz");
+    expect(out).toContain("Unknown command");
+    expect(out).toContain("/help");
   });
 });

@@ -24,6 +24,7 @@ import type { StrideThreat } from "../../agents/tasks/threat-modeling/types.js";
 import { type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ShellState, UIState } from "../state.js";
 import { tokens } from "../tokens.js";
+import { EmptyState as EmptyStateCard } from "./EmptyState.js";
 
 interface DiffSinceViewProps {
   state: UIState;
@@ -83,12 +84,7 @@ function EmptyState(): React.ReactElement {
         {tokens.strong("diff since \u2026")}
       </Text>
       <Box marginTop={1}>
-        <Text>
-          {tokens.warn("No diff computed yet. ")}
-          {tokens.muted("Type ")}
-          {tokens.strong("/since <git-ref>")}
-          {tokens.muted(" to scope.")}
-        </Text>
+        <EmptyStateCard kind="diff-since-idle" />
       </Box>
     </Box>
   );
