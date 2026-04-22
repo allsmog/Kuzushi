@@ -1168,6 +1168,105 @@ function pushToolActivity(store: UIStore, text: string): void {
   });
 }
 
+/**
+ * Batch-apply progress updates from `task:phase-progress` / `task:activity`
+ * in a single store mutation. This avoids 3-4 independent `store.update()`
+ * calls per bus event (phase + activity + live tail + scrollback), which
+ * caused visible Ink redraw flicker during noisy module runs.
+ */
+function appendProgressEvent(
+  store: UIStore,
+  event: {
+    text: string;
+    kind?: ShellHistoryEntry["progressKind"];
+    phase?: string;
+    activity?: string;
+    liveActivity?: string;
+  },
+): void {
+  const now = Date.now();
+  const progressText = event.text;
+  const phase = event.phase;
+  const activity = event.activity;
+  const liveActivity = event.liveActivity;
+  const phaseMatch = phase ? phase.match(PHASE_COUNT_RE) : null;
+  const phaseStep = phaseMatch ? Number(phaseMatch[1]) : undefined;
+  const phaseTotal = phaseMatch ? Number(phaseMatch[2]) : undefined;
+  const trimmedActivity =
+    activity && activity.length > ACTIVITY_TEXT_CAP
+      ? `${activity.slice(0, ACTIVITY_TEXT_CAP - 1)}…`
+      : activity;
+  const trimmedLiveActivity =
+    liveActivity && liveActivity.length > LIVE_ACTIVITY_TEXT_CAP
+      ? `${liveActivity.slice(0, LIVE_ACTIVITY_TEXT_CAP - 1)}…`
+      : liveActivity;
+
+  updateShell(store, (shell) => {
+    let nextShell: ShellState = shell;
+
+    if (shell.currentTool && (phase || trimmedActivity)) {
+      const current = shell.currentTool;
+      let nextCurrent = current;
+      if (phase) {
+        nextCurrent = {
+          ...nextCurrent,
+          phase,
+          step: phaseStep,
+          total: phaseTotal,
+          subLabel: phase,
+          lastEventAt: now,
+        };
+      }
+      if (trimmedActivity) {
+        const prev = nextCurrent.activities ?? [];
+        const nextActivities =
+          prev[0]?.text === trimmedActivity
+            ? [{ text: trimmedActivity, ts: now }, ...prev.slice(1)]
+            : [{ text: trimmedActivity, ts: now }, ...prev].slice(0, ACTIVITY_BUFFER_CAP);
+        nextCurrent = {
+          ...nextCurrent,
+          activities: nextActivities,
+          lastEventAt: now,
+        };
+      }
+      nextShell = { ...nextShell, currentTool: nextCurrent };
+    }
+
+    if (trimmedLiveActivity && shell.currentTool?.historyEntryId) {
+      const id = shell.currentTool.historyEntryId;
+      const idx = nextShell.history.findIndex((entry) => entry.id === id);
+      if (idx >= 0) {
+        const entry = nextShell.history[idx]!;
+        if (entry.type === "tool-call" && entry.status === "running") {
+          const prev = entry.liveActivities ?? [];
+          if (prev[0]?.text !== trimmedLiveActivity) {
+            const nextActivities = [
+              { id: `la-${now}-${liveActivitySeq++}`, text: trimmedLiveActivity },
+              ...prev,
+            ].slice(0, LIVE_ACTIVITY_CAP);
+            const nextHistory = nextShell.history.slice();
+            nextHistory[idx] = { ...entry, liveActivities: nextActivities };
+            nextShell = { ...nextShell, history: nextHistory };
+          }
+        }
+      }
+    }
+
+    return {
+      ...nextShell,
+      history: [
+        ...nextShell.history,
+        {
+          type: "tool-progress",
+          text: progressText,
+          timestamp: now,
+          ...(event.kind ? { progressKind: event.kind } : {}),
+        },
+      ],
+    };
+  });
+}
+
 function updateToolSummary(store: UIStore, summary: string): void {
   updateShell(store, (shell) => ({
     ...shell,
@@ -1654,15 +1753,10 @@ async function startInkShell(
       if (abortedRunIds.has(runId)) return;
       if (activeAbortRequested || store.getState().shell?.processing !== true) return;
       seenRunIdsThisTurn.add(runId);
-      pushToolPhase(store, event.payload.phase);
-      // Also feed the running tool-call's live tail so operators see the
-      // latest phase inline under the `⏺` header while the tool runs.
-      const entryId = store.getState().shell?.currentTool?.historyEntryId;
-      if (entryId) pushLiveActivity(store, entryId, event.payload.phase);
-      appendToHistory(store, {
-        type: "tool-progress",
+      appendProgressEvent(store, {
         text: event.payload.phase,
-        timestamp: Date.now(),
+        phase: event.payload.phase,
+        liveActivity: event.payload.phase,
       });
     },
   );
@@ -1671,16 +1765,13 @@ async function startInkShell(
     if (abortedRunIds.has(runId)) return;
     if (activeAbortRequested || store.getState().shell?.processing !== true) return;
     seenRunIdsThisTurn.add(runId);
-    if (event.payload.phase) pushToolPhase(store, event.payload.phase);
-    pushToolActivity(store, event.payload.description);
-    const entryId = store.getState().shell?.currentTool?.historyEntryId;
-    if (entryId) pushLiveActivity(store, entryId, event.payload.description);
     const isSubagentTool = looksLikeSubagentToolLine(event.payload.description);
-    appendToHistory(store, {
-      type: "tool-progress",
+    appendProgressEvent(store, {
       text: event.payload.description,
-      timestamp: Date.now(),
-      ...(isSubagentTool ? { progressKind: "invocation" as const } : {}),
+      activity: event.payload.description,
+      liveActivity: event.payload.description,
+      ...(event.payload.phase ? { phase: event.payload.phase } : {}),
+      ...(isSubagentTool ? { kind: "invocation" as const } : {}),
     });
   });
   // Ephemeral subprocess stdout / tool-use preview — shows in the running
