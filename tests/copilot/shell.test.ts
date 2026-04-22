@@ -329,10 +329,18 @@ describe("local shell commands", () => {
     const shellState = createShellState(module.tools.map((tool) => tool.name));
     const ctx = { focusedModule: "sast" };
 
+    // Unknown verb now routes through formatUnknownVerb(). The output keeps
+    // the `Unknown command: "/foo"` headline and points at /help. A nearest-
+    // match suggestion block is appended iff the needle is close enough to
+    // something in the catalog — `/foo` is intentionally far from all verbs.
     const unknown = __shellInternals.handleLocalCommand("/foo", core, opts, ctx, shellState);
-    expect(unknown).toEqual({
-      output: "Unknown command: /foo. Type /help for available commands.",
-    });
+    expect(unknown?.output).toContain('Unknown command: "/foo"');
+    expect(unknown?.output).toContain("Type /help");
+
+    // Nearest-match kicks in for a close typo.
+    const typo = __shellInternals.handleLocalCommand("/modulse", core, opts, ctx, shellState);
+    expect(typo?.output).toContain("Did you mean");
+    expect(typo?.output).toContain("modules");
 
     const setResult = __shellInternals.handleLocalCommand(
       "/set maxActors 7",
@@ -342,6 +350,126 @@ describe("local shell commands", () => {
       shellState,
     );
     expect(setResult).toEqual({ output: "No active tool selected. Use /options <tool> first." });
+  });
+
+  it("routes /use with an unknown module through formatUnknownModule", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand(
+      "/use sats",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(result?.output).toContain('Unknown module: "sats"');
+    // Nearest-match should pull in real module ids — "sast" is one char off.
+    expect(result?.output).toContain("Did you mean");
+    expect(result?.output).toContain("sast");
+  });
+
+  it("supports short aliases /f, /t, /b, /m", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      focusedModule: "sast" as const,
+      shellView: "module" as const,
+    };
+    const ctx = { focusedModule: "sast" };
+
+    const f = __shellInternals.handleLocalCommand("/f", core, opts, ctx, shellState);
+    expect(f?.shellStateUpdater).toBeTypeOf("function");
+    const fState = f!.shellStateUpdater!(shellState);
+    expect(fState.shellView).toBe("findings");
+
+    const t = __shellInternals.handleLocalCommand("/t", core, opts, ctx, shellState);
+    expect(t?.shellStateUpdater).toBeTypeOf("function");
+    const tState = t!.shellStateUpdater!(shellState);
+    expect(tState.shellView).toBe("tune");
+
+    // /b from the findings view should step back to module home.
+    const b = __shellInternals.handleLocalCommand("/b", core, opts, ctx, {
+      ...shellState,
+      shellView: "findings",
+    });
+    expect(b?.output).toBe("Back to module home.");
+
+    // /m lists modules (happy path: output mentions a module id).
+    const m = __shellInternals.handleLocalCommand("/m", core, opts, ctx, shellState);
+    expect(m?.output).toContain("sast");
+  });
+
+  it("supports /help <verb> with expanded description + unknown-verb fallback", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+
+    const helpOpen = __shellInternals.handleLocalCommand(
+      "/help open",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(helpOpen?.output).toContain("/open <F-NNNN>");
+    expect(helpOpen?.output).toContain("linear deep page");
+
+    // Leading-slash prefix should be tolerated.
+    const helpSlashOpen = __shellInternals.handleLocalCommand(
+      "/help /open",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(helpSlashOpen?.output).toContain("/open <F-NNNN>");
+
+    const helpUnknown = __shellInternals.handleLocalCommand(
+      "/help zzznope",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(helpUnknown?.output).toContain("Unknown command");
+  });
+
+  it("/help output contains every verb from the commands catalog", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+
+    const help = __shellInternals.handleLocalCommand("/help", core, opts, ctx, shellState);
+    expect(help?.output).toBeDefined();
+    const text = help!.output!;
+    for (const entry of SHELL_COMMAND_CATALOG) {
+      // Each catalog row's syntax string should appear verbatim somewhere
+      // in the rendered help — this is the structural drift-catcher.
+      expect(text).toContain(entry.syntax);
+    }
+  });
+
+  it("/help renders CLAUDE.md §12 section headings", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+
+    const help = __shellInternals.handleLocalCommand("/help", core, opts, ctx, shellState);
+    const text = help!.output!;
+    // Spot-check the group headings that map to CLAUDE.md §12 sections.
+    expect(text).toContain("Module + view navigation");
+    expect(text).toContain("Natural-language planner");
+    expect(text).toContain("Prompt editor");
+    expect(text).toContain("Replay & trace");
+    expect(text).toContain("Short-ID aliases");
+    expect(text).toContain("Threat modelling");
   });
 
   it("supports clear/history and bare exit aliases", async () => {
@@ -875,7 +1003,9 @@ describe("slash suggestions", () => {
 
   it("is case-insensitive", () => {
     expect(listShellSuggestions("/US")).toEqual(["/use <module>"]);
-    expect(listShellSuggestions("/THREATS")).toEqual(
+    // The catalog now carries per-view threat rows (dfd/stride/stories/scope/
+    // summary); raise the limit so /threats and /threats edit both surface.
+    expect(listShellSuggestions("/THREATS", 10)).toEqual(
       expect.arrayContaining(["/threats", "/threats edit"]),
     );
   });
