@@ -16,6 +16,7 @@
 import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
+import { Table } from "../primitives/Table.js";
 import type { ShellModuleCard, ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -49,8 +50,6 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
     byCategory[card.category] = bucket;
   }
 
-  const widest = Math.max(10, ...cards.map((c) => c.id.length));
-
   const cardWidth = 61;
   return (
     <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
@@ -69,10 +68,8 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
         return (
           <Box key={cat} flexDirection="column" marginTop={1}>
             <Text>{tokens.label(CATEGORY_LABEL[cat])}</Text>
-            <Box marginTop={1} flexDirection="column">
-              {rows.map((card) => (
-                <ModuleRow key={card.id} card={card} idWidth={widest} compact={narrow} />
-              ))}
+            <Box marginTop={1}>
+              <ModuleRows rows={rows} />
             </Box>
           </Box>
         );
@@ -85,10 +82,8 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
             {"  "}
             {tokens.muted("(loaded via --load package:<name>)")}
           </Text>
-          <Box marginTop={1} flexDirection="column">
-            {externals.map((card) => (
-              <ModuleRow key={card.id} card={card} idWidth={widest} compact={narrow} />
-            ))}
+          <Box marginTop={1}>
+            <ModuleRows rows={externals} />
           </Box>
         </Box>
       )}
@@ -152,33 +147,29 @@ function CatalogHeader({ shell, width }: { shell: ShellState; width: number }): 
   );
 }
 
-function ModuleRow({
-  card,
-  idWidth,
-  compact,
-}: {
-  card: ShellModuleCard;
-  idWidth: number;
-  compact: boolean;
-}): React.ReactElement {
-  const id = card.id.padEnd(idWidth + 2);
-  const desc = truncate(card.description, compact ? 34 : 54).padEnd(compact ? 34 : 54);
-  const last = card.lastRunSummary ?? "never run";
-  const isNever = !card.lastRunSummary;
-
+function ModuleRows({ rows }: { rows: ShellModuleCard[] }): React.ReactElement {
   return (
-    <Text>
-      {"   "}
-      {tokens.strong(id)}
-      {"  "}
-      {tokens.muted(desc)}
-      {"  "}
-      {isNever ? tokens.muted(last) : tokens.value(last)}
-    </Text>
+    <Table
+      showHeader
+      gap={1}
+      columns={[
+        { key: "id", header: "MODULE", width: 14, truncate: "end", render: (c) => c.id },
+        {
+          key: "description",
+          header: "DESCRIPTION",
+          flex: 4,
+          truncate: "end",
+          render: (c) => c.description,
+        },
+        {
+          key: "last",
+          header: "LAST RUN",
+          flex: 2,
+          truncate: "end",
+          render: (c) => c.lastRunSummary ?? "never run",
+        },
+      ]}
+      rows={rows}
+    />
   );
-}
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
 }

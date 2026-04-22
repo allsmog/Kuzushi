@@ -11,6 +11,7 @@
 import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
+import { Table } from "../primitives/Table.js";
 import type { ShellModuleCard, ShellModuleToolSummary, ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -29,7 +30,6 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
 
   const card = shell.moduleCatalog?.find((c) => c.id === moduleId);
   const tools: ReadonlyArray<ShellModuleToolSummary> = card?.toolSummaries ?? [];
-  const verbWidth = Math.max(10, ...tools.map((t) => t.verb.length));
   const panelWidth = 80;
 
   return (
@@ -53,9 +53,16 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
         {tools.length === 0 ? (
           <Text>{tokens.muted("   (no tools declared)")}</Text>
         ) : (
-          tools.map((tool) => (
-            <ToolRow key={tool.name} tool={tool} verbWidth={verbWidth} compact={narrow} />
-          ))
+          <Table
+            showHeader
+            gap={1}
+            columns={[
+              { key: "verb", header: "VERB", width: 14, truncate: "end" },
+              { key: "description", header: "DESCRIPTION", flex: 4, truncate: "end" },
+              { key: "name", header: "TOOL NAME", flex: 3, truncate: "middle" },
+            ]}
+            rows={tools}
+          />
         )}
       </Section>
 
@@ -88,13 +95,18 @@ function Header({
   card?: ShellModuleCard;
   width: number;
 }): React.ReactElement {
-  const tagline = card ? `· ${card.category} · ${truncate(card.description, 50)}` : "";
+  const tagline = card ? `· ${card.category} · ${clip(card.description, 50)}` : "";
   const line = `${"\u25C2 back"}  ${moduleId}  ${tagline}`.trim();
   return (
     <Box>
       <Text>{tokens.focus(line.slice(0, width - 2))}</Text>
     </Box>
   );
+}
+
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}\u2026`;
 }
 
 function Section({
@@ -116,29 +128,6 @@ function Section({
         {children}
       </Box>
     </Box>
-  );
-}
-
-function ToolRow({
-  tool,
-  verbWidth,
-  compact,
-}: {
-  tool: ShellModuleToolSummary;
-  verbWidth: number;
-  compact: boolean;
-}): React.ReactElement {
-  const verb = tool.verb.padEnd(verbWidth + 2);
-  const desc = truncate(tool.description, compact ? 34 : 50).padEnd(compact ? 34 : 50);
-  return (
-    <Text>
-      {"   "}
-      {tokens.strong(verb)}
-      {"  "}
-      {tokens.muted(desc)}
-      {"  "}
-      {tokens.muted(tool.name)}
-    </Text>
   );
 }
 
@@ -171,9 +160,4 @@ function WrappedText({ text, width }: { text: string; width: number }): React.Re
       ))}
     </Box>
   );
-}
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}\u2026`;
 }
