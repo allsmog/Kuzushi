@@ -51,13 +51,21 @@ interface CopilotShellProps {
 
 const IDLE_KEYBINDS = [
   { keys: "Enter", label: "Send" },
+  { keys: "←/→", label: "Cursor", secondary: true },
   { keys: "\u2191/\u2193", label: "History" },
   { keys: "Tab", label: "Autocomplete", secondary: true },
+  { keys: "?", label: "Help", secondary: true },
+  { keys: "Ctrl+U", label: "Clear line", secondary: true },
   { keys: "Esc", label: "Clear input", secondary: true },
   { keys: "Ctrl+C", label: "Exit", secondary: true },
 ];
 
 const PROCESSING_KEYBINDS = [{ keys: "Ctrl+C", label: "Abort" }];
+const PLAN_KEYBINDS = [
+  { keys: "Y", label: "Apply plan" },
+  { keys: "N/Esc", label: "Discard plan" },
+  { keys: "Ctrl+C", label: "Exit", secondary: true },
+];
 
 /** Window during which a second Ctrl+C at the idle prompt commits the exit. */
 const CTRL_C_ARM_WINDOW_MS = 2000;
@@ -78,11 +86,18 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const shell = state.shell;
   const { exit } = useApp();
   const [input, setInput] = useState("");
+  const [cursor, setCursor] = useState(0);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const draftInputRef = useRef("");
 
   const processing = shell?.processing === true;
-  useRegisterKeybindings(processing ? PROCESSING_KEYBINDS : IDLE_KEYBINDS);
+  useRegisterKeybindings(
+    processing
+      ? PROCESSING_KEYBINDS
+      : shell?.pendingPlan && input.length === 0
+        ? PLAN_KEYBINDS
+        : IDLE_KEYBINDS,
+  );
 
   // Raw-mode watchdog. The Claude Agent SDK subprocess (used by `randori` etc.)
   // disables parent stdin raw mode and doesn't restore it on exit, so Ink's
@@ -220,13 +235,36 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       if (key.return && input.length > 0) {
         liveShell.onInput?.(input);
         setInput("");
+        setCursor(0);
         setHistoryIndex(null);
         draftInputRef.current = "";
         return;
       }
 
+      if (key.leftArrow) {
+        setCursor((c) => Math.max(0, c - 1));
+        return;
+      }
+
+      if (key.rightArrow) {
+        setCursor((c) => Math.min(input.length, c + 1));
+        return;
+      }
+
+      if (key.ctrl && (char === "a" || char === "A")) {
+        setCursor(0);
+        return;
+      }
+
+      if (key.ctrl && (char === "e" || char === "E")) {
+        setCursor(input.length);
+        return;
+      }
+
       if (key.backspace || key.delete) {
-        setInput((v) => v.slice(0, -1));
+        if (cursor === 0 || input.length === 0) return;
+        setInput((v) => v.slice(0, cursor - 1) + v.slice(cursor));
+        setCursor((c) => Math.max(0, c - 1));
         setHistoryIndex(null);
         return;
       }
@@ -237,12 +275,16 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           draftInputRef.current = input;
           const nextIndex = liveShell.commandHistory.length - 1;
           setHistoryIndex(nextIndex);
-          setInput(liveShell.commandHistory[nextIndex] ?? "");
+          const next = liveShell.commandHistory[nextIndex] ?? "";
+          setInput(next);
+          setCursor(next.length);
           return;
         }
         const nextIndex = Math.max(0, historyIndex - 1);
         setHistoryIndex(nextIndex);
-        setInput(liveShell.commandHistory[nextIndex] ?? "");
+        const next = liveShell.commandHistory[nextIndex] ?? "";
+        setInput(next);
+        setCursor(next.length);
         return;
       }
 
@@ -252,15 +294,23 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         if (nextIndex >= liveShell.commandHistory.length) {
           setHistoryIndex(null);
           setInput(draftInputRef.current);
+          setCursor(draftInputRef.current.length);
           return;
         }
         setHistoryIndex(nextIndex);
-        setInput(liveShell.commandHistory[nextIndex] ?? "");
+        const next = liveShell.commandHistory[nextIndex] ?? "";
+        setInput(next);
+        setCursor(next.length);
         return;
       }
 
       if (key.escape) {
+        if (liveShell.pendingPlan && input.length === 0) {
+          liveShell.onInput?.("/no");
+          return;
+        }
         setInput("");
+        setCursor(0);
         setHistoryIndex(null);
         draftInputRef.current = "";
         return;
@@ -270,14 +320,29 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         const suggestion = firstShellSuggestion(input);
         if (suggestion) {
           setInput(suggestion);
+          setCursor(suggestion.length);
           setHistoryIndex(null);
         }
         return;
       }
 
+      if (char === "?" && input.length === 0) {
+        liveShell.onInput?.("/help");
+        return;
+      }
+
+      if (key.ctrl && (char === "u" || char === "U")) {
+        setInput("");
+        setCursor(0);
+        setHistoryIndex(null);
+        draftInputRef.current = "";
+        return;
+      }
+
       if (char && !key.ctrl && !key.meta && !key.tab) {
         if (historyIndex === null) draftInputRef.current = "";
-        setInput((v) => v + char);
+        setInput((v) => v.slice(0, cursor) + char + v.slice(cursor));
+        setCursor((c) => c + char.length);
         setHistoryIndex(null);
       }
     },
@@ -395,8 +460,9 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           <Box marginTop={1}>
             <Text>
               {tokens.accent(buildShellPrompt(shell.focusedModule))}
-              {input}
-              {tokens.muted("\u2588")}
+              {input.slice(0, cursor)}
+              {tokens.accent(cursor < input.length ? input[cursor] : "\u2588")}
+              {cursor < input.length ? input.slice(cursor + 1) : ""}
             </Text>
           </Box>
           {slashSuggestions.length > 0 && (
