@@ -21,6 +21,7 @@ import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { severityChalk } from "../severity.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
+import { ShellFooterHints } from "./ShellFooterHints.js";
 
 // ---------------------------------------------------------------------------
 // Constants + types exported for the test file
@@ -331,13 +332,16 @@ function PivotTable({
 
 function HintFooter(): React.ReactElement {
   return (
-    <Box marginTop={1}>
-      <Text>
-        {tokens.muted("1 dfd  ")}
-        {tokens.hint("2 stride  ")}
-        {tokens.muted("3 stories  4 scope  5 summary")}
-        {tokens.hint("   q back")}
-      </Text>
-    </Box>
+    <ShellFooterHints
+      divider={false}
+      hints={[
+        { key: "1", label: "dfd" },
+        { key: "2", label: "stride" },
+        { key: "3", label: "stories" },
+        { key: "4", label: "scope" },
+        { key: "5", label: "summary" },
+        { key: "/back", label: "" },
+      ]}
+    />
   );
 }

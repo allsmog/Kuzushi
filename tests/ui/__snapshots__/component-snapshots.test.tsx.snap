@@ -63,7 +63,7 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
   coming · blackbox · pwn · pentest · honeypot · yokai · revgraph — see
   VISION.md
 
-  /use <id> open   /findings list   /tune adjust   /help more   /exit quit"
+  /use <id> open · /findings list · /tune adjust · /help more · /exit quit"
 `;
 
 exports[`Ink component snapshots > ModuleHome — tools table + last-run summary 1`] = `
@@ -84,7 +84,7 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
      ran 2h · 4 tp
 
   ──────────────────────────────────────────────────────────────────────────────
-  type a tool   t tune   f findings   b back   /help more"
+  type a tool · t tune · f findings · b back · /help more"
 `;
 
 exports[`Ink component snapshots > PlanCard — option diff table with unsupported row 1`] = `
@@ -126,5 +126,5 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
 
      F1      P1 → D1 [http] {cloud-cred}  crosses B1
 
-  1 dfd  2 stride  3 stories  4 scope  5 summary   q back"
+  1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · /back"
 `;

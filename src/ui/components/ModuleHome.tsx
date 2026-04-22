@@ -12,6 +12,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import type { ShellModuleCard, ShellModuleToolSummary, ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
+import { ShellFooterHints } from "./ShellFooterHints.js";
 
 interface ModuleHomeProps {
   shell: ShellState;
@@ -54,22 +55,15 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
         </Text>
       </Section>
 
-      <Box marginTop={1}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
-      </Box>
-      <Box>
-        <Text>
-          {tokens.hint("type a tool   ")}
-          {tokens.muted("t")}
-          {tokens.hint(" tune   ")}
-          {tokens.muted("f")}
-          {tokens.hint(" findings   ")}
-          {tokens.muted("b")}
-          {tokens.hint(" back   ")}
-          {tokens.muted("/help")}
-          {tokens.hint(" more")}
-        </Text>
-      </Box>
+      <ShellFooterHints
+        hints={[
+          { key: "type a tool", label: "" },
+          { key: "t", label: "tune" },
+          { key: "f", label: "findings" },
+          { key: "b", label: "back" },
+          { key: "/help", label: "more" },
+        ]}
+      />
     </Box>
   );
 }
