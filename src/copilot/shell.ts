@@ -1168,103 +1168,96 @@ function pushToolActivity(store: UIStore, text: string): void {
   });
 }
 
-/**
- * Batch-apply progress updates from `task:phase-progress` / `task:activity`
- * in a single store mutation. This avoids 3-4 independent `store.update()`
- * calls per bus event (phase + activity + live tail + scrollback), which
- * caused visible Ink redraw flicker during noisy module runs.
- */
-function appendProgressEvent(
-  store: UIStore,
-  event: {
-    text: string;
-    kind?: ShellHistoryEntry["progressKind"];
-    phase?: string;
-    activity?: string;
-    liveActivity?: string;
-  },
-): void {
-  const now = Date.now();
-  const progressText = event.text;
-  const phase = event.phase;
-  const activity = event.activity;
-  const liveActivity = event.liveActivity;
-  const phaseMatch = phase ? phase.match(PHASE_COUNT_RE) : null;
+interface ProgressMutationEvent {
+  text: string;
+  kind?: ShellHistoryEntry["progressKind"];
+  phase?: string;
+  activity?: string;
+  liveActivity?: string;
+  recordHistory?: boolean;
+}
+
+function applyProgressMutation(
+  shell: ShellState,
+  event: ProgressMutationEvent,
+  now: number,
+): ShellState {
+  const phaseMatch = event.phase ? event.phase.match(PHASE_COUNT_RE) : null;
   const phaseStep = phaseMatch ? Number(phaseMatch[1]) : undefined;
   const phaseTotal = phaseMatch ? Number(phaseMatch[2]) : undefined;
   const trimmedActivity =
-    activity && activity.length > ACTIVITY_TEXT_CAP
-      ? `${activity.slice(0, ACTIVITY_TEXT_CAP - 1)}…`
-      : activity;
+    event.activity && event.activity.length > ACTIVITY_TEXT_CAP
+      ? `${event.activity.slice(0, ACTIVITY_TEXT_CAP - 1)}…`
+      : event.activity;
   const trimmedLiveActivity =
-    liveActivity && liveActivity.length > LIVE_ACTIVITY_TEXT_CAP
-      ? `${liveActivity.slice(0, LIVE_ACTIVITY_TEXT_CAP - 1)}…`
-      : liveActivity;
+    event.liveActivity && event.liveActivity.length > LIVE_ACTIVITY_TEXT_CAP
+      ? `${event.liveActivity.slice(0, LIVE_ACTIVITY_TEXT_CAP - 1)}…`
+      : event.liveActivity;
 
-  updateShell(store, (shell) => {
-    let nextShell: ShellState = shell;
-
-    if (shell.currentTool && (phase || trimmedActivity)) {
-      const current = shell.currentTool;
-      let nextCurrent = current;
-      if (phase) {
-        nextCurrent = {
-          ...nextCurrent,
-          phase,
-          step: phaseStep,
-          total: phaseTotal,
-          subLabel: phase,
-          lastEventAt: now,
-        };
-      }
-      if (trimmedActivity) {
-        const prev = nextCurrent.activities ?? [];
-        const nextActivities =
-          prev[0]?.text === trimmedActivity
-            ? [{ text: trimmedActivity, ts: now }, ...prev.slice(1)]
-            : [{ text: trimmedActivity, ts: now }, ...prev].slice(0, ACTIVITY_BUFFER_CAP);
-        nextCurrent = {
-          ...nextCurrent,
-          activities: nextActivities,
-          lastEventAt: now,
-        };
-      }
-      nextShell = { ...nextShell, currentTool: nextCurrent };
+  let nextShell: ShellState = shell;
+  if (shell.currentTool && (event.phase || trimmedActivity)) {
+    const current = shell.currentTool;
+    let nextCurrent = current;
+    if (event.phase) {
+      nextCurrent = {
+        ...nextCurrent,
+        phase: event.phase,
+        step: phaseStep,
+        total: phaseTotal,
+        subLabel: event.phase,
+        lastEventAt: now,
+      };
     }
+    if (trimmedActivity) {
+      const prev = nextCurrent.activities ?? [];
+      const nextActivities =
+        prev[0]?.text === trimmedActivity
+          ? [{ text: trimmedActivity, ts: now }, ...prev.slice(1)]
+          : [{ text: trimmedActivity, ts: now }, ...prev].slice(0, ACTIVITY_BUFFER_CAP);
+      nextCurrent = {
+        ...nextCurrent,
+        activities: nextActivities,
+        lastEventAt: now,
+      };
+    }
+    nextShell = { ...nextShell, currentTool: nextCurrent };
+  }
 
-    if (trimmedLiveActivity && shell.currentTool?.historyEntryId) {
-      const id = shell.currentTool.historyEntryId;
-      const idx = nextShell.history.findIndex((entry) => entry.id === id);
-      if (idx >= 0) {
-        const entry = nextShell.history[idx]!;
-        if (entry.type === "tool-call" && entry.status === "running") {
-          const prev = entry.liveActivities ?? [];
-          if (prev[0]?.text !== trimmedLiveActivity) {
-            const nextActivities = [
-              { id: `la-${now}-${liveActivitySeq++}`, text: trimmedLiveActivity },
-              ...prev,
-            ].slice(0, LIVE_ACTIVITY_CAP);
-            const nextHistory = nextShell.history.slice();
-            nextHistory[idx] = { ...entry, liveActivities: nextActivities };
-            nextShell = { ...nextShell, history: nextHistory };
-          }
+  if (trimmedLiveActivity && shell.currentTool?.historyEntryId) {
+    const id = shell.currentTool.historyEntryId;
+    const idx = nextShell.history.findIndex((entry) => entry.id === id);
+    if (idx >= 0) {
+      const entry = nextShell.history[idx]!;
+      if (entry.type === "tool-call" && entry.status === "running") {
+        const prev = entry.liveActivities ?? [];
+        if (prev[0]?.text !== trimmedLiveActivity) {
+          const nextActivities = [
+            { id: `la-${now}-${liveActivitySeq++}`, text: trimmedLiveActivity },
+            ...prev,
+          ].slice(0, LIVE_ACTIVITY_CAP);
+          const nextHistory = nextShell.history.slice();
+          nextHistory[idx] = { ...entry, liveActivities: nextActivities };
+          nextShell = { ...nextShell, history: nextHistory };
         }
       }
     }
+  }
 
-    return {
-      ...nextShell,
-      history: [
-        ...nextShell.history,
-        {
-          type: "tool-progress",
-          text: progressText,
-          timestamp: now,
-          ...(event.kind ? { progressKind: event.kind } : {}),
-        },
-      ],
-    };
-  });
+  return {
+    ...nextShell,
+    history:
+      event.recordHistory === false
+        ? nextShell.history
+        : [
+            ...nextShell.history,
+            {
+              type: "tool-progress",
+              text: event.text,
+              timestamp: now,
+              ...(event.kind ? { progressKind: event.kind } : {}),
+            },
+          ],
+  };
 }
 
 function updateToolSummary(store: UIStore, summary: string): void {
@@ -1736,6 +1729,30 @@ async function startInkShell(
     });
   });
 
+  const PROGRESS_FLUSH_MS = 50;
+  const progressQueue: ProgressMutationEvent[] = [];
+  let progressFlushTimer: NodeJS.Timeout | undefined;
+  const flushProgressQueue = (): void => {
+    if (progressFlushTimer) {
+      clearTimeout(progressFlushTimer);
+      progressFlushTimer = undefined;
+    }
+    if (progressQueue.length === 0) return;
+    const batch = progressQueue.splice(0, progressQueue.length);
+    updateShell(store, (shell) => {
+      let next = shell;
+      for (const item of batch) {
+        next = applyProgressMutation(next, item, Date.now());
+      }
+      return next;
+    });
+  };
+  const enqueueProgress = (event: ProgressMutationEvent): void => {
+    progressQueue.push(event);
+    if (progressFlushTimer) return;
+    progressFlushTimer = setTimeout(flushProgressQueue, PROGRESS_FLUSH_MS);
+  };
+
   // Tool progress rail — `task:phase-progress` updates the current tool's
   // phase strip and also appends a permanent history entry so operators see
   // each phase transition accumulate downward (cc-repo style) instead of
@@ -1753,7 +1770,7 @@ async function startInkShell(
       if (abortedRunIds.has(runId)) return;
       if (activeAbortRequested || store.getState().shell?.processing !== true) return;
       seenRunIdsThisTurn.add(runId);
-      appendProgressEvent(store, {
+      enqueueProgress({
         text: event.payload.phase,
         phase: event.payload.phase,
         liveActivity: event.payload.phase,
@@ -1766,7 +1783,7 @@ async function startInkShell(
     if (activeAbortRequested || store.getState().shell?.processing !== true) return;
     seenRunIdsThisTurn.add(runId);
     const isSubagentTool = looksLikeSubagentToolLine(event.payload.description);
-    appendProgressEvent(store, {
+    enqueueProgress({
       text: event.payload.description,
       activity: event.payload.description,
       liveActivity: event.payload.description,
@@ -1780,7 +1797,12 @@ async function startInkShell(
   // execution, then it's gone once the tool resolves.
   bus.subscribe<import("../bus/events.js").TaskOutputEvent>("task:output", (event) => {
     const entryId = store.getState().shell?.currentTool?.historyEntryId;
-    if (entryId) pushLiveActivity(store, entryId, event.payload.line);
+    if (entryId)
+      enqueueProgress({
+        text: event.payload.line,
+        liveActivity: event.payload.line,
+        recordHistory: false,
+      });
   });
 
   // Auto-patch bridge — when `setg AutoPatch true`, any verification:result
@@ -2756,6 +2778,8 @@ async function startInkShell(
     try {
       saveShellCommandHistory(dataDir, store.getState().shell?.commandHistory ?? []);
     } finally {
+      flushProgressQueue();
+      devTtyAbortTeardown?.();
       await closeSession();
       await jobManager.shutdown();
       scheduler?.stop();
