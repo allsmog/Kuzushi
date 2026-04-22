@@ -24,6 +24,7 @@ import { normalizeSeverity, severityChalk, severityStyle } from "../severity.js"
 import type { ActionableFinding, ResultLine } from "../state.js";
 import { tokens } from "../tokens.js";
 import { ChainGroup } from "./ChainGroup.js";
+import { EmptyState } from "./EmptyState.js";
 import { type FilterChip, FilterChips } from "./FilterChips.js";
 
 interface CompactProps {
@@ -79,9 +80,22 @@ function CompactFindings({ results }: { results: ResultLine[] }): React.ReactEle
   const triageResults = results.filter((r) => r.kind === "triage" && r.verdict);
 
   if (triageResults.length === 0) {
+    // Infer "in progress" from the source ResultLines: any non-triage row
+    // (progress tick, stage event) means the pipeline is doing work, just
+    // not finished triaging. The compact view is the running-scan view.
+    const total = results[0]?.total;
+    const current = results.filter((r) => r.kind === "triage").length;
+    const scanInProgress = results.length > 0;
     return (
       <Box paddingLeft={2} marginTop={1}>
-        <Text>{tokens.muted("No findings triaged yet...")}</Text>
+        <EmptyState
+          kind="findings-compact-idle"
+          context={
+            scanInProgress && typeof total === "number"
+              ? { scanInProgress: true, progress: { current, total } }
+              : undefined
+          }
+        />
       </Box>
     );
   }

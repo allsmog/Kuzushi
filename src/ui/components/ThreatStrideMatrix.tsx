@@ -21,6 +21,7 @@ import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { severityChalk } from "../severity.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
+import { EmptyState as EmptyStateCard } from "./EmptyState.js";
 import { ShellFooterHints } from "./ShellFooterHints.js";
 
 // ---------------------------------------------------------------------------
@@ -169,9 +170,7 @@ function EmptyState(): React.ReactElement {
         {tokens.strong("STRIDE matrix")}
       </Text>
       <Box marginTop={1}>
-        <Text>
-          {tokens.warn("No threat model loaded. Run a scan with threat modelling enabled first.")}
-        </Text>
+        <EmptyStateCard kind="threat-model-missing" context={{ threatView: "stride" }} />
       </Box>
     </Box>
   );

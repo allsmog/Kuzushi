@@ -2,8 +2,15 @@
  * Rich error display with category badge, dimmed frame list, and an
  * actionable "Next Step" call-to-action.
  *
- * Now delegates classification to `src/ui/error-format.ts` so the logic is
- * shared across UI surfaces and the orchestrator's error-reporting paths.
+ * Classification is delegated to `src/ui/error-format.ts` so the logic
+ * stays shared across UI surfaces and the orchestrator's error-reporting
+ * paths.
+ *
+ * Workstream 3 widened the props surface so tool-failure call sites can
+ * pass an explicit `{ code, hint }` pair instead of re-deriving them.
+ * When supplied, `code` replaces the category-derived badge and `hint`
+ * replaces `suggestNextStep`, so the shell can keep known-error copy
+ * close to the orchestrator throw site.
  */
 
 import { Box, Text } from "ink";
@@ -42,6 +49,18 @@ const CATEGORY_FALLBACK_HINTS: Record<ErrorCategory, string> = {
 interface ErrorCardProps {
   message: string;
   category?: ErrorCategory;
+  /**
+   * Optional short error code ("E_AUTH", "E_TOOL_TIMEOUT", etc). When set
+   * it's rendered inside a `[code]` prefix in front of the badge so
+   * operators can grep server logs / docs.
+   */
+  code?: string;
+  /**
+   * Explicit recovery hint. Overrides `suggestNextStep`. Use when the
+   * throw site knows more than `classifyError` can infer (e.g. it knows
+   * which env var was missing).
+   */
+  hint?: string;
   attempts?: number;
   maxAttempts?: number;
   /**
@@ -52,21 +71,42 @@ interface ErrorCardProps {
   error?: unknown;
   /** Show full stack trace. Gated upstream by `--debug`. */
   showStack?: boolean;
+  /**
+   * Tool name when rendering a ToolResult-failure card. Surfaces on a
+   * second line so the headline stays scannable.
+   */
+  toolName?: string;
+  /**
+   * Input summary for the failing tool call (e.g. JSON snippet). Dimmed
+   * and truncated so the card stays short.
+   */
+  toolInput?: string;
+}
+
+const TOOL_INPUT_MAX = 96;
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, Math.max(0, max - 1))}…`;
 }
 
 export function ErrorCard({
   message,
   category,
+  code,
+  hint,
   attempts,
   maxAttempts,
   error,
   showStack = false,
+  toolName,
+  toolInput,
 }: ErrorCardProps): React.ReactElement {
   const resolvedCategory: ErrorCategory =
     category ?? (error != null ? classifyError(error) : "unknown");
   const categoryBadge = CATEGORY_BADGES[resolvedCategory];
   const nextStep =
-    suggestNextStep(error, resolvedCategory) ?? CATEGORY_FALLBACK_HINTS[resolvedCategory];
+    hint ?? suggestNextStep(error, resolvedCategory) ?? CATEGORY_FALLBACK_HINTS[resolvedCategory];
   const retryInfo =
     attempts && maxAttempts
       ? tokens.muted(` (attempt ${attempts}/${maxAttempts})`)
@@ -82,10 +122,22 @@ export function ErrorCard({
     <Box flexDirection="column">
       <Box paddingLeft={2}>
         <Text>
+          {code ? `${tokens.muted(`[${code}]`)} ` : ""}
           {categoryBadge} {tokens.strong(message)}
           {retryInfo}
         </Text>
       </Box>
+      {toolName ? (
+        <Box paddingLeft={4}>
+          <Text>
+            {tokens.muted("tool: ")}
+            {tokens.value(toolName)}
+            {toolInput
+              ? tokens.muted(`   input: ${truncate(toolInput, TOOL_INPUT_MAX)}`)
+              : ""}
+          </Text>
+        </Box>
+      ) : null}
       {frames.length > 0 ? (
         <Box flexDirection="column" paddingLeft={4}>
           {frames.map((frame, i) => (

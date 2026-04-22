@@ -28,6 +28,7 @@ import type {
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import type { ShellState } from "../state.js";
 import { tokens } from "../tokens.js";
+import { EmptyState as EmptyStateCard } from "./EmptyState.js";
 
 interface ScopeAndCriticalityViewProps {
   shell: ShellState;
@@ -78,9 +79,7 @@ function EmptyState(): React.ReactElement {
         {tokens.strong("scope & criticality")}
       </Text>
       <Box marginTop={1}>
-        <Text>
-          {tokens.warn("No threat model loaded. Run a scan with threat modelling enabled first.")}
-        </Text>
+        <EmptyStateCard kind="threat-model-missing" context={{ threatView: "scope" }} />
       </Box>
     </Box>
   );
