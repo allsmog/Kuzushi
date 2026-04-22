@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { InProcessBus } from "../../../src/bus/adapters/in-process.js";
+import type { TaskActivityEvent } from "../../../src/bus/events.js";
 import { __threatHuntInternals, threatHuntTask } from "../../../src/agents/tasks/threat-hunt.js";
 import type {
   DfdElement,
   ThreatModelDocument,
 } from "../../../src/agents/tasks/threat-modeling/types.js";
+import type { TaskContext } from "../../../src/agents/types.js";
+import type { AgentMessage, AgentRuntime } from "../../../src/agent-runtime/types.js";
 
 const { extractActors, buildPrompt, resolveConfig } = __threatHuntInternals;
 
@@ -189,6 +193,102 @@ describe("threat-hunt", () => {
       expect(config.prompt).toContain("threat-driven hunt");
       expect(config.prompt).toContain("src/api.ts:42");
       expect(config.prompt).toContain("SQL injection");
+    });
+  });
+
+  describe("run() activity emissions", () => {
+    it("publishes task:activity for each setup stage and per-actor hunt", async () => {
+      const bus = new InProcessBus();
+      const activity: Array<{ description: string; step?: number; total?: number }> = [];
+      bus.subscribe<TaskActivityEvent>("task:activity", (event) => {
+        activity.push({
+          description: event.payload.description,
+          step: event.payload.step,
+          total: event.payload.total,
+        });
+      });
+
+      const emptyRuntime: AgentRuntime = {
+        id: "stub",
+        query(): AsyncIterable<AgentMessage> {
+          return (async function* () {
+            // No tool calls, no result — simulates the silent thinking phase.
+          })();
+        },
+      };
+
+      const upstream = new Map<string, unknown>();
+      upstream.set(
+        "threat-model-randori",
+        makeThreatModelOutput([
+          makeDfdElement({ id: "a1", name: "Attacker", type: "external-entity" }),
+        ]),
+      );
+
+      const ctx: TaskContext = {
+        runId: "test-run",
+        repoRoot: "/tmp/repo",
+        repoName: "repo",
+        config: {
+          model: "anthropic:claude-sonnet-4-6",
+          taskConfig: { "threat-hunt": { maxActors: 1, runsPerActor: 1 } },
+        } as any,
+        runtime: emptyRuntime,
+        bus,
+        upstreamOutputs: upstream,
+      };
+
+      await threatHuntTask.run({} as any, ctx);
+      // Give best-effort publishes a tick to drain.
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const descriptions = activity.map((a) => a.description);
+      expect(descriptions).toEqual([
+        "reading threat model",
+        "queuing 1 actor × 1 run",
+        "batch 1/1: hunting 1 actor",
+        expect.stringMatching(/^hunting as Attacker — thinking \(/),
+      ]);
+      const batch = activity.find((a) => a.description.startsWith("batch "));
+      expect(batch?.step).toBe(1);
+      expect(batch?.total).toBe(1);
+
+      await bus.close();
+    });
+
+    it("skips hunt activity when the threat model has no external entities", async () => {
+      const bus = new InProcessBus();
+      const activity: string[] = [];
+      bus.subscribe<TaskActivityEvent>("task:activity", (event) => {
+        activity.push(event.payload.description);
+      });
+
+      const emptyRuntime: AgentRuntime = {
+        id: "stub",
+        query(): AsyncIterable<AgentMessage> {
+          return (async function* () {})();
+        },
+      };
+
+      const upstream = new Map<string, unknown>();
+      upstream.set("threat-model-randori", makeThreatModelOutput([]));
+
+      const ctx: TaskContext = {
+        runId: "test-run",
+        repoRoot: "/tmp/repo",
+        repoName: "repo",
+        config: { model: "anthropic:claude-sonnet-4-6", taskConfig: {} } as any,
+        runtime: emptyRuntime,
+        bus,
+        upstreamOutputs: upstream,
+      };
+
+      await threatHuntTask.run({} as any, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(activity).toEqual(["reading threat model"]);
+
+      await bus.close();
     });
   });
 });
