@@ -7,7 +7,7 @@ import type React from "react";
 import type { QualityGateResult } from "../../quality-gate.js";
 import { badge } from "../format.js";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface QualityGateProps {
   result: QualityGateResult;
@@ -15,7 +15,7 @@ interface QualityGateProps {
 
 export function QualityGate({ result }: QualityGateProps): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <Text>{""}</Text>
       {result.passed ? (
         <Text>

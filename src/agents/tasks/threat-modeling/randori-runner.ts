@@ -345,9 +345,13 @@ function truncate(text: string, max: number): string {
 /**
  * Extract short human-readable activity lines from a runtime message so the
  * shell's progress rail sees forward motion while the plugin's LLM churns on
- * S1/S2/S3. Returns one entry per `tool_use` block in an assistant message
- * and a single line for tool summaries; `tool-progress` ticks and `result`
- * envelopes are ignored (too noisy / handled separately for cost).
+ * S1/S2/S3. Returns one entry per `tool_use` block in an assistant message,
+ * one line for a tool-summary, and one line for `tool-call-start` (pi-ai
+ * streaming's "model just committed to a tool" event — gives early
+ * visibility long before the assistant turn finishes, which on Opus + max
+ * thinking can take 5+ minutes). `tool-progress`, `text-delta`,
+ * `thinking-delta`, and `result` envelopes are ignored (too noisy / handled
+ * separately for cost).
  */
 export function describeRuntimeMessage(message: AgentMessage): string[] {
   if (message.type === "assistant") {
@@ -371,6 +375,17 @@ export function describeRuntimeMessage(message: AgentMessage): string[] {
     const firstLine = summary.split("\n")[0]?.trim() ?? "";
     if (!firstLine) return [];
     return [truncate(firstLine, ACTIVITY_MAX)];
+  }
+  if (message.type === "tool-call-start") {
+    // Fires the moment pi-ai's streaming runtime sees the model commit to a
+    // tool — before any JSON arguments have streamed in. We don't have the
+    // args yet (those arrive as `tool-call-delta` events), so emit just the
+    // name. The later `assistant` yield for the same turn will add a line
+    // with the full hint (`Read · src/foo.ts`) — yes, two entries per tool
+    // call on the pi-ai path, but the transient duplication is worth
+    // breaking the 5-minute first-turn silence on Opus + max thinking.
+    const name = typeof message.toolName === "string" ? message.toolName : "tool";
+    return [name];
   }
   return [];
 }

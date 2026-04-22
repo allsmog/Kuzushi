@@ -432,7 +432,7 @@ async function resolveRepoPaths(target: string): Promise<{ repoRoot: string; sca
 
 export function createVariantHunterModule(): CopilotModule {
   return {
-    id: "variant-hunter",
+    id: "variant",
     displayName: "Variant Hunter",
     category: "offense",
     version: "0.1.0",

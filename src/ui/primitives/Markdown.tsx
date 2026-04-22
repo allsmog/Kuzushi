@@ -13,8 +13,8 @@
  */
 
 import { Box, Text } from "ink";
-import React from "react";
-import { tokens } from "../tokens.js";
+import type React from "react";
+import { SPACING, tokens } from "../tokens.js";
 
 interface MarkdownProps {
   text: string;
@@ -104,7 +104,7 @@ export function Markdown({ text }: MarkdownProps): React.ReactElement {
         const key = `code-${codeKey++}`;
         const body = codeBuffer.join("\n");
         blocks.push(
-          <Box key={key} flexDirection="column" paddingLeft={2}>
+          <Box key={key} flexDirection="column" paddingLeft={SPACING.md}>
             {body.split("\n").map((ln, j) => (
               <Text key={`${key}-${j}`}>{tokens.muted(ln)}</Text>
             ))}
@@ -180,7 +180,7 @@ export function Markdown({ text }: MarkdownProps): React.ReactElement {
   if (inCode && codeBuffer.length > 0) {
     const key = `code-${codeKey++}`;
     blocks.push(
-      <Box key={key} flexDirection="column" paddingLeft={2}>
+      <Box key={key} flexDirection="column" paddingLeft={SPACING.md}>
         {codeBuffer.map((ln, j) => (
           <Text key={`${key}-${j}`}>{tokens.muted(ln)}</Text>
         ))}

@@ -13,7 +13,7 @@ import { formatCost, formatDuration } from "../format.js";
 import { classifyTerminalWidth, useElapsed, useTerminalWidth } from "../hooks.js";
 import { Divider } from "../primitives/Divider.js";
 import type { Phase } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface StatusFooterProps {
   model: string;
@@ -24,7 +24,7 @@ interface StatusFooterProps {
   throttle?: { concurrency: number; reason: string } | null;
 }
 
-const SEP = tokens.subtle(" \u2502 ");
+const SEP = tokens.tertiary(" \u2502 ");
 
 export const StatusFooter = React.memo(function StatusFooter({
   model,
@@ -65,7 +65,7 @@ export const StatusFooter = React.memo(function StatusFooter({
   const narrow = widthClass === "tiny";
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Divider width={Math.min(columns, 80)} />
       <Text>
         {narrow ? "" : tokens.strong(modelShort)}

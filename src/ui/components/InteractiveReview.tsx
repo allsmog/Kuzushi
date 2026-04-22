@@ -24,7 +24,7 @@ import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 import type { ActionableFinding } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { FindingCard } from "./FindingCard.js";
 
 interface InteractiveReviewProps {
@@ -93,7 +93,7 @@ export function InteractiveReview({
 
   if (!finding) {
     return (
-      <Box flexDirection="column" paddingLeft={2}>
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
         <Text>{""}</Text>
         <Text>{tokens.successStrong(`${icons.success} Review complete`)}</Text>
         <Text>
@@ -115,7 +115,7 @@ export function InteractiveReview({
 
       {/* Running tally */}
       {tally.tp + tally.fp + tally.by_design + tally.skipped > 0 && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>
             {tokens.muted("So far:")}
             {tally.tp > 0 ? ` ${tokens.danger(`tp=${tally.tp}`)}` : ""}

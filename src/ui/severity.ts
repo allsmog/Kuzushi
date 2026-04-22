@@ -23,6 +23,15 @@
  *           <Text color={color} bold={bold}>{severityToken("high")}</Text>`
  *   - chalk: `severityChalk("high")("HIGH")` to get the wrapped string.
  *   - plain/SR: `severityToken("high")` always includes the glyph+label.
+ *
+ * Relationship to `tokens` (`src/ui/tokens.ts`):
+ *   The `tokens` vocabulary owns *generic* semantic colors (danger / warn /
+ *   info / accent / muted / etc.). Severity is its own axis with its own
+ *   accessibility contract (Okabe-Ito palette + glyph pairing + NO_COLOR /
+ *   KUZUSHI_HIGH_CONTRAST), so it is intentionally NOT folded into
+ *   `tokens.danger`. Use `severityChalk(sev)(text)` at chalk callsites and
+ *   `<Text color={severityStyle(sev).color} bold>` at Ink callsites — this
+ *   is the canonical bridge. Keep `tokens.*` for non-severity color decisions.
  */
 
 import chalk, { type ChalkInstance } from "chalk";

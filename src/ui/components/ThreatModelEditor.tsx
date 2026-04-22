@@ -18,7 +18,7 @@ import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 import { TextInput } from "../primitives/TextInput.js";
-import { dangerStrong, info, muted, tokens, warnStrong } from "../tokens.js";
+import { dangerStrong, info, muted, SPACING, tokens, warnStrong } from "../tokens.js";
 
 interface ThreatModelEditorProps {
   threatModel: ThreatModelDocument;
@@ -176,7 +176,7 @@ export function ThreatModelEditor({
         <Text>{""}</Text>
         <Text>{boxHeader("Threat Model Editor", width)}</Text>
         <Text>{""}</Text>
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>{tokens.muted("No threats in threat model. Press [q] to continue.")}</Text>
         </Box>
         <Text>{""}</Text>
@@ -195,7 +195,7 @@ export function ThreatModelEditor({
       <Text>{boxHeader(`Threat Model Editor (${threats.length} threats)`, width)}</Text>
       <Text>{""}</Text>
 
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>
           {tokens.success(`${activeCount} active`)} {tokens.muted(`${dismissedCount} dismissed`)}{" "}
           {tokens.info(`${mitigatedCount} mitigated`)}
@@ -224,14 +224,14 @@ export function ThreatModelEditor({
               {cursor}
               {tokens.muted(t.id)} {titleText} {statusCell}
             </Text>
-            <Box paddingLeft={5}>
+            <Box paddingLeft={SPACING.xxl}>
               <Text>
                 {icons.bullet} {impactBadge(t.impact)} {tokens.muted("likelihood:")} {t.likelihood}{" "}
                 {categoryLabel(t.category)}
               </Text>
             </Box>
             {isSelected && (
-              <Box flexDirection="column" paddingLeft={5}>
+              <Box flexDirection="column" paddingLeft={SPACING.xxl}>
                 {t.attackVector && (
                   <Text>
                     {tokens.muted("Attack:")} {t.attackVector.slice(0, 70)}
@@ -261,7 +261,7 @@ export function ThreatModelEditor({
       })}
 
       {threats.length > VISIBLE_COUNT && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>
             {tokens.muted(
               `Showing ${scrollStart + 1}-${Math.min(scrollStart + VISIBLE_COUNT, threats.length)} of ${threats.length}`,
@@ -271,7 +271,7 @@ export function ThreatModelEditor({
       )}
 
       {annotateMode && (
-        <Box marginTop={1} paddingLeft={2}>
+        <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
           <Text>{tokens.accent("Note: ")}</Text>
           <TextInput
             value={annotateBuffer}

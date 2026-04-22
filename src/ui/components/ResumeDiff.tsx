@@ -7,7 +7,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 export interface ResumeDiffData {
   previousRunDate?: string;
@@ -37,7 +37,7 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
   return (
     <Box flexDirection="column">
       <Text>{boxHeader("Resume", width)}</Text>
-      <Box paddingLeft={2} flexDirection="column">
+      <Box paddingLeft={SPACING.md} flexDirection="column">
         <Text>
           {tokens.muted("Previous run:")} {prevDate} ({data.previousFindingCount} findings,{" "}
           {data.previousTriagedCount} triaged)
@@ -65,7 +65,7 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
             <Text>
               {tokens.warn(`${icons.warning} Verdict changes:`)} {data.verdictChanges.length}
             </Text>
-            <Box flexDirection="column" paddingLeft={2}>
+            <Box flexDirection="column" paddingLeft={SPACING.md}>
               {data.verdictChanges.slice(0, 5).map((change, i) => {
                 const isLast = i === Math.min(data.verdictChanges.length, 5) - 1;
                 const connector = isLast ? icons.treeLast : icons.treeMiddle;

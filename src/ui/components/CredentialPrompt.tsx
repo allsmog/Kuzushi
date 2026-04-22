@@ -24,7 +24,7 @@ import {
   type SelectListRenderContext,
 } from "../primitives/SelectList.js";
 import { TextInput } from "../primitives/TextInput.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 /** Provider ids aligned with pi-ai's builtin providers. */
 export type ProviderId =
@@ -197,12 +197,12 @@ function saveRenderer(ctx: SelectListRenderContext<SaveOption>): React.ReactElem
   const item = SAVE_ITEMS.find((c) => c.id === ctx.item.id)!;
   const name = ctx.isCursor ? tokens.strong(item.label) : tokens.muted(item.label);
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <Text>
         {ctx.cursorPrefix} {icons.complete} {name}
       </Text>
       {ctx.isCursor && item.detail && (
-        <Box paddingLeft={6}>
+        <Box paddingLeft={SPACING.xxxl}>
           <Text>{tokens.muted(item.detail)}</Text>
         </Box>
       )}
@@ -214,12 +214,12 @@ function providerRenderer(ctx: SelectListRenderContext<ProviderId>): React.React
   const provider = PROVIDERS.find((p) => p.id === ctx.item.id)!;
   const name = ctx.isCursor ? tokens.strong(provider.name) : tokens.muted(provider.name);
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <Text>
         {ctx.cursorPrefix} {icons.complete} {name} {tokens.muted(`— ${provider.description}`)}
       </Text>
       {ctx.isCursor && (
-        <Box paddingLeft={6}>
+        <Box paddingLeft={SPACING.xxxl}>
           <Text>{tokens.muted(provider.detail)}</Text>
         </Box>
       )}
@@ -319,10 +319,10 @@ export function CredentialPrompt({
         <Text>{""}</Text>
         <Text>{boxHeader("Persist credentials?", width)}</Text>
         <Text>{""}</Text>
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>{tokens.muted(`Save ${chosenProvider?.name} credentials to`)}</Text>
         </Box>
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>{tokens.muted("./.kuzushi/credentials.json (auto-added to .gitignore)?")}</Text>
         </Box>
         <Text>{""}</Text>
@@ -349,7 +349,7 @@ export function CredentialPrompt({
         <Text>{""}</Text>
         <Text>{boxHeader(title, width)}</Text>
         <Text>{""}</Text>
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>
             {tokens.muted(
               isBaseUrlOnly
@@ -359,7 +359,7 @@ export function CredentialPrompt({
           </Text>
         </Box>
         <Text>{""}</Text>
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <TextInput
             value={baseUrlValue}
             onChange={setBaseUrlValue}
@@ -402,11 +402,11 @@ export function CredentialPrompt({
         <Text>{""}</Text>
         <Text>{boxHeader(`${chosenProvider?.name} API key`, width)}</Text>
         <Text>{""}</Text>
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>{tokens.muted(`Paste your ${chosenProvider?.name} API key${envHint}:`)}</Text>
         </Box>
         <Text>{""}</Text>
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <TextInput
             value={inputValue}
             onChange={setInputValue}
@@ -436,11 +436,9 @@ export function CredentialPrompt({
       <Text>{""}</Text>
       <Text>{boxHeader("Choose an AI provider", width)}</Text>
       <Text>{""}</Text>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>
-          {tokens.muted(
-            "Kuzushi works with any provider below. Pick one to set up credentials.",
-          )}
+          {tokens.muted("Kuzushi works with any provider below. Pick one to set up credentials.")}
         </Text>
       </Box>
       <Text>{""}</Text>

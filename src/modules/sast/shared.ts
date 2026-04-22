@@ -70,6 +70,7 @@ export async function executeSastPipeline(
   const { resolveRepo } = await import("../../cli/shared.js");
   const { resolveScanSeverity } = await import("../../cli/scan-config.js");
   const { configureTerminalOutput, resetTerminalOutput } = await import("../../ui/output.js");
+  const { summarizePipelineResult } = await import("./pipeline-summary.js");
   const path = await import("node:path");
 
   const mergedConfig = mergeTaskConfig(ctx.config, options?.taskConfig);
@@ -130,9 +131,15 @@ export async function executeSastPipeline(
     tasks: taskIds?.join(","),
   };
 
-  if (ctx.uiStore) {
-    ctx.uiStore.update({ repoName });
-    configureTerminalOutput({ store: ctx.uiStore, quiet: true });
+  // The public `HostUiHandle` narrows `UIStore` to `getState()/update()`.
+  // Internal SAST infra still needs the concrete `UIStore` shape to pass
+  // through to `runPipeline` / `configureTerminalOutput`; cast at the
+  // boundary. Third parties outside `src/modules/` stay on the narrow type.
+  const uiStoreInternal = ctx.uiStore as import("../../ui/state.js").UIStore | undefined;
+
+  if (uiStoreInternal) {
+    uiStoreInternal.update({ repoName });
+    configureTerminalOutput({ store: uiStoreInternal, quiet: true });
   }
 
   try {
@@ -144,27 +151,22 @@ export async function executeSastPipeline(
       scanOpts,
       opts: opts as import("../../cli/scan-config.js").ScanCommandOptions,
       runtime: ctx.runtime,
-      reportMode: ctx.uiStore ? "full" : "suppress",
+      reportMode: uiStoreInternal ? "full" : "suppress",
       manageCache: false,
-      uiStore: ctx.uiStore,
+      uiStore: uiStoreInternal,
       signal: ctx.signal,
-      returnModeOnComplete: ctx.uiStore?.getState().shell ? "shell" : undefined,
+      returnModeOnComplete: uiStoreInternal?.getState().shell ? "shell" : undefined,
       postProcessMode: options?.postProcessMode ?? "full",
       seedTaskOutputs: ctx.seedTaskOutputs,
     });
 
     const label = options?.summaryLabel ?? "Scan";
-    const findings = result.stats?.totalFindings ?? 0;
-    const triaged = result.stats?.triaged ?? 0;
-    const cost = result.stats?.totalCostUsd;
-
-    const summary = result.aborted
-      ? `${label} cancelled: ${repoName}`
-      : result.status === "complete"
-        ? options?.postProcessMode === "scan-only"
-          ? `${label} complete: ${repoName} — ${findings} findings${cost ? ` ($${cost.toFixed(2)})` : ""}`
-          : `${label} complete: ${repoName} — ${findings} findings, ${triaged} triaged${cost ? ` ($${cost.toFixed(2)})` : ""}`
-        : `${label} finished with errors: ${repoName} — ${findings} findings${result.error ? ` (${result.error})` : ""}`;
+    const summary = summarizePipelineResult({
+      result,
+      repoName,
+      label,
+      postProcessMode: options?.postProcessMode ?? "full",
+    });
 
     return {
       ok: result.status === "complete",

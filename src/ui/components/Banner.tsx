@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Box, Static, Text } from "ink";
 import React from "react";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const assetsRoot = path.resolve(__dirname, "..", "..", "..", "assets");
@@ -65,7 +65,7 @@ function _Banner(): React.ReactElement {
                 <Text key={`logo-${i}`}>{line}</Text>
               ))}
             </Box>
-            <Box flexDirection="column" justifyContent="center" marginLeft={2}>
+            <Box flexDirection="column" justifyContent="center" marginLeft={SPACING.md}>
               <Text>{""}</Text>
               <Text>{""}</Text>
               <Text>{""}</Text>
@@ -73,7 +73,7 @@ function _Banner(): React.ReactElement {
             </Box>
           </Box>
           <Text>{""}</Text>
-          <Box flexDirection="column" paddingLeft={3}>
+          <Box flexDirection="column" paddingLeft={SPACING.lg}>
             <Text>
               {tokens.strong(
                 "\u2588\u2588\u2557  \u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557\u2588\u2588\u2557",
@@ -106,7 +106,7 @@ function _Banner(): React.ReactElement {
             </Text>
           </Box>
           <Text>{""}</Text>
-          <Box paddingLeft={3}>
+          <Box paddingLeft={SPACING.lg}>
             <Text>
               {tokens.strong("\u5D29\u3057 ")} {tokens.muted("\u2014 Agentic SAST Orchestration")}
             </Text>

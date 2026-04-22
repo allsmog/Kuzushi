@@ -17,7 +17,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface CostCapHaltProps {
   runningCostUsd: number;
@@ -27,14 +27,17 @@ interface CostCapHaltProps {
 export function CostCapHalt({ runningCostUsd, budgetUsd }: CostCapHaltProps): React.ReactElement {
   const over = budgetUsd != null ? Math.max(0, runningCostUsd - budgetUsd) : 0;
   const pct =
-    budgetUsd != null && budgetUsd > 0
-      ? Math.round((runningCostUsd / budgetUsd) * 100)
-      : undefined;
+    budgetUsd != null && budgetUsd > 0 ? Math.round((runningCostUsd / budgetUsd) * 100) : undefined;
   const width = 70;
   const bar = "─".repeat(width - 12);
 
   return (
-    <Box flexDirection="column" marginTop={1} marginBottom={1} paddingLeft={2}>
+    <Box
+      flexDirection="column"
+      marginTop={SPACING.sm}
+      marginBottom={SPACING.sm}
+      paddingLeft={SPACING.md}
+    >
       <Text>
         {tokens.muted("╭─ ")}
         {tokens.dangerStrong("BUDGET EXCEEDED")}
@@ -58,7 +61,7 @@ export function CostCapHalt({ runningCostUsd, budgetUsd }: CostCapHaltProps): Re
         )}
       </Row>
       <Text>{tokens.muted(`╰${"─".repeat(width - 2)}╯`)}</Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.hint("  press ")}
           {tokens.strong("c")}

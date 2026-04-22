@@ -15,9 +15,13 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { icons } from "../icons.js";
+import { Table } from "../primitives/Table.js";
 import type { ShellModuleCard, ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
-import { ShellFooterHints } from "./ShellFooterHints.js";
+import { SPACING, tokens } from "../tokens.js";
+import { ContextStrip } from "./ContextStrip.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 /** Roadmap modules — kept in sync with the VISION.md one-liner in the README. */
 const ROADMAP_MODULES = ["blackbox", "pwn", "pentest", "honeypot", "yokai", "revgraph"] as const;
@@ -35,6 +39,13 @@ interface ModuleCatalogProps {
 }
 
 export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement {
+  useRegisterKeybindings([
+    { keys: "/use <id>", label: "focus module" },
+    { keys: "/findings", label: "findings", secondary: true },
+    { keys: "/tune", label: "tune", secondary: true },
+    { keys: "?", label: "help", secondary: true },
+    { keys: "Ctrl+C", label: "exit", secondary: true },
+  ]);
   const cards = shell.moduleCatalog ?? [];
   const builtIns = cards.filter((c) => !c.external);
   const externals = cards.filter((c) => c.external);
@@ -46,44 +57,52 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
     byCategory[card.category] = bucket;
   }
 
-  const widest = Math.max(10, ...cards.map((c) => c.id.length));
-
+  const cardWidth = 61;
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <CatalogHeader shell={shell} />
+    <ScreenContent>
+      <ContextStrip
+        status={[
+          `workspace:${shell.workspace ?? "none"}`,
+          `target:${shell.target ?? "none"}`,
+          `${(shell.moduleCatalog ?? []).length} modules`,
+        ]}
+      />
+      <Box marginTop={SPACING.sm}>
+        <Text>
+          {tokens.strong("Primary next step: ")}
+          {tokens.accent("/use <module-id>")}
+          {tokens.muted(" to enter one module workflow.")}
+        </Text>
+      </Box>
 
       {CATEGORY_ORDER.map((cat) => {
         const rows = byCategory[cat];
         if (!rows || rows.length === 0) return null;
         return (
-          <Box key={cat} flexDirection="column" marginTop={1}>
+          <Box key={cat} flexDirection="column" marginTop={SPACING.sm}>
             <Text>{tokens.label(CATEGORY_LABEL[cat])}</Text>
-            <Box marginTop={1} flexDirection="column">
-              {rows.map((card) => (
-                <ModuleRow key={card.id} card={card} idWidth={widest} />
-              ))}
+            <Box marginTop={SPACING.sm}>
+              <ModuleRows rows={rows} />
             </Box>
           </Box>
         );
       })}
 
       {externals.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>
             {tokens.label("EXTERNAL")}
             {"  "}
             {tokens.muted("(loaded via --load package:<name>)")}
           </Text>
-          <Box marginTop={1} flexDirection="column">
-            {externals.map((card) => (
-              <ModuleRow key={card.id} card={card} idWidth={widest} />
-            ))}
+          <Box marginTop={SPACING.sm}>
+            <ModuleRows rows={externals} />
           </Box>
         </Box>
       )}
 
-      <Box marginTop={1}>
-        <Text>{tokens.muted("─".repeat(74))}</Text>
+      <Box marginTop={SPACING.sm}>
+        <Text>{tokens.metadata(icons.boxHorizontal.repeat(cardWidth - 2))}</Text>
       </Box>
       <Box>
         <Text>
@@ -91,81 +110,33 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
           {tokens.accent("see VISION.md")}
         </Text>
       </Box>
-
-      <ShellFooterHints
-        divider={false}
-        hints={[
-          { key: "/use <id>", label: "open" },
-          { key: "/findings", label: "list" },
-          { key: "/tune", label: "adjust" },
-          { key: "/help", label: "more" },
-          { key: "/exit", label: "quit" },
-        ]}
-      />
-    </Box>
+    </ScreenContent>
   );
 }
 
-function CatalogHeader({ shell }: { shell: ShellState }): React.ReactElement {
-  const workspace = shell.workspace ?? "(no workspace)";
-  const target = shell.target ?? "(no target)";
-  const modList = (shell.moduleCatalog ?? [])
-    .filter((c) => !c.external)
-    .slice(0, 5)
-    .map((c) => c.id)
-    .join(", ");
-
+function ModuleRows({ rows }: { rows: ShellModuleCard[] }): React.ReactElement {
   return (
-    <Box flexDirection="column">
-      <Text>{tokens.muted("╭─────────────────────────────────────────────────────────────╮")}</Text>
-      <Text>
-        {tokens.muted("│  ")}
-        {tokens.strong("kuzushi shell")}
-        {"                      "}
-        {tokens.muted("workspace ")}
-        {tokens.value(workspace)}
-        {tokens.muted("  │")}
-      </Text>
-      <Text>
-        {tokens.muted("│  modules ")}
-        {tokens.value(modList || "(none)")}
-        {tokens.muted("  │")}
-      </Text>
-      <Text>
-        {tokens.muted("│  target ")}
-        {tokens.value(target)}
-        {tokens.muted("  │")}
-      </Text>
-      <Text>{tokens.muted("╰─────────────────────────────────────────────────────────────╯")}</Text>
-    </Box>
+    <Table
+      showHeader
+      gap={1}
+      columns={[
+        { key: "id", header: "MODULE", width: 14, truncate: "end", render: (c) => c.id },
+        {
+          key: "description",
+          header: "DESCRIPTION",
+          flex: 4,
+          truncate: "end",
+          render: (c) => c.description,
+        },
+        {
+          key: "last",
+          header: "LAST RUN",
+          flex: 2,
+          truncate: "end",
+          render: (c) => c.lastRunSummary ?? "never run",
+        },
+      ]}
+      rows={rows}
+    />
   );
-}
-
-function ModuleRow({
-  card,
-  idWidth,
-}: {
-  card: ShellModuleCard;
-  idWidth: number;
-}): React.ReactElement {
-  const id = card.id.padEnd(idWidth + 2);
-  const desc = truncate(card.description, 54).padEnd(54);
-  const last = card.lastRunSummary ?? "never run";
-  const isNever = !card.lastRunSummary;
-
-  return (
-    <Text>
-      {"   "}
-      {tokens.strong(id)}
-      {"  "}
-      {tokens.muted(desc)}
-      {"  "}
-      {isNever ? tokens.muted(last) : tokens.value(last)}
-    </Text>
-  );
-}
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
 }

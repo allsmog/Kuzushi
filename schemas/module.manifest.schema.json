@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/module.manifest.schema.json",
+  "title": "Kuzushi Module Manifest",
+  "description": "Declarative manifest for a Kuzushi CopilotModule. Lives at the package root as `module.manifest.json` for file-based / package-based modules.",
+  "type": "object",
+  "required": ["id", "displayName", "version", "category", "entry"],
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Unique kebab-case module id. Tool names must start with `<id>:`."
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable name shown in the shell's module catalog."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+([-+].+)?$",
+      "description": "Semver of this module (independent of kuzushiSdkVersion)."
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line summary; rendered in `show modules` / `info`."
+    },
+    "category": {
+      "type": "string",
+      "enum": ["offense", "defense", "governance", "intel"],
+      "description": "High-level classification."
+    },
+    "entry": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Entry module path, relative to the manifest."
+    },
+    "author": { "type": "string" },
+    "license": { "type": "string" },
+    "kuzushiSdkVersion": {
+      "type": "string",
+      "description": "Host SDK version the module was built against. A bare semver (0.19.1) or a range (>=0.19, ^1.0.0). The loader warns on major-version drift.",
+      "pattern": "^([\\^~>=<]*\\s*)?\\d+(\\.\\d+){0,2}([-+].+)?(\\s*\\|\\|\\s*.+)?$"
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Environment variables that must be set."
+        },
+        "bins": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "CLI binaries that must exist on PATH."
+        },
+        "nodeVersion": {
+          "type": "string",
+          "description": "Minimum Node.js version (e.g. '>=22')."
+        }
+      }
+    },
+    "configSchema": {
+      "type": "object",
+      "description": "Per-module config JSON Schema. Validated against `opts.moduleConfig` before init()."
+    }
+  }
+}

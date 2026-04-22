@@ -16,7 +16,7 @@ import {
 import { icons } from "../icons.js";
 import { Table } from "../primitives/Table.js";
 import type { SummaryData } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { AttackChainDiagram } from "./AttackChainDiagram.js";
 import { FindingCard } from "./FindingCard.js";
 import { TrophyScreen } from "./TrophyScreen.js";
@@ -83,7 +83,7 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
       <Text>{""}</Text>
 
       {/* Indented body — every row below lands at column 2 via paddingLeft. */}
-      <Box flexDirection="column" paddingLeft={2}>
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
         <Table<VerdictRow>
           columns={[
             { key: "label", width: 14, align: "left" },
@@ -366,7 +366,7 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
 
         {/* Threat model context */}
         {data.threatModelSummary && (
-          <Box flexDirection="column" marginBottom={1}>
+          <Box flexDirection="column" marginBottom={SPACING.sm}>
             <Text bold>Threat Model Context</Text>
             <Text>{data.threatModelSummary}</Text>
           </Box>
@@ -398,7 +398,11 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
         {/* Cost summary — bar chart */}
         <Text>{""}</Text>
         <Text>{boxDivider(width)}</Text>
-        <Text>{tokens.label(`Cost (${formatCost(data.triageCostUsd + data.verificationCostUsd + data.pocHarnessCostUsd + data.variantAnalysisCostUsd + data.dynamicCostUsd + data.patchCostUsd)})`)}</Text>
+        <Text>
+          {tokens.label(
+            `Cost (${formatCost(data.triageCostUsd + data.verificationCostUsd + data.pocHarnessCostUsd + data.variantAnalysisCostUsd + data.dynamicCostUsd + data.patchCostUsd)})`,
+          )}
+        </Text>
         <Text>{""}</Text>
         {miniBarChart(
           [
@@ -410,7 +414,7 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
             { label: "Patch", value: data.patchCostUsd, color: tokens.muted },
           ].filter((e) => e.value > 0),
         ).map((line, i) => (
-          <Text key={`cost-${i}`}>  {line}</Text>
+          <Text key={`cost-${i}`}> {line}</Text>
         ))}
         {data.budgetExceeded && (
           <>

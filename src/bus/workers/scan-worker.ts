@@ -11,6 +11,7 @@ import type { KuzushiConfig } from "../../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TaskStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
+import { getRunSignal } from "../run-signals.js";
 import { wrapRuntimeWithActivityForwarding } from "../runtime-forwarding.js";
 import { executeAgentTask } from "../task-execution.js";
 import type { MessageBus } from "../types.js";
@@ -60,12 +61,18 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
       const projectRoot = context.repoRoot;
       const workRoot = context.scanPath ?? context.repoRoot;
 
-      let securityProfiles;
+      let securityProfiles: ReturnType<typeof loadSecurityProfiles> | undefined;
       try {
         securityProfiles = loadSecurityProfiles(projectRoot);
       } catch {
         // Security profiles loading is best-effort.
       }
+
+      // Look up the pipeline's abort signal from the run-signal registry.
+      // `runPipeline` registers the operator-provided signal under runId
+      // before publishing `pipeline:start`; without this hop `TaskContext.signal`
+      // stays undefined and tasks like threat-hunt can't honor Ctrl+C.
+      const runSignal = getRunSignal(runId);
 
       const taskContext: TaskContext = {
         runId,
@@ -82,6 +89,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
         securityProfiles,
         knowledgeRegistry: deps.knowledgeRegistry,
         db: deps.db,
+        ...(runSignal ? { signal: runSignal } : {}),
       };
 
       const executed = await executeTaskWithOptionalEnsemble(
