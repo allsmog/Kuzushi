@@ -22,11 +22,12 @@ import {
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useUIState } from "../hooks.js";
+import { useLayoutContext } from "../layout-context.js";
 import { Gutter } from "../primitives/Gutter.js";
 import { Markdown } from "../primitives/Markdown.js";
 import { Ratchet } from "../primitives/Ratchet.js";
 import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { DiffSinceView } from "./DiffSinceView.js";
@@ -74,6 +75,7 @@ function isThreatShellView(view: ShellState["shellView"] | undefined): boolean {
 }
 
 export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
+  const { theme } = useLayoutContext();
   const state = useUIState(store);
   const shell = state.shell;
   const { exit } = useApp();
@@ -343,7 +345,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       <MemoShellViewPanel state={state} shell={shell} />
 
       {shell.plannerBusy && !shell.pendingPlan && (
-        <Box marginTop={1} paddingLeft={2}>
+        <Box marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
           <Spinner />
           <Text>
             {"  "}
@@ -372,7 +374,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
 
       {shell.processing && !shell.currentTool && (
-        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+        <Box flexDirection="column" marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
           <Box>
             <Spinner />
             <Text>
@@ -385,7 +387,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
 
       {state.ctrlCArmedAt && Date.now() - state.ctrlCArmedAt < CTRL_C_ARM_WINDOW_MS ? (
-        <Box marginTop={1} paddingLeft={2}>
+        <Box marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
           <Text>{tokens.warn("press Ctrl+C again to exit")}</Text>
         </Box>
       ) : null}
@@ -400,7 +402,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
             </Text>
           </Box>
           {slashSuggestions.length > 0 && (
-            <Box flexDirection="column" paddingLeft={2}>
+            <Box flexDirection="column" paddingLeft={theme.spacing.md}>
               <Text>{tokens.muted("Suggestions:")}</Text>
               <Text>{tokens.muted(slashSuggestions.join("  •  "))}</Text>
             </Box>
@@ -440,7 +442,7 @@ function LlmHeartbeatLine({
   parts.push(calls);
   if (totalCostUsd > 0) parts.push(`$${totalCostUsd.toFixed(2)}`);
   return (
-    <Box paddingLeft={4}>
+    <Box paddingLeft={SPACING.lg}>
       <Text>{tokens.muted(`· ${parts.join(" · ")}`)}</Text>
     </Box>
   );
@@ -556,7 +558,7 @@ function ShellBannerImpl({ shell }: { shell: ShellState }): React.ReactElement {
     return <ModuleCatalog shell={shell} />;
   }
   return (
-    <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+    <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>{""}</Text>
       <Text>{tokens.label("Kuzushi")}</Text>
       <Text>{tokens.muted("security-native AI operating environment")}</Text>
