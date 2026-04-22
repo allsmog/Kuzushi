@@ -33,7 +33,7 @@ import {
 import { useHeartbeat } from "../hooks.js";
 import { icons } from "../icons.js";
 import type { AgentActivityLine, PipelineStage, ResultLine, SubTask } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { Spinner } from "./Spinner.js";
 
 interface PipelineIndicatorProps {
@@ -101,7 +101,7 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
   if (stages.length === 0) return null;
 
   return (
-    <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+    <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
       {phase ? <PhaseHeader phase={phase} /> : null}
       {stages.map((stage, stageIdx) => {
         const isLast = stageIdx === stages.length - 1;
@@ -275,9 +275,9 @@ function _SubTaskBranches({
   );
 }
 
-const SubTaskRow = React.memo(_SubTaskRow);
+const SubTaskRow = React.memo(SubTaskRowImpl);
 
-function _SubTaskRow({
+function SubTaskRowImpl({
   task,
   isLast,
   pipe,
@@ -539,7 +539,7 @@ function formatToolLine(line: AgentActivityLine): string {
  */
 function PhaseHeader({ phase }: { phase: { title: string; detail?: string } }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={SPACING.sm}>
       <Text>
         {tokens.label("now")}
         {"   "}

@@ -10,16 +10,26 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import type { ShellModuleCard, ShellModuleToolSummary, ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { Table } from "../primitives/Table.js";
+import type { ShellModuleToolSummary, ShellState } from "../state.js";
+import { SPACING, tokens } from "../tokens.js";
+import { ContextStrip } from "./ContextStrip.js";
 import { EmptyState } from "./EmptyState.js";
-import { ShellFooterHints } from "./ShellFooterHints.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 interface ModuleHomeProps {
   shell: ShellState;
 }
 
 export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
+  useRegisterKeybindings([
+    { keys: "Enter", label: "type tool verb" },
+    { keys: "t", label: "tune", secondary: true },
+    { keys: "f", label: "findings", secondary: true },
+    { keys: "b", label: "back", secondary: true },
+    { keys: "?", label: "help", secondary: true },
+  ]);
   const moduleId = shell.focusedModule;
   if (!moduleId) {
     return (
@@ -31,11 +41,20 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
 
   const card = shell.moduleCatalog?.find((c) => c.id === moduleId);
   const tools: ReadonlyArray<ShellModuleToolSummary> = card?.toolSummaries ?? [];
-  const verbWidth = Math.max(10, ...tools.map((t) => t.verb.length));
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <Header moduleId={moduleId} card={card} />
+    <ScreenContent>
+      <ContextStrip
+        status={card ? [card.category, `${tools.length} tools`] : [`${tools.length} tools`]}
+        subtitle={card?.description}
+      />
+      <Box marginTop={SPACING.sm}>
+        <Text>
+          {tokens.strong("Primary action: ")}
+          {tokens.accent("run one tool verb")}
+          {tokens.muted(" (listed below).")}
+        </Text>
+      </Box>
 
       {card?.description ? (
         <Section label="what it does">
@@ -49,7 +68,16 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
             <EmptyState kind="module-no-tools" context={{ moduleId }} />
           </Box>
         ) : (
-          tools.map((tool) => <ToolRow key={tool.name} tool={tool} verbWidth={verbWidth} />)
+          <Table
+            showHeader
+            gap={1}
+            columns={[
+              { key: "verb", header: "VERB", width: 14, truncate: "end" },
+              { key: "description", header: "DESCRIPTION", flex: 4, truncate: "end" },
+              { key: "name", header: "TOOL NAME", flex: 3, truncate: "middle" },
+            ]}
+            rows={tools}
+          />
         )}
       </Section>
 
@@ -61,37 +89,7 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
             : tokens.muted("never run for this workspace")}
         </Text>
       </Section>
-
-      <ShellFooterHints
-        hints={[
-          { key: "type a tool", label: "" },
-          { key: "t", label: "tune" },
-          { key: "f", label: "findings" },
-          { key: "b", label: "back" },
-          { key: "/help", label: "more" },
-        ]}
-      />
-    </Box>
-  );
-}
-
-function Header({
-  moduleId,
-  card,
-}: {
-  moduleId: string;
-  card?: ShellModuleCard;
-}): React.ReactElement {
-  const tagline = card ? `· ${card.category} · ${truncate(card.description, 50)}` : "";
-  return (
-    <Box>
-      <Text>
-        {tokens.muted("\u25C2 back  ")}
-        {tokens.strong(moduleId)}
-        {"  "}
-        {tokens.muted(tagline)}
-      </Text>
-    </Box>
+    </ScreenContent>
   );
 }
 
@@ -105,36 +103,15 @@ function Section({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {tokens.label(label)}
         {hint ? tokens.muted(`   ${hint}`) : ""}
       </Text>
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SPACING.sm}>
         {children}
       </Box>
     </Box>
-  );
-}
-
-function ToolRow({
-  tool,
-  verbWidth,
-}: {
-  tool: ShellModuleToolSummary;
-  verbWidth: number;
-}): React.ReactElement {
-  const verb = tool.verb.padEnd(verbWidth + 2);
-  const desc = truncate(tool.description, 50).padEnd(50);
-  return (
-    <Text>
-      {"   "}
-      {tokens.strong(verb)}
-      {"  "}
-      {tokens.muted(desc)}
-      {"  "}
-      {tokens.muted(tool.name)}
-    </Text>
   );
 }
 
@@ -151,20 +128,20 @@ function WrappedText({ text, width }: { text: string; width: number }): React.Re
     }
   }
   if (current) lines.push(current);
+  let offset = 0;
+  const keyedLines = lines.map((line) => {
+    offset += line.length + 1;
+    return { line, key: `${offset}-${line.slice(0, 16)}` };
+  });
 
   return (
     <Box flexDirection="column">
-      {lines.map((line, i) => (
-        <Text key={`${i}-${line.slice(0, 10)}`}>
+      {keyedLines.map(({ line, key }) => (
+        <Text key={key}>
           {"   "}
           {line}
         </Text>
       ))}
     </Box>
   );
-}
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}\u2026`;
 }

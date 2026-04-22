@@ -13,10 +13,11 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import type { ShellState, TuneSnapshot } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { HouseRules } from "./HouseRules.js";
-import { ShellFooterHints } from "./ShellFooterHints.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 const PRESETS = ["fast", "standard", "deep"] as const;
 const TASK_OPTIONS = ["semgrep", "codeql", "agentic", "iris-taint", "crypto-test"] as const;
@@ -27,11 +28,19 @@ interface TuneViewProps {
 }
 
 export function TuneView({ shell }: TuneViewProps): React.ReactElement {
+  useRegisterKeybindings([
+    { keys: "x", label: "run with these settings" },
+    { keys: "s", label: "save", secondary: true },
+    { keys: "r", label: "reset", secondary: true },
+    { keys: "p", label: "prompt editor", secondary: true },
+    { keys: "/config", label: "full editor", secondary: true },
+    { keys: "b", label: "back", secondary: true },
+  ]);
   const moduleId = shell.focusedModule ?? "(no module)";
   const snap = shell.tuneSnapshot;
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <ScreenContent>
       <Box>
         <Text>
           {tokens.muted("\u25C2 back   ")}
@@ -93,29 +102,17 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
         </Text>
       </TuneControl>
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>{tokens.muted("\u2500".repeat(78))}</Text>
       </Box>
+      <Box marginTop={SPACING.sm}>
+        <Text>{tokens.strong("Primary action: x run with these settings.")}</Text>
+      </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <HouseRules text={snap?.houseRules} path={snap?.houseRulesPath} />
       </Box>
-
-      <Box marginTop={1}>
-        <Text>{tokens.muted("\u2500".repeat(78))}</Text>
-      </Box>
-
-      <ShellFooterHints
-        divider={false}
-        hints={[
-          { key: "s", label: "save" },
-          { key: "r", label: "reset" },
-          { key: "x", label: "run with these" },
-          { key: "p", label: "full prompt editor (--expert)" },
-          { key: "/config", label: "open editor" },
-        ]}
-      />
-    </Box>
+    </ScreenContent>
   );
 }
 
@@ -131,14 +128,14 @@ function TuneControl({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {tokens.label(label)}
         {"     "}
         {tokens.hint(String(configKey))}
         {flag ? tokens.muted(`    ${flag}`) : ""}
       </Text>
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SPACING.sm}>
         {children}
       </Box>
     </Box>

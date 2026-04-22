@@ -25,12 +25,14 @@ import {
   dangerStrong,
   label,
   muted,
+  SPACING,
   strong,
   successStrong,
   warn,
   warnStrong,
 } from "../tokens.js";
 import { CodePreview } from "./CodePreview.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 const DEBUG_ON = process.env.KUZUSHI_DEBUG === "1";
 
@@ -181,18 +183,18 @@ function _FindingCard({ finding, mode }: FindingCardProps): React.ReactElement {
         {verificationBadge}
       </Text>
       {titleLine && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>{strong(titleLine)}</Text>
         </Box>
       )}
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>{location}</Text>
       </Box>
       <CodePreview filePath={finding.filePath} line={finding.startLine} context={2} />
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text dimColor>{finding.ruleId}</Text>
       </Box>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>
           {renderMarkdownInline(summaryText.slice(0, 160))}
           {summaryText.length > 160 ? "\u2026" : ""}
@@ -203,7 +205,7 @@ function _FindingCard({ finding, mode }: FindingCardProps): React.ReactElement {
 
   if (!hasDetails) {
     return (
-      <Box flexDirection="column" paddingLeft={2}>
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
         {summary}
         <Text> </Text>
       </Box>
@@ -214,7 +216,7 @@ function _FindingCard({ finding, mode }: FindingCardProps): React.ReactElement {
     details.length + (finding.corroboratingSignals.length > 0 ? 1 : 0) + (hasValidation ? 1 : 0);
 
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <ExpandableSection
         summary={summary}
         defaultExpanded={DEBUG_ON}
@@ -286,7 +288,7 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
   }
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <ScreenContent>
       <Box>
         <Text>
           {muted("\u25C2 findings   ")}
@@ -298,7 +300,7 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
         </Text>
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {"   "}
           {STATE_STRIP.map((step, i) => {
@@ -338,7 +340,7 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
         <LinearList label="next verification" items={finding.verificationSteps.slice(0, 4)} />
       )}
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>{muted("\u2500".repeat(78))}</Text>
       </Box>
       <Box>
@@ -350,7 +352,7 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
           {muted("a assign   c comment   s suppress   r resolve   p patch   v re-verify   q back")}
         </Text>
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 
@@ -364,7 +366,7 @@ function LinearRow({
   hint?: string;
 }): React.ReactElement {
   return (
-    <Box marginTop={1}>
+    <Box marginTop={SPACING.sm}>
       <Text>
         {"  "}
         {label(labelText.padEnd(14))}
@@ -384,12 +386,12 @@ function LinearParagraph({
 }): React.ReactElement | null {
   if (!text) return null;
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {"  "}
         {label(labelText)}
       </Text>
-      <Box paddingLeft={4}>
+      <Box paddingLeft={SPACING.xl}>
         <Text>{text}</Text>
       </Box>
     </Box>
@@ -404,12 +406,12 @@ function LinearList({
   items: ReadonlyArray<string>;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {"  "}
         {label(labelText)}
       </Text>
-      <Box flexDirection="column" paddingLeft={4}>
+      <Box flexDirection="column" paddingLeft={SPACING.xl}>
         {items.map((item, i) => (
           <Text key={`${i}-${item.slice(0, 12)}`}>{muted(item)}</Text>
         ))}

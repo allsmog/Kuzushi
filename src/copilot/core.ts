@@ -27,6 +27,7 @@ import { createCoreSastModule } from "../modules/core-sast.js";
 import { createCoreShinsaModule } from "../modules/core-shinsa.js";
 import { createCoreTobModule } from "../modules/core-tob.js";
 import { createCoreVulnScoutModule } from "../modules/core-vuln-scout.js";
+import { readHostKuzushiVersion } from "../modules/loader.js";
 import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
 import { createReconModule } from "../modules/recon/core-recon.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
@@ -48,6 +49,14 @@ import type {
 } from "../modules/types.js";
 import { createVariantHunterModule } from "../modules/variant-hunter.js";
 import type { KuzushiConfig } from "../types.js";
+
+/**
+ * Host SDK version injected into `ctx.host.sdkVersion` on every tool call.
+ * Read once at load time from the runtime `kuzushi` package.json; falls
+ * back to "0.0.0" if the package.json can't be located (vendored/worktree
+ * layouts).
+ */
+const KUZUSHI_SDK_VERSION: string = readHostKuzushiVersion() ?? "0.0.0";
 
 // ---------------------------------------------------------------------------
 // CopilotCore options
@@ -305,6 +314,25 @@ export class CopilotCore {
       qualifiedName,
       "shell",
     );
+    // HOST-21 — build the per-call capability probe. Modules call
+    // `ctx.host?.capabilities.has("workspace")` to guard optional features.
+    const capabilities = new Set<string>();
+    if (ctxOverrides?.workspace) capabilities.add("workspace");
+    if (ctxOverrides?.uiStore) capabilities.add("ui-store");
+    if (ctxOverrides?.datastore) capabilities.add("datastore");
+    if (ctxOverrides?.print) capabilities.add("print-sink");
+    if (scope) capabilities.add("module-events");
+    if (toolModel) capabilities.add("tool-model");
+    // Structured-output is a runtime-level capability — treat presence of
+    // the upstream runtime as sufficient; tools that need the feature can
+    // still probe the runtime directly.
+    if (toolRuntime) capabilities.add("structured-output");
+
+    const host = {
+      sdkVersion: KUZUSHI_SDK_VERSION,
+      capabilities: capabilities as ReadonlySet<string>,
+    };
+
     const ctx: ToolExecutionContext = {
       cwd: ctxOverrides?.cwd ?? this.opts.dataDir,
       runtime: toolRuntime,
@@ -320,6 +348,7 @@ export class CopilotCore {
       ...(ctxOverrides?.workspace ? { workspace: ctxOverrides.workspace } : {}),
       ...(scope ? { events: scope } : {}),
       ...(toolModel ? { toolModel } : {}),
+      host,
       reportActivity: (description, meta) => {
         void publishTaskActivity(ctxBus, qualifiedName, description, meta ?? {});
       },
@@ -406,7 +435,7 @@ export class CopilotCore {
 
     // Tool catalog
     sections.push("## Available Tools\n");
-    for (const { module: mod, tool } of allTools) {
+    for (const { tool } of allTools) {
       sections.push(`### ${tool.name}`);
       sections.push(tool.description);
       if (!tool.headless) {
@@ -455,9 +484,14 @@ export class CopilotCore {
       case "sast":
         await this.loadWithScope(createCoreSastModule());
         break;
+      case "variant":
+      // Backward-compat — the old module id was "variant-hunter"; bare
+      // `--load variant-hunter` should still work.
       case "variant-hunter":
         await this.loadWithScope(createVariantHunterModule());
         break;
+      case "ndiff":
+      // Backward-compat — prior id was "n-day-diff-hunter".
       case "n-day-diff-hunter":
         await this.loadWithScope(createNDayDiffHunterModule());
         break;
@@ -486,6 +520,7 @@ export class CopilotCore {
     const { loadManifestFromPath, checkRequirements, dynamicImportModule } = await import(
       "../modules/loader.js"
     );
+    const { ModuleLoadError } = await import("../modules/errors.js");
     const path = await import("node:path");
 
     const manifest = loadManifestFromPath(modulePath);
@@ -493,8 +528,10 @@ export class CopilotCore {
     if (manifest.requires) {
       const reqCheck = checkRequirements(manifest.requires);
       if (!reqCheck.satisfied) {
-        throw new Error(
+        throw new ModuleLoadError(
+          "REQUIREMENTS_UNMET",
           `Module "${manifest.id}" requirements not met: ${reqCheck.missing.join(", ")}`,
+          { moduleId: manifest.id, missing: reqCheck.missing },
         );
       }
     }
@@ -503,12 +540,14 @@ export class CopilotCore {
     const mod = await dynamicImportModule(entryPath);
 
     if (mod.id !== manifest.id) {
-      throw new Error(
+      throw new ModuleLoadError(
+        "ID_MISMATCH",
         `Module ID mismatch: manifest declares "${manifest.id}" but module exports "${mod.id}"`,
+        { manifestId: manifest.id, exportedId: mod.id, path: modulePath },
       );
     }
 
-    await this.loadWithScope(mod);
+    await this.loadWithScope(mod, { manifest });
   }
 
   private async loadPackageModule(packageName: string): Promise<void> {
@@ -555,18 +594,48 @@ export class CopilotCore {
   private async loadMcpModule(serverSpec: string): Promise<void> {
     const { createMcpModule } = await import("../modules/mcp-bridge.js");
 
-    // Derive a module ID from the server spec
-    const moduleId =
-      serverSpec
-        .replace(/^(https?:\/\/|npx\s+|node\s+|python\s+)/, "")
-        .replace(/[^a-z0-9-]/gi, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 30) || "mcp";
+    // Derive a module ID from the server spec and pick a collision-free
+    // suffix so two MCP specs that slug to the same base (e.g. localhost:3000
+    // and localhost:3001 both stripping punctuation to "localhost-3000"
+    // depending on pattern quirks) coexist. The original serverSpec is
+    // preserved in the module's description so operators can tell them apart
+    // in `/modules` and `/tools` listings.
+    const moduleId = deriveUniqueMcpModuleId(serverSpec, (id) => this.registry.has(id));
 
     const { module: mod } = await createMcpModule(serverSpec, moduleId);
     await this.loadWithScope(mod);
   }
+}
+
+/**
+ * Derive a Kuzushi module ID from an MCP server spec, appending `-2`, `-3`,
+ * ... until `isTaken(id)` returns false. Exported for tests.
+ *
+ * The base slug trims a handful of common command/URL prefixes
+ * (`http(s)://`, `npx `, `node `, `python `), replaces non-alphanumerics with
+ * `-`, collapses runs, trims leading/trailing dashes, and caps length at 30.
+ * Empty slugs fall back to `"mcp"`.
+ */
+export function deriveUniqueMcpModuleId(
+  serverSpec: string,
+  isTaken: (id: string) => boolean,
+): string {
+  const base =
+    serverSpec
+      .replace(/^(https?:\/\/|npx\s+|node\s+|python\s+)/, "")
+      .replace(/[^a-z0-9-]/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 30) || "mcp";
+
+  if (!isTaken(base)) return base;
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${base}-${n}`;
+    if (!isTaken(candidate)) return candidate;
+  }
+  throw new Error(
+    `Failed to derive a unique module ID for MCP server "${serverSpec}" after 1000 attempts.`,
+  );
 }
 
 /**

@@ -18,11 +18,13 @@ import type {
   StrideThreat,
 } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { severityChalk } from "../severity.js";
 import type { ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { ContextStrip } from "./ContextStrip.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
-import { ShellFooterHints } from "./ShellFooterHints.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 // ---------------------------------------------------------------------------
 // Constants + types exported for the test file
@@ -111,6 +113,14 @@ interface ThreatStrideMatrixProps {
 }
 
 export function ThreatStrideMatrix({ shell }: ThreatStrideMatrixProps): React.ReactElement {
+  useRegisterKeybindings([
+    { keys: "1", label: "dfd", secondary: true },
+    { keys: "2", label: "stride" },
+    { keys: "3", label: "stories", secondary: true },
+    { keys: "4", label: "scope", secondary: true },
+    { keys: "5", label: "summary", secondary: true },
+    { keys: "q", label: "back", secondary: true },
+  ]);
   const tm = shell.threatModel;
   if (!tm) return <EmptyState />;
 
@@ -134,10 +144,20 @@ export function ThreatStrideMatrix({ shell }: ThreatStrideMatrixProps): React.Re
   const nameWidth = Math.max(4, ...sortedElements.map((e) => Math.min(24, e.name.length)));
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <Header shell={shell} elementCount={elements.length} threatCount={threats.length} />
+    <ScreenContent>
+      <ContextStrip
+        status={[`${elements.length} elements`, `${threats.length} threats`]}
+        subtitle={
+          shell.threatModelSource
+            ? formatThreatModelSource({
+                sourcePath: shell.threatModelSource.path,
+                mtimeMs: shell.threatModelSource.mtimeMs,
+              })
+            : undefined
+        }
+      />
 
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SPACING.sm}>
         <MatrixHeaderRow idWidth={idWidth} nameWidth={nameWidth} />
         {sortedElements.map((el) => (
           <MatrixRow
@@ -152,60 +172,25 @@ export function ThreatStrideMatrix({ shell }: ThreatStrideMatrixProps): React.Re
 
       <Legend />
 
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SPACING.sm}>
         <Text>{tokens.label("impact × likelihood")}</Text>
         <PivotTable pivot={pivot} />
       </Box>
-
-      <HintFooter />
-    </Box>
+    </ScreenContent>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <ScreenContent>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("STRIDE matrix")}
       </Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <EmptyStateCard kind="threat-model-missing" context={{ threatView: "stride" }} />
       </Box>
-    </Box>
-  );
-}
-
-function Header({
-  shell,
-  elementCount,
-  threatCount,
-}: {
-  shell: ShellState;
-  elementCount: number;
-  threatCount: number;
-}): React.ReactElement {
-  return (
-    <Box flexDirection="column">
-      <Text>
-        {tokens.muted("\u25C2 back   ")}
-        {tokens.strong("STRIDE matrix")}
-        {tokens.muted("   \u2502   ")}
-        {tokens.value(`${elementCount} elements`)}
-        {tokens.muted("  \u00B7  ")}
-        {tokens.value(`${threatCount} threats`)}
-      </Text>
-      {shell.threatModelSource ? (
-        <Text>
-          {tokens.hint(
-            formatThreatModelSource({
-              sourcePath: shell.threatModelSource.path,
-              mtimeMs: shell.threatModelSource.mtimeMs,
-            }),
-          )}
-        </Text>
-      ) : null}
-    </Box>
+    </ScreenContent>
   );
 }
 
@@ -277,7 +262,7 @@ function colorCell(impact: CellImpact): string {
 
 function Legend(): React.ReactElement {
   return (
-    <Box marginTop={1}>
+    <Box marginTop={SPACING.sm}>
       <Text>
         {tokens.hint("cells: ")}
         {severityChalk("critical")("\u2588 crit")}
@@ -326,21 +311,5 @@ function PivotTable({
         </Text>
       ))}
     </Box>
-  );
-}
-
-function HintFooter(): React.ReactElement {
-  return (
-    <ShellFooterHints
-      divider={false}
-      hints={[
-        { key: "1", label: "dfd" },
-        { key: "2", label: "stride" },
-        { key: "3", label: "stories" },
-        { key: "4", label: "scope" },
-        { key: "5", label: "summary" },
-        { key: "/back", label: "" },
-      ]}
-    />
   );
 }

@@ -7,7 +7,7 @@
 import { Box, Text, useInput } from "ink";
 import type { FC } from "react";
 import { useState } from "react";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 export interface ConfirmDialogProps {
   message: string;
@@ -48,7 +48,7 @@ export const ConfirmDialog: FC<ConfirmDialogProps> = ({
   );
 
   const renderBtn = (label: string, active: boolean) => {
-    const padded = ` ${label} `;
+    const _padded = ` ${label} `;
     return active ? tokens.strong(`[${label}]`) : tokens.muted(` ${label} `);
   };
 
@@ -57,14 +57,14 @@ export const ConfirmDialog: FC<ConfirmDialogProps> = ({
       <Box>
         <Text>{tokens.label(message)}</Text>
       </Box>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {renderBtn(confirmLabel, choice === "confirm")}
           {"   "}
           {renderBtn(cancelLabel, choice === "cancel")}
         </Text>
       </Box>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.hint("[\u2190/\u2192] toggle  [Y/N] shortcut  [Enter] submit  [Esc] cancel")}
         </Text>

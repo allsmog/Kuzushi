@@ -2,9 +2,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { ModuleLoadError } from "../../src/modules/errors.js";
 import {
   checkRequirements,
   loadManifestFromPath,
+  sdkMajorMismatch,
   validateManifest,
   validateModuleExport,
 } from "../../src/modules/loader.js";
@@ -40,23 +42,25 @@ describe("validateManifest", () => {
   });
 
   it("rejects manifests missing required fields", () => {
-    expect(() => validateManifest({})).toThrow("missing or invalid 'id'");
-    expect(() => validateManifest({ id: "test" })).toThrow("missing or invalid 'displayName'");
+    // Zod surfaces "expected string, received undefined" for the missing `id`.
+    expect(() => validateManifest({})).toThrow(/id:/);
+    expect(() => validateManifest({ id: "test" })).toThrow(/displayName:/);
     expect(() =>
       validateManifest({
         id: "test",
         displayName: "T",
-        version: "1.0",
+        version: "1.0.0",
         entry: "./x.js",
         category: "invalid",
       }),
-    ).toThrow("invalid 'category'");
+    ).toThrow(/category:/);
   });
 
   it("rejects non-object input", () => {
-    expect(() => validateManifest(null)).toThrow("expected an object");
-    expect(() => validateManifest("string")).toThrow("expected an object");
-    expect(() => validateManifest([1, 2])).toThrow("expected an object");
+    // Zod surfaces "expected object, received null" / "... string" etc.
+    expect(() => validateManifest(null)).toThrow(/expected object/);
+    expect(() => validateManifest("string")).toThrow(/expected object/);
+    expect(() => validateManifest([1, 2])).toThrow(/expected object/);
   });
 });
 
@@ -136,5 +140,153 @@ describe("validateModuleExport", () => {
   it("rejects non-object exports", () => {
     expect(() => validateModuleExport(null)).toThrow("must export an object");
     expect(() => validateModuleExport("string")).toThrow("must export an object");
+  });
+
+  it("rejects tool names that don't start with <moduleId>:", () => {
+    const mod = {
+      id: "foo",
+      displayName: "Foo",
+      category: "offense",
+      version: "1.0.0",
+      description: "",
+      tools: [
+        {
+          name: "bar:scan", // wrong prefix
+          description: "Scan",
+          inputSchema: {},
+          headless: true,
+          execute: () => {},
+        },
+      ],
+    };
+    expect(() => validateModuleExport(mod)).toThrow(/must start with "foo:"/);
+  });
+
+  it("rejects tool names that don't match the kebab-case regex", () => {
+    const mod = {
+      id: "foo",
+      displayName: "Foo",
+      category: "offense",
+      version: "1.0.0",
+      description: "",
+      tools: [
+        {
+          name: "Foo:Scan", // uppercase not allowed
+          description: "Scan",
+          inputSchema: {},
+          headless: true,
+          execute: () => {},
+        },
+      ],
+    };
+    expect(() => validateModuleExport(mod)).toThrow(/must match/);
+  });
+
+  it("rejects duplicate tool names in a single module", () => {
+    const mod = {
+      id: "foo",
+      displayName: "Foo",
+      category: "offense",
+      version: "1.0.0",
+      description: "",
+      tools: [
+        {
+          name: "foo:scan",
+          description: "a",
+          inputSchema: {},
+          headless: true,
+          execute: () => {},
+        },
+        {
+          name: "foo:scan",
+          description: "b",
+          inputSchema: {},
+          headless: true,
+          execute: () => {},
+        },
+      ],
+    };
+    expect(() => validateModuleExport(mod)).toThrow(/duplicate tool name/);
+  });
+
+  it("throws ModuleLoadError with SHAPE_INVALID on prefix violation", () => {
+    const mod = {
+      id: "foo",
+      displayName: "Foo",
+      category: "offense",
+      version: "1.0.0",
+      description: "",
+      tools: [
+        {
+          name: "bar:x",
+          description: "",
+          inputSchema: {},
+          headless: true,
+          execute: () => {},
+        },
+      ],
+    };
+    try {
+      validateModuleExport(mod);
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ModuleLoadError);
+      expect((err as ModuleLoadError).code).toBe("SHAPE_INVALID");
+    }
+  });
+});
+
+describe("ModuleLoadError codes", () => {
+  it("throws MANIFEST_MISSING when manifest file absent", () => {
+    const dir = createTempDir();
+    try {
+      loadManifestFromPath(dir);
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ModuleLoadError);
+      expect((err as ModuleLoadError).code).toBe("MANIFEST_MISSING");
+    }
+  });
+
+  it("throws MANIFEST_INVALID with structured issues on schema failure", () => {
+    try {
+      validateManifest({ id: 123 });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ModuleLoadError);
+      expect((err as ModuleLoadError).code).toBe("MANIFEST_INVALID");
+      const issues = (err as ModuleLoadError).details?.["issues"];
+      expect(Array.isArray(issues)).toBe(true);
+    }
+  });
+});
+
+describe("kuzushiSdkVersion compatibility", () => {
+  it("accepts manifests with kuzushiSdkVersion set", () => {
+    const manifest = validateManifest({
+      id: "test",
+      displayName: "Test",
+      version: "1.0.0",
+      entry: "./x.js",
+      category: "offense",
+      description: "",
+      kuzushiSdkVersion: "^0.19.0",
+    });
+    expect(manifest.kuzushiSdkVersion).toBe("^0.19.0");
+  });
+
+  it("detects a major-version mismatch", () => {
+    // host is 0.19.x; required 1.0.0 is incompatible
+    const mismatch = sdkMajorMismatch("^1.0.0", "0.19.1");
+    expect(mismatch).toMatch(/host=0.*required=1/);
+  });
+
+  it("reports no mismatch when majors agree", () => {
+    expect(sdkMajorMismatch("0.19.0", "0.19.1")).toBeNull();
+    expect(sdkMajorMismatch(">=0.19", "0.99.0")).toBeNull();
+  });
+
+  it("returns null on unparseable constraint", () => {
+    expect(sdkMajorMismatch("not-a-version", "0.19.0")).toBeNull();
   });
 });

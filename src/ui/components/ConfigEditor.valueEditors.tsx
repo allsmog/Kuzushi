@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { TextInput } from "../primitives/TextInput.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import type { FieldDescriptor, FieldType } from "./ConfigEditor.fields.js";
 
 export interface ValueEditorProps {
@@ -42,7 +42,7 @@ export function BoolEditor({
     else if (input === " ") setValue((v) => !v);
   });
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <Text>
         {tokens.label(descriptor.label)} {tokens.muted("=")}{" "}
         {value ? tokens.success("true") : tokens.danger("false")}
@@ -125,7 +125,7 @@ export function EnumEditor({
     }
   });
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <Text>{tokens.label(descriptor.label)}</Text>
       {values.map((v, i) => {
         const isCursor = i === nav.index;
@@ -191,7 +191,7 @@ export function NumberEditor({
     onSubmit(spec.integer ? Math.floor(n) : n);
   };
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <Text>{tokens.label(descriptor.label)}</Text>
       <TextInput
         value={buffer}
@@ -234,7 +234,7 @@ export function StringEditor({
     onSubmit(trimmed);
   };
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <Text>{tokens.label(descriptor.label)}</Text>
       <TextInput
         value={buffer}
@@ -323,7 +323,7 @@ export function StringListEditor({
   };
 
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" paddingLeft={SPACING.md}>
       <Text>
         {tokens.label(descriptor.label)}{" "}
         {tokens.muted(`(${items.length} item${items.length === 1 ? "" : "s"})`)}
@@ -343,7 +343,7 @@ export function StringListEditor({
         })
       )}
       {mode !== "nav" && (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Text>{tokens.accent(mode === "add" ? "Add: " : "Edit: ")}</Text>
           <TextInput
             value={buffer}

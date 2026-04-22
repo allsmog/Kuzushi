@@ -8,7 +8,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface DiffViewProps {
   diff: string;
@@ -30,11 +30,11 @@ export function DiffView({ diff, title, maxLines = 20 }: DiffViewProps): React.R
   return (
     <Box flexDirection="column">
       {title && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>{tokens.label(title)}</Text>
         </Box>
       )}
-      <Box flexDirection="column" paddingLeft={4}>
+      <Box flexDirection="column" paddingLeft={SPACING.xl}>
         {visible.map((line, i) => (
           <DiffLineRow key={i} line={line} />
         ))}

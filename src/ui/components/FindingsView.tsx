@@ -17,15 +17,17 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { colorVerdict } from "../format.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { computeVisibleSlice } from "../hooks/useVisibleSlice.js";
 import { icons } from "../icons.js";
 import { useRenderCounter } from "../perf.js";
 import { normalizeSeverity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { ChainGroup } from "./ChainGroup.js";
 import { EmptyState } from "./EmptyState.js";
 import { type FilterChip, FilterChips } from "./FilterChips.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 interface CompactProps {
   mode?: "compact";
@@ -87,7 +89,7 @@ function CompactFindings({ results }: { results: ResultLine[] }): React.ReactEle
     const current = results.filter((r) => r.kind === "triage").length;
     const scanInProgress = results.length > 0;
     return (
-      <Box paddingLeft={2} marginTop={1}>
+      <Box paddingLeft={SPACING.md} marginTop={SPACING.sm}>
         <EmptyState
           kind="findings-compact-idle"
           context={
@@ -101,7 +103,7 @@ function CompactFindings({ results }: { results: ResultLine[] }): React.ReactEle
   }
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginTop={1}>
+    <Box flexDirection="column" paddingLeft={SPACING.md} marginTop={SPACING.sm}>
       {/* Header */}
       <Text>
         {tokens.muted(pad("#", 4))}
@@ -135,7 +137,7 @@ function CompactFindings({ results }: { results: ResultLine[] }): React.ReactEle
       <Text>
         {tokens.muted(`${triageResults.length} of ${results[0]?.total ?? "?"} triaged`)}
         {"  "}
-        {tokens.danger(
+        {tokens.dangerStrong(
           `${icons.error} ${triageResults.filter((r) => r.verdict === "tp").length} tp`,
         )}
         {"  "}
@@ -183,6 +185,14 @@ function UnifiedFindings({
   pageSize,
 }: UnifiedProps): React.ReactElement {
   useRenderCounter("UnifiedFindings");
+  useRegisterKeybindings([
+    { keys: "/open <F-NNNN>", label: "open finding" },
+    { keys: "/filter", label: "filter", secondary: true },
+    { keys: "e", label: "export", secondary: true },
+    { keys: "a", label: "assign", secondary: true },
+    { keys: "s", label: "suppress", secondary: true },
+    { keys: "b", label: "back", secondary: true },
+  ]);
 
   // Fingerprint lookup + chain-membership set are both O(findings) today;
   // memoizing on input identity lets the sort/filter chain skip when the
@@ -243,7 +253,7 @@ function UnifiedFindings({
   const hiddenBelow = Math.max(0, loose.length - slice.bottom);
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <ScreenContent>
       <Box>
         <Text>
           {tokens.muted("◂ back   ")}
@@ -254,11 +264,12 @@ function UnifiedFindings({
         </Text>
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm} flexDirection="column">
+        <Text>{tokens.strong("Primary action: /open F-NNNN to inspect one finding deeply.")}</Text>
         <FilterChips chips={filters ?? defaultFilters()} />
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>{tokens.muted("─".repeat(78))}</Text>
       </Box>
 
@@ -277,7 +288,8 @@ function UnifiedFindings({
       })}
 
       {loose.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={SPACING.sm}>
+          <Text>{tokens.label("ungrouped findings")}</Text>
           {hiddenAbove > 0 && (
             <Text>
               {"  "}
@@ -296,7 +308,16 @@ function UnifiedFindings({
         </Box>
       )}
 
-      <Box marginTop={1}>
+      {findings.length === 0 && (
+        <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
+          <Text>{tokens.muted("No actionable findings yet.")}</Text>
+          <Text>
+            {tokens.hint("Try /use <module>, run a scan tool, then return with /findings.")}
+          </Text>
+        </Box>
+      )}
+
+      <Box marginTop={SPACING.sm}>
         <Text>{tokens.muted("─".repeat(78))}</Text>
       </Box>
       <Box>
@@ -306,7 +327,7 @@ function UnifiedFindings({
           )}
         </Text>
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 

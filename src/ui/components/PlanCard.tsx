@@ -16,7 +16,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import type { ShellPlan, ShellPlanChange } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface PlanCardProps {
   plan: ShellPlan;
@@ -27,13 +27,18 @@ export function PlanCard({ plan }: PlanCardProps): React.ReactElement {
   const optionWidth = Math.max("option".length, ...changes.map((c) => c.option.length));
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginTop={1} marginBottom={1}>
+    <Box
+      flexDirection="column"
+      paddingLeft={SPACING.md}
+      marginTop={SPACING.sm}
+      marginBottom={SPACING.sm}
+    >
       <Text>
         {tokens.muted("\u256D\u2500 plan ")}
         {tokens.strong(plan.source)}
         {tokens.muted(`  \u2500  ${plan.toolName}`)}
         {tokens.muted(
-          " " + "\u2500".repeat(Math.max(0, 60 - plan.source.length - plan.toolName.length)),
+          ` ${"\u2500".repeat(Math.max(0, 60 - plan.source.length - plan.toolName.length))}`,
         )}
         {tokens.muted("\u256E")}
       </Text>
@@ -78,9 +83,9 @@ export function PlanCard({ plan }: PlanCardProps): React.ReactElement {
         {tokens.value(`$${plan.planCostUsd.toFixed(4)}`)}
       </Row>
 
-      <Text>{tokens.muted("\u2570" + "\u2500".repeat(76) + "\u256F")}</Text>
+      <Text>{tokens.muted(`\u2570${"\u2500".repeat(76)}\u256F`)}</Text>
 
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.hint("  press ")}
           {tokens.strong("y")}

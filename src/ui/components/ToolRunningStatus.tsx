@@ -20,14 +20,14 @@ import React, { useEffect, useState } from "react";
 import { useHeartbeat } from "../hooks.js";
 import { Gutter } from "../primitives/Gutter.js";
 import type { ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { PulseDot } from "./PulseDot.js";
 
 interface ToolRunningStatusProps {
   tool: NonNullable<ShellState["currentTool"]>;
 }
 
-export const ToolRunningStatus = React.memo(_ToolRunningStatus, (prev, next) => {
+export const ToolRunningStatus = React.memo(ToolRunningStatusImpl, (prev, next) => {
   // Only re-render when fields this component actually reads change. Phase /
   // activity / elapsedSeconds bumps from `task:activity` events must NOT
   // flicker the bottom block — history owns that surface now.
@@ -46,7 +46,7 @@ export const ToolRunningStatus = React.memo(_ToolRunningStatus, (prev, next) => 
  */
 const STALE_SECONDS = 5;
 
-function _ToolRunningStatus({ tool }: ToolRunningStatusProps): React.ReactElement {
+function ToolRunningStatusImpl({ tool }: ToolRunningStatusProps): React.ReactElement {
   const { isStale } = useHeartbeat(
     {
       startedAt: tool.startedAt,
@@ -61,13 +61,11 @@ function _ToolRunningStatus({ tool }: ToolRunningStatusProps): React.ReactElemen
   const label = tool.displayName ?? tool.name;
 
   return (
-    <Box marginTop={1}>
+    <Box marginTop={SPACING.sm}>
       <Gutter>
         <PulseDot status={isStale ? "warn" : "running"} />
       </Gutter>
-      <Text>
-        {isStale ? tokens.warn(label) : tokens.muted(label)}
-      </Text>
+      <Text>{isStale ? tokens.warn(label) : tokens.secondary(label)}</Text>
       <ElapsedReadout tool={tool} isStale={isStale} />
     </Box>
   );
@@ -115,4 +113,3 @@ function ElapsedReadout({
     </Text>
   );
 }
-

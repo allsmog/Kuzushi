@@ -1,0 +1,155 @@
+import type React from "react";
+import { createContext, useContext } from "react";
+import type { ShellState, UIState } from "./state.js";
+import { SPACING, WIDTHS } from "./tokens.js";
+
+export interface NavigationMeta {
+  title: string;
+  breadcrumbs: string[];
+  status: string[];
+  /** Optional subtitle line shown beneath the title (e.g. source path). */
+  subtitle?: string;
+}
+
+/** Glyph palette — every cursor, selector, and toggle shape lives here. */
+export interface ThemeGlyphs {
+  /** List-row selection cursor (default: ❯). */
+  selection: string;
+  /** Text-editor cursor block (default: █). */
+  textCursor: string;
+  /** Collapsed expand toggle (default: ▸). */
+  expand: string;
+  /** Expanded toggle (default: ▾). */
+  expandOpen: string;
+  /** "back" hint glyph in headers (default: ◂). */
+  back: string;
+}
+
+/** Box-drawing palette — pulled by Divider, GlobalHeader, frame helpers. */
+export interface ThemeDrawing {
+  /** Horizontal divider rule character. */
+  divider: string;
+  /** Breadcrumb separator string (e.g. " / "). */
+  breadcrumbSeparator: string;
+  /** Inline status separator (e.g. " · "). */
+  statusSeparator: string;
+}
+
+export interface LayoutTheme {
+  spacing: typeof SPACING;
+  widths: typeof WIDTHS;
+  glyphs: ThemeGlyphs;
+  drawing: ThemeDrawing;
+  /**
+   * @deprecated Use `glyphs.selection`. Kept for one release for any
+   * out-of-tree consumers that snapshot the theme shape.
+   */
+  selectionGlyph: string;
+}
+
+export interface LayoutContextValue {
+  theme: LayoutTheme;
+  navigation: NavigationMeta;
+}
+
+export const STANDARD_LAYOUT_THEME: LayoutTheme = {
+  spacing: SPACING,
+  widths: WIDTHS,
+  glyphs: {
+    selection: "❯",
+    textCursor: "█",
+    expand: "▸",
+    expandOpen: "▾",
+    back: "◂",
+  },
+  drawing: {
+    divider: "─",
+    breadcrumbSeparator: " / ",
+    statusSeparator: " · ",
+  },
+  selectionGlyph: "❯",
+};
+
+const defaultValue: LayoutContextValue = {
+  theme: STANDARD_LAYOUT_THEME,
+  navigation: {
+    title: "Kuzushi",
+    breadcrumbs: [],
+    status: [],
+  },
+};
+
+const LayoutContext = createContext<LayoutContextValue>(defaultValue);
+
+export function LayoutProvider({
+  value,
+  children,
+}: {
+  value: LayoutContextValue;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;
+}
+
+export function useLayoutContext(): LayoutContextValue {
+  return useContext(LayoutContext);
+}
+
+export function deriveNavigation(
+  state: Pick<UIState, "mode" | "phase" | "repoName" | "shell">,
+): NavigationMeta {
+  if (state.mode === "shell") {
+    const shell = state.shell;
+    return {
+      title: shellTitle(shell),
+      breadcrumbs: shellBreadcrumbs(shell),
+      status: shellStatus(shell),
+    };
+  }
+
+  const title =
+    state.mode === "running" ? "Scan Run" : state.mode === "summary" ? "Summary" : "Preflight";
+  const breadcrumbs = [state.repoName || "workspace", title];
+  const status = [state.phase];
+  return { title, breadcrumbs, status };
+}
+
+/** Map the threat-view enum onto a human label that fits the title slot. */
+const THREAT_VIEW_TITLES: Record<string, string> = {
+  "threat-dfd": "data flow diagram",
+  "threat-stride": "stride matrix",
+  "threat-stories": "attacker stories",
+  "threat-scope": "scope & criticality",
+  "threat-summary": "threat summary",
+};
+
+function shellTitle(shell: ShellState | null | undefined): string {
+  if (!shell) return "Shell";
+  const view = shell.shellView ?? "catalog";
+  if (view in THREAT_VIEW_TITLES) return THREAT_VIEW_TITLES[view] ?? view;
+  if (view === "findings") return "findings";
+  if (view === "finding") return "finding detail";
+  if (view === "tune") return "tune";
+  if (shell.focusedModule) return `module · ${shell.focusedModule}`;
+  return "module catalog";
+}
+
+function shellBreadcrumbs(shell: ShellState | null | undefined): string[] {
+  if (!shell) return ["shell"];
+  const crumbs = ["shell"];
+  if (shell.focusedModule) crumbs.push(shell.focusedModule);
+  const view = shell.shellView ?? "catalog";
+  // Collapse the "module" view bread to the focused module above so we
+  // don't emit "shell / sast / module" — just "shell / sast".
+  if (view !== "module") crumbs.push(view);
+  return crumbs;
+}
+
+function shellStatus(shell: ShellState | null | undefined): string[] {
+  if (!shell) return [];
+  const status: string[] = [];
+  status.push(shell.processing ? "busy" : "idle");
+  if (shell.workspace) status.push(`workspace:${shell.workspace}`);
+  if (shell.target) status.push(`target:${shell.target}`);
+  return status;
+}

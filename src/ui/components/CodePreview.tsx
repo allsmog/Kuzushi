@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { Box, Text } from "ink";
 import React from "react";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface CodePreviewProps {
   filePath: string;
@@ -31,7 +31,7 @@ function _CodePreview({
   if (!lines || lines.length === 0) return null;
 
   return (
-    <Box flexDirection="column" paddingLeft={6}>
+    <Box flexDirection="column" paddingLeft={SPACING.xxxl}>
       {lines.map(({ lineNumber, text, isTarget }) => {
         const num = String(lineNumber).padStart(4);
         const marker = isTarget ? tokens.dangerStrong("\u25B8") : " ";

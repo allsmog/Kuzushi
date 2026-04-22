@@ -22,11 +22,13 @@ import { Box, Text } from "ink";
 import type React from "react";
 import type { StrideCategory } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { ContextStrip } from "./ContextStrip.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
-import { ShellFooterHints } from "./ShellFooterHints.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 const STRIDE_ORDER: ReadonlyArray<{ category: StrideCategory; label: string }> = [
   { category: "spoofing", label: "Spoofing" },
@@ -63,14 +65,32 @@ interface ThreatSummaryExportProps {
 }
 
 export function ThreatSummaryExport({ shell }: ThreatSummaryExportProps): React.ReactElement {
+  useRegisterKeybindings([
+    { keys: "1", label: "dfd", secondary: true },
+    { keys: "2", label: "stride", secondary: true },
+    { keys: "3", label: "stories", secondary: true },
+    { keys: "4", label: "scope", secondary: true },
+    { keys: "5", label: "summary" },
+    { keys: "q", label: "back", secondary: true },
+  ]);
   const tm = shell.threatModel;
   if (!tm) return <EmptyState />;
 
   const totalThreats = tm.summary?.total ?? tm.threats.length;
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <Header shell={shell} totalThreats={totalThreats} elements={tm.dfd.elements.length} />
+    <ScreenContent>
+      <ContextStrip
+        status={[`${totalThreats} threats`, `${tm.dfd.elements.length} elements`]}
+        subtitle={
+          shell.threatModelSource
+            ? formatThreatModelSource({
+                sourcePath: shell.threatModelSource.path,
+                mtimeMs: shell.threatModelSource.mtimeMs,
+              })
+            : undefined
+        }
+      />
 
       <Counts
         total={totalThreats}
@@ -81,56 +101,21 @@ export function ThreatSummaryExport({ shell }: ThreatSummaryExportProps): React.
       <Drives />
 
       <Artifacts shell={shell} />
-
-      <HintFooter />
-    </Box>
+    </ScreenContent>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <ScreenContent>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("threat summary")}
       </Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <EmptyStateCard kind="threat-model-missing" context={{ threatView: "summary" }} />
       </Box>
-    </Box>
-  );
-}
-
-function Header({
-  shell,
-  totalThreats,
-  elements,
-}: {
-  shell: ShellState;
-  totalThreats: number;
-  elements: number;
-}): React.ReactElement {
-  return (
-    <Box flexDirection="column">
-      <Text>
-        {tokens.muted("\u25C2 back   ")}
-        {tokens.strong("threat summary")}
-        {tokens.muted("   \u2502   ")}
-        {tokens.value(`${totalThreats} threats`)}
-        {tokens.muted("  \u00B7  ")}
-        {tokens.value(`${elements} elements`)}
-      </Text>
-      {shell.threatModelSource ? (
-        <Text>
-          {tokens.hint(
-            formatThreatModelSource({
-              sourcePath: shell.threatModelSource.path,
-              mtimeMs: shell.threatModelSource.mtimeMs,
-            }),
-          )}
-        </Text>
-      ) : null}
-    </Box>
+    </ScreenContent>
   );
 }
 
@@ -146,10 +131,10 @@ function Counts({
   const maxSev = Math.max(1, ...SEVERITY_ORDER.map((k) => bySeverity[k] ?? 0));
   const maxCat = Math.max(1, ...STRIDE_ORDER.map((s) => byCategory?.[s.category] ?? 0));
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label(`counts · ${total} threats total`)}</Text>
 
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         <Text>{tokens.muted("severity")}</Text>
         {SEVERITY_ORDER.map((tier) => {
           const n = bySeverity[tier] ?? 0;
@@ -166,7 +151,7 @@ function Counts({
         })}
       </Box>
 
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         <Text>{tokens.muted("STRIDE category")}</Text>
         {STRIDE_ORDER.map((s) => {
           const n = byCategory?.[s.category] ?? 0;
@@ -186,9 +171,9 @@ function Counts({
 }
 
 function severityBadge(tier: string): string {
-  const sev = (tier === "critical" || tier === "high" || tier === "medium" || tier === "low"
-    ? tier
-    : "info") as Severity;
+  const sev = (
+    tier === "critical" || tier === "high" || tier === "medium" || tier === "low" ? tier : "info"
+  ) as Severity;
   const style = severityStyle(sev);
   // Glyph + short label — readable under NO_COLOR and for screen readers.
   return severityChalk(sev)(`${style.glyph} ${style.label}`);
@@ -214,9 +199,9 @@ function bar(n: number, max: number, colorKey: string): string {
 function Drives(): React.ReactElement {
   const moduleWidth = Math.max(...DRIVES.map((d) => d.module.length));
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("drives")}</Text>
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         {DRIVES.map((d) => (
           <Text key={d.module}>
             {tokens.accent(d.module.padEnd(moduleWidth + 2))}
@@ -260,11 +245,11 @@ function Artifacts({ shell }: { shell: ShellState }): React.ReactElement {
   });
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("artifact paths")}</Text>
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         {paths.map((p) => (
-          <Box key={p.path} flexDirection="column" marginBottom={1}>
+          <Box key={p.path} flexDirection="column" marginBottom={SPACING.sm}>
             <Text>
               {tokens.muted(p.label.padEnd(12))}
               {tokens.value(shortPath(p.path))}
@@ -279,24 +264,6 @@ function Artifacts({ shell }: { shell: ShellState }): React.ReactElement {
         ))}
       </Box>
     </Box>
-  );
-}
-
-function HintFooter(): React.ReactElement {
-  // `1..5` cycle across threat views; `/threats edit` opens the full
-  // editor; `q` and `/back` step up to the module home.
-  return (
-    <ShellFooterHints
-      hints={[
-        { key: "1", label: "dfd" },
-        { key: "2", label: "stride" },
-        { key: "3", label: "stories" },
-        { key: "4", label: "scope" },
-        { key: "5", label: "summary" },
-        { key: "/threats edit", label: "annotate" },
-        { key: "q", label: "back" },
-      ]}
-    />
   );
 }
 

@@ -15,7 +15,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 interface RateLimitBannerProps {
   throttle?: {
@@ -40,7 +40,7 @@ export function RateLimitBanner({
   const suggested = Math.max(1, Math.floor(throttle.concurrency / 2));
 
   return (
-    <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+    <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>
         {tokens.warnStrong(`${icons.warning} rate-limited`)}
         {tokens.muted(
@@ -49,9 +49,7 @@ export function RateLimitBanner({
           }`,
         )}
       </Text>
-      {throttle.reason ? (
-        <Text>{tokens.muted(`    ${throttle.reason}`)}</Text>
-      ) : null}
+      {throttle.reason ? <Text>{tokens.muted(`    ${throttle.reason}`)}</Text> : null}
       <Text>
         {tokens.hint(
           `    use /concurrency ${suggested} to back off further, or wait for auto-recovery`,

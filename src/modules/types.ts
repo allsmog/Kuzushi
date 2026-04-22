@@ -15,9 +15,33 @@ import type { MessageBus } from "../bus/types.js";
 import type { PrintSink } from "../copilot/print.js";
 import type { KnowledgeModule } from "../knowledge/types.js";
 import type { KuzushiConfig } from "../types.js";
+import type {
+  HostInfo,
+  HostUiHandle,
+  ModuleEventScope,
+  ToolLogger,
+  ToolOptionStore,
+  WorkspaceHandle,
+} from "./host-handles.js";
 import type { ModuleReference } from "./reference.js";
 import type { JSONSchema } from "./schema.js";
 
+export type {
+  HostCapability,
+  HostInfo,
+  HostUiHandle,
+  ModuleEventHandler,
+  ModuleEventPayload,
+  ModuleEventScope,
+  ToolLogger,
+  ToolOptionStore,
+  UiStatePatch,
+  WorkspaceHandle,
+  WorkspaceHostStore,
+  WorkspaceNoteStore,
+  WorkspaceServiceStore,
+  WorkspaceVulnStore,
+} from "./host-handles.js";
 export type { ModuleReference } from "./reference.js";
 export type { JSONSchema } from "./schema.js";
 
@@ -157,8 +181,11 @@ export interface ToolExecutionContext {
    * UIStore for Ink rendering. When provided, tools that run pipelines
    * should pass this through so the Ink UI renders progress natively
    * (PipelineIndicator, StatusFooter, etc.) instead of capturing stdout.
+   *
+   * Typed as the narrow `HostUiHandle`; the concrete host `UIStore` is a
+   * structural superset, so passing it here is a safe upcast.
    */
-  uiStore?: import("../ui/state.js").UIStore;
+  uiStore?: HostUiHandle;
   /**
    * Pre-computed task outputs to inject into a pipeline run, keyed by task ID.
    * Avoids re-running context tasks when the shell already has a ContextSnapshot.
@@ -175,21 +202,27 @@ export interface ToolExecutionContext {
    * Active datastore for resolving operator-set options (e.g. TRIAGE_PROMPT,
    * VERIFY_PROMPT). Tools that respect prompt overrides read here first and
    * fall back to their compiled default. Optional — undefined outside shell.
+   *
+   * Typed as the narrow `ToolOptionStore`; the concrete host `Datastore`
+   * is a structural superset.
    */
-  datastore?: import("../copilot/options.js").Datastore;
+  datastore?: ToolOptionStore;
   /**
    * WorkspaceManager for tools that read/write engagement state (hosts,
    * services, vulns, loot, creds, notes, sessions). Optional — undefined
    * when running outside a workspace (e.g. one-shot `kuzushi run`).
+   *
+   * Typed as the narrow `WorkspaceHandle`; the concrete host
+   * `WorkspaceManager` is a structural superset.
    */
-  workspace?: import("../workspace/manager.js").WorkspaceManager;
+  workspace?: WorkspaceHandle;
   /**
    * Module-scoped pub/sub handle (framework events). Subscriptions made
    * through this scope are auto-torn-down when the module is unloaded.
    * Optional — omitted outside the shell/run driver (e.g. during tests
    * that exercise a tool directly).
    */
-  events?: import("../bus/module-events.js").ModuleEventScope;
+  events?: ModuleEventScope;
   /**
    * Optional per-tool model override. When the operator runs
    * `setg TRIAGE_MODEL haiku`, the shell resolves that to this field
@@ -234,6 +267,20 @@ export interface ToolExecutionContext {
    *   ctx.reportOutput?.("Read(src/utils/format.ts)");
    */
   reportOutput?: (line: string) => void;
+  /**
+   * Host-side capability probe + SDK version. Populated by
+   * `CopilotCore.executeTool`; undefined in test-rig `createMockToolContext`
+   * calls that don't wire a host. Tools should feature-probe with
+   * `ctx.host?.capabilities.has("workspace")` before depending on a feature.
+   */
+  host?: HostInfo;
+  /**
+   * Optional structured logger. When the host wires one (the shell emits
+   * to the MessageBus), module authors can call `ctx.logger?.warn(...)`
+   * for machine-readable diagnostics. Distinct from `ctx.print` which is
+   * human-facing operator output.
+   */
+  logger?: ToolLogger;
 }
 
 /**
@@ -315,6 +362,14 @@ export interface ModuleManifest {
   configSchema?: JSONSchema;
   author?: string;
   license?: string;
+  /**
+   * The `kuzushi` SDK version the module was authored against. Used by the
+   * loader to warn on host-vs-module major-version drift. Accepts a plain
+   * semver ("0.19.1") or a constraint expression (">=0.19", "^1.0.0").
+   * Optional for backward compatibility with pre-SDK-versioning manifests;
+   * a warning is emitted when omitted.
+   */
+  kuzushiSdkVersion?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +390,7 @@ export interface ModuleContext {
    * Module-scoped framework event handle. Subscriptions created here are
    * auto-disposed on `dispose()`. Optional for backward compatibility.
    */
-  events?: import("../bus/module-events.js").ModuleEventScope;
+  events?: ModuleEventScope;
 }
 
 // ---------------------------------------------------------------------------

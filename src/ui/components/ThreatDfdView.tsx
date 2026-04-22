@@ -20,16 +20,27 @@ import { Box, Text } from "ink";
 import type React from "react";
 import type { DfdElement, TrustBoundary } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
+import { truncateEnd } from "../format.js";
+import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import type { ShellState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
+import { ContextStrip } from "./ContextStrip.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
-import { ShellFooterHints } from "./ShellFooterHints.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 interface ThreatDfdViewProps {
   shell: ShellState;
 }
 
 export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement {
+  useRegisterKeybindings([
+    { keys: "1", label: "dfd" },
+    { keys: "2", label: "stride", secondary: true },
+    { keys: "3", label: "stories", secondary: true },
+    { keys: "4", label: "scope", secondary: true },
+    { keys: "5", label: "summary", secondary: true },
+    { keys: "q", label: "back", secondary: true },
+  ]);
   const tm = shell.threatModel;
   if (!tm) return <EmptyState />;
 
@@ -51,19 +62,29 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
   const zoneOrder = [...zones.keys()].sort(zoneSortFn);
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-      <Header shell={shell} elementCount={elements.length} threatCount={tm.threats.length} />
+    <ScreenContent>
+      <ContextStrip
+        status={[`${elements.length} elements`, `${tm.threats.length} threats`]}
+        subtitle={
+          shell.threatModelSource
+            ? formatThreatModelSource({
+                sourcePath: shell.threatModelSource.path,
+                mtimeMs: shell.threatModelSource.mtimeMs,
+              })
+            : undefined
+        }
+      />
 
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SPACING.sm}>
         {zoneOrder.map((zone) => (
           <ZoneBlock key={zone} zone={zone} elements={zones.get(zone) ?? []} />
         ))}
       </Box>
 
       {boundaries.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>{tokens.label("trust boundaries")}</Text>
-          <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="column" marginTop={SPACING.sm}>
             {boundaries.map((b) => (
               <BoundaryRow key={b.id} boundary={b} />
             ))}
@@ -72,9 +93,9 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
       )}
 
       {flows.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>{tokens.label("data flows")}</Text>
-          <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="column" marginTop={SPACING.sm}>
             {flows.map((flow) => (
               <FlowRow
                 key={flow.id}
@@ -85,56 +106,21 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
           </Box>
         </Box>
       )}
-
-      <HintFooter />
-    </Box>
+    </ScreenContent>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <ScreenContent>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("data flow diagram")}
       </Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <EmptyStateCard kind="threat-model-missing" context={{ threatView: "dfd" }} />
       </Box>
-    </Box>
-  );
-}
-
-function Header({
-  shell,
-  elementCount,
-  threatCount,
-}: {
-  shell: ShellState;
-  elementCount: number;
-  threatCount: number;
-}): React.ReactElement {
-  return (
-    <Box flexDirection="column">
-      <Text>
-        {tokens.muted("\u25C2 back   ")}
-        {tokens.strong("data flow diagram")}
-        {tokens.muted("   \u2502   ")}
-        {tokens.value(`${elementCount} elements`)}
-        {tokens.muted("  \u00B7  ")}
-        {tokens.value(`${threatCount} threats`)}
-      </Text>
-      {shell.threatModelSource ? (
-        <Text>
-          {tokens.hint(
-            formatThreatModelSource({
-              sourcePath: shell.threatModelSource.path,
-              mtimeMs: shell.threatModelSource.mtimeMs,
-            }),
-          )}
-        </Text>
-      ) : null}
-    </Box>
+    </ScreenContent>
   );
 }
 
@@ -146,7 +132,7 @@ function ZoneBlock({
   elements: DfdElement[];
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={SPACING.sm}>
       <Text>
         {tokens.muted("\u256D\u2500 ")}
         {tokens.accent(zone)}
@@ -164,7 +150,9 @@ function ZoneRow({ element }: { element: DfdElement }): React.ReactElement {
   const glyph = formatGlyph(element);
   const id = tokens.muted(element.id.padEnd(6));
   const name = tokens.strong(element.name);
-  const desc = element.description ? tokens.muted(` — ${truncate(element.description, 44)}`) : "";
+  const desc = element.description
+    ? tokens.muted(` — ${truncateEnd(element.description, 44)}`)
+    : "";
   return (
     <Text>
       {tokens.muted("\u2502 ")}
@@ -236,26 +224,6 @@ function FlowRow({
       {crossing}
     </Text>
   );
-}
-
-function HintFooter(): React.ReactElement {
-  return (
-    <ShellFooterHints
-      divider={false}
-      hints={[
-        { key: "1", label: "dfd" },
-        { key: "2", label: "stride" },
-        { key: "3", label: "stories" },
-        { key: "4", label: "scope" },
-        { key: "5", label: "summary" },
-        { key: "/back", label: "" },
-      ]}
-    />
-  );
-}
-
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
 }
 
 function zoneSortFn(a: string, b: string): number {

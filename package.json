@@ -19,8 +19,8 @@
       "default": "./dist/index.js"
     },
     "./modules": {
-      "types": "./dist/modules/types.d.ts",
-      "default": "./dist/modules/types.js"
+      "types": "./dist/modules/index.d.ts",
+      "default": "./dist/modules/index.js"
     },
     "./testing": {
       "types": "./dist/testing/index.d.ts",

@@ -10,7 +10,7 @@
  * the shared footer.
  */
 
-import { Box, Static, Text, useApp, useInput } from "ink";
+import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import type React from "react";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
@@ -18,20 +18,21 @@ import {
   buildShellPrompt,
   firstShellSuggestion,
   listShellSuggestions,
-  resolveThreatView,
 } from "../../copilot/shell.js";
+import { formatClock, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useUIState } from "../hooks.js";
+import { useLayoutContext } from "../layout-context.js";
+import { Gutter } from "../primitives/Gutter.js";
+import { Markdown } from "../primitives/Markdown.js";
+import { Ratchet } from "../primitives/Ratchet.js";
 import {
   CTRL_C_ARM_WINDOW_MS as CTRL_C_ARM_WINDOW_MS_IMPORTED,
   resolveKeybind,
 } from "../shell-keybinds.js";
-import { Gutter } from "../primitives/Gutter.js";
-import { Markdown } from "../primitives/Markdown.js";
-import { Ratchet } from "../primitives/Ratchet.js";
 import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { DiffSinceView } from "./DiffSinceView.js";
@@ -56,13 +57,21 @@ interface CopilotShellProps {
 
 const IDLE_KEYBINDS = [
   { keys: "Enter", label: "Send" },
+  { keys: "←/→", label: "Cursor", secondary: true },
   { keys: "\u2191/\u2193", label: "History" },
   { keys: "Tab", label: "Autocomplete", secondary: true },
+  { keys: "?", label: "Help", secondary: true },
+  { keys: "Ctrl+U", label: "Clear line", secondary: true },
   { keys: "Esc", label: "Clear input", secondary: true },
   { keys: "Ctrl+C", label: "Exit", secondary: true },
 ];
 
 const PROCESSING_KEYBINDS = [{ keys: "Ctrl+C", label: "Abort" }];
+const PLAN_KEYBINDS = [
+  { keys: "Y", label: "Apply plan" },
+  { keys: "N/Esc", label: "Discard plan" },
+  { keys: "Ctrl+C", label: "Exit", secondary: true },
+];
 
 /** Window during which a second Ctrl+C at the idle prompt commits the exit. */
 const CTRL_C_ARM_WINDOW_MS = CTRL_C_ARM_WINDOW_MS_IMPORTED;
@@ -86,15 +95,32 @@ function countLooseFindings(state: UIState): number {
 }
 
 export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
+  const { theme } = useLayoutContext();
   const state = useUIState(store);
   const shell = state.shell;
   const { exit } = useApp();
   const [input, setInput] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 120;
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const draftInputRef = useRef("");
 
   const processing = shell?.processing === true;
-  useRegisterKeybindings(processing ? PROCESSING_KEYBINDS : IDLE_KEYBINDS);
+  const isCtrlChord = (char: string, key: { ctrl: boolean }, letter: string): boolean => {
+    if (!key.ctrl) return false;
+    const lower = letter.toLowerCase();
+    const ctrlCode = String.fromCharCode(lower.charCodeAt(0) - 96);
+    return char === lower || char === lower.toUpperCase() || char === ctrlCode;
+  };
+
+  useRegisterKeybindings(
+    processing
+      ? PROCESSING_KEYBINDS
+      : shell?.pendingPlan && input.length === 0
+        ? PLAN_KEYBINDS
+        : IDLE_KEYBINDS,
+  );
 
   // Raw-mode watchdog. The Claude Agent SDK subprocess (used by `randori` etc.)
   // disables parent stdin raw mode and doesn't restore it on exit, so Ink's
@@ -202,6 +228,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           return;
         case "clear-input":
           setInput("");
+          setCursor(0);
           setHistoryIndex(null);
           draftInputRef.current = "";
           return;
@@ -216,13 +243,42 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       if (key.return && input.length > 0) {
         liveShell.onInput?.(input);
         setInput("");
+        setCursor(0);
         setHistoryIndex(null);
         draftInputRef.current = "";
         return;
       }
 
-      if (key.backspace || key.delete) {
-        setInput((v) => v.slice(0, -1));
+      if (key.leftArrow) {
+        setCursor((c) => Math.max(0, c - 1));
+        return;
+      }
+
+      if (key.rightArrow) {
+        setCursor((c) => Math.min(input.length, c + 1));
+        return;
+      }
+
+      if (isCtrlChord(char, key, "a")) {
+        setCursor(0);
+        return;
+      }
+
+      if (isCtrlChord(char, key, "e")) {
+        setCursor(input.length);
+        return;
+      }
+
+      if (key.backspace) {
+        if (cursor === 0 || input.length === 0) return;
+        setInput((v) => v.slice(0, cursor - 1) + v.slice(cursor));
+        setCursor((c) => Math.max(0, c - 1));
+        setHistoryIndex(null);
+        return;
+      }
+      if (key.delete) {
+        if (cursor >= input.length) return;
+        setInput((v) => v.slice(0, cursor) + v.slice(cursor + 1));
         setHistoryIndex(null);
         return;
       }
@@ -233,12 +289,16 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           draftInputRef.current = input;
           const nextIndex = liveShell.commandHistory.length - 1;
           setHistoryIndex(nextIndex);
-          setInput(liveShell.commandHistory[nextIndex] ?? "");
+          const next = liveShell.commandHistory[nextIndex] ?? "";
+          setInput(next);
+          setCursor(next.length);
           return;
         }
         const nextIndex = Math.max(0, historyIndex - 1);
         setHistoryIndex(nextIndex);
-        setInput(liveShell.commandHistory[nextIndex] ?? "");
+        const next = liveShell.commandHistory[nextIndex] ?? "";
+        setInput(next);
+        setCursor(next.length);
         return;
       }
 
@@ -248,25 +308,48 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         if (nextIndex >= liveShell.commandHistory.length) {
           setHistoryIndex(null);
           setInput(draftInputRef.current);
+          setCursor(draftInputRef.current.length);
           return;
         }
         setHistoryIndex(nextIndex);
-        setInput(liveShell.commandHistory[nextIndex] ?? "");
+        const next = liveShell.commandHistory[nextIndex] ?? "";
+        setInput(next);
+        setCursor(next.length);
         return;
       }
+
+      // Esc handling lives in `resolveKeybind` above — it dispatches `/no`
+      // for pending plans, `clear-input` for non-empty buffers, and `/back`
+      // for backable views. The catalog-empty-buffer Esc falls through to
+      // `none` and is intentionally a no-op (mirrors q-on-catalog).
 
       if (key.tab && input.trim().startsWith("/")) {
         const suggestion = firstShellSuggestion(input);
         if (suggestion) {
           setInput(suggestion);
+          setCursor(suggestion.length);
           setHistoryIndex(null);
         }
         return;
       }
 
+      if (char === "?" && input.length === 0) {
+        liveShell.onInput?.("/help");
+        return;
+      }
+
+      if (isCtrlChord(char, key, "u")) {
+        setInput("");
+        setCursor(0);
+        setHistoryIndex(null);
+        draftInputRef.current = "";
+        return;
+      }
+
       if (char && !key.ctrl && !key.meta && !key.tab) {
         if (historyIndex === null) draftInputRef.current = "";
-        setInput((v) => v + char);
+        setInput((v) => v.slice(0, cursor) + char + v.slice(cursor));
+        setCursor((c) => c + char.length);
         setHistoryIndex(null);
       }
     },
@@ -329,10 +412,17 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         ))}
       </Box>
 
+      {!shell.processing && liveHistory.length > 0 ? (
+        <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
+          <Text>{tokens.tertiary("interactive")}</Text>
+        </Box>
+      ) : null}
+
       <MemoShellViewPanel state={state} shell={shell} />
+      <ShellWayfinding shell={shell} narrow={columns < 110} />
 
       {shell.plannerBusy && !shell.pendingPlan && (
-        <Box marginTop={1} paddingLeft={2}>
+        <Box marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
           <Spinner />
           <Text>
             {"  "}
@@ -361,7 +451,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
 
       {shell.processing && !shell.currentTool && (
-        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+        <Box flexDirection="column" marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
           <Box>
             <Spinner />
             <Text>
@@ -374,30 +464,67 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       )}
 
       {state.ctrlCArmedAt && Date.now() - state.ctrlCArmedAt < CTRL_C_ARM_WINDOW_MS ? (
-        <Box marginTop={1} paddingLeft={2}>
+        <Box marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
           <Text>{tokens.warn("press Ctrl+C again to exit")}</Text>
         </Box>
       ) : null}
 
       {!shell.processing && (
         <>
-          <Box marginTop={1}>
+          <Box marginTop={SPACING.sm}>
             <Text>
               {tokens.accent(buildShellPrompt(shell.focusedModule))}
-              {input}
-              {tokens.muted("\u2588")}
+              {input.slice(0, cursor)}
+              {tokens.tertiary(cursor < input.length ? input[cursor] : theme.glyphs.textCursor)}
+              {cursor < input.length ? input.slice(cursor + 1) : ""}
             </Text>
           </Box>
           {slashSuggestions.length > 0 && (
-            <Box flexDirection="column" paddingLeft={2}>
-              <Text>{tokens.muted("Suggestions:")}</Text>
-              <Text>{tokens.muted(slashSuggestions.join("  •  "))}</Text>
+            <Box flexDirection="column" paddingLeft={theme.spacing.md}>
+              <Text>{tokens.tertiary("Suggestions")}</Text>
+              <Text>{tokens.tertiary(slashSuggestions.join("  ·  "))}</Text>
             </Box>
           )}
         </>
       )}
     </Box>
   );
+}
+
+function ShellWayfinding({
+  shell,
+  narrow,
+}: {
+  shell: ShellState;
+  narrow: boolean;
+}): React.ReactElement {
+  const location = describeShellLocation(shell);
+  const backHint =
+    shell.shellView === "catalog"
+      ? "top-level"
+      : shell.shellView === "finding"
+        ? "/back → findings"
+        : shell.shellView === "module"
+          ? "/back → catalog"
+          : "/back → module";
+  return (
+    <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
+      <Text>
+        {tokens.muted("you are in ")}
+        {tokens.strong(location)}
+        {tokens.muted(" · mode ")}
+        {tokens.value(shell.processing ? "running" : "idle")}
+        {!narrow ? tokens.muted(` · ${backHint}`) : null}
+      </Text>
+    </Box>
+  );
+}
+
+function describeShellLocation(shell: ShellState): string {
+  if (shell.shellView === "module") return `${shell.focusedModule ?? "module"} home`;
+  if (shell.shellView === "finding") return `finding ${shell.openFindingId ?? "detail"}`;
+  if (shell.shellView.startsWith("threat-")) return shell.shellView.replace("threat-", "threat/");
+  return shell.shellView;
 }
 
 function historyEntryKey(entry: ShellHistoryEntry): string {
@@ -429,7 +556,7 @@ function LlmHeartbeatLine({
   parts.push(calls);
   if (totalCostUsd > 0) parts.push(`$${totalCostUsd.toFixed(2)}`);
   return (
-    <Box paddingLeft={4}>
+    <Box paddingLeft={SPACING.lg}>
       <Text>{tokens.muted(`· ${parts.join(" · ")}`)}</Text>
     </Box>
   );
@@ -451,11 +578,17 @@ function ShellViewPanel({
   state: UIState;
   shell: ShellState;
 }): React.ReactElement | null {
+  // Stable React keys per view stop React from re-mounting sibling sub-trees
+  // when the shellView changes. The `shellView` value is the key — same view
+  // string, same DOM identity, fresh view string, fresh mount. Without keys,
+  // React reconciles by position and reparents (re-running mount effects in
+  // children that should have been preserved) when the view changes shape.
+  const view = shell.shellView ?? "catalog";
   switch (shell.shellView) {
     case "module":
-      return shell.focusedModule ? <ModuleHome shell={shell} /> : null;
+      return shell.focusedModule ? <ModuleHome key={view} shell={shell} /> : null;
     case "tune":
-      return shell.focusedModule ? <TuneView shell={shell} /> : null;
+      return shell.focusedModule ? <TuneView key={view} shell={shell} /> : null;
     case "findings": {
       const summary = state.summary;
       const findings = summary?.actionableFindings ?? [];
@@ -467,6 +600,7 @@ function ShellViewPanel({
       }));
       return (
         <FindingsView
+          key={view}
           mode="unified"
           findings={findings}
           chains={chains}
@@ -492,22 +626,22 @@ function ShellViewPanel({
         ? summary.actionableFindings?.find((f) => f.fingerprint === target)
         : undefined;
       if (!match) return null;
-      return <FindingCard mode="linear" finding={match} />;
+      return <FindingCard key={`finding:${target}`} mode="linear" finding={match} />;
     }
     // Phase C — threat model views. C.4–C.5 still route through the
     // placeholder until their real components land.
     case "threat-dfd":
-      return <ThreatDfdView shell={shell} />;
+      return <ThreatDfdView key={view} shell={shell} />;
     case "threat-stride":
-      return <ThreatStrideMatrix shell={shell} />;
+      return <ThreatStrideMatrix key={view} shell={shell} />;
     case "threat-stories":
-      return <AttackerStoriesView shell={shell} />;
+      return <AttackerStoriesView key={view} shell={shell} />;
     case "threat-scope":
-      return <ScopeAndCriticalityView shell={shell} />;
+      return <ScopeAndCriticalityView key={view} shell={shell} />;
     case "threat-summary":
-      return <ThreatSummaryExport shell={shell} />;
+      return <ThreatSummaryExport key={view} shell={shell} />;
     case "diff-since":
-      return <DiffSinceView state={state} shell={shell} />;
+      return <DiffSinceView key={view} state={state} shell={shell} />;
     default:
       return null;
   }
@@ -555,7 +689,7 @@ function ShellBannerImpl({ shell }: { shell: ShellState }): React.ReactElement {
     return <ModuleCatalog shell={shell} />;
   }
   return (
-    <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+    <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>{""}</Text>
       <Text>{tokens.label("Kuzushi")}</Text>
       <Text>{tokens.muted("security-native AI operating environment")}</Text>
@@ -582,7 +716,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
   switch (entry.type) {
     case "input":
       return (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Text>
             {tokens.accent(entry.prompt ?? buildShellPrompt(null))}
             {entry.text}
@@ -591,13 +725,13 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
       );
     case "output":
       return (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Markdown text={entry.text} />
         </Box>
       );
     case "error":
       return (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <ErrorMessage text={entry.text} />
         </Box>
       );
@@ -615,9 +749,9 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
         return tokens.muted(s);
       };
       return (
-        <Box paddingLeft={0}>
+        <Box paddingLeft={SPACING.xs}>
           <Gutter>
-            <Text dimColor>{LOWER_HOOK}</Text>
+            <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
           </Gutter>
           <Text> {wrap(entry.text)}</Text>
         </Box>
@@ -639,6 +773,7 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
     status && status !== "running" && entry.elapsedSeconds && entry.elapsedSeconds > 0
       ? tokens.muted(` · ${entry.elapsedSeconds}s`)
       : "";
+  const ts = tokens.muted(` ${formatClock(entry.timestamp)}`);
 
   // Result line — per-tool renderResult output (or generic verb) shown
   // under the `⏺` when the tool resolves. Muted when ok, danger on
@@ -660,34 +795,44 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
 
   return (
     <Ratchet>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <Gutter>
           {status ? <PulseDot status={status} /> : <Text>{tokens.accent(BLACK_CIRCLE)}</Text>}
         </Gutter>
         <Text>
-          <Text bold>{label}</Text>
+          {tokens.label(label)}
           {entry.inputHint ? tokens.muted(`(${entry.inputHint})`) : ""}
           {elapsedSuffix}
+          {ts}
         </Text>
       </Box>
       {status === "running" && entry.liveActivities && entry.liveActivities.length > 0 ? (
         <Box flexDirection="column">
-          {entry.liveActivities.slice(0, 5).map((activity) => (
+          {entry.liveActivities.slice(-4).map((activity) => (
             <Box key={activity.id}>
+              <Gutter />
+              <Gutter>
+                <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
+              </Gutter>
+              <Text> {tokens.muted(truncateEnd(activity.text, 104))}</Text>
+            </Box>
+          ))}
+          {entry.liveActivities.length > 4 ? (
+            <Box>
               <Gutter />
               <Gutter>
                 <Text dimColor>{LOWER_HOOK}</Text>
               </Gutter>
-              <Text> {tokens.muted(activity.text)}</Text>
+              <Text> {tokens.muted(`… ${entry.liveActivities.length - 4} earlier updates`)}</Text>
             </Box>
-          ))}
+          ) : null}
         </Box>
       ) : null}
       {hasResult ? (
         <Box>
           <Gutter />
           <Gutter>
-            <Text dimColor>{LOWER_HOOK}</Text>
+            <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
           </Gutter>
           <Text>
             {" "}

@@ -16,7 +16,7 @@ import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 import { TextInput } from "../primitives/TextInput.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 type IntakeSection = "trust" | "scope" | "architecture" | "historical";
 const SECTIONS: IntakeSection[] = ["trust", "scope", "architecture", "historical"];
@@ -332,10 +332,10 @@ export function ContextIntake({
           )}
         </Text>
         <Text>{""}</Text>
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>{tokens.muted("No items detected for this section.")}</Text>
         </Box>
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>{tokens.muted("Press [tab] or [enter] to continue, [n] to add items.")}</Text>
         </Box>
         <Text>{""}</Text>
@@ -373,7 +373,7 @@ export function ContextIntake({
         return (
           <Box key={i} flexDirection="column">
             {showGroup && (
-              <Box paddingLeft={2}>
+              <Box paddingLeft={SPACING.md}>
                 <Text>{tokens.heading(item.groupLabel!)}</Text>
               </Box>
             )}
@@ -386,7 +386,7 @@ export function ContextIntake({
       })}
 
       {editMode && (
-        <Box marginTop={1} paddingLeft={2}>
+        <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
           <Text>{tokens.accent("Edit: ")}</Text>
           <TextInput
             value={editBuffer}
@@ -405,7 +405,7 @@ export function ContextIntake({
         const deleted = displayItems.filter((i) => i.status === "deleted").length;
         const pending = displayItems.filter((i) => i.status === "skipped").length;
         return (
-          <Box marginTop={1} paddingLeft={2}>
+          <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
             <Text>
               {tokens.muted("Items:")}
               {accepted > 0 ? ` ${tokens.success(`${accepted} accepted`)}` : ""}

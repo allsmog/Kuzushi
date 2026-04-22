@@ -7,11 +7,11 @@
  * to minimize flicker from spinner ticks.
  */
 
-import { Box, Static, Text, useInput } from "ink";
+import { Static, Text, useInput } from "ink";
 import React from "react";
+import { AppLayout } from "./components/AppLayout.js";
 import { Banner } from "./components/Banner.js";
 import type { CommandResult, ReplCommand } from "./components/CommandInput.js";
-import { CompactHeader } from "./components/CompactHeader.js";
 import { ConfigBanner } from "./components/ConfigBanner.js";
 import { ConfigConfirm } from "./components/ConfigConfirm.js";
 import { ConfigEditor } from "./components/ConfigEditor.js";
@@ -20,15 +20,15 @@ import { CopilotShell } from "./components/CopilotShell.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
 import { InteractiveReview } from "./components/InteractiveReview.js";
 import { NoticeRail } from "./components/NoticeRail.js";
+import { QualityGate } from "./components/QualityGate.js";
 import { ResumeDiff } from "./components/ResumeDiff.js";
 import { RunningView } from "./components/RunningView.js";
 import { ScanSummary } from "./components/ScanSummary.js";
 import { SetupWizard } from "./components/SetupWizard.js";
 import { ThreatModelEditor } from "./components/ThreatModelEditor.js";
-import { QualityGate } from "./components/QualityGate.js";
 import { KeybindingsProvider } from "./hooks/useKeybindings.js";
 import { shallowEqual, useUISelector } from "./hooks.js";
-import { Breadcrumb } from "./primitives/Breadcrumb.js";
+import { deriveNavigation, LayoutProvider, STANDARD_LAYOUT_THEME } from "./layout-context.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
 import { SpinnerClockProvider } from "./primitives/SpinnerClock.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
@@ -129,139 +129,120 @@ function AppInner({ store }: AppProps): React.ReactElement {
     { isActive: keyState.mode === "running" && process.stdin.isTTY === true },
   );
 
-  const showCompactHeader =
-    routing.mode !== "preflight" && routing.mode !== "shell" && routing.repoName.length > 0;
-
-  // Shell mode renders only the CopilotShell — no scan banner/header/pipeline chrome
-  if (routing.mode === "shell") {
-    return (
-      <Box flexDirection="column">
-        {routing.shell && <CopilotShell store={store} />}
-        <KeybindFooter />
-      </Box>
-    );
-  }
+  const layoutContext = React.useMemo(
+    () => ({
+      theme: STANDARD_LAYOUT_THEME,
+      navigation: deriveNavigation({
+        mode: routing.mode,
+        phase: routing.phase,
+        repoName: routing.repoName,
+        shell: routing.shell,
+      }),
+    }),
+    [routing.mode, routing.phase, routing.repoName, routing.shell],
+  );
 
   return (
-    <Box flexDirection="column">
-      <Banner />
-      {showCompactHeader && (
-        <CompactHeader
-          repoName={routing.repoName}
-          tasks={routing.tasks}
-          totalFindings={routing.startBannerShown ? routing.totalFindings : undefined}
-          selectedForTriage={routing.startBannerShown ? routing.selectedForTriage : undefined}
+    <LayoutProvider value={layoutContext}>
+      <AppLayout footer={<KeybindFooter />}>
+        {routing.mode !== "shell" && <Banner />}
+        {routing.mode === "shell" && routing.shell && <CopilotShell store={store} />}
+        {/*
+         * One-shot banners — config / resume / skip-info — share a single
+         * <Static> region. Multiple Static regions in one Ink tree are
+         * known to cause flicker (see CC's note in
+         * cc-repo/src/utils/staticRender.tsx:8-10), so we batch them into
+         * one items array. Each item carries the data needed to render
+         * the right banner type.
+         */}
+        <PreflightBannersStatic
+          configBanner={routing.mode !== "preflight" ? routing.configBanner : null}
+          resumeDiff={routing.resumeDiff}
+          skipInfo={
+            !routing.resumeDiff &&
+            routing.skippedAlreadyTriaged > 0 &&
+            routing.phase === "triaging" &&
+            routing.mode === "running"
+              ? {
+                  skipped: routing.skippedAlreadyTriaged,
+                  remaining: routing.selectedForTriage,
+                }
+              : null
+          }
         />
-      )}
-      {routing.breadcrumb && routing.breadcrumb.segments.length > 0 ? (
-        <Box paddingLeft={2} marginTop={1}>
-          <Breadcrumb
-            segments={routing.breadcrumb.segments}
-            currentStep={routing.breadcrumb.currentStep}
-            totalSteps={routing.breadcrumb.totalSteps}
+
+        <NoticeRail notices={routing.notices} expanded={routing.noticeRailExpanded} />
+
+        {routing.mode === "preflight" && routing.preflight?.kind === "wizard" && (
+          <SetupWizard
+            repoName={routing.preflight.repoName}
+            onComplete={routing.preflight.onComplete}
+            onCancel={routing.preflight.onCancel}
           />
-        </Box>
-      ) : null}
+        )}
+        {routing.mode === "preflight" && routing.preflight?.kind === "confirm" && (
+          <ConfigConfirm
+            config={routing.preflight.config}
+            repoName={routing.preflight.repoName}
+            onProceed={routing.preflight.onProceed}
+            onEdit={routing.preflight.onEdit}
+            onQuit={routing.preflight.onQuit}
+          />
+        )}
+        {routing.mode === "preflight" && routing.preflight?.kind === "credentials" && (
+          <CredentialPrompt
+            onComplete={routing.preflight.onComplete}
+            onCancel={routing.preflight.onCancel}
+          />
+        )}
+        {routing.mode === "preflight" && routing.preflight?.kind === "context-intake" && (
+          <ContextIntake
+            initialContext={routing.preflight.initialContext}
+            onComplete={routing.preflight.onComplete}
+            onSkip={routing.preflight.onSkip}
+            onCancel={routing.preflight.onCancel}
+          />
+        )}
+        {routing.mode === "preflight" && routing.preflight?.kind === "threat-editor" && (
+          <ThreatModelEditor
+            threatModel={routing.preflight.threatModel}
+            onComplete={routing.preflight.onComplete}
+            onSkip={routing.preflight.onSkip}
+            onCancel={routing.preflight.onCancel}
+          />
+        )}
+        {routing.mode === "preflight" && routing.preflight?.kind === "config-editor" && (
+          <ConfigEditor
+            initialConfig={routing.preflight.initialConfig}
+            configPath={routing.preflight.configPath}
+            focusKey={routing.preflight.focusKey}
+            onComplete={routing.preflight.onComplete}
+            onCancel={routing.preflight.onCancel}
+          />
+        )}
 
-      {/*
-       * One-shot banners — config / resume / skip-info — share a single
-       * <Static> region. Multiple Static regions in one Ink tree are
-       * known to cause flicker (see CC's note in
-       * cc-repo/src/utils/staticRender.tsx:8-10), so we batch them into
-       * one items array. Each item carries the data needed to render
-       * the right banner type.
-       */}
-      <PreflightBannersStatic
-        configBanner={routing.mode !== "preflight" ? routing.configBanner : null}
-        resumeDiff={routing.resumeDiff}
-        skipInfo={
-          !routing.resumeDiff &&
-          routing.skippedAlreadyTriaged > 0 &&
-          routing.phase === "triaging" &&
-          routing.mode === "running"
-            ? {
-                skipped: routing.skippedAlreadyTriaged,
-                remaining: routing.selectedForTriage,
-              }
-            : null
-        }
-      />
+        {routing.mode === "running" && <RunningView store={store} onCommand={handleCommand} />}
 
-      <NoticeRail notices={routing.notices} expanded={routing.noticeRailExpanded} />
+        {routing.mode === "summary" && routing.summary && (
+          <Static items={["scan-summary"]}>
+            {() => (
+              <React.Fragment key="scan-summary">
+                <ScanSummary data={routing.summary!} />
+                {routing.qualityGate && <QualityGate result={routing.qualityGate} />}
+              </React.Fragment>
+            )}
+          </Static>
+        )}
 
-      {routing.mode === "preflight" && routing.preflight?.kind === "wizard" && (
-        <SetupWizard
-          repoName={routing.preflight.repoName}
-          onComplete={routing.preflight.onComplete}
-          onCancel={routing.preflight.onCancel}
-        />
-      )}
-      {routing.mode === "preflight" && routing.preflight?.kind === "confirm" && (
-        <ConfigConfirm
-          config={routing.preflight.config}
-          repoName={routing.preflight.repoName}
-          onProceed={routing.preflight.onProceed}
-          onEdit={routing.preflight.onEdit}
-          onQuit={routing.preflight.onQuit}
-        />
-      )}
-      {routing.mode === "preflight" && routing.preflight?.kind === "credentials" && (
-        <CredentialPrompt
-          onComplete={routing.preflight.onComplete}
-          onCancel={routing.preflight.onCancel}
-        />
-      )}
-      {routing.mode === "preflight" && routing.preflight?.kind === "context-intake" && (
-        <ContextIntake
-          initialContext={routing.preflight.initialContext}
-          onComplete={routing.preflight.onComplete}
-          onSkip={routing.preflight.onSkip}
-          onCancel={routing.preflight.onCancel}
-        />
-      )}
-      {routing.mode === "preflight" && routing.preflight?.kind === "threat-editor" && (
-        <ThreatModelEditor
-          threatModel={routing.preflight.threatModel}
-          onComplete={routing.preflight.onComplete}
-          onSkip={routing.preflight.onSkip}
-          onCancel={routing.preflight.onCancel}
-        />
-      )}
-      {routing.mode === "preflight" && routing.preflight?.kind === "config-editor" && (
-        <ConfigEditor
-          initialConfig={routing.preflight.initialConfig}
-          configPath={routing.preflight.configPath}
-          focusKey={routing.preflight.focusKey}
-          onComplete={routing.preflight.onComplete}
-          onCancel={routing.preflight.onCancel}
-        />
-      )}
-
-      {routing.mode === "running" && (
-        <RunningView store={store} onCommand={handleCommand} />
-      )}
-
-      {routing.mode === "summary" && routing.summary && (
-        <Static items={["scan-summary"]}>
-          {() => (
-            <React.Fragment key="scan-summary">
-              <ScanSummary data={routing.summary!} />
-              {routing.qualityGate && <QualityGate result={routing.qualityGate} />}
-            </React.Fragment>
-          )}
-        </Static>
-      )}
-
-      {routing.mode === "review" && routing.review && (
-        <InteractiveReview
-          findings={routing.review.findings}
-          onVerdict={routing.review.onVerdict}
-          onQuit={routing.review.onQuit}
-        />
-      )}
-
-      <KeybindFooter />
-    </Box>
+        {routing.mode === "review" && routing.review && (
+          <InteractiveReview
+            findings={routing.review.findings}
+            onVerdict={routing.review.onVerdict}
+            onQuit={routing.review.onQuit}
+          />
+        )}
+      </AppLayout>
+    </LayoutProvider>
   );
 }
 
@@ -300,7 +281,12 @@ const PreflightBannersStatic = React.memo(function PreflightBannersStatic({
     if (configBanner) out.push({ _key: "config", kind: "config", data: configBanner });
     if (resumeDiff) out.push({ _key: "resume", kind: "resume", data: resumeDiff });
     if (skipInfo)
-      out.push({ _key: "skip", kind: "skip", skipped: skipInfo.skipped, remaining: skipInfo.remaining });
+      out.push({
+        _key: "skip",
+        kind: "skip",
+        skipped: skipInfo.skipped,
+        remaining: skipInfo.remaining,
+      });
     return out;
   }, [configBanner, resumeDiff, skipInfo]);
 

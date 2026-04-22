@@ -10,6 +10,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import { boxFooter, boxHeader, formatCost, terminalCardWidth } from "../format.js";
 import { Table } from "../primitives/Table.js";
+import { SPACING } from "../tokens.js";
 
 export interface ConfigBannerData {
   model: string;
@@ -55,7 +56,7 @@ export function ConfigBanner({ config }: ConfigBannerProps): React.ReactElement 
   return (
     <Box flexDirection="column">
       <Text>{boxHeader("Config", width)}</Text>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Table<Row>
           columns={[
             { key: "label", width: 14, align: "left" },

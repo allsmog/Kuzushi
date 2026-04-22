@@ -23,7 +23,7 @@ import type { ConfigPatchEntry } from "../../config.js";
 import type { KuzushiConfig } from "../../types.js";
 import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import {
   FIELDS,
   type FieldDescriptor,
@@ -197,7 +197,7 @@ export function ConfigEditor({
       if (!isExpanded) continue;
       if (section.id === "tasks") {
         for (const taskId of taskIds) {
-          const sub = (cfg.taskConfig ?? {})[taskId];
+          const sub = cfg.taskConfig?.[taskId];
           const keys = sub && typeof sub === "object" ? Object.keys(sub as object) : [];
           out.push({ kind: "task", taskId, childCount: keys.length });
         }
@@ -220,7 +220,7 @@ export function ConfigEditor({
 
   const drillRows = useMemo<DrillRow[]>(() => {
     if (!drill) return [];
-    const sub = (cfg.taskConfig ?? {})[drill.taskId];
+    const sub = cfg.taskConfig?.[drill.taskId];
     if (!sub || typeof sub !== "object") return [{ kind: "back" }];
     const subRecord = sub as Record<string, unknown>;
     const out: DrillRow[] = [{ kind: "back" }];
@@ -445,10 +445,10 @@ export function ConfigEditor({
     <Box flexDirection="column">
       <Text>{""}</Text>
       <Text>{boxHeader(drillTitle, width)}</Text>
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>
           {tokens.muted(
-            `Source: ${cfgPath}${dirty ? "  •  " + tokens.warn("unsaved changes") : ""}`,
+            `Source: ${cfgPath}${dirty ? `  •  ${tokens.warn("unsaved changes")}` : ""}`,
           )}
         </Text>
       </Box>
@@ -461,7 +461,7 @@ export function ConfigEditor({
       )}
 
       {editingDescriptor && (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <ValueEditorSwitch
             descriptor={editingDescriptor}
             value={editingValue}
@@ -617,7 +617,7 @@ function ValueEditorSwitch({
   }
   if (t.kind === "object") {
     return (
-      <Box paddingLeft={2}>
+      <Box paddingLeft={SPACING.md}>
         <Text>{tokens.muted("(object — drill down or edit raw JSON via /config raw)")}</Text>
       </Box>
     );

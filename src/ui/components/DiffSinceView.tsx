@@ -21,11 +21,12 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import type { StrideThreat } from "../../agents/tasks/threat-modeling/types.js";
+import { Table } from "../primitives/Table.js";
 import { type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ShellState, UIState } from "../state.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
-import { ShellFooterHints } from "./ShellFooterHints.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 interface DiffSinceViewProps {
   state: UIState;
@@ -46,7 +47,7 @@ export function DiffSinceView({ state, shell }: DiffSinceViewProps): React.React
   );
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <ScreenContent>
       <Header
         diff={diff}
         scopedFindings={scopedFindings.length}
@@ -54,7 +55,7 @@ export function DiffSinceView({ state, shell }: DiffSinceViewProps): React.React
       />
 
       {diff.error ? (
-        <Box marginTop={1}>
+        <Box marginTop={SPACING.sm}>
           <Text>
             {tokens.warn("git diff failed: ")}
             {tokens.muted(diff.error)}
@@ -73,21 +74,21 @@ export function DiffSinceView({ state, shell }: DiffSinceViewProps): React.React
       ) : null}
 
       <HintFooter />
-    </Box>
+    </ScreenContent>
   );
 }
 
 function EmptyState(): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <ScreenContent>
       <Text>
         {tokens.muted("\u25C2 back   ")}
         {tokens.strong("diff since \u2026")}
       </Text>
-      <Box marginTop={1}>
+      <Box marginTop={SPACING.sm}>
         <EmptyStateCard kind="diff-since-idle" />
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 
@@ -115,29 +116,28 @@ function Header({
         {tokens.muted("  \u00B7  ")}
         {tokens.value(`${scopedThreats} threat${scopedThreats === 1 ? "" : "s"}`)}
       </Text>
+      <Text>{tokens.muted(`scope: changed files only · /since reset for full workspace`)}</Text>
     </Box>
   );
 }
 
 function ChangedFiles({ files }: { files: string[] }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("changed files")}</Text>
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box marginTop={SPACING.sm}>
         {files.length === 0 ? (
-          <Text>{tokens.muted("(no files changed)")}</Text>
+          <Text>{tokens.muted("   (no files changed)")}</Text>
         ) : (
-          <>
-            {files.slice(0, 40).map((f) => (
-              <Text key={f}>
-                {tokens.muted("\u00B7  ")}
-                {tokens.value(f)}
-              </Text>
-            ))}
-            {files.length > 40 ? (
-              <Text>{tokens.hint(`\u00B7  (+${files.length - 40} more)`)}</Text>
-            ) : null}
-          </>
+          <Table
+            showHeader
+            gap={1}
+            columns={[
+              { key: "idx", header: "#", width: 4, align: "right" },
+              { key: "file", header: "FILE", flex: 1, truncate: "middle" },
+            ]}
+            rows={files.slice(0, 40).map((file, idx) => ({ idx: idx + 1, file }))}
+          />
         )}
       </Box>
     </Box>
@@ -152,23 +152,42 @@ function ScopedFindings({
   total: number;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {tokens.label("findings in changed files")}
         {tokens.muted(`  (${scopedFindings.length} of ${total})`)}
       </Text>
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         {scopedFindings.length === 0 ? (
           <Text>{tokens.muted("(no findings touch the changed files)")}</Text>
         ) : (
-          scopedFindings.slice(0, 15).map((f) => (
-            <Text key={f.fingerprint}>
-              {severityBadge(f)}
-              {"  "}
-              {tokens.strong(truncate(f.title ?? f.ruleId, 50))}
-              {tokens.muted(`  ${f.filePath}:${f.startLine}`)}
-            </Text>
-          ))
+          <Table
+            showHeader
+            gap={1}
+            columns={[
+              {
+                key: "sev",
+                header: "SEV",
+                width: 5,
+                render: (f: ActionableFinding) => severityBadge(f),
+              },
+              {
+                key: "title",
+                header: "TITLE",
+                flex: 4,
+                truncate: "end",
+                render: (f) => f.title ?? f.ruleId,
+              },
+              {
+                key: "loc",
+                header: "LOCATION",
+                flex: 3,
+                truncate: "middle",
+                render: (f) => `${f.filePath}:${f.startLine}`,
+              },
+            ]}
+            rows={scopedFindings.slice(0, 15)}
+          />
         )}
         {scopedFindings.length > 15 ? (
           <Text>{tokens.hint(`(+${scopedFindings.length - 15} more)`)}</Text>
@@ -186,24 +205,31 @@ function ScopedThreats({
   total: number;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
         {tokens.label("threats touching changed files")}
         {tokens.muted(`  (${scopedThreats.length} of ${total})`)}
       </Text>
-      <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+      <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         {scopedThreats.length === 0 ? (
           <Text>{tokens.muted("(no STRIDE threats target the changed files)")}</Text>
         ) : (
-          scopedThreats.slice(0, 10).map((t) => (
-            <Text key={t.id}>
-              {tokens.muted(`[${t.id}]`.padEnd(8))}
-              {impactBadge(t.impact)}
-              {"  "}
-              {tokens.strong(truncate(t.title, 54))}
-              {tokens.muted(`  ${t.category}`)}
-            </Text>
-          ))
+          <Table
+            showHeader
+            gap={1}
+            columns={[
+              { key: "id", header: "ID", width: 8, truncate: "end" },
+              {
+                key: "impact",
+                header: "IMP",
+                width: 5,
+                render: (t: StrideThreat) => impactBadge(t.impact),
+              },
+              { key: "title", header: "TITLE", flex: 4, truncate: "end" },
+              { key: "category", header: "CAT", width: 16, truncate: "end" },
+            ]}
+            rows={scopedThreats.slice(0, 10)}
+          />
         )}
         {scopedThreats.length > 10 ? (
           <Text>{tokens.hint(`(+${scopedThreats.length - 10} more)`)}</Text>
@@ -239,16 +265,12 @@ function impactBadge(impact: StrideThreat["impact"]): string {
 
 function HintFooter(): React.ReactElement {
   return (
-    <ShellFooterHints
-      hints={[
-        { key: "/since <ref>", label: "rescope" },
-        { key: "/findings", label: "full list" },
-        { key: "q", label: "back" },
-      ]}
-    />
+    <Box marginTop={SPACING.sm}>
+      <Text>
+        {tokens.hint("/since <ref> to rescope   ")}
+        {tokens.muted("/findings for the full list")}
+        {tokens.hint("   q back")}
+      </Text>
+    </Box>
   );
-}
-
-function truncate(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max - 1)}\u2026`;
 }

@@ -2,6 +2,7 @@
  * Terminal formatting utilities — progress bars, badges, costs, durations, etc.
  * Uses chalk for coloring and Unicode block characters for smooth visual rendering.
  */
+
 import chalk from "chalk";
 import type { Verdict } from "../types.js";
 import { icons } from "./icons.js";
@@ -185,9 +186,9 @@ export function statusBadge(
     case "pending":
       return { icon: icons.pending, color: tokens.muted };
     case "active":
-      return { icon: icons.active, color: tokens.dangerStrong };
+      return { icon: icons.active, color: tokens.focus };
     case "done":
-      return { icon: icons.complete, color: tokens.muted };
+      return { icon: icons.complete, color: tokens.success };
     case "error":
       return { icon: icons.error, color: tokens.danger };
   }
@@ -201,7 +202,7 @@ export function colorVerdict(verdict: Verdict): string {
     case "tp":
       return tokens.dangerStrong(`${icons.error} TRUE POSITIVE`);
     case "fp":
-      return tokens.success(`${icons.success} false positive`);
+      return tokens.success(`${icons.success} FALSE POSITIVE`);
     case "needs_review":
       return tokens.warn(`${icons.warning} needs review`);
     case "by_design":
@@ -254,8 +255,8 @@ export function miniBarChart(
 export function boxHeader(title: string, width = 60): string {
   const titlePart = ` ${title} `;
   const fill = Math.max(0, width - 2 - titlePart.length - 1); // -2 for corners, -1 for dash before title
-  return chalk.dim(
-    `${icons.boxTopLeft}${icons.boxHorizontal}${chalk.reset.bold(titlePart)}${chalk.dim(icons.boxHorizontal.repeat(fill))}${icons.boxTopRight}`,
+  return tokens.metadata(
+    `${icons.boxTopLeft}${icons.boxHorizontal}${tokens.label(titlePart)}${icons.boxHorizontal.repeat(fill)}${icons.boxTopRight}`,
   );
 }
 
@@ -263,7 +264,7 @@ export function boxHeader(title: string, width = 60): string {
  * Build a box footer line: ╰────────────────────╯
  */
 export function boxFooter(width = 60): string {
-  return chalk.dim(
+  return tokens.metadata(
     `${icons.boxBottomLeft}${icons.boxHorizontal.repeat(width - 2)}${icons.boxBottomRight}`,
   );
 }
@@ -272,7 +273,7 @@ export function boxFooter(width = 60): string {
  * Build a box divider line: ├────────────────────┤
  */
 export function boxDivider(width = 60): string {
-  return chalk.dim(
+  return tokens.metadata(
     `${icons.boxDividerLeft}${icons.boxHorizontal.repeat(width - 2)}${icons.boxDividerRight}`,
   );
 }
@@ -345,6 +346,18 @@ export function truncateMiddle(s: string, maxWidth: number, ellipsis = "\u2026")
   const head = Math.ceil((maxWidth - ellipsis.length) / 2);
   const tail = maxWidth - ellipsis.length - head;
   return plain.slice(0, head) + ellipsis + plain.slice(plain.length - tail);
+}
+
+/**
+ * Render a wall-clock HH:MM:SS for a UNIX-ms timestamp. Used by shell history
+ * rows to mark when each event was appended.
+ */
+export function formatClock(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
 }
 
 /**

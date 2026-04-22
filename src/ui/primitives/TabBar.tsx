@@ -8,7 +8,7 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 export interface Tab {
   id: string;
@@ -27,7 +27,7 @@ export const TabBar = React.memo(_TabBar);
 
 function _TabBar({ tabs, activeId }: TabBarProps): React.ReactElement {
   return (
-    <Box flexDirection="row" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="row" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
       {tabs.map((tab, i) => {
         const isActive = tab.id === activeId;
         const shortcut = tab.shortcut ? tokens.muted(` ${tab.shortcut}`) : "";
@@ -36,9 +36,15 @@ function _TabBar({ tabs, activeId }: TabBarProps): React.ReactElement {
           <Box key={tab.id}>
             {i > 0 && <Text>{tokens.subtle("  │  ")}</Text>}
             {isActive ? (
-              <Text underline>{tokens.accent(tab.label)}{shortcut}</Text>
+              <Text underline>
+                {tokens.accent(tab.label)}
+                {shortcut}
+              </Text>
             ) : (
-              <Text>{tokens.muted(tab.label)}{shortcut}</Text>
+              <Text>
+                {tokens.muted(tab.label)}
+                {shortcut}
+              </Text>
             )}
           </Box>
         );

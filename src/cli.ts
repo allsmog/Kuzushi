@@ -52,9 +52,7 @@ function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
         typeof (obj as Record<string, unknown>)["apiKey"] === "string" &&
         (obj as Record<string, string>)["apiKey"].trim().length > 0;
       storesApiKey =
-        hasApiKey(parsed) ||
-        hasApiKey((parsed ?? {})["claude"]) ||
-        hasApiKey((parsed ?? {})["piAi"]);
+        hasApiKey(parsed) || hasApiKey(parsed?.["claude"]) || hasApiKey(parsed?.["piAi"]);
     } catch {
       storesApiKey = false;
     }
@@ -683,6 +681,13 @@ program
   .option("--template <name>", "Starter template: offense, defense, or intel", "offense")
   .option("-d, --dir <path>", "Parent directory to create the module in (defaults to cwd)", ".")
   .option("--force", "Overwrite an existing target directory", false)
+  .option(
+    "--rank <rank>",
+    "Reliability tier: manual, low, normal, good, great, excellent",
+    "normal",
+  )
+  .option("--schema-url <url>", "Override the $schema URL in module.manifest.json")
+  .option("--skip-peer-deps", "Omit peerDependencies.kuzushi in the generated package.json", false)
   .addHelpText(
     "after",
     `
@@ -690,30 +695,53 @@ Examples:
   $ kuzushi create-module my-scanner --template offense
   $ kuzushi create-module honey-net --template defense --dir ./modules
   $ kuzushi create-module attck-lookup --template intel --force
+  $ kuzushi create-module beacon --template defense --rank great
 `,
   )
   .action(
-    wrapCliAction(async (id: string, opts: { template: string; dir: string; force?: boolean }) => {
-      const { createModule, isValidTemplate } = await import("./cli/create-module.js");
-      if (!isValidTemplate(opts.template)) {
-        throw new CliUsageError(
-          `Unknown --template "${opts.template}". Valid: offense, defense, intel.`,
+    wrapCliAction(
+      async (
+        id: string,
+        opts: {
+          template: string;
+          dir: string;
+          force?: boolean;
+          rank?: string;
+          schemaUrl?: string;
+          skipPeerDeps?: boolean;
+        },
+      ) => {
+        const { createModule, isValidTemplate, isValidRank } = await import(
+          "./cli/create-module.js"
         );
-      }
-      const result = createModule({
-        id,
-        template: opts.template,
-        targetDir: path.resolve(opts.dir),
-        force: opts.force === true,
-      });
-      console.log(`Scaffolded ${result.moduleDir}:`);
-      for (const file of result.files) console.log(`  ${file}`);
-      console.log("");
-      console.log("Next steps:");
-      console.log(`  $ cd ${path.relative(process.cwd(), result.moduleDir) || "."}`);
-      console.log("  $ pnpm install && pnpm build && pnpm test");
-      console.log(`  $ kuzushi run ${id}:<tool> --load file://$(pwd)`);
-    }),
+        if (!isValidTemplate(opts.template)) {
+          throw new CliUsageError(
+            `Unknown --template "${opts.template}". Valid: offense, defense, intel.`,
+          );
+        }
+        if (opts.rank !== undefined && !isValidRank(opts.rank)) {
+          throw new CliUsageError(
+            `Unknown --rank "${opts.rank}". Valid: manual, low, normal, good, great, excellent.`,
+          );
+        }
+        const result = createModule({
+          id,
+          template: opts.template,
+          targetDir: path.resolve(opts.dir),
+          force: opts.force === true,
+          rank: opts.rank as Parameters<typeof createModule>[0]["rank"],
+          schemaUrl: opts.schemaUrl,
+          skipPeerDeps: opts.skipPeerDeps === true,
+        });
+        console.log(`Scaffolded ${result.moduleDir}:`);
+        for (const file of result.files) console.log(`  ${file}`);
+        console.log("");
+        console.log("Next steps:");
+        console.log(`  $ cd ${path.relative(process.cwd(), result.moduleDir) || "."}`);
+        console.log("  $ pnpm install && pnpm build && pnpm test");
+        console.log(`  $ kuzushi run ${id}:<tool> --load file://$(pwd)`);
+      },
+    ),
   );
 
 // ── doctor (runtime preflight summary) ────────────────────────────────────

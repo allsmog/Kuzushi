@@ -12,7 +12,7 @@ import React from "react";
 import { formatCost, formatDuration, padCell, statusBadge, truncateMiddle } from "../format.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { icons } from "../icons.js";
-import { tokens } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { Spinner } from "./Spinner.js";
 
 export type ModuleStatus =
@@ -63,8 +63,8 @@ function _MonorepoProgress({
   );
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box paddingLeft={2}>
+    <Box flexDirection="column" marginTop={SPACING.sm}>
+      <Box paddingLeft={SPACING.md}>
         <Spinner color="accent" />
         <Text>
           {" "}
@@ -78,7 +78,7 @@ function _MonorepoProgress({
         const connector = isLast ? icons.treeLast : icons.treeMiddle;
 
         return (
-          <Box key={mod.path} paddingLeft={2}>
+          <Box key={mod.path} paddingLeft={SPACING.md}>
             <Text>{tokens.muted(icons.treePipe)} </Text>
             <ModuleLine module={mod} connector={connector} />
           </Box>
@@ -86,7 +86,7 @@ function _MonorepoProgress({
       })}
 
       {active.length > 0 && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={SPACING.md}>
           <Text>{tokens.muted(icons.treePipe)}</Text>
         </Box>
       )}
