@@ -6,12 +6,20 @@
  * - `unified` (Ink UI v2 screen 04): severity-sorted, chain-aware list for
  *   the post-scan / shell `findings` surface. Renders filter chips at the
  *   top, chain-grouped entries, and an action-hint footer.
+ *
+ * The unified mode virtualizes its row list: only `pageSize` loose-finding
+ * rows render at once, with cursor-driven window following. On a 2000-
+ * finding list this takes the per-render row count from O(N) to O(pageSize)
+ * (~50 by default), which is the difference between a visibly laggy `j/k`
+ * and an instant one.
  */
 
 import { Box, Text } from "ink";
 import React from "react";
 import { colorVerdict } from "../format.js";
+import { computeVisibleSlice } from "../hooks/useVisibleSlice.js";
 import { icons } from "../icons.js";
+import { useRenderCounter } from "../perf.js";
 import { normalizeSeverity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
 import { tokens } from "../tokens.js";
@@ -40,13 +48,27 @@ interface UnifiedProps {
   }>;
   /** Read-only filter chips (wiring keyboard is a follow-up). */
   filters?: ReadonlyArray<FilterChip>;
+  /**
+   * Cursor index into the (severity-sorted) loose-finding list. Used only
+   * for windowed rendering — if the caller doesn't pass one, the visible
+   * window is anchored at the top. Kept as a prop rather than internal
+   * state so the eventual j/k keybinds can drive it from shell-level state.
+   */
+  findingCursor?: number;
+  /**
+   * How many loose findings to render at once. Defaults to 50 — enough to
+   * fill every standard terminal height, small enough to kill the 2000-row
+   * render bill. Virtualization is a no-op when `findings.length <= pageSize`.
+   */
+  pageSize?: number;
 }
 
 type FindingsViewProps = CompactProps | UnifiedProps;
 
-export const FindingsView = React.memo(_FindingsView);
+export const FindingsView = React.memo(FindingsViewImpl);
 
-function _FindingsView(props: FindingsViewProps): React.ReactElement {
+function FindingsViewImpl(props: FindingsViewProps): React.ReactElement {
+  useRenderCounter("FindingsView");
   if (props.mode === "unified") {
     return <UnifiedFindings {...props} />;
   }
@@ -116,7 +138,7 @@ function CompactFindings({ results }: { results: ResultLine[] }): React.ReactEle
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips ANSI escape codes to measure visible width
-const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*[a-zA-Z]/g;
+const ANSI_ESCAPE_RE = /\[[0-9;]*[a-zA-Z]/g;
 
 function pad(text: string, width: number): string {
   // Strip ANSI to measure visible length, then pad
@@ -136,21 +158,83 @@ const SEVERITY_ORDER: Record<string, number> = {
   low: 3,
 };
 
-function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.ReactElement {
-  const chainFingerprints = new Set<string>((chains ?? []).flatMap((c) => c.findingFingerprints));
-  const loose = findings
-    .filter((f) => !chainFingerprints.has(f.fingerprint))
-    .sort((a, b) => severityRank(a) - severityRank(b));
+/** Default window size for the unified findings list. See {@link UnifiedProps.pageSize}. */
+const DEFAULT_PAGE_SIZE = 50;
 
-  const counts = tallyCounts(findings);
+function UnifiedFindings({
+  findings,
+  chains,
+  filters,
+  findingCursor,
+  pageSize,
+}: UnifiedProps): React.ReactElement {
+  useRenderCounter("UnifiedFindings");
+
+  // Fingerprint lookup + chain-membership set are both O(findings) today;
+  // memoizing on input identity lets the sort/filter chain skip when the
+  // parent re-renders without changing findings (e.g. throttle tick).
+  const byFingerprint = React.useMemo(() => {
+    const map = new Map<string, ActionableFinding>();
+    for (const f of findings) map.set(f.fingerprint, f);
+    return map;
+  }, [findings]);
+
+  const chainFingerprints = React.useMemo(
+    () => new Set<string>((chains ?? []).flatMap((c) => c.findingFingerprints)),
+    [chains],
+  );
+
+  const loose = React.useMemo(() => {
+    const out: ActionableFinding[] = [];
+    for (const f of findings) {
+      if (!chainFingerprints.has(f.fingerprint)) out.push(f);
+    }
+    // Stable sort; O(n log n) runs only when findings/chains change. The
+    // virtualized renderer below stays O(pageSize) per render.
+    out.sort((a, b) => severityRank(a) - severityRank(b));
+    return out;
+  }, [findings, chainFingerprints]);
+
+  const counts = React.useMemo(() => tallyCounts(findings), [findings]);
+
+  const resolvedPageSize = pageSize ?? DEFAULT_PAGE_SIZE;
+  const slice = React.useMemo(
+    () =>
+      computeVisibleSlice({
+        total: loose.length,
+        cursor: findingCursor ?? 0,
+        pageSize: resolvedPageSize,
+      }),
+    [loose.length, findingCursor, resolvedPageSize],
+  );
+
+  const resolvedChains = React.useMemo(
+    () =>
+      (chains ?? []).map((chain) => {
+        const members: ActionableFinding[] = [];
+        for (const fp of chain.findingFingerprints) {
+          const match = byFingerprint.get(fp);
+          if (match) members.push(match);
+        }
+        return { chain, members };
+      }),
+    [chains, byFingerprint],
+  );
+
+  const visibleLoose = React.useMemo(
+    () => loose.slice(slice.top, slice.bottom),
+    [loose, slice.top, slice.bottom],
+  );
+  const hiddenAbove = slice.top;
+  const hiddenBelow = Math.max(0, loose.length - slice.bottom);
 
   return (
     <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
       <Box>
         <Text>
-          {tokens.muted("\u25C2 back   ")}
+          {tokens.muted("◂ back   ")}
           {tokens.strong("findings")}
-          {tokens.muted("   \u2502   ")}
+          {tokens.muted("   │   ")}
           <SeverityCounts counts={counts} />
           {tokens.muted(`   ${findings.length} open`)}
         </Text>
@@ -161,13 +245,10 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
       </Box>
 
       <Box marginTop={1}>
-        <Text>{tokens.muted("\u2500".repeat(78))}</Text>
+        <Text>{tokens.muted("─".repeat(78))}</Text>
       </Box>
 
-      {(chains ?? []).map((chain) => {
-        const members = chain.findingFingerprints
-          .map((fp) => findings.find((f) => f.fingerprint === fp))
-          .filter((f): f is ActionableFinding => Boolean(f));
+      {resolvedChains.map(({ chain, members }) => {
         if (members.length === 0) return null;
         return (
           <ChainGroup
@@ -183,14 +264,26 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
 
       {loose.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          {loose.map((f) => (
+          {hiddenAbove > 0 && (
+            <Text>
+              {"  "}
+              {tokens.muted(`↑ ${hiddenAbove} more above`)}
+            </Text>
+          )}
+          {visibleLoose.map((f) => (
             <LooseRow key={f.fingerprint} finding={f} />
           ))}
+          {hiddenBelow > 0 && (
+            <Text>
+              {"  "}
+              {tokens.muted(`↓ ${hiddenBelow} more below`)}
+            </Text>
+          )}
         </Box>
       )}
 
       <Box marginTop={1}>
-        <Text>{tokens.muted("\u2500".repeat(78))}</Text>
+        <Text>{tokens.muted("─".repeat(78))}</Text>
       </Box>
       <Box>
         <Text>
@@ -203,29 +296,41 @@ function UnifiedFindings({ findings, chains, filters }: UnifiedProps): React.Rea
   );
 }
 
-function LooseRow({ finding }: { finding: ActionableFinding }): React.ReactElement {
-  const title = finding.title ?? finding.ruleId;
-  const sev = finding.displaySeverity ?? mapSeverity(finding.severity);
-  const sevTag = severityInline(sev);
-  return (
-    <Box flexDirection="column">
-      <Text>
-        {"  "}
-        {sevTag}
-        {"  "}
-        {tokens.strong(clip(title, 56))}
-        {"  "}
-        {tokens.muted(`[${finding.taskId || "sast"}]`)}
-      </Text>
-      <Text>
-        {"           "}
-        {tokens.muted(`${finding.filePath}:${finding.startLine}`)}
-        {"  "}
-        {tokens.muted(`· ${finding.verdict?.toUpperCase() ?? "—"}`)}
-      </Text>
-    </Box>
-  );
-}
+/**
+ * Memoized per-row component. `finding` identity equality is sufficient
+ * because findings are immutable snapshots in the store — if any field
+ * changed, the whole object would have been replaced upstream.
+ *
+ * Without this memo, every parent re-render walks every visible row; with
+ * it, unchanged rows short-circuit before the function body runs.
+ */
+const LooseRow = React.memo(
+  function LooseRow({ finding }: { finding: ActionableFinding }): React.ReactElement {
+    useRenderCounter("LooseRow");
+    const title = finding.title ?? finding.ruleId;
+    const sev = finding.displaySeverity ?? mapSeverity(finding.severity);
+    const sevTag = severityInline(sev);
+    return (
+      <Box flexDirection="column">
+        <Text>
+          {"  "}
+          {sevTag}
+          {"  "}
+          {tokens.strong(clip(title, 56))}
+          {"  "}
+          {tokens.muted(`[${finding.taskId || "sast"}]`)}
+        </Text>
+        <Text>
+          {"           "}
+          {tokens.muted(`${finding.filePath}:${finding.startLine}`)}
+          {"  "}
+          {tokens.muted(`· ${finding.verdict?.toUpperCase() ?? "—"}`)}
+        </Text>
+      </Box>
+    );
+  },
+  (prev, next) => prev.finding === next.finding,
+);
 
 function SeverityCounts({
   counts,
@@ -240,9 +345,7 @@ function SeverityCounts({
   const lowGlyph = severityStyle("low").glyph;
   return (
     <Text>
-      {counts.crit > 0
-        ? `${severityChalk("critical")(`${critGlyph} ${counts.crit} crit`)}  `
-        : ""}
+      {counts.crit > 0 ? `${severityChalk("critical")(`${critGlyph} ${counts.crit} crit`)}  ` : ""}
       {counts.high > 0 ? `${severityChalk("high")(`${highGlyph} ${counts.high} high`)}  ` : ""}
       {counts.med > 0 ? `${severityChalk("medium")(`${medGlyph} ${counts.med} med`)}  ` : ""}
       {counts.low > 0 ? `${severityChalk("low")(`${lowGlyph} ${counts.low} low`)}` : ""}
@@ -295,5 +398,5 @@ function severityInline(sev: "critical" | "high" | "medium" | "low"): string {
 
 function clip(text: string, max: number): string {
   if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}\u2026`;
+  return `${text.slice(0, max - 1)}…`;
 }
