@@ -21,6 +21,7 @@ import { ExpandableSection } from "../primitives/ExpandableSection.js";
 import type { ActionableFinding } from "../state.js";
 import { SPACING, accent, danger, dangerStrong, label, muted, strong, successStrong, warn, warnStrong,  } from "../tokens.js";
 import { CodePreview } from "./CodePreview.js";
+import { ScreenContent } from "./ScreenContent.js";
 
 const DEBUG_ON = process.env.KUZUSHI_DEBUG === "1";
 
@@ -276,7 +277,7 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
   }
 
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <Box>
         <Text>
           {muted("\u25C2 findings   ")}
@@ -336,7 +337,7 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
           {muted("a assign   c comment   s suppress   r resolve   p patch   v re-verify   q back")}
         </Text>
       </Box>
-    </Box>
+    </ScreenContent>
   );
 }
 

@@ -19,6 +19,7 @@ import { icons } from "../icons.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellModuleCard, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ScreenContent } from "./ScreenContent.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { ContextStrip } from "./ContextStrip.js";
 
@@ -61,7 +62,7 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
 
   const cardWidth = 61;
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <ContextStrip
         status={[
           `workspace:${shell.workspace ?? "none"}`,
@@ -113,7 +114,7 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
         </Text>
       </Box>
 
-    </Box>
+    </ScreenContent>
   );
 }
 

@@ -14,6 +14,7 @@ import { icons } from "../icons.js";
 import { ExpandableSection } from "../primitives/ExpandableSection.js";
 import type { AgentActivityLine, UIState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ScreenContent } from "./ScreenContent.js";
 import { Spinner } from "./Spinner.js";
 
 const DEBUG_ON = process.env.KUZUSHI_DEBUG === "1";
@@ -93,7 +94,7 @@ export function HeartbeatStrip({
   const agentStr = `${activeFingerprints} agent${activeFingerprints === 1 ? "" : "s"} active`;
 
   return (
-    <Box flexDirection="column" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
+    <ScreenContent>
       <Text>
         {tokens.accent(icons.active)}
         {"  "}
@@ -103,7 +104,7 @@ export function HeartbeatStrip({
         {tokens.hint("   (m) expand")}
       </Text>
       {expanded && activeFingerprints > 0 ? <HeartbeatAgentList state={state} /> : null}
-    </Box>
+    </ScreenContent>
   );
 }
 
