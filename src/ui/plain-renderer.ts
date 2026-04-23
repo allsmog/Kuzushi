@@ -682,9 +682,33 @@ function printThreatView(emit: Emit, shell: ShellState): void {
       break;
     }
     case "threat-scope": {
-      const bySev = tm.summary?.bySeverity ?? {};
-      emit("## severity buckets");
-      for (const k of Object.keys(bySev)) emit(`- ${k}: ${(bySev as Record<string, number>)[k]}`);
+      const buckets = tm.narrative?.criticalityBuckets;
+      if (buckets) {
+        emit("## criticality calibration");
+        for (const tier of ["critical", "high", "medium", "low"] as const) {
+          const items = buckets[tier] ?? [];
+          emit(`- ${tier}: ${items.length} example(s)`);
+          for (const item of items.slice(0, 5)) emit(`  · ${clipLine(item, 120)}`);
+          if (items.length > 5) emit(`  · (+${items.length - 5} more)`);
+        }
+      } else {
+        emit("## criticality calibration");
+        emit("- (no narrative criticality buckets)");
+      }
+
+      const outOfScope = tm.narrative?.outOfScope ?? [];
+      emit(`out-of-scope items: ${outOfScope.length}`);
+      for (const item of outOfScope.slice(0, 8)) emit(`- ${clipLine(item, 120)}`);
+      if (outOfScope.length > 8) emit(`...and ${outOfScope.length - 8} more`);
+
+      const annotationCount = Object.keys(tm.userAnnotations ?? {}).length;
+      const confirmedCount = tm.confirmedMitigations?.length ?? 0;
+      const dismissedCount = tm.dismissedThreats?.length ?? 0;
+      const editTotal = annotationCount + confirmedCount + dismissedCount;
+      emit(`operator edits: ${editTotal} total`);
+      emit(`- annotations: ${annotationCount}`);
+      emit(`- confirmed mitigations: ${confirmedCount}`);
+      emit(`- dismissed threats: ${dismissedCount}`);
       break;
     }
     case "threat-summary": {
