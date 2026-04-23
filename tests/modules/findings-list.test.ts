@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { migration100 } from "../../src/migrations/100_schema_reset.js";
 import { migration101 } from "../../src/migrations/101_workspace_entities.js";
-import { createFindingsModule } from "../../src/modules/sast/core-findings.js";
+import { createFindingsModule } from "../../src/modules/findings/findings.js";
 import type { ToolExecutionContext } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 import { WorkspaceManager } from "../../src/workspace/manager.js";

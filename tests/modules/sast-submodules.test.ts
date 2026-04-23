@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { createAgenticSastModule } from "../../src/modules/sast/core-agentic-sast.js";
-import { createCodeqlModule } from "../../src/modules/sast/core-codeql.js";
-import { createContextModule } from "../../src/modules/sast/core-context.js";
-import { createFindingsModule } from "../../src/modules/sast/core-findings.js";
-import { createPatchModule } from "../../src/modules/sast/core-patch.js";
-import { createSemgrepModule } from "../../src/modules/sast/core-semgrep.js";
-import { createTaintIrisModule } from "../../src/modules/sast/core-taint-iris.js";
-import { createThreatHuntModule } from "../../src/modules/sast/core-threat-hunt.js";
-import { createTriageModule } from "../../src/modules/sast/core-triage.js";
-import { createVerifyModule } from "../../src/modules/sast/core-verify.js";
+import { createAgenticSastModule } from "../../src/modules/agentic-sast/agentic-sast.js";
+import { createCodeqlModule } from "../../src/modules/codeql/codeql.js";
+import { createContextModule } from "../../src/modules/context/context.js";
+import { createFindingsModule } from "../../src/modules/findings/findings.js";
+import { createPatchModule } from "../../src/modules/patch/patch.js";
+import { createSemgrepModule } from "../../src/modules/semgrep/semgrep.js";
+import { createTaintIrisModule } from "../../src/modules/taint-iris/taint-iris.js";
+import { createThreatHuntModule } from "../../src/modules/threat-hunt/threat-hunt.js";
+import { createTriageModule } from "../../src/modules/triage/triage.js";
+import { createVerifyModule } from "../../src/modules/verify/verify.js";
 
 describe("SAST sub-modules", () => {
   const cases = [

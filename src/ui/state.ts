@@ -291,7 +291,7 @@ export interface UIState {
   etaMs?: number;
   /** Active view tab during running mode. */
   scanView: "pipeline" | "findings" | "cost";
-  /** Expand the B1 heartbeat strip into a per-agent list. Default false. */
+  /** Expand the B1 heartbeat strip into a per-agent list. Default true. */
   heartbeatExpanded?: boolean;
   /**
    * Expand the B2 NoticeRail from its collapsed rollup header into the
@@ -751,6 +751,7 @@ export class UIStore {
       scanView: "pipeline",
       results: [],
       agentActivity: new Map(),
+      heartbeatExpanded: true,
       summary: null,
       qualityGate: null,
       notices: [],

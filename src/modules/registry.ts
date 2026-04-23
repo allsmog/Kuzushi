@@ -11,6 +11,7 @@
 import type { TaskRegistry } from "../agents/registry.js";
 import type { AgentTask } from "../agents/types.js";
 import type { KnowledgeRegistry } from "../knowledge/types.js";
+import { registerDagToolsInTaskRegistry } from "./dag-bridge.js";
 import { ModuleLoadError } from "./errors.js";
 import type {
   CopilotModule,
@@ -103,6 +104,23 @@ export class ModuleRegistry {
           if (!opts.taskRegistry.has(task.id)) {
             opts.taskRegistry.register(task);
           }
+        }
+      }
+
+      // Register DagTools (module-forward DAG participants) via the bridge.
+      // Safe to call unconditionally — bridge silently skips re-registrations
+      // and modules without any DagTools are a no-op.
+      if (opts?.taskRegistry) {
+        registerDagToolsInTaskRegistry(opts.taskRegistry, mod);
+      }
+
+      // Run per-tool init hooks. Scanner-plugin-style tools (semgrep, codeql)
+      // use this to resolve rule paths from `moduleConfig` once, before any
+      // `execute`/`run` call. Module-level `init` has already run above.
+      const toolConfig = opts?.moduleConfig ?? {};
+      for (const tool of mod.tools) {
+        if (tool.init) {
+          await tool.init(toolConfig);
         }
       }
 

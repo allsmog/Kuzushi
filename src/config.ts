@@ -151,8 +151,6 @@ const UNSAFE_PROJECT_CONFIG_KEYS = new Set<string>([
   "jsonlOutput",
   "streamingEnabled",
   "streamingPort",
-  "externalTasks",
-  "enableExternalTasks",
   "hooks",
   "enableExternalHooks",
   "precedentsPath",
@@ -635,22 +633,6 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     return;
   }
 
-  if (key === "externalTasks") {
-    config.externalTasks = coerceStringArray(raw);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "enableExternalTasks") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("enableExternalTasks must be true or false");
-    }
-    config.enableExternalTasks = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
   if (key === "skipTriageForHighConfidenceAgentic") {
     const parsed = parseFlexibleValue(raw);
     if (typeof parsed !== "boolean") {
@@ -940,11 +922,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     config.cryptoBehavioralPerFindingBudgetUsd,
     DEFAULTS.cryptoBehavioralPerFindingBudgetUsd ?? 1,
   );
-  const externalTasks = normalizeStringArray(config.externalTasks);
-  const enableExternalTasks = normalizeBoolean(
-    config.enableExternalTasks,
-    DEFAULTS.enableExternalTasks ?? false,
-  );
   const monorepo = normalizeMonorepoConfig(config.monorepo);
 
   const skipTriageForHighConfidenceAgentic = normalizeBoolean(
@@ -999,8 +976,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     cryptoBehavioralTimeoutMs,
     cryptoBehavioralMaxFindings,
     cryptoBehavioralPerFindingBudgetUsd,
-    externalTasks,
-    enableExternalTasks,
     monorepo,
     skipTriageForHighConfidenceAgentic,
     tasks: dedupeStringsPreserveOrder(normalizedTasks),
@@ -1014,7 +989,6 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
   const merged: KuzushiConfig = {
     ...DEFAULTS,
     taskConfig: cloneTaskConfig(DEFAULTS.taskConfig),
-    externalTasks: [...(DEFAULTS.externalTasks ?? [])],
     ensembleModels: [...(DEFAULTS.ensembleModels ?? [])],
     tasks: [...DEFAULTS.tasks],
     severity: [...DEFAULTS.severity],

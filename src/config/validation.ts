@@ -53,16 +53,6 @@ export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIs
     });
   }
 
-  if ((config.externalTasks?.length ?? 0) > 0 && config.enableExternalTasks !== true) {
-    issues.push({
-      severity: "warning",
-      path: "externalTasks",
-      message:
-        "externalTasks are configured but enableExternalTasks is false, so they will not load.",
-      hint: "Set enableExternalTasks=true to activate the configured external tasks.",
-    });
-  }
-
   if (config.qualityGates?.failOnExploitable === true && config.verify !== true) {
     issues.push({
       severity: "warning",

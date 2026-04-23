@@ -27,6 +27,7 @@ import { ScanSummary } from "./components/ScanSummary.js";
 import { SetupWizard } from "./components/SetupWizard.js";
 import { ThreatModelEditor } from "./components/ThreatModelEditor.js";
 import { KeybindingsProvider } from "./hooks/useKeybindings.js";
+import { useRawModeWatchdog } from "./hooks/useRawModeWatchdog.js";
 import { shallowEqual, useUISelector } from "./hooks.js";
 import { deriveNavigation, LayoutProvider, STANDARD_LAYOUT_THEME } from "./layout-context.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
@@ -50,6 +51,13 @@ export function App({ store }: AppProps): React.ReactElement {
 }
 
 function AppInner({ store }: AppProps): React.ReactElement {
+  // App-root raw-mode watchdog. Lives for the lifetime of AppInner so it
+  // survives `mode` transitions ("shell" ↔ "running" ↔ "summary") that
+  // unmount the per-mode subtrees. Without this, a Claude Agent SDK
+  // subprocess spawned during `mode === "running"` could disable raw mode
+  // and the only watchdog (in CopilotShell) would already be unmounted.
+  useRawModeWatchdog();
+
   const [replCtx] = React.useState(() => createReplContext(store));
 
   const handleCommand = React.useCallback(

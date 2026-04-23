@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createCorePromptArmorModule } from "../../src/modules/core-prompt-armor.js";
+import { createCorePromptArmorModule } from "../../src/modules/prompt-armor/prompt-armor.js";
 import type { ToolExecutionContext } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 

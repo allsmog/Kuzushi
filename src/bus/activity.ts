@@ -7,7 +7,11 @@
  * listener never takes down the tool that's trying to report progress.
  */
 
+import { randomUUID } from "node:crypto";
+import type { AgentActivityKind, AgentActivityMeta } from "../modules/types.js";
+import type { KuzushiEvent, TaskAgentActivityPayload } from "./events.js";
 import { createEvent } from "./helpers.js";
+import type { RunContext } from "./run-context.js";
 import type { MessageBus } from "./types.js";
 
 /**
@@ -60,6 +64,61 @@ export function publishTaskOutput(
     .catch(() => {
       /* non-fatal — output previews are best-effort */
     });
+}
+
+/**
+ * Publish a `${moduleId}:agent-activity` event with the unified
+ * `TaskAgentActivityPayload` shape. The topic is built dynamically from
+ * `moduleId`, which means we can't use the template-literal-typed
+ * `createEvent<...>` helper — instead we cast the envelope to
+ * `KuzushiEvent` so `bus.publish` accepts it.
+ *
+ * Used by `ExecutionContext.reportAgentActivity` in `src/copilot/core.ts`
+ * so every module that fans out sub-agents gets uniform bus plumbing
+ * without bespoke per-topic helpers.
+ *
+ * The `context` field is populated from the supplied `runContext` when
+ * provided (so orchestrator-invoked DagTools get a real RunContext), and
+ * falls back to a synthetic shell context when invoked from shell/run mode.
+ */
+export function publishAgentActivity(
+  bus: MessageBus,
+  moduleId: string,
+  fingerprint: string,
+  kind: AgentActivityKind,
+  meta?: AgentActivityMeta & { runContext?: RunContext },
+): void {
+  const runContext: RunContext = meta?.runContext ?? {
+    runId: "shell",
+    repoName: "shell",
+    repoRoot: "",
+    dbPath: "",
+  };
+  const payload: TaskAgentActivityPayload = {
+    context: runContext,
+    fingerprint,
+    kind,
+    moduleId,
+    index: meta?.index ?? 0,
+    total: meta?.total ?? 0,
+    ...(meta?.toolName !== undefined ? { toolName: meta.toolName } : {}),
+    ...(meta?.toolInput !== undefined ? { toolInput: meta.toolInput } : {}),
+    ...(meta?.summary !== undefined ? { summary: meta.summary } : {}),
+    ...(meta?.elapsedSeconds !== undefined ? { elapsedSeconds: meta.elapsedSeconds } : {}),
+    ...(meta?.done !== undefined ? { done: meta.done } : {}),
+  };
+  const envelope = {
+    type: `${moduleId}:agent-activity` as const,
+    meta: {
+      id: randomUUID(),
+      timestamp: new Date().toISOString(),
+      runId: runContext.runId,
+    },
+    payload,
+  } as unknown as KuzushiEvent;
+  void bus.publish(envelope).catch(() => {
+    /* non-fatal — activity events are best-effort */
+  });
 }
 
 /**

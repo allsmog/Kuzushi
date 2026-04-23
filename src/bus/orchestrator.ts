@@ -513,7 +513,7 @@ export class PipelineOrchestrator {
     runId: string,
     resumeRunId: string,
   ): Promise<void> {
-    let run;
+    let run: ReturnType<typeof getRun>;
     try {
       run = getRun(this.deps.db, resumeRunId);
     } catch (error) {
@@ -1983,6 +1983,7 @@ export class PipelineOrchestrator {
       "verification:agent-activity",
       "poc-harness:agent-activity",
       "dynamic:agent-activity",
+      "threat-hunt:agent-activity",
       "budget:check",
       "budget:warning",
       "llm:call-start",

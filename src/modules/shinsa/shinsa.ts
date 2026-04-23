@@ -11,12 +11,12 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { resolveDefaultReadOnlyTools } from "../agent-runtime/execution.js";
-import type { AgentRuntime } from "../agent-runtime/types.js";
-import { resolveShinsaPluginPath } from "../agents/tasks/shinsa/resolve-shinsa-plugin.js";
-import { resolveRepo } from "../cli/shared.js";
-import { createLogger } from "../logger.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
+import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
+import { resolveShinsaPluginPath } from "../../agents/tasks/shinsa/resolve-shinsa-plugin.js";
+import { resolveRepo } from "../../cli/shared.js";
+import { createLogger } from "../../logger.js";
+import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
 
 const log = createLogger({ stage: "shinsa" });
 

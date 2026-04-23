@@ -8,12 +8,12 @@
  * consistent across all three execution modes.
  */
 
-import { resolveDefaultReadOnlyTools } from "../agent-runtime/execution.js";
-import { runPluginFindingScanner } from "../agents/tasks/plugin-finding-scanner.js";
-import { resolveVulnScoutPlugin } from "../agents/tasks/vuln-scout/resolve-vuln-scout.js";
-import { buildVulnScoutPrompt } from "../agents/tasks/vuln-scout/vuln-scout.js";
-import { resolveRepo } from "../cli/shared.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
+import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
+import { runPluginFindingScanner } from "../../agents/tasks/plugin-finding-scanner.js";
+import { resolveVulnScoutPlugin } from "../../agents/tasks/vuln-scout/resolve-vuln-scout.js";
+import { buildVulnScoutPrompt } from "../../agents/tasks/vuln-scout/vuln-scout.js";
+import { resolveRepo } from "../../cli/shared.js";
+import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
 
 function resolveTargetPaths(
   ctx: ToolExecutionContext,

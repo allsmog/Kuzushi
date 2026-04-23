@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createCoreTobModule } from "../../src/modules/core-tob.js";
+import { createCoreTobModule } from "../../src/modules/tob/tob.js";
 import type { ToolExecutionContext } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 

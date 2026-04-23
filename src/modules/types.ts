@@ -9,11 +9,14 @@
  * They work identically across all three execution modes (pipeline, shell, run).
  */
 
+import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
-import type { AgentTask } from "../agents/types.js";
+import type { AgentTask, TaskOutputKind } from "../agents/types.js";
 import type { MessageBus } from "../bus/types.js";
 import type { PrintSink } from "../copilot/print.js";
 import type { KnowledgeModule } from "../knowledge/types.js";
+import type { ToolPolicy } from "../prompts/tool-policy.js";
+import type { Finding, TriageAgentConfig } from "../scanners/types.js";
 import type { KuzushiConfig } from "../types.js";
 import type {
   HostInfo,
@@ -144,6 +147,62 @@ export type CopilotModuleRequirement =
       kind: "env";
       name: string;
     };
+
+// ---------------------------------------------------------------------------
+// DAG-aware tool types (module-forward merge of AgentTask into ModuleTool)
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-export of `TaskOutputKind` from `src/agents/types.ts`. During the
+ * module-forward merge both names co-exist; once `AgentTask` is demoted to an
+ * internal adapter shape (Step 4 of the reconciliation plan) the canonical
+ * name becomes `OutputKind` on the module side. Keeping these as the same
+ * underlying type today means the bridge is a no-op cast rather than a
+ * structural translation.
+ */
+export type OutputKind = TaskOutputKind;
+
+/**
+ * Kinds of per-agent activity a DagTool (or ModuleTool that fans out sub-
+ * agents) can emit. Mirrors the shapes used by triage / verification /
+ * poc-harness / dynamic-analysis / threat-hunt today; unifying them here is
+ * step 1 toward the single `TaskAgentActivityEvent` bus envelope.
+ */
+export type AgentActivityKind = "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
+
+/** Optional payload attached to a `reportAgentActivity` call. */
+export interface AgentActivityMeta {
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  summary?: string;
+  elapsedSeconds?: number;
+  index?: number;
+  total?: number;
+  /** Terminal signal — tells the UI to drop this fingerprint's row. */
+  done?: boolean;
+}
+
+/**
+ * Pipeline-only fields populated on `ExecutionContext.dag` when a tool is
+ * being invoked as a DAG node (i.e. by the scan orchestrator). Shell-mode
+ * and `kuzushi run` invocations leave `ctx.dag` undefined. Tools that need
+ * DAG state should assert via a helper (`requireDag(ctx)`) rather than
+ * speculatively reading `ctx.dag!.upstreamOutputs`.
+ */
+export interface DagContext {
+  runId: string;
+  /** Effective scan scope (same semantics as TaskContext.workRoot). */
+  workRoot?: string;
+  /** Git toplevel when the operator targeted a subdirectory of a repo. */
+  repoRoot: string;
+  scanPath?: string;
+  gitRoot?: string;
+  repoName: string;
+  /** Optional findings DB for regression detection + historical lookups. */
+  db?: Database.Database;
+  /** Outputs from completed dependency nodes, keyed by qualified tool name. */
+  upstreamOutputs: ReadonlyMap<string, unknown>;
+}
 
 // ---------------------------------------------------------------------------
 // Module tool types
@@ -281,7 +340,51 @@ export interface ToolExecutionContext {
    * human-facing operator output.
    */
   logger?: ToolLogger;
+  /**
+   * Pipeline-only state populated when the orchestrator invokes a `DagTool`
+   * as part of a scan run. Undefined in shell + run + direct-test paths.
+   * DagTool authors narrow via a helper (`requireDag(ctx)`) — never assert
+   * `ctx.dag!` in business logic.
+   */
+  dag?: DagContext;
+  /**
+   * Unified operator-option resolver. Falls back through:
+   *   1. `ctx.datastore.get(key)`  — per-session `set` / global `setg`
+   *   2. `ctx.config.taskConfig[<moduleId>][<key>]` — persisted overrides
+   *   3. `ctx.config.taskConfig[<moduleId>][<lowercased-key>]`
+   * Returns `undefined` on miss. Replaces the duplicated "read
+   * `THREAT_HUNT_PROMPT` from the module, `promptOverride` from the task"
+   * pattern that exists across every task-wrapping module today.
+   *
+   * Optional because some test paths don't populate the host fallback
+   * chain; production code always has one.
+   */
+  resolveOption?<T = string>(key: string): T | undefined;
+  /**
+   * Report per-sub-agent activity to the bus as a `${moduleId}:agent-activity`
+   * event (formally typed by `TaskAgentActivityEvent`). The orchestrator and
+   * report-worker subscribe to the template-literal pattern so every module
+   * that fans out sub-agents (threat-hunt, verify, poc-harness, triage, …)
+   * gets identical UI plumbing for free.
+   *
+   * `fingerprint` is a stable per-row id (e.g. an actor name for threat-hunt,
+   * a finding id for verify). `kind: "tool-complete"` with `meta.done: true`
+   * tells the UI to drop the row from its active-agents map.
+   */
+  reportAgentActivity?(
+    fingerprint: string,
+    kind: AgentActivityKind,
+    meta?: AgentActivityMeta,
+  ): void;
 }
+
+/**
+ * Canonical name for the tool execution context. During the module-forward
+ * merge both names are exported; tools authored against the new DagTool
+ * contract should prefer `ExecutionContext` so later removal of the legacy
+ * `ToolExecutionContext` name doesn't require per-tool rewrites.
+ */
+export type ExecutionContext = ToolExecutionContext;
 
 /**
  * A tool exposed by a module — callable from shell mode (via LLM tool dispatch),
@@ -330,8 +433,111 @@ export interface ModuleTool {
    * Glob → `"Matched 12 files"`, Bash → first stdout line truncated.
    */
   renderResult?(result: ToolResult): string | null | undefined;
+  /**
+   * When true, hides this tool from `search`, the LLM tool-dispatch list,
+   * and the `/use <module>` overview. Used for DAG-internal nodes that exist
+   * purely to produce upstream outputs for other tools (e.g. `context:gather`,
+   * individual detection sub-tasks on the `agentic-sast` module). Hidden
+   * tools still participate in the scan DAG and can be invoked programmatically.
+   */
+  readonly hidden?: boolean;
+  /**
+   * Optional one-time configuration hook — receives the per-module config
+   * slice at registry load time. Used by scanner-plugin tools (semgrep,
+   * codeql) to resolve rule paths from `moduleConfig` before any `execute`
+   * call. Distinct from `CopilotModule.init` which runs at the module level;
+   * this runs per-tool so tool-specific setup state stays colocated with
+   * the tool definition.
+   */
+  init?(moduleConfig: Record<string, unknown>): Promise<void>;
   /** Execute the tool with validated input. */
   execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult>;
+}
+
+// ---------------------------------------------------------------------------
+// DagTool — a ModuleTool that also participates in the scan DAG
+// ---------------------------------------------------------------------------
+
+/**
+ * Pipeline-only spec for a `DagTool`. Mirrors the fields formerly declared on
+ * `AgentTask` (dependsOn / outputKind / condition / promptMode / toolPolicy /
+ * triageAgentConfig) so the bridge at `src/modules/dag-bridge.ts` can adapt
+ * a DagTool into an AgentTask for the orchestrator's existing TaskRegistry
+ * plumbing.
+ *
+ * All string references in `dependsOn` are **qualified tool names**
+ * (`"threat-model-randori:build"`), not bare task ids. The bridge rewrites
+ * these back to bare ids when populating the TaskRegistry during migration.
+ */
+export interface DagToolSpec {
+  outputKind: OutputKind;
+  dependsOn: ReadonlyArray<string>;
+  condition?: (upstream: ReadonlyMap<string, unknown>, config: KuzushiConfig) => boolean;
+  promptMode?: "full" | "minimal" | "none";
+  toolPolicy?: ToolPolicy;
+  triageAgentConfig?: (finding: Finding, repoName: string) => TriageAgentConfig;
+  /**
+   * Additional task ids to include in the task-filter when the DagTool is
+   * invoked via shell / `kuzushi run`. The orchestrator's pinned-task mode
+   * disables automatic dependency resolution, so multi-task chains
+   * (e.g. `taint-iris` needs `taint-cwe-select` to run first) must opt
+   * upstream nodes back in here.
+   *
+   * Ignored during normal scan-mode dispatch where full-DAG execution
+   * resolves `dependsOn` automatically.
+   */
+  chainBefore?: ReadonlyArray<string>;
+}
+
+/**
+ * A `DagTool` is a `ModuleTool` that also declares DAG-node semantics.
+ * Author via `defineDagTool<"module-id">({...})` — the template-literal
+ * `name` type enforces the module-id prefix at compile time.
+ *
+ * When the orchestrator invokes the tool as part of a scan run, it populates
+ * `ctx.dag` with `upstreamOutputs` and scope paths. Shell / run-mode
+ * invocations leave `ctx.dag` undefined; tools that need DAG state should
+ * guard with a `requireDag(ctx)` helper so the missing-context error is
+ * explicit rather than a `.upstreamOutputs` on undefined.
+ *
+ * DagTools use a separate `run()` method (returning the typed output) rather
+ * than `execute()` (returning `ToolResult`). The bridge wraps `run` into the
+ * `execute` contract for shell/run-mode invocations, converting the output
+ * via the module's `outputKind` (e.g. `Finding[]` → `ToolResult.data`).
+ */
+export interface DagTool<Id extends string = string, TI = unknown, TO = unknown>
+  extends ModuleTool {
+  readonly name: `${Id}:${string}`;
+  readonly dag: DagToolSpec;
+  run(input: TI, ctx: ExecutionContext): Promise<TO>;
+}
+
+/**
+ * Structural guard — returns true when a `ModuleTool` carries a `dag` spec.
+ * Used by `ModuleRegistry.loadModule` to auto-register DagTools into the
+ * shared TaskRegistry, and by the shell/search UI to distinguish "DAG
+ * participant" from "interactive-only" tools.
+ */
+export function isDagTool(tool: ModuleTool): tool is DagTool {
+  return (
+    (tool as Partial<DagTool>).dag !== undefined &&
+    typeof (tool as Partial<DagTool>).run === "function"
+  );
+}
+
+/**
+ * Runtime guard that narrows `ctx.dag` to `DagContext`. Throws a descriptive
+ * error when called outside a DAG execution (e.g. from shell mode). DagTool
+ * authors call this at the top of `run()` to pull `upstreamOutputs`, `runId`,
+ * and scope paths without proliferating `ctx.dag!` assertions.
+ */
+export function requireDag(ctx: ExecutionContext): DagContext {
+  if (!ctx.dag) {
+    throw new Error(
+      "DagTool.run called without ExecutionContext.dag populated — this tool must be invoked via the scan orchestrator, not directly from shell/run mode.",
+    );
+  }
+  return ctx.dag;
 }
 
 // ---------------------------------------------------------------------------

@@ -34,9 +34,9 @@ const baseConfig: KuzushiConfig = {
 };
 
 async function createMockCore() {
-  const { createSemgrepModule } = await import("../../src/modules/sast/core-semgrep.js");
-  const { createThreatHuntModule } = await import("../../src/modules/sast/core-threat-hunt.js");
-  const { createContextModule } = await import("../../src/modules/sast/core-context.js");
+  const { createSemgrepModule } = await import("../../src/modules/semgrep/semgrep.js");
+  const { createThreatHuntModule } = await import("../../src/modules/threat-hunt/threat-hunt.js");
+  const { createContextModule } = await import("../../src/modules/context/context.js");
 
   const sast = createCoreSastModule();
   const semgrep = createSemgrepModule();
@@ -358,13 +358,7 @@ describe("local shell commands", () => {
     const shellState = createShellState(module.tools.map((t) => t.name));
     const ctx = { focusedModule: null };
 
-    const result = __shellInternals.handleLocalCommand(
-      "/use sats",
-      core,
-      opts,
-      ctx,
-      shellState,
-    );
+    const result = __shellInternals.handleLocalCommand("/use sats", core, opts, ctx, shellState);
     expect(result?.output).toContain('Unknown module: "sats"');
     // Nearest-match should pull in real module ids — "sast" is one char off.
     expect(result?.output).toContain("Did you mean");
@@ -403,19 +397,38 @@ describe("local shell commands", () => {
     expect(m?.output).toContain("sast");
   });
 
+  it("reconcileShellView promotes catalog→module when focus is set via bare `use <mod>`", () => {
+    // Regression: bare `use threat-hunt` pushes a ModuleDispatcher in
+    // core-dispatcher.cmd_use (emits `Selected module: <id>`) but returns no
+    // shellStateUpdater. The only sync path is `syncShellState` in shell.ts,
+    // which previously left `shellView` untouched — so the prompt read
+    // `kuzushi/threat-hunt>` while StatusFooter still said "you are in catalog".
+    expect(__shellInternals.reconcileShellView("catalog", "threat-hunt")).toBe("module");
+
+    // Clearing focus from a module-scoped view (after /back through the stack)
+    // must fall back to catalog so we don't leave a dangling module home.
+    expect(__shellInternals.reconcileShellView("module", null)).toBe("catalog");
+    expect(__shellInternals.reconcileShellView("findings", null)).toBe("catalog");
+    expect(__shellInternals.reconcileShellView("finding", null)).toBe("catalog");
+    expect(__shellInternals.reconcileShellView("tune", null)).toBe("catalog");
+
+    // Threat-* + diff-since are intentionally top-level views that can be
+    // entered without a focused module — don't clobber them.
+    expect(__shellInternals.reconcileShellView("threat-dfd", null)).toBe("threat-dfd");
+    expect(__shellInternals.reconcileShellView("diff-since", null)).toBe("diff-since");
+
+    // And don't demote an already-correct module view.
+    expect(__shellInternals.reconcileShellView("findings", "sast")).toBe("findings");
+    expect(__shellInternals.reconcileShellView("module", "sast")).toBe("module");
+  });
+
   it("supports /help <verb> with expanded description + unknown-verb fallback", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const shellState = createShellState(module.tools.map((t) => t.name));
     const ctx = { focusedModule: null };
 
-    const helpOpen = __shellInternals.handleLocalCommand(
-      "/help open",
-      core,
-      opts,
-      ctx,
-      shellState,
-    );
+    const helpOpen = __shellInternals.handleLocalCommand("/help open", core, opts, ctx, shellState);
     expect(helpOpen?.output).toContain("/open <F-NNNN>");
     expect(helpOpen?.output).toContain("linear deep page");
 

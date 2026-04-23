@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createCoreVulnScoutModule } from "../../src/modules/core-vuln-scout.js";
 import type { ToolExecutionContext } from "../../src/modules/types.js";
+import { createCoreVulnScoutModule } from "../../src/modules/vuln-scout/vuln-scout.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
 const { resolveRepoMock, resolveVulnScoutPluginMock, runPluginFindingScannerMock } = vi.hoisted(

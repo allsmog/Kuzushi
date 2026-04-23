@@ -3,8 +3,8 @@
  *
  * Extracted from `TextInput.tsx` and `CopilotShell.tsx`'s prompt handler,
  * which had duplicated cursor clamping, arrow navigation, ctrl-chord
- * detection, backspace/delete, and Ctrl+A/E/U handling. Anything that
- * accepts free-form text and needs a caret should go through this hook.
+ * detection, backspace, and Ctrl+A/E/U handling. Anything that accepts
+ * free-form text and needs a caret should go through this hook.
  *
  * Returns the live cursor index plus a setter so callers can render a
  * cursor glyph (use `theme.glyphs.textCursor` for the visual character).
@@ -12,6 +12,7 @@
 
 import { useInput } from "ink";
 import { useEffect, useState } from "react";
+import { applyBackspace, isCtrlChord } from "./text-edit-actions.js";
 
 export interface UseTextEditorProps {
   value: string;
@@ -27,13 +28,6 @@ export interface UseTextEditorProps {
 export interface UseTextEditorState {
   cursor: number;
   setCursor: (idx: number) => void;
-}
-
-function isCtrlChord(input: string, letter: string, ctrl: boolean): boolean {
-  if (!ctrl) return false;
-  const lower = letter.toLowerCase();
-  const ctrlCode = String.fromCharCode(lower.charCodeAt(0) - 96);
-  return input === lower || input === lower.toUpperCase() || input === ctrlCode;
 }
 
 export function useTextEditor({
@@ -81,17 +75,15 @@ export function useTextEditor({
         setCursor(0);
         return;
       }
-      if (key.backspace) {
-        if (value.length === 0 || cursor === 0) return;
-        const next = value.slice(0, cursor - 1) + value.slice(cursor);
-        onChange(next);
-        setCursor((c) => Math.max(0, c - 1));
-        return;
-      }
-      if (key.delete) {
-        if (cursor >= value.length) return;
-        const next = value.slice(0, cursor) + value.slice(cursor + 1);
-        onChange(next);
+      // In Ink 5, the physical Backspace key on macOS/most terminals sends
+      // \x7f and surfaces as `key.delete`, not `key.backspace`. Ctrl+H sends
+      // \x08 and surfaces as `key.backspace`. Treat both as delete-left so
+      // the user's intuition holds in either case.
+      if (key.backspace || key.delete) {
+        const edit = applyBackspace(value, cursor);
+        if (!edit) return;
+        onChange(edit.value);
+        setCursor(edit.cursor);
         return;
       }
       if (key.ctrl || key.meta) return;

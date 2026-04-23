@@ -218,9 +218,9 @@ describe("createCoreSastModule", () => {
 
   it("legacy sast:<action> names resolve through aliases to the sub-modules", async () => {
     // Mirror what CopilotCore.init() does: load the family + register aliases.
-    const { createSemgrepModule } = await import("../../src/modules/sast/core-semgrep.js");
-    const { createCodeqlModule } = await import("../../src/modules/sast/core-codeql.js");
-    const { createTriageModule } = await import("../../src/modules/sast/core-triage.js");
+    const { createSemgrepModule } = await import("../../src/modules/semgrep/semgrep.js");
+    const { createCodeqlModule } = await import("../../src/modules/codeql/codeql.js");
+    const { createTriageModule } = await import("../../src/modules/triage/triage.js");
     const reg = new ModuleRegistry();
     for (const m of [
       createCoreSastModule(),

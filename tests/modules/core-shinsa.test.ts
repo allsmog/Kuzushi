@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createCoreShinsaModule } from "../../src/modules/core-shinsa.js";
+import { createCoreShinsaModule } from "../../src/modules/shinsa/shinsa.js";
 import type { ToolExecutionContext } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 

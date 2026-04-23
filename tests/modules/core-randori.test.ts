@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createCoreRandoriModule } from "../../src/modules/core-randori.js";
+import { createCoreRandoriModule } from "../../src/modules/randori/randori.js";
 import type { ToolExecutionContext } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
