@@ -92,7 +92,16 @@ describe("core-randori module", () => {
     const mod = createCoreRandoriModule();
     expect(mod.id).toBe("randori");
     expect(mod.category).toBe("intel");
-    expect(mod.tools.map((t) => t.name).sort()).toEqual(["randori:pasta", "randori:threat-model"]);
+    // Hidden DAG bridges (e.g. the `randori:threat-model-randori` wrapper
+    // that keeps `dependsOn: ["threat-model-randori"]` resolving in the
+    // orchestrator) are filtered — this test asserts the user-visible tool
+    // surface.
+    expect(
+      mod.tools
+        .filter((t) => !t.hidden)
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["randori:pasta", "randori:threat-model"]);
   });
 
   it("randori:pasta returns a helpful error when the plugin is missing", async () => {

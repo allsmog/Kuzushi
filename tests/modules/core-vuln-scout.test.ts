@@ -57,8 +57,12 @@ describe("core-vuln-scout module", () => {
     const mod = createCoreVulnScoutModule();
     expect(mod.id).toBe("vuln-scout");
     expect(mod.category).toBe("offense");
-    expect(mod.tools.map((t) => t.name)).toEqual(["vuln-scout:audit"]);
-    expect(mod.tools[0].headless).toBe(true);
+    // Hidden DAG bridges (e.g. `vuln-scout:vuln-scout`, registered so
+    // `dependsOn: ["vuln-scout"]` resolves) are filtered — this test asserts
+    // the user-visible tool surface.
+    const visible = mod.tools.filter((t) => !t.hidden);
+    expect(visible.map((t) => t.name)).toEqual(["vuln-scout:audit"]);
+    expect(visible[0]!.headless).toBe(true);
   });
 
   it("returns a helpful error when the plugin is not installed", async () => {

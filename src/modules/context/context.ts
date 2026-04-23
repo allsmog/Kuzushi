@@ -1,16 +1,31 @@
 /**
  * Context module — application "map" builder.
  *
- * Pure `ModuleTool` — the shell entry point drives `generateContextSnapshot`
- * (which internally runs its own mini-DAG of context-gatherer →
- * context-enricher → app-model-build → threat-model → threat-scenario-build).
- * The individual DAG tasks remain registered in `src/agents/index.ts`; the
- * context module wraps them into a single shell-facing verb.
+ * Pure `ModuleTool` (`context:build`) — the shell entry point drives
+ * `generateContextSnapshot` (which internally runs its own mini-DAG of
+ * context-gatherer → context-enricher → app-model-build → threat-model →
+ * threat-scenario-build). Hidden DagTools on this module expose the
+ * individual infrastructure DAG nodes (context-gatherer,
+ * context-enricher, app-model-build, threat-scenario-build,
+ * code-config-detect, call-graph-assist, code-graph-build/enrich,
+ * invariant-extract/check) so the module registry owns their lifecycle
+ * instead of `createDefaultTaskRegistry`.
  *
  * Produces the ContextSnapshot consumed downstream by randori /
  * agentic-sast / taint-iris / threat-hunt.
  */
 
+import { appModelBuildTask } from "../../agents/tasks/app-model-build.js";
+import { callGraphAssistTask } from "../../agents/tasks/call-graph-assist.js";
+import { codeConfigDetectTask } from "../../agents/tasks/code-config-detect.js";
+import { codeGraphBuildTask } from "../../agents/tasks/code-graph/build.js";
+import { codeGraphEnrichTask } from "../../agents/tasks/code-graph/enrich.js";
+import { contextEnricherTask } from "../../agents/tasks/context-enricher.js";
+import { contextGathererTask } from "../../agents/tasks/context-gatherer.js";
+import { invariantCheckTask } from "../../agents/tasks/invariant-analysis/check.js";
+import { invariantExtractTask } from "../../agents/tasks/invariant-analysis/extract.js";
+import { threatScenarioBuildTask } from "../../agents/tasks/threat-scenario-build.js";
+import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import { defineModule, defineTool } from "../define.js";
 import { saveContextSnapshot } from "../sast/context-persist.js";
 import { formatContextSummary, generateContextSnapshot } from "../sast/shared.js";
@@ -102,6 +117,22 @@ export function createContextModule(): CopilotModule {
     },
   });
 
+  const hide = (task: Parameters<typeof exposeAgentTaskAsHiddenDagTool<"context">>[0]) =>
+    exposeAgentTaskAsHiddenDagTool<"context">(task, { moduleId: "context" });
+
+  const hiddenInfraDagTools = [
+    hide(contextGathererTask),
+    hide(contextEnricherTask),
+    hide(appModelBuildTask),
+    hide(threatScenarioBuildTask),
+    hide(codeConfigDetectTask),
+    hide(callGraphAssistTask),
+    hide(codeGraphBuildTask),
+    hide(codeGraphEnrichTask),
+    hide(invariantExtractTask),
+    hide(invariantCheckTask),
+  ];
+
   return defineModule({
     id: "context",
     displayName: "Context Map",
@@ -117,6 +148,6 @@ export function createContextModule(): CopilotModule {
       reliability: ["reliable"],
       sideEffects: ["costs LLM tokens"],
     },
-    tools: [contextBuildTool],
+    tools: [contextBuildTool, ...hiddenInfraDagTools],
   });
 }

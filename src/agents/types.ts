@@ -71,7 +71,7 @@ export interface AgentTask<TInput = unknown, TOutput = unknown> {
   readonly dependsOn: string[];
 
   /** Optional condition evaluated before running. Return false to skip. */
-  condition?: (upstreamOutputs: Map<string, unknown>, config: KuzushiConfig) => boolean;
+  condition?: (upstreamOutputs: ReadonlyMap<string, unknown>, config: KuzushiConfig) => boolean;
 
   /** Prompt rendering mode: full (default), minimal (sub-agents), none (routing only). */
   promptMode?: PromptMode;

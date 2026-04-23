@@ -11,8 +11,9 @@
 import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
 import { runPluginFindingScanner } from "../../agents/tasks/plugin-finding-scanner.js";
 import { resolveVulnScoutPlugin } from "../../agents/tasks/vuln-scout/resolve-vuln-scout.js";
-import { buildVulnScoutPrompt } from "../../agents/tasks/vuln-scout/vuln-scout.js";
+import { buildVulnScoutPrompt, vulnScoutTask } from "../../agents/tasks/vuln-scout/vuln-scout.js";
 import { resolveRepo } from "../../cli/shared.js";
+import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
 
 function resolveTargetPaths(
@@ -149,6 +150,11 @@ const auditTool: ModuleTool = {
 // ---------------------------------------------------------------------------
 
 export function createCoreVulnScoutModule(): CopilotModule {
+  const hiddenVulnScout = exposeAgentTaskAsHiddenDagTool<"vuln-scout">(vulnScoutTask, {
+    moduleId: "vuln-scout",
+    multiStrategy: true,
+  });
+
   return {
     id: "vuln-scout",
     displayName: "Vuln Scout",
@@ -157,7 +163,7 @@ export function createCoreVulnScoutModule(): CopilotModule {
     description:
       "Whitebox pentest wrapper around the @kuzushi/vuln-scout Claude Code plugin — " +
       "agentic SAST + taint analysis returning normalized Findings.",
-    tools: [auditTool],
+    tools: [auditTool, hiddenVulnScout],
     async init() {
       // No eager plugin resolution — the tool reports a graceful error if
       // the plugin is not installed.

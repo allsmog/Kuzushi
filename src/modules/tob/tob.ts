@@ -14,8 +14,9 @@ import {
   resolveTobPlugins,
   SECURITY_PLUGINS,
 } from "../../agents/tasks/tob-audit/resolve-tob-plugin.js";
-import { buildTobAuditPrompt } from "../../agents/tasks/tob-audit/tob-audit.js";
+import { buildTobAuditPrompt, tobAuditTask } from "../../agents/tasks/tob-audit/tob-audit.js";
 import { resolveRepo } from "../../cli/shared.js";
+import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
 
 function resolveTargetPaths(
@@ -238,6 +239,11 @@ const skillsTool: ModuleTool = {
 // ---------------------------------------------------------------------------
 
 export function createCoreTobModule(): CopilotModule {
+  const hiddenTobAudit = exposeAgentTaskAsHiddenDagTool<"tob">(tobAuditTask, {
+    moduleId: "tob",
+    multiStrategy: true,
+  });
+
   return {
     id: "tob",
     displayName: "Trail of Bits Skills",
@@ -246,7 +252,7 @@ export function createCoreTobModule(): CopilotModule {
     description:
       "Audit wrapper around the @kuzushi/tob-skills Claude Code plugin collection " +
       "(fp-check, variant-analysis, sharp-edges, insecure-defaults, and more).",
-    tools: [auditTool, skillsTool],
+    tools: [auditTool, skillsTool, hiddenTobAudit],
     async init() {
       // No eager plugin resolution — the tools report graceful errors.
     },
