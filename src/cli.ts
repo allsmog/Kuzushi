@@ -950,7 +950,6 @@ taskCmd
       }
 
       const task = taskRegistry.get(id);
-      const manifest = taskRegistry.getManifest(id);
 
       console.log(`Task: ${task.id}`);
       console.log(`  Display Name: ${task.displayName}`);
@@ -960,33 +959,6 @@ taskCmd
       );
       console.log(`  Has Condition: ${task.condition ? "yes" : "no"}`);
       console.log(`  Prompt Mode:  ${task.promptMode ?? "full"}`);
-
-      if (manifest) {
-        console.log(`\n  Manifest:`);
-        console.log(`    Version:     ${manifest.version}`);
-        console.log(`    Description: ${manifest.description}`);
-        if (manifest.author) console.log(`    Author:      ${manifest.author}`);
-        if (manifest.license) console.log(`    License:     ${manifest.license}`);
-        if (manifest.requires) {
-          if (manifest.requires.env?.length) {
-            console.log(`    Requires env: ${manifest.requires.env.join(", ")}`);
-          }
-          if (manifest.requires.bins?.length) {
-            console.log(`    Requires bins: ${manifest.requires.bins.join(", ")}`);
-          }
-          if (manifest.requires.nodeVersion) {
-            console.log(`    Node version: ${manifest.requires.nodeVersion}`);
-          }
-        }
-        if (manifest.config) {
-          console.log(`    Config schema:`);
-          for (const [key, entry] of Object.entries(manifest.config)) {
-            const defaultVal =
-              entry.default !== undefined ? ` (default: ${JSON.stringify(entry.default)})` : "";
-            console.log(`      ${key}: ${entry.type}${defaultVal} — ${entry.description}`);
-          }
-        }
-      }
     }),
   );
 
