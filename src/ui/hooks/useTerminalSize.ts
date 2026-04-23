@@ -6,21 +6,17 @@
  */
 import { useStdout } from "ink";
 import { useEffect, useState } from "react";
+import { resolveTerminalSize } from "../terminal.js";
 
 export interface TerminalSize {
   columns: number;
   rows: number;
 }
 
-const FALLBACK: TerminalSize = { columns: 80, rows: 24 };
 const DEBOUNCE_MS = 50;
 
 function measure(stdout: NodeJS.WriteStream | undefined): TerminalSize {
-  const s = stdout ?? process.stdout;
-  return {
-    columns: s?.columns ?? FALLBACK.columns,
-    rows: s?.rows ?? FALLBACK.rows,
-  };
+  return resolveTerminalSize(stdout);
 }
 
 export function useTerminalSize(): TerminalSize {
@@ -28,8 +24,8 @@ export function useTerminalSize(): TerminalSize {
   const [size, setSize] = useState<TerminalSize>(() => measure(stdout));
 
   useEffect(() => {
-    const s = stdout ?? process.stdout;
-    if (!s || !s.isTTY || typeof s.on !== "function") return;
+    const s = stdout;
+    if (!s?.isTTY || typeof s.on !== "function") return;
     let timer: NodeJS.Timeout | null = null;
     const handleResize = () => {
       if (timer) clearTimeout(timer);

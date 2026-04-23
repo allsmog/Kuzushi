@@ -15,6 +15,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { boxBottomLine, boxRowPrefix, boxTopLine } from "../format.js";
 import type { ShellPlan, ShellPlanChange } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -25,6 +26,12 @@ interface PlanCardProps {
 export function PlanCard({ plan }: PlanCardProps): React.ReactElement {
   const { changes, unsupported } = plan;
   const optionWidth = Math.max("option".length, ...changes.map((c) => c.option.length));
+  const width = 78;
+  const topLine = boxTopLine({
+    width,
+    left: `${tokens.metadata("─")}${tokens.label(" plan ")}${tokens.strong(plan.source)}`,
+    right: `${tokens.muted(" ")}${tokens.muted(plan.toolName)}${tokens.muted(" ")}`,
+  });
 
   return (
     <Box
@@ -33,15 +40,7 @@ export function PlanCard({ plan }: PlanCardProps): React.ReactElement {
       marginTop={SPACING.sm}
       marginBottom={SPACING.sm}
     >
-      <Text>
-        {tokens.muted("\u256D\u2500 plan ")}
-        {tokens.strong(plan.source)}
-        {tokens.muted(`  \u2500  ${plan.toolName}`)}
-        {tokens.muted(
-          ` ${"\u2500".repeat(Math.max(0, 60 - plan.source.length - plan.toolName.length))}`,
-        )}
-        {tokens.muted("\u256E")}
-      </Text>
+      <Text>{topLine}</Text>
 
       <Row>
         {tokens.label("intent")}
@@ -83,7 +82,7 @@ export function PlanCard({ plan }: PlanCardProps): React.ReactElement {
         {tokens.value(`$${plan.planCostUsd.toFixed(4)}`)}
       </Row>
 
-      <Text>{tokens.muted(`\u2570${"\u2500".repeat(76)}\u256F`)}</Text>
+      <Text>{boxBottomLine({ width })}</Text>
 
       <Box marginTop={SPACING.sm}>
         <Text>
@@ -123,7 +122,7 @@ function PlanRow({
 function Row({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
     <Text>
-      {tokens.muted("\u2502 ")}
+      {boxRowPrefix()}
       {children}
     </Text>
   );

@@ -12,8 +12,9 @@ import { execSync } from "node:child_process";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
-import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import type { ActionableFinding } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
@@ -30,7 +31,7 @@ export function ExportActions({
   onDone,
 }: ExportActionsProps): React.ReactElement {
   const [status, setStatus] = useState<string | null>(null);
-  const width = terminalCardWidth();
+  const width = useTerminalCardWidth();
 
   const actionableCount = findings.filter((f) => f.verdict !== "fp").length;
 

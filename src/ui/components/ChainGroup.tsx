@@ -2,7 +2,7 @@
  * ChainGroup — renders an `ExploitChain` as a bordered grouping of the
  * findings that compose it (Ink UI v2 screen 04 inner box).
  *
- * The visual model is a single rounded rectangle labeled with the chain id
+ * The visual model is a single bordered rectangle labeled with the chain id
  * and severity, enclosing the member findings. The caller is expected to
  * pass pre-resolved `ActionableFinding`s in step order — we don't reach back
  * into the store here so this stays a pure presentational component.
@@ -10,6 +10,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { boxBottomLine, boxTopLine } from "../format.js";
 import { Table } from "../primitives/Table.js";
 import { severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding } from "../state.js";
@@ -33,19 +34,21 @@ export function ChainGroup({
   findings,
   width = 78,
 }: ChainGroupProps): React.ReactElement {
-  const bar = "\u2500".repeat(Math.max(10, width - 20));
   const sevBadge = severityBadge(severity);
-  const verifiedSuffix = verified ? tokens.success(" · verified") : "";
+  const rightMeta = verified ? `${sevBadge}${tokens.success(" · verified")} ` : `${sevBadge} `;
+  const chainLabel = title
+    ? `${tokens.muted(" exploit chain · ")}${tokens.strong(chainId)}${tokens.muted(` · ${title} `)}`
+    : `${tokens.muted(" exploit chain · ")}${tokens.strong(chainId)} `;
 
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>
-        {tokens.muted("\u250C\u2500 exploit chain · ")}
-        {tokens.strong(chainId)}
-        {tokens.muted(" · ")}
-        {sevBadge}
-        {verifiedSuffix}
-        {tokens.muted(` ${bar}\u2510`)}
+        {boxTopLine({
+          width,
+          variant: "square",
+          left: `${tokens.metadata("─")}${chainLabel}`,
+          right: rightMeta,
+        })}
       </Text>
       <Box paddingLeft={SPACING.md}>
         <Table
@@ -82,7 +85,7 @@ export function ChainGroup({
           showHeader
         />
       </Box>
-      <Text>{tokens.muted(`\u2514${"\u2500".repeat(width)}\u2518`)}</Text>
+      <Text>{boxBottomLine({ width, variant: "square" })}</Text>
     </Box>
   );
 }

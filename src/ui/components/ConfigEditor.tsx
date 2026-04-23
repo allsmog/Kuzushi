@@ -21,9 +21,10 @@ import type React from "react";
 import { useMemo, useState } from "react";
 import type { ConfigPatchEntry } from "../../config.js";
 import type { KuzushiConfig } from "../../types.js";
-import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { boxFooter, boxHeader } from "../format.js";
 import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { SPACING, tokens } from "../tokens.js";
 import {
   FIELDS,
@@ -158,6 +159,7 @@ export function ConfigEditor({
   onCancel,
 }: ConfigEditorProps): React.ReactElement {
   const [cfg, setCfg] = useState<KuzushiConfig>(initialConfig);
+  const width = useTerminalCardWidth();
   const [expanded, setExpanded] = useState<Set<SectionId>>(() => {
     const initial = new Set<SectionId>();
     const auto = defaultExpandedSection(focusKey);
@@ -433,7 +435,6 @@ export function ConfigEditor({
     setEditingPath(null);
   }
 
-  const width = terminalCardWidth();
   const drillTitle = drill ? `Configuration → taskConfig.${drill.taskId}` : "Configuration";
   const dirty = rows.length > 0 || drill ? !deepEqual(initialConfig, cfg) : false;
 

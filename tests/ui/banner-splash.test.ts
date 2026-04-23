@@ -30,4 +30,9 @@ describe("BannerSplash.pickTip", () => {
     expect(() => pickTip(-1)).not.toThrow();
     expect(typeof pickTip(-60_001)).toBe("string");
   });
+
+  it("returns the same tip for the same string seed", () => {
+    expect(pickTip("workspace-a\u0000./repo")).toBe(pickTip("workspace-a\u0000./repo"));
+    expect(typeof pickTip("workspace-b\u0000./repo")).toBe("string");
+  });
 });

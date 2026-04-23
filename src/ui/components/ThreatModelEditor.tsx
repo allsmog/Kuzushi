@@ -13,9 +13,10 @@ import type {
   StrideThreat,
   ThreatModelDocument,
 } from "../../agents/tasks/threat-modeling/types.js";
-import { badge, boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { badge, boxFooter, boxHeader } from "../format.js";
 import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { TextInput } from "../primitives/TextInput.js";
 import { dangerStrong, info, muted, SPACING, tokens, warnStrong } from "../tokens.js";
@@ -95,7 +96,7 @@ export function ThreatModelEditor({
   const [model, setModel] = useState<ThreatModelDocument>({ ...threatModel });
   const [annotateMode, setAnnotateMode] = useState(false);
   const [annotateBuffer, setAnnotateBuffer] = useState("");
-  const width = terminalCardWidth();
+  const width = useTerminalCardWidth();
 
   const threats = model.threats;
 

@@ -11,8 +11,9 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
-import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import {
   SelectList,
@@ -235,7 +236,7 @@ export function SetupWizard({
 }: SetupWizardProps): React.ReactElement {
   const [step, setStep] = useState<WizardStep>("preset");
   const [result, setResult] = useState<Partial<WizardResult>>({});
-  const width = terminalCardWidth();
+  const width = useTerminalCardWidth();
 
   useRegisterKeybindings([
     { keys: "\u2191/\u2193", label: "Navigate" },

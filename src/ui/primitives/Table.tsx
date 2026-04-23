@@ -6,9 +6,10 @@
  * flex-proportional columns, right/center alignment, and middle or end
  * truncation (middle preserves the trailing path basename).
  */
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type { ReactNode } from "react";
 import { icons } from "../icons.js";
+import { resolveTerminalColumns } from "../terminal.js";
 import { tokens } from "../tokens.js";
 
 export type TableAlign = "left" | "right" | "center";
@@ -102,8 +103,8 @@ function computeWidths<Row>(
 
 export function Table<Row>(props: TableProps<Row>): JSX.Element {
   const { columns, rows, showHeader, divider = true, maxWidth, gap = 2, emptyMessage } = props;
-
-  const totalWidth = maxWidth ?? process.stdout.columns ?? 80;
+  const { stdout } = useStdout();
+  const totalWidth = maxWidth ?? resolveTerminalColumns(stdout);
   const widths = computeWidths(columns, totalWidth, gap);
   const headerVisible = showHeader ?? columns.some((c) => typeof c.header === "string");
 
@@ -134,14 +135,16 @@ export function Table<Row>(props: TableProps<Row>): JSX.Element {
         <Box>
           <Text>
             {columns
-              .map((col, i) => renderCell(tokens.label(col.header ?? col.key), col, widths[i] ?? 0))
+              .map((col, i) =>
+                renderCell(tokens.metadata(col.header ?? col.key), col, widths[i] ?? 0),
+              )
               .join(gapStr)}
           </Text>
         </Box>
       ) : null}
       {headerVisible && divider ? (
         <Box>
-          <Text>{tokens.muted(icons.boxHorizontal.repeat(dividerWidth))}</Text>
+          <Text>{tokens.subtle(icons.boxHorizontal.repeat(dividerWidth))}</Text>
         </Box>
       ) : null}
       {rows.map((row, rowIdx) => (

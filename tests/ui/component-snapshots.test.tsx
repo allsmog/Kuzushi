@@ -13,10 +13,11 @@
  * is intentional.
  */
 
-import { PassThrough, type Writable } from "node:stream";
+import { Writable } from "node:stream";
 import { render } from "ink";
 import { createElement, type ReactElement } from "react";
 import { describe, expect, it } from "vitest";
+import { createManualUiClock, UiClockProvider } from "../../src/ui/clock.js";
 import { BannerSplash } from "../../src/ui/components/BannerSplash.js";
 import { FindingCard } from "../../src/ui/components/FindingCard.js";
 import { ModuleCatalog } from "../../src/ui/components/ModuleCatalog.js";
@@ -29,46 +30,71 @@ import type { ActionableFinding, ShellState } from "../../src/ui/state.js";
 // Render harness
 // ---------------------------------------------------------------------------
 
-function renderToString(node: ReactElement): string {
-  const stream = new PassThrough();
-  const chunks: Buffer[] = [];
-  stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-  const instance = render(node, {
+class FrameCaptureStream extends Writable {
+  columns: number;
+  rows: number;
+  isTTY = true;
+  private frames: string[] = [];
+
+  constructor(columns = 80, rows = 24) {
+    super();
+    this.columns = columns;
+    this.rows = rows;
+  }
+
+  _write(
+    chunk: string | Uint8Array,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.frames.push(Buffer.from(chunk).toString("utf-8"));
+    callback();
+  }
+
+  clearLine(): void {
+    // no-op test stub
+  }
+
+  clearScreenDown(): void {
+    // no-op test stub
+  }
+
+  cursorTo(): void {
+    // no-op test stub
+  }
+
+  moveCursor(): void {
+    // no-op test stub
+  }
+
+  getColumns(): number {
+    return this.columns;
+  }
+
+  lastFrame(): string {
+    for (let i = this.frames.length - 1; i >= 0; i--) {
+      const frame = this.frames[i] ?? "";
+      if (stripAnsi(frame).trim().length > 0) return frame;
+    }
+    return "";
+  }
+}
+
+function renderToString(node: ReactElement, columns = 80): string {
+  const stream = new FrameCaptureStream(columns);
+  const clock = createManualUiClock(0);
+  const instance = render(createElement(UiClockProvider, { clock }, node), {
     stdout: stream as unknown as Writable & NodeJS.WriteStream,
     debug: true,
   });
   instance.unmount();
-  stream.end();
-  const raw = Buffer.concat(chunks).toString("utf-8");
-  return dedupeFinalFrame(stripAnsi(raw)).trimEnd();
-}
-
-/**
- * Ink with `debug: true` flushes the full rendered tree on every
- * reconciliation, so our captured stream typically contains 2–3 copies
- * of the same content. Keep only the final frame by splitting on the
- * first non-empty line and returning the trailing portion.
- */
-function dedupeFinalFrame(text: string): string {
-  const trimmed = text.trimEnd();
-  const lines = trimmed.split("\n");
-  // Find the first non-empty line and use it as the frame boundary.
-  // Each `render()` frame restarts with this same header line.
-  const firstNonEmpty = lines.findIndex((l) => l.trim().length > 0);
-  if (firstNonEmpty < 0) return trimmed;
-  const header = lines[firstNonEmpty]!;
-  // Find the LAST index where `header` appears as a full line — that's
-  // where the final frame begins.
-  for (let i = lines.length - 1; i > firstNonEmpty; i--) {
-    if (lines[i] === header) {
-      return lines.slice(i).join("\n");
-    }
-  }
-  return trimmed;
+  return stripAnsi(stream.lastFrame())
+    .replace(/^(?:\r?\n)+/, "")
+    .trimEnd();
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI for stable snapshots
-const ANSI_RE = /\u001b\[[0-9;]*[a-zA-Z]/g;
+const ANSI_RE = /\u001b(?:\[[0-9;?]*[ -/]*[@-~]|][^\u0007]*(?:\u0007|\u001b\\))/g;
 
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");

@@ -13,8 +13,8 @@
  *   - `danger` / `dangerStrong`  — errors, true positives, exploitable verdicts
  *   - `success` / `successStrong` — passing checks, safe/mitigated states
  *   - `warn` / `warnStrong`      — cautions, skipped, needs-review
- *   - `info`                     — informational / by-design / neutral link-ish
- *   - `accent`                   — brand accent (cyan); use sparingly for
+ *   - `info`                     — informational / by-design / neutral status
+ *   - `accent`                   — brand accent (blue); use sparingly for
  *                                  identifiers, file links, PoC/proof callouts
  *   - `muted` / `metadata`       — theme-aware secondary text (same impl —
  *                                  `metadata` names intent at the callsite)
@@ -33,7 +33,8 @@ import { isHighContrast, isNoColor } from "./severity.js";
 import { getTheme } from "./theme.js";
 
 /**
- * Theme-aware secondary/dim: `chalk.dim` on dark, `chalk.gray` on light.
+ * Theme-aware secondary copy. Prefer a readable neutral over raw `dim` on dark
+ * terminals, which often disappears on high-density themes.
  *
  * Accessibility behavior:
  *   - `NO_COLOR` set → identity (no ANSI applied; downstream can still
@@ -44,13 +45,13 @@ import { getTheme } from "./theme.js";
  */
 function muted(text: string): string {
   if (isNoColor() || isHighContrast()) return text;
-  return getTheme() === "light" ? chalk.gray(text) : chalk.dim(text);
+  return chalk.gray(text);
 }
 
-/** One step lighter/dimmer than `muted`. Flip the theme mapping to read a bit softer. */
+/** One step softer than `muted`, used only for tertiary separators and chrome. */
 function subtle(text: string): string {
   if (isNoColor() || isHighContrast()) return text;
-  return getTheme() === "light" ? chalk.dim(text) : chalk.gray(text);
+  return chalk.dim(text);
 }
 
 /** Italic + muted — for parenthetical hints and tertiary annotations. */
@@ -72,10 +73,11 @@ export const tokens = {
   successStrong: (text: string) => chalk.green.bold(text),
   warn: (text: string) => chalk.yellow(text),
   warnStrong: (text: string) => chalk.yellow.bold(text),
-  info: (text: string) => chalk.cyan(text),
-  accent: (text: string) => chalk.cyan(text),
-  focus: (text: string) => chalk.cyan.bold(text),
-  selection: (text: string) => chalk.black.bgCyan(text),
+  info: (text: string) => (getTheme() === "light" ? chalk.blue(text) : chalk.blueBright(text)),
+  accent: (text: string) => (getTheme() === "light" ? chalk.blue(text) : chalk.blueBright(text)),
+  focus: (text: string) =>
+    getTheme() === "light" ? chalk.blue.bold(text) : chalk.blueBright.bold(text),
+  selection: (text: string) => chalk.inverse(text),
   bgEmphasis: (text: string) =>
     getTheme() === "light" ? chalk.black.bgWhite(text) : chalk.white.bgBlackBright(text),
   strong: (text: string) => chalk.bold(text),

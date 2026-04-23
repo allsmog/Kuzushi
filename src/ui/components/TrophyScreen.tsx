@@ -28,7 +28,8 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import { formatCost, formatDuration, terminalCardWidth } from "../format.js";
+import { formatCost, formatDuration } from "../format.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import type { SummaryData } from "../state.js";
 import { tokens } from "../tokens.js";
 
@@ -36,10 +37,10 @@ interface TrophyScreenProps {
   data: SummaryData;
 }
 
-export const TrophyScreen = React.memo(_TrophyScreen);
+export const TrophyScreen = React.memo(TrophyScreenImpl);
 
-function _TrophyScreen({ data }: TrophyScreenProps): React.ReactElement {
-  const innerWidth = Math.max(44, terminalCardWidth(74, 56) - 2);
+function TrophyScreenImpl({ data }: TrophyScreenProps): React.ReactElement {
+  const innerWidth = Math.max(44, useTerminalCardWidth(74, 56) - 2);
   const tp = data.verdictCounts.tp;
   const isClean = tp === 0;
   const hasExploitable = data.exploitable > 0;

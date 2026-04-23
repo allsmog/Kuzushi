@@ -16,6 +16,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { boxBottomLine, boxRowPrefix, boxTopLine } from "../format.js";
 import { icons } from "../icons.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -29,7 +30,6 @@ export function CostCapHalt({ runningCostUsd, budgetUsd }: CostCapHaltProps): Re
   const pct =
     budgetUsd != null && budgetUsd > 0 ? Math.round((runningCostUsd / budgetUsd) * 100) : undefined;
   const width = 70;
-  const bar = "─".repeat(width - 12);
 
   return (
     <Box
@@ -39,9 +39,10 @@ export function CostCapHalt({ runningCostUsd, budgetUsd }: CostCapHaltProps): Re
       paddingLeft={SPACING.md}
     >
       <Text>
-        {tokens.muted("╭─ ")}
-        {tokens.dangerStrong("BUDGET EXCEEDED")}
-        {tokens.muted(` ${bar}╮`)}
+        {boxTopLine({
+          width,
+          left: `${tokens.metadata("─")}${tokens.dangerStrong(" BUDGET EXCEEDED ")}`,
+        })}
       </Text>
       <Row>
         {tokens.label("spent")}
@@ -57,10 +58,10 @@ export function CostCapHalt({ runningCostUsd, budgetUsd }: CostCapHaltProps): Re
       </Row>
       <Row>
         {tokens.muted(
-          "Pipeline paused. Continuing incurs additional charges — the cap is not re-enforced until the next run.",
+          "Pipeline paused. Continuing incurs additional charges - the cap is not re-enforced until the next run.",
         )}
       </Row>
-      <Text>{tokens.muted(`╰${"─".repeat(width - 2)}╯`)}</Text>
+      <Text>{boxBottomLine({ width })}</Text>
       <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.hint("  press ")}
@@ -83,7 +84,7 @@ export function CostCapHalt({ runningCostUsd, budgetUsd }: CostCapHaltProps): Re
 function Row({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
     <Text>
-      {tokens.muted("│ ")}
+      {boxRowPrefix()}
       {children}
     </Text>
   );

@@ -11,9 +11,10 @@ import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useCallback, useState } from "react";
 import type { IntakeItemStatus, OperatorContextItem, OperatorScanContext } from "../../types.js";
-import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { boxFooter, boxHeader } from "../format.js";
 import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { TextInput } from "../primitives/TextInput.js";
 import { SPACING, tokens } from "../tokens.js";
@@ -220,7 +221,7 @@ export function ContextIntake({
   const [context, setContext] = useState<OperatorScanContext>({ ...initialContext });
   const [editMode, setEditMode] = useState(false);
   const [editBuffer, setEditBuffer] = useState("");
-  const width = terminalCardWidth();
+  const width = useTerminalCardWidth();
 
   const currentSection = SECTIONS[sectionIdx]!;
   const displayItems = getDisplayItems(context, currentSection);
@@ -371,7 +372,7 @@ export function ContextIntake({
               : tokens.muted(item.label);
 
         return (
-          <Box key={i} flexDirection="column">
+          <Box key={item.path.join(":")} flexDirection="column">
             {showGroup && (
               <Box paddingLeft={SPACING.md}>
                 <Text>{tokens.heading(item.groupLabel!)}</Text>

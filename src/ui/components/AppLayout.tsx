@@ -17,7 +17,7 @@ export function AppLayout({
 }): React.ReactElement {
   const { navigation, theme } = useLayoutContext();
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={theme.spacing.sm} paddingLeft={theme.spacing.md}>
         <Text>
           {tokens.strong(navigation.title)}
@@ -34,7 +34,9 @@ export function AppLayout({
         )}
         {navigation.subtitle && <Text>{tokens.hint(navigation.subtitle)}</Text>}
       </Box>
-      <Box flexDirection="column">{children}</Box>
+      <Box flexDirection="column" flexGrow={1}>
+        {children}
+      </Box>
       <Box marginTop={theme.spacing.sm}>{footer}</Box>
     </Box>
   );

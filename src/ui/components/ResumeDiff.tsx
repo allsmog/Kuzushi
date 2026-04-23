@@ -5,7 +5,8 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { boxFooter, boxHeader } from "../format.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -32,7 +33,7 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
   const prevDate = data.previousRunDate
     ? new Date(data.previousRunDate).toLocaleDateString()
     : "unknown";
-  const width = terminalCardWidth();
+  const width = useTerminalCardWidth();
 
   return (
     <Box flexDirection="column">
@@ -70,7 +71,7 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
                 const isLast = i === Math.min(data.verdictChanges.length, 5) - 1;
                 const connector = isLast ? icons.treeLast : icons.treeMiddle;
                 return (
-                  <Text key={i}>
+                  <Text key={change.fingerprint}>
                     {tokens.muted(connector)} {tokens.muted(change.fingerprint.slice(0, 12))}{" "}
                     {tokens.danger(change.fromVerdict)} {icons.arrow}{" "}
                     {tokens.success(change.toVerdict)}

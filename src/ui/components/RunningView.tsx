@@ -7,23 +7,24 @@
  * routing shell.
  */
 
-import { Static } from "ink";
+import { Box, Static } from "ink";
 import React from "react";
-import { useUISelector, shallowEqual } from "../hooks.js";
+import { shallowEqual, useUISelector } from "../hooks.js";
+import { Ratchet } from "../primitives/Ratchet.js";
+import { TabBar } from "../primitives/TabBar.js";
+import type { PipelineStage, ResultLine as ResultLineData, UIStore } from "../state.js";
+import { tokens } from "../tokens.js";
+import { HeartbeatStrip } from "./AgentActivity.js";
 import type { CommandResult, ReplCommand } from "./CommandInput.js";
 import { CommandInput } from "./CommandInput.js";
 import { CostCapHalt } from "./CostCapHalt.js";
 import { CostView } from "./CostView.js";
 import { FindingsView } from "./FindingsView.js";
-import { HeartbeatStrip } from "./AgentActivity.js";
 import { PipelineIndicator } from "./PipelineIndicator.js";
 import { QualityGate } from "./QualityGate.js";
 import { RateLimitBanner } from "./RateLimitBanner.js";
 import { ResultLine } from "./ResultLine.js";
 import { StatusFooter } from "./StatusFooter.js";
-import { TabBar } from "../primitives/TabBar.js";
-import type { PipelineStage, ResultLine as ResultLineData, UIStore } from "../state.js";
-import { tokens } from "../tokens.js";
 
 interface RunningViewProps {
   store: UIStore;
@@ -60,35 +61,83 @@ export const RunningView = React.memo(function RunningView({
   }, [results]);
 
   const staticItems = React.useMemo(
-    () => staticResults.map((r, i) => ({ ...r, _key: `r-${i}` })),
+    () => staticResults.map((r) => ({ ...r, _key: staticResultKey(r) })),
     [staticResults],
   );
 
   return (
-    <>
-      <Static items={staticItems}>
-        {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
-      </Static>
+    <Box flexDirection="column" flexGrow={1} justifyContent="space-between">
+      <Box flexDirection="column">
+        <Static items={staticItems}>
+          {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
+        </Static>
 
-      <TabBar tabs={[...TABS]} activeId={scanView} />
+        <TabBar tabs={[...TABS]} activeId={scanView} />
 
-      {scanView === "pipeline" && <PipelineTab store={store} liveResults={liveResults} />}
-      {scanView === "findings" && <FindingsTab store={store} />}
-      {scanView === "cost" && <CostTab store={store} />}
+        {scanView === "pipeline" && <PipelineTab store={store} liveResults={liveResults} />}
+        {scanView === "findings" && <FindingsTab store={store} />}
+        {scanView === "cost" && <CostTab store={store} />}
 
-      <QualityGateSlot store={store} />
-      <RateLimitSlot store={store} />
-      <CostCapHaltSlot store={store} />
-      <HeartbeatSlot store={store} />
+        <QualityGateSlot store={store} />
+      </Box>
 
-      {phase !== "idle" && phase !== "done" && phase !== "summary" && (
-        <StatusFooterSlot store={store} />
-      )}
-
-      <CommandInputSlot store={store} phase={phase} onCommand={onCommand} />
-    </>
+      <RunningBottomDock store={store} phase={phase} onCommand={onCommand} />
+    </Box>
   );
 });
+
+function RunningBottomDock({
+  store,
+  phase,
+  onCommand,
+}: {
+  store: UIStore;
+  phase: string;
+  onCommand: (cmd: ReplCommand) => CommandResult;
+}): React.ReactElement {
+  const showStatusFooter = phase !== "idle" && phase !== "done" && phase !== "summary";
+  return (
+    <Box flexDirection="column">
+      <StableDockSlot minHeight={3}>
+        <AdvisoryStack store={store} />
+      </StableDockSlot>
+      <StableDockSlot minHeight={1}>
+        <HeartbeatSlot store={store} />
+      </StableDockSlot>
+      <StableDockSlot minHeight={showStatusFooter ? 3 : 0}>
+        {showStatusFooter ? <StatusFooterSlot store={store} /> : null}
+      </StableDockSlot>
+      <StableDockSlot minHeight={1}>
+        <CommandInputSlot store={store} phase={phase} onCommand={onCommand} />
+      </StableDockSlot>
+    </Box>
+  );
+}
+
+function StableDockSlot({
+  children,
+  minHeight = 0,
+}: {
+  children: React.ReactNode;
+  minHeight?: number;
+}): React.ReactElement {
+  return (
+    <Ratchet>
+      <Box flexDirection="column" minHeight={minHeight || undefined}>
+        {children}
+      </Box>
+    </Ratchet>
+  );
+}
+
+function AdvisoryStack({ store }: { store: UIStore }): React.ReactElement {
+  return (
+    <Box flexDirection="column">
+      <RateLimitSlot store={store} />
+      <CostCapHaltSlot store={store} />
+    </Box>
+  );
+}
 
 // --- Tab containers: each subscribes to exactly what it renders ------------
 
@@ -148,10 +197,7 @@ function RateLimitSlot({ store }: { store: UIStore }): React.ReactElement {
 function CostCapHaltSlot({ store }: { store: UIStore }): React.ReactElement | null {
   const costCapHalted = useUISelector(store, (s) => s.costCapHalted);
   const runningCostUsd = useUISelector(store, (s) => s.runningCostUsd);
-  const budgetUsd = useUISelector(
-    store,
-    (s) => s.costCapBudgetUsd ?? s.configBanner?.budget,
-  );
+  const budgetUsd = useUISelector(store, (s) => s.costCapBudgetUsd ?? s.configBanner?.budget);
   if (!costCapHalted) return null;
   return <CostCapHalt runningCostUsd={runningCostUsd} budgetUsd={budgetUsd} />;
 }
@@ -236,6 +282,10 @@ function phaseLabel(
     default:
       return { title: phase, detail };
   }
+}
+
+function staticResultKey(result: ResultLineData): string {
+  return `${result.kind}:${result.fingerprint}:${result.index}:${result.total}`;
 }
 
 // Unused helper to silence unused-import linter for tokens in case.

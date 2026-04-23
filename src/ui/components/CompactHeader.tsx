@@ -26,12 +26,12 @@ function _CompactHeader({
   return (
     <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>
-        {tokens.dangerStrong("Kuzushi")} {tokens.subtle("\u00B7")} {tokens.strong(repoName)}
-        {findingsLabel ? `${tokens.subtle(" \u00B7 ")}${tokens.strong(findingsLabel)}` : ""}
+        {tokens.metadata("Kuzushi")} {tokens.subtle("\u00B7")} {tokens.strong(repoName)}
+        {findingsLabel ? `${tokens.subtle(" \u00B7 ")}${tokens.metadata(findingsLabel)}` : ""}
       </Text>
       {tasks.length > 0 && (
         <Text>
-          {tokens.muted(icons.treeLast)} {tokens.muted(tasks.join(", "))}
+          {tokens.subtle(icons.treeLast)} {tokens.metadata(tasks.join(", "))}
         </Text>
       )}
     </Box>
