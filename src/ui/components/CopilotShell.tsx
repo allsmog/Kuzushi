@@ -333,12 +333,6 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     pendingAssistantStartedAtRef.current = 0;
   }
 
-  // ModuleCatalog re-reads shell.moduleCatalog on every render; wrapping it
-  // in <Static> would freeze the first snapshot and hide module/last-run
-  // updates, so we render it plainly when present. The memoized wrapper
-  // stops it from re-rendering on every heartbeat tick.
-  const showCatalog = shell.moduleCatalog && shell.moduleCatalog.length > 0;
-
   const slashSuggestions = input.trim().startsWith("/") ? listShellSuggestions(input) : [];
 
   return (
@@ -349,14 +343,6 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       <Static items={["kz-splash"]}>
         {() => <BannerSplash key="kz-splash" workspace={shell.workspace} target={shell.target} />}
       </Static>
-
-      {showCatalog ? (
-        <MemoShellBanner shell={shell} />
-      ) : (
-        <Static items={["shell-banner"]}>
-          {() => <MemoShellBanner key="shell-banner" shell={shell} />}
-        </Static>
-      )}
 
       <MemoShellHistory history={shell.history} />
 
@@ -574,6 +560,10 @@ function ShellViewPanel({
   // children that should have been preserved) when the view changes shape.
   const view = shell.shellView ?? "catalog";
   switch (shell.shellView) {
+    case "catalog":
+      return shell.moduleCatalog && shell.moduleCatalog.length > 0 ? (
+        <ModuleCatalog key={view} shell={shell} />
+      ) : null;
     case "module":
       return shell.focusedModule ? <ModuleHome key={view} shell={shell} /> : null;
     case "tune":
@@ -635,26 +625,9 @@ function ShellViewPanel({
 }
 
 /**
- * Memoized wrapper around ShellBanner — re-renders only when a field it
- * actually reads changes. Without this, every `store.update(...)` (LLM
- * heartbeat tick, phase-progress event, currentTool change) forces
- * ModuleCatalog to redraw its whole table, which caused visible flicker
- * on long-running tool runs.
- */
-const MemoShellBanner = memo(
-  ShellBannerImpl,
-  (prev, next) =>
-    prev.shell.moduleCatalog === next.shell.moduleCatalog &&
-    prev.shell.modules === next.shell.modules &&
-    prev.shell.tools === next.shell.tools &&
-    prev.shell.target === next.shell.target &&
-    prev.shell.workspace === next.shell.workspace,
-);
-
-/**
- * Same idea as `MemoShellBanner`, applied to the sub-view panel — so a
- * running tool-spinner doesn't redraw the (unrelated) findings/finding/tune
- * view tree on every heartbeat update.
+ * Memoized wrapper around the dynamic view panel — so a running tool-spinner
+ * doesn't redraw the (unrelated) findings/finding/tune view tree on every
+ * heartbeat update.
  */
 const MemoShellViewPanel = memo(
   ShellViewPanel,
@@ -665,31 +638,9 @@ const MemoShellViewPanel = memo(
     prev.shell.threatModel === next.shell.threatModel &&
     prev.shell.findingCursor === next.shell.findingCursor &&
     prev.shell.findingPageSize === next.shell.findingPageSize &&
+    prev.shell.moduleCatalog === next.shell.moduleCatalog &&
     prev.summary === next.summary,
 );
-
-function ShellBannerImpl({ shell }: { shell: ShellState }): React.ReactElement {
-  // Prefer the v2 catalog view whenever we have module data; fall back to the
-  // legacy flat header only if `moduleCatalog` hasn't been populated yet
-  // (e.g. during an early boot tick before `startInkShell` finishes init).
-  if (shell.moduleCatalog && shell.moduleCatalog.length > 0) {
-    return <ModuleCatalog shell={shell} />;
-  }
-  return (
-    <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
-      <Text>{""}</Text>
-      <Text>{tokens.label("Kuzushi")}</Text>
-      <Text>{tokens.muted("security-native AI operating environment")}</Text>
-      <Text>{""}</Text>
-      <Text>{`Modules:   ${shell.modules.join(", ") || "none"}`}</Text>
-      <Text>{`Tools:     ${shell.tools.length} available`}</Text>
-      {shell.target && <Text>{`Target:    ${shell.target}`}</Text>}
-      {shell.workspace && <Text>{`Workspace: ${shell.workspace}`}</Text>}
-      <Text>{""}</Text>
-      <Text>{tokens.muted('Type "/help" for commands, or just describe what you need.')}</Text>
-    </Box>
-  );
-}
 
 /**
  * Render a single history entry. Tool-call entries are the richest: they
