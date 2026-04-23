@@ -121,7 +121,6 @@ export async function executeSastPipeline(
     githubPr: false,
     githubComment: false,
     auditLog: false,
-    enableExternalTasks: false,
     qualityGate: false,
     failOnTp: false,
     moduleDiscovery: true,

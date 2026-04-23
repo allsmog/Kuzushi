@@ -733,22 +733,6 @@ describe("validateKuzushiConfig", () => {
       ]),
     );
   });
-
-  it("warns when external tasks are configured but disabled", () => {
-    const issues = validateKuzushiConfig({
-      ...DEFAULTS,
-      enableExternalTasks: false,
-      externalTasks: ["/tmp/ext-task"],
-    });
-
-    expect(issues).toEqual([
-      expect.objectContaining({
-        severity: "warning",
-        path: "externalTasks",
-      }),
-    ]);
-    expect(hasConfigValidationErrors(issues)).toBe(false);
-  });
 });
 
 describe("prototype pollution prevention", () => {

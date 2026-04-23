@@ -62,7 +62,6 @@ export interface ScanCommandOptions {
   agentRuntime?: string;
   apiKey?: string;
   baseUrl?: string;
-  enableExternalTasks: boolean;
   trustRepoConfig?: boolean;
   qualityGate: boolean;
   failOnTp: boolean;
@@ -156,8 +155,6 @@ export function applyScanCommandConfigOverrides(
   if (opts.agentRuntime) {
     config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
   }
-  if (opts.enableExternalTasks) config.enableExternalTasks = true;
-
   if (opts.apiKey || opts.baseUrl) {
     const runtimeConfig = { ...(config.agentRuntimeConfig ?? {}) };
     const slot = backendConfigSlot(config.agentRuntimeBackend);

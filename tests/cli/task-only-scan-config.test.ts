@@ -33,7 +33,6 @@ function makeOptions(overrides: Partial<ScanCommandOptions> = {}): ScanCommandOp
     pocHarness: false,
     context: true,
     auditLog: false,
-    enableExternalTasks: false,
     qualityGate: false,
     failOnTp: false,
     moduleDiscovery: true,

@@ -56,7 +56,7 @@ export class TaskRegistry {
 
   /** Resolve execution order as parallel groups. Throws on cycles. */
   resolveOrder(enabledIds: string[]): string[][] {
-    const enabled = dedupePreservingRegisteredIds(this, enabledIds);
+    const enabled = normalizeTaskIds(enabledIds);
     if (enabled.length === 0) return [];
 
     for (const id of enabled) {
@@ -122,18 +122,20 @@ export class TaskRegistry {
 }
 
 /**
- * Preserve the caller's requested order where possible. When the caller
- * submits ids that aren't registered, they're filtered out silently so
- * resolveOrder can deliver a helpful `Unknown enabled task` error later.
+ * Normalize a list of task ids: trim whitespace, drop empties, dedupe while
+ * preserving insertion order, and apply capability-alias rewrites (e.g.
+ * `semgrep-scan` → `semgrep`). Orchestrator task-policy callers use this
+ * to clean up configured/cli-supplied task lists before handing them to
+ * `resolveOrder` — which then validates ids against the registry and
+ * throws a descriptive error for any unknown entries.
  */
-function dedupePreservingRegisteredIds(registry: TaskRegistry, ids: string[]): string[] {
+export function normalizeTaskIds(ids: string[]): string[] {
   const seen = new Set<string>();
-  const unique: string[] = [];
+  const out: string[] = [];
   for (const id of normalizeTaskCapabilityIds(ids)) {
-    if (seen.has(id)) continue;
+    if (!id || seen.has(id)) continue;
     seen.add(id);
-    if (!registry.has(id)) continue;
-    unique.push(id);
+    out.push(id);
   }
-  return unique;
+  return out;
 }
