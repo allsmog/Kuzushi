@@ -85,7 +85,7 @@ every tool name starts with the module id.
 
 ```ts
 import { defineModule, defineTool } from "kuzushi/modules";
-import type { ToolExecutionContext, ToolResult } from "kuzushi/modules";
+import type { ExecutionContext, ToolResult } from "kuzushi/modules";
 
 const pingTool = defineTool<"my-module">({
   name: "my-module:ping",
@@ -117,8 +117,15 @@ export default defineModule({
 Optional fields: `rank` (`"manual" | "low" | "normal" | "good" | "great" | "excellent"`),
 `authors`, `references` (CVEs, ATT&CK techniques), `disclosureDate`, `notes`
 (stability / reliability / side-effects), `examples` (shell snippets shown by
-`examples <id>`), `requires`, `tasks` (pipeline DAG), `knowledge`, `events`,
+`examples <id>`), `requires`, `knowledge`, `events`, `hidden`,
 `init(config, ctx)`, `dispose()`.
+
+> **DAG participation.** Modules used to carry a separate `tasks` array for
+> pipeline DAG nodes. That field is gone — DAG nodes are now `DagTool`s
+> declared inside `tools`. Use `defineDagTool<"<id>">({...})` for
+> user-visible DAG nodes, or `exposeAgentTaskAsHiddenDagTool(task, {moduleId})`
+> for internal pipeline helpers you want the module registry to own
+> without surfacing to shell/LLM dispatch. See §6.1 below.
 
 See `src/modules/core-sast.ts` for the canonical reference.
 
@@ -150,7 +157,65 @@ defineTool<"my-module">({
 });
 ```
 
-## 7. `ToolExecutionContext` reference
+### 6.1. Writing a `DagTool`
+
+A `DagTool` is a `ModuleTool` that participates in the scan pipeline DAG.
+It has everything a normal tool has (`name`, `inputSchema`, `execute`) plus a
+`dag` block that declares its `outputKind`, upstream `dependsOn` ids,
+optional `condition`, `promptMode`, `toolPolicy`, and per-finding
+`triageAgentConfig`.
+
+```ts
+import { defineDagTool, requireDag } from "kuzushi/modules";
+import type { ExecutionContext } from "kuzushi/modules";
+import type { Finding } from "kuzushi/scanners";
+import type { ScanOpts } from "kuzushi";
+
+const hunt = defineDagTool<"my-scanner", ScanOpts, Finding[]>({
+  name: "my-scanner:hunt",
+  displayName: "My Scanner",
+  description: "LLM-driven hunt for weirdness X.",
+  headless: true,
+  inputSchema: { type: "object", properties: { target: { type: "string" } } },
+  dag: {
+    outputKind: "findings",
+    dependsOn: ["context-gatherer", "app-model-build"],
+    // Optional: only run when some upstream condition holds.
+    condition: (upstream, _cfg) => !!upstream.get("app-model-build"),
+  },
+  async run(input, ctx: ExecutionContext): Promise<Finding[]> {
+    const dag = requireDag(ctx);  // throws outside a pipeline run
+    // use dag.runId, dag.scanPath, dag.upstreamOutputs etc.
+    return [];
+  },
+});
+```
+
+Authors don't implement `execute` themselves — the module registry's DAG
+bridge installs one automatically. It re-enters the scan pipeline filtered
+to this one task, so shell dispatch (`/use my-scanner; run`) and headless
+`kuzushi run my-scanner:hunt --target ./repo` both share the exact code path
+scan mode uses.
+
+**Hidden DAG tools.** Internal helpers that shouldn't appear in `/use`
+overviews or LLM tool lists can be declared via
+`exposeAgentTaskAsHiddenDagTool(task, { moduleId })`. Pass
+`multiStrategy: true` to apply the host's multi-strategy wrapper. Example:
+
+```ts
+import { exposeAgentTaskAsHiddenDagTool } from "kuzushi/modules";
+import { ssrfDetectionTask } from "./tasks/ssrf.js";
+
+const hiddenSsrf = exposeAgentTaskAsHiddenDagTool<"my-scanner">(
+  ssrfDetectionTask,
+  { moduleId: "my-scanner", multiStrategy: true },
+);
+
+// Add to your module's tools[] — users never see it, but the orchestrator
+// will resolve `dependsOn: ["ssrf-detect"]` against it.
+```
+
+## 7. `ExecutionContext` reference
 
 | Field | Stability | Purpose |
 |-------|-----------|---------|
@@ -301,7 +366,7 @@ describe("my-module", () => {
 });
 ```
 
-`createMockToolContext` populates every `ToolExecutionContext` field with
+`createMockToolContext` populates every `ExecutionContext` field with
 permissive defaults and accepts per-field overrides. See
 `src/testing/index.ts` for the full helper list.
 
@@ -359,7 +424,7 @@ Complete one-file module, copy-pasteable:
 
 ```ts
 import { defineModule, defineTool } from "kuzushi/modules";
-import type { ToolExecutionContext, ToolResult } from "kuzushi/modules";
+import type { ExecutionContext, ToolResult } from "kuzushi/modules";
 
 const pingTool = defineTool<"my-module">({
   name: "my-module:ping",
@@ -370,7 +435,7 @@ const pingTool = defineTool<"my-module">({
     required: ["target"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const target = (input as { target: string }).target;
     ctx.reportActivity?.(`pinging ${target}`);
     ctx.logger?.info("ping started", { target });

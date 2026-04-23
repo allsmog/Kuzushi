@@ -5,7 +5,7 @@ This guide is for AI/code agents (Claude, Codex, etc.) working in Kuzushi.
 ## Module system
 
 For the full module-authoring guide — manifest, `defineModule`/`defineTool`
-helpers, `ToolExecutionContext` reference, load specifiers, testing, MCP
+helpers, `ExecutionContext` reference, load specifiers, testing, MCP
 bridging — see **[docs/modules.md](./docs/modules.md)**. What follows is
 the minimum an agent editing this repo needs to know.
 
@@ -20,14 +20,29 @@ Kuzushi has one runtime core and three execution modes:
 All three converge on `CopilotCore.executeTool(...)` and the
 `CopilotModule` / `ModuleTool` contract.
 
+**One authoring surface.** Every capability is a `CopilotModule` that
+exposes one or more `ModuleTool`s. DAG participants are `DagTool`s — a
+narrow extension of `ModuleTool` with a `dag` block (`outputKind`,
+`dependsOn`, optional `condition`/`promptMode`/`toolPolicy`/
+`triageAgentConfig`). The legacy `AgentTask` type still exists as an
+internal adapter shape but is no longer an authoring surface — new DAG
+nodes go on a module via `defineDagTool` (visible) or
+`exposeAgentTaskAsHiddenDagTool` (hidden infrastructure). The bridge at
+`src/modules/dag-bridge.ts` turns these into `AgentTask` adapters so the
+orchestrator's `TaskRegistry` sees them without authors needing to know.
+
 ### Key files
 
-- `src/modules/types.ts` — `CopilotModule`, `ModuleTool`, `ToolExecutionContext`.
+- `src/modules/types.ts` — `CopilotModule`, `ModuleTool`, `DagTool`,
+  `ExecutionContext`, `DagContext`.
 - `src/modules/host-handles.ts` — narrow handles (`HostUiHandle`,
   `ToolOptionStore`, `WorkspaceHandle`, `ModuleEventScope`, `ToolLogger`,
-  `HostInfo`) exposed via `ToolExecutionContext`.
-- `src/modules/define.ts` — `defineModule`/`defineTool` authoring helpers
-  with compile-time tool-name-prefix enforcement.
+  `HostInfo`) exposed via `ExecutionContext`.
+- `src/modules/define.ts` — `defineModule`/`defineTool`/`defineDagTool`
+  authoring helpers with compile-time tool-name-prefix enforcement.
+- `src/modules/dag-bridge.ts` — `exposeAgentTaskAsHiddenDagTool` helper
+  plus the `registerDagToolsInTaskRegistry` bridge that auto-populates
+  the orchestrator's `TaskRegistry` from a module's `tools[]`.
 - `src/modules/errors.ts` — `ModuleLoadError` with `code` discriminator.
 - `src/modules/loader.ts` — Zod-backed manifest validation + shape checks;
   enforces tool-name prefix and duplicate-name rejection.
@@ -47,19 +62,24 @@ All three converge on `CopilotCore.executeTool(...)` and the
 
 ### Guardrails for agents editing this repo
 
-- Do not break `CopilotModule`/`ModuleTool` contracts without a migration
-  plan (add a section to `RELEASING.md` + update `core-sast.ts` to stay
-  exemplary).
+- Do not break `CopilotModule`/`ModuleTool`/`DagTool` contracts without a
+  migration plan (add a section to `RELEASING.md` + update
+  `core-sast.ts` to stay exemplary).
 - Preserve the `<moduleId>:<action>` tool-name convention — it's enforced
   at load time.
 - Prefer adding behavior in the module/tool layer before touching
   orchestrator internals.
 - Keep `headless` truthful: shell-only behavior should not be marked
-  headless.
-- When adding fields to `ToolExecutionContext`, prefer narrow handles in
+  headless. `hidden: true` is for DAG-internal nodes that should not
+  surface in `/use` or the LLM tool list.
+- When adding fields to `ExecutionContext`, prefer narrow handles in
   `src/modules/host-handles.ts` over leaking internal host classes.
-- If you add task-producing modules, include tests around dependency
-  ordering.
+- If you add DAG-participating modules, include tests around dependency
+  ordering (see `tests/modules/` + `tests/bus/orchestrator.test.ts`).
+- Scan-mode bootstrap lives in `src/agents/index.ts`
+  (`createDefaultTaskRegistry`). New built-in modules that contribute DAG
+  nodes must be added to that factory's module list so the scan CLI sees
+  their tasks without needing full CopilotCore init.
 
 ### Troubleshooting pointers
 
