@@ -145,6 +145,7 @@ export function Table<Row>(props: TableProps<Row>): JSX.Element {
         </Box>
       ) : null}
       {rows.map((row, rowIdx) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: Table rows are opaque data; no stable id field. Re-renders replace the full set so keys never collide mid-list.
         <Box key={`row-${rowIdx}`}>
           <Text>
             {columns

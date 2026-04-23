@@ -30,7 +30,7 @@ export const callGraphAssistTask: AgentTask<Finding[], Finding[]> = {
     }
 
     const repoRoot = context.workRoot ?? context.scanPath ?? context.repoRoot;
-    let provider;
+    let provider: Awaited<ReturnType<typeof getCodeIntelligenceProvider>>;
     try {
       provider = await getCodeIntelligenceProvider(repoRoot);
     } catch (error) {

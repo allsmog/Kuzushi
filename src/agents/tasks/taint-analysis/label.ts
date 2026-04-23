@@ -342,7 +342,7 @@ export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutpu
     const candidateFingerprint = computeCandidatesFingerprint(allCandidates);
 
     // ── Signature dedup: label unique signatures, propagate to instances ──
-    const { representatives, signatureMap } = deduplicateBySig(allCandidates);
+    const { representatives } = deduplicateBySig(allCandidates);
     process.stderr.write(
       `[taint-analysis-label] Dedup: ${allCandidates.length} instances -> ${representatives.length} unique signatures (${((1 - representatives.length / allCandidates.length) * 100).toFixed(0)}% reduction)\n`,
     );

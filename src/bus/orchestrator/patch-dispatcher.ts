@@ -3,6 +3,7 @@ import { createLogger } from "../../logger.js";
 import { getPatchResultsForFinding } from "../../store/patch-results.js";
 import type {
   PatchCompleteEvent,
+  PatchVerifyCompleteEvent,
   PocHarnessResultEvent,
   RunContext,
   TriageResultEvent,
@@ -78,7 +79,7 @@ export function setupPatchDispatching(
   });
 
   // Track verify results
-  bus.subscribe("patch-verify:complete", async (event: any) => {
+  bus.subscribe<PatchVerifyCompleteEvent>("patch-verify:complete", async (event) => {
     const { verified } = event.payload;
     if (verified) {
       state.patchVerified++;
