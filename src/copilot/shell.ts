@@ -113,6 +113,25 @@ function looksLikeSubagentToolLine(text: string): boolean {
   return SUBAGENT_TOOL_RE.test(text);
 }
 
+/**
+ * True when a task:activity description is the *start-side* of a sub-agent
+ * tool call — either a bare tool name emitted on `tool-call-start` (before
+ * args have streamed) or the assistant-message-block hint (`"Read · path"`).
+ * These are superseded by the later `tool-summary` line (`"Read path (42
+ * lines)"`), so we suppress the start-side entries from scrollback history
+ * to avoid showing two-to-three rows for each Read/Grep/Bash. The
+ * running tool's `liveActivities` tail and the per-agent heartbeat still
+ * tick on every sub-agent step — suppression only targets the *permanent*
+ * scrollback record, not the live ephemeral feed.
+ */
+function looksLikeSubagentStartLine(text: string): boolean {
+  if (!SUBAGENT_TOOL_RE.test(text)) return false;
+  // Assistant tool_use hint: "Read · src/api.ts"
+  if (text.includes(" · ")) return true;
+  // tool-call-start: bare name ("Read", "Grep", ...)
+  return !/\s/.test(text);
+}
+
 /** Build a seed map from a ContextSnapshot to inject into pipelines.
  *
  * Seed VALUE SHAPE must match what each task actually returns, because
@@ -994,6 +1013,12 @@ function pushLiveActivity(store: UIStore, id: string, text: string): void {
 }
 
 function beginShellTurn(store: UIStore, input: string, focusedModule: string | null): void {
+  // Stale notices from the previous turn (e.g. "Review complete" from a just-
+  // finished scan) shouldn't linger into the next command's output window —
+  // they visually attach themselves to unrelated views (module home, catalog)
+  // and confuse operators about what just happened. Clear before the new
+  // turn's own notices can accumulate.
+  store.clearNotices();
   updateShell(store, (shell) => ({
     ...shell,
     history: [
@@ -1211,6 +1236,14 @@ function appendProgressEvent(
     phase?: string;
     activity?: string;
     liveActivity?: string;
+    /**
+     * When true, skip appending a `tool-progress` history entry but still
+     * update `currentTool.activities` + the running tool's `liveActivities`
+     * tail. Used to suppress the scrollback echo of sub-agent tool-call-
+     * start / tool_use lines whose summaries are already captured by the
+     * matching `tool-summary` row.
+     */
+    skipHistory?: boolean;
   },
 ): void {
   const now = Date.now();
@@ -1280,6 +1313,8 @@ function appendProgressEvent(
         }
       }
     }
+
+    if (event.skipHistory) return nextShell;
 
     return {
       ...nextShell,
@@ -1794,11 +1829,18 @@ async function startInkShell(
     if (abortedRunIds.has(runId)) return;
     if (activeAbortRequested || store.getState().shell?.processing !== true) return;
     seenRunIdsThisTurn.add(runId);
-    const isSubagentTool = looksLikeSubagentToolLine(event.payload.description);
+    const description = event.payload.description;
+    const isSubagentTool = looksLikeSubagentToolLine(description);
+    // Tool-call-start + assistant `tool_use` lines ("Read", "Read · path")
+    // are superseded by the matching `tool-summary` ("Read path (42 lines)"),
+    // so keep them out of permanent scrollback while still feeding the
+    // running tool's live tail.
+    const skipHistory = looksLikeSubagentStartLine(description);
     appendProgressEvent(store, {
-      text: event.payload.description,
-      activity: event.payload.description,
-      liveActivity: event.payload.description,
+      text: description,
+      activity: description,
+      liveActivity: description,
+      skipHistory,
       ...(event.payload.phase ? { phase: event.payload.phase } : {}),
       ...(isSubagentTool ? { kind: "invocation" as const } : {}),
     });
@@ -5359,6 +5401,7 @@ export const __shellInternals = {
   extractToolUseHeaders,
   finalizeAssistantText,
   looksLikeSubagentToolLine,
+  looksLikeSubagentStartLine,
   summarizeInput,
   renderToolInputHint,
   patchHistoryEntry,

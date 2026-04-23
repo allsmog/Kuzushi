@@ -1085,3 +1085,48 @@ describe("slash suggestions", () => {
     }
   });
 });
+
+describe("looksLikeSubagentStartLine — scrollback dedup", () => {
+  // Context for future readers: each Read/Grep/Bash tool call emits 2-3
+  // task:activity lines via runtime-forwarding + describeRuntimeMessage —
+  // tool-call-start ("Read"), assistant tool_use hint ("Read · path"),
+  // and tool-summary ("Read path (42 lines)"). The first two are
+  // superseded by the last, so the shell suppresses them from permanent
+  // scrollback history while still feeding the running tool's live tail.
+  const { looksLikeSubagentStartLine } = __shellInternals;
+
+  it("classifies bare tool names as start-side (suppressed)", () => {
+    expect(looksLikeSubagentStartLine("Read")).toBe(true);
+    expect(looksLikeSubagentStartLine("Grep")).toBe(true);
+    expect(looksLikeSubagentStartLine("Bash")).toBe(true);
+  });
+
+  it("classifies assistant tool_use hints as start-side (suppressed)", () => {
+    expect(looksLikeSubagentStartLine("Read · src/api.ts")).toBe(true);
+    expect(looksLikeSubagentStartLine("Grep · pattern='foo'")).toBe(true);
+  });
+
+  it("classifies tool-summary lines as NOT start-side (kept in scrollback)", () => {
+    expect(looksLikeSubagentStartLine("Read src/api.ts (42 lines)")).toBe(false);
+    expect(looksLikeSubagentStartLine("Grep src/ (3 matches)")).toBe(false);
+    expect(looksLikeSubagentStartLine("Bash npm test")).toBe(false);
+  });
+
+  it("ignores non-subagent activity text", () => {
+    // Kuzushi's own reportActivity messages (lowercase verbs) must pass
+    // through unchanged — dropping them would erase shell-visible
+    // progress ("scanning repo structure", "hunting as Attacker").
+    expect(looksLikeSubagentStartLine("scanning repo structure")).toBe(false);
+    expect(looksLikeSubagentStartLine("reading threat model")).toBe(false);
+    expect(looksLikeSubagentStartLine("hunting as Unauthenticated User")).toBe(false);
+    expect(looksLikeSubagentStartLine("")).toBe(false);
+  });
+
+  it("distinguishes `Read` vs `ReadOnly` (word-boundary match on tool name)", () => {
+    // SUBAGENT_TOOL_RE uses \b so "Read" matches "Read · x" but not
+    // arbitrary identifiers. Defensive test to catch accidental regex
+    // relaxation during future edits.
+    expect(looksLikeSubagentStartLine("Reading")).toBe(false);
+    expect(looksLikeSubagentStartLine("Bashful")).toBe(false);
+  });
+});
