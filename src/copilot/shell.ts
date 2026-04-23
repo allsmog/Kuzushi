@@ -1375,14 +1375,6 @@ function appendProgressEvent(
   });
 }
 
-function updateToolSummary(store: UIStore, summary: string): void {
-  updateShell(store, (shell) => ({
-    ...shell,
-    history: [...shell.history, { type: "output", text: `  ${summary}`, timestamp: Date.now() }],
-    currentTool: undefined,
-  }));
-}
-
 function clearTransientShellState(store: UIStore): void {
   updateShell(store, (shell) => ({
     ...shell,
@@ -1898,11 +1890,15 @@ async function startInkShell(
     seenRunIdsThisTurn.add(runId);
     const description = event.payload.description;
     const isSubagentTool = looksLikeSubagentToolLine(description);
-    // Tool-call-start + assistant `tool_use` lines ("Read", "Read · path")
-    // are superseded by the matching `tool-summary` ("Read path (42 lines)"),
-    // so keep them out of permanent scrollback while still feeding the
-    // running tool's live tail.
-    const skipHistory = looksLikeSubagentStartLine(description);
+    // All sub-agent tool-echo lines (bare tool-call-start "Read", assistant
+    // `tool_use` hint "Read · path", AND the eventual tool-summary
+    // "Read path (42 lines)") are kept out of permanent scrollback — the
+    // summary now attaches to the parent `⏺` entry as its `resultOutput`
+    // (see the `case "tool-summary"` handler below), and the running
+    // `liveActivities` tail still ticks on every sub-step via the
+    // appendProgressEvent calls this subscriber makes regardless of
+    // `skipHistory`. Result: one row per tool call instead of three.
+    const skipHistory = isSubagentTool;
     appendProgressEvent(store, {
       text: description,
       activity: description,
@@ -2580,12 +2576,15 @@ async function startInkShell(
 
           case "tool-summary": {
             // Flip any agent-driven `⏺` entries whose toolUseId is in the
-            // batch's `precedingToolUseIds` from "running" → "ok". The
-            // Anthropic SDK doesn't expose per-tool success/failure at
-            // the summary level — it bundles multiple uses together —
-            // so we mark everything in the batch as successful and rely
-            // on follow-up assistant text to surface errors explicitly.
+            // batch's `precedingToolUseIds` from "running" → "ok" AND attach
+            // the summary text as `resultOutput` so ToolCallEntry renders
+            // `⎿  Read path (42 lines)` under the `⏺` header — same shape
+            // as operator-typed direct dispatches get via `renderResult`.
+            // Previously the summary went to a separate "output" history
+            // entry *in addition to* the bus-path tool-progress echo,
+            // producing three rows per tool call; now it's one.
             const precedingIds = message.precedingToolUseIds ?? [];
+            const firstSummaryLine = message.summary.split("\n", 1)[0]?.trim() ?? message.summary;
             for (const toolUseId of precedingIds) {
               const history = store.getState().shell?.history ?? [];
               const entry = history.find(
@@ -2595,10 +2594,14 @@ async function startInkShell(
                 patchHistoryEntry(store, entry.id, {
                   status: "ok",
                   liveActivities: undefined,
+                  ...(firstSummaryLine ? { resultOutput: firstSummaryLine } : {}),
                 });
               }
             }
-            updateToolSummary(store, message.summary);
+            // Drop currentTool so ToolRunningStatus stops rendering; no
+            // separate scrollback append — the tool-call entry owns the
+            // visible record now.
+            updateShell(store, (shell) => ({ ...shell, currentTool: undefined }));
             const trailer = formatContextTrailer(
               opts.target ? path.resolve(opts.target) : process.cwd(),
             );
