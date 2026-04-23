@@ -260,6 +260,42 @@ describe("threat-hunt", () => {
       expect(config.prompt).toContain("src/api.ts:42");
       expect(config.prompt).toContain("SQL injection");
     });
+
+    describe("renderResult", () => {
+      it("returns the first non-empty output line as-is (avoids dup with runSingleTaskPipeline summary)", () => {
+        const rendered = threatHuntTool.renderResult?.({
+          ok: true,
+          output: "Threat hunt complete: teleport — 22 findings ($24.30)\nSecond line is dropped",
+          data: { stats: { totalFindings: 22 } },
+        });
+        expect(rendered).toBe("Threat hunt complete: teleport — 22 findings ($24.30)");
+      });
+
+      it("synthesizes from data.stats when output is empty", () => {
+        const rendered = threatHuntTool.renderResult?.({
+          ok: true,
+          output: "",
+          data: { stats: { totalFindings: 4 } },
+        });
+        expect(rendered).toBe("Threat hunt complete · 4 findings");
+      });
+
+      it("falls back to generic completion when no output and no stats", () => {
+        const rendered = threatHuntTool.renderResult?.({
+          ok: true,
+          output: "",
+        });
+        expect(rendered).toBe("Threat hunt complete");
+      });
+
+      it("signals failure when result.ok is false and output is empty", () => {
+        const rendered = threatHuntTool.renderResult?.({
+          ok: false,
+          output: "",
+        });
+        expect(rendered).toBe("Threat hunt failed");
+      });
+    });
   });
 
   describe("run() activity emissions", () => {
