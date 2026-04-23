@@ -126,7 +126,7 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
         const cursorPrefix = isCursor ? cursorColor(cursor) : cursorPrefixBlank;
         if (renderItem) {
           return (
-            <Box key={`${idx}-${String(item.id)}`} flexDirection="column">
+            <Box key={String(item.id)} flexDirection="column">
               {renderItem({ item, isCursor, cursor, cursorPrefix })}
             </Box>
           );
@@ -136,9 +136,9 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
           : isCursor
             ? tokens.strong(item.label)
             : item.label;
-        const detail = item.detail ? " " + tokens.subtle(item.detail) : "";
+        const detail = item.detail ? ` ${tokens.subtle(item.detail)}` : "";
         return (
-          <Box key={`${idx}-${String(item.id)}`} flexDirection="row">
+          <Box key={String(item.id)} flexDirection="row">
             <Text>
               {cursorPrefix} {label}
               {detail}

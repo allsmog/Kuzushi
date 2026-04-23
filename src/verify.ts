@@ -18,7 +18,7 @@ import {
   frameworkAwarenessModule,
   proofLevelModule,
 } from "./prompts/modules.js";
-import { renderTemplate } from "./prompts/template.js";
+import { renderTemplate, type TemplateContext } from "./prompts/template.js";
 import { BATCH_VERIFY_TEMPLATE, VERIFY_UNIFIED_TEMPLATE } from "./prompts/templates/verify.js";
 import { formatEnrichedRepoContext, formatRepoContext } from "./repo-context.js";
 import type { AllowedTriageTool, Finding } from "./scanners/types.js";
@@ -253,7 +253,10 @@ export function buildVerificationPrompt(
 ): string {
   const bypassEntry = getBypassKnowledge(finding.cwe, finding.ruleId);
   const context = buildVerifyContext(finding, triageResult, repoName, bypassEntry);
-  return renderTemplate(template ?? VERIFY_UNIFIED_TEMPLATE, context as any);
+  // VerifyTemplateContext is structurally narrower than the template
+  // engine's `{ [key: string]: unknown }` shape — widen explicitly via
+  // `unknown` rather than leak an `any`.
+  return renderTemplate(template ?? VERIFY_UNIFIED_TEMPLATE, context as unknown as TemplateContext);
 }
 
 export function parseVerificationOutput(raw: unknown, fingerprint: string): VerificationResult {
@@ -687,7 +690,7 @@ function buildBatchVerificationPrompt(
   template?: string,
 ): string {
   const context = buildBatchVerifyContext(items, repoName);
-  return renderTemplate(template ?? BATCH_VERIFY_TEMPLATE, context as any);
+  return renderTemplate(template ?? BATCH_VERIFY_TEMPLATE, context as unknown as TemplateContext);
 }
 
 function parseBatchVerificationOutput(

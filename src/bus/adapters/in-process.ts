@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { AnyEvent, MessageBus } from "../types.js";
+import type { AnyEvent, EventHandler, MessageBus } from "../types.js";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const HANDLER_ERROR_EVENT_TYPE = "bus:handler-error";
@@ -9,7 +9,7 @@ type WrappedHandler = (event: AnyEvent) => void;
 
 export class InProcessBus implements MessageBus {
   private readonly emitter = new EventEmitter();
-  private readonly handlerMap = new Map<string, Map<Function, WrappedHandler>>();
+  private readonly handlerMap = new Map<string, Map<EventHandler, WrappedHandler>>();
 
   constructor() {
     this.emitter.setMaxListeners(50);
@@ -27,11 +27,11 @@ export class InProcessBus implements MessageBus {
     let handlers = this.handlerMap.get(key);
 
     if (!handlers) {
-      handlers = new Map<Function, WrappedHandler>();
+      handlers = new Map<EventHandler, WrappedHandler>();
       this.handlerMap.set(key, handlers);
     }
 
-    if (handlers.has(handler as Function)) {
+    if (handlers.has(handler as EventHandler)) {
       return;
     }
 
@@ -48,11 +48,11 @@ export class InProcessBus implements MessageBus {
       }
     };
 
-    handlers.set(handler as Function, wrapped);
+    handlers.set(handler as EventHandler, wrapped);
     this.emitter.on(key, wrapped);
   }
 
-  unsubscribe(eventType: string, handler: Function): void {
+  unsubscribe(eventType: string, handler: EventHandler): void {
     const handlers = this.handlerMap.get(eventType);
     if (!handlers) {
       return;

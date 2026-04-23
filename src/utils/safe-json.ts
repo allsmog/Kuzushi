@@ -68,12 +68,17 @@ export function safeJsonStringify(value: unknown, space?: number): string {
  */
 export function safeJsonParse<T>(text: string): T;
 export function safeJsonParse<T>(text: string, fallback: T): T;
-export function safeJsonParse<T>(text: string, fallback?: T): T {
+export function safeJsonParse<T>(text: string, ...rest: [] | [T]): T {
   try {
     return JSON.parse(text) as T;
   } catch (error) {
-    if (arguments.length >= 2) {
-      return fallback as T;
+    // `rest.length === 1` distinguishes "caller passed a fallback" (even
+    // if that fallback is literally `undefined`) from "caller relied on
+    // the single-arg overload and expects us to rethrow". Using `rest`
+    // instead of `arguments.length` keeps us out of the non-arrow
+    // function's magic `arguments` object (banned by biome).
+    if (rest.length === 1) {
+      return rest[0] as T;
     }
     throw error;
   }

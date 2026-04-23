@@ -12,6 +12,13 @@ export type EventEnvelope<T extends string = string, P = unknown> = {
 
 export type AnyEvent = EventEnvelope<string, unknown>;
 
+/**
+ * Shape of a handler registered with the bus. Kept as a structural type
+ * (rather than the banned `Function`) so it can key a Map for unsubscribe
+ * while still allowing async handlers that return `void | Promise<void>`.
+ */
+export type EventHandler<E extends AnyEvent = AnyEvent> = (event: E) => void | Promise<void>;
+
 export interface MessageBus {
   /** Publish an event. Transport-specific (emit, XADD, pubsub publish, etc.) */
   publish<E extends AnyEvent>(event: E): Promise<void>;
@@ -23,7 +30,7 @@ export interface MessageBus {
   ): void;
 
   /** Remove a handler */
-  unsubscribe(eventType: string, handler: Function): void;
+  unsubscribe(eventType: string, handler: EventHandler): void;
 
   /** Wait for a specific event */
   waitFor<E extends AnyEvent>(
