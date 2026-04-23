@@ -358,13 +358,7 @@ describe("local shell commands", () => {
     const shellState = createShellState(module.tools.map((t) => t.name));
     const ctx = { focusedModule: null };
 
-    const result = __shellInternals.handleLocalCommand(
-      "/use sats",
-      core,
-      opts,
-      ctx,
-      shellState,
-    );
+    const result = __shellInternals.handleLocalCommand("/use sats", core, opts, ctx, shellState);
     expect(result?.output).toContain('Unknown module: "sats"');
     // Nearest-match should pull in real module ids — "sast" is one char off.
     expect(result?.output).toContain("Did you mean");
@@ -403,19 +397,37 @@ describe("local shell commands", () => {
     expect(m?.output).toContain("sast");
   });
 
+  it("/back returns to module home from threat and diff views", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const ctx = { focusedModule: "sast" };
+    const baseState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      focusedModule: "sast" as const,
+    };
+
+    const fromThreat = __shellInternals.handleLocalCommand("/back", core, opts, ctx, {
+      ...baseState,
+      shellView: "threat-summary",
+    });
+    expect(fromThreat?.output).toBe("Back to module home.");
+    expect(fromThreat?.shellStateUpdater?.(baseState).shellView).toBe("module");
+
+    const fromDiff = __shellInternals.handleLocalCommand("/back", core, opts, ctx, {
+      ...baseState,
+      shellView: "diff-since",
+    });
+    expect(fromDiff?.output).toBe("Back to module home.");
+    expect(fromDiff?.shellStateUpdater?.(baseState).shellView).toBe("module");
+  });
+
   it("supports /help <verb> with expanded description + unknown-verb fallback", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const shellState = createShellState(module.tools.map((t) => t.name));
     const ctx = { focusedModule: null };
 
-    const helpOpen = __shellInternals.handleLocalCommand(
-      "/help open",
-      core,
-      opts,
-      ctx,
-      shellState,
-    );
+    const helpOpen = __shellInternals.handleLocalCommand("/help open", core, opts, ctx, shellState);
     expect(helpOpen?.output).toContain("/open <F-NNNN>");
     expect(helpOpen?.output).toContain("linear deep page");
 
