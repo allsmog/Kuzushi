@@ -916,12 +916,10 @@ taskCmd
 
     for (const task of tasks) {
       const deps = task.dependsOn.length > 0 ? task.dependsOn.join(", ") : "none";
-      const version = task.manifest?.version ?? "-";
       console.log(`  ${task.id}`);
       console.log(`    Name:       ${task.displayName}`);
       console.log(`    Output:     ${task.outputKind}`);
       console.log(`    Depends on: ${deps}`);
-      console.log(`    Version:    ${version}`);
       console.log();
     }
 
