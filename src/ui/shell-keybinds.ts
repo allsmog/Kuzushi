@@ -110,6 +110,13 @@ const THREAT_DIGIT_TO_SUB: Record<string, string> = {
   "5": "summary",
 };
 
+function isCtrlChord(char: string, key: Keystroke["key"], letter: string): boolean {
+  if (!key.ctrl) return false;
+  const lower = letter.toLowerCase();
+  const ctrlCode = String.fromCharCode(lower.charCodeAt(0) - 96);
+  return char === lower || char === lower.toUpperCase() || char === ctrlCode;
+}
+
 /**
  * Resolve a keystroke into an action, applying the shell's dispatch
  * priority:
@@ -131,7 +138,7 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
   if (!shell) return { type: "none" };
 
   // --- 1. Ctrl+C / Ctrl+D ---------------------------------------------------
-  if ((key.ctrl && char === "c") || (key.ctrl && char === "d")) {
+  if (isCtrlChord(char, key, "c") || isCtrlChord(char, key, "d")) {
     if (shell.processing) {
       return { type: "abort-inflight" };
     }

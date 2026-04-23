@@ -158,6 +158,28 @@ describe("resolveKeybind — Ctrl+C two-stage", () => {
     });
     expect(action).toEqual({ type: "arm-exit", at: 0 });
   });
+
+  it("accepts ETX/EOT control bytes for Ctrl+C/Ctrl+D from raw stdin", () => {
+    const shell = baseShell();
+    const state = baseState(shell);
+    const etxAction = resolveKeybind({
+      stroke: stroke({ char: "\u0003", key: { ctrl: true } }),
+      input: "",
+      state,
+      looseFindingCount: 0,
+      now: 111,
+    });
+    expect(etxAction).toEqual({ type: "arm-exit", at: 111 });
+
+    const eotAction = resolveKeybind({
+      stroke: stroke({ char: "\u0004", key: { ctrl: true } }),
+      input: "",
+      state,
+      looseFindingCount: 0,
+      now: 222,
+    });
+    expect(eotAction).toEqual({ type: "arm-exit", at: 222 });
+  });
 });
 
 describe("resolveKeybind — plan-pending overlay", () => {
