@@ -30,6 +30,12 @@
 
 import type { TaskRegistry } from "../agents/registry.js";
 import type { AgentTask, TaskContext, TaskOutputKind } from "../agents/types.js";
+import {
+  createPopulatedRegistry,
+  getProfileForTask,
+  withMultiStrategy,
+} from "../strategies/index.js";
+import { defineDagTool } from "./define.js";
 import type {
   CopilotModule,
   DagTool,
@@ -39,6 +45,20 @@ import type {
   ToolResult,
 } from "./types.js";
 import { isDagTool } from "./types.js";
+
+/**
+ * Marker attached to DagTools produced by `exposeAgentTaskAsHiddenDagTool`
+ * so `registerDagToolsInTaskRegistry` knows to register the source task
+ * under its own id (preserving `dependsOn` chains across the codebase)
+ * instead of building a fresh adapter under `module:action`.
+ */
+const SOURCE_AGENT_TASK = Symbol.for("kuzushi.dag-bridge.sourceAgentTask");
+const MULTI_STRATEGY_WRAP = Symbol.for("kuzushi.dag-bridge.multiStrategy");
+
+interface HiddenDagToolInternals {
+  [SOURCE_AGENT_TASK]?: AgentTask;
+  [MULTI_STRATEGY_WRAP]?: boolean;
+}
 
 /**
  * Construct an `ExecutionContext` from a `TaskContext`. The task context
@@ -183,23 +203,132 @@ export function wrapDagToolExecute(
 }
 
 /**
+ * Build a hidden DagTool that wraps an existing `AgentTask`. The source
+ * task's body runs unchanged through `TaskRegistry`; the DagTool simply
+ * exposes the task on a `CopilotModule.tools[]` for module-system
+ * discoverability (counts, catalog rendering, `/use` overview filtering).
+ *
+ * Hidden DagTools are excluded from shell search, LLM dispatch lists, and
+ * module overviews — operators never invoke them directly. The orchestrator
+ * still resolves `dependsOn` chains against the source task's id.
+ *
+ * Pass `multiStrategy: true` when the source task is eligible for
+ * `withMultiStrategy` wrapping; the bridge applies the wrapper at
+ * registration time so modules don't need to reach into the strategy
+ * registry themselves.
+ */
+export function exposeAgentTaskAsHiddenDagTool<Id extends string>(
+  task: AgentTask,
+  options: {
+    moduleId: Id;
+    description?: string;
+    multiStrategy?: boolean;
+  },
+): DagTool<Id> {
+  const tool = defineDagTool<Id>({
+    name: `${options.moduleId}:${task.id}` as `${Id}:${string}`,
+    displayName: task.displayName,
+    description: options.description ?? `Internal DAG node: ${task.displayName}.`,
+    headless: true,
+    hidden: true,
+    inputSchema: {
+      type: "object",
+      additionalProperties: true,
+    },
+    dag: {
+      outputKind: task.outputKind,
+      dependsOn: [...task.dependsOn],
+      ...(task.condition ? { condition: task.condition } : {}),
+      ...(task.promptMode ? { promptMode: task.promptMode } : {}),
+      ...(task.toolPolicy ? { toolPolicy: task.toolPolicy } : {}),
+      ...(task.triageAgentConfig ? { triageAgentConfig: task.triageAgentConfig } : {}),
+    },
+    ...(task.init
+      ? {
+          async init(config) {
+            await task.init?.(config);
+          },
+        }
+      : {}),
+    async run(input, ctx: ExecutionContext) {
+      const taskCtx = buildTaskContextFromExecutionContext(ctx);
+      return task.run(input, taskCtx);
+    },
+  });
+
+  const internals = tool as DagTool<Id> & HiddenDagToolInternals;
+  internals[SOURCE_AGENT_TASK] = task;
+  if (options.multiStrategy) internals[MULTI_STRATEGY_WRAP] = true;
+
+  return tool;
+}
+
+/**
+ * Reverse of `buildExecutionContextFromTaskContext` — reconstructs a
+ * TaskContext from an ExecutionContext's `dag` block. Used by hidden
+ * DagTool wrappers that delegate to a source AgentTask's run body.
+ * Callers must have already asserted the presence of `ctx.dag`.
+ */
+function buildTaskContextFromExecutionContext(ctx: ExecutionContext): TaskContext {
+  if (!ctx.dag) {
+    throw new Error(
+      "Hidden DagTool invoked without a DAG context. Hidden DAG nodes only run through the scan pipeline.",
+    );
+  }
+  const dag = ctx.dag;
+  return {
+    runId: dag.runId,
+    repoRoot: dag.repoRoot,
+    ...(dag.workRoot !== undefined ? { workRoot: dag.workRoot } : {}),
+    ...(dag.scanPath !== undefined ? { scanPath: dag.scanPath } : {}),
+    ...(dag.gitRoot !== undefined ? { gitRoot: dag.gitRoot } : {}),
+    repoName: dag.repoName,
+    ...(dag.db !== undefined ? { db: dag.db } : {}),
+    config: ctx.config,
+    runtime: ctx.runtime,
+    bus: ctx.bus,
+    upstreamOutputs: dag.upstreamOutputs as Map<string, unknown>,
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+  };
+}
+
+/**
  * Walk a module's `tools` array, pick out DagTool instances, and register
- * each one as an AgentTask in the shared TaskRegistry. The first DagTool
- * wins the bare module id; subsequent DagTools are registered under their
- * qualified name (`module:action`) so every one remains addressable.
+ * each one as an AgentTask in the shared TaskRegistry. The first *visible*
+ * DagTool wins the bare module id; subsequent visible DagTools register
+ * under their qualified `module:action` name. Hidden DagTools that wrap an
+ * existing AgentTask (via `exposeAgentTaskAsHiddenDagTool`) register the
+ * source task directly under its own id so cross-task `dependsOn`
+ * references stay valid.
  *
  * Also installs a working `execute()` on every DagTool (replacing the
  * placeholder `defineDagTool` attaches) so shell / run mode can invoke
- * them through the normal `ModuleTool` contract.
+ * them through the normal `ModuleTool` contract. Hidden wrappers skip this
+ * step — operators can't invoke them directly.
  *
- * Silently skips tools that already have a registered entry (e.g. because
- * the legacy `mod.tasks?` path also registered them during migration) so
- * this can be called unconditionally from `ModuleRegistry.loadModule`.
+ * Silently skips tools that already have a registered entry so callers
+ * can invoke this unconditionally from `ModuleRegistry.loadModule`.
  */
 export function registerDagToolsInTaskRegistry(registry: TaskRegistry, mod: CopilotModule): void {
   let seenForBareId = false;
   for (const tool of mod.tools as ReadonlyArray<ModuleTool>) {
     if (!isDagTool(tool)) continue;
+
+    const internals = tool as DagTool & HiddenDagToolInternals;
+    const sourceTask = internals[SOURCE_AGENT_TASK];
+    if (sourceTask) {
+      // Hidden wrappers of existing AgentTasks: register the source task
+      // directly under its own id (preserves dependsOn chains) and skip
+      // the execute-wrapper installation (they're hidden from shell/run).
+      if (!registry.has(sourceTask.id)) {
+        const toRegister = internals[MULTI_STRATEGY_WRAP]
+          ? applyMultiStrategyWrap(sourceTask)
+          : sourceTask;
+        registry.register(toRegister);
+      }
+      continue;
+    }
+
     const id = !seenForBareId ? mod.id : tool.name;
     seenForBareId = true;
 
@@ -213,4 +342,22 @@ export function registerDagToolsInTaskRegistry(registry: TaskRegistry, mod: Copi
     const adapter = adaptDagToolToAgentTask(mod, tool, { idOverride: id });
     registry.register(adapter);
   }
+}
+
+/**
+ * Lazy-initialised per-process strategy registry. Only constructed the
+ * first time a hidden DagTool with `multiStrategy: true` registers, so
+ * modules that never request strategy wrapping don't pay the cost.
+ */
+let cachedStrategyRegistry: ReturnType<typeof createPopulatedRegistry> | undefined;
+function applyMultiStrategyWrap(task: AgentTask): AgentTask {
+  const profile = getProfileForTask(task.id);
+  if (!profile) return task;
+  if (!cachedStrategyRegistry) cachedStrategyRegistry = createPopulatedRegistry();
+  const registryRef = cachedStrategyRegistry;
+  return withMultiStrategy(
+    task as AgentTask<unknown, unknown>,
+    profile,
+    () => registryRef,
+  ) as AgentTask;
 }

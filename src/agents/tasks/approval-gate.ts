@@ -44,7 +44,7 @@ export function createApprovalGate(
     description?: string;
     timeoutMs?: number;
     defaultOnTimeout?: boolean;
-    condition?: (upstreamOutputs: Map<string, unknown>, config: KuzushiConfig) => boolean;
+    condition?: (upstreamOutputs: ReadonlyMap<string, unknown>, config: KuzushiConfig) => boolean;
   },
 ): AgentTask<ApprovalGateInput, ApprovalOutput> {
   return {
