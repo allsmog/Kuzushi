@@ -249,89 +249,150 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
     );
   }
 
-  if (key === "tasks") {
-    config.tasks = coerceStringArray(raw);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
+  const setter = TOP_LEVEL_CONFIG_SETTERS[key];
+  if (!setter) {
+    // Key is valid per the schema but not settable via `setConfigValue`
+    // (only via config-file edits or env vars). The original ladder landed
+    // here at its fall-through `throw` — preserved for behavior parity.
+    throw new Error(`Unknown config key: ${key}`);
   }
+  setter(config, raw);
+  saveUpdatedConfigLayer(config, repoRoot);
+}
 
-  if (key === "taskConfig") {
+type ConfigSetter = (config: WritableConfigLayer, raw: string) => void;
+
+function setBool(field: string): ConfigSetter {
+  return (config, raw) => {
+    const parsed = parseFlexibleValue(raw);
+    if (typeof parsed !== "boolean") {
+      throw new Error(`${field} must be true or false`);
+    }
+    (config as Record<string, unknown>)[field] = parsed;
+  };
+}
+
+function setPositiveInt(field: string): ConfigSetter {
+  return (config, raw) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new Error(`${field} must be a positive number`);
+    }
+    (config as Record<string, unknown>)[field] = Math.floor(n);
+  };
+}
+
+function setNonNegInt(field: string): ConfigSetter {
+  return (config, raw) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error(`${field} must be a non-negative number`);
+    }
+    (config as Record<string, unknown>)[field] = Math.floor(n);
+  };
+}
+
+function setPositiveNumber(field: string): ConfigSetter {
+  return (config, raw) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error(`${field} must be a positive number`);
+    }
+    (config as Record<string, unknown>)[field] = n;
+  };
+}
+
+function setOptionalString(field: string): ConfigSetter {
+  return (config, raw) => {
+    (config as Record<string, unknown>)[field] = raw.trim() || undefined;
+  };
+}
+
+function setEnum(field: string, values: Set<string>): ConfigSetter {
+  return (config, raw) => {
+    const v = raw.trim();
+    if (!values.has(v)) {
+      throw new Error(`${field} must be one of: ${[...values].join(", ")}`);
+    }
+    (config as Record<string, unknown>)[field] = v;
+  };
+}
+
+function setStringList(field: string): ConfigSetter {
+  return (config, raw) => {
+    (config as Record<string, unknown>)[field] = coerceStringArray(raw);
+  };
+}
+
+/**
+ * Handler map for top-level config keys that are settable via
+ * `setConfigValue` (CLI `config set` + shell `/config set`). Each handler
+ * validates `raw` and mutates `config` in place; the outer `setConfigValue`
+ * calls `saveUpdatedConfigLayer` once after dispatch.
+ *
+ * Not every schema key needs a handler — some fields (e.g. `hooks`,
+ * `monorepo`, `chainAnalysis`) are set by config-file edit or env var only.
+ * A drift-proofing test asserts the map contains no orphan keys (every
+ * handler key is a valid schema key), preventing typos.
+ */
+export const TOP_LEVEL_CONFIG_SETTERS: Record<string, ConfigSetter> = {
+  // Core
+  tasks: setStringList("tasks"),
+  taskConfig: (config, raw) => {
     const parsed = parseFlexibleValue(raw);
     if (!isRecord(parsed)) {
       throw new Error("taskConfig must be an object");
     }
     config.taskConfig = coerceTaskConfigMap(parsed);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  },
+  model: (config, raw) => {
+    config.model = raw;
+  },
+  severity: setStringList("severity"),
+  excludePatterns: setStringList("excludePatterns"),
+  costBudgetUsd: setPositiveNumber("costBudgetUsd"),
+  prioritizeFindings: setBool("prioritizeFindings"),
+  scanMode: setEnum("scanMode", new Set(["sequential", "concurrent"])),
 
-  if (key === "agentRuntimeConfig") {
+  // Agent runtime + bus
+  agentRuntimeBackend: setEnum("agentRuntimeBackend", AGENT_RUNTIME_BACKENDS),
+  agentRuntimeConfig: (config, raw) => {
     const parsed = parseFlexibleValue(raw);
     if (!isRecord(parsed)) {
       throw new Error("agentRuntimeConfig must be an object");
     }
     config.agentRuntimeConfig = normalizeAgentRuntimeConfig(parsed);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  },
+  busBackend: setEnum("busBackend", BUS_BACKENDS),
 
-  if (key === "triageBatchSize") {
+  // Triage
+  triageBatchSize: setPositiveInt("triageBatchSize"),
+  triageConcurrency: setPositiveInt("triageConcurrency"),
+  triageStrategy: setEnum("triageStrategy", new Set(["single", "multi-agent"])),
+  triageSpecialistMaxTurns: (config, raw) => {
+    // "null"/"unlimited"/"0" all map to null meaning "no turn cap"; any other
+    // value must parse as a positive integer.
+    if (raw === "null" || raw === "unlimited" || raw === "0") {
+      config.triageSpecialistMaxTurns = null;
+      return;
+    }
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 1) {
-      throw new Error("triageBatchSize must be a positive number");
+      throw new Error("triageSpecialistMaxTurns must be a positive number, 0, or 'unlimited'");
     }
-    config.triageBatchSize = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+    config.triageSpecialistMaxTurns = Math.floor(n);
+  },
+  triagePromptFile: setOptionalString("triagePromptFile"),
 
-  if (key === "triageConcurrency") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("triageConcurrency must be a positive number");
-    }
-    config.triageConcurrency = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "verify") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("verify must be true or false");
-    }
-    config.verify = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "verifyMaxTurns") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("verifyMaxTurns must be a positive number");
-    }
-    config.verifyMaxTurns = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "verifyConcurrency") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("verifyConcurrency must be a positive number");
-    }
-    config.verifyConcurrency = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "verifyVerdicts") {
+  // Verify
+  verify: setBool("verify"),
+  verifyMaxTurns: setPositiveInt("verifyMaxTurns"),
+  verifyConcurrency: setPositiveInt("verifyConcurrency"),
+  verifyBatchSize: setPositiveInt("verifyBatchSize"),
+  verifyVerdicts: (config, raw) => {
     config.verifyVerdicts = coerceVerdictArray(raw);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "verifyMinConfidence") {
+  },
+  verifyMinConfidence: (config, raw) => {
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0 || n > 100) {
       throw new Error(
@@ -339,420 +400,74 @@ export function setConfigValue(key: string, raw: string, repoRoot?: string): voi
       );
     }
     config.verifyMinConfidence = n > 1 ? n / 100 : n;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  },
+  verifyRefinementMaxIterations: setPositiveInt("verifyRefinementMaxIterations"),
+  verifyReflectionInterval: setPositiveInt("verifyReflectionInterval"),
+  verifyPromptFile: setOptionalString("verifyPromptFile"),
 
-  if (key === "pocHarness") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("pocHarness must be true or false");
-    }
-    config.pocHarness = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  // PoC harness
+  pocHarness: setBool("pocHarness"),
+  pocHarnessMaxTurns: setPositiveInt("pocHarnessMaxTurns"),
+  pocHarnessConcurrency: setPositiveInt("pocHarnessConcurrency"),
+  pocRefinementMaxIterations: setPositiveInt("pocRefinementMaxIterations"),
+  pocReflectionInterval: setPositiveInt("pocReflectionInterval"),
 
-  if (key === "pocHarnessMaxTurns") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("pocHarnessMaxTurns must be a positive number");
-    }
-    config.pocHarnessMaxTurns = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  // Context, audit, retries
+  enableContextGathering: setBool("enableContextGathering"),
+  auditLog: setBool("auditLog"),
+  maxTriageRetries: setNonNegInt("maxTriageRetries"),
+  maxVerifyRetries: setNonNegInt("maxVerifyRetries"),
+  maxPocHarnessRetries: setNonNegInt("maxPocHarnessRetries"),
+  retryBackoffMs: setNonNegInt("retryBackoffMs"),
+  retryBackoffMultiplier: setPositiveNumber("retryBackoffMultiplier"),
 
-  if (key === "pocHarnessConcurrency") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("pocHarnessConcurrency must be a positive number");
-    }
-    config.pocHarnessConcurrency = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  // Output destinations
+  reportOutput: setOptionalString("reportOutput"),
+  sarifOutput: setOptionalString("sarifOutput"),
+  jsonOutput: setOptionalString("jsonOutput"),
+  csvOutput: setOptionalString("csvOutput"),
+  jsonlOutput: setOptionalString("jsonlOutput"),
 
-  if (key === "enableContextGathering") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("enableContextGathering must be true or false");
-    }
-    config.enableContextGathering = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "auditLog") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("auditLog must be true or false");
-    }
-    config.auditLog = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "reportOutput") {
-    config.reportOutput = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "sarifOutput") {
-    config.sarifOutput = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "jsonOutput") {
-    config.jsonOutput = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "csvOutput") {
-    config.csvOutput = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "jsonlOutput") {
-    config.jsonlOutput = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "maxTriageRetries") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) {
-      throw new Error("maxTriageRetries must be a non-negative number");
-    }
-    config.maxTriageRetries = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "maxVerifyRetries") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) {
-      throw new Error("maxVerifyRetries must be a non-negative number");
-    }
-    config.maxVerifyRetries = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "maxPocHarnessRetries") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) {
-      throw new Error("maxPocHarnessRetries must be a non-negative number");
-    }
-    config.maxPocHarnessRetries = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "retryBackoffMs") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) {
-      throw new Error("retryBackoffMs must be a non-negative number");
-    }
-    config.retryBackoffMs = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "retryBackoffMultiplier") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) {
-      throw new Error("retryBackoffMultiplier must be a positive number");
-    }
-    config.retryBackoffMultiplier = n;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "scanMode") {
-    const mode = raw.trim();
-    if (mode !== "sequential" && mode !== "concurrent") {
-      throw new Error("scanMode must be one of: sequential, concurrent");
-    }
-    config.scanMode = mode;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "agentRuntimeBackend") {
-    const backend = raw.trim();
-    if (!AGENT_RUNTIME_BACKENDS.has(backend)) {
-      throw new Error(
-        `agentRuntimeBackend must be one of: ${[...AGENT_RUNTIME_BACKENDS].join(", ")}`,
-      );
-    }
-    config.agentRuntimeBackend = backend as KuzushiConfig["agentRuntimeBackend"];
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "busBackend") {
-    const backend = raw.trim();
-    if (!BUS_BACKENDS.has(backend)) {
-      throw new Error(`busBackend must be one of: ${[...BUS_BACKENDS].join(", ")}`);
-    }
-    config.busBackend = backend as KuzushiConfig["busBackend"];
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "severity") {
-    config.severity = coerceStringArray(raw);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "excludePatterns") {
-    config.excludePatterns = coerceStringArray(raw);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "model") {
-    config.model = raw;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "costBudgetUsd") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) {
-      throw new Error("costBudgetUsd must be a positive number");
-    }
-    config.costBudgetUsd = n;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "prioritizeFindings") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("prioritizeFindings must be true or false");
-    }
-    config.prioritizeFindings = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "confidenceCalibration") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("confidenceCalibration must be true or false");
-    }
-    config.confidenceCalibration = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "confidenceSignalWeights") {
+  // Confidence + trajectory
+  confidenceCalibration: setBool("confidenceCalibration"),
+  confidenceSignalWeights: (config, raw) => {
     const parsed = parseFlexibleValue(raw);
     if (!isRecord(parsed)) {
       throw new Error("confidenceSignalWeights must be an object");
     }
     config.confidenceSignalWeights = normalizeConfidenceSignalWeights(parsed);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  },
+  trajectoryMemory: setBool("trajectoryMemory"),
+  trajectoryMaxExemplars: setNonNegInt("trajectoryMaxExemplars"),
 
-  if (key === "trajectoryMemory") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("trajectoryMemory must be true or false");
-    }
-    config.trajectoryMemory = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "trajectoryMaxExemplars") {
+  // LLM rescore
+  llmRescoreEnabled: setBool("llmRescoreEnabled"),
+  llmRescoreThreshold: (config, raw) => {
     const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) {
-      throw new Error("trajectoryMaxExemplars must be a non-negative number");
+    if (!Number.isFinite(n) || n < 0 || n > 10) {
+      throw new Error("llmRescoreThreshold must be 0-10");
     }
-    config.trajectoryMaxExemplars = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "triageStrategy") {
-    const strategy = raw.trim();
-    if (strategy !== "single" && strategy !== "multi-agent") {
-      throw new Error("triageStrategy must be one of: single, multi-agent");
-    }
-    config.triageStrategy = strategy;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "triageSpecialistMaxTurns") {
-    if (raw === "null" || raw === "unlimited" || raw === "0") {
-      config.triageSpecialistMaxTurns = null;
-    } else {
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n < 1) {
-        throw new Error("triageSpecialistMaxTurns must be a positive number, 0, or 'unlimited'");
-      }
-      config.triageSpecialistMaxTurns = Math.floor(n);
-    }
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "llmRescoreEnabled") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") throw new Error("llmRescoreEnabled must be true or false");
-    config.llmRescoreEnabled = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "llmRescoreThreshold") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0 || n > 10) throw new Error("llmRescoreThreshold must be 0-10");
     config.llmRescoreThreshold = n;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  },
 
-  if (key === "verifyBatchSize") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("verifyBatchSize must be a positive number");
-    }
-    config.verifyBatchSize = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  skipTriageForHighConfidenceAgentic: setBool("skipTriageForHighConfidenceAgentic"),
+  ensembleModels: setStringList("ensembleModels"),
 
-  if (key === "skipTriageForHighConfidenceAgentic") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("skipTriageForHighConfidenceAgentic must be true or false");
-    }
-    config.skipTriageForHighConfidenceAgentic = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
+  // Crypto behavioral
+  cryptoBehavioralTestEnabled: setBool("cryptoBehavioralTestEnabled"),
+  cryptoBehavioralTimeoutMs: setPositiveInt("cryptoBehavioralTimeoutMs"),
+  cryptoBehavioralMaxFindings: setPositiveInt("cryptoBehavioralMaxFindings"),
+  cryptoBehavioralPerFindingBudgetUsd: setPositiveNumber("cryptoBehavioralPerFindingBudgetUsd"),
 
-  if (key === "ensembleModels") {
-    config.ensembleModels = coerceStringArray(raw);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "pocRefinementMaxIterations") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("pocRefinementMaxIterations must be a positive number");
-    }
-    config.pocRefinementMaxIterations = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "pocReflectionInterval") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("pocReflectionInterval must be a positive number");
-    }
-    config.pocReflectionInterval = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "verifyRefinementMaxIterations") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("verifyRefinementMaxIterations must be a positive number");
-    }
-    config.verifyRefinementMaxIterations = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "verifyReflectionInterval") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("verifyReflectionInterval must be a positive number");
-    }
-    config.verifyReflectionInterval = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "triagePromptFile") {
-    config.triagePromptFile = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "verifyPromptFile") {
-    config.verifyPromptFile = raw.trim() || undefined;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "cryptoBehavioralTestEnabled") {
-    const parsed = parseFlexibleValue(raw);
-    if (typeof parsed !== "boolean") {
-      throw new Error("cryptoBehavioralTestEnabled must be true or false");
-    }
-    config.cryptoBehavioralTestEnabled = parsed;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "cryptoBehavioralTimeoutMs") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("cryptoBehavioralTimeoutMs must be a positive number");
-    }
-    config.cryptoBehavioralTimeoutMs = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "cryptoBehavioralMaxFindings") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) {
-      throw new Error("cryptoBehavioralMaxFindings must be a positive number");
-    }
-    config.cryptoBehavioralMaxFindings = Math.floor(n);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "cryptoBehavioralPerFindingBudgetUsd") {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) {
-      throw new Error("cryptoBehavioralPerFindingBudgetUsd must be a positive number");
-    }
-    config.cryptoBehavioralPerFindingBudgetUsd = n;
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  if (key === "qualityGates") {
+  // Quality gates
+  qualityGates: (config, raw) => {
     const parsed = parseFlexibleValue(raw);
     if (!isRecord(parsed)) {
       throw new Error("qualityGates must be an object");
     }
     config.qualityGates = normalizeQualityGateConfig(parsed);
-    saveUpdatedConfigLayer(config, repoRoot);
-    return;
-  }
-
-  throw new Error(`Unknown config key: ${key}`);
-}
+  },
+};
 
 /** One entry in a config patch: a dotted path and the parsed value to set, or `undefined` to unset. */
 export interface ConfigPatchEntry {
