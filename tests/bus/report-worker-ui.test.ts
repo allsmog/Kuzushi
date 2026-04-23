@@ -153,7 +153,7 @@ describe("report-worker with UI store", () => {
     expect(state.shell?.focusedModule).toBe("sast");
     expect(state.shell?.workspace).toBe("acme");
     expect(state.shell?.commandHistory).toEqual(["scan ."]);
-    expect(scanStage?.detail).toContain("2 scanners");
+    expect(scanStage?.detail).toContain("2 tasks");
     expect(scanStage?.detail).toContain("1 finding");
     expect(semgrepTask?.findingCount).toBe(1);
     expect(semgrepTask?.detail).toContain("test.rule");
@@ -269,6 +269,63 @@ describe("report-worker with UI store", () => {
     const threatHuntTask = scanStage?.subTasks.find((task) => task.id === "threat-hunt");
     expect(threatHuntTask?.detail).toBe("analyzing threats from attack surface");
     expect(threatHuntTask?.detail).not.toBe("initializing");
+
+    await bus.close();
+    db.close();
+  });
+
+  it("uses 'preparing task' for unknown task start detail", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const store = createUIStore();
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 2,
+      scanMode: "parallel",
+      tasks: ["custom-task"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      taskConfig: { "custom-task": {} },
+    };
+
+    registerReportWorker(bus, { db, config }, store);
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          tasks: ["custom-task"],
+          fresh: false,
+        },
+      }),
+    );
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "custom-task",
+        outputKind: "findings",
+        input: null,
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    const scanStage = store.getState().stages.find((stage) => stage.id === "scan");
+    const customTask = scanStage?.subTasks.find((task) => task.id === "custom-task");
+    expect(customTask?.detail).toBe("preparing task");
 
     await bus.close();
     db.close();

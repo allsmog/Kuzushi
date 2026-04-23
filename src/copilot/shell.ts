@@ -202,13 +202,19 @@ interface LocalCommandResult {
   /** Fully-qualified tool name executed successfully by this command. */
   executedToolName?: string;
   /** Async tool execution needed — returns a promise of output. */
-  asyncExecute?: (signal?: AbortSignal) => Promise<string>;
+  asyncExecute?: (signal?: AbortSignal) => Promise<string | AsyncExecutionResult>;
   /**
    * When set, the shell should stream this string through `currentSession.query()`
    * — this is the `/ask` pathway. Replaces the old silent fallback that
    * forwarded any unknown input to the agent and invited hallucinated answers.
    */
   askQuestion?: string;
+}
+
+interface AsyncExecutionResult {
+  output: string;
+  ok?: boolean;
+  costUsd?: number;
 }
 
 type ShellSessionOutcome = {
@@ -368,6 +374,65 @@ export function buildModuleCatalog(
       toolSummaries,
     };
   });
+}
+
+function normalizeAsyncExecutionResult(value: string | AsyncExecutionResult): AsyncExecutionResult {
+  return typeof value === "string" ? { output: value } : value;
+}
+
+function moduleIdFromToolName(toolName: string): string | null {
+  const [moduleId] = toolName.split(":");
+  return moduleId && moduleId.length > 0 ? moduleId : null;
+}
+
+function formatRunRecency(lastRunAt: number): string {
+  const deltaMs = Math.max(0, Date.now() - lastRunAt);
+  const minutes = Math.floor(deltaMs / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(lastRunAt).toISOString().slice(0, 10);
+}
+
+function buildModuleRunSummary(
+  toolName: string,
+  status: "ok" | "fail" | "abort",
+  lastRunAt: number,
+  costUsd?: number,
+): string {
+  const statusText = status === "ok" ? "ok" : status === "abort" ? "aborted" : "error";
+  const action = toolActionName(toolName);
+  const recency = formatRunRecency(lastRunAt);
+  const cost = typeof costUsd === "number" ? ` · $${costUsd.toFixed(2)}` : "";
+  return `${statusText} · ${action} · ${recency}${cost}`;
+}
+
+function applyModuleRunTelemetry(
+  moduleCatalog: ShellModuleCard[] | undefined,
+  toolName: string,
+  status: "ok" | "fail" | "abort",
+  costUsd?: number,
+): ShellModuleCard[] | undefined {
+  if (!moduleCatalog || moduleCatalog.length === 0) return moduleCatalog;
+
+  const moduleId = moduleIdFromToolName(toolName);
+  if (!moduleId) return moduleCatalog;
+
+  const lastRunAt = Date.now();
+  let touched = false;
+  const next = moduleCatalog.map((card) => {
+    if (card.id !== moduleId) return card;
+    touched = true;
+    return {
+      ...card,
+      lastRunAt,
+      lastRunSummary: buildModuleRunSummary(toolName, status, lastRunAt, costUsd),
+    };
+  });
+  return touched ? next : moduleCatalog;
 }
 
 export function loadShellCommandHistory(dataDir: string): string[] {
@@ -1681,7 +1746,17 @@ async function startInkShell(
         // the per-activity entries for the audit trail.
         liveActivities: undefined,
       });
-      updateShell(store, (shell) => ({ ...shell, currentTool: undefined }));
+      updateShell(store, (shell) => ({
+        ...shell,
+        currentTool: undefined,
+        lastUsedTool: tool.name,
+        moduleCatalog: applyModuleRunTelemetry(
+          shell.moduleCatalog,
+          tool.name,
+          status,
+          status === "ok" ? finalResult?.costUsd : undefined,
+        ),
+      }));
       // Hunt post-mortem — after threat-hunt (and future hunt-class tools
       // whose runs publish per-actor `agent-activity` events) resolves,
       // drain the archived per-actor snapshots into a collapsed scrollback
@@ -2423,7 +2498,9 @@ async function startInkShell(
       const controller = new AbortController();
       setToolAbort(controller);
       try {
-        const output = await localResult.asyncExecute(controller.signal);
+        const execResult = normalizeAsyncExecutionResult(
+          await localResult.asyncExecute(controller.signal),
+        );
         // Gate on the per-turn controller rather than the shared
         // `activeAbortRequested` flag so a racing next-turn's setToolAbort
         // can't let this turn's stale output through.
@@ -2435,14 +2512,34 @@ async function startInkShell(
           updateShell(store, (shell) => ({
             ...shell,
             lastUsedTool: localResult.executedToolName,
+            moduleCatalog: applyModuleRunTelemetry(
+              shell.moduleCatalog,
+              localResult.executedToolName!,
+              execResult.ok === false ? "fail" : "ok",
+              execResult.costUsd,
+            ),
           }));
         }
-        if (output) {
-          appendToHistory(store, { type: "output", text: output, timestamp: Date.now() });
+        if (execResult.output) {
+          appendToHistory(store, {
+            type: "output",
+            text: execResult.output,
+            timestamp: Date.now(),
+          });
         }
       } catch (error) {
         const wasAborted = controller.signal.aborted;
         finishActiveAction();
+        if (localResult.executedToolName) {
+          updateShell(store, (shell) => ({
+            ...shell,
+            moduleCatalog: applyModuleRunTelemetry(
+              shell.moduleCatalog,
+              localResult.executedToolName!,
+              wasAborted ? "abort" : "fail",
+            ),
+          }));
+        }
         if (wasAborted) {
           // Abort handler already rendered `[aborted]` — no need to also
           // append CANCELLED_TOOL_MESSAGE.
@@ -3086,17 +3183,35 @@ async function startReadlineShell(
         activeAbortRequested = false;
         activeToolController = controller;
         try {
-          const output = await localResult.asyncExecute(controller.signal);
+          const execResult = normalizeAsyncExecutionResult(
+            await localResult.asyncExecute(controller.signal),
+          );
           if (localResult.executedToolName) {
             rlState = {
               ...rlState,
               lastUsedTool: localResult.executedToolName,
+              moduleCatalog: applyModuleRunTelemetry(
+                rlState.moduleCatalog,
+                localResult.executedToolName,
+                execResult.ok === false ? "fail" : "ok",
+                execResult.costUsd,
+              ),
             };
           }
-          if (output) {
-            process.stdout.write(`${output}\n`);
+          if (execResult.output) {
+            process.stdout.write(`${execResult.output}\n`);
           }
         } catch (error) {
+          if (localResult.executedToolName) {
+            rlState = {
+              ...rlState,
+              moduleCatalog: applyModuleRunTelemetry(
+                rlState.moduleCatalog,
+                localResult.executedToolName,
+                activeAbortRequested ? "abort" : "fail",
+              ),
+            };
+          }
           const message = activeAbortRequested
             ? CANCELLED_TOOL_MESSAGE
             : error instanceof Error
@@ -3289,7 +3404,7 @@ function handleSlashCommand(
 
     case "modules":
     case "m":
-      return { output: formatModuleList(core) };
+      return { output: formatModuleList(core, shellState.moduleCatalog) };
 
     case "tools":
       return { output: formatTools(core, ctx.focusedModule) };
@@ -3996,7 +4111,7 @@ function resolveToolExecution(
 
   // Context gating — block tools that require context when none exists
   if (CONTEXT_REQUIRED_TOOLS.has(finalToolName) && !shellState.contextSnapshot) {
-    return { output: `Context required for ${finalToolName}. Run /context first.` };
+    return { output: `Context required for ${finalToolName}. Run context (or /context) first.` };
   }
 
   return {
@@ -4038,7 +4153,11 @@ function resolveToolExecution(
         }
       }
 
-      return result.output;
+      return {
+        output: result.output,
+        ok: result.ok,
+        costUsd: result.costUsd,
+      };
     },
   };
 }
@@ -5363,9 +5482,15 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
   ]);
 }
 
-function formatModuleList(core: CopilotCore): string {
+function formatModuleList(
+  core: CopilotCore,
+  moduleCatalog?: ReadonlyArray<ShellModuleCard>,
+): string {
   const modules = core.listModules();
   if (modules.length === 0) return "  No modules loaded.";
+  const summaryByModule = new Map(
+    (moduleCatalog ?? []).map((card) => [card.id, card.lastRunSummary ?? "never run"]),
+  );
 
   return formatSections(
     modules.map((module) => {
@@ -5376,7 +5501,10 @@ function formatModuleList(core: CopilotCore): string {
       return [
         `  ${module.id} [${module.category}]`,
         `  ${formatModuleDescription(module.description)}`,
-        ...formatLabelValueRows([["Tools:", tools || "none"]]),
+        ...formatLabelValueRows([
+          ["Tools:", tools || "none"],
+          ["Last run:", summaryByModule.get(module.id) ?? "never run"],
+        ]),
       ];
     }),
   );

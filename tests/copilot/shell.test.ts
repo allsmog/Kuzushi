@@ -539,6 +539,31 @@ describe("local shell commands", () => {
     });
   });
 
+  it("shows per-module last-run telemetry in /modules output", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = {
+      ...createShellState(module.tools.map((tool) => tool.name)),
+      moduleCatalog: [
+        {
+          id: "sast",
+          displayName: "SAST",
+          category: "defense" as const,
+          description: "Umbrella for the full SAST DAG.",
+          toolCount: 1,
+          external: false,
+          lastRunAt: Date.now(),
+          lastRunSummary: "ok · scan · just now · $1.23",
+        },
+      ],
+    };
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand("/modules", core, opts, ctx, shellState);
+    expect(result?.output).toContain("Last run:");
+    expect(result?.output).toContain("ok · scan · just now · $1.23");
+  });
+
   it("resolves direct tool execution and merges stored options", async () => {
     const { core, module, executeTool } = await createMockCore();
     const opts = createShellOptions();

@@ -32,6 +32,8 @@ import type {
   StrideThreat,
   ThreatModelDocument,
 } from "../../agents/tasks/threat-modeling/types.js";
+import { createEvent } from "../../bus/helpers.js";
+import type { RunContext } from "../../bus/run-context.js";
 import { createLogger } from "../../logger.js";
 import { antiHallucinationModule } from "../../prompts/modules.js";
 import { ALL_TOOLS, buildPolicyLayers, resolveToolPolicy } from "../../prompts/tool-policy.js";
@@ -278,6 +280,46 @@ function buildActorFingerprint(actor: DfdElement, runIndex: number): string {
   return `threat-hunt:${sanitized}:${runIndex}`;
 }
 
+function buildScanRunContext(ctx: ExecutionContext): RunContext | null {
+  const dag = ctx.dag;
+  if (!dag) return null;
+
+  return {
+    runId: dag.runId,
+    repoRoot: dag.workRoot ?? dag.repoRoot,
+    ...(dag.scanPath ? { scanPath: dag.scanPath } : {}),
+    ...(dag.gitRoot ? { gitRoot: dag.gitRoot } : {}),
+    repoName: dag.repoName,
+    // report-worker does not read dbPath for scan:agent-activity, and scanner
+    // adapters use the same empty-string fallback when the DB path is unknown.
+    dbPath: "",
+  };
+}
+
+async function publishScanActivity(
+  ctx: ExecutionContext,
+  runContext: RunContext,
+  activity: AgentActivity,
+): Promise<void> {
+  try {
+    await ctx.bus.publish(
+      createEvent("scan:agent-activity", runContext.runId, {
+        context: runContext,
+        taskId: MODULE_ID,
+        kind: activity.kind,
+        ...(activity.toolName !== undefined ? { toolName: activity.toolName } : {}),
+        ...(activity.toolInput !== undefined ? { toolInput: activity.toolInput } : {}),
+        ...(activity.summary !== undefined ? { summary: activity.summary } : {}),
+        ...(activity.elapsedSeconds !== undefined
+          ? { elapsedSeconds: activity.elapsedSeconds }
+          : {}),
+      }),
+    );
+  } catch {
+    // Best-effort activity stream — never fail the hunt on UI event issues.
+  }
+}
+
 async function runActorHunt(
   actor: DfdElement,
   threats: StrideThreat[],
@@ -301,24 +343,29 @@ async function runActorHunt(
     else ctx.signal.addEventListener("abort", () => abortController.abort(), { once: true });
   }
 
-  // Per-actor agent-activity stream. Unified via `ctx.reportAgentActivity`,
-  // which publishes `threat-hunt:agent-activity` events that the report-
-  // worker and shell UI subscribe to (see src/bus/workers/report-worker.ts).
+  // Per-actor activity stream:
+  //   1) `threat-hunt:agent-activity` (fingerprinted rows for actor heartbeat)
+  //   2) `scan:agent-activity` (task-level live storytelling in scan stage UI)
   const fingerprint = buildActorFingerprint(actor, runIndex);
-  const activityCallback: AgentActivityCallback | undefined = ctx.reportAgentActivity
-    ? async (activity: AgentActivity) => {
-        ctx.reportAgentActivity?.(fingerprint, activity.kind, {
-          ...(activity.toolName !== undefined ? { toolName: activity.toolName } : {}),
-          ...(activity.toolInput !== undefined ? { toolInput: activity.toolInput } : {}),
-          ...(activity.summary !== undefined ? { summary: activity.summary } : {}),
-          ...(activity.elapsedSeconds !== undefined
-            ? { elapsedSeconds: activity.elapsedSeconds }
-            : {}),
-          index: runIndex,
-          total: totalRuns,
-        });
-      }
-    : undefined;
+  const scanRunContext = buildScanRunContext(ctx);
+  const activityCallback: AgentActivityCallback | undefined =
+    ctx.reportAgentActivity || scanRunContext
+      ? async (activity: AgentActivity) => {
+          ctx.reportAgentActivity?.(fingerprint, activity.kind, {
+            ...(activity.toolName !== undefined ? { toolName: activity.toolName } : {}),
+            ...(activity.toolInput !== undefined ? { toolInput: activity.toolInput } : {}),
+            ...(activity.summary !== undefined ? { summary: activity.summary } : {}),
+            ...(activity.elapsedSeconds !== undefined
+              ? { elapsedSeconds: activity.elapsedSeconds }
+              : {}),
+            index: runIndex,
+            total: totalRuns,
+          });
+          if (scanRunContext) {
+            await publishScanActivity(ctx, scanRunContext, activity);
+          }
+        }
+      : undefined;
 
   log.info(`${tag} Starting hunt (model=${config.model})`);
   ctx.reportActivity?.(

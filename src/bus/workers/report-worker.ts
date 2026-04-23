@@ -1026,9 +1026,9 @@ function updateScanStageDetail(store: UIStore): void {
   const parts: string[] = [];
 
   if (taskCount > 0 && doneCount < taskCount) {
-    parts.push(`${doneCount} of ${taskCount} scanners done`);
+    parts.push(`${doneCount} of ${taskCount} tasks done`);
   } else if (taskCount > 0) {
-    parts.push(`${taskCount} scanner${taskCount === 1 ? "" : "s"} complete`);
+    parts.push(`${taskCount} task${taskCount === 1 ? "" : "s"} complete`);
   }
   if (findingCount > 0) {
     parts.push(`${findingCount} finding${findingCount === 1 ? "" : "s"}`);
@@ -1057,7 +1057,7 @@ function scanTaskStartDetail(taskId: string): string {
     case "threat-hunt":
       return "analyzing threats from attack surface";
     default:
-      return "initializing";
+      return "preparing task";
   }
 }
 
