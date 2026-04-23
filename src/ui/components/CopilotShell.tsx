@@ -22,7 +22,7 @@ import {
 import { formatClock, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useUIState } from "../hooks.js";
+import { shallowEqual, useUISelector } from "../hooks.js";
 import { useLayoutContext } from "../layout-context.js";
 import { Gutter } from "../primitives/Gutter.js";
 import { Markdown } from "../primitives/Markdown.js";
@@ -31,7 +31,13 @@ import {
   CTRL_C_ARM_WINDOW_MS as CTRL_C_ARM_WINDOW_MS_IMPORTED,
   resolveKeybind,
 } from "../shell-keybinds.js";
-import type { ShellHistoryEntry, ShellState, UIState, UIStore } from "../state.js";
+import type {
+  ActionableFinding,
+  ShellHistoryEntry,
+  ShellState,
+  SummaryData,
+  UIStore,
+} from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
@@ -81,12 +87,12 @@ const CTRL_C_ARM_WINDOW_MS = CTRL_C_ARM_WINDOW_MS_IMPORTED;
  * that the findings cursor scans over. Kept in sync with FindingsView's own
  * filter so j/k clamps match exactly what the operator sees on screen.
  */
-function countLooseFindings(state: UIState): number {
-  const summary = state.summary;
-  if (!summary) return 0;
-  const findings = summary.actionableFindings ?? [];
+function countLooseFindings(
+  findings: ReadonlyArray<ActionableFinding>,
+  chains: NonNullable<SummaryData["exploitChains"]>,
+): number {
   const chainFingerprints = new Set<string>();
-  for (const chain of summary.exploitChains ?? []) {
+  for (const chain of chains) {
     for (const step of chain.steps) chainFingerprints.add(step.findingFingerprint);
   }
   let count = 0;
@@ -96,8 +102,16 @@ function countLooseFindings(state: UIState): number {
 
 export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const { theme } = useLayoutContext();
-  const state = useUIState(store);
-  const shell = state.shell;
+  const shellState = useUISelector(
+    store,
+    (s) => ({
+      shell: s.shell,
+      summary: s.summary,
+      ctrlCArmedAt: s.ctrlCArmedAt,
+    }),
+    shallowEqual,
+  );
+  const shell = shellState.shell;
   const { exit } = useApp();
   const [input, setInput] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -193,7 +207,10 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         stroke: { char, key },
         input,
         state: liveState,
-        looseFindingCount: countLooseFindings(liveState),
+        looseFindingCount: countLooseFindings(
+          liveState.summary?.actionableFindings ?? [],
+          liveState.summary?.exploitChains ?? [],
+        ),
         now: Date.now(),
       });
 
@@ -418,7 +435,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         </Box>
       ) : null}
 
-      <MemoShellViewPanel state={state} shell={shell} />
+      <MemoShellViewPanel summary={shellState.summary} shell={shell} />
       <ShellWayfinding shell={shell} narrow={columns < 110} />
 
       {shell.plannerBusy && !shell.pendingPlan && (
@@ -463,7 +480,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         </Box>
       )}
 
-      {state.ctrlCArmedAt && Date.now() - state.ctrlCArmedAt < CTRL_C_ARM_WINDOW_MS ? (
+      {shellState.ctrlCArmedAt && Date.now() - shellState.ctrlCArmedAt < CTRL_C_ARM_WINDOW_MS ? (
         <Box marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
           <Text>{tokens.warn("press Ctrl+C again to exit")}</Text>
         </Box>
@@ -572,10 +589,10 @@ function LlmHeartbeatLine({
  * the component is free to add/remove itself without flicker.
  */
 function ShellViewPanel({
-  state,
+  summary,
   shell,
 }: {
-  state: UIState;
+  summary: SummaryData | null;
   shell: ShellState;
 }): React.ReactElement | null {
   // Stable React keys per view stop React from re-mounting sibling sub-trees
@@ -590,7 +607,6 @@ function ShellViewPanel({
     case "tune":
       return shell.focusedModule ? <TuneView key={view} shell={shell} /> : null;
     case "findings": {
-      const summary = state.summary;
       const findings = summary?.actionableFindings ?? [];
       const chains = (summary?.exploitChains ?? []).map((c) => ({
         id: c.id,
@@ -610,7 +626,6 @@ function ShellViewPanel({
       );
     }
     case "finding": {
-      const summary = state.summary;
       const openId = shell.openFindingId;
       if (!openId || !summary) return null;
       // Resolve through the deterministic B.3 alias map so F-NNNN always
@@ -641,7 +656,7 @@ function ShellViewPanel({
     case "threat-summary":
       return <ThreatSummaryExport key={view} shell={shell} />;
     case "diff-since":
-      return <DiffSinceView key={view} state={state} shell={shell} />;
+      return <DiffSinceView key={view} summary={summary} shell={shell} />;
     default:
       return null;
   }
@@ -678,7 +693,7 @@ const MemoShellViewPanel = memo(
     prev.shell.threatModel === next.shell.threatModel &&
     prev.shell.findingCursor === next.shell.findingCursor &&
     prev.shell.findingPageSize === next.shell.findingPageSize &&
-    prev.state.summary === next.state.summary,
+    prev.summary === next.summary,
 );
 
 function ShellBannerImpl({ shell }: { shell: ShellState }): React.ReactElement {
