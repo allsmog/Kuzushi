@@ -513,6 +513,29 @@ function ShellStaticItemView({ item }: { item: ShellStaticItem }): React.ReactEl
   }
 }
 
+const MemoShellBanner = memo(
+  function ShellBanner({ shell }: { shell: ShellState }): React.ReactElement {
+    const location = describeShellLocation(shell);
+    const parts: string[] = [location];
+    if (shell.workspace) parts.push(shell.workspace);
+    if (shell.target && shell.target !== shell.workspace) parts.push(shell.target);
+    return (
+      <Box paddingLeft={SPACING.md} paddingTop={SPACING.xs}>
+        <Text>
+          {tokens.muted("▸ ")}
+          {tokens.strong(parts[0])}
+          {parts.length > 1 ? tokens.muted(` · ${parts.slice(1).join(" · ")}`) : null}
+        </Text>
+      </Box>
+    );
+  },
+  (prev, next) =>
+    prev.shell.shellView === next.shell.shellView &&
+    prev.shell.focusedModule === next.shell.focusedModule &&
+    prev.shell.workspace === next.shell.workspace &&
+    prev.shell.target === next.shell.target,
+);
+
 const MemoShellLiveHistory = memo(
   function ShellLiveHistory({
     history,
