@@ -48,7 +48,7 @@ import { isRecord, toErrorMessage } from "../../utils.js";
 import { defineDagTool, defineModule } from "../define.js";
 import { resolvePromptValue } from "../sast/prompts.js";
 import { targetProperty } from "../sast/shared.js";
-import type { CopilotModule, ExecutionContext } from "../types.js";
+import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 import { requireDag } from "../types.js";
 
 const log = createLogger({ stage: "threat-hunt" });
@@ -415,6 +415,24 @@ async function runActorHunt(
   return { findings: parsed.findings, costUsd };
 }
 
+/**
+ * One-line summary for the `⎿  <output>` line under the tool header on
+ * completion. Prefer the first non-empty line of `result.output` (from
+ * `runSingleTaskPipeline`, which already includes findings + cost — so
+ * re-appending them would produce "complete: 22 findings · 22 findings").
+ * Only synthesize from `data.stats` when `output` is empty (early exits,
+ * no-external-entities path, abort before first log line).
+ */
+function formatThreatHuntSummary(result: ToolResult): string {
+  const first = result.output.split("\n", 1)[0]?.trim();
+  if (first && first.length > 0) return first;
+  const stats = (result.data as { stats?: { totalFindings?: number } | null } | undefined)?.stats;
+  const findings =
+    typeof stats?.totalFindings === "number" ? `${stats.totalFindings} findings` : null;
+  if (result.ok) return findings ? `Threat hunt complete · ${findings}` : "Threat hunt complete";
+  return "Threat hunt failed";
+}
+
 const triageAgentConfig = (finding: Finding, repoName: string): TriageAgentConfig => ({
   prompt: [
     `You are triaging a finding from the threat-driven hunt in "${repoName}".`,
@@ -478,8 +496,7 @@ export const threatHuntTool = defineDagTool<
     return target ?? null;
   },
   renderResult(result) {
-    const first = result.output.split("\n", 1)[0]?.trim();
-    return first && first.length > 0 ? first : null;
+    return formatThreatHuntSummary(result);
   },
   dag: {
     outputKind: "findings",
