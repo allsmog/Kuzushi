@@ -120,6 +120,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const columns = stdout?.columns ?? 120;
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const draftInputRef = useRef("");
+  const pendingAssistantStartedAtRef = useRef<number>(Date.now());
 
   const processing = shell?.processing === true;
 
@@ -321,19 +322,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
   if (!shell) return <Text>Loading...</Text>;
 
-  const LIVE_COUNT = 8;
-  // Running tool-call entries mutate in place (status flip, resultOutput
-  // injection, liveActivities tail). They can't go into `<Static>` until
-  // they reach a terminal status, so everything at-or-after the oldest
-  // running tool-call stays in the live zone regardless of entry age.
-  const firstRunningIdx = shell.history.findIndex(
-    (e) => e.type === "tool-call" && e.status === "running",
-  );
-  const defaultCutoff = Math.max(0, shell.history.length - LIVE_COUNT);
-  const staticCutoff =
-    firstRunningIdx >= 0 ? Math.min(firstRunningIdx, defaultCutoff) : defaultCutoff;
-  const staticHistory = shell.history.slice(0, staticCutoff);
-  const liveHistory = shell.history.slice(staticCutoff);
+  if (shell.pendingAssistantText) {
+    if (pendingAssistantStartedAtRef.current === 0) {
+      pendingAssistantStartedAtRef.current = Date.now();
+    }
+  } else {
+    pendingAssistantStartedAtRef.current = 0;
+  }
 
   // ModuleCatalog re-reads shell.moduleCatalog on every render; wrapping it
   // in <Static> would freeze the first snapshot and hide module/last-run
@@ -360,22 +355,9 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         </Static>
       )}
 
-      <Static items={staticHistory}>
-        {(item) => (
-          <HistoryEntry
-            key={historyEntryKey(item as ShellHistoryEntry)}
-            entry={item as ShellHistoryEntry}
-          />
-        )}
-      </Static>
+      <MemoShellHistory history={shell.history} />
 
-      <Box flexDirection="column">
-        {liveHistory.map((entry) => (
-          <HistoryEntry key={historyEntryKey(entry)} entry={entry} />
-        ))}
-      </Box>
-
-      {!shell.processing && liveHistory.length > 0 ? (
+      {!shell.processing && shell.history.length > 0 ? (
         <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
           <Text>{tokens.tertiary("interactive")}</Text>
         </Box>
@@ -401,7 +383,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           entry={{
             type: "output",
             text: shell.pendingAssistantText,
-            timestamp: Date.now(),
+            timestamp: pendingAssistantStartedAtRef.current || Date.now(),
           }}
         />
       )}
@@ -453,6 +435,47 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     </Box>
   );
 }
+
+const MemoShellHistory = memo(
+  function ShellHistory({
+    history,
+  }: {
+    history: ReadonlyArray<ShellHistoryEntry>;
+  }): React.ReactElement {
+    const LIVE_COUNT = 8;
+    // Running tool-call entries mutate in place (status flip, resultOutput
+    // injection, liveActivities tail). They can't go into `<Static>` until
+    // they reach a terminal status, so everything at-or-after the oldest
+    // running tool-call stays in the live zone regardless of entry age.
+    const firstRunningIdx = history.findIndex(
+      (e) => e.type === "tool-call" && e.status === "running",
+    );
+    const defaultCutoff = Math.max(0, history.length - LIVE_COUNT);
+    const staticCutoff =
+      firstRunningIdx >= 0 ? Math.min(firstRunningIdx, defaultCutoff) : defaultCutoff;
+    const staticHistory = history.slice(0, staticCutoff);
+    const liveHistory = history.slice(staticCutoff);
+
+    return (
+      <>
+        <Static items={staticHistory}>
+          {(item) => (
+            <HistoryEntry
+              key={historyEntryKey(item as ShellHistoryEntry)}
+              entry={item as ShellHistoryEntry}
+            />
+          )}
+        </Static>
+        <Box flexDirection="column">
+          {liveHistory.map((entry) => (
+            <HistoryEntry key={historyEntryKey(entry)} entry={entry} />
+          ))}
+        </Box>
+      </>
+    );
+  },
+  (prev, next) => prev.history === next.history,
+);
 
 function ShellWayfinding({
   shell,
