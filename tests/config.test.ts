@@ -22,7 +22,9 @@ const {
   configPath,
   projectConfigPath,
   DEFAULTS,
+  TOP_LEVEL_CONFIG_SETTERS,
 } = await import("../src/config.js");
+const { KuzushiConfigSchema } = await import("../src/schemas.js");
 const { hasConfigValidationErrors, validateKuzushiConfig } = await import(
   "../src/config/validation.js"
 );
@@ -539,6 +541,16 @@ describe("setConfigValue", () => {
     expect(() => setConfigValue("agentRuntimeConfig", "not-object")).toThrow(
       "agentRuntimeConfig must be an object",
     );
+  });
+
+  it("TOP_LEVEL_CONFIG_SETTERS has no orphan keys", () => {
+    // Every handler must correspond to a real schema key; catches typos like
+    // `maxTriageRetry` vs `maxTriageRetries`. The reverse direction (schema
+    // keys without handlers) is intentionally NOT enforced — some fields
+    // like `hooks`/`monorepo` are only settable via config-file edit.
+    const schemaKeys = new Set(Object.keys(KuzushiConfigSchema.shape));
+    const orphanHandlers = Object.keys(TOP_LEVEL_CONFIG_SETTERS).filter((k) => !schemaKeys.has(k));
+    expect(orphanHandlers).toEqual([]);
   });
 });
 
