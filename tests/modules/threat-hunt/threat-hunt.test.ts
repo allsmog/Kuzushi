@@ -6,7 +6,11 @@ import type {
 } from "../../../src/agents/tasks/threat-modeling/types.js";
 import { publishAgentActivity } from "../../../src/bus/activity.js";
 import { InProcessBus } from "../../../src/bus/adapters/in-process.js";
-import type { TaskActivityEvent, TaskAgentActivityEvent } from "../../../src/bus/events.js";
+import type {
+  ScanAgentActivityEvent,
+  TaskActivityEvent,
+  TaskAgentActivityEvent,
+} from "../../../src/bus/events.js";
 import {
   __threatHuntInternals,
   threatHuntTool,
@@ -489,6 +493,34 @@ describe("threat-hunt", () => {
       const toolStart = events.find((e) => e.kind === "tool-start");
       expect(toolStart?.toolName).toBe("Grep");
       expect(toolStart?.toolInput).toEqual({ pattern: "verifyToken" });
+
+      await bus.close();
+    });
+
+    it("emits scan:agent-activity events when reportAgentActivity is not wired", async () => {
+      const bus = new InProcessBus();
+      const runtime = makeStubRuntime([
+        { type: "tool-progress", toolUseId: "t1", toolName: "Read", elapsedSeconds: 0.2 },
+        { type: "result", subtype: "success", result: '{"findings":[]}' },
+      ]);
+      const baseCtx = makeExecutionContext(bus, runtime);
+      const ctx: ExecutionContext = {
+        ...baseCtx,
+        reportAgentActivity: undefined,
+      };
+      const actor = makeDfdElement({ name: "Attacker" });
+      const events: ScanAgentActivityEvent["payload"][] = [];
+      bus.subscribe<ScanAgentActivityEvent>("scan:agent-activity", (event) => {
+        events.push(event.payload);
+      });
+      const config = await resolveConfig({}, ctx);
+      await runActorHunt(actor, [], ctx, config, 0, 1);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const progress = events.find((e) => e.kind === "tool-progress");
+      expect(progress).toBeDefined();
+      expect(progress?.taskId).toBe("threat-hunt");
+      expect(progress?.toolName).toBe("Read");
 
       await bus.close();
     });
