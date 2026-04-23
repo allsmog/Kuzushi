@@ -6,17 +6,17 @@ import type {
   ModuleEventScope,
   ToolOptionStore,
 } from "../../src/modules/host-handles.js";
-import type { ToolExecutionContext } from "../../src/modules/types.js";
+import type { ExecutionContext } from "../../src/modules/types.js";
 
 describe("narrow host handles (HOST-17)", () => {
-  it("ToolExecutionContext.uiStore is the narrow HostUiHandle shape", () => {
+  it("ExecutionContext.uiStore is the narrow HostUiHandle shape", () => {
     // Compile-time check: a shape that implements only the HostUiHandle
     // contract must be assignable to ctx.uiStore.
     const stub: HostUiHandle = {
       getState: () => ({}),
       update: () => {},
     };
-    const ctx = { uiStore: stub } as Partial<ToolExecutionContext>;
+    const ctx = { uiStore: stub } as Partial<ExecutionContext>;
     expect(ctx.uiStore).toBe(stub);
   });
 
@@ -46,6 +46,6 @@ describe("narrow host handles (HOST-17)", () => {
   });
 
   it("HostUiHandle and WorkspaceHandle types are exposed on ctx", () => {
-    expectTypeOf<ToolExecutionContext["uiStore"]>().toEqualTypeOf<HostUiHandle | undefined>();
+    expectTypeOf<ExecutionContext["uiStore"]>().toEqualTypeOf<HostUiHandle | undefined>();
   });
 });

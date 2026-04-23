@@ -1012,6 +1012,50 @@ function pushLiveActivity(store: UIStore, id: string, text: string): void {
   });
 }
 
+/**
+ * Tool names whose completion drains `state.lastHuntSnapshot` into a
+ * `hunt-post-mortem` scrollback block. Currently just threat-hunt:run;
+ * add other hunt-class tools here when they adopt the per-actor
+ * `reportAgentActivity` + `done:true` pattern.
+ */
+const HUNT_CLASS_TOOLS = new Set(["threat-hunt:run"]);
+
+function isHuntClassTool(toolName: string): boolean {
+  return HUNT_CLASS_TOOLS.has(toolName);
+}
+
+interface HuntStats {
+  findingsCount: number;
+  costUsd: number;
+}
+
+/**
+ * Read `totalFindings` + `totalCostUsd` off a hunt tool's `ToolResult.data`.
+ * `runSingleTaskPipeline` populates these under `data.stats`; the unknown
+ * cast is guarded by runtime shape checks so a shape drift produces zeros
+ * rather than a crash.
+ */
+function extractHuntStats(result: { data?: unknown }): HuntStats {
+  const stats = (result.data as { stats?: { totalFindings?: unknown; totalCostUsd?: unknown } })
+    ?.stats;
+  const findingsCount =
+    typeof stats?.totalFindings === "number" && Number.isFinite(stats.totalFindings)
+      ? stats.totalFindings
+      : 0;
+  const costUsd =
+    typeof stats?.totalCostUsd === "number" && Number.isFinite(stats.totalCostUsd)
+      ? stats.totalCostUsd
+      : 0;
+  return { findingsCount, costUsd };
+}
+
+function formatHuntSummaryLine(actorCount: number, findingsCount: number, costUsd: number): string {
+  const actorsLabel = `${actorCount} actor${actorCount === 1 ? "" : "s"}`;
+  const findingsLabel = `${findingsCount} finding${findingsCount === 1 ? "" : "s"}`;
+  const costLabel = `$${costUsd.toFixed(2)}`;
+  return `${actorsLabel} · ${findingsLabel} · ${costLabel}`;
+}
+
 function beginShellTurn(store: UIStore, input: string, focusedModule: string | null): void {
   // Stale notices from the previous turn (e.g. "Review complete" from a just-
   // finished scan) shouldn't linger into the next command's output window —
@@ -1646,6 +1690,29 @@ async function startInkShell(
         liveActivities: undefined,
       });
       updateShell(store, (shell) => ({ ...shell, currentTool: undefined }));
+      // Hunt post-mortem — after threat-hunt (and future hunt-class tools
+      // whose runs publish per-actor `agent-activity` events) resolves,
+      // drain the archived per-actor snapshots into a collapsed scrollback
+      // block so operators can expand it to see which actor made the last
+      // move. HeartbeatStrip only renders during `mode === "running"`, so
+      // without this the breakdown disappears the instant the tool returns.
+      if (status === "ok" && isHuntClassTool(tool.name)) {
+        const perActor = store.consumeHuntSnapshot();
+        if (perActor.length > 0 && finalResult) {
+          const stats = extractHuntStats(finalResult);
+          appendToHistory(store, {
+            type: "hunt-post-mortem",
+            text: formatHuntSummaryLine(perActor.length, stats.findingsCount, stats.costUsd),
+            timestamp: Date.now(),
+            huntSummary: {
+              actorCount: perActor.length,
+              findingsCount: stats.findingsCount,
+              costUsd: stats.costUsd,
+              perActor,
+            },
+          });
+        }
+      }
     }
   };
 
@@ -5397,9 +5464,12 @@ export const __shellInternals = {
   capShellHistory,
   createShellSession,
   extractAssistantText,
+  extractHuntStats,
   extractToolUseActivities,
   extractToolUseHeaders,
   finalizeAssistantText,
+  formatHuntSummaryLine,
+  isHuntClassTool,
   looksLikeSubagentToolLine,
   looksLikeSubagentStartLine,
   summarizeInput,

@@ -25,6 +25,7 @@ import { applyBackspace, isCtrlChord } from "../hooks/text-edit-actions.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { shallowEqual, useUISelector } from "../hooks.js";
 import { useLayoutContext } from "../layout-context.js";
+import { ExpandableSection } from "../primitives/ExpandableSection.js";
 import { Gutter } from "../primitives/Gutter.js";
 import { Markdown } from "../primitives/Markdown.js";
 import { Ratchet } from "../primitives/Ratchet.js";
@@ -34,6 +35,8 @@ import {
 } from "../shell-keybinds.js";
 import type {
   ActionableFinding,
+  AgentActivityLine,
+  HuntActorSnapshot,
   ShellHistoryEntry,
   ShellState,
   SummaryData,
@@ -721,6 +724,8 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
       );
     case "tool-call":
       return <ToolCallEntry entry={entry} />;
+    case "hunt-post-mortem":
+      return <HuntPostMortemEntry entry={entry} />;
     case "tool-progress": {
       const kind = entry.progressKind ?? "info";
       const wrap = (s: string): string => {
@@ -827,4 +832,86 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
       ) : null}
     </Ratchet>
   );
+}
+
+/**
+ * Collapsed scrollback block summarising a completed hunt run. Shows
+ * `N actors · M findings · $X.XX` as the headline with per-actor
+ * breakdown hidden behind `space to expand`. Replaces the ephemeral
+ * HeartbeatStrip per-agent list which only renders during the `running`
+ * phase — without this entry, operators lose the per-actor audit trail
+ * the instant the tool returns.
+ */
+function HuntPostMortemEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
+  const summary = entry.huntSummary;
+  if (!summary) {
+    return (
+      <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
+        <Text>{tokens.muted(entry.text)}</Text>
+      </Box>
+    );
+  }
+
+  const headline = (
+    <Text>
+      {tokens.strong(`${summary.actorCount} actor${summary.actorCount === 1 ? "" : "s"}`)}
+      {tokens.muted(
+        `  ·  ${summary.findingsCount} finding${summary.findingsCount === 1 ? "" : "s"}  ·  $${summary.costUsd.toFixed(2)}`,
+      )}
+    </Text>
+  );
+
+  return (
+    <Box marginTop={SPACING.sm} paddingLeft={SPACING.md} flexDirection="column">
+      <ExpandableSection summary={headline} hint="(press space for per-actor breakdown)">
+        {summary.perActor.map((actor) => (
+          <HuntActorRow key={actor.fingerprint} actor={actor} />
+        ))}
+      </ExpandableSection>
+    </Box>
+  );
+}
+
+function HuntActorRow({ actor }: { actor: HuntActorSnapshot }): React.ReactElement {
+  const lastLine = actor.lines[actor.lines.length - 1];
+  const label = extractActorLabel(actor.fingerprint);
+  const detail = lastLine ? formatLastLine(lastLine) : "(no activity)";
+  return (
+    <Text>
+      {tokens.muted("•")} {tokens.value(label)}
+      {tokens.muted("  ·  ")}
+      {tokens.muted(detail)}
+    </Text>
+  );
+}
+
+/**
+ * Pull the human-readable actor slug out of a threat-hunt fingerprint.
+ * `buildActorFingerprint` in `src/modules/threat-hunt/threat-hunt.ts`
+ * builds `threat-hunt:<Actor_Name>:<runIndex>`; we show
+ * `Actor Name` (runIndex 0 suppressed) or `Actor Name (run N)`.
+ */
+function extractActorLabel(fingerprint: string): string {
+  const parts = fingerprint.split(":");
+  if (parts.length < 3) return fingerprint;
+  const actorSlug = parts[parts.length - 2]!.replace(/_/g, " ");
+  const runIndex = parts[parts.length - 1]!;
+  return runIndex === "0" ? actorSlug : `${actorSlug} (run ${runIndex})`;
+}
+
+function formatLastLine(line: AgentActivityLine): string {
+  const prefix =
+    line.kind === "tool-complete"
+      ? "✓"
+      : line.kind === "tool-start"
+        ? "→"
+        : line.kind === "tool-progress"
+          ? "…"
+          : line.kind === "reasoning"
+            ? "•"
+            : line.kind === "finding-preview"
+              ? "!"
+              : "·";
+  const detail = line.detail ?? line.toolName ?? line.kind;
+  return `${prefix} ${truncateEnd(detail, 80)}`;
 }

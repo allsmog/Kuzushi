@@ -11,7 +11,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
+import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -176,7 +176,7 @@ export function bridgeTool(
     description: mcpTool.description ?? `MCP tool: ${mcpTool.name}`,
     inputSchema: schema,
     headless,
-    async execute(input: unknown, _ctx: ToolExecutionContext): Promise<ToolResult> {
+    async execute(input: unknown, _ctx: ExecutionContext): Promise<ToolResult> {
       try {
         const result = await callWithTimeout(
           () => client.callTool(mcpTool.name, coerceArguments(input)),

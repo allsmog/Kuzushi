@@ -16,7 +16,7 @@ import path from "node:path";
 import { analyzeVariants } from "../agents/tasks/variant-analysis.js";
 import type { Finding } from "../scanners/types.js";
 import type { TriageResult, Verdict } from "../types.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
+import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -79,7 +79,7 @@ async function loadFindingAndTriage(
   }
 }
 
-function resolveModel(ctx: ToolExecutionContext, override?: string): string {
+function resolveModel(ctx: ExecutionContext, override?: string): string {
   if (override) return override;
   const variantConfig = ctx.config.taskConfig?.["variant-analysis"] as
     | Record<string, unknown>
@@ -167,7 +167,7 @@ const liftPatternTool: ModuleTool = {
     required: ["fingerprint"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
     const fingerprint = params.fingerprint as string | undefined;
     if (!fingerprint) {
@@ -332,7 +332,7 @@ const huntTool: ModuleTool = {
     required: ["fingerprint"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
     const fingerprint = params.fingerprint as string | undefined;
     if (!fingerprint) {

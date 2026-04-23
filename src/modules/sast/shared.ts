@@ -16,7 +16,7 @@
  */
 
 import type { KuzushiConfig } from "../../types.js";
-import type { ToolExecutionContext, ToolResult } from "../types.js";
+import type { ExecutionContext, ToolResult } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Pipeline runners
@@ -49,7 +49,7 @@ export function mergeTaskConfig(
 
 export async function executeSastPipeline(
   input: unknown,
-  ctx: ToolExecutionContext,
+  ctx: ExecutionContext,
   options?: {
     summaryLabel?: string;
     tasks?: string[];
@@ -192,7 +192,7 @@ export async function executeSastPipeline(
 export async function runSingleTaskPipeline(
   taskIds: string[],
   input: unknown,
-  ctx: ToolExecutionContext,
+  ctx: ExecutionContext,
   extraOpts?: {
     summaryLabel?: string;
     taskConfig?: Record<string, Record<string, unknown>>;
@@ -259,7 +259,7 @@ function humanizeStage(taskName: string): string {
  * stage in the rolling activity tail + phase strip while `currentTool.name`
  * stays pinned to the actual tool id.
  */
-function createProgressTracker(ctx: ToolExecutionContext): {
+function createProgressTracker(ctx: ExecutionContext): {
   update: (name: string) => void;
   clear: () => void;
 } {
@@ -275,7 +275,7 @@ function createProgressTracker(ctx: ToolExecutionContext): {
 
 export async function generateContextSnapshot(
   target: string,
-  ctx: ToolExecutionContext,
+  ctx: ExecutionContext,
   opts: ContextGenOptions,
 ): Promise<import("../../ui/state.js").ContextSnapshot> {
   const path = await import("node:path");
@@ -320,7 +320,7 @@ export async function generateContextSnapshot(
 
 async function generateMonorepoSnapshot(
   target: string,
-  ctx: ToolExecutionContext,
+  ctx: ExecutionContext,
   opts: ContextGenOptions,
   repoRoot: string,
   scanPath: string,
@@ -398,7 +398,7 @@ async function generateSingleProjectContext(
   scanPath: string,
   repoName: string,
   repoRoot: string,
-  ctx: ToolExecutionContext,
+  ctx: ExecutionContext,
   opts: ContextGenOptions,
   updateProgress: (taskName: string) => void,
 ): Promise<Omit<import("../../ui/state.js").ContextSnapshot, "modules" | "discovery" | "options">> {

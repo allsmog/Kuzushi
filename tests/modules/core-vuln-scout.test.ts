@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ToolExecutionContext } from "../../src/modules/types.js";
+import type { ExecutionContext } from "../../src/modules/types.js";
 import { createCoreVulnScoutModule } from "../../src/modules/vuln-scout/vuln-scout.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
@@ -37,11 +37,11 @@ function createConfig(): KuzushiConfig {
   } as KuzushiConfig;
 }
 
-function createCtx(overrides: Partial<ToolExecutionContext> = {}): ToolExecutionContext {
+function createCtx(overrides: Partial<ExecutionContext> = {}): ExecutionContext {
   return {
     cwd: "/tmp/repo",
-    runtime: {} as ToolExecutionContext["runtime"],
-    bus: {} as ToolExecutionContext["bus"],
+    runtime: {} as ExecutionContext["runtime"],
+    bus: {} as ExecutionContext["bus"],
     config: createConfig(),
     ...overrides,
   };

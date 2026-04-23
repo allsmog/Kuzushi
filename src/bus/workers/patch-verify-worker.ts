@@ -9,7 +9,7 @@ import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import { toErrorMessage } from "../../utils.js";
 import type { PatchVerifyRequestedEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
-import { executeAgentTask } from "../task-execution.js";
+import { extractTaskFindings } from "../task-findings.js";
 import type { MessageBus } from "../types.js";
 
 export interface PatchVerifyWorkerDeps {
@@ -124,7 +124,11 @@ async function verifyPatch(
       upstreamOutputs: new Map(),
     };
     const taskConfig = resolveConfiguredTaskConfig(config, taskId);
-    const { emittedFindings } = await executeAgentTask(task, scanOpts, taskContext, taskConfig);
+    if (task.init) {
+      await task.init(taskConfig);
+    }
+    const output = await task.run(scanOpts, taskContext);
+    const emittedFindings = extractTaskFindings(task.outputKind, output);
 
     for (const finding of emittedFindings) {
       if (finding.fingerprint === fingerprint) {

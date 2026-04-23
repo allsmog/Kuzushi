@@ -9,7 +9,7 @@
  *   - `TaskContext` construction (scan-worker, patch-verify-worker,
  *     taint-analysis-refinement-worker, orchestrator's nested contexts,
  *     cross-service analyze's per-stage contexts)
- *   - `ToolExecutionContext` construction (copilot/core.ts executeTool)
+ *   - `ExecutionContext` construction (copilot/core.ts executeTool)
  *   - Verifier workers that iterate `runtime.query` outside a TaskContext
  *     (cheap-verify, verify-gate)
  */

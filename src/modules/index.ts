@@ -15,7 +15,7 @@ export { defineModule, defineTool } from "./define.js";
 export type { ModuleLoadErrorCode } from "./errors.js";
 // Structured load-time error type + its discriminator.
 export { ModuleLoadError } from "./errors.js";
-// Narrow host-handle interfaces exposed via ToolExecutionContext.
+// Narrow host-handle interfaces exposed via ExecutionContext.
 export type {
   HostCapability,
   HostInfo,
@@ -40,6 +40,7 @@ export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
 export type {
   CopilotModule,
   CopilotModuleRequirement,
+  ExecutionContext,
   JSONSchema,
   ModuleCategory,
   ModuleContext,
@@ -51,7 +52,6 @@ export type {
   ModuleRequirements,
   ModuleSpecifier,
   ModuleTool,
-  ToolExecutionContext,
   ToolResult,
 } from "./types.js";
 export { createVariantHunterModule } from "./variant-hunter.js";

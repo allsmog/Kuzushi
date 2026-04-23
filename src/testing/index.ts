@@ -8,7 +8,7 @@
  *   - Let module authors exercise `ModuleTool.execute(input, ctx)` in a unit
  *     test without standing up a real AgentRuntime, MessageBus, sqlite
  *     workspace, or Ink shell.
- *   - Cover every field on `ToolExecutionContext` with a sensible default,
+ *   - Cover every field on `ExecutionContext` with a sensible default,
  *     overridable per-test.
  *   - Provide recording stubs (logger, print-sink, event-scope, workspace,
  *     datastore) so tests can assert on side-effects without extra wiring.
@@ -27,7 +27,7 @@ import type {
   ToolOptionStore,
   WorkspaceHandle,
 } from "../modules/host-handles.js";
-import type { ToolExecutionContext } from "../modules/types.js";
+import type { ExecutionContext } from "../modules/types.js";
 import type { KuzushiConfig } from "../types.js";
 import { createMockOptionStore } from "./mocks/datastore.js";
 import { createMockEventScope } from "./mocks/event-scope.js";
@@ -151,13 +151,13 @@ export function createMockBus(): MessageBus & {
 // createMockToolContext
 // ---------------------------------------------------------------------------
 
-export type MockToolContextOverrides = Omit<Partial<ToolExecutionContext>, "config" | "host"> & {
+export type MockToolContextOverrides = Omit<Partial<ExecutionContext>, "config" | "host"> & {
   config?: Partial<KuzushiConfig>;
   host?: Partial<HostInfo>;
 };
 
 /**
- * Build a `ToolExecutionContext` for unit tests. Every field has a default;
+ * Build a `ExecutionContext` for unit tests. Every field has a default;
  * override the pieces your tool actually reads. Recording stubs (logger,
  * print, uiStore, workspace, datastore, events) are installed by default so
  * tests can `expect(ctx.logger!.records).toContain(...)` with no extra wiring.
@@ -171,9 +171,7 @@ export type MockToolContextOverrides = Omit<Partial<ToolExecutionContext>, "conf
  *   const result = await myTool.execute({ arg: 1 }, ctx);
  *   assertToolResult(result, { ok: true });
  */
-export function createMockToolContext(
-  overrides: MockToolContextOverrides = {},
-): ToolExecutionContext {
+export function createMockToolContext(overrides: MockToolContextOverrides = {}): ExecutionContext {
   const {
     config: configOverrides,
     host: hostOverrides,
@@ -197,7 +195,7 @@ export function createMockToolContext(
   }> = [];
   const outputCalls: string[] = [];
 
-  const ctx: ToolExecutionContext = {
+  const ctx: ExecutionContext = {
     cwd: rest.cwd ?? process.cwd(),
     runtime: runtime ?? noopRuntime,
     bus: bus ?? createMockBus(),
@@ -250,7 +248,7 @@ export function createMockToolContext(
  * `reportActivity` with a custom spy.
  */
 export function getRecordedActivity(
-  ctx: ToolExecutionContext,
+  ctx: ExecutionContext,
 ): Array<{ description: string; meta?: { phase?: string; step?: number; total?: number } }> {
   return (
     ((ctx as unknown as Record<string, unknown>)["__activityCalls"] as Array<{
@@ -261,7 +259,7 @@ export function getRecordedActivity(
 }
 
 /** Read the default `reportOutput` call log installed by `createMockToolContext`. */
-export function getRecordedOutput(ctx: ToolExecutionContext): string[] {
+export function getRecordedOutput(ctx: ExecutionContext): string[] {
   return ((ctx as unknown as Record<string, unknown>)["__outputCalls"] as string[]) ?? [];
 }
 
@@ -293,11 +291,11 @@ export { createMockWorkspace, type MockWorkspace } from "./mocks/workspace.js";
 export { expectModuleShape, ModuleShapeError } from "./module-shape.js";
 export type {
   AgentRuntime,
+  ExecutionContext,
   HostInfo,
   HostUiHandle,
   MessageBus,
   ModuleEventScope,
-  ToolExecutionContext,
   ToolLogger,
   ToolOptionStore,
   WorkspaceHandle,

@@ -26,7 +26,7 @@ import {
   executeSastPipeline,
   formatContextSummary as sharedFormatContextSummary,
 } from "./sast/shared.js";
-import type { CopilotModule, ToolExecutionContext, ToolResult } from "./types.js";
+import type { CopilotModule, ExecutionContext, ToolResult } from "./types.js";
 
 // Re-export so external callers (src/copilot/shell.ts) keep working.
 export const formatContextSummary = sharedFormatContextSummary;
@@ -92,7 +92,7 @@ const scanTool = defineTool<"sast">({
     required: ["target"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     // Capability probe — the pipeline needs the workspace to persist findings.
     // In `kuzushi run` mode without a workspace, warn via the structured
     // logger (if the host wired one) so operators see it in the module log;
@@ -129,11 +129,6 @@ export function createCoreSastModule(): CopilotModule {
       "agentic-sast, taint-iris, threat-hunt, triage, verify, patch, findings, context.",
     rank: "excellent",
     tools: [scanTool],
-
-    // Tasks are not listed here — they're already registered via
-    // createDefaultTaskRegistry(). The SAST module bridges to the
-    // existing pipeline rather than re-declaring its 40+ tasks.
-    tasks: undefined,
 
     events: {
       produces: [

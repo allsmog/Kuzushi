@@ -7,7 +7,7 @@
  */
 
 import { defineModule, defineTool } from "../define.js";
-import type { CopilotModule, ToolExecutionContext, ToolResult } from "../types.js";
+import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 
 type Severity = "critical" | "high" | "medium" | "low" | "info";
 type Verdict = "tp" | "fp" | "needs_review" | "by_design";
@@ -50,7 +50,7 @@ export function createFindingsModule(): CopilotModule {
       },
     },
     headless: true,
-    async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+    async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
       const params = (input ?? {}) as Record<string, unknown>;
       if (!ctx.workspace || !ctx.workspaceId) {
         return {

@@ -13,7 +13,7 @@
  * commands render.
  */
 
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 type Params = Record<string, unknown>;
 
@@ -45,7 +45,7 @@ const nmapTool: ModuleTool = {
     required: ["target"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const p = (input ?? {}) as Params;
     if (!ctx.workspace || !ctx.workspaceId) {
       return { ok: false, output: "recon:nmap needs an active workspace." };
@@ -110,7 +110,7 @@ const subdomainTool: ModuleTool = {
     required: ["domain"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const p = (input ?? {}) as Params;
     if (!ctx.workspace || !ctx.workspaceId) {
       return { ok: false, output: "recon:subdomain needs an active workspace." };
@@ -155,7 +155,7 @@ const httpFingerprintTool: ModuleTool = {
     required: ["target"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const p = (input ?? {}) as Params;
     if (!ctx.workspace || !ctx.workspaceId) {
       return { ok: false, output: "recon:http-fingerprint needs an active workspace." };

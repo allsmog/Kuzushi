@@ -29,7 +29,7 @@ import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import { defineModule, defineTool } from "../define.js";
 import { saveContextSnapshot } from "../sast/context-persist.js";
 import { formatContextSummary, generateContextSnapshot } from "../sast/shared.js";
-import type { CopilotModule, ToolExecutionContext, ToolResult } from "../types.js";
+import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 
 export function createContextModule(): CopilotModule {
   const contextBuildTool = defineTool<"context">({
@@ -83,7 +83,7 @@ export function createContextModule(): CopilotModule {
       required: ["target"],
     },
     headless: true,
-    async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+    async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
       const p = input as Record<string, unknown>;
       const target = (p.target as string) ?? ctx.target;
       if (!target) return { ok: false, output: "context:build requires a target (repo path)." };

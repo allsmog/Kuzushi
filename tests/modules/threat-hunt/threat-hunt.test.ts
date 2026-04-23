@@ -6,7 +6,7 @@ import type {
 } from "../../../src/agents/tasks/threat-modeling/types.js";
 import { publishAgentActivity } from "../../../src/bus/activity.js";
 import { InProcessBus } from "../../../src/bus/adapters/in-process.js";
-import type { TaskActivityEvent, ThreatHuntAgentActivityEvent } from "../../../src/bus/events.js";
+import type { TaskActivityEvent, TaskAgentActivityEvent } from "../../../src/bus/events.js";
 import {
   __threatHuntInternals,
   threatHuntTool,
@@ -413,9 +413,9 @@ describe("threat-hunt", () => {
       ctx: ExecutionContext,
       actor: DfdElement,
       runIndex: number,
-    ): Promise<ThreatHuntAgentActivityEvent["payload"][]> {
-      const events: ThreatHuntAgentActivityEvent["payload"][] = [];
-      bus.subscribe<ThreatHuntAgentActivityEvent>("threat-hunt:agent-activity", (event) => {
+    ): Promise<TaskAgentActivityEvent["payload"][]> {
+      const events: TaskAgentActivityEvent["payload"][] = [];
+      bus.subscribe<TaskAgentActivityEvent>("threat-hunt:agent-activity", (event) => {
         events.push(event.payload);
       });
       const config = await resolveConfig({}, ctx);
@@ -529,8 +529,8 @@ describe("threat-hunt", () => {
       const ctx = makeExecutionContext(bus, failingRuntime);
       const actor = makeDfdElement({ name: "Attacker" });
 
-      const events: ThreatHuntAgentActivityEvent["payload"][] = [];
-      bus.subscribe<ThreatHuntAgentActivityEvent>("threat-hunt:agent-activity", (event) => {
+      const events: TaskAgentActivityEvent["payload"][] = [];
+      bus.subscribe<TaskAgentActivityEvent>("threat-hunt:agent-activity", (event) => {
         events.push(event.payload);
       });
       const config = await resolveConfig({}, ctx);

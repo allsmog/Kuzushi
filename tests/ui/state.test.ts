@@ -71,3 +71,96 @@ describe("UIStore agentActivity memory retention", () => {
     expect(store.getState().agentActivity.size).toBe(0);
   });
 });
+
+describe("UIStore hunt snapshot archive", () => {
+  // The shell's `hunt-post-mortem` scrollback block consumes these
+  // snapshots — archive on `done:true` preserves the per-actor breakdown
+  // after HeartbeatStrip stops rendering; consume drains + resets so a
+  // second hunt's post-mortem doesn't inherit the first's actors.
+  it("archiveAgentActivity copies lines into lastHuntSnapshot before clear", () => {
+    const store = new UIStore();
+    store.addAgentActivity("threat-hunt:Attacker:0", {
+      kind: "tool-start",
+      toolName: "Read",
+      detail: "Read src/api.ts",
+      index: 0,
+      total: 1,
+    });
+
+    store.archiveAgentActivity("threat-hunt:Attacker:0");
+    store.clearAgentActivity("threat-hunt:Attacker:0");
+
+    const snapshot = store.getState().lastHuntSnapshot;
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]!.fingerprint).toBe("threat-hunt:Attacker:0");
+    expect(snapshot[0]!.lines).toHaveLength(1);
+    expect(snapshot[0]!.lines[0]!.toolName).toBe("Read");
+    // Active map is now empty — snapshot survives.
+    expect(store.getState().agentActivity.has("threat-hunt:Attacker:0")).toBe(false);
+  });
+
+  it("archiveAgentActivity is a no-op for unknown or empty fingerprints", () => {
+    const store = new UIStore();
+    store.archiveAgentActivity("nonexistent");
+    expect(store.getState().lastHuntSnapshot).toHaveLength(0);
+  });
+
+  it("consumeHuntSnapshot returns the accumulated snapshots and clears them", () => {
+    const store = new UIStore();
+    store.addAgentActivity("threat-hunt:A:0", {
+      kind: "tool-start",
+      toolName: "Read",
+      index: 0,
+      total: 2,
+    });
+    store.addAgentActivity("threat-hunt:B:0", {
+      kind: "tool-complete",
+      detail: "Grep done",
+      index: 0,
+      total: 2,
+    });
+    store.archiveAgentActivity("threat-hunt:A:0");
+    store.archiveAgentActivity("threat-hunt:B:0");
+
+    const drained = store.consumeHuntSnapshot();
+    expect(drained.map((s) => s.fingerprint)).toEqual(["threat-hunt:A:0", "threat-hunt:B:0"]);
+    expect(store.getState().lastHuntSnapshot).toHaveLength(0);
+
+    // Second consume returns empty — prevents a subsequent hunt's
+    // post-mortem from inheriting the prior run's actors.
+    expect(store.consumeHuntSnapshot()).toHaveLength(0);
+  });
+
+  it("preserves insertion order across multiple archives (matches hunt completion order)", () => {
+    const store = new UIStore();
+    for (const name of ["Third", "First", "Second"]) {
+      store.addAgentActivity(`threat-hunt:${name}:0`, {
+        kind: "tool-complete",
+        detail: `${name} done`,
+        index: 0,
+        total: 3,
+      });
+      store.archiveAgentActivity(`threat-hunt:${name}:0`);
+    }
+    const drained = store.consumeHuntSnapshot();
+    expect(drained.map((s) => s.fingerprint)).toEqual([
+      "threat-hunt:Third:0",
+      "threat-hunt:First:0",
+      "threat-hunt:Second:0",
+    ]);
+  });
+
+  it("does not touch snapshots when clearAgentActivity runs without archive", () => {
+    const store = new UIStore();
+    store.addAgentActivity("threat-hunt:Orphan:0", {
+      kind: "tool-start",
+      index: 0,
+      total: 1,
+    });
+    // No archive call — caller (triage/verification/poc-harness paths that
+    // don't set `done:true`) just clears. Snapshot must remain empty so
+    // non-hunt producers don't leak into the post-mortem block.
+    store.clearAgentActivity("threat-hunt:Orphan:0");
+    expect(store.getState().lastHuntSnapshot).toHaveLength(0);
+  });
+});

@@ -24,7 +24,7 @@ vi.mock("../../src/patch.js", async (importOriginal) => {
 // Imports must come after the vi.mock calls so the module graph picks up the stubs.
 import { createPatchModule } from "../../src/modules/patch/patch.js";
 import { createTriageModule } from "../../src/modules/triage/triage.js";
-import type { ToolExecutionContext } from "../../src/modules/types.js";
+import type { ExecutionContext } from "../../src/modules/types.js";
 import { createVerifyModule } from "../../src/modules/verify/verify.js";
 import { initDb } from "../../src/store.js";
 import type { KuzushiConfig } from "../../src/types.js";
@@ -61,12 +61,12 @@ function seedFinding(mgr: WorkspaceManager, fingerprint: string): void {
   ).run(fingerprint);
 }
 
-function mkCtx(mgr: WorkspaceManager): ToolExecutionContext {
+function mkCtx(mgr: WorkspaceManager): ExecutionContext {
   return {
     cwd: "/tmp",
     target: "/tmp/repo",
     runtime: { id: "test", async *query() {} },
-    bus: {} as ToolExecutionContext["bus"],
+    bus: {} as ExecutionContext["bus"],
     config: {
       model: "anthropic:claude-sonnet-4-6",
       busBackend: "in-process",
@@ -88,9 +88,9 @@ describe("triage:run", () => {
     const result = await tool.execute({}, {
       cwd: "/tmp",
       runtime: { id: "test", async *query() {} },
-      bus: {} as ToolExecutionContext["bus"],
+      bus: {} as ExecutionContext["bus"],
       config: {} as KuzushiConfig,
-    } as ToolExecutionContext);
+    } as ExecutionContext);
     expect(result.ok).toBe(false);
     expect(result.output).toContain("active workspace");
   });

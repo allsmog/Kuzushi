@@ -3,7 +3,7 @@ import {
   __nDayInternals,
   createNDayDiffHunterModule,
 } from "../../src/modules/n-day-diff-hunter.js";
-import type { ToolExecutionContext } from "../../src/modules/types.js";
+import type { ExecutionContext } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
 const { fetchCveOrAdvisoryMock, fetchPatchTextMock, resolveRepoMock } = vi.hoisted(() => ({
@@ -63,11 +63,11 @@ function createRuntime(output: unknown, cost = 0.02): MockRuntime {
   };
 }
 
-function createContext(runtime: MockRuntime, config = createConfig()): ToolExecutionContext {
+function createContext(runtime: MockRuntime, config = createConfig()): ExecutionContext {
   return {
     cwd: "/tmp/repo",
-    runtime: runtime as unknown as ToolExecutionContext["runtime"],
-    bus: {} as ToolExecutionContext["bus"],
+    runtime: runtime as unknown as ExecutionContext["runtime"],
+    bus: {} as ExecutionContext["bus"],
     config,
     target: "/tmp/repo",
   };

@@ -13,7 +13,7 @@ import {
 } from "../../src/testing/index.js";
 
 describe("createMockToolContext", () => {
-  it("supplies defaults for every documented ToolExecutionContext field", () => {
+  it("supplies defaults for every documented ExecutionContext field", () => {
     const ctx = createMockToolContext();
     expect(ctx.cwd).toBeTypeOf("string");
     expect(ctx.runtime).toBe(noopRuntime);
@@ -101,7 +101,7 @@ describe("createMockToolContext", () => {
 
   it("preserves backward compat: zero-arg call returns a usable context", async () => {
     const ctx = createMockToolContext();
-    // Should be usable as the ToolExecutionContext that pre-existing tools
+    // Should be usable as the ExecutionContext that pre-existing tools
     // already consume (cwd, runtime, bus, config).
     expect(ctx.cwd).toBeTruthy();
     expect(ctx.runtime).toBeTruthy();

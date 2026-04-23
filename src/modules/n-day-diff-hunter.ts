@@ -15,13 +15,13 @@ import {
 } from "../intel/cve-feed.js";
 import { scoreFindingMetadata } from "../scanners/scoring.js";
 import type { Finding } from "../scanners/types.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
+import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // ndiff:fetch-cve
 // ---------------------------------------------------------------------------
 
-function readNdiffConfig(ctx: ToolExecutionContext): {
+function readNdiffConfig(ctx: ExecutionContext): {
   offline: boolean;
   nvdApiKey?: string;
   githubToken?: string;
@@ -61,7 +61,7 @@ const fetchCveTool: ModuleTool = {
     required: ["id"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
     const id = params.id as string | undefined;
     if (!id) return { ok: false, output: "ndiff:fetch-cve requires an `id`." };
@@ -214,7 +214,7 @@ const extractFixPatternTool: ModuleTool = {
     },
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
     const id = params.id as string | undefined;
     const explicitPatch = params.patchText as string | undefined;
@@ -452,7 +452,7 @@ const huntVariantsTool: ModuleTool = {
     required: ["pattern"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
     const pattern = params.pattern as FixPattern | undefined;
     if (!pattern || typeof pattern !== "object") {

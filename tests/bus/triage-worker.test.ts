@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import type {
-  TriageAgentActivityEvent,
+  TaskAgentActivityEvent,
   TriageErrorEvent,
   TriageResultEvent,
 } from "../../src/bus/events.js";
@@ -362,7 +362,7 @@ describe("triage-worker", () => {
     };
 
     const finding = makeFinding();
-    const activityPromise = bus.waitFor<TriageAgentActivityEvent>(
+    const activityPromise = bus.waitFor<TaskAgentActivityEvent>(
       "triage:agent-activity",
       (event) => event.meta.runId === runId,
     );
