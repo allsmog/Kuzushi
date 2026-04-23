@@ -59,6 +59,8 @@
     "benchmark:regression": "tsx benchmarks/regression-check.ts",
     "perf": "tsx perf/harness.ts",
     "check:circular": "madge --ts-config tsconfig.json --extensions ts,tsx --circular src/",
+    "complexity": "node scripts/cyclomatic.mjs src --top 30 --min 20",
+    "complexity:logic": "node scripts/cyclomatic.mjs src --top 30 --min 20 --logic-only",
     "codegen": "tsx scripts/codegen/index.ts",
     "codegen:check": "tsx scripts/codegen/check.ts",
     "typecheck:codegen": "tsc -p scripts/codegen/tsconfig.json --noEmit",
