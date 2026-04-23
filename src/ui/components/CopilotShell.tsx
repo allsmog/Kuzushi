@@ -11,8 +11,7 @@
  */
 
 import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
-import type React from "react";
-import { memo, useRef, useState } from "react";
+import React, { memo, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
 import {
   buildShellPrompt,
@@ -323,9 +322,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     { isActive: process.stdin.isTTY === true && !!shell },
   );
 
-  if (!shell) return <Text>Loading...</Text>;
-
-  if (shell.pendingAssistantText) {
+  if (shell?.pendingAssistantText) {
     if (pendingAssistantStartedAtRef.current === 0) {
       pendingAssistantStartedAtRef.current = Date.now();
     }
@@ -333,134 +330,201 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     pendingAssistantStartedAtRef.current = 0;
   }
 
+  // ModuleCatalog re-reads shell.moduleCatalog on every render; wrapping it
+  // in <Static> would freeze the first snapshot and hide module/last-run
+  // updates, so we render it plainly when present. The memoized wrapper
+  // stops it from re-rendering on every heartbeat tick.
+  const showCatalog = (shell?.moduleCatalog?.length ?? 0) > 0;
+  const { staticHistory, liveHistory } = React.useMemo(
+    () => splitShellHistory(shell?.history ?? []),
+    [shell?.history],
+  );
+  const staticItems = React.useMemo<Array<ShellStaticItem>>(() => {
+    const items: Array<ShellStaticItem> = [
+      {
+        key: "kz-splash",
+        kind: "splash",
+        workspace: shell?.workspace,
+        target: shell?.target,
+      },
+    ];
+    if (shell && !showCatalog) {
+      items.push({
+        key: "shell-banner",
+        kind: "banner",
+        shell,
+      });
+    }
+    for (const entry of staticHistory) {
+      items.push({
+        key: `history:${historyEntryKey(entry)}`,
+        kind: "history",
+        entry,
+      });
+    }
+    return items;
+  }, [shell, showCatalog, staticHistory]);
   const slashSuggestions = input.trim().startsWith("/") ? listShellSuggestions(input) : [];
 
+  if (!shell) return <Text>Loading...</Text>;
+
   return (
-    <Box flexDirection="column">
-      {/* Phase D.2 banner splash — one-shot ASCII wordmark + tip. Inside
-          a <Static> so it stays at the top and doesn't re-render during
-          normal shell churn. */}
-      <Static items={["kz-splash"]}>
-        {() => <BannerSplash key="kz-splash" workspace={shell.workspace} target={shell.target} />}
-      </Static>
+    <Box flexDirection="column" flexGrow={1} justifyContent="space-between">
+      <Box flexDirection="column">
+        {/* Keep a single historical Static stream in the shell so printed
+            banners and scrolled-past transcript lines move upward cleanly
+            without competing Static regions fighting for reconciliation. */}
+        <Static items={staticItems}>
+          {(item) => <ShellStaticItemView key={item.key} item={item as ShellStaticItem} />}
+        </Static>
 
-      <MemoShellHistory history={shell.history} />
+        {showCatalog ? <MemoShellBanner shell={shell} /> : null}
 
-      {!shell.processing && shell.history.length > 0 ? (
-        <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
-          <Text>{tokens.tertiary("interactive")}</Text>
-        </Box>
-      ) : null}
+        <MemoShellLiveHistory history={liveHistory} />
+      </Box>
 
-      <MemoShellViewPanel summary={shellState.summary} shell={shell} />
-      <ShellWayfinding shell={shell} narrow={columns < 110} />
-
-      {shell.plannerBusy && !shell.pendingPlan && (
-        <Box marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
-          <Spinner />
-          <Text>
-            {"  "}
-            {tokens.muted("planning\u2026")}
-          </Text>
-        </Box>
-      )}
-
-      {shell.pendingPlan && <PlanCard plan={shell.pendingPlan} />}
-
-      {shell.pendingAssistantText && (
-        <HistoryEntry
-          entry={{
-            type: "output",
-            text: shell.pendingAssistantText,
-            timestamp: pendingAssistantStartedAtRef.current || Date.now(),
-          }}
-        />
-      )}
-
-      {shell.processing && shell.currentTool && (
-        <Box flexDirection="column">
-          <ToolRunningStatus tool={shell.currentTool} />
-          {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
-        </Box>
-      )}
-
-      {shell.processing && !shell.currentTool && (
-        <Box flexDirection="column" marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
-          <Box>
-            <Spinner />
-            <Text>
-              {"  "}
-              {tokens.muted("running...")}
-            </Text>
+      <Box flexDirection="column">
+        {!shell.processing && shell.history.length > 0 ? (
+          <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
+            <Text>{tokens.tertiary("interactive")}</Text>
           </Box>
-          {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
-        </Box>
-      )}
+        ) : null}
 
-      {shellState.ctrlCArmedAt && Date.now() - shellState.ctrlCArmedAt < CTRL_C_ARM_WINDOW_MS ? (
-        <Box marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
-          <Text>{tokens.warn("press Ctrl+C again to exit")}</Text>
-        </Box>
-      ) : null}
+        <MemoShellViewPanel summary={shellState.summary} shell={shell} />
+        <ShellWayfinding shell={shell} narrow={columns < 110} />
 
-      {!shell.processing && (
-        <>
-          <Box marginTop={SPACING.sm}>
-            <Text>
-              {tokens.accent(buildShellPrompt(shell.focusedModule))}
-              {input.slice(0, cursor)}
-              {tokens.tertiary(cursor < input.length ? input[cursor] : theme.glyphs.textCursor)}
-              {cursor < input.length ? input.slice(cursor + 1) : ""}
-            </Text>
+        <Ratchet>
+          <Box flexDirection="column" minHeight={1}>
+            {shell.plannerBusy && !shell.pendingPlan && (
+              <Box marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
+                <Spinner />
+                <Text>
+                  {"  "}
+                  {tokens.muted("planning\u2026")}
+                </Text>
+              </Box>
+            )}
+
+            {shell.pendingPlan && <PlanCard plan={shell.pendingPlan} />}
+
+            {shell.pendingAssistantText && (
+              <HistoryEntry
+                entry={{
+                  type: "output",
+                  text: shell.pendingAssistantText,
+                  timestamp: pendingAssistantStartedAtRef.current || Date.now(),
+                }}
+              />
+            )}
+
+            {shell.processing && shell.currentTool && (
+              <Box flexDirection="column">
+                <ToolRunningStatus tool={shell.currentTool} />
+                {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
+              </Box>
+            )}
+
+            {shell.processing && !shell.currentTool && (
+              <Box
+                flexDirection="column"
+                marginTop={theme.spacing.sm}
+                paddingLeft={theme.spacing.md}
+              >
+                <Box>
+                  <Spinner />
+                  <Text>
+                    {"  "}
+                    {tokens.muted("running...")}
+                  </Text>
+                </Box>
+                {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
+              </Box>
+            )}
+
+            {shellState.ctrlCArmedAt &&
+            Date.now() - shellState.ctrlCArmedAt < CTRL_C_ARM_WINDOW_MS ? (
+              <Box marginTop={theme.spacing.sm} paddingLeft={theme.spacing.md}>
+                <Text>{tokens.warn("press Ctrl+C again to exit")}</Text>
+              </Box>
+            ) : null}
           </Box>
-          {slashSuggestions.length > 0 && (
-            <Box flexDirection="column" paddingLeft={theme.spacing.md}>
-              <Text>{tokens.tertiary("Suggestions")}</Text>
-              <Text>{tokens.tertiary(slashSuggestions.join("  ·  "))}</Text>
+        </Ratchet>
+
+        {!shell.processing && (
+          <Box flexDirection="column" marginTop={SPACING.sm} minHeight={2}>
+            <Box>
+              <Text>
+                {tokens.accent(buildShellPrompt(shell.focusedModule))}
+                {input.slice(0, cursor)}
+                {tokens.tertiary(cursor < input.length ? input[cursor] : theme.glyphs.textCursor)}
+                {cursor < input.length ? input.slice(cursor + 1) : ""}
+              </Text>
             </Box>
-          )}
-        </>
-      )}
+            {slashSuggestions.length > 0 ? (
+              <Box flexDirection="column" paddingLeft={theme.spacing.md}>
+                <Text>{tokens.tertiary("Suggestions")}</Text>
+                <Text>{tokens.tertiary(slashSuggestions.join("  ·  "))}</Text>
+              </Box>
+            ) : (
+              <Box minHeight={1} />
+            )}
+          </Box>
+        )}
+      </Box>
     </Box>
   );
 }
 
-const MemoShellHistory = memo(
-  function ShellHistory({
+const SHELL_LIVE_HISTORY_COUNT = 8;
+
+type ShellStaticItem =
+  | { key: string; kind: "splash"; workspace?: string | null; target?: string | null }
+  | { key: string; kind: "banner"; shell: ShellState }
+  | { key: string; kind: "history"; entry: ShellHistoryEntry };
+
+function splitShellHistory(history: ReadonlyArray<ShellHistoryEntry>): {
+  staticHistory: ReadonlyArray<ShellHistoryEntry>;
+  liveHistory: ReadonlyArray<ShellHistoryEntry>;
+} {
+  // Running tool-call entries mutate in place (status flip, resultOutput
+  // injection, liveActivities tail). They can't go into `<Static>` until
+  // they reach a terminal status, so everything at-or-after the oldest
+  // running tool-call stays in the live zone regardless of entry age.
+  const firstRunningIdx = history.findIndex(
+    (e) => e.type === "tool-call" && e.status === "running",
+  );
+  const defaultCutoff = Math.max(0, history.length - SHELL_LIVE_HISTORY_COUNT);
+  const staticCutoff =
+    firstRunningIdx >= 0 ? Math.min(firstRunningIdx, defaultCutoff) : defaultCutoff;
+  return {
+    staticHistory: history.slice(0, staticCutoff),
+    liveHistory: history.slice(staticCutoff),
+  };
+}
+
+function ShellStaticItemView({ item }: { item: ShellStaticItem }): React.ReactElement {
+  switch (item.kind) {
+    case "splash":
+      return <BannerSplash workspace={item.workspace} target={item.target} />;
+    case "banner":
+      return <MemoShellBanner shell={item.shell} />;
+    case "history":
+      return <HistoryEntry entry={item.entry} />;
+  }
+}
+
+const MemoShellLiveHistory = memo(
+  function ShellLiveHistory({
     history,
   }: {
     history: ReadonlyArray<ShellHistoryEntry>;
   }): React.ReactElement {
-    const LIVE_COUNT = 8;
-    // Running tool-call entries mutate in place (status flip, resultOutput
-    // injection, liveActivities tail). They can't go into `<Static>` until
-    // they reach a terminal status, so everything at-or-after the oldest
-    // running tool-call stays in the live zone regardless of entry age.
-    const firstRunningIdx = history.findIndex(
-      (e) => e.type === "tool-call" && e.status === "running",
-    );
-    const defaultCutoff = Math.max(0, history.length - LIVE_COUNT);
-    const staticCutoff =
-      firstRunningIdx >= 0 ? Math.min(firstRunningIdx, defaultCutoff) : defaultCutoff;
-    const staticHistory = history.slice(0, staticCutoff);
-    const liveHistory = history.slice(staticCutoff);
-
     return (
-      <>
-        <Static items={staticHistory}>
-          {(item) => (
-            <HistoryEntry
-              key={historyEntryKey(item as ShellHistoryEntry)}
-              entry={item as ShellHistoryEntry}
-            />
-          )}
-        </Static>
-        <Box flexDirection="column">
-          {liveHistory.map((entry) => (
-            <HistoryEntry key={historyEntryKey(entry)} entry={entry} />
-          ))}
-        </Box>
-      </>
+      <Box flexDirection="column">
+        {history.map((entry) => (
+          <HistoryEntry key={historyEntryKey(entry)} entry={entry} />
+        ))}
+      </Box>
     );
   },
   (prev, next) => prev.history === next.history,

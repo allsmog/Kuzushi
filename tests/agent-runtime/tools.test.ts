@@ -64,6 +64,21 @@ describe("agent-runtime tools", () => {
     expect(output).not.toContain("scripts/util.ts");
   });
 
+  it("Glob respects exclude patterns", async () => {
+    const cwd = makeTempWorkspace();
+    const output = await executeTool(
+      "Glob",
+      {
+        pattern: "**/*.ts",
+        exclude: ["scripts/**"],
+      },
+      cwd,
+    );
+
+    expect(output).toContain("src/app.ts");
+    expect(output).not.toContain("scripts/util.ts");
+  });
+
   it("Grep returns file:line:content matches", async () => {
     const cwd = makeTempWorkspace();
     const output = await executeTool(
@@ -77,6 +92,29 @@ describe("agent-runtime tools", () => {
 
     expect(output).toContain("src/app.ts:2:  // TODO: sanitize input");
     expect(output).toContain("scripts/util.ts:2:// TODO: tighten validation");
+  });
+
+  it("Grep ignores node_modules by default", async () => {
+    const cwd = makeTempWorkspace();
+    mkdirSync(path.join(cwd, "node_modules", "demo"), { recursive: true });
+    writeFileSync(
+      path.join(cwd, "node_modules", "demo", "index.ts"),
+      "// TODO: should stay hidden",
+      "utf8",
+    );
+
+    const output = await executeTool(
+      "Grep",
+      {
+        pattern: "TODO",
+        glob: "**/*.ts",
+      },
+      cwd,
+    );
+
+    expect(output).toContain("src/app.ts:2:  // TODO: sanitize input");
+    expect(output).toContain("scripts/util.ts:2:// TODO: tighten validation");
+    expect(output).not.toContain("node_modules/demo/index.ts");
   });
 
   it("throws for unsupported tool names", async () => {

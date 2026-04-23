@@ -27,3 +27,40 @@ export const OUTCOME_GLYPH = {
   fail: "✗", // ✗
   abort: "·", // ·
 } as const;
+
+export type BorderVariant = "rounded" | "square";
+
+export const BORDER_GLYPHS: Record<
+  BorderVariant,
+  {
+    topLeft: string;
+    topRight: string;
+    bottomLeft: string;
+    bottomRight: string;
+    horizontal: string;
+    vertical: string;
+    dividerLeft: string;
+    dividerRight: string;
+  }
+> = {
+  rounded: {
+    topLeft: "╭",
+    topRight: "╮",
+    bottomLeft: "╰",
+    bottomRight: "╯",
+    horizontal: "─",
+    vertical: "│",
+    dividerLeft: "├",
+    dividerRight: "┤",
+  },
+  square: {
+    topLeft: "┌",
+    topRight: "┐",
+    bottomLeft: "└",
+    bottomRight: "┘",
+    horizontal: "─",
+    vertical: "│",
+    dividerLeft: "├",
+    dividerRight: "┤",
+  },
+} as const;

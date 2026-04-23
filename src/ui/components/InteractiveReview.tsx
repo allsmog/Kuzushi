@@ -20,8 +20,9 @@ import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
 import type { Verdict } from "../../types.js";
-import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import type { ActionableFinding } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
@@ -47,7 +48,7 @@ export function InteractiveReview({
 }: InteractiveReviewProps): React.ReactElement {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [tally, setTally] = useState<ReviewTally>({ tp: 0, fp: 0, by_design: 0, skipped: 0 });
-  const width = terminalCardWidth();
+  const width = useTerminalCardWidth();
 
   useRegisterKeybindings([
     { keys: "t", label: "True positive" },

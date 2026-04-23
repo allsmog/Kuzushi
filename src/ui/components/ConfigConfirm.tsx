@@ -8,8 +8,9 @@
 
 import { Box, Text, useInput } from "ink";
 import type React from "react";
-import { boxFooter, boxHeader, formatCost, terminalCardWidth } from "../format.js";
+import { boxFooter, boxHeader, formatCost } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { Table } from "../primitives/Table.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -44,7 +45,7 @@ export function ConfigConfirm({
   onEdit,
   onQuit,
 }: ConfigConfirmProps): React.ReactElement {
-  const width = terminalCardWidth();
+  const width = useTerminalCardWidth();
 
   useRegisterKeybindings([
     { keys: "Enter", label: "Start scan" },

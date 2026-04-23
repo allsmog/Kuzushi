@@ -3,10 +3,9 @@
  * how `critical | high | medium | low | info` severities render.
  *
  * Design goals:
- *   - Color-blind-safe: the palette is inspired by the Okabe-Ito set
- *     (vermillion / orange / yellow / sky-blue / bluish-green) which is
- *     distinguishable under deuteranopia, protanopia, and tritanopia.
- *     Pure "red vs green" is deliberately avoided.
+ *   - Restrained severity ladder: warm hues carry risk, cooler/neutral hues
+ *     carry lower-priority context. This keeps the shell from reading like a
+ *     rainbow while preserving quick scanability.
  *   - Never rely on hue alone: every severity carries a `glyph` + `label`
  *     pair so a grayscale / screen-reader render still conveys the tier.
  *   - Honor `NO_COLOR` (https://no-color.org): any non-empty value on the
@@ -27,7 +26,7 @@
  * Relationship to `tokens` (`src/ui/tokens.ts`):
  *   The `tokens` vocabulary owns *generic* semantic colors (danger / warn /
  *   info / accent / muted / etc.). Severity is its own axis with its own
- *   accessibility contract (Okabe-Ito palette + glyph pairing + NO_COLOR /
+ *   accessibility contract (severity ladder + glyph pairing + NO_COLOR /
  *   KUZUSHI_HIGH_CONTRAST), so it is intentionally NOT folded into
  *   `tokens.danger`. Use `severityChalk(sev)(text)` at chalk callsites and
  *   `<Text color={severityStyle(sev).color} bold>` at Ink callsites — this
@@ -77,15 +76,12 @@ export interface SeverityStyle {
  *   - `glyph` is ALWAYS emitted even when color is suppressed.
  *   - `label` / `longLabel` are plain-text — screen readers speak these.
  *
- * Palette mapping (Okabe-Ito friendly):
- *   critical → vermillion (redBright)   — strong attention-getter
- *   high     → orange-ish (yellowBright + bold) in practice renders
- *              as a distinct "bright yellow" which humans read as orange
- *              on most palettes; falls back to red on the plain pass
- *   medium   → amber/yellow             — cautionary, not alarming
- *   low      → sky blue                 — still colored, not dim, so
- *              operators can scan the bottom of a findings list
- *   info     → bluish-green (cyan)      — neutral/by-design
+ * Palette mapping:
+ *   critical → bright red               — strongest attention-getter
+ *   high     → red                      — urgent, but below critical
+ *   medium   → yellow                   — cautionary, not alarming
+ *   low      → blue                     — low-priority but still scannable
+ *   info     → gray                     — informational/by-design
  */
 const BASE_PALETTE: Record<Severity, Omit<SeverityStyle, "color" | "bold"> & { color: InkColor }> =
   {
@@ -108,13 +104,13 @@ const BASE_PALETTE: Record<Severity, Omit<SeverityStyle, "color" | "bold"> & { c
       longLabel: "MEDIUM",
     },
     low: {
-      color: "cyan",
+      color: "blue",
       glyph: "●", // ● circle
       label: "LOW ",
       longLabel: "LOW",
     },
     info: {
-      color: "blue",
+      color: "gray",
       glyph: "○", // ○ hollow circle
       label: "INFO",
       longLabel: "INFO",
@@ -129,8 +125,8 @@ const HIGH_CONTRAST_COLOR: Record<Severity, InkColor> = {
   critical: "redBright",
   high: "redBright",
   medium: "yellowBright",
-  low: "cyanBright",
-  info: "blueBright",
+  low: "blueBright",
+  info: "white",
 };
 
 /**

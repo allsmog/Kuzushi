@@ -11,8 +11,8 @@ import {
   formatCost,
   formatDuration,
   miniBarChart,
-  terminalCardWidth,
 } from "../format.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { Table } from "../primitives/Table.js";
 import type { SummaryData } from "../state.js";
@@ -30,10 +30,10 @@ interface ScanSummaryProps {
   data: SummaryData;
 }
 
-export const ScanSummary = React.memo(_ScanSummary);
+export const ScanSummary = React.memo(ScanSummaryImpl);
 
-function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
-  const width = terminalCardWidth(96, 60);
+function ScanSummaryImpl({ data }: ScanSummaryProps): React.ReactElement {
+  const width = useTerminalCardWidth(96, 60);
   const { verdictCounts: counts } = data;
   const total = counts.tp + counts.fp + counts.needs_review;
   const actionableCount = counts.tp + counts.needs_review;
@@ -204,8 +204,8 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
               { label: "tp", value: counts.tp, color: tokens.danger },
               { label: "fp", value: counts.fp, color: tokens.success },
               { label: "needs_review", value: counts.needs_review, color: tokens.warn },
-            ]).map((line, i) => (
-              <Text key={i}>{line}</Text>
+            ]).map((line) => (
+              <Text key={line}>{line}</Text>
             ))}
           </>
         )}
@@ -355,8 +355,8 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
             <Text>{boxDivider(width)}</Text>
             <Text>{tokens.label("Exploitation Chains")}</Text>
             <Text>{""}</Text>
-            {data.exploitChains.map((chain, ci) => (
-              <Box key={ci} flexDirection="column">
+            {data.exploitChains.map((chain) => (
+              <Box key={chain.id} flexDirection="column">
                 <AttackChainDiagram chain={chain} />
                 <Text>{""}</Text>
               </Box>
@@ -379,8 +379,8 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
             <Text>{boxDivider(width)}</Text>
             <Text>{tokens.label("Actionable Findings")}</Text>
             <Text>{""}</Text>
-            {data.actionableFindings.map((f, i) => (
-              <FindingCard key={i} finding={f} />
+            {data.actionableFindings.map((f) => (
+              <FindingCard key={f.fingerprint} finding={f} />
             ))}
           </>
         )}
@@ -413,8 +413,8 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
             { label: "Dynamic", value: data.dynamicCostUsd, color: tokens.success },
             { label: "Patch", value: data.patchCostUsd, color: tokens.muted },
           ].filter((e) => e.value > 0),
-        ).map((line, i) => (
-          <Text key={`cost-${i}`}> {line}</Text>
+        ).map((line) => (
+          <Text key={`cost:${line}`}> {line}</Text>
         ))}
         {data.budgetExceeded && (
           <>
@@ -432,7 +432,7 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
         )}
 
         {/* Run metrics */}
-        {data.runMetrics && <RunMetricsSummary metrics={data.runMetrics} />}
+        {data.runMetrics && <RunMetricsSummary metrics={data.runMetrics} width={width} />}
       </Box>
 
       <Text>{boxFooter(width)}</Text>
@@ -442,15 +442,17 @@ function _ScanSummary({ data }: ScanSummaryProps): React.ReactElement {
 
 function RunMetricsSummary({
   metrics,
+  width,
 }: {
   metrics: import("../../scoring/run-metrics.js").RunMetrics;
+  width: number;
 }): React.ReactElement {
   const verdictTotal = Object.values(metrics.verdictCounts).reduce((s, n) => s + n, 0);
 
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
-      <Text>{boxDivider(terminalCardWidth(96, 60))}</Text>
+      <Text>{boxDivider(width)}</Text>
       <Text>{tokens.label("Run Metrics")}</Text>
       <Text>{""}</Text>
 

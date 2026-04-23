@@ -6,29 +6,40 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { boxDivider, boxFooter, boxHeader } from "../format.js";
+import type { BorderVariant } from "../glyphs.js";
 
 interface SectionBoxProps {
   title: string;
   width?: number;
+  variant?: BorderVariant;
   children: React.ReactNode;
 }
 
-export function SectionBox({ title, width = 60, children }: SectionBoxProps): React.ReactElement {
+export function SectionBox({
+  title,
+  width = 60,
+  variant = "rounded",
+  children,
+}: SectionBoxProps): React.ReactElement {
   return (
     <Box flexDirection="column">
-      <Text>{boxHeader(title, width)}</Text>
+      <Text>{boxHeader(title, width, { variant })}</Text>
       <Text> </Text>
       {children}
       <Text> </Text>
-      <Text>{boxFooter(width)}</Text>
+      <Text>{boxFooter(width, { variant })}</Text>
     </Box>
   );
 }
 
 interface SectionDividerProps {
   width?: number;
+  variant?: BorderVariant;
 }
 
-export function SectionDivider({ width = 60 }: SectionDividerProps): React.ReactElement {
-  return <Text>{boxDivider(width)}</Text>;
+export function SectionDivider({
+  width = 60,
+  variant = "rounded",
+}: SectionDividerProps): React.ReactElement {
+  return <Text>{boxDivider(width, { variant })}</Text>;
 }

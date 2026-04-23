@@ -1,9 +1,11 @@
 /**
  * React hooks for subscribing to the UIStore.
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
+import { useUiNow } from "./clock.js";
 import { useTerminalSize } from "./hooks/useTerminalSize.js";
 import type { Phase, UIState, UIStore } from "./state.js";
+import { clampTerminalCardWidth } from "./terminal.js";
 
 /**
  * Subscribe to the full UIState — triggers re-render on any store change.
@@ -106,13 +108,7 @@ export function shallowEqual<T>(a: T, b: T): boolean {
  * 1s footer tick doesn't re-render the rest of the UI.
  */
 export function useElapsed(startedAt: number | undefined, tickMs = 1000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (startedAt == null) return;
-    const id = setInterval(() => setNow(Date.now()), tickMs);
-    return () => clearInterval(id);
-  }, [startedAt, tickMs]);
-
+  const now = useUiNow(startedAt != null ? tickMs : null);
   return startedAt != null ? Math.max(0, now - startedAt) : 0;
 }
 
@@ -134,6 +130,10 @@ export function useElapsed(startedAt: number | undefined, tickMs = 1000): number
  */
 export function useTerminalWidth(): number {
   return useTerminalSize().columns;
+}
+
+export function useTerminalCardWidth(maxWidth = 88, minWidth = 56): number {
+  return clampTerminalCardWidth(useTerminalWidth(), maxWidth, minWidth);
 }
 
 /**
@@ -179,16 +179,8 @@ export function useHeartbeat(
   task: HeartbeatTask,
   staleSeconds = 15,
 ): { isStale: boolean; elapsedMs: number } {
-  const [, setTick] = useState(0);
   const isActive = task.status === "active";
-
-  useEffect(() => {
-    if (!isActive) return;
-    const id = setInterval(() => setTick((t) => t + 1), 5000);
-    return () => clearInterval(id);
-  }, [isActive]);
-
-  const now = Date.now();
+  const now = useUiNow(isActive ? 5000 : null);
   const elapsedMs = task.startedAt ? now - task.startedAt : 0;
   const isStale =
     isActive &&

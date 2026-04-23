@@ -3,8 +3,9 @@
  * scattered across the UI layer. Uses `<Box>` + `<Text>` so Ink can handle
  * layout and wrapping cleanly.
  */
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type { FC } from "react";
+import { resolveTerminalColumns } from "../terminal.js";
 import { tokens } from "../tokens.js";
 
 export interface DividerProps {
@@ -19,7 +20,8 @@ export interface DividerProps {
 }
 
 export const Divider: FC<DividerProps> = ({ width, char = "\u2500", dim = true, title }) => {
-  const resolvedWidth = width ?? process.stdout.columns ?? 80;
+  const { stdout } = useStdout();
+  const resolvedWidth = width ?? resolveTerminalColumns(stdout);
   const safeWidth = Math.max(4, resolvedWidth);
   const fill = (n: number) => char.repeat(Math.max(0, n));
 
@@ -27,7 +29,7 @@ export const Divider: FC<DividerProps> = ({ width, char = "\u2500", dim = true, 
     const rule = fill(safeWidth);
     return (
       <Box>
-        <Text>{dim ? tokens.muted(rule) : rule}</Text>
+        <Text>{dim ? tokens.subtle(rule) : rule}</Text>
       </Box>
     );
   }
@@ -39,13 +41,13 @@ export const Divider: FC<DividerProps> = ({ width, char = "\u2500", dim = true, 
   const rightN = remaining - leftN;
   const leftRule = fill(leftN);
   const rightRule = fill(rightN);
-  const wrap = dim ? tokens.muted : (s: string) => s;
+  const wrap = dim ? tokens.subtle : (s: string) => s;
 
   return (
     <Box>
       <Text>
         {wrap(leftRule)}
-        {tokens.label(titlePart)}
+        {dim ? tokens.metadata(titlePart) : titlePart}
         {wrap(rightRule)}
       </Text>
     </Box>

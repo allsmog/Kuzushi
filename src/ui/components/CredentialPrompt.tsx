@@ -15,8 +15,9 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
-import { boxFooter, boxHeader, terminalCardWidth } from "../format.js";
+import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import {
   SelectList,
@@ -237,7 +238,7 @@ export function CredentialPrompt({
   const [capturedValue, setCapturedValue] = useState("");
   const [baseUrlValue, setBaseUrlValue] = useState("");
   const [capturedBaseUrl, setCapturedBaseUrl] = useState<string | undefined>(undefined);
-  const width = terminalCardWidth();
+  const width = useTerminalCardWidth();
 
   const stepKeybinds =
     step === "provider"

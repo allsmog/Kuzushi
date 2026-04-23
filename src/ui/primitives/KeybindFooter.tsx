@@ -10,7 +10,7 @@ import { Box, Text } from "ink";
 import type { FC } from "react";
 import { type Keybinding, useKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
-import { SPACING, tokens } from "../tokens.js";
+import { SPACING, tokens, WIDTHS } from "../tokens.js";
 import { Divider } from "./Divider.js";
 
 export interface KeybindFooterProps {
@@ -28,18 +28,18 @@ export const KeybindFooter: FC<KeybindFooterProps> = ({ bindings: override, maxS
 
   return (
     <Box flexDirection="column">
-      <Divider width={80} />
+      <Divider width={WIDTHS.footerWidth} />
       <Box flexDirection="row" paddingLeft={SPACING.md}>
         <Text>
           {shown
             .map((b, i) => {
-              const key = tokens.hint(`[${b.keys}]`);
-              const label = b.secondary ? tokens.subtle(b.label) : tokens.muted(b.label);
+              const key = `${tokens.subtle("[")}${tokens.label(b.keys)}${tokens.subtle("]")}`;
+              const label = b.secondary ? tokens.subtle(b.label) : tokens.metadata(b.label);
               const sep = i > 0 ? tokens.subtle(`  ${icons.dot}  `) : "";
               return `${sep}${key} ${label}`;
             })
             .join("")}
-          {extra > 0 ? tokens.muted(`  +${extra} more`) : ""}
+          {extra > 0 ? tokens.subtle(`  +${extra} more`) : ""}
         </Text>
       </Box>
     </Box>

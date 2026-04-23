@@ -14,7 +14,7 @@ import { tokens } from "../tokens.js";
 export interface ContextStripProps {
   /** Status badges (rendered in `value` token, joined by status separator). */
   status?: ReadonlyArray<string | number>;
-  /** Italic hint line below status (e.g. source path · mtime). */
+  /** Secondary metadata line below status (e.g. source path · mtime). */
   subtitle?: string;
 }
 
@@ -28,11 +28,11 @@ export function ContextStrip({ status, subtitle }: ContextStripProps): React.Rea
       {items.length > 0 && (
         <Text>
           {items
-            .map((item, i) => `${i === 0 ? "" : tokens.muted(sep)}${tokens.value(String(item))}`)
+            .map((item, i) => `${i === 0 ? "" : tokens.subtle(sep)}${tokens.value(String(item))}`)
             .join("")}
         </Text>
       )}
-      {subtitle && <Text>{tokens.hint(subtitle)}</Text>}
+      {subtitle && <Text>{tokens.metadata(subtitle)}</Text>}
     </Box>
   );
 }

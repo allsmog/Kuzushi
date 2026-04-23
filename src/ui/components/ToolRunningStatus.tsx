@@ -12,16 +12,18 @@
  * history header — one visual vocabulary across the whole tool lifecycle.
  *
  * `useHeartbeat` drives the elapsed-stale detection + flips the pulse
- * color to `warn` + appends a `waiting…` affordance after 15s of silence.
+ * color to `warn` + appends a `waiting…` affordance after a short silence.
  */
 
 import { Box, Text } from "ink";
-import React, { useEffect, useState } from "react";
-import { useHeartbeat } from "../hooks.js";
+import React from "react";
+import { useElapsed, useHeartbeat } from "../hooks.js";
 import { Gutter } from "../primitives/Gutter.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { PulseDot } from "./PulseDot.js";
+
+const WAITING_LABEL_WIDTH = " · waiting…".length;
 
 interface ToolRunningStatusProps {
   tool: NonNullable<ShellState["currentTool"]>;
@@ -84,16 +86,7 @@ function ElapsedReadout({
   isStale: boolean;
 }): React.ReactElement | null {
   const startedAt = tool.startedAt;
-  const [elapsed, setElapsed] = useState(() =>
-    startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0,
-  );
-  useEffect(() => {
-    if (startedAt == null) return;
-    const timer = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [startedAt]);
+  const elapsed = Math.floor(useElapsed(startedAt, 1000) / 1000);
 
   if (startedAt == null) {
     if (tool.elapsedSeconds && tool.elapsedSeconds > 0) {
@@ -101,15 +94,15 @@ function ElapsedReadout({
     }
     return null;
   }
-  if (elapsed <= 0 && !isStale) return null;
   const mm = Math.floor(elapsed / 60)
     .toString()
     .padStart(2, "0");
   const ss = (elapsed % 60).toString().padStart(2, "0");
+  const staleLabel = isStale ? " · waiting…" : "".padEnd(WAITING_LABEL_WIDTH, " ");
   return (
     <Text>
       {tokens.muted(`  ${mm}:${ss}`)}
-      {isStale ? tokens.warn(" · waiting…") : ""}
+      {isStale ? tokens.warn(staleLabel) : tokens.muted(staleLabel)}
     </Text>
   );
 }

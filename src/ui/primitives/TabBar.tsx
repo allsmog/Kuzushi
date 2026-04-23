@@ -3,7 +3,7 @@
  *
  * Renders:  [Pipeline]  Findings  Cost
  *
- * Active tab uses accent color + underline. Inactive tabs are muted.
+ * Active tab uses a single high-emphasis treatment. Inactive tabs stay quiet.
  */
 
 import { Box, Text } from "ink";
@@ -30,19 +30,19 @@ function _TabBar({ tabs, activeId }: TabBarProps): React.ReactElement {
     <Box flexDirection="row" paddingLeft={SPACING.md} marginBottom={SPACING.sm}>
       {tabs.map((tab, i) => {
         const isActive = tab.id === activeId;
-        const shortcut = tab.shortcut ? tokens.muted(` ${tab.shortcut}`) : "";
+        const shortcut = tab.shortcut ? tokens.subtle(` ${tab.shortcut}`) : "";
 
         return (
           <Box key={tab.id}>
             {i > 0 && <Text>{tokens.subtle("  │  ")}</Text>}
             {isActive ? (
-              <Text underline>
-                {tokens.accent(tab.label)}
+              <Text>
+                {tokens.focus(tab.label)}
                 {shortcut}
               </Text>
             ) : (
               <Text>
-                {tokens.muted(tab.label)}
+                {tokens.metadata(tab.label)}
                 {shortcut}
               </Text>
             )}

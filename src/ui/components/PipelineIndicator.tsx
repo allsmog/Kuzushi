@@ -21,12 +21,12 @@
 
 import { Box, Text } from "ink";
 import React from "react";
+import { useUiNow } from "../clock.js";
 import {
   colorVerdict,
   formatCost,
   formatDuration,
   padCell,
-  progressBar,
   statusBadge,
   truncateEnd,
 } from "../format.js";
@@ -69,12 +69,19 @@ const HEARTBEAT_STALE_SECONDS = 15;
 // than inject blank spaces that would eat real estate.
 const STAGE_DETAIL_WIDTH = 12;
 const STAGE_ELAPSED_WIDTH = 8;
+const STAGE_COST_WIDTH = 8;
+const STAGE_PROGRESS_WIDTH = 22;
+const STAGE_PROGRESS_BAR_WIDTH = 12;
+const STAGE_WAITING_WIDTH = 22;
 // Same rationale for scanner sub-task rows. Count and detail only get
 // padded when at least one row in the set would ever render them — see
 // `SubTaskBranches` for the per-list reservation check.
 const SUBTASK_COUNT_WIDTH = 10;
 const SUBTASK_DETAIL_WIDTH = 22;
 const SUBTASK_ELAPSED_WIDTH = 8;
+const FULL_BLOCK = "\u2588";
+const PARTIAL_BLOCKS = ["", "\u258F", "\u258E", "\u258D", "\u258C", "\u258B", "\u258A", "\u2589"];
+const EMPTY_BLOCK = "\u2591";
 
 export const PipelineIndicator = React.memo(function PipelineIndicator({
   stages,
@@ -86,17 +93,8 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
   etaMs,
   phase,
 }: PipelineIndicatorProps): React.ReactElement | null {
-  // Heartbeat timer — re-renders every 5s when scan tasks are active so
-  // "still analyzing..." and elapsed time stay fresh.
-  const hasActiveScanTasks = stages.some(
-    (s) => s.id === "scan" && s.subTasks.some((t) => t.status === "active"),
-  );
-  const [, setTick] = React.useState(0);
-  React.useEffect(() => {
-    if (!hasActiveScanTasks) return;
-    const id = setInterval(() => setTick((t) => t + 1), 5000);
-    return () => clearInterval(id);
-  }, [hasActiveScanTasks]);
+  const hasActiveStage = stages.some((stage) => stage.status === "active");
+  const nowMs = useUiNow(hasActiveStage ? 5000 : null);
 
   if (stages.length === 0) return null;
 
@@ -117,6 +115,7 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
               runningCostUsd={stage.status === "active" ? runningCostUsd : undefined}
               throttle={stage.status === "active" ? throttle : undefined}
               etaMs={stage.status === "active" ? etaMs : undefined}
+              nowMs={stage.status === "active" ? nowMs : undefined}
             />
 
             {/* Sub-task branches for scanner tasks (scan stage) */}
@@ -152,12 +151,14 @@ function _StageHeaderLine({
   runningCostUsd,
   throttle,
   etaMs,
+  nowMs,
 }: {
   stage: PipelineStage;
   progress?: { current: number; total: number };
   runningCostUsd?: number;
   throttle?: { concurrency: number; reason: string } | null;
   etaMs?: number;
+  nowMs?: number;
 }): React.ReactElement {
   const labelWidth = 14;
   const paddedLabel = padCell(stage.label, labelWidth);
@@ -182,19 +183,17 @@ function _StageHeaderLine({
     const detail = detailRaw
       ? `  ${tokens.strong(padCell(detailRaw, STAGE_DETAIL_WIDTH))}`
       : `  ${" ".repeat(STAGE_DETAIL_WIDTH)}`;
-    const cost =
-      runningCostUsd && runningCostUsd > 0 ? `  ${tokens.muted(formatCost(runningCostUsd))}` : "";
+    const costRaw = runningCostUsd != null ? formatCost(runningCostUsd) : "$0.00";
+    const cost = `  ${tokens.muted(padCell(costRaw, STAGE_COST_WIDTH))}`;
     const throttleLabel = throttle
       ? `  ${tokens.warn(`${icons.warning} ${throttle.concurrency} concurrent`)}`
       : "";
-    const bar =
-      progress && progress.total > 0
-        ? `  ${progressBar(progress.current, progress.total, 12)}`
-        : "";
-    const elapsedRaw = stage.startedAt ? formatDuration(Date.now() - stage.startedAt) : "";
-    const elapsed = elapsedRaw ? `  ${tokens.muted(padCell(elapsedRaw, STAGE_ELAPSED_WIDTH))}` : "";
-    const eta =
-      etaMs && etaMs > 0 ? `  ${tokens.muted(`~${formatDuration(etaMs)} remaining`)}` : "";
+    const bar = `  ${formatStageProgress(progress)}`;
+    const elapsedRaw =
+      stage.startedAt != null && nowMs != null ? formatDuration(nowMs - stage.startedAt) : "";
+    const elapsed = `  ${tokens.muted(padCell(elapsedRaw, STAGE_ELAPSED_WIDTH))}`;
+    const etaRaw = etaMs && etaMs > 0 ? `~${formatDuration(etaMs)}` : "";
+    const eta = `  ${tokens.muted(padCell(etaRaw, STAGE_WAITING_WIDTH))}`;
     // Active stages use the brand accent for the spinner frame. The static
     // filled-circle glyph still carries `dangerStrong` via `statusBadge` when
     // rendered non-animated (e.g. in tests or plain-renderer).
@@ -227,6 +226,34 @@ function _StageHeaderLine({
 
   const { icon } = statusBadge("stage", "pending");
   return <Text>{tokens.muted(`${icon} ${paddedLabel}`)}</Text>;
+}
+
+function formatStageProgress(progress?: { current: number; total: number }): string {
+  if (!progress || progress.total <= 0) {
+    return " ".repeat(STAGE_PROGRESS_WIDTH);
+  }
+
+  const bar = buildStageProgressBar(progress.current, progress.total, STAGE_PROGRESS_BAR_WIDTH);
+  const totalDigits = Math.max(1, String(Math.max(progress.total, progress.current, 0)).length);
+  const count = `${String(Math.min(progress.current, progress.total)).padStart(totalDigits, " ")}/${String(progress.total).padStart(totalDigits, " ")}`;
+  const pct = `${String(Math.round((progress.current / progress.total) * 100)).padStart(3, " ")}%`;
+  return padCell(`${bar} ${pct} ${count}`, STAGE_PROGRESS_WIDTH);
+}
+
+function buildStageProgressBar(current: number, total: number, width: number): string {
+  const ratio = total > 0 ? Math.max(0, Math.min(current / total, 1)) : 0;
+  const scaled = ratio * width;
+  const full = Math.floor(scaled);
+  const remainder = scaled - full;
+  const partialIndex = Math.floor(remainder * 8);
+  const hasPartial = partialIndex > 0 && full < width;
+  const empty = width - full - (hasPartial ? 1 : 0);
+
+  return [
+    tokens.accent(FULL_BLOCK.repeat(full)),
+    hasPartial ? tokens.accent(PARTIAL_BLOCKS[partialIndex] ?? "") : "",
+    tokens.muted(EMPTY_BLOCK.repeat(Math.max(0, empty))),
+  ].join("");
 }
 
 // --- Sub-task branches (scanners under Scan stage) ---
@@ -370,7 +397,9 @@ function SubTaskRowImpl({
             const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
             const branchPipe = isLast ? " " : tokens.muted(icons.treePipe);
             return (
-              <Text key={li}>
+              <Text
+                key={`${line.kind}:${line.toolName ?? ""}:${line.detail ?? ""}:${line.index}:${line.total}`}
+              >
                 {pipe} {"  "}
                 {branchPipe} {tokens.muted(toolConnector)} {formatToolLine(line)}
               </Text>
@@ -423,7 +452,7 @@ function _ResultBranches({
         const isLast = i === visible.length - 1 && activeEntries.length === 0;
         const connector = isLast ? icons.treeLast : icons.treeMiddle;
         return (
-          <Text key={i}>
+          <Text key={r.fingerprint}>
             {"  "}
             {pipe} {tokens.muted(connector)} {formatResultBranchLine(r)}
           </Text>
@@ -456,7 +485,9 @@ function _ResultBranches({
               // Continuation pipe from the active finding
               const branchPipe = isLast ? " " : tokens.muted(icons.treePipe);
               return (
-                <Text key={li}>
+                <Text
+                  key={`${fp}:${line.kind}:${line.toolName ?? ""}:${line.detail ?? ""}:${line.index}:${line.total}`}
+                >
                   {pipe} {"  "}
                   {branchPipe} {tokens.muted(toolConnector)} {formatToolLine(line)}
                 </Text>

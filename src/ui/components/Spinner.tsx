@@ -34,7 +34,9 @@ export const Spinner = React.memo(function Spinner({
   color = "accent",
 }: SpinnerProps): React.ReactElement {
   const frame = useSpinnerFrame();
-  const glyph = FRAMES[frame % FRAMES.length]!;
+  // Hold each frame for two clock ticks so active rows read as smooth motion
+  // instead of high-frequency shimmer when many indicators are visible.
+  const glyph = FRAMES[Math.floor(frame / 2) % FRAMES.length]!;
   const colorFn = COLOR_MAP[color] ?? tokens.accent;
   return (
     <Text>

@@ -8,7 +8,8 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import { boxFooter, boxHeader, formatCost, terminalCardWidth } from "../format.js";
+import { boxFooter, boxHeader, formatCost } from "../format.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { Table } from "../primitives/Table.js";
 import { SPACING } from "../tokens.js";
 
@@ -32,7 +33,7 @@ interface Row {
 }
 
 export function ConfigBanner({ config }: ConfigBannerProps): React.ReactElement {
-  const width = terminalCardWidth();
+  const width = useTerminalCardWidth();
   const rows: Row[] = [
     { label: "Model", value: config.model },
     { label: "Tasks", value: config.tasks.join(", ") },

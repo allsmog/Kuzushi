@@ -4,17 +4,16 @@
  * Uses the shared `SpinnerClock` frame so every pulse ticks in phase with
  * the rest of the UI (no independent setInterval bleed).
  *
- * The pulse is a visibility toggle: `⏺` → space → `⏺` → space …, at a
- * ~400ms rate (every other 200ms spinner tick). This matches cc-repo's
- * `useBlink` behavior and preserves baseline alignment because space is
- * rendered inside a `Gutter` (fixed width) so layout never shifts.
+ * The pulse is now a low-motion intensity cycle instead of a hard hide/show
+ * blink. That keeps the row visibly alive without the "disappearing dot"
+ * flicker that reads as layout instability in a busy TUI.
  */
 
 import { Text } from "ink";
 import React from "react";
+import { BLACK_CIRCLE } from "../glyphs.js";
 import { useSpinnerFrame } from "../primitives/SpinnerClock.js";
 import { tokens } from "../tokens.js";
-import { BLACK_CIRCLE } from "../glyphs.js";
 
 type PulseStatus = "running" | "warn" | "ok" | "fail" | "abort";
 
@@ -40,10 +39,18 @@ export const PulseDot = React.memo(function PulseDot({
   status,
 }: PulseDotProps): React.ReactElement {
   const frame = useSpinnerFrame();
-  // Pulse at 400ms (every 2 ticks) while running or waiting; solid glyph
-  // otherwise.
-  const animates = status === "running" || status === "warn";
-  const visible = animates ? Math.floor(frame / 2) % 2 === 0 : true;
+  const pulseFrame = Math.floor(frame / 2) % 4;
+
+  if (status === "running") {
+    const runningFrames = [tokens.subtle, tokens.accent, tokens.focus, tokens.accent] as const;
+    return <Text>{runningFrames[pulseFrame]!(BLACK_CIRCLE)}</Text>;
+  }
+
+  if (status === "warn") {
+    const warnFrames = [tokens.muted, tokens.warn, tokens.warnStrong, tokens.warn] as const;
+    return <Text>{warnFrames[pulseFrame]!(BLACK_CIRCLE)}</Text>;
+  }
+
   const colorFn = COLOR_BY_STATUS[status];
-  return <Text>{visible ? colorFn(BLACK_CIRCLE) : " "}</Text>;
+  return <Text>{colorFn(BLACK_CIRCLE)}</Text>;
 });

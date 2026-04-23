@@ -47,7 +47,7 @@ interface BannerSplashProps {
 }
 
 export function BannerSplash({ workspace, target, tip }: BannerSplashProps): React.ReactElement {
-  const resolvedTip = tip ?? pickTip(Date.now());
+  const resolvedTip = tip ?? pickTip(`${workspace ?? ""}\u0000${target ?? ""}`);
   const contextParts: string[] = [];
   if (workspace) contextParts.push(`workspace ${workspace}`);
   if (target) contextParts.push(`target ${target}`);
@@ -59,8 +59,8 @@ export function BannerSplash({ workspace, target, tip }: BannerSplashProps): Rea
       marginTop={SPACING.sm}
       marginBottom={SPACING.sm}
     >
-      {WORDMARK.map((row, i) => (
-        <Text key={`w-${i}`}>{tokens.accent(row)}</Text>
+      {WORDMARK.map((row) => (
+        <Text key={row}>{tokens.accent(row)}</Text>
       ))}
       <Box marginTop={SPACING.sm}>
         <Text>
@@ -88,12 +88,15 @@ export function BannerSplash({ workspace, target, tip }: BannerSplashProps): Rea
 }
 
 /**
- * Deterministic tip pick: quantise the boot timestamp to the minute so
- * two shell starts in the same minute show the same tip. Exported for
- * tests — keeps the index-from-time logic pure.
+ * Deterministic tip pick:
+ * - numeric seeds preserve the legacy "same minute => same tip" behavior
+ * - string seeds hash stable shell context such as workspace/target
  */
-export function pickTip(bootMs: number): string {
-  const minute = Math.floor(bootMs / 60_000);
-  const idx = Math.abs(minute) % TIPS.length;
+export function pickTip(seed: number | string): string {
+  const basis =
+    typeof seed === "number"
+      ? Math.floor(seed / 60_000)
+      : [...seed].reduce((acc, ch) => (acc * 33 + ch.charCodeAt(0)) >>> 0, 5381);
+  const idx = Math.abs(basis) % TIPS.length;
   return TIPS[idx]!;
 }

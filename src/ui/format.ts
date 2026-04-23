@@ -5,8 +5,10 @@
 
 import chalk from "chalk";
 import type { Verdict } from "../types.js";
+import { BORDER_GLYPHS, type BorderVariant } from "./glyphs.js";
 import { icons } from "./icons.js";
 import { normalizeSeverity, severityChalk, severityStyle } from "./severity.js";
+import { clampTerminalCardWidth, resolveTerminalColumns } from "./terminal.js";
 import { tokens } from "./tokens.js";
 
 /**
@@ -249,33 +251,113 @@ export function miniBarChart(
     });
 }
 
+interface BoxFrameOptions {
+  variant?: BorderVariant;
+  width?: number;
+}
+
+interface BoxEdgeLineOptions extends BoxFrameOptions {
+  left?: string;
+  right?: string;
+  borderStyle?: (text: string) => string;
+}
+
+function borderGlyphs(variant: BorderVariant = "rounded") {
+  return BORDER_GLYPHS[variant];
+}
+
+function clampBoxWidth(width: number): number {
+  return Math.max(4, Math.floor(width));
+}
+
+function buildEdgeLine(
+  width: number,
+  startCorner: string,
+  endCorner: string,
+  horizontal: string,
+  left = "",
+  right = "",
+  borderStyle: (text: string) => string = tokens.metadata,
+): string {
+  const safeWidth = clampBoxWidth(width);
+  const fill = Math.max(0, safeWidth - 2 - visibleWidth(left) - visibleWidth(right));
+  return `${borderStyle(startCorner)}${left}${borderStyle(horizontal.repeat(fill))}${right}${borderStyle(endCorner)}`;
+}
+
+export function boxTopLine({
+  left = "",
+  right = "",
+  width = 60,
+  variant = "rounded",
+  borderStyle = tokens.metadata,
+}: BoxEdgeLineOptions = {}): string {
+  const glyphs = borderGlyphs(variant);
+  return buildEdgeLine(
+    width,
+    glyphs.topLeft,
+    glyphs.topRight,
+    glyphs.horizontal,
+    left,
+    right,
+    borderStyle,
+  );
+}
+
+export function boxBottomLine({
+  left = "",
+  right = "",
+  width = 60,
+  variant = "rounded",
+  borderStyle = tokens.metadata,
+}: BoxEdgeLineOptions = {}): string {
+  const glyphs = borderGlyphs(variant);
+  return buildEdgeLine(
+    width,
+    glyphs.bottomLeft,
+    glyphs.bottomRight,
+    glyphs.horizontal,
+    left,
+    right,
+    borderStyle,
+  );
+}
+
 /**
  * Build a box header line: ╭─ Title ────────────╮
  */
-export function boxHeader(title: string, width = 60): string {
-  const titlePart = ` ${title} `;
-  const fill = Math.max(0, width - 2 - titlePart.length - 1); // -2 for corners, -1 for dash before title
-  return tokens.metadata(
-    `${icons.boxTopLeft}${icons.boxHorizontal}${tokens.label(titlePart)}${icons.boxHorizontal.repeat(fill)}${icons.boxTopRight}`,
-  );
+export function boxHeader(title: string, width = 60, options: BoxFrameOptions = {}): string {
+  const glyphs = borderGlyphs(options.variant);
+  return boxTopLine({
+    width,
+    variant: options.variant,
+    left: `${tokens.metadata(glyphs.horizontal)}${tokens.label(` ${title} `)}`,
+  });
 }
 
 /**
  * Build a box footer line: ╰────────────────────╯
  */
-export function boxFooter(width = 60): string {
-  return tokens.metadata(
-    `${icons.boxBottomLeft}${icons.boxHorizontal.repeat(width - 2)}${icons.boxBottomRight}`,
-  );
+export function boxFooter(width = 60, options: BoxFrameOptions = {}): string {
+  return boxBottomLine({ width, variant: options.variant });
 }
 
 /**
  * Build a box divider line: ├────────────────────┤
  */
-export function boxDivider(width = 60): string {
+export function boxDivider(width = 60, options: BoxFrameOptions = {}): string {
+  const glyphs = borderGlyphs(options.variant);
+  const safeWidth = clampBoxWidth(width);
   return tokens.metadata(
-    `${icons.boxDividerLeft}${icons.boxHorizontal.repeat(width - 2)}${icons.boxDividerRight}`,
+    `${glyphs.dividerLeft}${glyphs.horizontal.repeat(safeWidth - 2)}${glyphs.dividerRight}`,
   );
+}
+
+export function boxRowPrefix(options: BoxFrameOptions = {}): string {
+  return tokens.metadata(`${borderGlyphs(options.variant).vertical} `);
+}
+
+export function boxInnerWidth(width = 60): number {
+  return Math.max(0, clampBoxWidth(width) - 2);
 }
 
 /**
@@ -283,15 +365,18 @@ export function boxDivider(width = 60): string {
  */
 export function boxLine(content: string, width = 60): string {
   // We can't easily measure ANSI string width, so just use the borders
-  return `${chalk.dim(icons.boxVertical)}  ${content}`;
+  return `${chalk.dim(borderGlyphs().vertical)}  ${content}`;
 }
 
 /**
  * Compute a card width that fits the current terminal while keeping a sensible minimum.
  */
-export function terminalCardWidth(maxWidth = 88, minWidth = 56): number {
-  const columns = process.stdout.columns ?? maxWidth;
-  return Math.max(minWidth, Math.min(maxWidth, columns - 4));
+export function terminalCardWidth(maxWidth = 88, minWidth = 56, columns?: number): number {
+  return clampTerminalCardWidth(
+    columns ?? resolveTerminalColumns(undefined, maxWidth),
+    maxWidth,
+    minWidth,
+  );
 }
 
 // ─── Column / path width utilities ────────────────────────────────────────

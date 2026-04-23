@@ -103,7 +103,7 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
 `;
 
 exports[`Ink component snapshots > PlanCard — option diff table with unsupported row 1`] = `
-"  ╭─ plan console-agent/r1  ─  sast:scan ───────────────────────────────────╮
+"  ╭─ plan console-agent/r1────────────────────────────────────────── sast:scan ╮
   │ intent  Operator wants a harder run focused on admin routes.
   │ option           current               proposed              why
   │ preset           standard              deep                  "run harder"

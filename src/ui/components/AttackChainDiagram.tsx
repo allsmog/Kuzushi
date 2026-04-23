@@ -19,7 +19,7 @@
 import { Box, Text } from "ink";
 import React from "react";
 import type { ExploitChain } from "../../types.js";
-import { terminalCardWidth } from "../format.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { danger, dangerStrong, tokens, warn } from "../tokens.js";
 
@@ -31,10 +31,10 @@ interface AttackChainDiagramProps {
 const STEP_INNER_WIDTH = 18;
 const ARROW = " ───→ ";
 
-export const AttackChainDiagram = React.memo(_AttackChainDiagram);
+export const AttackChainDiagram = React.memo(AttackChainDiagramImpl);
 
-function _AttackChainDiagram({ chain }: AttackChainDiagramProps): React.ReactElement {
-  const availableWidth = Math.max(38, terminalCardWidth(96, 60) - 6);
+function AttackChainDiagramImpl({ chain }: AttackChainDiagramProps): React.ReactElement {
+  const availableWidth = Math.max(38, useTerminalCardWidth(96, 60) - 6);
   // Single severity → (headline, border) token mapping — avoids the two
   // near-duplicate ternaries we had before. Border stays one shade below
   // the headline so the title pops against its frame.
@@ -114,7 +114,7 @@ function _AttackChainDiagram({ chain }: AttackChainDiagramProps): React.ReactEle
       )}
       {useVerticalLayout &&
         chain.steps.map((step, index) => (
-          <React.Fragment key={`${step.findingFingerprint}-${index}`}>
+          <React.Fragment key={step.findingFingerprint}>
             <Text>
               {"  "}
               {borderColor("│")} {tokens.muted(`${index + 1}.`)} {step.description}
@@ -136,13 +136,13 @@ function _AttackChainDiagram({ chain }: AttackChainDiagramProps): React.ReactEle
         {borderColor("│")}
       </Text>
       {impactLines.map((line, index) => (
-        <Text key={`impact-${index}`}>
+        <Text key={`impact:${line}`}>
           {"  "}
           {borderColor("│")} {index === 0 ? line : tokens.muted(line)}
         </Text>
       ))}
-      {preconditionLines.map((line, index) => (
-        <Text key={`pre-${index}`}>
+      {preconditionLines.map((line) => (
+        <Text key={`pre:${line}`}>
           {"  "}
           {borderColor("│")} {tokens.muted(line)}
         </Text>

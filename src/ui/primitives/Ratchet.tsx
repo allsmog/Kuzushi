@@ -20,21 +20,50 @@
  */
 
 import { Box, type DOMElement, measureElement } from "ink";
-import React, { useLayoutEffect, useRef, useState } from "react";
+import type React from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 interface RatchetProps {
   children: React.ReactNode;
+  minHeight?: number;
+  growSettleFrames?: number;
+  shrinkSettleFrames?: number;
 }
 
-export function Ratchet({ children }: RatchetProps): React.ReactElement {
+type PendingLock = { direction: "grow" | "shrink"; height: number; frames: number } | null;
+
+export function Ratchet({
+  children,
+  minHeight = 0,
+  growSettleFrames = 2,
+  shrinkSettleFrames = 3,
+}: RatchetProps): React.ReactElement {
   const ref = useRef<DOMElement | null>(null);
-  const [minHeight, setMinHeight] = useState(0);
+  const [lockedHeight, setLockedHeight] = useState(minHeight);
+  const pendingRef = useRef<PendingLock>(null);
 
   useLayoutEffect(() => {
     if (!ref.current) return;
     try {
       const { height } = measureElement(ref.current);
-      if (height > minHeight) setMinHeight(height);
+      const measured = Math.max(minHeight, height);
+      if (measured === lockedHeight) {
+        pendingRef.current = null;
+        return;
+      }
+      const direction = measured > lockedHeight ? "grow" : "shrink";
+      const settleFrames = direction === "grow" ? growSettleFrames : shrinkSettleFrames;
+      const pending = pendingRef.current;
+      if (pending && pending.direction === direction && pending.height === measured) {
+        if (pending.frames + 1 >= settleFrames) {
+          pendingRef.current = null;
+          setLockedHeight(measured);
+        } else {
+          pendingRef.current = { ...pending, frames: pending.frames + 1 };
+        }
+        return;
+      }
+      pendingRef.current = { direction, height: measured, frames: 1 };
     } catch {
       // Ink renders under ink-testing-library don't always implement
       // measureElement; we silently skip the ratchet in that case.
@@ -42,7 +71,7 @@ export function Ratchet({ children }: RatchetProps): React.ReactElement {
   });
 
   return (
-    <Box ref={ref} flexDirection="column" minHeight={minHeight || undefined}>
+    <Box ref={ref} flexDirection="column" minHeight={lockedHeight || undefined}>
       {children}
     </Box>
   );
