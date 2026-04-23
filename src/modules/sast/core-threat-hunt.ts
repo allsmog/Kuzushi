@@ -9,6 +9,28 @@ import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from
 import { resolvePromptValue } from "./prompts.js";
 import { runSingleTaskPipeline, targetProperty } from "./shared.js";
 
+function formatThreatHuntSummary(result: ToolResult): string {
+  const first = result.output.split("\n", 1)[0]?.trim();
+  const stats = (
+    result.data as { stats?: { totalFindings?: number; totalCostUsd?: number } | null } | undefined
+  )?.stats;
+
+  const findings = typeof stats?.totalFindings === "number" ? stats.totalFindings : null;
+  const cost = typeof stats?.totalCostUsd === "number" ? stats.totalCostUsd : null;
+
+  if (first && findings !== null && cost !== null) {
+    return `${first} · ${findings} findings · $${cost.toFixed(2)}`;
+  }
+  if (first && findings !== null) {
+    return `${first} · ${findings} findings`;
+  }
+  return first && first.length > 0
+    ? first
+    : result.ok
+      ? "Threat hunt complete"
+      : "Threat hunt failed";
+}
+
 const threatHuntTool: ModuleTool = {
   name: "threat-hunt:run",
   displayName: "Threat Hunt",
@@ -20,8 +42,7 @@ const threatHuntTool: ModuleTool = {
     return target ?? null;
   },
   renderResult(result) {
-    const first = result.output.split("\n", 1)[0]?.trim();
-    return first && first.length > 0 ? first : null;
+    return formatThreatHuntSummary(result);
   },
   description: "Run the threat-hunt task — CTF-framed actors hunting STRIDE threats end-to-end.",
   inputSchema: {
@@ -46,7 +67,13 @@ const threatHuntTool: ModuleTool = {
   async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
     const p = input as Record<string, unknown>;
     const promptOverride = await resolvePromptValue(p["THREAT_HUNT_PROMPT"] as string, ctx.cwd);
-    return runSingleTaskPipeline(["threat-hunt"], input, ctx, {
+    const maxActors = typeof p.maxActors === "number" ? p.maxActors : undefined;
+    ctx.reportActivity?.(
+      maxActors ? `starting threat hunt (${maxActors} actors max)` : "starting threat hunt",
+      { phase: "threat-hunt" },
+    );
+
+    const result = await runSingleTaskPipeline(["threat-hunt"], input, ctx, {
       summaryLabel: "Threat hunt",
       taskConfig: {
         "threat-hunt": {
@@ -59,6 +86,11 @@ const threatHuntTool: ModuleTool = {
         },
       },
     });
+
+    ctx.reportActivity?.(result.ok ? "threat hunt complete" : "threat hunt finished with errors", {
+      phase: "threat-hunt",
+    });
+    return result;
   },
 };
 

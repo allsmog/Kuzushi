@@ -63,6 +63,7 @@ function createContext(config = createConfig()): ToolExecutionContext {
     bus: {} as ToolExecutionContext["bus"],
     config,
     target: "/tmp/repo",
+    reportActivity: vi.fn(),
   };
 }
 
@@ -154,5 +155,33 @@ describe("createCoreSastModule tool execution", () => {
         }),
       }),
     );
+  });
+
+  it("adds threat-hunt activity updates and richer one-line summary", async () => {
+    runPipelineMock.mockResolvedValue({
+      runId: "run-3",
+      status: "complete",
+      stats: {
+        totalFindings: 4,
+        triaged: 0,
+        totalCostUsd: 1.5,
+      },
+    });
+
+    const ctx = createContext();
+    const threatHuntTool = createThreatHuntModule().tools.find((e) => e.name === "threat-hunt:run");
+    const result = await threatHuntTool!.execute({ target: "/tmp/repo", maxActors: 3 }, ctx);
+
+    expect(ctx.reportActivity).toHaveBeenNthCalledWith(
+      1,
+      "starting threat hunt (3 actors max)",
+      expect.objectContaining({ phase: "threat-hunt" }),
+    );
+    expect(ctx.reportActivity).toHaveBeenNthCalledWith(
+      2,
+      "threat hunt complete",
+      expect.objectContaining({ phase: "threat-hunt" }),
+    );
+    expect(threatHuntTool!.renderResult?.(result)).toContain("4 findings · $1.50");
   });
 });
