@@ -1086,6 +1086,41 @@ describe("slash suggestions", () => {
   });
 });
 
+describe("hunt-post-mortem helpers", () => {
+  const { isHuntClassTool, extractHuntStats, formatHuntSummaryLine } = __shellInternals;
+
+  it("recognizes threat-hunt:run as the hunt-class tool", () => {
+    expect(isHuntClassTool("threat-hunt:run")).toBe(true);
+    expect(isHuntClassTool("semgrep:scan")).toBe(false);
+    expect(isHuntClassTool("triage:run")).toBe(false);
+  });
+
+  it("reads stats.totalFindings + stats.totalCostUsd off the ToolResult", () => {
+    const stats = extractHuntStats({
+      data: { stats: { totalFindings: 22, totalCostUsd: 24.3 } },
+    });
+    expect(stats).toEqual({ findingsCount: 22, costUsd: 24.3 });
+  });
+
+  it("returns zeros when the data shape drifts (safe default)", () => {
+    expect(extractHuntStats({ data: undefined })).toEqual({ findingsCount: 0, costUsd: 0 });
+    expect(extractHuntStats({ data: { stats: {} } })).toEqual({ findingsCount: 0, costUsd: 0 });
+    expect(
+      extractHuntStats({ data: { stats: { totalFindings: "nope" as unknown as number } } }),
+    ).toEqual({ findingsCount: 0, costUsd: 0 });
+  });
+
+  it("formats the collapsed headline with correct pluralization", () => {
+    expect(formatHuntSummaryLine(1, 0, 0)).toBe("1 actor · 0 findings · $0.00");
+    expect(formatHuntSummaryLine(5, 1, 0.05)).toBe("5 actors · 1 finding · $0.05");
+    expect(formatHuntSummaryLine(5, 22, 24.3)).toBe("5 actors · 22 findings · $24.30");
+  });
+
+  it("renders cost with exactly two decimals even for integer dollars", () => {
+    expect(formatHuntSummaryLine(3, 3, 10)).toBe("3 actors · 3 findings · $10.00");
+  });
+});
+
 describe("looksLikeSubagentStartLine — scrollback dedup", () => {
   // Context for future readers: each Read/Grep/Bash tool call emits 2-3
   // task:activity lines via runtime-forwarding + describeRuntimeMessage —

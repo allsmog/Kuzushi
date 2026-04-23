@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { migration100 } from "../../src/migrations/100_schema_reset.js";
 import { migration101 } from "../../src/migrations/101_workspace_entities.js";
 import { createReconModule } from "../../src/modules/recon/core-recon.js";
-import type { ToolExecutionContext } from "../../src/modules/types.js";
+import type { ExecutionContext } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 import { WorkspaceManager } from "../../src/workspace/manager.js";
 
@@ -28,11 +28,11 @@ function mkWorkspace(): { mgr: WorkspaceManager; wsId: string } {
   return { mgr, wsId: ws.id };
 }
 
-function mkCtx(mgr: WorkspaceManager, wsId: string): ToolExecutionContext {
+function mkCtx(mgr: WorkspaceManager, wsId: string): ExecutionContext {
   return {
     cwd: "/tmp",
     runtime: { id: "test", async *query() {} },
-    bus: {} as ToolExecutionContext["bus"],
+    bus: {} as ExecutionContext["bus"],
     config: {
       model: "anthropic:claude-sonnet-4-6",
       busBackend: "in-process",
@@ -93,9 +93,9 @@ describe("recon module", () => {
     const result = await tool.execute({ target: "acme.example" }, {
       cwd: "/tmp",
       runtime: { id: "test", async *query() {} },
-      bus: {} as ToolExecutionContext["bus"],
+      bus: {} as ExecutionContext["bus"],
       config: {} as KuzushiConfig,
-    } as ToolExecutionContext);
+    } as ExecutionContext);
     expect(result.ok).toBe(false);
     expect(result.output).toContain("active workspace");
   });

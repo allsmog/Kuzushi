@@ -22,7 +22,7 @@ import { forwardSubAgentMessage } from "../../agents/tasks/forward-subagent-outp
 import { resolvePromptArmorPluginPath } from "../../agents/tasks/prompt-armor/resolve-promptarmor-plugin.js";
 import { resolveRepo } from "../../cli/shared.js";
 import { createLogger } from "../../logger.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 const log = createLogger({ stage: "prompt-armor" });
 
@@ -48,17 +48,14 @@ interface PromptArmorRunResult {
   outputDir: string;
 }
 
-function resolveModel(ctx: ToolExecutionContext, override?: string): string {
+function resolveModel(ctx: ExecutionContext, override?: string): string {
   if (override) return override;
   const cfg = ctx.config.taskConfig?.["prompt-armor"] as Record<string, unknown> | undefined;
   if (cfg && typeof cfg.model === "string" && cfg.model.trim()) return cfg.model.trim();
   return ctx.config.model;
 }
 
-function resolveTargetPaths(
-  ctx: ToolExecutionContext,
-  input?: string,
-): { root: string; name: string } {
+function resolveTargetPaths(ctx: ExecutionContext, input?: string): { root: string; name: string } {
   return resolveRepo(input ?? ctx.target ?? ctx.cwd);
 }
 
@@ -191,7 +188,7 @@ function buildCommandTool(spec: BuildToolSpec): ModuleTool {
       properties: baseProperties,
     },
     headless: true,
-    async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+    async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
       const params = (input ?? {}) as Record<string, unknown>;
 
       if (requiresAuth && params.authorized !== true) {

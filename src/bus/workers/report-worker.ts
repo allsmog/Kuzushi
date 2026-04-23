@@ -24,7 +24,6 @@ import type {
   BudgetWarningEvent,
   PipelineErrorEvent,
   PipelineStartEvent,
-  PocHarnessAgentActivityEvent,
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
   PocHarnessStartEvent,
@@ -32,16 +31,14 @@ import type {
   ReportRequestedEvent,
   ScanAgentActivityEvent,
   ScanCompleteEvent,
+  TaskAgentActivityEvent,
   TaskCompleteEvent,
   TaskErrorEvent,
   TaskProgressEvent,
   TaskStartEvent,
-  ThreatHuntAgentActivityEvent,
-  TriageAgentActivityEvent,
   TriageErrorEvent,
   TriageResultEvent,
   TriageStartEvent,
-  VerificationAgentActivityEvent,
   VerificationErrorEvent,
   VerificationResultEvent,
   VerificationStartEvent,
@@ -527,6 +524,13 @@ export function registerReportWorker(
     const { kind, index, total, fingerprint } = event.payload;
 
     if (store && fingerprint && event.payload.done) {
+      // Preserve the per-actor line history so the shell can render a
+      // post-mortem block after the hunt returns (HeartbeatStrip only
+      // lives during the `running` phase; without this archive step the
+      // breakdown would be unrecoverable once the tool resolves).
+      // Currently only threat-hunt producers set `done: true`, so the
+      // other handlers fall through to the no-op branch unchanged.
+      store.archiveAgentActivity(fingerprint);
       store.clearAgentActivity(fingerprint);
       return;
     }
@@ -580,10 +584,10 @@ export function registerReportWorker(
     }
   };
 
-  bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", handleAgentActivity);
-  bus.subscribe<VerificationAgentActivityEvent>("verification:agent-activity", handleAgentActivity);
-  bus.subscribe<PocHarnessAgentActivityEvent>("poc-harness:agent-activity", handleAgentActivity);
-  bus.subscribe<ThreatHuntAgentActivityEvent>("threat-hunt:agent-activity", handleAgentActivity);
+  bus.subscribe<TaskAgentActivityEvent>("triage:agent-activity", handleAgentActivity);
+  bus.subscribe<TaskAgentActivityEvent>("verification:agent-activity", handleAgentActivity);
+  bus.subscribe<TaskAgentActivityEvent>("poc-harness:agent-activity", handleAgentActivity);
+  bus.subscribe<TaskAgentActivityEvent>("threat-hunt:agent-activity", handleAgentActivity);
 
   // Scan-time agent activity — keyed by taskId (not fingerprint)
   bus.subscribe<ScanAgentActivityEvent>("scan:agent-activity", (event) => {

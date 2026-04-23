@@ -21,20 +21,17 @@ import { resolveRandoriPluginPath } from "../../agents/tasks/threat-modeling/res
 import { resolveRepo } from "../../cli/shared.js";
 import { loadPersistentThreatModel } from "../../threat-model-renderer.js";
 import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 const DEFAULT_STAGES = ["s1", "s2", "s3", "s4"] as const;
 const VALID_STAGES = new Set(["s1", "s2", "s3", "s4"]);
 
-function resolveTargetPaths(
-  ctx: ToolExecutionContext,
-  input?: string,
-): { root: string; name: string } {
+function resolveTargetPaths(ctx: ExecutionContext, input?: string): { root: string; name: string } {
   const target = input ?? ctx.target ?? ctx.cwd;
   return resolveRepo(target);
 }
 
-function resolveModel(ctx: ToolExecutionContext, override?: string): string {
+function resolveModel(ctx: ExecutionContext, override?: string): string {
   if (override) return override;
   const cfg = ctx.config.taskConfig?.["threat-model-randori"] as
     | Record<string, unknown>
@@ -126,7 +123,7 @@ const pastaTool: ModuleTool = {
     },
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
 
     let pluginPath: string;
@@ -264,7 +261,7 @@ const threatModelTool: ModuleTool = {
     required: ["outputDir"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
     const outputDir = params.outputDir;
     if (typeof outputDir !== "string" || !outputDir.trim()) {

@@ -13,7 +13,7 @@
 import { defineModule, defineTool } from "../define.js";
 import { storedToFinding } from "../sast/findings-bridge.js";
 import { resolvePromptValue } from "../sast/prompts.js";
-import type { CopilotModule, ToolExecutionContext, ToolResult } from "../types.js";
+import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 
 type Params = Record<string, unknown>;
 
@@ -47,7 +47,7 @@ export function createVerifyModule(): CopilotModule {
       required: ["fingerprint"],
     },
     headless: true,
-    async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+    async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
       const p = (input ?? {}) as Params;
       if (!ctx.workspace) {
         return { ok: false, output: "verify:finding needs an active workspace." };

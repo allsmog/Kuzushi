@@ -29,22 +29,19 @@ import { createFindingsModule } from "../modules/findings/findings.js";
 import { readHostKuzushiVersion } from "../modules/loader.js";
 import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
 import { createPatchModule } from "../modules/patch/patch.js";
+import { createPipelineModule } from "../modules/pipeline/pipeline.js";
 import { createCorePromptArmorModule } from "../modules/prompt-armor/prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/randori/randori.js";
 import { createReconModule } from "../modules/recon/core-recon.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
 import { createSemgrepModule } from "../modules/semgrep/semgrep.js";
 import { createCoreShinsaModule } from "../modules/shinsa/shinsa.js";
+import { createSystemsHuntModule } from "../modules/systems-hunt/systems-hunt.js";
 import { createTaintIrisModule } from "../modules/taint-iris/taint-iris.js";
 import { createThreatHuntModule } from "../modules/threat-hunt/threat-hunt.js";
 import { createCoreTobModule } from "../modules/tob/tob.js";
 import { createTriageModule } from "../modules/triage/triage.js";
-import type {
-  ModuleContext,
-  ModuleInfo,
-  ToolExecutionContext,
-  ToolResult,
-} from "../modules/types.js";
+import type { ExecutionContext, ModuleContext, ModuleInfo, ToolResult } from "../modules/types.js";
 import { createVariantHunterModule } from "../modules/variant-hunter.js";
 import { createVerifyModule } from "../modules/verify/verify.js";
 import { createCoreVulnScoutModule } from "../modules/vuln-scout/vuln-scout.js";
@@ -168,12 +165,18 @@ export class CopilotCore {
         createAgenticSastModule(),
         createThreatHuntModule(),
         createTaintIrisModule(),
+        createSystemsHuntModule(),
         createTriageModule(),
         createVerifyModule(),
         createPatchModule(),
         createFindingsModule(),
         createContextModule(),
         createReconModule(),
+        // Hidden orchestrator-level module — infrastructure DAG nodes
+        // (task-selector, approval gates, taint-iris sub-tasks). Loaded so
+        // the module registry owns every scan-DAG participant; the user
+        // never sees `/use pipeline` in the catalog.
+        createPipelineModule(),
       ];
       for (const mod of sastFamily) {
         await this.loadWithScope(mod);
@@ -259,7 +262,7 @@ export class CopilotCore {
   async executeTool(
     qualifiedName: string,
     input: unknown,
-    ctxOverrides?: Partial<ToolExecutionContext>,
+    ctxOverrides?: Partial<ExecutionContext>,
   ): Promise<ToolResult> {
     const resolved = this.registry.resolveTool(qualifiedName);
     if (!resolved) {
@@ -335,7 +338,7 @@ export class CopilotCore {
 
     const runConfig = ctxOverrides?.config ?? this.opts.config;
     const datastore = ctxOverrides?.datastore;
-    const ctx: ToolExecutionContext = {
+    const ctx: ExecutionContext = {
       cwd: ctxOverrides?.cwd ?? this.opts.dataDir,
       runtime: toolRuntime,
       bus: ctxBus,

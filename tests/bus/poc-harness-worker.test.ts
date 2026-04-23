@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import type {
-  PocHarnessAgentActivityEvent,
   PocHarnessErrorEvent,
   PocHarnessResultEvent,
+  TaskAgentActivityEvent,
 } from "../../src/bus/events.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerPocHarnessWorker } from "../../src/bus/workers/poc-harness-worker.js";
@@ -257,7 +257,7 @@ describe("poc-harness-worker", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    const activityPromise = bus.waitFor<PocHarnessAgentActivityEvent>(
+    const activityPromise = bus.waitFor<TaskAgentActivityEvent>(
       "poc-harness:agent-activity",
       (event) => event.meta.runId === runId,
     );

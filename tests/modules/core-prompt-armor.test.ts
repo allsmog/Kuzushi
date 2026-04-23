@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createCorePromptArmorModule } from "../../src/modules/prompt-armor/prompt-armor.js";
-import type { ToolExecutionContext } from "../../src/modules/types.js";
+import type { ExecutionContext } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
 const { resolveRepoMock, resolvePromptArmorPluginPathMock, runtimeQueryMock, existsSyncMock } =
@@ -41,11 +41,11 @@ function createConfig(): KuzushiConfig {
   } as KuzushiConfig;
 }
 
-function createCtx(): ToolExecutionContext {
+function createCtx(): ExecutionContext {
   return {
     cwd: "/tmp/repo",
-    runtime: { query: runtimeQueryMock } as unknown as ToolExecutionContext["runtime"],
-    bus: {} as ToolExecutionContext["bus"],
+    runtime: { query: runtimeQueryMock } as unknown as ExecutionContext["runtime"],
+    bus: {} as ExecutionContext["bus"],
     config: createConfig(),
   };
 }

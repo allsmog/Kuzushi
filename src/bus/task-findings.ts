@@ -1,76 +1,24 @@
-import type { AgentRuntime } from "../agent-runtime/types.js";
 import { isHandoff } from "../agents/handoff.js";
-import type { AgentTask, TaskContext } from "../agents/types.js";
+import type { AgentTask } from "../agents/types.js";
 import type {
   CorroboratingSignal,
   EngineProvenance,
   Finding,
   ProofState,
-  ScannerPlugin,
   SuppressionReason,
   TaintPathStep,
-  TaskConfig,
 } from "../scanners/types.js";
-import { getTaskOutputMeta } from "../task-output-meta.js";
-import { isRecord, normalizeCostUsd } from "../utils.js";
+import { isRecord } from "../utils.js";
 
-export interface ExecutedTaskResult {
-  output: unknown;
-  emittedFindings: Finding[];
-  durationMs: number;
-  costUsd: number;
-}
-
-export interface ExecutedScannerResult {
-  findings: Finding[];
-  durationMs: number;
-  costUsd: number;
-}
-
-export async function executeAgentTask(
-  task: AgentTask,
-  input: unknown,
-  context: TaskContext,
-  config: TaskConfig,
-): Promise<ExecutedTaskResult> {
-  const startedAt = Date.now();
-
-  if (task.init) {
-    await task.init(config);
-  }
-
-  const output = await task.run(input, context);
-
-  return {
-    output,
-    emittedFindings: extractTaskFindings(task.outputKind, output),
-    durationMs: Date.now() - startedAt,
-    costUsd: normalizeCostUsd(getTaskOutputMeta(output)?.costUsd),
-  };
-}
-
-export async function executeScannerPlugin(
-  plugin: ScannerPlugin,
-  repoRoot: string,
-  input: Parameters<ScannerPlugin["scan"]>[1],
-  config: TaskConfig,
-  runtime: AgentRuntime,
-): Promise<ExecutedScannerResult> {
-  const startedAt = Date.now();
-
-  if (plugin.init) {
-    await plugin.init(config);
-  }
-
-  const findings = await plugin.scan(repoRoot, input, config, runtime, undefined);
-
-  return {
-    findings,
-    durationMs: Date.now() - startedAt,
-    costUsd: normalizeCostUsd(getTaskOutputMeta(findings)?.costUsd),
-  };
-}
-
+/**
+ * Extract `Finding[]` from a task's output, unwrapping `TaskHandoff`
+ * envelopes and honouring the task's declared `outputKind`.
+ *
+ * - `findings` — treat the output itself as `Finding[]`.
+ * - `threat-model` — look for a `.findings` array inside the output.
+ * - Anything else — returns `[]` (tasks that produce threat models,
+ *   verdicts, or reports emit findings separately via the bus).
+ */
 export function extractTaskFindings(
   outputKind: AgentTask["outputKind"],
   output: unknown,
@@ -161,7 +109,6 @@ function asString(value: unknown): string {
   if (typeof value === "string") {
     return value;
   }
-
   return "";
 }
 
@@ -169,7 +116,6 @@ function asNullableString(value: unknown): string | null {
   if (typeof value === "string") {
     return value;
   }
-
   return null;
 }
 
@@ -182,7 +128,6 @@ function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
-
   return value.map((item) => String(item));
 }
 

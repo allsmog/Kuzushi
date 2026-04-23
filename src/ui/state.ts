@@ -166,6 +166,18 @@ export interface AgentActivityLine {
 }
 
 /**
+ * Frozen copy of a single per-actor hunt run, captured on the `done:true`
+ * activity event before `clearAgentActivity` drops the fingerprint. Powers
+ * the `hunt-post-mortem` scrollback block — operators can expand it after
+ * the run to see which actor made the last move and what that move was.
+ */
+export interface HuntActorSnapshot {
+  fingerprint: string;
+  lines: AgentActivityLine[];
+  archivedAt: number;
+}
+
+/**
  * One sub-step in the rolling tail shown beneath a running shell tool.
  * Timestamps drive "just now / 5s ago" relative-age labels.
  */
@@ -328,6 +340,14 @@ export interface UIState {
   } | null;
   results: ResultLine[];
   agentActivity: Map<string, AgentActivityLine[]>;
+  /**
+   * Completed per-actor activity snapshots from the most recent hunt run.
+   * `archiveAgentActivity()` moves a fingerprint's final lines here before
+   * clearing them from `agentActivity`, so the shell can emit a
+   * `hunt-post-mortem` scrollback block summarising the run once the tool
+   * resolves. Cleared by `consumeHuntSnapshot()` at dispatch-finally time.
+   */
+  lastHuntSnapshot: HuntActorSnapshot[];
   summary: SummaryData | null;
   qualityGate: QualityGateResult | null;
   notices: UINotice[];
@@ -390,7 +410,7 @@ function preflightBreadcrumb(kind: (typeof PREFLIGHT_STEP_ORDER)[number]): UISta
 }
 
 export interface ShellHistoryEntry {
-  type: "input" | "output" | "error" | "tool-progress" | "tool-call";
+  type: "input" | "output" | "error" | "tool-progress" | "tool-call" | "hunt-post-mortem";
   text: string;
   timestamp: number;
   prompt?: string;
@@ -455,6 +475,19 @@ export interface ShellHistoryEntry {
    *   colored green/red accordingly.
    */
   progressKind?: "info" | "invocation" | "ok" | "fail" | "abort";
+  /**
+   * For `hunt-post-mortem`: aggregated summary of the completed run —
+   * collapsed `N actors · M findings · $X.XX` headline with per-actor
+   * detail lines hidden behind `space to expand`. Consumed from
+   * `state.lastHuntSnapshot` at tool-dispatch finally-block time, so this
+   * stays fixed even if a subsequent hunt mutates the live map.
+   */
+  huntSummary?: {
+    actorCount: number;
+    findingsCount: number;
+    costUsd: number;
+    perActor: HuntActorSnapshot[];
+  };
 }
 
 /**
@@ -751,6 +784,7 @@ export class UIStore {
       scanView: "pipeline",
       results: [],
       agentActivity: new Map(),
+      lastHuntSnapshot: [],
       heartbeatExpanded: true,
       summary: null,
       qualityGate: null,
@@ -909,6 +943,43 @@ export class UIStore {
     this.agentActivityTimestamps.delete(fingerprint);
     this.state = { ...this.state, agentActivity: newMap };
     this.notify();
+  }
+
+  /**
+   * Move a fingerprint's current activity lines into `lastHuntSnapshot`
+   * before its `clearAgentActivity` drop. Called from the report-worker's
+   * `handleAgentActivity` on `done:true` threat-hunt events — preserves the
+   * per-actor breakdown for the post-mortem block even after `HeartbeatStrip`
+   * stops rendering. No-op if the fingerprint has no active lines (e.g. an
+   * actor that errored before its first activity tick).
+   */
+  archiveAgentActivity(fingerprint: string): void {
+    const lines = this.state.agentActivity.get(fingerprint);
+    if (!lines || lines.length === 0) return;
+    const snapshot: HuntActorSnapshot = {
+      fingerprint,
+      lines: lines.slice(),
+      archivedAt: Date.now(),
+    };
+    this.state = {
+      ...this.state,
+      lastHuntSnapshot: [...this.state.lastHuntSnapshot, snapshot],
+    };
+    this.notify();
+  }
+
+  /**
+   * Read + clear `lastHuntSnapshot` in one shot. The shell's
+   * direct-tool-dispatch `finally` block calls this when a hunt tool
+   * resolves so the snapshot embeds in a `hunt-post-mortem` history entry
+   * instead of leaking into the next tool's result rendering.
+   */
+  consumeHuntSnapshot(): HuntActorSnapshot[] {
+    const snapshot = this.state.lastHuntSnapshot;
+    if (snapshot.length === 0) return snapshot;
+    this.state = { ...this.state, lastHuntSnapshot: [] };
+    this.notify();
+    return snapshot;
   }
 
   /**

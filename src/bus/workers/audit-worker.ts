@@ -5,10 +5,9 @@ import { safeJsonStringify } from "../../utils/safe-json.js";
 import type {
   PipelineCompleteEvent,
   PipelineStartEvent,
-  TriageAgentActivityEvent,
+  TaskAgentActivityEvent,
   TriageErrorEvent,
   TriageResultEvent,
-  VerificationAgentActivityEvent,
   VerificationErrorEvent,
   VerificationResultEvent,
 } from "../events.js";
@@ -62,7 +61,7 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
     );
   });
 
-  bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", (event) => {
+  bus.subscribe<TaskAgentActivityEvent>("triage:agent-activity", (event) => {
     appendAuditLine(runState, event.meta.runId, "triage", event.meta.timestamp, event.type, {
       fingerprint: event.payload.fingerprint,
       payload: event.payload,
@@ -97,7 +96,7 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
     });
   });
 
-  bus.subscribe<VerificationAgentActivityEvent>("verification:agent-activity", (event) => {
+  bus.subscribe<TaskAgentActivityEvent>("verification:agent-activity", (event) => {
     appendAuditLine(runState, event.meta.runId, "verify", event.meta.timestamp, event.type, {
       fingerprint: event.payload.fingerprint,
       payload: event.payload,

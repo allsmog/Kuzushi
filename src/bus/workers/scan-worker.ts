@@ -6,14 +6,14 @@ import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabili
 import type { KnowledgeRegistry } from "../../knowledge/types.js";
 import type { Finding, TaskConfig } from "../../scanners/types.js";
 import { loadSecurityProfiles } from "../../security-profiles.js";
-import { attachTaskOutputMeta } from "../../task-output-meta.js";
+import { attachTaskOutputMeta, getTaskOutputMeta } from "../../task-output-meta.js";
 import type { KuzushiConfig } from "../../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
 import type { TaskStartEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
 import { getRunSignal } from "../run-signals.js";
 import { wrapRuntimeWithActivityForwarding } from "../runtime-forwarding.js";
-import { executeAgentTask } from "../task-execution.js";
+import { extractTaskFindings } from "../task-findings.js";
 import type { MessageBus } from "../types.js";
 
 export interface ScanWorkerDeps {
@@ -143,6 +143,32 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
   });
 }
 
+/**
+ * Run a task once, returning the structured result the scan-worker needs
+ * (output, emitted findings, wall-clock, cost). Replaces the legacy
+ * `executeAgentTask` helper — the bridge now ensures every DAG node is an
+ * `AgentTask` adapter registered through a `CopilotModule`, so this inlined
+ * call is the only invocation shape left.
+ */
+async function runTaskOnce(
+  task: AgentTask,
+  input: unknown,
+  taskContext: TaskContext,
+  taskConfig: TaskConfig,
+) {
+  const startedAt = Date.now();
+  if (task.init) {
+    await task.init(taskConfig);
+  }
+  const output = await task.run(input, taskContext);
+  return {
+    output,
+    emittedFindings: extractTaskFindings(task.outputKind, output),
+    durationMs: Date.now() - startedAt,
+    costUsd: normalizeCostUsd(getTaskOutputMeta(output)?.costUsd),
+  };
+}
+
 async function executeTaskWithOptionalEnsemble(
   task: AgentTask,
   input: unknown,
@@ -156,14 +182,14 @@ async function executeTaskWithOptionalEnsemble(
     task.outputKind !== "findings" ||
     !ENSEMBLE_ELIGIBLE_TASK_IDS.has(task.id)
   ) {
-    return executeAgentTask(task, input, taskContext, taskConfig);
+    return runTaskOnce(task, input, taskContext, taskConfig);
   }
 
   const startedAt = Date.now();
   const laneResults = await Promise.all(
     ensembleModels.map(async (model) => {
       try {
-        const result = await executeAgentTask(
+        const result = await runTaskOnce(
           task,
           input,
           {

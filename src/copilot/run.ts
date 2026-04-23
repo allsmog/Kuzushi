@@ -15,7 +15,7 @@
 
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { MessageBus } from "../bus/types.js";
-import type { ToolExecutionContext, ToolResult } from "../modules/types.js";
+import type { ExecutionContext, ToolResult } from "../modules/types.js";
 import type { KuzushiConfig } from "../types.js";
 import { CopilotCore } from "./core.js";
 
@@ -99,7 +99,7 @@ export async function executeRun(opts: RunOptions): Promise<RunResult> {
       };
     }
 
-    const ctxOverrides: Partial<ToolExecutionContext> = {
+    const ctxOverrides: Partial<ExecutionContext> = {
       cwd: opts.cwd,
       target: opts.target,
       workspaceId: opts.workspaceId,

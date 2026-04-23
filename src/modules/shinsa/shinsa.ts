@@ -16,7 +16,7 @@ import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveShinsaPluginPath } from "../../agents/tasks/shinsa/resolve-shinsa-plugin.js";
 import { resolveRepo } from "../../cli/shared.js";
 import { createLogger } from "../../logger.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 const log = createLogger({ stage: "shinsa" });
 
@@ -41,17 +41,14 @@ interface ShinsaRunResult {
   outputDir: string;
 }
 
-function resolveModel(ctx: ToolExecutionContext, override?: string): string {
+function resolveModel(ctx: ExecutionContext, override?: string): string {
   if (override) return override;
   const cfg = ctx.config.taskConfig?.shinsa as Record<string, unknown> | undefined;
   if (cfg && typeof cfg.model === "string" && cfg.model.trim()) return cfg.model.trim();
   return ctx.config.model;
 }
 
-function resolveTargetPaths(
-  ctx: ToolExecutionContext,
-  input?: string,
-): { root: string; name: string } {
+function resolveTargetPaths(ctx: ExecutionContext, input?: string): { root: string; name: string } {
   return resolveRepo(input ?? ctx.target ?? ctx.cwd);
 }
 
@@ -187,7 +184,7 @@ function buildScanTool(mode: ScanMode, toolId: string, title: string, blurb: str
       },
     },
     headless: true,
-    async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+    async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
       const params = (input ?? {}) as Record<string, unknown>;
 
       let pluginPath: string;
@@ -308,7 +305,7 @@ const frameworksTool: ModuleTool = {
     "(read from <pluginRoot>/skills/). No LLM call — cheap introspection.",
   inputSchema: { type: "object", properties: {} },
   headless: true,
-  async execute(_input: unknown, _ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(_input: unknown, _ctx: ExecutionContext): Promise<ToolResult> {
     let pluginPath: string;
     try {
       pluginPath = resolveShinsaPluginPath();

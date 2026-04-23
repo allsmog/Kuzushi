@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ToolExecutionContext } from "../../src/modules/types.js";
+import type { ExecutionContext } from "../../src/modules/types.js";
 import { createVariantHunterModule } from "../../src/modules/variant-hunter.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
@@ -60,11 +60,11 @@ function createRuntimeWithStructuredReply(output: unknown, cost = 0.01): MockRun
   };
 }
 
-function createContext(runtime: MockRuntime, config = createConfig()): ToolExecutionContext {
+function createContext(runtime: MockRuntime, config = createConfig()): ExecutionContext {
   return {
     cwd: "/tmp/repo",
-    runtime: runtime as unknown as ToolExecutionContext["runtime"],
-    bus: {} as ToolExecutionContext["bus"],
+    runtime: runtime as unknown as ExecutionContext["runtime"],
+    bus: {} as ExecutionContext["bus"],
     config,
     target: "/tmp/repo",
   };

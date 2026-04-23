@@ -14,24 +14,21 @@ import { resolveVulnScoutPlugin } from "../../agents/tasks/vuln-scout/resolve-vu
 import { buildVulnScoutPrompt, vulnScoutTask } from "../../agents/tasks/vuln-scout/vuln-scout.js";
 import { resolveRepo } from "../../cli/shared.js";
 import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
-function resolveTargetPaths(
-  ctx: ToolExecutionContext,
-  input?: string,
-): { root: string; name: string } {
+function resolveTargetPaths(ctx: ExecutionContext, input?: string): { root: string; name: string } {
   const target = input ?? ctx.target ?? ctx.cwd;
   return resolveRepo(target);
 }
 
-function resolveModel(ctx: ToolExecutionContext, override?: string): string {
+function resolveModel(ctx: ExecutionContext, override?: string): string {
   if (override) return override;
   const cfg = ctx.config.taskConfig?.["vuln-scout"] as Record<string, unknown> | undefined;
   if (cfg && typeof cfg.model === "string" && cfg.model.trim()) return cfg.model.trim();
   return ctx.config.model;
 }
 
-function resolveMaxFindings(ctx: ToolExecutionContext, override?: unknown): number {
+function resolveMaxFindings(ctx: ExecutionContext, override?: unknown): number {
   const fromInput = typeof override === "number" ? override : undefined;
   if (fromInput && fromInput >= 1) return Math.floor(fromInput);
   const cfg = ctx.config.taskConfig?.["vuln-scout"] as Record<string, unknown> | undefined;
@@ -80,7 +77,7 @@ const auditTool: ModuleTool = {
     },
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
 
     let plugin: { type: "local"; path: string };

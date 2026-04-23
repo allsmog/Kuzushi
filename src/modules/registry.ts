@@ -9,17 +9,17 @@
  */
 
 import type { TaskRegistry } from "../agents/registry.js";
-import type { AgentTask } from "../agents/types.js";
 import type { KnowledgeRegistry } from "../knowledge/types.js";
 import { registerDagToolsInTaskRegistry } from "./dag-bridge.js";
 import { ModuleLoadError } from "./errors.js";
-import type {
-  CopilotModule,
-  ModuleContext,
-  ModuleInfo,
-  ModuleManifest,
-  ModuleSpecifier,
-  ModuleTool,
+import {
+  type CopilotModule,
+  isDagTool,
+  type ModuleContext,
+  type ModuleInfo,
+  type ModuleManifest,
+  type ModuleSpecifier,
+  type ModuleTool,
 } from "./types.js";
 
 /** Events emitted by the registry itself. */
@@ -97,15 +97,6 @@ export class ModuleRegistry {
         await mod.init(opts?.moduleConfig ?? {}, ctx);
       }
       this.initialized.add(mod.id);
-
-      // Register pipeline tasks in the shared TaskRegistry
-      if (mod.tasks && opts?.taskRegistry) {
-        for (const task of mod.tasks) {
-          if (!opts.taskRegistry.has(task.id)) {
-            opts.taskRegistry.register(task);
-          }
-        }
-      }
 
       // Register DagTools (module-forward DAG participants) via the bridge.
       // Safe to call unconditionally — bridge silently skips re-registrations
@@ -203,7 +194,11 @@ export class ModuleRegistry {
       version: mod.version,
       description: mod.description,
       toolCount: mod.tools.length,
-      taskCount: mod.tasks?.length ?? 0,
+      // Report the number of DagTools — historically reflected the
+      // module's `tasks?` contribution. After the module-forward
+      // reconciliation, DAG participants live on `tools` with
+      // `isDagTool(t) === true`.
+      taskCount: mod.tools.filter(isDagTool).length,
       loaded: this.initialized.has(mod.id),
       ...(mod.rank ? { rank: mod.rank } : {}),
       ...(mod.references ? { references: mod.references } : {}),
@@ -274,22 +269,6 @@ export class ModuleRegistry {
   moduleTools(moduleId: string): ReadonlyArray<ModuleTool> {
     const mod = this.modules.get(moduleId);
     return mod?.tools ?? [];
-  }
-
-  /**
-   * Get all pipeline tasks across all loaded modules.
-   */
-  allTasks(): Array<{ moduleId: string; task: AgentTask }> {
-    const results: Array<{ moduleId: string; task: AgentTask }> = [];
-
-    for (const mod of this.modules.values()) {
-      if (!mod.tasks) continue;
-      for (const task of mod.tasks) {
-        results.push({ moduleId: mod.id, task });
-      }
-    }
-
-    return results;
   }
 }
 

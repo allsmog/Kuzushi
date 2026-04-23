@@ -110,7 +110,6 @@ import {
   type VerifyGateResult,
 } from "./orchestrator/verify-gate.js";
 import { wrapRuntimeWithActivityForwarding } from "./runtime-forwarding.js";
-import { executeAgentTask } from "./task-execution.js";
 import type { MessageBus } from "./types.js";
 import { runVariantAnalysis } from "./workers/variant-analysis-worker.js";
 
@@ -150,7 +149,6 @@ function allSettledCollect(outcomes: Promise<TaskOutcome>[]): Promise<TaskOutcom
  */
 export class PipelineOrchestrator {
   private readonly runs = new Map<string, RunState>();
-  private draining = false;
 
   constructor(
     private readonly bus: MessageBus,
@@ -164,7 +162,6 @@ export class PipelineOrchestrator {
    * and wait for current in-flight items to complete (with timeout).
    */
   async drain(timeoutMs: number = 10_000): Promise<void> {
-    this.draining = true;
     const deadline = Date.now() + timeoutMs;
 
     for (const [_runId, state] of this.runs) {
@@ -191,8 +188,6 @@ export class PipelineOrchestrator {
         // Best-effort persistence during shutdown.
       }
     }
-
-    this.draining = false;
   }
 
   private buildHookContext(state: RunState): HookContext {
@@ -1414,17 +1409,14 @@ export class PipelineOrchestrator {
           bus: this.bus,
           upstreamOutputs: new Map(state.taskOutputs),
         };
-        const executed = await executeAgentTask(
-          reachabilityCheckTask,
-          filteredFindings,
-          reachabilityContext,
-          {},
-        );
-        const enriched = executed.output;
-        if (Array.isArray(enriched) && enriched.length > 0) {
-          filteredFindings = enriched as Finding[];
+        if (reachabilityCheckTask.init) {
+          await reachabilityCheckTask.init({});
         }
-        const reachCostUsd = normalizeCostUsd(executed.costUsd);
+        const reachOutput = await reachabilityCheckTask.run(filteredFindings, reachabilityContext);
+        if (Array.isArray(reachOutput) && reachOutput.length > 0) {
+          filteredFindings = reachOutput as Finding[];
+        }
+        const reachCostUsd = normalizeCostUsd(getTaskOutputMeta(reachOutput)?.costUsd);
         if (reachCostUsd > 0) {
           state.totalCostUsd += reachCostUsd;
           try {
@@ -1461,17 +1453,14 @@ export class PipelineOrchestrator {
           bus: this.bus,
           upstreamOutputs: new Map(state.taskOutputs),
         };
-        const cgExecuted = await executeAgentTask(
-          callGraphAssistTask,
-          filteredFindings,
-          cgContext,
-          {},
-        );
-        const cgEnriched = cgExecuted.output;
-        if (Array.isArray(cgEnriched) && cgEnriched.length > 0) {
-          filteredFindings = cgEnriched as Finding[];
+        if (callGraphAssistTask.init) {
+          await callGraphAssistTask.init({});
         }
-        const cgCostUsd = normalizeCostUsd(cgExecuted.costUsd);
+        const cgOutput = await callGraphAssistTask.run(filteredFindings, cgContext);
+        if (Array.isArray(cgOutput) && cgOutput.length > 0) {
+          filteredFindings = cgOutput as Finding[];
+        }
+        const cgCostUsd = normalizeCostUsd(getTaskOutputMeta(cgOutput)?.costUsd);
         if (cgCostUsd > 0) {
           state.totalCostUsd += cgCostUsd;
           try {

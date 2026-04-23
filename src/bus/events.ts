@@ -319,31 +319,19 @@ export interface TaskAgentActivityPayload {
 /**
  * Template-literal supertype for all per-agent activity events. Any event
  * whose type matches `${moduleId}:agent-activity` carries a
- * `TaskAgentActivityPayload`. Consumers can subscribe by exact topic (fast
- * path) or pattern-match the suffix (orchestrator / report-worker do this
- * so new fan-out tools get uniform UI plumbing without bus wiring).
+ * `TaskAgentActivityPayload`. Consumers subscribe by exact topic (fast path)
+ * or pattern-match the suffix (orchestrator / report-worker do this so new
+ * fan-out tools get uniform UI plumbing without bus wiring).
  *
- * The narrow per-module aliases below (`TriageAgentActivityEvent`, …) exist
- * for source compatibility with consumers that type-annotate a specific
- * topic. All five share the same payload shape.
+ * The five narrow per-module aliases (`TriageAgentActivityEvent`,
+ * `VerificationAgentActivityEvent`, `PocHarnessAgentActivityEvent`,
+ * `DynamicAnalysisAgentActivityEvent`, `ThreatHuntAgentActivityEvent`) used
+ * to live here for source compatibility. They were collapsed into this
+ * supertype as part of the module-forward reconciliation — every consumer
+ * now types against `TaskAgentActivityEvent` directly.
  */
 export type TaskAgentActivityEvent = EventEnvelope<
   `${string}:agent-activity`,
-  TaskAgentActivityPayload
->;
-
-export type TriageAgentActivityEvent = EventEnvelope<
-  "triage:agent-activity",
-  TaskAgentActivityPayload
->;
-
-/**
- * Threat-hunt emits one row per actor-run via this event. Subscribed to the
- * same shared `handleAgentActivity` handler in the report-worker as the
- * other `*:agent-activity` producers.
- */
-export type ThreatHuntAgentActivityEvent = EventEnvelope<
-  "threat-hunt:agent-activity",
   TaskAgentActivityPayload
 >;
 
@@ -454,11 +442,6 @@ export type VerificationErrorEvent = EventEnvelope<
     total: number;
     errorCategory?: ErrorCategory;
   }
->;
-
-export type VerificationAgentActivityEvent = EventEnvelope<
-  "verification:agent-activity",
-  TaskAgentActivityPayload
 >;
 
 export type VerificationCompleteEvent = EventEnvelope<
@@ -610,11 +593,6 @@ export type DynamicAnalysisErrorEvent = EventEnvelope<
     index: number;
     total: number;
   }
->;
-
-export type DynamicAnalysisAgentActivityEvent = EventEnvelope<
-  "dynamic:agent-activity",
-  TaskAgentActivityPayload
 >;
 
 export type DynamicAnalysisCompleteEvent = EventEnvelope<
@@ -1101,8 +1079,7 @@ export type KuzushiEvent =
   | TriageBatchQueuedEvent
   | TriageResultEvent
   | TriageErrorEvent
-  | TriageAgentActivityEvent
-  | ThreatHuntAgentActivityEvent
+  | TaskAgentActivityEvent
   | TriageAssertionsEvent
   | TriageCompleteEvent
   | TriageQueueDepthEvent
@@ -1111,21 +1088,18 @@ export type KuzushiEvent =
   | VerificationBatchQueuedEvent
   | VerificationResultEvent
   | VerificationErrorEvent
-  | VerificationAgentActivityEvent
   | VerificationCompleteEvent
   | VerificationQueueDepthEvent
   | PocHarnessStartEvent
   | PocHarnessFindingQueuedEvent
   | PocHarnessResultEvent
   | PocHarnessErrorEvent
-  | PocHarnessAgentActivityEvent
   | PocHarnessCompleteEvent
   | PocHarnessQueueDepthEvent
   | DynamicAnalysisStartEvent
   | DynamicAnalysisFindingQueuedEvent
   | DynamicAnalysisResultEvent
   | DynamicAnalysisErrorEvent
-  | DynamicAnalysisAgentActivityEvent
   | DynamicAnalysisCompleteEvent
   | DynamicAnalysisQueueDepthEvent
   | StoreUpsertedEvent

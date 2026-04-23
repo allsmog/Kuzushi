@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { type ExecutedTaskResult, executeAgentTask } from "../../../../bus/task-execution.js";
+import { extractTaskFindings } from "../../../../bus/task-findings.js";
 import type { Finding, TaskConfig } from "../../../../scanners/types.js";
 import { attachTaskOutputMeta, getTaskOutputMeta } from "../../../../task-output-meta.js";
 import type { ScanOpts } from "../../../../types.js";
@@ -308,29 +308,42 @@ async function runTaintAnalysisForService(
   };
 }
 
+interface NestedTaskResult<TOutput> {
+  output: TOutput;
+  emittedFindings: Finding[];
+  durationMs: number;
+  costUsd: number;
+}
+
 async function executeNestedTask<TOutput>(
   task: AgentTask<ScanOpts, TOutput>,
   input: ScanOpts,
   context: TaskContext,
   serviceId: string,
-): Promise<ExecutedTaskResult & { output: TOutput }> {
+): Promise<NestedTaskResult<TOutput>> {
   process.stderr.write(
     `[taint-analysis-cross-analyze] [${serviceId}] Starting nested task ${task.id}\n`,
   );
 
   try {
-    const executed = await executeAgentTask(
-      task,
-      input,
-      context,
-      resolveTaskConfig(context.config, task.id),
-    );
+    const startedAt = Date.now();
+    const taskConfig = resolveTaskConfig(context.config, task.id);
+    if (task.init) {
+      await task.init(taskConfig);
+    }
+    const output = await task.run(input, context);
+    const result: NestedTaskResult<TOutput> = {
+      output,
+      emittedFindings: extractTaskFindings(task.outputKind, output),
+      durationMs: Date.now() - startedAt,
+      costUsd: normalizeCostUsd(getTaskOutputMeta(output)?.costUsd),
+    };
 
     process.stderr.write(
-      `[taint-analysis-cross-analyze] [${serviceId}] Completed nested task ${task.id} in ${executed.durationMs}ms (cost $${executed.costUsd.toFixed(4)})\n`,
+      `[taint-analysis-cross-analyze] [${serviceId}] Completed nested task ${task.id} in ${result.durationMs}ms (cost $${result.costUsd.toFixed(4)})\n`,
     );
 
-    return executed as ExecutedTaskResult & { output: TOutput };
+    return result;
   } catch (error) {
     process.stderr.write(
       `[taint-analysis-cross-analyze] [${serviceId}] Nested task ${task.id} failed: ${toErrorMessage(error)}\n`,

@@ -1,5 +1,5 @@
 /**
- * Narrow host-side handles exposed to modules via `ToolExecutionContext`.
+ * Narrow host-side handles exposed to modules via `ExecutionContext`.
  *
  * These interfaces intentionally describe only the slice of the underlying
  * host objects (`UIStore`, `Datastore`, `WorkspaceManager`, `ModuleEventBus`)

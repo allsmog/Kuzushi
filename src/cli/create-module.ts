@@ -192,7 +192,7 @@ function starterTsFor(id: string, template: ModuleTemplate, rank: ScaffoldRank):
   const toolName = `${id}:${toolSuffix}`;
   const toolVar = `${camel(toolSuffix)}Tool`;
   return `import { defineModule, defineTool } from "kuzushi/modules";
-import type { ToolExecutionContext, ToolResult } from "kuzushi/modules";
+import type { ExecutionContext, ToolResult } from "kuzushi/modules";
 
 /**
  * ${description}
@@ -215,7 +215,7 @@ const ${toolVar} = defineTool<"${id}">({
     required: ["target"],
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
     const target = (params.target as string) ?? ctx.target ?? ctx.cwd;
 

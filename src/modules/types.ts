@@ -11,7 +11,7 @@
 
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
-import type { AgentTask, TaskOutputKind } from "../agents/types.js";
+import type { TaskOutputKind } from "../agents/types.js";
 import type { MessageBus } from "../bus/types.js";
 import type { PrintSink } from "../copilot/print.js";
 import type { KnowledgeModule } from "../knowledge/types.js";
@@ -221,7 +221,7 @@ export interface ToolResult {
 }
 
 /** Context provided to every tool execution. */
-export interface ToolExecutionContext {
+export interface ExecutionContext {
   /** Active workspace ID, if any. */
   workspaceId?: string;
   /** Current target (repo path, host, etc.). */
@@ -379,14 +379,6 @@ export interface ToolExecutionContext {
 }
 
 /**
- * Canonical name for the tool execution context. During the module-forward
- * merge both names are exported; tools authored against the new DagTool
- * contract should prefer `ExecutionContext` so later removal of the legacy
- * `ToolExecutionContext` name doesn't require per-tool rewrites.
- */
-export type ExecutionContext = ToolExecutionContext;
-
-/**
  * A tool exposed by a module — callable from shell mode (via LLM tool dispatch),
  * run mode (direct headless invocation), or pipeline mode (if wrapped as a task).
  */
@@ -451,7 +443,7 @@ export interface ModuleTool {
    */
   init?(moduleConfig: Record<string, unknown>): Promise<void>;
   /** Execute the tool with validated input. */
-  execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult>;
+  execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -644,6 +636,16 @@ export interface CopilotModule {
   /** Stability/reliability/side-effect notes. */
   readonly notes?: ModuleNotes;
 
+  /**
+   * When true, hides the module from the catalog listing, `/modules` table,
+   * and module-picker UI. Tools on hidden modules are still loaded and
+   * participate in the scan DAG — this flag just affects user-facing
+   * discoverability. Used by orchestrator-internal modules like `pipeline`
+   * whose DagTools exist purely to produce upstream outputs for visible
+   * modules.
+   */
+  readonly hidden?: boolean;
+
   /** Tools exposed by this module. */
   readonly tools: ReadonlyArray<ModuleTool>;
 
@@ -661,9 +663,6 @@ export interface CopilotModule {
    * modules with no deps (semgrep, codeql, context) omit this field.
    */
   readonly requires?: ReadonlyArray<CopilotModuleRequirement>;
-
-  /** Pipeline tasks contributed by this module (registered in TaskRegistry). */
-  readonly tasks?: ReadonlyArray<AgentTask>;
 
   /** Knowledge modules contributed (registered in KnowledgeRegistry). */
   readonly knowledge?: ReadonlyArray<KnowledgeModule>;

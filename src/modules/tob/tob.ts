@@ -17,24 +17,21 @@ import {
 import { buildTobAuditPrompt, tobAuditTask } from "../../agents/tasks/tob-audit/tob-audit.js";
 import { resolveRepo } from "../../cli/shared.js";
 import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
+import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
-function resolveTargetPaths(
-  ctx: ToolExecutionContext,
-  input?: string,
-): { root: string; name: string } {
+function resolveTargetPaths(ctx: ExecutionContext, input?: string): { root: string; name: string } {
   const target = input ?? ctx.target ?? ctx.cwd;
   return resolveRepo(target);
 }
 
-function resolveModel(ctx: ToolExecutionContext, override?: string): string {
+function resolveModel(ctx: ExecutionContext, override?: string): string {
   if (override) return override;
   const cfg = ctx.config.taskConfig?.["tob-audit"] as Record<string, unknown> | undefined;
   if (cfg && typeof cfg.model === "string" && cfg.model.trim()) return cfg.model.trim();
   return ctx.config.model;
 }
 
-function resolveMaxFindings(ctx: ToolExecutionContext, override?: unknown): number {
+function resolveMaxFindings(ctx: ExecutionContext, override?: unknown): number {
   const fromInput = typeof override === "number" ? override : undefined;
   if (fromInput && fromInput >= 1) return Math.floor(fromInput);
   const cfg = ctx.config.taskConfig?.["tob-audit"] as Record<string, unknown> | undefined;
@@ -91,7 +88,7 @@ const auditTool: ModuleTool = {
     },
   },
   headless: true,
-  async execute(input: unknown, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const params = (input ?? {}) as Record<string, unknown>;
 
     let plugins: Array<{ type: "local"; path: string }>;
@@ -201,7 +198,7 @@ const skillsTool: ModuleTool = {
     "from the installed @kuzushi/tob-skills package. Returns plugin IDs and absolute paths.",
   inputSchema: { type: "object", properties: {} },
   headless: true,
-  async execute(_input: unknown, _ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(_input: unknown, _ctx: ExecutionContext): Promise<ToolResult> {
     let plugins: Array<{ type: "local"; path: string }>;
     try {
       plugins = resolveTobPlugins();

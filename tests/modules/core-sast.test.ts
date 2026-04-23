@@ -3,7 +3,7 @@ import { createCoreSastModule } from "../../src/modules/core-sast.js";
 import { wrapDagToolExecute } from "../../src/modules/dag-bridge.js";
 import { createSemgrepModule } from "../../src/modules/semgrep/semgrep.js";
 import { createTaintIrisModule } from "../../src/modules/taint-iris/taint-iris.js";
-import type { CopilotModule, DagTool, ToolExecutionContext } from "../../src/modules/types.js";
+import type { CopilotModule, DagTool, ExecutionContext } from "../../src/modules/types.js";
 import { isDagTool } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
@@ -63,11 +63,11 @@ function createConfig(): KuzushiConfig {
   };
 }
 
-function createContext(config = createConfig()): ToolExecutionContext {
+function createContext(config = createConfig()): ExecutionContext {
   return {
     cwd: "/tmp/repo",
     runtime: { id: "test", async *query() {} },
-    bus: {} as ToolExecutionContext["bus"],
+    bus: {} as ExecutionContext["bus"],
     config,
     target: "/tmp/repo",
   };

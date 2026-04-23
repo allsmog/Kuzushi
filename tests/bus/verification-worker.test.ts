@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import type {
-  VerificationAgentActivityEvent,
+  TaskAgentActivityEvent,
   VerificationErrorEvent,
   VerificationResultEvent,
 } from "../../src/bus/events.js";
@@ -248,7 +248,7 @@ describe("verification-worker", () => {
       dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
     };
 
-    const activityPromise = bus.waitFor<VerificationAgentActivityEvent>(
+    const activityPromise = bus.waitFor<TaskAgentActivityEvent>(
       "verification:agent-activity",
       (event) => event.meta.runId === runId,
     );

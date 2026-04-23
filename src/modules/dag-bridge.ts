@@ -36,14 +36,7 @@ import {
   withMultiStrategy,
 } from "../strategies/index.js";
 import { defineDagTool } from "./define.js";
-import type {
-  CopilotModule,
-  DagTool,
-  ExecutionContext,
-  ModuleTool,
-  ToolExecutionContext,
-  ToolResult,
-} from "./types.js";
+import type { CopilotModule, DagTool, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 import { isDagTool } from "./types.js";
 
 /**
@@ -77,7 +70,7 @@ export function buildExecutionContextFromTaskContext(
   taskCtx: TaskContext,
   hostOverrides?: Partial<
     Pick<
-      ToolExecutionContext,
+      ExecutionContext,
       | "workspaceId"
       | "target"
       | "uiStore"
@@ -195,7 +188,7 @@ export function wrapDagToolExecute(
   // installed execute without needing to track a second registration.
   (tool as { execute: ModuleTool["execute"] }).execute = async (
     input: unknown,
-    ctx: ToolExecutionContext,
+    ctx: ExecutionContext,
   ): Promise<ToolResult> => {
     const { runSingleTaskPipeline } = await import("./sast/shared.js");
     return runSingleTaskPipeline(taskIds, input, ctx, { summaryLabel });
