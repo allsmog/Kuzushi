@@ -3395,10 +3395,10 @@ function handleSlashCommand(
 
   switch (command) {
     case "help":
-      // `/help <verb>` prints the one-line row from the commands table plus
-      // a short expanded description; bare `/help` falls through to the
-      // grouped top-level help. Keeps both surfaces in sync via
-      // SHELL_COMMAND_CATALOG so drift is impossible.
+      // `/help <verb>` prints the one-line row from the commands table plus a
+      // short expanded description; bare `/help` falls through to the grouped
+      // top-level help. Both surfaces render from SHELL_COMMAND_CATALOG so
+      // drift is impossible.
       if (args[0]) return { output: formatHelpForVerb(args[0]) };
       return { output: formatHelp(core, opts) };
 
@@ -3409,69 +3409,12 @@ function handleSlashCommand(
     case "tools":
       return { output: formatTools(core, ctx.focusedModule) };
 
-    case "use": {
-      const moduleId = args[0];
-      if (!moduleId) {
-        return { output: "Usage: /use <module>" };
-      }
-      if (!core.hasModule(moduleId)) {
-        const loaded = core.listModules().map((m) => m.id);
-        return { output: formatUnknownModule(moduleId, loaded) };
-      }
-      const mod = core.registry.get(moduleId);
-      const tuneSnapshot = ctx.dataDir
-        ? buildTuneSnapshot(opts.config, ctx.dataDir, moduleId)
-        : undefined;
-      return {
-        setFocus: moduleId,
-        shellStateUpdater: (shell) => ({
-          ...shell,
-          shellView: "module",
-          openFindingId: null,
-          tuneSnapshot: tuneSnapshot ?? shell.tuneSnapshot,
-        }),
-        output: `Focused on ${mod.displayName}. ${mod.tools.length} tools available.`,
-      };
-    }
+    case "use":
+      return handleUseCommand(args, core, opts, ctx);
 
     case "back":
-    case "b": {
-      // Step up through the shellView stack before falling back to top-level.
-      const currentView = shellState.shellView;
-      if (currentView === "finding") {
-        return {
-          shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
-          output: "Back to findings.",
-        };
-      }
-      if (
-        currentView === "findings" ||
-        currentView === "tune" ||
-        currentView === "diff-since" ||
-        currentView?.startsWith("threat-")
-      ) {
-        return {
-          shellStateUpdater: (shell) => ({ ...shell, shellView: "module" }),
-          output: "Back to module home.",
-        };
-      }
-      if (ctx.focusedModule) {
-        const clearedTune = ctx.dataDir
-          ? buildTuneSnapshot(opts.config, ctx.dataDir, null)
-          : undefined;
-        return {
-          setFocus: null,
-          shellStateUpdater: (shell) => ({
-            ...shell,
-            shellView: "catalog",
-            openFindingId: null,
-            tuneSnapshot: clearedTune ?? shell.tuneSnapshot,
-          }),
-          output: "Returned to top level.",
-        };
-      }
-      return { output: "Already at top level." };
-    }
+    case "b":
+      return handleBackCommand(opts, ctx, shellState);
 
     case "findings":
     case "f":
@@ -3492,111 +3435,19 @@ function handleSlashCommand(
         output: `Tuning ${ctx.focusedModule}. Press p for expert prompt editor.`,
       };
 
-    case "open": {
-      const findingId = args[0];
-      if (!findingId) {
-        return { output: "Usage: /open <F-NNNN|fingerprint>" };
-      }
-      return {
-        shellStateUpdater: (shell) => ({
-          ...shell,
-          shellView: "finding",
-          openFindingId: findingId,
-        }),
-        output: `Opening ${findingId}.`,
-      };
-    }
+    case "open":
+      return handleOpenCommand(args);
 
-    case "plan": {
-      // Natural-language → option-diff planner. Joins all args into the
-      // request text so quoting is optional: `/plan run harder, focus on auth`.
-      const text = args.join(" ").trim();
-      if (!text) {
-        return { output: 'Usage: /plan "<english>" — e.g. /plan run harder, focus on auth' };
-      }
-      if (!ctx.focusedModule) {
-        return { output: "No focused module. Use /use <module> first." };
-      }
-      const activeToolName = shellState.lastUsedTool;
-      const fallbackToolName = activeToolName?.startsWith(`${ctx.focusedModule}:`)
-        ? activeToolName
-        : pickDefaultToolName(core, ctx.focusedModule);
-      if (!fallbackToolName) {
-        return { output: `No tool resolved for ${ctx.focusedModule}. Use /options <tool> first.` };
-      }
-      const resolved = core.registry.resolveTool(fallbackToolName);
-      if (!resolved) {
-        return { output: formatUnknownToolMessage(fallbackToolName, core) };
-      }
-      const currentOptions = { ...(shellState.moduleOptions[fallbackToolName] ?? {}) };
-      const runtime = opts.runtime;
-      return {
-        output: `Planning: "${text.slice(0, 80)}${text.length > 80 ? "\u2026" : ""}"`,
-        shellStateUpdater: (shell) => ({ ...shell, plannerBusy: true }),
-        asyncExecute: async (signal) => {
-          const abortController = new AbortController();
-          if (signal) {
-            if (signal.aborted) abortController.abort();
-            else signal.addEventListener("abort", () => abortController.abort(), { once: true });
-          }
-          let plan: ShellPlan | undefined;
-          let errorMsg: string | undefined;
-          try {
-            plan = await runPlanner({
-              runtime,
-              cwd: opts.target ? path.resolve(opts.target) : process.cwd(),
-              tool: resolved.tool,
-              currentOptions,
-              text,
-              toolName: fallbackToolName,
-              abortController,
-            });
-          } catch (err) {
-            errorMsg = err instanceof Error ? err.message : String(err);
-          }
-          if (ctx.uiStore) {
-            updateShell(ctx.uiStore, (shell) => ({
-              ...shell,
-              plannerBusy: false,
-              pendingPlan: plan ?? null,
-            }));
-          }
-          if (errorMsg) return `Planner error: ${errorMsg}`;
-          if (!plan) return "Planner returned no plan.";
-          if (plan.changes.length === 0 && plan.unsupported.length === 0) {
-            return "Planner found nothing to change.";
-          }
-          return "Plan ready. Press y to apply, n to discard.";
-        },
-      };
-    }
+    case "plan":
+      return handlePlanCommand(args, core, opts, ctx, shellState);
 
     case "yes":
-    case "apply-plan": {
-      const plan = shellState.pendingPlan;
-      if (!plan) {
-        return { output: 'No pending plan. Use /plan "<english>" first.' };
-      }
-      const result = applyShellPlan(plan, core, shellState);
-      return {
-        output: result.output,
-        shellStateUpdater: (shell) => ({
-          ...result.updater(shell),
-          pendingPlan: null,
-        }),
-      };
-    }
+    case "apply-plan":
+      return handleApplyPlanCommand(core, shellState);
 
     case "no":
-    case "discard-plan": {
-      if (!shellState.pendingPlan) {
-        return { output: "No pending plan." };
-      }
-      return {
-        output: "Plan discarded.",
-        shellStateUpdater: (shell) => ({ ...shell, pendingPlan: null }),
-      };
-    }
+    case "discard-plan":
+      return handleDiscardPlanCommand(shellState);
 
     case "prompt": {
       const sub = args[0]?.toLowerCase();
@@ -3617,21 +3468,8 @@ function handleSlashCommand(
       };
     }
 
-    case "show": {
-      const sub = args[0]?.toLowerCase();
-      if (sub === "prompts") {
-        const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
-        const rows = readPromptAudit(core, shellState.moduleOptions, cwd);
-        return { output: formatPromptAuditTable(rows) };
-      }
-      if (sub === "runs") {
-        return handleShowRunsCommand(args.slice(1), ctx);
-      }
-      if (sub === "aliases") {
-        return handleShowAliasesCommand(args.slice(1), ctx);
-      }
-      return { output: "Usage: /show prompts  |  /show runs  |  /show aliases [prefix]" };
-    }
+    case "show":
+      return handleShowCommand(args, core, opts, ctx, shellState);
 
     case "runs":
       return handleShowRunsCommand(args, ctx);
@@ -3642,24 +3480,8 @@ function handleSlashCommand(
     case "trace":
       return handleTraceCommand(args, ctx);
 
-    case "options": {
-      const resolved = resolveOptionsTool(
-        core,
-        args[0],
-        ctx.focusedModule,
-        shellState.lastUsedTool,
-      );
-      if (!resolved.ok) {
-        return { output: resolved.output };
-      }
-      return {
-        output: formatOptions(core, resolved.toolName, opts, shellState),
-        shellStateUpdater: (shell) => ({
-          ...shell,
-          lastUsedTool: resolved.toolName,
-        }),
-      };
-    }
+    case "options":
+      return handleOptionsCommand(args, core, opts, ctx, shellState);
 
     case "set":
       return handleSetCommand(args, core, ctx.focusedModule, shellState);
@@ -3679,334 +3501,20 @@ function handleSlashCommand(
     case "provider":
       return handleProviderCommand(args, opts);
 
-    case "context": {
-      const sub = args[0]?.toLowerCase();
+    case "context":
+      return handleContextCommand(args, core, opts, ctx, shellState);
 
-      // /context edit — open the operator context intake editor
-      if (sub === "edit") {
-        if (!opts.target) return { output: "No target set. Use /target <path> first." };
-        const repoRoot = path.resolve(opts.target);
-        return {
-          output: "Opening operator context editor...",
-          asyncExecute: async () => {
-            const { loadOperatorScanContext, generateDefaultContext } = await import(
-              "../operator-context.js"
-            );
-            const { runContextIntake } = await import("../ui/setup.js");
-            let operatorCtx = loadOperatorScanContext(repoRoot);
-            if (!operatorCtx) operatorCtx = generateDefaultContext();
-            const outcome = await runContextIntake(
-              ctx.uiStore,
-              operatorCtx,
-              path.basename(repoRoot),
-              repoRoot,
-              "shell",
-            );
-            if (outcome.action === "proceed") {
-              return "Operator context saved to .kuzushi/scan-context.json";
-            }
-            return "Context intake skipped.";
-          },
-        };
-      }
+    case "since":
+      return handleSinceCommand(args, opts, ctx);
 
-      // /context regenerate — force re-run
-      if (sub === "regenerate" || sub === "regen") {
-        if (!opts.target) return { output: "No target set. Use /target <path> first." };
-        return resolveToolExecution("sast:context", args.slice(1), core, opts, ctx, shellState);
-      }
+    case "threats":
+      return handleThreatsCommand(args, opts, ctx);
 
-      // /context <module-path> — drill into monorepo module
-      if (sub && shellState.contextSnapshot?.modules?.[sub]) {
-        return { output: formatContextSummary(shellState.contextSnapshot, sub) };
-      }
+    case "target":
+      return handleTargetCommand(args, opts, shellState);
 
-      // /context — show current snapshot if valid for current target
-      if (
-        shellState.contextSnapshot &&
-        opts.target &&
-        shellState.contextSnapshot.target === path.resolve(opts.target)
-      ) {
-        return { output: formatContextSummary(shellState.contextSnapshot) };
-      }
-
-      // No valid snapshot — trigger generation
-      if (!opts.target) return { output: "No target set. Use /target <path> first." };
-      return resolveToolExecution("sast:context", [], core, opts, ctx, shellState);
-    }
-
-    case "since": {
-      // `/since <ref>` — diff-aware view. Computes the changed-file set
-      // between HEAD and `<ref>` via git, stores it on shell.diffSince,
-      // and pivots to the diff-since shellView. Works on any git ref
-      // including tags and commit SHAs.
-      const ref = args[0];
-      if (!ref) {
-        return { output: "Usage: /since <git-ref>  e.g.  /since main" };
-      }
-      if (!opts.target) {
-        return { output: "No target set. Use /target <path> first." };
-      }
-      const repoRoot = path.resolve(opts.target);
-      return {
-        output: `Diffing HEAD against ${ref}\u2026`,
-        shellStateUpdater: (shell) => ({ ...shell, shellView: "diff-since" }),
-        asyncExecute: async () => {
-          const { computeDiffScope } = await import("./diff-scope.js");
-          const scope = computeDiffScope(repoRoot, ref);
-          if (ctx.uiStore) {
-            updateShell(ctx.uiStore, (shell) => ({
-              ...shell,
-              diffSince: {
-                ref: scope.ref,
-                repoRoot: scope.repoRoot,
-                changedFiles: scope.changedFiles,
-                ...(scope.error ? { error: scope.error } : {}),
-              },
-            }));
-          }
-          if (!scope.ok) {
-            return `git diff failed: ${scope.error ?? "unknown error"}`;
-          }
-          return `Found ${scope.changedFiles.length} changed file${
-            scope.changedFiles.length === 1 ? "" : "s"
-          } since ${ref}.`;
-        },
-      };
-    }
-
-    case "threats": {
-      const sub = args[0]?.toLowerCase();
-
-      // /threats dfd|stride|stories|scope|summary (and 1..5) — Phase C
-      // visualization views. Each routes to a shellView; the component
-      // reads shell.threatModel which this handler populates below.
-      const viewRoute = resolveThreatView(sub);
-      if (viewRoute) {
-        if (!opts.target) return { output: "No target set. Use /target <path> first." };
-        const repoRoot = path.resolve(opts.target);
-        return {
-          output: `Loading threat model for ${viewRoute.label}…`,
-          shellStateUpdater: (shell) => ({ ...shell, shellView: viewRoute.shellView }),
-          asyncExecute: async () => {
-            const { loadShellThreatModel } = await import("./threat-model-loader.js");
-            const loaded = loadShellThreatModel(repoRoot);
-            if (!loaded) {
-              return "No threat model found. Run a scan with threat modeling enabled first.";
-            }
-            if (ctx.uiStore) {
-              updateShell(ctx.uiStore, (shell) => ({
-                ...shell,
-                threatModel: loaded.document,
-                threatModelSource: {
-                  path: loaded.sourcePath,
-                  mtimeMs: loaded.mtimeMs,
-                },
-              }));
-            }
-            return `Showing ${viewRoute.label}.`;
-          },
-        };
-      }
-
-      // /threats edit — open the threat model editor
-      if (sub === "edit") {
-        if (!opts.target) return { output: "No target set. Use /target <path> first." };
-        const repoRoot = path.resolve(opts.target);
-        return {
-          output: "Opening threat model editor...",
-          asyncExecute: async () => {
-            const { loadPersistentThreatModel } = await import("../threat-model-renderer.js");
-            const { runThreatModelEditor } = await import("../ui/setup.js");
-            const tm = loadPersistentThreatModel(repoRoot);
-            if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
-            const outcome = await runThreatModelEditor(
-              ctx.uiStore,
-              tm,
-              path.basename(repoRoot),
-              repoRoot,
-              "shell",
-            );
-            if (outcome.action === "proceed") {
-              return "Threat model saved to .kuzushi/threat-model.json";
-            }
-            return "Threat model editing skipped.";
-          },
-        };
-      }
-
-      // /threats — show summary
-      if (!opts.target) return { output: "No target set. Use /target <path> first." };
-      return {
-        output: "Loading threat model...",
-        asyncExecute: async () => {
-          try {
-            const { loadPersistentThreatModel } = await import("../threat-model-renderer.js");
-            const repoRoot = path.resolve(opts.target!);
-            const tm = loadPersistentThreatModel(repoRoot);
-            if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
-            const dismissed = tm.dismissedThreats?.length ?? 0;
-            const total = tm.threats.length;
-            const mitigations = tm.confirmedMitigations?.length ?? 0;
-            return `Threat model: ${total} threats (${dismissed} dismissed, ${mitigations} confirmed mitigations)\nUse /threats edit to review and edit.`;
-          } catch {
-            return "Failed to load threat model.";
-          }
-        },
-      };
-    }
-
-    case "target": {
-      const newTarget = args.join(" ").trim();
-      if (newTarget) {
-        const hadContext = !!shellState.contextSnapshot;
-        const changed = opts.target !== newTarget;
-        opts.target = newTarget;
-        if (changed && hadContext) {
-          return {
-            output: `Target set to: ${newTarget}\n  Context invalidated — run /context to regenerate.`,
-            shellStateUpdater: (shell) => ({ ...shell, contextSnapshot: null }),
-          };
-        }
-        return { output: `Target set to: ${newTarget}` };
-      }
-      return {
-        output: opts.target
-          ? `Current target: ${opts.target}`
-          : "No target set. Usage: /target <path>",
-      };
-    }
-
-    case "workspace": {
-      const sub = args[0]?.toLowerCase();
-      const mgr = ctx.workspaceManager;
-
-      // -a / -d / -r / -D / -v / -S — msfconsole-style flags. These live
-      // alongside the positional subcommands (list / create / switch) so
-      // muscle memory from either side keeps working.
-      if (sub === "-a" && args[1] && mgr) {
-        const name = args.slice(1).join(" ");
-        if (mgr.getByName(name)) return { output: `[-] Workspace '${name}' already exists.` };
-        const ws = mgr.create(name, opts.target ? [opts.target] : []);
-        opts.workspace = ws.id;
-        return { output: `[+] Workspace created: ${name} (${ws.id.slice(0, 8)})` };
-      }
-      if (sub === "-d" && args[1] && mgr) {
-        const target = args.slice(1).join(" ");
-        const existing = mgr.getByName(target);
-        if (!existing) return { output: `[-] No workspace named '${target}'.` };
-        mgr.delete(existing.id);
-        if (opts.workspace === existing.id) opts.workspace = undefined;
-        return { output: `[+] Deleted workspace '${target}'.` };
-      }
-      if (sub === "-r" && args[1] && args[2] && mgr) {
-        const oldName = args[1] as string;
-        const newName = args[2] as string;
-        const existing = mgr.getByName(oldName);
-        if (!existing) return { output: `[-] No workspace named '${oldName}'.` };
-        if (mgr.getByName(newName)) {
-          return { output: `[-] A workspace named '${newName}' already exists.` };
-        }
-        mgr.update(existing.id, { name: newName });
-        return { output: `[+] Renamed workspace '${oldName}' → '${newName}'.` };
-      }
-      // -D (capital): set default workspace for next shell launch. We check
-      // the raw arg to distinguish from -d (delete). parseCommand splits on
-      // whitespace but preserves case.
-      if (args[0] === "-D" && args[1]) {
-        const name = args.slice(1).join(" ");
-        const defaultPath = path.join(homedir(), ".kuzushi", "default-workspace");
-        mkdirSync(path.dirname(defaultPath), { recursive: true });
-        writeFileSync(defaultPath, name, "utf8");
-        return { output: `[+] Default workspace for next launch: ${name}` };
-      }
-      if (sub === "-v" && mgr) {
-        const workspaces = mgr.list();
-        if (workspaces.length === 0) return { output: "  No workspaces yet." };
-        const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - s.length));
-        const rows = workspaces.map((ws) => {
-          const hosts = mgr.hosts.list(ws.id).length;
-          const vulns = mgr.vulns.listForWorkspace(ws.id).length;
-          const loot = mgr.loot.listForWorkspace(ws.id).length;
-          const notes = mgr.notes.listForWorkspace(ws.id).length;
-          const creds = mgr.creds.listForWorkspace(ws.id).length;
-          const sess = mgr.sessions.listForWorkspace(ws.id).length;
-          const active = ws.id === opts.workspace ? " *" : "  ";
-          return `${active}${pad(ws.name, 24)} hosts=${hosts} vulns=${vulns} loot=${loot} notes=${notes} creds=${creds} sessions=${sess}`;
-        });
-        return { output: ["Workspaces (counts):", ...rows].join("\n") };
-      }
-      if ((args[0] === "-S" || args[0] === "-s") && mgr) {
-        if (!args[1]) return { output: "Usage: workspace -S <pattern>" };
-        return filteredWorkspaceListing(mgr, args.slice(1).join(" "), opts.workspace);
-      }
-
-      // /workspace list
-      if (sub === "list" && mgr) {
-        const workspaces = mgr.list();
-        if (workspaces.length === 0) return { output: "  No workspaces yet." };
-        const rows = workspaces.map((ws) => {
-          const targets = ws.targets.length > 0 ? ws.targets.join(", ") : "no targets";
-          const active = ws.id === opts.workspace ? " (active)" : "";
-          return `  ${ws.name}${active}  —  ${targets}  [${ws.lastAccessedAt.slice(0, 10)}]`;
-        });
-        return { output: formatSections([["  Workspaces", ...rows]]) };
-      }
-
-      // /workspace create <name>
-      if (sub === "create" && args[1] && mgr) {
-        const name = args.slice(1).join(" ");
-        const ws = mgr.create(name, opts.target ? [opts.target] : []);
-        opts.workspace = ws.id;
-        return { output: `Workspace created: ${name} (${ws.id.slice(0, 8)})` };
-      }
-
-      // /workspace switch <name> or /workspace <name> (backward compat)
-      const name = sub === "switch" ? args.slice(1).join(" ").trim() : args.join(" ").trim();
-      if (name) {
-        if (mgr) {
-          const ws = mgr.getOrCreate(name, opts.target ? [opts.target] : []);
-          mgr.touchAccessed(ws.id);
-          opts.workspace = ws.id;
-          return {
-            output: `Workspace: ${ws.name} (${ws.targets.length} targets, last accessed ${ws.lastAccessedAt.slice(0, 10)})`,
-          };
-        }
-        opts.workspace = name;
-        return { output: `Workspace set to: ${name}` };
-      }
-
-      // /workspace (show current)
-      if (opts.workspace && mgr) {
-        const ws = mgr.get(opts.workspace);
-        if (ws) {
-          const cost =
-            typeof ws.metadata.totalCostUsd === "number"
-              ? `$${ws.metadata.totalCostUsd.toFixed(2)}`
-              : "—";
-          return {
-            output: formatSections([
-              [
-                `  Workspace: ${ws.name}`,
-                ...formatLabelValueRows([
-                  ["ID:", ws.id.slice(0, 8)],
-                  ["Targets:", ws.targets.join(", ") || "none"],
-                  ["Created:", ws.createdAt.slice(0, 10)],
-                  ["Last accessed:", ws.lastAccessedAt.slice(0, 10)],
-                  ["Total cost:", cost],
-                ]),
-              ],
-            ]),
-          };
-        }
-      }
-
-      return {
-        output: opts.workspace
-          ? `Current workspace: ${opts.workspace}`
-          : "No workspace set. Usage: /workspace <name>",
-      };
-    }
+    case "workspace":
+      return handleWorkspaceCommand(args, opts, ctx);
 
     case "clear":
       return {
@@ -4018,26 +3526,8 @@ function handleSlashCommand(
     case "history":
       return { output: formatHistory(shellState.commandHistory) };
 
-    case "load": {
-      const specifier = args.join(" ").trim();
-      if (!specifier)
-        return {
-          output:
-            "Usage: /load <module-specifier>\n  Examples: /load file:///path/to/module, /load package:@kuzushi/blackbox",
-        };
-      return {
-        asyncExecute: async () => {
-          try {
-            await core.loadModuleFromSpecifier(specifier);
-            const modules = core.listModules();
-            const tools = core.registry.allTools();
-            return `Module loaded: ${specifier}\n  ${modules.length} modules, ${tools.length} tools available.`;
-          } catch (err) {
-            return `Failed to load module: ${err instanceof Error ? err.message : String(err)}`;
-          }
-        },
-      };
-    }
+    case "load":
+      return handleLoadCommand(args, core);
 
     case "exit":
       return { exit: true };
@@ -4045,6 +3535,598 @@ function handleSlashCommand(
     default:
       return { output: formatUnknownVerb(command, collectKnownVerbs()) };
   }
+}
+
+function handleUseCommand(
+  args: string[],
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+): LocalCommandResult {
+  const moduleId = args[0];
+  if (!moduleId) {
+    return { output: "Usage: /use <module>" };
+  }
+  if (!core.hasModule(moduleId)) {
+    const loaded = core.listModules().map((m) => m.id);
+    return { output: formatUnknownModule(moduleId, loaded) };
+  }
+  const mod = core.registry.get(moduleId);
+  const tuneSnapshot = ctx.dataDir
+    ? buildTuneSnapshot(opts.config, ctx.dataDir, moduleId)
+    : undefined;
+  return {
+    setFocus: moduleId,
+    shellStateUpdater: (shell) => ({
+      ...shell,
+      shellView: "module",
+      openFindingId: null,
+      tuneSnapshot: tuneSnapshot ?? shell.tuneSnapshot,
+    }),
+    output: `Focused on ${mod.displayName}. ${mod.tools.length} tools available.`,
+  };
+}
+
+function handleBackCommand(
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  // Step up through the shellView stack before falling back to top-level.
+  const currentView = shellState.shellView;
+  if (currentView === "finding") {
+    return {
+      shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
+      output: "Back to findings.",
+    };
+  }
+  if (
+    currentView === "findings" ||
+    currentView === "tune" ||
+    currentView === "diff-since" ||
+    currentView?.startsWith("threat-")
+  ) {
+    return {
+      shellStateUpdater: (shell) => ({ ...shell, shellView: "module" }),
+      output: "Back to module home.",
+    };
+  }
+  if (ctx.focusedModule) {
+    const clearedTune = ctx.dataDir ? buildTuneSnapshot(opts.config, ctx.dataDir, null) : undefined;
+    return {
+      setFocus: null,
+      shellStateUpdater: (shell) => ({
+        ...shell,
+        shellView: "catalog",
+        openFindingId: null,
+        tuneSnapshot: clearedTune ?? shell.tuneSnapshot,
+      }),
+      output: "Returned to top level.",
+    };
+  }
+  return { output: "Already at top level." };
+}
+
+function handleOpenCommand(args: string[]): LocalCommandResult {
+  const findingId = args[0];
+  if (!findingId) {
+    return { output: "Usage: /open <F-NNNN|fingerprint>" };
+  }
+  return {
+    shellStateUpdater: (shell) => ({
+      ...shell,
+      shellView: "finding",
+      openFindingId: findingId,
+    }),
+    output: `Opening ${findingId}.`,
+  };
+}
+
+function handlePlanCommand(
+  args: string[],
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  // Natural-language → option-diff planner. Joins all args into the request
+  // text so quoting is optional: `/plan run harder, focus on auth`.
+  const text = args.join(" ").trim();
+  if (!text) {
+    return { output: 'Usage: /plan "<english>" — e.g. /plan run harder, focus on auth' };
+  }
+  if (!ctx.focusedModule) {
+    return { output: "No focused module. Use /use <module> first." };
+  }
+  const activeToolName = shellState.lastUsedTool;
+  const fallbackToolName = activeToolName?.startsWith(`${ctx.focusedModule}:`)
+    ? activeToolName
+    : pickDefaultToolName(core, ctx.focusedModule);
+  if (!fallbackToolName) {
+    return { output: `No tool resolved for ${ctx.focusedModule}. Use /options <tool> first.` };
+  }
+  const resolved = core.registry.resolveTool(fallbackToolName);
+  if (!resolved) {
+    return { output: formatUnknownToolMessage(fallbackToolName, core) };
+  }
+  const currentOptions = { ...(shellState.moduleOptions[fallbackToolName] ?? {}) };
+  const runtime = opts.runtime;
+  return {
+    output: `Planning: "${text.slice(0, 80)}${text.length > 80 ? "…" : ""}"`,
+    shellStateUpdater: (shell) => ({ ...shell, plannerBusy: true }),
+    asyncExecute: async (signal) => {
+      const abortController = new AbortController();
+      if (signal) {
+        if (signal.aborted) abortController.abort();
+        else signal.addEventListener("abort", () => abortController.abort(), { once: true });
+      }
+      let plan: ShellPlan | undefined;
+      let errorMsg: string | undefined;
+      try {
+        plan = await runPlanner({
+          runtime,
+          cwd: opts.target ? path.resolve(opts.target) : process.cwd(),
+          tool: resolved.tool,
+          currentOptions,
+          text,
+          toolName: fallbackToolName,
+          abortController,
+        });
+      } catch (err) {
+        errorMsg = err instanceof Error ? err.message : String(err);
+      }
+      if (ctx.uiStore) {
+        updateShell(ctx.uiStore, (shell) => ({
+          ...shell,
+          plannerBusy: false,
+          pendingPlan: plan ?? null,
+        }));
+      }
+      if (errorMsg) return `Planner error: ${errorMsg}`;
+      if (!plan) return "Planner returned no plan.";
+      if (plan.changes.length === 0 && plan.unsupported.length === 0) {
+        return "Planner found nothing to change.";
+      }
+      return "Plan ready. Press y to apply, n to discard.";
+    },
+  };
+}
+
+function handleApplyPlanCommand(core: CopilotCore, shellState: ShellState): LocalCommandResult {
+  const plan = shellState.pendingPlan;
+  if (!plan) {
+    return { output: 'No pending plan. Use /plan "<english>" first.' };
+  }
+  const result = applyShellPlan(plan, core, shellState);
+  return {
+    output: result.output,
+    shellStateUpdater: (shell) => ({
+      ...result.updater(shell),
+      pendingPlan: null,
+    }),
+  };
+}
+
+function handleDiscardPlanCommand(shellState: ShellState): LocalCommandResult {
+  if (!shellState.pendingPlan) {
+    return { output: "No pending plan." };
+  }
+  return {
+    output: "Plan discarded.",
+    shellStateUpdater: (shell) => ({ ...shell, pendingPlan: null }),
+  };
+}
+
+function handleShowCommand(
+  args: string[],
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  const sub = args[0]?.toLowerCase();
+  if (sub === "prompts") {
+    const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
+    const rows = readPromptAudit(core, shellState.moduleOptions, cwd);
+    return { output: formatPromptAuditTable(rows) };
+  }
+  if (sub === "runs") {
+    return handleShowRunsCommand(args.slice(1), ctx);
+  }
+  if (sub === "aliases") {
+    return handleShowAliasesCommand(args.slice(1), ctx);
+  }
+  return { output: "Usage: /show prompts  |  /show runs  |  /show aliases [prefix]" };
+}
+
+function handleOptionsCommand(
+  args: string[],
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  const resolved = resolveOptionsTool(core, args[0], ctx.focusedModule, shellState.lastUsedTool);
+  if (!resolved.ok) {
+    return { output: resolved.output };
+  }
+  return {
+    output: formatOptions(core, resolved.toolName, opts, shellState),
+    shellStateUpdater: (shell) => ({
+      ...shell,
+      lastUsedTool: resolved.toolName,
+    }),
+  };
+}
+
+function handleContextCommand(
+  args: string[],
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  const sub = args[0]?.toLowerCase();
+
+  // /context edit — open the operator context intake editor
+  if (sub === "edit") {
+    if (!opts.target) return { output: "No target set. Use /target <path> first." };
+    const repoRoot = path.resolve(opts.target);
+    return {
+      output: "Opening operator context editor...",
+      asyncExecute: async () => {
+        const { loadOperatorScanContext, generateDefaultContext } = await import(
+          "../operator-context.js"
+        );
+        const { runContextIntake } = await import("../ui/setup.js");
+        let operatorCtx = loadOperatorScanContext(repoRoot);
+        if (!operatorCtx) operatorCtx = generateDefaultContext();
+        const outcome = await runContextIntake(
+          ctx.uiStore,
+          operatorCtx,
+          path.basename(repoRoot),
+          repoRoot,
+          "shell",
+        );
+        if (outcome.action === "proceed") {
+          return "Operator context saved to .kuzushi/scan-context.json";
+        }
+        return "Context intake skipped.";
+      },
+    };
+  }
+
+  // /context regenerate — force re-run
+  if (sub === "regenerate" || sub === "regen") {
+    if (!opts.target) return { output: "No target set. Use /target <path> first." };
+    return resolveToolExecution("sast:context", args.slice(1), core, opts, ctx, shellState);
+  }
+
+  // /context <module-path> — drill into monorepo module
+  if (sub && shellState.contextSnapshot?.modules?.[sub]) {
+    return { output: formatContextSummary(shellState.contextSnapshot, sub) };
+  }
+
+  // /context — show current snapshot if valid for current target
+  if (
+    shellState.contextSnapshot &&
+    opts.target &&
+    shellState.contextSnapshot.target === path.resolve(opts.target)
+  ) {
+    return { output: formatContextSummary(shellState.contextSnapshot) };
+  }
+
+  // No valid snapshot — trigger generation
+  if (!opts.target) return { output: "No target set. Use /target <path> first." };
+  return resolveToolExecution("sast:context", [], core, opts, ctx, shellState);
+}
+
+function handleSinceCommand(
+  args: string[],
+  opts: ShellOptions,
+  ctx: ShellContext,
+): LocalCommandResult {
+  // `/since <ref>` — diff-aware view. Computes the changed-file set between
+  // HEAD and `<ref>` via git, stores it on shell.diffSince, and pivots to the
+  // diff-since shellView. Works on any git ref including tags and SHAs.
+  const ref = args[0];
+  if (!ref) {
+    return { output: "Usage: /since <git-ref>  e.g.  /since main" };
+  }
+  if (!opts.target) {
+    return { output: "No target set. Use /target <path> first." };
+  }
+  const repoRoot = path.resolve(opts.target);
+  return {
+    output: `Diffing HEAD against ${ref}…`,
+    shellStateUpdater: (shell) => ({ ...shell, shellView: "diff-since" }),
+    asyncExecute: async () => {
+      const { computeDiffScope } = await import("./diff-scope.js");
+      const scope = computeDiffScope(repoRoot, ref);
+      if (ctx.uiStore) {
+        updateShell(ctx.uiStore, (shell) => ({
+          ...shell,
+          diffSince: {
+            ref: scope.ref,
+            repoRoot: scope.repoRoot,
+            changedFiles: scope.changedFiles,
+            ...(scope.error ? { error: scope.error } : {}),
+          },
+        }));
+      }
+      if (!scope.ok) {
+        return `git diff failed: ${scope.error ?? "unknown error"}`;
+      }
+      return `Found ${scope.changedFiles.length} changed file${
+        scope.changedFiles.length === 1 ? "" : "s"
+      } since ${ref}.`;
+    },
+  };
+}
+
+function handleThreatsCommand(
+  args: string[],
+  opts: ShellOptions,
+  ctx: ShellContext,
+): LocalCommandResult {
+  const sub = args[0]?.toLowerCase();
+
+  // /threats dfd|stride|stories|scope|summary (and 1..5) — Phase C views.
+  // Each routes to a shellView; the component reads shell.threatModel which
+  // this handler populates below.
+  const viewRoute = resolveThreatView(sub);
+  if (viewRoute) {
+    if (!opts.target) return { output: "No target set. Use /target <path> first." };
+    const repoRoot = path.resolve(opts.target);
+    return {
+      output: `Loading threat model for ${viewRoute.label}…`,
+      shellStateUpdater: (shell) => ({ ...shell, shellView: viewRoute.shellView }),
+      asyncExecute: async () => {
+        const { loadShellThreatModel } = await import("./threat-model-loader.js");
+        const loaded = loadShellThreatModel(repoRoot);
+        if (!loaded) {
+          return "No threat model found. Run a scan with threat modeling enabled first.";
+        }
+        if (ctx.uiStore) {
+          updateShell(ctx.uiStore, (shell) => ({
+            ...shell,
+            threatModel: loaded.document,
+            threatModelSource: {
+              path: loaded.sourcePath,
+              mtimeMs: loaded.mtimeMs,
+            },
+          }));
+        }
+        return `Showing ${viewRoute.label}.`;
+      },
+    };
+  }
+
+  // /threats edit — open the threat model editor
+  if (sub === "edit") {
+    if (!opts.target) return { output: "No target set. Use /target <path> first." };
+    const repoRoot = path.resolve(opts.target);
+    return {
+      output: "Opening threat model editor...",
+      asyncExecute: async () => {
+        const { loadPersistentThreatModel } = await import("../threat-model-renderer.js");
+        const { runThreatModelEditor } = await import("../ui/setup.js");
+        const tm = loadPersistentThreatModel(repoRoot);
+        if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
+        const outcome = await runThreatModelEditor(
+          ctx.uiStore,
+          tm,
+          path.basename(repoRoot),
+          repoRoot,
+          "shell",
+        );
+        if (outcome.action === "proceed") {
+          return "Threat model saved to .kuzushi/threat-model.json";
+        }
+        return "Threat model editing skipped.";
+      },
+    };
+  }
+
+  // /threats — show summary
+  if (!opts.target) return { output: "No target set. Use /target <path> first." };
+  return {
+    output: "Loading threat model...",
+    asyncExecute: async () => {
+      try {
+        const { loadPersistentThreatModel } = await import("../threat-model-renderer.js");
+        const repoRoot = path.resolve(opts.target!);
+        const tm = loadPersistentThreatModel(repoRoot);
+        if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
+        const dismissed = tm.dismissedThreats?.length ?? 0;
+        const total = tm.threats.length;
+        const mitigations = tm.confirmedMitigations?.length ?? 0;
+        return `Threat model: ${total} threats (${dismissed} dismissed, ${mitigations} confirmed mitigations)\nUse /threats edit to review and edit.`;
+      } catch {
+        return "Failed to load threat model.";
+      }
+    },
+  };
+}
+
+function handleTargetCommand(
+  args: string[],
+  opts: ShellOptions,
+  shellState: ShellState,
+): LocalCommandResult {
+  const newTarget = args.join(" ").trim();
+  if (newTarget) {
+    const hadContext = !!shellState.contextSnapshot;
+    const changed = opts.target !== newTarget;
+    opts.target = newTarget;
+    if (changed && hadContext) {
+      return {
+        output: `Target set to: ${newTarget}\n  Context invalidated — run /context to regenerate.`,
+        shellStateUpdater: (shell) => ({ ...shell, contextSnapshot: null }),
+      };
+    }
+    return { output: `Target set to: ${newTarget}` };
+  }
+  return {
+    output: opts.target ? `Current target: ${opts.target}` : "No target set. Usage: /target <path>",
+  };
+}
+
+function handleWorkspaceCommand(
+  args: string[],
+  opts: ShellOptions,
+  ctx: ShellContext,
+): LocalCommandResult {
+  const sub = args[0]?.toLowerCase();
+  const mgr = ctx.workspaceManager;
+
+  // -a / -d / -r / -D / -v / -S — msfconsole-style flags. These live
+  // alongside the positional subcommands (list / create / switch) so muscle
+  // memory from either side keeps working.
+  if (sub === "-a" && args[1] && mgr) {
+    const name = args.slice(1).join(" ");
+    if (mgr.getByName(name)) return { output: `[-] Workspace '${name}' already exists.` };
+    const ws = mgr.create(name, opts.target ? [opts.target] : []);
+    opts.workspace = ws.id;
+    return { output: `[+] Workspace created: ${name} (${ws.id.slice(0, 8)})` };
+  }
+  if (sub === "-d" && args[1] && mgr) {
+    const target = args.slice(1).join(" ");
+    const existing = mgr.getByName(target);
+    if (!existing) return { output: `[-] No workspace named '${target}'.` };
+    mgr.delete(existing.id);
+    if (opts.workspace === existing.id) opts.workspace = undefined;
+    return { output: `[+] Deleted workspace '${target}'.` };
+  }
+  if (sub === "-r" && args[1] && args[2] && mgr) {
+    const oldName = args[1] as string;
+    const newName = args[2] as string;
+    const existing = mgr.getByName(oldName);
+    if (!existing) return { output: `[-] No workspace named '${oldName}'.` };
+    if (mgr.getByName(newName)) {
+      return { output: `[-] A workspace named '${newName}' already exists.` };
+    }
+    mgr.update(existing.id, { name: newName });
+    return { output: `[+] Renamed workspace '${oldName}' → '${newName}'.` };
+  }
+  // -D (capital): set default workspace for next shell launch. We check the
+  // raw arg to distinguish from -d (delete). parseCommand splits on
+  // whitespace but preserves case.
+  if (args[0] === "-D" && args[1]) {
+    const name = args.slice(1).join(" ");
+    const defaultPath = path.join(homedir(), ".kuzushi", "default-workspace");
+    mkdirSync(path.dirname(defaultPath), { recursive: true });
+    writeFileSync(defaultPath, name, "utf8");
+    return { output: `[+] Default workspace for next launch: ${name}` };
+  }
+  if (sub === "-v" && mgr) {
+    const workspaces = mgr.list();
+    if (workspaces.length === 0) return { output: "  No workspaces yet." };
+    const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - s.length));
+    const rows = workspaces.map((ws) => {
+      const hosts = mgr.hosts.list(ws.id).length;
+      const vulns = mgr.vulns.listForWorkspace(ws.id).length;
+      const loot = mgr.loot.listForWorkspace(ws.id).length;
+      const notes = mgr.notes.listForWorkspace(ws.id).length;
+      const creds = mgr.creds.listForWorkspace(ws.id).length;
+      const sess = mgr.sessions.listForWorkspace(ws.id).length;
+      const active = ws.id === opts.workspace ? " *" : "  ";
+      return `${active}${pad(ws.name, 24)} hosts=${hosts} vulns=${vulns} loot=${loot} notes=${notes} creds=${creds} sessions=${sess}`;
+    });
+    return { output: ["Workspaces (counts):", ...rows].join("\n") };
+  }
+  if ((args[0] === "-S" || args[0] === "-s") && mgr) {
+    if (!args[1]) return { output: "Usage: workspace -S <pattern>" };
+    return filteredWorkspaceListing(mgr, args.slice(1).join(" "), opts.workspace);
+  }
+
+  // /workspace list
+  if (sub === "list" && mgr) {
+    const workspaces = mgr.list();
+    if (workspaces.length === 0) return { output: "  No workspaces yet." };
+    const rows = workspaces.map((ws) => {
+      const targets = ws.targets.length > 0 ? ws.targets.join(", ") : "no targets";
+      const active = ws.id === opts.workspace ? " (active)" : "";
+      return `  ${ws.name}${active}  —  ${targets}  [${ws.lastAccessedAt.slice(0, 10)}]`;
+    });
+    return { output: formatSections([["  Workspaces", ...rows]]) };
+  }
+
+  // /workspace create <name>
+  if (sub === "create" && args[1] && mgr) {
+    const name = args.slice(1).join(" ");
+    const ws = mgr.create(name, opts.target ? [opts.target] : []);
+    opts.workspace = ws.id;
+    return { output: `Workspace created: ${name} (${ws.id.slice(0, 8)})` };
+  }
+
+  // /workspace switch <name> or /workspace <name> (backward compat)
+  const name = sub === "switch" ? args.slice(1).join(" ").trim() : args.join(" ").trim();
+  if (name) {
+    if (mgr) {
+      const ws = mgr.getOrCreate(name, opts.target ? [opts.target] : []);
+      mgr.touchAccessed(ws.id);
+      opts.workspace = ws.id;
+      return {
+        output: `Workspace: ${ws.name} (${ws.targets.length} targets, last accessed ${ws.lastAccessedAt.slice(0, 10)})`,
+      };
+    }
+    opts.workspace = name;
+    return { output: `Workspace set to: ${name}` };
+  }
+
+  // /workspace (show current)
+  if (opts.workspace && mgr) {
+    const ws = mgr.get(opts.workspace);
+    if (ws) {
+      const cost =
+        typeof ws.metadata.totalCostUsd === "number"
+          ? `$${ws.metadata.totalCostUsd.toFixed(2)}`
+          : "—";
+      return {
+        output: formatSections([
+          [
+            `  Workspace: ${ws.name}`,
+            ...formatLabelValueRows([
+              ["ID:", ws.id.slice(0, 8)],
+              ["Targets:", ws.targets.join(", ") || "none"],
+              ["Created:", ws.createdAt.slice(0, 10)],
+              ["Last accessed:", ws.lastAccessedAt.slice(0, 10)],
+              ["Total cost:", cost],
+            ]),
+          ],
+        ]),
+      };
+    }
+  }
+
+  return {
+    output: opts.workspace
+      ? `Current workspace: ${opts.workspace}`
+      : "No workspace set. Usage: /workspace <name>",
+  };
+}
+
+function handleLoadCommand(args: string[], core: CopilotCore): LocalCommandResult {
+  const specifier = args.join(" ").trim();
+  if (!specifier) {
+    return {
+      output:
+        "Usage: /load <module-specifier>\n  Examples: /load file:///path/to/module, /load package:@kuzushi/blackbox",
+    };
+  }
+  return {
+    asyncExecute: async () => {
+      try {
+        await core.loadModuleFromSpecifier(specifier);
+        const modules = core.listModules();
+        const tools = core.registry.allTools();
+        return `Module loaded: ${specifier}\n  ${modules.length} modules, ${tools.length} tools available.`;
+      } catch (err) {
+        return `Failed to load module: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
 }
 
 function resolveDirectToolDispatch(
