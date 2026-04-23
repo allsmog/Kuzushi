@@ -182,6 +182,8 @@ describe("createCoreSastModule tool execution", () => {
       "threat hunt complete",
       expect.objectContaining({ phase: "threat-hunt" }),
     );
-    expect(threatHuntTool!.renderResult?.(result)).toContain("4 findings · $1.50");
+    expect(threatHuntTool!.renderResult?.(result)).toBe(
+      "Threat hunt complete: repo — 4 findings ($1.50)",
+    );
   });
 });
