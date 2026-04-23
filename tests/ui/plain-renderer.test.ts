@@ -568,42 +568,93 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(joined).not.toContain("threat one [high/medium]");
   });
 
-  it("threat-scope / threat-summary each print their heading", () => {
-    const cases: Array<{
-      view: ShellState["shellView"];
-      head: string;
-    }> = [
-      { view: "threat-scope", head: "# THREATS  SCOPE" },
-      { view: "threat-summary", head: "# THREATS  SUMMARY" },
-    ];
-    for (const c of cases) {
-      const store = createUIStore();
-      const { lines, unsub } = attach(store);
-      store.update({
-        shell: baseShell({
-          shellView: c.view,
-          threatModel: {
-            version: "1.0",
-            dfd: { elements: [], trustBoundaries: [] },
-            threats: [],
-            summary: {
-              total: 0,
-              bySeverity: { critical: 0 },
-              byCategory: {
-                spoofing: 0,
-                tampering: 0,
-                repudiation: 0,
-                "information-disclosure": 0,
-                "denial-of-service": 0,
-                "elevation-of-privilege": 0,
-              },
+  it("threat-scope prints calibration, out-of-scope, and operator-edit counts", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "threat-scope",
+        threatModel: {
+          version: "1.0",
+          dfd: { elements: [], trustBoundaries: [] },
+          threats: [],
+          narrative: {
+            overview: "overview",
+            inputCategories: {
+              attackerControlled: [],
+              operatorControlled: [],
+              developerControlled: [],
+              externalServices: [],
+              sandboxBoundary: [],
+              assumptions: [],
+            },
+            attackerStories: [],
+            criticalityBuckets: {
+              critical: ["RCE in prod"],
+              high: ["auth bypass", "tenant escape"],
+              medium: [],
+              low: ["non-sensitive metadata leak"],
+            },
+            outOfScope: ["supply-chain compromise", "physical access"],
+          },
+          userAnnotations: { T1: "accepted in lab env" },
+          confirmedMitigations: ["mTLS on backend path"],
+          dismissedThreats: ["T2", "T3"],
+          summary: {
+            total: 0,
+            bySeverity: { critical: 0 },
+            byCategory: {
+              spoofing: 0,
+              tampering: 0,
+              repudiation: 0,
+              "information-disclosure": 0,
+              "denial-of-service": 0,
+              "elevation-of-privilege": 0,
             },
           },
-        }),
-      });
-      unsub();
-      expect(lines).toContain(c.head);
-    }
+        },
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("# THREATS  SCOPE");
+    expect(joined).toContain("## criticality calibration");
+    expect(joined).toContain("- critical: 1 example(s)");
+    expect(joined).toContain("- high: 2 example(s)");
+    expect(joined).toContain("out-of-scope items: 2");
+    expect(joined).toContain("operator edits: 4 total");
+    expect(joined).toContain("- annotations: 1");
+    expect(joined).toContain("- confirmed mitigations: 1");
+    expect(joined).toContain("- dismissed threats: 2");
+  });
+
+  it("threat-summary prints its heading", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "threat-summary",
+        threatModel: {
+          version: "1.0",
+          dfd: { elements: [], trustBoundaries: [] },
+          threats: [],
+          summary: {
+            total: 0,
+            bySeverity: { critical: 0 },
+            byCategory: {
+              spoofing: 0,
+              tampering: 0,
+              repudiation: 0,
+              "information-disclosure": 0,
+              "denial-of-service": 0,
+              "elevation-of-privilege": 0,
+            },
+          },
+        },
+      }),
+    });
+    unsub();
+    expect(lines).toContain("# THREATS  SUMMARY");
   });
 
   it("diff-since view with no diffSince routes through diff-since-idle empty copy", () => {
