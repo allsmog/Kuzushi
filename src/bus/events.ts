@@ -278,19 +278,73 @@ export type TriageErrorEvent = EventEnvelope<
   }
 >;
 
+/**
+ * Shared payload for every `${moduleId}:agent-activity` event. One row in
+ * the UI's `agentActivity` map is keyed by `fingerprint` (e.g. finding id
+ * for triage/verify/poc, actor name for threat-hunt).
+ *
+ * `done: true` signals the fingerprint's agent has reached a terminal state
+ * (success, error, or abort); the shared handler in the report-worker drops
+ * the row so the "N agents active" count is accurate. Producers that run a
+ * single monolithic agent (non-fan-out) simply don't set this field.
+ *
+ * `moduleId` is optional and derivable from the event topic
+ * (`triage:agent-activity` → `"triage"`); included for fast routing in
+ * pattern-subscribed handlers.
+ */
+export interface TaskAgentActivityPayload {
+  context: RunContext;
+  fingerprint: string;
+  kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  summary?: string;
+  elapsedSeconds?: number;
+  index: number;
+  total: number;
+  /**
+   * Terminal signal — UI drops this fingerprint's row on the next tick.
+   * Producers that fan out sub-agents (threat-hunt actors, verify finding
+   * workers, …) set `done: true` on the last event for each fingerprint.
+   */
+  done?: boolean;
+  /**
+   * Emitting module id (e.g. `"threat-hunt"`). Optional and derivable from
+   * the topic name; populated by `ExecutionContext.reportAgentActivity` for
+   * subscribers that can't easily pattern-match the topic.
+   */
+  moduleId?: string;
+}
+
+/**
+ * Template-literal supertype for all per-agent activity events. Any event
+ * whose type matches `${moduleId}:agent-activity` carries a
+ * `TaskAgentActivityPayload`. Consumers can subscribe by exact topic (fast
+ * path) or pattern-match the suffix (orchestrator / report-worker do this
+ * so new fan-out tools get uniform UI plumbing without bus wiring).
+ *
+ * The narrow per-module aliases below (`TriageAgentActivityEvent`, …) exist
+ * for source compatibility with consumers that type-annotate a specific
+ * topic. All five share the same payload shape.
+ */
+export type TaskAgentActivityEvent = EventEnvelope<
+  `${string}:agent-activity`,
+  TaskAgentActivityPayload
+>;
+
 export type TriageAgentActivityEvent = EventEnvelope<
   "triage:agent-activity",
-  {
-    context: RunContext;
-    fingerprint: string;
-    kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
-    toolName?: string;
-    toolInput?: Record<string, unknown>;
-    summary?: string;
-    elapsedSeconds?: number;
-    index: number;
-    total: number;
-  }
+  TaskAgentActivityPayload
+>;
+
+/**
+ * Threat-hunt emits one row per actor-run via this event. Subscribed to the
+ * same shared `handleAgentActivity` handler in the report-worker as the
+ * other `*:agent-activity` producers.
+ */
+export type ThreatHuntAgentActivityEvent = EventEnvelope<
+  "threat-hunt:agent-activity",
+  TaskAgentActivityPayload
 >;
 
 export type TriageAssertionsEvent = EventEnvelope<
@@ -404,17 +458,7 @@ export type VerificationErrorEvent = EventEnvelope<
 
 export type VerificationAgentActivityEvent = EventEnvelope<
   "verification:agent-activity",
-  {
-    context: RunContext;
-    fingerprint: string;
-    kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
-    toolName?: string;
-    toolInput?: Record<string, unknown>;
-    summary?: string;
-    elapsedSeconds?: number;
-    index: number;
-    total: number;
-  }
+  TaskAgentActivityPayload
 >;
 
 export type VerificationCompleteEvent = EventEnvelope<
@@ -492,17 +536,7 @@ export type PocHarnessErrorEvent = EventEnvelope<
 
 export type PocHarnessAgentActivityEvent = EventEnvelope<
   "poc-harness:agent-activity",
-  {
-    context: RunContext;
-    fingerprint: string;
-    kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
-    toolName?: string;
-    toolInput?: Record<string, unknown>;
-    summary?: string;
-    elapsedSeconds?: number;
-    index: number;
-    total: number;
-  }
+  TaskAgentActivityPayload
 >;
 
 export type PocHarnessCompleteEvent = EventEnvelope<
@@ -580,17 +614,7 @@ export type DynamicAnalysisErrorEvent = EventEnvelope<
 
 export type DynamicAnalysisAgentActivityEvent = EventEnvelope<
   "dynamic:agent-activity",
-  {
-    context: RunContext;
-    fingerprint: string;
-    kind: "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
-    toolName?: string;
-    toolInput?: Record<string, unknown>;
-    summary?: string;
-    elapsedSeconds?: number;
-    index: number;
-    total: number;
-  }
+  TaskAgentActivityPayload
 >;
 
 export type DynamicAnalysisCompleteEvent = EventEnvelope<
@@ -1078,6 +1102,7 @@ export type KuzushiEvent =
   | TriageResultEvent
   | TriageErrorEvent
   | TriageAgentActivityEvent
+  | ThreatHuntAgentActivityEvent
   | TriageAssertionsEvent
   | TriageCompleteEvent
   | TriageQueueDepthEvent

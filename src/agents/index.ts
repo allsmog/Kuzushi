@@ -1,13 +1,8 @@
-import { AgenticPlugin } from "../scanners/agentic.js";
-import { CodeQLPlugin } from "../scanners/codeql.js";
-import { SemgrepPlugin } from "../scanners/semgrep.js";
-import type { Finding, ScannerPlugin, TaskConfig } from "../scanners/types.js";
 import { createPopulatedRegistry } from "../strategies/init.js";
 import { withMultiStrategy } from "../strategies/multi-strategy-task.js";
 import { getProfileForTask } from "../strategies/task-profile-map.js";
-import type { KuzushiConfig, ScanOpts } from "../types.js";
+import type { KuzushiConfig } from "../types.js";
 import { TaskRegistry } from "./registry.js";
-import { loadAllExternalTasksWithManifest } from "./task-loader.js";
 import { appModelBuildTask } from "./tasks/app-model-build.js";
 import { authLogicDetectTask } from "./tasks/auth-logic-detect.js";
 import { callGraphAssistTask } from "./tasks/call-graph-assist.js";
@@ -41,7 +36,6 @@ import { taintCweSelectTask } from "./tasks/taint-iris/cwe-select.js";
 import { taintIrisTask } from "./tasks/taint-iris/iris.js";
 import { taskSelectorTask } from "./tasks/task-selector.js";
 import { templateInjectionTask } from "./tasks/template-injection.js";
-import { threatHuntTask } from "./tasks/threat-hunt.js";
 import { threatModelRandoriTask } from "./tasks/threat-modeling/randori.js";
 import { threatScenarioBuildTask } from "./tasks/threat-scenario-build.js";
 import { tobAuditTask } from "./tasks/tob-audit/tob-audit.js";
@@ -49,47 +43,10 @@ import { vulnScoutTask } from "./tasks/vuln-scout/vuln-scout.js";
 import { xxeDetectionTask } from "./tasks/xxe-detection.js";
 import type { AgentTask } from "./types.js";
 
-function createNativeFindingTask(plugin: ScannerPlugin): AgentTask<ScanOpts, Finding[]> {
-  let taskConfig: TaskConfig = {};
-
-  const task: AgentTask<ScanOpts, Finding[]> = {
-    id: plugin.id,
-    displayName: plugin.displayName,
-    outputKind: "findings",
-    dependsOn: [],
-    async init(config: Record<string, unknown>): Promise<void> {
-      taskConfig = config;
-      if (plugin.init) {
-        await plugin.init(config);
-      }
-    },
-    async run(input: ScanOpts, context): Promise<Finding[]> {
-      return plugin.scan(context.workRoot ?? context.repoRoot, input, taskConfig, context.runtime, {
-        bus: context.bus,
-        taskId: plugin.id,
-        runId: context.runId,
-        runContext: {
-          runId: context.runId,
-          repoRoot: context.workRoot ?? context.repoRoot,
-          scanPath: context.scanPath,
-          repoName: context.repoName,
-          dbPath: context.dbPath ?? "",
-        },
-      });
-    },
-  };
-
-  if (typeof plugin.triageAgentConfig === "function") {
-    task.triageAgentConfig = (finding, repoName) => plugin.triageAgentConfig!(finding, repoName);
-  }
-
-  return task;
-}
-
-/** Create task registry populated with native and external tasks. */
+/** Create task registry populated with native tasks. */
 export async function createDefaultTaskRegistry(
-  config?: KuzushiConfig,
-  repoRoot?: string,
+  _config?: KuzushiConfig,
+  _repoRoot?: string,
 ): Promise<TaskRegistry> {
   const tasks = new TaskRegistry();
 
@@ -101,9 +58,10 @@ export async function createDefaultTaskRegistry(
     return profile ? withMultiStrategy(task, profile, () => strategyRegistry) : task;
   };
 
-  tasks.register(createNativeFindingTask(new SemgrepPlugin()));
-  tasks.register(createNativeFindingTask(new CodeQLPlugin()));
-  tasks.register(createNativeFindingTask(new AgenticPlugin()));
+  // Scanner-plugin tasks (semgrep, codeql, agentic) are registered via the
+  // CopilotModule registry bridge — see src/modules/{semgrep,codeql,
+  // agentic-sast}/<id>.ts. The ModuleRegistry installs them into this
+  // TaskRegistry at loadModule() time through src/modules/dag-bridge.ts.
 
   tasks.register(contextGathererTask);
 
@@ -141,8 +99,10 @@ export async function createDefaultTaskRegistry(
   tasks.register(wrapTask(xxeDetectionTask));
   tasks.register(wrapTask(deserializationDetectionTask));
 
-  // Threat-driven hunt (Carlini-style, one agent per DFD threat actor)
-  tasks.register(wrapTask(threatHuntTask));
+  // Threat-driven hunt: registered via CopilotModule at `src/modules/threat-hunt/threat-hunt.ts`.
+  // The ModuleRegistry bridge (src/modules/dag-bridge.ts) inserts the adapter
+  // into this TaskRegistry at module-load time, so `dependsOn: ["threat-hunt"]`
+  // references still resolve without a direct import here.
 
   // Sharp-edges detection (Trail of Bits, three adversarial personas)
   tasks.register(wrapTask(sharpEdgesDetectTask));
@@ -189,25 +149,6 @@ export async function createDefaultTaskRegistry(
 
   // Dynamic task selection
   tasks.register(taskSelectorTask);
-
-  // Load external tasks from config
-  if (config?.externalTasks && config.externalTasks.length > 0) {
-    if (config.enableExternalTasks) {
-      const resolvedRoot = repoRoot ?? process.cwd();
-      const loaded = await loadAllExternalTasksWithManifest(config.externalTasks, resolvedRoot);
-      for (const info of loaded) {
-        tasks.register(info.task);
-        if (info.manifest) {
-          tasks.setManifest(info.task.id, info.manifest);
-        }
-      }
-    } else {
-      console.warn(
-        "Warning: externalTasks are configured but enableExternalTasks is not true. " +
-          "Set enableExternalTasks to true or pass --enable-external-tasks to load them.",
-      );
-    }
-  }
 
   tasks.validate();
 

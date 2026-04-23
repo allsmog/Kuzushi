@@ -752,20 +752,6 @@ export const FIELDS: ReadonlyArray<FieldDescriptor> = [
     type: { kind: "number", min: 0, integer: true },
   },
   {
-    path: "externalTasks",
-    section: "advanced",
-    label: "externalTasks",
-    description: "External task specifiers (file:// or package:).",
-    type: { kind: "stringList" },
-  },
-  {
-    path: "enableExternalTasks",
-    section: "advanced",
-    label: "enableExternalTasks",
-    description: "Allow loading of external tasks.",
-    type: { kind: "bool" },
-  },
-  {
     path: "streamingEnabled",
     section: "advanced",
     label: "streamingEnabled",

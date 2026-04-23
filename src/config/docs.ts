@@ -128,12 +128,6 @@ export const CONFIG_KEY_DOCS: ConfigKeyDoc[] = [
     type: "number",
     summary: "Upper bound on modules scanned in Phase 2 of monorepo discovery.",
   },
-  {
-    key: "enableExternalTasks",
-    type: "boolean",
-    summary: "Allow loading external task files listed under externalTasks.",
-    default: "false",
-  },
 ];
 
 export function explainConfigKey(key: string): ConfigKeyDoc | null {

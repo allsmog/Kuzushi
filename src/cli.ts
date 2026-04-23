@@ -990,65 +990,6 @@ taskCmd
     }),
   );
 
-taskCmd
-  .command("validate")
-  .description("Validate an external task file and its manifest")
-  .argument("<path>", "Path to task file")
-  .action(
-    wrapCliAction(async (filePath: string) => {
-      const { parseTaskSpecifier, loadExternalTask } = await import("./agents/task-loader.js");
-      const { loadManifestForTaskFile, checkRequirements } = await import(
-        "./agents/task-manifest.js"
-      );
-
-      const absPath = path.resolve(filePath);
-
-      // Validate manifest if present
-      const manifestResult = loadManifestForTaskFile(absPath);
-      if (manifestResult) {
-        if (!manifestResult.valid) {
-          throw new CliUsageError("Manifest validation failed:", {
-            details: (manifestResult.errors ?? []).map((err) => `  - ${err}`),
-          });
-        }
-        console.log(
-          `Manifest: valid (${manifestResult.manifest!.id} v${manifestResult.manifest!.version})`,
-        );
-
-        // Check requirements
-        const reqCheck = checkRequirements(manifestResult.manifest!);
-        if (!reqCheck.satisfied) {
-          console.warn("Requirements not fully satisfied:");
-          if (reqCheck.missing.env.length > 0) {
-            console.warn(`  Missing env: ${reqCheck.missing.env.join(", ")}`);
-          }
-          if (reqCheck.missing.bins.length > 0) {
-            console.warn(`  Missing bins: ${reqCheck.missing.bins.join(", ")}`);
-          }
-          if (reqCheck.missing.nodeVersion) {
-            console.warn(`  Node version: ${reqCheck.missing.nodeVersion}`);
-          }
-        } else {
-          console.log("Requirements: all satisfied");
-        }
-      } else {
-        console.log("Manifest: not found (optional)");
-      }
-
-      // Validate the task module loads correctly
-      try {
-        const specifier = `file://${absPath}`;
-        const spec = parseTaskSpecifier(specifier);
-        await loadExternalTask(spec, path.dirname(absPath));
-        console.log("Task module: valid");
-      } catch (err) {
-        throw new CliUsageError(
-          `Task module validation failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }),
-  );
-
 // ── patch ─────────────────────────────────────────────────────────────────
 
 program

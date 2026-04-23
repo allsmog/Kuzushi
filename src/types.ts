@@ -734,10 +734,6 @@ export interface KuzushiConfig {
   triageAssertions?: TriageAssertionConfig;
   /** Quality gate configuration for CI/CD enforcement. */
   qualityGates?: QualityGateConfig;
-  /** External task specifiers to load at runtime (file:// or package: URIs). */
-  externalTasks?: string[];
-  /** Enable loading of external tasks. Must be true for externalTasks to take effect. Default false. */
-  enableExternalTasks?: boolean;
   /** Pipeline hooks configuration. */
   hooks?: { files?: string[] };
   /** Security opt-in required for loading external hook files. Default false. */

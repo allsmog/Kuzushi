@@ -12,7 +12,7 @@
 
 import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import type React from "react";
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
 import {
   buildShellPrompt,
@@ -21,6 +21,7 @@ import {
 } from "../../copilot/shell.js";
 import { formatClock, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
+import { applyBackspace, isCtrlChord } from "../hooks/text-edit-actions.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useUIState } from "../hooks.js";
 import { useLayoutContext } from "../layout-context.js";
@@ -107,12 +108,6 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const draftInputRef = useRef("");
 
   const processing = shell?.processing === true;
-  const isCtrlChord = (char: string, key: { ctrl: boolean }, letter: string): boolean => {
-    if (!key.ctrl) return false;
-    const lower = letter.toLowerCase();
-    const ctrlCode = String.fromCharCode(lower.charCodeAt(0) - 96);
-    return char === lower || char === lower.toUpperCase() || char === ctrlCode;
-  };
 
   useRegisterKeybindings(
     processing
@@ -122,59 +117,12 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         : IDLE_KEYBINDS,
   );
 
-  // Raw-mode watchdog. The Claude Agent SDK subprocess (used by `randori` etc.)
-  // disables parent stdin raw mode and doesn't restore it on exit, so Ink's
-  // `useInput` stops receiving Ctrl+C as `0x03` — the terminal falls back to
-  // cooked mode and echoes typed characters below Ink's frame. Re-asserting
-  // in `useLayoutEffect` runs synchronously during React commit, closing the
-  // window before Ink's next render cycle. Claude Code's custom Ink does the
-  // same thing via `handleSetRawMode` tracked with a counter (see
-  // yasasbanukaofficial/claude-code/src/ink/hooks/use-input.ts:46-55).
-  useLayoutEffect(() => {
-    if (!processing) return;
-    const stdin = process.stdin as NodeJS.ReadStream & {
-      isRaw?: boolean;
-      setRawMode?: (mode: boolean) => void;
-    };
-    if (!stdin.isTTY || !stdin.setRawMode) return;
-    // Re-assert on every render while processing. Cheap (no-op if already raw)
-    // but critical on the render that fires right after a subprocess exits.
-    if (!stdin.isRaw) {
-      try {
-        stdin.setRawMode(true);
-      } catch {
-        /* best-effort */
-      }
-    }
-  });
-
-  // Backstop interval: for the rare case where no render fires between a
-  // subprocess exit and the next Ctrl+C press (e.g. no progress events
-  // stream in), poll raw mode while processing. 75 ms closes the gap
-  // between subprocess takeover and Ink reclaiming raw mode — if the
-  // user hits Ctrl+C in that window, cooked mode routes the signal to
-  // the node SIGINT handler (which then runs abortActiveAction), but
-  // once the subprocess has exited we want useInput to be responsive
-  // for the *next* key press. The poll itself is a single `isRaw`
-  // read + optional setRawMode call, trivially cheap.
-  useEffect(() => {
-    if (!processing) return;
-    const id = setInterval(() => {
-      const stdin = process.stdin as NodeJS.ReadStream & {
-        isRaw?: boolean;
-        setRawMode?: (mode: boolean) => void;
-      };
-      if (!stdin.isTTY || !stdin.setRawMode) return;
-      if (!stdin.isRaw) {
-        try {
-          stdin.setRawMode(true);
-        } catch {
-          /* best-effort */
-        }
-      }
-    }, 75);
-    return () => clearInterval(id);
-  }, [processing]);
+  // Raw-mode watchdog now lives on `AppInner` via `useRawModeWatchdog` so it
+  // survives `mode` flips ("shell" ↔ "running" ↔ "summary"). Previously the
+  // watchdog was scoped here; when a tool dispatch caused the report-worker
+  // to flip `mode` to "running", `CopilotShell` unmounted, the watchdog
+  // unmounted with it, and the Claude Agent SDK subprocess could drop raw
+  // mode for the rest of the run with nobody watching.
 
   useInput(
     (char, key) => {
@@ -259,26 +207,24 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         return;
       }
 
-      if (isCtrlChord(char, key, "a")) {
+      if (isCtrlChord(char, "a", key.ctrl)) {
         setCursor(0);
         return;
       }
 
-      if (isCtrlChord(char, key, "e")) {
+      if (isCtrlChord(char, "e", key.ctrl)) {
         setCursor(input.length);
         return;
       }
 
-      if (key.backspace) {
-        if (cursor === 0 || input.length === 0) return;
-        setInput((v) => v.slice(0, cursor - 1) + v.slice(cursor));
-        setCursor((c) => Math.max(0, c - 1));
-        setHistoryIndex(null);
-        return;
-      }
-      if (key.delete) {
-        if (cursor >= input.length) return;
-        setInput((v) => v.slice(0, cursor) + v.slice(cursor + 1));
+      // Ink 5 surfaces the physical Backspace key (\x7f) as `key.delete`,
+      // not `key.backspace` — see text-edit-actions.ts. Merge both into a
+      // single delete-left so backspace works at end-of-line.
+      if (key.backspace || key.delete) {
+        const edit = applyBackspace(input, cursor);
+        if (!edit) return;
+        setInput(edit.value);
+        setCursor(edit.cursor);
         setHistoryIndex(null);
         return;
       }
@@ -338,7 +284,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         return;
       }
 
-      if (isCtrlChord(char, key, "u")) {
+      if (isCtrlChord(char, "u", key.ctrl)) {
         setInput("");
         setCursor(0);
         setHistoryIndex(null);

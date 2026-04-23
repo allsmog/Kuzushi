@@ -36,6 +36,7 @@ import type {
   TaskErrorEvent,
   TaskProgressEvent,
   TaskStartEvent,
+  ThreatHuntAgentActivityEvent,
   TriageAgentActivityEvent,
   TriageErrorEvent,
   TriageResultEvent,
@@ -513,9 +514,22 @@ export function registerReportWorker(
       elapsedSeconds?: number;
       summary?: string;
       fingerprint?: string;
+      /**
+       * Only set by `threat-hunt:agent-activity` producers. Signals the actor
+       * hunt has finished — drop the fingerprint from the UI's active-agents
+       * map so its row disappears from `HeartbeatStrip` as each actor
+       * completes, rather than all at once when the whole task ends.
+       * Other producers never set this, so their behaviour is unchanged.
+       */
+      done?: boolean;
     };
   }) => {
     const { kind, index, total, fingerprint } = event.payload;
+
+    if (store && fingerprint && event.payload.done) {
+      store.clearAgentActivity(fingerprint);
+      return;
+    }
 
     if (store && fingerprint) {
       const detail =
@@ -569,6 +583,7 @@ export function registerReportWorker(
   bus.subscribe<TriageAgentActivityEvent>("triage:agent-activity", handleAgentActivity);
   bus.subscribe<VerificationAgentActivityEvent>("verification:agent-activity", handleAgentActivity);
   bus.subscribe<PocHarnessAgentActivityEvent>("poc-harness:agent-activity", handleAgentActivity);
+  bus.subscribe<ThreatHuntAgentActivityEvent>("threat-hunt:agent-activity", handleAgentActivity);
 
   // Scan-time agent activity — keyed by taskId (not fingerprint)
   bus.subscribe<ScanAgentActivityEvent>("scan:agent-activity", (event) => {

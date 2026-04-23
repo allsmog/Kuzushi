@@ -54,7 +54,7 @@ export function AgentActivity({
           const connector = isLast ? icons.treeLast : icons.treeMiddle;
           const content = formatActivityLine(line);
           return (
-            <Text key={i}>
+            <Text key={`${line.index}-${line.kind}`}>
               {tokens.muted(connector)} {content}
             </Text>
           );
@@ -101,7 +101,7 @@ export function HeartbeatStrip({
         {tokens.strong(agentStr)}
         {tokens.muted(`  ·  ${costStr}  ·  ${elapsedStr}`)}
         {state.throttle ? tokens.warn(`  ·  throttled (${state.throttle.concurrency})`) : ""}
-        {tokens.hint("   (m) expand")}
+        {tokens.hint(expanded ? "   (m) collapse" : "   (m) expand")}
       </Text>
       {expanded && activeFingerprints > 0 ? <HeartbeatAgentList state={state} /> : null}
     </ScreenContent>

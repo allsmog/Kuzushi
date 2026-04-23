@@ -8,15 +8,14 @@
  * with the rest of the UI suite.
  */
 import { PassThrough, type Writable } from "node:stream";
-import { Text, render } from "ink";
+import { render, Text } from "ink";
 import { createElement, type ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 import { PulseDot } from "../../src/ui/components/PulseDot.js";
+import { BLACK_CIRCLE } from "../../src/ui/glyphs.js";
 import { Gutter } from "../../src/ui/primitives/Gutter.js";
 import { Ratchet } from "../../src/ui/primitives/Ratchet.js";
-import { BLACK_CIRCLE } from "../../src/ui/glyphs.js";
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI
 const ANSI_RE = /\[[0-9;]*[a-zA-Z]/g;
 
 function renderToText(node: ReactElement): string {

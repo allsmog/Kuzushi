@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCoreSastModule } from "../../src/modules/core-sast.js";
-import { createSemgrepModule } from "../../src/modules/sast/core-semgrep.js";
-import { createTaintIrisModule } from "../../src/modules/sast/core-taint-iris.js";
-import { createThreatHuntModule } from "../../src/modules/sast/core-threat-hunt.js";
-import type { ToolExecutionContext } from "../../src/modules/types.js";
+import { wrapDagToolExecute } from "../../src/modules/dag-bridge.js";
+import { createSemgrepModule } from "../../src/modules/semgrep/semgrep.js";
+import { createTaintIrisModule } from "../../src/modules/taint-iris/taint-iris.js";
+import type { CopilotModule, DagTool, ToolExecutionContext } from "../../src/modules/types.js";
+import { isDagTool } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
+
+// threat-hunt is no longer a task-wrapping module — it now runs its agent
+// fan-out directly via the DagTool contract (see
+// `src/modules/threat-hunt/threat-hunt.ts`). The `runPipeline` assertions
+// that used to live here moved to
+// `tests/modules/threat-hunt/threat-hunt.test.ts`.
 
 const {
   runPipelineMock,
@@ -113,11 +120,13 @@ describe("createCoreSastModule tool execution", () => {
 
     const ctx = createContext();
 
-    const semgrepTool = createSemgrepModule().tools.find((e) => e.name === "semgrep:scan");
-    const threatHuntTool = createThreatHuntModule().tools.find((e) => e.name === "threat-hunt:run");
-    const taintIrisTool = createTaintIrisModule().tools.find((e) => e.name === "taint-iris:hunt");
+    // The semgrep module ships a DagTool — its shell-mode `execute()` is
+    // installed by the registry bridge at `loadModule` time. This test
+    // exercises tools directly, so install the wrapper ourselves.
+    const semgrepTool = pickDagToolWithExecute(createSemgrepModule(), "semgrep:scan");
+    const taintIrisTool = pickDagToolWithExecute(createTaintIrisModule(), "taint-iris:hunt");
 
-    await semgrepTool!.execute({ target: "/tmp/repo", severity: ["high"] }, ctx);
+    await semgrepTool.execute({ target: "/tmp/repo", severity: ["high"] }, ctx);
     expect(runPipelineMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         postProcessMode: "scan-only",
@@ -127,25 +136,7 @@ describe("createCoreSastModule tool execution", () => {
       }),
     );
 
-    await threatHuntTool!.execute({ target: "/tmp/repo", maxActors: 7, maxFindings: 12 }, ctx);
-    expect(runPipelineMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        postProcessMode: "scan-only",
-        scanOpts: expect.objectContaining({
-          tasks: ["threat-hunt"],
-        }),
-        config: expect.objectContaining({
-          taskConfig: expect.objectContaining({
-            "threat-hunt": expect.objectContaining({
-              maxActors: 7,
-              maxFindings: 12,
-            }),
-          }),
-        }),
-      }),
-    );
-
-    await taintIrisTool!.execute({ target: "/tmp/repo" }, ctx);
+    await taintIrisTool.execute({ target: "/tmp/repo" }, ctx);
     expect(runPipelineMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         postProcessMode: "scan-only",
@@ -156,3 +147,18 @@ describe("createCoreSastModule tool execution", () => {
     );
   });
 });
+
+/**
+ * Resolve a DagTool by name and ensure it has a working `execute()`
+ * installed (the registry bridge normally does this at load time). Returns
+ * the tool typed as the underlying `DagTool` so callers can invoke
+ * `.execute()` without navigating the undiscriminated union.
+ */
+function pickDagToolWithExecute(mod: CopilotModule, name: string): DagTool {
+  const tool = mod.tools.find((t) => t.name === name);
+  if (!tool || !isDagTool(tool)) {
+    throw new Error(`Expected DagTool "${name}" on module "${mod.id}".`);
+  }
+  wrapDagToolExecute(mod, tool);
+  return tool;
+}

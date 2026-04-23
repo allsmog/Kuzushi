@@ -16,13 +16,13 @@
 
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { resolveDefaultReadOnlyTools } from "../agent-runtime/execution.js";
-import type { AgentRuntime } from "../agent-runtime/types.js";
-import { forwardSubAgentMessage } from "../agents/tasks/forward-subagent-output.js";
-import { resolvePromptArmorPluginPath } from "../agents/tasks/prompt-armor/resolve-promptarmor-plugin.js";
-import { resolveRepo } from "../cli/shared.js";
-import { createLogger } from "../logger.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
+import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
+import type { AgentRuntime } from "../../agent-runtime/types.js";
+import { forwardSubAgentMessage } from "../../agents/tasks/forward-subagent-output.js";
+import { resolvePromptArmorPluginPath } from "../../agents/tasks/prompt-armor/resolve-promptarmor-plugin.js";
+import { resolveRepo } from "../../cli/shared.js";
+import { createLogger } from "../../logger.js";
+import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
 
 const log = createLogger({ stage: "prompt-armor" });
 

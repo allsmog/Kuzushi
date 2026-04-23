@@ -1083,10 +1083,37 @@ function appendPendingAssistantText(store: UIStore, text: string): void {
   }));
 }
 
+/**
+ * Keep `shellView` consistent with `focusedModule`. The `/use <mod>` slash
+ * path sets shellView="module" via its own updater, but the bare dispatcher
+ * path (`use <mod>`) only pushes a ModuleDispatcher and lands here with
+ * shellView still "catalog" — which makes the StatusFooter lie ("you are
+ * in catalog" while the prompt reads `kuzushi/<mod>>`). Mirror the
+ * module-scoped views `/back` already recognises so we don't clobber an
+ * explicit `/findings`, `/tune`, finding detail, or threat-* sub-view.
+ */
+export function reconcileShellView(
+  currentView: ShellView,
+  focusedModule: string | null,
+): ShellView {
+  if (focusedModule && currentView === "catalog") return "module";
+  if (
+    !focusedModule &&
+    (currentView === "module" ||
+      currentView === "findings" ||
+      currentView === "finding" ||
+      currentView === "tune")
+  ) {
+    return "catalog";
+  }
+  return currentView;
+}
+
 function syncShellState(store: UIStore, opts: ShellOptions, focusedModule: string | null): void {
   updateShell(store, (shell) => ({
     ...shell,
     focusedModule,
+    shellView: reconcileShellView(shell.shellView, focusedModule),
     target: opts.target ?? null,
     workspace: opts.workspace ?? null,
   }));
@@ -5344,6 +5371,7 @@ export const __shellInternals = {
   formatWelcome,
   handleLocalCommand: routeInput,
   handleSlashCommand,
+  reconcileShellView,
   loadArtifactManifest,
   loadShellCommandHistory,
   resolveDirectToolDispatch,

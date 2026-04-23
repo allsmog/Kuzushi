@@ -16,31 +16,29 @@ import { type Dirent, existsSync, readdirSync } from "node:fs";
 import nodePath from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { TaskRegistry } from "../agents/registry.js";
-import { publishTaskActivity, publishTaskOutput } from "../bus/activity.js";
+import { publishAgentActivity, publishTaskActivity, publishTaskOutput } from "../bus/activity.js";
 import { ModuleEventBus, type ModuleEventScope } from "../bus/module-events.js";
 import { wrapRuntimeWithActivityForwarding } from "../bus/runtime-forwarding.js";
 import type { MessageBus } from "../bus/types.js";
+import { createAgenticSastModule } from "../modules/agentic-sast/agentic-sast.js";
 import { ModuleCache } from "../modules/cache.js";
-import { createCorePromptArmorModule } from "../modules/core-prompt-armor.js";
-import { createCoreRandoriModule } from "../modules/core-randori.js";
+import { createCodeqlModule } from "../modules/codeql/codeql.js";
+import { createContextModule } from "../modules/context/context.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
-import { createCoreShinsaModule } from "../modules/core-shinsa.js";
-import { createCoreTobModule } from "../modules/core-tob.js";
-import { createCoreVulnScoutModule } from "../modules/core-vuln-scout.js";
+import { createFindingsModule } from "../modules/findings/findings.js";
 import { readHostKuzushiVersion } from "../modules/loader.js";
 import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
+import { createPatchModule } from "../modules/patch/patch.js";
+import { createCorePromptArmorModule } from "../modules/prompt-armor/prompt-armor.js";
+import { createCoreRandoriModule } from "../modules/randori/randori.js";
 import { createReconModule } from "../modules/recon/core-recon.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
-import { createAgenticSastModule } from "../modules/sast/core-agentic-sast.js";
-import { createCodeqlModule } from "../modules/sast/core-codeql.js";
-import { createContextModule } from "../modules/sast/core-context.js";
-import { createFindingsModule } from "../modules/sast/core-findings.js";
-import { createPatchModule } from "../modules/sast/core-patch.js";
-import { createSemgrepModule } from "../modules/sast/core-semgrep.js";
-import { createTaintIrisModule } from "../modules/sast/core-taint-iris.js";
-import { createThreatHuntModule } from "../modules/sast/core-threat-hunt.js";
-import { createTriageModule } from "../modules/sast/core-triage.js";
-import { createVerifyModule } from "../modules/sast/core-verify.js";
+import { createSemgrepModule } from "../modules/semgrep/semgrep.js";
+import { createCoreShinsaModule } from "../modules/shinsa/shinsa.js";
+import { createTaintIrisModule } from "../modules/taint-iris/taint-iris.js";
+import { createThreatHuntModule } from "../modules/threat-hunt/threat-hunt.js";
+import { createCoreTobModule } from "../modules/tob/tob.js";
+import { createTriageModule } from "../modules/triage/triage.js";
 import type {
   ModuleContext,
   ModuleInfo,
@@ -48,6 +46,8 @@ import type {
   ToolResult,
 } from "../modules/types.js";
 import { createVariantHunterModule } from "../modules/variant-hunter.js";
+import { createVerifyModule } from "../modules/verify/verify.js";
+import { createCoreVulnScoutModule } from "../modules/vuln-scout/vuln-scout.js";
 import type { KuzushiConfig } from "../types.js";
 
 /**
@@ -333,17 +333,19 @@ export class CopilotCore {
       capabilities: capabilities as ReadonlySet<string>,
     };
 
+    const runConfig = ctxOverrides?.config ?? this.opts.config;
+    const datastore = ctxOverrides?.datastore;
     const ctx: ToolExecutionContext = {
       cwd: ctxOverrides?.cwd ?? this.opts.dataDir,
       runtime: toolRuntime,
       bus: ctxBus,
-      config: ctxOverrides?.config ?? this.opts.config,
+      config: runConfig,
       workspaceId: ctxOverrides?.workspaceId,
       target,
       signal: ctxOverrides?.signal,
       uiStore: ctxOverrides?.uiStore,
       seedTaskOutputs: ctxOverrides?.seedTaskOutputs,
-      ...(ctxOverrides?.datastore ? { datastore: ctxOverrides.datastore } : {}),
+      ...(datastore ? { datastore } : {}),
       ...(ctxOverrides?.print ? { print: ctxOverrides.print } : {}),
       ...(ctxOverrides?.workspace ? { workspace: ctxOverrides.workspace } : {}),
       ...(scope ? { events: scope } : {}),
@@ -354,6 +356,43 @@ export class CopilotCore {
       },
       reportOutput: (line) => {
         void publishTaskOutput(ctxBus, qualifiedName, line);
+      },
+      /**
+       * Unified operator-option resolver. Replaces the duplicated pattern of
+       * "read `THREAT_HUNT_PROMPT` from the datastore in core-threat-hunt.ts,
+       * then read `promptOverride` from `taskConfig` in threat-hunt.ts" that
+       * exists in every task-wrapping module today.
+       *
+       * Fallback order:
+       *   1. `ctx.datastore.get(key)` — shell `set` / global `setg` (highest priority)
+       *   2. `ctx.config.taskConfig[moduleId][key]` — persisted operator overrides
+       *
+       * Authors that want a legacy-field fallback (e.g.
+       * `taskConfig["threat-hunt"]["promptOverride"]`) should call
+       * `resolveOption` first and fall back to the legacy lookup explicitly:
+       *
+       *   const prompt = ctx.resolveOption<string>("THREAT_HUNT_PROMPT")
+       *     ?? (ctx.config.taskConfig["threat-hunt"]?.["promptOverride"] as string);
+       */
+      resolveOption: <T = string>(key: string): T | undefined => {
+        const fromStore = datastore?.get<T>(key);
+        if (fromStore !== undefined) return fromStore;
+        const moduleBucket = runConfig.taskConfig?.[moduleId] as
+          | Record<string, unknown>
+          | undefined;
+        if (moduleBucket && key in moduleBucket) {
+          return moduleBucket[key] as T;
+        }
+        return undefined;
+      },
+      /**
+       * Emit a `${moduleId}:agent-activity` event via the unified publisher.
+       * The report-worker subscribes via a pattern listener (see
+       * `src/bus/workers/report-worker.ts`), so every DagTool that fans out
+       * sub-agents gets identical UI plumbing without bespoke bus wiring.
+       */
+      reportAgentActivity: (fingerprint, kind, meta) => {
+        publishAgentActivity(ctxBus, moduleId, fingerprint, kind, meta);
       },
     };
 

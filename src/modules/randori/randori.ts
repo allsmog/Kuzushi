@@ -9,17 +9,17 @@
  */
 
 import path from "node:path";
-import { resolveDefaultReadOnlyTools } from "../agent-runtime/execution.js";
-import { convertRandoriToThreatModel } from "../agents/tasks/threat-modeling/randori-adapter.js";
+import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
+import { convertRandoriToThreatModel } from "../../agents/tasks/threat-modeling/randori-adapter.js";
 import {
   mergeRandoriStageOutputs,
   readRandoriArtifacts,
-} from "../agents/tasks/threat-modeling/randori-artifacts.js";
-import { runRandoriPasta } from "../agents/tasks/threat-modeling/randori-runner.js";
-import { resolveRandoriPluginPath } from "../agents/tasks/threat-modeling/resolve-randori.js";
-import { resolveRepo } from "../cli/shared.js";
-import { loadPersistentThreatModel } from "../threat-model-renderer.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
+} from "../../agents/tasks/threat-modeling/randori-artifacts.js";
+import { runRandoriPasta } from "../../agents/tasks/threat-modeling/randori-runner.js";
+import { resolveRandoriPluginPath } from "../../agents/tasks/threat-modeling/resolve-randori.js";
+import { resolveRepo } from "../../cli/shared.js";
+import { loadPersistentThreatModel } from "../../threat-model-renderer.js";
+import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
 
 const DEFAULT_STAGES = ["s1", "s2", "s3", "s4"] as const;
 const VALID_STAGES = new Set(["s1", "s2", "s3", "s4"]);

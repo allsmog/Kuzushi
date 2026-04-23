@@ -105,8 +105,6 @@ export const DEFAULTS: KuzushiConfig = {
   triageSpecialistMaxTurns: null,
   triageMaxFindings: 50,
   prioritizeFindings: true,
-  externalTasks: [],
-  enableExternalTasks: false,
   diffBase: undefined,
   streamingEnabled: false,
   streamingPort: 0,

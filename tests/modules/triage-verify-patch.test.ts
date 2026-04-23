@@ -22,10 +22,10 @@ vi.mock("../../src/patch.js", async (importOriginal) => {
 });
 
 // Imports must come after the vi.mock calls so the module graph picks up the stubs.
-import { createPatchModule } from "../../src/modules/sast/core-patch.js";
-import { createTriageModule } from "../../src/modules/sast/core-triage.js";
-import { createVerifyModule } from "../../src/modules/sast/core-verify.js";
+import { createPatchModule } from "../../src/modules/patch/patch.js";
+import { createTriageModule } from "../../src/modules/triage/triage.js";
 import type { ToolExecutionContext } from "../../src/modules/types.js";
+import { createVerifyModule } from "../../src/modules/verify/verify.js";
 import { initDb } from "../../src/store.js";
 import type { KuzushiConfig } from "../../src/types.js";
 import { WorkspaceManager } from "../../src/workspace/manager.js";

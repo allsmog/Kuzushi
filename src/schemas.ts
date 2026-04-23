@@ -765,8 +765,6 @@ export const KuzushiConfigSchema = z.object({
   jsonOutput: z.string().optional(),
   csvOutput: z.string().optional(),
   jsonlOutput: z.string().optional(),
-  externalTasks: z.array(z.string()).optional(),
-  enableExternalTasks: z.boolean().optional(),
   hooks: z
     .object({
       files: z.array(z.string()).optional(),

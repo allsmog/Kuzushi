@@ -8,15 +8,15 @@
  * implementation with the `tob-audit` pipeline task.
  */
 
-import { resolveDefaultReadOnlyTools } from "../agent-runtime/execution.js";
-import { runPluginFindingScanner } from "../agents/tasks/plugin-finding-scanner.js";
+import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
+import { runPluginFindingScanner } from "../../agents/tasks/plugin-finding-scanner.js";
 import {
   resolveTobPlugins,
   SECURITY_PLUGINS,
-} from "../agents/tasks/tob-audit/resolve-tob-plugin.js";
-import { buildTobAuditPrompt } from "../agents/tasks/tob-audit/tob-audit.js";
-import { resolveRepo } from "../cli/shared.js";
-import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "./types.js";
+} from "../../agents/tasks/tob-audit/resolve-tob-plugin.js";
+import { buildTobAuditPrompt } from "../../agents/tasks/tob-audit/tob-audit.js";
+import { resolveRepo } from "../../cli/shared.js";
+import type { CopilotModule, ModuleTool, ToolExecutionContext, ToolResult } from "../types.js";
 
 function resolveTargetPaths(
   ctx: ToolExecutionContext,
