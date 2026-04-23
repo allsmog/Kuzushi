@@ -3190,7 +3190,12 @@ function handleSlashCommand(
           output: "Back to findings.",
         };
       }
-      if (currentView === "findings" || currentView === "tune") {
+      if (
+        currentView === "findings" ||
+        currentView === "tune" ||
+        currentView === "diff-since" ||
+        currentView?.startsWith("threat-")
+      ) {
         return {
           shellStateUpdater: (shell) => ({ ...shell, shellView: "module" }),
           output: "Back to module home.",
