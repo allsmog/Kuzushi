@@ -11,24 +11,12 @@ import { runSingleTaskPipeline, targetProperty } from "./shared.js";
 
 function formatThreatHuntSummary(result: ToolResult): string {
   const first = result.output.split("\n", 1)[0]?.trim();
-  const stats = (
-    result.data as { stats?: { totalFindings?: number; totalCostUsd?: number } | null } | undefined
-  )?.stats;
-
-  const findings = typeof stats?.totalFindings === "number" ? stats.totalFindings : null;
-  const cost = typeof stats?.totalCostUsd === "number" ? stats.totalCostUsd : null;
-
-  if (first && findings !== null && cost !== null) {
-    return `${first} · ${findings} findings · $${cost.toFixed(2)}`;
-  }
-  if (first && findings !== null) {
-    return `${first} · ${findings} findings`;
-  }
-  return first && first.length > 0
-    ? first
-    : result.ok
-      ? "Threat hunt complete"
-      : "Threat hunt failed";
+  if (first && first.length > 0) return first;
+  const stats = (result.data as { stats?: { totalFindings?: number } | null } | undefined)?.stats;
+  const findings =
+    typeof stats?.totalFindings === "number" ? `${stats.totalFindings} findings` : null;
+  if (result.ok) return findings ? `Threat hunt complete · ${findings}` : "Threat hunt complete";
+  return "Threat hunt failed";
 }
 
 const threatHuntTool: ModuleTool = {
