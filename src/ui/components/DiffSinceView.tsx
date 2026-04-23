@@ -23,22 +23,22 @@ import type React from "react";
 import type { StrideThreat } from "../../agents/tasks/threat-modeling/types.js";
 import { Table } from "../primitives/Table.js";
 import { type Severity, severityChalk, severityStyle } from "../severity.js";
-import type { ActionableFinding, ShellState, UIState } from "../state.js";
+import type { ActionableFinding, ShellState, SummaryData } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 interface DiffSinceViewProps {
-  state: UIState;
+  summary: SummaryData | null;
   shell: ShellState;
 }
 
-export function DiffSinceView({ state, shell }: DiffSinceViewProps): React.ReactElement {
+export function DiffSinceView({ summary, shell }: DiffSinceViewProps): React.ReactElement {
   const diff = shell.diffSince;
   if (!diff) return <EmptyState />;
 
   const changedSet = new Set(diff.changedFiles);
-  const allFindings = state.summary?.actionableFindings ?? [];
+  const allFindings = summary?.actionableFindings ?? [];
   const scopedFindings = allFindings.filter((f) => changedSet.has(f.filePath));
 
   const threats = shell.threatModel?.threats ?? [];
