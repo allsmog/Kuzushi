@@ -657,6 +657,59 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(lines).toContain("# THREATS  SUMMARY");
   });
 
+  it("threat views include recent agent actions when present", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "threat-summary",
+        threatModel: {
+          version: "1.0",
+          dfd: { elements: [], trustBoundaries: [] },
+          threats: [],
+          summary: {
+            total: 0,
+            bySeverity: { critical: 0 },
+            byCategory: {
+              spoofing: 0,
+              tampering: 0,
+              repudiation: 0,
+              "information-disclosure": 0,
+              "denial-of-service": 0,
+              "elevation-of-privilege": 0,
+            },
+          },
+        },
+      }),
+      agentActivity: new Map([
+        [
+          "fp-1",
+          [
+            {
+              kind: "tool-progress",
+              toolName: "threat-hunt",
+              detail: "Enumerating top actors",
+              index: 1,
+              total: 3,
+            },
+            {
+              kind: "tool-complete",
+              toolName: "threat-hunt",
+              detail: "Generated actor backlog",
+              index: 2,
+              total: 3,
+            },
+          ],
+        ],
+      ]),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("## agent actions");
+    expect(joined).toContain("- threat-hunt: Generated actor backlog");
+    expect(joined).toContain("- threat-hunt: Enumerating top actors");
+  });
+
   it("diff-since view with no diffSince routes through diff-since-idle empty copy", () => {
     const store = createUIStore();
     const { lines, unsub } = attach(store);

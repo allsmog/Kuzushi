@@ -469,7 +469,7 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
     case "threat-stories":
     case "threat-scope":
     case "threat-summary":
-      printThreatView(emit, shell);
+      printThreatView(emit, shell, state.agentActivity);
       return;
     case "diff-since":
       printDiffSinceView(emit, shell);
@@ -638,7 +638,11 @@ function printFindingView(emit: Emit, shell: ShellState, state: UIState): void {
   emit("hint: a assign · c comment · s suppress · r resolve · q back");
 }
 
-function printThreatView(emit: Emit, shell: ShellState): void {
+function printThreatView(
+  emit: Emit,
+  shell: ShellState,
+  agentActivity: Map<string, AgentActivityLine[]>,
+): void {
   const suffix = shell.shellView.replace(/^threat-/, "");
   const tm = shell.threatModel;
   const threats = tm?.threats.length ?? 0;
@@ -722,7 +726,29 @@ function printThreatView(emit: Emit, shell: ShellState): void {
       break;
     }
   }
+  const actionLines = collectRecentAgentActions(agentActivity, 6);
+  if (actionLines.length > 0) {
+    emit("## agent actions");
+    for (const line of actionLines) emit(`- ${line}`);
+  }
   emit("hint: 1..5 to cycle threat views · /threats edit to author · /back to return");
+}
+
+function collectRecentAgentActions(
+  activity: Map<string, AgentActivityLine[]>,
+  maxLines: number,
+): string[] {
+  const flattened: AgentActivityLine[] = [];
+  for (const lines of activity.values()) flattened.push(...lines);
+  const ordered = flattened.sort((a, b) => b.index - a.index);
+  const out: string[] = [];
+  for (const line of ordered) {
+    const label = line.toolName ?? line.kind;
+    const detail = line.detail?.trim();
+    out.push(detail ? `${label}: ${clipLine(detail, 100)}` : label);
+    if (out.length >= maxLines) break;
+  }
+  return out;
 }
 
 function printDiffSinceView(emit: Emit, shell: ShellState): void {
