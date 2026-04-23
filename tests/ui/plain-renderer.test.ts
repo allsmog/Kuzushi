@@ -484,12 +484,95 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(joined).toContain("- information-disclosure: 3");
   });
 
-  it("threat-stories / threat-scope / threat-summary each print their heading", () => {
+  it("threat-stories prints narrative attacker stories (not STRIDE threats)", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "threat-stories",
+        threatModel: {
+          version: "1.0",
+          dfd: { elements: [], trustBoundaries: [] },
+          threats: [
+            {
+              id: "T-1",
+              elementId: "E1",
+              category: "spoofing",
+              title: "threat one",
+              description: "desc",
+              attackVector: "vec",
+              preconditions: [],
+              impact: "high",
+              likelihood: "medium",
+              existingMitigations: [],
+              missingMitigations: [],
+              relatedCwe: [],
+              affectedFiles: [],
+            },
+            {
+              id: "T-2",
+              elementId: "E1",
+              category: "tampering",
+              title: "threat two",
+              description: "desc",
+              attackVector: "vec",
+              preconditions: [],
+              impact: "medium",
+              likelihood: "low",
+              existingMitigations: [],
+              missingMitigations: [],
+              relatedCwe: [],
+              affectedFiles: [],
+            },
+          ],
+          narrative: {
+            overview: "overview",
+            inputCategories: {
+              attackerControlled: [],
+              operatorControlled: [],
+              developerControlled: [],
+              externalServices: [],
+              sandboxBoundary: [],
+              assumptions: [],
+            },
+            attackerStories: [
+              { title: "Story A", narrative: "a", mitigation: "m1", threatIds: ["T-1"] },
+              { title: "Story B", narrative: "b", mitigation: "m2", threatIds: ["T-1", "T-2"] },
+              { title: "Story C", narrative: "c", mitigation: "m3" },
+            ],
+            criticalityBuckets: { critical: [], high: [], medium: [], low: [] },
+            outOfScope: [],
+          },
+          summary: {
+            total: 2,
+            bySeverity: { high: 1, medium: 1 },
+            byCategory: {
+              spoofing: 1,
+              tampering: 1,
+              repudiation: 0,
+              "information-disclosure": 0,
+              "denial-of-service": 0,
+              "elevation-of-privilege": 0,
+            },
+          },
+        },
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("# THREATS  STORIES");
+    expect(joined).toContain("total stories: 3");
+    expect(joined).toContain("- Story A (1 linked threat)");
+    expect(joined).toContain("- Story B (2 linked threats)");
+    expect(joined).toContain("- Story C (0 linked threats)");
+    expect(joined).not.toContain("threat one [high/medium]");
+  });
+
+  it("threat-scope / threat-summary each print their heading", () => {
     const cases: Array<{
       view: ShellState["shellView"];
       head: string;
     }> = [
-      { view: "threat-stories", head: "# THREATS  STORIES" },
       { view: "threat-scope", head: "# THREATS  SCOPE" },
       { view: "threat-summary", head: "# THREATS  SUMMARY" },
     ];

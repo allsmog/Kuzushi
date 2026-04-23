@@ -672,11 +672,13 @@ function printThreatView(emit: Emit, shell: ShellState): void {
       break;
     }
     case "threat-stories": {
-      emit(`total stories: ${threats}`);
-      for (const t of tm.threats.slice(0, 10)) {
-        emit(`- ${t.id}: ${t.title ?? t.category} [${t.impact}/${t.likelihood}]`);
+      const stories = tm.narrative?.attackerStories ?? [];
+      emit(`total stories: ${stories.length}`);
+      for (const story of stories.slice(0, 10)) {
+        const linked = story.threatIds?.length ?? 0;
+        emit(`- ${story.title} (${linked} linked threat${linked === 1 ? "" : "s"})`);
       }
-      if (threats > 10) emit(`...and ${threats - 10} more`);
+      if (stories.length > 10) emit(`...and ${stories.length - 10} more`);
       break;
     }
     case "threat-scope": {
