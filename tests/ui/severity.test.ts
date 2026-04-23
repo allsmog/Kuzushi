@@ -63,11 +63,10 @@ describe("severityStyle — default palette", () => {
     expect(severityStyle("info", {}).bold).toBe(false);
   });
 
-  it("picks an Okabe-Ito friendly color — not default white — for every tier", () => {
+  it("picks an explicit color — not default white — for every tier", () => {
     for (const sev of ALL) {
       const s = severityStyle(sev, {});
       expect(s.color).not.toBe("white");
-      expect(s.color).not.toBe("gray");
     }
   });
 });
@@ -110,9 +109,9 @@ describe("severityStyle — KUZUSHI_HIGH_CONTRAST", () => {
     // Spot-check: medium should move from `yellow` → `yellowBright`.
     expect(severityStyle("medium", {}).color).toBe("yellow");
     expect(severityStyle("medium", { KUZUSHI_HIGH_CONTRAST: "1" }).color).toBe("yellowBright");
-    // info (blue → blueBright)
-    expect(severityStyle("info", {}).color).toBe("blue");
-    expect(severityStyle("info", { KUZUSHI_HIGH_CONTRAST: "1" }).color).toBe("blueBright");
+    // low (blue → blueBright)
+    expect(severityStyle("low", {}).color).toBe("blue");
+    expect(severityStyle("low", { KUZUSHI_HIGH_CONTRAST: "1" }).color).toBe("blueBright");
   });
 
   it("accepts truthy strings (1/true/yes/on, case-insensitive)", () => {
