@@ -32,6 +32,38 @@ export function makePathId(entryNodeId: string, targetNodeId: string, nodeIds: s
   return createHash("sha256").update(source).digest("hex").slice(0, 32);
 }
 
+function cleanStringArray(values: string[]): string[] {
+  return values.map((value) => value.trim()).filter(Boolean);
+}
+
+function parseStringArrayJson(raw: unknown): string[] {
+  if (typeof raw !== "string") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.map((value) => String(value).trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function deriveHopCount(nodeIds: string[], edgeIds: string[], fallback: unknown): number {
+  if (nodeIds.length > 0) {
+    return Math.max(0, nodeIds.length - 1);
+  }
+  if (edgeIds.length > 0) {
+    return edgeIds.length;
+  }
+  return typeof fallback === "number" && Number.isFinite(fallback)
+    ? Math.max(0, Math.trunc(fallback))
+    : 0;
+}
+
 // ── Node operations ──────────────────────────────────────────────────────
 
 export function upsertGraphNode(db: Database.Database, repo: string, node: CodeGraphNode): void {
@@ -80,21 +112,31 @@ export function upsertGraphEdge(db: Database.Database, repo: string, edge: CodeG
 }
 
 export function upsertGraphPath(db: Database.Database, repo: string, path: CodeGraphPath): void {
+  const nodeIds = cleanStringArray(path.nodeIds);
+  const edgeIds = cleanStringArray(path.edgeIds);
+  const sanitizerNodeIds = cleanStringArray(path.sanitizerNodeIds);
+  const hopCount = deriveHopCount(nodeIds, edgeIds, path.hopCount);
+
   db.prepare(`
     INSERT INTO code_graph_paths (path_id, repo, entry_node_id, target_node_id, hop_count, path_node_ids, path_edge_ids, has_sanitizer, sanitizer_nodes, confidence)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(path_id) DO UPDATE SET
+      hop_count = excluded.hop_count,
+      path_node_ids = excluded.path_node_ids,
+      path_edge_ids = excluded.path_edge_ids,
+      has_sanitizer = excluded.has_sanitizer,
+      sanitizer_nodes = excluded.sanitizer_nodes,
       confidence = MAX(code_graph_paths.confidence, excluded.confidence)
   `).run(
     path.pathId,
     repo,
     path.entryNodeId,
     path.targetNodeId,
-    path.hopCount,
-    JSON.stringify(path.nodeIds),
-    JSON.stringify(path.edgeIds),
-    path.hasSanitizer ? 1 : 0,
-    JSON.stringify(path.sanitizerNodeIds),
+    hopCount,
+    JSON.stringify(nodeIds),
+    JSON.stringify(edgeIds),
+    sanitizerNodeIds.length > 0 ? 1 : 0,
+    JSON.stringify(sanitizerNodeIds),
     path.confidence,
   );
 }
@@ -151,7 +193,7 @@ export function getPathsToNode(
       `SELECT ${PATH_COLUMNS} FROM code_graph_paths WHERE repo = ? AND target_node_id = ? ORDER BY hop_count ASC`,
     )
     .all(repo, targetNodeId) as Array<Record<string, unknown>>;
-  return rows.map(rowToPath);
+  return rows.map(rowToPath).sort((a, b) => a.hopCount - b.hopCount);
 }
 
 export function getEdgesFromNode(db: Database.Database, fromNodeId: string): CodeGraphEdge[] {
@@ -190,6 +232,14 @@ export function invalidateStaleNodes(
   for (let i = 0; i < staleFilePaths.length; i += CHUNK_SIZE) {
     const chunk = staleFilePaths.slice(i, i + CHUNK_SIZE);
     const placeholders = chunk.map(() => "?").join(",");
+    const staleNodeRows = db
+      .prepare(
+        `SELECT node_id FROM code_graph_nodes WHERE repo = ? AND file_path IN (${placeholders})`,
+      )
+      .all(repo, ...chunk) as Array<{ node_id: string }>;
+    const staleNodeIds = new Set(staleNodeRows.map((row) => row.node_id));
+
+    deletePathsReferencingNodeIds(db, repo, staleNodeIds);
 
     db.prepare(`
       DELETE FROM code_graph_edges WHERE repo = ? AND (
@@ -212,6 +262,36 @@ export function invalidateStaleNodes(
   }
 
   return totalRemoved;
+}
+
+function deletePathsReferencingNodeIds(
+  db: Database.Database,
+  repo: string,
+  staleNodeIds: Set<string>,
+): void {
+  if (staleNodeIds.size === 0) {
+    return;
+  }
+
+  const rows = db
+    .prepare("SELECT path_id, path_node_ids FROM code_graph_paths WHERE repo = ?")
+    .all(repo) as Array<{ path_id: string; path_node_ids: string | null }>;
+  const stalePathIds = rows
+    .filter((row) =>
+      parseStringArrayJson(row.path_node_ids).some((nodeId) => staleNodeIds.has(nodeId)),
+    )
+    .map((row) => row.path_id);
+  if (stalePathIds.length === 0) {
+    return;
+  }
+
+  const deletePath = db.prepare("DELETE FROM code_graph_paths WHERE path_id = ?");
+  const deleteStalePaths = db.transaction((pathIds: string[]) => {
+    for (const pathId of pathIds) {
+      deletePath.run(pathId);
+    }
+  });
+  deleteStalePaths(stalePathIds);
 }
 
 // ── Row mappers ──────────────────────────────────────────────────────────
@@ -244,15 +324,18 @@ function rowToEdge(row: Record<string, unknown>): CodeGraphEdge {
 }
 
 function rowToPath(row: Record<string, unknown>): CodeGraphPath {
+  const nodeIds = parseStringArrayJson(row["path_node_ids"]);
+  const edgeIds = parseStringArrayJson(row["path_edge_ids"]);
+  const sanitizerNodeIds = parseStringArrayJson(row["sanitizer_nodes"]);
   return {
     pathId: row["path_id"] as string,
     entryNodeId: row["entry_node_id"] as string,
     targetNodeId: row["target_node_id"] as string,
-    hopCount: row["hop_count"] as number,
-    nodeIds: JSON.parse(row["path_node_ids"] as string),
-    edgeIds: JSON.parse(row["path_edge_ids"] as string),
-    hasSanitizer: (row["has_sanitizer"] as number) === 1,
-    sanitizerNodeIds: row["sanitizer_nodes"] ? JSON.parse(row["sanitizer_nodes"] as string) : [],
+    hopCount: deriveHopCount(nodeIds, edgeIds, row["hop_count"]),
+    nodeIds,
+    edgeIds,
+    hasSanitizer: sanitizerNodeIds.length > 0,
+    sanitizerNodeIds,
     confidence: row["confidence"] as number,
   };
 }

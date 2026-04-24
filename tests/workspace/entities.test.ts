@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { migration100 } from "../../src/migrations/100_schema_reset.js";
 import { migration101 } from "../../src/migrations/101_workspace_entities.js";
 import { migration102 } from "../../src/migrations/102_session_aliases.js";
+import { migration103 } from "../../src/migrations/103_schedules.js";
+import { migration104 } from "../../src/migrations/104_workspace_integrity_guards.js";
 import { WorkspaceManager } from "../../src/workspace/manager.js";
 
 const tempDirs: string[] = [];
@@ -19,6 +21,8 @@ function createTestDb(): Database.Database {
   migration100.up(db);
   migration101.up(db);
   migration102.up(db);
+  migration103.up(db);
+  migration104.up(db);
   return db;
 }
 
@@ -140,6 +144,87 @@ describe("creds + logins", () => {
     expect(login.status).toBe("successful");
     const all = mgr.creds.loginsFor(cred.id);
     expect(all).toHaveLength(1);
+  });
+
+  it("rejects duplicate credential identities below the upsert API", () => {
+    const db = createTestDb();
+    const mgr = new WorkspaceManager(db);
+    const ws = mgr.create("e", []);
+    mgr.creds.create({
+      workspaceId: ws.id,
+      publicUsername: "admin",
+      privateType: "password",
+      privateData: "hunter2",
+    });
+
+    expect(() =>
+      mgr.creds.create({
+        workspaceId: ws.id,
+        publicUsername: "admin",
+        privateType: "password",
+        privateData: "hunter2",
+      }),
+    ).toThrow(/duplicate credential identity/);
+  });
+
+  it("rejects credential logins across workspaces", () => {
+    const db = createTestDb();
+    const mgr = new WorkspaceManager(db);
+    const wsA = mgr.create("a", []);
+    const wsB = mgr.create("b", []);
+    const hostB = mgr.hosts.create({ workspaceId: wsB.id, address: "10.0.1.9" });
+    const svcB = mgr.services.create({ hostId: hostB.id, port: 22, proto: "tcp" });
+    const credA = mgr.creds.create({
+      workspaceId: wsA.id,
+      publicUsername: "root",
+      privateType: "ssh_key",
+      privateData: "PEM...",
+    });
+
+    expect(() =>
+      mgr.creds.recordLogin({
+        credId: credA.id,
+        serviceId: svcB.id,
+        status: "successful",
+      }),
+    ).toThrow(/same workspace/);
+  });
+});
+
+describe("workspace-scoped link guards", () => {
+  it("rejects vuln service links across workspaces", () => {
+    const db = createTestDb();
+    const mgr = new WorkspaceManager(db);
+    const wsA = mgr.create("a", []);
+    const wsB = mgr.create("b", []);
+    const hostA = mgr.hosts.create({ workspaceId: wsA.id, address: "10.0.0.8" });
+    const svcA = mgr.services.create({ hostId: hostA.id, port: 443, proto: "tcp" });
+
+    expect(() =>
+      mgr.vulns.create({
+        workspaceId: wsB.id,
+        serviceId: svcA.id,
+        name: "cross-workspace",
+      }),
+    ).toThrow(/vuln workspace/);
+  });
+
+  it("rejects session host/service mismatches", () => {
+    const db = createTestDb();
+    const mgr = new WorkspaceManager(db);
+    const ws = mgr.create("e", []);
+    const hostA = mgr.hosts.create({ workspaceId: ws.id, address: "10.0.0.10" });
+    const hostB = mgr.hosts.create({ workspaceId: ws.id, address: "10.0.0.11" });
+    const svcB = mgr.services.create({ hostId: hostB.id, port: 22, proto: "tcp" });
+
+    expect(() =>
+      mgr.sessions.create({
+        workspaceId: ws.id,
+        hostId: hostA.id,
+        serviceId: svcB.id,
+        kind: "ssh",
+      }),
+    ).toThrow(/session workspace/);
   });
 });
 

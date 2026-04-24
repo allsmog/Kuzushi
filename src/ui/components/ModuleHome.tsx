@@ -83,7 +83,7 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
                   <Box paddingLeft={3} marginTop={SPACING.sm}>
                     <Text>
                       {tokens.muted(
-                        `+ ${hiddenCount} internal DAG node${hiddenCount === 1 ? "" : "s"} — run \`/tools --all\` to list`,
+                        `+ ${hiddenCount} advanced pipeline step${hiddenCount === 1 ? "" : "s"} — run \`/tools --all\` to list`,
                       )}
                     </Text>
                   </Box>

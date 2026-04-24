@@ -128,7 +128,7 @@ const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
 };
 
 /** Current canonical schema version. */
-const CURRENT_SCHEMA_VERSION = 103;
+const CURRENT_SCHEMA_VERSION = 104;
 
 /**
  * Lowest schema version that the migration runner can upgrade in-place.
@@ -398,6 +398,7 @@ function upsertFindingParams(
       display_severity: triage.displaySeverity ?? null,
       source: triage.source ?? null,
       sink: triage.sink ?? null,
+      sink_function: triage.sinkFunction ?? null,
       is_vulnerable: triage.isVulnerable ?? null,
       exploit_scenario: triage.exploitScenario ?? null,
       recommended_fix: triage.recommendedFix ?? null,
@@ -614,6 +615,7 @@ function parseTriageDetails(raw: string | null): Partial<TriageResult> {
   return {
     source,
     sink,
+    sinkFunction: asOptionalString(record["sink_function"]),
     isVulnerable:
       typeof record["is_vulnerable"] === "boolean" ? record["is_vulnerable"] : undefined,
     exploitScenario: asOptionalString(record["exploit_scenario"]),
@@ -1579,12 +1581,40 @@ export function updateRunMetrics(db: Database.Database, runId: string, metrics: 
   `).run(safeJsonStringify(metrics), runId);
 }
 
-/** Persist verification result fields for an existing finding row. */
-export function updateVerificationResult(
+type VerificationUpdatePatch =
+  | { result: VerificationResult; costOnly?: never }
+  | { result?: never; costOnly: number };
+
+type PocHarnessUpdatePatch =
+  | { result: PocHarnessResult; costOnly?: never }
+  | { result?: never; costOnly: number };
+
+function isPersistableCost(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+/** Persist verification result or verification cost fields for an existing finding row. */
+export function updateVerification(
   db: Database.Database,
   fingerprint: string,
-  result: VerificationResult,
+  patch: VerificationUpdatePatch,
 ): void {
+  if ("costOnly" in patch) {
+    if (!isPersistableCost(patch.costOnly)) {
+      return;
+    }
+
+    db.prepare(`
+      UPDATE findings
+      SET
+        verify_cost_usd = ?,
+        updated_at = datetime('now')
+      WHERE fingerprint = ?
+    `).run(patch.costOnly, fingerprint);
+    return;
+  }
+
+  const { result } = patch;
   db.prepare(`
     UPDATE findings
     SET
@@ -1615,6 +1645,15 @@ export function updateVerificationResult(
   // triage stage missed; previously those were discarded because verify only
   // wrote its scalar verify_* columns.
   mergeVerificationEvidenceIntoTriageDetails(db, fingerprint, result);
+}
+
+/** Persist verification result fields for an existing finding row. */
+export function updateVerificationResult(
+  db: Database.Database,
+  fingerprint: string,
+  result: VerificationResult,
+): void {
+  updateVerification(db, fingerprint, { result });
 }
 
 /**
@@ -1750,25 +1789,31 @@ export function updateVerificationCost(
   fingerprint: string,
   costUsd: number,
 ): void {
-  if (!Number.isFinite(costUsd) || costUsd < 0) {
+  updateVerification(db, fingerprint, { costOnly: costUsd });
+}
+
+/** Persist PoC harness result or generation cost fields for an existing finding row. */
+export function updatePocHarness(
+  db: Database.Database,
+  fingerprint: string,
+  patch: PocHarnessUpdatePatch,
+): void {
+  if ("costOnly" in patch) {
+    if (!isPersistableCost(patch.costOnly)) {
+      return;
+    }
+
+    db.prepare(`
+      UPDATE findings
+      SET
+        poc_harness_cost_usd = ?,
+        updated_at = datetime('now')
+      WHERE fingerprint = ?
+    `).run(patch.costOnly, fingerprint);
     return;
   }
 
-  db.prepare(`
-    UPDATE findings
-    SET
-      verify_cost_usd = ?,
-      updated_at = datetime('now')
-    WHERE fingerprint = ?
-  `).run(costUsd, fingerprint);
-}
-
-/** Persist PoC harness generation result fields for an existing finding row. */
-export function updatePocHarnessResult(
-  db: Database.Database,
-  fingerprint: string,
-  result: PocHarnessResult,
-): void {
+  const { result } = patch;
   db.prepare(`
     UPDATE findings
     SET
@@ -1803,23 +1848,22 @@ export function updatePocHarnessResult(
   );
 }
 
+/** Persist PoC harness generation result fields for an existing finding row. */
+export function updatePocHarnessResult(
+  db: Database.Database,
+  fingerprint: string,
+  result: PocHarnessResult,
+): void {
+  updatePocHarness(db, fingerprint, { result });
+}
+
 /** Persist PoC harness generation cost for a finding even when generation errors. */
 export function updatePocHarnessCost(
   db: Database.Database,
   fingerprint: string,
   costUsd: number,
 ): void {
-  if (!Number.isFinite(costUsd) || costUsd < 0) {
-    return;
-  }
-
-  db.prepare(`
-    UPDATE findings
-    SET
-      poc_harness_cost_usd = ?,
-      updated_at = datetime('now')
-    WHERE fingerprint = ?
-  `).run(costUsd, fingerprint);
+  updatePocHarness(db, fingerprint, { costOnly: costUsd });
 }
 
 /** Persist proof-state updates from verification or dynamic execution. */

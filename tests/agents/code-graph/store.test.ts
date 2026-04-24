@@ -204,19 +204,97 @@ describe("Code Graph Store", () => {
       expect(paths[0]!.hasSanitizer).toBe(true);
       expect(paths[0]!.sanitizerNodeIds).toEqual(["mid-1"]);
     });
+
+    it("derives cheap path fields from stored path arrays", () => {
+      upsertGraphNode(db, "test-repo", makeNode({ nodeId: "entry-derive" }));
+      upsertGraphNode(db, "test-repo", makeNode({ nodeId: "target-derive" }));
+
+      const path: CodeGraphPath = {
+        pathId: makePathId("entry-derive", "target-derive", [
+          "entry-derive",
+          "mid-derive",
+          "target-derive",
+        ]),
+        entryNodeId: "entry-derive",
+        targetNodeId: "target-derive",
+        hopCount: 99,
+        nodeIds: ["entry-derive", "mid-derive", "target-derive"],
+        edgeIds: ["edge-a", "edge-b"],
+        hasSanitizer: false,
+        sanitizerNodeIds: ["mid-derive"],
+        confidence: 0.8,
+      };
+      upsertGraphPath(db, "test-repo", path);
+
+      db.prepare(
+        "UPDATE code_graph_paths SET hop_count = 99, has_sanitizer = 0 WHERE path_id = ?",
+      ).run(path.pathId);
+
+      const raw = db
+        .prepare(
+          "SELECT hop_count as hopCount, has_sanitizer as hasSanitizer FROM code_graph_paths WHERE path_id = ?",
+        )
+        .get(path.pathId) as { hopCount: number; hasSanitizer: number };
+      expect(raw.hopCount).toBe(99);
+      expect(raw.hasSanitizer).toBe(0);
+
+      const paths = getPathsToNode(db, "test-repo", "target-derive");
+      expect(paths[0]!.hopCount).toBe(2);
+      expect(paths[0]!.hasSanitizer).toBe(true);
+    });
+
+    it("refreshes derived path fields on conflict", () => {
+      upsertGraphNode(db, "test-repo", makeNode({ nodeId: "entry-conflict" }));
+      upsertGraphNode(db, "test-repo", makeNode({ nodeId: "target-conflict" }));
+      const pathId = makePathId("entry-conflict", "target-conflict", [
+        "entry-conflict",
+        "target-conflict",
+      ]);
+
+      upsertGraphPath(db, "test-repo", {
+        pathId,
+        entryNodeId: "entry-conflict",
+        targetNodeId: "target-conflict",
+        hopCount: 1,
+        nodeIds: ["entry-conflict", "target-conflict"],
+        edgeIds: ["edge-a"],
+        hasSanitizer: false,
+        sanitizerNodeIds: [],
+        confidence: 0.5,
+      });
+      upsertGraphPath(db, "test-repo", {
+        pathId,
+        entryNodeId: "entry-conflict",
+        targetNodeId: "target-conflict",
+        hopCount: 99,
+        nodeIds: ["entry-conflict", "target-conflict"],
+        edgeIds: ["edge-a"],
+        hasSanitizer: false,
+        sanitizerNodeIds: ["target-conflict"],
+        confidence: 0.4,
+      });
+
+      const [path] = getPathsToNode(db, "test-repo", "target-conflict");
+      expect(path!.hopCount).toBe(1);
+      expect(path!.hasSanitizer).toBe(true);
+      expect(path!.sanitizerNodeIds).toEqual(["target-conflict"]);
+      expect(path!.confidence).toBe(0.5);
+    });
   });
 
   describe("invalidateStaleNodes", () => {
     it("removes nodes and related edges/paths for stale files", () => {
-      const n1 = makeNode({ nodeId: "n1", filePath: "src/old.ts" });
-      const n2 = makeNode({ nodeId: "n2", filePath: "src/fresh.ts" });
-      upsertGraphNode(db, "test-repo", n1);
-      upsertGraphNode(db, "test-repo", n2);
+      const staleNode = makeNode({ nodeId: "n1", filePath: "src/old.ts" });
+      const entryNode = makeNode({ nodeId: "entry-fresh", filePath: "src/entry.ts" });
+      const targetNode = makeNode({ nodeId: "target-fresh", filePath: "src/target.ts" });
+      upsertGraphNode(db, "test-repo", staleNode);
+      upsertGraphNode(db, "test-repo", entryNode);
+      upsertGraphNode(db, "test-repo", targetNode);
 
       const edge: CodeGraphEdge = {
         edgeId: "e1",
         fromNodeId: "n1",
-        toNodeId: "n2",
+        toNodeId: "target-fresh",
         edgeKind: "calls",
         dataLabel: null,
         ordinal: null,
@@ -225,11 +303,24 @@ describe("Code Graph Store", () => {
       };
       upsertGraphEdge(db, "test-repo", edge);
 
+      upsertGraphPath(db, "test-repo", {
+        pathId: makePathId("entry-fresh", "target-fresh", ["entry-fresh", "n1", "target-fresh"]),
+        entryNodeId: "entry-fresh",
+        targetNodeId: "target-fresh",
+        hopCount: 2,
+        nodeIds: ["entry-fresh", "n1", "target-fresh"],
+        edgeIds: ["entry-to-old", "old-to-target"],
+        hasSanitizer: false,
+        sanitizerNodeIds: [],
+        confidence: 1.0,
+      });
+
       const removed = invalidateStaleNodes(db, "test-repo", ["src/old.ts"]);
       expect(removed).toBe(1);
 
-      expect(getGraphNodesForRepo(db, "test-repo")).toHaveLength(1);
+      expect(getGraphNodesForRepo(db, "test-repo")).toHaveLength(2);
       expect(getEdgesFromNode(db, "n1")).toHaveLength(0);
+      expect(getPathsToNode(db, "test-repo", "target-fresh")).toHaveLength(0);
     });
 
     it("returns 0 for empty stale list", () => {

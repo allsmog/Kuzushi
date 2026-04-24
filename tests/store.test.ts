@@ -239,6 +239,7 @@ describe("upsertFinding", () => {
     triage.recommendedFix = "tighten source pattern";
     triage.ruleRefinementHint = "constrain source role";
     triage.triageSchemaVersion = "1.0.0";
+    triage.sinkFunction = "db.query";
 
     upsertFinding(db, makeFinding("fp-ext"), triage, "repo", "HEAD");
 
@@ -248,6 +249,7 @@ describe("upsertFinding", () => {
     expect(restored?.sink?.isFalsePositive).toBe(false);
     expect(restored?.isVulnerable).toBe(false);
     expect(restored?.ruleRefinementHint).toBe("constrain source role");
+    expect(restored?.sinkFunction).toBe("db.query");
 
     db.close();
   });

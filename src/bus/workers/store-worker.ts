@@ -1,18 +1,16 @@
 import type Database from "better-sqlite3";
 import { extractRuleFamily, updateCalibrationWeights } from "../../confidence-calibration.js";
+import { isOneOf, PIPELINE_RUN_STATUSES } from "../../contracts.js";
 import {
   FindingUpsertQueue,
-  type PipelineRunStatus,
   saveAssertionResults,
-  updatePocHarnessCost,
-  updatePocHarnessResult,
+  updatePocHarness,
   updateRunContext,
   updateRunCost,
   updateRunFindings,
   updateRunMetrics,
   updateRunStatus,
-  updateVerificationCost,
-  updateVerificationResult,
+  updateVerification,
   upsertFinding,
 } from "../../store.js";
 import { updateTrajectoryCorrectness } from "../../trajectory-memory.js";
@@ -90,7 +88,7 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
 
     // Ensure the triage row is flushed before the UPDATE.
     upsertQueue.flush();
-    updateVerificationResult(deps.db, finding.fingerprint, result);
+    updateVerification(deps.db, finding.fingerprint, { result });
 
     // Update trajectory correctness for trajectory memory
     if (deps.config?.trajectoryMemory) {
@@ -132,7 +130,7 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
     upsertQueue.flush();
     // Ensure the row exists even if persistence ordering is delayed.
     upsertFinding(deps.db, finding, triageResult, context.repoName, deps.ref ?? "HEAD");
-    updateVerificationCost(deps.db, finding.fingerprint, costUsd);
+    updateVerification(deps.db, finding.fingerprint, { costOnly: costUsd });
   });
 
   bus.subscribe<PocHarnessResultEvent>("poc-harness:result", async (event) => {
@@ -143,7 +141,7 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
 
     // Ensure the triage row is flushed before the UPDATE.
     upsertQueue.flush();
-    updatePocHarnessResult(deps.db, finding.fingerprint, result);
+    updatePocHarness(deps.db, finding.fingerprint, { result });
 
     await bus.publish(
       createEvent("store:upserted", event.meta.runId, {
@@ -164,19 +162,17 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
     upsertQueue.flush();
     // Ensure the row exists even if persistence ordering is delayed.
     upsertFinding(deps.db, finding, triageResult, context.repoName, deps.ref ?? "HEAD");
-    updatePocHarnessCost(deps.db, finding.fingerprint, costUsd);
+    updatePocHarness(deps.db, finding.fingerprint, { costOnly: costUsd });
   });
 
   // ── Run lifecycle persistence (best-effort — DB failures must not kill the pipeline) ──
 
   bus.subscribe<RunStatusEvent>("run:status", (event) => {
+    if (!isOneOf(PIPELINE_RUN_STATUSES, event.payload.status)) {
+      throw new Error(`Invalid run status: ${String(event.payload.status)}`);
+    }
     try {
-      updateRunStatus(
-        deps.db,
-        event.meta.runId,
-        event.payload.status as PipelineRunStatus,
-        event.payload.extra,
-      );
+      updateRunStatus(deps.db, event.meta.runId, event.payload.status, event.payload.extra);
     } catch {
       /* best-effort */
     }

@@ -7,7 +7,7 @@
  * `InvalidApiKeyMessage`, etc.). We roll that into a single dispatcher
  * that pattern-matches the error text and renders the right body. Keeps
  * the surface area small while matching cc-repo's UX — operators see
- * "Context limit reached · /compact or /clear to continue" instead of a
+ * "Context limit reached · /clear to continue" instead of a
  * raw "Error: context window exceeded" string.
  */
 
@@ -15,13 +15,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import { tokens } from "../tokens.js";
 
-export type ErrorKind =
-  | "rate-limit"
-  | "auth"
-  | "timeout"
-  | "context-limit"
-  | "aborted"
-  | "generic";
+export type ErrorKind = "rate-limit" | "auth" | "timeout" | "context-limit" | "aborted" | "generic";
 
 /** Heuristic classification — pattern-match against the error text. */
 export function classifyError(text: string): ErrorKind {
@@ -49,7 +43,10 @@ export function classifyError(text: string): ErrorKind {
   }
   if (
     lower.includes("context") &&
-    (lower.includes("limit") || lower.includes("exceeded") || lower.includes("too long") || lower.includes("window"))
+    (lower.includes("limit") ||
+      lower.includes("exceeded") ||
+      lower.includes("too long") ||
+      lower.includes("window"))
   ) {
     return "context-limit";
   }
@@ -95,7 +92,7 @@ export function ErrorMessage({ text, kind }: ErrorMessageProps): React.ReactElem
           <Text>{tokens.danger(`Auth failure · ${text}`)}</Text>
           <Text>
             {tokens.muted(
-              "API key is missing, expired, or rejected. Run /auth to paste a fresh Anthropic key.",
+              "API key is missing, expired, or rejected. Run /auth to paste a fresh provider key.",
             )}
           </Text>
         </Box>
@@ -117,7 +114,7 @@ export function ErrorMessage({ text, kind }: ErrorMessageProps): React.ReactElem
           <Text>{tokens.danger(`Context limit reached · ${text}`)}</Text>
           <Text>
             {tokens.muted(
-              "Conversation exceeded the model's window. Run /compact or /clear to continue.",
+              "Conversation exceeded the model's window. Run /clear to continue with a fresh shell context.",
             )}
           </Text>
         </Box>

@@ -15,6 +15,7 @@ import { migration100 } from "../../src/migrations/100_schema_reset.js";
 import { migration101 } from "../../src/migrations/101_workspace_entities.js";
 import { migration102 } from "../../src/migrations/102_session_aliases.js";
 import { migration103 } from "../../src/migrations/103_schedules.js";
+import { migration104 } from "../../src/migrations/104_workspace_integrity_guards.js";
 import { parseIntervalMs, Scheduler } from "../../src/scheduler/core.js";
 import { SqliteScheduleStore } from "../../src/scheduler/store.js";
 
@@ -116,6 +117,7 @@ describe("Scheduler", () => {
     migration101.up(db);
     migration102.up(db);
     migration103.up(db);
+    migration104.up(db);
     const store = new SqliteScheduleStore(db);
 
     const jobs = new JobManager();
@@ -133,5 +135,39 @@ describe("Scheduler", () => {
 
     expect(store.remove("persisted")).toBe(true);
     expect(store.list()).toHaveLength(0);
+  });
+
+  it("rejects invalid persisted schedules below Scheduler.add", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "kz-sched-"));
+    tempDirs.push(dir);
+    const db = new Database(path.join(dir, "x.sqlite3"));
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    migration100.up(db);
+    migration101.up(db);
+    migration102.up(db);
+    migration103.up(db);
+    migration104.up(db);
+    const store = new SqliteScheduleStore(db);
+
+    expect(() =>
+      store.upsert({
+        label: "bad",
+        interval: "0m",
+        command: "help",
+        lastFiredAt: null,
+        nextFireAt: Date.now(),
+      }),
+    ).toThrow(/invalid persisted schedule/);
+
+    expect(() =>
+      store.upsert({
+        label: "bad-time",
+        interval: "5m",
+        command: "help",
+        lastFiredAt: null,
+        nextFireAt: -1,
+      }),
+    ).toThrow(/invalid persisted schedule/);
   });
 });

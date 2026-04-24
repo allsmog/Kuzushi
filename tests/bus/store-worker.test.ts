@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
-import type { StoreUpsertedEvent } from "../../src/bus/events.js";
+import type { BusHandlerErrorEvent, StoreUpsertedEvent } from "../../src/bus/events.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
 import type { Finding } from "../../src/scanners/types.js";
@@ -229,6 +229,38 @@ describe("store-worker", () => {
     expect(row.pocHarnessPath).toContain(".kuzushi/poc");
     expect(row.pocHarnessParsed).toBe(1);
     expect(row.pocHarnessCostUsd).toBeCloseTo(0.02, 8);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("rejects invalid run status values before persistence", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    registerStoreWorker(bus, { db });
+
+    const runId = generateRunId();
+    const handlerError = bus.waitFor<BusHandlerErrorEvent>(
+      "bus:handler-error",
+      (event) => event.meta.runId === runId,
+      1_000,
+    );
+
+    await bus.publish(
+      createEvent("run:status", runId, {
+        context: {
+          runId,
+          repoRoot: "/tmp/repo",
+          repoName: "repo",
+          dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+        },
+        status: "not-a-status",
+      } as never),
+    );
+
+    const event = await handlerError;
+    expect(event.payload.error).toContain("Invalid run status");
 
     await bus.close();
     db.close();

@@ -47,6 +47,7 @@ import type {
   UIState,
   UIStore,
 } from "./state.js";
+import { formatStoryEventPlain } from "./task-story.js";
 
 export interface PlainRendererOptions {
   /**
@@ -496,6 +497,23 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
     case "context-build":
       printContextBuildView(emit, shell);
       return;
+    case "task-story":
+      printTaskStoryView(emit, shell);
+      return;
+  }
+}
+
+function printTaskStoryView(emit: Emit, shell: ShellState): void {
+  const story = shell.taskStory;
+  emit(chalk.dim(`  [shell] task story · ${story?.events.length ?? 0} events`));
+  emit("# TASK STORY");
+  if (!story || story.events.length === 0) {
+    emit("  (no task story yet)");
+    return;
+  }
+  for (const event of story.events) {
+    if (event.importance === "debug") continue;
+    emit(`  ${formatStoryEventPlain(event)}`);
   }
 }
 
