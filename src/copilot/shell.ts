@@ -1,12 +1,9 @@
 /**
  * Interactive copilot shell — the default `kuzushi` experience.
  *
- * The LLM is the router. User input goes to an AgentSession, which
- * decides what tools to call. The Ink UI streams the conversation.
- *
- * This is the Claude Code model: you type naturally, the agent
- * handles dispatch, tool progress renders inline, results appear
- * as the conversation flows.
+ * The shell is module-forward: operators choose a module, set options,
+ * and run tools through the dispatcher. Agent chat is explicit via /ask
+ * so command execution stays predictable.
  */
 
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -3477,6 +3474,48 @@ function routeInput(
     return { exit: true };
   }
 
+  if (lower === "help") {
+    return { output: formatHelp(core, opts) };
+  }
+  if (lower === "modules" || lower === "m") {
+    return { output: formatModuleList(core, shellState.moduleCatalog) };
+  }
+  if (lower === "tools") {
+    return { output: formatTools(core, ctx.focusedModule) };
+  }
+  if (lower.startsWith("use ")) {
+    return handleUseCommand(trimmed.split(/\s+/).slice(1), core, opts, ctx);
+  }
+  if (lower === "back" || lower === "b") {
+    return handleBackCommand(opts, ctx, shellState);
+  }
+  if (lower === "findings" || lower === "f") {
+    return {
+      shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
+      output: "Showing current findings.",
+    };
+  }
+  if (lower === "tune" || lower === "t") {
+    if (!ctx.focusedModule) return { output: "Use a module first: use <module>" };
+    return {
+      shellStateUpdater: (shell) => ({ ...shell, shellView: "tune" }),
+      output: `Tuning ${ctx.focusedModule}. Use prompt edit <verb> for prompt overrides.`,
+    };
+  }
+  if (lower.startsWith("open ")) {
+    return handleOpenCommand(trimmed.split(/\s+/).slice(1));
+  }
+  if (lower === "scan" || lower.startsWith("scan ")) {
+    return resolveToolExecution(
+      "sast:scan",
+      trimmed.split(/\s+/).slice(1),
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+  }
+
   const toolResult = resolveDirectToolDispatch(trimmed, core, opts, ctx, shellState);
   if (toolResult !== undefined) {
     return toolResult;
@@ -3519,6 +3558,9 @@ function handleSlashCommand(
         output: formatTools(core, ctx.focusedModule, { includeHidden: args.includes("--all") }),
       };
 
+    case "scan":
+      return resolveToolExecution("sast:scan", args, core, opts, ctx, shellState);
+
     case "use":
       return handleUseCommand(args, core, opts, ctx);
 
@@ -3530,9 +3572,7 @@ function handleSlashCommand(
     case "f":
       return {
         shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
-        output: ctx.focusedModule
-          ? `Showing findings for ${ctx.focusedModule}.`
-          : "Showing all findings across modules.",
+        output: "Showing current findings.",
       };
 
     case "tune":
@@ -3542,7 +3582,7 @@ function handleSlashCommand(
       }
       return {
         shellStateUpdater: (shell) => ({ ...shell, shellView: "tune" }),
-        output: `Tuning ${ctx.focusedModule}. Press p for expert prompt editor.`,
+        output: `Tuning ${ctx.focusedModule}. Use prompt edit <verb> for prompt overrides.`,
       };
 
     case "open":
@@ -3964,6 +4004,16 @@ function handleSinceCommand(
   if (!ref) {
     return { output: "Usage: /since <git-ref>  e.g.  /since main" };
   }
+  if (ref.toLowerCase() === "reset") {
+    return {
+      output: "Diff scope cleared.",
+      shellStateUpdater: (shell) => ({
+        ...shell,
+        diffSince: undefined,
+        shellView: "findings",
+      }),
+    };
+  }
   if (!opts.target) {
     return { output: "No target set. Use /target <path> first." };
   }
@@ -4000,7 +4050,7 @@ function handleThreatsCommand(
   opts: ShellOptions,
   ctx: ShellContext,
 ): LocalCommandResult {
-  const sub = args[0]?.toLowerCase();
+  const sub = args[0]?.toLowerCase() ?? "summary";
 
   // /threats dfd|stride|stories|scope|summary (and 1..5) — Phase C views.
   // Each routes to a shellView; the component reads shell.threatModel which
@@ -4059,24 +4109,8 @@ function handleThreatsCommand(
     };
   }
 
-  // /threats — show summary
-  if (!opts.target) return { output: "No target set. Use /target <path> first." };
   return {
-    output: "Loading threat model...",
-    asyncExecute: async () => {
-      try {
-        const { loadPersistentThreatModel } = await import("../threat-model-renderer.js");
-        const repoRoot = path.resolve(opts.target!);
-        const tm = loadPersistentThreatModel(repoRoot);
-        if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
-        const dismissed = tm.dismissedThreats?.length ?? 0;
-        const total = tm.threats.length;
-        const mitigations = tm.confirmedMitigations?.length ?? 0;
-        return `Threat model: ${total} threats (${dismissed} dismissed, ${mitigations} confirmed mitigations)\nUse /threats edit to review and edit.`;
-      } catch {
-        return "Failed to load threat model.";
-      }
-    },
+    output: "Usage: /threats [dfd|stride|stories|scope|summary|edit]  (1..5 also switches views)",
   };
 }
 
@@ -5379,17 +5413,17 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
     [
       "  Tool Shortcuts",
       ...formatCommandRows([
-        ["sast:scan .", "Direct tool invocation"],
-        ["semgrep .", "Global shorthand when unambiguous"],
-        ["scan .", "Focused module shorthand"],
-        ["run sast:scan .", "Explicit run prefix"],
+        ["use sast", "Enter a module workflow"],
+        ["set target .", "Set a module option"],
+        ["run", "Run the focused module's primary tool"],
+        ["scan .", "Top-level shortcut for sast:scan"],
       ]),
     ],
     [
-      "  Natural Language",
+      "  Ask The Agent",
       ...formatCommandRows([
-        ["What vulns are in this repo?", "Ask the copilot anything"],
-        ["Hunt for SSRF chains", "Targeted code investigation"],
+        ["/ask What vulns are in this repo?", "Ask with current shell context"],
+        ["?Hunt for SSRF chains", "Short form for /ask"],
         ["exit | quit | q", "Bare aliases that always exit"],
         ["/help <verb>", "Expand one command — e.g. /help open"],
       ]),
@@ -5527,7 +5561,7 @@ export function formatWelcome(core: CopilotCore, opts: ShellOptions): string {
         ["Target:", opts.target ?? null],
         ["Workspace:", opts.workspace ?? null],
       ]),
-      '  Type "/help" for commands, or just describe what you need.',
+      '  Type "modules" to choose a workflow, or "/ask <question>" for agent chat.',
     ],
   ]);
 }

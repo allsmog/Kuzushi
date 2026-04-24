@@ -6,9 +6,9 @@
  * options (the active one bolded). The mapped config key is shown faintly
  * after the label, and the matching CLI flag on the right.
  *
- * Editing still flows through the full `ConfigEditor` — press `p` or type
- * `/config` to open it. This is the same escape hatch the v2 design calls
- * out as `prompt edit --expert`.
+ * Editing still flows through module commands: use `set <key> <value>` for
+ * tool options, `prompt edit <verb>` for prompt overrides, or `/config` for
+ * global settings.
  */
 
 import { Box, Text } from "ink";
@@ -29,10 +29,9 @@ interface TuneViewProps {
 
 export function TuneView({ shell }: TuneViewProps): React.ReactElement {
   useRegisterKeybindings([
-    { keys: "x", label: "run with these settings" },
-    { keys: "s", label: "save", secondary: true },
-    { keys: "r", label: "reset", secondary: true },
-    { keys: "p", label: "prompt editor", secondary: true },
+    { keys: "run", label: "run focused tool" },
+    { keys: "set", label: "set option", secondary: true },
+    { keys: "prompt edit", label: "prompt editor", secondary: true },
     { keys: "/config", label: "full editor", secondary: true },
     { keys: "b", label: "back", secondary: true },
   ]);
@@ -106,7 +105,7 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
         <Text>{tokens.muted("\u2500".repeat(78))}</Text>
       </Box>
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.strong("Primary action: x run with these settings.")}</Text>
+        <Text>{tokens.strong("Primary action: run with the focused module settings.")}</Text>
       </Box>
 
       <Box marginTop={SPACING.sm}>

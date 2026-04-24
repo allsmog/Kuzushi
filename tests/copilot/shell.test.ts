@@ -179,7 +179,7 @@ describe("artifact visibility", () => {
 });
 
 describe("local shell commands", () => {
-  it("uses slash-prefixed commands for workspace, focus, and help", async () => {
+  it("supports module-forward commands and slash aliases", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const shellState = createShellState(module.tools.map((tool) => tool.name));
@@ -195,29 +195,40 @@ describe("local shell commands", () => {
     expect(workspaceResult).toEqual({ output: "Workspace set to: acme-pentest" });
     expect(opts.workspace).toBe("acme-pentest");
 
-    const useResult = __shellInternals.handleLocalCommand("/use sast", core, opts, ctx, shellState);
+    const useResult = __shellInternals.handleLocalCommand("use sast", core, opts, ctx, shellState);
     expect(useResult?.setFocus).toBe("sast");
 
     ctx.focusedModule = "sast";
-    const toolsResult = __shellInternals.handleLocalCommand("/tools", core, opts, ctx, shellState);
+    const toolsResult = __shellInternals.handleLocalCommand("tools", core, opts, ctx, shellState);
     // Post-split the sast umbrella only lists its own `scan` tool; threat-hunt
     // lives in its own module now. Exercising that here would require focusing
     // on `threat-hunt`, which is covered by the dispatcher tests.
     expect(toolsResult?.output).toContain("scan");
 
-    const backResult = __shellInternals.handleLocalCommand("/back", core, opts, ctx, shellState);
+    const findingsResult = __shellInternals.handleLocalCommand(
+      "findings",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(findingsResult?.output).toBe("Showing current findings.");
+    expect(findingsResult?.shellStateUpdater?.(shellState).shellView).toBe("findings");
+
+    const tuneResult = __shellInternals.handleLocalCommand("tune", core, opts, ctx, shellState);
+    expect(tuneResult?.output).toContain("Tuning sast");
+    expect(tuneResult?.shellStateUpdater?.(shellState).shellView).toBe("tune");
+
+    const backResult = __shellInternals.handleLocalCommand("back", core, opts, ctx, shellState);
     expect(backResult?.setFocus).toBeNull();
     expect(backResult?.output).toBe("Returned to top level.");
     // The v2 "modules calmed" redesign adds a shellStateUpdater on /back so
     // the shell-view + openFindingId fields reset alongside focus.
     expect(typeof backResult?.shellStateUpdater).toBe("function");
 
-    // After the NL-fallback removal, bare `help` (no slash) no longer falls
-    // through to the agent — it surfaces an "Unknown command" pointer to the
-    // new `/help` / `/ask` paths instead.
     const bareHelp = __shellInternals.handleLocalCommand("help", core, opts, ctx, shellState);
-    expect(bareHelp?.output).toContain("Unknown command");
-    expect(bareHelp?.output).toContain("/ask");
+    expect(bareHelp?.output).toContain("Kuzushi");
+    expect(bareHelp?.output).toContain("use sast");
   });
 
   it("routes /ask through askQuestion with current screen context", async () => {
@@ -609,6 +620,15 @@ describe("local shell commands", () => {
     const focused = __shellInternals.handleLocalCommand("scan .", core, opts, ctx, shellState);
     expect(focused?.executedToolName).toBe("sast:scan");
 
+    const slashScan = __shellInternals.handleLocalCommand(
+      "/scan .",
+      core,
+      opts,
+      { focusedModule: null },
+      shellState,
+    );
+    expect(slashScan?.executedToolName).toBe("sast:scan");
+
     const threatHunt = __shellInternals.handleLocalCommand(
       "threat-hunt /repo maxActors=7",
       core,
@@ -727,6 +747,40 @@ describe("context system", () => {
       shellState,
     );
     expect(result?.executedToolName).toBe("context:build");
+    expect(result?.asyncExecute).toBeTypeOf("function");
+  });
+
+  it("/since reset clears diff scope without requiring a target", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      shellView: "diff-since" as const,
+      diffSince: {
+        ref: "main",
+        repoRoot: "/repo",
+        changedFiles: ["src/app.ts"],
+      },
+    };
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand("/since reset", core, opts, ctx, shellState);
+    expect(result?.output).toBe("Diff scope cleared.");
+    const next = result!.shellStateUpdater!(shellState);
+    expect(next.diffSince).toBeUndefined();
+    expect(next.shellView).toBe("findings");
+  });
+
+  it("routes bare /threats to the threat summary view", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = "/resolved/repo";
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand("/threats", core, opts, ctx, shellState);
+    expect(result?.output).toContain("threat summary");
+    expect(result?.shellStateUpdater?.(shellState).shellView).toBe("threat-summary");
     expect(result?.asyncExecute).toBeTypeOf("function");
   });
 
@@ -1122,6 +1176,7 @@ describe("slash suggestions", () => {
       "/modules",
       "/tools",
       "/use <module>",
+      "/scan [target]",
       "/findings",
       "/open <F-NNNN>",
       "/tune",

@@ -37,13 +37,18 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   { syntax: "/tools", description: "List available tools", group: "nav" },
   { syntax: "/use <module>", description: "Focus on a module", group: "nav" },
   {
+    syntax: "/scan [target]",
+    description: "Run the default SAST scan shortcut",
+    group: "nav",
+  },
+  {
     syntax: "/back",
     description: "Step back one level (alias: /b) — finding → findings → module → catalog",
     group: "nav",
   },
   {
     syntax: "/findings",
-    description: "Show the findings list for the current module (alias: /f)",
+    description: "Show the current findings list (alias: /f)",
     group: "nav",
   },
   { syntax: "/open <F-NNNN>", description: "Open a finding in the linear deep page", group: "nav" },
@@ -131,7 +136,7 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   },
   {
     syntax: "/ask <question>",
-    description: "Ask the agent with current shell context (? prefix also works)",
+    description: "Ask the agent with current shell context",
     group: "config",
   },
   { syntax: "/target <path>", description: "Set or show the active target", group: "scope" },

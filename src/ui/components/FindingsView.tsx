@@ -187,10 +187,7 @@ function UnifiedFindings({
   useRenderCounter("UnifiedFindings");
   useRegisterKeybindings([
     { keys: "/open <F-NNNN>", label: "open finding" },
-    { keys: "/filter", label: "filter", secondary: true },
-    { keys: "e", label: "export", secondary: true },
-    { keys: "a", label: "assign", secondary: true },
-    { keys: "s", label: "suppress", secondary: true },
+    { keys: "j/k", label: "move cursor", secondary: true },
     { keys: "b", label: "back", secondary: true },
   ]);
 
@@ -311,9 +308,7 @@ function UnifiedFindings({
       {findings.length === 0 && (
         <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
           <Text>{tokens.muted("No actionable findings yet.")}</Text>
-          <Text>
-            {tokens.hint("Try /use <module>, run a scan tool, then return with /findings.")}
-          </Text>
+          <Text>{tokens.hint("Try use sast, run scan, then return with findings.")}</Text>
         </Box>
       )}
 
@@ -321,11 +316,7 @@ function UnifiedFindings({
         <Text>{tokens.muted("─".repeat(78))}</Text>
       </Box>
       <Box>
-        <Text>
-          {tokens.hint(
-            "enter open   / filter   e export (sarif|json|csv|junit)   a assign   s suppress",
-          )}
-        </Text>
+        <Text>{tokens.hint("j/k move   /open F-NNNN inspect   b back")}</Text>
       </Box>
     </ScreenContent>
   );
