@@ -474,7 +474,44 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
     case "diff-since":
       printDiffSinceView(emit, shell);
       return;
+    case "context-build":
+      printContextBuildView(emit, shell);
+      return;
   }
+}
+
+function printContextBuildView(emit: Emit, shell: ShellState): void {
+  const cb = shell.contextBuild;
+  if (!cb) {
+    emit("# CONTEXT BUILD");
+    emit("  (no build in progress — run /context build)");
+    return;
+  }
+  const phaseOrder: ReadonlyArray<"manifests" | "walk" | "path-signals" | "grep" | "assemble"> = [
+    "manifests",
+    "walk",
+    "path-signals",
+    "grep",
+    "assemble",
+  ];
+  const runningIdx = phaseOrder.findIndex((p) => cb.phases[p].status === "running");
+  const activePhase =
+    runningIdx >= 0
+      ? phaseOrder[runningIdx]
+      : phaseOrder.find((p) => cb.phases[p].status === "pending");
+  const progressIdx = runningIdx >= 0 ? runningIdx + 1 : phaseOrder.length;
+  emit(chalk.dim(`  [shell] context:build · ${cb.status}`));
+  emit(`# CONTEXT BUILD · run ${cb.runId}`);
+  emit(`  status: ${cb.status} (phase ${progressIdx}/${phaseOrder.length})`);
+  if (activePhase) emit(`  active: ${activePhase}`);
+  if (cb.walk) {
+    emit(`  walk: ${cb.walk.entries} entries · ${cb.walk.sourceFiles} source files`);
+  }
+  if (cb.grep) {
+    emit(`  grep: ${cb.grep.filesDone}/${cb.grep.filesTotal} files · ${cb.grep.workers} workers`);
+  }
+  if (cb.scanContextPath) emit(`  wrote: ${cb.scanContextPath}`);
+  if (cb.errorMessage) emit(`  error: ${cb.errorMessage}`);
 }
 
 function printCatalogView(emit: Emit, shell: ShellState): void {

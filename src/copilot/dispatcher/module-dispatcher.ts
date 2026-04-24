@@ -66,7 +66,7 @@ export class ModuleDispatcher implements CommandDispatcher {
         // Falls through to the core dispatcher's `show options` via re-issuing.
         return ctx.driver.handle("show options", ctx.signal);
       case "tools":
-        return this.cmd_tools();
+        return this.cmd_tools(args);
       default:
         return undefined;
     }
@@ -83,9 +83,24 @@ export class ModuleDispatcher implements CommandDispatcher {
   // Handlers
   // -------------------------------------------------------------------------
 
-  private cmd_tools(): CommandResult {
-    const lines = this.module.tools.map((t) => `  ${t.name.padEnd(28)}  ${t.description}`);
-    return { output: lines.length === 0 ? "  (no tools)" : lines.join("\n") };
+  private cmd_tools(args: string[]): CommandResult {
+    const includeHidden = args.includes("--all");
+    const tools = this.module.tools;
+    if (tools.length === 0) return { output: "  (no tools)" };
+    const visible = includeHidden ? tools : tools.filter((t) => t.hidden !== true);
+    const hiddenCount = tools.length - visible.length;
+    if (visible.length === 0 && hiddenCount > 0) {
+      return {
+        output: `  All ${hiddenCount} tools on this module are DAG-internal. Run \`tools --all\` to list them.`,
+      };
+    }
+    const lines = visible.map((t) => `  ${t.name.padEnd(28)}  ${t.description}`);
+    if (hiddenCount > 0) {
+      lines.push(
+        `  + ${hiddenCount} internal DAG node${hiddenCount === 1 ? "" : "s"} hidden (run \`tools --all\` to list)`,
+      );
+    }
+    return { output: lines.join("\n") };
   }
 
   private async cmd_check(ctx: CommandContext): Promise<CommandResult> {

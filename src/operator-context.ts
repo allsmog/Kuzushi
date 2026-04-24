@@ -18,7 +18,7 @@ import type {
   Verdict,
 } from "./types.js";
 
-const PERSISTENT_CONTEXT_PATH = ".kuzushi/scan-context.json";
+export const PERSISTENT_CONTEXT_PATH = ".kuzushi/scan-context.json";
 const CONTEXT_VERSION = "1";
 
 // ── Persistence ──

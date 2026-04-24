@@ -167,6 +167,46 @@ export interface ContextGathererOutput {
   fileIndex: FileIndex;
 }
 
+// ── Live-build phase observer ─────────────────────────────────────────────
+//
+// Optional observer hook that `gatherContextForRoot` can drive to stream
+// per-phase progress into an Ink view (see `ContextBuildView`). All callers
+// remain source-compatible — omitting the observer reproduces the prior
+// behaviour exactly.
+export type BuildPhaseId = "manifests" | "walk" | "path-signals" | "grep" | "assemble";
+
+export type ManifestProbe = "package.json" | "go.mod" | "pyproject" | "Cargo.toml" | "native-build";
+
+export type ContextBuildEvent =
+  | { type: "phase-start"; phase: BuildPhaseId; atMs: number }
+  | { type: "phase-done"; phase: BuildPhaseId; atMs: number; durationMs: number }
+  | { type: "manifest-result"; which: ManifestProbe; found: boolean }
+  | { type: "walk-result"; entries: number; dirs: number; sourceFiles: number; cap: number }
+  | { type: "path-signals-result"; signals: string[] }
+  | {
+      type: "grep-start";
+      filesTotal: number;
+      workers: number;
+      domainCap: number;
+      domains: string[];
+    }
+  | { type: "grep-file-progress"; filesDone: number; filesTotal: number }
+  | {
+      type: "grep-domain-state";
+      domain: string;
+      matches: number;
+      status: "active" | "capped" | "skipped-no-ext";
+    }
+  | {
+      type: "assemble-result";
+      repoContext: RepoContext;
+      sourceFileCount: number;
+      patternMatchCount: number;
+    }
+  | { type: "tail"; tsMs: number; message: string; kind?: "info" | "warn" };
+
+export type ContextBuildObserver = (event: ContextBuildEvent) => void;
+
 interface MutableRepoContext {
   languages: Set<string>;
   frameworks: Set<string>;
@@ -203,30 +243,83 @@ export const contextGathererTask: AgentTask<ScanOpts, ContextGathererOutput> = {
 export async function gatherContextForRoot(
   workRoot: string,
   signal?: AbortSignal,
+  observer?: ContextBuildObserver,
 ): Promise<ContextGathererOutput> {
   const aggregate = createMutableRepoContext();
+  const emit = observer ?? (() => undefined);
+  const phaseTimer = makePhaseTimer(emit);
 
-  await Promise.all([
-    gatherFromPackageJson(workRoot, aggregate),
-    gatherFromGoMod(workRoot, aggregate),
-    gatherFromPython(workRoot, aggregate),
-    gatherFromCargoToml(workRoot, aggregate),
-    gatherFromNativeBuildSystem(workRoot, aggregate),
-  ]);
+  // ── Phase 1: manifest probes ─────────────────────────────────────────
+  phaseTimer.start("manifests");
+  const manifestProbes: ReadonlyArray<{
+    which: ManifestProbe;
+    files: string[];
+    run: () => Promise<void>;
+  }> = [
+    {
+      which: "package.json",
+      files: ["package.json"],
+      run: () => gatherFromPackageJson(workRoot, aggregate),
+    },
+    { which: "go.mod", files: ["go.mod"], run: () => gatherFromGoMod(workRoot, aggregate) },
+    {
+      which: "pyproject",
+      files: ["pyproject.toml", "requirements.txt"],
+      run: () => gatherFromPython(workRoot, aggregate),
+    },
+    {
+      which: "Cargo.toml",
+      files: ["Cargo.toml"],
+      run: () => gatherFromCargoToml(workRoot, aggregate),
+    },
+    {
+      which: "native-build",
+      files: ["CMakeLists.txt", "Makefile", "configure.ac", "meson.build"],
+      run: () => gatherFromNativeBuildSystem(workRoot, aggregate),
+    },
+  ];
+  await Promise.all(
+    manifestProbes.map(async (probe) => {
+      const found = (
+        await Promise.all(probe.files.map((f) => pathExists(path.join(workRoot, f))))
+      ).some(Boolean);
+      await probe.run();
+      emit({ type: "manifest-result", which: probe.which, found });
+    }),
+  );
+  phaseTimer.done("manifests");
   signal?.throwIfAborted();
 
+  // ── Phase 2: walk repo ───────────────────────────────────────────────
+  phaseTimer.start("walk");
   const pathSignals = await walkRepo(workRoot);
-  signal?.throwIfAborted();
-  gatherFromPathSignals(pathSignals, aggregate);
-
   const sourceFiles = pathSignals.files.filter((file) =>
     SOURCE_EXTENSIONS.has(path.extname(file.relPath).toLowerCase()),
   );
+  emit({
+    type: "walk-result",
+    entries: pathSignals.files.length + pathSignals.dirs.size,
+    dirs: pathSignals.dirs.size,
+    sourceFiles: sourceFiles.length,
+    cap: MAX_WALK_ENTRIES,
+  });
+  phaseTimer.done("walk");
+  signal?.throwIfAborted();
 
+  // ── Phase 3: path signals ────────────────────────────────────────────
+  phaseTimer.start("path-signals");
+  gatherFromPathSignals(pathSignals, aggregate);
+  emit({ type: "path-signals-result", signals: describePathSignals(pathSignals) });
+  phaseTimer.done("path-signals");
+
+  // ── Phase 4: grep sweep ──────────────────────────────────────────────
+  phaseTimer.start("grep");
   const tree = sourceFiles.slice(0, MAX_FILE_INDEX_ENTRIES).map((file) => ({ path: file.relPath }));
+  const patternMatches = await grepSecurityPatterns(workRoot, sourceFiles, signal, emit);
+  phaseTimer.done("grep");
 
-  const patternMatches = await grepSecurityPatterns(workRoot, sourceFiles, signal);
-
+  // ── Phase 5: assemble ────────────────────────────────────────────────
+  phaseTimer.start("assemble");
   const repoContext: RepoContext = {
     languages: sortValues(aggregate.languages),
     frameworks: sortValues(aggregate.frameworks),
@@ -235,6 +328,14 @@ export async function gatherContextForRoot(
     ormOrDb: sortValues(aggregate.ormOrDb),
     entryPoints: sortValues(aggregate.entryPoints),
   };
+  const patternMatchCount = Object.values(patternMatches).reduce((sum, arr) => sum + arr.length, 0);
+  emit({
+    type: "assemble-result",
+    repoContext,
+    sourceFileCount: sourceFiles.length,
+    patternMatchCount,
+  });
+  phaseTimer.done("assemble");
 
   return {
     repoContext,
@@ -247,18 +348,80 @@ export async function gatherContextForRoot(
   };
 }
 
+function makePhaseTimer(emit: ContextBuildObserver): {
+  start: (phase: BuildPhaseId) => void;
+  done: (phase: BuildPhaseId) => void;
+} {
+  const startedAt = new Map<BuildPhaseId, number>();
+  return {
+    start(phase) {
+      const atMs = Date.now();
+      startedAt.set(phase, atMs);
+      emit({ type: "phase-start", phase, atMs });
+    },
+    done(phase) {
+      const atMs = Date.now();
+      const started = startedAt.get(phase) ?? atMs;
+      emit({ type: "phase-done", phase, atMs, durationMs: atMs - started });
+    },
+  };
+}
+
+function describePathSignals(signals: PathSignals): string[] {
+  const hits: string[] = [];
+  if ([...signals.dirs].some((d) => d.includes("/auth") || d.startsWith("auth")))
+    hits.push("auth/");
+  if ([...signals.dirs].some((d) => d.includes("/middleware") || d.startsWith("middleware")))
+    hits.push("middleware/");
+  if (signals.fileSet.has("Dockerfile")) hits.push("Dockerfile");
+  if (signals.fileSet.has("docker-compose.yml") || signals.fileSet.has("docker-compose.yaml"))
+    hits.push("docker-compose");
+  if ([...signals.fileSet].some((f) => f.startsWith("src/pages/api/"))) hits.push("src/pages/api/");
+  if ([...signals.fileSet].some((f) => f.startsWith("src/app/api/"))) hits.push("src/app/api/");
+  return hits;
+}
+
 const GREP_CONCURRENCY = 16;
 
 async function grepSecurityPatterns(
   repoRoot: string,
   files: WalkEntry[],
   signal?: AbortSignal,
+  emit: ContextBuildObserver = () => undefined,
 ): Promise<Record<string, SecurityPatternMatch[]>> {
+  const domains = Object.keys(SECURITY_GREP_PATTERNS);
   const result: Record<string, SecurityPatternMatch[]> = {};
+  for (const domain of domains) result[domain] = [];
 
-  for (const domain of Object.keys(SECURITY_GREP_PATTERNS)) {
-    result[domain] = [];
+  // Which domains have at least one file that passes their `fileFilter`?
+  // Domains that match nothing get an immediate `skipped-no-ext` so the
+  // view can render that state from the start of the sweep — matching the
+  // design's "skipped (no matching ext)" label.
+  const domainEligible = new Map<string, boolean>();
+  for (const domain of domains) {
+    const spec = SECURITY_GREP_PATTERNS[domain];
+    const eligible = spec.fileFilter
+      ? files.some((f) => (spec.fileFilter as (p: string) => boolean)(f.relPath))
+      : files.length > 0;
+    domainEligible.set(domain, eligible);
+    if (!eligible)
+      emit({ type: "grep-domain-state", domain, matches: 0, status: "skipped-no-ext" });
   }
+
+  const workers = Math.min(GREP_CONCURRENCY, Math.max(files.length, 1));
+  emit({
+    type: "grep-start",
+    filesTotal: files.length,
+    workers,
+    domainCap: MAX_MATCHES_PER_DOMAIN,
+    domains,
+  });
+
+  const domainCapEmitted = new Set<string>();
+  let filesDone = 0;
+  let lastProgressAtMs = 0;
+  const PROGRESS_FILE_INTERVAL = 25;
+  const PROGRESS_MS_INTERVAL = 200;
 
   // Process files with bounded concurrency instead of sequentially
   let cursor = 0;
@@ -274,14 +437,19 @@ async function grepSecurityPatterns(
         const s = await stat(absPath);
         fileSize = s.size;
       } catch {
+        advanceFileCounter();
         continue;
       }
-      if (fileSize > MAX_GREP_FILE_SIZE) continue;
+      if (fileSize > MAX_GREP_FILE_SIZE) {
+        advanceFileCounter();
+        continue;
+      }
 
       let content: string;
       try {
         content = await readFile(absPath, "utf-8");
       } catch {
+        advanceFileCounter();
         continue;
       }
 
@@ -306,13 +474,48 @@ async function grepSecurityPatterns(
             }
           }
         }
+
+        if (result[domain].length >= MAX_MATCHES_PER_DOMAIN && !domainCapEmitted.has(domain)) {
+          domainCapEmitted.add(domain);
+          emit({
+            type: "grep-domain-state",
+            domain,
+            matches: result[domain].length,
+            status: "capped",
+          });
+        }
       }
+
+      advanceFileCounter();
     }
   };
 
-  await Promise.all(
-    Array.from({ length: Math.min(GREP_CONCURRENCY, files.length) }, () => worker()),
-  );
+  function advanceFileCounter(): void {
+    filesDone += 1;
+    const now = Date.now();
+    const intervalReached = filesDone % PROGRESS_FILE_INTERVAL === 0;
+    const dueByTime = now - lastProgressAtMs >= PROGRESS_MS_INTERVAL;
+    const isLast = filesDone === files.length;
+    if (intervalReached || dueByTime || isLast) {
+      lastProgressAtMs = now;
+      emit({ type: "grep-file-progress", filesDone, filesTotal: files.length });
+    }
+  }
+
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+
+  // On completion, emit the final active counts for any eligible, non-capped
+  // domain so the view can show the tally even if the cap was never hit.
+  for (const domain of domains) {
+    if (!domainEligible.get(domain)) continue;
+    if (domainCapEmitted.has(domain)) continue;
+    emit({
+      type: "grep-domain-state",
+      domain,
+      matches: result[domain].length,
+      status: "active",
+    });
+  }
 
   return result;
 }

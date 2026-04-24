@@ -2,10 +2,10 @@
  * ModuleHome — the per-module landing page (D2, Ink UI v2 screen 02).
  *
  * Renders when `shell.focusedModule` is set and `shell.shellView === "module"`.
- * Four-band layout: header breadcrumb, "what it does" paragraph, tools table,
- * last-run card, and a hint footer. Everything is keyboard-driven through the
- * existing shell prompt (`scan`, `tune`, `findings`, `back`, etc.) — this
- * component is purely presentational.
+ * Four-band layout: header breadcrumb, tools table, last-run card, and a hint
+ * footer. Everything is keyboard-driven through the existing shell prompt
+ * (`scan`, `tune`, `findings`, `back`, etc.) — this component is purely
+ * presentational.
  */
 
 import { Box, Text } from "ink";
@@ -40,55 +40,68 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   }
 
   const card = shell.moduleCatalog?.find((c) => c.id === moduleId);
-  const tools: ReadonlyArray<ShellModuleToolSummary> = card?.toolSummaries ?? [];
+  const allTools: ReadonlyArray<ShellModuleToolSummary> = card?.toolSummaries ?? [];
+  const visibleTools = allTools.filter((t) => !t.hidden);
+  const hiddenCount = allTools.length - visibleTools.length;
+  // While a tool is actively running, the tools table + last-run card are
+  // clutter — the operator has already picked a verb. Collapse to just the
+  // header strip so the progress bar dominates the viewport.
+  const busy = shell.processing === true;
 
   return (
     <ScreenContent>
       <ContextStrip
-        status={card ? [card.category, `${tools.length} tools`] : [`${tools.length} tools`]}
+        status={
+          card ? [card.category, `${visibleTools.length} tools`] : [`${visibleTools.length} tools`]
+        }
         subtitle={card?.description}
       />
-      <Box marginTop={SPACING.sm}>
-        <Text>
-          {tokens.strong("Primary action: ")}
-          {tokens.accent("run one tool verb")}
-          {tokens.muted(" (listed below).")}
-        </Text>
-      </Box>
 
-      {card?.description ? (
-        <Section label="what it does">
-          <WrappedText text={card.description} width={74} />
-        </Section>
-      ) : null}
+      {busy ? null : (
+        <>
+          <Section
+            label="tools"
+            hint="(invoke from this shell as verb, or headless via kuzushi run)"
+          >
+            {visibleTools.length === 0 ? (
+              <Box paddingLeft={3}>
+                <EmptyState kind="module-no-tools" context={{ moduleId }} />
+              </Box>
+            ) : (
+              <>
+                <Table
+                  showHeader
+                  gap={1}
+                  columns={[
+                    { key: "verb", header: "VERB", flex: 2, truncate: "end" },
+                    { key: "name", header: "TOOL NAME", flex: 3, truncate: "middle" },
+                    { key: "description", header: "DESCRIPTION", flex: 5, truncate: "end" },
+                  ]}
+                  rows={visibleTools}
+                />
+                {hiddenCount > 0 ? (
+                  <Box paddingLeft={3} marginTop={SPACING.sm}>
+                    <Text>
+                      {tokens.muted(
+                        `+ ${hiddenCount} internal DAG node${hiddenCount === 1 ? "" : "s"} — run \`/tools --all\` to list`,
+                      )}
+                    </Text>
+                  </Box>
+                ) : null}
+              </>
+            )}
+          </Section>
 
-      <Section label="tools" hint="(invoke from this shell as verb, or headless via kuzushi run)">
-        {tools.length === 0 ? (
-          <Box paddingLeft={3}>
-            <EmptyState kind="module-no-tools" context={{ moduleId }} />
-          </Box>
-        ) : (
-          <Table
-            showHeader
-            gap={1}
-            columns={[
-              { key: "verb", header: "VERB", width: 14, truncate: "end" },
-              { key: "description", header: "DESCRIPTION", flex: 4, truncate: "end" },
-              { key: "name", header: "TOOL NAME", flex: 3, truncate: "middle" },
-            ]}
-            rows={tools}
-          />
-        )}
-      </Section>
-
-      <Section label="last run">
-        <Text>
-          {"   "}
-          {card?.lastRunSummary
-            ? tokens.value(card.lastRunSummary)
-            : tokens.muted("never run for this workspace")}
-        </Text>
-      </Section>
+          <Section label="last run">
+            <Text>
+              {"   "}
+              {card?.lastRunSummary
+                ? tokens.value(card.lastRunSummary)
+                : tokens.muted("never run for this workspace")}
+            </Text>
+          </Section>
+        </>
+      )}
     </ScreenContent>
   );
 }
@@ -111,37 +124,6 @@ function Section({
       <Box flexDirection="column" marginTop={SPACING.sm}>
         {children}
       </Box>
-    </Box>
-  );
-}
-
-function WrappedText({ text, width }: { text: string; width: number }): React.ReactElement {
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    if (`${current} ${word}`.trim().length > width && current.length > 0) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = current ? `${current} ${word}` : word;
-    }
-  }
-  if (current) lines.push(current);
-  let offset = 0;
-  const keyedLines = lines.map((line) => {
-    offset += line.length + 1;
-    return { line, key: `${offset}-${line.slice(0, 16)}` };
-  });
-
-  return (
-    <Box flexDirection="column">
-      {keyedLines.map(({ line, key }) => (
-        <Text key={key}>
-          {"   "}
-          {line}
-        </Text>
-      ))}
     </Box>
   );
 }

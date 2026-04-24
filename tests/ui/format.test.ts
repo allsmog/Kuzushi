@@ -6,6 +6,7 @@ import {
   truncateEnd,
   truncateMiddle,
   visibleWidth,
+  wrapToWidth,
 } from "../../src/ui/format.js";
 
 describe("visibleWidth", () => {
@@ -92,5 +93,31 @@ describe("formatRelativeAgo", () => {
   });
   it("clamps negative deltas to 'just now'", () => {
     expect(formatRelativeAgo(now + 5_000, now)).toBe("just now");
+  });
+});
+
+describe("wrapToWidth", () => {
+  it("returns empty array for empty string", () => {
+    expect(wrapToWidth("", 10)).toEqual([]);
+  });
+  it("returns one line when text fits", () => {
+    expect(wrapToWidth("hello world", 20)).toEqual(["hello world"]);
+  });
+  it("wraps on word boundaries", () => {
+    expect(wrapToWidth("one two three four", 8)).toEqual(["one two", "three", "four"]);
+  });
+  it("keeps words longer than maxWidth on their own line", () => {
+    expect(wrapToWidth("short supercalifragilistic tail", 10)).toEqual([
+      "short",
+      "supercalifragilistic",
+      "tail",
+    ]);
+  });
+  it("handles zero or negative maxWidth by returning the text as one line", () => {
+    expect(wrapToWidth("hello world", 0)).toEqual(["hello world"]);
+    expect(wrapToWidth("", 0)).toEqual([]);
+  });
+  it("collapses runs of whitespace", () => {
+    expect(wrapToWidth("one   two    three", 40)).toEqual(["one two three"]);
   });
 });

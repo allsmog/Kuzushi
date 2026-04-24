@@ -730,6 +730,29 @@ describe("context system", () => {
     expect(result?.asyncExecute).toBeTypeOf("function");
   });
 
+  it("/context build enters the Live Build view and seeds contextBuild state", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = "/resolved/repo";
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand(
+      "/context build",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(result?.asyncExecute).toBeTypeOf("function");
+    expect(result?.shellStateUpdater).toBeTypeOf("function");
+    const next = result!.shellStateUpdater!(shellState);
+    expect(next.shellView).toBe("context-build");
+    expect(next.contextBuild?.status).toBe("running");
+    expect(next.contextBuild?.repoRoot).toBe("/resolved/repo");
+    expect(next.contextBuild?.phases.manifests.status).toBe("pending");
+  });
+
   it("context gating blocks threat-hunt without snapshot", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
