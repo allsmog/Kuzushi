@@ -220,6 +220,22 @@ describe("resolveKeybind — plan-pending overlay", () => {
   });
 });
 
+describe("resolveKeybind — task story details", () => {
+  it("opens task story details with Ctrl+O even while work is in flight", () => {
+    const shell = baseShell({ processing: true });
+    const state = baseState(shell);
+    const action = resolveKeybind({
+      stroke: stroke({ char: "o", key: { ctrl: true } }),
+      input: "",
+      state,
+      looseFindingCount: 0,
+      now: 0,
+    });
+
+    expect(action).toEqual({ type: "open-story" });
+  });
+});
+
 describe("resolveKeybind — threat digits", () => {
   it("maps 1..5 to the correct /threats subcommand on a threat view", () => {
     const shell = baseShell({ shellView: "threat-dfd" });

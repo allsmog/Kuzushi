@@ -4018,6 +4018,9 @@ function handleSlashCommand(
         output: `Tuning ${ctx.focusedModule}. Use prompt edit <verb> for prompt overrides.`,
       };
 
+    case "story":
+      return handleStoryCommand(shellState);
+
     case "open":
       return handleOpenCommand(args);
 
@@ -4167,6 +4170,7 @@ function handleBackCommand(
     currentView === "findings" ||
     currentView === "tune" ||
     currentView === "diff-since" ||
+    currentView === "task-story" ||
     currentView?.startsWith("threat-")
   ) {
     return {
@@ -4188,6 +4192,17 @@ function handleBackCommand(
     };
   }
   return { output: "Already at top level." };
+}
+
+function handleStoryCommand(shellState: ShellState): LocalCommandResult {
+  const eventCount = shellState.taskStory?.events.length ?? 0;
+  return {
+    shellStateUpdater: (shell) => ({ ...shell, shellView: "task-story" }),
+    output:
+      eventCount > 0
+        ? `Showing task story (${eventCount} events).`
+        : "No task story yet. Run a tool or ask the agent first.",
+  };
 }
 
 function handleOpenCommand(args: string[]): LocalCommandResult {
@@ -4365,6 +4380,7 @@ function handleContextCommand(
         shellView: "context-build",
         contextBuild: initContextBuildState(repoRoot),
       }),
+      executedToolName: "context:build",
       asyncExecute: async (signal) => {
         const { runContextBuildLive } = await import("./context-build-runner.js");
         return runContextBuildLive(ctx.uiStore, repoRoot, signal);
@@ -6046,8 +6062,13 @@ export const __shellInternals = {
   formatArtifactBanner,
   formatContextTrailer,
   formatWelcome,
+  appendStoryEvent,
+  applyStoryEventToShell,
+  beginShellTurn,
   handleLocalCommand: routeInput,
   handleSlashCommand,
+  handleStoryCommand,
+  isTaskStoryNavigationInput,
   reconcileShellView,
   loadArtifactManifest,
   loadShellCommandHistory,
