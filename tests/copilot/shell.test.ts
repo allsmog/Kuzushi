@@ -219,6 +219,26 @@ describe("local shell commands", () => {
     expect(tuneResult?.output).toContain("Tuning sast");
     expect(tuneResult?.shellStateUpdater?.(shellState).shellView).toBe("tune");
 
+    const storyResult = __shellInternals.handleLocalCommand("story", core, opts, ctx, {
+      ...shellState,
+      taskStory: {
+        activeTurnId: "turn-1",
+        activeRunIds: [],
+        events: [
+          {
+            id: "story-1",
+            kind: "phase",
+            status: "running",
+            importance: "primary",
+            message: "Building context",
+            timestamp: 1,
+          },
+        ],
+      },
+    });
+    expect(storyResult?.output).toContain("Showing task story (1 events).");
+    expect(storyResult?.shellStateUpdater?.(shellState).shellView).toBe("task-story");
+
     const backResult = __shellInternals.handleLocalCommand("back", core, opts, ctx, shellState);
     expect(backResult?.setFocus).toBeNull();
     expect(backResult?.output).toBe("Returned to top level.");
@@ -455,6 +475,19 @@ describe("local shell commands", () => {
     });
     expect(fromDiff?.output).toBe("Back to module home.");
     expect(fromDiff?.shellStateUpdater?.(baseState).shellView).toBe("module");
+
+    const fromStory = __shellInternals.handleLocalCommand("/back", core, opts, ctx, {
+      ...baseState,
+      shellView: "task-story",
+    });
+    expect(fromStory?.output).toBe("Back to module home.");
+    expect(fromStory?.shellStateUpdater?.(baseState).shellView).toBe("module");
+  });
+
+  it("recognizes task story navigation input without resetting the story stream", () => {
+    expect(__shellInternals.isTaskStoryNavigationInput("story")).toBe(true);
+    expect(__shellInternals.isTaskStoryNavigationInput("/story")).toBe(true);
+    expect(__shellInternals.isTaskStoryNavigationInput("context build")).toBe(false);
   });
 
   it("supports /help <verb> with expanded description + unknown-verb fallback", async () => {
@@ -493,7 +526,7 @@ describe("local shell commands", () => {
     const shellState = createShellState(module.tools.map((t) => t.name));
     const ctx = { focusedModule: null };
 
-    const help = __shellInternals.handleLocalCommand("/help", core, opts, ctx, shellState);
+    const help = __shellInternals.handleLocalCommand("/help advanced", core, opts, ctx, shellState);
     expect(help?.output).toBeDefined();
     const text = help!.output!;
     for (const entry of SHELL_COMMAND_CATALOG) {
@@ -509,7 +542,7 @@ describe("local shell commands", () => {
     const shellState = createShellState(module.tools.map((t) => t.name));
     const ctx = { focusedModule: null };
 
-    const help = __shellInternals.handleLocalCommand("/help", core, opts, ctx, shellState);
+    const help = __shellInternals.handleLocalCommand("/help advanced", core, opts, ctx, shellState);
     const text = help!.output!;
     // Spot-check the group headings that map to CLAUDE.md §12 sections.
     expect(text).toContain("Module + view navigation");

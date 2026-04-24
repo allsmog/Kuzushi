@@ -14,6 +14,9 @@ const {
   patchHistoryEntry,
   pushLiveActivity,
   finalizeRunningToolCalls,
+  appendStoryEvent,
+  applyStoryEventToShell,
+  beginShellTurn,
 } = __shellInternals;
 
 function seedShellState(): UIStore {
@@ -43,6 +46,99 @@ function seedShellState(): UIStore {
   });
   return store;
 }
+
+describe("task story shell integration helpers", () => {
+  it("seeds a new task story at turn start", () => {
+    const store = seedShellState();
+    beginShellTurn(store, "context build", null, "turn-1");
+
+    const shell = store.getState().shell!;
+    expect(shell.taskStory?.activeTurnId).toBe("turn-1");
+    expect(shell.taskStory?.events).toEqual([]);
+    expect(shell.processing).toBe(true);
+    expect(shell.history.at(-1)).toMatchObject({ type: "input", text: "context build" });
+  });
+
+  it("preserves existing task story when navigating to details", () => {
+    const store = seedShellState();
+    appendStoryEvent(store, {
+      kind: "phase",
+      status: "running",
+      importance: "primary",
+      message: "Building context",
+      turnId: "turn-1",
+    });
+
+    beginShellTurn(store, "/story", null, "turn-1", { preserveTaskStory: true });
+
+    expect(store.getState().shell!.taskStory?.events.map((event) => event.message)).toEqual([
+      "Building context",
+    ]);
+  });
+
+  it("updates task story, current tool tail, and durable history for story events", () => {
+    const store = seedShellState();
+
+    appendStoryEvent(store, {
+      kind: "phase",
+      status: "running",
+      importance: "primary",
+      message: "Walking repository",
+      runId: "run-1",
+      turnId: "turn-1",
+    });
+
+    const shell = store.getState().shell!;
+    expect(shell.taskStory?.activeRunIds).toEqual(["run-1"]);
+    expect(shell.currentTool?.storyTail?.[0]?.message).toBe("Walking repository");
+    expect(shell.history.at(-1)).toMatchObject({ type: "story" });
+  });
+
+  it("can apply debug story events as live-only tail without history", () => {
+    const store = seedShellState();
+    const shell = store.getState().shell!;
+    const event = {
+      id: "story-debug",
+      kind: "activity" as const,
+      status: "running" as const,
+      importance: "debug" as const,
+      message: "Read · package.json",
+      timestamp: 2,
+    };
+
+    const next = applyStoryEventToShell(shell, event, { persistHistory: false, liveOnly: true });
+
+    expect(next.taskStory?.events.at(-1)?.message).toBe("Read · package.json");
+    expect(next.history).toEqual(shell.history);
+  });
+
+  it("marks finalized aborted tool calls with abort status", () => {
+    const store = seedShellState();
+    store.update({
+      shell: {
+        ...store.getState().shell!,
+        history: [
+          {
+            type: "tool-call",
+            id: "tc-1",
+            tool: "context:build",
+            text: "⏺ context:build",
+            status: "running",
+            timestamp: 1,
+          },
+        ],
+      },
+    });
+
+    finalizeRunningToolCalls(store, "abort", "Cancelled active operation.");
+
+    expect(store.getState().shell!.history[0]).toMatchObject({
+      status: "abort",
+      abortStatus: "aborted",
+      resultOutput: "Cancelled active operation.",
+    });
+  });
+});
 
 describe("extractToolUseActivities", () => {
   it("returns a label per tool_use block", () => {

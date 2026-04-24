@@ -206,6 +206,48 @@ describe("plain-renderer Phase D.5 emitters", () => {
     expect(lines).not.toContain("[input] kuzushi> run scan");
   });
 
+  it("prints task story view with durable beats only", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+
+    store.update({
+      mode: "shell",
+      shell: baseShell({
+        shellView: "task-story",
+        taskStory: {
+          activeTurnId: "turn-1",
+          activeRunIds: ["run-1"],
+          startedAt: 1,
+          abortStatus: "idle",
+          events: [
+            {
+              id: "story-1",
+              kind: "phase",
+              status: "running",
+              importance: "primary",
+              message: "Building context",
+              timestamp: 1,
+            },
+            {
+              id: "story-2",
+              kind: "activity",
+              status: "running",
+              importance: "debug",
+              message: "Read · package.json",
+              timestamp: 2,
+            },
+          ],
+        },
+      }),
+    });
+    unsub();
+
+    const joined = lines.join("\n");
+    expect(joined).toContain("# TASK STORY");
+    expect(joined).toContain("[story:running] Building context");
+    expect(joined).not.toContain("Read · package.json");
+  });
+
   it("prints [threats] summary with element + threat counts", () => {
     const store = createUIStore();
     const cap = captureConsole();

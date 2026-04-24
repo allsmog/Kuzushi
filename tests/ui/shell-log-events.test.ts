@@ -7,6 +7,28 @@ import {
 import type { ShellHistoryEntry } from "../../src/ui/state.js";
 
 describe("shell log event projection", () => {
+  it("formats structured story beats for plain renderers", () => {
+    const entry: ShellHistoryEntry = {
+      type: "story",
+      text: "",
+      timestamp: 1,
+      storyEvent: {
+        id: "story-1",
+        kind: "phase",
+        status: "running",
+        importance: "primary",
+        message: "Building context",
+        timestamp: 1,
+      },
+    };
+
+    expect(projectShellHistoryEntry(entry)).toMatchObject({
+      kind: "story",
+      text: "[story:running] Building context",
+    });
+    expect(formatShellHistoryEntryPlain(entry)).toEqual(["[story:running] Building context"]);
+  });
+
   it("projects running tool calls as tool/use events", () => {
     const entry: ShellHistoryEntry = {
       type: "tool-call",
