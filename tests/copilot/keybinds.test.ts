@@ -8,11 +8,12 @@
  *   2. Any other key resets the arm logic at the reducer boundary.
  *   3. In-flight work gets an immediate abort; an armed follow-up exits.
  *   4. Plan-pending overlay steals y / n / Esc.
- *   5. Threat-view digits cycle through `/threats <sub>`.
- *   6. Findings cursor keybinds clamp to `looseFindingCount`.
- *   7. `q` + empty buffer on a backable view → `/back`.
- *   8. Esc clears non-empty buffer before considering `/back`.
- *   9. Typing / Enter / history keys fall through to `{ type: "none" }`.
+ *   5. Context-build L/q expands the tail or aborts/backs out.
+ *   6. Threat-view digits cycle through `/threats <sub>`.
+ *   7. Findings cursor keybinds clamp to `looseFindingCount`.
+ *   8. `q` + empty buffer on a backable view → `/back`.
+ *   9. Esc clears non-empty buffer before considering `/back`.
+ *   10. Typing / Enter / history keys fall through to `{ type: "none" }`.
  */
 
 import { describe, expect, it } from "vitest";
@@ -23,6 +24,7 @@ import {
   type KeybindAction,
   type Keystroke,
   resolveKeybind,
+  resolveTaskStoryToggleView,
 } from "../../src/ui/shell-keybinds.js";
 import type { ShellState, UIState } from "../../src/ui/state.js";
 
@@ -71,6 +73,13 @@ function baseState(shell: ShellState, overrides: Partial<UIState> = {}): UIState
     shell,
     ...overrides,
   } as UIState;
+}
+
+function contextBuildState(
+  status: NonNullable<ShellState["contextBuild"]>["status"] = "running",
+  tailExpanded = false,
+): ShellState["contextBuild"] {
+  return { status, tailExpanded } as unknown as ShellState["contextBuild"];
 }
 
 function stroke(partial: Partial<Keystroke> = {}): Keystroke {
@@ -246,7 +255,29 @@ describe("resolveKeybind — task story details", () => {
       now: 0,
     });
 
-    expect(action).toEqual({ type: "open-story" });
+    expect(action).toEqual({ type: "toggle-story", nextView: "task-story" });
+  });
+
+  it("closes task story details with Ctrl+O while work is in flight", () => {
+    const shell = baseShell({
+      focusedModule: "context",
+      shellView: "task-story",
+      processing: true,
+    });
+    const state = baseState(shell);
+    const action = resolveKeybind({
+      stroke: stroke({ char: "o", key: { ctrl: true } }),
+      input: "",
+      state,
+      looseFindingCount: 0,
+      now: 0,
+    });
+
+    expect(action).toEqual({ type: "toggle-story", nextView: "module" });
+  });
+
+  it("closes task story details back to catalog when no module is focused", () => {
+    expect(resolveTaskStoryToggleView(baseShell({ shellView: "task-story" }))).toBe("catalog");
   });
 });
 
@@ -391,6 +422,43 @@ describe("resolveKeybind — findings cursor", () => {
 });
 
 describe("resolveKeybind — q, Esc, and /back", () => {
+  it("L toggles the context-build tail while work is in flight", () => {
+    const shell = baseShell({
+      shellView: "context-build",
+      processing: true,
+      contextBuild: contextBuildState("running"),
+    });
+    const state = baseState(shell);
+    const action = resolveKeybind({
+      stroke: stroke({ char: "L" }),
+      input: "",
+      state,
+      looseFindingCount: 0,
+      now: 0,
+    });
+
+    expect(action).toEqual({ type: "toggle-context-tail" });
+  });
+
+  it("q aborts a running context-build view", () => {
+    const shell = baseShell({
+      shellView: "context-build",
+      processing: true,
+      contextBuild: contextBuildState("running"),
+    });
+    const state = baseState(shell);
+    expect(dispatch("q", shell, state)).toEqual({ type: "abort-inflight" });
+  });
+
+  it("q backs out of a terminal context-build view", () => {
+    const shell = baseShell({
+      shellView: "context-build",
+      contextBuild: contextBuildState("done"),
+    });
+    const state = baseState(shell);
+    expect(dispatch("q", shell, state)).toEqual({ type: "dispatch", command: "/back" });
+  });
+
   it("q on a backable view with empty buffer dispatches /back", () => {
     const shell = baseShell({ shellView: "findings" });
     const state = baseState(shell);

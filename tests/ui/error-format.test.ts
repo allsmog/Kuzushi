@@ -54,13 +54,15 @@ describe("suggestNextStep", () => {
     expect(suggestNextStep(null, "fatal")).toBeUndefined();
     expect(suggestNextStep(null, "unknown")).toBeUndefined();
   });
-  it("rate_limit hint mentions /concurrency", () => {
-    expect(suggestNextStep(null, "rate_limit")).toContain("/concurrency");
+  it("rate_limit hint mentions advanced config", () => {
+    const hint = suggestNextStep(null, "rate_limit") ?? "";
+    expect(hint).toContain("triageConcurrency");
+    expect(hint).toContain("/config advanced");
   });
-  it("budget hint mentions c and a keys", () => {
+  it("budget hint points at budget/model changes before rerunning", () => {
     const hint = suggestNextStep(null, "budget") ?? "";
-    expect(hint).toMatch(/\bc\b/);
-    expect(hint).toMatch(/\ba\b/);
+    expect(hint).toContain("--budget");
+    expect(hint).toContain("cheaper model");
   });
 });
 

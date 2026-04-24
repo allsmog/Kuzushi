@@ -205,8 +205,21 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         case "set-finding-cursor":
           store.update({ shell: { ...liveShell, findingCursor: action.cursor } });
           return;
-        case "open-story":
-          store.update({ shell: { ...liveShell, shellView: "task-story" } });
+        case "toggle-story":
+          store.update({ shell: { ...liveShell, shellView: action.nextView } });
+          return;
+        case "toggle-context-tail":
+          if (liveShell.contextBuild) {
+            store.update({
+              shell: {
+                ...liveShell,
+                contextBuild: {
+                  ...liveShell.contextBuild,
+                  tailExpanded: !liveShell.contextBuild.tailExpanded,
+                },
+              },
+            });
+          }
           return;
         case "clear-input":
           setInput("");

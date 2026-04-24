@@ -95,7 +95,7 @@ exports[`ContextBuildView > initial state — all phases pending 1`] = `
     (waiting on first event)
 
   ╭────────────────────────────────────────────────────────────────────────────────╮
-  │  q abort      L expand tail      b background (notify on done)                 │
+  │  q abort      L expand tail                                                    │
   │  safe to walk away — no writes until phase 5 (assemble)                        │
   ╰────────────────────────────────────────────────────────────────────────────────╯"
 `;
@@ -152,7 +152,7 @@ exports[`ContextBuildView > mid-grep — phases 1-3 done, phase 4 running with p
     14:08:03.281  grep    spawn 16 workers over 1102 files
 
   ╭────────────────────────────────────────────────────────────────────────────────╮
-  │  q abort      L expand tail      b background (notify on done)                 │
+  │  q abort      L expand tail                                                    │
   │  safe to walk away — no writes until phase 5 (assemble)                        │
   ╰────────────────────────────────────────────────────────────────────────────────╯"
 `;

@@ -1,7 +1,7 @@
 /**
- * RateLimitBanner tests — verify the actionable copy: concrete
- * `/concurrency` hint, "retrying …" suffix when `until` is supplied, and
- * auto-hide when no throttle is active.
+ * RateLimitBanner tests — verify the actionable copy: concrete config
+ * recovery hint, "retrying …" suffix when `until` is supplied, and auto-hide
+ * when no throttle is active.
  */
 
 import { PassThrough, type Writable } from "node:stream";
@@ -36,7 +36,7 @@ describe("RateLimitBanner", () => {
     expect(out.trim()).toBe("");
   });
 
-  it("renders concurrency and a /concurrency recovery hint", () => {
+  it("renders concurrency and a /config advanced recovery hint", () => {
     const out = renderToText(
       createElement(RateLimitBanner, {
         throttle: { concurrency: 4, reason: "429 from provider" },
@@ -44,26 +44,26 @@ describe("RateLimitBanner", () => {
     );
     expect(out).toContain("rate-limited");
     expect(out).toContain("concurrency reduced to 4");
-    expect(out).toContain("/concurrency");
+    expect(out).toContain("triageConcurrency");
+    expect(out).toContain("/config advanced");
   });
 
-  it("suggests halving the current concurrency", () => {
+  it("does not suggest the removed /concurrency shortcut", () => {
     const out = renderToText(
       createElement(RateLimitBanner, {
         throttle: { concurrency: 8, reason: "" },
       }),
     );
-    // 8 / 2 = 4
-    expect(out).toContain("/concurrency 4");
+    expect(out).not.toContain("/concurrency");
   });
 
-  it("never suggests /concurrency 0 at minimum concurrency", () => {
+  it("keeps the config hint at minimum concurrency", () => {
     const out = renderToText(
       createElement(RateLimitBanner, {
         throttle: { concurrency: 1, reason: "" },
       }),
     );
-    expect(out).toContain("/concurrency 1");
+    expect(out).toContain("/config advanced");
     expect(out).not.toContain("/concurrency 0");
   });
 

@@ -483,6 +483,13 @@ describe("local shell commands", () => {
     });
     expect(fromStory?.output).toBe("Back to module home.");
     expect(fromStory?.shellStateUpdater?.(baseState).shellView).toBe("module");
+
+    const fromContextBuild = __shellInternals.handleLocalCommand("/back", core, opts, ctx, {
+      ...baseState,
+      shellView: "context-build",
+    });
+    expect(fromContextBuild?.output).toBe("Back to module home.");
+    expect(fromContextBuild?.shellStateUpdater?.(baseState).shellView).toBe("module");
   });
 
   it("recognizes task story navigation input without resetting the story stream", () => {

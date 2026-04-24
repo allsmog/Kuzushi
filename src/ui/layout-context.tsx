@@ -52,6 +52,11 @@ export interface LayoutContextValue {
   navigation: NavigationMeta;
 }
 
+export type ShellNavigationState = Pick<
+  ShellState,
+  "focusedModule" | "shellView" | "processing" | "workspace" | "target" | "threatTab"
+>;
+
 export const STANDARD_LAYOUT_THEME: LayoutTheme = {
   spacing: SPACING,
   widths: WIDTHS,
@@ -96,7 +101,9 @@ export function useLayoutContext(): LayoutContextValue {
 }
 
 export function deriveNavigation(
-  state: Pick<UIState, "mode" | "phase" | "repoName" | "shell">,
+  state: Pick<UIState, "mode" | "phase" | "repoName"> & {
+    shell?: ShellNavigationState | null;
+  },
 ): NavigationMeta {
   if (state.mode === "shell") {
     const shell = state.shell;
@@ -114,19 +121,21 @@ export function deriveNavigation(
   return { title, breadcrumbs, status };
 }
 
-/** Map the threat-view enum onto a human label that fits the title slot. */
-const THREAT_VIEW_TITLES: Record<string, string> = {
-  "threat-dfd": "data flow diagram",
-  "threat-stride": "stride matrix",
-  "threat-stories": "attacker stories",
-  "threat-scope": "scope & criticality",
-  "threat-summary": "threat summary",
+/** Map the current threat tab onto a human label that fits the title slot. */
+const THREAT_TAB_TITLES: Record<NonNullable<ShellNavigationState["threatTab"]>, string> = {
+  dfd: "data flow diagram",
+  stride: "stride matrix",
+  stories: "attacker stories",
+  scope: "scope & criticality",
+  summary: "threat summary",
 };
 
-function shellTitle(shell: ShellState | null | undefined): string {
+function shellTitle(shell: ShellNavigationState | null | undefined): string {
   if (!shell) return "Shell";
   const view = shell.shellView ?? "catalog";
-  if (view in THREAT_VIEW_TITLES) return THREAT_VIEW_TITLES[view] ?? view;
+  if (view === "threats") return THREAT_TAB_TITLES[shell.threatTab ?? "summary"];
+  if (view === "context-build") return "context build";
+  if (view === "task-story") return "task details";
   if (view === "findings") return "findings";
   if (view === "finding") return "finding detail";
   if (view === "tune") return "tune";
@@ -134,7 +143,7 @@ function shellTitle(shell: ShellState | null | undefined): string {
   return "module catalog";
 }
 
-function shellBreadcrumbs(shell: ShellState | null | undefined): string[] {
+function shellBreadcrumbs(shell: ShellNavigationState | null | undefined): string[] {
   if (!shell) return ["shell"];
   const crumbs = ["shell"];
   if (shell.focusedModule) crumbs.push(shell.focusedModule);
@@ -145,7 +154,7 @@ function shellBreadcrumbs(shell: ShellState | null | undefined): string[] {
   return crumbs;
 }
 
-function shellStatus(shell: ShellState | null | undefined): string[] {
+function shellStatus(shell: ShellNavigationState | null | undefined): string[] {
   if (!shell) return [];
   const status: string[] = [];
   status.push(shell.processing ? "busy" : "idle");

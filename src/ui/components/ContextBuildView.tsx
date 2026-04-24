@@ -90,10 +90,10 @@ interface ContextBuildViewProps {
 }
 
 export function ContextBuildView({ shell }: ContextBuildViewProps): React.ReactElement {
+  const contextBuildStatus = shell.contextBuild?.status;
   useRegisterKeybindings([
-    { keys: "q", label: "abort" },
+    { keys: "q", label: contextBuildStatus === "running" ? "abort" : "back" },
     { keys: "L", label: "expand tail", secondary: true },
-    { keys: "b", label: "background", secondary: true },
   ]);
   const terminalWidth = useTerminalWidth();
   const frameWidth = Math.max(60, Math.min(terminalWidth - 4, 82));
@@ -446,7 +446,7 @@ function ControlBar({
 }): React.ReactElement {
   const prompt =
     state.status === "running"
-      ? `${tokens.strong("q")} abort      ${tokens.strong("L")} expand tail      ${tokens.strong("b")} background (notify on done)`
+      ? `${tokens.strong("q")} abort      ${tokens.strong("L")} expand tail`
       : `${tokens.strong("q")} back      ${tokens.strong("L")} expand tail`;
   const hint =
     state.status === "running"
