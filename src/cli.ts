@@ -20,6 +20,7 @@ import { createDefaultTaskRegistry } from "./agents/index.js";
 import { runScanCommand } from "./cli/commands/scan.js";
 import { CliUsageError, wrapCliAction } from "./cli/errors.js";
 import { resolveRepo } from "./cli/shared.js";
+import { DEFAULTS } from "./config/defaults.js";
 import { formatConfigValidationIssue, validateKuzushiConfig } from "./config/validation.js";
 import {
   configPath,
@@ -302,7 +303,18 @@ program
   )
   .option("--max-modules <n>", "Max modules to scan in Phase 2 (top N by priority)", parseInt)
   .option("--dry-run", "Print scan scope (modules, tasks, tasks) without running", false)
-  .option("--enable-external-tasks", "Enable loading of external tasks from config", false)
+  .option("--confirm-config", "Review effective config before starting an interactive scan", false)
+  .option(
+    "--review-context",
+    "Review saved scan context before starting an interactive scan",
+    false,
+  )
+  .option(
+    "--review-threat-model",
+    "Review saved threat model before starting an interactive scan",
+    false,
+  )
+  .option("--review-findings", "Open the interactive findings review after scan completion", false)
   .option(
     "--trust-repo-config",
     "Trust unsafe repo-local config keys such as hooks and external tasks",
@@ -351,8 +363,82 @@ function delta(a: number | undefined, b: number | undefined): string {
   return `${(d >= 0 ? "+" : "") + d.toFixed(1)}pp`;
 }
 
+function compareRuns(id1: string, id2: string, repoPath: string): void {
+  const { root } = resolveRepo(repoPath);
+  const dbPath = defaultDbPath(root);
+  const db = initDb(dbPath);
+  try {
+    const run1 = getRun(db, id1);
+    const run2 = getRun(db, id2);
+    if (!run1 || !run2) {
+      throw new CliUsageError(`Run not found: ${!run1 ? id1 : id2}`);
+    }
+    const metrics1 = run1.metricsJson ? JSON.parse(run1.metricsJson) : null;
+    const metrics2 = run2.metricsJson ? JSON.parse(run2.metricsJson) : null;
+
+    console.log("Pipeline Run Comparison");
+    console.log("=".repeat(60));
+    console.log(`Run 1: ${id1} (${run1.status})`);
+    console.log(`Run 2: ${id2} (${run2.status})`);
+    console.log(`Prompt hash: ${run1.promptHash ?? "n/a"} vs ${run2.promptHash ?? "n/a"}`);
+    if (run1.promptHash && run2.promptHash && run1.promptHash !== run2.promptHash) {
+      console.log("  Warning: Prompt templates changed between runs");
+    }
+    console.log("");
+
+    if (metrics1 && metrics2) {
+      console.log("Metrics Comparison:");
+      console.log(
+        `  TP Rate: ${fmt(metrics1.tpRate)} -> ${fmt(metrics2.tpRate)} (${delta(metrics1.tpRate, metrics2.tpRate)})`,
+      );
+      console.log(
+        `  FP Rate: ${fmt(metrics1.fpRate)} -> ${fmt(metrics2.fpRate)} (${delta(metrics1.fpRate, metrics2.fpRate)})`,
+      );
+      console.log(
+        `  Avg Confidence: ${fmt(metrics1.averageConfidence)} -> ${fmt(metrics2.averageConfidence)} (${delta(metrics1.averageConfidence, metrics2.averageConfidence)})`,
+      );
+      console.log(
+        `  Total Cost: $${metrics1.costBreakdown?.total?.toFixed(4) ?? "?"} -> $${metrics2.costBreakdown?.total?.toFixed(4) ?? "?"}`,
+      );
+    }
+
+    const assertions1 = run1.assertionsJson ? JSON.parse(run1.assertionsJson) : null;
+    const assertions2 = run2.assertionsJson ? JSON.parse(run2.assertionsJson) : null;
+    if (assertions1 || assertions2) {
+      console.log("\nAssertion Comparison:");
+      if (assertions1?.totalAssertions != null && assertions2?.totalAssertions != null) {
+        console.log(
+          `  Pass rate: ${assertions1.passedAssertions}/${assertions1.totalAssertions} -> ${assertions2.passedAssertions}/${assertions2.totalAssertions}`,
+        );
+        console.log(
+          `  Avg quality: ${fmt(assertions1.averageQualityScore)} -> ${fmt(assertions2.averageQualityScore)}`,
+        );
+      } else {
+        console.log(`  Run 1: ${assertions1 ? JSON.stringify(assertions1) : "n/a"}`);
+        console.log(`  Run 2: ${assertions2 ? JSON.stringify(assertions2) : "n/a"}`);
+      }
+    }
+
+    if (metrics1 && metrics2) {
+      const regressions: string[] = [];
+      if (metrics2.tpRate < metrics1.tpRate * 0.9) regressions.push("TP rate dropped >10%");
+      if (metrics2.fpRate > metrics1.fpRate * 1.1) regressions.push("FP rate increased >10%");
+      if (metrics2.averageConfidence < metrics1.averageConfidence * 0.9)
+        regressions.push("Average confidence dropped >10%");
+      if (regressions.length > 0) {
+        console.log("\nREGRESSIONS DETECTED:");
+        for (const r of regressions) console.log(`  - ${r}`);
+      } else {
+        console.log("\nNo regressions detected");
+      }
+    }
+  } finally {
+    db.close();
+  }
+}
+
 program
-  .command("compare-runs <id1> <id2>")
+  .command("compare-runs <id1> <id2>", { hidden: true })
   .description("Compare metrics and assertions between two pipeline runs")
   .option("-r, --repo <path>", "Repository path", ".")
   .addHelpText(
@@ -365,81 +451,8 @@ Examples:
   )
   .action(
     wrapCliAction(async (id1: string, id2: string, options: { repo: string }) => {
-      const { root } = resolveRepo(options.repo);
-      const dbPath = defaultDbPath(root);
-      const db = initDb(dbPath);
-      try {
-        const run1 = getRun(db, id1);
-        const run2 = getRun(db, id2);
-        if (!run1 || !run2) {
-          throw new CliUsageError(`Run not found: ${!run1 ? id1 : id2}`);
-        }
-        // Parse metrics
-        const metrics1 = run1.metricsJson ? JSON.parse(run1.metricsJson) : null;
-        const metrics2 = run2.metricsJson ? JSON.parse(run2.metricsJson) : null;
-
-        // Print comparison
-        console.log("Pipeline Run Comparison");
-        console.log("=".repeat(60));
-        console.log(`Run 1: ${id1} (${run1.status})`);
-        console.log(`Run 2: ${id2} (${run2.status})`);
-        console.log(`Prompt hash: ${run1.promptHash ?? "n/a"} vs ${run2.promptHash ?? "n/a"}`);
-        if (run1.promptHash && run2.promptHash && run1.promptHash !== run2.promptHash) {
-          console.log("  Warning: Prompt templates changed between runs");
-        }
-        console.log("");
-
-        if (metrics1 && metrics2) {
-          console.log("Metrics Comparison:");
-          console.log(
-            `  TP Rate: ${fmt(metrics1.tpRate)} -> ${fmt(metrics2.tpRate)} (${delta(metrics1.tpRate, metrics2.tpRate)})`,
-          );
-          console.log(
-            `  FP Rate: ${fmt(metrics1.fpRate)} -> ${fmt(metrics2.fpRate)} (${delta(metrics1.fpRate, metrics2.fpRate)})`,
-          );
-          console.log(
-            `  Avg Confidence: ${fmt(metrics1.averageConfidence)} -> ${fmt(metrics2.averageConfidence)} (${delta(metrics1.averageConfidence, metrics2.averageConfidence)})`,
-          );
-          console.log(
-            `  Total Cost: $${metrics1.costBreakdown?.total?.toFixed(4) ?? "?"} -> $${metrics2.costBreakdown?.total?.toFixed(4) ?? "?"}`,
-          );
-        }
-
-        // Compare assertions
-        const assertions1 = run1.assertionsJson ? JSON.parse(run1.assertionsJson) : null;
-        const assertions2 = run2.assertionsJson ? JSON.parse(run2.assertionsJson) : null;
-        if (assertions1 || assertions2) {
-          console.log("\nAssertion Comparison:");
-          if (assertions1?.totalAssertions != null && assertions2?.totalAssertions != null) {
-            console.log(
-              `  Pass rate: ${assertions1.passedAssertions}/${assertions1.totalAssertions} -> ${assertions2.passedAssertions}/${assertions2.totalAssertions}`,
-            );
-            console.log(
-              `  Avg quality: ${fmt(assertions1.averageQualityScore)} -> ${fmt(assertions2.averageQualityScore)}`,
-            );
-          } else {
-            console.log(`  Run 1: ${assertions1 ? JSON.stringify(assertions1) : "n/a"}`);
-            console.log(`  Run 2: ${assertions2 ? JSON.stringify(assertions2) : "n/a"}`);
-          }
-        }
-
-        // Flag regressions
-        if (metrics1 && metrics2) {
-          const regressions: string[] = [];
-          if (metrics2.tpRate < metrics1.tpRate * 0.9) regressions.push("TP rate dropped >10%");
-          if (metrics2.fpRate > metrics1.fpRate * 1.1) regressions.push("FP rate increased >10%");
-          if (metrics2.averageConfidence < metrics1.averageConfidence * 0.9)
-            regressions.push("Average confidence dropped >10%");
-          if (regressions.length > 0) {
-            console.log("\nREGRESSIONS DETECTED:");
-            for (const r of regressions) console.log(`  - ${r}`);
-          } else {
-            console.log("\nNo regressions detected");
-          }
-        }
-      } finally {
-        db.close();
-      }
+      console.warn("Warning: `kuzushi compare-runs` is deprecated. Use `kuzushi runs compare`.");
+      compareRuns(id1, id2, options.repo);
     }),
   );
 
@@ -629,16 +642,16 @@ Examples:
       }
 
       const starter = {
-        model: "anthropic:claude-sonnet-4-6",
-        agentRuntimeBackend: "claude-code",
-        busBackend: "in-process",
-        triageBatchSize: 5,
-        triageConcurrency: 2,
-        scanMode: "parallel",
-        tasks: ["semgrep", "triage"],
-        severity: ["ERROR", "WARNING"],
+        model: DEFAULTS.model,
+        agentRuntimeBackend: DEFAULTS.agentRuntimeBackend,
+        busBackend: DEFAULTS.busBackend,
+        triageBatchSize: DEFAULTS.triageBatchSize,
+        triageConcurrency: DEFAULTS.triageConcurrency,
+        scanMode: DEFAULTS.scanMode,
+        tasks: DEFAULTS.tasks,
+        severity: DEFAULTS.severity,
         excludePatterns: ["test", "tests", "node_modules", "dist", "build", ".next"],
-        verify: false,
+        verify: DEFAULTS.verify,
         qualityGates: { failOnExploitable: false },
       };
       writeFileSync(configFile, `${JSON.stringify(starter, null, 2)}\n`, "utf-8");
@@ -648,7 +661,7 @@ Examples:
         writeFileSync(
           envExample,
           [
-            "# Kuzushi agent-runtime credentials. At minimum set ANTHROPIC_API_KEY.",
+            "# Kuzushi provider credentials. Set the key for your configured provider.",
             "ANTHROPIC_API_KEY=",
             "",
             "# Optional overrides:",
@@ -665,7 +678,7 @@ Examples:
       console.log(`Initialised ${dataDir}.`);
       console.log("");
       console.log("Next steps:");
-      console.log(`  1. Set ANTHROPIC_API_KEY (copy ${envExample} to .env and fill it in).`);
+      console.log(`  1. Set a provider API key (copy ${envExample} to .env and fill it in).`);
       console.log("  2. Run `kuzushi doctor` to check your environment.");
       console.log("  3. Run `kuzushi config validate -r .` to confirm everything is wired.");
       console.log("  4. Run `kuzushi scan .` for your first scan.");
@@ -1219,6 +1232,7 @@ Examples:
   $ kuzushi runs list --status interrupted --limit 10  # only resumable runs
   $ kuzushi runs show 2026-04-15-abc -r ./repo         # details for one run
   $ kuzushi runs show 2026-04-15-abc --costs           # include cost breakdown
+  $ kuzushi runs compare last-main last-pr -r ./repo   # diff two runs
 `,
   );
 
@@ -1311,6 +1325,18 @@ runsCmd
       } finally {
         db.close();
       }
+    }),
+  );
+
+runsCmd
+  .command("compare")
+  .description("Compare metrics and assertions between two pipeline runs")
+  .argument("<id1>", "First run ID")
+  .argument("<id2>", "Second run ID")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .action(
+    wrapCliAction((id1: string, id2: string, options: { repo: string }) => {
+      compareRuns(id1, id2, options.repo);
     }),
   );
 

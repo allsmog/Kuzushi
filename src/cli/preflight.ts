@@ -10,7 +10,9 @@
 
 import { accessSync, constants, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import { parsePiAiModelSpec } from "../agent-runtime/model-spec.js";
 import type { ConfigValidationIssue } from "../config/validation.js";
+import { providerEnvVar, resolveActiveCredentials } from "../config.js";
 import type { KuzushiConfig } from "../types.js";
 
 /** Return the first directory on PATH containing an executable named `bin`, or null. */
@@ -61,8 +63,7 @@ export function runPreflight(config: KuzushiConfig, repoRoot: string): Preflight
   const checks: PreflightCheck[] = [];
 
   // ── Agent runtime credentials ──
-  const backend = config.agentRuntimeBackend ?? "claude-code";
-  const credCheck = checkAgentRuntimeCredentials(backend);
+  const credCheck = checkAgentRuntimeCredentials(config);
   checks.push(credCheck.check);
   if (credCheck.issue) issues.push(credCheck.issue);
 
@@ -136,12 +137,33 @@ const SCANNER_BINARIES: Array<{ task: string; bin: string; hint: string }> = [
   },
 ];
 
-function checkAgentRuntimeCredentials(backend: string): {
+function checkAgentRuntimeCredentials(config: KuzushiConfig): {
   check: PreflightCheck;
   issue: ConfigValidationIssue | null;
 } {
-  // Non-hosted or user-managed — nothing for us to check.
-  if (backend !== "claude-code" && backend !== "anthropic" && backend !== "pi-ai") {
+  const backend = config.agentRuntimeBackend ?? "pi-ai";
+  const savedCredentials = resolveActiveCredentials(config);
+  if (savedCredentials.apiKey?.trim()) {
+    return {
+      check: {
+        name: "credentials",
+        status: "ok",
+        detail: `saved ${backend} provider credentials are configured`,
+      },
+      issue: null,
+    };
+  }
+
+  let providerId = "anthropic";
+  if (backend === "pi-ai") {
+    try {
+      providerId = parsePiAiModelSpec(config.model ?? "").provider;
+    } catch {
+      providerId = "";
+    }
+  } else if (backend === "claude") {
+    providerId = "anthropic";
+  } else {
     return {
       check: {
         name: "credentials",
@@ -152,13 +174,25 @@ function checkAgentRuntimeCredentials(backend: string): {
     };
   }
 
-  const envKey = process.env.ANTHROPIC_API_KEY;
+  const envVar = providerId ? providerEnvVar(providerId) : undefined;
+  if (!envVar) {
+    return {
+      check: {
+        name: "credentials",
+        status: "skipped",
+        detail: `provider "${providerId || "unknown"}" does not require a known API-key env var`,
+      },
+      issue: null,
+    };
+  }
+
+  const envKey = process.env[envVar];
   if (envKey && envKey.trim().length > 0) {
     return {
       check: {
         name: "credentials",
         status: "ok",
-        detail: `ANTHROPIC_API_KEY set (${envKey.length} chars)`,
+        detail: `${envVar} set`,
       },
       issue: null,
     };
@@ -168,14 +202,13 @@ function checkAgentRuntimeCredentials(backend: string): {
     check: {
       name: "credentials",
       status: "missing",
-      detail:
-        "ANTHROPIC_API_KEY is not set. Export it in your shell or pass --api-key at invocation time.",
+      detail: `${envVar} is not set and no saved provider credential was found.`,
     },
     issue: {
       severity: "error",
       path: "credentials",
-      message: "ANTHROPIC_API_KEY is not set.",
-      hint: "Export ANTHROPIC_API_KEY in your shell or pass --api-key to the scan/shell/run command.",
+      message: `${envVar} is not set.`,
+      hint: `Run \`kuzushi auth\`, export ${envVar}, or pass --api-key to the scan/shell/run command.`,
     },
   };
 }

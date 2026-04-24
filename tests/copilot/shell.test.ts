@@ -443,17 +443,16 @@ describe("local shell commands", () => {
     expect(__shellInternals.reconcileShellView("finding", null)).toBe("catalog");
     expect(__shellInternals.reconcileShellView("tune", null)).toBe("catalog");
 
-    // Threat-* + diff-since are intentionally top-level views that can be
-    // entered without a focused module — don't clobber them.
-    expect(__shellInternals.reconcileShellView("threat-dfd", null)).toBe("threat-dfd");
-    expect(__shellInternals.reconcileShellView("diff-since", null)).toBe("diff-since");
+    // Threats is an intentionally top-level view that can be entered without
+    // a focused module — don't clobber it.
+    expect(__shellInternals.reconcileShellView("threats", null)).toBe("threats");
 
     // And don't demote an already-correct module view.
     expect(__shellInternals.reconcileShellView("findings", "sast")).toBe("findings");
     expect(__shellInternals.reconcileShellView("module", "sast")).toBe("module");
   });
 
-  it("/back returns to module home from threat and diff views", async () => {
+  it("/back returns to module home from threat and findings views", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const ctx = { focusedModule: "sast" };
@@ -464,14 +463,16 @@ describe("local shell commands", () => {
 
     const fromThreat = __shellInternals.handleLocalCommand("/back", core, opts, ctx, {
       ...baseState,
-      shellView: "threat-summary",
+      shellView: "threats",
+      threatTab: "summary",
     });
     expect(fromThreat?.output).toBe("Back to module home.");
     expect(fromThreat?.shellStateUpdater?.(baseState).shellView).toBe("module");
 
     const fromDiff = __shellInternals.handleLocalCommand("/back", core, opts, ctx, {
       ...baseState,
-      shellView: "diff-since",
+      shellView: "findings",
+      findingScope: { kind: "changed-files", ref: "main", repoRoot: "/tmp", changedFiles: [] },
     });
     expect(fromDiff?.output).toBe("Back to module home.");
     expect(fromDiff?.shellStateUpdater?.(baseState).shellView).toBe("module");
@@ -788,7 +789,7 @@ describe("context system", () => {
     const opts = createShellOptions();
     const shellState = {
       ...createShellState(module.tools.map((t) => t.name)),
-      shellView: "diff-since" as const,
+      shellView: "findings" as const,
       diffSince: {
         ref: "main",
         repoRoot: "/repo",
@@ -813,7 +814,9 @@ describe("context system", () => {
 
     const result = __shellInternals.handleLocalCommand("/threats", core, opts, ctx, shellState);
     expect(result?.output).toContain("threat summary");
-    expect(result?.shellStateUpdater?.(shellState).shellView).toBe("threat-summary");
+    const nextShell = result?.shellStateUpdater?.(shellState);
+    expect(nextShell?.shellView).toBe("threats");
+    expect(nextShell?.threatTab).toBe("summary");
     expect(result?.asyncExecute).toBeTypeOf("function");
   });
 

@@ -29,16 +29,16 @@ export const CONFIG_KEY_DOCS: ConfigKeyDoc[] = [
     key: "agentRuntimeBackend",
     type: "enum",
     summary: "Which agent runtime drives LLM calls.",
-    default: "claude-code",
-    values: ["claude-code", "anthropic", "pi-ai", "in-process"],
+    default: "pi-ai",
+    values: ["pi-ai", "claude"],
   },
   {
     key: "agentRuntimeConfig.apiKey",
     type: "string (sensitive)",
-    summary: "Plaintext API key. Strongly discouraged — use env vars instead.",
-    envVar: "ANTHROPIC_API_KEY",
+    summary: "Plaintext provider API key. Strongly discouraged — use env vars or /auth instead.",
+    envVar: "provider-specific, such as ANTHROPIC_API_KEY or OPENAI_API_KEY",
     details:
-      "`kuzushi config set agentRuntimeConfig.apiKey ...` triggers a plaintext warning. Prefer ANTHROPIC_API_KEY or pass --api-key per invocation.",
+      "`kuzushi config set agentRuntimeConfig.apiKey ...` triggers a plaintext warning. Prefer /auth, provider env vars, or pass --api-key per invocation.",
   },
   {
     key: "busBackend",
@@ -89,7 +89,7 @@ export const CONFIG_KEY_DOCS: ConfigKeyDoc[] = [
     key: "triageConcurrency",
     type: "number",
     summary: "Max concurrent triage workers.",
-    default: "2",
+    default: "5",
   },
   {
     key: "scanMode",

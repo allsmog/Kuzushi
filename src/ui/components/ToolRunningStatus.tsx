@@ -69,8 +69,12 @@ function ToolRunningStatusImpl({ tool }: ToolRunningStatusProps): React.ReactEle
   // yellow instead of cyan. Otherwise stays `running` (cyan pulse).
   const label = tool.displayName ?? tool.name;
   const aborting = tool.abortStatus === "aborting";
+  const backgrounded = tool.backgrounded || Boolean(tool.backgroundJobId);
   const dotStatus = aborting ? "warn" : isStale ? "warn" : "running";
-  const phase = tool.phase ?? tool.subLabel;
+  const phase =
+    tool.phase ??
+    tool.subLabel ??
+    (tool.step && tool.total ? `phase ${tool.step}/${tool.total}` : undefined);
   const tail = (tool.storyTail ?? []).slice(0, 3);
 
   return (
@@ -81,6 +85,7 @@ function ToolRunningStatusImpl({ tool }: ToolRunningStatusProps): React.ReactEle
         </Gutter>
         <Text>{aborting || isStale ? tokens.warn(label) : tokens.secondary(label)}</Text>
         {phase ? <Text>{tokens.muted(` · ${phase}`)}</Text> : null}
+        {backgrounded ? <Text>{tokens.muted(" · background")}</Text> : null}
         {aborting ? <Text>{tokens.warn(" · interrupting")}</Text> : null}
         <ElapsedReadout tool={tool} isStale={isStale} />
       </Box>

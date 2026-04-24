@@ -26,7 +26,11 @@ import { createCodeqlModule } from "../modules/codeql/codeql.js";
 import { createContextModule } from "../modules/context/context.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
 import { createFindingsModule } from "../modules/findings/findings.js";
-import { formatToolInputValidationError, validateToolInput } from "../modules/input-validation.js";
+import {
+  formatToolInputValidationError,
+  normalizeToolInputKeys,
+  validateToolInput,
+} from "../modules/input-validation.js";
 import { readHostKuzushiVersion } from "../modules/loader.js";
 import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
 import { createPatchModule } from "../modules/patch/patch.js";
@@ -286,7 +290,8 @@ export class CopilotCore {
 
     const { tool } = resolved;
 
-    const validation = validateToolInput(input, tool.inputSchema);
+    const normalizedInput = normalizeToolInputKeys(input, tool.inputSchema);
+    const validation = validateToolInput(normalizedInput, tool.inputSchema);
     if (!validation.ok) {
       const detail = formatToolInputValidationError(qualifiedName, validation.issues);
       return problemToolResult(
@@ -306,8 +311,8 @@ export class CopilotCore {
 
     // Governance enforcement — check scope, budget, tier before execution
     const inputRecord =
-      input && typeof input === "object" && !Array.isArray(input)
-        ? (input as Record<string, unknown>)
+      normalizedInput && typeof normalizedInput === "object" && !Array.isArray(normalizedInput)
+        ? (normalizedInput as Record<string, unknown>)
         : {};
     const target = ctxOverrides?.target ?? (inputRecord.target as string | undefined);
 
@@ -441,11 +446,11 @@ export class CopilotCore {
     // can subscribe to its own tool calls in init(). Other modules can
     // observe too; the bus broadcasts. See src/bus/module-events.ts for
     // the full well-known event list.
-    scope?.emit("tool:before_run", { qualifiedName, input });
+    scope?.emit("tool:before_run", { qualifiedName, input: normalizedInput });
 
     let result: ToolResult;
     try {
-      result = await tool.execute(input, ctx);
+      result = await tool.execute(normalizedInput, ctx);
     } catch (err) {
       scope?.emit("tool:on_error", {
         qualifiedName,

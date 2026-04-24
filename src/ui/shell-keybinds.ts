@@ -85,13 +85,7 @@ export interface KeybindInputs {
 
 /** True for any of the Phase C threat-model sub-views. */
 export function isThreatShellView(view: ShellState["shellView"] | undefined): boolean {
-  return (
-    view === "threat-dfd" ||
-    view === "threat-stride" ||
-    view === "threat-stories" ||
-    view === "threat-scope" ||
-    view === "threat-summary"
-  );
+  return view === "threats";
 }
 
 /**
@@ -123,7 +117,7 @@ function isCtrlChord(char: string, key: Keystroke["key"], letter: string): boole
  * Resolve a keystroke into an action, applying the shell's dispatch
  * priority:
  *
- *   1. Ctrl+C / Ctrl+D — abort in-flight work, else arm/commit exit.
+ *   1. Ctrl+C / Ctrl+D — commit an armed exit, abort in-flight work, else arm.
  *   2. Plan-pending overlay — y / n / Esc apply / discard / cancel.
  *   3. Threat-view 1..5 — cycle views when buffer is empty.
  *   4. Findings j/k/g/G/arrow/PgUp/PgDown — drive cursor when buffer is empty.
@@ -141,12 +135,12 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
 
   // --- 1. Ctrl+C / Ctrl+D ---------------------------------------------------
   if (isCtrlChord(char, key, "c") || isCtrlChord(char, key, "d")) {
-    if (shell.processing) {
-      return { type: "abort-inflight" };
-    }
     const armedAt = state.ctrlCArmedAt ?? 0;
     if (armedAt > 0 && now - armedAt <= CTRL_C_ARM_WINDOW_MS) {
       return { type: "exit" };
+    }
+    if (shell.processing) {
+      return { type: "abort-inflight" };
     }
     return { type: "arm-exit", at: now };
   }

@@ -112,6 +112,31 @@ describe("task story shell integration helpers", () => {
     expect(next.history).toEqual(shell.history);
   });
 
+  it("suppresses story events from superseded turns", () => {
+    const store = seedShellState();
+    const shell = {
+      ...store.getState().shell!,
+      taskStory: {
+        activeTurnId: "turn-new",
+        activeRunIds: ["run-new"],
+        startedAt: 1,
+        events: [],
+      },
+    };
+    const event = {
+      id: "story-old",
+      kind: "activity" as const,
+      status: "running" as const,
+      importance: "secondary" as const,
+      message: "late old event",
+      timestamp: 2,
+      turnId: "turn-old",
+      runId: "run-old",
+    };
+
+    expect(applyStoryEventToShell(shell, event)).toBe(shell);
+  });
+
   it("marks finalized aborted tool calls with abort status", () => {
     const store = seedShellState();
     store.update({

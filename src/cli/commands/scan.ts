@@ -73,8 +73,8 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
       if (outcome.model && !opts.model) {
         opts.model = outcome.model;
       }
-    } else {
-      // Returning user: show config confirmation
+    } else if (opts.confirmConfig === true) {
+      // Returning user: only show config confirmation when explicitly requested.
       const resolvedConfig = loadConfig(repoRoot, {
         trustProjectConfig: opts.trustRepoConfig === true,
       });
@@ -100,14 +100,18 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     }
   }
 
-  // Operator context intake — if persisted context or threat model exists, offer review
-  if (!opts.resume && process.stdout.isTTY) {
+  // Operator context intake is opt-in so the default TTY scan path gets to value quickly.
+  if (
+    !opts.resume &&
+    process.stdout.isTTY &&
+    (opts.reviewContext === true || opts.reviewThreatModel === true)
+  ) {
     const { loadOperatorScanContext } = await import("../../operator-context.js");
     const { loadPersistentThreatModel } = await import("../../threat-model-renderer.js");
     const { runContextIntake, runThreatModelEditor } = await import("../../ui/setup.js");
 
     const existingContext = loadOperatorScanContext(repoRoot);
-    if (existingContext) {
+    if (opts.reviewContext === true && existingContext) {
       const intakeOutcome = await runContextIntake(uiStore, existingContext, repoName, repoRoot);
       if (intakeOutcome.action === "cancel") {
         resetTerminalOutput();
@@ -117,7 +121,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     }
 
     const existingThreatModel = loadPersistentThreatModel(repoRoot);
-    if (existingThreatModel) {
+    if (opts.reviewThreatModel === true && existingThreatModel) {
       const tmOutcome = await runThreatModelEditor(
         uiStore,
         existingThreatModel,

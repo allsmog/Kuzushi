@@ -404,12 +404,12 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       }
       if (stats.deadLetterCount && stats.deadLetterCount > 0) {
         console.error(
-          `\n${stats.deadLetterCount} finding(s) failed all triage retries. Run \`kuzushi explain <fingerprint>\` for details.`,
+          `\n${stats.deadLetterCount} finding(s) failed all triage retries. Re-run with \`--resume\` after fixing the blocker, or use \`--review-findings\` to inspect completed findings.`,
         );
       }
     }
 
-    if (process.stdout.isTTY && reportMode === "full") {
+    if (process.stdout.isTTY && reportMode === "full" && params.opts.reviewFindings === true) {
       try {
         const { runInteractiveReview } = await import("../../ui/review.js");
         const reviewResult = await runInteractiveReview(

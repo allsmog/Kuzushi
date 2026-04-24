@@ -31,12 +31,79 @@ export function validateToolInput(input: unknown, schema: JSONSchema): ToolInput
   return { ok: issues.length === 0, issues };
 }
 
+export function normalizeToolInputKeys(input: unknown, schema: JSONSchema): unknown {
+  return normalizeValueKeys(input, schema, new WeakMap<object, unknown>());
+}
+
 export function formatToolInputValidationError(
   qualifiedName: string,
   issues: ReadonlyArray<ToolInputValidationIssue>,
 ): string {
   const lines = issues.map((issue) => `  - ${issue.path}: ${issue.message}`);
   return `Invalid input for tool "${qualifiedName}":\n${lines.join("\n")}`;
+}
+
+function normalizeValueKeys(
+  value: unknown,
+  schema: JSONSchema,
+  seen: WeakMap<object, unknown>,
+): unknown {
+  if (Array.isArray(value)) {
+    const items = schema.items;
+    if (!isSchemaRecord(items)) return value;
+    return value.map((item) => normalizeValueKeys(item, items, seen));
+  }
+  if (!isPlainRecord(value)) return value;
+  if (seen.has(value)) return seen.get(value);
+
+  const properties = readProperties(schema);
+  const additional = schema.additionalProperties;
+  const hasObjectShape =
+    Object.keys(properties).length > 0 ||
+    schema.required !== undefined ||
+    schema.additionalProperties !== undefined;
+  if (!hasObjectShape) return value;
+
+  const out: Record<string, unknown> = {};
+  seen.set(value, out);
+
+  const canonicalByLower = new Map<string, string | null>();
+  for (const key of Object.keys(properties)) {
+    const lower = key.toLowerCase();
+    const previous = canonicalByLower.get(lower);
+    canonicalByLower.set(lower, previous === undefined ? key : previous === key ? key : null);
+  }
+  const exactKeysPresent = new Set(
+    Object.keys(value).filter((key) => Object.hasOwn(properties, key)),
+  );
+
+  for (const [key, child] of Object.entries(value)) {
+    if (DANGEROUS_KEYS.has(key)) {
+      out[key] = child;
+      continue;
+    }
+
+    let outputKey = key;
+    let childSchema = Object.hasOwn(properties, key) ? properties[key] : undefined;
+    if (!childSchema) {
+      const canonical = canonicalByLower.get(key.toLowerCase());
+      if (canonical && Object.hasOwn(properties, canonical)) {
+        if (exactKeysPresent.has(canonical)) continue;
+        outputKey = canonical;
+        childSchema = properties[canonical];
+      }
+    }
+
+    if (childSchema) {
+      out[outputKey] = normalizeValueKeys(child, childSchema, seen);
+    } else if (isSchemaRecord(additional)) {
+      out[outputKey] = normalizeValueKeys(child, additional, seen);
+    } else {
+      out[outputKey] = child;
+    }
+  }
+
+  return out;
 }
 
 function validateValue(
