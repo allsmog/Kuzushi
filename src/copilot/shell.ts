@@ -4376,7 +4376,8 @@ function handleBackCommand(
     currentView === "findings" ||
     currentView === "tune" ||
     currentView === "task-story" ||
-    currentView === "threats"
+    currentView === "threats" ||
+    currentView === "context-build"
   ) {
     return {
       shellStateUpdater: (shell) => ({

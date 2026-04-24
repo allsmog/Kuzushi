@@ -23,6 +23,65 @@ describe("deriveNavigation", () => {
     expect(nav.status).toContain("idle");
   });
 
+  it("derives titles for threat tabs from the current threatTab", () => {
+    const nav = deriveNavigation({
+      mode: "shell",
+      phase: "idle",
+      repoName: "repo",
+      shell: {
+        focusedModule: null,
+        shellView: "threats",
+        threatTab: "dfd",
+        processing: false,
+        workspace: "demo",
+      } as ShellState,
+    });
+
+    expect(nav.title).toBe("data flow diagram");
+    expect(nav.breadcrumbs).toEqual(["shell", "threats"]);
+  });
+
+  it("defaults bare threat navigation to the summary title", () => {
+    const nav = deriveNavigation({
+      mode: "shell",
+      phase: "idle",
+      repoName: "repo",
+      shell: {
+        focusedModule: null,
+        shellView: "threats",
+        processing: false,
+      } as ShellState,
+    });
+
+    expect(nav.title).toBe("threat summary");
+  });
+
+  it("derives titles for context build and task story views", () => {
+    const contextNav = deriveNavigation({
+      mode: "shell",
+      phase: "idle",
+      repoName: "repo",
+      shell: {
+        focusedModule: null,
+        shellView: "context-build",
+        processing: false,
+      } as ShellState,
+    });
+    const storyNav = deriveNavigation({
+      mode: "shell",
+      phase: "idle",
+      repoName: "repo",
+      shell: {
+        focusedModule: null,
+        shellView: "task-story",
+        processing: false,
+      } as ShellState,
+    });
+
+    expect(contextNav.title).toBe("context build");
+    expect(storyNav.title).toBe("task details");
+  });
+
   it("derives non-shell title from mode", () => {
     const nav = deriveNavigation({
       mode: "running",

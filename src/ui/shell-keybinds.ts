@@ -65,8 +65,10 @@ export type KeybindAction =
   | { type: "dispatch"; command: string }
   /** Set `shell.findingCursor` to the given (already-clamped) index. */
   | { type: "set-finding-cursor"; cursor: number }
-  /** Open the active/latest task story details view. */
-  | { type: "open-story" }
+  /** Open or close the active/latest task story details view. */
+  | { type: "toggle-story"; nextView: ShellState["shellView"] }
+  /** Toggle the `/context build` tail log between compact and expanded. */
+  | { type: "toggle-context-tail" }
   /** Clear the in-progress input buffer. */
   | { type: "clear-input" };
 
@@ -113,16 +115,24 @@ function isCtrlChord(char: string, key: Keystroke["key"], letter: string): boole
   return char === lower || char === lower.toUpperCase() || char === ctrlCode;
 }
 
+export function resolveTaskStoryToggleView(
+  shell: Pick<ShellState, "shellView" | "focusedModule">,
+): ShellState["shellView"] {
+  if (shell.shellView !== "task-story") return "task-story";
+  return shell.focusedModule ? "module" : "catalog";
+}
+
 /**
  * Resolve a keystroke into an action, applying the shell's dispatch
  * priority:
  *
  *   1. Ctrl+C / Ctrl+D — commit an armed exit, abort in-flight work, else arm.
  *   2. Plan-pending overlay — y / n / Esc apply / discard / cancel.
- *   3. Threat-view 1..5 — cycle views when buffer is empty.
- *   4. Findings j/k/g/G/arrow/PgUp/PgDown — drive cursor when buffer is empty.
- *   5. `q` with empty buffer on a backable view — /back.
- *   6. `Esc` — clear buffer if non-empty, else /back on backable views.
+ *   3. Context-build L/q — expand the live tail or abort/back out.
+ *   4. Threat-view 1..5 — cycle views when buffer is empty.
+ *   5. Findings j/k/g/G/arrow/PgUp/PgDown — drive cursor when buffer is empty.
+ *   6. `q` with empty buffer on a backable view — /back.
+ *   7. `Esc` — clear buffer if non-empty, else /back on backable views.
  *
  * Everything else returns `{ type: "none" }` so the component handles it
  * locally (typing, backspace, Enter submit, Tab completion, history).
@@ -146,13 +156,22 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
   }
 
   if (isCtrlChord(char, key, "o")) {
-    return { type: "open-story" };
+    return { type: "toggle-story", nextView: resolveTaskStoryToggleView(shell) };
   }
 
   // If we got here with an armed timestamp, any other keystroke should
   // disarm — the component handles the store update alongside its other
   // state mutations. We still compute the real action below.
   // (Reporting the disarm is the component's concern.)
+
+  if (shell.shellView === "context-build" && input.length === 0) {
+    if (char === "L") return { type: "toggle-context-tail" };
+    if (char === "q") {
+      return shell.processing || shell.contextBuild?.status === "running"
+        ? { type: "abort-inflight" }
+        : { type: "dispatch", command: "/back" };
+    }
+  }
 
   if (shell.processing) return { type: "none" };
 
