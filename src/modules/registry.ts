@@ -11,6 +11,7 @@
 import type { TaskRegistry } from "../agents/registry.js";
 import type { KnowledgeRegistry } from "../knowledge/types.js";
 import { registerDagToolsInTaskRegistry } from "./dag-bridge.js";
+import { installDagToolExecuteWrappers } from "./dag-execute.js";
 import { ModuleLoadError } from "./errors.js";
 import {
   type CopilotModule,
@@ -104,6 +105,7 @@ export class ModuleRegistry {
       if (opts?.taskRegistry) {
         registerDagToolsInTaskRegistry(opts.taskRegistry, mod);
       }
+      installDagToolExecuteWrappers(mod);
 
       // Run per-tool init hooks. Scanner-plugin-style tools (semgrep, codeql)
       // use this to resolve rule paths from `moduleConfig` once, before any

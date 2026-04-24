@@ -26,10 +26,16 @@ import { createCodeqlModule } from "../modules/codeql/codeql.js";
 import { createContextModule } from "../modules/context/context.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
 import { createFindingsModule } from "../modules/findings/findings.js";
+import { formatToolInputValidationError, validateToolInput } from "../modules/input-validation.js";
 import { readHostKuzushiVersion } from "../modules/loader.js";
 import { createNDayDiffHunterModule } from "../modules/n-day-diff-hunter.js";
 import { createPatchModule } from "../modules/patch/patch.js";
 import { createPipelineModule } from "../modules/pipeline/pipeline.js";
+import {
+  createProblemDetails,
+  ProblemCode,
+  problemToolResult,
+} from "../modules/problem-details.js";
 import { createCorePromptArmorModule } from "../modules/prompt-armor/prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/randori/randori.js";
 import { createReconModule } from "../modules/recon/core-recon.js";
@@ -266,13 +272,37 @@ export class CopilotCore {
   ): Promise<ToolResult> {
     const resolved = this.registry.resolveTool(qualifiedName);
     if (!resolved) {
-      return {
-        ok: false,
-        output: `Unknown tool: "${qualifiedName}". Use "module list" to see available tools.`,
-      };
+      const detail = `Unknown tool: "${qualifiedName}". Use "module list" to see available tools.`;
+      return problemToolResult(
+        createProblemDetails({
+          code: ProblemCode.ToolNotFound,
+          title: "Unknown tool",
+          status: 404,
+          detail,
+          instance: qualifiedName,
+        }),
+      );
     }
 
     const { tool } = resolved;
+
+    const validation = validateToolInput(input, tool.inputSchema);
+    if (!validation.ok) {
+      const detail = formatToolInputValidationError(qualifiedName, validation.issues);
+      return problemToolResult(
+        createProblemDetails({
+          code: ProblemCode.InputValidationFailed,
+          title: "Tool input validation failed",
+          status: 400,
+          detail,
+          instance: qualifiedName,
+          errors: validation.issues.map((issue) => ({
+            path: issue.path,
+            message: issue.message,
+          })),
+        }),
+      );
+    }
 
     // Governance enforcement — check scope, budget, tier before execution
     const inputRecord =
@@ -302,7 +332,15 @@ export class CopilotCore {
             }),
           );
         }
-        return { ok: false, output: `Blocked by governance: ${check.reason}` };
+        return problemToolResult(
+          createProblemDetails({
+            code: ProblemCode.GovernanceBlocked,
+            title: "Governance policy blocked tool execution",
+            status: 403,
+            detail: `Blocked by governance: ${check.reason}`,
+            instance: qualifiedName,
+          }),
+        );
       }
     }
 

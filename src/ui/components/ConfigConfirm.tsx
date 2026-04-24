@@ -11,19 +11,11 @@ import type React from "react";
 import { boxFooter, boxHeader, formatCost } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
+import type { ConfigConfirmData } from "../preflight-types.js";
 import { Table } from "../primitives/Table.js";
 import { SPACING, tokens } from "../tokens.js";
 
-export interface ConfigConfirmData {
-  model: string;
-  tasks: string[];
-  severity?: string[];
-  concurrency?: number;
-  verify?: boolean;
-  pocHarness?: boolean;
-  preset?: string;
-  budget?: number;
-}
+export type { ConfigConfirmData } from "../preflight-types.js";
 
 interface ConfigConfirmProps {
   config: ConfigConfirmData;

@@ -49,7 +49,7 @@ import type { ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import { defineDagTool, defineModule } from "../define.js";
 import { resolvePromptValue } from "../sast/prompts.js";
-import { targetProperty } from "../sast/shared.js";
+import { targetProperty } from "../sast/schema-fragments.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 import { requireDag } from "../types.js";
 

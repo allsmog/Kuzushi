@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseToolArgs } from "../../src/copilot/run.js";
+import { parseToolArgs, parseToolInputJson } from "../../src/copilot/run.js";
+import { MAX_TOOL_INPUT_BYTES } from "../../src/modules/input-validation.js";
 
 describe("parseToolArgs", () => {
   it("treats bare positional as target", () => {
@@ -45,5 +46,21 @@ describe("parseToolArgs", () => {
 
   it("only uses first bare positional as target", () => {
     expect(parseToolArgs(["./repo", "./other"])).toEqual({ target: "./repo" });
+  });
+});
+
+describe("parseToolInputJson", () => {
+  it("parses JSON object payloads", () => {
+    expect(parseToolInputJson('{"target":"./repo"}')).toEqual({ target: "./repo" });
+  });
+
+  it("rejects arrays and scalars", () => {
+    expect(() => parseToolInputJson("[]")).toThrow("Tool input must be a JSON object");
+    expect(() => parseToolInputJson('"x"')).toThrow("Tool input must be a JSON object");
+  });
+
+  it("rejects oversized JSON before parsing", () => {
+    const raw = `{"target":"${"x".repeat(MAX_TOOL_INPUT_BYTES + 1)}"}`;
+    expect(() => parseToolInputJson(raw)).toThrow("Tool input exceeds");
   });
 });

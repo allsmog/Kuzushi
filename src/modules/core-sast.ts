@@ -22,10 +22,8 @@
  */
 
 import { defineModule, defineTool } from "./define.js";
-import {
-  executeSastPipeline,
-  formatContextSummary as sharedFormatContextSummary,
-} from "./sast/shared.js";
+import { executeSastPipeline } from "./sast/pipeline-runner.js";
+import { formatContextSummary as sharedFormatContextSummary } from "./sast/shared.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "./types.js";
 
 // Re-export so external callers (src/copilot/shell.ts) keep working.

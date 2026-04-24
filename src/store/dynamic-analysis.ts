@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { DYNAMIC_ANALYSIS_STATUSES, isOneOf } from "../contracts.js";
 import type { DynamicAnalysisRun, DynamicAnalysisStatus } from "../types.js";
 import { safeJsonParse, safeJsonStringify } from "../utils/safe-json.js";
 
@@ -126,13 +127,5 @@ function rowToDynamicAnalysisRun(row: DynamicAnalysisRunRow): DynamicAnalysisRun
 }
 
 function parseDynamicAnalysisStatus(raw: string | null): DynamicAnalysisStatus | undefined {
-  switch (raw) {
-    case "confirmed":
-    case "interesting":
-    case "rejected":
-    case "error":
-      return raw;
-    default:
-      return undefined;
-  }
+  return isOneOf(DYNAMIC_ANALYSIS_STATUSES, raw) ? raw : undefined;
 }

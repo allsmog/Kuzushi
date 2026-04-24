@@ -8,11 +8,12 @@
  */
 import { Box, Text, useStdout } from "ink";
 import type { ReactNode } from "react";
+import { type Align, padCell, truncateEnd, truncateMiddle, visibleWidth } from "../format.js";
 import { icons } from "../icons.js";
 import { resolveTerminalColumns } from "../terminal.js";
 import { tokens } from "../tokens.js";
 
-export type TableAlign = "left" | "right" | "center";
+export type TableAlign = Align;
 export type TableTruncate = "end" | "middle" | "none";
 
 export interface TableColumn<Row> {
@@ -33,55 +34,6 @@ export interface TableProps<Row> {
   maxWidth?: number;
   gap?: number;
   emptyMessage?: string;
-}
-
-// biome-ignore lint/suspicious/noControlCharactersInRegex: ESC/CSI bytes are intrinsic to ANSI escape detection
-const ANSI_RE = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
-
-function stripAnsi(s: string): string {
-  return s.replace(ANSI_RE, "");
-}
-
-function visibleLen(s: string): number {
-  return stripAnsi(s).length;
-}
-
-function truncateEnd(s: string, width: number, ellipsis = "\u2026"): string {
-  if (visibleLen(s) <= width) return s;
-  if (width <= ellipsis.length) return ellipsis.slice(0, width);
-  const plain = stripAnsi(s);
-  return plain.slice(0, width - ellipsis.length) + ellipsis;
-}
-
-function truncateMiddle(s: string, width: number, ellipsis = "\u2026"): string {
-  const plain = stripAnsi(s);
-  if (plain.length <= width) return s;
-  const slash = plain.lastIndexOf("/");
-  if (slash >= 0 && plain.length - slash <= width - ellipsis.length - 1) {
-    const basename = plain.slice(slash);
-    const prefixBudget = width - ellipsis.length - basename.length;
-    if (prefixBudget > 0) {
-      return plain.slice(0, prefixBudget) + ellipsis + basename;
-    }
-    return ellipsis + basename.slice(-(width - ellipsis.length));
-  }
-  if (width <= ellipsis.length) return ellipsis.slice(0, width);
-  const head = Math.ceil((width - ellipsis.length) / 2);
-  const tail = width - ellipsis.length - head;
-  return plain.slice(0, head) + ellipsis + plain.slice(plain.length - tail);
-}
-
-function padCell(s: string, width: number, align: TableAlign): string {
-  const vw = visibleLen(s);
-  if (vw >= width) return s;
-  const gap = width - vw;
-  if (align === "right") return " ".repeat(gap) + s;
-  if (align === "center") {
-    const left = Math.floor(gap / 2);
-    const right = gap - left;
-    return " ".repeat(left) + s + " ".repeat(right);
-  }
-  return s + " ".repeat(gap);
 }
 
 function computeWidths<Row>(
@@ -119,7 +71,7 @@ export function Table<Row>(props: TableProps<Row>): JSX.Element {
   const renderCell = (raw: string, col: TableColumn<Row>, width: number) => {
     const trunc = col.truncate ?? "end";
     let cell = raw;
-    if (visibleLen(cell) > width) {
+    if (visibleWidth(cell) > width) {
       if (trunc === "middle") cell = truncateMiddle(cell, width);
       else if (trunc === "end") cell = truncateEnd(cell, width);
     }

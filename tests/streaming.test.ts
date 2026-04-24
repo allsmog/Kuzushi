@@ -3,12 +3,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { MessageBus } from "../src/bus/types.js";
 import { startStreamingServer } from "../src/streaming.js";
 
+type BusHandler = (event: any) => unknown;
+
 /** Minimal mock bus for testing. */
 function createMockBus(): MessageBus & {
-  handlers: Map<string, Function[]>;
+  handlers: Map<string, BusHandler[]>;
   emit: (type: string, event: any) => Promise<void>;
 } {
-  const handlers = new Map<string, Function[]>();
+  const handlers = new Map<string, BusHandler[]>();
 
   return {
     handlers,
@@ -16,7 +18,7 @@ function createMockBus(): MessageBus & {
       const fns = handlers.get(event.type) ?? [];
       for (const fn of fns) await fn(event);
     },
-    subscribe(eventType: string, handler: Function) {
+    subscribe(eventType: string, handler: BusHandler) {
       if (!handlers.has(eventType)) handlers.set(eventType, []);
       handlers.get(eventType)!.push(handler);
     },
@@ -170,6 +172,33 @@ describe("Streaming Server", () => {
     expect(triageResult.confidence).toBe(0.92);
   });
 
+  it("keeps the legacy root SSE route but marks it deprecated", async () => {
+    const bus = createMockBus();
+    const streaming = startStreamingServer(bus, 0);
+    cleanup = streaming.close;
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const result = await new Promise<{ status: number; deprecation?: string; link?: string }>(
+      (resolve, reject) => {
+        const req = http.get(`http://localhost:${streaming.port}/`, (res) => {
+          resolve({
+            status: res.statusCode ?? 0,
+            deprecation: res.headers.deprecation as string | undefined,
+            link: res.headers.link as string | undefined,
+          });
+          req.destroy();
+        });
+        req.on("error", reject);
+      },
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.deprecation).toBe("true");
+    expect(result.link).toContain("</events>");
+    expect(result.link).toContain('rel="successor-version"');
+  });
+
   it("returns 404 for unknown paths", async () => {
     const bus = createMockBus();
     const streaming = startStreamingServer(bus, 0);
@@ -177,14 +206,66 @@ describe("Streaming Server", () => {
 
     await new Promise((r) => setTimeout(r, 100));
 
-    const status = await new Promise<number>((resolve, reject) => {
-      http
-        .get(`http://localhost:${streaming.port}/unknown`, (res) => {
-          resolve(res.statusCode ?? 0);
-        })
-        .on("error", reject);
-    });
+    const response = await new Promise<{ status: number; contentType: string; body: string }>(
+      (resolve, reject) => {
+        http
+          .get(`http://localhost:${streaming.port}/unknown`, (res) => {
+            let body = "";
+            res.on("data", (chunk) => {
+              body += chunk;
+            });
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                contentType: res.headers["content-type"] ?? "",
+                body,
+              }),
+            );
+          })
+          .on("error", reject);
+      },
+    );
 
-    expect(status).toBe(404);
+    expect(response.status).toBe(404);
+    expect(response.contentType).toBe("application/problem+json");
+    expect(JSON.parse(response.body)).toEqual({
+      type: "https://kuzushi.dev/problems/not_found",
+      title: "Not Found",
+      status: 404,
+      detail: "No streaming endpoint exists for GET /unknown.",
+      code: "not_found",
+      category: "validation",
+      retryable: false,
+      instance: "/unknown",
+    });
+  });
+
+  it("streams pipeline errors with a standardized problem object", async () => {
+    const bus = createMockBus();
+    const streaming = startStreamingServer(bus, 0);
+    cleanup = streaming.close;
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const eventsPromise = fetchSSE(streaming.port, 2, 3_000);
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    await bus.publish(makeEvent("pipeline:error", { error: "scan failed", fatal: true }));
+
+    const events = await eventsPromise;
+    const pipelineError = JSON.parse(events[1]!);
+
+    expect(pipelineError.error).toBe("scan failed");
+    expect(pipelineError.fatal).toBe(true);
+    expect(pipelineError.problem).toEqual({
+      type: "https://kuzushi.dev/problems/pipeline_error",
+      title: "Pipeline Error",
+      status: 500,
+      detail: "scan failed",
+      code: "pipeline_error",
+      category: "fatal",
+      retryable: false,
+    });
   });
 });

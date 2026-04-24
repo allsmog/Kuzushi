@@ -25,9 +25,8 @@ import type {
   SecurityControl,
   Verdict,
 } from "../types.js";
-import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
-import type { CredentialChoice } from "./components/CredentialPrompt.js";
-import type { WizardResult } from "./components/SetupWizard.js";
+import type { ConfigConfirmData, CredentialChoice, WizardResult } from "./preflight-types.js";
+import type { ResumeDiffData } from "./resume-types.js";
 
 export type Phase = "idle" | "scanning" | "triaging" | "verifying" | "poc" | "summary" | "done";
 export type UIMode = "preflight" | "running" | "summary" | "review" | "done" | "shell";
@@ -356,7 +355,7 @@ export interface UIState {
   compactBannerShown?: boolean;
   startBannerShown: boolean;
   /** Resume diff data — shown when resuming a previous run. */
-  resumeDiff?: import("./components/ResumeDiff.js").ResumeDiffData | null;
+  resumeDiff?: ResumeDiffData | null;
   /** REPL state — controls live scan behavior via slash commands. */
   replState?: {
     skippedFingerprints: Set<string>;

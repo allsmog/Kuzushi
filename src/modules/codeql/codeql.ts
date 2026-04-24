@@ -9,7 +9,7 @@
 
 import { CodeQLPlugin } from "../../scanners/codeql.js";
 import { defineModule } from "../define.js";
-import { severityProperty, targetProperty } from "../sast/shared.js";
+import { severityProperty, targetProperty } from "../sast/schema-fragments.js";
 import { buildScannerDagTool } from "../scanner-adapter.js";
 import type { CopilotModule } from "../types.js";
 

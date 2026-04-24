@@ -8,22 +8,10 @@ import type React from "react";
 import { boxFooter, boxHeader } from "../format.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
+import type { ResumeDiffData } from "../resume-types.js";
 import { SPACING, tokens } from "../tokens.js";
 
-export interface ResumeDiffData {
-  previousRunDate?: string;
-  previousFindingCount: number;
-  previousTriagedCount: number;
-  newFindings: number;
-  skipped: number;
-  pendingRetriage: number;
-  verdictChanges: Array<{
-    fingerprint: string;
-    fromVerdict: string;
-    toVerdict: string;
-    reason?: string;
-  }>;
-}
+export type { ResumeDiffData } from "../resume-types.js";
 
 interface ResumeDiffProps {
   data: ResumeDiffData;

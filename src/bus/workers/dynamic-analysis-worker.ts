@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import type { AgentActivity } from "../../agent-runtime/execution.js";
 import type { AgentHistoryEntry, AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
+import type { PocExecutionVerdict } from "../../contracts.js";
 import { createPocExecutor } from "../../poc-executor/index.js";
 import { generatePocHarness, PocHarnessExecutionError } from "../../poc-harness.js";
 import { coerceRepoContext } from "../../repo-context.js";
@@ -153,7 +154,7 @@ function synthesizeSeedInputs(
 }
 
 function classifyDynamicResult(
-  verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT" | undefined,
+  verdict: PocExecutionVerdict | undefined,
   exitCode: number | undefined,
   stdout: string,
 ): DynamicAnalysisStatus {
@@ -425,7 +426,7 @@ function buildDynamicRefinementPrompt(
         exitCode: number;
         stdout: string;
         stderr: string;
-        verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+        verdict: PocExecutionVerdict;
       }
     | undefined,
   error: string,

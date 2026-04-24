@@ -29,7 +29,7 @@ import type {
   KuzushiConfig,
   Verdict,
 } from "./types.js";
-import { isPathWithinRoot, isRecord } from "./utils.js";
+import { isPathWithinRoot, isRecord, toErrorMessage } from "./utils.js";
 
 type ConfigLayer = Record<string, unknown>;
 type WritableConfigLayer = Partial<KuzushiConfig> & ConfigLayer;
@@ -1448,8 +1448,8 @@ function parseFlexibleValue(raw: string): unknown {
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
       return JSON.parse(trimmed);
-    } catch {
-      throw new Error(`Invalid JSON value: ${trimmed.slice(0, 80)}`);
+    } catch (error) {
+      throw new Error(`Invalid JSON value: ${trimmed.slice(0, 80)} (${toErrorMessage(error)})`);
     }
   }
 

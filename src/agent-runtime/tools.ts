@@ -1449,8 +1449,8 @@ function executeGetCallees(args: Record<string, unknown>, cwd: string): string {
   let fileContent: string;
   try {
     fileContent = readFileSync(absolutePath, "utf8");
-  } catch {
-    throw new Error(`GetCallees could not read file: ${filePath}`);
+  } catch (error) {
+    throw new Error(`GetCallees could not read file "${filePath}": ${toErrorMessage(error)}`);
   }
 
   // Find the function body — derive language from file extension for accuracy

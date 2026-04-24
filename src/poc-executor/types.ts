@@ -1,9 +1,11 @@
+import type { PocExecutionVerdict } from "../contracts.js";
+
+export type { PocSandboxBackend } from "../contracts.js";
+
 /**
  * PoC sandbox execution types — run generated PoC harness scripts
  * in isolated environments and capture results.
  */
-
-export type PocSandboxBackend = "docker" | "process";
 
 export interface PocExecutionResult {
   exitCode: number;
@@ -11,7 +13,7 @@ export interface PocExecutionResult {
   stderr: string;
   timedOut: boolean;
   durationMs: number;
-  verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+  verdict: PocExecutionVerdict;
 }
 
 export interface PocExecutor {

@@ -42,7 +42,7 @@ kuzushi> use sast
 kuzushi/sast> run scan ./repo preset=deep
 kuzushi/sast> back
 kuzushi> tools
-kuzushi> run sast:verify fingerprint=abc123
+kuzushi> run verify:finding fingerprint=abc123
 kuzushi> exit
 ```
 
@@ -142,9 +142,9 @@ Execute a single module tool without the interactive shell. Scriptable, composab
 
 ```sh
 kuzushi run sast:scan ./repo --json
-kuzushi run sast:triage fingerprint=abc123 --json
-kuzushi run sast:verify fingerprint=abc123 --quiet
-kuzushi run sast:findings severity=critical,high --json
+kuzushi run triage:run fingerprint=abc123 --json
+kuzushi run verify:finding fingerprint=abc123 --quiet
+kuzushi run findings:list severity=critical,high --json
 ```
 
 ## Quick Start
@@ -213,7 +213,7 @@ Kuzushi's capabilities come from `CopilotModule`s that expose tools (for shell a
 
 | Module | Category | What It Does | Key Tools |
 |--------|----------|--------------|-----------|
-| **sast** | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch | `sast:scan`, `sast:semgrep`, `sast:codeql`, `sast:triage`, `sast:verify`, `sast:patch`, `sast:findings`, `sast:context`, `sast:threat-hunt`, `sast:taint-iris` |
+| **sast** | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch | `sast:scan` plus split-module tools `semgrep:scan`, `codeql:scan`, `agentic-sast:scan`, `triage:run`, `verify:finding`, `patch:finding`, `findings:list`, `context:build`, `threat-hunt:run`, `taint-iris:hunt` |
 | **randori** | intel | PASTA threat modeling via the `@kuzushi/randori-plugin` — S1–S4 stages plus narrative synthesis, returning a `ThreatModelDocument` | `randori:pasta`, `randori:threat-model` |
 | **vuln-scout** | offense | Whitebox pentest via the `@kuzushi/vuln-scout` plugin — agentic SAST + taint analysis returning normalized Findings | `vuln-scout:audit` |
 | **tob** | offense | Trail of Bits skills audit via `@kuzushi/tob-skills` — fp-check, sharp-edges, insecure-defaults, static-analysis, variant-analysis, and more | `tob:audit`, `tob:skills` |
@@ -223,6 +223,8 @@ Kuzushi's capabilities come from `CopilotModule`s that expose tools (for shell a
 | **ndiff** | offense | CVE-diff-based n-day hunting and variant search against a target | `ndiff:fetch-cve`, `ndiff:search-patch-shape`, `ndiff:hunt-variants` |
 
 Load with the shell or at startup: `kuzushi shell --load randori,vuln-scout,tob,shinsa,prompt-armor,variant,ndiff` (the bare id works — `builtin:` prefix is optional). Legacy ids `variant-hunter` / `n-day-diff-hunter` still resolve for backward compatibility.
+
+Legacy `sast:<action>` aliases for split-module tools still resolve for backward compatibility, but new scripts and docs should use the canonical tool names shown above.
 
 ### External `CopilotModule` packages
 
@@ -464,9 +466,9 @@ kuzushi runs show <runId> --json           # JSON output for tooling
 
 ```
 kuzushi run sast:scan ./repo --json
-kuzushi run sast:triage fingerprint=abc123 --json
-kuzushi run sast:verify fingerprint=abc123 --quiet
-kuzushi run sast:findings severity=critical,high --json
+kuzushi run triage:run fingerprint=abc123 --json
+kuzushi run verify:finding fingerprint=abc123 --quiet
+kuzushi run findings:list severity=critical,high --json
 ```
 
 ### Patch

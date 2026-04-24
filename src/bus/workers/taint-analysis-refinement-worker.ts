@@ -393,8 +393,10 @@ async function triageDeltaFindings(args: {
       errors,
       costUsd: normalizeCostUsd(costUsd),
     };
-  } catch {
-    throw new Error("Refinement delta triage failed; findings left unresolved.");
+  } catch (error) {
+    throw new Error(
+      `Refinement delta triage failed; findings left unresolved: ${toErrorMessage(error)}`,
+    );
   }
 }
 

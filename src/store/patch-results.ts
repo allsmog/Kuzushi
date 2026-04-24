@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { isOneOf, PATCH_STATUSES } from "../contracts.js";
 import type { PatchResult, PatchStatus } from "../types.js";
 import { safeJsonParse, safeJsonStringify } from "../utils/safe-json.js";
 
@@ -98,16 +99,5 @@ export function updatePatchResultStatus(
 }
 
 function parsePatchStatus(raw: string | null): PatchStatus | undefined {
-  switch (raw) {
-    case "APPLY_FAILED":
-    case "BUILD_FAILED":
-    case "STILL_VULNERABLE":
-    case "TESTS_FAILED":
-    case "SOUND":
-    case "VERIFIED":
-    case "UNKNOWN":
-      return raw;
-    default:
-      return undefined;
-  }
+  return isOneOf(PATCH_STATUSES, raw) ? raw : undefined;
 }

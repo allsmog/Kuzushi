@@ -10,22 +10,24 @@
  * `triage:run` first if that hasn't happened yet.
  */
 
+import type { TriageResult } from "../../types.js";
+import { isRecord } from "../../utils.js";
 import { defineModule, defineTool } from "../define.js";
 import { storedToFinding } from "../sast/findings-bridge.js";
 import { resolvePromptValue } from "../sast/prompts.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 
-type Params = Record<string, unknown>;
+interface VerifyFindingInput {
+  fingerprint?: string;
+  VERIFY_PROMPT?: string;
+}
 
 export function createVerifyModule(): CopilotModule {
   const verifyFindingTool = defineTool<"verify">({
     name: "verify:finding",
     displayName: "Verify",
     formatInput(input) {
-      const p = (input ?? {}) as Record<string, unknown>;
-      return typeof p["fingerprint"] === "string"
-        ? (p["fingerprint"] as string).slice(0, 12)
-        : null;
+      return parseVerifyFindingInput(input).fingerprint?.slice(0, 12) ?? null;
     },
     renderResult(result) {
       const first = result.output.split("\n", 1)[0]?.trim();
@@ -48,11 +50,11 @@ export function createVerifyModule(): CopilotModule {
     },
     headless: true,
     async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
-      const p = (input ?? {}) as Params;
+      const p = parseVerifyFindingInput(input);
       if (!ctx.workspace) {
         return { ok: false, output: "verify:finding needs an active workspace." };
       }
-      const fingerprint = typeof p["fingerprint"] === "string" ? (p["fingerprint"] as string) : "";
+      const fingerprint = p.fingerprint ?? "";
       if (!fingerprint) {
         return { ok: false, output: "verify:finding requires a fingerprint." };
       }
@@ -68,7 +70,7 @@ export function createVerifyModule(): CopilotModule {
         return { ok: false, output: `[-] Failed to load finding '${fingerprint}'.` };
       }
 
-      const triageResult = {
+      const triageResult: TriageResult = {
         fingerprint: stored.fingerprint,
         verdict: stored.verdict,
         confidence: stored.confidence,
@@ -80,8 +82,7 @@ export function createVerifyModule(): CopilotModule {
       // Prompt override: prefer the unified `ctx.resolveOption` resolver
       // (shell `set VERIFY_PROMPT`/`setg` → taskConfig lookup). Fall back to
       // the input field if the caller passed it inline on the tool call.
-      const rawPrompt =
-        ctx.resolveOption?.<string>("VERIFY_PROMPT") ?? (p["VERIFY_PROMPT"] as string | undefined);
+      const rawPrompt = ctx.resolveOption?.<string>("VERIFY_PROMPT") ?? p.VERIFY_PROMPT;
       const template = await resolvePromptValue(rawPrompt, ctx.cwd);
 
       const repoRoot = ctx.target ?? ctx.cwd;
@@ -93,7 +94,7 @@ export function createVerifyModule(): CopilotModule {
       const { verifyFindingWithAgent } = await import("../../verify.js");
       const outcome = await verifyFindingWithAgent(
         finding,
-        triageResult as never,
+        triageResult,
         repoRoot,
         repoName,
         model,
@@ -138,4 +139,20 @@ export function createVerifyModule(): CopilotModule {
     examples: ["# Verify a single finding\nuse verify\nset FINGERPRINT fp_a3b2c1\nrun"],
     tools: [verifyFindingTool],
   });
+}
+
+function parseVerifyFindingInput(input: unknown): VerifyFindingInput {
+  if (!isRecord(input)) return {};
+  return {
+    fingerprint: readStringField(input, "fingerprint"),
+    VERIFY_PROMPT: readStringField(input, "VERIFY_PROMPT"),
+  };
+}
+
+function readStringField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
 }

@@ -1,3 +1,5 @@
+import type { PocExecutionVerdict } from "../contracts.js";
+
 export type CryptoBehavioralTestType =
   | "timing"
   | "ecb-mode"
@@ -8,7 +10,7 @@ export type CryptoBehavioralTestType =
 
 export type CryptoBehavioralVerdict = "vulnerable" | "secure" | "inconclusive" | "error";
 
-export type CryptoBehavioralExecutionVerdict = "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+export type CryptoBehavioralExecutionVerdict = PocExecutionVerdict;
 
 export interface TimingAnalysisResult {
   constantTime: boolean;

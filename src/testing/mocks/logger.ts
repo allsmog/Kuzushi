@@ -7,7 +7,7 @@
 
 import type { ToolLogger } from "../../modules/host-handles.js";
 
-export type LogLevel = "info" | "warn" | "error" | "debug";
+export type LogLevel = keyof ToolLogger;
 
 export interface LogRecord {
   level: LogLevel;

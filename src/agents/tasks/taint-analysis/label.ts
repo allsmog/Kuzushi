@@ -12,7 +12,7 @@ import type { AgentRuntime } from "../../../agent-runtime/types.js";
 import { withRetry } from "../../../retry.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
-import { isRecord, toErrorMessage } from "../../../utils.js";
+import { extractJsonObject, isRecord, toErrorMessage } from "../../../utils.js";
 import type { AgentTask } from "../../types.js";
 import {
   countCandidateCsvRecords,
@@ -1366,7 +1366,7 @@ function parseTriageResponse(
 
   if (typeof value === "string") {
     try {
-      const parsed = JSON.parse(extractJson(value));
+      const parsed = JSON.parse(extractJsonObject(value));
       return parseTriageResponse(parsed, expectedIds);
     } catch {
       return { entries: [], missingIds: [...expectedIds] };
@@ -1463,7 +1463,7 @@ function parseLabelResponse(value: unknown): LabelResponse {
 
   if (typeof value === "string") {
     try {
-      const parsed = JSON.parse(extractJson(value));
+      const parsed = JSON.parse(extractJsonObject(value));
       return parseLabelResponse(parsed);
     } catch (error) {
       throw new Error(
@@ -2635,21 +2635,6 @@ function asPreflightOutput(value: unknown): TaintAnalysisPreflightOutput | null 
   }
 
   return output;
-}
-
-function extractJson(value: string): string {
-  const fenced = value.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (fenced) {
-    return fenced[1].trim();
-  }
-
-  const first = value.indexOf("{");
-  const last = value.lastIndexOf("}");
-  if (first >= 0 && last > first) {
-    return value.slice(first, last + 1);
-  }
-
-  return value;
 }
 
 function parseFlowKind(value: string | undefined): TaintAnalysisCandidate["flowKind"] {

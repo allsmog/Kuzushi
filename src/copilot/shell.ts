@@ -58,7 +58,24 @@ import { openRepl as openDevRepl } from "./repl.js";
 import { formatRunReplay, formatRunsTable, formatRunTrace, readTraceEvents } from "./replay.js";
 import { loadAndRunResource, saveResourceScript } from "./resource.js";
 import { parseToolArgs } from "./run.js";
+import {
+  buildShellPrompt,
+  collectKnownVerbs,
+  formatHelpForVerb,
+  SHELL_COMMAND_CATALOG,
+  SHELL_COMMAND_GROUP_TITLES,
+  type ShellCommandEntry,
+  type ShellCommandGroup,
+} from "./shell-commands.js";
 import { SpoolController } from "./spool.js";
+
+export type { ShellCommandEntry, ShellCommandGroup } from "./shell-commands.js";
+export {
+  buildShellPrompt,
+  firstShellSuggestion,
+  listShellSuggestions,
+  SHELL_COMMAND_CATALOG,
+} from "./shell-commands.js";
 
 const SHELL_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "LS"];
 const SHELL_HISTORY_FILENAME = "shell-history.json";
@@ -238,10 +255,6 @@ function shellHistoryPath(dataDir: string): string {
 
 function capShellHistory(history: string[]): string[] {
   return history.filter(Boolean).slice(-MAX_SHELL_HISTORY);
-}
-
-export function buildShellPrompt(focusedModule: string | null): string {
-  return focusedModule ? `kuzushi/${focusedModule}> ` : "kuzushi> ";
 }
 
 /**
@@ -5314,310 +5327,6 @@ function openConfigEditor(ctx: ShellContext, focusKey?: string): LocalCommandRes
       return `Config updated (${outcome.changed} key${outcome.changed === 1 ? "" : "s"}).${restartNote}`;
     },
   };
-}
-
-/**
- * Groups come from CLAUDE.md §12 so `/help` structure stays anchored to the
- * canonical operator-facing docs. Order matters — `formatHelp()` renders
- * sections in this sequence.
- */
-export type ShellCommandGroup =
-  | "nav"
-  | "planner"
-  | "prompt"
-  | "replay"
-  | "aliases"
-  | "config"
-  | "scope"
-  | "threats"
-  | "session";
-
-export interface ShellCommandEntry {
-  readonly syntax: string;
-  readonly description: string;
-  /** Which CLAUDE.md §12 section this verb lives under. */
-  readonly group?: ShellCommandGroup;
-  /** Longer-form description for `/help <verb>` — keep to 1–2 sentences. */
-  readonly longDescription?: string;
-}
-
-// Single source of truth for shell slash commands. Consumed by `formatHelp()`
-// and by the Tab-autocomplete / suggestions strip in CopilotShell.tsx. Add new
-// commands here — they propagate to both `/help` and the UI automatically.
-export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
-  // Module + view navigation -----------------------------------------------
-  {
-    syntax: "/help",
-    description: "Show this help; `/help <verb>` expands one entry",
-    group: "nav",
-  },
-  { syntax: "/modules", description: "List loaded modules (alias: /m)", group: "nav" },
-  { syntax: "/tools", description: "List available tools", group: "nav" },
-  { syntax: "/use <module>", description: "Focus on a module", group: "nav" },
-  {
-    syntax: "/back",
-    description: "Step back one level (alias: /b) — finding → findings → module → catalog",
-    group: "nav",
-  },
-  {
-    syntax: "/findings",
-    description: "Show the findings list for the current module (alias: /f)",
-    group: "nav",
-  },
-  { syntax: "/open <F-NNNN>", description: "Open a finding in the linear deep page", group: "nav" },
-  {
-    syntax: "/tune",
-    description: "Open the tune view for the focused module (alias: /t)",
-    group: "nav",
-  },
-  {
-    syntax: "/since <git-ref>",
-    description: "Diff-aware view — scope findings to files changed since <ref>",
-    group: "nav",
-    longDescription:
-      "Computes the changed-file set between HEAD and <ref> via git and pivots the shell to diff-since view.",
-  },
-
-  // Natural-language planner (Phase A.1) -----------------------------------
-  {
-    syntax: "/plan <english>",
-    description: "Propose option changes from a plain-English request",
-    group: "planner",
-    longDescription:
-      "Haiku translates the natural-language request into a PlanCard with an option diff the operator can apply with /yes or discard with /no.",
-  },
-  {
-    syntax: "/yes | /no",
-    description: "Apply or discard the pending planner proposal",
-    group: "planner",
-  },
-
-  // Prompt editor (Phase A.2) ----------------------------------------------
-  {
-    syntax: "/prompt edit <verb>",
-    description: "Open the operator system-prompt override in $EDITOR",
-    group: "prompt",
-  },
-  {
-    syntax: "/prompt show <verb>",
-    description: "Show the effective prompt + source for a tool",
-    group: "prompt",
-  },
-  {
-    syntax: "/show prompts",
-    description: "Cross-module audit of every *_PROMPT override",
-    group: "prompt",
-  },
-
-  // Replay / trace (Phase A.3) ---------------------------------------------
-  {
-    syntax: "/show runs [repo]",
-    description: "List recent pipeline runs (id · status · cost)",
-    group: "replay",
-  },
-  {
-    syntax: "/replay <runId>",
-    description: "Re-render the summary of a past run from stored state",
-    group: "replay",
-  },
-  {
-    syntax: "/trace <runId>",
-    description: "Stream the per-event JSONL audit log of a past run",
-    group: "replay",
-  },
-
-  // Short-ID aliases (Phase B.3) -------------------------------------------
-  {
-    syntax: "/show aliases [pfx]",
-    description: "List short-ID aliases (F-0001, C-01) for the current run",
-    group: "aliases",
-  },
-
-  // Config + tool options --------------------------------------------------
-  { syntax: "/options [tool]", description: "Show tool options", group: "config" },
-  { syntax: "/set <key> <value>", description: "Set a tool option", group: "config" },
-  { syntax: "/config", description: "Open the interactive config editor", group: "config" },
-  {
-    syntax: "/config raw|get|set|path",
-    description: "Inspect/update ~/.kuzushi/config.json",
-    group: "config",
-  },
-  {
-    syntax: "/auth",
-    description: "Set or change credentials for any supported provider",
-    group: "config",
-  },
-  {
-    syntax: "/provider",
-    description: "Show or set the default <provider>:<model> (e.g. openai:gpt-5-mini)",
-    group: "config",
-  },
-  {
-    syntax: "/backend [claude|pi-ai]",
-    description: "Show or change the agent runtime backend (advanced)",
-    group: "config",
-  },
-  {
-    syntax: "/ask <question>",
-    description: "Ask the agent with current shell context (? prefix also works)",
-    group: "config",
-  },
-
-  // Scope: target + workspace + context ------------------------------------
-  { syntax: "/target <path>", description: "Set or show the active target", group: "scope" },
-  { syntax: "/context", description: "Generate or show application context map", group: "scope" },
-  {
-    syntax: "/context build",
-    description:
-      "Live-build the operator scan context (5 phases, writes .kuzushi/scan-context.json)",
-    group: "scope",
-  },
-  { syntax: "/context edit", description: "Review/edit operator scan context", group: "scope" },
-  {
-    syntax: "/context regenerate",
-    description: "Re-generate context for current target",
-    group: "scope",
-  },
-  {
-    syntax: "/workspace <id>",
-    description: "Set or show the active workspace",
-    group: "scope",
-  },
-
-  // Threat model ----------------------------------------------------------
-  { syntax: "/threats", description: "Show threat model summary", group: "threats" },
-  {
-    syntax: "/threats dfd | 1",
-    description: "Data flow diagram grouped by trust zone",
-    group: "threats",
-  },
-  {
-    syntax: "/threats stride | 2",
-    description: "Element × STRIDE heat matrix + impact × likelihood",
-    group: "threats",
-  },
-  {
-    syntax: "/threats stories | 3",
-    description: "Attacker narrative cards + input-categories rail",
-    group: "threats",
-  },
-  {
-    syntax: "/threats scope | 4",
-    description: "Criticality buckets + out-of-scope + operator edits",
-    group: "threats",
-  },
-  {
-    syntax: "/threats summary | 5",
-    description: "Counts bar charts + drives + artifact paths",
-    group: "threats",
-  },
-  {
-    syntax: "/threats edit",
-    description: "Review/edit threat model interactively",
-    group: "threats",
-  },
-
-  // Session + module loading ----------------------------------------------
-  {
-    syntax: "/load <specifier>",
-    description: "Load an external module at runtime",
-    group: "session",
-  },
-  { syntax: "/clear", description: "Clear conversation history", group: "session" },
-  { syntax: "/history", description: "Show command history", group: "session" },
-  { syntax: "/exit", description: "Exit the shell", group: "session" },
-];
-
-/** Human-readable section titles for `/help`, keyed by group id. */
-const SHELL_COMMAND_GROUP_TITLES: Record<ShellCommandGroup, string> = {
-  nav: "Module + view navigation",
-  planner: "Natural-language planner",
-  prompt: "Prompt editor",
-  replay: "Replay & trace",
-  aliases: "Short-ID aliases",
-  config: "Config & tool options",
-  scope: "Target · context · workspace",
-  threats: "Threat modelling",
-  session: "Session",
-};
-
-/**
- * Compute the set of known canonical verbs for unknown-verb nearest-match
- * suggestions. Derived from `SHELL_COMMAND_CATALOG` so additions stay in
- * sync, plus the aliases that don't appear as their own catalog rows.
- */
-function collectKnownVerbs(): string[] {
-  const verbs = new Set<string>();
-  for (const entry of SHELL_COMMAND_CATALOG) {
-    // Extract the leading "/foo" or "/foo bar" — strip argument placeholders.
-    const raw = entry.syntax.replace(/^\//, "");
-    const head = raw.split(/\s+/)[0] ?? "";
-    // Handle "/yes | /no" — split on " | " and recurse.
-    if (entry.syntax.includes("|")) {
-      for (const alt of entry.syntax.split("|").map((s) => s.trim().replace(/^\//, ""))) {
-        const altHead = alt.split(/\s+/)[0];
-        if (altHead) verbs.add(altHead);
-      }
-    } else if (head) {
-      verbs.add(head);
-    }
-  }
-  // Aliases that dispatch but don't get their own catalog row.
-  for (const alias of ["f", "t", "m", "b", "apply-plan", "discard-plan", "runs"]) {
-    verbs.add(alias);
-  }
-  return Array.from(verbs);
-}
-
-/**
- * `/help <verb>` — print the single catalog row matching <verb> plus the
- * entry's longDescription (if any). Matches by the leading token so
- * `/help open` and `/help /open` both resolve to `/open <F-NNNN>`.
- */
-function formatHelpForVerb(input: string): string {
-  const needle = input.replace(/^\//, "").trim().toLowerCase();
-  if (!needle) return "Usage: /help [verb]";
-  const entries = SHELL_COMMAND_CATALOG.filter((entry) => {
-    const head = entry.syntax.replace(/^\//, "").split(/\s+/)[0]?.toLowerCase();
-    if (head === needle) return true;
-    // `/help yes` / `/help no` match "/yes | /no".
-    if (entry.syntax.includes("|")) {
-      return entry.syntax
-        .split("|")
-        .some((s) => s.trim().replace(/^\//, "").toLowerCase() === needle);
-    }
-    return false;
-  });
-  if (entries.length === 0) {
-    return formatUnknownVerb(needle, collectKnownVerbs());
-  }
-  const lines: string[] = [];
-  for (const entry of entries) {
-    lines.push(`  ${entry.syntax}`);
-    lines.push(`    ${entry.description}`);
-    if (entry.longDescription) {
-      lines.push(`    ${entry.longDescription}`);
-    }
-  }
-  return lines.join("\n");
-}
-
-export function listShellSuggestions(input: string, limit = 4): string[] {
-  const trimmed = input.trim();
-  if (!trimmed.startsWith("/")) return [];
-  const prefix = trimmed.toLowerCase();
-  const matches: string[] = [];
-  for (const { syntax } of SHELL_COMMAND_CATALOG) {
-    if (syntax.toLowerCase().startsWith(prefix)) {
-      matches.push(syntax);
-      if (matches.length >= limit) break;
-    }
-  }
-  return matches;
-}
-
-export function firstShellSuggestion(input: string): string | null {
-  return listShellSuggestions(input, 1)[0] ?? null;
 }
 
 function formatHelp(core: CopilotCore, opts: ShellOptions): string {

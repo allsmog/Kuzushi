@@ -12,7 +12,12 @@ import {
   type TaskOutputMeta,
 } from "../../../../task-output-meta.js";
 import type { ScanOpts } from "../../../../types.js";
-import { isRecord, normalizeCostUsd, toErrorMessage } from "../../../../utils.js";
+import {
+  extractJsonObject,
+  isRecord,
+  normalizeCostUsd,
+  toErrorMessage,
+} from "../../../../utils.js";
 import type { AgentTask } from "../../../types.js";
 import { resolveTaintAnalysisConfig } from "../types.js";
 import {
@@ -908,7 +913,7 @@ function parseStitchResponse(value: unknown): StitchLlmResponse {
 
   if (typeof value === "string") {
     try {
-      const parsed = JSON.parse(extractJson(value));
+      const parsed = JSON.parse(extractJsonObject(value));
       return parseStitchResponse(parsed);
     } catch (error) {
       throw new Error(`Could not parse stitch response JSON: ${toErrorMessage(error)}`);
@@ -1028,15 +1033,6 @@ function collectIntraServiceFindings(output: CrossServiceAnalysisOutput): Findin
 function clampUnit(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
-}
-
-function extractJson(value: string): string {
-  const fenced = value.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (fenced) return fenced[1].trim();
-  const first = value.indexOf("{");
-  const last = value.lastIndexOf("}");
-  if (first >= 0 && last > first) return value.slice(first, last + 1);
-  return value;
 }
 
 /** Normalize a database entity name for fuzzy matching: strip schema prefix, lowercase, de-pluralize. */

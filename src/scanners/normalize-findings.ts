@@ -4,7 +4,7 @@
  */
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { isRecord } from "../utils.js";
+import { extractJsonObject, isRecord, toErrorMessage } from "../utils.js";
 import { detectParameterRiskBoost, scoreFindingMetadata } from "./scoring.js";
 import type { Finding } from "./types.js";
 
@@ -195,27 +195,16 @@ function parseRawOutput(raw: unknown): unknown {
 
   try {
     return JSON.parse(text);
-  } catch {
+  } catch (initialError) {
     try {
       const extracted = extractJsonObject(text);
       return JSON.parse(extracted);
-    } catch {
-      throw new Error("Scanner returned invalid JSON output");
+    } catch (fallbackError) {
+      throw new Error(
+        `Scanner returned invalid JSON output: ${toErrorMessage(fallbackError)} (initial parse: ${toErrorMessage(initialError)})`,
+      );
     }
   }
-}
-
-function extractJsonObject(text: string): string {
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (fenceMatch) return fenceMatch[1].trim();
-
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start !== -1 && end > start) {
-    return text.slice(start, end + 1);
-  }
-
-  return text;
 }
 
 function normalizeFilePath(repoRoot: string, filePath: string): string {

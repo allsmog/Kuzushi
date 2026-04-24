@@ -11,6 +11,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
+import { isRecord } from "../utils.js";
+import { formatToolInputValidationError, validateToolInput } from "./input-validation.js";
+import { createProblemDetails, ProblemCode, problemToolResult } from "./problem-details.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 
 interface JsonRpcRequest {
@@ -18,13 +21,6 @@ interface JsonRpcRequest {
   id: string;
   method: string;
   params?: Record<string, unknown>;
-}
-
-interface JsonRpcResponse {
-  jsonrpc: "2.0";
-  id: string;
-  result?: unknown;
-  error?: { code: number; message: string; data?: unknown };
 }
 
 /**
@@ -177,6 +173,26 @@ export function bridgeTool(
     inputSchema: schema,
     headless,
     async execute(input: unknown, _ctx: ExecutionContext): Promise<ToolResult> {
+      const validation = validateToolInput(input, schema);
+      if (!validation.ok) {
+        const detail = formatToolInputValidationError(
+          `${moduleId}:${mcpTool.name}`,
+          validation.issues,
+        );
+        return problemToolResult(
+          createProblemDetails({
+            code: ProblemCode.InputValidationFailed,
+            title: "MCP tool input validation failed",
+            status: 400,
+            detail,
+            instance: `${moduleId}:${mcpTool.name}`,
+            errors: validation.issues.map((issue) => ({
+              path: issue.path,
+              message: issue.message,
+            })),
+          }),
+        );
+      }
       try {
         const result = await callWithTimeout(
           () => client.callTool(mcpTool.name, coerceArguments(input)),
@@ -261,9 +277,9 @@ function coerceArguments(input: unknown): Record<string, unknown> {
   if (input && typeof input === "object" && !Array.isArray(input)) {
     return input as Record<string, unknown>;
   }
-  // MCP tools expect a keyed args object. When the caller passed a non-object
-  // (shouldn't happen given validation, but be defensive), wrap it.
-  return { value: input };
+  // Should be unreachable after schema validation. Preserve a closed payload
+  // instead of inventing an implicit `{ value }` wire contract.
+  return {};
 }
 
 function stringifyToolContent(result: McpToolResult): string {
@@ -291,6 +307,78 @@ function stringifyToolContent(result: McpToolResult): string {
     }
   }
   return parts.join("\n");
+}
+
+function parseToolsListResult(result: unknown): McpToolDefinition[] {
+  if (!isRecord(result)) {
+    throw new Error("MCP tools/list returned a non-object result.");
+  }
+  if (result.tools === undefined) return [];
+  if (!Array.isArray(result.tools)) {
+    throw new Error("MCP tools/list returned an invalid tools array.");
+  }
+  return result.tools.map((tool, index) => parseMcpToolDefinition(tool, index));
+}
+
+function parseMcpToolDefinition(tool: unknown, index: number): McpToolDefinition {
+  if (!isRecord(tool) || typeof tool.name !== "string" || tool.name.length === 0) {
+    throw new Error(`MCP tools/list returned an invalid tool at index ${index}.`);
+  }
+  return {
+    name: tool.name,
+    ...(typeof tool.description === "string" ? { description: tool.description } : {}),
+    ...(isRecord(tool.inputSchema) ? { inputSchema: { ...tool.inputSchema } } : {}),
+    ...(isRecord(tool.annotations)
+      ? { annotations: parseMcpToolAnnotations(tool.annotations) }
+      : {}),
+  };
+}
+
+function parseMcpToolAnnotations(
+  annotations: Record<string, unknown>,
+): McpToolDefinition["annotations"] {
+  return {
+    ...(typeof annotations.title === "string" ? { title: annotations.title } : {}),
+    ...(typeof annotations.readOnlyHint === "boolean"
+      ? { readOnlyHint: annotations.readOnlyHint }
+      : {}),
+    ...(typeof annotations.destructiveHint === "boolean"
+      ? { destructiveHint: annotations.destructiveHint }
+      : {}),
+    ...(typeof annotations.idempotentHint === "boolean"
+      ? { idempotentHint: annotations.idempotentHint }
+      : {}),
+    ...(typeof annotations.openWorldHint === "boolean"
+      ? { openWorldHint: annotations.openWorldHint }
+      : {}),
+  };
+}
+
+function parseMcpToolResult(result: unknown, toolName: string): McpToolResult {
+  if (!isRecord(result)) {
+    throw new Error(`MCP tool "${toolName}" returned a non-object result.`);
+  }
+  if (!Array.isArray(result.content)) {
+    throw new Error(`MCP tool "${toolName}" returned an invalid content array.`);
+  }
+  return {
+    content: result.content.map((item, index) => parseMcpContentItem(item, toolName, index)),
+    ...(typeof result.isError === "boolean" ? { isError: result.isError } : {}),
+  };
+}
+
+function parseMcpContentItem(
+  item: unknown,
+  toolName: string,
+  index: number,
+): McpToolResult["content"][number] {
+  if (!isRecord(item) || typeof item.type !== "string") {
+    throw new Error(`MCP tool "${toolName}" returned invalid content at index ${index}.`);
+  }
+  return {
+    type: item.type,
+    ...(typeof item.text === "string" ? { text: item.text } : {}),
+  };
 }
 
 function deepClone<T>(value: T): T {
@@ -380,13 +468,14 @@ class HttpMcpClient implements McpClient {
 
   async listTools(): Promise<McpToolDefinition[]> {
     if (!this.initialized) throw new Error("MCP client not initialized.");
-    const result = (await this.sendRequest("tools/list", {})) as { tools?: McpToolDefinition[] };
-    return result.tools ?? [];
+    const result = await this.sendRequest("tools/list", {});
+    return parseToolsListResult(result);
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
     if (!this.initialized) throw new Error("MCP client not initialized.");
-    return this.sendRequest("tools/call", { name, arguments: args }) as Promise<McpToolResult>;
+    const result = await this.sendRequest("tools/call", { name, arguments: args });
+    return parseMcpToolResult(result, name);
   }
 
   close(): void {
@@ -428,7 +517,7 @@ class HttpMcpClient implements McpClient {
 
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType.includes("application/json")) {
-      const json = (await response.json()) as JsonRpcResponse;
+      const json = (await response.json()) as unknown;
       return parseJsonRpcResponse(json, id, method);
     }
     if (contentType.includes("text/event-stream")) {
@@ -459,11 +548,30 @@ class HttpMcpClient implements McpClient {
   }
 }
 
-function parseJsonRpcResponse(msg: JsonRpcResponse, expectedId: string, method: string): unknown {
-  if (msg.id !== expectedId) {
-    throw new Error(`MCP HTTP ${method}: response id mismatch (${msg.id} !== ${expectedId})`);
+function parseJsonRpcResponse(msg: unknown, expectedId: string, method: string): unknown {
+  if (!isRecord(msg)) {
+    throw new Error(`MCP HTTP ${method}: invalid JSON-RPC response envelope`);
   }
-  if (msg.error) {
+  if (msg.jsonrpc !== "2.0") {
+    throw new Error(`MCP HTTP ${method}: invalid JSON-RPC version`);
+  }
+  if (msg.id !== expectedId) {
+    throw new Error(
+      `MCP HTTP ${method}: response id mismatch (${String(msg.id)} !== ${expectedId})`,
+    );
+  }
+  const hasResult = "result" in msg;
+  const hasError = "error" in msg;
+  if (hasResult && hasError) {
+    throw new Error(`MCP HTTP ${method}: response cannot include both result and error`);
+  }
+  if (!hasResult && !hasError) {
+    throw new Error(`MCP HTTP ${method}: response must include result or error`);
+  }
+  if (hasError) {
+    if (!isRecord(msg.error) || typeof msg.error.message !== "string") {
+      throw new Error(`MCP HTTP ${method}: invalid JSON-RPC error object`);
+    }
     throw new Error(msg.error.message);
   }
   return msg.result;
@@ -474,7 +582,7 @@ function parseJsonRpcResponse(msg: JsonRpcResponse, expectedId: string, method: 
  * the requested id. Returns null if nothing matches. Tolerates interleaved
  * notifications and comments.
  */
-function findMatchingSseResponse(body: string, expectedId: string): JsonRpcResponse | null {
+function findMatchingSseResponse(body: string, expectedId: string): unknown | null {
   for (const frame of body.split(/\n\n+/)) {
     const dataLines = frame
       .split("\n")
@@ -483,8 +591,8 @@ function findMatchingSseResponse(body: string, expectedId: string): JsonRpcRespo
     if (dataLines.length === 0) continue;
     const joined = dataLines.join("\n");
     try {
-      const msg = JSON.parse(joined) as JsonRpcResponse;
-      if (msg.id === expectedId) return msg;
+      const msg = JSON.parse(joined) as unknown;
+      if (isRecord(msg) && msg.id === expectedId) return msg;
     } catch {
       // skip unparsable frame
     }
@@ -528,14 +636,14 @@ class StdioMcpClient implements McpClient {
     const rl = createInterface({ input: this.process.stdout! });
     rl.on("line", (line) => {
       try {
-        const msg = JSON.parse(line) as JsonRpcResponse;
-        if (msg.id && this.pendingRequests.has(msg.id)) {
+        const msg = JSON.parse(line) as unknown;
+        if (isRecord(msg) && typeof msg.id === "string" && this.pendingRequests.has(msg.id)) {
           const pending = this.pendingRequests.get(msg.id)!;
           this.pendingRequests.delete(msg.id);
-          if (msg.error) {
-            pending.reject(new Error(msg.error.message));
-          } else {
-            pending.resolve(msg.result);
+          try {
+            pending.resolve(parseJsonRpcResponse(msg, msg.id, "stdio"));
+          } catch (err) {
+            pending.reject(err instanceof Error ? err : new Error(String(err)));
           }
         }
       } catch {
@@ -564,13 +672,14 @@ class StdioMcpClient implements McpClient {
 
   async listTools(): Promise<McpToolDefinition[]> {
     if (!this.initialized) throw new Error("MCP client not initialized.");
-    const result = (await this.sendRequest("tools/list", {})) as { tools: McpToolDefinition[] };
-    return result.tools ?? [];
+    const result = await this.sendRequest("tools/list", {});
+    return parseToolsListResult(result);
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
     if (!this.initialized) throw new Error("MCP client not initialized.");
-    return this.sendRequest("tools/call", { name, arguments: args }) as Promise<McpToolResult>;
+    const result = await this.sendRequest("tools/call", { name, arguments: args });
+    return parseMcpToolResult(result, name);
   }
 
   close(): void {

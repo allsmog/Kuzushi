@@ -8,20 +8,23 @@
  * diff. No scan DAG participation.
  */
 
+import { isRecord } from "../../utils.js";
 import { defineModule, defineTool } from "../define.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 
-type Params = Record<string, unknown>;
+interface PatchFindingInput {
+  fingerprint?: string;
+  maxIterations?: number;
+  buildCmd?: string;
+  testCmd?: string;
+}
 
 export function createPatchModule(): CopilotModule {
   const patchFindingTool = defineTool<"patch">({
     name: "patch:finding",
     displayName: "Patch",
     formatInput(input) {
-      const p = (input ?? {}) as Record<string, unknown>;
-      return typeof p["fingerprint"] === "string"
-        ? (p["fingerprint"] as string).slice(0, 12)
-        : null;
+      return parsePatchFindingInput(input).fingerprint?.slice(0, 12) ?? null;
     },
     renderResult(result) {
       const first = result.output.split("\n", 1)[0]?.trim();
@@ -53,11 +56,11 @@ export function createPatchModule(): CopilotModule {
     },
     headless: true,
     async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
-      const p = (input ?? {}) as Params;
+      const p = parsePatchFindingInput(input);
       if (!ctx.workspace) {
         return { ok: false, output: "patch:finding needs an active workspace." };
       }
-      const fingerprint = typeof p["fingerprint"] === "string" ? (p["fingerprint"] as string) : "";
+      const fingerprint = p.fingerprint ?? "";
       if (!fingerprint) return { ok: false, output: "patch:finding requires a fingerprint." };
 
       const repoRoot = ctx.target ?? ctx.cwd;
@@ -75,10 +78,9 @@ export function createPatchModule(): CopilotModule {
           repoName,
           model,
           runtime: ctx.runtime,
-          maxIterations:
-            typeof p["maxIterations"] === "number" ? (p["maxIterations"] as number) : 3,
-          buildCommand: typeof p["buildCmd"] === "string" ? (p["buildCmd"] as string) : null,
-          testCommand: typeof p["testCmd"] === "string" ? (p["testCmd"] as string) : null,
+          maxIterations: p.maxIterations ?? 3,
+          buildCommand: p.buildCmd ?? null,
+          testCommand: p.testCmd ?? null,
         });
 
         const status = result.patchResult.status;
@@ -136,4 +138,30 @@ export function createPatchModule(): CopilotModule {
     examples: ["# Patch a confirmed finding\nuse patch\nset FINGERPRINT fp_a3b2c1\nrun"],
     tools: [patchFindingTool],
   });
+}
+
+function parsePatchFindingInput(input: unknown): PatchFindingInput {
+  if (!isRecord(input)) return {};
+  return {
+    fingerprint: readStringField(input, "fingerprint"),
+    maxIterations: readNumberField(input, "maxIterations"),
+    buildCmd: readStringField(input, "buildCmd"),
+    testCmd: readStringField(input, "testCmd"),
+  };
+}
+
+function readStringField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readNumberField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+  return typeof value === "number" ? value : undefined;
 }

@@ -202,6 +202,33 @@ describe("bridgeTool", () => {
     expect(result.output).toBe("boom");
   });
 
+  it("rejects payloads that violate the advertised MCP input schema", async () => {
+    const client = mockClient(async () => {
+      throw new Error("should not call server");
+    });
+    const tool = bridgeTool(
+      {
+        name: "scan",
+        inputSchema: {
+          type: "object",
+          properties: { target: { type: "string" } },
+          required: ["target"],
+          additionalProperties: false,
+        },
+      },
+      "m",
+      client,
+      baseOpts,
+    );
+
+    const result = await tool.execute({ target: 42, extra: true }, {} as never);
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('Invalid input for tool "m:scan"');
+    expect(result.output).toContain("target: expected string");
+    expect(result.output).toContain("extra: unknown property");
+  });
+
   it("stringifies non-text content chunks as JSON fallback", async () => {
     const client = mockClient(async () => ({
       content: [

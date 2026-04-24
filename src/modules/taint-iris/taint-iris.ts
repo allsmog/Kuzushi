@@ -20,7 +20,7 @@
 import type { Finding } from "../../scanners/types.js";
 import type { ScanOpts } from "../../types.js";
 import { defineDagTool, defineModule } from "../define.js";
-import { severityProperty, targetProperty } from "../sast/shared.js";
+import { severityProperty, targetProperty } from "../sast/schema-fragments.js";
 import type { CopilotModule, ExecutionContext } from "../types.js";
 
 export function createTaintIrisModule(): CopilotModule {

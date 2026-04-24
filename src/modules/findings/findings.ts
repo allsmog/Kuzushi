@@ -6,11 +6,10 @@
  * unverified" without needing an active scan run.
  */
 
+import type { Verdict } from "../../types.js";
+import type { Vuln, VulnSeverity } from "../../workspace/entities.js";
 import { defineModule, defineTool } from "../define.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
-
-type Severity = "critical" | "high" | "medium" | "low" | "info";
-type Verdict = "tp" | "fp" | "needs_review" | "by_design";
 
 export function createFindingsModule(): CopilotModule {
   const findingsListTool = defineTool<"findings">({
@@ -61,11 +60,9 @@ export function createFindingsModule(): CopilotModule {
 
       // Narrow `WorkspaceHandle` returns opaque `unknown` arrays; cast to the
       // concrete `Vuln` shape here — in-tree modules may depend on host types.
-      const rows = ctx.workspace.vulns.listForWorkspace(ctx.workspaceId) as ReadonlyArray<
-        import("../../workspace/entities.js").Vuln
-      >;
+      const rows = ctx.workspace.vulns.listForWorkspace(ctx.workspaceId) as ReadonlyArray<Vuln>;
       const severity = Array.isArray(params["severity"])
-        ? (params["severity"] as Severity[])
+        ? (params["severity"] as VulnSeverity[])
         : undefined;
       const verdict = Array.isArray(params["verdict"])
         ? (params["verdict"] as Verdict[])
@@ -75,7 +72,7 @@ export function createFindingsModule(): CopilotModule {
       const limit = typeof params["limit"] === "number" ? (params["limit"] as number) : 50;
 
       const filtered = rows.filter((v) => {
-        if (severity && (!v.severity || !severity.includes(v.severity as Severity))) return false;
+        if (severity && (!v.severity || !severity.includes(v.severity))) return false;
         if (verdict) {
           const asVerdict = checkCodeToVerdict(v.checkCode);
           if (!verdict.includes(asVerdict)) return false;
@@ -143,7 +140,7 @@ export function createFindingsModule(): CopilotModule {
 }
 
 /** Translate a CheckCodeKind to Kuzushi's legacy Verdict enum. */
-function checkCodeToVerdict(code: string | null): "tp" | "fp" | "needs_review" | "by_design" {
+function checkCodeToVerdict(code: string | null): Verdict {
   switch (code) {
     case "vulnerable":
       return "tp";

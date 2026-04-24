@@ -1,6 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import {
+  ACTIVE_PIPELINE_RUN_STATUSES,
+  DYNAMIC_ANALYSIS_STATUSES,
+  ENGINE_PROVENANCE_KINDS,
+  isOneOf,
+  PATCH_STATUSES,
+  type PipelineRunStatus,
+  type PocExecutionVerdict,
+  PROOF_STATES,
+  VERDICTS,
+} from "./contracts.js";
 import { allMigrations, runMigrations } from "./migrations/index.js";
 import type {
   CorroboratingSignal,
@@ -31,15 +42,7 @@ import type {
 import { safeJsonParse, safeJsonStringify } from "./utils/safe-json.js";
 import { isRecord } from "./utils.js";
 
-export type PipelineRunStatus =
-  | "scanning"
-  | "triaging"
-  | "verifying"
-  | "poc-harnessing"
-  | "dynamic-analyzing"
-  | "complete"
-  | "error"
-  | "aborted";
+export type { PipelineRunStatus } from "./contracts.js";
 
 interface PipelineRunRecord {
   runId: string;
@@ -91,7 +94,7 @@ export interface StoredFindingRecord {
   pocRunExitCode: number | null;
   pocRunStdout: string | null;
   pocRunStderr: string | null;
-  pocRunVerdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT" | null;
+  pocRunVerdict: PocExecutionVerdict | null;
   pocRunDurationMs: number | null;
   adjustedScore: number | null;
   taintPath: TaintPathStep[] | undefined;
@@ -809,7 +812,10 @@ export function getStoredVerificationResults(
 
 /** Get summary counts by verdict. */
 export function getVerdictCounts(db: Database.Database, repo?: string): Record<Verdict, number> {
-  const counts: Record<Verdict, number> = { tp: 0, fp: 0, needs_review: 0, by_design: 0 };
+  const counts = Object.fromEntries(VERDICTS.map((verdict) => [verdict, 0])) as Record<
+    Verdict,
+    number
+  >;
 
   const query = repo
     ? "SELECT verdict, COUNT(*) as count FROM findings WHERE repo = ? GROUP BY verdict"
@@ -1043,7 +1049,7 @@ export function getActionableFindings(
     pocRunExitCode: number | null;
     pocRunStdout: string | null;
     pocRunStderr: string | null;
-    pocRunVerdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT" | null;
+    pocRunVerdict: PocExecutionVerdict | null;
     pocRunDurationMs: number | null;
   }>;
 
@@ -1434,16 +1440,7 @@ function parseTriageDetailsRecord(raw: string | null): Record<string, unknown> |
 }
 
 function parseProofState(raw: string | null): ProofState | undefined {
-  switch (raw) {
-    case "symbolic_only":
-    case "execution_attempted":
-    case "execution_confirmed":
-    case "execution_rejected":
-    case "inconclusive":
-      return raw;
-    default:
-      return undefined;
-  }
+  return isOneOf(PROOF_STATES, raw) ? raw : undefined;
 }
 
 function parseEngineProvenance(raw: string | null): EngineProvenance[] | undefined {
@@ -1460,13 +1457,7 @@ function parseEngineProvenance(raw: string | null): EngineProvenance[] | undefin
     const record = item as Record<string, unknown>;
     const kind = asOptionalString(record["kind"]);
     const detail = asOptionalString(record["detail"]) ?? "";
-    if (
-      kind === "semgrep" ||
-      kind === "codeql" ||
-      kind === "taint-analysis" ||
-      kind === "agentic" ||
-      kind === "dynamic"
-    ) {
+    if (isOneOf(ENGINE_PROVENANCE_KINDS, kind)) {
       engineProvenance.push({ kind, detail });
     }
   }
@@ -1530,29 +1521,11 @@ function parseFindingMetadata(raw: string | null): FindingMetadata | undefined {
 }
 
 function parseDynamicAnalysisStatus(raw: string | null): DynamicAnalysisStatus | undefined {
-  switch (raw) {
-    case "confirmed":
-    case "interesting":
-    case "rejected":
-    case "error":
-      return raw;
-    default:
-      return undefined;
-  }
+  return isOneOf(DYNAMIC_ANALYSIS_STATUSES, raw) ? raw : undefined;
 }
 
 function _parsePatchStatus(raw: string | null): PatchStatus | undefined {
-  switch (raw) {
-    case "APPLY_FAILED":
-    case "BUILD_FAILED":
-    case "STILL_VULNERABLE":
-    case "TESTS_FAILED":
-    case "SOUND":
-    case "UNKNOWN":
-      return raw;
-    default:
-      return undefined;
-  }
+  return isOneOf(PATCH_STATUSES, raw) ? raw : undefined;
 }
 
 function parseSuppressionReasons(raw: string | null): SuppressionReason[] {
@@ -2124,11 +2097,12 @@ export function saveAssertionResults(
  * Cleans up orphaned runs from killed processes or crashes.
  */
 export function markStaleRunsAborted(db: Database.Database, repo: string): number {
+  const activeStatuses = ACTIVE_PIPELINE_RUN_STATUSES.map((status) => `'${status}'`).join(", ");
   const result = db
     .prepare(`
     UPDATE pipeline_runs
     SET status = 'aborted', completed_at = datetime('now'), updated_at = datetime('now')
-    WHERE repo = ? AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing', 'dynamic-analyzing')
+    WHERE repo = ? AND status IN (${activeStatuses})
   `)
     .run(repo);
   return result.changes;

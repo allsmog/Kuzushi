@@ -1,4 +1,5 @@
 import type { TaskOutputKind } from "../agents/types.js";
+import type { PocExecutionVerdict, ReportMode } from "../contracts.js";
 import type { ErrorCategory } from "../errors.js";
 import type { QualityGateResult } from "../quality-gate-types.js";
 import type { Finding, TaskId } from "../scanners/types.js";
@@ -720,7 +721,7 @@ export type PocExecutionResultEvent = EventEnvelope<
     stderr: string;
     timedOut: boolean;
     durationMs: number;
-    verdict: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
+    verdict: PocExecutionVerdict;
   }
 >;
 
@@ -882,7 +883,7 @@ export type ReportRequestedEvent = EventEnvelope<
     stats?: Partial<PipelineStats>;
     fingerprints?: string[];
     exploitChains?: ExploitChain[];
-    reportMode?: "full" | "suppress";
+    reportMode?: ReportMode;
   }
 >;
 
