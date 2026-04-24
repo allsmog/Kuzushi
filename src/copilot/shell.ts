@@ -23,6 +23,7 @@ import type { ModuleInfo, ModuleTool } from "../modules/types.js";
 import { SessionManager } from "../sessions/manager.js";
 import type { KuzushiConfig } from "../types.js";
 import { formatUnknownModule, formatUnknownTool, formatUnknownVerb } from "../ui/error-format.js";
+import { formatDuration } from "../ui/format.js";
 import type {
   ContextSnapshot,
   ShellHistoryEntry,
@@ -33,6 +34,7 @@ import type {
   TuneSnapshot,
   UIStore,
 } from "../ui/state.js";
+import { initContextBuildState } from "../ui/state.js";
 import { CopilotCore } from "./core.js";
 import { resolveTool } from "./dispatch/resolve-tool.js";
 import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
@@ -360,6 +362,7 @@ export function buildModuleCatalog(
           verb: tool.name.includes(":") ? tool.name.split(":").slice(1).join(":") : tool.name,
           description: tool.description,
           headless: tool.headless,
+          hidden: tool.hidden === true,
         }))
       : undefined;
     return {
@@ -1337,6 +1340,39 @@ function pushToolActivity(store: UIStore, text: string): void {
  * calls per bus event (phase + activity + live tail + scrollback), which
  * caused visible Ink redraw flicker during noisy module runs.
  */
+/**
+ * Stamp the in-flight phase's most recent `tool-progress` entry with its
+ * elapsed time, so the scrollback reads as a finalized build log:
+ * `scanning repo structure · 3s`. Safe to call when no phase is active —
+ * it's a no-op.
+ */
+function finalizeCurrentPhase(store: UIStore, outcome: "ok" | "fail" | "abort"): void {
+  updateShell(store, (shell) => {
+    const current = shell.currentTool;
+    if (!current?.phase) return shell;
+    const startedAt = current.phaseStartedAt ?? current.startedAt;
+    if (!startedAt) return shell;
+    const elapsedLabel = formatDuration(Math.max(0, Date.now() - startedAt));
+    const hist = shell.history;
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const entry = hist[i]!;
+      if (entry.type !== "tool-progress") continue;
+      if (entry.text !== current.phase) continue;
+      // Already finalized (has a " · " elapsed suffix)? Leave it alone so
+      // repeat calls are idempotent.
+      if (entry.progressKind === "ok" || entry.progressKind === "fail") return shell;
+      const nextHistory = hist.slice();
+      nextHistory[i] = {
+        ...entry,
+        text: `${current.phase} · ${elapsedLabel}`,
+        progressKind: outcome === "fail" ? "fail" : outcome === "abort" ? "info" : "ok",
+      };
+      return { ...shell, history: nextHistory };
+    }
+    return shell;
+  });
+}
+
 function appendProgressEvent(
   store: UIStore,
   event: {
@@ -1379,9 +1415,35 @@ function appendProgressEvent(
       const current = shell.currentTool;
       let nextCurrent = current;
       if (phase) {
+        // Detect a phase transition. When the phase label changes, rewrite
+        // the most recent tool-progress entry for the previous phase to
+        // carry an elapsed-time suffix so the scrollback reads like a
+        // progressively-built log: "scanning repo structure · 3s" →
+        // "enriching context · 12s" → "building threat model …".
+        const prevPhase = current.phase;
+        const prevPhaseStartedAt = current.phaseStartedAt ?? current.startedAt;
+        if (prevPhase && prevPhase !== phase && prevPhaseStartedAt) {
+          const elapsedMs = Math.max(0, now - prevPhaseStartedAt);
+          const elapsedLabel = formatDuration(elapsedMs);
+          const hist = nextShell.history;
+          for (let i = hist.length - 1; i >= 0; i--) {
+            const entry = hist[i]!;
+            if (entry.type === "tool-progress" && entry.text === prevPhase) {
+              const nextHistory = hist.slice();
+              nextHistory[i] = {
+                ...entry,
+                text: `${prevPhase} · ${elapsedLabel}`,
+                progressKind: "ok",
+              };
+              nextShell = { ...nextShell, history: nextHistory };
+              break;
+            }
+          }
+        }
         nextCurrent = {
           ...nextCurrent,
           phase,
+          phaseStartedAt: prevPhase !== phase ? now : nextCurrent.phaseStartedAt,
           step: phaseStep,
           total: phaseTotal,
           subLabel: phase,
@@ -1581,6 +1643,15 @@ async function startInkShell(
   let credentialsMissing = false;
   let activeActionKind: "tool" | "agent" | null = null;
   let activeAbortRequested = false;
+  /**
+   * Epoch ms the most recent tool/agent abort fired. The SIGINT fallback
+   * consults this to distinguish a "real" idle-prompt Ctrl+C (operator
+   * intent: exit) from a "duplicate" SIGINT forwarded milliseconds after an
+   * abort completed (pnpm/tsx / terminal-driver double-delivery). Without
+   * this, the second SIGINT takes the idle branch and exits the shell with
+   * code 130 even though the operator only pressed Ctrl+C once.
+   */
+  let lastAbortFiredAt = 0;
 
   // runId-based blacklist for the task:phase-progress / task:activity bus
   // subscribers. When the operator Ctrl+Cs a tool that doesn't honor
@@ -1729,6 +1800,11 @@ async function startInkShell(
       if (signal?.aborted) aborted = true;
       throw err;
     } finally {
+      // Before the ⏺ entry flips to its terminal state, stamp the
+      // currently-active phase entry in scrollback with its elapsed time
+      // so the last line of the "progressive build" log isn't left
+      // unlabeled. Phase transitions handle this for all prior phases.
+      finalizeCurrentPhase(store, aborted ? "abort" : ok ? "ok" : "fail");
       const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       const status: "ok" | "fail" | "abort" = aborted ? "abort" : ok ? "ok" : "fail";
       // Per-tool renderResult() may return a concise summary like
@@ -2324,6 +2400,10 @@ async function startInkShell(
       // happen before the next keystroke or the terminal echoes chars
       // below Ink's frame and Ctrl+C keeps missing `useInput`.
       ensureRawMode();
+      // Stamp the abort time so a duplicate SIGINT arriving milliseconds
+      // later (e.g. from pnpm/tsx signal forwarding) doesn't fall through
+      // the idle branch of `shellSigintHandler` and exit the shell.
+      lastAbortFiredAt = Date.now();
     });
   };
 
@@ -2362,6 +2442,10 @@ async function startInkShell(
       // Restore raw mode — the session's subprocess almost certainly
       // disabled it. Without this the next keystroke echoes below Ink.
       ensureRawMode();
+      // Stamp the abort time (see tool-abort path above) so the next
+      // spurious SIGINT — commonly a duplicate forwarded by pnpm/tsx —
+      // doesn't exit the shell by falling through the idle branch.
+      lastAbortFiredAt = Date.now();
       // Tear down the session in the background. Any straggler messages the
       // for-await loop drains are swallowed via the `activeAbortRequested`
       // guard inside the loop; `ensureSession()` lazily opens a fresh
@@ -2850,6 +2934,17 @@ async function startInkShell(
     }
     // Idle — fall through to the original cli.ts shutdown behavior so
     // Ctrl+C at an empty prompt still exits cleanly.
+    //
+    // Guard: a SIGINT within 2s of a tool/agent abort is almost certainly
+    // a duplicate — pnpm/tsx and some terminal drivers forward the same
+    // Ctrl+C twice (once as 0x03 byte, once as SIGINT) across the
+    // raw-mode flip. Without this, the shell exits with code 130 right
+    // after a successful abort even though the operator only pressed
+    // Ctrl+C once.
+    if (lastAbortFiredAt > 0 && Date.now() - lastAbortFiredAt < 2000) {
+      abortDebug("SIGINT at idle — within 2s of abort, swallowing duplicate");
+      return;
+    }
     abortDebug("SIGINT at idle — forwarding to prior listeners");
     for (const listener of priorSigintListeners) {
       try {
@@ -3407,7 +3502,9 @@ function handleSlashCommand(
       return { output: formatModuleList(core, shellState.moduleCatalog) };
 
     case "tools":
-      return { output: formatTools(core, ctx.focusedModule) };
+      return {
+        output: formatTools(core, ctx.focusedModule, { includeHidden: args.includes("--all") }),
+      };
 
     case "use":
       return handleUseCommand(args, core, opts, ctx);
@@ -3767,6 +3864,27 @@ function handleContextCommand(
   shellState: ShellState,
 ): LocalCommandResult {
   const sub = args[0]?.toLowerCase();
+
+  // /context build — Live Build screen. Runs the deterministic
+  // `gatherContextForRoot` pipeline with a phase observer that streams
+  // into `shell.contextBuild`, writes `.kuzushi/scan-context.json` on
+  // completion, and returns to the prompt with a one-line summary.
+  if (sub === "build") {
+    if (!opts.target) return { output: "No target set. Use /target <path> first." };
+    const repoRoot = path.resolve(opts.target);
+    return {
+      output: "Building operator scan context…",
+      shellStateUpdater: (shell) => ({
+        ...shell,
+        shellView: "context-build",
+        contextBuild: initContextBuildState(repoRoot),
+      }),
+      asyncExecute: async (signal) => {
+        const { runContextBuildLive } = await import("./context-build-runner.js");
+        return runContextBuildLive(ctx.uiStore, repoRoot, signal);
+      },
+    };
+  }
 
   // /context edit — open the operator context intake editor
   if (sub === "edit") {
@@ -5348,6 +5466,12 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   // Scope: target + workspace + context ------------------------------------
   { syntax: "/target <path>", description: "Set or show the active target", group: "scope" },
   { syntax: "/context", description: "Generate or show application context map", group: "scope" },
+  {
+    syntax: "/context build",
+    description:
+      "Live-build the operator scan context (5 phases, writes .kuzushi/scan-context.json)",
+    group: "scope",
+  },
   { syntax: "/context edit", description: "Review/edit operator scan context", group: "scope" },
   {
     syntax: "/context regenerate",
@@ -5616,37 +5740,65 @@ function formatModuleInfo(core: CopilotCore, id: string): string {
   ]);
 }
 
-function formatTools(core: CopilotCore, focusedModule: string | null): string {
+function formatTools(
+  core: CopilotCore,
+  focusedModule: string | null,
+  opts: { includeHidden?: boolean } = {},
+): string {
+  const includeHidden = opts.includeHidden === true;
   if (focusedModule) {
     const module = core.registry.get(focusedModule);
     if (module.tools.length === 0) {
       return `  No tools available for ${focusedModule}.`;
     }
+    const visible = includeHidden ? module.tools : module.tools.filter((t) => t.hidden !== true);
+    const hiddenCount = module.tools.length - visible.length;
+    if (visible.length === 0 && hiddenCount > 0) {
+      return `  All ${hiddenCount} tools on ${focusedModule} are DAG-internal. Run \`/tools --all\` to list them.`;
+    }
 
-    return formatSections([
+    const sections: string[][] = [
       [
         `  ${module.displayName}`,
         ...formatCommandRows(
-          module.tools.map((tool) => [
+          visible.map((tool) => [
             toolActionName(tool.name),
             formatModuleDescription(tool.description),
           ]),
         ),
       ],
-    ]);
+    ];
+    if (hiddenCount > 0) {
+      sections.push([
+        `  + ${hiddenCount} internal DAG node${hiddenCount === 1 ? "" : "s"} hidden (run \`/tools --all\` to list)`,
+      ]);
+    }
+    return formatSections(sections);
   }
 
   const tools = core.registry.allTools();
-  if (tools.length === 0) return "  No tools available.";
+  const visibleTools = includeHidden ? tools : tools.filter(({ tool }) => tool.hidden !== true);
+  if (visibleTools.length === 0) {
+    return tools.length === 0
+      ? "  No tools available."
+      : "  No user-facing tools. Run `/tools --all` to list DAG-internal nodes.";
+  }
+  const hiddenCount = tools.length - visibleTools.length;
 
-  return formatSections([
+  const sections: string[][] = [
     [
       "  Available Tools",
       ...formatCommandRows(
-        tools.map(({ tool }) => [tool.name, formatModuleDescription(tool.description)]),
+        visibleTools.map(({ tool }) => [tool.name, formatModuleDescription(tool.description)]),
       ),
     ],
-  ]);
+  ];
+  if (hiddenCount > 0) {
+    sections.push([
+      `  + ${hiddenCount} internal DAG node${hiddenCount === 1 ? "" : "s"} hidden (run \`/tools --all\` to list)`,
+    ]);
+  }
+  return formatSections(sections);
 }
 
 /**

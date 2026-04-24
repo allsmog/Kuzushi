@@ -446,6 +446,37 @@ export function formatClock(ts: number): string {
 }
 
 /**
+ * Word-wrap a string to `maxWidth` columns, returning one string per line.
+ * Splits on whitespace; preserves single spaces between words. Words longer
+ * than `maxWidth` are emitted on their own line (not hard-split), since hard
+ * splits destroy identifiers like URLs and fully-qualified tool names.
+ *
+ * ANSI-naive — callers are expected to pass plain text, since continuation
+ * lines cannot safely re-open a mid-string escape without per-line state.
+ */
+export function wrapToWidth(text: string, maxWidth: number): string[] {
+  if (maxWidth <= 0 || !text) return text ? [text] : [];
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return [];
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (current.length === 0) {
+      current = word;
+      continue;
+    }
+    if (current.length + 1 + word.length > maxWidth) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = `${current} ${word}`;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/**
  * Pad a string to exactly `width` columns, ANSI-aware.
  */
 export function padCell(s: string, width: number, align: Align = "left"): string {

@@ -80,21 +80,15 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
   40+ task pipeline
 
 
-  Primary action: run one tool verb (listed below).
-
-  what it does
-
-     40+ task pipeline
-
   tools   (invoke from this shell as verb, or headless via kuzushi run)
 
-  VERB           DESCRIPTION                          TOOL NAME
+  VERB            TOOL NAME               DESCRIPTION
 
   ──────────────────────────────────────────────────────────────────────────────
   ─
-  scan           run the full pipeline                sast:scan
+  scan            sast:scan               run the full pipeline
 
-  triage         re-triage one finding                sast:triage
+  triage          sast:triage             re-triage one finding
 
 
   last run

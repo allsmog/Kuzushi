@@ -1,0 +1,158 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ContextBuildView > complete — all phases done, scan-context.json written 1`] = `
+"  done · 00:12 · run 9a21 · started 14:08:03
+  building OperatorScanContext from ~/src/acme-api
+
+  ╭─ Phases ───────────────────────────────────────────────────────────────────────╮
+  │                                                                                │
+  │  ✓ 1. manifest probes          done     5 in parallel · 0.14s                  │
+  │       package.json  ✓   go.mod  —   pyproject  —                               │
+  │       Cargo.toml  —   CMakeLists / Makefile  —                                 │
+  │                                                                                │
+  │  ✓ 2. walk repo                done     depth≤5 · capped at 4000 · 0.11s       │
+  │       entries 1 847 / 4 000     dirs 214     source files 1 102                │
+  │       ▰▰▰▰▰▱▱▱▱▱  well under cap — fileIndex not truncated                     │
+  │                                                                                │
+  │  ✓ 3. path signals             done     auth/, middleware/, Dockerfile · 0.02s │
+  │                                                                                │
+  │  ✓ 4. grep sweep               done     4 domains · 16 workers · 11.6s         │
+  │       file 1 102 / 1 102                                                       │
+  │       ▰▰▰▰▰▰▰▰▰▰  under-size cap 100KB; large files skipped                    │
+  │                                                                                │
+  │       domain                matches       status                               │
+  │       crypto-import           7           active                               │
+  │       auth-session           31           active                               │
+  │       protocol-parser         0           skipped (no matching ext)            │
+  │       unsafe-memory         50 / 50       capped — this is fine                │
+  │                                                                                │
+  │  ✓ 5. assemble + write .kuzushi/scan-context.json done     0.08s               │
+  │                                                                                │
+  ╰────────────────────────────────────────────────────────────────────────────────╯
+
+  Pillar preview   filling in as signals land — all items will land as [ skipped ]
+
+  ARCHITECTURE                              TRUST
+  ├ languages          TypeScript           ├ external defenses  helmet · DOMPurify
+  ├ frameworks         Next.js · Express …  ├ auth patterns      JWT · session-based
+  ├ entry points       src/pages/api/* · …  └ sanitization libs  helmet · DOMPurify
+  ├ data flows         waiting on enrichm…
+  └ external deps      Prisma
+
+  SCOPE                                     HISTORICAL
+  ├ high-value assets  not auto-detected    ├ suppressed fp      waiting on verdict…
+  └ sensitive data     not auto-detected    └ confirmed tp       waiting on verdict…
+
+  (scope / historical fed by findings cache, not this run)
+
+  Tail   last 3 lines · press L to expand full log
+
+    14:08:03.142  probe   package.json → found
+    14:08:03.260  path    auth/ middleware/ Dockerfile
+    14:08:03.281  grep    spawn 16 workers over 1102 files
+
+  ╭────────────────────────────────────────────────────────────────────────────────╮
+  │  q back      L expand tail                                                     │
+  │  context saved to ~/src/acme-api/.kuzushi/scan-context.json                    │
+  ╰────────────────────────────────────────────────────────────────────────────────╯"
+`;
+
+exports[`ContextBuildView > initial state — all phases pending 1`] = `
+"  building · 00:12 · run TEST · started 14:08:03
+  building OperatorScanContext from ~/src/acme-api
+
+  ╭─ Phases ───────────────────────────────────────────────────────────────────────╮
+  │                                                                                │
+  │  ○ 1. manifest probes          pending  5 in parallel                          │
+  │                                                                                │
+  │  ○ 2. walk repo                pending  depth≤5 · capped at 4000               │
+  │                                                                                │
+  │  ○ 3. path signals             pending  scanning paths                         │
+  │                                                                                │
+  │  ○ 4. grep sweep               pending  8 domains · 16 workers                 │
+  │                                                                                │
+  │  ○ 5. assemble + write .kuzushi/scan-context.json pending                      │
+  │                                                                                │
+  ╰────────────────────────────────────────────────────────────────────────────────╯
+
+  Pillar preview   filling in as signals land — all items will land as [ skipped ]
+
+  ARCHITECTURE                              TRUST
+  ├ languages          waiting…             ├ external defenses  waiting…
+  ├ frameworks         waiting…             ├ auth patterns      waiting…
+  ├ entry points       waiting…             └ sanitization libs  waiting…
+  ├ data flows         waiting on enrichm…
+  └ external deps      waiting on enrichm…
+
+  SCOPE                                     HISTORICAL
+  ├ high-value assets  not auto-detected    ├ suppressed fp      waiting on verdict…
+  └ sensitive data     not auto-detected    └ confirmed tp       waiting on verdict…
+
+  (scope / historical fed by findings cache, not this run)
+
+  Tail   last 0 lines · press L to expand full log
+
+    (waiting on first event)
+
+  ╭────────────────────────────────────────────────────────────────────────────────╮
+  │  q abort      L expand tail      b background (notify on done)                 │
+  │  safe to walk away — no writes until phase 5 (assemble)                        │
+  ╰────────────────────────────────────────────────────────────────────────────────╯"
+`;
+
+exports[`ContextBuildView > mid-grep — phases 1-3 done, phase 4 running with partial domain table 1`] = `
+"  building · 00:12 · run 9a21 · started 14:08:03
+  building OperatorScanContext from ~/src/acme-api
+
+  ╭─ Phases ───────────────────────────────────────────────────────────────────────╮
+  │                                                                                │
+  │  ✓ 1. manifest probes          done     5 in parallel · 0.14s                  │
+  │       package.json  ✓   go.mod  —   pyproject  —                               │
+  │       Cargo.toml  —   CMakeLists / Makefile  —                                 │
+  │                                                                                │
+  │  ✓ 2. walk repo                done     depth≤5 · capped at 4000 · 0.11s       │
+  │       entries 1 847 / 4 000     dirs 214     source files 1 102                │
+  │       ▰▰▰▰▰▱▱▱▱▱  well under cap — fileIndex not truncated                     │
+  │                                                                                │
+  │  ✓ 3. path signals             done     auth/, middleware/, Dockerfile · 0.02s │
+  │                                                                                │
+  │  ▸ 4. grep sweep               running  4 domains · 16 workers                 │
+  │       file 614 / 1 102                                                         │
+  │       ▰▰▰▰▰▰▱▱▱▱  under-size cap 100KB; large files skipped                    │
+  │                                                                                │
+  │       domain                matches       status                               │
+  │       crypto-import           7           active                               │
+  │       auth-session           31           active                               │
+  │       protocol-parser         0           skipped (no matching ext)            │
+  │       unsafe-memory         50 / 50       capped — this is fine                │
+  │                                                                                │
+  │  ○ 5. assemble + write .kuzushi/scan-context.json pending                      │
+  │                                                                                │
+  ╰────────────────────────────────────────────────────────────────────────────────╯
+
+  Pillar preview   filling in as signals land — all items will land as [ skipped ]
+
+  ARCHITECTURE                              TRUST
+  ├ languages          TypeScript           ├ external defenses  helmet · DOMPurify
+  ├ frameworks         Next.js · Express …  ├ auth patterns      JWT · session-based
+  ├ entry points       src/pages/api/* · …  └ sanitization libs  helmet · DOMPurify
+  ├ data flows         waiting on grep…
+  └ external deps      Prisma
+
+  SCOPE                                     HISTORICAL
+  ├ high-value assets  not auto-detected    ├ suppressed fp      waiting on verdict…
+  └ sensitive data     not auto-detected    └ confirmed tp       waiting on verdict…
+
+  (scope / historical fed by findings cache, not this run)
+
+  Tail   last 3 lines · press L to expand full log
+
+    14:08:03.142  probe   package.json → found
+    14:08:03.260  path    auth/ middleware/ Dockerfile
+    14:08:03.281  grep    spawn 16 workers over 1102 files
+
+  ╭────────────────────────────────────────────────────────────────────────────────╮
+  │  q abort      L expand tail      b background (notify on done)                 │
+  │  safe to walk away — no writes until phase 5 (assemble)                        │
+  ╰────────────────────────────────────────────────────────────────────────────────╯"
+`;

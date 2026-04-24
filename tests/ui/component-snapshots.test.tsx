@@ -223,6 +223,87 @@ describe("Ink component snapshots", () => {
     expect(out).toMatchSnapshot();
   });
 
+  it("ModuleHome — collapses tools and last-run while processing", () => {
+    const shell = stubShell({
+      focusedModule: "context",
+      shellView: "module",
+      processing: true,
+      moduleCatalog: [
+        {
+          id: "context",
+          displayName: "Context",
+          category: "intel",
+          description: "Builds the application context snapshot.",
+          toolCount: 1,
+          toolSummaries: [
+            {
+              name: "context:build",
+              verb: "build",
+              description: "Generate the application context snapshot",
+              headless: true,
+            },
+          ],
+        },
+      ],
+    });
+    const out = renderToString(createElement(ModuleHome, { shell }));
+    // Header strip stays visible so the operator knows where they are.
+    expect(out).toContain("intel");
+    expect(out).toContain("Builds the application context snapshot");
+    // Tools table + last-run sections are suppressed during the run.
+    expect(out).not.toContain("TOOL NAME");
+    expect(out).not.toContain("last run");
+    expect(out).not.toContain("never run for this workspace");
+  });
+
+  it("ModuleHome — hides internal DAG nodes and shows the hint line", () => {
+    const shell = stubShell({
+      focusedModule: "context",
+      shellView: "module",
+      moduleCatalog: [
+        {
+          id: "context",
+          displayName: "Context",
+          category: "intel",
+          description: "Builds the application context snapshot.",
+          toolCount: 3,
+          toolSummaries: [
+            {
+              name: "context:build",
+              verb: "build",
+              description: "Generate the application context snapshot",
+              headless: true,
+            },
+            {
+              name: "context:context-gatherer",
+              verb: "context-gatherer",
+              description: "Internal DAG node: Context Gatherer",
+              headless: true,
+              hidden: true,
+            },
+            {
+              name: "context:app-model-build",
+              verb: "app-model-build",
+              description: "Internal DAG node: Application Model",
+              headless: true,
+              hidden: true,
+            },
+          ],
+        },
+      ],
+    });
+    const out = renderToString(createElement(ModuleHome, { shell }));
+    // Only the public verb should appear — hidden ones must stay out of the table.
+    expect(out).toContain("build");
+    expect(out).not.toContain("context-gatherer");
+    expect(out).not.toContain("app-model-build");
+    // Hint line announces the hidden count.
+    expect(out).toContain("2 internal DAG nodes");
+    expect(out).toContain("/tools --all");
+    // Status strip shows visible-tool count (1), not total (3).
+    expect(out).toContain("1 tools");
+  });
+
   it("FindingCard linear — state strip + evidence + timeline", () => {
     const out = renderToString(
       createElement(FindingCard, { finding: stubFinding(), mode: "linear" }),

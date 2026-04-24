@@ -11,6 +11,7 @@
 
 import type { ModuleRegistry } from "../../modules/registry.js";
 import type { CopilotModule } from "../../modules/types.js";
+import { wrapToWidth } from "../../ui/format.js";
 import { type Datastore, formatOptionsTable } from "../options.js";
 import { formatSearchResult, searchCatalog } from "../search.js";
 import { randomTip } from "../tips.js";
@@ -354,14 +355,25 @@ export class CoreDispatcher implements CommandDispatcher {
       id: Math.max(2, ...list.map((m) => m.id.length)),
       cat: Math.max(8, ...list.map((m) => m.category.length)),
       ver: Math.max(7, ...list.map((m) => m.version.length)),
+      tools: 5,
     };
+    // Column start for the Description cell: 2-space indent + each leader cell
+    // followed by a 2-space gap.
+    const descStart = 2 + widths.id + 2 + widths.cat + 2 + widths.ver + 2 + widths.tools + 2;
+    const availableWidth = process.stdout?.columns ?? 100;
+    const descWidth = Math.max(20, availableWidth - descStart - 1);
+    const contPad = " ".repeat(descStart);
+
     const header = `  ${pad("Id", widths.id)}  ${pad("Category", widths.cat)}  ${pad("Version", widths.ver)}  Tools  Description`;
     const sep = `  ${"-".repeat(widths.id)}  ${"-".repeat(widths.cat)}  ${"-".repeat(widths.ver)}  -----  -----------`;
     const body = list
-      .map(
-        (m) =>
-          `  ${pad(m.id, widths.id)}  ${pad(m.category, widths.cat)}  ${pad(m.version, widths.ver)}  ${String(m.toolCount).padStart(5)}  ${m.description}`,
-      )
+      .map((m) => {
+        const descLines = wrapToWidth(m.description, descWidth);
+        const first = descLines[0] ?? "";
+        const rest = descLines.slice(1);
+        const leader = `  ${pad(m.id, widths.id)}  ${pad(m.category, widths.cat)}  ${pad(m.version, widths.ver)}  ${String(m.toolCount).padStart(5)}  ${first}`;
+        return [leader, ...rest.map((l) => `${contPad}${l}`)].join("\n");
+      })
       .join("\n");
     return { output: [header, sep, body].join("\n") };
   }
@@ -370,7 +382,13 @@ export class CoreDispatcher implements CommandDispatcher {
     const id = args[0];
     if (!id) return { output: "Usage: use <module-id>" };
     if (!this.opts.registry.has(id)) {
-      return { output: `Unknown module: ${id}. Try: modules` };
+      const all = this.opts.registry.ids();
+      const suggestions = suggestMatches(id, all, 3);
+      const hint =
+        suggestions.length > 0
+          ? `Did you mean: ${suggestions.join(", ")}?`
+          : "Run `modules` to list all loaded modules.";
+      return { output: `Unknown module: ${id}. ${hint}` };
     }
     const mod = this.opts.registry.get(id);
     const dispatcher = new ModuleDispatcher({
@@ -437,8 +455,22 @@ export class CoreDispatcher implements CommandDispatcher {
         return { output: formatOptionsTable(this.opts.globals) };
       case "modules":
         return this.cmd_modules(ctx);
-      default:
-        return { output: `Unknown show target: ${what}` };
+      default: {
+        const validTargets = ["options", "advanced", "evasion", "missing", "globals", "modules"];
+        const suggestions = suggestMatches(what, validTargets, 3);
+        const suggestLine =
+          suggestions.length > 0
+            ? `Did you mean: ${suggestions.join(", ")}?`
+            : `Try: ${validTargets.join(", ")}.`;
+        const lines = [`Unknown show target: "${what}". ${suggestLine}`];
+        const active = this.activeModuleDispatcher(ctx);
+        if (active) {
+          lines.push(
+            `(You're in the ${active.module.id} module — run \`tools\` to list its actions, or \`run <verb>\` to invoke one.)`,
+          );
+        }
+        return { output: lines.join("\n") };
+      }
     }
   }
 
@@ -1198,4 +1230,54 @@ export function formatToolInfo(mod: CopilotModule, tool: CopilotModule["tools"][
     for (const ref of refs) lines.push(`  ${ref.type}: ${ref.value}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * Rank candidate strings by fuzzy closeness to `query` and return up to
+ * `limit` of the best matches. Scoring prefers exact prefix > substring >
+ * small Levenshtein distance; candidates that share no characters are
+ * dropped so the suggestion list stays useful (typing "zzz" shouldn't
+ * suggest every loaded module).
+ */
+export function suggestMatches(
+  query: string,
+  candidates: ReadonlyArray<string>,
+  limit = 3,
+): string[] {
+  const q = query.toLowerCase();
+  if (q.length === 0) return [];
+  const scored = candidates
+    .map((c) => {
+      const lc = c.toLowerCase();
+      if (lc === q) return { c, score: 0 };
+      if (lc.startsWith(q)) return { c, score: 1 };
+      if (lc.includes(q)) return { c, score: 2 };
+      const d = levenshtein(q, lc);
+      // Require the distance to be small relative to the query length so
+      // near-typos like "modles" → "modules" (dist 1 on q.len 6) are
+      // suggested, but unrelated strings are dropped.
+      if (d <= Math.max(1, Math.floor(q.length / 3))) return { c, score: 3 + d };
+      return undefined;
+    })
+    .filter((x): x is { c: string; score: number } => x !== undefined)
+    .sort((a, b) => a.score - b.score || a.c.length - b.c.length);
+  return scored.slice(0, limit).map((x) => x.c);
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const prev = new Array<number>(b.length + 1);
+  const curr = new Array<number>(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min((curr[j - 1] ?? 0) + 1, (prev[j] ?? 0) + 1, (prev[j - 1] ?? 0) + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j] ?? 0;
+  }
+  return prev[b.length] ?? 0;
 }

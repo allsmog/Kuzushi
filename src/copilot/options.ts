@@ -15,6 +15,7 @@
  */
 
 import type { JSONSchema } from "../modules/schema.js";
+import { wrapToWidth } from "../ui/format.js";
 
 // ---------------------------------------------------------------------------
 // Option spec
@@ -326,6 +327,13 @@ export interface FormatOptionsOpts {
   evasion?: boolean;
   /** If true, mark missing-required rows with a leading "*". */
   highlightMissing?: boolean;
+  /**
+   * Target width in columns for the rendered table. Descriptions that would
+   * overflow this width are word-wrapped into continuation lines aligned
+   * under the Description column. Defaults to `process.stdout.columns` or
+   * 100 if the terminal width is unavailable.
+   */
+  availableWidth?: number;
 }
 
 /** Render a `show options`-style table. Returns a string (multi-line). */
@@ -362,13 +370,27 @@ export function formatOptionsTable(store: Datastore, opts: FormatOptionsOpts = {
     required: Math.max(8, ...rows.map((r) => r.required.length)),
   };
 
+  // Column start offset for the Description cell (in total visible columns).
+  // Leading 2-space indent + 3 cells each followed by 2-space gap.
+  const descStart = 2 + widths.name + 2 + widths.current + 2 + widths.required + 2;
+  const availableWidth = opts.availableWidth ?? process.stdout?.columns ?? 100;
+  // Reserve a 1-column safety margin so Ink/terminal doesn't wrap on its own.
+  // Enforce a 20-column minimum so descriptions stay readable on narrow shells
+  // (a shorter column produces extreme single-word stacks that look worse than
+  // a mild right-overflow).
+  const descWidth = Math.max(20, availableWidth - descStart - 1);
+
   const header = `  ${pad("Name", widths.name)}  ${pad("Current Setting", widths.current)}  ${pad("Required", widths.required)}  Description`;
   const sep = `  ${"-".repeat(widths.name)}  ${"-".repeat(widths.current)}  ${"-".repeat(widths.required)}  -----------`;
+  const contPad = " ".repeat(descStart);
   const body = rows
-    .map(
-      (r) =>
-        `  ${pad(r.name, widths.name)}  ${pad(r.current, widths.current)}  ${pad(r.required, widths.required)}  ${r.description}`,
-    )
+    .map((r) => {
+      const descLines = wrapToWidth(r.description, descWidth);
+      const first = descLines[0] ?? "";
+      const rest = descLines.slice(1);
+      const leader = `  ${pad(r.name, widths.name)}  ${pad(r.current, widths.current)}  ${pad(r.required, widths.required)}  ${first}`;
+      return [leader, ...rest.map((l) => `${contPad}${l}`)].join("\n");
+    })
     .join("\n");
 
   return [header, sep, body].join("\n");

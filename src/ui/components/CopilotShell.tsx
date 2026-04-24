@@ -44,6 +44,7 @@ import type {
 import { SPACING, tokens } from "../tokens.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
+import { ContextBuildView } from "./ContextBuildView.js";
 import { DiffSinceView } from "./DiffSinceView.js";
 import { ErrorMessage } from "./ErrorMessage.js";
 import { FindingCard } from "./FindingCard.js";
@@ -706,6 +707,8 @@ function ShellViewPanel({
       return <ThreatSummaryExport key={view} shell={shell} />;
     case "diff-since":
       return <DiffSinceView key={view} summary={summary} shell={shell} />;
+    case "context-build":
+      return <ContextBuildView key={view} shell={shell} />;
     default:
       return null;
   }
@@ -726,6 +729,7 @@ const MemoShellViewPanel = memo(
     prev.shell.findingCursor === next.shell.findingCursor &&
     prev.shell.findingPageSize === next.shell.findingPageSize &&
     prev.shell.moduleCatalog === next.shell.moduleCatalog &&
+    prev.shell.contextBuild === next.shell.contextBuild &&
     prev.summary === next.summary,
 );
 
@@ -835,7 +839,15 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
       </Box>
       {status === "running" && entry.liveActivities && entry.liveActivities.length > 0 ? (
         <Box flexDirection="column">
-          {entry.liveActivities.slice(-4).map((activity) => (
+          {/*
+           * Show the last 12 sub-activities while the ⏺ row is active so
+           * operators can watch the build progress instead of getting the
+           * single "… N earlier updates" collapse notice. The finalized
+           * per-phase `tool-progress` rows in scrollback preserve the full
+           * sequence once each phase completes, so there's no information
+           * loss from a deeper tail here.
+           */}
+          {entry.liveActivities.slice(-12).map((activity) => (
             <Box key={activity.id}>
               <Gutter />
               <Gutter>
@@ -844,15 +856,6 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
               <Text> {tokens.muted(truncateEnd(activity.text, 104))}</Text>
             </Box>
           ))}
-          {entry.liveActivities.length > 4 ? (
-            <Box>
-              <Gutter />
-              <Gutter>
-                <Text dimColor>{LOWER_HOOK}</Text>
-              </Gutter>
-              <Text> {tokens.muted(`… ${entry.liveActivities.length - 4} earlier updates`)}</Text>
-            </Box>
-          ) : null}
         </Box>
       ) : null}
       {hasResult ? (

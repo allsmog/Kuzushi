@@ -100,6 +100,111 @@ describe("CoreDispatcher", () => {
     expect(result.output).toContain("Required");
   });
 
+  it("show <unknown> lists valid targets and hints the focused module", async () => {
+    const { driver } = seed();
+    const baseline = await driver.handle("show context");
+    expect(baseline.output).toContain(`Unknown show target: "context"`);
+    expect(baseline.output).toContain("options");
+    expect(baseline.output).not.toContain("You're in");
+
+    await driver.handle("use sast");
+    const focused = await driver.handle("show context");
+    expect(focused.output).toContain(`Unknown show target: "context"`);
+    expect(focused.output).toContain("You're in the sast module");
+    expect(focused.output).toContain("run `tools`");
+  });
+
+  it("show <near-miss> suggests the closest valid target", async () => {
+    const { driver } = seed();
+    const res = await driver.handle("show module");
+    expect(res.output).toContain("Did you mean:");
+    expect(res.output).toContain("modules");
+  });
+
+  it("use <partial> suggests similar module ids", async () => {
+    const registry = new ModuleRegistry();
+    registry.register(mkModule("taint-iris", [mkTool("taint-iris:run")]));
+    registry.register(mkModule("threat-hunt", [mkTool("threat-hunt:run")]));
+    registry.register(mkModule("triage", [mkTool("triage:run")]));
+    (registry as unknown as { initialized: Set<string> }).initialized.add("taint-iris");
+    (registry as unknown as { initialized: Set<string> }).initialized.add("threat-hunt");
+    (registry as unknown as { initialized: Set<string> }).initialized.add("triage");
+
+    const sink = createArraySink();
+    const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+
+    const res = await driver.handle("use taint");
+    expect(res.output).toContain("Unknown module: taint.");
+    expect(res.output).toContain("Did you mean: taint-iris");
+  });
+
+  it("use <nonsense> falls back to the 'Run `modules`' hint", async () => {
+    const { driver } = seed();
+    const res = await driver.handle("use zzznope");
+    expect(res.output).toContain("Unknown module: zzznope.");
+    expect(res.output).toContain("Run `modules`");
+  });
+
+  it("modules table wraps long descriptions under the Description column", async () => {
+    const registry = new ModuleRegistry();
+    const long: CopilotModule = {
+      ...mkModule("wordy", [mkTool("wordy:run")]),
+      description:
+        "This is a very long description that should wrap cleanly beneath the Description column even on a narrow 80-column terminal without breaking mid-word.",
+    };
+    registry.register(long);
+    (registry as unknown as { initialized: Set<string> }).initialized.add("wordy");
+    const sink = createArraySink();
+    const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+
+    // Force a narrow terminal so we can assert wrap behavior.
+    const origCols = process.stdout.columns;
+    Object.defineProperty(process.stdout, "columns", { configurable: true, value: 80 });
+    try {
+      const res = await driver.handle("modules");
+      const lines = res.output.split("\n");
+      // First body line starts with leading spaces + id + category + version + tools + first chunk of description.
+      const leader = lines.find((l) => l.includes("wordy"));
+      expect(leader).toBeDefined();
+      expect(leader!).toMatch(/wordy\s+.*\s+This is a very long/);
+      // At least one continuation line padded to align under the Description column.
+      const contPad = lines[0]!.indexOf("Description");
+      const contLines = lines.filter(
+        (l) =>
+          l.length > contPad &&
+          l.startsWith(" ".repeat(contPad)) &&
+          !l.includes("wordy") &&
+          !l.trim().startsWith("---"),
+      );
+      expect(contLines.length).toBeGreaterThan(0);
+    } finally {
+      Object.defineProperty(process.stdout, "columns", { configurable: true, value: origCols });
+    }
+  });
+
+  it("tools --all surfaces hidden DAG nodes", async () => {
+    const registry = new ModuleRegistry();
+    const publicTool = mkTool("sast:scan");
+    const hiddenTool: ModuleTool = { ...mkTool("sast:triage-internal"), hidden: true };
+    registry.register(mkModule("sast", [publicTool, hiddenTool]));
+    (registry as unknown as { initialized: Set<string> }).initialized.add("sast");
+    const sink = createArraySink();
+    const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: sink });
+
+    await driver.handle("use sast");
+    const def = await driver.handle("tools");
+    expect(def.output).toContain("sast:scan");
+    expect(def.output).not.toContain("sast:triage-internal");
+    expect(def.output).toContain("1 internal DAG node");
+
+    const all = await driver.handle("tools --all");
+    expect(all.output).toContain("sast:scan");
+    expect(all.output).toContain("sast:triage-internal");
+  });
+
   it("show missing lists required options not yet set", async () => {
     const { driver } = seed();
     await driver.handle("use sast");

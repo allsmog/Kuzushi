@@ -550,7 +550,121 @@ export type ShellView =
   // Phase D.3 — diff-aware view showing findings + threat elements scoped
   // to the set of files that differ between HEAD and a user-supplied git
   // ref (e.g. main). Interactive surface over the existing scan `--since`.
-  | "diff-since";
+  | "diff-since"
+  // Live Build — ContextBuildView renders the 5 phases of
+  // `gatherContextForRoot` (manifests → walk → path signals → grep sweep →
+  // assemble) plus a pillar preview that fills in as signals land. Entered
+  // via `/context build`; reads from `shell.contextBuild`.
+  | "context-build";
+
+/**
+ * Phases of the deterministic `gatherContextForRoot` pipeline, mirrored in
+ * `ContextBuildView`'s phase tracker. Kept in sync with
+ * `BuildPhaseId` in `src/agents/tasks/context-gatherer.ts`.
+ */
+export type ContextBuildPhaseId = "manifests" | "walk" | "path-signals" | "grep" | "assemble";
+
+export interface ContextBuildPhaseSlice {
+  status: "pending" | "running" | "done" | "failed";
+  startedAtMs?: number;
+  durationMs?: number;
+}
+
+export interface ContextBuildGrepDomainSlice {
+  name: string;
+  matches: number;
+  status: "pending" | "active" | "capped" | "skipped-no-ext";
+}
+
+/**
+ * Live state for the `/context build` Ink view. A fresh instance is seeded
+ * via `initContextBuildState()` when the command is invoked; phase observer
+ * events then drive incremental updates until the run terminates.
+ */
+export interface ContextBuildState {
+  /** 4-char id shown as "run 9a21" in the view header. */
+  runId: string;
+  repoRoot: string;
+  startedAtMs: number;
+  /** Terminal status. While "running", the view's live indicators animate. */
+  status: "running" | "done" | "failed" | "aborted";
+  phases: Record<ContextBuildPhaseId, ContextBuildPhaseSlice>;
+  manifests: Partial<
+    Record<
+      "package.json" | "go.mod" | "pyproject" | "Cargo.toml" | "native-build",
+      "found" | "miss"
+    >
+  >;
+  walk?: { entries: number; dirs: number; sourceFiles: number; cap: number };
+  pathSignals: ReadonlyArray<string>;
+  grep?: {
+    filesDone: number;
+    filesTotal: number;
+    workers: number;
+    domainCap: number;
+    domains: ReadonlyArray<ContextBuildGrepDomainSlice>;
+  };
+  /** Minimal pillar preview — gather-phase signals only; LLM-sourced pillars
+   * ("scope", "historical") are rendered as placeholders in the view. */
+  pillars: {
+    architecture: {
+      languages: ReadonlyArray<string>;
+      frameworks: ReadonlyArray<string>;
+      entryPoints: ReadonlyArray<string>;
+      ormOrDb: ReadonlyArray<string>;
+    };
+    trust: {
+      sanitizationLibs: ReadonlyArray<string>;
+      authPatterns: ReadonlyArray<string>;
+    };
+  };
+  tail: ReadonlyArray<{ tsMs: number; message: string; kind?: "info" | "warn" }>;
+  tailExpanded: boolean;
+  errorMessage?: string;
+  /** Absolute path to the written `.kuzushi/scan-context.json`, once assembled. */
+  scanContextPath?: string;
+  /** Total grep matches across all domains, populated on assemble. */
+  totalMatches?: number;
+}
+
+const ORDERED_BUILD_PHASES: ReadonlyArray<ContextBuildPhaseId> = [
+  "manifests",
+  "walk",
+  "path-signals",
+  "grep",
+  "assemble",
+];
+
+export function initContextBuildState(
+  repoRoot: string,
+  now: number = Date.now(),
+): ContextBuildState {
+  const phases = {} as Record<ContextBuildPhaseId, ContextBuildPhaseSlice>;
+  for (const id of ORDERED_BUILD_PHASES) phases[id] = { status: "pending" };
+  return {
+    runId: generateRunId(now),
+    repoRoot,
+    startedAtMs: now,
+    status: "running",
+    phases,
+    manifests: {},
+    pathSignals: [],
+    pillars: {
+      architecture: { languages: [], frameworks: [], entryPoints: [], ormOrDb: [] },
+      trust: { sanitizationLibs: [], authPatterns: [] },
+    },
+    tail: [],
+    tailExpanded: false,
+  };
+}
+
+function generateRunId(now: number): string {
+  // Short deterministic-looking 4-char hex derived from the timestamp + a
+  // small random nibble — mirrors the "run 9a21" pattern in the design.
+  const high = (now & 0xffff).toString(16).padStart(4, "0");
+  const salt = Math.floor(Math.random() * 0xf).toString(16);
+  return high.slice(0, 3) + salt;
+}
 
 /**
  * Rich per-module info used by the v2 ModuleCatalog and ModuleHome screens.
@@ -584,6 +698,12 @@ export interface ShellModuleToolSummary {
   description: string;
   /** Tool runs in non-interactive / run mode. */
   headless: boolean;
+  /**
+   * True for DAG-internal nodes that should be filtered out of the default
+   * ModuleHome tools table. Surfaces only via `/tools --all` or `/info <tool>`.
+   * Mirrors `ModuleTool.hidden` — see `src/modules/types.ts`.
+   */
+  hidden?: boolean;
 }
 
 /**
@@ -685,6 +805,13 @@ export interface ShellState {
   lastUsedTool?: string;
   /** Generated context for the current target. Platform-level — readable by all modules. */
   contextSnapshot?: ContextSnapshot | null;
+  /**
+   * Live-build progress for the current `/context build` run. Seeded on
+   * command entry by `initContextBuildState()`, then mutated by the phase
+   * observer in `runContextBuildLive`. `null` when no build is active and no
+   * completed build is being kept around for re-viewing.
+   */
+  contextBuild?: ContextBuildState | null;
   /** Transient assistant text streamed before the turn finalizes. */
   pendingAssistantText?: string;
   /** Whether the agent is currently processing a query. */
@@ -704,6 +831,12 @@ export interface ShellState {
     subLabel?: string;
     /** Current phase label from `task:phase-progress` (populated live). */
     phase?: string;
+    /**
+     * Epoch ms the current phase began. Used to compute per-phase elapsed
+     * time so each phase entry in scrollback can be retroactively annotated
+     * (e.g. "scanning repo structure · 3s") when the phase transitions.
+     */
+    phaseStartedAt?: number;
     /** Step index parsed from phase when formatted as "<label> (N/M)". */
     step?: number;
     /** Total step count parsed from phase when formatted as "<label> (N/M)". */

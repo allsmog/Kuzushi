@@ -114,4 +114,44 @@ describe("formatOptionsTable", () => {
     expect(formatOptionsTable(ds)).not.toContain("Y  ");
     expect(formatOptionsTable(ds, { advanced: true })).toContain("Y");
   });
+
+  it("wraps long descriptions under the Description column", () => {
+    const ds = new Datastore([
+      Opt.string("discovery", {
+        description: "auto = detect monorepo, flat = single project, modules = force per-module.",
+        default: "auto",
+      }),
+    ]);
+    // 80-col terminal is typical; descStart = 2 + 9 + 2 + 15 + 2 + 8 + 2 = 40.
+    // descWidth = 80 - 40 - 1 = 39 → description should wrap to >=2 lines
+    // with continuation padded to 40 columns.
+    const out = formatOptionsTable(ds, { availableWidth: 80 });
+    const lines = out.split("\n");
+    // First body line carries the option name, value, required, and start of description.
+    const leader = lines.find((l) => l.includes("discovery"));
+    expect(leader).toBeDefined();
+    expect(leader!).toMatch(/discovery\s+auto\s+no\s+auto = detect monorepo/);
+    // Continuation line should start with exactly 40 spaces then more description text.
+    const cont = lines.find(
+      (l) => l.startsWith(" ".repeat(40)) && !l.includes("discovery") && l.trim().length > 0,
+    );
+    expect(cont).toBeDefined();
+    expect(cont!.length).toBeLessThanOrEqual(80);
+    // No line should exceed the target width.
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it("does not break mid-word when width is wide enough", () => {
+    const ds = new Datastore([
+      Opt.string("threatModel", {
+        description: "Run PASTA S1-S4 threat modeling.",
+        default: "true",
+      }),
+    ]);
+    const out = formatOptionsTable(ds, { availableWidth: 120 });
+    expect(out).toContain("Run PASTA S1-S4 threat modeling.");
+    expect(out.split("\n").filter((l) => l.trim().length > 0)).toHaveLength(3); // header + sep + one body line
+  });
 });
