@@ -31,6 +31,11 @@ import {
 } from "./format.js";
 import { icons } from "./icons.js";
 import { normalizeSeverity, severityToken } from "./severity.js";
+import {
+  formatShellHistoryEntryPlain,
+  shellHistoryPlainKey,
+  shellHistoryPlainSignature,
+} from "./shell-log-events.js";
 import type {
   ActionableFinding,
   AgentActivityLine,
@@ -79,6 +84,8 @@ export function registerPlainTextRenderer(
   let lastPlanSource: string | null = null;
   let lastThreatModelPath: string | null = null;
   let lastDiffSinceRef: string | null = null;
+  let lastShellHistoryLength = 0;
+  let printedShellHistory = new Map<string, string>();
   // Workstream 5 — overlay trackers. Each overlay emits once per edge
   // transition (false → true) to avoid duplicate prompts on every
   // subscriber tick while the overlay stays active.
@@ -230,6 +237,18 @@ export function registerPlainTextRenderer(
     // useful; the full layouts live in the Ink components.
     const shell = state.shell;
     if (shell) {
+      if (shell.history.length < lastShellHistoryLength) {
+        printedShellHistory = new Map();
+      }
+      lastShellHistoryLength = shell.history.length;
+      shell.history.forEach((entry, index) => {
+        const key = shellHistoryPlainKey(entry, index);
+        const signature = shellHistoryPlainSignature(entry);
+        if (printedShellHistory.get(key) === signature) return;
+        printedShellHistory.set(key, signature);
+        for (const line of formatShellHistoryEntryPlain(entry)) emit(line);
+      });
+
       const viewKey = `${shell.shellView}:${shell.focusedModule ?? ""}:${shell.openFindingId ?? ""}`;
       if (viewKey !== lastShellView) {
         lastShellView = viewKey;

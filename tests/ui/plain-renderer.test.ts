@@ -160,6 +160,52 @@ describe("plain-renderer Phase D.5 emitters", () => {
     expect(cap.lines.some((l) => l.includes("[shell] module home (sast)"))).toBe(true);
   });
 
+  it("emits typed shell history and terminal tool-call updates", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    const runningTool = {
+      type: "tool-call" as const,
+      id: "tc-1",
+      tool: "sast:scan",
+      displayName: "Scan",
+      inputHint: "./repo",
+      status: "running" as const,
+      text: "⏺ Scan(./repo)",
+      timestamp: 1,
+    };
+
+    store.update({
+      mode: "shell",
+      shell: baseShell({
+        history: [
+          { type: "input", text: "run scan", prompt: "kuzushi> ", timestamp: 0 },
+          runningTool,
+        ],
+      }),
+    });
+    expect(lines).toContain("[input] kuzushi> run scan");
+    expect(lines).toContain("[tool] Scan(./repo) started");
+
+    lines.length = 0;
+    store.update({
+      shell: baseShell({
+        history: [
+          { type: "input", text: "run scan", prompt: "kuzushi> ", timestamp: 0 },
+          {
+            ...runningTool,
+            status: "ok",
+            elapsedSeconds: 4,
+            resultOutput: "3 findings",
+          },
+        ],
+      }),
+    });
+    unsub();
+
+    expect(lines).toContain("[tool:ok] Scan · 3 findings · 4s");
+    expect(lines).not.toContain("[input] kuzushi> run scan");
+  });
+
   it("prints [threats] summary with element + threat counts", () => {
     const store = createUIStore();
     const cap = captureConsole();
