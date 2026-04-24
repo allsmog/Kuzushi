@@ -4,9 +4,7 @@
  * Renders when the shell is at the top level (shellView === "catalog" and
  * no focused module). Groups the loaded modules by the real README
  * categories — offense · intel · governance · defense — plus an optional
- * EXTERNAL section for `pkg:*` modules. The roadmap footer lists
- * not-yet-shipped modules as italic muted text so operators see the future
- * shape without it crowding today's work.
+ * EXTERNAL section for `pkg:*` modules.
  *
  * Each row shows: `id · one-liner · last-run summary`. Selection is purely
  * visual — the user types `/use <id>` in the shell prompt below the catalog
@@ -16,15 +14,11 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { icons } from "../icons.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellModuleCard, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
 import { ScreenContent } from "./ScreenContent.js";
-
-/** Roadmap modules — kept in sync with the VISION.md one-liner in the README. */
-const ROADMAP_MODULES = ["blackbox", "pwn", "pentest", "honeypot", "yokai", "revgraph"] as const;
 
 const CATEGORY_ORDER = ["offense", "intel", "governance", "defense"] as const;
 const CATEGORY_LABEL: Record<(typeof CATEGORY_ORDER)[number], string> = {
@@ -40,9 +34,8 @@ interface ModuleCatalogProps {
 
 export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement {
   useRegisterKeybindings([
-    { keys: "/use <id>", label: "focus module" },
-    { keys: "/findings", label: "findings", secondary: true },
-    { keys: "/tune", label: "tune", secondary: true },
+    { keys: "use <id>", label: "focus module" },
+    { keys: "findings", label: "findings", secondary: true },
     { keys: "?", label: "help", secondary: true },
     { keys: "Ctrl+C", label: "exit", secondary: true },
   ]);
@@ -56,8 +49,6 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
     bucket.push(card);
     byCategory[card.category] = bucket;
   }
-
-  const cardWidth = 61;
   return (
     <ScreenContent>
       <ContextStrip
@@ -70,7 +61,7 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
       <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.strong("Primary next step: ")}
-          {tokens.accent("/use <module-id>")}
+          {tokens.accent("use <module-id>")}
           {tokens.muted(" to enter one module workflow.")}
         </Text>
       </Box>
@@ -100,16 +91,6 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
           </Box>
         </Box>
       )}
-
-      <Box marginTop={SPACING.sm}>
-        <Text>{tokens.metadata(icons.boxHorizontal.repeat(cardWidth - 2))}</Text>
-      </Box>
-      <Box>
-        <Text>
-          {tokens.hint(`coming · ${ROADMAP_MODULES.join(" · ")} — `)}
-          {tokens.accent("see VISION.md")}
-        </Text>
-      </Box>
     </ScreenContent>
   );
 }
