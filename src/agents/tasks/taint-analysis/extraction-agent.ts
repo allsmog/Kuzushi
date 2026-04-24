@@ -9,7 +9,7 @@ import type {
   AgentToolDecision,
 } from "../../../agent-runtime/types.js";
 import { getLogger } from "../../../logger.js";
-import { toErrorMessage } from "../../../utils.js";
+import { isPathWithinRoot, toErrorMessage } from "../../../utils.js";
 import type { TaintAnalysisLanguage } from "./types.js";
 
 const SOURCE_BODY_PLACEHOLDERS = ["{{SOURCE_HANDLER_PREDICATE}}"];
@@ -613,11 +613,6 @@ function resolveInputPath(repoRoot: string, candidatePath: string): string {
   return path.isAbsolute(candidatePath)
     ? path.normalize(candidatePath)
     : path.resolve(repoRoot, candidatePath);
-}
-
-function isPathWithinRoot(rootPath: string, candidatePath: string): boolean {
-  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function isSamePath(left: string, right: string): boolean {

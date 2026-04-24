@@ -15,6 +15,7 @@ import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
+import type { WizardResult } from "../preflight-types.js";
 import {
   SelectList,
   type SelectListItem,
@@ -22,14 +23,7 @@ import {
 } from "../primitives/SelectList.js";
 import { SPACING, tokens } from "../tokens.js";
 
-export interface WizardResult {
-  preset: string;
-  model?: string;
-  verify?: boolean;
-  pocHarness?: boolean;
-  severity?: string[];
-  saveLocation?: "project" | "global" | "none";
-}
+export type { WizardResult } from "../preflight-types.js";
 
 interface SetupWizardProps {
   repoName: string;

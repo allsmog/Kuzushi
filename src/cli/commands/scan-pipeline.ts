@@ -22,6 +22,7 @@ import {
   validateKuzushiConfig,
 } from "../../config/validation.js";
 import { loadConfig, resolveActiveCredentials } from "../../config.js";
+import type { ReportMode } from "../../contracts.js";
 import { registerShutdownHook } from "../../lifecycle.js";
 import { printQualityGateResult } from "../../report.js";
 import { configureRateLimitRegistry } from "../../scheduler/index.js";
@@ -66,7 +67,7 @@ export interface PipelineParams {
   postProcessMode?: "full" | "scan-only";
   dbPath?: string;
   runRepoId?: string;
-  reportMode?: "full" | "suppress";
+  reportMode?: ReportMode;
   runtime?: AgentRuntime;
   manageCache?: boolean;
   seedTaskOutputs?: Map<string, unknown>;

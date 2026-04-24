@@ -28,3 +28,20 @@ export function normalizeCostUsd(value: unknown): number {
 
   return value;
 }
+
+/**
+ * Extract a JSON object from common LLM wrappers while preserving raw JSON input.
+ * Handles fenced ```json blocks and prose that surrounds a single object.
+ */
+export function extractJsonObject(text: string): string {
+  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenceMatch) return fenceMatch[1].trim();
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    return text.slice(start, end + 1);
+  }
+
+  return text;
+}

@@ -776,7 +776,7 @@ async function triageSingleBatch(
 
 function buildBatchTriagePrompt(findings: Finding[], repoName: string, template?: string): string {
   const context = buildBatchTriageContext(findings, repoName);
-  return renderTemplate(template ?? BATCH_TRIAGE_TEMPLATE, context as any);
+  return renderTemplate(template ?? BATCH_TRIAGE_TEMPLATE, context);
 }
 
 function parseBatchTriageOutput(
@@ -927,7 +927,7 @@ export function buildDefaultTriageAgentConfig(
 ): TriageAgentConfig {
   const context = buildTriageContext(finding, repoName);
   return {
-    prompt: renderTemplate(template ?? TRIAGE_TEMPLATE, context as any),
+    prompt: renderTemplate(template ?? TRIAGE_TEMPLATE, context),
   };
 }
 
@@ -947,7 +947,10 @@ function resolveAgentConfig(
       return buildDefaultTriageAgentConfig(finding, repoName, template);
     }
     return config;
-  } catch {
+  } catch (error) {
+    log.warn(
+      `Falling back to default triage prompt for ${finding.taskId}/${finding.fingerprint}: ${toErrorMessage(error)}`,
+    );
     return buildDefaultTriageAgentConfig(finding, repoName, template);
   }
 }

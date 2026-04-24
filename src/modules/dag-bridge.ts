@@ -36,7 +36,7 @@ import {
   withMultiStrategy,
 } from "../strategies/index.js";
 import { defineDagTool } from "./define.js";
-import type { CopilotModule, DagTool, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
+import type { CopilotModule, DagTool, ExecutionContext, ModuleTool } from "./types.js";
 import { isDagTool } from "./types.js";
 
 /**
@@ -155,47 +155,6 @@ export function adaptDagToolToAgentTask(
 }
 
 /**
- * Install a working `execute()` on a DagTool so shell / `kuzushi run` paths
- * can invoke it through the standard `ModuleTool` contract. The generated
- * wrapper boots the full scan pipeline filtered to this one task — that's
- * what gives the tool context gathering, dependency resolution, upstream
- * output wiring, findings persistence, and cost accounting "for free."
- *
- * `defineDagTool` attaches a placeholder `execute` that throws a descriptive
- * error to surface bugs if a DagTool is invoked before registration. This
- * function replaces that placeholder at module-load time.
- *
- * Scanner-plugin wrappers (semgrep, codeql, agentic-sast, taint-iris) and
- * the full scan pipeline share this path, so shell invocation of
- * `semgrep:scan` spawns the same runPipeline() call the scan CLI uses —
- * just filtered to a single task.
- */
-export function wrapDagToolExecute(
-  mod: CopilotModule,
-  tool: DagTool,
-  options?: { registrationId?: string; extraTaskIds?: ReadonlyArray<string> },
-): void {
-  const registrationId = options?.registrationId ?? mod.id;
-  const extraTaskIds =
-    options?.extraTaskIds ??
-    (tool.dag.chainBefore && tool.dag.chainBefore.length > 0 ? tool.dag.chainBefore : []);
-  // Prepend extras so upstream chain-before tasks visually come first in
-  // logs; orchestrator's resolveOrder() topologically re-sorts regardless.
-  const taskIds = [...extraTaskIds, registrationId];
-  const summaryLabel = tool.displayName ?? mod.displayName ?? mod.id;
-
-  // Mutate the tool in place so the CopilotRegistry / Shell see the
-  // installed execute without needing to track a second registration.
-  (tool as { execute: ModuleTool["execute"] }).execute = async (
-    input: unknown,
-    ctx: ExecutionContext,
-  ): Promise<ToolResult> => {
-    const { runSingleTaskPipeline } = await import("./sast/shared.js");
-    return runSingleTaskPipeline(taskIds, input, ctx, { summaryLabel });
-  };
-}
-
-/**
  * Build a hidden DagTool that wraps an existing `AgentTask`. The source
  * task's body runs unchanged through `TaskRegistry`; the DagTool simply
  * exposes the task on a `CopilotModule.tools[]` for module-system
@@ -294,11 +253,6 @@ function buildTaskContextFromExecutionContext(ctx: ExecutionContext): TaskContex
  * source task directly under its own id so cross-task `dependsOn`
  * references stay valid.
  *
- * Also installs a working `execute()` on every DagTool (replacing the
- * placeholder `defineDagTool` attaches) so shell / run mode can invoke
- * them through the normal `ModuleTool` contract. Hidden wrappers skip this
- * step — operators can't invoke them directly.
- *
  * Silently skips tools that already have a registered entry so callers
  * can invoke this unconditionally from `ModuleRegistry.loadModule`.
  */
@@ -324,12 +278,6 @@ export function registerDagToolsInTaskRegistry(registry: TaskRegistry, mod: Copi
 
     const id = !seenForBareId ? mod.id : tool.name;
     seenForBareId = true;
-
-    // Install the shell/run-mode execute wrapper regardless of whether the
-    // task registry already has an entry for this id — operators still need
-    // a working execute() on the CopilotModule side. `chainBefore` is
-    // read from `tool.dag` automatically.
-    wrapDagToolExecute(mod, tool, { registrationId: id });
 
     if (registry.has(id)) continue;
     const adapter = adaptDagToolToAgentTask(mod, tool, { idOverride: id });

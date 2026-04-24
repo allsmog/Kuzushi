@@ -17,7 +17,7 @@ import {
   buildShellPrompt,
   firstShellSuggestion,
   listShellSuggestions,
-} from "../../copilot/shell.js";
+} from "../../copilot/shell-commands.js";
 import { formatClock, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { applyBackspace, isCtrlChord } from "../hooks/text-edit-actions.js";

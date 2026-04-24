@@ -46,7 +46,7 @@ import { xxeDetectionTask } from "../../agents/tasks/xxe-detection.js";
 import { AgenticPlugin } from "../../scanners/agentic.js";
 import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import { defineModule } from "../define.js";
-import { severityProperty, targetProperty } from "../sast/shared.js";
+import { severityProperty, targetProperty } from "../sast/schema-fragments.js";
 import { buildScannerDagTool } from "../scanner-adapter.js";
 import type { CopilotModule } from "../types.js";
 

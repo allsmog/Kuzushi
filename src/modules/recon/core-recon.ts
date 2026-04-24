@@ -13,17 +13,38 @@
  * commands render.
  */
 
+import { isRecord } from "../../utils.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
-type Params = Record<string, unknown>;
+interface NmapInput {
+  target?: string;
+  ports?: string;
+}
+
+interface SubdomainInput {
+  domain?: string;
+  source?: string;
+}
+
+interface HttpFingerprintInput {
+  target?: string;
+}
+
+interface WorkspaceRowWithId {
+  id: string;
+}
+
+interface WorkspaceServiceRow extends WorkspaceRowWithId {
+  name: string;
+}
 
 const nmapTool: ModuleTool = {
   name: "recon:nmap",
   displayName: "Nmap",
   formatInput(input) {
-    const p = input as Record<string, unknown> | undefined;
-    const target = typeof p?.["target"] === "string" ? (p["target"] as string) : null;
-    const ports = typeof p?.["ports"] === "string" ? (p["ports"] as string) : null;
+    const p = parseNmapInput(input);
+    const target = p.target ?? null;
+    const ports = p.ports ?? null;
     if (target && ports) return `${target} · ${ports}`;
     return target ?? null;
   },
@@ -46,11 +67,11 @@ const nmapTool: ModuleTool = {
   },
   headless: true,
   async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
-    const p = (input ?? {}) as Params;
+    const p = parseNmapInput(input);
     if (!ctx.workspace || !ctx.workspaceId) {
       return { ok: false, output: "recon:nmap needs an active workspace." };
     }
-    const target = String(p["target"] ?? "");
+    const target = p.target ?? "";
     if (!target) return { ok: false, output: "recon:nmap requires a target." };
     if (!(await isOnPath("nmap"))) {
       return {
@@ -61,17 +82,20 @@ const nmapTool: ModuleTool = {
 
     // Real impl would shell out and parse. Until then: write a placeholder
     // host so `hosts` + `services` render something, and tag it with origin.
-    const host = ctx.workspace.hosts.upsert({
-      workspaceId: ctx.workspaceId,
-      address: target,
-      state: "alive",
-      metadata: { discoveredBy: "recon:nmap", discoveredAt: new Date().toISOString() },
-    }) as { id: string };
+    const host = readWorkspaceRowId(
+      ctx.workspace.hosts.upsert({
+        workspaceId: ctx.workspaceId,
+        address: target,
+        state: "alive",
+        metadata: { discoveredBy: "recon:nmap", discoveredAt: new Date().toISOString() },
+      }),
+    );
+    if (!host) return { ok: false, output: "recon:nmap could not persist the seeded host." };
     ctx.workspace.notes.create({
       workspaceId: ctx.workspaceId,
       hostId: host.id,
       ntype: "recon:nmap-pending",
-      data: { target, ports: p["ports"] ?? "top100" },
+      data: { target, ports: p.ports ?? "top100" },
     });
 
     return {
@@ -86,8 +110,7 @@ const subdomainTool: ModuleTool = {
   name: "recon:subdomain",
   displayName: "Subdomain Enum",
   formatInput(input) {
-    const p = input as Record<string, unknown> | undefined;
-    return typeof p?.["domain"] === "string" ? (p["domain"] as string) : null;
+    return parseSubdomainInput(input).domain ?? null;
   },
   renderResult(result) {
     const first = result.output.split("\n", 1)[0]?.trim();
@@ -111,17 +134,17 @@ const subdomainTool: ModuleTool = {
   },
   headless: true,
   async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
-    const p = (input ?? {}) as Params;
+    const p = parseSubdomainInput(input);
     if (!ctx.workspace || !ctx.workspaceId) {
       return { ok: false, output: "recon:subdomain needs an active workspace." };
     }
-    const domain = String(p["domain"] ?? "");
+    const domain = p.domain ?? "";
     if (!domain) return { ok: false, output: "recon:subdomain requires a domain." };
 
     ctx.workspace.notes.create({
       workspaceId: ctx.workspaceId,
       ntype: "recon:subdomain-pending",
-      data: { domain, source: p["source"] ?? "both" },
+      data: { domain, source: p.source ?? "both" },
     });
     return {
       ok: true,
@@ -137,8 +160,7 @@ const httpFingerprintTool: ModuleTool = {
   name: "recon:http-fingerprint",
   displayName: "HTTP Fingerprint",
   formatInput(input) {
-    const p = input as Record<string, unknown> | undefined;
-    return typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+    return parseHttpFingerprintInput(input).target ?? null;
   },
   renderResult(result) {
     const first = result.output.split("\n", 1)[0]?.trim();
@@ -156,26 +178,36 @@ const httpFingerprintTool: ModuleTool = {
   },
   headless: true,
   async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
-    const p = (input ?? {}) as Params;
+    const p = parseHttpFingerprintInput(input);
     if (!ctx.workspace || !ctx.workspaceId) {
       return { ok: false, output: "recon:http-fingerprint needs an active workspace." };
     }
-    const target = String(p["target"] ?? "");
+    const target = p.target ?? "";
     if (!target) return { ok: false, output: "recon:http-fingerprint requires a target." };
 
     const { host: hostname, port } = splitHostPort(target);
-    const hostRow = ctx.workspace.hosts.upsert({
-      workspaceId: ctx.workspaceId,
-      address: hostname,
-    }) as { id: string };
-    const service = ctx.workspace.services.upsert({
-      hostId: hostRow.id,
-      port,
-      proto: "tcp",
-      name: port === 443 ? "https" : "http",
-      state: "open",
-      info: { discoveredBy: "recon:http-fingerprint" },
-    }) as { id: string; name: string };
+    const hostRow = readWorkspaceRowId(
+      ctx.workspace.hosts.upsert({
+        workspaceId: ctx.workspaceId,
+        address: hostname,
+      }),
+    );
+    if (!hostRow) {
+      return { ok: false, output: "recon:http-fingerprint could not persist the host." };
+    }
+    const service = readWorkspaceServiceRow(
+      ctx.workspace.services.upsert({
+        hostId: hostRow.id,
+        port,
+        proto: "tcp",
+        name: port === 443 ? "https" : "http",
+        state: "open",
+        info: { discoveredBy: "recon:http-fingerprint" },
+      }),
+    );
+    if (!service) {
+      return { ok: false, output: "recon:http-fingerprint could not persist the service." };
+    }
     return {
       ok: true,
       output: `[+] Registered ${hostname}:${port} as ${service.name}.`,
@@ -214,6 +246,49 @@ export function createReconModule(): CopilotModule {
 // helpers
 // ---------------------------------------------------------------------------
 
+function parseNmapInput(input: unknown): NmapInput {
+  if (!isRecord(input)) return {};
+  return {
+    target: readStringField(input, "target"),
+    ports: readStringField(input, "ports"),
+  };
+}
+
+function parseSubdomainInput(input: unknown): SubdomainInput {
+  if (!isRecord(input)) return {};
+  return {
+    domain: readStringField(input, "domain"),
+    source: readStringField(input, "source"),
+  };
+}
+
+function parseHttpFingerprintInput(input: unknown): HttpFingerprintInput {
+  if (!isRecord(input)) return {};
+  return {
+    target: readStringField(input, "target"),
+  };
+}
+
+function readStringField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readWorkspaceRowId(value: unknown): WorkspaceRowWithId | null {
+  if (!isRecord(value) || typeof value.id !== "string") return null;
+  return { id: value.id };
+}
+
+function readWorkspaceServiceRow(value: unknown): WorkspaceServiceRow | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
+    return null;
+  }
+  return { id: value.id, name: value.name };
+}
+
 async function isOnPath(bin: string): Promise<boolean> {
   try {
     const { spawn } = await import("node:child_process");
@@ -234,6 +309,6 @@ function splitHostPort(target: string): { host: string; port: number } {
   const host = (hostPart ?? target).split("/")[0] ?? target;
   const explicitPort = portPart ? Number.parseInt(portPart, 10) : NaN;
   const defaultPort = target.startsWith("https://") ? 443 : 80;
-  const port = Number.isFinite(explicitPort) ? (explicitPort as number) : defaultPort;
+  const port = Number.isFinite(explicitPort) ? explicitPort : defaultPort;
   return { host, port };
 }

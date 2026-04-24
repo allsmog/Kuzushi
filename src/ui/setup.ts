@@ -13,10 +13,8 @@ import { applyConfigPatch, configPath, loadConfig } from "../config.js";
 import { saveOperatorScanContext } from "../operator-context.js";
 import { savePersistentThreatModel } from "../threat-model-renderer.js";
 import type { OperatorScanContext } from "../types.js";
-import type { ConfigConfirmData } from "./components/ConfigConfirm.js";
-import type { CredentialChoice } from "./components/CredentialPrompt.js";
-import type { WizardResult } from "./components/SetupWizard.js";
 import { emitOutputNotice } from "./output.js";
+import type { ConfigConfirmData, CredentialChoice, WizardResult } from "./preflight-types.js";
 import type { UIMode, UIStore } from "./state.js";
 
 export type SetupOutcome =

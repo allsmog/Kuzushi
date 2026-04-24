@@ -19,6 +19,7 @@ import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
+import type { CredentialChoice, ProviderId } from "../preflight-types.js";
 import {
   SelectList,
   type SelectListItem,
@@ -27,24 +28,7 @@ import {
 import { TextInput } from "../primitives/TextInput.js";
 import { SPACING, tokens } from "../tokens.js";
 
-/** Provider ids aligned with pi-ai's builtin providers. */
-export type ProviderId =
-  | "anthropic"
-  | "openai"
-  | "google"
-  | "mistral"
-  | "groq"
-  | "cerebras"
-  | "xai"
-  | "openrouter"
-  | "bedrock"
-  | "ollama"
-  | "inherited";
-
-export type CredentialChoice =
-  | { kind: "api-key"; providerId: ProviderId; value: string; baseUrl?: string; persist: boolean }
-  | { kind: "base-url"; providerId: ProviderId; baseUrl: string; apiKey?: string; persist: boolean }
-  | { kind: "inherited"; providerId?: ProviderId };
+export type { CredentialChoice, ProviderId } from "../preflight-types.js";
 
 interface CredentialPromptProps {
   onComplete: (choice: CredentialChoice) => void;

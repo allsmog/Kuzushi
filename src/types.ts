@@ -1,7 +1,36 @@
 import type { EvidenceAnchor } from "./agents/tasks/threat-modeling/types.js";
 import type { DiscoveredModule } from "./discovery/types.js";
 import type { QualityGateConfig } from "./quality-gate-types.js";
-import type { ProofState, TaskConfig, TaskId } from "./scanners/types.js";
+import type { TaskConfig, TaskId } from "./scanners/types.js";
+import type {
+  AgentRuntimeBackendZ,
+  AgentRuntimeConfigZ,
+  AgentRuntimeCredentialsZ,
+  AttackPathAnalysisZ,
+  BusBackendZ,
+  CodeCitationZ,
+  DataSensitivityZ,
+  DynamicAnalysisRunZ,
+  DynamicAnalysisStatusZ,
+  DynamicCoverageModeZ,
+  EnrichedRepoContextZ,
+  EvidenceStepZ,
+  FindingMetadataZ,
+  FindingRowZ,
+  PatchResultZ,
+  PatchStatusZ,
+  PocHarnessResultZ,
+  PocSandboxZ,
+  ProofVerdictZ,
+  RepoContextZ,
+  ScanModeZ,
+  SecurityControlZ,
+  TriagePathAssessmentZ,
+  TriageResultZ,
+  TriageStrategyZ,
+  VerdictZ,
+  VerificationResultZ,
+} from "./schemas.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 
 export type { CryptoBehavioralRun } from "./crypto-behavioral/types.js";
@@ -42,13 +71,13 @@ export {
 } from "./schemas.js";
 
 /** Pluggable message bus backend. */
-export type BusBackend = "in-process";
+export type BusBackend = BusBackendZ;
 
 /** Scanner execution mode. */
-export type ScanMode = "sequential" | "concurrent";
+export type ScanMode = ScanModeZ;
 
 /** Runtime provider for agent execution. */
-export type AgentRuntimeBackend = "claude" | "pi-ai";
+export type AgentRuntimeBackend = AgentRuntimeBackendZ;
 
 /**
  * Credentials for a single agent runtime backend.
@@ -56,12 +85,7 @@ export type AgentRuntimeBackend = "claude" | "pi-ai";
  * Consumed directly by `ClaudeAgentRuntime` and `PiAiAgentRuntime`. The shape
  * matches the env-var pair they resolve to.
  */
-export interface AgentRuntimeCredentials {
-  /** API key for the backend's LLM provider. Overrides ANTHROPIC_API_KEY when set. */
-  apiKey?: string;
-  /** Base URL for the backend's LLM API endpoint. Overrides ANTHROPIC_BASE_URL when set. */
-  baseUrl?: string;
-}
+export type AgentRuntimeCredentials = AgentRuntimeCredentialsZ;
 
 /**
  * Per-backend credentials bag. Switching `agentRuntimeBackend` selects which
@@ -71,12 +95,7 @@ export interface AgentRuntimeCredentials {
  * Legacy flat configs (`{ apiKey, baseUrl }` at the top level) are migrated on
  * load into `{ claude: { ... } }` — see `normalizeAgentRuntimeConfig`.
  */
-export interface AgentRuntimeConfig {
-  /** Credentials used when `agentRuntimeBackend === "claude"` (default). */
-  claude?: AgentRuntimeCredentials;
-  /** Credentials used when `agentRuntimeBackend === "pi-ai"`. */
-  piAi?: AgentRuntimeCredentials;
-}
+export type AgentRuntimeConfig = AgentRuntimeConfigZ;
 
 /** Configuration for triage quality assertion checks. */
 export interface TriageAssertionConfig {
@@ -104,96 +123,26 @@ export interface TriageAssertionConfig {
  * @see {@link ProofVerdict} — proof-level verdict from exploitability verification
  * @see CryptoBehavioralVerdict in `src/crypto-behavioral/types.ts` — behavioral test verdict for crypto findings
  */
-export type Verdict = "tp" | "fp" | "needs_review" | "by_design";
+export type Verdict = VerdictZ;
 
-export interface TriagePathAssessment {
-  why: string;
-  isFalsePositive: boolean;
-  evidence: string;
-}
+export type TriagePathAssessment = TriagePathAssessmentZ;
 
 export type { ScanOpts } from "./scan-opts.js";
 
 /** A single step in the fine-grained evidence chain produced during triage. */
-export interface EvidenceStep {
-  stepType: string;
-  description: string;
-  confidence: number;
-  evidence: string;
-}
+export type EvidenceStep = EvidenceStepZ;
 
 /** A structured code citation referencing a specific code location with context. */
-export interface CodeCitation {
-  filePath: string;
-  startLine: number;
-  endLine: number;
-  snippet: string;
-  description: string;
-}
+export type CodeCitation = CodeCitationZ;
 
 /** Structured attack-path analysis linking entry point to impact. */
-export interface AttackPathAnalysis {
-  /** Ordered chain of steps from entry to impact. */
-  chain: string[];
-  /** Narrative explanation of the attack path. */
-  narrative: string;
-  /** Reasoning for the assessed likelihood level. */
-  likelihoodReasoning: string;
-  /** Reasoning for the assessed impact level. */
-  impactReasoning: string;
-}
+export type AttackPathAnalysis = AttackPathAnalysisZ;
 
 /** An identified security control or existing defense. */
-export interface SecurityControl {
-  name: string;
-  description: string;
-  filePath?: string;
-}
+export type SecurityControl = SecurityControlZ;
 
 /** Result of AI triage for a single finding. */
-export interface TriageResult {
-  fingerprint: string;
-  /** Human-readable title for the finding (5-12 words). */
-  title?: string;
-  /** Alice-and-Bob style attack narrative describing who, what, and impact. */
-  attackNarrative?: string;
-  /** Assessed security severity: critical, high, medium, or low. */
-  displaySeverity?: "critical" | "high" | "medium" | "low";
-  verdict: Verdict;
-  confidence: number;
-  rationale: string;
-  verificationSteps: string[];
-  fixPatch: string | null;
-  source?: TriagePathAssessment;
-  sink?: TriagePathAssessment;
-  /** The dangerous function/API that data flows into (e.g. 'eval', 'popen', 'SafeExecWithTimeout'). */
-  sinkFunction?: string | null;
-  isVulnerable?: boolean;
-  exploitScenario?: string;
-  recommendedFix?: string;
-  ruleRefinementHint?: string;
-  triageSchemaVersion?: string;
-  evidenceTrail?: Array<{ level: string; evidence: string }>;
-  triageCostUsd?: number;
-  /** Calibrated confidence computed from per-step evidence weights. */
-  calibratedConfidence?: number;
-  /** Composite confidence blending scanner and triage signals. */
-  compositeConfidence?: number;
-  /** Per-step evidence chain for fine-grained confidence calibration. */
-  evidenceChain?: EvidenceStep[];
-  /** Structured code citations with file paths, line ranges, and snippets. */
-  codeCitations?: CodeCitation[];
-  /** Attack-path analysis with chain diagram, narrative, and risk reasoning. */
-  attackPath?: AttackPathAnalysis;
-  /** Explicit assumptions underlying the triage assessment. */
-  assumptions?: string[];
-  /** Existing security controls and defenses identified during investigation. */
-  controls?: SecurityControl[];
-  /** Aspects the analysis could not verify or areas of uncertainty. */
-  blindspots?: string[];
-  /** Threat model threat IDs that this finding relates to (e.g. ["T-01", "T-03"]). */
-  sourceThreatIds?: string[];
-}
+export type TriageResult = TriageResultZ;
 
 /**
  * Proof-level verdict for exploitability verification.
@@ -202,167 +151,31 @@ export interface TriageResult {
  * @see {@link Verdict} — AI triage verdict for scan findings
  * @see CryptoBehavioralVerdict in `src/crypto-behavioral/types.ts` — behavioral test verdict for crypto findings
  */
-export type ProofVerdict = "exploited" | "blocked_by_security" | "out_of_scope" | "false_positive";
+export type ProofVerdict = ProofVerdictZ;
 
 /** Result of exploitability verification for a triaged finding. */
-export interface VerificationResult {
-  fingerprint: string;
-  exploitable: boolean;
-  pocPayload: string | null;
-  pocDescription: string;
-  attackVector: string | null;
-  preconditions: string[];
-  confidence: number;
-  proofLevel?: 1 | 2 | 3 | 4;
-  proofVerdict?: ProofVerdict;
-  bypassAttempts?: string[];
-  verifyCostUsd?: number;
-  /** Composite confidence combining multiple signals (self-reported, calibrated, verification). */
-  compositeConfidence?: number;
-  /** Structured code citations with file paths, line ranges, and snippets. */
-  codeCitations?: CodeCitation[];
-  /** Attack-path analysis with chain diagram, narrative, and risk reasoning. */
-  attackPath?: AttackPathAnalysis;
-  /** Explicit assumptions underlying the verification assessment. */
-  assumptions?: string[];
-  /** Existing security controls and defenses identified during verification. */
-  controls?: SecurityControl[];
-  /** Aspects the verification could not confirm or areas of uncertainty. */
-  blindspots?: string[];
-}
+export type VerificationResult = VerificationResultZ;
 
 /** Result of PoC harness generation for a verified-exploitable finding. */
-export interface PocHarnessResult {
-  fingerprint: string;
-  scriptPath: string | null;
-  language: string | null;
-  scriptContent: string | null;
-  parsed: boolean;
-  parseError: string | null;
-  skipped: boolean;
-  skipReason: string | null;
-  costUsd?: number;
-  /** PoC execution results (populated when pocExecute is enabled). */
-  pocExecExitCode?: number;
-  pocExecStdout?: string;
-  pocExecStderr?: string;
-  pocExecVerdict?: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
-  pocExecDurationMs?: number;
-  iterations?: number;
-  refinementHistory?: Array<{
-    attempt: number;
-    error: string;
-    approach: string;
-  }>;
-}
+export type PocHarnessResult = PocHarnessResultZ;
 
-export type DynamicAnalysisStatus = "confirmed" | "interesting" | "rejected" | "error";
+export type DynamicAnalysisStatus = DynamicAnalysisStatusZ;
 
-export type DynamicCoverageMode = "none" | "node-v8" | "python-coverage";
+export type DynamicCoverageMode = DynamicCoverageModeZ;
 
-export interface DynamicAnalysisRun {
-  dynamicRunId: string;
-  pipelineRunId?: string;
-  fingerprint: string;
-  repo: string;
-  status: DynamicAnalysisStatus;
-  score: number;
-  proofValue: number;
-  language?: string;
-  harnessPath?: string | null;
-  harnessLanguage?: string | null;
-  seedInputs?: string[];
-  coverageMode?: DynamicCoverageMode;
-  coverageSummary?: string;
-  executionExitCode?: number | null;
-  executionStdout?: string;
-  executionStderr?: string;
-  executionVerdict?: "PASS" | "FAIL" | "ERROR" | "TIMEOUT";
-  executionDurationMs?: number | null;
-  iterations: number;
-  costUsd?: number;
-  metadata?: Record<string, unknown>;
-  createdAt?: string;
-  updatedAt?: string;
-}
+export type DynamicAnalysisRun = DynamicAnalysisRunZ;
 
-export type PatchStatus =
-  | "APPLY_FAILED"
-  | "BUILD_FAILED"
-  | "STILL_VULNERABLE"
-  | "TESTS_FAILED"
-  | "SOUND"
-  | "VERIFIED"
-  | "UNKNOWN";
+export type PatchStatus = PatchStatusZ;
 
-export interface PatchResult {
-  patchRunId: string;
-  fingerprint: string;
-  repo: string;
-  diff: string | null;
-  status: PatchStatus;
-  iterations: number;
-  buildCommand?: string | null;
-  testCommand?: string | null;
-  worktreePath?: string | null;
-  costUsd?: number;
-  validatorLog?: string;
-  history: Array<{
-    attempt: number;
-    diff: string;
-    status: PatchStatus;
-    output: string;
-  }>;
-  createdAt?: string;
-  updatedAt?: string;
-}
+export type PatchResult = PatchResultZ;
 
-export interface FindingMetadata {
-  latestDynamicRunId?: string;
-  dynamicRunIds?: string[];
-  latestPatchRunId?: string;
-  patchRunIds?: string[];
-  latestDynamicStatus?: DynamicAnalysisStatus;
-  notes?: string[];
-  blame?: { sha: string; author: string; date: string; summary: string };
-  introducedIn?: string;
-}
+export type FindingMetadata = FindingMetadataZ;
 
 /** Heuristic repository metadata used to enrich triage/verification prompts. */
-export interface RepoContext {
-  languages: string[];
-  frameworks: string[];
-  authPatterns: string[];
-  sanitizationLibs: string[];
-  ormOrDb: string[];
-  entryPoints: string[];
-}
+export type RepoContext = RepoContextZ;
 
 /** Extended repository context produced by the LLM context enricher. */
-export interface EnrichedRepoContext {
-  base: RepoContext;
-  enrichment: {
-    customMiddleware: Array<{
-      name: string;
-      filePath: string;
-      purpose: string;
-      appliesTo?: string;
-    }>;
-    customSanitizers: Array<{
-      name: string;
-      filePath: string;
-      sanitizationType: string;
-      usedBy?: string;
-    }>;
-    trustBoundaries: Array<{ name: string; description: string; entryPoints?: string[] }>;
-    dataClassifications: Array<{
-      dataType: string;
-      sensitivity: "public" | "internal" | "confidential" | "restricted";
-      locations?: string[];
-    }>;
-    architecturalNotes: string[];
-  };
-}
+export type EnrichedRepoContext = EnrichedRepoContextZ;
 
 /**
  * Evidence anchor tying a model element to a source location.
@@ -707,7 +520,7 @@ export interface KuzushiConfig {
   /** Enable PoC harness execution after generation. Default false. */
   pocExecute?: boolean;
   /** Sandbox backend for PoC execution. Default "docker". */
-  pocSandbox?: "docker" | "process";
+  pocSandbox?: PocSandboxZ;
   /** Timeout for PoC execution in milliseconds. Default 30000. */
   pocExecTimeoutMs?: number;
   /** Max PoC refinement iterations when execution feedback is enabled. Default 3. */
@@ -727,7 +540,7 @@ export interface KuzushiConfig {
   /** Max exemplar trajectories injected into triage prompt. Default 2. */
   trajectoryMaxExemplars?: number;
   /** Triage strategy: single agent or multi-agent panel. Default "single". */
-  triageStrategy?: "single" | "multi-agent";
+  triageStrategy?: TriageStrategyZ;
   /** Max turns for each specialist sub-agent. null = unlimited. */
   triageSpecialistMaxTurns?: number | null;
   /** Configuration for triage quality assertion checks. Non-blocking, informational only. */
@@ -795,7 +608,7 @@ export interface KuzushiConfig {
 export type TrustLevel = "trusted" | "semi-trusted" | "untrusted" | "unknown";
 
 /** Sensitivity classification for data tags. */
-export type DataSensitivity = "public" | "internal" | "confidential" | "restricted";
+export type DataSensitivity = DataSensitivityZ;
 
 /** Review status of an individual context item during operator intake. */
 export type IntakeItemStatus = "accepted" | "edited" | "deleted" | "skipped" | "added";
@@ -881,46 +694,4 @@ export interface OperatorScanContext {
 }
 
 /** A persisted finding row from SQLite. */
-export interface FindingRow {
-  taskId: TaskId;
-  fingerprint: string;
-  repo: string;
-  ref: string;
-  ruleId: string;
-  filePath: string;
-  startLine: number;
-  severity: string;
-  message: string;
-  verdict: Verdict;
-  confidence: number;
-  rationale: string;
-  verificationSteps: string;
-  fixPatch: string | null;
-  triageDetailsJson?: string | null;
-  verifyExploitable?: number | null;
-  verifyPocPayload?: string | null;
-  verifyPocDescription?: string | null;
-  verifyAttackVector?: string | null;
-  verifyPreconditions?: string | null;
-  verifyConfidence?: number | null;
-  verifyCostUsd?: number | null;
-  pocHarnessPath?: string | null;
-  pocHarnessLanguage?: string | null;
-  pocHarnessParsed?: number | null;
-  pocHarnessParseError?: string | null;
-  pocHarnessSkipped?: number | null;
-  pocHarnessSkipReason?: string | null;
-  pocHarnessCostUsd?: number | null;
-  pocRunExitCode?: number | null;
-  pocRunStdout?: string | null;
-  pocRunStderr?: string | null;
-  pocRunVerdict?: "PASS" | "FAIL" | "ERROR" | "TIMEOUT" | null;
-  pocRunDurationMs?: number | null;
-  compositeConfidence?: number | null;
-  confidenceSignalsJson?: string | null;
-  taintPathJson?: string | null;
-  proofState?: ProofState | null;
-  engineProvenanceJson?: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+export type FindingRow = FindingRowZ;

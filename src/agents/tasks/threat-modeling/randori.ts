@@ -14,9 +14,10 @@ import { loadPersistentThreatModel } from "../../../threat-model-renderer.js";
 import type { ScanOpts } from "../../../types.js";
 import type { AgentTask } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
+import { resolveThreatModelConfig } from "./config.js";
 import { runRandoriPasta } from "./randori-runner.js";
 import { resolveRandoriPluginPath } from "./resolve-randori.js";
-import { resolveThreatModelConfig, type ThreatModelDocument } from "./types.js";
+import type { ThreatModelDocument } from "./types.js";
 
 // Re-export so existing tests (and external callers) that import
 // assessNarrativeArtifact from this module keep working.

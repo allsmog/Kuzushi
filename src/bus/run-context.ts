@@ -4,6 +4,7 @@
  * Extracted to its own file to break the circular type dependency
  * between bus/events.ts and scanners/types.ts.
  */
+import type { ReportMode } from "../contracts.js";
 
 export interface RunContext {
   runId: string;
@@ -17,5 +18,5 @@ export interface RunContext {
   repoName: string;
   dbPath: string;
   postProcessMode?: "full" | "scan-only";
-  reportMode?: "full" | "suppress";
+  reportMode?: ReportMode;
 }

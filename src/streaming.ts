@@ -10,9 +10,17 @@ import type {
   VerificationResultEvent,
 } from "./bus/events.js";
 import type { MessageBus } from "./bus/types.js";
+import {
+  createProblemDetails,
+  statusForErrorCategory,
+  writeProblemDetails,
+} from "./http-error-response.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger({ stage: "streaming" });
+export const STREAM_EVENTS_PATH = "/events";
+export const STREAM_LEGACY_EVENTS_PATH = "/";
+export const STREAM_HEALTH_PATH = "/health";
 
 /** Minimal SSE event for streaming to clients. */
 interface StreamEvent {
@@ -41,13 +49,18 @@ export function startStreamingServer(
       return;
     }
 
-    if (req.url === "/events" || req.url === "/") {
-      // SSE endpoint
-      res.writeHead(200, {
+    if (req.url === STREAM_EVENTS_PATH || req.url === STREAM_LEGACY_EVENTS_PATH) {
+      const headers: Record<string, string> = {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-      });
+      };
+      if (req.url === STREAM_LEGACY_EVENTS_PATH) {
+        headers.Deprecation = "true";
+        headers.Link = `<${STREAM_EVENTS_PATH}>; rel="successor-version"`;
+      }
+      // SSE endpoint
+      res.writeHead(200, headers);
 
       // Send initial connection event
       sendSSE(res, { type: "connected", data: { message: "Streaming pipeline events" } });
@@ -57,12 +70,19 @@ export function startStreamingServer(
       req.on("close", () => {
         clients.delete(res);
       });
-    } else if (req.url === "/health") {
+    } else if (req.url === STREAM_HEALTH_PATH) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok", clients: clients.size }));
     } else {
-      res.writeHead(404);
-      res.end("Not found");
+      writeProblemDetails(
+        res,
+        createProblemDetails({
+          status: 404,
+          code: "not_found",
+          detail: `No streaming endpoint exists for ${req.method ?? "GET"} ${req.url ?? "/"}.`,
+          instance: req.url ?? undefined,
+        }),
+      );
     }
   });
 
@@ -173,11 +193,20 @@ export function startStreamingServer(
   });
 
   bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
+    const category = event.payload.errorCategory ?? (event.payload.fatal ? "fatal" : "validation");
+    const problem = createProblemDetails({
+      status: statusForErrorCategory(category),
+      code: event.payload.fatal ? "pipeline_error" : "pipeline_warning",
+      title: event.payload.fatal ? "Pipeline Error" : "Pipeline Warning",
+      detail: event.payload.error,
+      category,
+    });
     broadcast({
       type: "pipeline:error",
       data: {
         error: event.payload.error,
         fatal: event.payload.fatal,
+        problem,
       },
     });
   });

@@ -1,13 +1,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { taskCapabilityMatches } from "./capabilities.js";
+import type { SecurityProfile } from "./types.js";
 
-/** A domain-specific security vulnerability category profile. */
-export interface SecurityProfile {
-  name: string;
-  items: string[];
-  appliesTo?: string[];
-}
+export type { SecurityProfile } from "./types.js";
 
 /**
  * Load security profiles from `.kuzushi/security-profiles.txt` in the project root.

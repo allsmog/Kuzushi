@@ -393,15 +393,7 @@ async function detectRegressions(
     }
   }
 
-  const parsed =
-    structuredOutput ??
-    (() => {
-      try {
-        return JSON.parse(resultText);
-      } catch {
-        return { regressions: [] };
-      }
-    })();
+  const parsed = structuredOutput ?? parseJson(resultText, "[diff-review/regression]");
 
   if (!isRecord(parsed) || !Array.isArray(parsed["regressions"])) return [];
 

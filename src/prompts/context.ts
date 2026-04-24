@@ -7,9 +7,10 @@ import type { BypassEntry } from "../bypass-knowledge.js";
 import type { Finding } from "../scanners/types.js";
 import type { TriageResult } from "../types.js";
 import { sanitizeForPrompt } from "./sanitize.js";
+import type { TemplateContext } from "./template.js";
 
 /** Context shape available inside triage prompt templates. */
-export interface TriageTemplateContext {
+export interface TriageTemplateContext extends TemplateContext {
   finding: {
     taskId: string;
     ruleId: string;
@@ -32,7 +33,7 @@ export interface TriageTemplateContext {
 }
 
 /** Context shape available inside verification prompt templates. */
-export interface VerifyTemplateContext {
+export interface VerifyTemplateContext extends TemplateContext {
   finding: TriageTemplateContext["finding"];
   triage: {
     verdict: string;
@@ -113,7 +114,7 @@ export function buildVerifyContext(
 }
 
 /** Context shape for batch triage prompt templates. */
-export interface BatchTriageTemplateContext {
+export interface BatchTriageTemplateContext extends TemplateContext {
   repoName: string;
   findingCount: number;
   findings: TriageTemplateContext["finding"][];
@@ -150,7 +151,7 @@ export function buildBatchTriageContext(
 }
 
 /** Context shape for batch verification prompt templates. */
-export interface BatchVerifyTemplateContext {
+export interface BatchVerifyTemplateContext extends TemplateContext {
   repoName: string;
   findingCount: number;
   items: Array<{

@@ -874,7 +874,7 @@ const taskCmd = program
 Examples:
   $ kuzushi task list                                 # all registered tasks + DAG stages
   $ kuzushi task list --filter findings               # only finding-producing tasks
-  $ kuzushi task info sast:verify                     # deep info for one task
+  $ kuzushi task info semgrep                         # deep info for one DAG task
   $ kuzushi task validate ./my-external-task.ts       # validate a 3rd-party task file
 `,
   );
@@ -1097,7 +1097,7 @@ program
     `
 Examples:
   $ kuzushi run sast:scan ./repo --json                                    # JSON output
-  $ kuzushi run sast:triage fingerprint=abc123 --quiet                     # just the exit code
+  $ kuzushi run triage:run fingerprint=abc123 --quiet                      # just the exit code
   $ kuzushi run tob:skills --json                                          # list resolvable ToB skills
   $ kuzushi run randori:pasta --target ./repo --input '{"stages":["s1","s2"]}'
   $ kuzushi run variant:hunt fingerprint=abc123 --load variant-hunter      # load extra module
@@ -1120,16 +1120,24 @@ Examples:
           apiKey?: string;
         },
       ) => {
-        const { executeRun, formatRunOutput, parseToolArgs } = await import("./copilot/run.js");
+        const { executeRun, formatRunOutput, parseToolArgs, parseToolInputJson } = await import(
+          "./copilot/run.js"
+        );
         const { createBus } = await import("./bus/index.js");
 
         // Build tool input from args or --input
         let input: Record<string, unknown>;
         if (opts.input) {
           try {
-            input = JSON.parse(opts.input);
-          } catch {
-            throw new CliUsageError("Invalid JSON in --input");
+            input = parseToolInputJson(opts.input);
+          } catch (err) {
+            throw new CliUsageError(
+              err instanceof SyntaxError
+                ? "Invalid JSON in --input"
+                : err instanceof Error
+                  ? err.message
+                  : "Invalid --input",
+            );
           }
         } else {
           input = parseToolArgs(args);

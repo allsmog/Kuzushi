@@ -7,23 +7,28 @@
  * (`src/bus/workers/triage-worker.ts`), not by this module.
  */
 
+import { isRecord } from "../../utils.js";
 import { defineModule, defineTool } from "../define.js";
 import { loadFindingsForTriage } from "../sast/findings-bridge.js";
 import { resolvePromptValue } from "../sast/prompts.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 
-type Params = Record<string, unknown>;
+interface TriageRunInput {
+  fingerprint?: string;
+  fingerprints?: string[];
+  batchSize?: number;
+  TRIAGE_PROMPT?: string;
+}
 
 export function createTriageModule(): CopilotModule {
   const triageRunTool = defineTool<"triage">({
     name: "triage:run",
     displayName: "Triage",
     formatInput(input) {
-      const p = (input ?? {}) as Record<string, unknown>;
-      if (typeof p["fingerprint"] === "string") return (p["fingerprint"] as string).slice(0, 12);
-      if (Array.isArray(p["fingerprints"])) {
-        const arr = p["fingerprints"] as unknown[];
-        return `${arr.length} finding${arr.length === 1 ? "" : "s"}`;
+      const p = parseTriageRunInput(input);
+      if (p.fingerprint) return p.fingerprint.slice(0, 12);
+      if (p.fingerprints) {
+        return `${p.fingerprints.length} finding${p.fingerprints.length === 1 ? "" : "s"}`;
       }
       return null;
     },
@@ -58,7 +63,7 @@ export function createTriageModule(): CopilotModule {
     },
     headless: true,
     async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
-      const p = (input ?? {}) as Params;
+      const p = parseTriageRunInput(input);
       if (!ctx.workspace) {
         return { ok: false, output: "triage:run needs an active workspace." };
       }
@@ -79,13 +84,12 @@ export function createTriageModule(): CopilotModule {
       // Prompt override: prefer the unified `ctx.resolveOption` resolver
       // (shell `set TRIAGE_PROMPT`/`setg` → taskConfig lookup). Fall back
       // to the input field for inline calls.
-      const rawPrompt =
-        ctx.resolveOption?.<string>("TRIAGE_PROMPT") ?? (p["TRIAGE_PROMPT"] as string | undefined);
+      const rawPrompt = ctx.resolveOption?.<string>("TRIAGE_PROMPT") ?? p.TRIAGE_PROMPT;
       const template = await resolvePromptValue(rawPrompt, ctx.cwd);
 
       const repoRoot = ctx.target ?? ctx.cwd;
       const repoName = repoRoot.split("/").pop() ?? "repo";
-      const batchSize = typeof p["batchSize"] === "number" ? (p["batchSize"] as number) : 5;
+      const batchSize = p.batchSize ?? 5;
 
       ctx.print?.status(`Triaging ${findings.length} finding(s) in batches of ${batchSize}...`);
 
@@ -155,11 +159,44 @@ export function createTriageModule(): CopilotModule {
   });
 }
 
-function collectFingerprints(p: Params): string[] | undefined {
-  const single = typeof p["fingerprint"] === "string" ? [p["fingerprint"] as string] : [];
-  const list = Array.isArray(p["fingerprints"])
-    ? (p["fingerprints"] as unknown[]).filter((x): x is string => typeof x === "string")
-    : [];
+function parseTriageRunInput(input: unknown): TriageRunInput {
+  if (!isRecord(input)) return {};
+  return {
+    fingerprint: readStringField(input, "fingerprint"),
+    fingerprints: readStringArrayField(input, "fingerprints"),
+    batchSize: readNumberField(input, "batchSize"),
+    TRIAGE_PROMPT: readStringField(input, "TRIAGE_PROMPT"),
+  };
+}
+
+function collectFingerprints(p: TriageRunInput): string[] | undefined {
+  const single = p.fingerprint ? [p.fingerprint] : [];
+  const list = p.fingerprints ?? [];
   const combined = [...single, ...list];
   return combined.length > 0 ? combined : undefined;
+}
+
+function readStringField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readNumberField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function readStringArrayField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): string[] | undefined {
+  const value = record[key];
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === "string");
 }

@@ -13,8 +13,25 @@ import { runPluginFindingScanner } from "../../agents/tasks/plugin-finding-scann
 import { resolveVulnScoutPlugin } from "../../agents/tasks/vuln-scout/resolve-vuln-scout.js";
 import { buildVulnScoutPrompt, vulnScoutTask } from "../../agents/tasks/vuln-scout/vuln-scout.js";
 import { resolveRepo } from "../../cli/shared.js";
+import { isRecord } from "../../utils.js";
 import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
+
+interface VulnScoutAuditInput {
+  target?: string;
+  maxFindings?: number;
+  model?: string;
+}
+
+interface VulnScoutTaskConfig {
+  model?: string;
+  maxFindings?: number;
+}
+
+interface LocalClaudePlugin {
+  type: "local";
+  path: string;
+}
 
 function resolveTargetPaths(ctx: ExecutionContext, input?: string): { root: string; name: string } {
   const target = input ?? ctx.target ?? ctx.cwd;
@@ -23,16 +40,14 @@ function resolveTargetPaths(ctx: ExecutionContext, input?: string): { root: stri
 
 function resolveModel(ctx: ExecutionContext, override?: string): string {
   if (override) return override;
-  const cfg = ctx.config.taskConfig?.["vuln-scout"] as Record<string, unknown> | undefined;
-  if (cfg && typeof cfg.model === "string" && cfg.model.trim()) return cfg.model.trim();
+  const cfg = readVulnScoutTaskConfig(ctx);
+  if (cfg?.model?.trim()) return cfg.model.trim();
   return ctx.config.model;
 }
 
-function resolveMaxFindings(ctx: ExecutionContext, override?: unknown): number {
-  const fromInput = typeof override === "number" ? override : undefined;
-  if (fromInput && fromInput >= 1) return Math.floor(fromInput);
-  const cfg = ctx.config.taskConfig?.["vuln-scout"] as Record<string, unknown> | undefined;
-  const configured = cfg && typeof cfg.maxFindings === "number" ? cfg.maxFindings : undefined;
+function resolveMaxFindings(ctx: ExecutionContext, override?: number): number {
+  if (override && override >= 1) return Math.floor(override);
+  const configured = readVulnScoutTaskConfig(ctx)?.maxFindings;
   if (configured && configured >= 1) return Math.floor(configured);
   return 50;
 }
@@ -45,8 +60,7 @@ const auditTool: ModuleTool = {
   name: "vuln-scout:audit",
   displayName: "VulnScout",
   formatInput(input) {
-    const p = input as Record<string, unknown> | undefined;
-    return typeof p?.["target"] === "string" ? (p["target"] as string) : null;
+    return parseAuditInput(input).target ?? null;
   },
   renderResult(result) {
     const first = result.output.split("\n", 1)[0]?.trim();
@@ -78,9 +92,9 @@ const auditTool: ModuleTool = {
   },
   headless: true,
   async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
-    const params = (input ?? {}) as Record<string, unknown>;
+    const params = parseAuditInput(input);
 
-    let plugin: { type: "local"; path: string };
+    let plugin: LocalClaudePlugin;
     try {
       plugin = resolveVulnScoutPlugin();
     } catch (err) {
@@ -93,8 +107,8 @@ const auditTool: ModuleTool = {
       };
     }
 
-    const { root, name } = resolveTargetPaths(ctx, params.target as string | undefined);
-    const model = resolveModel(ctx, params.model as string | undefined);
+    const { root, name } = resolveTargetPaths(ctx, params.target);
+    const model = resolveModel(ctx, params.model);
     const maxFindings = resolveMaxFindings(ctx, params.maxFindings);
 
     ctx.reportActivity?.(`auditing ${name} · ${model}`);
@@ -176,3 +190,37 @@ export const __coreVulnScoutInternals = {
   resolveModel,
   resolveMaxFindings,
 };
+
+function parseAuditInput(input: unknown): VulnScoutAuditInput {
+  if (!isRecord(input)) return {};
+  return {
+    target: readStringField(input, "target"),
+    maxFindings: readNumberField(input, "maxFindings"),
+    model: readStringField(input, "model"),
+  };
+}
+
+function readVulnScoutTaskConfig(ctx: ExecutionContext): VulnScoutTaskConfig | undefined {
+  const raw = ctx.config.taskConfig?.["vuln-scout"];
+  if (!isRecord(raw)) return undefined;
+  return {
+    model: readStringField(raw, "model"),
+    maxFindings: readNumberField(raw, "maxFindings"),
+  };
+}
+
+function readStringField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readNumberField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+  return typeof value === "number" ? value : undefined;
+}

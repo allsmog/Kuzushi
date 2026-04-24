@@ -6,58 +6,69 @@
  * from their original modules so that existing imports keep working.
  */
 import { z } from "zod";
+import {
+  AGENT_RUNTIME_BACKENDS,
+  BUS_BACKENDS,
+  DATA_SENSITIVITIES,
+  DISPLAY_SEVERITIES,
+  DYNAMIC_ANALYSIS_STATUSES,
+  DYNAMIC_COVERAGE_MODES,
+  ENGINE_PROVENANCE_KINDS,
+  EXPLOIT_CHAIN_SEVERITIES,
+  PATCH_STATUSES,
+  POC_EXECUTION_VERDICTS,
+  POC_SANDBOX_BACKENDS,
+  PROOF_STATES,
+  PROOF_VERDICTS,
+  SCAN_MODES,
+  TRIAGE_STRATEGIES,
+  VERDICTS,
+} from "./contracts.js";
 
 // ---------------------------------------------------------------------------
 // Shared enums / literals
 // ---------------------------------------------------------------------------
 
-export const VerdictSchema = z.enum(["tp", "fp", "needs_review", "by_design"]);
+export const VerdictSchema = z.enum(VERDICTS);
+export type VerdictZ = z.infer<typeof VerdictSchema>;
 
-export const BusBackendSchema = z.enum(["in-process"]);
+export const DisplaySeveritySchema = z.enum(DISPLAY_SEVERITIES);
+export type DisplaySeverityZ = z.infer<typeof DisplaySeveritySchema>;
 
-export const ScanModeSchema = z.enum(["sequential", "concurrent"]);
+export const BusBackendSchema = z.enum(BUS_BACKENDS);
+export type BusBackendZ = z.infer<typeof BusBackendSchema>;
 
-export const AgentRuntimeBackendSchema = z.enum(["claude", "pi-ai"]);
+export const ScanModeSchema = z.enum(SCAN_MODES);
+export type ScanModeZ = z.infer<typeof ScanModeSchema>;
 
-export const ProofVerdictSchema = z.enum([
-  "exploited",
-  "blocked_by_security",
-  "out_of_scope",
-  "false_positive",
-]);
+export const AgentRuntimeBackendSchema = z.enum(AGENT_RUNTIME_BACKENDS);
+export type AgentRuntimeBackendZ = z.infer<typeof AgentRuntimeBackendSchema>;
 
-export const PocExecVerdictSchema = z.enum(["PASS", "FAIL", "ERROR", "TIMEOUT"]);
+export const ProofVerdictSchema = z.enum(PROOF_VERDICTS);
+export type ProofVerdictZ = z.infer<typeof ProofVerdictSchema>;
 
-export const PocSandboxSchema = z.enum(["docker", "process"]);
+export const PocExecVerdictSchema = z.enum(POC_EXECUTION_VERDICTS);
+export type PocExecVerdictZ = z.infer<typeof PocExecVerdictSchema>;
 
-export const TriageStrategySchema = z.enum(["single", "multi-agent"]);
+export const PocSandboxSchema = z.enum(POC_SANDBOX_BACKENDS);
+export type PocSandboxZ = z.infer<typeof PocSandboxSchema>;
 
-export const DataSensitivitySchema = z.enum(["public", "internal", "confidential", "restricted"]);
+export const TriageStrategySchema = z.enum(TRIAGE_STRATEGIES);
+export type TriageStrategyZ = z.infer<typeof TriageStrategySchema>;
 
-export const ExploitChainSeveritySchema = z.enum(["CRITICAL", "HIGH", "MEDIUM"]);
-export const ProofStateSchema = z.enum([
-  "symbolic_only",
-  "execution_attempted",
-  "execution_confirmed",
-  "execution_rejected",
-  "inconclusive",
-]);
-export const DynamicAnalysisStatusSchema = z.enum([
-  "confirmed",
-  "interesting",
-  "rejected",
-  "error",
-]);
-export const DynamicCoverageModeSchema = z.enum(["none", "node-v8", "python-coverage"]);
-export const PatchStatusSchema = z.enum([
-  "APPLY_FAILED",
-  "BUILD_FAILED",
-  "STILL_VULNERABLE",
-  "TESTS_FAILED",
-  "SOUND",
-  "VERIFIED",
-  "UNKNOWN",
-]);
+export const DataSensitivitySchema = z.enum(DATA_SENSITIVITIES);
+export type DataSensitivityZ = z.infer<typeof DataSensitivitySchema>;
+
+export const ExploitChainSeveritySchema = z.enum(EXPLOIT_CHAIN_SEVERITIES);
+export type ExploitChainSeverityZ = z.infer<typeof ExploitChainSeveritySchema>;
+export const ProofStateSchema = z.enum(PROOF_STATES);
+export type ProofStateZ = z.infer<typeof ProofStateSchema>;
+export const DynamicAnalysisStatusSchema = z.enum(DYNAMIC_ANALYSIS_STATUSES);
+export type DynamicAnalysisStatusZ = z.infer<typeof DynamicAnalysisStatusSchema>;
+export const DynamicCoverageModeSchema = z.enum(DYNAMIC_COVERAGE_MODES);
+export type DynamicCoverageModeZ = z.infer<typeof DynamicCoverageModeSchema>;
+export const PatchStatusSchema = z.enum(PATCH_STATUSES);
+export type PatchStatusZ = z.infer<typeof PatchStatusSchema>;
 
 // ---------------------------------------------------------------------------
 // Finding (task output)
@@ -71,7 +82,7 @@ export const TaintPathStepSchema = z.object({
 });
 
 export const EngineProvenanceSchema = z.object({
-  kind: z.enum(["semgrep", "codeql", "taint-analysis", "agentic", "dynamic"]),
+  kind: z.enum(ENGINE_PROVENANCE_KINDS),
   detail: z.string(),
 });
 
@@ -171,6 +182,9 @@ export type SecurityControlZ = z.infer<typeof SecurityControlSchema>;
 
 export const TriageResultSchema = z.object({
   fingerprint: z.string(),
+  title: z.string().optional(),
+  attackNarrative: z.string().optional(),
+  displaySeverity: DisplaySeveritySchema.optional(),
   verdict: VerdictSchema,
   confidence: z.number(),
   rationale: z.string(),
@@ -187,6 +201,7 @@ export const TriageResultSchema = z.object({
   evidenceTrail: z.array(z.object({ level: z.string(), evidence: z.string() })).optional(),
   triageCostUsd: z.number().optional(),
   calibratedConfidence: z.number().optional(),
+  compositeConfidence: z.number().optional(),
   evidenceChain: z.array(EvidenceStepSchema).optional(),
   codeCitations: z.array(CodeCitationSchema).optional(),
   attackPath: AttackPathAnalysisSchema.optional(),
@@ -214,6 +229,7 @@ export const VerificationResultSchema = z.object({
   proofVerdict: ProofVerdictSchema.optional(),
   bypassAttempts: z.array(z.string()).optional(),
   verifyCostUsd: z.number().optional(),
+  compositeConfidence: z.number().optional(),
   codeCitations: z.array(CodeCitationSchema).optional(),
   attackPath: AttackPathAnalysisSchema.optional(),
   assumptions: z.array(z.string()).optional(),
@@ -364,6 +380,15 @@ export const FindingMetadataSchema = z.object({
   patchRunIds: z.array(z.string()).optional(),
   latestDynamicStatus: DynamicAnalysisStatusSchema.optional(),
   notes: z.array(z.string()).optional(),
+  blame: z
+    .object({
+      sha: z.string(),
+      author: z.string(),
+      date: z.string(),
+      summary: z.string(),
+    })
+    .optional(),
+  introducedIn: z.string().optional(),
 });
 
 export type FindingMetadataZ = z.infer<typeof FindingMetadataSchema>;
@@ -866,7 +891,7 @@ export const RawTriageOutputSchema = z.object({
   fingerprint: z.string(),
   title: z.string().optional(),
   attack_narrative: z.string().nullable().optional(),
-  display_severity: z.enum(["critical", "high", "medium", "low"]).optional(),
+  display_severity: DisplaySeveritySchema.optional(),
   verdict: VerdictSchema,
   confidence: z.number(),
   rationale: z.string(),

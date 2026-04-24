@@ -43,9 +43,12 @@ export const STRIDE_COLUMNS: ReadonlyArray<{
   { category: "elevation-of-privilege", letter: "E", label: "Elevation" },
 ];
 
-export type CellImpact = "critical" | "high" | "medium" | "low" | null;
+type ThreatImpact = StrideThreat["impact"];
+type ThreatLikelihood = StrideThreat["likelihood"];
 
-const IMPACT_RANK: Record<Exclude<CellImpact, null>, number> = {
+export type CellImpact = ThreatImpact | null;
+
+const IMPACT_RANK: Record<ThreatImpact, number> = {
   critical: 4,
   high: 3,
   medium: 2,
@@ -77,7 +80,7 @@ export function computeStrideCell(
  */
 export function computeImpactLikelihoodPivot(
   threats: ReadonlyArray<StrideThreat>,
-): Record<"critical" | "high" | "medium" | "low", Record<"high" | "medium" | "low", number>> {
+): Record<ThreatImpact, Record<ThreatLikelihood, number>> {
   const pivot: ReturnType<typeof computeImpactLikelihoodPivot> = {
     critical: { high: 0, medium: 0, low: 0 },
     high: { high: 0, medium: 0, low: 0 },

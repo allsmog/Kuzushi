@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_THREAT_MODEL_CONFIG,
   resolveThreatModelConfig,
-} from "../../../../src/agents/tasks/threat-modeling/types.js";
+} from "../../../../src/agents/tasks/threat-modeling/config.js";
 import type { KuzushiConfig } from "../../../../src/types.js";
 
 function makeConfig(): KuzushiConfig {

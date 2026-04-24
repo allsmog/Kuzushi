@@ -8,7 +8,9 @@ two package exports:
 - `kuzushi/testing` — in-memory mocks for unit-testing a tool in isolation.
 
 Companion docs: [`mcp-server-requirements.md`](./mcp-server-requirements.md)
-for MCP-bridged modules; [`devex/06-module-sdk-assessment.md`](./devex/06-module-sdk-assessment.md)
+for MCP-bridged modules; [`api-compatibility.md`](./api-compatibility.md)
+for legacy aliases and route compatibility;
+[`devex/06-module-sdk-assessment.md`](./devex/06-module-sdk-assessment.md)
 for the SDK audit that shaped the current surface.
 
 ## 1. What is a module?

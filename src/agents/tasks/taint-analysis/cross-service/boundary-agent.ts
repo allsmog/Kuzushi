@@ -6,7 +6,12 @@ import type {
   AgentToolDecision,
 } from "../../../../agent-runtime/types.js";
 import { attachTaskOutputMeta } from "../../../../task-output-meta.js";
-import { isRecord, toErrorMessage } from "../../../../utils.js";
+import {
+  extractJsonObject,
+  isPathWithinRoot,
+  isRecord,
+  toErrorMessage,
+} from "../../../../utils.js";
 import {
   BOUNDARY_RESPONSE_SCHEMA,
   type BoundaryDirection,
@@ -192,7 +197,7 @@ function createBoundaryToolGuard(serviceRoot: string) {
         ? path.normalize(inputPath)
         : path.resolve(resolvedRoot, inputPath);
 
-      if (!isWithinRoot(resolvedRoot, resolved)) {
+      if (!isPathWithinRoot(resolvedRoot, resolved)) {
         return {
           behavior: "deny",
           message: `Path must stay inside service root: ${serviceRoot}`,
@@ -224,7 +229,7 @@ function parseBoundaryResponse(
 
   if (typeof value === "string") {
     try {
-      const parsed = JSON.parse(extractJson(value));
+      const parsed = JSON.parse(extractJsonObject(value));
       return parseBoundaryResponse(parsed, confidenceThreshold);
     } catch (error) {
       throw new Error(`Could not parse boundary detection JSON: ${toErrorMessage(error)}`);
@@ -297,20 +302,6 @@ function getPathArg(args: Record<string, unknown>): string | null {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
-}
-
-function isWithinRoot(rootPath: string, candidatePath: string): boolean {
-  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function extractJson(value: string): string {
-  const fenced = value.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (fenced) return fenced[1].trim();
-  const first = value.indexOf("{");
-  const last = value.lastIndexOf("}");
-  if (first >= 0 && last > first) return value.slice(first, last + 1);
-  return value;
 }
 
 const VALID_PROTOCOLS = new Set<BoundaryProtocol>([

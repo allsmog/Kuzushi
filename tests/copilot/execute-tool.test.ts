@@ -76,6 +76,13 @@ describe("CopilotCore.executeTool", () => {
     const result = await core.executeTool("no-such:tool", {});
     expect(result.ok).toBe(false);
     expect(result.output).toContain('Unknown tool: "no-such:tool"');
+    expect(result.data).toMatchObject({
+      problem: {
+        code: "tool_not_found",
+        status: 404,
+        instance: "no-such:tool",
+      },
+    });
   });
 
   it("dispatches to the module's tool and passes through its result + cost", async () => {
@@ -95,6 +102,85 @@ describe("CopilotCore.executeTool", () => {
     expect(result.ok).toBe(true);
     expect(result.output).toBe("2+2=4");
     expect(result.costUsd).toBe(0.01);
+  });
+
+  it("rejects invalid input before dispatching to the module tool", async () => {
+    const core = new CopilotCore({
+      runtime: fakeRuntime,
+      bus: fakeBus,
+      config: fakeConfig(),
+      dataDir: tmp,
+      loadCoreSast: false,
+    });
+    const executeSpy = vi.fn(() => Promise.resolve({ ok: true, output: "unreachable" }));
+    core.registry.register(
+      module("demo", [
+        {
+          ...tool("demo:scan", () => ({ ok: true, output: "x" })),
+          inputSchema: {
+            type: "object",
+            properties: { target: { type: "string" } },
+            required: ["target"],
+          },
+          execute: executeSpy,
+        },
+      ]),
+    );
+
+    const result = await core.executeTool("demo:scan", { target: 42, extra: true });
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('Invalid input for tool "demo:scan"');
+    expect(result.output).toContain("target: expected string");
+    expect(result.output).toContain("extra: unknown property");
+    expect(result.data).toMatchObject({
+      problem: {
+        code: "input_validation_failed",
+        status: 400,
+        instance: "demo:scan",
+      },
+    });
+    expect(executeSpy).not.toHaveBeenCalled();
+  });
+
+  it("validates input before governance checks so audit records do not store raw invalid payloads", async () => {
+    const enforcer = new GovernanceEnforcer({
+      ...defaultScopePolicy(),
+      deniedTargets: ["production-db"],
+    });
+    const auditTrail = new AuditTrail(tmp);
+    const recordSpy = vi.spyOn(auditTrail, "record");
+
+    const core = new CopilotCore({
+      runtime: fakeRuntime,
+      bus: fakeBus,
+      config: fakeConfig(),
+      dataDir: tmp,
+      loadCoreSast: false,
+      enforcer,
+      auditTrail,
+    });
+    const executeSpy = vi.fn(() => Promise.resolve({ ok: true, output: "unreachable" }));
+    core.registry.register(
+      module("demo", [
+        {
+          ...tool("demo:scan", () => ({ ok: true, output: "x" })),
+          inputSchema: {
+            type: "object",
+            properties: { target: { type: "string" } },
+            required: ["target"],
+          },
+          execute: executeSpy,
+        },
+      ]),
+    );
+
+    const result = await core.executeTool("demo:scan", { target: "production-db", extra: true });
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("extra: unknown property");
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(recordSpy).not.toHaveBeenCalled();
   });
 
   it("blocks execution when the governance enforcer denies", async () => {
@@ -117,13 +203,28 @@ describe("CopilotCore.executeTool", () => {
     const executeSpy = vi.fn(() => Promise.resolve({ ok: true, output: "unreachable" }));
     core.registry.register(
       module("demo", [
-        { ...tool("demo:scan", () => ({ ok: true, output: "x" })), execute: executeSpy },
+        {
+          ...tool("demo:scan", () => ({ ok: true, output: "x" })),
+          inputSchema: {
+            type: "object",
+            properties: { target: { type: "string" } },
+            required: ["target"],
+          },
+          execute: executeSpy,
+        },
       ]),
     );
 
     const result = await core.executeTool("demo:scan", { target: "production-db" });
     expect(result.ok).toBe(false);
     expect(result.output).toContain("Blocked by governance");
+    expect(result.data).toMatchObject({
+      problem: {
+        code: "governance_blocked",
+        status: 403,
+        instance: "demo:scan",
+      },
+    });
     expect(executeSpy).not.toHaveBeenCalled();
     expect(recordSpy).toHaveBeenCalled();
   });

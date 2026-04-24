@@ -1,4 +1,5 @@
 import type { AgentRuntime } from "../agent-runtime/types.js";
+import type { EngineProvenanceKind, ProofState } from "../contracts.js";
 
 export type TaskId = string;
 export type TaskConfig = Record<string, unknown>;
@@ -29,15 +30,10 @@ export interface TaintPathStep {
   snippet?: string;
 }
 
-export type ProofState =
-  | "symbolic_only"
-  | "execution_attempted"
-  | "execution_confirmed"
-  | "execution_rejected"
-  | "inconclusive";
+export type { ProofState } from "../contracts.js";
 
 export interface EngineProvenance {
-  kind: "semgrep" | "codeql" | "taint-analysis" | "agentic" | "dynamic";
+  kind: EngineProvenanceKind;
   detail: string;
 }
 
